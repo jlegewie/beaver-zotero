@@ -62,7 +62,9 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
         // Select the correct atoms based on whether we're in the separate window
         const scrollPositionAtom = isWindow ? windowScrollPositionAtom : currentThreadScrollPositionAtom;
         const scrolledAtom = isWindow ? windowUserScrolledAtom : userScrolledAtom;
-        const storedScrollTop = useAtomValue(scrollPositionAtom);
+        // Read scroll position imperatively inside restoreScrollPosition rather than subscribing.
+        // The atom is updated every ~10px of scroll, so subscribing would cause ThreadView to
+        // re-render constantly while the user scrolls, cascading through all message components.
         
         // Watch expansion state to re-evaluate scroll button visibility after expand/collapse
         // Track multiple expansion states: tool calls, sources, and agent actions
@@ -169,7 +171,7 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                 return;
             }
 
-            const targetScrollTop = storedScrollTop ?? container.scrollHeight;
+            const targetScrollTop = store.get(scrollPositionAtom) ?? container.scrollHeight;
             const delta = Math.abs(container.scrollTop - targetScrollTop);
             
             // Check if this is a thread switch
@@ -202,7 +204,7 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                     }
                 }
             }
-        }, [pendingRunId, isProtocolScrollLocked, storedScrollTop, scrolledAtom, scrollContainerRef, currentThreadId, isLoadingThread]);
+        }, [pendingRunId, isProtocolScrollLocked, scrollPositionAtom, scrolledAtom, scrollContainerRef, currentThreadId]);
 
         // Restore scroll position from atom (only for thread switching, not during streaming)
         // Note: userScrolledAtom is managed by useAutoScroll.handleScroll, not here
@@ -248,10 +250,19 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                 // Re-evaluate scroll state when container height changes (window resize)
                 // Only trigger if already visible (not on visibility transition)
                 else if (!wasHidden && isVisible && prevHeight > 0 && currentHeight !== prevHeight) {
-                    const { scrollHeight, scrollTop } = container;
-                    const distanceFromBottom = scrollHeight - scrollTop - currentHeight;
-                    const isNearBottom = distanceFromBottom <= BOTTOM_THRESHOLD;
-                    store.set(scrolledAtom, !isNearBottom);
+                    const containerShrunk = currentHeight < prevHeight;
+                    const wasAtBottom = !store.get(scrolledAtom);
+
+                    // If the container shrunk and the user was at the bottom,
+                    // pin to the new bottom
+                    if (containerShrunk && wasAtBottom && !isProtocolScrollLocked()) {
+                        container.scrollTop = Math.max(container.scrollHeight - currentHeight, 0);
+                    } else {
+                        const { scrollHeight, scrollTop } = container;
+                        const distanceFromBottom = scrollHeight - scrollTop - currentHeight;
+                        const isNearBottom = distanceFromBottom <= BOTTOM_THRESHOLD;
+                        store.set(scrolledAtom, !isNearBottom);
+                    }
                 }
                 
                 wasHiddenRef.current = !isVisible;
@@ -265,7 +276,7 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                     win.clearTimeout(restoreDebounceRef.current);
                 }
             };
-        }, [restoreScrollPosition, scrolledAtom, tryScrollToPendingRun, win]);
+        }, [restoreScrollPosition, scrolledAtom, tryScrollToPendingRun, isProtocolScrollLocked, win]);
 
         // Scroll to bottom when runs change
         useEffect(() => {

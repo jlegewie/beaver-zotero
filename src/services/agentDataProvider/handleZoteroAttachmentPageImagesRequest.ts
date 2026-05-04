@@ -10,7 +10,7 @@
 import { logger } from '../../utils/logger';
 import { getPref } from '../../utils/prefs';
 
-import { isAttachmentOnServer } from '../../utils/webAPI';
+import { isAttachmentAvailableRemotely } from '../../utils/webAPI';  // kept for file_missing message check
 import {
     WSZoteroAttachmentPageImagesRequest,
     WSZoteroAttachmentPageImagesResponse,
@@ -18,7 +18,20 @@ import {
     WSPageImage,
 } from '../agentProtocol';
 import { PDFExtractor, ExtractionError, ExtractionErrorCode } from '../pdf';
-import { resolveToPdfAttachment, validateZoteroItemReference, backfillMetadataForError } from './utils';
+import { EXTRACTION_VERSION, makeRemoteFilePath, isRemoteFilePath } from '../attachmentFileCache';
+import { resolveToPdfAttachment, validateZoteroItemReference, backfillMetadataForError, loadPdfData, checkRemotePdfSize, isRemoteAccessAvailable } from './utils';
+import { ensurePageLabelsForResolution, resolvePageValue, InvalidPageValueError } from './pageLabelResolution';
+
+// Convert raw bytes to base64 in 32 KB chunks
+function uint8ToBase64(bytes: Uint8Array): string {
+    const CHUNK_SIZE = 0x8000;
+    let binary = '';
+    for (let i = 0; i < bytes.length; i += CHUNK_SIZE) {
+        const chunk = bytes.subarray(i, i + CHUNK_SIZE);
+        binary += String.fromCharCode.apply(null, chunk as unknown as number[]);
+    }
+    return btoa(binary);
+}
 
 /**
  * Handle zotero_attachment_page_images_request event.
@@ -27,13 +40,14 @@ import { resolveToPdfAttachment, validateZoteroItemReference, backfillMetadataFo
 export async function handleZoteroAttachmentPageImagesRequest(
     request: WSZoteroAttachmentPageImagesRequest
 ): Promise<WSZoteroAttachmentPageImagesResponse> {
-    const { attachment, pages, scale, dpi, format, jpeg_quality, skip_local_limits, request_id } = request;
+    const { attachment, pages, scale, dpi, format, jpeg_quality, skip_local_limits, prefer_page_labels, request_id } = request;
     const requestKey = `${attachment.library_id}-${attachment.zotero_key}`;
     let errorKey = requestKey;
 
     // Hoisted for catch-block metadata backfill
     let resolvedPdfItem: Zotero.Item | null = null;
     let resolvedFilePath: string | null = null;
+    let resolvedCachedPageCount: number | null = null;
 
     // Helper to create error response
     const errorResponse = (
@@ -85,20 +99,24 @@ export async function handleZoteroAttachmentPageImagesRequest(
         resolvedPdfItem = pdfItem;
 
         // 3. Get the file path — returns false if missing or nonexistent
-        const filePath = await pdfItem.getFilePathAsync();
-        resolvedFilePath = filePath || null;
-        if (!filePath) {
-            const isOnServer = isAttachmentOnServer(pdfItem);
+        const rawFilePath = await pdfItem.getFilePathAsync();
+        const filePath = rawFilePath || null;  // normalize false → null
+        const isRemoteOnly = !filePath && isRemoteAccessAvailable(pdfItem);
+        const effectiveFilePath = filePath || (isRemoteOnly ? makeRemoteFilePath(pdfItem) : null);
+        resolvedFilePath = effectiveFilePath;
+
+        if (!effectiveFilePath) {
+            const onServer = isAttachmentAvailableRemotely(pdfItem);
             return errorResponse(
-                isOnServer
-                    ? `The PDF file for ${pdfKey} is not available locally. It may be in remote storage, which cannot be accessed by Beaver.`
+                onServer
+                    ? `The PDF file for ${pdfKey} is not available locally and remote file access is disabled in settings.`
                     : `The PDF file for ${pdfKey} is not available locally.`,
                 'file_missing'
             );
         }
 
-        // 4. Check file size limit (skip if skip_local_limits is true)
-        if (!skip_local_limits) {
+        // 4. Check file size limit (skip if skip_local_limits is true; skip for remote — checked after download)
+        if (!skip_local_limits && !isRemoteOnly) {
             const maxFileSizeMB = getPref('maxFileSizeMB');
             const fileSize = await Zotero.Attachments.getTotalFileSize(pdfItem);
 
@@ -115,7 +133,8 @@ export async function handleZoteroAttachmentPageImagesRequest(
 
         // 4b. Try metadata cache for fast prechecks
         const cache = Zotero.Beaver?.attachmentFileCache;
-        const cachedMeta = cache ? await cache.getMetadata(pdfItem.id, filePath).catch(() => null) : null;
+        const cachedMeta = cache ? await cache.getMetadata(pdfItem.id, effectiveFilePath).catch(() => null) : null;
+        resolvedCachedPageCount = cachedMeta?.page_count ?? null;
 
         // Determine once whether this is an all-pages request
         const requestingAllPages = !pages || pages.length === 0;
@@ -139,19 +158,64 @@ export async function handleZoteroAttachmentPageImagesRequest(
             }
         }
 
-        // 5. Read PDF and get page count
-        const pdfData = await IOUtils.read(filePath);
+        // 5. Resolve page labels and (only if needed) page count up-front.
         const extractor = new PDFExtractor();
-        let totalPages: number;
+        let pdfData: Uint8Array | null = null;
+        let pageLabels: Record<number, string> | null = null;
+        let totalPages: number | null = null;
 
-        if (cachedMeta?.page_count != null) {
+        // 5a. Load page labels for label-aware resolution. Short-circuits on cache.
+        if (prefer_page_labels && filePath) {
+            const labelResult = await ensurePageLabelsForResolution(filePath, cachedMeta, extractor);
+            pageLabels = labelResult.labels;
+            if (labelResult.pageCount != null) {
+                totalPages = labelResult.pageCount;
+            }
+            if (labelResult.pdfData) {
+                pdfData = labelResult.pdfData;
+            }
+        } else if (cachedMeta?.page_labels && Object.keys(cachedMeta.page_labels).length > 0) {
+            pageLabels = cachedMeta.page_labels;
+        }
+
+        // 5b. Adopt cached page count when available (no doc-open).
+        if (totalPages == null && cachedMeta?.page_count != null) {
             totalPages = cachedMeta.page_count;
-        } else {
+        }
+
+        // 5c. Upfront getPageCount ONLY when rendering all pages and we have
+        // no cached page_count — needed to gate `maxPageCount` before
+        // committing to a multi-thousand-page render. Bounded requests get
+        // pageCount back inside `renderPagesToImagesWithMeta`.
+        const needsUpfrontPageCount =
+            totalPages == null && requestingAllPages && !skip_local_limits;
+        if (needsUpfrontPageCount) {
+            if (!pdfData) {
+                try {
+                    pdfData = await loadPdfData(pdfItem, effectiveFilePath, isRemoteOnly);
+                } catch (error) {
+                    if (!isRemoteOnly) throw error;
+                    logger(`handleZoteroAttachmentPageImagesRequest: Remote download failed: ${error}`, 1);
+                    return errorResponse(
+                        `Failed to download PDF for ${pdfKey} from remote storage: ${error instanceof Error ? error.message : String(error)}`,
+                        'download_failed'
+                    );
+                }
+                if (isRemoteOnly) {
+                    const exceeded = checkRemotePdfSize(pdfData, skip_local_limits);
+                    if (exceeded) {
+                        return errorResponse(
+                            `The PDF file for ${pdfKey} has a file size of ${exceeded.sizeMB.toFixed(1)}MB, which exceeds the ${exceeded.maxMB}MB limit`,
+                            'file_too_large'
+                        );
+                    }
+                }
+            }
             totalPages = await extractor.getPageCount(pdfData);
         }
 
-        // 6. Check page count limit for all-pages requests (skip if skip_local_limits is true)
-        if (!skip_local_limits && requestingAllPages) {
+        // 6. Check page count limit for all-pages requests when totalPages known.
+        if (!skip_local_limits && requestingAllPages && totalPages != null) {
             const maxPageCount = getPref('maxPageCount');
             if (totalPages > maxPageCount) {
                 return errorResponse(
@@ -161,28 +225,66 @@ export async function handleZoteroAttachmentPageImagesRequest(
             }
         }
 
-        // 7. Determine which pages to render
-        let pageIndices: number[];
+        // 7. Resolve `pages` array (label or numeric strings) to numeric indices
+        // on main thread. Same separation-of-concerns as the pages handler:
+        // string parsing → `invalid_page_value`; range validation →
+        // `page_out_of_range` (worker-side).
+        let pageIndicesArg: number[] | undefined;  // undefined = all pages
         if (pages && pages.length > 0) {
-            // Filter out invalid pages: keep only pages in [1, totalPages]
-            const validPages = pages.filter(p => p >= 1 && p <= totalPages);
-
-            if (validPages.length === 0) {
-                return errorResponse(
-                    `All requested pages are out of range (document has ${totalPages} pages)`,
-                    'page_out_of_range',
-                    totalPages
-                );
+            let resolvedPages: number[];
+            try {
+                resolvedPages = pages.map(p => resolvePageValue(p, pageLabels, prefer_page_labels === true));
+            } catch (error) {
+                if (error instanceof InvalidPageValueError) {
+                    return errorResponse(error.message, 'invalid_page_value', totalPages);
+                }
+                throw error;
             }
 
-            // Convert 1-indexed page numbers to 0-indexed
-            pageIndices = validPages.map(p => p - 1);
-        } else {
-            // Default to all pages
-            pageIndices = Array.from({ length: totalPages }, (_, i) => i);
+            if (totalPages != null) {
+                // We know totalPages — pre-filter against bounds to short-circuit.
+                const validPages = resolvedPages.filter(p => Number.isInteger(p) && p >= 1 && p <= totalPages!);
+                if (validPages.length === 0) {
+                    return errorResponse(
+                        `All requested pages are out of range (document has ${totalPages} pages)`,
+                        'page_out_of_range',
+                        totalPages
+                    );
+                }
+                pageIndicesArg = validPages.map(p => p - 1);
+            } else {
+                // totalPages unknown — let the worker's strict resolver enforce
+                // PAGE_OUT_OF_RANGE. Convert to 0-indexed; non-integers are
+                // filtered by `resolveExplicitPageIndicesOrThrow`.
+                pageIndicesArg = resolvedPages.map(p => p - 1);
+            }
+        }
+        // requestingAllPages → pageIndicesArg stays undefined → worker enumerates internally.
+
+        // 8. Ensure PDF bytes are loaded before render.
+        if (!pdfData) {
+            try {
+                pdfData = await loadPdfData(pdfItem, effectiveFilePath, isRemoteOnly);
+            } catch (error) {
+                if (!isRemoteOnly) throw error;
+                logger(`handleZoteroAttachmentPageImagesRequest: Remote download failed: ${error}`, 1);
+                return errorResponse(
+                    `Failed to download PDF for ${pdfKey} from remote storage: ${error instanceof Error ? error.message : String(error)}`,
+                    'download_failed'
+                );
+            }
+            if (isRemoteOnly) {
+                const exceeded = checkRemotePdfSize(pdfData, skip_local_limits);
+                if (exceeded) {
+                    return errorResponse(
+                        `The PDF file for ${pdfKey} has a file size of ${exceeded.sizeMB.toFixed(1)}MB, which exceeds the ${exceeded.maxMB}MB limit`,
+                        'file_too_large'
+                    );
+                }
+            }
         }
 
-        // 8. Build render options
+        // 9. Build render options
         const renderOptions = {
             scale: scale ?? 1.0,
             dpi: dpi ?? 0,
@@ -190,19 +292,30 @@ export async function handleZoteroAttachmentPageImagesRequest(
             jpegQuality: jpeg_quality ?? 85,
         };
 
-        // 9. Render pages
-        const renderResults = await extractor.renderPagesToImages(pdfData, pageIndices, renderOptions);
+        // 10. Render — fused metadata + render in one round-trip.
+        logger(
+            `handleZoteroAttachmentPageImagesRequest: renderPagesToImagesWithMeta for ${requestKey} `
+            + `pageIndices=${JSON.stringify(pageIndicesArg ?? null)} (allPages=${requestingAllPages})`,
+            3,
+        );
+        const renderResult = await extractor.renderPagesToImagesWithMeta(pdfData, {
+            pageIndices: pageIndicesArg,
+            options: renderOptions,
+        });
 
-        // 10. Convert to base64 and build response
-        const pageImages: WSPageImage[] = renderResults.map((result) => {
-            // Convert Uint8Array to base64
-            const binaryStr = Array.from(result.data)
-                .map(byte => String.fromCharCode(byte))
-                .join('');
-            const base64Data = btoa(binaryStr);
+        // Refresh local state from the worker result.
+        totalPages = renderResult.pageCount;
+        if (!pageLabels && Object.keys(renderResult.pageLabels).length > 0) {
+            pageLabels = renderResult.pageLabels;
+        }
+
+        // 11. Convert to base64 and build response
+        const pageImages: WSPageImage[] = renderResult.pages.map((result) => {
+            const base64Data = uint8ToBase64(result.data);
 
             return {
                 page_number: result.pageIndex + 1, // Convert back to 1-indexed
+                page_label: pageLabels?.[result.pageIndex],
                 image_data: base64Data,
                 format: result.format,
                 width: result.width,
@@ -210,12 +323,80 @@ export async function handleZoteroAttachmentPageImagesRequest(
             };
         });
 
+        // 11b. Write-through metadata only when it's safe to do so.
+        //
+        // Rendering proves the PDF opens, but it does NOT inspect the text
+        // layer. `setMetadata` is a full upsert, and downstream readers
+        // (`fileStatusFromCache` in utils.ts:384) treat a falsy `needs_ocr`
+        // as "available". So if the image-render path is the FIRST cache
+        // writer for a scanned/no-text PDF, writing `needs_ocr: null` would
+        // make the file appear text-ready and skip the OCR check on later
+        // `getAttachmentFileStatus` calls.
+        //
+        // Rule: only refresh page_count/page_labels when a prior writer
+        // has already set `needs_ocr === false` (i.e., an authoritative
+        // text-layer check has run). In that case we extend the existing
+        // record without disturbing OCR state. Otherwise leave the cache
+        // alone — a later text-extraction or status call will seed it
+        // correctly.
+        // Skip cache writes during shutdown — DB writes here race Zotero's
+        // teardown (same guard as sync.ts:266 and FileUploader.ts:338).
+        const canSafelyExtendCache = cache != null
+            && !Zotero.__beaverShuttingDown
+            && cachedMeta != null
+            && cachedMeta.needs_ocr === false
+            && cachedMeta.is_encrypted === false
+            && cachedMeta.is_invalid === false;
+        if (cache && !canSafelyExtendCache) {
+            logger(
+                `handleZoteroAttachmentPageImagesRequest: skipping metadata write for ${requestKey} (no authoritative needs_ocr in cache)`,
+                3,
+            );
+        }
+        if (canSafelyExtendCache) {
+            try {
+                let file_mtime_ms = 0;
+                let file_size_bytes = 0;
+                if (!isRemoteFilePath(effectiveFilePath) && filePath) {
+                    const stat = await IOUtils.stat(filePath);
+                    file_mtime_ms = stat.lastModified ?? 0;
+                    file_size_bytes = stat.size ?? 0;
+                }
+                // Recheck after the stat await — shutdown can race in
+                // during the I/O. Without this the entry-guard above
+                // doesn't cover writes whose preceding awaits yielded.
+                if (Zotero.__beaverShuttingDown) {
+                    logger(`handleZoteroAttachmentPageImagesRequest: skipping metadata write for ${requestKey} — shutdown signalled during stat`, 3);
+                } else {
+                    const persistedPageLabels = Object.keys(renderResult.pageLabels).length > 0 ? renderResult.pageLabels : {};
+                    await cache!.setMetadata({
+                        item_id: pdfItem.id,
+                        library_id: pdfItem.libraryID,
+                        zotero_key: pdfItem.key,
+                        file_path: effectiveFilePath,
+                        file_mtime_ms,
+                        file_size_bytes,
+                        content_type: pdfItem.attachmentContentType || 'application/pdf',
+                        page_count: renderResult.pageCount,
+                        page_labels: persistedPageLabels,
+                        has_text_layer: cachedMeta!.has_text_layer,
+                        needs_ocr: cachedMeta!.needs_ocr,
+                        is_encrypted: false,
+                        is_invalid: false,
+                        extraction_version: EXTRACTION_VERSION,
+                    });
+                }
+            } catch (error) {
+                logger(`handleZoteroAttachmentPageImagesRequest: cache write error: ${error}`, 1);
+            }
+        }
+
         return {
             type: 'zotero_attachment_page_images',
             request_id,
             attachment,
             pages: pageImages,
-            total_pages: totalPages,
+            total_pages: renderResult.pageCount,
         };
 
     } catch (error) {
@@ -224,8 +405,11 @@ export async function handleZoteroAttachmentPageImagesRequest(
         if (error instanceof ExtractionError) {
             // Backfill metadata for known error states
             if (resolvedPdfItem && resolvedFilePath && (error.code === ExtractionErrorCode.ENCRYPTED || error.code === ExtractionErrorCode.INVALID_PDF)) {
-                await backfillMetadataForError(resolvedPdfItem, resolvedFilePath, error, null, 'handleZoteroAttachmentPageImagesRequest');
+                await backfillMetadataForError(resolvedPdfItem, resolvedFilePath, error, resolvedCachedPageCount, 'handleZoteroAttachmentPageImagesRequest');
             }
+
+            // PAGE_OUT_OF_RANGE carries `pageCount` in payload (worker strict resolvers).
+            const totalPagesForError = error.pageCount ?? resolvedCachedPageCount ?? null;
 
             switch (error.code) {
                 case ExtractionErrorCode.ENCRYPTED:
@@ -233,7 +417,7 @@ export async function handleZoteroAttachmentPageImagesRequest(
                 case ExtractionErrorCode.INVALID_PDF:
                     return errorResponse(`The PDF file for ${errorKey} is invalid or corrupted`, 'invalid_pdf');
                 case ExtractionErrorCode.PAGE_OUT_OF_RANGE:
-                    return errorResponse(`The requested pages for ${errorKey} are out of range`, 'page_out_of_range');
+                    return errorResponse(error.message, 'page_out_of_range', totalPagesForError);
                 default:
                     return errorResponse(
                         `Failed to render PDF pages for ${errorKey}: ${error.message}`,

@@ -19,13 +19,13 @@ interface ModelMessagesViewProps {
  * Only renders ModelResponse messages (kind='response').
  * ModelRequest messages (user prompts or tool returns) are handled via toolResultsMapAtom.
  */
-export const ModelMessagesView: React.FC<ModelMessagesViewProps> = ({
+export const ModelMessagesView: React.FC<ModelMessagesViewProps> = React.memo(function ModelMessagesView({
     messages,
     runId,
     isStreaming,
     showStatusIndicator,
     status,
-}) => {
+}) {
     // Don't render anything if there's no content to show
     if (messages.length === 0 && !showStatusIndicator) {
         return null;
@@ -79,7 +79,7 @@ export const ModelMessagesView: React.FC<ModelMessagesViewProps> = ({
             )}
         </div>
     );
-};
+});
 
 export default ModelMessagesView;
 

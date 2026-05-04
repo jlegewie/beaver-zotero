@@ -49,24 +49,28 @@ function isActionableContextItem(item: any): boolean {
 // before inner menu items' onShowing (parent popup → submenu popup order).
 // ---------------------------------------------------------------------------
 
-interface WinningTarget { type: 'items' | 'attachment'; count: number }
+interface WinningTarget { type: 'items' | 'attachment' | 'note'; count: number }
 let winningTarget: WinningTarget | null = null;
 
 /**
- * Determine the single winning target type from actionable items.
- * Priority: regular items > PDF attachments (mirrors getActiveTarget in ActionSuggestions).
+ * Determine the single winning target type from selected items.
+ * Priority: regular items > PDF attachments > notes (mirrors getActiveTarget in ActionSuggestions).
  */
-function getWinningTarget(actionable: any[]): WinningTarget | null {
+function getWinningTarget(items: any[]): WinningTarget | null {
+    const actionable = items.filter((i: any) => isActionableContextItem(i));
     const regular = actionable.filter((i: any) => i.isRegularItem());
     if (regular.length > 0) return { type: 'items', count: regular.length };
     const pdfs = actionable.filter((i: any) => i.isPDFAttachment());
     if (pdfs.length > 0) return { type: 'attachment', count: pdfs.length };
+    const notes = items.filter((i: any) => i.isNote?.() && !safeIsInTrash(i));
+    if (notes.length > 0) return { type: 'note', count: notes.length };
     return null;
 }
 
 /** Build a human-readable label for the winning target (e.g. "3 items", "1 attachment"). */
 function winningTargetLabel(wt: WinningTarget): string {
     if (wt.type === 'items') return `${wt.count} item${wt.count !== 1 ? 's' : ''}`;
+    if (wt.type === 'note') return `${wt.count} note${wt.count !== 1 ? 's' : ''}`;
     return `${wt.count} attachment${wt.count !== 1 ? 's' : ''}`;
 }
 
@@ -143,6 +147,9 @@ export function initContextMenus(): void {
         ztoolkit.log('zoteroContextMenu: MenuManager not available, skipping');
         return;
     }
+    // Clear stale Beaver DOM left by a prior version that didn't get a chance
+    // to clean up (e.g., upgraded mid-session).
+    removeStaleMenuDOM();
     registerMenus();
     startPrefObserver();
 }
@@ -159,6 +166,33 @@ export function cleanupContextMenus(): void {
 // ---------------------------------------------------------------------------
 // Menu registration
 // ---------------------------------------------------------------------------
+
+/**
+ * Wrap an onShowing handler to swallow any throw and default to hidden.
+ * `label` identifies the handler in logs so a failing action is traceable
+ * when many wrappers share the same root cause.
+ */
+function safeOnShowing(
+    label: string,
+    fn: (event: any, context: any) => void,
+): (event: any, context: any) => void {
+    // Log at most once per wrapped handler to avoid spamming on every
+    // popupshowing when a handler throws consistently.
+    let logged = false;
+    return (event: any, context: any) => {
+        try {
+            fn(event, context);
+        } catch (e) {
+            try { context?.setVisible?.(false); } catch { /* ignore */ }
+            if (!logged) {
+                logged = true;
+                try {
+                    ztoolkit.log(`zoteroContextMenu: onShowing threw in "${label}", hiding menu item: ${e}`);
+                } catch { /* ignore — logger must not break the wrapper guarantee */ }
+            }
+        }
+    };
+}
 
 function unregisterMenus(): void {
     const MenuManager = (Zotero as any).MenuManager;
@@ -184,9 +218,8 @@ function registerMenus(): void {
     const actions = getMergedActions();
 
     // --- Item context menu ---
-    // Note actions are excluded for now — enable by adding 'note' back to this filter
     const itemActions = actions.filter(a =>
-        a.targetType === 'items' || a.targetType === 'attachment'
+        a.targetType === 'items' || a.targetType === 'attachment' || a.targetType === 'note'
     );
 
     // Always register — at minimum shows "Add custom action..."
@@ -197,7 +230,7 @@ function registerMenus(): void {
         menus: [{
             menuType: 'submenu' as const,
             l10nID: 'beaver-context-menu-submenu',
-            onShowing: (_event: any, context: any) => {
+            onShowing: safeOnShowing('item-submenu', (_event: any, context: any) => {
                 const { items, setVisible } = context;
 
                 // Reset module-level state
@@ -212,28 +245,16 @@ function registerMenus(): void {
                     setVisible(false);
                     return;
                 }
-                // Hide for notes — not yet supported (re-enable by removing this block)
-                if (items.every((i: any) => i.isNote())) {
-                    setVisible(false);
-                    return;
-                }
 
-                // Filter to actionable items (supported type + not in trash)
-                const actionable = items.filter((i: any) => isActionableContextItem(i));
-                if (actionable.length === 0) {
-                    setVisible(false);
-                    return;
-                }
-
-                // Determine the single winning target type (items > attachments)
-                winningTarget = getWinningTarget(actionable);
+                // Determine the single winning target type (items > attachments > notes)
+                winningTarget = getWinningTarget(items);
                 if (!winningTarget) {
                     setVisible(false);
                     return;
                 }
 
                 setVisible(true);
-            },
+            }),
             menus: buildItemMenuItems(itemActions),
         }],
     });
@@ -249,10 +270,10 @@ function registerMenus(): void {
         menus: [{
             menuType: 'submenu' as const,
             l10nID: 'beaver-context-menu-submenu',
-            onShowing: (_event: any, context: any) => {
+            onShowing: safeOnShowing('collection-submenu', (_event: any, context: any) => {
                 const { collectionTreeRow, setVisible } = context;
                 setVisible(collectionTreeRow?.isCollection?.() === true);
-            },
+            }),
             menus: buildCollectionMenuItems(collectionActions),
         }],
     });
@@ -274,7 +295,7 @@ function buildItemMenuItems(itemActions: Action[]): any[] {
         menuType: 'menuitem' as const,
         l10nID: 'beaver-context-menu-context-header',
         l10nArgs: JSON.stringify({ context: '' }),
-        onShowing: (_event: any, context: any) => {
+        onShowing: safeOnShowing('context-header', (_event: any, context: any) => {
             const { items, setVisible, setEnabled, setL10nArgs } = context;
             const totalSelected = items?.length ?? 0;
             if (winningTarget && winningTarget.count < totalSelected) {
@@ -284,7 +305,7 @@ function buildItemMenuItems(itemActions: Action[]): any[] {
             } else {
                 setVisible(false);
             }
-        },
+        }),
     });
 
     // Action items
@@ -293,9 +314,9 @@ function buildItemMenuItems(itemActions: Action[]): any[] {
             menuType: 'menuitem' as const,
             l10nID: 'beaver-context-menu-action',
             l10nArgs: JSON.stringify({ title: action.title }),
-            onShowing: (_event: any, context: any) => {
+            onShowing: safeOnShowing(`item-action:${action.id}`, (_event: any, context: any) => {
                 filterItemAction(action, context);
-            },
+            }),
             onCommand: (_event: any, context: any) => {
                 dispatchAction(action, context);
             },
@@ -322,9 +343,9 @@ function buildCollectionMenuItems(collectionActions: Action[]): any[] {
         menuType: 'menuitem' as const,
         l10nID: 'beaver-context-menu-action',
         l10nArgs: JSON.stringify({ title: action.title }),
-        onShowing: (_event: any, context: any) => {
+        onShowing: safeOnShowing(`collection-action:${action.id}`, (_event: any, context: any) => {
             filterCollectionAction(action, context);
-        },
+        }),
         onCommand: (_event: any, context: any) => {
             dispatchAction(action, context);
         },
@@ -362,18 +383,23 @@ function filterItemAction(action: Action, context: any): void {
         return;
     }
 
-    const actionable = items.filter((i: any) => isActionableContextItem(i));
-
     switch (action.targetType) {
         case 'items': {
             const min = action.minItems ?? 1;
+            const actionable = items.filter((i: any) => isActionableContextItem(i));
             const regular = actionable.filter((i: any) => i.isRegularItem());
             setVisible(regular.length >= min);
             break;
         }
         case 'attachment': {
+            const actionable = items.filter((i: any) => isActionableContextItem(i));
             const hasAttachment = actionable.some((i: any) => i.isPDFAttachment());
             setVisible(hasAttachment);
+            break;
+        }
+        case 'note': {
+            const notes = items.filter((i: any) => i.isNote?.() && !safeIsInTrash(i));
+            setVisible(notes.length > 0);
             break;
         }
         default:
@@ -405,6 +431,9 @@ function dispatchAction(action: Action, context: any): void {
         case 'attachment':
             filteredItems = allItems.filter((i: any) => i.isPDFAttachment() && !safeIsInTrash(i));
             break;
+        case 'note':
+            filteredItems = allItems.filter((i: any) => i.isNote?.() && !safeIsInTrash(i));
+            break;
         default:
             filteredItems = allItems;
     }
@@ -430,14 +459,17 @@ function dispatchAction(action: Action, context: any): void {
 const CUSTOM_MENU_CLASS = 'zotero-custom-menu-item';
 
 function removeStaleMenuDOM(): void {
+    // Scoped to Beaver's own l10n IDs so we never wipe other plugins' menu
+    // items (they share CUSTOM_MENU_CLASS via Zotero's MenuManager).
     try {
         const win = Zotero.getMainWindow();
         if (!win?.document) return;
 
+        const selector = `.${CUSTOM_MENU_CLASS}[data-l10n-id^="beaver-context-menu-"]`;
         for (const popupId of ['zotero-itemmenu', 'zotero-collectionmenu']) {
             const popup = win.document.getElementById(popupId);
             if (!popup) continue;
-            const stale = popup.querySelectorAll(`.${CUSTOM_MENU_CLASS}`);
+            const stale = popup.querySelectorAll(selector);
             if (stale.length > 0) {
                 stale.forEach((el: Element) => el.remove());
             }

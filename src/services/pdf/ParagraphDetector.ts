@@ -218,11 +218,15 @@ function mergeBoundingBoxes(bboxes: LineBBox[]): LineBBox {
 }
 
 /**
- * Check if text is mostly numeric
+ * Check if text is mostly numeric.
+ *
+ * Unicode-aware: counts letters from any script (Latin, Cyrillic, Greek,
+ * Arabic, CJK, ...) so a line like "Глава 1" or "第1章" is not mis-classified
+ * as "mostly numeric" just because it lacks Latin letters.
  */
 function isMostlyNumeric(text: string, threshold: number = 0.8): boolean {
-    const alphaCount = (text.match(/[a-zA-Z]/g) || []).length;
-    const digitCount = (text.match(/\d/g) || []).length;
+    const alphaCount = (text.match(/\p{L}/gu) || []).length;
+    const digitCount = (text.match(/\p{N}/gu) || []).length;
     const total = alphaCount + digitCount;
 
     if (total === 0) return false;
@@ -236,8 +240,9 @@ function joinLines(lines: string[], removeHyphenation: boolean = true): string {
     let text = lines.join("\n");
 
     if (removeHyphenation) {
-        // Remove hyphens between letters across newlines
-        text = text.replace(/([a-zA-Z])-\n+([a-zA-Z])/g, "$1$2");
+        // Remove hyphens between letters across newlines. Unicode-aware so
+        // hyphenated words in Cyrillic/Greek/etc. are joined, not just Latin.
+        text = text.replace(/(\p{L})-\n+(\p{L})/gu, "$1$2");
     }
 
     // Replace multiple newlines with single newline

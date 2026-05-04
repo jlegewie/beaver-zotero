@@ -23,6 +23,7 @@ declare namespace _ZoteroTypes {
       "readerExplainPrompt": string;
       "maxFileSizeMB": number;
       "maxPageCount": number;
+      "accessRemoteFiles": boolean;
       "autoApplyAnnotations": boolean;
       "autoCreateNotes": boolean;
       "autoImportItems": boolean;
@@ -30,6 +31,7 @@ declare namespace _ZoteroTypes {
       "confirmExternalSearchCosts": boolean;
       "pauseLongRunningAgent": boolean;
       "requestPlusTools": boolean;
+      "showDiffPreviewInNoteEditor": boolean;
       "deferredToolPreferences": string;
       "customInstructions": string;
       "googleGenerativeAiApiKey": string;
@@ -41,6 +43,7 @@ declare namespace _ZoteroTypes {
       "citationFormat": string;
       "citationStyle": string;
       "citationLocale": string;
+      "usePageLabels": boolean;
       "customPrompts": string;
       "customPromptsLastUsed": string;
       "actions": string;
@@ -50,14 +53,18 @@ declare namespace _ZoteroTypes {
       "skippedItems": string;
       "onboardingWelcomeShown": boolean;
       "onboardingReaderTipShown": boolean;
+      "onboardingNoteTipShown": boolean;
       "onboardingCitationTipShown": boolean;
       "onboardingWelcomeShownAt": string;
+      "onboardingSignInTextShown": boolean;
       "mcpServerEnabled": boolean;
       "runConsistencyCheck": boolean;
       "runCollectionSync": boolean;
       "runWebDAVSync": boolean;
       "runEmbeddingFullDiff": boolean;
       "pendingVersionNotifications": string;
+      "librarySuggestions": string;
+      "librarySuggestionsGeneratedAt": string;
     };
   }
 }

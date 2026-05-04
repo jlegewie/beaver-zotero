@@ -2,7 +2,8 @@ import { atom } from "jotai";
 import { currentMessageItemsAtom, currentMessageContentAtom, updateMessageItemsFromZoteroSelectionAtom, updateReaderAttachmentAtom } from "./messageComposition";
 import { isLibraryTabAtom, isWebSearchEnabledAtom, removePopupMessagesByTypeAtom, userScrolledAtom, windowUserScrolledAtom } from "./ui";
 
-import { citationMetadataAtom, citationDataMapAtom, updateCitationDataAtom, resetCitationMarkersAtom } from "./citations";
+import { citationMetadataAtom, citationDataMapAtom, updateCitationDataAtom, resetCitationMarkersAtom, bumpPageLabelsVersionAtom } from "./citations";
+import { preloadPageLabelsForCitations } from "../utils/pageLabels";
 import { isExternalCitation } from "../types/citations";
 import { agentRunService, agentService } from "../../src/services/agentService";
 import { threadService } from "../../src/services/threadService";
@@ -423,9 +424,24 @@ export const loadThreadAtom = atom(
                 set(citationMetadataAtom, citationMetadata);
                 await set(updateCitationDataAtom);
 
+                // Preload PDF page labels in the background so subsequent
+                // renders can resolve page locators to their display labels.
+                preloadPageLabelsForCitations(citationMetadata)
+                    .then((loaded) => {
+                        if (loaded) set(bumpPageLabelsVersionAtom);
+                    })
+                    .catch((err) =>
+                        logger(`loadThreadAtom: Failed to preload page labels: ${err}`, 1)
+                    );
+
                 // Set agent runs
                 set(threadRunsAtom, processedRuns);
-                
+
+                // Reconcile toolcall_id mismatches between REST API and model messages
+                if (agent_actions && agent_actions.length > 0) {
+                    reconcileToolcallIds(processedRuns, agent_actions);
+                }
+
                 // Set agent actions
                 set(threadAgentActionsAtom, agent_actions || []);
 

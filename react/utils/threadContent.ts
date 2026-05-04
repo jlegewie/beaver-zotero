@@ -2,6 +2,18 @@ import { AgentRun, TextPart, ToolCallPart } from '../agents/types';
 import { getToolCallLabel } from '../agents/toolLabels';
 
 /**
+ * Parse args from a ToolCallPart, handling both string and object formats.
+ */
+function parseToolCallArgs(part: ToolCallPart): Record<string, unknown> {
+    if (!part.args) return {};
+    if (typeof part.args === 'object') return part.args as Record<string, unknown>;
+    if (typeof part.args === 'string') {
+        try { return JSON.parse(part.args); } catch { return {}; }
+    }
+    return {};
+}
+
+/**
  * Extract tool call details as a formatted string.
  * Moved from AgentRunFooter's inline getToolDetails closure.
  */
@@ -61,7 +73,20 @@ export function extractRunResponseContent(
             );
             if (toolCallParts.length > 0) {
                 const toolDescriptions = toolCallParts
-                    .map(p => getToolCallDetails(p, toolResultsMap))
+                    .map(p => {
+                        // For create_note, include the note content inline (like <note> tags)
+                        if (p.tool_name === 'create_note') {
+                            const args = parseToolCallArgs(p);
+                            const title = args.title as string | undefined;
+                            const content = args.content as string | undefined;
+                            if (title && content) {
+                                // Match preprocessNoteContent output: blank lines around --- to
+                                // ensure they are thematic breaks (not setext headings)
+                                return `\n\n---\n## ${title}\n\n${content}\n\n---`;
+                            }
+                        }
+                        return getToolCallDetails(p, toolResultsMap);
+                    })
                     .join('\n\n');
                 parts.push(toolDescriptions);
             }
@@ -78,6 +103,8 @@ export interface ExtractThreadContentOptions {
     threadId?: string | null;
     /** Include per-run [↗] deep links (works in clipboard markdown, not in Zotero notes) */
     includeRunLinks?: boolean;
+    /** Wrap user messages in blockquotes (for note saves) */
+    userMessageAsBlockquote?: boolean;
 }
 
 /**
@@ -97,7 +124,7 @@ export function extractThreadContent(
     toolResultsMap: Map<string, any>,
     options: ExtractThreadContentOptions = {}
 ): string {
-    const { threadName, threadId, includeRunLinks = true } = options;
+    const { threadName, threadId, includeRunLinks = true, userMessageAsBlockquote = false } = options;
     const sections: string[] = [];
 
     if (threadName) {
@@ -112,7 +139,10 @@ export function extractThreadContent(
             const userHeading = includeRunLinks && threadId
                 ? ` [User ↗](zotero://beaver/thread/${threadId}/run/${run.id})`
                 : 'User';
-            sections.push(`## ${userHeading}\n\n${userMessage}`);
+            const formattedMessage = userMessageAsBlockquote
+                ? `> ${userMessage.replace(/\n/g, '\n> ')}`
+                : userMessage;
+            sections.push(`## ${userHeading}\n\n${formattedMessage}`);
         }
         if (responseContent) {
             sections.push(`## Beaver\n\n${responseContent}`);

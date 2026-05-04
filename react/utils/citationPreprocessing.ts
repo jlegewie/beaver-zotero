@@ -117,6 +117,12 @@ export function preprocessCitationMatch(
 }
 
 /**
+ * Unwrap backtick-wrapped citation tags (common LLM mistake).
+ * Matches: `<citation att_id="...">` → <citation att_id="...">
+ */
+const UNWRAP_BACKTICK_PATTERN = /`(<citation[^>]*>)`/g;
+
+/**
  * Regex pattern for matching citation tags in all formats:
  * - Self-closing: <citation att_id="..."/>
  * - Opening only (missing /): <citation att_id="...">
@@ -147,14 +153,17 @@ export function preprocessCitations(
     content: string, 
     state: CitationPreprocessState = createPreprocessState()
 ): string {
+    // Unwrap backtick-wrapped citation tags (common LLM mistake)
+    content = content.replace(UNWRAP_BACKTICK_PATTERN, '$1');
+
     // Reset the regex lastIndex for each call
     CITATION_TAG_PATTERN.lastIndex = 0;
-    
+
     // Reset lastEndIndex for this new content string - adjacency detection
     // should only apply within the same content, not across different segments.
     // Keep lastIdentityKey so consecutive detection still works across segments.
     state.lastEndIndex = -1;
-    
+
     return content.replace(
         CITATION_TAG_PATTERN,
         (match, attributesStr, offset, fullString) => {

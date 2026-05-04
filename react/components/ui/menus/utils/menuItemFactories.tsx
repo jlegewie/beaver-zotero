@@ -168,6 +168,89 @@ export function createCollectionMenuItem(
 /**
  * Create a menu item from a Zotero tag (for tags mode)
  */
+/**
+ * Create a menu item from a Zotero note item (for notes mode)
+ */
+export async function createNoteMenuItem(
+    note: Zotero.Item,
+    context: SourceMenuItemContext
+): Promise<SearchMenuItem> {
+    const { currentMessageItems, onAdd, onRemove } = context;
+
+    const title = note.getNoteTitle() || 'Untitled Note';
+    const isInCurrentMessageItems = currentMessageItems.some(
+        (i) => i.id === note.id
+    );
+
+    // Get secondary text: parent info for child notes, content snippet for standalone
+    let secondaryText = '';
+    try {
+        if (note.parentItem) {
+            const parent = note.parentItem;
+            const firstCreator = parent.firstCreator || '';
+            const year = parent.getField('date')?.match(/\d{4}/)?.[0] || '';
+            secondaryText = firstCreator
+                ? `Note on ${firstCreator}${year ? ` ${year}` : ''}`
+                : `Note on ${parent.getDisplayTitle() || 'item'}`;
+        } else {
+            const noteContent = note.getNote() || '';
+            const textContent = noteContent.replace(/<[^>]*>/g, '').trim();
+            const afterTitle = textContent.startsWith(title)
+                ? textContent.slice(title.length).trim()
+                : textContent;
+            if (afterTitle) {
+                secondaryText = afterTitle.slice(0, 80) + (afterTitle.length > 80 ? '\u2026' : '');
+            } else {
+                secondaryText = 'Standalone note';
+            }
+        }
+    } catch {
+        secondaryText = '';
+    }
+
+    const handleMenuItemClick = async () => {
+        const exists = currentMessageItems.some((i) => i.id === note.id);
+        if (!exists) {
+            onAdd(note);
+        } else {
+            onRemove(note);
+        }
+    };
+
+    const iconName = note.getItemTypeIconName();
+    const iconElement = iconName ? (
+        <span className="scale-80">
+            <CSSItemTypeIcon itemType={iconName} />
+        </span>
+    ) : null;
+
+    return {
+        label: title + ' ' + secondaryText,
+        onClick: handleMenuItemClick,
+        customContent: (
+            <div className="display-flex flex-row gap-2 items-start min-w-0">
+                {iconElement}
+                <div className="display-flex flex-col gap-2 min-w-0 font-color-secondary">
+                    <div className="display-flex flex-row justify-between min-w-0">
+                        <span className="truncate font-color-secondary">
+                            {title}
+                        </span>
+                        {isInCurrentMessageItems && <Icon icon={TickIcon} className="scale-12 ml-2" />}
+                    </div>
+                    {secondaryText && (
+                        <span className="truncate text-sm font-color-tertiary min-w-0">
+                            {secondaryText}
+                        </span>
+                    )}
+                </div>
+            </div>
+        ),
+    };
+}
+
+/**
+ * Create a menu item from a Zotero tag (for tags mode)
+ */
 export function createTagMenuItem(
     tag: ZoteroTag,
     context: TagMenuItemContext

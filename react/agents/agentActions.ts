@@ -1,5 +1,8 @@
 import { atom } from 'jotai';
 import { logger } from '../../src/utils/logger';
+import { dismissDiffPreview } from '../utils/noteEditorDiffPreview';
+import { updateDiffPreviewForNote, diffPreviewNoteKeyAtom } from '../utils/diffPreviewCoordinator';
+import { makeNoteKey } from '../atoms/editNoteAutoApprove';
 import { agentActionsService, AckActionLink } from '../../src/services/agentActionsService';
 import { ZoteroItemReference } from '../types/zotero';
 import {
@@ -14,6 +17,7 @@ import {
     normalizeNotePosition,
 } from '../types/agentActions/annotations';
 import type { CreateItemProposedData, CreateItemResultData } from '../types/agentActions/items';
+import type { ManageCollectionsProposedData, ManageCollectionsResultData } from '../types/agentActions/base';
 import type { WSDeferredApprovalRequest, AgentActionType } from '../../src/services/agentProtocol';
 
 // =============================================================================
@@ -77,6 +81,13 @@ export const isZoteroNoteAgentAction = (action: AgentAction): boolean => {
 };
 
 /**
+ * Type guard for create note actions (via create_note tool)
+ */
+export const isCreateNoteAgentAction = (action: AgentAction): boolean => {
+    return action.action_type === 'create_note';
+};
+
+/**
  * Type guard for create item actions
  */
 export const isCreateItemAgentAction = (action: AgentAction): action is CreateItemAgentAction => {
@@ -105,6 +116,27 @@ export const isOrganizeItemsAgentAction = (action: AgentAction): boolean => {
 };
 
 /**
+ * Type guard for manage tags actions
+ */
+export const isManageTagsAgentAction = (action: AgentAction): boolean => {
+    return action.action_type === 'manage_tags';
+};
+
+/**
+ * Type guard for manage collections actions
+ */
+export const isManageCollectionsAgentAction = (action: AgentAction): action is ManageCollectionsAgentAction => {
+    return action.action_type === 'manage_collections';
+};
+
+/**
+ * Type guard for edit note actions
+ */
+export const isEditNoteAgentAction = (action: AgentAction): boolean => {
+    return action.action_type === 'edit_note';
+};
+
+/**
  * Type guard for confirm extraction actions
  */
 export const isConfirmExtractionAgentAction = (action: AgentAction): boolean => {
@@ -125,6 +157,15 @@ export type CreateItemAgentAction = AgentAction & {
     action_type: 'create_item';
     proposed_data: CreateItemProposedData;
     result_data?: CreateItemResultData;
+};
+
+/**
+ * Typed agent action for manage_collections actions
+ */
+export type ManageCollectionsAgentAction = AgentAction & {
+    action_type: 'manage_collections';
+    proposed_data: ManageCollectionsProposedData;
+    result_data?: ManageCollectionsResultData;
 };
 
 /**
@@ -519,7 +560,19 @@ export const upsertAgentActionsAtom = atom(
                 const update = newActionsById.get(existing.id);
                 if (update) {
                     newActionsById.delete(existing.id); // Mark as processed
-                    return { ...existing, ...update };
+                    const merged = { ...existing, ...update };
+                    // Preserve existing proposed_data when update has empty proposed_data
+                    // (backend may send status updates without full proposed_data)
+                    if (existing.proposed_data && Object.keys(existing.proposed_data).length > 0 &&
+                        (!update.proposed_data || Object.keys(update.proposed_data).length === 0)) {
+                        merged.proposed_data = existing.proposed_data;
+                    }
+                    // Same for result_data
+                    if (existing.result_data && Object.keys(existing.result_data).length > 0 &&
+                        (!update.result_data || Object.keys(update.result_data).length === 0)) {
+                        merged.result_data = existing.result_data;
+                    }
+                    return merged;
                 }
                 return existing;
             });
@@ -660,11 +713,15 @@ export const undoAgentActionAtom = atom(
         set(threadAgentActionsAtom, (prev: AgentAction[]) => {
             return prev.map((action) => {
                 if (action.id !== actionId) return action;
-                // Preserve old_creators from result_data into proposed_data before clearing,
-                // so the preview can show the before/after diff in the "undone" state.
-                const proposed_data = (action.result_data?.old_creators && !action.proposed_data?.old_creators)
-                    ? { ...action.proposed_data, old_creators: action.result_data.old_creators }
-                    : action.proposed_data;
+                // Preserve undo-critical fields from result_data into proposed_data before
+                // clearing, so the preview can show the before/after diff in the "undone" state.
+                let proposed_data = action.proposed_data;
+                if (action.result_data?.old_creators && !proposed_data?.old_creators) {
+                    proposed_data = { ...proposed_data, old_creators: action.result_data.old_creators };
+                }
+                if (action.result_data?.undo_full_html && !proposed_data?.undo_full_html) {
+                    proposed_data = { ...proposed_data, undo_full_html: action.result_data.undo_full_html };
+                }
                 return { ...action, proposed_data, status: 'undone' as ActionStatus, result_data: undefined, error_message: undefined };
             });
         });
@@ -748,6 +805,14 @@ export const addPendingApprovalAtom = atom(
             });
             return next;
         });
+
+        // Trigger in-editor diff preview for edit_note approvals
+        if (event.action_type === 'edit_note') {
+            const { library_id, zotero_key } = event.action_data || {};
+            if (library_id != null && zotero_key) {
+                updateDiffPreviewForNote(library_id, zotero_key);
+            }
+        }
     }
 );
 
@@ -756,12 +821,25 @@ export const addPendingApprovalAtom = atom(
  */
 export const removePendingApprovalAtom = atom(
     null,
-    (_, set, actionId: string) => {
-        set(pendingApprovalsAtom, (prev) => {
-            const next = new Map(prev);
+    (get, set, actionId: string) => {
+        // Read the approval before removing so we know which note to update
+        const prev = get(pendingApprovalsAtom);
+        const removed = prev.get(actionId);
+
+        set(pendingApprovalsAtom, (p) => {
+            const next = new Map(p);
             next.delete(actionId);
             return next;
         });
+
+        // If the removed approval was edit_note, update/dismiss the preview
+        if (removed?.actionType === 'edit_note') {
+            const libId = removed.actionData?.library_id;
+            const zKey = removed.actionData?.zotero_key;
+            if (libId != null && zKey) {
+                updateDiffPreviewForNote(libId, zKey);
+            }
+        }
     }
 );
 
@@ -771,6 +849,8 @@ export const removePendingApprovalAtom = atom(
 export const clearAllPendingApprovalsAtom = atom(
     null,
     (_, set) => {
+        dismissDiffPreview();
+        set(diffPreviewNoteKeyAtom, null);
         set(pendingApprovalsAtom, new Map());
     }
 );
@@ -858,6 +938,9 @@ export async function buildPendingApprovalFromAction(action: AgentAction): Promi
         currentValue = undefined;
     } else if (actionType === 'confirm_external_search') {
         // No Zotero data fetching needed — cost info is entirely in proposed_data
+        currentValue = undefined;
+    } else if (actionType === 'edit_note') {
+        // No extra Zotero data fetching needed — old_string/new_string are in proposed_data
         currentValue = undefined;
     }
 

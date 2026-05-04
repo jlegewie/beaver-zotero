@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { PopupMessage, POPUP_MESSAGE_DURATION } from '../../../types/popupMessage';
-import { Icon, AlertIcon, InformationCircleIcon, PuzzleIcon, SearchIcon } from '../../icons/icons';
+import { Icon, AlertIcon, InformationCircleIcon, PuzzleIcon } from '../../icons/icons';
 import { useSetAtom } from 'jotai';
 import { removePopupMessageAtom } from '../../../utils/popupMessageUtils';
 import PlanChangeMessageContent from './PlanChangeMessageContent';
@@ -8,8 +8,8 @@ import IndexingCompleteMessageContent from './IndexingCompleteMessageContent';
 import VersionUpdateMessageContent from './VersionUpdateMessageContent';
 import WelcomeOnboardingContent from './WelcomeOnboardingContent';
 import ReaderTipContent from './ReaderTipContent';
+import NoteTipContent from './NoteTipContent';
 import { CitationTipContent } from '../../sources/CitationTipContent';
-import EmbeddingIndexingMessageContent from './EmbeddingIndexingMessageContent';
 import Button from "../Button";
 import PopupMessageHeader from './PopupMessageHeader';
 import { getWindowFromElement } from '../../../utils/windowContext';
@@ -73,8 +73,6 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message, onRemove, 
             case 'version_update':
                 // return <Icon icon={AiMagicIcon} className="scale-12 mt-020 font-color-secondary" />;
                 return null;
-            case 'embedding_indexing':
-                return <Icon icon={SearchIcon} className="scale-12 mt-020 font-color-secondary" />;
             case 'info':
             default:
                 return <Icon icon={InformationCircleIcon} className="scale-12 mt-020 font-color-secondary" />;
@@ -94,7 +92,6 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message, onRemove, 
         case 'plan_change':
         case 'indexing_complete':
         case 'version_update':
-        case 'embedding_indexing':
         default:
             fontColor = 'font-color-secondary';
             backgroundColor = 'var(--material-mix-quarternary)';
@@ -116,7 +113,7 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message, onRemove, 
         >
             <div className="p-3 display-flex flex-col items-start gap-2">
                 {/* Floating version_update/welcome_onboarding/reader_tip render their own headers */}
-                {!(isFloating && (message.type === 'version_update' || message.type === 'welcome_onboarding' || message.type === 'reader_tip')) && (
+                {!(isFloating && (message.type === 'version_update' || message.type === 'welcome_onboarding' || message.type === 'reader_tip' || message.type === 'note_tip')) && (
                     <PopupMessageHeader
                         icon={message.icon || getDefaultIcon()}
                         title={message.title}
@@ -188,12 +185,12 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message, onRemove, 
                     <ReaderTipContent onDismiss={handleDismiss} />
                 )}
 
-                {message.type === 'citation_tip' && (
-                    <CitationTipContent />
+                {message.type === 'note_tip' && (
+                    <NoteTipContent onDismiss={handleDismiss} />
                 )}
 
-                {message.type === 'embedding_indexing' && (
-                    <EmbeddingIndexingMessageContent message={message} />
+                {message.type === 'citation_tip' && (
+                    <CitationTipContent />
                 )}
 
                 {message.button && (

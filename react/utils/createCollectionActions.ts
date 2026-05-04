@@ -106,13 +106,21 @@ export async function executeCreateCollectionAction(
 
 /**
  * Undo a create_collection agent action by deleting the created collection.
+ *
+ * Refuses when the collection has subcollections. Zotero's
+ * `collection.eraseTx()` cascades through all descendant collections (see
+ * `Zotero.Collection.prototype._eraseData`), so erasing a collection that
+ * later had other collections moved into it would also destroy those and
+ * anything under them. Mirrors the existing subcollection guard in
+ * `executeManageCollectionsAction` (manageCollectionsActions.ts).
+ *
  * @param action The agent action to undo (must have been applied)
  */
 export async function undoCreateCollectionAction(
     action: AgentAction
 ): Promise<void> {
     const resultData = action.result_data as CreateCollectionResultData | undefined;
-    
+
     if (!resultData?.collection_key || !resultData?.library_id) {
         throw new Error('No result data available for undo - collection was not created');
     }
@@ -127,6 +135,12 @@ export async function undoCreateCollectionAction(
         // Collection may have already been deleted manually
         logger(`undoCreateCollectionAction: Collection ${resultData.library_id}-${resultData.collection_key} not found, may have been deleted`, 1);
         return;
+    }
+
+    // Refuse if subcollections were moved in after creation — eraseTx would
+    // cascade-delete them. Items are fine (eraseTx detaches, doesn't delete).
+    if (collection.hasChildCollections(false)) {
+        throw new Error('Collection contains subcollections.');
     }
 
     // Erase the collection (this will NOT delete items in the collection, just remove them from it)

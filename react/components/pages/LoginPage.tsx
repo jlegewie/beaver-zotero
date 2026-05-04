@@ -1,5 +1,9 @@
 import React, { useState } from "react";
+import { useAtomValue } from "jotai";
 import SignInForm from "../auth/SignInForm";
+import { Icon, LockIcon } from "../icons/icons";
+import { getPref } from "../../../src/utils/prefs";
+import { loginStepAtom } from "../../atoms/auth";
 
 interface LoginPageProps {
     emailInputRef?: React.RefObject<HTMLInputElement>;
@@ -7,6 +11,9 @@ interface LoginPageProps {
 
 const LoginPage: React.FC<LoginPageProps> = ({ emailInputRef }) => {
     const [errorMsg, setErrorMsg] = useState<string | null>(null)
+    // Show first-time privacy disclosure on the sign-in form until acknowledged
+    const [showOnboardingText] = useState<boolean>(() => !getPref("onboardingSignInTextShown"))
+    const loginStep = useAtomValue(loginStepAtom)
 
     return (
         <div 
@@ -33,6 +40,25 @@ const LoginPage: React.FC<LoginPageProps> = ({ emailInputRef }) => {
                     </div>
                 )} */}
             </div>
+            <div className="flex-1"/>
+            {showOnboardingText && loginStep !== 'otp' && (
+                <div className="display-flex flex-row gap-3 items-start bg-quinary p-25 rounded-lg">
+                    <Icon icon={LockIcon} className="mt-020 scale-11" />
+                    <span>
+                        Signing in lets Beaver read your library.
+                        We securely process extracted text to answer questions, but never upload or permanently store your original files.
+                        <a
+                            className="text-link cursor-pointer ml-1"
+                            href={process.env.WEBAPP_BASE_URL + '/docs/privacy'}
+                            onClick={() => Zotero.launchURL(process.env.WEBAPP_BASE_URL + '/docs/privacy')}
+                            target='_blank'
+                            rel='noopener noreferrer'
+                        >
+                            Learn more
+                        </a>
+                    </span>
+                </div>
+            )}
         </div>
     );
 };

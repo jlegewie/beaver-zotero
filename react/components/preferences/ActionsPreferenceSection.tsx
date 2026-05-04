@@ -93,16 +93,16 @@ const ActionsPreferenceSection: React.FC = () => {
                 </div>
             ),
         },
-        // {
-        //     label: TARGET_TYPE_LABELS.note,
-        //     onClick: () => handleAddAction('note'),
-        //     customContent: (
-        //         <div className="display-flex flex-col">
-        //             <span className="text-sm font-color-primary">{TARGET_TYPE_LABELS.note}</span>
-        //             <span className="text-sm font-color-tertiary">{TARGET_TYPE_DESCRIPTIONS.note}</span>
-        //         </div>
-        //     ),
-        // },
+        {
+            label: TARGET_TYPE_LABELS.note,
+            onClick: () => handleAddAction('note'),
+            customContent: (
+                <div className="display-flex flex-col">
+                    <span className="text-sm font-color-primary">{TARGET_TYPE_LABELS.note}</span>
+                    <span className="text-sm font-color-tertiary">{TARGET_TYPE_DESCRIPTIONS.note}</span>
+                </div>
+            ),
+        },
         {
             label: TARGET_TYPE_LABELS.collection,
             onClick: () => handleAddAction('collection'),

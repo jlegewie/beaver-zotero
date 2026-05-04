@@ -8,6 +8,8 @@ import { removePopupMessagesByTypeAtom } from '../atoms/ui';
 import { currentMessageItemsAtom, updateMessageItemsFromZoteroSelectionAtom } from '../atoms/messageComposition';
 import { searchableLibraryIdsAtom } from '../atoms/profile';
 import { logger } from '../../src/utils/logger';
+import { dismissDiffPreview } from '../utils/noteEditorDiffPreview';
+import { prewarmMuPDFWorker } from '../../src/services/pdf/prewarm';
 
 export function useToggleSidebar() {
     const setSidebarVisible = useSetAtom(isSidebarVisibleAtom);
@@ -16,6 +18,13 @@ export function useToggleSidebar() {
     const setCurrentMessageItems = useSetAtom(currentMessageItemsAtom);
     
     useEventSubscription('toggleChat', (detail) => {
+        // Pre-warm the MuPDF worker on every false → true transition
+        const currentlyOpenSnapshot = store.get(isSidebarVisibleAtom);
+        const willOpen = detail?.forceOpen ? true : !currentlyOpenSnapshot;
+        if (!currentlyOpenSnapshot && willOpen) {
+            prewarmMuPDFWorker();
+        }
+
         // Update atoms
         setSidebarVisible((prev) => {
             const currentlyOpen = prev;
@@ -24,8 +33,13 @@ export function useToggleSidebar() {
             // Already in the desired state — no-op
             if (newIsVisible === currentlyOpen) return prev;
             const isLibraryTab = Zotero.getMainWindow().Zotero_Tabs.selectedType === 'library';
-            
+
             logger(`useToggleSidebar: toggleChat event received - currently open: ${currentlyOpen}, will be: ${newIsVisible}, location: ${isLibraryTab ? 'library' : 'reader'}`);
+
+            // If closing, dismiss any active diff preview
+            if (currentlyOpen && !newIsVisible) {
+                dismissDiffPreview();
+            }
 
             // If just opened, initialize
             if (!currentlyOpen) {

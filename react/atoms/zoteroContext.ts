@@ -42,6 +42,10 @@ export const currentNoteItemAtom = atom<Zotero.Item | null>(null);
 // --- Recently Added Items (today) ---
 export const recentlyAddedTodayCountAtom = atom<number>(0);
 
+// --- Library has any regular items (across non-feed libraries) ---
+// null means the async DB probe has not completed yet.
+export const libraryHasItemsAtom = atom<boolean | null>(null);
+
 // --- Derived Context ---
 export type ZoteroContextType =
     | 'reader' | 'note' | 'items_selected' | 'tag_filtered'

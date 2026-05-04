@@ -144,23 +144,26 @@ const ItemPreviewContent: React.FC<ItemPreviewContentProps> = ({
             // Show note preview
             try {
                 const noteContent = item.getNote();
-                const plainText = noteContent.replace(/<[^>]*>/g, '').substring(0, 200);
-                
+                const noteTitle = item.getNoteTitle();
+                let plainText = noteContent.replace(/<[^>]*>/g, '').trim();
+                // Strip the title from the beginning of the content to avoid duplication
+                if (noteTitle && plainText.startsWith(noteTitle)) {
+                    plainText = plainText.substring(noteTitle.length).trim();
+                }
+                plainText = plainText.substring(0, 200);
+
                 return (
-                    <div className="space-y-2">
-                        <div className="display-flex items-start gap-2">
-                            <span className="mt-1">
-                                <CSSItemTypeIcon itemType={item.getItemTypeIconName()} />
-                            </span>
-                            <div className="min-w-0 flex-1">
-                                <div className="font-weight-medium">Note</div>
-                                <div className="text-sm font-color-secondary mt-1">{plainText}...</div>
-                            </div>
-                        </div>
+                    <div className="p-3 display-flex flex-col items-start gap-2">
+                        <PopupMessageHeader
+                            icon={createElement(CSSItemTypeIcon, { itemType: item.getItemTypeIconName() })}
+                            title={getDisplayNameFromItem(item)}
+                            handleDismiss={() => setActivePreview(null)}
+                        />
+                        {plainText && <div className="text-sm font-color-secondary ml-15">{plainText}{plainText.length >= 200 ? '...' : ''}</div>}
                     </div>
                 );
             } catch (error) {
-                return <div className="font-color-secondary">Unable to load note</div>;
+                return <div className="p-3 font-color-secondary">Unable to load note</div>;
             }
         }
         

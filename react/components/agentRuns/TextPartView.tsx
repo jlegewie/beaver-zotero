@@ -13,19 +13,19 @@ interface TextPartViewProps {
  * Since WSPartEvent sends accumulated content (not deltas),
  * we simply render the current content state.
  */
-export const TextPartView: React.FC<TextPartViewProps> = ({ part, runId }) => {
+export const TextPartView: React.FC<TextPartViewProps> = React.memo(function TextPartView({ part, runId }) {
     if (!part.content || part.content.trim() === '' || part.content == '_') {
         return null;
     }
 
     return (
-        <MarkdownRenderer 
+        <MarkdownRenderer
             className="markdown"
             content={part.content.trim()}
             runId={runId}
         />
     );
-};
+});
 
 export default TextPartView;
 

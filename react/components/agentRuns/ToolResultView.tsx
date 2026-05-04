@@ -31,6 +31,8 @@ import {
     extractGetMetadataData,
     isExtractResult,
     extractExtractData,
+    isReadNoteResult,
+    extractReadNoteData,
 } from '../../agents/toolResultTypes';
 import { ItemSearchResultView } from './ItemSearchResultView';
 import { FulltextSearchResultView } from './FulltextSearchResultView';
@@ -40,6 +42,7 @@ import { ExternalSearchResultView } from './ExternalSearchResultView';
 import { ListCollectionsResultView } from './ListCollectionsResultView';
 import { ListTagsResultView } from './ListTagsResultView';
 import { ExtractResultView } from './ExtractResultView';
+import { ReadNoteResultView } from './ReadNoteResultView';
 
 interface ToolResultViewProps {
     toolcall: ToolCallPart;
@@ -58,6 +61,22 @@ export const ToolResultView: React.FC<ToolResultViewProps> = ({ toolcall, result
     const toolName = toolcall.tool_name;
     const content = result.content;
     const metadata = result.metadata;
+
+    // Zotero search results (zotero_search)
+    if (isZoteroSearchResult(toolName, content, metadata)) {
+        const data = extractZoteroSearchData(content, metadata);
+        if (data) {
+            return <ItemSearchResultView items={data.items} showParentItem={false} />;
+        }
+    }
+
+    // List items results (list_items)
+    if (isListItemsResult(toolName, content, metadata)) {
+        const data = extractListItemsData(content, metadata);
+        if (data) {
+            return <ItemSearchResultView items={data.items} showParentItem={false} />;
+        }
+    }
 
     // Item search results (search_references_by_topic, search_references_by_metadata)
     if (isItemSearchResult(toolName, content, metadata)) {
@@ -135,22 +154,6 @@ export const ToolResultView: React.FC<ToolResultViewProps> = ({ toolcall, result
         }
     }
 
-    // Zotero search results (zotero_search)
-    if (isZoteroSearchResult(toolName, content, metadata)) {
-        const data = extractZoteroSearchData(content, metadata);
-        if (data) {
-            return <ItemSearchResultView items={data.items} />;
-        }
-    }
-
-    // List items results (list_items)
-    if (isListItemsResult(toolName, content, metadata)) {
-        const data = extractListItemsData(content, metadata);
-        if (data) {
-            return <ItemSearchResultView items={data.items} />;
-        }
-    }
-
     // List collections results (list_collections)
     if (isListCollectionsResult(toolName, content, metadata)) {
         const data = extractListCollectionsData(content, metadata);
@@ -192,6 +195,22 @@ export const ToolResultView: React.FC<ToolResultViewProps> = ({ toolcall, result
         const data = extractExtractData(content, metadata);
         if (data) {
             return <ExtractResultView items={data.items} />;
+        }
+    }
+
+    // Read note results (read_note)
+    if (isReadNoteResult(toolName, content, metadata)) {
+        const data = extractReadNoteData(content, metadata);
+        if (data) {
+            return (
+                <ReadNoteResultView
+                    noteReference={data.noteReference}
+                    parentReference={data.parentReference}
+                    title={data.title}
+                    totalLines={data.totalLines}
+                    linesReturned={data.linesReturned}
+                />
+            );
         }
     }
 

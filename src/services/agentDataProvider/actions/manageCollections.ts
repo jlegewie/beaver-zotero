@@ -1,0 +1,468 @@
+/**
+ * Validate and execute library-wide collection operations (manage_collections).
+ *
+ * Supports three actions:
+ *   - 'rename': changes the collection name.
+ *   - 'move':   reparents the collection. new_parent_key=null means top-level.
+ *               Rejects cycles (moving into self or a descendant) and
+ *               cross-library moves (Zotero requires copy+delete).
+ *   - 'delete': soft-deletes the collection (collection.deleted = true; saveTx)
+ *               Refuses if the collection has direct subcollections.
+ *
+ * Snapshots (old_name, old_parent_key) are captured at execute time to
+ * support undo for rename/move. Delete undo is a plain restore-from-trash
+ * and doesn't need an item-level snapshot.
+ */
+
+import {
+    WSAgentActionValidateRequest,
+    WSAgentActionValidateResponse,
+    WSAgentActionExecuteRequest,
+    WSAgentActionExecuteResponse,
+} from '../../agentProtocol';
+import { getDeferredToolPreference, isLibrarySearchable, getCollectionByIdOrName } from '../utils';
+import { TimeoutContext, checkAborted, TimeoutError } from '../timeout';
+import { logger } from '../../../utils/logger';
+
+/**
+ * Parse a collection identifier that may be a plain 8-char Zotero key or a
+ * compound '<libraryID>-<key>' string. Returns { libraryId, key } where
+ * libraryId is null if the input was a plain key.
+ */
+function parseCollectionRef(ref: string): { libraryId: number | null; key: string } {
+    const compound = ref.match(/^(\d+)-(.+)$/);
+    if (compound) {
+        return { libraryId: parseInt(compound[1], 10), key: compound[2] };
+    }
+    return { libraryId: null, key: ref };
+}
+
+
+interface SubcollectionSummary {
+    key: string;
+    name: string;
+    item_count: number;
+}
+
+
+/**
+ * Summarize direct child collections of `collection` (not deep descendants —
+ * the agent should walk one level at a time so deletion stays explicit).
+ * Returns name, key and direct item count for each, excluding trashed.
+ */
+function summarizeChildCollections(collection: any): SubcollectionSummary[] {
+    const children: any[] = collection.getChildCollections(false, false);
+    return children.map((child) => ({
+        key: String(child.key),
+        name: String(child.name),
+        item_count: (child.getChildItems(true, false) as number[]).length,
+    }));
+}
+
+
+function formatSubcollectionList(subs: SubcollectionSummary[]): string {
+    return subs
+        .map((s) => `  - '${s.name}' (key=${s.key}, ${s.item_count} item${s.item_count === 1 ? '' : 's'})`)
+        .join('\n');
+}
+
+
+export async function validateManageCollectionsAction(
+    request: WSAgentActionValidateRequest
+): Promise<WSAgentActionValidateResponse> {
+    const { action, collection_key: rawCollectionKey, new_name: rawNewName, new_parent_key: rawNewParentKey, library_id: rawLibraryId } = request.action_data as {
+        action: 'rename' | 'move' | 'delete';
+        collection_key: string;
+        new_name?: string | null;
+        new_parent_key?: string | null;
+        library_id?: number | null;
+    };
+
+    if (!rawCollectionKey || typeof rawCollectionKey !== 'string' || !rawCollectionKey.trim()) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: 'collection_key cannot be empty',
+            error_code: 'invalid_collection_key',
+            preference: 'always_ask',
+        };
+    }
+
+    const trimmedCollectionKey = rawCollectionKey.trim();
+    const hintLibraryId = typeof rawLibraryId === 'number' && rawLibraryId > 0 ? rawLibraryId : undefined;
+
+    // Consistency check: when both the compound collection_key and the
+    // separate library_id are sent, they must agree. (library_id is on its
+    // way out — once all agents send compound collection_key it can be
+    // dropped from the schema.)
+    const parsed = parseCollectionRef(trimmedCollectionKey);
+    if (parsed.libraryId !== null && hintLibraryId !== undefined && parsed.libraryId !== hintLibraryId) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: `collection_key embeds library ${parsed.libraryId} but library_id=${hintLibraryId} was also provided`,
+            error_code: 'invalid_library_id',
+            preference: 'always_ask',
+        };
+    }
+
+    // Pass the raw input through getCollectionByIdOrName. It handles the
+    // compound form strictly (lookup scoped to the embedded library with no
+    // cross-library fallback), and uses library_id as a hint for plain keys.
+    const effectiveLibraryId = parsed.libraryId ?? hintLibraryId;
+    const lookup = getCollectionByIdOrName(trimmedCollectionKey, effectiveLibraryId);
+    if (!lookup) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: `Collection not found: ${rawCollectionKey}`,
+            error_code: 'collection_not_found',
+            preference: 'always_ask',
+        };
+    }
+
+    const collection = lookup.collection;
+    const libraryID = lookup.libraryID;
+    const library = Zotero.Libraries.get(libraryID);
+    if (!library) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: `Library not found for collection '${rawCollectionKey}'`,
+            error_code: 'library_not_found',
+            preference: 'always_ask',
+        };
+    }
+    if (!isLibrarySearchable(libraryID)) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: `Collection '${collection.name}' is in library '${library.name}' which is not synced with Beaver.`,
+            error_code: 'library_not_searchable',
+            preference: 'always_ask',
+        };
+    }
+    if (!library.editable) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: `Library '${library.name}' is read-only and cannot be modified`,
+            error_code: 'library_not_editable',
+            preference: 'always_ask',
+        };
+    }
+
+    const oldName: string = collection.name;
+    const oldParentKey: string | null = collection.parentKey ? String(collection.parentKey) : null;
+
+    // Action-specific validation
+    let newName: string | null = null;
+    let newParentKey: string | null = null;
+
+    if (action === 'rename') {
+        newName = (rawNewName ?? '').trim();
+        if (!newName) {
+            return {
+                type: 'agent_action_validate_response',
+                request_id: request.request_id,
+                valid: false,
+                error: "action='rename' requires a non-empty new_name",
+                error_code: 'invalid_new_name',
+                preference: 'always_ask',
+            };
+        }
+        if (newName === oldName) {
+            return {
+                type: 'agent_action_validate_response',
+                request_id: request.request_id,
+                valid: false,
+                error: 'new_name must be different from the current name',
+                error_code: 'invalid_new_name',
+                preference: 'always_ask',
+            };
+        }
+    } else if (action === 'move') {
+        const trimmedParent = rawNewParentKey ? rawNewParentKey.trim() || null : null;
+        if (trimmedParent) {
+            // Accept plain 8-char key or compound '<libraryID>-<key>'. The
+            // compound form must reference the same library as the child being
+            // moved (Zotero can't reparent across libraries — that's a copy).
+            const parsedParent = parseCollectionRef(trimmedParent);
+            if (!parsedParent) {
+                return {
+                    type: 'agent_action_validate_response',
+                    request_id: request.request_id,
+                    valid: false,
+                    error: `Invalid new_parent_key format: '${trimmedParent}'`,
+                    error_code: 'invalid_parent',
+                    preference: 'always_ask',
+                };
+            }
+            if (parsedParent.libraryId !== null && parsedParent.libraryId !== libraryID) {
+                return {
+                    type: 'agent_action_validate_response',
+                    request_id: request.request_id,
+                    valid: false,
+                    error: `new_parent_key '${trimmedParent}' is in library ${parsedParent.libraryId}, but the collection is in library ${libraryID}. Cross-library moves are not supported.`,
+                    error_code: 'invalid_parent',
+                    preference: 'always_ask',
+                };
+            }
+            const parentKeyLookup = parsedParent.key;
+            const parent = await Zotero.Collections.getByLibraryAndKeyAsync(libraryID, parentKeyLookup);
+            if (!parent) {
+                return {
+                    type: 'agent_action_validate_response',
+                    request_id: request.request_id,
+                    valid: false,
+                    error: `Parent collection not found in library '${library.name}': ${trimmedParent}`,
+                    error_code: 'parent_not_found',
+                    preference: 'always_ask',
+                };
+            }
+            // Cannot move into self
+            if (parent.id === collection.id) {
+                return {
+                    type: 'agent_action_validate_response',
+                    request_id: request.request_id,
+                    valid: false,
+                    error: 'Cannot move a collection into itself',
+                    error_code: 'invalid_parent',
+                    preference: 'always_ask',
+                };
+            }
+            // Cannot move into a descendant (cycle)
+            const descendantIds = new Set(
+                collection.getDescendents(false, 'collection', false).map((d: any) => d.id)
+            );
+            if (descendantIds.has(parent.id)) {
+                return {
+                    type: 'agent_action_validate_response',
+                    request_id: request.request_id,
+                    valid: false,
+                    error: 'Cannot move a collection into one of its own descendants (cycle)',
+                    error_code: 'invalid_parent',
+                    preference: 'always_ask',
+                };
+            }
+            newParentKey = parent.key;
+        } else {
+            newParentKey = null;
+        }
+        // No-op move (same parent) — reject
+        const currentParentKey = oldParentKey;
+        if ((newParentKey ?? null) === currentParentKey) {
+            return {
+                type: 'agent_action_validate_response',
+                request_id: request.request_id,
+                valid: false,
+                error: `Collection is already at this location (parent: ${currentParentKey ?? 'top-level'})`,
+                error_code: 'no_change',
+                preference: 'always_ask',
+            };
+        }
+    } else if (action !== 'delete') {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: `Unsupported action: '${action}'. Use 'rename', 'move', or 'delete'.`,
+            error_code: 'invalid_action',
+            preference: 'always_ask',
+        };
+    }
+
+    // Preview-only counts (for the approval card). The authoritative
+    // snapshot is captured at execute time — NOT here — so a re-apply after
+    // manual library edits produces a fresh snapshot.
+    let oldItemCount: number | undefined;
+    if (action === 'delete') {
+        // Refuse delete when subcollections exist. Recursive delete would
+        // erase the whole subtree but undo can only restore the top-level
+        // collection (with a new key), losing structure silently. Force the
+        // agent to walk leaves first so the user sees and approves each level.
+        if (collection.hasChildCollections(false)) {
+            const subs = summarizeChildCollections(collection);
+            const list = formatSubcollectionList(subs);
+            return {
+                type: 'agent_action_validate_response',
+                request_id: request.request_id,
+                valid: false,
+                error:
+                    `Cannot delete collection '${collection.name}' because it contains ${subs.length} subcollection${subs.length === 1 ? '' : 's'}. ` +
+                    `Delete or move each subcollection first, then retry:\n${list}`,
+                error_code: 'has_subcollections',
+                preference: 'always_ask',
+            };
+        }
+        oldItemCount = (collection.getChildItems(true, false) as number[]).length;
+    }
+
+    const preference = getDeferredToolPreference('manage_collections');
+
+    return {
+        type: 'agent_action_validate_response',
+        request_id: request.request_id,
+        valid: true,
+        current_value: {
+            library_id: libraryID,
+            library_name: library.name,
+            action,
+            collection_key: collection.key,
+            collection_name: oldName,
+            old_name: oldName,
+            old_parent_key: oldParentKey,
+            old_item_count: oldItemCount,
+        },
+        // Normalize to plain scalars so execute, the persisted AgentAction, and
+        // the UI apply/undo path all see the resolved library_id + 8-char keys
+        // regardless of whether the agent sent a compound '<lib>-<key>' form.
+        // Snapshots are captured at execute time, not here.
+        normalized_action_data: {
+            library_id: libraryID,
+            collection_key: collection.key,
+            ...(action === 'move' ? { new_parent_key: newParentKey } : {}),
+        },
+        preference,
+    };
+}
+
+
+export async function executeManageCollectionsAction(
+    request: WSAgentActionExecuteRequest,
+    ctx: TimeoutContext,
+): Promise<WSAgentActionExecuteResponse> {
+    const { action, collection_key, new_name, new_parent_key, library_id } = request.action_data as {
+        action: 'rename' | 'move' | 'delete';
+        collection_key: string;
+        new_name?: string | null;
+        new_parent_key?: string | null;
+        library_id: number;
+    };
+
+    if (!library_id || typeof library_id !== 'number') {
+        return {
+            type: 'agent_action_execute_response',
+            request_id: request.request_id,
+            success: false,
+            error: 'library_id missing or invalid in action_data',
+            error_code: 'invalid_library_id',
+        };
+    }
+
+    try {
+        const collection = await Zotero.Collections.getByLibraryAndKeyAsync(library_id, collection_key);
+        if (!collection) {
+            return {
+                type: 'agent_action_execute_response',
+                request_id: request.request_id,
+                success: false,
+                error: `Collection not found: ${collection_key}`,
+                error_code: 'collection_not_found',
+            };
+        }
+
+        // Re-snapshot the authoritative pre-apply state at execute time.
+        // A re-apply after manual library edits produces a fresh snapshot
+        // that the next undo can correctly reverse.
+        const oldName: string = collection.name;
+        const oldParentKey: string | null = collection.parentKey ? String(collection.parentKey) : null;
+        let itemsAffected: number | null = null;
+        if (action === 'delete') {
+            // Defensive re-check: subcollections may have been added between
+            // validation and execute (manual edit, race). Refuse here too so
+            // the undo contract ("single collection, items stay attached")
+            // always holds.
+            if (collection.hasChildCollections(false)) {
+                const subs = summarizeChildCollections(collection);
+                const list = formatSubcollectionList(subs);
+                return {
+                    type: 'agent_action_execute_response',
+                    request_id: request.request_id,
+                    success: false,
+                    error:
+                        `Cannot delete collection '${oldName}' because it now contains ${subs.length} subcollection${subs.length === 1 ? '' : 's'}. ` +
+                        `Delete or move each subcollection first, then retry:\n${list}`,
+                    error_code: 'has_subcollections',
+                };
+            }
+            itemsAffected = (collection.getChildItems(true, false) as number[]).length;
+        }
+
+        if (action === 'rename') {
+            const target = (new_name ?? '').trim();
+            if (!target) {
+                return {
+                    type: 'agent_action_execute_response',
+                    request_id: request.request_id,
+                    success: false,
+                    error: 'new_name required for rename',
+                    error_code: 'invalid_new_name',
+                };
+            }
+            checkAborted(ctx, 'manage_collections:before_rename');
+            collection.name = target;
+            await collection.saveTx();
+            logger(`executeManageCollectionsAction: Renamed collection ${library_id}-${collection_key} → '${target}'`, 1);
+        } else if (action === 'move') {
+            // Zotero uses `false` to signal top-level (see collection.js parentKey setter).
+            checkAborted(ctx, 'manage_collections:before_move');
+            (collection as any).parentKey = new_parent_key ? new_parent_key : false;
+            await collection.saveTx();
+            logger(`executeManageCollectionsAction: Moved collection ${library_id}-${collection_key} to parent ${new_parent_key ?? 'top-level'}`, 1);
+        } else if (action === 'delete') {
+            checkAborted(ctx, 'manage_collections:before_delete');
+            // Soft-delete (trash): collection is hidden from the library view,
+            // items stay attached via collectionItems. Reversible with
+            // `collection.deleted = false; saveTx()` until the user explicitly
+            // empties the trash — Zotero's `trashAutoEmptyDays` timer only
+            // auto-empties trashed items, not trashed collections
+            // (see Zotero.Items.startEmptyTrashTimer in items.js).
+            (collection as any).deleted = true;
+            await collection.saveTx();
+            logger(`executeManageCollectionsAction: Trashed collection ${library_id}-${collection_key}`, 1);
+        } else {
+            return {
+                type: 'agent_action_execute_response',
+                request_id: request.request_id,
+                success: false,
+                error: `Unsupported action: '${action}'`,
+                error_code: 'invalid_action',
+            };
+        }
+
+        return {
+            type: 'agent_action_execute_response',
+            request_id: request.request_id,
+            success: true,
+            result_data: {
+                library_id,
+                action,
+                collection_key,
+                new_name: new_name ?? null,
+                new_parent_key: new_parent_key ?? null,
+                items_affected: itemsAffected,
+                old_name: oldName,
+                old_parent_key: oldParentKey,
+            },
+        };
+    } catch (error) {
+        if (error instanceof TimeoutError) {
+            throw error;
+        }
+        logger(`executeManageCollectionsAction: Failed: ${error}`, 1);
+        return {
+            type: 'agent_action_execute_response',
+            request_id: request.request_id,
+            success: false,
+            error: String(error),
+            error_code: 'execution_failed',
+        };
+    }
+}

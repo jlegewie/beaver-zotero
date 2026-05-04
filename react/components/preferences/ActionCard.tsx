@@ -137,7 +137,7 @@ const ActionCard: React.FC<ActionCardProps> = ({
         customContent: (
             <div className="display-flex flex-col">
                 <span className="text-sm font-color-primary">{TARGET_TYPE_LABELS[tt]}</span>
-                <span className="text-sm font-color-tertiary">{TARGET_TYPE_DESCRIPTIONS[tt]}</span>
+                <span className="text-sm font-color-secondary">{TARGET_TYPE_DESCRIPTIONS[tt]}</span>
             </div>
         )
     }));

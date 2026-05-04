@@ -100,6 +100,7 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
     onEmptyBackspace
 }) => {
     const menuRef = useRef<HTMLDivElement | null>(null);
+    const scrollContainerRef = useRef<HTMLDivElement | null>(null);
     const inputRef = useRef<HTMLInputElement | null>(null);
     const wasOpen = useRef(false);
     const [focusedIndex, setFocusedIndex] = useState<number>(-1);
@@ -309,6 +310,13 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
         return () => doc.removeEventListener('keydown', handleKeyNav);
     }, [isOpen, menuItems, focusedIndex, onClose, closeOnSelect, verticalPosition]);
     
+    // Scroll to bottom when menu opens in 'above' mode so items nearest the search input are visible
+    useEffect(() => {
+        if (isOpen && verticalPosition === 'above' && scrollContainerRef.current) {
+            scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+        }
+    }, [isOpen, menuItems, verticalPosition]);
+
     // Set initial focus
     useEffect(() => {
         if (isOpen) {
@@ -496,7 +504,7 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
             {verticalPosition === 'above' ? (
                 <>
                     {/* Menu items take remaining space and scroll */}
-                    <div className="overflow-y-auto overflow-x-hidden scrollbar flex-1">
+                    <div ref={scrollContainerRef} className="overflow-y-auto overflow-x-hidden scrollbar flex-1">
                         {displayOrderMenuItems.length > 0 ? (
                             displayOrderMenuItems.map((item, index) => renderMenuItem(item, index))
                         ) : (
@@ -505,7 +513,7 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
                             </div>
                         )}
                     </div>
-                    
+
                     {/* Search input at the bottom, ensure it doesn't shrink */}
                     {showSearchInput && (
                         <div className="flex-shrink-0"> 

@@ -171,55 +171,57 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
                                                         ariaLabel="Reveal source"
                                                         title="Reveal in Zotero"
                                                         className="display-flex scale-11"
-                                                        disabled={!mappedZoteroItem && citation.type !== "item" && citation.type !== "attachment"}
+                                                        disabled={!mappedZoteroItem && citation.type !== "item" && citation.type !== "attachment" && citation.type !== "note"}
                                                     />
                                                 </Tooltip>
-                                                <Tooltip content="Open PDF" singleLine>
-                                                    <IconButton
-                                                        icon={PdfIcon}
-                                                        variant="ghost-secondary"
-                                                        onClick={async () => {
-                                                            try {
-                                                                if (mappedZoteroItem) {
-                                                                    // Handle mapped external citation
-                                                                    const item = Zotero.Items.getByLibraryAndKey(
-                                                                        mappedZoteroItem.library_id,
-                                                                        mappedZoteroItem.zotero_key
-                                                                    );
-                                                                    if (item && item.isRegularItem()) {
-                                                                        const bestAttachment = await item.getBestAttachment();
-                                                                        if (bestAttachment) {
-                                                                            Zotero.getActiveZoteroPane().viewAttachment(bestAttachment.id);
+                                                {citation.type !== "note" && (
+                                                    <Tooltip content="Open PDF" singleLine>
+                                                        <IconButton
+                                                            icon={PdfIcon}
+                                                            variant="ghost-secondary"
+                                                            onClick={async () => {
+                                                                try {
+                                                                    if (mappedZoteroItem) {
+                                                                        // Handle mapped external citation
+                                                                        const item = Zotero.Items.getByLibraryAndKey(
+                                                                            mappedZoteroItem.library_id,
+                                                                            mappedZoteroItem.zotero_key
+                                                                        );
+                                                                        if (item && item.isRegularItem()) {
+                                                                            const bestAttachment = await item.getBestAttachment();
+                                                                            if (bestAttachment) {
+                                                                                Zotero.getActiveZoteroPane().viewAttachment(bestAttachment.id);
+                                                                            }
+                                                                        } else if (item && item.isAttachment()) {
+                                                                            Zotero.getActiveZoteroPane().viewAttachment(item.id);
                                                                         }
-                                                                    } else if (item && item.isAttachment()) {
-                                                                        Zotero.getActiveZoteroPane().viewAttachment(item.id);
-                                                                    }
-                                                                } else if (citation.type === "item" && citation.library_id && citation.zotero_key) {
-                                                                    // Handle item citation - get best attachment
-                                                                    const item = Zotero.Items.getByLibraryAndKey(
-                                                                        citation.library_id,
-                                                                        citation.zotero_key
-                                                                    );
-                                                                    if (item && item.isRegularItem()) {
-                                                                        const bestAttachment = await item.getBestAttachment();
-                                                                        if (bestAttachment) {
-                                                                            Zotero.getActiveZoteroPane().viewAttachment(bestAttachment.id);
+                                                                    } else if (citation.type === "item" && citation.library_id && citation.zotero_key) {
+                                                                        // Handle item citation - get best attachment
+                                                                        const item = Zotero.Items.getByLibraryAndKey(
+                                                                            citation.library_id,
+                                                                            citation.zotero_key
+                                                                        );
+                                                                        if (item && item.isRegularItem()) {
+                                                                            const bestAttachment = await item.getBestAttachment();
+                                                                            if (bestAttachment) {
+                                                                                Zotero.getActiveZoteroPane().viewAttachment(bestAttachment.id);
+                                                                            }
                                                                         }
+                                                                    } else {
+                                                                        openSource(citation);
                                                                     }
-                                                                } else {
+                                                                } catch (e) {
+                                                                    logger(`CitedSourcesList: Item not loaded, falling back to openSource: ${e}`);
                                                                     openSource(citation);
                                                                 }
-                                                            } catch (e) {
-                                                                logger(`CitedSourcesList: Item not loaded, falling back to openSource: ${e}`);
-                                                                openSource(citation);
-                                                            }
-                                                        }}
-                                                        ariaLabel="Open PDF"
-                                                        title="Open PDF"
-                                                        className="display-flex scale-12"
-                                                        disabled={!isPdfButtonEnabled(citation, mappedZoteroItem)}
-                                                    />
-                                                </Tooltip>
+                                                            }}
+                                                            ariaLabel="Open PDF"
+                                                            title="Open PDF"
+                                                            className="display-flex scale-12"
+                                                            disabled={!isPdfButtonEnabled(citation, mappedZoteroItem)}
+                                                        />
+                                                    </Tooltip>
+                                                )}
                                             </>
                                         )}
                                     </div>

@@ -10,9 +10,13 @@ async function onLoad() {
     await Zotero.initializationPromise;
     await Zotero.uiReadyPromise;
 
-    // Register UI properties for font size and UI density (same as main Zotero windows)
-    // This applies the user's preferred font size and UI density settings
-    Zotero.UIProperties.registerRoot(document.documentElement);
+    // Apply Zotero's font-size and UI density preferences to the React mount point.
+    // This mirrors how Zotero's own windows do it (e.g. zoteroPane.js calls registerRoot
+    // on #zotero-pane, advancedSearch.js on #zotero-search-box-container).
+    const mountContainer = document.getElementById('beaver-pane-window');
+    if (mountContainer) {
+        Zotero.UIProperties.registerRoot(mountContainer);
+    }
 
     // Register keyboard shortcut for closing the window (Cmd+W on Mac, Ctrl+W on Windows)
     window.addEventListener("keydown", (event) => {

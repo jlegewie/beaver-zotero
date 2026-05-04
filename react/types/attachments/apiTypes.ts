@@ -55,9 +55,9 @@ export interface AnnotationAttachment extends BaseMessageAttachment {
 // "note" type attachment (Zotero note item)
 export interface NoteAttachment extends BaseMessageAttachment {
     type: "note";
-    parent_key?: string;
-    note_content: string;
-    date_modified?: string; // ISO string
+    parent_key?: string;      // Optional - standalone notes have no parent
+    title?: string;            // Derived from note content (getNoteTitle())
+    date_modified?: string;    // ISO string
 }
 
 // "collection" type attachment (explicit collection reference)
@@ -81,6 +81,13 @@ export interface ReaderState {
     text_selection?: TextSelection;
     annotations?: Annotation[];
 }    
+
+export interface NoteState {
+    library_id: number;
+    zotero_key: string;
+    parent_key?: string;
+    title?: string;
+}
 
 /**
  * TextSelection represents a text selection in a reader.

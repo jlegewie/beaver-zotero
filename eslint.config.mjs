@@ -1,7 +1,13 @@
 // @ts-check Let TS check this config file
 
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
 import eslint from "@eslint/js";
 import tseslint from "typescript-eslint";
+
+/** Resolves ambiguous project roots when nested copies (e.g. .claude/worktrees) exist. */
+const tsconfigRootDir = path.dirname(fileURLToPath(import.meta.url));
 
 export default tseslint.config(
     {
@@ -9,6 +15,11 @@ export default tseslint.config(
     },
     {
         extends: [eslint.configs.recommended, ...tseslint.configs.recommended],
+        languageOptions: {
+            parserOptions: {
+                tsconfigRootDir,
+            },
+        },
         rules: {
             "no-restricted-globals": [
                 "error",

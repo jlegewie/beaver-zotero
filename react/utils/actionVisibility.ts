@@ -83,7 +83,12 @@ export function isActionVisible(action: Action, ctx: ActionContext): boolean {
             }
             return false;
         case 'note':
-            return ctx.zotero.type === 'note';
+            if (ctx.zotero.type === 'note') return true;
+            // Selected notes in library view
+            if (ctx.zotero.type === 'items_selected') {
+                if (ctx.zotero.selectedItems.some(i => i.isNote())) return true;
+            }
+            return false;
         case 'collection':
             return ctx.zotero.libraryView.treeRowType === 'collection';
         case 'global':
@@ -222,6 +227,26 @@ export function computeActionGroups(allActions: Action[], ctx: ActionContext): A
                         });
                     }
                 }
+            }
+        }
+    }
+
+    // --- 3b. Selected notes group ---
+    if (ctx.zotero.type === 'items_selected') {
+        const selectedNotes = ctx.zotero.selectedItems.filter(i => i.isNote());
+        if (selectedNotes.length > 0) {
+            const noteActions = allActions.filter(a => a.targetType === 'note');
+            if (noteActions.length > 0) {
+                const label = selectedNotes.length === 1
+                    ? truncateText(selectedNotes[0].getNoteTitle(), MAX_LABEL_ITEM_LENGTH)
+                    : `${selectedNotes.length} selected notes`;
+                groups.push({
+                    id: 'selected-notes',
+                    label,
+                    actions: noteActions,
+                    targetType: 'note',
+                    iconInfo: { type: 'css-icon', name: 'note' },
+                });
             }
         }
     }

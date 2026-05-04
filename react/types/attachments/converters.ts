@@ -2,6 +2,7 @@ import {
     MessageAttachment,
     SourceAttachment,
     AnnotationAttachment,
+    NoteAttachment,
     Annotation,
     AnnotationPosition,
     ItemMetadataAttachment
@@ -59,6 +60,15 @@ export function toMessageAttachment(item: Zotero.Item): MessageAttachment | null
             ...zoteroItemReference,
             ...toAnnotation(item)
         } as AnnotationAttachment;
+
+    } else if (item.isNote()) {
+        return {
+            type: "note",
+            ...zoteroItemReference,
+            parent_key: item.parentKey || undefined,
+            title: item.getNoteTitle() || undefined,
+            date_modified: Zotero.Date.sqlToISO8601(item.dateModified),
+        } as NoteAttachment;
 
     } else {
         return null;

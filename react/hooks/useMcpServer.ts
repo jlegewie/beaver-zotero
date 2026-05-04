@@ -42,6 +42,7 @@ import type {
     WSListTagsResponse,
     WSListItemsRequest,
     WSListItemsResponse,
+    RegularListResultItem,
     ItemSearchFrontendResultItem,
 } from '../../src/services/agentProtocol';
 
@@ -872,14 +873,16 @@ async function handleListItems(args: any): Promise<any> {
         items: response.items.map((item) => {
             const parsed = parseItemId(item.item_id);
             const zoteroUri = parsed ? getZoteroSelectURI(parsed.libraryId, parsed.key) : null;
+            // We always request item_category='regular', so items are RegularListResultItem
+            const regular = item as RegularListResultItem;
             return {
                 item_id: item.item_id,
-                item_type: item.item_type,
+                item_type: regular.item_type,
                 title: item.title ?? null,
-                authors: item.creators ?? null,
-                year: item.year ?? null,
-                date_added: item.date_added ?? null,
-                date_modified: item.date_modified ?? null,
+                authors: regular.creators ?? null,
+                year: regular.year ?? null,
+                date_added: regular.date_added ?? null,
+                date_modified: regular.date_modified ?? null,
                 ...(zoteroUri && { zotero_uri: zoteroUri }),
             };
         }),

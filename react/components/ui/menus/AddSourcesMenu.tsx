@@ -16,11 +16,13 @@ import { useSourcesMenu } from './hooks/useSourcesMenu';
 import { useLibrariesMenu } from './hooks/useLibrariesMenu';
 import { useCollectionsMenu } from './hooks/useCollectionsMenu';
 import { useTagsMenu } from './hooks/useTagsMenu';
+import { useNotesMenu } from './hooks/useNotesMenu';
 import { ZoteroTag } from '../../../types/zotero';
+import Tooltip from '../Tooltip';
 
 const RECENT_ITEMS_LIMIT = 5;
 
-type MenuMode = 'sources' | 'libraries' | 'collections' | 'tags';
+type MenuMode = 'sources' | 'libraries' | 'collections' | 'tags' | 'notes';
 
 interface RecentItem {
     zotero_key: string;
@@ -139,16 +141,15 @@ const AddSourcesMenu: React.FC<{
             query = query.trim();
             
             // Search Zotero items
-            const { libraryIds, collectionIds, tagSelections } = store.get(currentMessageFiltersAtom);
+            const { libraryIds, tagSelections } = store.get(currentMessageFiltersAtom);
             const searchLibraryIds = libraryIds.length > 0
                 ? libraryIds
                 : tagSelections.length > 0
                     ? Array.from(new Set(tagSelections.map((tag: ZoteroTag) => tag.libraryId)))
                     : searchableLibraryIds;
-            const searchCollectionIds = collectionIds.length > 0 ? collectionIds : undefined;
             const searchTags = tagSelections.length > 0 ? tagSelections : undefined;
-            logger(`AddSourcesMenu.handleSearch: Searching for '${query}' in libraries: ${searchLibraryIds.join(', ')}${searchCollectionIds ? `, collections: ${searchCollectionIds.join(', ')}` : ''}${searchTags ? `, tags: ${searchTags.map((tag: ZoteroTag) => `${tag.tag} (lib ${tag.libraryId})`).join('; ')}` : ''}`)
-            const resultsItems = await searchTitleCreatorYear(query, searchLibraryIds, searchCollectionIds, searchTags);
+            logger(`AddSourcesMenu.handleSearch: Searching for '${query}' in libraries: ${searchLibraryIds.join(', ')}${searchTags ? `, tags: ${searchTags.map((tag: ZoteroTag) => `${tag.tag} (lib ${tag.libraryId})`).join('; ')}` : ''}`)
+            const resultsItems = await searchTitleCreatorYear(query, searchLibraryIds, undefined, searchTags);
 
             // Ensure item data is loaded
             await loadFullItemData(resultsItems);
@@ -207,6 +208,11 @@ const AddSourcesMenu: React.FC<{
         setSearchQuery('');
         setMenuMode('tags');
     }, [setActiveZoteroLibraryId, setMenuMode, setSearchQuery]);
+
+    const handleNavigateToNotes = useCallback(() => {
+        setSearchQuery('');
+        setMenuMode('notes');
+    }, [setMenuMode, setSearchQuery]);
 
     // Handler functions for menu item callbacks
     const handleAddSourceItem = useCallback((item: Zotero.Item) => {
@@ -293,6 +299,7 @@ const AddSourcesMenu: React.FC<{
         onNavigateToLibraries: handleNavigateToLibraries,
         onNavigateToCollections: handleNavigateToCollections,
         onNavigateToTags: handleNavigateToTags,
+        onNavigateToNotes: handleNavigateToNotes,
         getRecentItems,
         recentItemsLimit: RECENT_ITEMS_LIMIT,
         verticalPosition
@@ -322,13 +329,23 @@ const AddSourcesMenu: React.FC<{
         verticalPosition
     });
 
+    const notesMenu = useNotesMenu({
+        isActive: isMenuOpen && menuMode === 'notes',
+        searchQuery,
+        searchableLibraryIds,
+        sourceMenuItemContext,
+        verticalPosition
+    });
+
     const menuItems = menuMode === 'sources'
         ? sourcesMenu.menuItems
         : menuMode === 'libraries'
             ? librariesMenu.menuItems
             : menuMode === 'collections'
                 ? collectionsMenu.menuItems
-                : tagsMenu.menuItems;
+                : menuMode === 'tags'
+                    ? tagsMenu.menuItems
+                    : notesMenu.menuItems;
 
     const handleButtonClick = (e: React.MouseEvent) => {
         e.stopPropagation();
@@ -347,9 +364,10 @@ const AddSourcesMenu: React.FC<{
             // Remove focus from the button after opening the menu
             buttonRef.current.blur();
             
-            // Force any active tooltip to close by triggering a mousedown event on document
+            // Force any active tooltip to close — Tooltip listens on the window,
+            // and our e.stopPropagation() above prevents the real click from reaching it.
             const mainWindow = Zotero.getMainWindow();
-            mainWindow.document.dispatchEvent(new MouseEvent('click'));
+            mainWindow.dispatchEvent(new MouseEvent('click'));
         }
     };
 
@@ -359,7 +377,9 @@ const AddSourcesMenu: React.FC<{
             ? "No libraries found"
             : menuMode === 'collections'
                 ? "No collections found"
-                : "No tags found";
+                : menuMode === 'tags'
+                    ? "No tags found"
+                    : "No notes found";
 
     const placeholderText = menuMode === 'sources'
         ? "Search by author, year and title"
@@ -367,11 +387,13 @@ const AddSourcesMenu: React.FC<{
             ? "Search libraries"
             : menuMode === 'collections'
                 ? "Search collections"
-                : "Search tags";
+                : menuMode === 'tags'
+                    ? "Search tags"
+                    : "Search notes";
 
     // Handle backspace/delete when search input is empty
     const handleEmptyBackspace = useCallback(() => {
-        if (menuMode === 'libraries' || menuMode === 'collections' || menuMode === 'tags') {
+        if (menuMode === 'libraries' || menuMode === 'collections' || menuMode === 'tags' || menuMode === 'notes') {
             // Navigate back to sources mode
             setSearchQuery('');
             setMenuMode('sources');
@@ -383,19 +405,21 @@ const AddSourcesMenu: React.FC<{
 
     return (
         <>
-            <button
-                className="variant-outline source-button"
-                style={{ height: '22px', paddingRight: '4px', paddingLeft: '4px', paddingTop: '3px', paddingBottom: '3px' }}
-                ref={buttonRef}
-                onClick={handleButtonClick}
-                aria-label="Add Sources"
-                aria-haspopup="menu"
-                aria-expanded={isMenuOpen}
-                disabled={disabled}
-            >
-                <Icon icon={PlusSignIcon} className="scale-12" />
-                {showText && <span>Add Sources</span>}
-            </button>
+            <Tooltip content="Add Sources" showArrow singleLine>
+                <button
+                    className="variant-outline source-button"
+                    style={{ height: '22px', paddingRight: '4px', paddingLeft: '4px', paddingTop: '3px', paddingBottom: '3px' }}
+                    ref={buttonRef}
+                    onClick={handleButtonClick}
+                    aria-label="Add Sources"
+                    aria-haspopup="menu"
+                    aria-expanded={isMenuOpen}
+                    disabled={disabled}
+                >
+                    <Icon icon={PlusSignIcon} className="scale-12" />
+                    {showText && <span>Add Sources</span>}
+                </button>
+            </Tooltip>
             <SearchMenu
                 menuItems={menuItems}
                 isOpen={isMenuOpen}

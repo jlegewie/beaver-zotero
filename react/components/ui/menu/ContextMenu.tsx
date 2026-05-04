@@ -453,7 +453,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
                             {item.icon && (
                                 <Icon icon={item.icon} size={14} className="font-color-secondary flex-shrink-0"/>
                             )}
-                            <span className="flex-1 text-sm font-color-secondary truncate">{item.label}</span>
+                            <span className="flex-1 text-base font-color-secondary truncate">{item.label}</span>
                         </span>
                     )}
                 </div>

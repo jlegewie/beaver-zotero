@@ -955,6 +955,85 @@ export function extractExtractData(
 }
 
 // ============================================================================
+// Read Note Tool Results
+// ============================================================================
+
+/** Valid tool names for read note results */
+const READ_NOTE_TOOL_NAMES: readonly string[] = [
+    'read_note',
+] as const;
+
+/**
+ * View data for read_note results.
+ */
+export interface ReadNoteViewData {
+    noteReference: { library_id: number; zotero_key: string };
+    parentReference?: { library_id: number; zotero_key: string };
+    title?: string;
+    totalLines?: number;
+    linesReturned?: string;
+}
+
+/**
+ * Type guard for read_note results.
+ * Checks content for note_id field (content-based, not metadata.summary).
+ */
+export function isReadNoteResult(
+    toolName: string,
+    content: unknown,
+    _metadata?: Record<string, unknown>
+): boolean {
+    if (!READ_NOTE_TOOL_NAMES.includes(toolName)) return false;
+
+    if (!content || typeof content !== 'object') return false;
+    const obj = content as Record<string, unknown>;
+    return typeof obj.note_id === 'string' && typeof obj.content === 'string';
+}
+
+/**
+ * Extract read note data from content.
+ * Parses note_id and parent_item_id to extract references.
+ */
+export function extractReadNoteData(
+    content: unknown,
+    _metadata?: Record<string, unknown>
+): ReadNoteViewData | null {
+    if (!content || typeof content !== 'object') return null;
+    const obj = content as Record<string, unknown>;
+
+    const noteId = obj.note_id as string | undefined;
+    if (!noteId) return null;
+
+    // Parse note_id: "<library_id>-<zotero_key>"
+    const [libraryIdStr, ...keyParts] = noteId.split('-');
+    const libraryId = parseInt(libraryIdStr, 10);
+    const zoteroKey = keyParts.join('-');
+    if (isNaN(libraryId) || !zoteroKey) return null;
+
+    const noteReference = { library_id: libraryId, zotero_key: zoteroKey };
+
+    // Parse parent_item_id if present
+    let parentReference: { library_id: number; zotero_key: string } | undefined;
+    const parentItemId = obj.parent_item_id as string | undefined;
+    if (parentItemId) {
+        const [pLibStr, ...pKeyParts] = parentItemId.split('-');
+        const pLib = parseInt(pLibStr, 10);
+        const pKey = pKeyParts.join('-');
+        if (!isNaN(pLib) && pKey) {
+            parentReference = { library_id: pLib, zotero_key: pKey };
+        }
+    }
+
+    return {
+        noteReference,
+        parentReference,
+        title: obj.title as string | undefined,
+        totalLines: typeof obj.total_lines === 'number' ? obj.total_lines : undefined,
+        linesReturned: obj.lines_returned as string | undefined,
+    };
+}
+
+// ============================================================================
 // Unified Extraction
 // ============================================================================
 
@@ -1139,10 +1218,11 @@ export interface GetMetadataResultSummary {
 }
 
 /**
- * Result item from zotero_search.
- * Matches ZoteroSearchResultItem from backend.
+ * Regular (non-note/attachment) result item from zotero_search.
+ * Matches RegularSearchResultItem from agentProtocol.
  */
-export interface ZoteroSearchResultItem {
+export interface RegularSearchResultItem {
+    result_type: 'regular';
     item_id: string;
     item_type: string;
     title?: string | null;
@@ -1151,11 +1231,37 @@ export interface ZoteroSearchResultItem {
     extra_fields?: Record<string, unknown> | null;
 }
 
+/** Note result item from search/list results */
+export interface NoteResultItem {
+    result_type: 'note';
+    item_id: string;
+    title?: string | null;
+    parent_item_id?: string | null;
+    parent_title?: string | null;
+    date_modified?: string | null;
+}
+
+/** Attachment result item from search/list results */
+export interface AttachmentResultItem {
+    result_type: 'attachment';
+    item_id: string;
+    title?: string | null;
+    filename?: string | null;
+    content_type?: string | null;
+    parent_item_id?: string | null;
+    parent_title?: string | null;
+    date_modified?: string | null;
+}
+
+/** Result item from zotero_search (regular, note, or attachment) */
+export type ZoteroSearchResultItem = RegularSearchResultItem | NoteResultItem | AttachmentResultItem;
+
 /**
- * Result item from list_items.
- * Matches ListItemsResultItem from backend.
+ * Regular (non-note/attachment) result item from list_items.
+ * Matches RegularListResultItem from agentProtocol.
  */
-export interface ListItemsResultItem {
+export interface RegularListResultItem {
+    result_type: 'regular';
     item_id: string;
     item_type: string;
     title?: string | null;
@@ -1164,6 +1270,9 @@ export interface ListItemsResultItem {
     date_added?: string | null;
     date_modified?: string | null;
 }
+
+/** Result item from list_items (regular, note, or attachment) */
+export type ListItemsResultItem = RegularListResultItem | NoteResultItem | AttachmentResultItem;
 
 /**
  * Collection info from list_collections.

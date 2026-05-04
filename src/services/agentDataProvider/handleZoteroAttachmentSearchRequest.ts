@@ -10,7 +10,7 @@
 import { logger } from '../../utils/logger';
 import { getPref } from '../../utils/prefs';
 
-import { isAttachmentOnServer } from '../../utils/webAPI';
+import { isAttachmentAvailableRemotely } from '../../utils/webAPI';  // kept for file_missing message check
 import {
     WSZoteroAttachmentSearchRequest,
     WSZoteroAttachmentSearchResponse,
@@ -19,7 +19,8 @@ import {
     WSSearchHit,
 } from '../agentProtocol';
 import { PDFExtractor, ExtractionError, ExtractionErrorCode } from '../pdf';
-import { validateZoteroItemReference, backfillMetadataForError } from './utils';
+import { makeRemoteFilePath } from '../attachmentFileCache';
+import { validateZoteroItemReference, backfillMetadataForError, loadPdfData, checkRemotePdfSize, isRemoteAccessAvailable } from './utils';
 
 
 /**
@@ -95,36 +96,41 @@ export async function handleZoteroAttachmentSearchRequest(
 
         // 3. Get the file path
         resolvedItem = zoteroItem;
-        const filePath = await zoteroItem.getFilePathAsync();
-        resolvedFilePath = filePath || null;
-        if (!filePath) {
-            const isFileAvailableOnServer = isAttachmentOnServer(zoteroItem);
-            const errorMessage = isFileAvailableOnServer
-                ? 'PDF file is not available locally. It may be in remote storage, which cannot be accessed by Beaver.'
-                : 'PDF file is not available locally';
+        const rawFilePath = await zoteroItem.getFilePathAsync();
+        const filePath = rawFilePath || null;  // normalize false → null
+        const isRemoteOnly = !filePath && isRemoteAccessAvailable(zoteroItem);
+        const effectiveFilePath = filePath || (isRemoteOnly ? makeRemoteFilePath(zoteroItem) : null);
+        resolvedFilePath = effectiveFilePath;
+
+        if (!effectiveFilePath) {
+            const onServer = isAttachmentAvailableRemotely(zoteroItem);
             return errorResponse(
-                errorMessage,
+                onServer
+                    ? 'PDF file is not available locally and remote file access is disabled in settings.'
+                    : 'PDF file is not available locally',
                 'file_missing'
             );
         }
 
-        // 4. Verify file exists
-        const fileExists = await zoteroItem.fileExists();
-        if (!fileExists) {
-            return errorResponse(
-                'PDF file does not exist at expected location',
-                'file_missing'
-            );
+        // 4. Verify file exists (skip for remote files)
+        if (!isRemoteOnly) {
+            const fileExists = await zoteroItem.fileExists();
+            if (!fileExists) {
+                return errorResponse(
+                    'PDF file does not exist at expected location',
+                    'file_missing'
+                );
+            }
         }
 
-        // 5. Check file size before reading (skip if skip_local_limits is true)
-        if (!skip_local_limits) {
+        // 5. Check file size before reading (skip if skip_local_limits is true; skip for remote — checked after download)
+        if (!skip_local_limits && !isRemoteOnly) {
             const maxFileSizeMB = getPref('maxFileSizeMB');
             const fileSize = await Zotero.Attachments.getTotalFileSize(zoteroItem);
-            
+
             if (fileSize) {
                 const fileSizeInMB = fileSize / 1024 / 1024;
-                
+
                 if (fileSizeInMB > maxFileSizeMB) {
                     return errorResponse(
                         `PDF file size of ${fileSizeInMB.toFixed(1)}MB exceeds the ${maxFileSizeMB}MB limit`,
@@ -136,7 +142,7 @@ export async function handleZoteroAttachmentSearchRequest(
 
         // 5b. Try metadata cache for fast prechecks
         const cache = Zotero.Beaver?.attachmentFileCache;
-        const cachedMeta = cache ? await cache.getMetadata(zoteroItem.id, filePath).catch(() => null) : null;
+        const cachedMeta = cache ? await cache.getMetadata(zoteroItem.id, effectiveFilePath).catch(() => null) : null;
 
         if (cachedMeta) {
             if (cachedMeta.is_encrypted) {
@@ -160,49 +166,53 @@ export async function handleZoteroAttachmentSearchRequest(
         }
 
         // 6. Read the PDF data
-        const pdfData = await IOUtils.read(filePath);
-
-        // 7. Create extractor and get page count first
-        const extractor = new PDFExtractor();
-        let totalPages: number;
-
-        if (cachedMeta?.page_count != null) {
-            totalPages = cachedMeta.page_count;
-        } else {
-            try {
-                totalPages = await extractor.getPageCount(pdfData);
-            } catch (error) {
-                if (error instanceof ExtractionError) {
-                    if (error.code === ExtractionErrorCode.ENCRYPTED) {
-                        // Let outer catch backfill encrypted metadata before returning.
-                        throw error;
-                    } else if (error.code === ExtractionErrorCode.INVALID_PDF) {
-                        // Let outer catch backfill invalid metadata before returning.
-                        throw error;
-                    }
-                }
-                throw error;
-            }
+        let pdfData: Uint8Array;
+        try {
+            pdfData = await loadPdfData(zoteroItem, effectiveFilePath, isRemoteOnly);
+        } catch (error) {
+            if (!isRemoteOnly) throw error; // local I/O error — let outer handler deal with it
+            logger(`handleZoteroAttachmentSearchRequest: Remote download failed: ${error}`, 1);
+            return errorResponse(
+                `Failed to download PDF from remote storage: ${error instanceof Error ? error.message : String(error)}`,
+                'download_failed'
+            );
         }
-
-        // 8. Check page count limit (skip if skip_local_limits is true)
-        if (!skip_local_limits) {
-            const maxPageCount = getPref('maxPageCount');
-            
-            if (totalPages > maxPageCount) {
+        if (isRemoteOnly) {
+            const exceeded = checkRemotePdfSize(pdfData, skip_local_limits);
+            if (exceeded) {
                 return errorResponse(
-                    `PDF has ${totalPages} pages, which exceeds the ${maxPageCount}-page limit`,
-                    'too_many_pages'
+                    `PDF file size of ${exceeded.sizeMB.toFixed(1)}MB exceeds the ${exceeded.maxMB}MB limit`,
+                    'file_too_large'
                 );
             }
         }
 
-        // 9. Perform search
+        // 7. Search — pageCount + maxPageCount gate are pushed into the worker.
+        // Cold-cache path goes from 2 doc-opens (getPageCount + search) → 1.
+        // The cache fast-path above (lines 157-165) already covers the
+        // `cachedMeta.page_count > maxPageCount` case before any worker call.
+        const extractor = new PDFExtractor();
+        const maxPageCount = !skip_local_limits ? getPref('maxPageCount') : undefined;
         const searchResult = await extractor.search(pdfData, query, {
             maxHitsPerPage: max_hits_per_page ?? 100,
+            maxPageCount,
         });
 
-        // 10. Convert to response format
+        // 8. Worker page-count gate fired? Map to too_many_pages.
+        if (searchResult.exceedsPageCountLimit) {
+            logger(
+                `handleZoteroAttachmentSearchRequest: worker exceedsPageCountLimit for ${unique_key} (${searchResult.totalPages} pages)`,
+                3,
+            );
+            return errorResponse(
+                `PDF has ${searchResult.totalPages} pages, which exceeds the ${maxPageCount}-page limit`,
+                'too_many_pages'
+            );
+        }
+
+        const totalPages = searchResult.totalPages;
+
+        // 9. Convert to response format
         const pages: WSPageSearchResult[] = searchResult.pages.map((page) => ({
             page_index: page.pageIndex,
             label: page.label,
@@ -244,6 +254,9 @@ export async function handleZoteroAttachmentSearchRequest(
                 case ExtractionErrorCode.INVALID_PDF:
                     return errorResponse('PDF file is invalid or corrupted', 'invalid_pdf');
                 case ExtractionErrorCode.NO_TEXT_LAYER:
+                    // Note: dead branch: opSearch does not run
+                    // OCR detection. Kept as cheap insurance against future
+                    // refactor that adds checkTextLayer to the search path.
                     return errorResponse('PDF requires OCR (no text layer) — text search unavailable', 'no_text_layer');
                 default:
                     return errorResponse(
