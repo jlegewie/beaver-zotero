@@ -49,6 +49,10 @@ import {
     getMarginsOverlay,
 } from '../utils/extractionOverlay';
 import { drawBBoxOverlayPNG } from '../utils/canvasOverlay';
+import type {
+    PageSentenceBBoxResult,
+    SentencePipelineTrace,
+} from '../../src/services/pdf';
 import type { AgentAction } from '../agents/agentActions';
 import type {
     WSZoteroDataRequest,
@@ -1782,17 +1786,13 @@ async function handleTestPdfRenderOverlayHttpRequest(request: any) {
  *     sentence_stats }
  */
 async function handleTestPdfPipelineTraceHttpRequest(request: any) {
-    const { getMuPDFWorkerClient } = await import(
-        '../../src/services/pdf/MuPDFWorkerClient'
-    );
     const {
         MarginFilter,
         StyleAnalyzer,
-        extractPageSentenceBBoxes,
         DEFAULT_MARGINS,
         DEFAULT_MARGIN_ZONE,
-        resolveAnalysisPageIndices,
-        detectFilteredParagraphs,
+        runSentenceExtractionPipeline,
+        ExtractionError,
     } = await import('../../src/services/pdf');
     const { getSentenceSplitterWithFallback, normalizeLanguageCode } = await import(
         '../../src/services/pdf/SentencexSplitter'
@@ -1812,36 +1812,74 @@ async function handleTestPdfPipelineTraceHttpRequest(request: any) {
     const includeChars = request?.include_chars === true;
     const summary = request?.summary === true;
 
-    const client = getMuPDFWorkerClient();
+    // ------------------------------------------------------------------
+    // Resolve the splitter the same way production does, then run the
+    // shared sentence-extraction pipeline with `trace: true` for access to
+    // intermediate object.
+    // ------------------------------------------------------------------
+    let language: string | undefined =
+        typeof request?.language === 'string' ? request.language : undefined;
+    if (!language && request?.library_id != null && request?.zotero_key != null) {
+        try {
+            const { getItemLanguage } = await import('../../src/utils/zoteroUtils');
+            const raw = await getItemLanguage(request.library_id, request.zotero_key);
+            if (raw) language = raw;
+        } catch {
+            // Best effort.
+        }
+    }
+    const splitter = await getSentenceSplitterWithFallback(
+        normalizeLanguageCode(language),
+    );
 
-    // ------------------------------------------------------------------
-    // Decide analysis window for cross-page smart removal via the shared
-    // helper (centralized cap + error path).
-    // ------------------------------------------------------------------
-    const totalPages = await client.getPageCount(pdfData);
-    let analysisIndices: number[];
+    const analysisPageWindow =
+        request?.analysis_page_window != null
+            ? Number(request.analysis_page_window)
+            : undefined;
+
+    let result: PageSentenceBBoxResult;
+    let trace: SentencePipelineTrace;
     try {
-        analysisIndices = resolveAnalysisPageIndices(
+        const out = await runSentenceExtractionPipeline({
+            pdfData,
             pageIndex,
-            totalPages,
-            Number(request?.analysis_page_window),
-        );
+            splitter,
+            analysisPageWindow,
+            trace: true,
+        });
+        result = out.result;
+        trace = out.trace;
     } catch (e) {
-        return {
-            ok: false,
-            error: {
-                name: 'Error',
-                message: e instanceof Error ? e.message : String(e),
-            },
-        };
+        if (e instanceof RangeError) {
+            return {
+                ok: false,
+                error: {
+                    name: 'Error',
+                    message: e.message,
+                },
+            };
+        }
+        if (e instanceof ExtractionError) {
+            return {
+                ok: false,
+                error: {
+                    name: 'ExtractionError',
+                    code: e.code,
+                    message: e.message,
+                },
+            };
+        }
+        throw e;
     }
 
-    // ------------------------------------------------------------------
-    // Pull the analysis range as plain pages and the target page detailed
-    // (the latter only used for sentence-level mapping).
-    // ------------------------------------------------------------------
-    const rawDoc = await client.extractRawPages(pdfData, analysisIndices);
-    const targetPage = rawDoc.pages.find((p) => p.pageIndex === pageIndex);
+    // Read the target page from `pagesForFilter` (the substituted detailed
+    // page) — bbox object identity in `trace.filteredResult.lineResult` /
+    // `paragraphResult` is matched against this page, not against
+    // `rawDoc.pages`. Reading from the wrong source breaks every
+    // cross-stage link below.
+    const targetPage = trace.pagesForFilter.find(
+        (p) => p.pageIndex === pageIndex,
+    );
     if (!targetPage) {
         return {
             ok: false,
@@ -1850,17 +1888,9 @@ async function handleTestPdfPipelineTraceHttpRequest(request: any) {
     }
 
     // ------------------------------------------------------------------
-    // Stage 1: smart-removal analysis (cross-page).
+    // Stage 1: smart-removal analysis (cross-page) — read from trace.
     // ------------------------------------------------------------------
-    const marginAnalysis = MarginFilter.collectMarginElements(
-        rawDoc.pages,
-        DEFAULT_MARGIN_ZONE,
-    );
-    const smartRemoval = MarginFilter.identifyElementsToRemove(
-        marginAnalysis,
-        3,
-        true,
-    );
+    const smartRemoval = trace.marginRemoval;
     const reasonByText = new Map<string, 'page_number' | 'repeat'>();
     for (const c of smartRemoval.candidates) {
         reasonByText.set(c.text, c.reason);
@@ -1957,24 +1987,15 @@ async function handleTestPdfPipelineTraceHttpRequest(request: any) {
     }
 
     // ------------------------------------------------------------------
-    // Stages 3-6: style profile + filter + columns + lines + paragraphs,
-    // produced by the shared helper. Note: style profile is now
-    // **window-wide** (built from `rawDoc.pages`), matching production
-    // line extraction (`worker/ops.ts:273-279`). This is an intentional
-    // behavior change vs. the previous trace endpoint which built it
-    // from `[targetPage]` only — agents may see a small number of role
-    // flips on pages whose local sample disagreed with the document-
-    // wide picture.
+    // Stages 3-6: style profile + filter + columns + lines + paragraphs
+    // — read from `trace.filteredResult`, which the helper computed by
+    // running the production filtered-paragraph pipeline on
+    // `pagesForFilter` (detailed target page substituted in).
     // ------------------------------------------------------------------
-    const filteredResult = detectFilteredParagraphs({
-        pages: rawDoc.pages,
-        pageIndex,
-        marginRemoval: smartRemoval,
-    });
-    const styleProfile = filteredResult.styleProfile;
-    const columnResult = filteredResult.columnResult;
-    const lineResult = filteredResult.lineResult;
-    const paragraphResult = filteredResult.paragraphResult;
+    const styleProfile = trace.filteredResult.styleProfile;
+    const columnResult = trace.filteredResult.columnResult;
+    const lineResult = trace.filteredResult.lineResult;
+    const paragraphResult = trace.filteredResult.paragraphResult;
 
     // Per-line role classification using the (window-wide) style profile.
     {
@@ -2047,31 +2068,11 @@ async function handleTestPdfPipelineTraceHttpRequest(request: any) {
     });
 
     // ------------------------------------------------------------------
-    // Stage 7: sentences (paragraph-scoped). Needs the detailed walk.
+    // Stage 7: sentences (paragraph-scoped). Already produced by the
+    // helper — `trace.sentenceResult` is the same reference as `result`.
     // ------------------------------------------------------------------
-    let language: string | undefined =
-        typeof request?.language === 'string' ? request.language : undefined;
-    if (!language && request?.library_id != null && request?.zotero_key != null) {
-        try {
-            const { getItemLanguage } = await import('../../src/utils/zoteroUtils');
-            const raw = await getItemLanguage(request.library_id, request.zotero_key);
-            if (raw) language = raw;
-        } catch {
-            // Best effort.
-        }
-    }
-    const splitter = await getSentenceSplitterWithFallback(
-        normalizeLanguageCode(language),
-    );
-    // Detailed walk now (only the sentence-mapping step needs it)
-    const detailed = await client.extractRawPageDetailed(pdfData, pageIndex);
-    // Always prefer the precomputed (filtered) paragraph result when `itemLines` is set, even if `items` is empty
-    const sentenceResult = paragraphResult.itemLines
-        ? extractPageSentenceBBoxes(detailed, {
-              splitter,
-              precomputed: { paragraphResult },
-          })
-        : extractPageSentenceBBoxes(detailed, { splitter });
+    const sentenceResult = result;
+    const detailed = trace.detailed;
 
     // Mark which paragraphs degraded so we can flag fallback sentences.
     const degradedItemIndices = new Set(
@@ -2179,10 +2180,10 @@ async function handleTestPdfPipelineTraceHttpRequest(request: any) {
             },
             smart_removal: {
                 analysisRange: [
-                    analysisIndices[0],
-                    analysisIndices[analysisIndices.length - 1],
+                    trace.analysisPageIndices[0],
+                    trace.analysisPageIndices[trace.analysisPageIndices.length - 1],
                 ],
-                analysisPagesScanned: analysisIndices.length,
+                analysisPagesScanned: trace.analysisPageIndices.length,
                 candidates: candidatesOut,
             },
             primaryBodyStyle: styleProfile.primaryBodyStyle,
@@ -2227,10 +2228,10 @@ async function handleTestPdfPipelineTraceHttpRequest(request: any) {
         raw_lines: rawLineEntries,
         smart_removal: {
             analysisRange: [
-                analysisIndices[0],
-                analysisIndices[analysisIndices.length - 1],
+                trace.analysisPageIndices[0],
+                trace.analysisPageIndices[trace.analysisPageIndices.length - 1],
             ],
-            analysisPagesScanned: analysisIndices.length,
+            analysisPagesScanned: trace.analysisPageIndices.length,
             candidates: candidatesOut,
         },
         style_profile: {
