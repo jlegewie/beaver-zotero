@@ -848,60 +848,72 @@ function joinAndSort(
     return joined;
 }
 
+// Column gutters in journals are typically >= 10pt; smaller cuts are noise.
+const MIN_V_CUT_GAP = 8;
+// Cuts smaller than this within a merged column are paragraph-spacing noise.
+const MIN_H_CUT_GAP = 8;
+
 /**
  * Phase 5: Sort blocks for proper reading order (critical for multi-column).
+ *
+ * Vertical-first recursive XY-cut: a clean vertical whitespace cut wins
+ * over any horizontal cut, so columns drive the reading order whenever
+ * the layout permits. A horizontal cut is only taken when a wide spanning
+ * element (title, caption, full-width figure) blocks vertical
+ * partitioning. With neither axis cuttable, fall back to (y, x) sort.
  */
 function sortForReadingOrder(
     blocks: Rect[],
     _opts: Required<ColumnDetectionOptions>
 ): Rect[] {
-    if (blocks.length === 0) return [];
+    if (blocks.length <= 1) return blocks.slice();
+    return xyCut(blocks);
+}
 
-    const sortedBlocks = blocks.map(block => {
-        // Find blocks to the left that vertically overlap
-        const leftBlocks = blocks.filter(other => {
-            // Must be to the left
-            if (other.x + other.w >= block.x) return false;
+function xyCut(blocks: Rect[]): Rect[] {
+    if (blocks.length <= 1) return blocks.slice();
 
-            // Must vertically overlap
-            const vOverlap = !(
-                block.y + block.h < other.y || other.y + other.h < block.y
-            );
-            if (!vOverlap) return false;
+    const vCut = findCleanCut(blocks, "x", MIN_V_CUT_GAP);
+    if (vCut) {
+        return [...xyCut(vCut.first), ...xyCut(vCut.second)];
+    }
 
-            // Filter out small blocks (subscripts, superscripts)
-            const otherArea = other.w * other.h;
-            const blockArea = block.w * block.h;
-            if (otherArea < blockArea * 0.15) return false;
-            if (other.w < 50) return false;
+    const hCut = findCleanCut(blocks, "y", MIN_H_CUT_GAP);
+    if (hCut) {
+        return [...xyCut(hCut.first), ...xyCut(hCut.second)];
+    }
 
-            return true;
-        });
+    return [...blocks].sort((a, b) => a.y - b.y || a.x - b.x);
+}
 
-        // Sort by rightmost edge to find the closest left block
-        leftBlocks.sort((a, b) => b.x + b.w - (a.x + a.w));
+function findCleanCut(
+    blocks: Rect[],
+    axis: "x" | "y",
+    minGap: number
+): { gap: number; first: Rect[]; second: Rect[] } | null {
+    const start = (b: Rect) => (axis === "x" ? b.x : b.y);
+    const end = (b: Rect) => (axis === "x" ? b.x + b.w : b.y + b.h);
 
-        // Compute sort key
-        let sortKey: [number, number];
-        if (leftBlocks.length > 0) {
-            const leftBlock = leftBlocks[0];
-            sortKey = [leftBlock.y, block.x]; // Use left block's top
-        } else {
-            sortKey = [block.y, block.x]; // Use own top
+    const sorted = [...blocks].sort((a, b) => start(a) - start(b));
+
+    let bestGap = 0;
+    let bestIdx = -1;
+    let maxEnd = end(sorted[0]);
+    for (let i = 1; i < sorted.length; i++) {
+        const gap = start(sorted[i]) - maxEnd;
+        if (gap > bestGap) {
+            bestGap = gap;
+            bestIdx = i;
         }
+        if (end(sorted[i]) > maxEnd) maxEnd = end(sorted[i]);
+    }
 
-        return { block, sortKey };
-    });
-
-    // Sort by computed keys
-    sortedBlocks.sort((a, b) => {
-        if (Math.abs(a.sortKey[0] - b.sortKey[0]) > 0.1) {
-            return a.sortKey[0] - b.sortKey[0];
-        }
-        return a.sortKey[1] - b.sortKey[1];
-    });
-
-    return sortedBlocks.map(item => item.block);
+    if (bestIdx < 0 || bestGap < minGap) return null;
+    return {
+        gap: bestGap,
+        first: sorted.slice(0, bestIdx),
+        second: sorted.slice(bestIdx),
+    };
 }
 
 /**
