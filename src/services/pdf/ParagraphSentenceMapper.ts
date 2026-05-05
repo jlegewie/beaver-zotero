@@ -365,6 +365,7 @@ export function tryBuildParagraphText(
 function fallbackSentenceFromItem(
     item: ContentItem,
     pageIndex: number,
+    paragraphIndex: number,
 ): SentenceBBox {
     const bbox: RawBBox = {
         x: item.bbox.l,
@@ -374,6 +375,8 @@ function fallbackSentenceFromItem(
     };
     const sentence: SentenceBBox = {
         pageIndex,
+        paragraphIndex,
+        sentenceIndex: 0,
         text: item.text,
         bboxes: [bbox],
         fragments: [
@@ -398,6 +401,7 @@ function fallbackSentenceFromItem(
 function headingSentenceFromParagraph(
     paragraphText: ParagraphText,
     pageIndex: number,
+    paragraphIndex: number,
 ): SentenceBBox {
     const fragments = paragraphText.lines.map((line, lineIndex) => ({
         lineIndex,
@@ -406,6 +410,8 @@ function headingSentenceFromParagraph(
     }));
     return {
         pageIndex,
+        paragraphIndex,
+        sentenceIndex: 0,
         text: fragments.map((f) => f.text).join(" "),
         bboxes: fragments.map((f) => f.bbox),
         fragments,
@@ -423,6 +429,7 @@ function headingSentenceFromParagraph(
 function resolveSentencesInParagraph(
     paragraphText: ParagraphText,
     pageIndex: number,
+    paragraphIndex: number,
     splitter: SentenceSplitter,
 ): SentenceBBox[] {
     // Reuse the page-wide sentenceToBoxes by repackaging as a PageText view
@@ -436,7 +443,13 @@ function resolveSentencesInParagraph(
     const ranges: SentenceRange[] = splitter(paragraphText.text);
     const out: SentenceBBox[] = [];
     for (const range of ranges) {
-        const s = sentenceToBoxes(pageTextView, range, pageIndex);
+        const s = sentenceToBoxes(
+            pageTextView,
+            range,
+            pageIndex,
+            paragraphIndex,
+            out.length,
+        );
         if (s) out.push(s);
     }
     return out;
@@ -555,7 +568,7 @@ export function extractPageSentenceBBoxes(
         if (detailedLines.length === 0) {
             unmappedParagraphs++;
             addNote({ itemIndex: i, itemType: item.type, reason: "unmapped" });
-            const fallback = fallbackSentenceFromItem(item, detailedPage.pageIndex);
+            const fallback = fallbackSentenceFromItem(item, detailedPage.pageIndex, i);
             paragraphs.push({
                 item,
                 paragraphText: {
@@ -581,7 +594,7 @@ export function extractPageSentenceBBoxes(
                 reason: "invariant_violation",
                 message: built.error,
             });
-            const fallback = fallbackSentenceFromItem(item, detailedPage.pageIndex);
+            const fallback = fallbackSentenceFromItem(item, detailedPage.pageIndex, i);
             paragraphs.push({
                 item,
                 paragraphText: {
@@ -603,6 +616,7 @@ export function extractPageSentenceBBoxes(
             const heading = headingSentenceFromParagraph(
                 paragraphText,
                 detailedPage.pageIndex,
+                i,
             );
             paragraphs.push({ item, paragraphText, sentences: [heading] });
             flatSentences.push(heading);
@@ -613,6 +627,7 @@ export function extractPageSentenceBBoxes(
         const sentences = resolveSentencesInParagraph(
             paragraphText,
             detailedPage.pageIndex,
+            i,
             splitter,
         );
 
@@ -622,7 +637,7 @@ export function extractPageSentenceBBoxes(
         if (sentences.length === 0 && paragraphText.text.trim().length > 0) {
             degradedParagraphs++;
             addNote({ itemIndex: i, itemType: item.type, reason: "empty_split" });
-            const fallback = fallbackSentenceFromItem(item, detailedPage.pageIndex);
+            const fallback = fallbackSentenceFromItem(item, detailedPage.pageIndex, i);
             paragraphs.push({ item, paragraphText, sentences: [fallback] });
             flatSentences.push(fallback);
             continue;

@@ -106,6 +106,10 @@ export interface ActualSentenceResult {
         text: string;
         bboxes: FixtureBBox[];
         kind?: 'text' | 'heading';
+        // Page-local addressing fields populated by the producer.
+        paragraphIndex?: number;
+        sentenceIndex?: number;
+        spansParagraphs?: number[];
     }>;
     degradedParagraphs: number;
     unmappedParagraphs: number;
@@ -175,6 +179,25 @@ export function expectSentencesMatch(
             }
         }
     } else {
+        // Derive expected sentenceIndex from within-paragraph position in
+        // the flat expected list (fixture stores paragraphIndex per sentence
+        // but not sentenceIndex). For each contiguous run of sentences with
+        // the same paragraphIndex, sentenceIndex resets at 0.
+        const expectedSentenceIdxByPos: number[] = [];
+        {
+            let runStart = 0;
+            for (let i = 0; i < expected.sentences.length; i++) {
+                if (
+                    i > 0 &&
+                    expected.sentences[i].paragraphIndex !==
+                        expected.sentences[i - 1].paragraphIndex
+                ) {
+                    runStart = i;
+                }
+                expectedSentenceIdxByPos[i] = i - runStart;
+            }
+        }
+
         // Per-sentence comparison.
         for (let i = 0; i < expected.sentences.length; i++) {
             const exp = expected.sentences[i];
@@ -189,7 +212,21 @@ export function expectSentencesMatch(
             const actParaIdx = actualParaIdxBySentence[i] ?? -1;
             if (actParaIdx !== exp.paragraphIndex) {
                 failures.push(
-                    `[${i}] paragraphIndex: expected ${exp.paragraphIndex}, got ${actParaIdx}`,
+                    `[${i}] paragraphIndex (re-derived from grouping): expected ${exp.paragraphIndex}, got ${actParaIdx}`,
+                );
+            }
+            // Direct assertion on the new SentenceBBox.paragraphIndex field.
+            if (act.paragraphIndex !== undefined && act.paragraphIndex !== exp.paragraphIndex) {
+                failures.push(
+                    `[${i}] sentence.paragraphIndex (direct): expected ${exp.paragraphIndex}, got ${act.paragraphIndex}`,
+                );
+            }
+            // Direct assertion on the new SentenceBBox.sentenceIndex field
+            // (paragraph-local position).
+            const expSentenceIdx = expectedSentenceIdxByPos[i];
+            if (act.sentenceIndex !== undefined && act.sentenceIndex !== expSentenceIdx) {
+                failures.push(
+                    `[${i}] sentence.sentenceIndex: expected ${expSentenceIdx} (paragraph-local), got ${act.sentenceIndex}`,
                 );
             }
             const actKind = act.kind ?? 'text';

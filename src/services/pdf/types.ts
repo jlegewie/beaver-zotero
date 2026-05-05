@@ -202,9 +202,21 @@ export interface RawPageDataDetailed extends Omit<RawPageData, "blocks"> {
 /**
  * A sentence resolved to one bbox per line-fragment it occupies.
  * Multi-line sentences produce multiple bboxes; short sentences produce one.
+ *
+ * Addressing model: `(pageIndex, paragraphIndex, sentenceIndex)` is a stable
+ * page-local identifier. Both indices are page-local and reset per page.
+ * `sentenceIndex` is paragraph-local (resets at each paragraph boundary), so
+ * `(paragraphIndex, sentenceIndex)` lexicographically equals reading order
+ * within a page. Indices are deterministic for the same input but may drift
+ * across code changes — citations should persist self-contained data
+ * (text + bboxes), not these indices.
  */
 export interface SentenceBBox {
     pageIndex: number;
+    /** Index into the producing page's `paragraphs[]`. For cross-paragraph merges, the first paragraph the sentence starts in. */
+    paragraphIndex: number;
+    /** Position within the paragraph's sentence list (0-based). For merges, the index in the first paragraph. */
+    sentenceIndex: number;
     text: string;
     /** One bbox per contiguous line-fragment */
     bboxes: RawBBox[];
@@ -220,6 +232,14 @@ export interface SentenceBBox {
      * so one heading paragraph always produces exactly one SentenceBBox.
      */
     kind?: "text" | "heading";
+    /**
+     * Present only for cross-paragraph merges (e.g. a sentence that runs
+     * from the bottom of one column into the top of the next). Lists the
+     * paragraph indices the sentence spans, in reading order. When set,
+     * length is >= 2 and the first entry equals `paragraphIndex`. Absent
+     * for the common case of a sentence that lives in one paragraph.
+     */
+    spansParagraphs?: number[];
 }
 
 /**

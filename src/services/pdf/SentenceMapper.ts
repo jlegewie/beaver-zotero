@@ -226,6 +226,8 @@ export function sentenceToBoxes(
     pageText: PageText,
     range: SentenceRange,
     pageIndex: number,
+    paragraphIndex: number,
+    sentenceIndex: number,
 ): SentenceBBox | null {
     const { source, lines } = pageText;
     const clampedStart = Math.max(0, range.start);
@@ -279,6 +281,8 @@ export function sentenceToBoxes(
     const text = fragments.map((f) => f.text).join(" ");
     return {
         pageIndex,
+        paragraphIndex,
+        sentenceIndex,
         text,
         bboxes,
         fragments,
@@ -300,11 +304,20 @@ export function extractSentenceBBoxes(
     page: RawPageDataDetailed,
     splitter: SentenceSplitter = simpleRegexSentenceSplit,
 ): SentenceBBox[] {
+    // Page-wide path treats the whole page as a single virtual paragraph,
+    // since paragraph detection is intentionally out of scope here. Callers
+    // that need true paragraph addressing should use ParagraphSentenceMapper.
     const pageText = flattenPageText(page);
     const ranges = splitter(pageText.text);
     const result: SentenceBBox[] = [];
     for (const range of ranges) {
-        const sentence = sentenceToBoxes(pageText, range, page.pageIndex);
+        const sentence = sentenceToBoxes(
+            pageText,
+            range,
+            page.pageIndex,
+            0,
+            result.length,
+        );
         if (sentence) result.push(sentence);
     }
     return result;
@@ -367,7 +380,13 @@ export function buildFeasibilityReport(
     const ranges = splitter(pageText.text);
     const sentencesFull: SentenceBBox[] = [];
     for (const r of ranges) {
-        const s = sentenceToBoxes(pageText, r, page.pageIndex);
+        const s = sentenceToBoxes(
+            pageText,
+            r,
+            page.pageIndex,
+            0,
+            sentencesFull.length,
+        );
         if (s) sentencesFull.push(s);
     }
 
