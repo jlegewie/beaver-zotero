@@ -134,8 +134,8 @@ function makeReplaySplitter(
         throw new Error(
             `replaySplitter: no recorded splitter output for paragraph text ` +
                 `(len=${text.length}, head="${text.slice(0, 60)}…"). ` +
-                `Mapper input changed since fixture capture — re-capture with ` +
-                `"Update Sentence Test" or run with UPDATE_FIXTURES=1.`,
+                `Mapper input changed since fixture capture — re-capture via ` +
+                `"Create/Update Sentence Test" or run with UPDATE_FIXTURES=1.`,
         );
     };
 }

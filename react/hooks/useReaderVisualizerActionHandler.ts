@@ -50,7 +50,7 @@ export function useReaderVisualizerActionHandler() {
                     return;
                 }
                 case 'create-or-update-sentence-fixture': {
-                    const r = await createSentenceFixture({ overwrite: true });
+                    const r = await createSentenceFixture();
                     logger(`[ReaderVisualizer] create-or-update-sentence-fixture: ${r.message}`);
                     if (!r.ok) Zotero.alert(Zotero.getMainWindow(), 'Beaver Sentence Test', r.message);
                     return;
