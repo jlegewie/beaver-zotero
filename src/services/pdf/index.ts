@@ -118,6 +118,10 @@ export {
     DEFAULT_ANALYSIS_WINDOW_CAP,
 } from "./AnalysisWindow";
 export { detectFilteredParagraphs } from "./FilteredParagraphPipeline";
+export {
+    bridgeDetailedPageFonts,
+    pagesForFilterWithBridgedFonts,
+} from "./RawFontBridge";
 export type {
     FilteredParagraphContext,
     FilteredParagraphResult,

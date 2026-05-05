@@ -24,6 +24,7 @@ import {
     extractPageSentenceBBoxes,
     lineBBoxToRect,
     MarginFilter,
+    pagesForFilterWithBridgedFonts,
     DEFAULT_MARGINS,
     DEFAULT_MARGIN_ZONE,
     Rect,
@@ -127,8 +128,11 @@ export interface OverlayResult {
 
 /**
  * Substitute the detailed target page into the analysis window before
- * paragraph detection runs. `runSentenceExtractionPipeline` does the
- * same thing.
+ * paragraph detection runs, AND bridge real font metadata onto the
+ * detailed page (the wasm font binding leaves detailed-walk lines with
+ * empty `font.{name, family, weight, style}`, which silently disables
+ * heading detection on the target page). `runSentenceExtractionPipeline`
+ * does the same thing.
  *
  * If `detailedTargetPage` is omitted, falls through to the raw target
  * page already in `pages` — overlays remain functional but no longer
@@ -140,13 +144,7 @@ export function pagesForFilter(
     pageIndex: number,
     detailedTargetPage?: RawPageDataDetailed,
 ): RawPageData[] {
-    if (!detailedTargetPage) return pages;
-    // `RawPageDataDetailed` is structurally assignable to `RawPageData`
-    // because `RawBlock.lines` and `RawPageData.blocks` are readonly,
-    // making detailed blocks/lines covariantly compatible.
-    return pages.map((p) =>
-        p.pageIndex === pageIndex ? detailedTargetPage : p,
-    );
+    return pagesForFilterWithBridgedFonts(pages, pageIndex, detailedTargetPage);
 }
 
 /**

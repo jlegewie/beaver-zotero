@@ -563,9 +563,19 @@ function startNewItem(
     const spacingTop = line.bbox.t - prevLine.bbox.b;
     const gapBreak = spacingTop > pageThresholds.gapExcessThreshold;
 
-    // Header detection
-    const isLocalHeader = isHeaderStyle(line, bodyStyles, settings, gapBreak);
+    // Header detection. Compute prev first so we can relax the gap
+    // requirement when the current line follows a header — handles
+    // consecutive section/subsection lines like
+    //   "3. Results"
+    //   "3.1. Educational Data Analysis"
+    // where the line spacing between them is the same as body leading
+    // but the styles differ. Without this relaxation `isLocalHeader`
+    // for the second line returns false (rules 2/3/4 require gap), the
+    // two lines merge into one paragraph, and the subsection title is
+    // lost as a distinct heading.
     const prevIsLocalHeader = isHeaderStyle(prevLine, bodyStyles, settings);
+    const headerGapPasses = gapBreak || prevIsLocalHeader;
+    const isLocalHeader = isHeaderStyle(line, bodyStyles, settings, headerGapPasses);
 
     if (isLocalHeader && !prevIsLocalHeader) {
         return true; // Header after non-header

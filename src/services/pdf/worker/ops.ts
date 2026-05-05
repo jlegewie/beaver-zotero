@@ -26,6 +26,7 @@ import { SearchScorer } from "../SearchScorer";
 import { extractPageSentenceBBoxes } from "../ParagraphSentenceMapper";
 import { resolveAnalysisPageIndices } from "../AnalysisWindow";
 import { detectFilteredParagraphs } from "../FilteredParagraphPipeline";
+import { pagesForFilterWithBridgedFonts } from "../RawFontBridge";
 import type {
     DocumentAnalysis,
     ExtractionResult,
@@ -675,13 +676,16 @@ export async function opExtractSentenceBBoxes(
             pageCount,
             opts.analysisPageWindow,
         );
-        // Substitute the detailed target page into the analysis window
-        // so paragraph detection runs on the same walk the mapper later
-        // looks up (exact bbox identity, no bridge drift).
-        const pages: RawPageData[] = analysisIndices.map((i) =>
-            i === args.pageIndex
-                ? (detailed as unknown as RawPageData)
-                : extractRawPageFromDoc(doc, i),
+        // Walk every analysis page via JSON, then substitute the
+        // detailed target page (for bbox identity with the mapper) and
+        // bridge real font metadata onto it — without the bridge,
+        // heading detection is silently disabled on the target page.
+        // See `RawFontBridge.ts` for details.
+        const jsonPages = analysisIndices.map((i) => extractRawPageFromDoc(doc, i));
+        const pages = pagesForFilterWithBridgedFonts(
+            jsonPages,
+            args.pageIndex,
+            detailed,
         );
         const filtered = detectFilteredParagraphs({
             pages,

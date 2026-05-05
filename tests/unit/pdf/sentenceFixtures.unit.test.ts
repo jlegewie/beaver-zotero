@@ -30,6 +30,7 @@ import { describe, it, expect } from 'vitest';
 import {
     detectFilteredParagraphs,
     extractPageSentenceBBoxes,
+    pagesForFilterWithBridgedFonts,
 } from '../../../src/services/pdf';
 import type {
     RawPageData,
@@ -104,17 +105,20 @@ function runPipelineForFixture(fx: LoadedFixture) {
 
 /**
  * Substitute the captured detailed page into the analysis window
- * before paragraph detection runs. Mirrors `pagesForFilter` in
- * `react/utils/extractionOverlay.ts`.
+ * before paragraph detection runs, AND bridge fonts from the JSON-walk
+ * version onto it (the wasm font binding leaves detailed-walk lines
+ * with empty `font.{name, family, weight, style}`). Mirrors
+ * `pagesForFilter` in `react/utils/extractionOverlay.ts` and the
+ * production sentence pipeline. The bridge is a no-op for fixtures
+ * captured after the bridge was added (those already have populated
+ * fonts on the detailed page).
  */
 function pagesForFilter(
     pages: RawPageData[],
     pageIndex: number,
     detailedTargetPage: RawPageDataDetailed,
 ): RawPageData[] {
-    return pages.map((p) =>
-        p.pageIndex === pageIndex ? detailedTargetPage : p,
-    );
+    return pagesForFilterWithBridgedFonts(pages, pageIndex, detailedTargetPage);
 }
 
 /**
