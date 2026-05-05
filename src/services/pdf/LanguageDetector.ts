@@ -98,7 +98,11 @@ export const SENTENCEX_ACCEPTED_DETECTED_LANGUAGES: ReadonlySet<string> =
     ]);
 
 const DEFAULT_MIN_LETTERS = 200;
-const SAMPLE_LETTER_CAP = 6000;
+// eld's accuracy plateau on academic prose flattens well below this
+// threshold (per the upstream README, even 140-char tweet samples hit
+// 99.3%). 3 KB of letters keeps the analysis-window walk short on
+// long PDFs while staying comfortably above eld's reliable-input floor.
+const SAMPLE_LETTER_CAP = 3000;
 const SCRIPT_DOMINANCE = 0.85;
 const KANA_PRESENCE = 0.05;
 

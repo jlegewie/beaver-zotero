@@ -106,7 +106,12 @@ export type SentencePipelineOutput =
     | { result: PageSentenceBBoxResult }
     | { result: PageSentenceBBoxResult; trace: SentencePipelineTrace };
 
-const SAMPLE_LETTER_CAP = 6000;
+// Must match `SAMPLE_LETTER_CAP` in `LanguageDetector.ts`. The
+// detector caps its own working sample at the same threshold, so any
+// letters the builder collects beyond it would be discarded inside
+// the detector — wasting `filterPageWithSmartRemoval` work on
+// non-target pages.
+const SAMPLE_LETTER_CAP = 3000;
 // Must match the detector's `DEFAULT_MIN_LETTERS` so the primary →
 // raw cascade kicks in on the same threshold the detector itself uses
 // to declare a sample sparse.
