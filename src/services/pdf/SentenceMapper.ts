@@ -221,9 +221,18 @@ function unionBBoxes(bboxes: RawBBox[]): RawBBox {
  * pieces have effectively identical y / h, well below the ~12 pt line
  * spacing of typical body text. 1 pt absolute is comfortably above
  * MuPDF rounding noise and well below normal line spacing.
+ *
+ * `MAX_GAP_RATIO` caps the horizontal gap (left edge of next fragment
+ * minus right edge of previous fragment) we'll bridge, expressed as a
+ * multiple of the fragment height. ~3× covers extra-space / justified
+ * intra-line splits comfortably while staying well under any realistic
+ * column gutter or table cell separation, so unrelated same-y fragments
+ * (table cells, column-order edge cases on the page-wide path) never
+ * collapse into one rectangle.
  */
 const SAME_LINE_Y_TOL_PT = 1.0;
 const SAME_LINE_H_TOL_PT = 1.0;
+const SAME_LINE_MAX_GAP_RATIO = 3.0;
 
 /**
  * Merge consecutive fragments that share a visual line into one fragment.
@@ -236,6 +245,17 @@ const SAME_LINE_H_TOL_PT = 1.0;
  * detected by near-equal y and h; subscripts / superscripts have a
  * smaller h and won't merge.
  *
+ * Guards:
+ * - Fragments must be nearly co-linear (y, h within ~1 pt).
+ * - The next fragment must lie to the right of the previous one
+ *   (`frag.x >= last.right - tol`), so we never bridge backwards
+ *   (e.g. a column-order fallback that emits a same-y fragment from
+ *   another column).
+ * - The horizontal gap between them must be at most a few line heights
+ *   (`SAME_LINE_MAX_GAP_RATIO`). Anything wider is treated as a real
+ *   layout boundary (column gutter, table cell separation) and left
+ *   alone — preserving per-fragment precision.
+ *
  * Fragments are merged in document order — `sentenceToBoxes` already
  * walks the source map linearly, so same-line pieces always appear
  * consecutively.
@@ -247,31 +267,39 @@ function mergeSameLineFragments(
     const out: NonNullable<SentenceBBox["fragments"]> = [];
     for (const frag of fragments) {
         const last = out.length > 0 ? out[out.length - 1] : null;
-        if (
-            last &&
+        const sameLine =
+            !!last &&
             Math.abs(last.bbox.y - frag.bbox.y) <= SAME_LINE_Y_TOL_PT &&
-            Math.abs(last.bbox.h - frag.bbox.h) <= SAME_LINE_H_TOL_PT
-        ) {
-            const minX = Math.min(last.bbox.x, frag.bbox.x);
-            const maxX = Math.max(
-                last.bbox.x + last.bbox.w,
-                frag.bbox.x + frag.bbox.w,
-            );
-            const minY = Math.min(last.bbox.y, frag.bbox.y);
-            const maxY = Math.max(
-                last.bbox.y + last.bbox.h,
-                frag.bbox.y + frag.bbox.h,
-            );
-            last.bbox = {
-                x: minX,
-                y: minY,
-                w: maxX - minX,
-                h: maxY - minY,
-            };
-            last.text = last.text + " " + frag.text;
-        } else {
-            out.push({ ...frag, bbox: { ...frag.bbox } });
+            Math.abs(last.bbox.h - frag.bbox.h) <= SAME_LINE_H_TOL_PT;
+        if (last && sameLine) {
+            const lastRight = last.bbox.x + last.bbox.w;
+            const gap = frag.bbox.x - lastRight;
+            // Allow a tiny negative slop for sub-pt overlaps (kerning,
+            // rounding); reject real backwards jumps and oversized gaps.
+            const refHeight = Math.max(last.bbox.h, frag.bbox.h, 1);
+            const maxGap = refHeight * SAME_LINE_MAX_GAP_RATIO;
+            if (gap >= -SAME_LINE_Y_TOL_PT && gap <= maxGap) {
+                const minX = Math.min(last.bbox.x, frag.bbox.x);
+                const maxX = Math.max(
+                    last.bbox.x + last.bbox.w,
+                    frag.bbox.x + frag.bbox.w,
+                );
+                const minY = Math.min(last.bbox.y, frag.bbox.y);
+                const maxY = Math.max(
+                    last.bbox.y + last.bbox.h,
+                    frag.bbox.y + frag.bbox.h,
+                );
+                last.bbox = {
+                    x: minX,
+                    y: minY,
+                    w: maxX - minX,
+                    h: maxY - minY,
+                };
+                last.text = last.text + " " + frag.text;
+                continue;
+            }
         }
+        out.push({ ...frag, bbox: { ...frag.bbox } });
     }
     return out;
 }
