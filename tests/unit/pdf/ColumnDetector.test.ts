@@ -178,3 +178,45 @@ describe('detectColumns reading order', () => {
         expect(ys).toEqual(sortedYs);
     });
 });
+
+describe('detectColumns clipping respects custom header/footerMargin', () => {
+    // Production callers (FilteredParagraphPipeline, worker/ops.ts) thread
+    // their margins.{top,bottom} into ColumnDetectionOptions so the column
+    // clip matches the upstream MarginFilter content area. These two tests
+    // lock in that contract: a body line just inside the custom content
+    // area is kept, while a line squarely inside the margin is dropped.
+
+    it('keeps a body block whose top sits at pageHeight - 49 when footerMargin is 40', () => {
+        const height = 800;
+        const bodyTop: Rect = { x: 100, y: 100, w: 200, h: 400 };
+        const bodyBottom: Rect = { x: 100, y: height - 49, w: 200, h: 8 };
+        const page: RawPageData = {
+            pageIndex: 0,
+            pageNumber: 1,
+            width: 400,
+            height,
+            blocks: [makeTextBlock(bodyTop), makeTextBlock(bodyBottom)],
+        };
+        const result = detectColumns(page, { headerMargin: 40, footerMargin: 40 });
+        const bottomMost = Math.max(...result.columns.map(c => c.y + c.h));
+        // Default 50pt clip would have dropped the y=751 block; with 40pt
+        // the bottom rect (y=751..759) survives and extends past 751.
+        expect(bottomMost).toBeGreaterThan(height - 49);
+    });
+
+    it('still drops a footer entirely inside the bottom 40pt margin', () => {
+        const height = 800;
+        const body: Rect = { x: 100, y: 100, w: 200, h: 400 };
+        const footer: Rect = { x: 100, y: height - 30, w: 200, h: 8 };
+        const page: RawPageData = {
+            pageIndex: 0,
+            pageNumber: 1,
+            width: 400,
+            height,
+            blocks: [makeTextBlock(body), makeTextBlock(footer)],
+        };
+        const result = detectColumns(page, { headerMargin: 40, footerMargin: 40 });
+        const bottomMost = Math.max(...result.columns.map(c => c.y + c.h));
+        expect(bottomMost).toBeLessThanOrEqual(height - 40);
+    });
+});
