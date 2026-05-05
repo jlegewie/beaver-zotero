@@ -737,8 +737,6 @@ export async function handleTestPdfRenderOverlayHttpRequest(request: any) {
         '../../../src/services/pdf/MuPDFWorkerClient'
     );
     const {
-        getSentenceSplitterWithFallback,
-        normalizeLanguageCode,
         resolveAnalysisPageIndices,
         runSentenceExtractionPipeline,
         ExtractionError,
@@ -799,13 +797,14 @@ export async function handleTestPdfRenderOverlayHttpRequest(request: any) {
     if (level === 'sentences') {
         // Route through the production orchestration so the rects we draw
         // on the PNG are exactly the bboxes the production sentence
-        // pipeline produced. `trace: true` adds zero worker round-trips
-        // (just keeps intermediates in memory) and lets us read the
-        // analysis-window size for `stats.analysisPagesScanned`.
-        const language = await resolveLanguage();
-        const splitter = await getSentenceSplitterWithFallback(
-            normalizeLanguageCode(language),
-        );
+        // pipeline produced — including automatic language detection.
+        // Pass an explicit `request.language` as `language` (so it wins
+        // over detection); otherwise pass any Zotero-item language as
+        // `languageFallback` so detection is the primary signal and the
+        // metadata is the fallback.
+        const explicitLanguage =
+            typeof request?.language === 'string' ? request.language : undefined;
+        const itemLanguage = explicitLanguage ? undefined : await resolveLanguage();
         const analysisPageWindow =
             request?.analysis_page_window != null
                 ? Number(request.analysis_page_window)
@@ -814,7 +813,8 @@ export async function handleTestPdfRenderOverlayHttpRequest(request: any) {
             const out = await runSentenceExtractionPipeline({
                 pdfData,
                 pageIndex,
-                splitter,
+                language: explicitLanguage,
+                languageFallback: itemLanguage,
                 analysisPageWindow,
                 trace: true,
             });
@@ -971,9 +971,6 @@ export async function handleTestPdfPipelineTraceHttpRequest(request: any) {
         runSentenceExtractionPipeline,
         ExtractionError,
     } = await import('../../../src/services/pdf');
-    const { getSentenceSplitterWithFallback, normalizeLanguageCode } = await import(
-        '../../../src/services/pdf/SentencexSplitter'
-    );
 
     const loaded = await loadPdfBytesForTestEndpoint(request);
     if (!loaded.ok) return loaded;
@@ -990,24 +987,28 @@ export async function handleTestPdfPipelineTraceHttpRequest(request: any) {
     const summary = request?.summary === true;
 
     // ------------------------------------------------------------------
-    // Resolve the splitter the same way production does, then run the
-    // shared sentence-extraction pipeline with `trace: true` for access to
-    // intermediate object.
+    // Hand language inputs to the pipeline and let it resolve the
+    // splitter internally (detection-first, with Zotero metadata as
+    // fallback). This makes the trace endpoint reflect the production
+    // decision flow exactly. The resolved decision is surfaced in the
+    // response as `language_resolution`.
     // ------------------------------------------------------------------
-    let language: string | undefined =
+    const explicitLanguage =
         typeof request?.language === 'string' ? request.language : undefined;
-    if (!language && request?.library_id != null && request?.zotero_key != null) {
+    let languageFallback: string | undefined;
+    if (
+        !explicitLanguage &&
+        request?.library_id != null &&
+        request?.zotero_key != null
+    ) {
         try {
             const { getItemLanguage } = await import('../../../src/utils/zoteroUtils');
             const raw = await getItemLanguage(request.library_id, request.zotero_key);
-            if (raw) language = raw;
+            if (raw) languageFallback = raw;
         } catch {
             // Best effort.
         }
     }
-    const splitter = await getSentenceSplitterWithFallback(
-        normalizeLanguageCode(language),
-    );
 
     const analysisPageWindow =
         request?.analysis_page_window != null
@@ -1020,7 +1021,8 @@ export async function handleTestPdfPipelineTraceHttpRequest(request: any) {
         const out = await runSentenceExtractionPipeline({
             pdfData,
             pageIndex,
-            splitter,
+            language: explicitLanguage,
+            languageFallback,
             analysisPageWindow,
             trace: true,
         });
@@ -1350,6 +1352,7 @@ export async function handleTestPdfPipelineTraceHttpRequest(request: any) {
             page_width: targetPage.width,
             page_height: targetPage.height,
             page_label: targetPage.label,
+            language_resolution: trace.languageResolution,
             counts: {
                 rawLines: rawLineEntries.length,
                 rawLinesFinalKept: rawLineEntries.filter((e) => e.marginFilter.finalKept)
@@ -1412,6 +1415,7 @@ export async function handleTestPdfPipelineTraceHttpRequest(request: any) {
         page_width: targetPage.width,
         page_height: targetPage.height,
         page_label: targetPage.label,
+        language_resolution: trace.languageResolution,
         raw_lines: rawLineEntries,
         smart_removal: {
             analysisRange: [

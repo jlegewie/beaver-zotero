@@ -132,6 +132,35 @@ export type {
     SentencePipelineTrace,
     SentencePipelineOutput,
 } from "./SentenceExtractionPipeline";
+export {
+    detectLanguageFromText,
+    SENTENCEX_ACCEPTED_DETECTED_LANGUAGES,
+} from "./LanguageDetector";
+export type {
+    DetectSource,
+    DetectResult,
+    DetectOptions,
+} from "./LanguageDetector";
+
+/**
+ * Caller-facing options for sentence-bbox extraction. Extends the
+ * mapper-level `PageSentenceBBoxOptions` with pipeline-only fields
+ * (language fallback, detection toggle) — the mapper itself doesn't
+ * see these.
+ */
+export type PDFSentenceBBoxOptions = PageSentenceBBoxOptions & {
+    /**
+     * Used when no caller-provided splitter is available and detection
+     * is sparse or rejected by the allowlist gate.
+     */
+    languageFallback?: string;
+    /**
+     * Default `true`. Set `false` to skip detection entirely;
+     * `language` → `languageFallback` → `"en"` chain decides the
+     * splitter instead.
+     */
+    detectLanguage?: boolean;
+};
 
 /**
  * PDFExtractor - High-level API for extracting text from PDFs.
@@ -329,30 +358,22 @@ export class PDFExtractor {
     async extractSentenceBBoxes(
         pdfData: Uint8Array | ArrayBuffer,
         pageIndex: number,
-        options: PageSentenceBBoxOptions = {}
+        options: PDFSentenceBBoxOptions = {}
     ): Promise<PageSentenceBBoxResult> {
         const client = getMuPDFWorkerClient();
 
-        // Splitter functions are not structurally cloneable across the
-        // worker boundary, so whenever we need to run a JS splitter we
-        // fetch the detailed page from the worker and run the mapper on
-        // the main thread. This applies to both caller-provided
-        // splitters and the default sentencex splitter (loaded via
-        // ChromeUtils.importESModule on the main thread). The sentencex
-        // module is cached after first init, so the WASM tax is paid
-        // once per session.
-        const splitter =
-            options.splitter ??
-            (await getSentenceSplitterWithFallback(
-                normalizeLanguageCode(options.language),
-            ));
-
-        // If the caller already ran their own paragraph pipeline (e.g.
-        // the trace endpoint, or an internal worker call passing a
-        // precomputed result through the worker boundary), keep the
-        // legacy single-page path — the precomputed paragraphResult
-        // already reflects whatever filtering they applied.
+        // Precomputed shortcut bypasses the analysis window entirely,
+        // so language detection can't run here (no window text loaded).
+        // Resolve splitter from caller > language > languageFallback >
+        // "en" (the latter coming from `normalizeLanguageCode(undefined)`).
         if (options.precomputed) {
+            const splitter =
+                options.splitter ??
+                (await getSentenceSplitterWithFallback(
+                    normalizeLanguageCode(
+                        options.language ?? options.languageFallback,
+                    ),
+                ));
             const detailed = await client.extractRawPageDetailed(
                 pdfData,
                 pageIndex,
@@ -362,18 +383,20 @@ export class PDFExtractor {
 
         // Otherwise: delegate to the shared sentence-extraction
         // pipeline, which owns the analysis-window load, detailed-page
-        // substitution, filtered paragraph detection, and the final
-        // sentence mapping. This is the same orchestration the
-        // `/beaver/test/pdf-pipeline-trace` endpoint runs (with
-        // `trace: true`), so the debug endpoint always reflects what
-        // production actually does.
+        // substitution, filtered paragraph detection, language
+        // resolution, and the final sentence mapping. This is the same
+        // orchestration the `/beaver/test/pdf-pipeline-trace` endpoint
+        // runs (with `trace: true`), so the debug endpoint always
+        // reflects what production actually does.
         const { result } = await runSentenceExtractionPipeline({
             pdfData,
             pageIndex,
-            splitter,
+            splitter: options.splitter,
             analysisPageWindow: options.analysisPageWindow,
             paragraphSettings: options.paragraphSettings,
             language: options.language,
+            languageFallback: options.languageFallback,
+            detectLanguage: options.detectLanguage,
         });
         return result;
     }
@@ -694,30 +717,33 @@ export async function searchFromZoteroItem(
 export async function extractSentenceBBoxesFromZoteroItem(
     item: Zotero.Item,
     pageIndex: number,
-    options: PageSentenceBBoxOptions = {}
+    options: PDFSentenceBBoxOptions = {}
 ): Promise<PageSentenceBBoxResult | null> {
     const path = await item.getFilePathAsync();
     if (!path) {
         return null;
     }
 
-    // Resolve language from the parent regular item if the caller didn't
-    // pass one explicitly. `getItemLanguage` walks attachments → parent
-    // and returns the raw `language` field; `normalizeLanguageCode` (run
-    // inside the extractor) handles BCP-47 / ISO 639-2 / English-name
-    // variants. We resolve here rather than inside the extractor so that
-    // the extractor stays Zotero-item-agnostic.
-    let language = options.language;
-    if (language === undefined) {
+    // Resolve a language fallback from the parent regular item if the
+    // caller didn't pass one explicitly. The wrapper used to forward
+    // Zotero's `language` field as `language` (forcing the splitter);
+    // it now forwards it as `languageFallback`, so PDF-text language
+    // detection takes priority and Zotero metadata only kicks in when
+    // the body sample is too sparse or the detected code is outside
+    // the accepted-detection allowlist. `getItemLanguage` walks
+    // attachments → parent and returns the raw `language` field;
+    // `normalizeLanguageCode` (run downstream) handles BCP-47 /
+    // ISO 639-2 / English-name variants.
+    let languageFallback = options.languageFallback;
+    if (options.language === undefined && languageFallback === undefined) {
         try {
             const { getItemLanguage } = await import(
                 "../../utils/zoteroUtils"
             );
             const raw = await getItemLanguage(item.libraryID, item.key);
-            if (raw) language = raw;
+            if (raw) languageFallback = raw;
         } catch {
-            // Field lookup is best effort — fall through to the "en"
-            // default applied by normalizeLanguageCode downstream.
+            // Field lookup is best effort.
         }
     }
 
@@ -725,6 +751,6 @@ export async function extractSentenceBBoxesFromZoteroItem(
     const extractor = new PDFExtractor();
     return extractor.extractSentenceBBoxes(pdfData, pageIndex, {
         ...options,
-        language,
+        languageFallback,
     });
 }
