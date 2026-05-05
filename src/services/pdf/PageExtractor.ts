@@ -239,7 +239,7 @@ export class PageExtractor {
     /**
      * Process raw blocks into structured blocks.
      */
-    private processBlocks(rawBlocks: RawBlock[]): ProcessedBlock[] {
+    private processBlocks(rawBlocks: readonly RawBlock[]): ProcessedBlock[] {
         const processed: ProcessedBlock[] = [];
 
         for (const block of rawBlocks) {

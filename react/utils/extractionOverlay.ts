@@ -141,10 +141,11 @@ function pagesForFilter(
     detailedTargetPage?: RawPageDataDetailed,
 ): RawPageData[] {
     if (!detailedTargetPage) return pages;
+    // `RawPageDataDetailed` is structurally assignable to `RawPageData`
+    // because `RawBlock.lines` and `RawPageData.blocks` are readonly,
+    // making detailed blocks/lines covariantly compatible.
     return pages.map((p) =>
-        p.pageIndex === pageIndex
-            ? (detailedTargetPage as unknown as RawPageData)
-            : p,
+        p.pageIndex === pageIndex ? detailedTargetPage : p,
     );
 }
 

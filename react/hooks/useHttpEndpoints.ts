@@ -2327,7 +2327,8 @@ async function handleTestPdfPipelineTraceHttpRequest(request: any) {
  * Request body:
  *   { library_id, zotero_key | raw_bytes_base64,
  *     page_indices?: number[],            // explicit list to scan; if
- *                                         //   omitted, all pages (capped 50)
+ *                                         //   omitted, all pages (capped at
+ *                                         //   DEFAULT_ANALYSIS_WINDOW_CAP)
  *     page_range?: { start, end },        // alternative to page_indices
  *     repeat_threshold?: number,          // min pages for "repeat"
  *                                         //   classification (default 3)
@@ -2344,9 +2345,8 @@ async function handleTestPdfSmartRemovalSummaryHttpRequest(request: any) {
     const { getMuPDFWorkerClient } = await import(
         '../../src/services/pdf/MuPDFWorkerClient'
     );
-    const { MarginFilter, DEFAULT_MARGIN_ZONE } = await import(
-        '../../src/services/pdf'
-    );
+    const { MarginFilter, DEFAULT_MARGIN_ZONE, DEFAULT_ANALYSIS_WINDOW_CAP } =
+        await import('../../src/services/pdf');
 
     const loaded = await loadPdfBytesForTestEndpoint(request);
     if (!loaded.ok) return loaded;
@@ -2381,10 +2381,12 @@ async function handleTestPdfSmartRemovalSummaryHttpRequest(request: any) {
         analysisIndices = [];
         for (let i = 0; i < totalPages; i++) analysisIndices.push(i);
     }
-    // Cap at 50 to bound latency. Center on the requested range start so
-    // an explicit narrow request isn't reduced.
-    if (analysisIndices.length > 50) {
-        analysisIndices = analysisIndices.slice(0, 50);
+    // Cap at DEFAULT_ANALYSIS_WINDOW_CAP to bound latency. Slice the
+    // first N requested pages rather than centering — the caller chose
+    // which pages to scan, and centering an explicit list/range would
+    // silently drop pages the caller asked for.
+    if (analysisIndices.length > DEFAULT_ANALYSIS_WINDOW_CAP) {
+        analysisIndices = analysisIndices.slice(0, DEFAULT_ANALYSIS_WINDOW_CAP);
     }
     if (analysisIndices.length === 0) {
         return {

@@ -106,11 +106,11 @@ export async function runSentenceExtractionPipeline(
 
     // Substitute the detailed target page into the analysis window so
     // paragraph detection runs on the same walk the mapper later looks
-    // up (exact bbox identity, no bridge drift).
+    // up (exact bbox identity, no bridge drift). `RawPageDataDetailed`
+    // is structurally assignable to `RawPageData` (readonly arrays
+    // make blocks/lines covariant), so no cast is needed.
     const pagesForFilter: RawPageData[] = rawDoc.pages.map((p) =>
-        p.pageIndex === pageIndex
-            ? (detailed as unknown as RawPageData)
-            : p,
+        p.pageIndex === pageIndex ? detailed : p,
     );
 
     // Pre-compute margin analysis from `pagesForFilter` so trace can
