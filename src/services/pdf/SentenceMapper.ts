@@ -214,6 +214,69 @@ function unionBBoxes(bboxes: RawBBox[]): RawBBox {
 }
 
 /**
+ * Tolerances used to decide whether two consecutive fragments share a
+ * single visual line. MuPDF sometimes emits one visual line as multiple
+ * `RawLineDetailed` entries when a wider-than-normal horizontal gap
+ * (justified spacing, manual extra spaces) appears mid-line — those
+ * pieces have effectively identical y / h, well below the ~12 pt line
+ * spacing of typical body text. 1 pt absolute is comfortably above
+ * MuPDF rounding noise and well below normal line spacing.
+ */
+const SAME_LINE_Y_TOL_PT = 1.0;
+const SAME_LINE_H_TOL_PT = 1.0;
+
+/**
+ * Merge consecutive fragments that share a visual line into one fragment.
+ *
+ * Why: MuPDF's structured-text walker can split a single visual line into
+ * multiple `RawLineDetailed` entries when there's an unusually wide
+ * horizontal gap (extra spaces, justified-text spacing). Without this
+ * pass, a sentence highlight on one visual line renders as multiple
+ * disjoint rectangles with a blank gap between them. Same-line is
+ * detected by near-equal y and h; subscripts / superscripts have a
+ * smaller h and won't merge.
+ *
+ * Fragments are merged in document order — `sentenceToBoxes` already
+ * walks the source map linearly, so same-line pieces always appear
+ * consecutively.
+ */
+function mergeSameLineFragments(
+    fragments: NonNullable<SentenceBBox["fragments"]>,
+): NonNullable<SentenceBBox["fragments"]> {
+    if (fragments.length < 2) return fragments;
+    const out: NonNullable<SentenceBBox["fragments"]> = [];
+    for (const frag of fragments) {
+        const last = out.length > 0 ? out[out.length - 1] : null;
+        if (
+            last &&
+            Math.abs(last.bbox.y - frag.bbox.y) <= SAME_LINE_Y_TOL_PT &&
+            Math.abs(last.bbox.h - frag.bbox.h) <= SAME_LINE_H_TOL_PT
+        ) {
+            const minX = Math.min(last.bbox.x, frag.bbox.x);
+            const maxX = Math.max(
+                last.bbox.x + last.bbox.w,
+                frag.bbox.x + frag.bbox.w,
+            );
+            const minY = Math.min(last.bbox.y, frag.bbox.y);
+            const maxY = Math.max(
+                last.bbox.y + last.bbox.h,
+                frag.bbox.y + frag.bbox.h,
+            );
+            last.bbox = {
+                x: minX,
+                y: minY,
+                w: maxX - minX,
+                h: maxY - minY,
+            };
+            last.text = last.text + " " + frag.text;
+        } else {
+            out.push({ ...frag, bbox: { ...frag.bbox } });
+        }
+    }
+    return out;
+}
+
+/**
  * Resolve a sentence range `[start, end)` into one bbox per line-fragment.
  *
  * Walks the source map once, groups real-char entries by their `lineIndex`
@@ -262,22 +325,22 @@ export function sentenceToBoxes(
 
     if (runs.length === 0) return null;
 
-    const fragments: NonNullable<SentenceBBox["fragments"]> = [];
-    const bboxes: RawBBox[] = [];
+    const rawFragments: NonNullable<SentenceBBox["fragments"]> = [];
 
     for (const run of runs) {
         const line = lines[run.lineIndex];
         const slice = line.chars.slice(run.charStart, run.charEnd + 1);
         const fragText = slice.map((c) => c.c).join("");
         const fragBBox = unionBBoxes(slice.map((c) => c.bbox));
-        fragments.push({
+        rawFragments.push({
             lineIndex: run.lineIndex,
             text: fragText,
             bbox: fragBBox,
         });
-        bboxes.push(fragBBox);
     }
 
+    const fragments = mergeSameLineFragments(rawFragments);
+    const bboxes = fragments.map((f) => f.bbox);
     const text = fragments.map((f) => f.text).join(" ");
     return {
         pageIndex,
