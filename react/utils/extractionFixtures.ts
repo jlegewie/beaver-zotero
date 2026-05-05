@@ -29,7 +29,8 @@ import {
 import { getItemLanguage } from "../../src/utils/zoteroUtils";
 import { logger } from "../../src/utils/logger";
 import { resolveActiveReaderContext } from "./extractionVisualizer";
-import { pagesForFilter } from "./extractionOverlay";
+import { buildSentenceOverlayFromResult, pagesForFilter } from "./extractionOverlay";
+import { drawBBoxOverlayPNG } from "./canvasOverlay";
 
 const FIXTURE_ROOT_PREF = "extensions.beaver.devFixtureRoot";
 const DEFAULT_BBOX_TOL_PT = 0.5;
@@ -174,11 +175,22 @@ export async function createSentenceFixture(): Promise<CreateSentenceFixtureResu
 
         const expected = buildExpectedFromResult(result);
 
-        // Render preview PNG.
+        // Render preview PNG, then paint the sentence overlay on top so the
+        // captured page image visually matches what the live visualizer
+        // shows in the reader.
         const pageImage = await client.renderPageToImage(pdfData, pageIndex, {
             scale: 1.5,
             format: "png",
         });
+        const overlay = buildSentenceOverlayFromResult(result, rawDoc.pages.length);
+        const pagePngBytes = await drawBBoxOverlayPNG(
+            pageImage.data,
+            pageImage.width,
+            pageImage.height,
+            overlay.pageWidth,
+            overlay.pageHeight,
+            overlay.rects,
+        );
 
         // Ensure folders.
         await IOUtils.makeDirectory(folderPath, {
@@ -196,10 +208,10 @@ export async function createSentenceFixture(): Promise<CreateSentenceFixtureResu
             await IOUtils.write(sharedPdfPath, pdfData);
         }
 
-        // Write page PNG.
+        // Write page PNG (with sentence overlay).
         await IOUtils.write(
             PathUtils.join(folderPath, "page.png"),
-            pageImage.data,
+            pagePngBytes,
         );
 
         // Write raw-extraction.json (hermetic input for unit tests).
