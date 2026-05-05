@@ -183,9 +183,78 @@ export const mergeLabelSentences: PostProcessStep = (ranges, text) => {
 };
 
 // ---------------------------------------------------------------------------
+// Step 2: split enumerated lists introduced by a colon
+// ---------------------------------------------------------------------------
+
+/**
+ * Pattern: colon, whitespace, parenthesized integer, whitespace, uppercase
+ * letter. The `g` flag is added per-call so the regex object can be shared.
+ *
+ * `\p{Lu}` (Unicode uppercase letter) ensures we don't fire on inline lists
+ * with lowercase items like `"...three: (1) the first, (2) the second..."`,
+ * where keeping a single sentence is correct. The colon + parenthesized
+ * integer + uppercase signal is the conventional academic-writing cue that
+ * what follows is a sequence of full-sentence list items, e.g.
+ * `"...women: (1) The NLSY97 consists..."` — sentencex splits after a
+ * period before `(2)`, `(3)`, ... but not after the colon before `(1)`.
+ */
+const ENUMERATED_LIST_AFTER_COLON_RE = /:\s+\(\d+\)\s+\p{Lu}/u;
+
+/**
+ * Split a single sentence range at every `: (\d+) <uppercase>` occurrence.
+ * The colon stays with the preceding clause; the new sub-range starts at
+ * the opening paren of the enumerator. Whitespace between colon and paren
+ * is dropped so neither sub-range carries trailing/leading filler.
+ *
+ * Applied after the splitter (sentencex or the regex fallback) has already
+ * produced its boundaries — this fixes the one case where sentencex
+ * doesn't break (`(1)` after a colon) while leaving paragraphs without the
+ * pattern untouched.
+ */
+export const splitOnEnumeratedListAfterColon: PostProcessStep = (
+    ranges,
+    text,
+) => {
+    const out: SentenceRange[] = [];
+    for (const range of ranges) {
+        const segText = text.slice(range.start, range.end);
+        const re = new RegExp(ENUMERATED_LIST_AFTER_COLON_RE.source, "gu");
+        const splitPositions: number[] = [];
+        let m: RegExpExecArray | null;
+        while ((m = re.exec(segText)) !== null) {
+            const parenIdx = segText.indexOf("(", m.index);
+            if (parenIdx === -1) continue;
+            splitPositions.push(parenIdx);
+        }
+        if (splitPositions.length === 0) {
+            out.push(range);
+            continue;
+        }
+        let cursor = 0;
+        for (const splitAt of splitPositions) {
+            // Trim the whitespace between the colon and the opening paren.
+            let endIdx = splitAt;
+            while (endIdx > cursor && /\s/.test(segText[endIdx - 1])) endIdx--;
+            if (endIdx > cursor) {
+                out.push({
+                    start: range.start + cursor,
+                    end: range.start + endIdx,
+                });
+            }
+            cursor = splitAt;
+        }
+        if (cursor < segText.length) {
+            out.push({ start: range.start + cursor, end: range.end });
+        }
+    }
+    return out;
+};
+
+// ---------------------------------------------------------------------------
 // Pipeline registration
 // ---------------------------------------------------------------------------
 
 const POST_PROCESS_STEPS: ReadonlyArray<PostProcessStep> = [
     mergeLabelSentences,
+    splitOnEnumeratedListAfterColon,
 ];

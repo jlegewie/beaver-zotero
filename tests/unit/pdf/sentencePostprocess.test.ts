@@ -13,6 +13,7 @@ import { describe, it, expect } from "vitest";
 import {
     applyPostProcessing,
     mergeLabelSentences,
+    splitOnEnumeratedListAfterColon,
 } from "../../../src/services/pdf/sentencePostprocess";
 import type { SentenceRange } from "../../../src/services/pdf/SentenceMapper";
 
@@ -211,5 +212,108 @@ describe("mergeLabelSentences", () => {
 
     it("returns an empty array for empty input", () => {
         expect(mergeLabelSentences([], "")).toEqual([]);
+    });
+});
+
+describe("splitOnEnumeratedListAfterColon", () => {
+    it("splits at ': (1) The...' when sentencex did not break there", () => {
+        const text =
+            "The NLS are surveys of men and women: (1) The NLSY97 consists of a sample.";
+        const ranges = rangesFromChunks(text, [
+            "The NLS are surveys of men and women: (1) The NLSY97 consists of a sample.",
+        ]);
+        expect(slice(text, splitOnEnumeratedListAfterColon(ranges, text))).toEqual(
+            [
+                "The NLS are surveys of men and women:",
+                "(1) The NLSY97 consists of a sample.",
+            ],
+        );
+    });
+
+    it("splits at every ': (N) <Uppercase>' occurrence in a range", () => {
+        const text =
+            "We saw two patterns: (1) Apple is red. (2) Banana is yellow. Closing: (3) Cherry is dark.";
+        const ranges = rangesFromChunks(text, [
+            "We saw two patterns: (1) Apple is red.",
+            "(2) Banana is yellow.",
+            "Closing: (3) Cherry is dark.",
+        ]);
+        expect(slice(text, splitOnEnumeratedListAfterColon(ranges, text))).toEqual(
+            [
+                "We saw two patterns:",
+                "(1) Apple is red.",
+                "(2) Banana is yellow.",
+                "Closing:",
+                "(3) Cherry is dark.",
+            ],
+        );
+    });
+
+    it("does NOT split inline lists with lowercase items", () => {
+        // Conventional inline list — items are short phrases starting
+        // lowercase. Keeping them as one sentence is correct.
+        const text =
+            "We have three options: (1) the first, (2) the second, and (3) the third.";
+        const ranges = rangesFromChunks(text, [
+            "We have three options: (1) the first, (2) the second, and (3) the third.",
+        ]);
+        expect(slice(text, splitOnEnumeratedListAfterColon(ranges, text))).toEqual(
+            [
+                "We have three options: (1) the first, (2) the second, and (3) the third.",
+            ],
+        );
+    });
+
+    it("does NOT split when the parenthesized item contains non-digits", () => {
+        // `(i)` Roman numerals and `(a)` alphabetic labels are common but
+        // less reliable as sentence-break signals — keep the rule narrow.
+        const text =
+            "We have two options: (i) The first one. (ii) The second one.";
+        const ranges = rangesFromChunks(text, [
+            "We have two options: (i) The first one. (ii) The second one.",
+        ]);
+        expect(slice(text, splitOnEnumeratedListAfterColon(ranges, text))).toEqual(
+            ["We have two options: (i) The first one. (ii) The second one."],
+        );
+    });
+
+    it("does NOT split when there is no colon before the enumerator", () => {
+        const text = "He said (1) The first. (2) The second.";
+        // Pretend sentencex already split correctly on the periods.
+        const ranges = rangesFromChunks(text, [
+            "He said (1) The first.",
+            "(2) The second.",
+        ]);
+        expect(slice(text, splitOnEnumeratedListAfterColon(ranges, text))).toEqual(
+            ["He said (1) The first.", "(2) The second."],
+        );
+    });
+
+    it("is a no-op when no enumerator pattern is present", () => {
+        const text = "First sentence. Second sentence.";
+        const ranges = rangesFromChunks(text, [
+            "First sentence.",
+            "Second sentence.",
+        ]);
+        expect(slice(text, splitOnEnumeratedListAfterColon(ranges, text))).toEqual(
+            ["First sentence.", "Second sentence."],
+        );
+    });
+
+    it("handles colon followed by a newline before the enumerator", () => {
+        // Multi-line paragraph text uses `" "` line fillers, but the rule
+        // should also be robust to other whitespace runs.
+        const text =
+            "Two cohorts:\n(1) The younger group consists of 5083 women.";
+        const ranges = rangesFromChunks(text, [
+            "Two cohorts:\n(1) The younger group consists of 5083 women.",
+        ]);
+        expect(slice(text, splitOnEnumeratedListAfterColon(ranges, text))).toEqual(
+            ["Two cohorts:", "(1) The younger group consists of 5083 women."],
+        );
+    });
+
+    it("returns an empty array for empty input", () => {
+        expect(splitOnEnumeratedListAfterColon([], "")).toEqual([]);
     });
 });
