@@ -2,8 +2,9 @@
  * Extraction Overlay — shared bbox source-of-truth.
  *
  * Computes per-level bounding-box overlays (columns / lines / paragraphs /
- * sentences) for a single PDF page, returning plain rect data in MuPDF
- * top-left point coordinates. No DOM, no Zotero reader, no annotations.
+ * sentences / raw-lines / margins) for a single PDF page, returning plain
+ * rect data in MuPDF top-left point coordinates. No DOM, no Zotero reader,
+ * no annotations.
  *
  * Two consumers:
  *   1. `extractionVisualizer.ts` — converts these rects into Zotero
@@ -12,23 +13,19 @@
  *      them to `canvasOverlay.ts` to draw on a rendered page PNG for
  *      headless agent debugging.
  *
- * Keeping rect-building in one place guarantees both consumers build the
- * same overlay shape from a `PageSentenceBBoxResult`. The HTTP endpoint
- * feeds in the result from `runSentenceExtractionPipeline` (production
- * orchestration); the visualizer still composes its own sentence result
- * via `getSentenceOverlay` for now.
+ * Filter alignment: columns / lines / paragraphs / sentences all route
+ * through `detectFilteredParagraphs`, so every overlay reflects what the
+ * production sentence pipeline sees (cross-page smart margin removal,
+ * document-wide style profile). `raw-lines` and `margins` deliberately
+ * skip that filter — their purpose is to expose pre-filter state.
  */
 import {
-    detectColumns,
-    detectLinesOnPage,
-    detectParagraphs,
     detectFilteredParagraphs,
     extractPageSentenceBBoxes,
     lineBBoxToRect,
     MarginFilter,
     DEFAULT_MARGINS,
     DEFAULT_MARGIN_ZONE,
-    StyleAnalyzer,
     Rect,
     RawPageData,
     RawPageDataDetailed,
@@ -129,12 +126,45 @@ export interface OverlayResult {
 // ---------------------------------------------------------------------------
 
 /**
- * Column overlay: one rect per detected column, labelled C1..Cn in reading
- * order. Uses the unfiltered raw page (matches the visualizer).
+ * Substitute the detailed target page into the analysis window before
+ * paragraph detection runs. `runSentenceExtractionPipeline` does the
+ * same thing.
+ *
+ * If `detailedTargetPage` is omitted, falls through to the raw target
+ * page already in `pages` — overlays remain functional but no longer
+ * guaranteed to mirror production exactly. Both call sites
+ * (`useHttpEndpoints.ts` and `extractionVisualizer.ts`) supply it.
  */
-export function getColumnOverlay(rawPage: RawPageData): OverlayResult {
-    const columnResult = detectColumns(rawPage);
-    const rects: OverlayRect[] = columnResult.columns.map((col, i) => ({
+function pagesForFilter(
+    pages: RawPageData[],
+    pageIndex: number,
+    detailedTargetPage?: RawPageDataDetailed,
+): RawPageData[] {
+    if (!detailedTargetPage) return pages;
+    return pages.map((p) =>
+        p.pageIndex === pageIndex
+            ? (detailedTargetPage as unknown as RawPageData)
+            : p,
+    );
+}
+
+/**
+ * Column overlay: one rect per detected column, labelled C1..Cn in reading
+ * order. Uses the smart cross-page filter via `detectFilteredParagraphs`,
+ * so columns are detected on the same filtered page the production
+ * sentence pipeline operates on. Pass `detailedTargetPage` for byte-exact
+ * parity with production (see `pagesForFilter`).
+ */
+export function getColumnOverlay(
+    pages: RawPageData[],
+    pageIndex: number,
+    detailedTargetPage?: RawPageDataDetailed,
+): OverlayResult {
+    const filtered = detectFilteredParagraphs({
+        pages: pagesForFilter(pages, pageIndex, detailedTargetPage),
+        pageIndex,
+    });
+    const rects: OverlayRect[] = filtered.columnResult.columns.map((col, i) => ({
         rect: col,
         color: OVERLAY_COLORS.column,
         label: `C${i + 1}`,
@@ -142,106 +172,104 @@ export function getColumnOverlay(rawPage: RawPageData): OverlayResult {
     }));
     return {
         level: "columns",
-        pageIndex: rawPage.pageIndex,
-        pageWidth: rawPage.width,
-        pageHeight: rawPage.height,
+        pageIndex: filtered.filteredPage.pageIndex,
+        pageWidth: filtered.filteredPage.width,
+        pageHeight: filtered.filteredPage.height,
         groupCount: rects.length,
         rects,
         stats: {
             columns: rects.length,
-            broken: columnResult.isBroken ? 1 : 0,
+            broken: filtered.columnResult.isBroken ? 1 : 0,
+            analysisPagesScanned: pages.length,
         },
     };
 }
 
 /**
  * Line overlay: one rect per detected line, labelled L1..Ln across all
- * columns. Mirrors the visualizer's pipeline (margin filter → column
- * detection → line detection).
+ * columns. Built from `detectFilteredParagraphs.lineResult` so lines
+ * reflect the smart cross-page filter (repeating watermarks/page numbers
+ * removed) — same pipeline production sentence extraction uses. Pass
+ * `detailedTargetPage` for byte-exact parity with production.
  */
-export function getLineOverlay(rawPage: RawPageData): OverlayResult {
-    const filtered = MarginFilter.filterPageByMargins(rawPage, DEFAULT_MARGINS);
-    const columnResult = detectColumns(filtered);
+export function getLineOverlay(
+    pages: RawPageData[],
+    pageIndex: number,
+    detailedTargetPage?: RawPageDataDetailed,
+): OverlayResult {
+    const filtered = detectFilteredParagraphs({
+        pages: pagesForFilter(pages, pageIndex, detailedTargetPage),
+        pageIndex,
+    });
     const rects: OverlayRect[] = [];
     let groupCount = 0;
-
-    if (columnResult.columns.length > 0) {
-        const lineResult = detectLinesOnPage(filtered, columnResult.columns);
-        for (const colResult of lineResult.columnResults) {
-            for (const line of colResult.lines) {
-                groupCount++;
-                rects.push({
-                    rect: lineBBoxToRect(line.bbox),
-                    color: OVERLAY_COLORS.line,
-                    label: `L${groupCount}`,
-                    group: groupCount - 1,
-                });
-            }
+    for (const colResult of filtered.lineResult.columnResults) {
+        for (const line of colResult.lines) {
+            groupCount++;
+            rects.push({
+                rect: lineBBoxToRect(line.bbox),
+                color: OVERLAY_COLORS.line,
+                label: `L${groupCount}`,
+                group: groupCount - 1,
+            });
         }
     }
-
     return {
         level: "lines",
-        pageIndex: rawPage.pageIndex,
-        pageWidth: rawPage.width,
-        pageHeight: rawPage.height,
+        pageIndex: filtered.filteredPage.pageIndex,
+        pageWidth: filtered.filteredPage.width,
+        pageHeight: filtered.filteredPage.height,
         groupCount,
         rects,
         stats: {
             lines: groupCount,
-            columns: columnResult.columns.length,
+            columns: filtered.columnResult.columns.length,
+            analysisPagesScanned: pages.length,
         },
     };
 }
 
 /**
  * Paragraph overlay: one rect per detected paragraph (green) or header
- * (purple). Style analysis is run on this single page only — multi-page
- * style profiling isn't available in a per-page overlay.
+ * (purple). Built from `detectFilteredParagraphs.paragraphResult`, which
+ * uses the document-wide style profile — header vs body classification
+ * matches what production sentence extraction sees. Pass
+ * `detailedTargetPage` for byte-exact parity with production.
  */
-export function getParagraphOverlay(rawPage: RawPageData): OverlayResult {
-    const filtered = MarginFilter.filterPageByMargins(rawPage, DEFAULT_MARGINS);
-    const columnResult = detectColumns(filtered);
-    const rects: OverlayRect[] = [];
-    let paragraphCount = 0;
-    let headerCount = 0;
-
-    if (columnResult.columns.length > 0) {
-        const lineResult = detectLinesOnPage(filtered, columnResult.columns);
-        if (lineResult.allLines.length > 0) {
-            const styleProfile = new StyleAnalyzer().analyze([filtered], 4, 0.15, 0);
-            const bodyStyles = styleProfile?.bodyStyles || null;
-            const paragraphResult = detectParagraphs(lineResult, bodyStyles);
-            paragraphCount = paragraphResult.paragraphCount;
-            headerCount = paragraphResult.headerCount;
-
-            paragraphResult.items.forEach((item, i) => {
-                const isHeader = item.type === "header";
-                rects.push({
-                    rect: {
-                        x: item.bbox.l,
-                        y: item.bbox.t,
-                        w: item.bbox.width,
-                        h: item.bbox.height,
-                    },
-                    color: isHeader ? OVERLAY_COLORS.header : OVERLAY_COLORS.paragraph,
-                    label: `${isHeader ? "H" : "P"}${item.idx + 1}`,
-                    group: i,
-                });
-            });
-        }
-    }
-
+export function getParagraphOverlay(
+    pages: RawPageData[],
+    pageIndex: number,
+    detailedTargetPage?: RawPageDataDetailed,
+): OverlayResult {
+    const filtered = detectFilteredParagraphs({
+        pages: pagesForFilter(pages, pageIndex, detailedTargetPage),
+        pageIndex,
+    });
+    const rects: OverlayRect[] = filtered.paragraphResult.items.map((item, i) => {
+        const isHeader = item.type === "header";
+        return {
+            rect: {
+                x: item.bbox.l,
+                y: item.bbox.t,
+                w: item.bbox.width,
+                h: item.bbox.height,
+            },
+            color: isHeader ? OVERLAY_COLORS.header : OVERLAY_COLORS.paragraph,
+            label: `${isHeader ? "H" : "P"}${item.idx + 1}`,
+            group: i,
+        };
+    });
     return {
         level: "paragraphs",
-        pageIndex: rawPage.pageIndex,
-        pageWidth: rawPage.width,
-        pageHeight: rawPage.height,
+        pageIndex: filtered.filteredPage.pageIndex,
+        pageWidth: filtered.filteredPage.width,
+        pageHeight: filtered.filteredPage.height,
         groupCount: rects.length,
         rects,
         stats: {
-            paragraphs: paragraphCount,
-            headers: headerCount,
+            paragraphs: filtered.paragraphResult.paragraphCount,
+            headers: filtered.paragraphResult.headerCount,
+            analysisPagesScanned: pages.length,
         },
     };
 }
@@ -264,13 +292,8 @@ export function getSentenceOverlay(
     // Run paragraph detection on the *detailed* page so its line bboxes
     // exactly match what the sentence mapper will look up (same MuPDF
     // walk → identical bboxes).
-    const pagesForFilter: RawPageData[] = pages.map((p) =>
-        p.pageIndex === detailedPage.pageIndex
-            ? (detailedPage as unknown as RawPageData)
-            : p,
-    );
     const filtered = detectFilteredParagraphs({
-        pages: pagesForFilter,
+        pages: pagesForFilter(pages, detailedPage.pageIndex, detailedPage),
         pageIndex: detailedPage.pageIndex,
     });
     const result = extractPageSentenceBBoxes(detailedPage, {

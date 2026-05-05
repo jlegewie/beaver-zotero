@@ -184,6 +184,30 @@ async function pushOverlayToReader(
 }
 
 /**
+ * Load the analysis-window pages and the detailed target page used by
+ * the smart-filter overlay collectors. The detailed target page is
+ * substituted into the window by the collectors before paragraph
+ * detection — same thing `runSentenceExtractionPipeline` does, so
+ * column / line / paragraph overlays mirror what the production sentence
+ * pipeline sees on PDFs where the JSON walker and detailed walker
+ * produce different glyph mappings (ligatures etc.).
+ */
+async function loadAnalysisWindow(
+    filePath: string,
+    pageIndex: number,
+): Promise<{ pages: RawPageData[]; detailedTarget: RawPageDataDetailed }> {
+    const pdfData = await IOUtils.read(filePath);
+    const client = getMuPDFWorkerClient();
+    const pageCount = await client.getPageCount(pdfData);
+    const analysisIndices = resolveAnalysisPageIndices(pageIndex, pageCount);
+    const [rawDoc, detailedTarget] = await Promise.all([
+        client.extractRawPages(pdfData, analysisIndices),
+        client.extractRawPageDetailed(pdfData, pageIndex),
+    ]);
+    return { pages: rawDoc.pages, detailedTarget };
+}
+
+/**
  * Visualize column detection results for the current page in the reader.
  */
 export async function visualizeCurrentPageColumns(): Promise<{
@@ -198,18 +222,9 @@ export async function visualizeCurrentPageColumns(): Promise<{
         const { reader, filePath, pageIndex } = ctx;
 
         logger(`[Visualizer] Loading PDF and extracting page ${pageIndex + 1}...`);
-        const pdfData = await IOUtils.read(filePath);
+        const { pages, detailedTarget } = await loadAnalysisWindow(filePath, pageIndex);
 
-        const mupdf = new MuPDFService();
-        await mupdf.open(pdfData);
-        let rawPage: RawPageData;
-        try {
-            rawPage = mupdf.extractRawPage(pageIndex);
-        } finally {
-            mupdf.close();
-        }
-
-        const overlay = getColumnOverlay(rawPage);
+        const overlay = getColumnOverlay(pages, pageIndex, detailedTarget);
         if (overlay.rects.length === 0) {
             return {
                 success: true,
@@ -252,18 +267,9 @@ export async function visualizeCurrentPageLines(): Promise<{
         const { reader, filePath, pageIndex } = ctx;
 
         logger(`[Visualizer] Loading PDF and detecting lines on page ${pageIndex + 1}...`);
-        const pdfData = await IOUtils.read(filePath);
+        const { pages, detailedTarget } = await loadAnalysisWindow(filePath, pageIndex);
 
-        const mupdf = new MuPDFService();
-        await mupdf.open(pdfData);
-        let rawPage: RawPageData;
-        try {
-            rawPage = mupdf.extractRawPage(pageIndex);
-        } finally {
-            mupdf.close();
-        }
-
-        const overlay = getLineOverlay(rawPage);
+        const overlay = getLineOverlay(pages, pageIndex, detailedTarget);
         if (overlay.rects.length === 0) {
             return {
                 success: true,
@@ -312,18 +318,9 @@ export async function visualizeCurrentPageParagraphs(): Promise<{
         const { reader, filePath, pageIndex } = ctx;
 
         logger(`[Visualizer] Loading PDF for paragraph detection on page ${pageIndex + 1}...`);
-        const pdfData = await IOUtils.read(filePath);
+        const { pages, detailedTarget } = await loadAnalysisWindow(filePath, pageIndex);
 
-        const mupdf = new MuPDFService();
-        await mupdf.open(pdfData);
-        let rawPage: RawPageData;
-        try {
-            rawPage = mupdf.extractRawPage(pageIndex);
-        } finally {
-            mupdf.close();
-        }
-
-        const overlay = getParagraphOverlay(rawPage);
+        const overlay = getParagraphOverlay(pages, pageIndex, detailedTarget);
         if (overlay.rects.length === 0) {
             return {
                 success: true,

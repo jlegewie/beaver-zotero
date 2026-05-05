@@ -1588,25 +1588,25 @@ async function handleTestPdfSentenceBBoxesHttpRequest(request: any) {
  *          | "raw-lines" | "margins",
  *     dpi?: number,                       // default 144
  *     language?: string,                  // sentences only; falls back to item lang
- *     analysis_page_window?: number }     // sentences/margins only: ±N pages
- *                                         // around page_index for cross-page
- *                                         // repeat / page-number detection.
- *                                         // 0 (default) = whole document.
- *                                         // Capped at 50.
+ *     analysis_page_window?: number }     // applies to all levels except
+ *                                         // raw-lines: ±N pages around
+ *                                         // page_index for cross-page repeat /
+ *                                         // page-number detection and
+ *                                         // document-wide style profiling.
+ *                                         // 0 (default) = whole document,
+ *                                         // capped at 50.
  *
  * Level dispatch notes:
  *   - `sentences` runs through `runSentenceExtractionPipeline`
  *     so the rects drawn on the PNG are byte-for-byte the bboxes the
- *     production sentence pipeline produced. Verified by the live parity
- *     test `tests/live/pdfRenderOverlayParity.live.test.ts`.
- *   - `margins` needs *multiple* pages (cross-page repeating-text /
- *     page-number detection). Window controlled by `analysis_page_window`.
- *   - `columns`, `lines`, `paragraphs`, `raw-lines` use the JSON-pass
- *     `RawPageData` for the single requested page. The detailed walker
- *     populates `RawLine.font` from the first char (see worker/docHelpers.ts)
- *     so paragraph-style classification is well-defined either way; the raw
- *     page is used here to avoid the extra detailed-walk cost when only
- *     simple geometry is needed.
+ *     production sentence pipeline produced.
+ *   - `columns`, `lines`, `paragraphs`, `margins` route through
+ *     `detectFilteredParagraphs` (inside the per-level overlay collectors)
+ *     so they reflect the same smart cross-page filter the production
+ *     sentence pipeline uses.
+ *   - `raw-lines` deliberately stays on a single-page unfiltered extract —
+ *     its purpose is to expose the pre-filter MuPDF lines so an agent can
+ *     see what the margin filter did or didn't catch.
  *
  * Response: `{ ok: true, image_base64, width, height, page_width,
  *   page_height, group_count, stats, rects }`. `rects` carries the
@@ -1721,9 +1721,21 @@ async function handleTestPdfRenderOverlayHttpRequest(request: any) {
             }
             throw e;
         }
-    } else if (level === 'margins') {
-        // Cross-page analysis: resolve the window via the shared helper
-        // (centralized cap + error path).
+    } else if (level === 'raw-lines') {
+        // Pre-filter view — single page, no smart removal.
+        const rawDoc = await client.extractRawPages(pdfData, [pageIndex]);
+        const rawPage = rawDoc.pages[0];
+        if (!rawPage) {
+            return {
+                ok: false,
+                error: { name: 'Error', message: `page_index ${pageIndex} out of range` },
+            };
+        }
+        overlay = getRawLinesOverlay(rawPage);
+    } else {
+        // columns / lines / paragraphs / margins: all need the analysis
+        // window so smart cross-page filtering and document-wide style
+        // profiling reflect what production sentence extraction sees.
         const totalPages = await client.getPageCount(pdfData);
         let analysisIndices: number[];
         try {
@@ -1748,20 +1760,24 @@ async function handleTestPdfRenderOverlayHttpRequest(request: any) {
                 error: { name: 'Error', message: `page_index ${pageIndex} out of range` },
             };
         }
-        overlay = getMarginsOverlay(rawDoc.pages, pageIndex);
-    } else {
-        const rawDoc = await client.extractRawPages(pdfData, [pageIndex]);
-        const rawPage = rawDoc.pages[0];
-        if (!rawPage) {
-            return {
-                ok: false,
-                error: { name: 'Error', message: `page_index ${pageIndex} out of range` },
-            };
+        // For columns / lines / paragraphs, also fetch the detailed
+        // target page and substitute it into the analysis window before
+        // paragraph detection.
+        if (level === 'margins') {
+            overlay = getMarginsOverlay(rawDoc.pages, pageIndex);
+        } else {
+            const detailedTarget = await client.extractRawPageDetailed(
+                pdfData,
+                pageIndex,
+            );
+            if (level === 'columns') {
+                overlay = getColumnOverlay(rawDoc.pages, pageIndex, detailedTarget);
+            } else if (level === 'lines') {
+                overlay = getLineOverlay(rawDoc.pages, pageIndex, detailedTarget);
+            } else {
+                overlay = getParagraphOverlay(rawDoc.pages, pageIndex, detailedTarget);
+            }
         }
-        if (level === 'columns') overlay = getColumnOverlay(rawPage);
-        else if (level === 'lines') overlay = getLineOverlay(rawPage);
-        else if (level === 'raw-lines') overlay = getRawLinesOverlay(rawPage);
-        else overlay = getParagraphOverlay(rawPage);
     }
 
     const rendered = await client.renderPageToImage(pdfData, pageIndex, {
