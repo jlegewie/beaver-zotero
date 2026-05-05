@@ -12,8 +12,11 @@
  *      them to `canvasOverlay.ts` to draw on a rendered page PNG for
  *      headless agent debugging.
  *
- * Keeping both consumers on a single helper guarantees the visualizer and
- * the agent see the exact same boxes.
+ * Keeping rect-building in one place guarantees both consumers build the
+ * same overlay shape from a `PageSentenceBBoxResult`. The HTTP endpoint
+ * feeds in the result from `runSentenceExtractionPipeline` (production
+ * orchestration); the visualizer still composes its own sentence result
+ * via `getSentenceOverlay` for now.
  */
 import {
     detectColumns,
@@ -35,6 +38,7 @@ import type {
     SentenceSplitter,
     MarginPosition,
     MarginRemovalResult,
+    PageSentenceBBoxResult,
 } from "../../src/services/pdf";
 
 export type OverlayLevel =
@@ -273,6 +277,21 @@ export function getSentenceOverlay(
         splitter,
         precomputed: { paragraphResult: filtered.paragraphResult },
     });
+    return buildSentenceOverlayFromResult(result, pages.length);
+}
+
+/**
+ * Build a sentence overlay from an already-computed `PageSentenceBBoxResult`.
+ *
+ * Used by the `/beaver/test/pdf-render-overlay` endpoint to feed the result
+ * from `runSentenceExtractionPipeline` (production orchestration) into the
+ * shared rect-building loop. Same rect/color/label/group semantics as
+ * `getSentenceOverlay`.
+ */
+export function buildSentenceOverlayFromResult(
+    result: PageSentenceBBoxResult,
+    analysisPagesScanned: number,
+): OverlayResult {
     const degradedItemIndices = new Set(result.degradationNotes.map((n) => n.itemIndex));
     const degradedSentenceIndices = computeDegradedSentenceIndices(
         result.paragraphs,
@@ -302,9 +321,9 @@ export function getSentenceOverlay(
 
     return {
         level: "sentences",
-        pageIndex: detailedPage.pageIndex,
-        pageWidth: detailedPage.width,
-        pageHeight: detailedPage.height,
+        pageIndex: result.pageIndex,
+        pageWidth: result.width,
+        pageHeight: result.height,
         groupCount: result.sentences.length,
         rects,
         stats: {
@@ -312,7 +331,7 @@ export function getSentenceOverlay(
             paragraphs: result.paragraphs.length,
             degradedParagraphs: result.degradedParagraphs,
             unmappedParagraphs: result.unmappedParagraphs,
-            analysisPagesScanned: pages.length,
+            analysisPagesScanned,
         },
     };
 }

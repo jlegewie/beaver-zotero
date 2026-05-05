@@ -44,7 +44,7 @@ import {
     getColumnOverlay,
     getLineOverlay,
     getParagraphOverlay,
-    getSentenceOverlay,
+    buildSentenceOverlayFromResult,
     getRawLinesOverlay,
     getMarginsOverlay,
 } from '../utils/extractionOverlay';
@@ -1588,10 +1588,25 @@ async function handleTestPdfSentenceBBoxesHttpRequest(request: any) {
  *          | "raw-lines" | "margins",
  *     dpi?: number,                       // default 144
  *     language?: string,                  // sentences only; falls back to item lang
- *     analysis_page_window?: number }     // margins only: ±N pages around
- *                                         // page_index for cross-page repeat /
- *                                         // page-number detection. 0 (default)
- *                                         // = whole document. Capped at 50.
+ *     analysis_page_window?: number }     // sentences/margins only: ±N pages
+ *                                         // around page_index for cross-page
+ *                                         // repeat / page-number detection.
+ *                                         // 0 (default) = whole document.
+ *                                         // Capped at 50.
+ *
+ * Level dispatch notes:
+ *   - `sentences` runs through `runSentenceExtractionPipeline`
+ *     so the rects drawn on the PNG are byte-for-byte the bboxes the
+ *     production sentence pipeline produced. Verified by the live parity
+ *     test `tests/live/pdfRenderOverlayParity.live.test.ts`.
+ *   - `margins` needs *multiple* pages (cross-page repeating-text /
+ *     page-number detection). Window controlled by `analysis_page_window`.
+ *   - `columns`, `lines`, `paragraphs`, `raw-lines` use the JSON-pass
+ *     `RawPageData` for the single requested page. The detailed walker
+ *     populates `RawLine.font` from the first char (see worker/docHelpers.ts)
+ *     so paragraph-style classification is well-defined either way; the raw
+ *     page is used here to avoid the extra detailed-walk cost when only
+ *     simple geometry is needed.
  *
  * Response: `{ ok: true, image_base64, width, height, page_width,
  *   page_height, group_count, stats, rects }`. `rects` carries the
@@ -1605,6 +1620,8 @@ async function handleTestPdfRenderOverlayHttpRequest(request: any) {
         getSentenceSplitterWithFallback,
         normalizeLanguageCode,
         resolveAnalysisPageIndices,
+        runSentenceExtractionPipeline,
+        ExtractionError,
     } = await import('../../src/services/pdf');
 
     const loaded = await loadPdfBytesForTestEndpoint(request);
@@ -1640,18 +1657,6 @@ async function handleTestPdfRenderOverlayHttpRequest(request: any) {
 
     const client = getMuPDFWorkerClient();
 
-    // Level dispatch:
-    //  - sentences: needs the per-character detailed walk.
-    //  - margins: needs *multiple* pages (cross-page repeating-text /
-    //    page-number detection). Window controlled by analysis_page_window
-    //    (default = whole document, capped at 50).
-    //  - columns / lines / paragraphs / raw-lines: the JSON-pass
-    //    `RawPageData` for the single requested page. The detailed walker
-    //    zeroes out `RawLine.font` (see worker/docHelpers.ts), and
-    //    `getParagraphOverlay` feeds those font fields through
-    //    `StyleAnalyzer` to separate body text from headers — passing the
-    //    detailed page would silently mis-classify headers and produce
-    //    overlays that disagree with the live visualizer.
     // Helper: resolve language for sentence splitter. Best-effort —
     // explicit `request.language` wins, then item language lookup,
     // finally English fallback inside `normalizeLanguageCode`.
@@ -1671,9 +1676,54 @@ async function handleTestPdfRenderOverlayHttpRequest(request: any) {
     };
 
     let overlay;
-    if (level === 'sentences' || level === 'margins') {
-        // Both levels need cross-page analysis. Resolve the analysis
-        // window via the shared helper (centralized cap + error path).
+    if (level === 'sentences') {
+        // Route through the production orchestration so the rects we draw
+        // on the PNG are exactly the bboxes the production sentence
+        // pipeline produced. `trace: true` adds zero worker round-trips
+        // (just keeps intermediates in memory) and lets us read the
+        // analysis-window size for `stats.analysisPagesScanned`.
+        const language = await resolveLanguage();
+        const splitter = await getSentenceSplitterWithFallback(
+            normalizeLanguageCode(language),
+        );
+        const analysisPageWindow =
+            request?.analysis_page_window != null
+                ? Number(request.analysis_page_window)
+                : undefined;
+        try {
+            const out = await runSentenceExtractionPipeline({
+                pdfData,
+                pageIndex,
+                splitter,
+                analysisPageWindow,
+                trace: true,
+            });
+            overlay = buildSentenceOverlayFromResult(
+                out.result,
+                out.trace.analysisPageIndices.length,
+            );
+        } catch (e) {
+            if (e instanceof RangeError) {
+                return {
+                    ok: false,
+                    error: { name: 'Error', message: e.message },
+                };
+            }
+            if (e instanceof ExtractionError) {
+                return {
+                    ok: false,
+                    error: {
+                        name: 'ExtractionError',
+                        code: e.code,
+                        message: e.message,
+                    },
+                };
+            }
+            throw e;
+        }
+    } else if (level === 'margins') {
+        // Cross-page analysis: resolve the window via the shared helper
+        // (centralized cap + error path).
         const totalPages = await client.getPageCount(pdfData);
         let analysisIndices: number[];
         try {
@@ -1698,16 +1748,7 @@ async function handleTestPdfRenderOverlayHttpRequest(request: any) {
                 error: { name: 'Error', message: `page_index ${pageIndex} out of range` },
             };
         }
-        if (level === 'sentences') {
-            const detailed = await client.extractRawPageDetailed(pdfData, pageIndex);
-            const language = await resolveLanguage();
-            const splitter = await getSentenceSplitterWithFallback(
-                normalizeLanguageCode(language),
-            );
-            overlay = getSentenceOverlay(detailed, rawDoc.pages, splitter);
-        } else {
-            overlay = getMarginsOverlay(rawDoc.pages, pageIndex);
-        }
+        overlay = getMarginsOverlay(rawDoc.pages, pageIndex);
     } else {
         const rawDoc = await client.extractRawPages(pdfData, [pageIndex]);
         const rawPage = rawDoc.pages[0];
