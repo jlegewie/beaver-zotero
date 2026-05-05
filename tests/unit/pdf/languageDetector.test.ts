@@ -53,6 +53,18 @@ const JAPANESE_SAMPLE = REPEAT(
     2,
 );
 
+// Mixed Japanese + English abstract — the academic-PDF case. Han + kana
+// is well under 85% of letters here (~50%) but well over 30%, and kana
+// dominates the CJK subset.
+const JAPANESE_WITH_EN_ABSTRACT_SAMPLE =
+    'Abstract: This paper investigates pre-trained language models for Japanese ' +
+    'natural language processing tasks including text classification, named ' +
+    'entity recognition, and question answering, with extensive evaluation on ' +
+    'multiple public benchmarks across several real-world domains. ' +
+    '本論文では、日本語の自然言語処理タスクにおける事前学習モデルの応用について検討します。' +
+    'テキスト分類、固有表現認識、質問応答の三つの主要タスクを取り上げ、複数のデータセットで性能を評価しました。' +
+    '実験結果は、大規模日本語コーパスで事前学習されたモデルが従来の手法を大きく上回ることを示しています。';
+
 // Pure Han (no kana) — a Chinese paragraph repeated to clear the gate.
 const CHINESE_SAMPLE = REPEAT(
     '从前有一座山，山里有一座庙，庙里有一个老和尚和一个小和尚。' +
@@ -61,6 +73,15 @@ const CHINESE_SAMPLE = REPEAT(
         '日复一日，年复一年，小和尚渐渐长大，终于明白这个故事永远没有结束的一天。',
     2,
 );
+
+// Mixed Chinese + English abstract — academic PDF case.
+const CHINESE_WITH_EN_ABSTRACT_SAMPLE =
+    'Abstract: This paper investigates the application of pre-trained language models ' +
+    'to Chinese natural language processing tasks, including text classification, ' +
+    'named entity recognition, and question answering, with extensive empirical evaluation. ' +
+    '本文研究了预训练语言模型在中文自然语言处理任务中的应用。' +
+    '我们重点关注文本分类、命名实体识别以及问答系统三个核心任务。' +
+    '实验结果表明，基于大规模中文语料预训练的模型在各项任务上均取得了显著提升。';
 
 // Hangul-only Korean paragraph repeated.
 const KOREAN_SAMPLE = REPEAT(
@@ -71,6 +92,15 @@ const KOREAN_SAMPLE = REPEAT(
         '가장 아름다운 양탄자를 가져오는 자가 다음 왕이 될 것이라고 말했습니다.',
     2,
 );
+
+// Cyrillic Russian with English abstract — exercises the strip-Latin path.
+const RUSSIAN_WITH_EN_ABSTRACT_SAMPLE =
+    'Abstract: This paper investigates the application of machine learning methods ' +
+    'in the analysis of scientific publications, with particular attention to ' +
+    'citation graphs and topic modelling on extensive evaluation datasets. ' +
+    'Жили-были старик со старухой у самого синего моря; они жили в ветхой землянке ' +
+    'ровно тридцать лет и три года. Старик ловил неводом рыбу, старуха пряла свою ' +
+    'пряжу. Раз он в море закинул невод — пришёл невод с одною тиной.';
 
 // Cyrillic Russian — must go through eld, not a script short-circuit.
 const RUSSIAN_SAMPLE =
@@ -139,6 +169,16 @@ describe('detectLanguageFromText: Unicode script short-circuits', () => {
         const r = await detectLanguageFromText(RUSSIAN_SAMPLE);
         expect(r.source).not.toBe('script');
     });
+
+    it('Japanese with English abstract still resolves to ja (academic-PDF case)', async () => {
+        const r = await detectLanguageFromText(JAPANESE_WITH_EN_ABSTRACT_SAMPLE);
+        expect(r).toEqual({ language: 'ja', source: 'script' });
+    });
+
+    it('Chinese with English abstract still resolves to zh (academic-PDF case)', async () => {
+        const r = await detectLanguageFromText(CHINESE_WITH_EN_ABSTRACT_SAMPLE);
+        expect(r).toEqual({ language: 'zh', source: 'script' });
+    });
 });
 
 // ---------------------------------------------------------------------------
@@ -166,6 +206,14 @@ describe('detectLanguageFromText: eld classifier', () => {
         // eld may or may not distinguish ru/uk on a small sample; accept
         // whichever it produces, but assert it's in the Cyrillic family.
         expect(r.source).toBe('eld');
+        expect(['ru', 'uk']).toContain(r.language);
+    });
+
+    it('Russian with English abstract: strip-Latin path keeps eld on Cyrillic', async () => {
+        const r = await detectLanguageFromText(RUSSIAN_WITH_EN_ABSTRACT_SAMPLE);
+        expect(r.source).toBe('eld');
+        // Without the strip, eld would see ~50% Latin and pick "en". With
+        // the strip, only Cyrillic survives → ru/uk family.
         expect(['ru', 'uk']).toContain(r.language);
     });
 });

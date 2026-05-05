@@ -103,8 +103,24 @@ const DEFAULT_MIN_LETTERS = 200;
 // 99.3%). 3 KB of letters keeps the analysis-window walk short on
 // long PDFs while staying comfortably above eld's reliable-input floor.
 const SAMPLE_LETTER_CAP = 3000;
-const SCRIPT_DOMINANCE = 0.85;
-const KANA_PRESENCE = 0.05;
+// Threshold for "this non-Latin script is the document's primary
+// language." Set low because academic PDFs in non-Latin scripts almost
+// always include an English abstract + author/affiliation block in
+// Latin (empirically ~25-45% of first-page letters across our ZH / JA /
+// KO / AR fixtures). Anything above this share of an unambiguous
+// script means the document is in that script; the Latin block is
+// metadata, not the primary language.
+const SCRIPT_DOMINANCE = 0.3;
+// Within the CJK family, even a small share of kana is a strong vote
+// for Japanese over Chinese. Computed against the kana+han combined
+// count, not against total letters, so it survives the Latin abstract.
+const KANA_SHARE_OF_CJK = 0.1;
+// Lowered threshold for "strip Latin before feeding eld": when a
+// disambiguation-script (Cyrillic / Arabic / Devanagari) is at least
+// this fraction of letters, drop Latin codepoints from the eld input
+// so eld picks the right language within the script family without
+// being poisoned by an English abstract.
+const NON_LATIN_PRESENCE_FOR_STRIP = 0.3;
 
 interface ScriptTally {
     total: number;
@@ -232,13 +248,16 @@ function shortCircuitFromScripts(t: ScriptTally): string | null {
     if (t.total === 0) return null;
     const r = (n: number) => n / t.total;
 
-    // CJK with kana → Japanese.
+    // CJK with kana → Japanese. Disambiguates ja vs zh within the CJK
+    // family using the kana share *of CJK letters*, not of total
+    // letters — academic Japanese PDFs routinely have ~30% Latin
+    // abstracts which would dilute kana-of-total below any useful
+    // threshold.
     const kana = t.hiragana + t.katakana;
     const cjk = t.han + kana;
-    if (r(cjk) >= SCRIPT_DOMINANCE && r(kana) >= KANA_PRESENCE) return "ja";
-
-    // Pure Han (no meaningful kana) → Chinese.
-    if (r(t.han) >= SCRIPT_DOMINANCE && r(kana) < KANA_PRESENCE) return "zh";
+    if (cjk > 0 && r(cjk) >= SCRIPT_DOMINANCE) {
+        return kana / cjk >= KANA_SHARE_OF_CJK ? "ja" : "zh";
+    }
 
     if (r(t.hangul) >= SCRIPT_DOMINANCE) return "ko";
     if (r(t.hebrew) >= SCRIPT_DOMINANCE) return "he";
@@ -246,6 +265,39 @@ function shortCircuitFromScripts(t: ScriptTally): string | null {
     if (r(t.thai) >= SCRIPT_DOMINANCE) return "th";
 
     return null;
+}
+
+/**
+ * Strip Latin letters (and the spaces / punctuation between them)
+ * from `text` when a non-Latin disambiguation-script (Cyrillic /
+ * Arabic / Devanagari) makes up at least `NON_LATIN_PRESENCE_FOR_STRIP`
+ * of letters. This stops eld's input from being poisoned by an English
+ * abstract on a Russian / Arabic / Hindi paper.
+ *
+ * Returns the original text unchanged when no script qualifies.
+ */
+function stripLatinIfNeeded(text: string, t: ScriptTally): string {
+    if (t.total === 0) return text;
+    const r = (n: number) => n / t.total;
+    const targetSharePresent =
+        r(t.cyrillic) >= NON_LATIN_PRESENCE_FOR_STRIP ||
+        r(t.arabic) >= NON_LATIN_PRESENCE_FOR_STRIP ||
+        r(t.devanagari) >= NON_LATIN_PRESENCE_FOR_STRIP;
+    if (!targetSharePresent) return text;
+
+    let out = "";
+    for (let i = 0; i < text.length; ) {
+        const cp = text.codePointAt(i)!;
+        const step = cp > 0xffff ? 2 : 1;
+        const isLatinLetter =
+            (cp >= 0x41 && cp <= 0x5a) ||
+            (cp >= 0x61 && cp <= 0x7a) ||
+            (cp >= 0xc0 && cp <= 0x024f) ||
+            (cp >= 0x1e00 && cp <= 0x1eff);
+        if (!isLatinLetter) out += text[i] + (step === 2 ? text[i + 1] : "");
+        i += step;
+    }
+    return out;
 }
 
 function fallbackResult(opts: DetectOptions | undefined): DetectResult {
@@ -270,13 +322,21 @@ export async function detectLanguageFromText(
     const scriptHit = shortCircuitFromScripts(tally);
     if (scriptHit) return { language: scriptHit, source: "script" };
 
+    // NFKC normalization collapses PDF-renderer glyph variants (Arabic
+    // Presentation Forms-B at U+FE70..U+FEFF, fullwidth Latin, ligatures,
+    // etc.) to their canonical base letters. eld's n-gram dictionary is
+    // keyed on canonical letters; without this step, an Arabic PDF
+    // rendered in presentation forms produces no match and eld returns
+    // an empty string.
+    const eldInput = stripLatinIfNeeded(capped, tally).normalize("NFKC");
+
     let raw: string;
     try {
         // webpackMode: "eager" — see file header for why.
         const mod: any = await import(
             /* webpackMode: "eager" */ "eld/extrasmall"
         );
-        raw = mod.eld.detect(capped).language ?? "";
+        raw = mod.eld.detect(eldInput).language ?? "";
     } catch (err) {
         try {
             (globalThis as any).Zotero?.debug?.(
