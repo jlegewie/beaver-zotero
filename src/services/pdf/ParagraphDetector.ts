@@ -287,6 +287,28 @@ function stylesEqual(a: TextStyle | null, b: TextStyle | null): boolean {
 }
 
 /**
+ * Check if a line's style matches one of the document's body styles.
+ *
+ * Wider than `stylesEqual` because the detailed mupdf walk does not always
+ * populate `font.name` (the wasm `_wasm_stext_char_get_font` pointer doesn't
+ * expose `getName()`, so the worker falls back to ""). Lines on the
+ * detailed-walk target page therefore arrive with `font: "unknown"` and would
+ * fail an exact font-name comparison against bodyStyles harvested from the
+ * JSON-walk pages of the analysis window. When either side is unknown we
+ * accept the match if size + bold + italic agree.
+ */
+function matchesBodyStyle(line: TextStyle, bodyStyles: TextStyle[]): boolean {
+    return bodyStyles.some(bs => {
+        if (Math.abs(bs.size - line.size) >= 0.5) return false;
+        if (bs.bold !== line.bold) return false;
+        if (bs.italic !== line.italic) return false;
+        if (bs.font === line.font) return true;
+        return !line.font || line.font === "unknown" ||
+               !bs.font || bs.font === "unknown";
+    });
+}
+
+/**
  * Get style dominance (fraction of spans with the given style)
  */
 function getStyleDominance(line: PageLine, style: TextStyle): number {
@@ -434,7 +456,7 @@ function isHeaderStyle(
     if (!lineStyle) return false;
 
     // Not a header if it's a known body style
-    if (bodyStyles.some(bs => stylesEqual(bs, lineStyle))) {
+    if (matchesBodyStyle(lineStyle, bodyStyles)) {
         return false;
     }
 

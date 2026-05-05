@@ -309,7 +309,14 @@ export function extractRawPageDetailedFromDoc(
                                 family,
                                 weight: isBold ? "bold" : "normal",
                                 style: isItalic ? "italic" : "normal",
-                                size: typeof size === "number" ? size : 0,
+                                // Mirror the JSON walker's `(int)size` truncation
+                                // (`extractRawPageFromDoc` -> `stext.asJSON()`).
+                                // Without this, body text reported as 9.96 here
+                                // rounds to 10 while the same text on JSON-walk
+                                // pages rounds to 9, breaking body-style
+                                // matching when the detailed page is substituted
+                                // into a JSON-walk analysis window.
+                                size: typeof size === "number" ? Math.trunc(size) : 0,
                             };
                         } catch {
                             // Best effort — leave defaults if Font API
