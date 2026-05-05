@@ -518,7 +518,8 @@ function isHeaderStyle(
     bodyStyles: TextStyle[] | null,
     settings: Required<ParagraphDetectionSettings>,
     precededByGap: boolean | null = null,
-    bodyAllCaps: boolean = false
+    bodyAllCaps: boolean = false,
+    phraseTextOverride: string | null = null
 ): boolean {
     if (!bodyStyles || bodyStyles.length === 0) return false;
 
@@ -589,13 +590,20 @@ function isHeaderStyle(
     // multi-word phrase so isolated all-caps labels in figures/charts
     // ("MALARIA", "UMAP3", "IBS", "VIII") aren't promoted. Skipped when the
     // body itself is all-caps (document-wide rendering, not a heading signal).
+    //
+    // `phraseTextOverride` lets the multi-line item evaluator pass the joined
+    // text — e.g. "THE MALIGNANCY OF SOCIAL\nFRONTIERS" wraps to two lines, and
+    // the second line ("FRONTIERS") on its own would fail the multi-word phrase
+    // test. Per-line evaluation in `startNewItem` leaves this null, so the
+    // first line still triggers the header break correctly.
+    const phraseText = phraseTextOverride ?? text;
     if (
         !isPotentialHeader &&
         gapCheckPasses &&
         !bodyAllCaps &&
         lineStyle.size <= primaryBodyStyle.size + 0.5 &&
         lineStyle.font !== primaryBodyStyle.font &&
-        isAllCapsHeaderPhrase(text)
+        isAllCapsHeaderPhrase(phraseText)
     ) {
         isPotentialHeader = true;
     }
@@ -734,14 +742,17 @@ function processCurrentLinesAsItem(
     pageContent: string;
     item: ContentItem;
 } {
-    // a. Check if all lines are headers
-    const isPotentialHeader = currentLines.every(l =>
-        isHeaderStyle(l, bodyStyles, settings, null, bodyAllCaps)
-    );
-
-    // b. Build text content
+    // b. Build text content (needed by header check below for Rule 5's
+    // phrase test on multi-line headers)
     const itemLines = currentLines.map(l => l.text);
     const rawItemText = joinLines(itemLines, settings.removeHyphenation);
+
+    // a. Check if all lines are headers. Pass the joined text so Rule 5's
+    // multi-word all-caps phrase check sees the full heading even when it
+    // wraps across lines (e.g. "THE MALIGNANCY OF SOCIAL\nFRONTIERS").
+    const isPotentialHeader = currentLines.every(l =>
+        isHeaderStyle(l, bodyStyles, settings, null, bodyAllCaps, rawItemText)
+    );
 
     // c. Finalize header decision
     let isHeader = false;
