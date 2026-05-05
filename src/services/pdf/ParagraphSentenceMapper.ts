@@ -220,6 +220,45 @@ function collectDetailedLinesForParagraph(
 }
 
 /**
+ * Canonical footnote-marker glyphs. A superscript run consisting of these
+ * characters and following a sentence-ending punctuation is collapsed to a
+ * single space so the splitter sees the underlying boundary.
+ *
+ * Restricted to digits and traditional footnote symbols on purpose — keeps
+ * the transformation away from inline math, trademark glyphs, and raised
+ * letters in ordinals like "1st".
+ */
+const FOOTNOTE_MARKER_CHARS = new Set([
+    "0", "1", "2", "3", "4", "5", "6", "7", "8", "9",
+    "*", "†", "‡", "§", "¶", "#",
+]);
+
+/**
+ * Sentence-ending punctuation that, when immediately followed by a
+ * superscript footnote marker, hides what would otherwise be a clean
+ * sentence boundary (e.g. "factor.11 The").
+ */
+const SENTENCE_END_PUNCT = new Set([".", "!", "?"]);
+
+/**
+ * A char whose bbox height is below this fraction of the line's median
+ * char height is treated as a superscript candidate. 0.85 is generous
+ * enough to catch ~0.65× footnote glyphs without flagging punctuation
+ * whose ink box happens to be slightly shorter than the median.
+ */
+const SUPERSCRIPT_HEIGHT_RATIO = 0.85;
+
+function lineMedianCharHeight(line: RawLineDetailed): number {
+    const heights: number[] = [];
+    for (const c of line.chars) {
+        if (c.bbox.h > 0) heights.push(c.bbox.h);
+    }
+    if (heights.length === 0) return 0;
+    heights.sort((a, b) => a - b);
+    return heights[Math.floor(heights.length / 2)];
+}
+
+/**
  * Build a `ParagraphText` (text + source map + lines) from a list of
  * detailed raw lines belonging to a single paragraph.
  *
@@ -230,12 +269,21 @@ function collectDetailedLinesForParagraph(
  *   lines so the splitter sees word boundaries.
  * - The invariant `line.text.length === line.chars.length` is checked
  *   loudly; a violation throws.
+ *
+ * Superscript footnote markers following a sentence-ending punctuation
+ * (e.g. the "11" in "factor.11 The") are replaced with a single
+ * inter-word space. Without this the splitter sees `.1` and keeps both
+ * clauses in one sentence; with it the splitter sees `. ` and recovers
+ * the boundary. The footnote chars contribute no source entry, so they
+ * drop out of bbox mapping cleanly.
  */
 export function buildParagraphText(
     lines: RawLineDetailed[],
 ): ParagraphText {
     const textParts: string[] = [];
     const source: ParagraphText["source"] = [];
+    let lastEmittedNonWhitespaceRealChar: string | null = null;
+    let inFootnoteRun = false;
     for (let li = 0; li < lines.length; li++) {
         const line = lines[li];
         if (line.text.length !== line.chars.length) {
@@ -244,8 +292,35 @@ export function buildParagraphText(
                 `text.length=${line.text.length}, chars.length=${line.chars.length}`,
             );
         }
+        const median = lineMedianCharHeight(line);
+        const superscriptThreshold =
+            median > 0 ? median * SUPERSCRIPT_HEIGHT_RATIO : 0;
         for (let ci = 0; ci < line.chars.length; ci++) {
-            textParts.push(line.chars[ci].c);
+            const ch = line.chars[ci];
+            const isSmall =
+                superscriptThreshold > 0 &&
+                ch.bbox.h > 0 &&
+                ch.bbox.h < superscriptThreshold;
+            const isFootnoteMarker =
+                isSmall && FOOTNOTE_MARKER_CHARS.has(ch.c);
+            if (
+                isFootnoteMarker &&
+                (inFootnoteRun ||
+                    (lastEmittedNonWhitespaceRealChar !== null &&
+                        SENTENCE_END_PUNCT.has(lastEmittedNonWhitespaceRealChar)))
+            ) {
+                if (!inFootnoteRun) {
+                    textParts.push(" ");
+                    source.push(null);
+                    inFootnoteRun = true;
+                }
+                continue;
+            }
+            inFootnoteRun = false;
+            if (!/\s/.test(ch.c)) {
+                lastEmittedNonWhitespaceRealChar = ch.c;
+            }
+            textParts.push(ch.c);
             source.push({ lineIndex: li, charIndex: ci });
         }
         if (li < lines.length - 1) {
