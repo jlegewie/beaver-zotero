@@ -297,7 +297,7 @@ function fallbackSentenceFromItem(
         w: item.bbox.width,
         h: item.bbox.height,
     };
-    return {
+    const sentence: SentenceBBox = {
         pageIndex,
         text: item.text,
         bboxes: [bbox],
@@ -308,6 +308,33 @@ function fallbackSentenceFromItem(
                 bbox,
             },
         ],
+    };
+    if (item.type === "header") sentence.kind = "heading";
+    return sentence;
+}
+
+/**
+ * Build a single `SentenceBBox` for a heading paragraph, using one fragment
+ * per detailed line so multi-line headings keep precise per-line geometry.
+ *
+ * Headings are intentionally never run through the sentence splitter — one
+ * heading paragraph always produces exactly one sentence.
+ */
+function headingSentenceFromParagraph(
+    paragraphText: ParagraphText,
+    pageIndex: number,
+): SentenceBBox {
+    const fragments = paragraphText.lines.map((line, lineIndex) => ({
+        lineIndex,
+        text: line.text,
+        bbox: line.bbox,
+    }));
+    return {
+        pageIndex,
+        text: fragments.map((f) => f.text).join(" "),
+        bboxes: fragments.map((f) => f.bbox),
+        fragments,
+        kind: "heading",
     };
 }
 
@@ -493,8 +520,21 @@ export function extractPageSentenceBBoxes(
             continue;
         }
 
-        // Happy path.
         const paragraphText = built.paragraphText;
+
+        // Heading path: never split a heading. One heading paragraph always
+        // produces exactly one sentence, tagged kind: "heading".
+        if (item.type === "header") {
+            const heading = headingSentenceFromParagraph(
+                paragraphText,
+                detailedPage.pageIndex,
+            );
+            paragraphs.push({ item, paragraphText, sentences: [heading] });
+            flatSentences.push(heading);
+            continue;
+        }
+
+        // Happy path (body paragraph).
         const sentences = resolveSentencesInParagraph(
             paragraphText,
             detailedPage.pageIndex,
