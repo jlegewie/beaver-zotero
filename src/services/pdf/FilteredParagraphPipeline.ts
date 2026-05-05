@@ -121,7 +121,10 @@ export function detectFilteredParagraphs(
         marginRemoval,
     );
 
-    const columnResult = detectColumns(filteredPage);
+    const columnResult = detectColumns(filteredPage, {
+        headerMargin: margins.top,
+        footerMargin: margins.bottom,
+    });
 
     let lineResult: PageLineResult;
     let paragraphResult: PageParagraphResult;

@@ -299,7 +299,10 @@ function runExtractFromIndices(
                 opts.marginZone,
                 removalResult,
             );
-            const columnResult = detectColumns(filteredPage);
+            const columnResult = detectColumns(filteredPage, {
+                headerMargin: opts.margins.top,
+                footerMargin: opts.margins.bottom,
+            });
             logColumnDetection(rawPage.pageIndex, columnResult);
             const lineResult: PageLineResult = detectLinesOnPage(filteredPage, columnResult.columns);
             logLineDetection(lineResult);
@@ -341,7 +344,10 @@ function runExtractFromIndices(
                 opts.marginZone,
                 removalResult,
             );
-            const columnResult = detectColumns(filteredPage);
+            const columnResult = detectColumns(filteredPage, {
+                headerMargin: opts.margins.top,
+                footerMargin: opts.margins.bottom,
+            });
             logColumnDetection(rawPage.pageIndex, columnResult);
             pages.push(pageExtractor.extractPageWithColumns(filteredPage, columnResult, true));
         }
