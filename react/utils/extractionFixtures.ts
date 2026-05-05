@@ -88,15 +88,11 @@ export interface CreateSentenceFixtureResult {
 }
 
 /**
- * Capture a sentence-extraction fixture for the active reader page.
- *
- * If `overwrite` is false and a fixture already exists for this
- * (libraryID, key, pageIndex), returns `ok=false` with a hint to use the
- * Update menu item instead.
+ * Capture (or recapture) a sentence-extraction fixture for the active
+ * reader page. Always overwrites any existing fixture for the same
+ * (libraryID, key, pageIndex).
  */
-export async function createSentenceFixture(opts: {
-    overwrite: boolean;
-}): Promise<CreateSentenceFixtureResult> {
+export async function createSentenceFixture(): Promise<CreateSentenceFixtureResult> {
     try {
         const fixtureRoot = readFixtureRootPref();
         if (!fixtureRoot) {
@@ -115,19 +111,12 @@ export async function createSentenceFixture(opts: {
         const folderName = `${item.libraryID}__${item.key}__p${pageIndex}`;
         const folderPath = PathUtils.join(fixtureRoot, folderName);
         const sharedDir = PathUtils.join(fixtureRoot, "_shared");
-
         const fixtureJsonPath = PathUtils.join(folderPath, "fixture.json");
-        if (!opts.overwrite && (await IOUtils.exists(fixtureJsonPath))) {
-            return {
-                ok: false,
-                message:
-                    `Fixture already exists at ${folderPath}. ` +
-                    `Use "Update Sentence Test (current page)" to overwrite.`,
-                folder: folderPath,
-            };
-        }
+        const isUpdate = await IOUtils.exists(fixtureJsonPath);
 
-        logger(`[SentenceFixture] Capturing for ${folderName}…`);
+        logger(
+            `[SentenceFixture] ${isUpdate ? "Updating" : "Capturing"} ${folderName}…`,
+        );
 
         const pdfData = await IOUtils.read(filePath);
         const pdfSha256 = await sha256Hex(pdfData);
@@ -257,8 +246,9 @@ export async function createSentenceFixture(opts: {
 
         await writeFixtureJsonAtomic(fixtureJsonPath, fixture);
 
+        const verb = isUpdate ? "Updated" : "Created";
         const msg =
-            `Wrote fixture ${folderName} ` +
+            `${verb} fixture ${folderName} ` +
             `(${expected.sentences.length} sentences in ` +
             `${expected.paragraphCount} paragraphs)`;
         logger(`[SentenceFixture] ${msg}`);

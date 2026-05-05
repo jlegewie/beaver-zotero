@@ -249,7 +249,7 @@ Integration tests exercise full pipelines. Same prerequisites as live tests plus
 
 ### Sentence-extraction regression fixtures
 
-`tests/unit/pdf/sentenceFixtures.unit.test.ts` and `tests/live/sentenceFixtures.live.test.ts` lock in sentence-level PDF extraction output against real PDF pages. Capture is one click from the reader (right-click → "Create Sentence Test"); fixtures live under `tests/fixtures/pdfs/sentences/` (gitignored). Failure messages emit `libraryID`/`key`/`pageIndex` plus a `zotero://select` link so the failure flows directly into the debug endpoints.
+`tests/unit/pdf/sentenceFixtures.unit.test.ts` and `tests/live/sentenceFixtures.live.test.ts` lock in sentence-level PDF extraction output against real PDF pages. Capture is one click from the reader (right-click → "Create/Update Sentence Test"); fixtures live under `tests/fixtures/pdfs/sentences/` (gitignored). Failure messages emit `libraryID`/`key`/`pageIndex` plus a `zotero://select` link so the failure flows directly into the debug endpoints.
 
 See **[docs-zotero/pdf-extraction-debug-endpoints.md](../docs-zotero/pdf-extraction-debug-endpoints.md#sentence-extraction-regression-tests)** for the full capture / update / failure-flow guide.
 

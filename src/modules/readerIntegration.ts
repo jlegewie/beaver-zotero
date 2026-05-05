@@ -44,8 +44,7 @@ function dispatchVisualizerAction(
         | 'paragraphs'
         | 'sentences'
         | 'clear'
-        | 'create-sentence-fixture'
-        | 'update-sentence-fixture',
+        | 'create-or-update-sentence-fixture',
 ): void {
     const win = Zotero.getMainWindow();
     const eventBus = win?.__beaverEventBus;
@@ -204,14 +203,10 @@ function onCreateViewContextMenu(event: any): void {
                 onCommand: () => dispatchVisualizerAction('clear'),
             },
             {
-                label: 'Create Sentence Test (current page)',
+                label: 'Create/Update Sentence Test',
                 persistent: true,
-                onCommand: () => dispatchVisualizerAction('create-sentence-fixture'),
-            },
-            {
-                label: 'Update Sentence Test (current page)',
-                persistent: true,
-                onCommand: () => dispatchVisualizerAction('update-sentence-fixture'),
+                onCommand: () =>
+                    dispatchVisualizerAction('create-or-update-sentence-fixture'),
             },
         );
     }

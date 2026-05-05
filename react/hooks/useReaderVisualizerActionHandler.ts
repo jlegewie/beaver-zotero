@@ -49,15 +49,9 @@ export function useReaderVisualizerActionHandler() {
                     logger('[ReaderVisualizer] cleared');
                     return;
                 }
-                case 'create-sentence-fixture': {
-                    const r = await createSentenceFixture({ overwrite: false });
-                    logger(`[ReaderVisualizer] create-sentence-fixture: ${r.message}`);
-                    if (!r.ok) Zotero.alert(Zotero.getMainWindow(), 'Beaver Sentence Test', r.message);
-                    return;
-                }
-                case 'update-sentence-fixture': {
+                case 'create-or-update-sentence-fixture': {
                     const r = await createSentenceFixture({ overwrite: true });
-                    logger(`[ReaderVisualizer] update-sentence-fixture: ${r.message}`);
+                    logger(`[ReaderVisualizer] create-or-update-sentence-fixture: ${r.message}`);
                     if (!r.ok) Zotero.alert(Zotero.getMainWindow(), 'Beaver Sentence Test', r.message);
                     return;
                 }

@@ -2,7 +2,7 @@
  * Hermetic regression tests for sentence-level PDF extraction.
  *
  * Each fixture under `tests/fixtures/pdfs/sentences/` was captured from a
- * real PDF via the dev-only "Create Sentence Test (current page)" reader
+ * real PDF via the dev-only "Create/Update Sentence Test" reader
  * menu (see `react/utils/extractionFixtures.ts`). We replay the captured
  * `raw-extraction.json` (rawPages + detailedPage + splitter recording)
  * through `extractPageSentenceBBoxes` and assert the result matches

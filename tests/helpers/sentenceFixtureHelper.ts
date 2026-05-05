@@ -1,7 +1,7 @@
 /**
  * Shared loader + matcher for sentence-extraction regression fixtures.
  *
- * Captured by the "Create Sentence Test (current page)" item in the
+ * Captured by the "Create Sentence Test" item in the
  * reader's dev-only context menu (see
  * `react/utils/extractionFixtures.ts`). Both the unit tier
  * (`tests/unit/pdf/sentenceFixtures.unit.test.ts`) and the live tier
