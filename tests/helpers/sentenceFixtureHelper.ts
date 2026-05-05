@@ -27,6 +27,7 @@ export interface FixtureBBox {
 export interface FixtureSentenceExpected {
     index: number;
     paragraphIndex: number;
+    kind: 'text' | 'heading';
     text: string;
     bboxes: FixtureBBox[];
 }
@@ -101,7 +102,11 @@ export function loadFixtures(rootDir: string): LoadedFixture[] {
 /** A `PageSentenceBBoxResult`-shaped subset that both tiers can produce. */
 export interface ActualSentenceResult {
     paragraphs: Array<{ sentences: Array<{ text: string }> }>;
-    sentences: Array<{ text: string; bboxes: FixtureBBox[] }>;
+    sentences: Array<{
+        text: string;
+        bboxes: FixtureBBox[];
+        kind?: 'text' | 'heading';
+    }>;
     degradedParagraphs: number;
     unmappedParagraphs: number;
 }
@@ -185,6 +190,12 @@ export function expectSentencesMatch(
             if (actParaIdx !== exp.paragraphIndex) {
                 failures.push(
                     `[${i}] paragraphIndex: expected ${exp.paragraphIndex}, got ${actParaIdx}`,
+                );
+            }
+            const actKind = act.kind ?? 'text';
+            if (actKind !== exp.kind) {
+                failures.push(
+                    `[${i}] kind: expected "${exp.kind}", got "${actKind}"`,
                 );
             }
             if (act.bboxes.length !== exp.bboxes.length) {

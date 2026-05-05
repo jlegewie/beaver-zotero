@@ -37,6 +37,7 @@ const DEFAULT_BBOX_TOL_PT = 0.5;
 interface FixtureSentenceExpected {
     index: number;
     paragraphIndex: number;
+    kind: "text" | "heading";
     text: string;
     bboxes: Array<{ x: number; y: number; w: number; h: number }>;
 }
@@ -288,6 +289,7 @@ function buildExpectedFromResult(
         (s: SentenceBBox, idx) => ({
             index: idx,
             paragraphIndex: paragraphIndexBySentence[idx] ?? -1,
+            kind: s.kind ?? "text",
             text: s.text,
             bboxes: s.bboxes.map(roundBBox),
         }),
