@@ -129,8 +129,12 @@ export interface RawBlock {
     type: "text" | "image";
     /** Bounding box */
     bbox: RawBBox;
-    /** Lines (only for text blocks) */
-    lines?: RawLine[];
+    /**
+     * Lines (only for text blocks). `readonly` so detailed subtypes
+     * (`RawBlockDetailed`) are covariantly assignable to `RawBlock` —
+     * extracted page data is built once and treated as immutable.
+     */
+    lines?: readonly RawLine[];
 }
 
 /**
@@ -147,8 +151,12 @@ export interface RawPageData {
     height: number;
     /** Page label (e.g., "iv", "220") */
     label?: string;
-    /** Structured text blocks */
-    blocks: RawBlock[];
+    /**
+     * Structured text blocks. `readonly` for the same reason as
+     * `RawBlock.lines` — lets `RawPageDataDetailed` be structurally
+     * assignable to `RawPageData` without unsafe casts.
+     */
+    blocks: readonly RawBlock[];
 }
 
 // ============================================================================

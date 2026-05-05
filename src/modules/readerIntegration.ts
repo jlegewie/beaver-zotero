@@ -35,6 +35,26 @@ function dispatchReaderAction(
     }));
 }
 
+// Dev-only: dispatch an extraction-visualizer action so the React layer
+// (which owns the visualizer code in the webpack bundle) can run it.
+function dispatchVisualizerAction(
+    action:
+        | 'columns'
+        | 'lines'
+        | 'paragraphs'
+        | 'sentences'
+        | 'clear'
+        | 'create-or-update-sentence-fixture',
+): void {
+    const win = Zotero.getMainWindow();
+    const eventBus = win?.__beaverEventBus;
+    if (!eventBus) return;
+
+    eventBus.dispatchEvent(new win.CustomEvent('readerVisualizerAction', {
+        detail: { action },
+    }));
+}
+
 // ---------------------------------------------------------------------------
 // Text selection popup handler
 // ---------------------------------------------------------------------------
@@ -151,6 +171,45 @@ function onCreateViewContextMenu(event: any): void {
             },
         },
     );
+
+    // Dev-only: extraction visualizer controls. A second `append` call
+    // becomes a new item group, which the reader renders with a separator
+    // above it. Dropped from production builds at compile time.
+    if (process.env.NODE_ENV === 'development') {
+        append(
+            {
+                label: 'Visualize Columns',
+                persistent: true,
+                onCommand: () => dispatchVisualizerAction('columns'),
+            },
+            {
+                label: 'Visualize Lines',
+                persistent: true,
+                onCommand: () => dispatchVisualizerAction('lines'),
+            },
+            {
+                label: 'Visualize Paragraphs',
+                persistent: true,
+                onCommand: () => dispatchVisualizerAction('paragraphs'),
+            },
+            {
+                label: 'Visualize Sentences',
+                persistent: true,
+                onCommand: () => dispatchVisualizerAction('sentences'),
+            },
+            {
+                label: 'Clear Visualization',
+                persistent: true,
+                onCommand: () => dispatchVisualizerAction('clear'),
+            },
+            {
+                label: 'Create/Update Sentence Test',
+                persistent: true,
+                onCommand: () =>
+                    dispatchVisualizerAction('create-or-update-sentence-fixture'),
+            },
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -205,7 +264,7 @@ function onCreateAnnotationContextMenu(event: any): void {
 // Cleanup helper
 // ---------------------------------------------------------------------------
 
-function removeListenerSafely(type: string, handler: Function): boolean {
+function removeListenerSafely(type: string, handler: (...args: unknown[]) => unknown): boolean {
     const reader = Zotero?.Reader as any;
     const listeners = reader?._registeredListeners;
     if (!Array.isArray(listeners)) return false;

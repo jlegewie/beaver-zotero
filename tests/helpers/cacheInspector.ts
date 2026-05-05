@@ -371,6 +371,62 @@ export async function pdfSentenceBBoxes(
 }
 
 /**
+ * `/beaver/test/pdf-render-overlay` — renders a page and paints bbox
+ * overlays for the requested level. Sentence-level rects are produced by
+ * the same orchestration as `/beaver/test/pdf-sentence-bboxes`; the
+ * `pdfRenderOverlayParity.live.test.ts` test asserts the bboxes match
+ * exactly.
+ */
+export interface PdfRenderOverlayRect {
+    rect: { x: number; y: number; w: number; h: number };
+    color: string;
+    label?: string;
+    group: number;
+    degraded?: boolean;
+    marginPosition?: 'top' | 'bottom' | 'left' | 'right' | null;
+}
+
+export interface PdfRenderOverlayResponse {
+    ok: boolean;
+    level?: string;
+    page_index?: number;
+    page_width?: number;
+    page_height?: number;
+    image_width?: number;
+    image_height?: number;
+    dpi?: number;
+    group_count?: number;
+    stats?: Record<string, number | string | undefined>;
+    rects?: PdfRenderOverlayRect[];
+    image_base64?: string;
+    image_byte_length?: number;
+    error?: PdfErrorEnvelope;
+}
+
+export async function pdfRenderOverlay(
+    attachment: AttachmentFixture,
+    body: {
+        page_index: number;
+        level:
+            | 'columns'
+            | 'lines'
+            | 'paragraphs'
+            | 'sentences'
+            | 'raw-lines'
+            | 'margins';
+        dpi?: number;
+        language?: string;
+        analysis_page_window?: number;
+    },
+): Promise<PdfRenderOverlayResponse> {
+    return post<PdfRenderOverlayResponse>('/beaver/test/pdf-render-overlay', {
+        library_id: attachment.library_id,
+        zotero_key: attachment.zotero_key,
+        ...body,
+    });
+}
+
+/**
  * Single-page render — exercises the dedicated `renderPageToImage` op.
  * The plural endpoint silently filters invalid indices, so this is the
  * only way to test PAGE_OUT_OF_RANGE parity.

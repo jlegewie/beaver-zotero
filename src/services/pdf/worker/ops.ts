@@ -24,6 +24,8 @@ import { detectLinesOnPage, logLineDetection } from "../LineDetector";
 import type { PageLineResult } from "../LineDetector";
 import { SearchScorer } from "../SearchScorer";
 import { extractPageSentenceBBoxes } from "../ParagraphSentenceMapper";
+import { resolveAnalysisPageIndices } from "../AnalysisWindow";
+import { detectFilteredParagraphs } from "../FilteredParagraphPipeline";
 import type {
     DocumentAnalysis,
     ExtractionResult,
@@ -656,7 +658,40 @@ export async function opExtractSentenceBBoxes(
             );
         }
         const detailed = extractRawPageDetailedFromDoc(doc, args.pageIndex, false);
-        const result = extractPageSentenceBBoxes(detailed, args.options);
+
+        // If the caller passed a precomputed paragraphResult through the
+        // worker boundary, honor it. Otherwise resolve the analysis
+        // window, walk those pages once, and run the shared filtered
+        // pipeline so sentences exclude marginalia (matching production
+        // line extraction).
+        const opts = args.options ?? {};
+        if (opts.precomputed) {
+            const result = extractPageSentenceBBoxes(detailed, opts);
+            return { result };
+        }
+
+        const analysisIndices = resolveAnalysisPageIndices(
+            args.pageIndex,
+            pageCount,
+            opts.analysisPageWindow,
+        );
+        // Substitute the detailed target page into the analysis window
+        // so paragraph detection runs on the same walk the mapper later
+        // looks up (exact bbox identity, no bridge drift).
+        const pages: RawPageData[] = analysisIndices.map((i) =>
+            i === args.pageIndex
+                ? (detailed as unknown as RawPageData)
+                : extractRawPageFromDoc(doc, i),
+        );
+        const filtered = detectFilteredParagraphs({
+            pages,
+            pageIndex: args.pageIndex,
+            paragraphSettings: opts.paragraphSettings,
+        });
+        const result = extractPageSentenceBBoxes(detailed, {
+            ...opts,
+            precomputed: { paragraphResult: filtered.paragraphResult },
+        });
         return { result };
     } finally {
         releaseDoc(doc);

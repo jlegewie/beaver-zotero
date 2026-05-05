@@ -375,6 +375,14 @@ export interface PageSentenceBBoxOptions {
     precomputed?: {
         paragraphResult: PageParagraphResult;
     };
+    /**
+     * Cross-page analysis window for smart-removal and document-wide
+     * style profiling.
+     *   - undefined / 0 = whole document (capped at
+     *     `DEFAULT_ANALYSIS_WINDOW_CAP` centered on the target page)
+     *   - positive N    = ±N pages around the target page (still capped)
+     */
+    analysisPageWindow?: number;
 }
 
 /**

@@ -29,6 +29,7 @@ import {
     getSentenceSplitterWithFallback,
     normalizeLanguageCode,
 } from "./SentencexSplitter";
+import { runSentenceExtractionPipeline } from "./SentenceExtractionPipeline";
 // `getItemLanguage` is intentionally lazy-imported inside
 // `extractSentenceBBoxesFromZoteroItem` to keep the static import surface
 // of this barrel small. `zoteroUtils` transitively pulls in heavy modules
@@ -112,6 +113,21 @@ export {
     byteRangesToCharRanges,
 } from "./SentencexSplitter";
 export type { SentencexBoundary } from "./SentencexSplitter";
+export {
+    resolveAnalysisPageIndices,
+    DEFAULT_ANALYSIS_WINDOW_CAP,
+} from "./AnalysisWindow";
+export { detectFilteredParagraphs } from "./FilteredParagraphPipeline";
+export type {
+    FilteredParagraphContext,
+    FilteredParagraphResult,
+} from "./FilteredParagraphPipeline";
+export { runSentenceExtractionPipeline } from "./SentenceExtractionPipeline";
+export type {
+    SentencePipelineOptions,
+    SentencePipelineTrace,
+    SentencePipelineOutput,
+} from "./SentenceExtractionPipeline";
 
 /**
  * PDFExtractor - High-level API for extracting text from PDFs.
@@ -321,16 +337,41 @@ export class PDFExtractor {
         // ChromeUtils.importESModule on the main thread). The sentencex
         // module is cached after first init, so the WASM tax is paid
         // once per session.
-        if (options.splitter) {
-            const detailed = await client.extractRawPageDetailed(pdfData, pageIndex);
-            return extractPageSentenceBBoxes(detailed, options);
+        const splitter =
+            options.splitter ??
+            (await getSentenceSplitterWithFallback(
+                normalizeLanguageCode(options.language),
+            ));
+
+        // If the caller already ran their own paragraph pipeline (e.g.
+        // the trace endpoint, or an internal worker call passing a
+        // precomputed result through the worker boundary), keep the
+        // legacy single-page path — the precomputed paragraphResult
+        // already reflects whatever filtering they applied.
+        if (options.precomputed) {
+            const detailed = await client.extractRawPageDetailed(
+                pdfData,
+                pageIndex,
+            );
+            return extractPageSentenceBBoxes(detailed, { ...options, splitter });
         }
 
-        const splitter = await getSentenceSplitterWithFallback(
-            normalizeLanguageCode(options.language),
-        );
-        const detailed = await client.extractRawPageDetailed(pdfData, pageIndex);
-        return extractPageSentenceBBoxes(detailed, { ...options, splitter });
+        // Otherwise: delegate to the shared sentence-extraction
+        // pipeline, which owns the analysis-window load, detailed-page
+        // substitution, filtered paragraph detection, and the final
+        // sentence mapping. This is the same orchestration the
+        // `/beaver/test/pdf-pipeline-trace` endpoint runs (with
+        // `trace: true`), so the debug endpoint always reflects what
+        // production actually does.
+        const { result } = await runSentenceExtractionPipeline({
+            pdfData,
+            pageIndex,
+            splitter,
+            analysisPageWindow: options.analysisPageWindow,
+            paragraphSettings: options.paragraphSettings,
+            language: options.language,
+        });
+        return result;
     }
 
     /**

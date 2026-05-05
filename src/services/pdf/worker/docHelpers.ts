@@ -272,7 +272,7 @@ export function extractRawPageDetailedFromDoc(
                     }
                     currentLine = null;
                 },
-                onChar: (rune, _origin, _font, _size, quad) => {
+                onChar: (rune, _origin, font, size, quad) => {
                     if (!currentLine) return;
                     currentLine.text += rune;
                     currentLine.chars.push({
@@ -280,6 +280,43 @@ export function extractRawPageDetailedFromDoc(
                         quad,
                         bbox: bboxFromQuad(quad),
                     } as RawChar);
+                    // Populate the line's font from the first char.
+                    const fontObj = font as unknown as {
+                        getName?: () => string;
+                        isBold?: () => boolean;
+                        isItalic?: () => boolean;
+                    };
+                    if (currentLine.chars.length === 1 && fontObj) {
+                        try {
+                            const name = typeof fontObj.getName === "function"
+                                ? fontObj.getName()
+                                : "";
+                            const isBold = typeof fontObj.isBold === "function"
+                                ? fontObj.isBold()
+                                : /bold/i.test(name);
+                            const isItalic = typeof fontObj.isItalic === "function"
+                                ? fontObj.isItalic()
+                                : /italic|oblique/i.test(name);
+                            // Family is the part before any comma / "MT" /
+                            // "PS" PostScript suffix, mirroring how the
+                            // JSON walker derives it.
+                            const family = name
+                                .split(",")[0]
+                                .replace(/(?:[-+])?(?:Bold|Italic|Oblique|Regular|MT|PS).*$/i, "")
+                                .trim() || name;
+                            currentLine.font = {
+                                name,
+                                family,
+                                weight: isBold ? "bold" : "normal",
+                                style: isItalic ? "italic" : "normal",
+                                size: typeof size === "number" ? size : 0,
+                            };
+                        } catch {
+                            // Best effort — leave defaults if Font API
+                            // throws (won't happen with mupdf-wasm but
+                            // future-proof against binding changes).
+                        }
+                    }
                 },
                 onImageBlock: (bbox) => {
                     if (includeImages) {
