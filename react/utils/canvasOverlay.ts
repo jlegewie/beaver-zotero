@@ -55,7 +55,7 @@ export async function drawBBoxOverlayPNG(
         const sx = imageWidth / pageWidth;
         const sy = imageHeight / pageHeight;
 
-        ctx.lineWidth = Math.max(1, Math.round(sx));
+        ctx.lineWidth = 1;
         for (const r of rects) {
             const x = r.rect.x * sx;
             const y = r.rect.y * sy;
