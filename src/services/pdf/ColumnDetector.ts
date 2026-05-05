@@ -649,11 +649,16 @@ function canMergeBlocks(
     }
 
     // Third check: is one block contained within the other horizontally?
-    // Allow merging if smaller block is fully within larger block's x-range
-    const block1ContainsBlock2 = 
-        block1.x <= block2.x && (block1.x + block1.w) >= (block2.x + block2.w);
-    const block2ContainsBlock1 = 
-        block2.x <= block1.x && (block2.x + block2.w) >= (block1.x + block1.w);
+    // Allow merging if smaller block is fully within larger block's x-range.
+    // Apply edge tolerance — MuPDF emits per-line widths that vary by a small
+    // fraction of a point even within the same column, so strict inequality
+    // here would treat a 0.01pt overshoot the same as a real column gutter.
+    const block1ContainsBlock2 =
+        block1.x <= block2.x + tolerance &&
+        (block1.x + block1.w) >= (block2.x + block2.w) - tolerance;
+    const block2ContainsBlock1 =
+        block2.x <= block1.x + tolerance &&
+        (block2.x + block2.w) >= (block1.x + block1.w) - tolerance;
 
     // Only merge if widths are similar (within 20% of each other)
     const widthRatio = Math.min(block1.w, block2.w) / Math.max(block1.w, block2.w);
