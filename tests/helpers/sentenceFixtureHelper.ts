@@ -30,6 +30,14 @@ export interface FixtureSentenceExpected {
     kind: 'text' | 'heading';
     text: string;
     bboxes: FixtureBBox[];
+    /**
+     * Producer hint that this sentence is continued by the next one in
+     * reading order (cross-column / cross-page continuation). Omitted ≡
+     * false; we never serialize the explicit `false`. Older fixtures
+     * captured before the field existed have no key — comparator treats
+     * that the same as `false`.
+     */
+    joinWithNext?: boolean;
 }
 
 export interface FixtureExpected {
@@ -109,7 +117,8 @@ export interface ActualSentenceResult {
         // Page-local addressing fields populated by the producer.
         paragraphIndex?: number;
         sentenceIndex?: number;
-        spansParagraphs?: number[];
+        // Cross-paragraph continuation hint. Omitted ≡ false.
+        joinWithNext?: boolean;
     }>;
     degradedParagraphs: number;
     unmappedParagraphs: number;
@@ -233,6 +242,16 @@ export function expectSentencesMatch(
             if (actKind !== exp.kind) {
                 failures.push(
                     `[${i}] kind: expected "${exp.kind}", got "${actKind}"`,
+                );
+            }
+            // joinWithNext: omitted ≡ false on both sides. Detects regressions
+            // in the continuation heuristic without forcing the field to be
+            // present on legacy fixtures.
+            const actJoin = act.joinWithNext === true;
+            const expJoin = exp.joinWithNext === true;
+            if (actJoin !== expJoin) {
+                failures.push(
+                    `[${i}] joinWithNext: expected ${expJoin}, got ${actJoin}`,
                 );
             }
             if (act.bboxes.length !== exp.bboxes.length) {

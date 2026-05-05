@@ -284,6 +284,13 @@ export function getParagraphOverlay(
  * `splitter` is required by the caller — production callers pass a
  * sentencex-backed splitter; tests can pass `simpleRegexSentenceSplit`
  * via the mapper's default.
+ *
+ * **`joinWithNext` rendering**: a sentence with `joinWithNext: true` is a
+ * producer hint that it continues into the next sentence in reading order
+ * (typically across a column / page break). The overlay does NOT merge —
+ * it appends a "↪" suffix to that sentence's label so the continuation
+ * boundary is visually obvious during heuristic tuning. Downstream
+ * consumers (citations, embeddings) are responsible for any actual merge.
  */
 export function getSentenceOverlay(
     detailedPage: RawPageDataDetailed,
@@ -347,6 +354,11 @@ export function buildSentenceOverlayFromResult(
             color = OVERLAY_COLORS.sentence[bodyIdx % OVERLAY_COLORS.sentence.length];
             label = `S${sentenceIdx + 1}`;
             bodyIdx++;
+        }
+        // Surface the continuation hint visually so heuristic mistakes are
+        // obvious in the overlay PNG. Omitted ≡ false on SentenceBBox.
+        if (sentence.joinWithNext) {
+            label = `${label}↪`;
         }
 
         sentence.bboxes.forEach((bb, fragIdx) => {

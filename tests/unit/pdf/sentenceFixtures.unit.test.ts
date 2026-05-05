@@ -146,6 +146,7 @@ interface ActualLikeResult {
         text: string;
         bboxes: any[];
         kind?: 'text' | 'heading';
+        joinWithNext?: boolean;
     }>;
     degradedParagraphs: number;
     unmappedParagraphs: number;
@@ -180,18 +181,23 @@ function buildExpectedFromActual(
             degradedParagraphs: actual.degradedParagraphs,
             unmappedParagraphs: actual.unmappedParagraphs,
         },
-        sentences: actual.sentences.map((s, idx) => ({
-            index: idx,
-            paragraphIndex: paragraphIndexBySentence[idx] ?? -1,
-            kind: (s.kind ?? 'text') as 'text' | 'heading',
-            text: s.text,
-            bboxes: s.bboxes.map((b: any) => ({
-                x: round3(b.x),
-                y: round3(b.y),
-                w: round3(b.w),
-                h: round3(b.h),
-            })),
-        })),
+        sentences: actual.sentences.map((s, idx) => {
+            const out: FixtureFile['expected']['sentences'][number] = {
+                index: idx,
+                paragraphIndex: paragraphIndexBySentence[idx] ?? -1,
+                kind: (s.kind ?? 'text') as 'text' | 'heading',
+                text: s.text,
+                bboxes: s.bboxes.map((b: any) => ({
+                    x: round3(b.x),
+                    y: round3(b.y),
+                    w: round3(b.w),
+                    h: round3(b.h),
+                })),
+            };
+            // Only serialize joinWithNext when true. Omitted ≡ false.
+            if (s.joinWithNext) out.joinWithNext = true;
+            return out;
+        }),
     };
 }
 

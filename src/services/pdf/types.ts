@@ -233,13 +233,15 @@ export interface SentenceBBox {
      */
     kind?: "text" | "heading";
     /**
-     * Present only for cross-paragraph merges (e.g. a sentence that runs
-     * from the bottom of one column into the top of the next). Lists the
-     * paragraph indices the sentence spans, in reading order. When set,
-     * length is >= 2 and the first entry equals `paragraphIndex`. Absent
-     * for the common case of a sentence that lives in one paragraph.
+     * Hint that this sentence is continued by the *next* sentence in reading
+     * order — typically across a column or page break (no terminal
+     * punctuation here, lowercase / continuation start on the next sentence,
+     * both sides body text). The producer never merges; downstream consumers
+     * decide whether to join. For runs that span N > 2 fragments, every
+     * non-final fragment carries the flag. **Omitted ≡ false** — never
+     * encoded explicitly as `false`.
      */
-    spansParagraphs?: number[];
+    joinWithNext?: boolean;
 }
 
 /**

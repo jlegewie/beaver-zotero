@@ -1261,7 +1261,7 @@ export async function handleTestPdfPipelineTraceHttpRequest(request: any) {
         paragraphId: string | null;
         paragraphIndex: number;
         sentenceIndex: number;
-        spansParagraphs?: number[];
+        joinWithNext?: boolean;
         bboxes: Array<{ x: number; y: number; w: number; h: number }>;
         degraded: boolean;
     }> = [];
@@ -1287,8 +1287,9 @@ export async function handleTestPdfPipelineTraceHttpRequest(request: any) {
                 })),
                 degraded: isFallback,
             };
-            if (sentence.spansParagraphs) {
-                entry.spansParagraphs = sentence.spansParagraphs;
+            // Only emit when truthy. Omitted ≡ false.
+            if (sentence.joinWithNext) {
+                entry.joinWithNext = true;
             }
             sentencesOut.push(entry);
         }
