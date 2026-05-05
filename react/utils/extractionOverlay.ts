@@ -377,8 +377,9 @@ function computeDegradedSentenceIndices(
     const out = new Set<number>();
     if (degradedItemIndices.size === 0) return out;
     let flatIdx = 0;
-    for (const pws of paragraphs) {
+    for (const [paragraphIdx, pws] of paragraphs.entries()) {
         if (
+            degradedItemIndices.has(paragraphIdx) &&
             pws.sentences.length === 1 &&
             pws.sentences[0].text === pws.item.text
         ) {
