@@ -214,6 +214,140 @@ describe("detectFilteredParagraphs", () => {
         });
     });
 
+    describe("smart-removal: 'K of 13' indicators (regression — original bug)", () => {
+        it("removes 'K of 13' page indicators across pages", () => {
+            const buildPage = (idx: number, k: number): RawPageData =>
+                makePage(idx, [
+                    {
+                        wmode: 0,
+                        bbox: { x: 80, y: 50, w: 60, h: 8 },
+                        font: {
+                            name: "PN",
+                            family: "PN",
+                            weight: "normal",
+                            style: "normal",
+                            size: 8,
+                        },
+                        x: 80,
+                        y: 50,
+                        text: `${k} of 13`,
+                    },
+                    bodyLine(`Body of page ${idx + 1}.`, 200),
+                    bodyLine("Filler line two.", 220),
+                ]);
+            const pages = [0, 1, 2, 3, 4].map((i) => buildPage(i, i + 1));
+            const out = detectFilteredParagraphs({
+                pages,
+                pageIndex: 2,
+                repeatThreshold: 3,
+                detectPageSequences: true,
+            });
+            const allText = out.lineResult.allLines.map((l) => l.text).join(" ");
+            expect(allText).not.toContain("of 13");
+            expect(out.marginRemoval.candidates.some((c) => c.reason === "page_number"))
+                .toBe(true);
+        });
+    });
+
+    describe("smart-removal: multilingual prefix headers", () => {
+        it("removes 'Seite N' running headers across ≥3 pages", () => {
+            const buildPage = (idx: number, k: number): RawPageData =>
+                makePage(idx, [
+                    {
+                        wmode: 0,
+                        bbox: { x: 80, y: 50, w: 60, h: 8 },
+                        font: {
+                            name: "H",
+                            family: "H",
+                            weight: "normal",
+                            style: "normal",
+                            size: 8,
+                        },
+                        x: 80,
+                        y: 50,
+                        text: `Seite ${k}`,
+                    },
+                    bodyLine(`Body of page ${idx + 1}.`, 200),
+                    bodyLine("Filler line two.", 220),
+                ]);
+            const pages = [0, 1, 2, 3, 4].map((i) => buildPage(i, i + 1));
+            const out = detectFilteredParagraphs({
+                pages,
+                pageIndex: 2,
+                repeatThreshold: 3,
+            });
+            const allText = out.lineResult.allLines.map((l) => l.text).join(" ");
+            expect(allText).not.toContain("Seite");
+            expect(out.marginRemoval.candidates.some((c) => c.reason === "repeat"))
+                .toBe(true);
+        });
+    });
+
+    describe("smart-removal: negative — must NOT over-remove", () => {
+        it("preserves 'Chapter N' lines in margin zone", () => {
+            const buildPage = (idx: number, k: number): RawPageData =>
+                makePage(idx, [
+                    {
+                        wmode: 0,
+                        bbox: { x: 80, y: 50, w: 80, h: 8 },
+                        font: {
+                            name: "H",
+                            family: "H",
+                            weight: "normal",
+                            style: "normal",
+                            size: 8,
+                        },
+                        x: 80,
+                        y: 50,
+                        text: `Chapter ${k}`,
+                    },
+                    bodyLine(`Body of page ${idx + 1}.`, 200),
+                    bodyLine("Filler line two.", 220),
+                ]);
+            const pages = [0, 1, 2, 3, 4].map((i) => buildPage(i, i + 1));
+            const out = detectFilteredParagraphs({
+                pages,
+                pageIndex: 2,
+                repeatThreshold: 3,
+            });
+            // No repeat candidate should fire for the Chapter sequence.
+            expect(out.marginRemoval.candidates.some((c) => c.reason === "repeat"))
+                .toBe(false);
+        });
+
+        it("preserves hyphenated ISO codes like '2024-05' in margin zone", () => {
+            const codes = ["2024-05", "2025-06", "2026-07", "2027-08", "2028-09"];
+            const buildPage = (idx: number): RawPageData =>
+                makePage(idx, [
+                    {
+                        wmode: 0,
+                        bbox: { x: 80, y: 50, w: 60, h: 8 },
+                        font: {
+                            name: "H",
+                            family: "H",
+                            weight: "normal",
+                            style: "normal",
+                            size: 8,
+                        },
+                        x: 80,
+                        y: 50,
+                        text: codes[idx],
+                    },
+                    bodyLine(`Body of page ${idx + 1}.`, 200),
+                    bodyLine("Filler line two.", 220),
+                ]);
+            const pages = [0, 1, 2, 3, 4].map(buildPage);
+            const out = detectFilteredParagraphs({
+                pages,
+                pageIndex: 2,
+                repeatThreshold: 3,
+                detectPageSequences: true,
+            });
+            // Hyphen excluded from bare-connector forms → no candidates at all.
+            expect(out.marginRemoval.candidates.length).toBe(0);
+        });
+    });
+
     describe("empty / degenerate pages", () => {
         it("returns a well-formed empty result when the page has no text blocks", () => {
             const pages = [makePage(0, [])];

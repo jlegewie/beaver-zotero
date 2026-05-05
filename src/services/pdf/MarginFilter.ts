@@ -19,52 +19,173 @@ import type {
 } from "./types";
 
 // ============================================================================
-// Page Number Detection Patterns
+// Page Number Detection — multilingual prefixes, anchored parser
 // ============================================================================
 
-/** Patterns for detecting page numbers */
-const PAGE_NUMBER_PATTERNS = [
-    /^\d+$/,                          // Pure digits: "1", "42", "100"
-    /^page\s*\d+$/i,                  // "Page 1", "page42"
-    /^p\.?\s*\d+$/i,                  // "P. 1", "p1"
-    /^\d+\s*(of|\/|-)\s*\d+$/i,       // "1 of 10", "5/20", "3-15"
-    /^[ivxlcdm]+$/i,                  // Roman numerals: "iv", "XII"
+/** Lowercase prefix words for "page" across major languages. */
+const PAGE_WORDS = [
+    "page", "página", "pagina", "seite", "strona",
+    "страница", "sayfa", "صفحة", "ページ", "페이지",
 ];
 
-/** Check if text matches a page number pattern */
+/** Pre-escaped abbreviations (already regex fragments — note `\.`). */
+const PAGE_ABBREVS = ["p\\.", "pp\\.", "pág\\.", "pag\\.", "str\\.", "стр\\."];
+
+/**
+ * Bare-connector list: word connectors ("of", "de", "von", "di", "van", "из")
+ * and "/". NO hyphens — those would parse "2024-05" / "2025-06" as page
+ * numbers and form a strictly increasing sequence, causing date and
+ * ISO-range strings in margins to be falsely flagged.
+ */
+const BARE_CONNECTOR_WORDS = ["of", "de", "von", "di", "van", "из", "/"];
+
+/**
+ * Prefix-anchored connector list: allows hyphens because the prefix word
+ * (page/seite/p./...) is the strong signal that disambiguates from dates.
+ */
+const PREFIX_CONNECTOR_WORDS = [...BARE_CONNECTOR_WORDS, "-", "—", "–"];
+
+const PAGE_PREFIX_RE = [...PAGE_WORDS, ...PAGE_ABBREVS].join("|");
+const BARE_CONNECTOR_RE = BARE_CONNECTOR_WORDS
+    .map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("|");
+const PREFIX_CONNECTOR_RE = PREFIX_CONNECTOR_WORDS
+    .map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("|");
+
+/** Patterns the gatekeeper accepts. Always run on digit-normalized text. */
+const PAGE_NUMBER_PATTERNS: RegExp[] = [
+    /^\d+$/u,
+    new RegExp(`^(?:${PAGE_PREFIX_RE})\\s*\\d+$`, "iu"),
+    new RegExp(`^\\d+\\s*(?:${BARE_CONNECTOR_RE})\\s*\\d+$`, "iu"),
+    new RegExp(
+        `^(?:${PAGE_PREFIX_RE})\\s*\\d+\\s*(?:${PREFIX_CONNECTOR_RE})\\s*\\d+$`,
+        "iu",
+    ),
+    /^第\s*\d+\s*(?:页|頁)$/u,
+    /^\d+\s*(?:页|頁|쪽|ページ)$/u,
+    /^[ivxlcdm]+$/iu,
+];
+
+// Parser-specific regexes (anchored, with capture groups). Same source of
+// truth (PAGE_PREFIX_RE / *_CONNECTOR_RE), so patterns and parser stay in
+// lockstep.
+const PARSE_PREFIX_RANGE_RE = new RegExp(
+    `^(?:${PAGE_PREFIX_RE})\\s*(\\d+)\\s*(?:${PREFIX_CONNECTOR_RE})\\s*\\d+$`,
+    "iu",
+);
+const PARSE_PREFIX_RE = new RegExp(`^(?:${PAGE_PREFIX_RE})\\s*(\\d+)$`, "iu");
+const PARSE_RANGE_RE = new RegExp(
+    `^(\\d+)\\s*(?:${BARE_CONNECTOR_RE})\\s*\\d+$`,
+    "iu",
+);
+const PARSE_CJK_WRAPPED = /^第\s*(\d+)\s*(?:页|頁)$/u;
+const PARSE_CJK_SUFFIX = /^(\d+)\s*(?:页|頁|쪽|ページ)$/u;
+
+// Roman numerals — bounded to a practical preface range. A full parser up to
+// 3999 would let stray single-letter glyphs (C, D, M) become valid page
+// numbers.
+const ROMAN_RE = /^M{0,3}(?:CM|CD|D?C{0,3})(?:XC|XL|L?X{0,3})(?:IX|IV|V?I{0,3})$/i;
+const ROMAN_VALUES: Record<string, number> = {
+    M: 1000, D: 500, C: 100, L: 50, X: 10, V: 5, I: 1,
+};
+const ROMAN_MAX = 50;
+
+function parseRoman(text: string): number | null {
+    const upper = text.toUpperCase();
+    if (!upper || !ROMAN_RE.test(upper)) return null;
+    let total = 0;
+    for (let i = 0; i < upper.length; i++) {
+        const cur = ROMAN_VALUES[upper[i]];
+        const next = ROMAN_VALUES[upper[i + 1]];
+        total += next && next > cur ? -cur : cur;
+    }
+    return total > ROMAN_MAX ? null : total;
+}
+
+/**
+ * Fold full-width / superscript / compatibility digits via NFKC, then map
+ * common non-Latin script digits to ASCII. NOT a full \p{Nd} fold — only
+ * the scripts listed here.
+ */
+const DIGIT_ZERO_BASES = [
+    0x0660, // Arabic-Indic
+    0x06F0, // Extended Arabic-Indic (Persian)
+    0x0966, // Devanagari
+    0x09E6, // Bengali
+    0x0E50, // Thai
+];
+
+function normalizeDigits(text: string): string {
+    const nfkc = text.normalize("NFKC");
+    return nfkc.replace(/[٠-٩۰-۹०-९০-৯๐-๙]/g,
+        (ch) => {
+            const code = ch.codePointAt(0)!;
+            for (const base of DIGIT_ZERO_BASES) {
+                if (code >= base && code <= base + 9) return String(code - base);
+            }
+            return ch;
+        });
+}
+
 function isPageNumberPattern(text: string): boolean {
-    const normalized = text.trim().toLowerCase();
-    return PAGE_NUMBER_PATTERNS.some(pattern => pattern.test(normalized));
+    const cleaned = normalizeDigits(text).trim().toLowerCase();
+    if (!cleaned) return false;
+    return PAGE_NUMBER_PATTERNS.some((pattern) => pattern.test(cleaned));
 }
 
-/** Parse numeric value from page-like text (returns null if not parseable) */
 function parsePageNumber(text: string): number | null {
-    const normalized = text.trim().toLowerCase();
-    
-    // Pure digits
-    if (/^\d+$/.test(normalized)) {
-        return parseInt(normalized, 10);
-    }
-    
-    // "Page X" or "P. X" patterns
-    const match = normalized.match(/(?:page|p\.?)\s*(\d+)/i);
-    if (match) {
-        return parseInt(match[1], 10);
-    }
-    
-    // Roman numerals (simplified - just common ones)
-    const romanMap: Record<string, number> = {
-        i: 1, ii: 2, iii: 3, iv: 4, v: 5, vi: 6, vii: 7, viii: 8, ix: 9, x: 10,
-        xi: 11, xii: 12, xiii: 13, xiv: 14, xv: 15, xvi: 16, xvii: 17, xviii: 18, xix: 19, xx: 20,
-    };
-    if (romanMap[normalized] !== undefined) {
-        return romanMap[normalized];
-    }
-    
-    return null;
+    const cleaned = normalizeDigits(text).trim().toLowerCase();
+    if (!cleaned) return null;
+
+    if (/^\d+$/u.test(cleaned)) return parseInt(cleaned, 10);
+
+    // Prefix + range first (more specific), so the prefix branch doesn't
+    // anchor on "page 3" of a "page 3 of 13" string.
+    const prefixRange = cleaned.match(PARSE_PREFIX_RANGE_RE);
+    if (prefixRange) return parseInt(prefixRange[1], 10);
+
+    const prefix = cleaned.match(PARSE_PREFIX_RE);
+    if (prefix) return parseInt(prefix[1], 10);
+
+    // Bare range: "X of Y" / "X/Y" — return X (the changing component).
+    const range = cleaned.match(PARSE_RANGE_RE);
+    if (range) return parseInt(range[1], 10);
+
+    const cjkWrapped = cleaned.match(PARSE_CJK_WRAPPED);
+    if (cjkWrapped) return parseInt(cjkWrapped[1], 10);
+
+    const cjkSuffix = cleaned.match(PARSE_CJK_SUFFIX);
+    if (cjkSuffix) return parseInt(cjkSuffix[1], 10);
+
+    return parseRoman(cleaned);
 }
 
-/** Check if numbers form a strictly increasing sequence */
+/**
+ * Templating gate: true only for forms with a non-numeric structural anchor
+ * (a page word or CJK page marker). Bare digits, bare romans, and bare
+ * connector forms are excluded — they rely on the sequence-detection path
+ * (which checks values strictly increase across pages).
+ */
+function isStructuredPageNumber(text: string): boolean {
+    const cleaned = normalizeDigits(text).trim().toLowerCase();
+    if (!cleaned) return false;
+    if (PARSE_PREFIX_RANGE_RE.test(cleaned)) return true;
+    if (PARSE_PREFIX_RE.test(cleaned)) return true;
+    if (PARSE_CJK_WRAPPED.test(cleaned)) return true;
+    if (PARSE_CJK_SUFFIX.test(cleaned)) return true;
+    return false;
+}
+
+/**
+ * Replace digit runs with a sentinel so paginated headers ("Page 1",
+ * "Page 2", …) collapse to a single template key. Operates on
+ * digit-normalized text so "page １" and "page 1" share a template.
+ */
+function templateKey(text: string): string {
+    return normalizeDigits(text).trim().toLowerCase().replace(/\d+/gu, "§N");
+}
+
 function isIncreasingSequence(numbers: number[]): boolean {
     if (numbers.length < 2) return false;
     for (let i = 1; i < numbers.length; i++) {
@@ -133,7 +254,7 @@ function getMarginPosition(
     return null;
 }
 
-/** Normalize text for comparison */
+/** Normalize text for exact-match comparison (does NOT fold digits). */
 function normalizeText(text: string): string {
     return text.trim().toLowerCase();
 }
@@ -278,54 +399,82 @@ export class MarginFilter {
 
         // Process each margin position
         for (const [position, elements] of analysis.elements) {
-            // Group by normalized text
-            const textGroups = new Map<string, { original: string; pageIndices: Set<number> }>();
+            // Group elements by structural template if structured, else by
+            // normalized exact text. The bucket tracks each variant's own
+            // page set so removalsByPage only receives variants that
+            // actually appeared on that page (not the whole template family).
+            type Bucket = {
+                firstNormalized: string;
+                firstOriginal: string;
+                variantPages: Map<string, Set<number>>;
+                pageIndices: Set<number>;
+            };
+            const buckets = new Map<string, Bucket>();
 
             for (const el of elements) {
                 const normalized = normalizeText(el.text);
-                const existing = textGroups.get(normalized);
-
-                if (existing) {
-                    existing.pageIndices.add(el.pageIndex);
-                } else {
-                    textGroups.set(normalized, {
-                        original: el.text,
-                        pageIndices: new Set([el.pageIndex]),
-                    });
+                const key = isStructuredPageNumber(el.text)
+                    ? `tpl:${templateKey(el.text)}`
+                    : `txt:${normalized}`;
+                let bucket = buckets.get(key);
+                if (!bucket) {
+                    bucket = {
+                        firstNormalized: normalized,
+                        firstOriginal: el.text,
+                        variantPages: new Map(),
+                        pageIndices: new Set(),
+                    };
+                    buckets.set(key, bucket);
                 }
+                let pagesForVariant = bucket.variantPages.get(normalized);
+                if (!pagesForVariant) {
+                    pagesForVariant = new Set();
+                    bucket.variantPages.set(normalized, pagesForVariant);
+                }
+                pagesForVariant.add(el.pageIndex);
+                bucket.pageIndices.add(el.pageIndex);
             }
 
-            // Identify repeating elements (frequency >= requiredCount)
-            for (const [normalized, { original, pageIndices }] of textGroups) {
-                if (pageIndices.size >= requiredCount) {
-                    const pages = Array.from(pageIndices).sort((a, b) => a - b);
+            for (const bucket of buckets.values()) {
+                if (bucket.pageIndices.size < requiredCount) continue;
+                const pages = Array.from(bucket.pageIndices).sort((a, b) => a - b);
 
-                    candidates.push({
-                        text: normalized,
-                        originalText: original,
-                        pageIndices: pages,
-                        reason: "repeat",
-                        position,
-                    });
+                // candidate.text stays as exact normalized text — external
+                // consumers (testPdfHandlers, extractionOverlay) match
+                // candidate.text against line text. Internal Map/Set keys
+                // (tpl:/txt:) are scoped to this function only.
+                candidates.push({
+                    text: bucket.firstNormalized,
+                    originalText: bucket.firstOriginal,
+                    pageIndices: pages,
+                    reason: "repeat",
+                    position,
+                });
 
-                    textsToRemove.add(normalized);
-
-                    // Add to per-page lookup
-                    for (const pageIdx of pages) {
-                        if (!removalsByPage.has(pageIdx)) {
-                            removalsByPage.set(pageIdx, new Set());
+                for (const [variant, variantPages] of bucket.variantPages) {
+                    textsToRemove.add(variant);
+                    for (const p of variantPages) {
+                        if (!removalsByPage.has(p)) {
+                            removalsByPage.set(p, new Set());
                         }
-                        removalsByPage.get(pageIdx)!.add(normalized);
+                        removalsByPage.get(p)!.add(variant);
                     }
                 }
             }
 
             // Detect page number sequences
             if (detectPageSequences) {
-                // Collect elements that match page number patterns
+                // Collect elements that match page number patterns. Skip
+                // elements already covered by the repeat/templating pass
+                // for this position — otherwise a co-located "Page K"
+                // family (already removed) and a "K of 13" family would
+                // interleave into [1,1,2,2,3,3,...], breaking strict
+                // increase and silently dropping the second family.
                 const pageNumberElements: { el: MarginElement; value: number }[] = [];
 
                 for (const el of elements) {
+                    const normalized = normalizeText(el.text);
+                    if (textsToRemove.has(normalized)) continue;
                     if (isPageNumberPattern(el.text)) {
                         const value = parsePageNumber(el.text);
                         if (value !== null) {
@@ -340,19 +489,16 @@ export class MarginFilter {
 
                     // Check if values form an increasing sequence
                     const values = pageNumberElements.map(p => p.value);
-                    
+
                     if (isIncreasingSequence(values)) {
                         // These are page numbers - mark all for removal
-                        const pageIndices = pageNumberElements.map(p => p.el.pageIndex);
-
-                        // Group by normalized text to avoid duplicates
                         const seenTexts = new Set<string>();
                         for (const { el } of pageNumberElements) {
                             const normalized = normalizeText(el.text);
-                            
+
                             if (!seenTexts.has(normalized) && !textsToRemove.has(normalized)) {
                                 seenTexts.add(normalized);
-                                
+
                                 candidates.push({
                                     text: normalized,
                                     originalText: el.text,
@@ -473,7 +619,7 @@ export class MarginFilter {
                 const pageStr = pages.length > 10
                     ? `pages ${pages.slice(0, 5).join(", ")}... (${pages.length} total)`
                     : `pages ${pages.join(", ")}`;
-                
+
                 const reasonTag = candidate.reason === "page_number" ? " [PAGE#]" : "";
                 const displayText = candidate.originalText.slice(0, 50);
 
