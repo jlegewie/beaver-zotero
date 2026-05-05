@@ -247,6 +247,12 @@ Integration tests exercise full pipelines. Same prerequisites as live tests plus
 - Run: `npm run test:live` (or target just this file: `npx vitest run --config vitest.live.config.ts tests/live/editNote.live.test.ts`).
 - Each test seeds and deletes its own notes — no manual fixture setup required.
 
+### Sentence-extraction regression fixtures
+
+`tests/unit/pdf/sentenceFixtures.unit.test.ts` and `tests/live/sentenceFixtures.live.test.ts` lock in sentence-level PDF extraction output against real PDF pages. Capture is one click from the reader (right-click → "Create Sentence Test"); fixtures live under `tests/fixtures/pdfs/sentences/` (gitignored). Failure messages emit `libraryID`/`key`/`pageIndex` plus a `zotero://select` link so the failure flows directly into the debug endpoints.
+
+See **[docs-zotero/pdf-extraction-debug-endpoints.md](../docs-zotero/pdf-extraction-debug-endpoints.md#sentence-extraction-regression-tests)** for the full capture / update / failure-flow guide.
+
 ## Conventions
 
 - **File placement**: One file per logical module/concern, in the appropriate subdirectory.

@@ -135,7 +135,7 @@ export interface OverlayResult {
  * guaranteed to mirror production exactly. Both call sites
  * (`useHttpEndpoints.ts` and `extractionVisualizer.ts`) supply it.
  */
-function pagesForFilter(
+export function pagesForFilter(
     pages: RawPageData[],
     pageIndex: number,
     detailedTargetPage?: RawPageDataDetailed,

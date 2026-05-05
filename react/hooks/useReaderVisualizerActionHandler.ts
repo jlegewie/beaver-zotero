@@ -15,6 +15,7 @@ import {
     visualizeCurrentPageSentences,
     clearVisualizationAnnotations,
 } from '../utils/extractionVisualizer';
+import { createSentenceFixture } from '../utils/extractionFixtures';
 import { logger } from '../../src/utils/logger';
 
 export function useReaderVisualizerActionHandler() {
@@ -46,6 +47,18 @@ export function useReaderVisualizerActionHandler() {
                 case 'clear': {
                     await clearVisualizationAnnotations();
                     logger('[ReaderVisualizer] cleared');
+                    return;
+                }
+                case 'create-sentence-fixture': {
+                    const r = await createSentenceFixture({ overwrite: false });
+                    logger(`[ReaderVisualizer] create-sentence-fixture: ${r.message}`);
+                    if (!r.ok) Zotero.alert(Zotero.getMainWindow(), 'Beaver Sentence Test', r.message);
+                    return;
+                }
+                case 'update-sentence-fixture': {
+                    const r = await createSentenceFixture({ overwrite: true });
+                    logger(`[ReaderVisualizer] update-sentence-fixture: ${r.message}`);
+                    if (!r.ok) Zotero.alert(Zotero.getMainWindow(), 'Beaver Sentence Test', r.message);
                     return;
                 }
             }

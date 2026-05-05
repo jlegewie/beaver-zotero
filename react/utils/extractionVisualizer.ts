@@ -63,7 +63,7 @@ function rectToZoteroFormat(
  * Returns `null` when no PDF reader is available — callers convert that
  * into a user-facing error message.
  */
-async function resolveActiveReaderContext(): Promise<
+export async function resolveActiveReaderContext(): Promise<
     | {
         reader: ZoteroReader;
         item: Zotero.Item;

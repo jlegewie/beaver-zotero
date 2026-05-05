@@ -38,7 +38,14 @@ function dispatchReaderAction(
 // Dev-only: dispatch an extraction-visualizer action so the React layer
 // (which owns the visualizer code in the webpack bundle) can run it.
 function dispatchVisualizerAction(
-    action: 'columns' | 'lines' | 'paragraphs' | 'sentences' | 'clear',
+    action:
+        | 'columns'
+        | 'lines'
+        | 'paragraphs'
+        | 'sentences'
+        | 'clear'
+        | 'create-sentence-fixture'
+        | 'update-sentence-fixture',
 ): void {
     const win = Zotero.getMainWindow();
     const eventBus = win?.__beaverEventBus;
@@ -195,6 +202,16 @@ function onCreateViewContextMenu(event: any): void {
                 label: 'Clear Visualization',
                 persistent: true,
                 onCommand: () => dispatchVisualizerAction('clear'),
+            },
+            {
+                label: 'Create Sentence Test (current page)',
+                persistent: true,
+                onCommand: () => dispatchVisualizerAction('create-sentence-fixture'),
+            },
+            {
+                label: 'Update Sentence Test (current page)',
+                persistent: true,
+                onCommand: () => dispatchVisualizerAction('update-sentence-fixture'),
             },
         );
     }

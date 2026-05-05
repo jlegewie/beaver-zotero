@@ -29,7 +29,14 @@ export interface BeaverEvents {
         readerItemID: number;
     };
     readerVisualizerAction: {
-        action: 'columns' | 'lines' | 'paragraphs' | 'sentences' | 'clear';
+        action:
+            | 'columns'
+            | 'lines'
+            | 'paragraphs'
+            | 'sentences'
+            | 'clear'
+            | 'create-sentence-fixture'
+            | 'update-sentence-fixture';
     };
     focusInput: {};
 }
