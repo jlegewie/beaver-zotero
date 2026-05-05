@@ -25,6 +25,7 @@ import { useReaderSelectionActionHandler } from './hooks/useReaderSelectionActio
 import { useReaderAnnotationActionHandler } from './hooks/useReaderAnnotationActionHandler';
 import { useReaderVisualizerActionHandler } from './hooks/useReaderVisualizerActionHandler';
 import { useOnboardingPopups } from './hooks/useOnboardingPopups';
+import { BeaverTemporaryAnnotations } from './utils/annotationUtils';
 
 
 /**
@@ -225,4 +226,12 @@ export function unmountFromElement(domElement: HTMLElement) {
         return true;
     }
     return false;
+}
+
+/**
+ * Dev-only cleanup hook called by the esbuild bundle before React unmounts.
+ */
+export async function cleanupTemporaryAnnotations() {
+    if (process.env.NODE_ENV !== 'development') return;
+    await BeaverTemporaryAnnotations.cleanupAll();
 }

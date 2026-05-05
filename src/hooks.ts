@@ -60,6 +60,21 @@ async function cleanupSupabaseWindowState(
     }
 }
 
+async function cleanupDevTemporaryAnnotations(
+    win: Window | null | undefined,
+): Promise<void> {
+    if (process.env.NODE_ENV !== "development") return;
+
+    const cleanup = (win as any)?.BeaverReact?.cleanupTemporaryAnnotations;
+    if (typeof cleanup !== "function") return;
+
+    try {
+        await withShutdownTimeout(cleanup(), "cleanupTemporaryAnnotations");
+    } catch (e) {
+        ztoolkit.log(`cleanupTemporaryAnnotations: ${e}`);
+    }
+}
+
 let isAppQuitting = false;
 let quitObserverRegistered = false;
 const quitObserver = {
@@ -385,6 +400,10 @@ async function onMainWindowUnload(win: Window): Promise<void> {
             win.__beaverEventBus = null;
         }
 
+        // Dev-only: visualizer highlights are temporary reader annotations
+        // owned by the React bundle, so clear them before unmounting React.
+        await cleanupDevTemporaryAnnotations(win);
+
         // Remove React components and DOM elements for this window.
         // React cleanup effects run here — they will see the shutdown
         // flag and skip any fire-and-forget DB/network operations.
@@ -593,9 +612,10 @@ async function onShutdown(): Promise<void> {
         const isAppShuttingDown = Services?.startup?.shuttingDown ?? false;
         if (!isAppShuttingDown) {
             const openWindows = Zotero.getMainWindows?.().filter(w => w && !w.closed) ?? [];
-            openWindows.forEach((win) => {
+            for (const win of openWindows) {
+                await cleanupDevTemporaryAnnotations(win as Window);
                 BeaverUIFactory.removeChatPanel(win as Window);
-            });
+            }
         }
 
         // These should already be done in onMainWindowUnload, but just in case

@@ -297,6 +297,7 @@ export const BeaverTemporaryAnnotations = {
         try {
             // Split into database annotations and temporary-only annotations
             const annotationReferences = this._currentAnnotations;
+            const allAnnotationIds = annotationReferences.map(reference => reference.zotero_key);
             
             // Erase database annotations from Zotero
             for (const reference of annotationReferences) {
@@ -309,15 +310,26 @@ export const BeaverTemporaryAnnotations = {
             }
 
             // UI cleanup for all annotations (both database and temporary-only)
-            const reader = readerInstance || (getCurrentReader() as unknown as ZoteroReader);
-            if (reader && reader._internalReader) {
-                const allAnnotationIds = this._currentAnnotations.map(reference => reference.zotero_key);
-                await reader._internalReader.unsetAnnotations(
-                    Components.utils.cloneInto(allAnnotationIds, reader._iframeWindow)
-                );
+            const readers = readerInstance
+                ? [readerInstance]
+                : [
+                    ...(Zotero.Reader as any)?._readers ?? [],
+                    getCurrentReader(),
+                ].filter(Boolean) as ZoteroReader[];
+            const seenReaders = new Set<ZoteroReader>();
+            for (const reader of readers) {
+                if (!reader || seenReaders.has(reader) || !reader._internalReader) continue;
+                seenReaders.add(reader);
+                try {
+                    await reader._internalReader.unsetAnnotations(
+                        Components.utils.cloneInto(allAnnotationIds, reader._iframeWindow)
+                    );
+                } catch (error) {
+                    console.warn('Failed to unset temporary annotations in reader:', error);
+                }
             }
             
-            logger(`BeaverTemporaryAnnotations: Successfully cleaned up ${annotationReferences.length} database annotations`);
+            logger(`BeaverTemporaryAnnotations: Successfully cleaned up ${annotationReferences.length} temporary annotations`);
         } catch (error) {
             console.error('BeaverTemporaryAnnotations: Failed to cleanup temporary annotations:', error);
         }
