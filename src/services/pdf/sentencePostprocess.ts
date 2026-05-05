@@ -30,7 +30,16 @@ import type { SentenceRange } from "./SentenceMapper";
 export type PostProcessStep = (
     ranges: ReadonlyArray<SentenceRange>,
     text: string,
+    context?: PostProcessContext,
 ) => SentenceRange[];
+
+export interface PostProcessContext {
+    /**
+     * Optional source map parallel to `text`. Real PDF chars carry their source
+     * line; synthetic fillers inserted between PDF lines carry `null`.
+     */
+    source?: ReadonlyArray<{ lineIndex: number; charIndex: number } | null>;
+}
 
 /**
  * Run the post-processing pipeline over splitter output.
@@ -41,11 +50,12 @@ export type PostProcessStep = (
 export function applyPostProcessing(
     ranges: ReadonlyArray<SentenceRange>,
     text: string,
+    context?: PostProcessContext,
 ): SentenceRange[] {
     if (ranges.length === 0) return [];
     let current: SentenceRange[] = ranges as SentenceRange[];
     for (const step of POST_PROCESS_STEPS) {
-        current = step(current, text);
+        current = step(current, text, context);
     }
     return current;
 }
@@ -251,10 +261,133 @@ export const splitOnEnumeratedListAfterColon: PostProcessStep = (
 };
 
 // ---------------------------------------------------------------------------
+// Step 3: split a trailing multi-segment numeric subsection label off the
+// preceding range when the next range looks like a heading title
+// ---------------------------------------------------------------------------
+
+/**
+ * Multi-segment numeric label at the end of a range, e.g. ` 4.1.` or ` 1.2.3.`.
+ * Requires the leading whitespace boundary (so we never match a label that
+ * isn't preceded by content) and at least two dot-separated segments. The
+ * single-segment case (`We tried 4.`) is intentionally excluded because it
+ * collides with normal prose ("version 4.", "Step 4.").
+ */
+const TRAILING_NUMERIC_SUBSECTION_RE = /\s\d+(?:\.\d+)+\.?$/;
+
+/**
+ * Heading-like continuation: short, no sentence-final punctuation, and at
+ * least two reasonably long content words that are mostly Title-Cased.
+ *
+ * The Title-Case bias is what filters out `…value 1.5. The new release…`
+ * style false positives — the next clause there is regular prose with at
+ * most one capitalized word.
+ */
+function looksLikeHeadingContinuation(text: string): boolean {
+    const trimmed = text.trim();
+    if (!trimmed || trimmed.length > 200) return false;
+    const lastChar = trimmed[trimmed.length - 1];
+    if (/[.!?]/.test(lastChar)) return false;
+    const words = trimmed.split(/\s+/);
+    if (words.length < 2) return false;
+    const contentWords = words.filter((w) => w.length >= 4);
+    if (contentWords.length < 2) return false;
+    const capitalized = contentWords.filter((w) => /^\p{Lu}/u.test(w)).length;
+    return capitalized >= contentWords.length * 0.5;
+}
+
+function nearestRealSourceBefore(
+    source: NonNullable<PostProcessContext["source"]>,
+    index: number,
+): { lineIndex: number; charIndex: number } | null {
+    for (let i = index - 1; i >= 0; i--) {
+        const entry = source[i];
+        if (entry) return entry;
+    }
+    return null;
+}
+
+function labelStartsOnSeparateLine(
+    text: string,
+    labelStart: number,
+    context?: PostProcessContext,
+): boolean {
+    const source = context?.source;
+    if (source) {
+        const labelSource = source[labelStart];
+        if (!labelSource) return false;
+
+        const separatorSource = source[labelStart - 1];
+        if (separatorSource !== null) return false;
+
+        const previousSource = nearestRealSourceBefore(source, labelStart - 1);
+        return (
+            !!previousSource &&
+            previousSource.lineIndex !== labelSource.lineIndex
+        );
+    }
+
+    return text[labelStart - 1] === "\n" || text[labelStart - 1] === "\r";
+}
+
+/**
+ * When two heading lines end up in the same paragraph (typical when
+ * MuPDF strips font metadata so the paragraph detector can't separate
+ * them) sentencex emits ranges like
+ *   `"4. Discussion 4.1."`, `"Academic Performance in Pennsylvania Schools"`
+ * and `mergeLabelSentences` doesn't fire because the first range isn't a
+ * pure label. Split the trailing label off so the subsequent merge step
+ * binds it to the heading title:
+ *   `"4. Discussion"`, `"4.1."`, `"Academic Performance…"`
+ *   ⇒ `"4. Discussion"`, `"4.1. Academic Performance…"`.
+ *
+ * Conservative guards keep this from firing on normal prose:
+ *   - label must be multi-segment (`X.Y.` or longer)
+ *   - next range must look like a heading continuation (Title-Cased,
+ *     short, no terminal punctuation).
+ */
+export const splitTrailingNumericSubsectionLabel: PostProcessStep = (
+    ranges,
+    text,
+    context,
+) => {
+    const out: SentenceRange[] = [];
+    for (let i = 0; i < ranges.length; i++) {
+        const r = ranges[i];
+        const next = i + 1 < ranges.length ? ranges[i + 1] : null;
+        const segText = text.slice(r.start, r.end);
+        const m = TRAILING_NUMERIC_SUBSECTION_RE.exec(segText);
+        if (
+            !m ||
+            !next ||
+            !looksLikeHeadingContinuation(text.slice(next.start, next.end))
+        ) {
+            out.push(r);
+            continue;
+        }
+        // m.index points at the leading whitespace; the label itself starts
+        // one code unit later. Trim any whitespace off the prefix end.
+        const labelStart = r.start + m.index + 1;
+        if (!labelStartsOnSeparateLine(text, labelStart, context)) {
+            out.push(r);
+            continue;
+        }
+        let prefixEnd = labelStart;
+        while (prefixEnd > r.start && /\s/.test(text[prefixEnd - 1]))
+            prefixEnd--;
+        if (prefixEnd > r.start) {
+            out.push({ start: r.start, end: prefixEnd });
+        }
+        out.push({ start: labelStart, end: r.end });
+    }
+    return out;
+};
+
+// ---------------------------------------------------------------------------
 // Pipeline registration
 // ---------------------------------------------------------------------------
 
 const POST_PROCESS_STEPS: ReadonlyArray<PostProcessStep> = [
+    splitTrailingNumericSubsectionLabel,
     mergeLabelSentences,
     splitOnEnumeratedListAfterColon,
 ];

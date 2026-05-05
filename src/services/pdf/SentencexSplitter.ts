@@ -339,12 +339,12 @@ export async function getSentencexSplitter(
 ): Promise<SentenceSplitter> {
     const mod = await loadSentencexModule();
     const lang = language || "en";
-    return (text: string): SentenceRange[] => {
+    return (text, context): SentenceRange[] => {
         if (!text) return [];
         const boundaries = mod.get_sentence_boundaries(lang, text);
         if (!boundaries || boundaries.length === 0) return [];
         const ranges = sentencexBoundariesToCharRanges(text, boundaries);
-        return applyPostProcessing(ranges, text);
+        return applyPostProcessing(ranges, text, context);
     };
 }
 
@@ -377,9 +377,9 @@ export async function getSentenceSplitterWithFallback(
         // problem is fixed) gets a fresh attempt instead of resolving to
         // the stale failure.
         modulePromise = null;
-        return (text: string): SentenceRange[] => {
+        return (text, context): SentenceRange[] => {
             const ranges = simpleRegexSentenceSplit(text);
-            return applyPostProcessing(ranges, text);
+            return applyPostProcessing(ranges, text, context);
         };
     }
 }

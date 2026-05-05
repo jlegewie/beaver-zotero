@@ -42,7 +42,10 @@ export interface SentenceRange {
  * ranges. Must return half-open intervals `[start, end)` in offset order.
  * Overlapping ranges are not supported.
  */
-export type SentenceSplitter = (text: string) => SentenceRange[];
+export type SentenceSplitter = (
+    text: string,
+    context?: import("./sentencePostprocess").PostProcessContext,
+) => SentenceRange[];
 
 // ---------------------------------------------------------------------------
 // Very simple regex-based splitter (feasibility only)

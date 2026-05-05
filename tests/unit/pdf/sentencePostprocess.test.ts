@@ -14,6 +14,7 @@ import {
     applyPostProcessing,
     mergeLabelSentences,
     splitOnEnumeratedListAfterColon,
+    splitTrailingNumericSubsectionLabel,
 } from "../../../src/services/pdf/sentencePostprocess";
 import type { SentenceRange } from "../../../src/services/pdf/SentenceMapper";
 
@@ -42,6 +43,26 @@ function rangesFromChunks(
 
 function slice(text: string, ranges: SentenceRange[]): string[] {
     return ranges.map((r) => text.slice(r.start, r.end));
+}
+
+function paragraphFromLines(lines: ReadonlyArray<string>): {
+    text: string;
+    source: Array<{ lineIndex: number; charIndex: number } | null>;
+} {
+    const textParts: string[] = [];
+    const source: Array<{ lineIndex: number; charIndex: number } | null> = [];
+    for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+        if (lineIndex > 0) {
+            textParts.push(" ");
+            source.push(null);
+        }
+        const line = lines[lineIndex];
+        for (let charIndex = 0; charIndex < line.length; charIndex++) {
+            textParts.push(line[charIndex]);
+            source.push({ lineIndex, charIndex });
+        }
+    }
+    return { text: textParts.join(""), source };
 }
 
 describe("applyPostProcessing", () => {
@@ -315,5 +336,140 @@ describe("splitOnEnumeratedListAfterColon", () => {
 
     it("returns an empty array for empty input", () => {
         expect(splitOnEnumeratedListAfterColon([], "")).toEqual([]);
+    });
+});
+
+describe("splitTrailingNumericSubsectionLabel", () => {
+    it("splits a trailing '4.1.' off when the next range is a heading title", () => {
+        // Two heading lines collapsed into one paragraph — sentencex
+        // splits at the colon-less period and leaves the label glued to
+        // the previous heading.
+        const { text, source } = paragraphFromLines([
+            "4. Discussion",
+            "4.1.",
+            "Academic Performance in Pennsylvania Schools",
+        ]);
+        const ranges = rangesFromChunks(text, [
+            "4. Discussion 4.1.",
+            "Academic Performance in Pennsylvania Schools",
+        ]);
+        expect(
+            slice(
+                text,
+                splitTrailingNumericSubsectionLabel(ranges, text, { source }),
+            ),
+        ).toEqual([
+            "4. Discussion",
+            "4.1.",
+            "Academic Performance in Pennsylvania Schools",
+        ]);
+    });
+
+    it("integrates with the full pipeline to merge label and title", () => {
+        const { text, source } = paragraphFromLines([
+            "4. Discussion",
+            "4.1.",
+            "Academic Performance in Pennsylvania Schools",
+        ]);
+        const ranges = rangesFromChunks(text, [
+            "4. Discussion 4.1.",
+            "Academic Performance in Pennsylvania Schools",
+        ]);
+        expect(
+            slice(text, applyPostProcessing(ranges, text, { source })),
+        ).toEqual([
+            "4. Discussion",
+            "4.1. Academic Performance in Pennsylvania Schools",
+        ]);
+    });
+
+    it("handles deeper labels like '1.2.3.'", () => {
+        const { text, source } = paragraphFromLines([
+            "Background",
+            "1.2.3.",
+            "Sub Sub Section Title",
+        ]);
+        const ranges = rangesFromChunks(text, [
+            "Background 1.2.3.",
+            "Sub Sub Section Title",
+        ]);
+        expect(
+            slice(
+                text,
+                splitTrailingNumericSubsectionLabel(ranges, text, { source }),
+            ),
+        ).toEqual(["Background", "1.2.3.", "Sub Sub Section Title"]);
+    });
+
+    it("does NOT split same-line prose ending in a decimal before a title-like range", () => {
+        const { text, source } = paragraphFromLines([
+            "The estimated value was 1.5. Robustness Checks",
+        ]);
+        const ranges = rangesFromChunks(text, [
+            "The estimated value was 1.5.",
+            "Robustness Checks",
+        ]);
+        expect(
+            slice(
+                text,
+                splitTrailingNumericSubsectionLabel(ranges, text, { source }),
+            ),
+        ).toEqual(["The estimated value was 1.5.", "Robustness Checks"]);
+    });
+
+    it("does NOT split when the next range ends with a period", () => {
+        // Real prose: "...version 1.5." followed by a normal sentence.
+        const text = "We use version 1.5. The new release adds telemetry.";
+        const ranges = rangesFromChunks(text, [
+            "We use version 1.5.",
+            "The new release adds telemetry.",
+        ]);
+        expect(
+            slice(text, splitTrailingNumericSubsectionLabel(ranges, text)),
+        ).toEqual([
+            "We use version 1.5.",
+            "The new release adds telemetry.",
+        ]);
+    });
+
+    it("does NOT split when the next range is a regular prose continuation", () => {
+        // No terminal punct on next, but the next range isn't Title-Cased.
+        const text =
+            "Then we did test 1.1. After completing the test we moved on";
+        const ranges = rangesFromChunks(text, [
+            "Then we did test 1.1.",
+            "After completing the test we moved on",
+        ]);
+        expect(
+            slice(text, splitTrailingNumericSubsectionLabel(ranges, text)),
+        ).toEqual([
+            "Then we did test 1.1.",
+            "After completing the test we moved on",
+        ]);
+    });
+
+    it("does NOT split a single-segment trailing number ('4.')", () => {
+        // Bare-trailing-numeric is too risky (collides with `version 4.`,
+        // step counters, etc.) — only multi-segment labels are recognized.
+        const text = "Discussion 4. Some Heading Like Words";
+        const ranges = rangesFromChunks(text, [
+            "Discussion 4.",
+            "Some Heading Like Words",
+        ]);
+        expect(
+            slice(text, splitTrailingNumericSubsectionLabel(ranges, text)),
+        ).toEqual(["Discussion 4.", "Some Heading Like Words"]);
+    });
+
+    it("does NOT split when this is the last range (nothing to merge into)", () => {
+        const text = "Conclusion 4.1.";
+        const ranges = rangesFromChunks(text, ["Conclusion 4.1."]);
+        expect(
+            slice(text, splitTrailingNumericSubsectionLabel(ranges, text)),
+        ).toEqual(["Conclusion 4.1."]);
+    });
+
+    it("returns an empty array for empty input", () => {
+        expect(splitTrailingNumericSubsectionLabel([], "")).toEqual([]);
     });
 });

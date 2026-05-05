@@ -440,7 +440,9 @@ function resolveSentencesInParagraph(
         source: paragraphText.source,
         lines: paragraphText.lines,
     };
-    const ranges: SentenceRange[] = splitter(paragraphText.text);
+    const ranges: SentenceRange[] = splitter(paragraphText.text, {
+        source: paragraphText.source,
+    });
     const out: SentenceBBox[] = [];
     for (const range of ranges) {
         const s = sentenceToBoxes(
