@@ -323,20 +323,39 @@ export function buildSentenceOverlayFromResult(
     );
 
     const rects: OverlayRect[] = [];
+    let headingCount = 0;
+    let bodyIdx = 0;
     result.sentences.forEach((sentence, sentenceIdx) => {
         if (sentence.bboxes.length === 0) return;
         const isDegraded = degradedSentenceIndices.has(sentenceIdx);
-        const color = isDegraded
-            ? OVERLAY_COLORS.sentenceDegraded
-            : OVERLAY_COLORS.sentence[sentenceIdx % OVERLAY_COLORS.sentence.length];
+        const isHeading = sentence.kind === "heading";
+
+        // Priority: degraded (gray) > heading (purple) > body (alternating).
+        // Body sentences alternate using their own counter so a heading
+        // sandwiched between two body sentences does not break the
+        // pink/yellow alternation.
+        let color: string;
+        let label: string;
+        if (isDegraded) {
+            color = OVERLAY_COLORS.sentenceDegraded;
+            label = `S${sentenceIdx + 1}`;
+        } else if (isHeading) {
+            headingCount++;
+            color = OVERLAY_COLORS.header;
+            label = `H${headingCount}`;
+        } else {
+            color = OVERLAY_COLORS.sentence[bodyIdx % OVERLAY_COLORS.sentence.length];
+            label = `S${sentenceIdx + 1}`;
+            bodyIdx++;
+        }
 
         sentence.bboxes.forEach((bb, fragIdx) => {
             rects.push({
                 rect: { x: bb.x, y: bb.y, w: bb.w, h: bb.h },
                 color,
-                // Only the first fragment carries the sentence label so the
-                // overlay isn't visually noisy on multi-line sentences.
-                label: fragIdx === 0 ? `S${sentenceIdx + 1}` : undefined,
+                // Only the first fragment carries the label so the overlay
+                // isn't visually noisy on multi-line sentences/headings.
+                label: fragIdx === 0 ? label : undefined,
                 group: sentenceIdx,
                 degraded: isDegraded,
             });
@@ -352,6 +371,7 @@ export function buildSentenceOverlayFromResult(
         rects,
         stats: {
             sentences: result.sentences.length,
+            headings: headingCount,
             paragraphs: result.paragraphs.length,
             degradedParagraphs: result.degradedParagraphs,
             unmappedParagraphs: result.unmappedParagraphs,
