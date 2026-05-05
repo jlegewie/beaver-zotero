@@ -234,6 +234,75 @@ function isMostlyNumeric(text: string, threshold: number = 0.8): boolean {
 }
 
 /**
+ * Check if text is all uppercase.
+ *
+ * Unicode-aware: a letter "counts" as cased only if `toUpper(c) !== toLower(c)`,
+ * so scripts without case (CJK, Arabic, Hebrew) cannot make a line "all caps"
+ * by themselves. Requires at least `minLetters` cased letters to avoid false
+ * positives on short tokens like "USA" or "I".
+ */
+function isAllCapsText(text: string, minLetters: number = 3): boolean {
+    const letters = text.match(/\p{L}/gu) || [];
+    let cased = 0;
+    for (const c of letters) {
+        if (c.toLowerCase() === c.toUpperCase()) continue; // uncased script
+        cased++;
+        if (c !== c.toUpperCase()) return false;
+    }
+    return cased >= minLetters;
+}
+
+/**
+ * Stricter all-caps check used to gate the same-size-different-font header
+ * rule. Requires multi-word phrasing so isolated all-caps tokens like
+ * figure/chart labels ("MALARIA", "IBS", "UMAP3", "MSC1 MSC3 MSC13 MSC14",
+ * "VIII") don't get promoted to headers — those have ≤ 1 pure-letter word.
+ *
+ * Heuristic: needs ≥ 2 whitespace-separated tokens that are pure letters
+ * (no digits, no symbols), each at least 2 letters long, and all letters
+ * are uppercase by `isAllCapsText`'s definition.
+ */
+function isAllCapsHeaderPhrase(text: string): boolean {
+    if (!isAllCapsText(text)) return false;
+    const tokens = text.split(/\s+/).filter(t => t.length > 0);
+    let pureLetterTokens = 0;
+    for (const tok of tokens) {
+        if (tok.length < 2) continue;
+        if (!/^\p{L}+$/u.test(tok)) continue;
+        pureLetterTokens++;
+    }
+    return pureLetterTokens >= 2;
+}
+
+/**
+ * Decide whether the body text on this page is itself all-caps. Sampled from
+ * lines that match a known body style. Used to gate the all-caps header
+ * rule — without this, an all-caps document would promote every line.
+ *
+ * Conservative threshold: at least 5 body-style sample lines AND ≥80% of
+ * them must be all-caps. Returns false if the sample is too small (we'd
+ * rather miss the gate on a thin page than falsely disable the rule).
+ */
+function computeBodyAllCaps(
+    columnResults: ColumnLineResult[],
+    bodyStyles: TextStyle[] | null
+): boolean {
+    if (!bodyStyles || bodyStyles.length === 0) return false;
+    let total = 0;
+    let allCaps = 0;
+    for (const col of columnResults) {
+        for (const line of col.lines) {
+            const style = extractLineStyle(line);
+            if (!style || !matchesBodyStyle(style, bodyStyles)) continue;
+            total++;
+            if (isAllCapsText(line.text.trim())) allCaps++;
+        }
+    }
+    if (total < 5) return false;
+    return allCaps / total >= 0.8;
+}
+
+/**
  * Join lines with optional hyphenation removal
  */
 function joinLines(lines: string[], removeHyphenation: boolean = true): string {
@@ -448,7 +517,8 @@ function isHeaderStyle(
     line: PageLine,
     bodyStyles: TextStyle[] | null,
     settings: Required<ParagraphDetectionSettings>,
-    precededByGap: boolean | null = null
+    precededByGap: boolean | null = null,
+    bodyAllCaps: boolean = false
 ): boolean {
     if (!bodyStyles || bodyStyles.length === 0) return false;
 
@@ -510,10 +580,29 @@ function isHeaderStyle(
         isPotentialHeader = true;
     }
 
+    const text = line.text.trim();
+
+    // Rule 5: Same-or-smaller size, all-caps phrase, different font (requires
+    // gap). Catches all-caps headers in display fonts that report
+    // `weight: 'normal'` — e.g. "THE MALIGNANCY OF SOCIAL FRONTIERS" set in a
+    // separate heading face that MuPDF doesn't flag as bold. Requires a
+    // multi-word phrase so isolated all-caps labels in figures/charts
+    // ("MALARIA", "UMAP3", "IBS", "VIII") aren't promoted. Skipped when the
+    // body itself is all-caps (document-wide rendering, not a heading signal).
+    if (
+        !isPotentialHeader &&
+        gapCheckPasses &&
+        !bodyAllCaps &&
+        lineStyle.size <= primaryBodyStyle.size + 0.5 &&
+        lineStyle.font !== primaryBodyStyle.font &&
+        isAllCapsHeaderPhrase(text)
+    ) {
+        isPotentialHeader = true;
+    }
+
     if (!isPotentialHeader) return false;
 
     // Apply disqualifying heuristics
-    const text = line.text.trim();
 
     // Check for figure/table labels
     const prefixLabelRe =
@@ -554,7 +643,8 @@ function startNewItem(
     columnThresholds: ColumnThresholds,
     pageThresholds: PageThresholds,
     bodyStyles: TextStyle[] | null,
-    settings: Required<ParagraphDetectionSettings>
+    settings: Required<ParagraphDetectionSettings>,
+    bodyAllCaps: boolean = false
 ): boolean {
     if (i === 0) return true;
     if (!prevLine) return true;
@@ -573,9 +663,9 @@ function startNewItem(
     // for the second line returns false (rules 2/3/4 require gap), the
     // two lines merge into one paragraph, and the subsection title is
     // lost as a distinct heading.
-    const prevIsLocalHeader = isHeaderStyle(prevLine, bodyStyles, settings);
+    const prevIsLocalHeader = isHeaderStyle(prevLine, bodyStyles, settings, null, bodyAllCaps);
     const headerGapPasses = gapBreak || prevIsLocalHeader;
-    const isLocalHeader = isHeaderStyle(line, bodyStyles, settings, headerGapPasses);
+    const isLocalHeader = isHeaderStyle(line, bodyStyles, settings, headerGapPasses, bodyAllCaps);
 
     if (isLocalHeader && !prevIsLocalHeader) {
         return true; // Header after non-header
@@ -638,14 +728,15 @@ function processCurrentLinesAsItem(
     columnIndex: number,
     pageIndex: number,
     bodyStyles: TextStyle[] | null,
-    settings: Required<ParagraphDetectionSettings>
+    settings: Required<ParagraphDetectionSettings>,
+    bodyAllCaps: boolean = false
 ): {
     pageContent: string;
     item: ContentItem;
 } {
     // a. Check if all lines are headers
     const isPotentialHeader = currentLines.every(l =>
-        isHeaderStyle(l, bodyStyles, settings)
+        isHeaderStyle(l, bodyStyles, settings, null, bodyAllCaps)
     );
 
     // b. Build text content
@@ -707,7 +798,8 @@ function processColumnLines(
     bodyStyles: TextStyle[] | null,
     settings: Required<ParagraphDetectionSettings>,
     itemCounters: ItemCounters,
-    initialPageContent: string
+    initialPageContent: string,
+    bodyAllCaps: boolean = false
 ): {
     pageContent: string;
     items: ContentItem[];
@@ -736,7 +828,8 @@ function processColumnLines(
                 columnThresholds,
                 pageThresholds,
                 bodyStyles,
-                settings
+                settings,
+                bodyAllCaps
             );
 
         if (shouldStartNew) {
@@ -750,7 +843,8 @@ function processColumnLines(
                     columnIndex,
                     pageIndex,
                     bodyStyles,
-                    settings
+                    settings,
+                    bodyAllCaps
                 );
 
                 pageContent = result.pageContent;
@@ -781,7 +875,8 @@ function processColumnLines(
             columnIndex,
             pageIndex,
             bodyStyles,
-            settings
+            settings,
+            bodyAllCaps
         );
 
         pageContent = result.pageContent;
@@ -836,6 +931,11 @@ export function detectParagraphs(
     // Step 1: Calculate page-wide thresholds
     const pageThresholds = calculatePageThresholds(lineResult.columnResults, opts);
 
+    // Sample body-styled lines to decide whether body text is itself
+    // all-caps. Used to gate the all-caps header rule so all-caps
+    // documents don't promote every line to a header.
+    const bodyAllCaps = computeBodyAllCaps(lineResult.columnResults, bodyStyles);
+
     let pageContent = "";
     const allItems: ContentItem[] = [];
     const allItemLines: PageLine[][] = [];
@@ -863,7 +963,8 @@ export function detectParagraphs(
             bodyStyles,
             opts,
             itemCounters,
-            pageContent
+            pageContent,
+            bodyAllCaps
         );
 
         pageContent = result.pageContent;
