@@ -41,6 +41,8 @@ interface FixtureSentenceExpected {
     kind: "text" | "heading";
     text: string;
     bboxes: Array<{ x: number; y: number; w: number; h: number }>;
+    /** Producer continuation hint. Omitted ≡ false; never serialized as false. */
+    joinWithNext?: boolean;
 }
 
 interface FixtureExpected {
@@ -298,13 +300,18 @@ function buildExpectedFromResult(
     });
 
     const sentences: FixtureSentenceExpected[] = result.sentences.map(
-        (s: SentenceBBox, idx) => ({
-            index: idx,
-            paragraphIndex: paragraphIndexBySentence[idx] ?? -1,
-            kind: s.kind ?? "text",
-            text: s.text,
-            bboxes: s.bboxes.map(roundBBox),
-        }),
+        (s: SentenceBBox, idx) => {
+            const out: FixtureSentenceExpected = {
+                index: idx,
+                paragraphIndex: paragraphIndexBySentence[idx] ?? -1,
+                kind: s.kind ?? "text",
+                text: s.text,
+                bboxes: s.bboxes.map(roundBBox),
+            };
+            // Only serialize joinWithNext when true. Omitted ≡ false.
+            if (s.joinWithNext) out.joinWithNext = true;
+            return out;
+        },
     );
 
     return {

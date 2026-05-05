@@ -1259,6 +1259,9 @@ export async function handleTestPdfPipelineTraceHttpRequest(request: any) {
         idx: number;
         text: string;
         paragraphId: string | null;
+        paragraphIndex: number;
+        sentenceIndex: number;
+        joinWithNext?: boolean;
         bboxes: Array<{ x: number; y: number; w: number; h: number }>;
         degraded: boolean;
     }> = [];
@@ -1270,10 +1273,12 @@ export async function handleTestPdfPipelineTraceHttpRequest(request: any) {
                 isDegradedItem &&
                 pws.sentences.length === 1 &&
                 pws.sentences[0].text === pws.item.text;
-            sentencesOut.push({
+            const entry: typeof sentencesOut[number] = {
                 idx: flatSentenceIdx++,
                 text: sentence.text,
                 paragraphId: pws.item.id ?? null,
+                paragraphIndex: sentence.paragraphIndex,
+                sentenceIndex: sentence.sentenceIndex,
                 bboxes: sentence.bboxes.map((b) => ({
                     x: b.x,
                     y: b.y,
@@ -1281,7 +1286,12 @@ export async function handleTestPdfPipelineTraceHttpRequest(request: any) {
                     h: b.h,
                 })),
                 degraded: isFallback,
-            });
+            };
+            // Only emit when truthy. Omitted ≡ false.
+            if (sentence.joinWithNext) {
+                entry.joinWithNext = true;
+            }
+            sentencesOut.push(entry);
         }
     });
 
