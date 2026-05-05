@@ -214,6 +214,12 @@ export interface SentenceBBox {
         text: string;
         bbox: RawBBox;
     }>;
+    /**
+     * Source paragraph kind. Absent ≡ "text". "heading" sentences come from
+     * paragraphs the detector classified as headers; they are never split,
+     * so one heading paragraph always produces exactly one SentenceBBox.
+     */
+    kind?: "text" | "heading";
 }
 
 /**

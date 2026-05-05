@@ -358,6 +358,7 @@ export async function visualizeCurrentPageSentences(): Promise<{
     success: boolean;
     message: string;
     sentences?: number;
+    headings?: number;
     paragraphs?: number;
     degradedParagraphs?: number;
     unmappedParagraphs?: number;
@@ -425,18 +426,21 @@ export async function visualizeCurrentPageSentences(): Promise<{
         BeaverTemporaryAnnotations.addToTracking(refs);
 
         const sentences = Number(overlay.stats.sentences ?? 0);
+        const headings = Number(overlay.stats.headings ?? 0);
         const paragraphs = Number(overlay.stats.paragraphs ?? 0);
         const degraded = Number(overlay.stats.degradedParagraphs ?? 0);
         const unmapped = Number(overlay.stats.unmappedParagraphs ?? 0);
         const tail = degraded > 0 || unmapped > 0
             ? ` (degraded: ${degraded}, unmapped: ${unmapped})`
             : "";
-        const message = `Page ${pageIndex + 1}: ${sentences} sentences in ${paragraphs} paragraphs${tail}`;
+        const headingTail = headings > 0 ? ` (${headings} heading${headings === 1 ? "" : "s"})` : "";
+        const message = `Page ${pageIndex + 1}: ${sentences} sentences${headingTail} in ${paragraphs} paragraphs${tail}`;
         logger(`[Visualizer] ${message}`);
         return {
             success: true,
             message,
             sentences,
+            headings,
             paragraphs,
             degradedParagraphs: degraded,
             unmappedParagraphs: unmapped,

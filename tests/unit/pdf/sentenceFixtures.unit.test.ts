@@ -142,7 +142,11 @@ function makeReplaySplitter(
 
 interface ActualLikeResult {
     paragraphs: Array<{ sentences: Array<{ text: string; bboxes: any[] }> }>;
-    sentences: Array<{ text: string; bboxes: any[] }>;
+    sentences: Array<{
+        text: string;
+        bboxes: any[];
+        kind?: 'text' | 'heading';
+    }>;
     degradedParagraphs: number;
     unmappedParagraphs: number;
 }
@@ -179,6 +183,7 @@ function buildExpectedFromActual(
         sentences: actual.sentences.map((s, idx) => ({
             index: idx,
             paragraphIndex: paragraphIndexBySentence[idx] ?? -1,
+            kind: (s.kind ?? 'text') as 'text' | 'heading',
             text: s.text,
             bboxes: s.bboxes.map((b: any) => ({
                 x: round3(b.x),

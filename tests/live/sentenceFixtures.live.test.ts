@@ -81,6 +81,7 @@ describe('sentence-extraction fixtures (live)', () => {
 function normalizeLiveResult(result: any): ActualSentenceResult {
     const sentences = (result?.sentences ?? []).map((s: any) => ({
         text: String(s.text ?? ''),
+        kind: (s.kind === 'heading' ? 'heading' : 'text') as 'text' | 'heading',
         bboxes: (s.bboxes ?? []).map((b: any): FixtureBBox => ({
             x: Number(b.x),
             y: Number(b.y),
