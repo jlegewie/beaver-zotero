@@ -92,6 +92,13 @@ export interface OverlayRect {
     /** Optional short label drawn near the rect (group label only). */
     label?: string;
     /**
+     * Optional long-form text used as the annotation comment in the live
+     * Zotero reader visualizer. Distinct from `label` (which is rendered on
+     * the overlay PNG and kept short) so we can stash sentence text + address
+     * info on the annotation without cluttering the headless overlay image.
+     */
+    annotationText?: string;
+    /**
      * Group index — multiple rects with the same group form one logical
      * highlight (e.g. a sentence that wraps across two lines). Sequential
      * within a level, starting at 0.
@@ -359,6 +366,10 @@ export function buildSentenceOverlayFromResult(
             label = `${label}↪`;
         }
 
+        const annotationText =
+            `page ${result.pageIndex + 1}, para ${sentence.paragraphIndex + 1}, s${sentence.sentenceIndex + 1}\n` +
+            sentence.text;
+
         sentence.bboxes.forEach((bb, fragIdx) => {
             rects.push({
                 rect: { x: bb.x, y: bb.y, w: bb.w, h: bb.h },
@@ -366,6 +377,7 @@ export function buildSentenceOverlayFromResult(
                 // Only the first fragment carries the label so the overlay
                 // isn't visually noisy on multi-line sentences/headings.
                 label: fragIdx === 0 ? label : undefined,
+                annotationText: fragIdx === 0 ? annotationText : undefined,
                 group: sentenceIdx,
                 degraded: isDegraded,
             });

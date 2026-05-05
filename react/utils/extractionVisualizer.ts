@@ -144,6 +144,10 @@ async function pushOverlayToReader(
         // Pull a comment-friendly label out of the head rect; fall back to
         // the level name when none was set (shouldn't happen).
         const label = head.label ?? `${overlay.level} ${groupIdx + 1}`;
+        // Sentence overlays attach a richer comment (address + full text) so
+        // hovering the annotation surfaces the sentence body; other levels
+        // fall back to the short label.
+        const comment = head.annotationText ?? label;
 
         const tempAnnotation = {
             id: tempId,
@@ -154,7 +158,7 @@ async function pushOverlayToReader(
             sortIndex,
             position: { pageIndex, rects: zoteroRects },
             tags: [],
-            comment: label,
+            comment,
             text: label,
             authorName: "Beaver Visualizer",
             pageLabel: (pageIndex + 1).toString(),
@@ -165,7 +169,7 @@ async function pushOverlayToReader(
             annotationType: "highlight",
             annotationAuthorName: "Beaver Visualizer",
             annotationText: label,
-            annotationComment: label,
+            annotationComment: comment,
             annotationColor: head.color,
             annotationPageLabel: (pageIndex + 1).toString(),
             annotationSortIndex: sortIndex,
