@@ -253,6 +253,27 @@ function isAllCapsText(text: string, minLetters: number = 3): boolean {
 }
 
 /**
+ * Author-list shape detector. Bold subset fonts on cover pages frequently
+ * encode the author block in the same `.B` face used for section titles, so
+ * structural rules alone (same size, bold, gap, different font, < 200 chars)
+ * can't tell them apart. Author lists, though, almost always carry one of
+ * two distinctive token shapes that real section headings don't:
+ *
+ *   - 2+ dagger/double-dagger/section/pilcrow markers (typically corresponding-
+ *     author and equal-contribution flags). Single markers can appear in
+ *     normal text, so threshold is 2.
+ *   - 3+ "≥3-letter word immediately followed by digits" patterns
+ *     (e.g. `Dogga1, Cudini1, Farr1, Dara3`). Threshold is 3 so genetics
+ *     headings like "BRCA1 and BRCA2" (2 hits) stay clean.
+ */
+function looksLikeAuthorList(text: string): boolean {
+    const markers = (text.match(/[†‡§¶]/gu) || []).length;
+    if (markers >= 2) return true;
+    const namePlusDigit = (text.match(/\p{L}{3,}\d+(?=[,\s\)*†‡§¶]|$)/gu) || []).length;
+    return namePlusDigit >= 3;
+}
+
+/**
  * Stricter all-caps check used to gate the same-size-different-font header
  * rule. Requires multi-word phrasing so isolated all-caps tokens like
  * figure/chart labels ("MALARIA", "IBS", "UMAP3", "MSC1 MSC3 MSC13 MSC14",
@@ -327,19 +348,40 @@ function joinLines(lines: string[], removeHyphenation: boolean = true): string {
 /**
  * Extract TextStyle from a PageLine
  */
+// Subset font names often encode weight/style as a suffix that the substring
+// checks miss — e.g. `AJHJCE+AdvTT56ea2c23.B` (bold), `BPEJCI+AdvTTa15c7c65.I`
+// (italic), `XXX.BI` / `.IB` (bold-italic). Match these explicitly.
+const BOLD_SUFFIX_RE = /\.(B|Bd|Bld|Bold|Black|Heavy|BI|IB)$/i;
+const ITALIC_SUFFIX_RE = /\.(I|It|Italic|Obl|Oblique|BI|IB)$/i;
+
+function extractSpanStyle(
+    fontName: string,
+    fontWeight: string | undefined,
+    fontStyle: string | undefined,
+    size: number | undefined
+): TextStyle {
+    const lower = fontName.toLowerCase();
+    return {
+        size: Math.round(size || 12),
+        font: fontName,
+        bold: fontWeight === "bold" ||
+              lower.includes("bold") ||
+              BOLD_SUFFIX_RE.test(fontName),
+        italic: fontStyle === "italic" ||
+                lower.includes("italic") ||
+                ITALIC_SUFFIX_RE.test(fontName),
+    };
+}
+
 function extractLineStyle(line: PageLine): TextStyle | null {
     if (line.spans.length === 0) return null;
-
-    // Use the first span's style as representative
     const firstSpan = line.spans[0];
-    return {
-        size: Math.round(firstSpan.size || 12),
-        font: firstSpan.fontName || "unknown",
-        bold: firstSpan.fontWeight === "bold" || 
-              (firstSpan.fontName || "").toLowerCase().includes("bold"),
-        italic: firstSpan.fontStyle === "italic" ||
-                (firstSpan.fontName || "").toLowerCase().includes("italic"),
-    };
+    return extractSpanStyle(
+        firstSpan.fontName || "unknown",
+        firstSpan.fontWeight,
+        firstSpan.fontStyle,
+        firstSpan.size
+    );
 }
 
 /**
@@ -384,14 +426,12 @@ function getStyleDominance(line: PageLine, style: TextStyle): number {
     if (line.spans.length === 0) return 0;
 
     const matchingSpans = line.spans.filter(s => {
-        const spanStyle: TextStyle = {
-            size: Math.round(s.size || 12),
-            font: s.fontName || "unknown",
-            bold: s.fontWeight === "bold" ||
-                  (s.fontName || "").toLowerCase().includes("bold"),
-            italic: s.fontStyle === "italic" ||
-                    (s.fontName || "").toLowerCase().includes("italic"),
-        };
+        const spanStyle = extractSpanStyle(
+            s.fontName || "unknown",
+            s.fontWeight,
+            s.fontStyle,
+            s.size
+        );
         return stylesEqual(spanStyle, style);
     });
 
@@ -611,6 +651,13 @@ function isHeaderStyle(
     if (!isPotentialHeader) return false;
 
     // Apply disqualifying heuristics
+
+    // Author block on a paper's cover page commonly uses the same bold-encoded
+    // subset font as section titles. Use the merged `phraseText` so multi-line
+    // author lists are evaluated as a whole.
+    if (looksLikeAuthorList(phraseText)) {
+        return false;
+    }
 
     // Check for figure/table labels
     const prefixLabelRe =

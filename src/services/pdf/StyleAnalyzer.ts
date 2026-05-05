@@ -43,15 +43,22 @@ function extractStyle(line: RawLine): TextStyle {
     const fontName = font.name || "unknown";
     const fontNameLower = fontName.toLowerCase();
 
-    // Check font weight and style properties
+    // Subset font names often encode weight/style as a suffix that substring
+    // checks miss — e.g. `AJHJCE+AdvTT56ea2c23.B` (bold),
+    // `BPEJCI+AdvTTa15c7c65.I` (italic), `XXX.BI`/`.IB` (bold-italic).
+    const boldSuffix = /\.(B|Bd|Bld|Bold|Black|Heavy|BI|IB)$/i;
+    const italicSuffix = /\.(I|It|Italic|Obl|Oblique|BI|IB)$/i;
+
     const isBold = font.weight === "bold" ||
         fontNameLower.includes("bold") ||
         fontNameLower.includes("black") ||
-        fontNameLower.includes("heavy");
+        fontNameLower.includes("heavy") ||
+        boldSuffix.test(fontName);
 
     const isItalic = font.style === "italic" ||
         fontNameLower.includes("italic") ||
-        fontNameLower.includes("oblique");
+        fontNameLower.includes("oblique") ||
+        italicSuffix.test(fontName);
 
     return {
         size: Math.round(font.size || 12),
