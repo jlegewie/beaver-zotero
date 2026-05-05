@@ -270,18 +270,20 @@ function lineMedianCharHeight(line: RawLineDetailed): number {
  * - The invariant `line.text.length === line.chars.length` is checked
  *   loudly; a violation throws.
  *
- * Superscript footnote markers immediately following a sentence-ending
- * punctuation (e.g. the "11" in "factor.11 The") are replaced with a
- * single inter-word space. Without this, the splitter sees `.1` and
- * keeps both clauses in one sentence; with it, the splitter sees `. ` and
- * recovers the boundary. The footnote chars contribute no source entry,
- * so they drop out of bbox mapping cleanly.
+ * Superscript footnote markers following a sentence-ending punctuation
+ * (e.g. the "11" in "factor.11 The") are replaced with a single
+ * inter-word space. Without this the splitter sees `.1` and keeps both
+ * clauses in one sentence; with it the splitter sees `. ` and recovers
+ * the boundary. The footnote chars contribute no source entry, so they
+ * drop out of bbox mapping cleanly.
  */
 export function buildParagraphText(
     lines: RawLineDetailed[],
 ): ParagraphText {
     const textParts: string[] = [];
     const source: ParagraphText["source"] = [];
+    let lastEmittedNonWhitespaceRealChar: string | null = null;
+    let inFootnoteRun = false;
     for (let li = 0; li < lines.length; li++) {
         const line = lines[li];
         if (line.text.length !== line.chars.length) {
@@ -293,8 +295,6 @@ export function buildParagraphText(
         const median = lineMedianCharHeight(line);
         const superscriptThreshold =
             median > 0 ? median * SUPERSCRIPT_HEIGHT_RATIO : 0;
-        let lastEmittedRealChar: string | null = null;
-        let inFootnoteRun = false;
         for (let ci = 0; ci < line.chars.length; ci++) {
             const ch = line.chars[ci];
             const isSmall =
@@ -306,8 +306,8 @@ export function buildParagraphText(
             if (
                 isFootnoteMarker &&
                 (inFootnoteRun ||
-                    (lastEmittedRealChar !== null &&
-                        SENTENCE_END_PUNCT.has(lastEmittedRealChar)))
+                    (lastEmittedNonWhitespaceRealChar !== null &&
+                        SENTENCE_END_PUNCT.has(lastEmittedNonWhitespaceRealChar)))
             ) {
                 if (!inFootnoteRun) {
                     textParts.push(" ");
@@ -317,7 +317,9 @@ export function buildParagraphText(
                 continue;
             }
             inFootnoteRun = false;
-            lastEmittedRealChar = ch.c;
+            if (!/\s/.test(ch.c)) {
+                lastEmittedNonWhitespaceRealChar = ch.c;
+            }
             textParts.push(ch.c);
             source.push({ lineIndex: li, charIndex: ci });
         }

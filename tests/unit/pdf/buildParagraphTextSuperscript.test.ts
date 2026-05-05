@@ -14,11 +14,17 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { buildParagraphText } from "../../../src/services/pdf/ParagraphSentenceMapper";
+import {
+    buildParagraphText,
+    extractPageSentenceBBoxes,
+} from "../../../src/services/pdf/ParagraphSentenceMapper";
+import { simpleRegexSentenceSplit } from "../../../src/services/pdf/SentenceMapper";
 import type {
     QuadPoint,
+    RawBlockDetailed,
     RawChar,
     RawLineDetailed,
+    RawPageDataDetailed,
 } from "../../../src/services/pdf/types";
 
 function makeLine(text: string, yTop: number, xStart = 50): RawLineDetailed {
@@ -53,6 +59,50 @@ function shrinkChars(line: RawLineDetailed, indices: number[], ratio = 0.65) {
     for (const idx of indices) {
         const ch = line.chars[idx];
         ch.bbox = { ...ch.bbox, h: ch.bbox.h * ratio };
+    }
+}
+
+function makePage(lines: RawLineDetailed[]): RawPageDataDetailed {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const l of lines) {
+        if (l.bbox.x < minX) minX = l.bbox.x;
+        if (l.bbox.y < minY) minY = l.bbox.y;
+        if (l.bbox.x + l.bbox.w > maxX) maxX = l.bbox.x + l.bbox.w;
+        if (l.bbox.y + l.bbox.h > maxY) maxY = l.bbox.y + l.bbox.h;
+    }
+    const block: RawBlockDetailed = {
+        type: "text",
+        bbox: { x: minX, y: minY, w: maxX - minX, h: maxY - minY },
+        lines,
+    };
+    return {
+        pageIndex: 0,
+        pageNumber: 1,
+        width: maxX + 50,
+        height: maxY + 50,
+        blocks: [block],
+    };
+}
+
+/**
+ * Walk the source map and assert that no entry references the given
+ * (line, charIndex) — i.e. the marker char was dropped, not just hidden.
+ * Compares by referential identity of `pt.lines[entry.lineIndex]`
+ * against the supplied line so multi-line paragraphs work.
+ */
+function assertNoSourceForChar(
+    pt: ReturnType<typeof buildParagraphText>,
+    line: RawLineDetailed,
+    charIndex: number,
+) {
+    for (const entry of pt.source) {
+        if (entry === null) continue;
+        if (pt.lines[entry.lineIndex] === line && entry.charIndex === charIndex) {
+            throw new Error(
+                `expected no source entry for charIndex=${charIndex} ` +
+                `(char='${line.chars[charIndex].c}'), but found one`,
+            );
+        }
     }
 }
 
@@ -128,5 +178,152 @@ describe("buildParagraphText superscript-footnote collapse", () => {
         shrinkChars(line, [7, 8, 9]);
         const pt = buildParagraphText([line]);
         expect(pt.text).toBe("factor.  The");
+    });
+});
+
+describe("buildParagraphText whitespace-tolerant precondition", () => {
+    it("collapses a same-line marker run separated from the period by a space", () => {
+        // "factor. 11 The" — period + real space + footnote. Without the
+        // whitespace-tolerant tracker, lastReal would be ' ' and the
+        // collapse would fail. Expected: period + original space +
+        // collapsed-run space + real space after "11" = three spaces.
+        const line = makeLine("factor. 11 The", 100);
+        shrinkChars(line, [8, 9]);
+        const pt = buildParagraphText([line]);
+        expect(pt.text).toBe("factor.   The");
+        expect(pt.source.length).toBe(pt.text.length);
+        assertNoSourceForChar(pt, line, 8);
+        assertNoSourceForChar(pt, line, 9);
+    });
+
+    it("collapses a marker run at the start of the next line (no trailing space on line N)", () => {
+        // line N = "factor.", line N+1 = "11 The"
+        // → "factor." + interline-filler " " + collapsed " " + real " " after 11 + "The"
+        const lineA = makeLine("factor.", 100);
+        const lineB = makeLine("11 The", 115);
+        shrinkChars(lineB, [0, 1]);
+        const pt = buildParagraphText([lineA, lineB]);
+        expect(pt.text).toBe("factor.   The");
+        expect(pt.source.length).toBe(pt.text.length);
+        assertNoSourceForChar(pt, lineB, 0);
+        assertNoSourceForChar(pt, lineB, 1);
+    });
+
+    it("collapses a marker run at the start of the next line when line N has trailing whitespace", () => {
+        // line N = "factor. " (trailing space), line N+1 = "11 The"
+        // → real trailing space + interline filler + collapsed-run + real space after 11 = 4 spaces
+        const lineA = makeLine("factor. ", 100);
+        const lineB = makeLine("11 The", 115);
+        shrinkChars(lineB, [0, 1]);
+        const pt = buildParagraphText([lineA, lineB]);
+        expect(pt.text).toBe("factor.    The");
+        expect(pt.source.length).toBe(pt.text.length);
+        assertNoSourceForChar(pt, lineB, 0);
+        assertNoSourceForChar(pt, lineB, 1);
+    });
+
+    it("collapses a marker run that ends a line (run + line break + body)", () => {
+        // line N = "factor.11", line N+1 = "The"
+        // → "factor." + collapsed-run " " + interline-filler " " + "The" = two spaces
+        const lineA = makeLine("factor.11", 100);
+        shrinkChars(lineA, [7, 8]);
+        const lineB = makeLine("The", 115);
+        const pt = buildParagraphText([lineA, lineB]);
+        expect(pt.text).toBe("factor.  The");
+        expect(pt.source.length).toBe(pt.text.length);
+        assertNoSourceForChar(pt, lineA, 7);
+        assertNoSourceForChar(pt, lineA, 8);
+    });
+
+    it("collapses a load-bearing marker but preserves a mid-sentence marker on the same line", () => {
+        // "factor.11 The. Smith2 et al."
+        //  indices: 0..6=factor., 7,8="11", 9=' ', 10..12="The", 13='.', 14=' ',
+        //           15..19="Smith", 20='2', 21..=" et al."
+        const line = makeLine("factor.11 The. Smith2 et al.", 100);
+        shrinkChars(line, [7, 8]); // load-bearing footnote
+        shrinkChars(line, [20]);   // mid-sentence superscript ("Smith2")
+        const pt = buildParagraphText([line]);
+        // "factor."  + collapsed " " + " The. Smith2 et al."
+        expect(pt.text).toBe("factor.  The. Smith2 et al.");
+        // The "1"s have no source entries.
+        assertNoSourceForChar(pt, line, 7);
+        assertNoSourceForChar(pt, line, 8);
+        // The "2" still has a source entry — it is preserved.
+        const sourceFor20 = pt.source.find(
+            (e) => e !== null && e.lineIndex === 0 && e.charIndex === 20,
+        );
+        expect(sourceFor20).toBeDefined();
+    });
+
+    it("preserves mid-sentence markers across a line break when another marker is load-bearing", () => {
+        // line N = "factor.11 The factor.", line N+1 = "Smith2 et al found."
+        const lineA = makeLine("factor.11 The factor.", 100);
+        shrinkChars(lineA, [7, 8]);
+        const lineB = makeLine("Smith2 et al found.", 115);
+        shrinkChars(lineB, [5]);
+        const pt = buildParagraphText([lineA, lineB]);
+        expect(pt.text).toBe(
+            "factor.  The factor. Smith2 et al found.",
+        );
+        // load-bearing markers dropped
+        assertNoSourceForChar(pt, lineA, 7);
+        assertNoSourceForChar(pt, lineA, 8);
+        // mid-sentence "2" preserved (preceding non-WS real char is 'h')
+        const sourceFor5OnB = pt.source.find(
+            (e) =>
+                e !== null &&
+                pt.lines[e.lineIndex] === lineB &&
+                e.charIndex === 5,
+        );
+        expect(sourceFor5OnB).toBeDefined();
+    });
+});
+
+describe("end-to-end: cross-line marker is absent from final SentenceBBox", () => {
+    it("splits at the line break and excludes the marker chars from sentence text + bboxes", () => {
+        // Synthetic single-paragraph page. Two lines with a small vertical
+        // gap so the paragraph detector groups them. Line N ends with a
+        // period, line N+1 starts with a superscript footnote, then "The".
+        const xStart = 50;
+        const lineA = makeLine("belong to the same factor.", 100, xStart);
+        // Line B: small "11" then space then "The factor score"
+        const lineB = makeLine("11 The factor score", 113, xStart);
+        shrinkChars(lineB, [0, 1]);
+        // 'T' is at lineB.chars[3] (after "11 "). Capture its expected x.
+        const expectedTx = lineB.chars[3].bbox.x;
+        const page = makePage([lineA, lineB]);
+
+        const result = extractPageSentenceBBoxes(page, {
+            splitter: simpleRegexSentenceSplit,
+        });
+
+        // Pipeline did not degrade.
+        expect(result.degradedParagraphs).toBe(0);
+        expect(result.unmappedParagraphs).toBe(0);
+
+        // We expect at least two sentences. The relevant ones are the
+        // first ending at "factor." and the next starting with "The".
+        const sentences = result.sentences;
+        expect(sentences.length).toBeGreaterThanOrEqual(2);
+
+        const first = sentences.find((s) => s.text.includes("factor."));
+        expect(first).toBeDefined();
+        expect(first!.text).not.toContain("1");
+        for (const f of first!.fragments ?? []) {
+            expect(f.text).not.toContain("1");
+        }
+
+        const second = sentences.find(
+            (s) => s !== first && s.text.includes("The factor score"),
+        );
+        expect(second).toBeDefined();
+        expect(second!.text).not.toContain("1");
+        for (const f of second!.fragments ?? []) {
+            expect(f.text).not.toContain("1");
+        }
+        // The second sentence's first fragment bbox should start at the
+        // 'T' x-coordinate, not at the smaller '1' x-coordinate. This
+        // pins the bbox-exclusion claim via the synthetic geometry.
+        expect(second!.fragments![0].bbox.x).toBeCloseTo(expectedTx, 5);
     });
 });
