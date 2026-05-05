@@ -36,9 +36,26 @@ import {
     // Notes
     handleReadNoteRequest,
 } from '../../src/services/agentDataProvider';
-import { wrapWithSchemaVersion } from '../utils/noteActions';
-import { undoEditNoteAction } from '../utils/editNoteActions';
-import { getLatestNoteHtml } from '../../src/utils/noteEditorIO';
+import {
+    handleTestPingHttpRequest,
+    handleTestCacheMetadataHttpRequest,
+    handleTestCacheInvalidateHttpRequest,
+    handleTestCacheClearMemoryHttpRequest,
+    handleTestCacheDeleteContentHttpRequest,
+    handleTestWorkerStatsHttpRequest,
+    handleTestWorkerMarkStaleHttpRequest,
+    handleTestWorkerCacheClearHttpRequest,
+    handleTestFileStatusHttpRequest,
+    handleTestResolveItemHttpRequest,
+} from './httpHandlers/testCacheHandlers';
+import {
+    handleTestNoteCreateHttpRequest,
+    handleTestNoteDeleteHttpRequest,
+    handleTestNoteReadHttpRequest,
+    handleTestNoteOpenEditorHttpRequest,
+    handleTestNoteCloseEditorHttpRequest,
+    handleTestNoteUndoHttpRequest,
+} from './httpHandlers/testNoteHandlers';
 import {
     handleTestSentenceBBoxesHttpRequest,
     handleTestPdfPageCountHttpRequest,
@@ -59,7 +76,6 @@ import {
     handleTestPdfSmartRemovalSummaryHttpRequest,
     handleTestPdfRenderPageHttpRequest,
 } from './httpHandlers/testPdfHandlers';
-import type { AgentAction } from '../agents/agentActions';
 import type {
     WSZoteroDataRequest,
     WSExternalReferenceCheckRequest,
@@ -570,352 +586,6 @@ async function handleReadNoteHttpRequest(request: any) {
     return await handleReadNoteRequest(wsRequest);
 }
 
-
-// =============================================================================
-// Test-Only HTTP Handlers (cache inspection / manipulation)
-// =============================================================================
-
-async function handleTestPingHttpRequest(_request: any) {
-    const cache = Zotero.Beaver?.attachmentFileCache;
-    const db = Zotero.Beaver?.db;
-    return {
-        ok: true,
-        cache_available: !!cache,
-        db_available: !!db,
-    };
-}
-
-async function handleTestCacheMetadataHttpRequest(request: any) {
-    const { library_id, zotero_key, item_id } = request;
-    const db = Zotero.Beaver?.db;
-    if (!db) return { error: 'db not available' };
-
-    let record;
-    if (item_id != null) {
-        record = await db.getAttachmentFileCache(item_id);
-    } else if (library_id != null && zotero_key != null) {
-        record = await db.getAttachmentFileCacheByKey(library_id, zotero_key);
-    } else {
-        return { error: 'Provide item_id or library_id + zotero_key' };
-    }
-    return { record: record ?? null };
-}
-
-async function handleTestCacheInvalidateHttpRequest(request: any) {
-    const { library_id, zotero_key, item_id } = request;
-    const cache = Zotero.Beaver?.attachmentFileCache;
-    if (!cache) return { error: 'cache not available' };
-
-    if (item_id != null && library_id != null && zotero_key != null) {
-        await cache.invalidate(item_id, library_id, zotero_key);
-    } else if (library_id != null && zotero_key != null) {
-        // Resolve item_id from DB
-        const db = Zotero.Beaver?.db;
-        if (!db) return { error: 'db not available' };
-        const record = await db.getAttachmentFileCacheByKey(library_id, zotero_key);
-        if (record) {
-            await cache.invalidate(record.item_id, library_id, zotero_key);
-        } else {
-            // No cache entry, nothing to invalidate
-        }
-    } else {
-        return { error: 'Provide library_id + zotero_key (and optionally item_id)' };
-    }
-    return { ok: true };
-}
-
-async function handleTestCacheClearMemoryHttpRequest(_request: any) {
-    const cache = Zotero.Beaver?.attachmentFileCache;
-    if (!cache) return { error: 'cache not available' };
-    cache.clearMemoryCache();
-    return { ok: true };
-}
-
-async function handleTestCacheDeleteContentHttpRequest(request: any) {
-    const { library_id, zotero_key } = request;
-    const cache = Zotero.Beaver?.attachmentFileCache;
-    if (!cache) return { error: 'cache not available' };
-    if (library_id == null || zotero_key == null) {
-        return { error: 'Provide library_id + zotero_key' };
-    }
-    await cache.deleteContent(library_id, zotero_key);
-    return { ok: true };
-}
-
-async function handleTestNoteCreateHttpRequest(request: any) {
-    const { library_id, html, title, parent_key, wrap_schema } = request as {
-        library_id?: number;
-        html: string;
-        title?: string;
-        parent_key?: string;
-        wrap_schema?: boolean;
-    };
-    if (typeof html !== 'string') {
-        return { error: 'html is required' };
-    }
-    const note = new Zotero.Item('note');
-    if (typeof library_id === 'number') note.libraryID = library_id;
-    if (parent_key) note.parentKey = parent_key;
-
-    const body = title ? `<h1>${title}</h1>${html}` : html;
-    const wrapped = wrap_schema === false ? body : wrapWithSchemaVersion(body);
-    note.setNote(wrapped);
-    await note.saveTx();
-
-    return {
-        library_id: note.libraryID,
-        zotero_key: note.key,
-        item_id: note.id,
-    };
-}
-
-async function handleTestNoteDeleteHttpRequest(request: any) {
-    const { library_id, zotero_key } = request;
-    if (library_id == null || zotero_key == null) {
-        return { error: 'Provide library_id + zotero_key' };
-    }
-    const item = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);
-    if (!item) return { ok: true, deleted: false };
-    if (!item.isNote()) return { error: 'not_a_note' };
-    await Zotero.Items.erase([item.id]);
-    return { ok: true, deleted: true };
-}
-
-async function handleTestNoteReadHttpRequest(request: any) {
-    const { library_id, zotero_key } = request;
-    if (library_id == null || zotero_key == null) {
-        return { error: 'Provide library_id + zotero_key' };
-    }
-    const item = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);
-    if (!item) return { error: 'not_found' };
-    if (!item.isNote()) return { error: 'not_a_note' };
-    await item.loadDataType('note');
-    const savedHtml: string = item.getNote();
-    let liveHtml: string | null = null;
-    try {
-        liveHtml = getLatestNoteHtml(item);
-    } catch {
-        liveHtml = null;
-    }
-    let inEditor = false;
-    try {
-        const instances = (Zotero as any).Notes._editorInstances;
-        if (Array.isArray(instances)) {
-            inEditor = instances.some((inst: any) => {
-                if (!inst._item || inst._item.id !== item.id) return false;
-                try {
-                    const frameElement = inst._iframeWindow?.frameElement;
-                    return frameElement?.isConnected === true;
-                } catch {
-                    return false;
-                }
-            });
-        }
-    } catch {
-        inEditor = false;
-    }
-    return {
-        library_id: item.libraryID,
-        zotero_key: item.key,
-        item_id: item.id,
-        saved_html: savedHtml,
-        live_html: liveHtml,
-        in_editor: inEditor,
-    };
-}
-
-async function handleTestNoteOpenEditorHttpRequest(request: any) {
-    const { library_id, zotero_key, open_in_window } = request;
-    if (library_id == null || zotero_key == null) {
-        return { error: 'Provide library_id + zotero_key' };
-    }
-    const item = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);
-    if (!item) return { error: 'not_found' };
-    if (!item.isNote()) return { error: 'not_a_note' };
-
-    const openInWindow = open_in_window !== false;
-    await (Zotero as any).Notes.open(item.id, undefined, { openInWindow });
-
-    // Wait briefly for the editor instance to attach
-    let inEditor = false;
-    for (let i = 0; i < 30; i++) {
-        await new Promise((r) => setTimeout(r, 100));
-        try {
-            const instances = (Zotero as any).Notes._editorInstances;
-            if (Array.isArray(instances)) {
-                inEditor = instances.some((inst: any) => {
-                    if (!inst._item || inst._item.id !== item.id) return false;
-                    const frame = inst._iframeWindow?.frameElement;
-                    return frame?.isConnected === true;
-                });
-            }
-        } catch {
-            inEditor = false;
-        }
-        if (inEditor) break;
-    }
-    return { ok: true, in_editor: inEditor };
-}
-
-async function handleTestNoteCloseEditorHttpRequest(request: any) {
-    const { library_id, zotero_key } = request;
-    if (library_id == null || zotero_key == null) {
-        return { error: 'Provide library_id + zotero_key' };
-    }
-    const item = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);
-    if (!item) return { error: 'not_found' };
-
-    let closed = 0;
-    try {
-        const instances = (Zotero as any).Notes._editorInstances ?? [];
-        for (const inst of [...instances]) {
-            if (!inst._item || inst._item.id !== item.id) continue;
-            const frame = inst._iframeWindow?.frameElement;
-            const instanceWin = frame?.ownerDocument?.defaultView;
-            try {
-                if (inst.viewMode === 'window' && instanceWin && instanceWin.close) {
-                    instanceWin.close();
-                    closed++;
-                    continue;
-                }
-                if (inst.tabID) {
-                    const mainWin: any = Zotero.getMainWindow?.();
-                    if (mainWin?.Zotero_Tabs?.close) {
-                        mainWin.Zotero_Tabs.close(inst.tabID);
-                        closed++;
-                        continue;
-                    }
-                }
-                if (typeof inst.uninit === 'function') {
-                    await inst.uninit();
-                    closed++;
-                }
-            } catch {
-                // best-effort
-            }
-        }
-    } catch {
-        // best-effort
-    }
-    // Let Zotero settle
-    await new Promise((r) => setTimeout(r, 150));
-    return { ok: true, closed };
-}
-
-async function handleTestNoteUndoHttpRequest(request: any) {
-    const { action } = request as { action: AgentAction };
-    if (!action || !action.proposed_data) {
-        return { error: 'action with proposed_data is required' };
-    }
-    try {
-        await undoEditNoteAction(action);
-        return { ok: true };
-    } catch (e: any) {
-        return { ok: false, error: e?.message || String(e) };
-    }
-}
-
-/**
- * Dev-only: snapshot of MuPDFWorkerClient dispatch / spawn counters and
- * the worker-side document cache.
- *
- * Lets manual-test runners (`docs-zotero/manual-tests-fused-worker-ops.md`)
- * verify "exactly one extractWithMeta dispatch", "no extra spawns", etc.
- * without log grepping. POST `{ reset: true }` to zero counters first.
- *
- * `cacheStats` is `null` when no worker has spawned yet — the call must
- * never spawn one or pollute `dispatchCounts`, so the doc-cache fields stay
- * absent until a real op has run.
- */
-async function handleTestWorkerStatsHttpRequest(request: any) {
-    const { getMuPDFWorkerClient } = await import(
-        '../../src/services/pdf/MuPDFWorkerClient'
-    );
-    const client = getMuPDFWorkerClient();
-    if (request?.reset === true) {
-        client.resetStats();
-    }
-    const stats = client.getStats();
-    const cacheStats = await client.getCacheStats();
-    return { ok: true, stats, cacheStats };
-}
-
-/**
- * Dev-only: terminate the current MuPDF worker as if it had died mid-flight.
- *
- * Drives the same `markStale` code path as a real worker death, so the next
- * `call()` either retries (if a request is in-flight) or respawns on the
- * next dispatch. Used by manual test 1.3.
- */
-async function handleTestWorkerMarkStaleHttpRequest(request: any) {
-    const { getMuPDFWorkerClient } = await import(
-        '../../src/services/pdf/MuPDFWorkerClient'
-    );
-    const reason = typeof request?.reason === 'string' ? request.reason : 'test';
-    const client = getMuPDFWorkerClient();
-    const before = client.getStats();
-    client.markStaleForTest(reason);
-    return { ok: true, before, after: client.getStats() };
-}
-
-/**
- * Dev-only: clear the worker-side document cache. By default also resets
- * the cache hit/miss/eviction counters so live tests can assert exact
- * values; pass `{ resetCounters: false }` to keep history.
- *
- * No-op when no worker has spawned yet (returns `cacheStats: null`).
- */
-async function handleTestWorkerCacheClearHttpRequest(request: any) {
-    const { getMuPDFWorkerClient } = await import(
-        '../../src/services/pdf/MuPDFWorkerClient'
-    );
-    const client = getMuPDFWorkerClient();
-    const resetCounters = request?.resetCounters !== false;
-    const cacheStats = await client.clearWorkerCacheForTest({ resetCounters });
-    return { ok: true, cacheStats };
-}
-
-/**
- * Dev-only: invoke `getAttachmentFileStatus(item, isPrimary)` directly.
- *
- * Manual tests 2.3 (step 3), 5.4, and 7.2 need to trigger the file-status
- * side-effect that, in production, runs from agent or sidebar flows. This
- * endpoint short-circuits the trigger so a runner can assert on the cache
- * write / log output that follows.
- */
-async function handleTestFileStatusHttpRequest(request: any) {
-    const { getAttachmentFileStatus } = await import(
-        '../../src/services/agentDataProvider/utils'
-    );
-    const { library_id, zotero_key, is_primary } = request || {};
-    if (library_id == null || zotero_key == null) {
-        return { ok: false, error: 'Provide library_id + zotero_key' };
-    }
-    const item = await Zotero.Items.getByLibraryAndKeyAsync(
-        library_id,
-        zotero_key,
-    );
-    if (!item) return { ok: false, error: 'not_found' };
-    if (!item.isAttachment()) return { ok: false, error: 'not_an_attachment' };
-    const status = await getAttachmentFileStatus(item, is_primary !== false);
-    return { ok: true, status };
-}
-
-async function handleTestResolveItemHttpRequest(request: any) {
-    const { library_id, zotero_key } = request;
-    if (library_id == null || zotero_key == null) {
-        return { error: 'Provide library_id + zotero_key' };
-    }
-    const item = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);
-    if (!item) return { item_id: null, item_type: null };
-    return {
-        item_id: item.id,
-        item_type: item.itemType,
-        is_attachment: item.isAttachment(),
-        parent_id: item.parentID || null,
-        attachment_content_type: item.isAttachment() ? item.attachmentContentType : null,
-    };
-}
 
 // =============================================================================
 // Registration Functions
