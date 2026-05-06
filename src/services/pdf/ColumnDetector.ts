@@ -499,8 +499,24 @@ export function detectColumns(
         }
     }
 
+    // Phase 4.5: Re-run join with relaxed tail-merge enabled. Catches two
+    // patterns that survive Phases 1-4 on ragged-right (left-aligned) text:
+    //   (a) paragraph fragments separated only by an absorbed bridge whose
+    //       removal would now leave them with a small gap and matching edges
+    //   (b) trailing ragged lines (paragraph endings) below a host column,
+    //       which fail Phase-2's width-ratio gate and have no neighbor below
+    //       for bridge merging to fire.
+    const rejoined = joinAndSort(bridgeMerged, opts, /* relaxed */ true);
+
+    if (opts.debug && rejoined.length !== bridgeMerged.length) {
+        console.log(`[ColumnDetector] Page ${page.pageIndex}: After Phase 4.5 (rejoin): ${rejoined.length} blocks`);
+        for (const b of rejoined) {
+            console.log(`    x=${b.x.toFixed(0)}-${(b.x + b.w).toFixed(0)}, y=${b.y.toFixed(0)}, h=${b.h.toFixed(0)}`);
+        }
+    }
+
     // Phase 5: Final reading order sort
-    const sortedColumns = sortForReadingOrder(bridgeMerged, opts);
+    const sortedColumns = sortForReadingOrder(rejoined, opts);
 
     return {
         columns: sortedColumns,
@@ -758,12 +774,80 @@ function mergeBlocks(
 }
 
 /**
+ * Short-block-merge predicate.
+ *
+ * Absorbs a short narrow block (paragraph-end ragged tail OR paragraph-start
+ * indented head) into an adjacent wider host column. Fires when:
+ *   - the smaller-by-width block is horizontally CONTAINED in the wider one
+ *     (paragraph indents and ragged tails are always contained, regardless
+ *     of left-edge alignment);
+ *   - the small block's height is ≤ maxBridgeHeight (= the same "short"
+ *     threshold the bridge merger already uses), which excludes tall
+ *     sidebars/abstracts (see ColumnDetector.test.ts case #6);
+ *   - they sit immediately above OR below each other within a gap budget
+ *     that scales with the small block's own height (so single-line lines
+ *     get caught regardless of font size / leading).
+ */
+function canJoinAsShortAdjacent(
+    b1: Rect,
+    b2: Rect,
+    opts: Required<ColumnDetectionOptions>
+): boolean {
+    const [small, large] = b1.w <= b2.w ? [b1, b2] : [b2, b1];
+    if (!isHorizontallyContained(small, large, opts.edgeTolerance)) return false;
+    if (small.h > opts.maxBridgeHeight) return false;
+    const gapBudget = Math.max(opts.maxVerticalGap, 1.5 * small.h);
+    const gapBelow = small.y - (large.y + large.h);
+    const gapAbove = large.y - (small.y + small.h);
+    if (gapBelow >= 0 && gapBelow <= gapBudget) return true;
+    if (gapAbove >= 0 && gapAbove <= gapBudget) return true;
+    return false;
+}
+
+/**
+ * Same-column-paragraphs predicate.
+ *
+ * Merges two TALL blocks (both h > maxBridgeHeight) that look like adjacent
+ * paragraphs in the same column: same left edge, similar widths, small
+ * vertical gap. Complementary to canJoinAsShortAdjacent (which handles the
+ * short-block case): the "both tall" gate keeps this from firing on
+ * heading-vs-body or abstract-vs-body shapes (those have one short side).
+ *
+ * The `widthRatio ≥ 0.85` gate further protects multi-column layouts where
+ * a sidebar/abstract sits at the same x as a body column (e.g. QKFDM868).
+ *
+ * The gap budget is bumped slightly above the strict same-edge join's
+ * maxVerticalGap because paragraph spacing in body text is often a hair
+ * over 10pt (~12pt with 16pt line height).
+ */
+function canJoinAsSameColumnParagraphs(
+    b1: Rect,
+    b2: Rect,
+    opts: Required<ColumnDetectionOptions>
+): boolean {
+    if (b1.h <= opts.maxBridgeHeight || b2.h <= opts.maxBridgeHeight) return false;
+    if (Math.abs(b1.x - b2.x) > opts.edgeTolerance) return false;
+    const widthRatio = Math.min(b1.w, b2.w) / Math.max(b1.w, b2.w);
+    if (widthRatio < 0.85) return false;
+    const gapBelow = b2.y - (b1.y + b1.h);
+    const gapAbove = b1.y - (b2.y + b2.h);
+    const gap = gapBelow >= 0 ? gapBelow : (gapAbove >= 0 ? gapAbove : -1);
+    return gap >= 0 && gap <= opts.maxVerticalGap * 1.5;
+}
+
+/**
  * Phase 3: Join rectangles and normalize edges.
  * Does NOT do final reading order sorting - that's done in Phase 5.
+ *
+ * When `relaxed=true`, the iterative second pass also accepts tail merges
+ * via canJoinAsTail (with an intersectsOthers safety guard). Used for the
+ * post-bridge re-join so paragraph fragments separated only by an absorbed
+ * bridge get reunited and trailing ragged-right tails get absorbed.
  */
 function joinAndSort(
     blocks: Rect[],
-    opts: Required<ColumnDetectionOptions>
+    opts: Required<ColumnDetectionOptions>,
+    relaxed: boolean = false
 ): Rect[] {
     if (blocks.length === 0) return [];
 
@@ -835,25 +919,49 @@ function joinAndSort(
                 const block1 = joined[i];
                 const block2 = joined[j];
 
-                // Check if blocks have similar edges
+                // Strict same-edge merge (always enabled).
                 const sameLeftEdge = Math.abs(block1.x - block2.x) <= opts.edgeTolerance;
                 const sameRightEdge =
                     Math.abs(block1.x + block1.w - (block2.x + block2.w)) <= opts.edgeTolerance;
-
-                if (!sameLeftEdge || !sameRightEdge) continue;
-
-                // Check if they're vertically adjacent now
                 const gapBelow = block2.y - (block1.y + block1.h);
                 const gapAbove = block1.y - (block2.y + block2.h);
+                const adjacentStrict =
+                    (gapBelow >= 0 && gapBelow <= opts.maxVerticalGap) ||
+                    (gapAbove >= 0 && gapAbove <= opts.maxVerticalGap);
+                const strictMerge = sameLeftEdge && sameRightEdge && adjacentStrict;
 
-                if ((gapBelow >= 0 && gapBelow <= opts.maxVerticalGap) ||
-                    (gapAbove >= 0 && gapAbove <= opts.maxVerticalGap)) {
-                    // Merge blocks
-                    joined[i] = unionRect(block1, block2);
-                    joined.splice(j, 1);
-                    changed = true;
-                    break;
+                // Relaxed merges (only enabled in the post-bridge re-run):
+                //  - canJoinAsShortAdjacent: short narrow tails / indented
+                //    paragraph-start heads, contained in adjacent wider host.
+                //  - canJoinAsSameColumnParagraphs: two tall same-column
+                //    paragraph blocks separated by a small gap.
+                const relaxedMerge =
+                    relaxed &&
+                    (canJoinAsShortAdjacent(block1, block2, opts) ||
+                     canJoinAsSameColumnParagraphs(block1, block2, opts));
+
+                if (!strictMerge && !relaxedMerge) continue;
+
+                // Safety guard for relaxed merges: the union must not swallow
+                // any non-participating block. Strict same-edge merges sit on
+                // top of each other and can't extend laterally, so they don't
+                // need this check, but relaxed merges grow the host vertically
+                // and could otherwise cover a sibling rect.
+                const unionBlock = unionRect(block1, block2);
+                if (relaxedMerge && !strictMerge) {
+                    const intersectsOthers = joined.some(
+                        (other, idx) =>
+                            idx !== i &&
+                            idx !== j &&
+                            rectsIntersect(unionBlock, other)
+                    );
+                    if (intersectsOthers) continue;
                 }
+
+                joined[i] = unionBlock;
+                joined.splice(j, 1);
+                changed = true;
+                break;
             }
             if (changed) break;
         }

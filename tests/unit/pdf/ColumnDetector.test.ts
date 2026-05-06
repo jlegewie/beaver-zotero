@@ -179,6 +179,106 @@ describe('detectColumns reading order', () => {
     });
 });
 
+describe('detectColumns tail/head/paragraph merge for ragged-right text', () => {
+    // Phase 4.5 (post-bridge re-join with relaxed predicates) absorbs:
+    //   1. narrow short trailing lines below a wider host (canJoinAsShortAdjacent)
+    //   2. narrow short indented first lines above a wider host (canJoinAsShortAdjacent)
+    //   3. two tall same-column paragraph blocks separated by a small gap
+    //      (canJoinAsSameColumnParagraphs)
+    // Each predicate is gated to keep multi-column layouts and headings
+    // from collapsing.
+
+    it('tail merges into host (CZAA39JT shape)', () => {
+        // Body paragraph + short trailing ragged line "with these changes."
+        // gap=10pt, tail.h=12pt → strict 10pt budget already covers it,
+        // but right edges differ (469 vs 90) so only the relaxed path can
+        // fire.
+        const body: Rect = { x: 72, y: 100, w: 470, h: 400 };
+        const tail: Rect = { x: 72, y: 510, w: 90, h: 12 };
+        const result = detectColumns(makeColumnPage([body, tail]));
+        expect(result.columns.length).toBe(1);
+        expect(result.columns[0].x).toBe(72);
+        expect(result.columns[0].y).toBe(100);
+        expect(result.columns[0].y + result.columns[0].h).toBe(522);
+    });
+
+    it('tail merges with line-height-scaled gap (WUIJDNRF shape)', () => {
+        // Body + trailing line; gap=12pt > maxVerticalGap=10pt but
+        // ≤ 1.5 × tail.h (1.5 × 16 = 24pt). Verifies the height-scaled
+        // gap budget catches looser line spacing.
+        const body: Rect = { x: 108, y: 70, w: 436, h: 458 };
+        const tail: Rect = { x: 108, y: 540, w: 172, h: 16 };
+        const result = detectColumns(makeColumnPage([body, tail]));
+        expect(result.columns.length).toBe(1);
+        expect(result.columns[0].x).toBe(108);
+        expect(result.columns[0].y).toBe(70);
+        expect(result.columns[0].y + result.columns[0].h).toBe(556);
+    });
+
+    it('does NOT merge tall sidebar/abstract above body (QKFDM868 regression guard)', () => {
+        // Tall abstract h=200 must not be mistaken for a tail of the right
+        // body column. The maxBridgeHeight gate excludes it. (And the
+        // "tail must sit below host" rule excludes it from the other
+        // direction.)
+        const abstract: Rect = { x: 440, y: 80, w: 100, h: 200 };
+        const body: Rect = { x: 440, y: 300, w: 200, h: 250 };
+        const result = detectColumns(makeColumnPage([abstract, body]));
+        expect(result.columns.length).toBe(2);
+        // Order is y-then-x: abstract first.
+        expect(result.columns[0].y).toBe(80);
+        expect(result.columns[1].y).toBe(300);
+    });
+
+    it('indented head merges into host (WUIJDNRF p4 dedication shape)', () => {
+        // Paragraph-first-line indent (different left edge from body) sitting
+        // just above the body should be absorbed. Without sameLeft as a hard
+        // requirement, containment + short height + small gap is enough.
+        const head: Rect = { x: 144, y: 170, w: 390, h: 16 };
+        const body: Rect = { x: 108, y: 198, w: 434, h: 320 };
+        const result = detectColumns(makeColumnPage([head, body]));
+        expect(result.columns.length).toBe(1);
+        expect(result.columns[0].x).toBe(108);
+        expect(result.columns[0].y).toBe(170);
+        expect(result.columns[0].y + result.columns[0].h).toBe(518);
+    });
+
+    it('two tall paragraphs same column merge across a small gap (WUIJDNRF p4 shape)', () => {
+        // Mimics the Phase-2-can't-merge scenario: an "obstacle" indented
+        // line between the two paragraphs that intersects either union, so
+        // Phase 2's mergeBlocks gives up. After Phase 4 bridge absorbs the
+        // obstacle into para1, Phase 4.5 must merge para1 + para2 across
+        // the remaining ~12pt gap with right edges differing by a few pt.
+        const para1: Rect = { x: 108, y: 200, w: 434, h: 280 };       // right=542
+        const obstacle: Rect = { x: 144, y: 488, w: 398, h: 16 };     // x=144 indent, contained in para1's x-range, between paras
+        const para2: Rect = { x: 108, y: 520, w: 430, h: 180 };       // right=538
+        const result = detectColumns(makeColumnPage([para1, obstacle, para2]));
+        expect(result.columns.length).toBe(1);
+        expect(result.columns[0].x).toBe(108);
+        expect(result.columns[0].y).toBe(200);
+        // Spans para1 top through para2 bottom.
+        expect(result.columns[0].y + result.columns[0].h).toBe(700);
+    });
+
+    it('does NOT merge tail across column boundary', () => {
+        // Two side-by-side columns with the tail of the LEFT column at the
+        // bottom. The right column shares neither a left edge with the
+        // left column nor with the tail, so nothing relaxed can fire
+        // across the gutter. Locks in the sameLeftEdge gate.
+        const left: Rect = { x: 100, y: 100, w: 200, h: 400 };
+        const right: Rect = { x: 350, y: 100, w: 200, h: 420 };
+        const tail: Rect = { x: 100, y: 510, w: 80, h: 12 };
+        const result = detectColumns(makeColumnPage([right, left, tail]));
+        expect(result.columns.length).toBe(2);
+        // Left column should now span 100..522 (absorbed tail).
+        const leftCol = result.columns.find(c => c.x === 100)!;
+        expect(leftCol.y + leftCol.h).toBe(522);
+        // Right column unaffected.
+        const rightCol = result.columns.find(c => c.x === 350)!;
+        expect(rightCol.y).toBe(100);
+        expect(rightCol.h).toBe(420);
+    });
+});
+
 describe('detectColumns clipping respects custom header/footerMargin', () => {
     // Production callers (FilteredParagraphPipeline, worker/ops.ts) thread
     // their margins.{top,bottom} into ColumnDetectionOptions so the column
