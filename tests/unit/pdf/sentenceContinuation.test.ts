@@ -193,7 +193,11 @@ describe("annotateColumnContinuations", () => {
         expect(left.sentences[0].joinWithNext).toBeUndefined();
     });
 
-    it("leaves the flag unset when the last char is a hyphen (hyphenation skip)", () => {
+    it("sets the flag when the last char is a hyphen (continuation indicator)", () => {
+        // A trailing hyphen at a column break ("popula-" / "tion of the
+        // city...") is a strong positive signal that the sentence continues.
+        // Word-level rejoining ("popula-" + "tion" → "population") is a
+        // downstream concern; the producer's job is only to mark continuation.
         for (const hyphen of ["-", "‐", "‑", "‒", "–", "—", "­"]) {
             const left = makeParagraph(0, [
                 makeSentence(`continuing popula${hyphen}`),
@@ -209,7 +213,7 @@ describe("annotateColumnContinuations", () => {
             expect(
                 left.sentences[0].joinWithNext,
                 `hyphen U+${hyphen.codePointAt(0)?.toString(16)}`,
-            ).toBeUndefined();
+            ).toBe(true);
         }
     });
 

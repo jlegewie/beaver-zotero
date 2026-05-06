@@ -679,28 +679,6 @@ export function extractPageSentenceBBoxes(
 // Column-continuation annotator (sets SentenceBBox.joinWithNext)
 // ---------------------------------------------------------------------------
 
-/**
- * Hyphen-like characters that, at the very end of a paragraph, indicate the
- * *word* (not just the sentence) continues into the next paragraph. We skip
- * the join hint for these because word-level rejoining belongs upstream in
- * paragraph-text construction, not in this sentence-level hint.
- */
-const HYPHEN_LIKE_BREAK_CHARS = new Set([
-    "-",   // U+002D HYPHEN-MINUS
-    "‐",   // U+2010 HYPHEN
-    "‑",   // U+2011 NON-BREAKING HYPHEN
-    "‒",   // U+2012 FIGURE DASH
-    "–",   // U+2013 EN DASH
-    "—",   // U+2014 EM DASH
-    "­",   // U+00AD SOFT HYPHEN
-]);
-
-function endsInHyphen(text: string): boolean {
-    const trimmed = text.replace(/\s+$/u, "");
-    if (!trimmed) return false;
-    return HYPHEN_LIKE_BREAK_CHARS.has(trimmed[trimmed.length - 1]);
-}
-
 function startsWithLowercase(text: string): boolean {
     const trimmed = text.replace(/^\s+/u, "");
     if (!trimmed) return false;
@@ -776,7 +754,9 @@ function shouldJoinAcrossColumns(
     const lastText = prev.text;
     const firstText = next.text;
 
-    if (endsInHyphen(lastText)) return false;
+    // A trailing hyphen ("ge-" / "nomes") is a strong continuation indicator,
+    // not a reason to skip — word-level rejoining is a downstream consumer
+    // concern, not the producer's. Only sentence-final terminators block.
     if (hasSentenceFinalTerminator(lastText)) return false;
     // Gate 7: next must look like a continuation. Default test is "starts with
     // a lowercase letter". The unclosed-paren bypass covers the cross-column
