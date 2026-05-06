@@ -399,24 +399,47 @@ export const splitTrailingNumericSubsectionLabel: PostProcessStep = (
  * false positive (collapsing real prose) is higher than the cost of leaving
  * a reference paragraph over-split.
  *
- * Strategy:
- *   1. Detect a reference paragraph using two independent shape signals
- *      that both must fire:
- *        A. The paragraph **starts** like a citation entry
- *           (numbered, "Surname, Initial(s)", "Initials. Surname",
- *            or "FirstName Surname" + nearby year).
- *        B. The paragraph carries strong bibliographic **tail** evidence
- *           (DOI/URL, Volume(Issue)+pages, Vol:Page, Pp., or a
- *            publisher/venue keyword in the trailing 120 chars).
- *   2. When classified as a reference paragraph, find boundary points
- *      between adjacent references — either `". " + reference-start` or
- *      `URL + " " + reference-start`. Re-split into N+1 sentences (one per
- *      reference) using the boundaries; the original sentencex splits inside
- *      a single reference are discarded.
- *   3. Sanity invariant: if the re-split would produce empty / out-of-order
- *      ranges or a sentence that doesn't start like a reference, fall back
- *      to the input ranges unchanged. Better to leave the existing over-split
- *      than to emit garbage.
+ * Detection has three paths (see `isReferenceParagraph`):
+ *
+ *   1. **A∧B (primary path)** — paragraph starts like a citation entry
+ *      (A = numbered, "Surname, Initial(s)", "Initials. Surname", or
+ *      "FirstName Surname" + nearby year) AND ends with bibliographic
+ *      tail evidence B (DOI/URL, Volume(Issue)+pages, Vol:Page, Pp.,
+ *      a publisher keyword in the trailing 120 chars, PMID, or — via
+ *      B7 — chained journal abbreviations + Vol Pages anchored to the
+ *      paragraph end, which catches old-style physics references like
+ *      `…J. Chem. Phys. 128 114114`).
+ *
+ *   2. **Multi-numbered with body evidence** — paragraph starts with a
+ *      numbered marker, has ≥1 internal numbered marker, AND contains a
+ *      chained-journal-abbrev + Vol Pages shape *anywhere* in the body
+ *      (not just at the end). Catches multi-reference paragraphs whose
+ *      trailing reference's tail is unrecognized (e.g. `… pp 271–82`)
+ *      but where another reference inside carries the journal-abbrev
+ *      evidence. The chained-abbrev guard rejects numbered prose like
+ *      `[1] In 2008, X. [2] In 2010, Y.` and honorific lists.
+ *
+ *   3. **Continuation (column-wrap)** — paragraph does NOT start with an
+ *      A-pattern (column-wrap from the previous column has placed the
+ *      tail of the previous reference at the top of this paragraph),
+ *      contains at least one **internal** numbered marker, AND carries
+ *      strong DOI/PMID evidence anywhere. The DOI/PMID-only threshold is
+ *      stricter than B because a generic `https?://` URL (B1) appears in
+ *      methods/data-availability prose far too easily to qualify.
+ *
+ * Boundary finding (see `findReferenceBoundaries`) uses the loose
+ * `\s+ N. Capital` boundary in the numbered-start case AND in the
+ * continuation case (gated on the same DOI/PMID evidence). Otherwise
+ * the period-boundary regex applies. URL boundaries are collected in
+ * every case.
+ *
+ * Sanity invariant (see `mergedRangesValid`): every emitted range must
+ * be non-empty, in strictly ascending order, and start with a
+ * reference-start (A1/A2/A3) — except that for continuation paragraphs
+ * the first emitted range is the trailing portion of the previous
+ * reference and is checked for DOI/PMID evidence instead. If the
+ * invariant fails, the merge step falls back to the input ranges
+ * unchanged.
  */
 
 const REFERENCE_MIN_PARAGRAPH_LEN = 30;
@@ -584,11 +607,36 @@ const REF_NUMBERED_START_RE = new RegExp(`^\\s*${A1_CORE}`, "u");
 //   - generic `https?://` URL
 const REF_TAIL_B1_RE =
     /(?:\bdoi\.org\/\S+|\bhttps?:\/\/\S{6,}|\b10\.\d{4,9}\/\S+)/iu;
-// B2 — Volume(Issue): pages, with optional whitespace between the
-// volume and the issue parens. Some styles render `84 (408): 862–74`
-// (space) and others `46(4):613–40` (no space); both must match.
-const REF_TAIL_B2_RE =
-    /\b\d{1,4}\s*\(\d{1,3}\)\s*[:,]\s*\d{1,4}(?:\s*[-–]\s*\d{1,4})?/u;
+// B2 — Volume(Issue): pages, with two arms:
+//   1. **Digits in parens** (e.g. `46(4):613–40`, `13(12), 7082`,
+//      `84 (408): 862–74`) — page range optional. This is the canonical
+//      APA / journal style; digits-in-parens is a strong signal on its own.
+//   2. **Closed-list issue tokens** (months, seasons, Suppl., Pt., No.,
+//      Part) — page range REQUIRED. Some humanities/economics journals
+//      use a month or season name in place of an issue number, e.g.
+//      `Economica 47 (November): 387–406`, `Quarterly Journal 9 (Spring):
+//      100–120`, `Annu. Rev. 7 (Suppl.): 50–60`. The token list is
+//      intentionally enumerated rather than wildcard `[^)]+` to keep
+//      contrived prose like `bus 4 (red): 50–60 passengers` rejected
+//      (the wildcard form passes the A∧B classifier on numbered prose
+//      with adjacent letter-parens-colon-range shape).
+//
+// The enumerated tokens cover English month names (full + 3-letter
+// abbreviations), seasons, and supplement / part / number markers. Each
+// may be followed by an optional issue number (`Suppl. 2`, `Pt 3`).
+const REF_B2_ISSUE_TOKEN_RE_SRC =
+    `(?:January|February|March|April|May|June|July|August|September` +
+    `|October|November|December` +
+    `|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sept|Sep|Oct|Nov|Dec` +
+    `|Spring|Summer|Fall|Autumn|Winter` +
+    `|Suppl|Supplement|Pt|Part|No)` +
+    `\\.?(?:\\s+\\d{1,3})?`;
+const REF_TAIL_B2_RE = new RegExp(
+    `\\b\\d{1,4}\\s*` +
+        `(?:\\(\\d{1,3}\\)\\s*[:,]\\s*\\d{1,4}(?:\\s*[-–]\\s*\\d{1,4})?` +
+        `|\\(${REF_B2_ISSUE_TOKEN_RE_SRC}\\)\\s*[:,]\\s*\\d{1,4}\\s*[-–]\\s*\\d{1,4})`,
+    "u",
+);
 // B3 — colon-separated journal-style citation. Requires a **page range**
 // (hyphen-separated digits after the colon), so prose like
 // `"Smith, J. argues that the relevant threshold is 12:34 ..."` does not
@@ -601,6 +649,97 @@ const REF_TAIL_B5_RE =
 // B6: PMID (PubMed ID). A strong reference-only signal — `pmid:` with a
 // numeric ID appears almost exclusively in biomedical reference lists.
 const REF_TAIL_B6_RE = /\bpmid:\s*\d{4,}/iu;
+// B7: old-style "Journal-Abbrev. (Journal-Abbrev.) Vol Pages" tail anchored
+// to the trimmed paragraph end. Catches references like
+// `…J. Chem. Phys. 128 114114` or `…Chem. Phys. 95 1–28` that have no DOI,
+// no `Vol(Issue):pages`, and no recognized publisher keyword.
+//
+// The chained-abbreviation prefix `(?:\p{Lu}\p{L}*\.\s+){2,}` requires
+// every preceding token to end in a period — that excludes prose endings
+// like `He retired in Oct. 2008. 50 papers` (single abbrev). The 1–3-digit
+// volume cap blocks 4-digit-year tokens from satisfying the volume slot.
+// Anchoring to `\s*$` is the key safety belt: real prose almost never ends
+// with `<Word.> <Word.> <NN> <NN>` — it ends with words.
+const REF_TAIL_B7_RE =
+    /(?:\p{Lu}\p{L}*\.\s+){2,}\d{1,3}\s+\d{1,7}(?:\s*[–-]\s*\d{1,5})?\.?\s*$/u;
+
+// Body-position chained-abbrev + Vol + Page-Range pattern (NOT end-anchored).
+// Used as the bibliographic-evidence guard for the multi-numbered branch
+// of `isReferenceParagraph` — paragraphs like
+//   `[10] James D R … Chem. Phys. Lett. 120 455–9 [11] Bradley J V … pp 271–82`
+// where the trailing reference's tail (`pp 271–82`) does not match B7
+// at the very end, but an earlier reference's body shape carries the
+// citation evidence.
+//
+// **Two tightenings vs. B7** to keep the false-positive surface narrow,
+// since this regex matches anywhere in the paragraph (B7 is end-anchored,
+// which is the natural safety belt):
+//
+//   1. Each chained abbrev requires `\p{L}{2,}` after the leading capital
+//      (≥3 chars total). This excludes initials (`J.`, `K.`), single-
+//      letter codes (`Acta A.`), and 2-letter honorifics (`Mr.`, `Dr.`)
+//      that would otherwise fortuitously chain in prose.
+//
+//   2. The trailing numerics MUST form a page range (digits + dash + digits),
+//      not just `<Vol> <Pages>`. This body-position fallback intentionally
+//      only accepts range-shaped tails — reference tails almost always end
+//      in a range; numbered prose with adjacent numbers (`Test. Cont. 100
+//      200 outcomes`) does not.
+//
+// **Volume slot is intentionally `\d{1,3}`, not `\d{1,4}`.** A 4-digit
+// volume cap re-opens the false-positive surface for numbered prose that
+// happens to chain abbreviations with a year-shaped 4-digit token plus a
+// page range — e.g. `[1] The Dept. Agric. 2023 50-60 survey ... [2] ...`.
+// The 3-digit cap excludes year tokens (1900-2099) from satisfying the
+// volume slot. A few biomedical / old physics journals (Biochim. Biophys.
+// Acta etc.) carry vol > 999, so we won't catch their full body-position
+// citations — that's an acceptable cost; B7 (end-anchored) still covers
+// most of them.
+const REF_BODY_JOURNAL_ABBREV_VOL_RE =
+    /(?:\p{Lu}\p{L}{2,}\.\s+){2,}\d{1,3}\s+\d{1,5}\s*[–-]\s*\d{1,5}/u;
+
+/**
+ * Strict subset of B1+B6 used to gate the continuation-paragraph branch:
+ * DOI URLs (canonical or bare), CrossRef DOI prefix (`10.<digits>/<...>`),
+ * or PMID. Generic `https?://...` URLs are intentionally **not** included
+ * because they appear in methods sections, data-availability statements,
+ * and footnotes far too easily to qualify as "this is part of a reference
+ * list."
+ *
+ * Implemented as its own regex (rather than reusing B1) so that future
+ * widening of B1 cannot accidentally relax the continuation-evidence
+ * threshold.
+ */
+const REF_CONTINUATION_EVIDENCE_RE =
+    /(?:\bdoi\.org\/\S+|\b10\.\d{4,9}\/\S+|\bpmid:\s*\d{4,})/iu;
+
+/**
+ * @internal Exported for unit testing.
+ */
+export function hasContinuationTailEvidence(text: string): boolean {
+    return REF_CONTINUATION_EVIDENCE_RE.test(text);
+}
+
+/**
+ * Count A1-style numbered markers that are **not** at the start of the
+ * trimmed paragraph. Used by both the continuation classifier in
+ * `isReferenceParagraph` and the boundary-style gate in
+ * `findReferenceBoundaries`.
+ *
+ * `REF_BOUNDARY_NUMBERED_RE` requires leading `\s+`, so a marker at index
+ * 0 of a trimmed string never matches — internal-only by construction.
+ *
+ * @internal Exported for unit testing.
+ */
+export function countInternalNumberedMarkers(text: string): number {
+    const r = new RegExp(
+        REF_BOUNDARY_NUMBERED_RE.source,
+        REF_BOUNDARY_NUMBERED_RE.flags,
+    );
+    let count = 0;
+    while (r.exec(text) !== null) count++;
+    return count;
+}
 
 /**
  * Decide whether a paragraph starts like a bibliographic reference entry.
@@ -621,9 +760,9 @@ export function hasReferenceStart(text: string): boolean {
 
 /**
  * Decide whether a paragraph carries strong bibliographic-tail evidence.
- * Pattern B — at least one of B1..B5 must match. B5 is restricted to the
+ * Pattern B — at least one of B1..B7 must match. B5 is restricted to the
  * trailing window so a "Press" mention earlier in normal prose doesn't
- * count.
+ * count. B7 is anchored to the very end of the trimmed text.
  *
  * @internal Exported for unit testing.
  */
@@ -636,12 +775,44 @@ export function hasReferenceTail(text: string): boolean {
     const tailStart = Math.max(0, text.length - REFERENCE_TAIL_WINDOW_CHARS);
     const tail = text.slice(tailStart);
     if (REF_TAIL_B5_RE.test(tail)) return true;
+    if (REF_TAIL_B7_RE.test(text.trimEnd())) return true;
     return false;
 }
 
 /**
- * A∧B classifier: paragraph is reference-shaped iff it both starts and
- * ends like a bibliographic entry.
+ * Classify a paragraph as reference-shaped via one of three paths:
+ *
+ *  1. **A∧B (primary path)** — paragraph starts with a reference marker
+ *     (numbered, "Surname, Initial(s)", "Initials. Surname",
+ *     or "FirstName Surname" + nearby year) AND ends with bibliographic
+ *     tail evidence (DOI/URL, Vol(Issue):pages, publisher keyword,
+ *     PMID, or — via B7 — chained journal abbreviations + Vol Pages
+ *     anchored to the paragraph end).
+ *
+ *  2. **Multi-numbered (body-evidence)** — paragraph starts with a
+ *     numbered marker (`[N]` / `N.` / `N)`), contains at least one
+ *     **internal** numbered marker, AND has at least one chained
+ *     journal-abbreviation + Vol Pages shape anywhere in the body.
+ *     Catches old-style multi-reference paragraphs whose trailing
+ *     reference ends without a B-tail (e.g. `... pp 271–82` or
+ *     `... Prentice-Hall)`) but where an earlier reference inside the
+ *     paragraph carries the journal-abbrev-vol-pages evidence.
+ *
+ *     The chained-abbrev guard is what distinguishes real reference
+ *     lists from numbered prose like `[1] In 2008, X. [2] In 2010, Y.`
+ *     (no abbreviations) or `[1] Mr. Smith. [2] Dr. Jones.` (no
+ *     following volume+pages).
+ *
+ *  3. **Continuation (column-wrap)** — paragraph does NOT start with a
+ *     reference marker (it begins with the trailing portion of the
+ *     previous reference that wrapped from the previous column / page),
+ *     contains at least one internal numbered marker, AND carries
+ *     strong DOI/PMID evidence anywhere. The DOI/PMID-only threshold
+ *     is stricter than `hasReferenceTail`'s B because a generic
+ *     `https?://` URL appears in methods / data-availability prose far
+ *     too easily to qualify. The same threshold gates `mergedRangesValid`
+ *     in `allowContinuationFirst` mode, so the classifier and validator
+ *     stay in sync.
  *
  * @internal Exported for unit testing.
  */
@@ -649,9 +820,33 @@ export function isReferenceParagraph(text: string): boolean {
     if (!text) return false;
     const trimmed = text.trim();
     if (trimmed.length < REFERENCE_MIN_PARAGRAPH_LEN) return false;
-    if (!hasReferenceStart(trimmed)) return false;
-    if (!hasReferenceTail(trimmed)) return false;
-    return true;
+
+    const hasStart = hasReferenceStart(trimmed);
+    const numberedAtStart = REF_NUMBERED_START_RE.test(trimmed);
+    const internalNumbered = countInternalNumberedMarkers(trimmed);
+
+    // Path 1: A∧B.
+    if (hasStart && hasReferenceTail(trimmed)) return true;
+
+    // Path 2: multi-numbered with body-level chained-journal-abbrev evidence.
+    if (
+        numberedAtStart &&
+        internalNumbered >= 1 &&
+        REF_BODY_JOURNAL_ABBREV_VOL_RE.test(trimmed)
+    ) {
+        return true;
+    }
+
+    // Path 3: continuation paragraph with strong DOI/PMID evidence.
+    if (
+        !hasStart &&
+        internalNumbered >= 1 &&
+        hasContinuationTailEvidence(trimmed)
+    ) {
+        return true;
+    }
+
+    return false;
 }
 
 /**
@@ -692,7 +887,31 @@ export function findReferenceBoundaries(text: string): number[] {
         }
     };
 
-    if (REF_NUMBERED_START_RE.test(text)) {
+    const numberedAtStart = REF_NUMBERED_START_RE.test(text);
+    // Continuation-style: paragraph starts mid-reference (not numbered, no
+    // A-pattern at start) but contains internal numbered markers AND strong
+    // DOI/PMID evidence. We trust the loose `\s+ N. Capital` boundary in
+    // this case for the same reason we trust it in the numbered-start
+    // case — the surrounding evidence has already established that this
+    // is a reference list.
+    //
+    // **Caller contract**: this gate assumes `findReferenceBoundaries` is
+    // only invoked after `isReferenceParagraph` has classified the input.
+    // In particular, the DOI/PMID test here checks for evidence anywhere
+    // in the text (including AFTER the first stray numbered marker), so
+    // calling this helper directly on prose like
+    //   `"Foo 12. Bar. ...much later... pmid: 12345"`
+    // would activate the loose numbered boundary inappropriately. The
+    // sentence-merge path (`mergeReferenceListSentences`) is protected by
+    // `mergedRangesValid`'s `allowContinuationFirst` check — it requires
+    // the FIRST emitted range itself to carry DOI/PMID evidence, so the
+    // false-positive cannot leak through end-to-end.
+    const isContinuationStyle =
+        !hasReferenceStart(text) &&
+        countInternalNumberedMarkers(text) >= 1 &&
+        hasContinuationTailEvidence(text);
+
+    if (numberedAtStart || isContinuationStyle) {
         // Numbered-style reference lists: use **only** the numbered
         // boundary (any `\s+ N. Capital`). The period-boundary form is
         // unsafe here because internal author-lists like
@@ -742,6 +961,14 @@ function trimmedEndBeforeBoundary(text: string, boundary: number): number {
  *   3. begins with a reference-start (A1/A2/A3 anchored to its
  *      own segment).
  *
+ * `options.allowContinuationFirst` relaxes rule 3 for the first range
+ * only — for column-wrap continuation paragraphs, the first emitted
+ * range is the trailing portion of the previous reference and won't
+ * carry a reference-start. In that mode the first range must instead
+ * carry strong DOI/PMID continuation evidence (a generic `https://…` URL
+ * is intentionally not enough) so arbitrary prose cannot pass as a
+ * "reference tail."
+ *
  * If any check fails, the merge step falls back to the original
  * splitter ranges. This is defense-in-depth: the boundary regex
  * normally produces well-formed offsets, but a single bad
@@ -752,12 +979,17 @@ function trimmedEndBeforeBoundary(text: string, boundary: number): number {
 export function mergedRangesValid(
     newRanges: ReadonlyArray<SentenceRange>,
     text: string,
+    options?: { allowContinuationFirst?: boolean },
 ): boolean {
     for (let i = 0; i < newRanges.length; i++) {
         const r = newRanges[i];
         if (r.end <= r.start) return false;
         if (i > 0 && r.start < newRanges[i - 1].end) return false;
         const segment = text.slice(r.start, r.end);
+        if (i === 0 && options?.allowContinuationFirst) {
+            if (!hasContinuationTailEvidence(segment)) return false;
+            continue;
+        }
         if (!hasReferenceStart(segment)) return false;
     }
     return true;
@@ -766,8 +998,14 @@ export function mergedRangesValid(
 /**
  * Reference-collapse / re-split step. Runs after sentencex splits have
  * already been produced and the earlier post-processing steps have run.
- * Only modifies ranges when the paragraph is reference-shaped (A∧B);
- * otherwise returns the input unchanged.
+ * Only modifies ranges when the paragraph is reference-shaped (A∧B or
+ * the continuation path); otherwise returns the input unchanged.
+ *
+ * For continuation paragraphs (no A-pattern at the trimmed start), the
+ * first emitted range is the trailing portion of the previous
+ * reference. `mergedRangesValid` is invoked with `allowContinuationFirst`
+ * so that range is checked for DOI/PMID evidence rather than a
+ * reference-start.
  */
 export const mergeReferenceListSentences: PostProcessStep = (ranges, text) => {
     if (ranges.length === 0) return ranges as SentenceRange[];
@@ -780,6 +1018,9 @@ export const mergeReferenceListSentences: PostProcessStep = (ranges, text) => {
     let trimEnd = text.length;
     while (trimEnd > trimStart && /\s/u.test(text[trimEnd - 1])) trimEnd--;
     if (trimEnd <= trimStart) return ranges as SentenceRange[];
+
+    const trimmed = text.slice(trimStart, trimEnd);
+    const isContinuation = !hasReferenceStart(trimmed);
 
     const boundaries = findReferenceBoundaries(text);
     // Filter boundaries to those inside the trimmed extent.
@@ -803,10 +1044,18 @@ export const mergeReferenceListSentences: PostProcessStep = (ranges, text) => {
     if (newRanges.length === 0) return ranges as SentenceRange[];
 
     // Sanity invariant: every emitted range must be non-empty, in
-    // strictly ascending order, and start with a reference-start. If
-    // any check fails, abort and return the original input — better to
-    // leave the sentencex over-split than to emit garbage.
-    if (!mergedRangesValid(newRanges, text)) return ranges as SentenceRange[];
+    // strictly ascending order, and start with a reference-start. For
+    // continuation paragraphs the first range is exempt from the
+    // reference-start check but must carry DOI/PMID evidence. If any
+    // check fails, abort and return the original input — better to leave
+    // the sentencex over-split than to emit garbage.
+    if (
+        !mergedRangesValid(newRanges, text, {
+            allowContinuationFirst: isContinuation,
+        })
+    ) {
+        return ranges as SentenceRange[];
+    }
 
     return newRanges;
 };
