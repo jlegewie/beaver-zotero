@@ -58,11 +58,31 @@ function makeSentence(
     };
 }
 
+/**
+ * Synthetic per-column geometry. Column N occupies x ∈ [50 + N*300, 50 + N*300 + 250]
+ * with a 50pt gutter between columns. Mirrors the LTR multi-column shape the
+ * geometric gate in `shouldJoinAcrossColumns` checks: column N+1 starts
+ * strictly to the right of column N's right edge.
+ */
+function defaultBBoxForColumn(columnIndex: number) {
+    const x = 50 + columnIndex * 300;
+    return { x, y: 0, w: 250, h: 12 };
+}
+
 function makeParagraph(
     columnIndex: number,
     sentences: SentenceBBox[],
     opts: { type?: "paragraph" | "header"; idx?: number } = {},
 ): ParagraphWithSentences {
+    // Auto-fill bboxes so tests don't have to specify geometry unless they're
+    // exercising the geometric gate. Mutates in place so the caller's
+    // sentence references still point at the same objects after the test
+    // helper runs the producer.
+    for (const s of sentences) {
+        if (s.bboxes.length === 0) {
+            s.bboxes = [defaultBBoxForColumn(columnIndex)];
+        }
+    }
     return {
         item: makeItem({
             idx: opts.idx ?? columnIndex,
@@ -214,6 +234,82 @@ describe("annotateColumnContinuations", () => {
                 `first="${firstText}"`,
             ).toBeUndefined();
         }
+    });
+
+    it("does not join when CUR's bbox extends past NEXT's left edge (full-width figure-caption case)", () => {
+        // Reproduces 1__2YWA8DTZ__p7 [3]: a figure-caption tag spans the full
+        // page width above the two columns, the next paragraph starts at the
+        // left edge of column 0. Cheap gates pass (no terminator, lowercase
+        // start) but the geometric gate must reject because the caption's
+        // rightmost bbox extends past the body's leftmost bbox.
+        const left = makeParagraph(0, [
+            makeSentence(
+                "[Colour figure can be viewed at wileyonlinelibrary.com]",
+                { bboxes: [{ x: 50, y: 0, w: 700, h: 12 }] },
+            ),
+        ]);
+        const right = makeParagraph(0, [
+            makeSentence(
+                "population in 2001 and 2011 with the quintiles of each variable",
+                { bboxes: [{ x: 50, y: 100, w: 250, h: 12 }] },
+            ),
+        ], { idx: 1 });
+        // Force a column-step transition (helper's other gates require it).
+        right.item.columnIndex = 1;
+        annotateColumnContinuations(
+            [left, right],
+            simpleRegexSentenceSplit,
+            new Set(),
+        );
+        expect(left.sentences[0].joinWithNext).toBeUndefined();
+    });
+
+    it("does not join when NEXT's left edge equals CUR's right edge minus a pixel (geometric overlap)", () => {
+        // Edge case: next.left = prev.right - 1. The gate uses `>=` so any
+        // overlap (even a single point shy) blocks the join.
+        const left = makeParagraph(0, [
+            makeSentence("ending without terminator", {
+                bboxes: [{ x: 50, y: 0, w: 250, h: 12 }],
+            }),
+        ]);
+        const right = makeParagraph(0, [
+            makeSentence("continuation that would join", {
+                bboxes: [{ x: 299, y: 100, w: 250, h: 12 }],
+            }),
+        ], { idx: 1 });
+        right.item.columnIndex = 1;
+        annotateColumnContinuations(
+            [left, right],
+            simpleRegexSentenceSplit,
+            new Set(),
+        );
+        expect(left.sentences[0].joinWithNext).toBeUndefined();
+    });
+
+    it("uses MAX(prev.right) and MIN(next.left) across multi-fragment sentences", () => {
+        // Prev sentence has two fragments; the WIDEST one defines the right
+        // edge for the gate. Here fragment 0 is wide (overlaps right column)
+        // — gate must reject even though fragment 1 (the last) is narrow.
+        const left = makeParagraph(0, [
+            makeSentence("multi-line ending without terminator", {
+                bboxes: [
+                    { x: 50, y: 0, w: 700, h: 12 }, // wide fragment 0
+                    { x: 50, y: 12, w: 100, h: 12 }, // narrow fragment 1
+                ],
+            }),
+        ]);
+        const right = makeParagraph(0, [
+            makeSentence("continuation that would join", {
+                bboxes: [{ x: 350, y: 100, w: 250, h: 12 }],
+            }),
+        ], { idx: 1 });
+        right.item.columnIndex = 1;
+        annotateColumnContinuations(
+            [left, right],
+            simpleRegexSentenceSplit,
+            new Set(),
+        );
+        expect(left.sentences[0].joinWithNext).toBeUndefined();
     });
 
     it("sets the flag for capitalized continuation when CUR has an unclosed paren (parenthetical-citation case)", () => {

@@ -730,14 +730,52 @@ function hasUnclosedParen(text: string): boolean {
 }
 
 /**
+ * Geometric gate: in an LTR multi-column layout, a continuation paragraph in
+ * column N+1 sits **entirely to the right** of column N's rightmost extent.
+ * If `next`'s leftmost bbox starts to the left of (or overlaps with) `prev`'s
+ * rightmost bbox edge, the two are not in a clean column-to-column relation
+ * — typical false-positive shape is a full-width figure-caption / banner
+ * paragraph (bbox spans both columns) followed by a left-column body
+ * paragraph that resumes the previous page's text.
+ *
+ * Uses MAX(x+w) over `prev.bboxes` and MIN(x) over `next.bboxes` so multi-
+ * fragment sentences (wrapped across several lines) are evaluated at their
+ * widest extent, not just the last fragment.
+ *
+ * **LTR only.** The producer's other gates (lowercase-start in particular)
+ * are already LTR-biased — RTL layouts and scripts without case never reach
+ * here today. Documented as out of scope; revisit alongside RTL paragraph
+ * detection.
+ */
+function nextStartsStrictlyRightOfPrev(
+    prev: SentenceBBox,
+    next: SentenceBBox,
+): boolean {
+    if (prev.bboxes.length === 0 || next.bboxes.length === 0) return false;
+    let prevMaxRight = -Infinity;
+    for (const b of prev.bboxes) {
+        const right = b.x + b.w;
+        if (right > prevMaxRight) prevMaxRight = right;
+    }
+    let nextMinLeft = Infinity;
+    for (const b of next.bboxes) {
+        if (b.x < nextMinLeft) nextMinLeft = b.x;
+    }
+    return nextMinLeft >= prevMaxRight;
+}
+
+/**
  * Decide whether a (last sentence, first sentence) pair across consecutive
  * columns should be joined. Pure heuristic — no I/O.
  */
 function shouldJoinAcrossColumns(
-    lastText: string,
-    firstText: string,
+    prev: SentenceBBox,
+    next: SentenceBBox,
     splitter: SentenceSplitter,
 ): boolean {
+    const lastText = prev.text;
+    const firstText = next.text;
+
     if (endsInHyphen(lastText)) return false;
     if (hasSentenceFinalTerminator(lastText)) return false;
     // Gate 7: next must look like a continuation. Default test is "starts with
@@ -750,6 +788,10 @@ function shouldJoinAcrossColumns(
     ) {
         return false;
     }
+    // Geometric gate: next paragraph must start strictly to the right of
+    // prev's rightmost extent (LTR-only — see `nextStartsStrictlyRightOfPrev`).
+    // Catches full-width figure-caption → left-column-body false positives.
+    if (!nextStartsStrictlyRightOfPrev(prev, next)) return false;
 
     const left = lastText.replace(/\s+$/u, "");
     const right = firstText.replace(/^\s+/u, "");
@@ -816,13 +858,7 @@ export function annotateColumnContinuations(
         if (!firstSentence) continue;
         if (firstSentence.kind === "heading") continue;
 
-        if (
-            shouldJoinAcrossColumns(
-                lastSentence.text,
-                firstSentence.text,
-                splitter,
-            )
-        ) {
+        if (shouldJoinAcrossColumns(lastSentence, firstSentence, splitter)) {
             lastSentence.joinWithNext = true;
         }
     }
