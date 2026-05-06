@@ -12,7 +12,9 @@
 import { describe, it, expect } from "vitest";
 import {
     applyPostProcessing,
+    countInternalNumberedMarkers,
     findReferenceBoundaries,
+    hasContinuationTailEvidence,
     hasReferenceStart,
     hasReferenceTail,
     isReferenceParagraph,
@@ -1155,5 +1157,439 @@ describe("mergeReferenceListSentences fallback path", () => {
         const out = mergeReferenceListSentences(input, text);
         // Should be the exact same array (no detection → early return).
         expect(out).toBe(input);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// New behavior: B7 tail (old-style journal-abbrev), continuation paragraphs,
+// and false-positive guards.
+// ---------------------------------------------------------------------------
+
+describe("hasReferenceTail B7 (old-style journal-abbrev tail)", () => {
+    it("fires on `…J. Chem. Phys. 128 114114`", () => {
+        const text =
+            "[1] Giurleo J T and Talaga D S 2008 Global ﬁtting without a " +
+            "global model J. Chem. Phys. 128 114114";
+        expect(hasReferenceTail(text)).toBe(true);
+    });
+
+    it("fires on `…Chem. Phys. 95 1–28` (en-dash page range)", () => {
+        const text =
+            "[2] Landl G, Langthaler T 1991 Distribution of event times in " +
+            "time-resolved fluorescence Chem. Phys. 95 1–28";
+        expect(hasReferenceTail(text)).toBe(true);
+    });
+
+    it("does NOT fire on prose ending in a single abbreviation", () => {
+        const text =
+            "He retired in Oct. 2008 and 50 papers were published since then.";
+        expect(hasReferenceTail(text)).toBe(false);
+    });
+
+    it("does NOT fire on numbered historical prose", () => {
+        const text =
+            "[1] In 2008, X happened across the field. " +
+            "[2] In 2010, Y happened in the same region.";
+        expect(hasReferenceTail(text)).toBe(false);
+    });
+
+    it("does NOT fire on prose ending with `Mr. Smith was born. 50 papers`", () => {
+        const text = "Mr. Smith was born. 50 papers were published.";
+        expect(hasReferenceTail(text)).toBe(false);
+    });
+});
+
+describe("countInternalNumberedMarkers", () => {
+    it("counts internal markers but excludes the start-of-text marker", () => {
+        const text = "[1] Foo. [2] Bar. [3] Baz.";
+        expect(countInternalNumberedMarkers(text)).toBe(2);
+    });
+
+    it("counts whitespace-preceded `N. Capital` and `N) Capital` forms", () => {
+        const text = "1. First. 2. Second 3) Third 4. Fourth";
+        // The leading `1.` has no preceding whitespace → excluded.
+        // The remaining 3 markers are counted.
+        expect(countInternalNumberedMarkers(text)).toBe(3);
+    });
+
+    it("returns 0 for plain prose without numbered markers", () => {
+        const text =
+            "Smith and Jones (2023) reported a strong effect across all groups.";
+        expect(countInternalNumberedMarkers(text)).toBe(0);
+    });
+});
+
+describe("hasContinuationTailEvidence (DOI/PMID only — strict)", () => {
+    it("fires on bare `doi.org/<...>`", () => {
+        expect(
+            hasContinuationTailEvidence("trailing tail doi.org/10.1234/abcde"),
+        ).toBe(true);
+    });
+
+    it("fires on canonical DOI URL", () => {
+        expect(
+            hasContinuationTailEvidence(
+                "trailing tail https://doi.org/10.1038/nature12920",
+            ),
+        ).toBe(true);
+    });
+
+    it("fires on CrossRef DOI prefix `10.<digits>/...`", () => {
+        expect(
+            hasContinuationTailEvidence("doi: 10.1038/s41598-019-50768-y"),
+        ).toBe(true);
+    });
+
+    it("fires on `pmid: <digits>`", () => {
+        expect(hasContinuationTailEvidence("pmid: 31601834")).toBe(true);
+    });
+
+    it("does NOT fire on a plain `https://example.com` URL", () => {
+        expect(
+            hasContinuationTailEvidence(
+                "discussed at length online; see https://example.com/page",
+            ),
+        ).toBe(false);
+    });
+
+    it("does NOT fire on a publisher keyword tail", () => {
+        expect(
+            hasContinuationTailEvidence("New York: Springer."),
+        ).toBe(false);
+    });
+});
+
+describe("isReferenceParagraph — multi-numbered with B7 tail", () => {
+    it("accepts DPKD3QHI multi-numbered paragraph (`[1] … [2] … Chem. Phys. 95 1–28`)", () => {
+        const text =
+            "[1] Giurleo J T and Talaga D S 2008 Global ﬁtting without a " +
+            "global model J. Chem. Phys. 128 114114 " +
+            "[2] Landl G, Langthaler T 1991 Distribution of event times in " +
+            "time-resolved fluorescence Chem. Phys. 95 1–28";
+        expect(isReferenceParagraph(text)).toBe(true);
+    });
+
+    it("accepts DPKD3QHI single-ref paragraph ending with chained abbreviations", () => {
+        const text =
+            "[4] McKinnon A E, Szabo A G and Miller D R 1977 The deconvolution " +
+            "of photoluminescence data J. Phys. Chem. 81 1564–70";
+        expect(isReferenceParagraph(text)).toBe(true);
+    });
+
+    it("does NOT accept numbered historical prose with year tokens but no B-tail", () => {
+        // The case the reviewer flagged: numbered prose with multiple year
+        // tokens but no journal abbreviations + vol-pages. B7's
+        // chained-abbrev requirement keeps this rejected.
+        const text =
+            "[1] In 2008, X happened across the region. " +
+            "[2] In 2010, Y happened in the next study.";
+        expect(isReferenceParagraph(text)).toBe(false);
+    });
+
+    it("does NOT accept numbered prose with `Mr. / Dr.` honorifics", () => {
+        const text =
+            "[1] Mr. Smith was born in 1950 and lived a productive life. " +
+            "[2] Dr. Jones was born in 1955 and made important discoveries.";
+        expect(isReferenceParagraph(text)).toBe(false);
+    });
+});
+
+describe("isReferenceParagraph — multi-numbered with body-level evidence (path 2)", () => {
+    it("accepts DPKD3QHI [10]/[11] paragraph (trailing ref ends `pp 271–82`)", () => {
+        // Real shape from DPKD3QHI page 18 `para_p17_11`. The trailing
+        // reference [11] ends with `pp 271–82` which doesn't match any
+        // B-tail pattern (B7 anchored to end fails because the very last
+        // token is `pp` not `Word.`). But ref [10]'s tail `Chem. Phys.
+        // Lett. 120 455–9` sits in the body and matches the body-position
+        // chained-abbrev guard.
+        const text =
+            "[10] James D R and Ware W R 1985 A fallacy in the interpretation " +
+            "of fluorescence decay parameters Chem. Phys. Lett. 120 455–9 " +
+            "[11] Bradley J V 1968 Distribution-Free Statistical Tests " +
+            "(Englewood Cliffs, NJ: Prentice-Hall) pp 271–82";
+        expect(isReferenceParagraph(text)).toBe(true);
+    });
+
+    it("does NOT accept numbered prose without a chained-abbrev + vol-pages anywhere", () => {
+        // The body-position guard distinguishes real reference lists from
+        // numbered prose that happens to have multiple year tokens.
+        const text =
+            "[1] In 2008, X happened across the region. " +
+            "[2] In 2010, Y happened in the next study.";
+        expect(isReferenceParagraph(text)).toBe(false);
+    });
+
+    it("does NOT accept numbered treatment-group prose", () => {
+        const text =
+            "[1] Treatment group received 100mg dose orally and was " +
+            "monitored for 6 weeks. " +
+            "[2] Control group received placebo and was monitored " +
+            "for the same duration.";
+        expect(isReferenceParagraph(text)).toBe(false);
+    });
+
+    it("does NOT accept numbered prose with chained abbrevs + numbers but no page range", () => {
+        // The reviewer-flagged false-positive shape: a numbered prose
+        // paragraph that contains chained `Word. Word.` followed by two
+        // numbers (`Test. Cont. 100 200 ...`). Path 2's pattern requires
+        // the trailing numerics to form a page range (digit + dash +
+        // digit) — real reference tails always do, numbered prose does
+        // not — so this is rejected.
+        const text =
+            "[1] In trial 1, Test. Cont. 100 200 outcomes were measured " +
+            "across the cohort over a six-week period of observation. " +
+            "[2] In trial 2, Test. Cont. 50 60 outcomes were measured " +
+            "across the same cohort with a different intervention.";
+        expect(isReferenceParagraph(text)).toBe(false);
+    });
+
+    it("does NOT accept numbered prose with `Item A. 12 345` shape", () => {
+        // The single-letter `A.` is too short to satisfy the
+        // `\p{L}{2,}` (≥3-char abbrev) requirement, so the chain
+        // breaks at `A.` and Path 2 doesn't fire.
+        const text =
+            "[1] First step uses Item A. 12 345 measurements per cohort " +
+            "with the appropriate calibration applied. " +
+            "[2] Second step uses Item B. 67 890 measurements per cohort " +
+            "with the same calibration.";
+        expect(isReferenceParagraph(text)).toBe(false);
+    });
+});
+
+describe("mergeReferenceListSentences — body-evidence multi-numbered (path 2)", () => {
+    it("collapses DPKD3QHI [10]/[11] paragraph at the internal numbered marker", () => {
+        const text =
+            "[10] James D R and Ware W R 1985 A fallacy in the interpretation " +
+            "of fluorescence decay parameters Chem. Phys. Lett. 120 455–9 " +
+            "[11] Bradley J V 1968 Distribution-Free Statistical Tests " +
+            "(Englewood Cliffs, NJ: Prentice-Hall) pp 271–82";
+        // Simulate sentencex's over-split inside the paragraph.
+        const input = rangesFromChunks(text, [
+            "[10] James D R and Ware W R 1985 A fallacy in the interpretation of fluorescence decay parameters Chem. Phys.",
+            "Lett. 120 455–9 [11] Bradley J V 1968 Distribution-Free Statistical Tests (Englewood Cliffs, NJ: Prentice-Hall) pp 271–82",
+        ]);
+        const out = mergeReferenceListSentences(input, text);
+        const sliced = slice(text, out);
+        expect(out).toHaveLength(2);
+        expect(sliced[0].startsWith("[10] James")).toBe(true);
+        expect(sliced[0].endsWith("Chem. Phys. Lett. 120 455–9")).toBe(true);
+        expect(sliced[1].startsWith("[11] Bradley")).toBe(true);
+        expect(sliced[1].endsWith("pp 271–82")).toBe(true);
+    });
+});
+
+describe("isReferenceParagraph — continuation path", () => {
+    it("accepts a 2HWTUN94-style column-wrap continuation paragraph", () => {
+        const text =
+            "quantification of sexual conversion rates in the malaria " +
+            "parasite Plasmodium falciparum. Sci. Rep. 9, 14595 (2019). " +
+            "doi: 10.1038/s41598-019-50768-y; pmid: 31601834 " +
+            "20. G. A. Josling et al., Dissecting the role of PfAP2-G in " +
+            "malaria gametocytogenesis. Nat. Commun. 11, 1503 (2020). " +
+            "doi: 10.1038/s41467-020-15026-0; pmid: 32198457 " +
+            "21. F. Silvestrini et al., Title here. Mol. Biochem. Parasitol. " +
+            "33, 100-110 (1989).";
+        expect(isReferenceParagraph(text)).toBe(true);
+    });
+
+    it("accepts a 2HWTUN94-style ref-37 paragraph (1 internal marker, DOI+PMID at start)", () => {
+        const text =
+            "doi: 10.12688/wellcomeopenres.11896.2; pmid: 28748223 " +
+            "37. S. Kumar, S. H. I. Kappe, PfHMGB2 has a role in " +
+            "Plasmodium falciparum sporozoite development.";
+        expect(isReferenceParagraph(text)).toBe(true);
+    });
+
+    it("does NOT accept a continuation candidate with only a generic URL", () => {
+        // No DOI / PMID anywhere → continuation evidence threshold not met.
+        const text =
+            "discussed at length online; see https://example.com/page. " +
+            "20. Smith J. (2023) Title One. Applied Sciences, 13(12), 7082.";
+        expect(isReferenceParagraph(text)).toBe(false);
+    });
+
+    it("does NOT accept normal prose with one stray numbered token", () => {
+        const text =
+            "The analysis proceeds across multiple stages of model selection. " +
+            "Step 12. Some additional considerations apply to the design.";
+        expect(isReferenceParagraph(text)).toBe(false);
+    });
+});
+
+describe("findReferenceBoundaries — continuation paragraphs", () => {
+    it("finds boundaries at internal numbered markers in a 2HWTUN94 continuation", () => {
+        const text =
+            "quantification of sexual conversion rates in the malaria " +
+            "parasite Plasmodium falciparum. Sci. Rep. 9, 14595 (2019). " +
+            "doi: 10.1038/s41598-019-50768-y; pmid: 31601834 " +
+            "20. G. A. Josling et al., Dissecting the role of PfAP2-G in " +
+            "malaria gametocytogenesis. Nat. Commun. 11, 1503 (2020). " +
+            "doi: 10.1038/s41467-020-15026-0; pmid: 32198457 " +
+            "21. F. Silvestrini et al., Title here. Mol. Biochem. Parasitol. " +
+            "33, 100-110 (1989). doi: 10.1234/abc; pmid: 12686607 " +
+            "22. T. Spielmann, Membrane proteins. Mol. Biol. Cell 14, 1529–1544 (2003).";
+        const boundaries = findReferenceBoundaries(text);
+        expect(boundaries).toEqual([
+            text.indexOf("20. G."),
+            text.indexOf("21. F."),
+            text.indexOf("22. T."),
+        ]);
+    });
+
+    it("does not throw on a continuation candidate that lacks DOI/PMID evidence", () => {
+        // Generic URL only → the continuation gate inside
+        // `findReferenceBoundaries` does NOT fire (no DOI/PMID evidence)
+        // so the helper falls through to the period-boundary regex. That
+        // can still match — the period-boundary gate doesn't have its own
+        // tail-evidence check — so the boundary count is non-deterministic
+        // here. The actual end-to-end safety against a false-positive
+        // re-split is enforced one layer up in
+        // `mergeReferenceListSentences` (via `isReferenceParagraph`'s
+        // gate and `mergedRangesValid`'s `allowContinuationFirst` check).
+        // The lone guarantee at this level is that the function doesn't
+        // crash on such input.
+        const text =
+            "discussed at length online; see https://example.com/page. " +
+            "20. Smith J. (2023) Title One. Applied Sciences.";
+        expect(() => findReferenceBoundaries(text)).not.toThrow();
+    });
+});
+
+describe("mergeReferenceListSentences — multi-numbered + continuation", () => {
+    it("collapses DPKD3QHI multi-numbered paragraph into 2 ranges", () => {
+        const text =
+            "[1] Giurleo J T and Talaga D S 2008 Global ﬁtting without a " +
+            "global model J. Chem. Phys. 128 114114 " +
+            "[2] Landl G, Langthaler T 1991 Distribution of event times in " +
+            "time-resolved fluorescence Chem. Phys. 95 1–28";
+        // Simulate sentencex's over-split.
+        const input = rangesFromChunks(text, [
+            "[1] Giurleo J T and Talaga D S 2008 Global ﬁtting without a global model J. Chem. Phys.",
+            "128 114114 [2] Landl G, Langthaler T 1991 Distribution of event times in time-resolved fluorescence Chem. Phys.",
+            "95 1–28",
+        ]);
+        const out = mergeReferenceListSentences(input, text);
+        const sliced = slice(text, out);
+        expect(out).toHaveLength(2);
+        expect(sliced[0].startsWith("[1] Giurleo")).toBe(true);
+        expect(sliced[0].endsWith("128 114114")).toBe(true);
+        expect(sliced[1].startsWith("[2] Landl")).toBe(true);
+        expect(sliced[1].endsWith("95 1–28")).toBe(true);
+    });
+
+    it("collapses 2HWTUN94 column-wrap continuation into 4 ranges (tail + 3 refs)", () => {
+        const text =
+            "quantification of sexual conversion rates in the malaria " +
+            "parasite Plasmodium falciparum. Sci. Rep. 9, 14595 (2019). " +
+            "doi: 10.1038/s41598-019-50768-y; pmid: 31601834 " +
+            "20. G. A. Josling et al., Dissecting the role of PfAP2-G in " +
+            "malaria gametocytogenesis. Nat. Commun. 11, 1503 (2020). " +
+            "doi: 10.1038/s41467-020-15026-0; pmid: 32198457 " +
+            "21. F. Silvestrini et al., Title here. Mol. Biochem. Parasitol. " +
+            "33, 100-110 (1989). doi: 10.1234/abc; pmid: 12686607 " +
+            "22. T. Spielmann, Membrane proteins. Mol. Biol. Cell 14, 1529–1544 (2003).";
+        // Simulate sentencex's heavy over-split inside the paragraph.
+        const input = rangesFromChunks(text, [
+            "quantification of sexual conversion rates in the malaria parasite Plasmodium falciparum.",
+            "Sci.",
+            "Rep. 9, 14595 (2019).",
+            "doi: 10.1038/s41598-019-50768-y; pmid: 31601834 20. G. A. Josling et al., Dissecting the role of PfAP2-G in malaria gametocytogenesis.",
+            "Nat.",
+            "Commun. 11, 1503 (2020).",
+            "doi: 10.1038/s41467-020-15026-0; pmid: 32198457 21. F. Silvestrini et al., Title here.",
+            "Mol. Biochem. Parasitol. 33, 100-110 (1989).",
+            "doi: 10.1234/abc; pmid: 12686607 22. T. Spielmann, Membrane proteins.",
+            "Mol. Biol. Cell 14, 1529–1544 (2003).",
+        ]);
+        const out = mergeReferenceListSentences(input, text);
+        expect(out).toHaveLength(4);
+        const sliced = slice(text, out);
+        expect(sliced[0].startsWith("quantification")).toBe(true);
+        expect(sliced[0].endsWith("pmid: 31601834")).toBe(true);
+        expect(sliced[1].startsWith("20. G. A. Josling")).toBe(true);
+        expect(sliced[2].startsWith("21. F. Silvestrini")).toBe(true);
+        expect(sliced[3].startsWith("22. T. Spielmann")).toBe(true);
+    });
+
+    it("collapses 2HWTUN94 ref-37 paragraph into 2 ranges (tail + ref 37)", () => {
+        const text =
+            "doi: 10.12688/wellcomeopenres.11896.2; pmid: 28748223 " +
+            "37. S. Kumar, S. H. I. Kappe, PfHMGB2 has a role in " +
+            "Plasmodium falciparum sporozoite development. Mol. Biochem. " +
+            "Parasitol. 33, 100-110 (2018). doi: 10.5678/xyz; pmid: 99999999";
+        const input = rangesFromChunks(text, [
+            "doi: 10.12688/wellcomeopenres.11896.2; pmid: 28748223 37. S. Kumar, S. H. I. Kappe, PfHMGB2 has a role in Plasmodium falciparum sporozoite development.",
+            "Mol. Biochem. Parasitol. 33, 100-110 (2018).",
+            "doi: 10.5678/xyz; pmid: 99999999",
+        ]);
+        const out = mergeReferenceListSentences(input, text);
+        expect(out).toHaveLength(2);
+        const sliced = slice(text, out);
+        expect(sliced[0].startsWith("doi: 10.12688")).toBe(true);
+        expect(sliced[0].endsWith("pmid: 28748223")).toBe(true);
+        expect(sliced[1].startsWith("37. S. Kumar")).toBe(true);
+    });
+
+    it("leaves continuation candidate with only a generic URL unchanged", () => {
+        // Belt-and-suspenders: classifier rejects, validator would also
+        // reject, fallback returns the original ranges.
+        const text =
+            "discussed at length online; see https://example.com/page. " +
+            "20. Smith J. (2023) Title One. Applied Sciences, 13(12), 7082.";
+        const input = rangesFromChunks(text, [
+            "discussed at length online; see https://example.com/page.",
+            "20. Smith J. (2023) Title One.",
+            "Applied Sciences, 13(12), 7082.",
+        ]);
+        const out = mergeReferenceListSentences(input, text);
+        expect(out).toBe(input);
+    });
+});
+
+describe("mergedRangesValid with allowContinuationFirst", () => {
+    const text =
+        "doi: 10.12688/wellcomeopenres.11896.2; pmid: 28748223 " +
+        "37. S. Kumar, S. H. I. Kappe, PfHMGB2 has a role.";
+
+    it("default mode rejects a first range without reference-start", () => {
+        const r1 = { start: 0, end: text.indexOf("37. S.") - 1 };
+        const r2 = { start: text.indexOf("37. S."), end: text.length };
+        expect(mergedRangesValid([r1, r2], text)).toBe(false);
+    });
+
+    it("with allowContinuationFirst=true accepts a first range carrying DOI+PMID", () => {
+        const r1 = { start: 0, end: text.indexOf("37. S.") - 1 };
+        const r2 = { start: text.indexOf("37. S."), end: text.length };
+        expect(
+            mergedRangesValid([r1, r2], text, { allowContinuationFirst: true }),
+        ).toBe(true);
+    });
+
+    it("with allowContinuationFirst=true rejects a first range that lacks DOI/PMID", () => {
+        const proseText =
+            "discussed at length online; see https://example.com/page. " +
+            "37. S. Kumar et al.";
+        const r1 = { start: 0, end: proseText.indexOf("37. S.") - 1 };
+        const r2 = { start: proseText.indexOf("37. S."), end: proseText.length };
+        // Generic URL is not DOI/PMID evidence → first-range check fails.
+        expect(
+            mergedRangesValid([r1, r2], proseText, {
+                allowContinuationFirst: true,
+            }),
+        ).toBe(false);
+    });
+
+    it("with allowContinuationFirst=true still rejects subsequent ranges without reference-start", () => {
+        // Build a text where the second range mid-content doesn't start
+        // with any A-pattern (no initials, no surname-comma, no numbered
+        // marker). "has a role" is plain prose continuation.
+        const t =
+            "doi: 10.12688/wellcomeopenres.11896.2; pmid: 28748223 " +
+            "has a role in Plasmodium falciparum sporozoite development.";
+        const r1 = { start: 0, end: t.indexOf("has a role") - 1 };
+        const r2 = { start: t.indexOf("has a role"), end: t.length };
+        expect(
+            mergedRangesValid([r1, r2], t, { allowContinuationFirst: true }),
+        ).toBe(false);
     });
 });
