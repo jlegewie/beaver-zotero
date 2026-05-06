@@ -927,6 +927,12 @@ function processCurrentLinesAsItem(
     // splits such lines into their own column when the wrap indents
     // slightly. Real italic subsection titles appear after body text that
     // ends a sentence, not after an icon-font line ending mid-phrase.
+    //
+    // Guarded against explicit heading cues — section-number prefix
+    // ("2.1 Methods") or all-caps phrase — which carry independent signal
+    // strong enough to override the suspicion. Without these guards, a real
+    // italic subsection title at the top of a two-column page that follows
+    // a wrapped bullet list in the previous column would be demoted.
     if (
         isPotentialHeader &&
         currentLines.length === 1 &&
@@ -938,7 +944,11 @@ function processCurrentLinesAsItem(
         const prevStyle = extractLineStyle(prevDocLine);
         const prevText = prevDocLine.text.trimEnd();
         const prevEndsTerminator = /[.!?:;]["'”’)]?$/u.test(prevText);
+        const hasExplicitHeadingCue =
+            SECTION_PREFIX_RE.test(rawItemText) ||
+            isAllCapsHeaderPhrase(rawItemText);
         if (
+            !hasExplicitHeadingCue &&
             lineStyle &&
             lineStyle.italic &&
             !lineStyle.bold &&
