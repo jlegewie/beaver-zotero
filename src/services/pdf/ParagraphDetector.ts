@@ -961,6 +961,19 @@ function startNewItem(
     const spacingTop = line.bbox.t - prevLine.bbox.b;
     const gapBreak = spacingTop > pageThresholds.gapExcessThreshold;
 
+    // Heading-shape signal: current line ends well short of the column
+    // right edge — a typical heading on its own line. Used below to relax
+    // the gap requirement on the header rules. APA-style theses commonly
+    // place a bold section title immediately after a fully-justified body
+    // paragraph with no extra leading; without this signal those titles
+    // merge into the preceding paragraph and disappear from the outline.
+    // The body-style + 90%-style-dominance + different-font checks inside
+    // `isHeaderStyle` keep ordinary paragraph last-lines (which also end
+    // short) from misfiring.
+    const currentEndsShort =
+        columnThresholds.rightEdgeMode - line.bbox.r >
+        columnThresholds.earlyEndExcessThreshold;
+
     // Header detection. Compute prev first so we can relax the gap
     // requirement when the current line follows a header — handles
     // consecutive section/subsection lines like
@@ -972,7 +985,7 @@ function startNewItem(
     // two lines merge into one paragraph, and the subsection title is
     // lost as a distinct heading.
     const prevIsLocalHeader = isHeaderStyle(prevLine, bodyStyles, settings, null, bodyAllCaps);
-    const headerGapPasses = gapBreak || prevIsLocalHeader;
+    const headerGapPasses = gapBreak || prevIsLocalHeader || currentEndsShort;
     const isLocalHeader = isHeaderStyle(line, bodyStyles, settings, headerGapPasses, bodyAllCaps);
 
     if (isLocalHeader && !prevIsLocalHeader) {
