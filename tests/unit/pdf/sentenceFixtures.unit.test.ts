@@ -38,6 +38,7 @@ import type {
     SentenceRange,
     SentenceSplitter,
 } from '../../../src/services/pdf';
+import { simpleRegexSentenceSplit } from '../../../src/services/pdf/SentenceMapper';
 import {
     defaultFixtureRoot,
     expectSentencesMatch,
@@ -92,15 +93,59 @@ function runPipelineForFixture(fx: LoadedFixture) {
         fs.readFileSync(path.join(fx.folder, 'raw-extraction.json'), 'utf8'),
     ) as RawExtraction;
 
-    const splitter = makeReplaySplitter(raw.splitterRecording);
+    const { splitter, unknownTexts } = makeReplaySplitter(
+        raw.splitterRecording,
+    );
     const filtered = detectFilteredParagraphs({
         pages: pagesForFilter(raw.rawPages, raw.pageIndex, raw.detailedPage),
         pageIndex: raw.pageIndex,
     });
-    return extractPageSentenceBBoxes(raw.detailedPage, {
+    const result = extractPageSentenceBBoxes(raw.detailedPage, {
         splitter,
         precomputed: { paragraphResult: filtered.paragraphResult },
     });
+
+    assertUnknownsAreContinuationProbes(unknownTexts, result, fx);
+    return result;
+}
+
+/**
+ * Validate every text the splitter received that wasn't in the recording.
+ *
+ * Each unknown MUST exactly equal a candidate continuation-probe string —
+ * `<last sentence text>.trimEnd() + " " + <first sentence text>.trimStart()`
+ * for some adjacent paragraph pair in the result. Anything else means the
+ * mapper started passing the splitter a paragraph text that wasn't captured
+ * (drift) — fail loudly so re-capture is required.
+ */
+function assertUnknownsAreContinuationProbes(
+    unknownTexts: ReadonlyArray<string>,
+    result: { paragraphs: ActualLikeResult['paragraphs'] },
+    fx: LoadedFixture,
+): void {
+    if (unknownTexts.length === 0) return;
+    const candidates = new Set<string>();
+    for (let i = 0; i < result.paragraphs.length - 1; i++) {
+        const cur = result.paragraphs[i].sentences;
+        const next = result.paragraphs[i + 1].sentences;
+        if (cur.length === 0 || next.length === 0) continue;
+        const left = cur[cur.length - 1].text.replace(/\s+$/u, '');
+        const right = next[0].text.replace(/^\s+/u, '');
+        if (!left || !right) continue;
+        candidates.add(`${left} ${right}`);
+    }
+    for (const text of unknownTexts) {
+        if (!candidates.has(text)) {
+            throw new Error(
+                `replaySplitter: splitter received unrecorded text that is ` +
+                    `not a valid continuation-probe candidate ` +
+                    `(fixture=${fx.folderName}, len=${text.length}, ` +
+                    `head="${text.slice(0, 60)}…"). Mapper input drifted ` +
+                    `since fixture capture — re-capture via "Create/Update ` +
+                    `Sentence Test" or run with UPDATE_FIXTURES=1.`,
+            );
+        }
+    }
 }
 
 /**
@@ -122,26 +167,38 @@ function pagesForFilter(
 }
 
 /**
- * Build a `SentenceSplitter` that returns the captured ranges for
- * matching paragraph text. If unknown text comes in (mapper changed the
- * input it gives the splitter), throws with a descriptive error so the
- * regression is visible rather than silently producing wrong output.
+ * Build a `SentenceSplitter` that returns the captured ranges for matching
+ * paragraph text.
+ *
+ * Two distinct call sites feed this splitter inside `extractPageSentenceBBoxes`:
+ *   1. Per-paragraph splits (`resolveSentencesInParagraph`) — texts here MUST
+ *      come from the recording. An unrecorded paragraph text means the mapper
+ *      input drifted since fixture capture; re-capture via UPDATE_FIXTURES=1.
+ *   2. Cross-column join probes (`annotateColumnContinuations`) — the helper
+ *      builds a *combined* string from the last + first sentence around each
+ *      column boundary. These probes are not part of the recording.
+ *
+ * The splitter cannot tell the two call sites apart synchronously. Instead
+ * of choosing one regression-coverage failure mode, we collect every
+ * unrecorded text into `unknownTexts`. The caller validates after extraction
+ * that each unknown matches a valid continuation-probe candidate from the
+ * actual result; anything else indicates real mapper drift on a paragraph
+ * split. This preserves drift detection on per-paragraph splits without
+ * requiring re-capture for every code change that adds new probe inputs.
  */
 function makeReplaySplitter(
     recording: ReadonlyArray<{ text: string; ranges: SentenceRange[] }>,
-): SentenceSplitter {
+): { splitter: SentenceSplitter; unknownTexts: string[] } {
     const byText = new Map<string, SentenceRange[]>();
     for (const entry of recording) byText.set(entry.text, entry.ranges);
-    return (text: string): SentenceRange[] => {
+    const unknownTexts: string[] = [];
+    const splitter: SentenceSplitter = (text: string): SentenceRange[] => {
         const hit = byText.get(text);
         if (hit) return hit;
-        throw new Error(
-            `replaySplitter: no recorded splitter output for paragraph text ` +
-                `(len=${text.length}, head="${text.slice(0, 60)}…"). ` +
-                `Mapper input changed since fixture capture — re-capture via ` +
-                `"Create/Update Sentence Test" or run with UPDATE_FIXTURES=1.`,
-        );
+        unknownTexts.push(text);
+        return simpleRegexSentenceSplit(text);
     };
+    return { splitter, unknownTexts };
 }
 
 interface ActualLikeResult {

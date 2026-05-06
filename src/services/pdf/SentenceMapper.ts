@@ -117,6 +117,61 @@ export function simpleRegexSentenceSplit(text: string): SentenceRange[] {
 }
 
 // ---------------------------------------------------------------------------
+// Terminal-punctuation check (used by the column-continuation hint producer)
+// ---------------------------------------------------------------------------
+
+/**
+ * Trailing closers walked back over before checking the terminal char, so
+ * `…the report.")` and `…見た。」` count as terminated. Conservative list:
+ * straight + curly quotes, ASCII brackets, French guillemets, CJK brackets.
+ * Extend only with concrete fixture evidence.
+ */
+const SENTENCE_FINAL_CLOSERS = new Set([
+    ")", "]", "}",
+    '"', "'",   // straight ASCII quotes
+    "”", "’",   // ” curly double, ’ curly single
+    "»", "›",   // » guillemet, › single guillemet
+    "」", "』",   // 」 」 CJK closing brackets
+]);
+
+/**
+ * Sentence-ending check used by `annotateColumnContinuations`.
+ *
+ * Returns `true` iff the trimmed end of `text` (after walking back through
+ * SENTENCE_FINAL_CLOSERS) is one of:
+ *   - ASCII `.`, `!`, `?`
+ *   - Ellipsis `…` (U+2026) or the literal three-character `...`
+ *   - Myanmar `။` (U+104B)
+ *   - Any member of `UNAMBIGUOUS_SENTENCE_TERMINATORS`
+ *
+ * Whitespace at the end is ignored. The check looks only at the trailing
+ * position — a terminator buried mid-string with non-closer text after it
+ * does not count.
+ */
+export function hasSentenceFinalTerminator(text: string): boolean {
+    if (!text) return false;
+
+    // Walk back past trailing whitespace, then any stack of closers, then
+    // any further trailing whitespace between closers and the terminator.
+    let end = text.length;
+    while (end > 0 && /\s/.test(text[end - 1])) end--;
+    while (end > 0 && SENTENCE_FINAL_CLOSERS.has(text[end - 1])) {
+        end--;
+        while (end > 0 && /\s/.test(text[end - 1])) end--;
+    }
+    if (end <= 0) return false;
+
+    const last = text[end - 1];
+    // ASCII `.` covers the literal three-dot ellipsis (`...`) automatically.
+    if (last === "." || last === "!" || last === "?") return true;
+    if (last === "…") return true;   // … ellipsis
+    if (last === "။") return true;   // ။ Myanmar full stop
+    if (UNAMBIGUOUS_SENTENCE_TERMINATORS.has(last)) return true;
+
+    return false;
+}
+
+// ---------------------------------------------------------------------------
 // Page text concatenation with source map
 // ---------------------------------------------------------------------------
 
