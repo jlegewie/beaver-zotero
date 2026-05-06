@@ -361,10 +361,12 @@ const SECTION_PREFIX_RE =
  * the line "looks like" a header by font/size compared to body. Real
  * headings don't use these fonts.
  *
- * Matches both bare names ("Symbol") and the common subset-prefix form
- * ("ABCDEE+Symbol", "AAAAA+ZapfDingbats").
+ * Matches the base name with no trailing word-boundary because real PDFs
+ * routinely append a brand initialism (`ZapfDingbatsITC`, `ZapfDingbatsBT`,
+ * `Wingdings2`, `SymbolMT`, …). The `(?:^|\+)` anchor scopes the match to
+ * the font-name proper, not to the random subset prefix MuPDF prepends.
  */
-const ICON_FONT_RE = /(?:^|\+)(?:Symbol|Wingdings|ZapfDingbats|Webdings|Marlett)\b/i;
+const ICON_FONT_RE = /(?:^|\+)(?:Symbol|Wingdings|ZapfDingbats|Webdings|Marlett)/i;
 
 /**
  * Math-symbol fonts (MathTime upright `MTSYN` / italic `MTSY`). These are
@@ -382,10 +384,13 @@ const MATH_SYMBOL_FONT_RE = /(?:^|\+)MTSYN?\b/i;
  *   ‣ U+2023 TRIANGULAR BULLET      ⁃ U+2043 HYPHEN BULLET
  *   ● U+25CF / ○ U+25CB / ◆ U+25C6 / ◇ U+25C7 / ■ U+25A0 / □ U+25A1
  *   ∙ U+2219 BULLET OPERATOR
+ *   ◗ U+25D7 RIGHT HALF BLACK CIRCLE — design-heavy bullet glyph
+ *           (e.g. ZapfDingbatsITC, common in marketing/report PDFs).
+ *   ▶ U+25B6 / ► U+25BA / ➤ U+27A4 — right-pointing arrow bullets.
  *      Symbol-font private-use bullet that survives MuPDF extraction
  *            verbatim (the codepoint Symbol-bulleted PDFs typically emit).
  */
-const BULLET_LEAD_CHAR_RE = /^\s*[•◦▪▫‣⁃●○◆◇■□∙]/u;
+const BULLET_LEAD_CHAR_RE = /^\s*[•◦▪▫‣⁃●○◆◇■□∙◗▶►➤]/u;
 
 /**
  * Decide whether a line is a dingbat-led bullet item. Requires both:
