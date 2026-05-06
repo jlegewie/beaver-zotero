@@ -20,6 +20,17 @@
  * `UPDATE_FIXTURES=1` to overwrite `expected` from the current pipeline:
  *   UPDATE_FIXTURES=1 npx vitest run tests/unit/pdf/sentenceFixtures
  *
+ * `UPDATE_FIXTURES` only rewrites `fixture.json#expected`. If the change
+ * also shifts paragraph boundaries, the captured `splitterRecording` in
+ * `raw-extraction.json` is now stale (the splitter is asked to split text
+ * that was never recorded). The only correct fix is to recapture the
+ * affected fixture(s) through the in-reader dev menu (right-click in the
+ * reader → "Update Sentence Test (current page)") so the recording is
+ * refreshed with real sentencex output. There is intentionally no
+ * regex-fallback path — a recording produced from `simpleRegexSentenceSplit`
+ * would not reflect production behavior and would silently mask sentencex
+ * regressions.
+ *
  * Run: `npx vitest run tests/unit/pdf/sentenceFixtures`
  */
 
@@ -140,9 +151,12 @@ function assertUnknownsAreContinuationProbes(
                 `replaySplitter: splitter received unrecorded text that is ` +
                     `not a valid continuation-probe candidate ` +
                     `(fixture=${fx.folderName}, len=${text.length}, ` +
-                    `head="${text.slice(0, 60)}…"). Mapper input drifted ` +
-                    `since fixture capture — re-capture via "Create/Update ` +
-                    `Sentence Test" or run with UPDATE_FIXTURES=1.`,
+                    `head="${text.slice(0, 60)}…"). Paragraph boundaries ` +
+                    `drifted since fixture capture — recapture via the ` +
+                    `reader's "Update Sentence Test (current page)" menu ` +
+                    `so the splitter recording is refreshed with real ` +
+                    `sentencex output. UPDATE_FIXTURES=1 alone will not ` +
+                    `fix this: it only rewrites \`expected\`.`,
             );
         }
     }

@@ -367,6 +367,53 @@ const SECTION_PREFIX_RE =
 const ICON_FONT_RE = /(?:^|\+)(?:Symbol|Wingdings|ZapfDingbats|Webdings|Marlett)\b/i;
 
 /**
+ * Math-symbol fonts (MathTime upright `MTSYN` / italic `MTSY`). These are
+ * used for both bulleted list glyphs and inline / standalone equations, so
+ * font-name alone is ambiguous — gate on a leading bullet character (see
+ * `isIconBulletLine`) before treating an MT* line as a list item.
+ */
+const MATH_SYMBOL_FONT_RE = /(?:^|\+)MTSYN?\b/i;
+
+/**
+ * Recognized leading bullet glyphs (after optional whitespace). Covers the
+ * common Unicode bullets that survive MuPDF extraction:
+ *   • U+2022 BULLET                 ◦ U+25E6 WHITE BULLET
+ *   ▪ U+25AA BLACK SMALL SQUARE     ▫ U+25AB WHITE SMALL SQUARE
+ *   ‣ U+2023 TRIANGULAR BULLET      ⁃ U+2043 HYPHEN BULLET
+ *   ● U+25CF / ○ U+25CB / ◆ U+25C6 / ◇ U+25C7 / ■ U+25A0 / □ U+25A1
+ *   ∙ U+2219 BULLET OPERATOR
+ *      Symbol-font private-use bullet that survives MuPDF extraction
+ *            verbatim (the codepoint Symbol-bulleted PDFs typically emit).
+ */
+const BULLET_LEAD_CHAR_RE = /^\s*[•◦▪▫‣⁃●○◆◇■□∙]/u;
+
+/**
+ * Decide whether a line is a dingbat-led bullet item. Requires both:
+ *   - a font signal: either an unambiguous bullet/dingbat font (`Symbol`,
+ *     `Wingdings`, `ZapfDingbats`, …) or a math-symbol font (MTSY/MTSYN
+ *     — dual-use for bullets and equations),
+ *   - a text signal: a leading bullet glyph (`BULLET_LEAD_CHAR_RE`).
+ *
+ * Requiring both screens out:
+ *   - Symbol/dingbat lines that are pure equations or scattered glyphs
+ *     (no leading bullet glyph), and
+ *   - MTSY/MTSYN equation lines that happen to start with a non-bullet
+ *     math symbol.
+ *
+ * The Symbol-font private-use bullet (U+F0B7) survives MuPDF extraction as
+ * a single codepoint, so YDMSJ83R-style lines (`Teacher's aid: …` led by
+ * U+F0B7 in Symbol) are still recognized.
+ */
+function isIconBulletLine(line: PageLine): boolean {
+    const style = extractLineStyle(line);
+    if (!style) return false;
+    const fontIsBullet =
+        ICON_FONT_RE.test(style.font) || MATH_SYMBOL_FONT_RE.test(style.font);
+    if (!fontIsBullet) return false;
+    return BULLET_LEAD_CHAR_RE.test(line.text);
+}
+
+/**
  * Decide whether the body text on this page is itself all-caps. Sampled from
  * lines that match a known body style. Used to gate the all-caps header
  * rule — without this, an all-caps document would promote every line.
@@ -637,11 +684,16 @@ function isHeaderStyle(
     const lineStyle = extractLineStyle(line);
     if (!lineStyle) return false;
 
-    // Bullet-led list items: MuPDF's JSON walk aggregates the leading bullet
-    // glyph's font (Symbol / Wingdings / ZapfDingbats / etc.) over the whole
-    // line, so the line reads as "different font, possibly larger size" vs.
-    // body. Always reject — real headings don't use these fonts.
-    if (ICON_FONT_RE.test(lineStyle.font)) {
+    // Bullet-led list items and math-symbol lines: MuPDF's JSON walk
+    // aggregates the leading glyph's font over the whole line, so the line
+    // reads as "different font, possibly larger size" vs. body. Math-symbol
+    // fonts (MTSY/MTSYN) cover both bullet-led list items (`• ...` set in
+    // MathTime) and equation lines — neither belongs in the heading
+    // classifier. Always reject — real headings don't use these fonts.
+    if (
+        ICON_FONT_RE.test(lineStyle.font) ||
+        MATH_SYMBOL_FONT_RE.test(lineStyle.font)
+    ) {
         return false;
     }
 
@@ -849,6 +901,37 @@ function startNewItem(
         indentExcess > columnThresholds.indentExcessThreshold &&
         indentExcessPrevLine > columnThresholds.indentExcessThreshold / 2;
 
+    // Bullet hanging-indent suppression. The column's leftEdgeMode picks
+    // the most common indent; when body or bullet-first-line lines
+    // outnumber wrap continuations (typical when a bulleted section shares
+    // a column with body paragraphs or a references list), continuations
+    // look "indented" relative to the mode and trigger a false indent
+    // break. Suppress only when the geometry, style, and textual cues all
+    // say "this is a hanging continuation, not a new paragraph": current
+    // line is body-styled, indent magnitude is in the typical hanging-
+    // indent range, prev is a recognized bullet line, and prev did not
+    // end with a sentence-final terminator. Mid-clause separators like
+    // `:` and `;` are kept allowed because bullets routinely wrap mid-
+    // clause (e.g. "• Slashing occurred at Canal street; person fit
+    // description;" continues on the next line).
+    if (indentBreak && !gapBreak && bodyStyles && bodyStyles.length > 0) {
+        const currStyle = extractLineStyle(line);
+        const isHangingIndent =
+            indentExcessPrevLine > 0 && indentExcessPrevLine <= 30;
+        if (
+            currStyle &&
+            matchesBodyStyle(currStyle, bodyStyles) &&
+            isHangingIndent &&
+            isIconBulletLine(prevLine)
+        ) {
+            const prevText = prevLine.text.trimEnd();
+            const prevEndsSentence = /[.!?]["'”’)]?$/u.test(prevText);
+            if (!prevEndsSentence) {
+                indentBreak = false;
+            }
+        }
+    }
+
     // (c) Early line end signal
     let earlyEndBreak = false;
     const prevEarlyEndExcess = columnThresholds.rightEdgeMode - prevLine.bbox.r;
@@ -941,7 +1024,6 @@ function processCurrentLinesAsItem(
     ) {
         const lineStyle = extractLineStyle(currentLines[0]);
         const primaryBodyStyle = bodyStyles[0];
-        const prevStyle = extractLineStyle(prevDocLine);
         const prevText = prevDocLine.text.trimEnd();
         const prevEndsTerminator = /[.!?:;]["'”’)]?$/u.test(prevText);
         const hasExplicitHeadingCue =
@@ -954,8 +1036,7 @@ function processCurrentLinesAsItem(
             !lineStyle.bold &&
             Math.abs(lineStyle.size - primaryBodyStyle.size) < 0.5 &&
             lineStyle.font !== primaryBodyStyle.font &&
-            prevStyle &&
-            ICON_FONT_RE.test(prevStyle.font) &&
+            isIconBulletLine(prevDocLine) &&
             !prevEndsTerminator
         ) {
             isPotentialHeader = false;
