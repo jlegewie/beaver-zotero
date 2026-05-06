@@ -640,6 +640,114 @@ describe("isReferenceParagraph (A∧B classifier)", () => {
         );
     });
 
+    it("hasReferenceStart matches all-caps surnames (BOTTOMS, A.E)", () => {
+        // European-style references (e.g. 2YWA8DTZ p17) typeset author
+        // surnames in ALL CAPS. The 3+ caps SURNAME alternative must
+        // match.
+        expect(
+            hasReferenceStart(
+                "BOTTOMS, A.E & P. WILES (2002), Environmental Criminology.",
+            ),
+        ).toBe(true);
+        expect(
+            hasReferenceStart(
+                "BUTLER, T. & G. ROBSON (2001), Social Capital.",
+            ),
+        ).toBe(true);
+        expect(
+            hasReferenceStart(
+                "BRANTINGHAM, P. J., G. E. TITA, M. B. SHORT (2012)",
+            ),
+        ).toBe(true);
+    });
+
+    it("hasReferenceStart matches D'Augustino-style apostrophe surnames", () => {
+        // UCZSE63I p30: 'D'Augustino, Ralph B. 1998. ...' — the surname
+        // is Cap+apostrophe+Cap+lower, which the mixed-case alternative
+        // accepts because the trailing 'ugustino' is lowercase.
+        expect(
+            hasReferenceStart("D’Augustino, Ralph B. 1998."),
+        ).toBe(true);
+        expect(
+            hasReferenceStart("O’Neil, James. 2010."),
+        ).toBe(true);
+    });
+
+    it("isReferenceParagraph fires on European all-caps style refs", () => {
+        const text =
+            "BOTTOMS, A.E & P. WILES (2002), Environmental Criminology. " +
+            "In: M. Maguire, R. Morgan & R. Reiner, eds., The Oxford " +
+            "Handbook of Criminology, Oxford: Oxford University Press, " +
+            "pp. 620–656.";
+        // A2 (BOTTOMS surname-comma-initial) + B5 (University Press in tail)
+        expect(isReferenceParagraph(text)).toBe(true);
+    });
+
+    it("hasReferenceTail B2 fires with optional space between volume and parens", () => {
+        // PZXKV348 p37: 'Statistical 84 (408): 862–74.' — the relaxed
+        // B2 must match the spaced form.
+        expect(hasReferenceTail("Statistical 84 (408): 862–74.")).toBe(true);
+        // No-space form (Pediatrics-style) must continue to match.
+        expect(
+            hasReferenceTail("British Journal of Criminology 46(4):613–40."),
+        ).toBe(true);
+    });
+
+    it("isReferenceParagraph fires on space-(Issue) APA-style refs", () => {
+        const text =
+            "Heckman, James J., Hidehiko Ichimura, Jeffrey Smith, and " +
+            "Petra Todd. 1998. \"Characterizing Selection Bias Using " +
+            "Experimental Data.\" Econometrica 66 (5): 1017–1098.";
+        expect(isReferenceParagraph(text)).toBe(true);
+    });
+
+    it("does NOT classify acronym-led organization prose with URL tail", () => {
+        // The all-caps SURNAME alternative looked like a citation entry
+        // when paired with a full given name, e.g. `NASA, Johnson Space
+        // Center`. Combined with a URL tail (B1), this would falsely
+        // collapse normal prose into one reference. The fix: A2 requires
+        // **initial-only** post-comma for all-caps surnames.
+        const nasa =
+            "NASA, Johnson Space Center provides extensive flight " +
+            "training for new astronauts and continues to operate the " +
+            "International Space Station; see https://www.nasa.gov/jsc/ " +
+            "for current programs.";
+        expect(hasReferenceStart(nasa)).toBe(false);
+        expect(isReferenceParagraph(nasa)).toBe(false);
+
+        // Variants with DOI in tail must also stay rejected.
+        const cdc =
+            "CDC, Atlanta Field Office released the new guidelines on " +
+            "respiratory infection control in 2024; the formal report " +
+            "is at https://doi.org/10.15585/mmwr.example with full " +
+            "supplemental tables.";
+        expect(hasReferenceStart(cdc)).toBe(false);
+        expect(isReferenceParagraph(cdc)).toBe(false);
+
+        // Acronym + acronym (e.g. `CDC, MMWR`) must also not match A2 —
+        // the all-caps post-comma token isn't an initial.
+        const cdcMmwr =
+            "CDC, MMWR Quick Stats reports new findings on the rates " +
+            "of seasonal influenza and pneumococcal disease; see the " +
+            "interactive dashboard at https://www.cdc.gov/mmwr/.";
+        expect(hasReferenceStart(cdcMmwr)).toBe(false);
+        expect(isReferenceParagraph(cdcMmwr)).toBe(false);
+    });
+
+    it("still fires on real all-caps reference entries (initial post-comma)", () => {
+        // Regression guard: the all-caps SURNAME path must still work
+        // when the post-comma token is an initial pattern.
+        expect(
+            hasReferenceStart("BOTTOMS, A.E & P. WILES (2002), ..."),
+        ).toBe(true);
+        expect(
+            hasReferenceStart("BUTLER, T. & G. ROBSON (2001), ..."),
+        ).toBe(true);
+        expect(
+            hasReferenceStart("BRANTINGHAM, P. J., G. E. TITA, ..."),
+        ).toBe(true);
+    });
+
     it("hasReferenceStart returns false on a lowercase continuation paragraph", () => {
         expect(
             hasReferenceStart(

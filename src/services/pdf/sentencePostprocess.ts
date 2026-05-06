@@ -424,16 +424,38 @@ const REFERENCE_TAIL_WINDOW_CHARS = 120;
 const REFERENCE_A4_YEAR_WINDOW_CHARS = 80;
 
 /**
- * Surname-token tail used in A2 and A4. Must start with a lowercase
- * letter (so all-caps tokens like `NJ` can't match an uppercase-then-
- * tail pattern), but the rest may include any letter to support
- * hyphenated compound surnames such as `Durán-Narucki`,
- * `Sainte-Beuve`, `Smith-Jones`. Apostrophe variants and explicit
- * hyphen are listed separately for clarity even though `\p{L}` covers
- * the alphabetic portion.
+ * Surname-token tail used in A4 (and as the FirstName tail in A2's
+ * second alternative). Must start with a lowercase letter (so all-caps
+ * tokens like `NJ` can't match an uppercase-then-tail pattern), but
+ * the rest may include any letter to support hyphenated compound
+ * surnames such as `Durán-Narucki`, `Sainte-Beuve`, `Smith-Jones`.
  */
 const NAME_TAIL =
     "\\p{Ll}[\\p{L}\\u2019\\u2018\\u02BC'\\-]*";
+
+/**
+ * Mixed-case surname (Smith, Durán-Narucki, D'Augustino): a capital
+ * followed by letters/punctuation that contain at least one lowercase
+ * letter somewhere. The lowercase requirement distinguishes a real
+ * surname from an all-caps state code (NJ) or organization acronym
+ * (NASA).
+ *
+ * Apostrophe variants (`U+2019` curly, `U+2018` left, `U+02BC` modifier
+ * letter, plain ASCII) are listed explicitly alongside `\p{L}` because
+ * `\p{L}` does not cover them.
+ */
+const SURNAME_MIXED =
+    "\\p{Lu}[\\p{L}\\u2019\\u2018\\u02BC'\\-]*\\p{Ll}[\\p{L}\\u2019\\u2018\\u02BC'\\-]*";
+
+/**
+ * All-caps surname (BOTTOMS, BUTLER, WILES): ≥ 3 capitals, optionally
+ * followed by more letters/punctuation. The 3-cap minimum excludes
+ * 2-letter codes (NJ, US). Used only for the continental European
+ * reference style. Note that A2 paired with this surname requires
+ * **initials-only** after the comma — see `A2_ALLCAPS_CORE` for why.
+ */
+const SURNAME_ALLCAPS =
+    "\\p{Lu}{3,}[\\p{L}\\u2019\\u2018\\u02BC'\\-]*";
 
 /**
  * A1 — numbered list marker. `[12]`, `12.`, or `12)` followed by a
@@ -444,13 +466,32 @@ const NAME_TAIL =
 const A1_CORE = `(?:\\[\\d{1,3}\\]|\\d{1,3}\\.|\\d{1,3}\\))\\s+\\p{Lu}`;
 
 /**
- * A2 — "Surname, FirstName" or "Surname, Initial(s)". Allows R.J. (no
- * space between initials), R. J. (with), and "Athey, Susan, ..." (full
- * given name).
+ * A2 has two sub-patterns whose post-comma rules differ:
+ *
+ *   - **Mixed-case** surname: post-comma may be a full given name
+ *     (`Susan`, `Joshua`) **or** an initial pattern (`J.`, `R.J.`,
+ *     `R. J.`). This is the dominant Anglo / APA / Chicago style.
+ *
+ *   - **All-caps** surname: post-comma **must be an initial pattern**.
+ *     Real all-caps reference styles (continental European, e.g.
+ *     `BOTTOMS, A.E`, `BUTLER, T.`, `BRANTINGHAM, P. J.`) consistently
+ *     pair an all-caps surname with initialed given names. Without
+ *     this restriction, organization-acronym prose like
+ *     `"NASA, Johnson Space Center provides ... https://nasa.gov/..."`
+ *     would A2-match — `NASA` as surname, `Johnson` as full given name —
+ *     and combined with a URL tail collapse normal prose into one
+ *     "reference" sentence. The initials-only post-comma rule is the
+ *     guard that distinguishes all-caps reference entries from
+ *     all-caps acronym sentences.
  */
-const A2_CORE =
-    `\\p{Lu}${NAME_TAIL},\\s*` +
+const A2_MIXED_CORE =
+    `${SURNAME_MIXED},\\s*` +
     `(?:\\p{Lu}${NAME_TAIL}|\\p{Lu}\\.(?:\\s*\\p{Lu}\\.)*)`;
+
+const A2_ALLCAPS_CORE =
+    `${SURNAME_ALLCAPS},\\s*\\p{Lu}\\.(?:\\s*\\p{Lu}\\.)*`;
+
+const A2_CORE = `(?:${A2_MIXED_CORE}|${A2_ALLCAPS_CORE})`;
 
 /**
  * A3 — "Initial(s) Surname" optionally with an "and Initial(s)" interlude.
@@ -543,7 +584,11 @@ const REF_NUMBERED_START_RE = new RegExp(`^\\s*${A1_CORE}`, "u");
 //   - generic `https?://` URL
 const REF_TAIL_B1_RE =
     /(?:\bdoi\.org\/\S+|\bhttps?:\/\/\S{6,}|\b10\.\d{4,9}\/\S+)/iu;
-const REF_TAIL_B2_RE = /\b\d{1,4}\(\d{1,3}\)\s*[:,]\s*\d{1,4}(?:\s*[-–]\s*\d{1,4})?/u;
+// B2 — Volume(Issue): pages, with optional whitespace between the
+// volume and the issue parens. Some styles render `84 (408): 862–74`
+// (space) and others `46(4):613–40` (no space); both must match.
+const REF_TAIL_B2_RE =
+    /\b\d{1,4}\s*\(\d{1,3}\)\s*[:,]\s*\d{1,4}(?:\s*[-–]\s*\d{1,4})?/u;
 // B3 — colon-separated journal-style citation. Requires a **page range**
 // (hyphen-separated digits after the colon), so prose like
 // `"Smith, J. argues that the relevant threshold is 12:34 ..."` does not

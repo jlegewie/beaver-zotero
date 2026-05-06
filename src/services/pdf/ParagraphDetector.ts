@@ -276,6 +276,35 @@ function looksLikeAuthorList(text: string): boolean {
 }
 
 /**
+ * Reference-list citation-tail detector. Reference lists routinely italicize
+ * the journal name (and trailing volume/pages/year) in a different italic face
+ * from the body, which fits Rule 3 of header detection ("same size, italic,
+ * different font") exactly. The line is structurally a citation tail, not a
+ * section heading. Distinguish by numeric citation cues that real italic
+ * subsection titles don't carry:
+ *
+ *   - year in parens at end ("(2017).", "(1993b)")
+ *   - "pp." / "p." followed by digits ("pp. 385-409")
+ *   - page range with en-dash / em-dash ("631–643", "175–187")
+ *   - volume-issue pair ("96(1)", "101(3)")
+ *   - trailing ", NN." (volume-only tail like
+ *     "Industrial and Labor relations review, pp.175-187." or
+ *     "The Quarterly Journal of Economics, 116.")
+ *
+ * En-dash/em-dash specifically (not the plain hyphen) so headings like
+ * "State-of-the-art" don't get caught.
+ */
+function looksLikeJournalCitation(text: string): boolean {
+    const t = text.trim();
+    if (/\(\s*(?:18|19|20)\d{2}[a-z]?\s*\)\.?$/.test(t)) return true;
+    if (/\bpp?\.\s*\d/i.test(t)) return true;
+    if (/\d+\s*[–—]\s*\d+/.test(t)) return true;
+    if (/\b\d{1,4}\s*\(\s*\d{1,3}\s*\)/.test(t)) return true;
+    if (/,\s*\d{1,4}\.?\s*$/.test(t)) return true;
+    return false;
+}
+
+/**
  * Stricter all-caps check used to gate the same-size-different-font header
  * rule. Requires multi-word phrasing so isolated all-caps tokens like
  * figure/chart labels ("MALARIA", "IBS", "UMAP3", "MSC1 MSC3 MSC13 MSC14",
@@ -658,6 +687,15 @@ function isHeaderStyle(
     // subset font as section titles. Use the merged `phraseText` so multi-line
     // author lists are evaluated as a whole.
     if (looksLikeAuthorList(phraseText)) {
+        return false;
+    }
+
+    // Reference-list citation tails: italicized journal names with trailing
+    // volume/pages/year fit Rule 3 ("same size, italic, different font")
+    // perfectly but aren't headings. Gated on `lineStyle.italic` so the
+    // disqualifier only touches the italic-rule path and leaves Rule 1
+    // (larger size) / Rule 2 (bold) decisions alone.
+    if (lineStyle.italic && looksLikeJournalCitation(phraseText)) {
         return false;
     }
 
