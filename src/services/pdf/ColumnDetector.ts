@@ -590,8 +590,17 @@ function isPlotSymbolBlock(block: RawBlock): boolean {
         const text = line.text || "";
         const font = line.font;
 
-        // Check symbol font
-        if (font && isSymbolFont(font.name)) continue;
+        // Check symbol font — only when the text doesn't carry
+        // substantial body content. MuPDF's JSON walk tags each line
+        // with the font of its first run, so a bulleted heading like
+        // "● Expert Systems: An expert system…" shows up here with
+        // font.name = "Symbol" even though almost all the text is
+        // regular body content. Gating on alnum count prevents the
+        // whole heading block from being dropped as a plot marker.
+        if (font && isSymbolFont(font.name)) {
+            const alnumCount = (text.match(/[\p{L}\p{N}]/gu) || []).length;
+            if (alnumCount < 3) continue;
+        }
 
         // Check plot marker
         if (isPlotMarker(text)) continue;
