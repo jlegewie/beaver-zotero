@@ -17,7 +17,7 @@
 
 import { DocumentAnalyzer } from "../DocumentAnalyzer";
 import { StyleAnalyzer } from "../StyleAnalyzer";
-import { MarginFilter } from "../MarginFilter";
+import { MarginFilter, getEffectiveRepeatThreshold } from "../MarginFilter";
 import { PageExtractor } from "../PageExtractor";
 import { detectColumns, logColumnDetection } from "../ColumnDetector";
 import { detectLinesOnPage, logLineDetection } from "../LineDetector";
@@ -265,6 +265,7 @@ export async function opSearchPages(
 function runExtractFromIndices(
     doc: DocumentLike,
     opts: Required<Omit<ExtractionSettings, 'pages' | 'useLineDetection' | 'minTextPerPage' | 'styleSampleSize'>> & ExtractionSettings,
+    requestedRepeatThreshold: number | undefined,
     indices: number[],
     pageCount: number,
     pageLabels: Record<number, string>,
@@ -285,7 +286,11 @@ function runExtractFromIndices(
     const marginAnalysis = MarginFilter.collectMarginElements(rawData.pages, opts.marginZone);
     const removalResult = MarginFilter.identifyElementsToRemove(
         marginAnalysis,
-        opts.repeatThreshold,
+        getEffectiveRepeatThreshold({
+            requested: requestedRepeatThreshold,
+            totalPageCount: pageCount,
+            analysisPageCount: rawData.pages.length,
+        }),
         opts.detectPageSequences,
     );
     MarginFilter.logRemovalCandidates(removalResult);
@@ -390,6 +395,11 @@ function runExtractCommon(
     settings: ExtractionSettings | undefined,
     useLineDetection: boolean,
 ): ExtractionResult | LineExtractionResult {
+    // Capture the caller-supplied threshold BEFORE the spread flattens it to
+    // the default. `getEffectiveRepeatThreshold` uses this to distinguish
+    // "user wanted 3" from "user omitted the field" so the short-doc
+    // relaxation only kicks in when no explicit value was provided.
+    const requestedRepeatThreshold = settings?.repeatThreshold;
     const opts = { ...DEFAULT_EXTRACTION_SETTINGS, ...(settings || {}) };
 
     const provider = rawPageProviderFromDoc(doc);
@@ -413,7 +423,15 @@ function runExtractCommon(
         : undefined;
     const indices = resolvePageIndices(pageCount, pageIndices);
 
-    return runExtractFromIndices(doc, opts as any, indices, pageCount, pageLabels, useLineDetection);
+    return runExtractFromIndices(
+        doc,
+        opts as any,
+        requestedRepeatThreshold,
+        indices,
+        pageCount,
+        pageLabels,
+        useLineDetection,
+    );
 }
 
 export async function opExtract(
@@ -468,6 +486,9 @@ export async function opExtractWithMeta(
     }
     const doc = await acquireDoc(args.pdfData);
     try {
+        // Capture the caller-supplied threshold BEFORE the spread flattens
+        // it to the default — see runExtractCommon for the rationale.
+        const requestedRepeatThreshold = args.settings?.repeatThreshold;
         const opts = { ...DEFAULT_EXTRACTION_SETTINGS, ...(args.settings || {}) };
         const provider = rawPageProviderFromDoc(doc);
         const docAnalyzer = new DocumentAnalyzer(provider);
@@ -492,6 +513,7 @@ export async function opExtractWithMeta(
         const result = runExtractFromIndices(
             doc,
             opts as any,
+            requestedRepeatThreshold,
             indices,
             pageCount,
             pageLabels,
@@ -696,6 +718,7 @@ export async function opExtractSentenceBBoxes(
         const filtered = detectFilteredParagraphs({
             pages,
             pageIndex: args.pageIndex,
+            totalPageCount: pageCount,
             paragraphSettings: opts.paragraphSettings,
         });
         const result = extractPageSentenceBBoxes(detailed, {

@@ -7,7 +7,7 @@
  * barrel inside the worker).
  */
 
-import { MarginFilter } from "./MarginFilter";
+import { MarginFilter, getEffectiveRepeatThreshold } from "./MarginFilter";
 import { StyleAnalyzer } from "./StyleAnalyzer";
 import { detectColumns, type ColumnDetectionResult } from "./ColumnDetector";
 import { detectLinesOnPage, type PageLineResult } from "./LineDetector";
@@ -57,6 +57,13 @@ export interface FilteredParagraphContext {
     marginZone?: MarginSettings;
     /** Minimum pages a text must appear on to be flagged as repeating. */
     repeatThreshold?: number;
+    /**
+     * Total number of pages in the source document. Used to decide whether
+     * the document is short for the adaptive repeat-threshold relaxation.
+     * If omitted, `pages.length` is used as a proxy — pass this when the
+     * analysis window is a subset of a longer document.
+     */
+    totalPageCount?: number;
     /** Whether to detect ascending page-number sequences in margins. */
     detectPageSequences?: boolean;
     /** Forwarded to `detectParagraphs`. */
@@ -107,7 +114,11 @@ export function detectFilteredParagraphs(
         ctx.marginRemoval ??
         MarginFilter.identifyElementsToRemove(
             MarginFilter.collectMarginElements(ctx.pages, marginZone),
-            ctx.repeatThreshold ?? 3,
+            getEffectiveRepeatThreshold({
+                requested: ctx.repeatThreshold,
+                totalPageCount: ctx.totalPageCount,
+                analysisPageCount: ctx.pages.length,
+            }),
             ctx.detectPageSequences ?? true,
         );
 

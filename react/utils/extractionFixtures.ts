@@ -169,6 +169,7 @@ export async function createSentenceFixture(): Promise<CreateSentenceFixtureResu
         const filtered = detectFilteredParagraphs({
             pages: pagesForFilter(rawDoc.pages, pageIndex, detailedPage),
             pageIndex,
+            totalPageCount: pageCount,
         });
         const result = extractPageSentenceBBoxes(detailedPage, {
             splitter: recordingSplitter,

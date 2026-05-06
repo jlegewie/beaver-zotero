@@ -53,6 +53,25 @@ const PREFIX_CONNECTOR_RE = PREFIX_CONNECTOR_WORDS
     .map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
     .join("|");
 
+/**
+ * Middle-dot characters that wrap page numbers in Chinese journals
+ * (e.g. `·2466·`, `・100・`, `‧42‧`). Single source of truth for the
+ * matcher and the parser below.
+ *
+ * - U+00B7 MIDDLE DOT (Latin / common in Chinese typesetting)
+ * - U+30FB KATAKANA MIDDLE DOT
+ * - U+2027 HYPHENATION POINT
+ */
+const MIDDOT_CHARS = "·・‧";
+const MIDDOT_WRAPPED_RE = new RegExp(
+    `^[${MIDDOT_CHARS}]\\s*\\d+\\s*[${MIDDOT_CHARS}]$`,
+    "u",
+);
+const PARSE_MIDDOT_WRAPPED = new RegExp(
+    `^[${MIDDOT_CHARS}]\\s*(\\d+)\\s*[${MIDDOT_CHARS}]$`,
+    "u",
+);
+
 /** Patterns the gatekeeper accepts. Always run on digit-normalized text. */
 const PAGE_NUMBER_PATTERNS: RegExp[] = [
     /^\d+$/u,
@@ -64,6 +83,7 @@ const PAGE_NUMBER_PATTERNS: RegExp[] = [
     ),
     /^第\s*\d+\s*(?:页|頁)$/u,
     /^\d+\s*(?:页|頁|쪽|ページ)$/u,
+    MIDDOT_WRAPPED_RE,
     /^[ivxlcdm]+$/iu,
 ];
 
@@ -158,6 +178,9 @@ function parsePageNumber(text: string): number | null {
     const cjkSuffix = cleaned.match(PARSE_CJK_SUFFIX);
     if (cjkSuffix) return parseInt(cjkSuffix[1], 10);
 
+    const middot = cleaned.match(PARSE_MIDDOT_WRAPPED);
+    if (middot) return parseInt(middot[1], 10);
+
     return parseRoman(cleaned);
 }
 
@@ -174,6 +197,7 @@ function isStructuredPageNumber(text: string): boolean {
     if (PARSE_PREFIX_RE.test(cleaned)) return true;
     if (PARSE_CJK_WRAPPED.test(cleaned)) return true;
     if (PARSE_CJK_SUFFIX.test(cleaned)) return true;
+    if (PARSE_MIDDOT_WRAPPED.test(cleaned)) return true;
     return false;
 }
 
@@ -257,6 +281,82 @@ function getMarginPosition(
 /** Normalize text for exact-match comparison (does NOT fold digits). */
 function normalizeText(text: string): string {
     return text.trim().toLowerCase();
+}
+
+// ============================================================================
+// Effective repeat-threshold helper
+// ============================================================================
+
+export interface RepeatThresholdInput {
+    /** Caller-supplied threshold (or undefined when not specified). */
+    requested?: number;
+    /**
+     * Total number of pages in the **source document** — what determines
+     * whether the document itself is short. Pass this when known so a
+     * caller extracting a 5-page subset of a 100-page paper does NOT
+     * relax the threshold.
+     *
+     * If both `totalPageCount` and `analysisPageCount` are omitted, no
+     * relaxation is applied. If only `analysisPageCount` is provided (no
+     * total), it is used as a best-effort proxy — acceptable when the
+     * caller's analysis window IS the whole document (typical), but it
+     * will incorrectly relax for short subsets of long documents. Prefer
+     * passing `totalPageCount` whenever the value is available.
+     */
+    totalPageCount?: number;
+    /**
+     * Pages in the current analysis window. Used as a fallback when
+     * `totalPageCount` is unknown. Required so the caller declares its
+     * intent — passing 0 disables relaxation.
+     */
+    analysisPageCount: number;
+}
+
+/**
+ * Per-position repeat threshold for `identifyElementsToRemove`.
+ *
+ * Short academic papers (≤6 pages) frequently use **alternating** verso/recto
+ * running headers (e.g. journal title on even pages, author/article title on
+ * odd pages) so a given header text appears on at most ⌈N/2⌉ pages. The
+ * conservative default of 3 means short documents miss the header entirely.
+ * For top/bottom positions on short docs we relax to 2; left/right (vertical
+ * watermarks, side stripes) keep the conservative default.
+ *
+ * The relaxation only applies when the caller did NOT pass an explicit
+ * threshold — explicit values win for both positions, so debug endpoints
+ * with `repeat_threshold: 3` keep deterministic behavior.
+ *
+ * `requested` is sanitized: only a positive integer counts as explicit. 0,
+ * negative, NaN, non-integer (and undefined) all fall back to the adaptive
+ * default. Call sites can hand us `ctx.repeatThreshold` without their own
+ * validation.
+ */
+export function getEffectiveRepeatThreshold(
+    input: RepeatThresholdInput,
+): { topBottom: number; leftRight: number } {
+    const SHORT_DOC_PAGE_LIMIT = 6;
+    const DEFAULT_THRESHOLD = 3;
+    const explicit =
+        input.requested !== undefined &&
+        Number.isInteger(input.requested) &&
+        input.requested > 0
+            ? input.requested
+            : undefined;
+    if (explicit !== undefined) {
+        return { topBottom: explicit, leftRight: explicit };
+    }
+    // "Short document" check uses total page count when provided, falling
+    // back to the analysis window size only when total is unknown. This
+    // prevents relaxing for a 5-page subset of a 100-page paper.
+    const docPages =
+        input.totalPageCount !== undefined && input.totalPageCount > 0
+            ? input.totalPageCount
+            : input.analysisPageCount;
+    const relaxed =
+        docPages > 0 && docPages <= SHORT_DOC_PAGE_LIMIT
+            ? 2
+            : DEFAULT_THRESHOLD;
+    return { topBottom: relaxed, leftRight: DEFAULT_THRESHOLD };
 }
 
 // ============================================================================
@@ -384,13 +484,18 @@ export class MarginFilter {
      * Identify elements to remove based on frequency and page number detection.
      *
      * @param analysis - Margin analysis results
-     * @param requiredCount - Minimum pages for text to be considered repeating
+     * @param requiredCount - Minimum pages for text to be considered repeating.
+     *   Pass a number for a uniform threshold (back-compat) or an object
+     *   `{ topBottom, leftRight }` for per-position thresholds (used by the
+     *   short-doc relaxation in `getEffectiveRepeatThreshold`).
      * @param detectPageSequences - Whether to detect page number sequences
      * @returns Removal result with candidates and lookup structures
      */
     static identifyElementsToRemove(
         analysis: MarginAnalysis,
-        requiredCount: number = 3,
+        requiredCount:
+            | number
+            | { topBottom: number; leftRight: number } = 3,
         detectPageSequences: boolean = true
     ): MarginRemovalResult {
         const candidates: RemovalCandidate[] = [];
@@ -399,6 +504,13 @@ export class MarginFilter {
 
         // Process each margin position
         for (const [position, elements] of analysis.elements) {
+            const requiredForPosition =
+                typeof requiredCount === "number"
+                    ? requiredCount
+                    : position === "top" || position === "bottom"
+                        ? requiredCount.topBottom
+                        : requiredCount.leftRight;
+
             // Group elements by structural template if structured, else by
             // normalized exact text. The bucket tracks each variant's own
             // page set so removalsByPage only receives variants that
@@ -436,7 +548,7 @@ export class MarginFilter {
             }
 
             for (const bucket of buckets.values()) {
-                if (bucket.pageIndices.size < requiredCount) continue;
+                if (bucket.pageIndices.size < requiredForPosition) continue;
                 const pages = Array.from(bucket.pageIndices).sort((a, b) => a - b);
 
                 // candidate.text stays as exact normalized text — external
@@ -483,17 +595,48 @@ export class MarginFilter {
                     }
                 }
 
-                if (pageNumberElements.length >= requiredCount) {
-                    // Sort by page index
-                    pageNumberElements.sort((a, b) => a.el.pageIndex - b.el.pageIndex);
+                // Collapse to one candidate per page BEFORE the
+                // increasing-sequence check. If a page emits two numeric
+                // margin elements (e.g. `1` in left header + `1` in right
+                // header), the raw value list `[1, 1, 2, 2, 3, 3, …]`
+                // never strictly increases and a real page sequence is
+                // missed. Pick the lowest value per page — for the typical
+                // failure shape (two slots showing the same page number)
+                // the choice doesn't matter; for the rarer case of two
+                // legitimately-different numbers per page, the lowest is
+                // the better proxy for "the page label."
+                const perPage = new Map<number, { el: MarginElement; value: number }>();
+                for (const entry of pageNumberElements) {
+                    const existing = perPage.get(entry.el.pageIndex);
+                    if (!existing || entry.value < existing.value) {
+                        perPage.set(entry.el.pageIndex, entry);
+                    }
+                }
+                const oneCandidatePerPage = Array.from(perPage.values());
 
-                    // Check if values form an increasing sequence
-                    const values = pageNumberElements.map(p => p.value);
+                // Distinct-page guard: count distinct pages, not raw
+                // element count. With the relaxed threshold of 2, a single
+                // page that emits two numeric-looking margin elements
+                // would otherwise pass the gate and be classified as a
+                // "sequence" of length 1.
+                if (oneCandidatePerPage.length >= requiredForPosition) {
+                    // Sort by page index
+                    oneCandidatePerPage.sort((a, b) => a.el.pageIndex - b.el.pageIndex);
+
+                    // Check if values form an increasing sequence (one per page)
+                    const values = oneCandidatePerPage.map((p) => p.value);
 
                     if (isIncreasingSequence(values)) {
                         // These are page numbers - mark all for removal
+                        // (use ALL elements on the matched pages, not just
+                        // the per-page picks, so co-located variants both
+                        // get cleaned up).
+                        const matchedPageIndices = new Set(
+                            oneCandidatePerPage.map((p) => p.el.pageIndex),
+                        );
                         const seenTexts = new Set<string>();
                         for (const { el } of pageNumberElements) {
+                            if (!matchedPageIndices.has(el.pageIndex)) continue;
                             const normalized = normalizeText(el.text);
 
                             if (!seenTexts.has(normalized) && !textsToRemove.has(normalized)) {

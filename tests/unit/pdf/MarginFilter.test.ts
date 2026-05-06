@@ -7,7 +7,10 @@
  */
 
 import { describe, it, expect, test } from "vitest";
-import { MarginFilter } from "../../../src/services/pdf/MarginFilter";
+import {
+    MarginFilter,
+    getEffectiveRepeatThreshold,
+} from "../../../src/services/pdf/MarginFilter";
 import type {
     MarginAnalysis,
     MarginElement,
@@ -348,5 +351,352 @@ describe("requiredCount threshold", () => {
         const analysis = oneTextPerPage(["Page 1", "Page 2"]);
         const out = MarginFilter.identifyElementsToRemove(analysis, 2, true);
         expect(out.candidates.some((c) => c.reason === "repeat")).toBe(true);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Fix 4a: middot-wrapped page numbers (Chinese journal stripe `·NNNN·`)
+// ---------------------------------------------------------------------------
+
+describe("middot-wrapped page numbers", () => {
+    const middotFixtures: { name: string; pages: string[] }[] = [
+        { name: "U+00B7 wrap", pages: ["·2466·", "·2467·", "·2468·"] },
+        { name: "U+30FB wrap", pages: ["・100・", "・101・", "・102・"] },
+        { name: "U+2027 wrap", pages: ["‧42‧", "‧43‧", "‧44‧"] },
+    ];
+    test.each(middotFixtures)(
+        "$name on 3 pages → caught via templating (single repeat candidate)",
+        ({ pages }) => {
+            const analysis = oneTextPerPage(pages);
+            const out = MarginFilter.identifyElementsToRemove(analysis, 3, true);
+            // Templated → one repeat candidate, not three separate ones.
+            const repeatCandidates = out.candidates.filter((c) => c.reason === "repeat");
+            expect(repeatCandidates).toHaveLength(1);
+            expect(repeatCandidates[0].pageIndices).toEqual([0, 1, 2]);
+        },
+    );
+
+    it("rejects bare middot with no digits", () => {
+        const analysis = oneTextPerPage(["·", "·", "·"]);
+        const out = MarginFilter.identifyElementsToRemove(analysis, 3, true);
+        expect(out.candidates.some((c) => c.reason === "page_number")).toBe(false);
+    });
+
+    it("relaxed top-margin threshold (=2) catches ·NNNN· on 2 pages via templating", () => {
+        const analysis = oneTextPerPage(["·2466·", "·2467·"]);
+        const out = MarginFilter.identifyElementsToRemove(
+            analysis,
+            { topBottom: 2, leftRight: 3 },
+            true,
+        );
+        const repeatCandidates = out.candidates.filter((c) => c.reason === "repeat");
+        expect(repeatCandidates).toHaveLength(1);
+        expect(repeatCandidates[0].pageIndices).toEqual([0, 1]);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Fix 4b: getEffectiveRepeatThreshold helper
+// ---------------------------------------------------------------------------
+
+describe("getEffectiveRepeatThreshold", () => {
+    it("uses adaptive default for short docs (≤6 pages): top/bottom=2, left/right=3", () => {
+        const t = getEffectiveRepeatThreshold({ analysisPageCount: 5 });
+        expect(t).toEqual({ topBottom: 2, leftRight: 3 });
+    });
+
+    it("uses default 3 everywhere for longer docs", () => {
+        const t = getEffectiveRepeatThreshold({ analysisPageCount: 20 });
+        expect(t).toEqual({ topBottom: 3, leftRight: 3 });
+    });
+
+    it("respects explicit caller value (applied to both positions)", () => {
+        const t = getEffectiveRepeatThreshold({
+            requested: 5,
+            analysisPageCount: 4, // short doc
+        });
+        expect(t).toEqual({ topBottom: 5, leftRight: 5 });
+    });
+
+    it("explicit value of 3 overrides relaxation on a short doc", () => {
+        const t = getEffectiveRepeatThreshold({
+            requested: 3,
+            analysisPageCount: 4,
+        });
+        expect(t).toEqual({ topBottom: 3, leftRight: 3 });
+    });
+
+    it("ignores invalid requested values (0, negative, NaN, non-integer)", () => {
+        // analysisPageCount=4 (short doc) → should fall back to adaptive.
+        for (const requested of [0, -1, NaN, 2.5]) {
+            const t = getEffectiveRepeatThreshold({
+                requested,
+                analysisPageCount: 4,
+            });
+            expect(t).toEqual({ topBottom: 2, leftRight: 3 });
+        }
+    });
+
+    it("undefined analysisPageCount=0 falls back to default 3", () => {
+        const t = getEffectiveRepeatThreshold({ analysisPageCount: 0 });
+        expect(t).toEqual({ topBottom: 3, leftRight: 3 });
+    });
+
+    it("boundary: 6-page doc (≤6) gets relaxed, 7-page doc (>6) does not", () => {
+        expect(getEffectiveRepeatThreshold({ analysisPageCount: 6 }))
+            .toEqual({ topBottom: 2, leftRight: 3 });
+        expect(getEffectiveRepeatThreshold({ analysisPageCount: 7 }))
+            .toEqual({ topBottom: 3, leftRight: 3 });
+    });
+
+    // totalPageCount is the authoritative signal — a 5-page subset of a
+    // 100-page paper should NOT relax.
+    it("totalPageCount=100 with analysisPageCount=5 does NOT relax", () => {
+        const t = getEffectiveRepeatThreshold({
+            totalPageCount: 100,
+            analysisPageCount: 5,
+        });
+        expect(t).toEqual({ topBottom: 3, leftRight: 3 });
+    });
+
+    it("totalPageCount=4 with analysisPageCount=4 DOES relax (genuinely short doc)", () => {
+        const t = getEffectiveRepeatThreshold({
+            totalPageCount: 4,
+            analysisPageCount: 4,
+        });
+        expect(t).toEqual({ topBottom: 2, leftRight: 3 });
+    });
+
+    it("totalPageCount missing falls back to analysisPageCount (best-effort)", () => {
+        const t = getEffectiveRepeatThreshold({ analysisPageCount: 5 });
+        expect(t).toEqual({ topBottom: 2, leftRight: 3 });
+    });
+
+    it("totalPageCount=0 (invalid) falls back to analysisPageCount", () => {
+        const t = getEffectiveRepeatThreshold({
+            totalPageCount: 0,
+            analysisPageCount: 5,
+        });
+        expect(t).toEqual({ topBottom: 2, leftRight: 3 });
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Fix 4b: per-position threshold inside identifyElementsToRemove
+// ---------------------------------------------------------------------------
+
+describe("per-position threshold object", () => {
+    it("top-margin candidate on 2 pages: caught with topBottom=2, missed with topBottom=3", () => {
+        const analysis = oneTextPerPage(["recto title", "recto title"], "top");
+        const caught = MarginFilter.identifyElementsToRemove(
+            analysis,
+            { topBottom: 2, leftRight: 3 },
+            true,
+        );
+        expect(caught.candidates.some((c) => c.reason === "repeat")).toBe(true);
+
+        const missed = MarginFilter.identifyElementsToRemove(
+            analysis,
+            { topBottom: 3, leftRight: 3 },
+            true,
+        );
+        expect(missed.candidates.some((c) => c.reason === "repeat")).toBe(false);
+    });
+
+    it("left-margin candidate on 2 pages: NOT caught even when topBottom=2 (leftRight stays 3)", () => {
+        const analysis = oneTextPerPage(["sidebar text", "sidebar text"], "left");
+        const out = MarginFilter.identifyElementsToRemove(
+            analysis,
+            { topBottom: 2, leftRight: 3 },
+            true,
+        );
+        expect(out.candidates.some((c) => c.reason === "repeat")).toBe(false);
+    });
+
+    it("numeric form preserves single-threshold backward compat", () => {
+        const analysis = oneTextPerPage(["repeating", "repeating", "repeating"]);
+        // numeric 3 → same as { topBottom: 3, leftRight: 3 }.
+        const out = MarginFilter.identifyElementsToRemove(analysis, 3, true);
+        expect(out.candidates.some((c) => c.reason === "repeat")).toBe(true);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Fix 4b: distinct-page guard on page-number-sequence path
+// ---------------------------------------------------------------------------
+
+describe("page-number-sequence distinct-page guard", () => {
+    it("does not flag a single page that emits two numeric margin elements as a sequence", () => {
+        // Two separate elements on page 0 only. Old code would compare
+        // pageNumberElements.length (2) >= requiredForPosition (2) and try
+        // to build a sequence from `[1, 2]` → falsely detect.
+        const elements = new Map<MarginPosition, MarginElement[]>([
+            ["top", []],
+            ["bottom", []],
+            ["left", []],
+            ["right", []],
+        ]);
+        for (const value of ["1", "2"]) {
+            const line = makeLine(value, 100, 30);
+            elements.get("top")!.push({
+                text: value,
+                position: "top",
+                bbox: line.bbox,
+                pageIndex: 0, // both on the SAME page
+                line,
+            });
+        }
+        const analysis: MarginAnalysis = {
+            elements,
+            counts: { top: 2, bottom: 0, left: 0, right: 0 },
+        };
+        const out = MarginFilter.identifyElementsToRemove(
+            analysis,
+            { topBottom: 2, leftRight: 3 },
+            true,
+        );
+        // Only 1 distinct page → guard fails → no page_number candidate.
+        expect(out.candidates.some((c) => c.reason === "page_number")).toBe(false);
+    });
+
+    it("still flags page numbers when distinct pages reach the threshold", () => {
+        const analysis = oneTextPerPage(["1", "2"]);
+        const out = MarginFilter.identifyElementsToRemove(
+            analysis,
+            { topBottom: 2, leftRight: 3 },
+            true,
+        );
+        expect(out.candidates.some((c) => c.reason === "page_number")).toBe(true);
+    });
+
+    it("collapses to one element per page before the increasing-sequence check", () => {
+        // Each page emits TWO numeric margin elements (e.g. left+right
+        // headers both showing the same page number). Raw value list
+        // would be `[1, 1, 2, 2, 3, 3]` which is NOT strictly
+        // increasing; the per-page collapse picks one per page and
+        // tests `[1, 2, 3]` which IS increasing.
+        const elements = new Map<MarginPosition, MarginElement[]>([
+            ["top", []],
+            ["bottom", []],
+            ["left", []],
+            ["right", []],
+        ]);
+        for (let pageIndex = 0; pageIndex < 3; pageIndex++) {
+            // Two elements on each page with the same numeric value.
+            const value = String(pageIndex + 1);
+            for (let slot = 0; slot < 2; slot++) {
+                const line = makeLine(value, 100 + slot * 200, 30);
+                elements.get("top")!.push({
+                    text: value,
+                    position: "top",
+                    bbox: line.bbox,
+                    pageIndex,
+                    line,
+                });
+            }
+        }
+        const analysis: MarginAnalysis = {
+            elements,
+            counts: { top: 6, bottom: 0, left: 0, right: 0 },
+        };
+        const out = MarginFilter.identifyElementsToRemove(analysis, 3, true);
+        // Sequence detected → page_number candidates emitted.
+        expect(out.candidates.some((c) => c.reason === "page_number")).toBe(true);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Fix 4: end-to-end split-line alternating recto/verso headers
+// ---------------------------------------------------------------------------
+
+describe("split-line alternating headers (5I23IGRY shape)", () => {
+    /**
+     * Build a 4-page synthetic fixture mirroring the shape of the
+     * 5I23IGRY journal:
+     *   - even pages (0, 2): three top-margin elements per page —
+     *     `·NNNN·` (left), `化工进展` (center), `2012年第31卷` (right)
+     *   - odd pages (1, 3): three top-margin elements per page —
+     *     `第11期` (left), `李磊等：Beta沸石合成研究进展` (center), `·NNNN·` (right)
+     *
+     * MuPDF emits each text run as its own raw line, so the cross-page
+     * grouping sees 4 distinct verso lines and 4 distinct recto lines
+     * with the page-number stripe varying per page.
+     */
+    function build4PageHeaders(): MarginAnalysis {
+        const elements = new Map<MarginPosition, MarginElement[]>([
+            ["top", []],
+            ["bottom", []],
+            ["left", []],
+            ["right", []],
+        ]);
+        const top = elements.get("top")!;
+
+        const versoCenter = "化工进展";
+        const versoRight = "2012年第31卷";
+        const rectoLeft = "第11期";
+        const rectoCenter = "李磊等：Beta沸石合成研究进展";
+
+        const pageNumbers = ["·2466·", "·2467·", "·2468·", "·2469·"];
+
+        for (let pageIndex = 0; pageIndex < 4; pageIndex++) {
+            const pn = pageNumbers[pageIndex];
+            if (pageIndex % 2 === 0) {
+                // verso: pn (left) + journal title (center) + volume (right)
+                for (const text of [pn, versoCenter, versoRight]) {
+                    const line = makeLine(text, 100, 30);
+                    top.push({ text, position: "top", bbox: line.bbox, pageIndex, line });
+                }
+            } else {
+                // recto: 第11期 (left) + author/title (center) + pn (right)
+                for (const text of [rectoLeft, rectoCenter, pn]) {
+                    const line = makeLine(text, 100, 30);
+                    top.push({ text, position: "top", bbox: line.bbox, pageIndex, line });
+                }
+            }
+        }
+
+        const counts = { top: top.length, bottom: 0, left: 0, right: 0 };
+        return { elements, counts };
+    }
+
+    it("relaxed threshold (4-page short doc) catches both verso and recto text repeats AND middot stripe", () => {
+        const analysis = build4PageHeaders();
+        const thresholds = getEffectiveRepeatThreshold({ analysisPageCount: 4 });
+        // Sanity: helper relaxed top to 2.
+        expect(thresholds.topBottom).toBe(2);
+
+        const out = MarginFilter.identifyElementsToRemove(analysis, thresholds, true);
+        const texts = out.candidates
+            .filter((c) => c.reason === "repeat")
+            .map((c) => c.text);
+        // Verso text-heavy parts (each on 2 pages):
+        expect(texts).toContain("化工进展");
+        expect(texts).toContain("2012年第31卷");
+        // Recto text-heavy parts (each on 2 pages):
+        expect(texts).toContain("第11期");
+        expect(texts).toContain("李磊等：beta沸石合成研究进展"); // normalized lowercase
+        // Middot-wrapped page numbers grouped by templating — `·2466·`,
+        // `·2467·`, `·2468·`, `·2469·` collapse to one template family
+        // covering all 4 pages.
+        const middotCandidate = out.candidates.find(
+            (c) => c.reason === "repeat" && /·\d+·/.test(c.originalText),
+        );
+        expect(middotCandidate).toBeDefined();
+        expect(middotCandidate!.pageIndices).toEqual([0, 1, 2, 3]);
+    });
+
+    it("default threshold of 3 misses the alternating verso/recto headers (regression baseline)", () => {
+        const analysis = build4PageHeaders();
+        const out = MarginFilter.identifyElementsToRemove(analysis, 3, true);
+        const texts = out.candidates
+            .filter((c) => c.reason === "repeat")
+            .map((c) => c.text);
+        // 化工进展 only on 2 pages → not enough.
+        expect(texts).not.toContain("化工进展");
+        expect(texts).not.toContain("第11期");
+        // The middot family still hits 4 pages → still caught.
+        expect(out.candidates.some(
+            (c) => c.reason === "repeat" && /·\d+·/.test(c.originalText),
+        )).toBe(true);
     });
 });

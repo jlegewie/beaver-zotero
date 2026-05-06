@@ -19,6 +19,7 @@ import {
     hasReferenceTail,
     isReferenceParagraph,
     mergedRangesValid,
+    mergeDecimalNumberSplits,
     mergeLabelSentences,
     mergeReferenceListSentences,
     splitOnEnumeratedListAfterColon,
@@ -1697,5 +1698,101 @@ describe("mergedRangesValid with allowContinuationFirst", () => {
         expect(
             mergedRangesValid([r1, r2], t, { allowContinuationFirst: true }),
         ).toBe(false);
+    });
+});
+
+describe("mergeDecimalNumberSplits", () => {
+    it("merges a single decimal split", () => {
+        // sentencex sees "1413. 74 kt" and emits two ranges either side of
+        // the period.
+        const text = "天然源VOCs 的排放量为 1413. 74 kt，主要来源是植物。";
+        const ranges = rangesFromChunks(text, [
+            "天然源VOCs 的排放量为 1413.",
+            "74 kt，主要来源是植物。",
+        ]);
+        const merged = mergeDecimalNumberSplits(ranges, text);
+        expect(slice(text, merged)).toEqual([
+            "天然源VOCs 的排放量为 1413. 74 kt，主要来源是植物。",
+        ]);
+    });
+
+    it("merges multiple decimals in one paragraph", () => {
+        const text = "占比29. 4%、 30. 2%。 人为源VOCs 总排放量为923. 6 kt。";
+        const ranges = rangesFromChunks(text, [
+            "占比29.",
+            "4%、 30.",
+            "2%。",
+            "人为源VOCs 总排放量为923.",
+            "6 kt。",
+        ]);
+        const merged = mergeDecimalNumberSplits(ranges, text);
+        expect(slice(text, merged)).toEqual([
+            "占比29. 4%、 30. 2%。",
+            "人为源VOCs 总排放量为923. 6 kt。",
+        ]);
+    });
+
+    it("leaves a non-numeric boundary alone", () => {
+        // Right side starts with a Chinese character, not a digit → no merge.
+        const text = "末端处理是目前主要方法。 国内外不同的VOCs 处理技术。";
+        const ranges = rangesFromChunks(text, [
+            "末端处理是目前主要方法。",
+            "国内外不同的VOCs 处理技术。",
+        ]);
+        const merged = mergeDecimalNumberSplits(ranges, text);
+        expect(slice(text, merged)).toEqual([
+            "末端处理是目前主要方法。",
+            "国内外不同的VOCs 处理技术。",
+        ]);
+    });
+
+    it("leaves an ordered-list marker alone (digit. + capital letter)", () => {
+        // "1. Apples" — left ends in digit-period but right starts with
+        // a letter, not a digit, so no merge.
+        const text = "Items are: 1. Apples 2. Pears.";
+        const ranges = rangesFromChunks(text, [
+            "Items are: 1.",
+            "Apples 2.",
+            "Pears.",
+        ]);
+        const merged = mergeDecimalNumberSplits(ranges, text);
+        expect(slice(text, merged)).toEqual([
+            "Items are: 1.",
+            "Apples 2.",
+            "Pears.",
+        ]);
+    });
+
+    it("returns input unchanged when only one range", () => {
+        const text = "single sentence.";
+        const ranges = rangesFromChunks(text, ["single sentence."]);
+        const merged = mergeDecimalNumberSplits(ranges, text);
+        expect(slice(text, merged)).toEqual(["single sentence."]);
+    });
+
+    it("merges across more than two ranges of digit-period boundaries", () => {
+        // 1.2.3 split into three ranges → one merged range.
+        const text = "version 1. 2. 3 released.";
+        const ranges = rangesFromChunks(text, [
+            "version 1.",
+            "2.",
+            "3 released.",
+        ]);
+        const merged = mergeDecimalNumberSplits(ranges, text);
+        expect(slice(text, merged)).toEqual(["version 1. 2. 3 released."]);
+    });
+
+    // Documented limitation: a sentence that legitimately ends with a
+    // digit-period followed by a sentence that starts with a digit
+    // ("…cited as 1996. 2 also relevant…") will be merged. Rare in
+    // practice; the merge is preferable to the over-split.
+    it("documents the false-positive merge for digit-ending sentence followed by digit-starting sentence", () => {
+        const text = "cited as 1996. 2 also relevant.";
+        const ranges = rangesFromChunks(text, [
+            "cited as 1996.",
+            "2 also relevant.",
+        ]);
+        const merged = mergeDecimalNumberSplits(ranges, text);
+        expect(slice(text, merged)).toEqual(["cited as 1996. 2 also relevant."]);
     });
 });

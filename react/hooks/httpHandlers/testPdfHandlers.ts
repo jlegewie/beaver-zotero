@@ -884,18 +884,18 @@ export async function handleTestPdfRenderOverlayHttpRequest(request: any) {
         // target page and substitute it into the analysis window before
         // paragraph detection.
         if (level === 'margins') {
-            overlay = getMarginsOverlay(rawDoc.pages, pageIndex);
+            overlay = getMarginsOverlay(rawDoc.pages, pageIndex, totalPages);
         } else {
             const detailedTarget = await client.extractRawPageDetailed(
                 pdfData,
                 pageIndex,
             );
             if (level === 'columns') {
-                overlay = getColumnOverlay(rawDoc.pages, pageIndex, detailedTarget);
+                overlay = getColumnOverlay(rawDoc.pages, pageIndex, detailedTarget, totalPages);
             } else if (level === 'lines') {
-                overlay = getLineOverlay(rawDoc.pages, pageIndex, detailedTarget);
+                overlay = getLineOverlay(rawDoc.pages, pageIndex, detailedTarget, totalPages);
             } else {
-                overlay = getParagraphOverlay(rawDoc.pages, pageIndex, detailedTarget);
+                overlay = getParagraphOverlay(rawDoc.pages, pageIndex, detailedTarget, totalPages);
             }
         }
     }
@@ -1461,7 +1461,15 @@ export async function handleTestPdfPipelineTraceHttpRequest(request: any) {
  *                                         //   DEFAULT_ANALYSIS_WINDOW_CAP)
  *     page_range?: { start, end },        // alternative to page_indices
  *     repeat_threshold?: number,          // min pages for "repeat"
- *                                         //   classification (default 3)
+ *                                         //   classification. Omitted:
+ *                                         //   adaptive default — for ≤6
+ *                                         //   page docs, top/bottom uses 2
+ *                                         //   (catches alternating verso/
+ *                                         //   recto headers), left/right
+ *                                         //   stays at 3. Longer docs use
+ *                                         //   3 everywhere. Explicit
+ *                                         //   value: applied to all
+ *                                         //   positions.
  *     detect_page_sequences?: boolean }   // run page-number sequence
  *                                         //   detection (default true)
  *
@@ -1475,17 +1483,23 @@ export async function handleTestPdfSmartRemovalSummaryHttpRequest(request: any) 
     const { getMuPDFWorkerClient } = await import(
         '../../../src/services/pdf/MuPDFWorkerClient'
     );
-    const { MarginFilter, DEFAULT_MARGIN_ZONE, DEFAULT_ANALYSIS_WINDOW_CAP } =
-        await import('../../../src/services/pdf');
+    const {
+        MarginFilter,
+        DEFAULT_MARGIN_ZONE,
+        DEFAULT_ANALYSIS_WINDOW_CAP,
+        getEffectiveRepeatThreshold,
+    } = await import('../../../src/services/pdf');
 
     const loaded = await loadPdfBytesForTestEndpoint(request);
     if (!loaded.ok) return loaded;
     const { pdfData } = loaded;
 
-    const repeatThreshold =
+    // Pass through "did the caller set this?" so the helper can apply the
+    // adaptive default for short docs without overriding explicit values.
+    const requestedRepeatThreshold =
         Number.isInteger(request?.repeat_threshold) && request.repeat_threshold > 0
             ? request.repeat_threshold
-            : 3;
+            : undefined;
     const detectPageSequences = request?.detect_page_sequences !== false;
 
     const client = getMuPDFWorkerClient();
@@ -1532,7 +1546,11 @@ export async function handleTestPdfSmartRemovalSummaryHttpRequest(request: any) 
     );
     const removal = MarginFilter.identifyElementsToRemove(
         marginAnalysis,
-        repeatThreshold,
+        getEffectiveRepeatThreshold({
+            requested: requestedRepeatThreshold,
+            totalPageCount: totalPages,
+            analysisPageCount: analysisIndices.length,
+        }),
         detectPageSequences,
     );
 
