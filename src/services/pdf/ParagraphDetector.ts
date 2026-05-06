@@ -306,25 +306,65 @@ function looksLikeJournalCitation(text: string): boolean {
 
 /**
  * Stricter all-caps check used to gate the same-size-different-font header
- * rule. Requires multi-word phrasing so isolated all-caps tokens like
- * figure/chart labels ("MALARIA", "IBS", "UMAP3", "MSC1 MSC3 MSC13 MSC14",
- * "VIII") don't get promoted to headers — those have ≤ 1 pure-letter word.
+ * rule. Accepts two shapes that real section headings carry but figure/chart
+ * labels typically don't:
  *
- * Heuristic: needs ≥ 2 whitespace-separated tokens that are pure letters
- * (no digits, no symbols), each at least 2 letters long, and all letters
- * are uppercase by `isAllCapsText`'s definition.
+ *   - Multi-word phrase: ≥ 2 pure-letter tokens (each ≥ 2 letters). Catches
+ *     "THE MALIGNANCY OF SOCIAL FRONTIERS", "DATA AND METHODS".
+ *   - Single long word: 1 pure-letter token ≥ 6 letters. Catches standalone
+ *     section names ("REFERENCES", "INTRODUCTION", "DISCUSSION",
+ *     "CONCLUSION", "ABSTRACT", "METHODS", "RESULTS"). 6-letter floor keeps
+ *     short labels ("IBS", "UMAP3", "VIII") out.
+ *
+ * Tokens with digits/symbols are excluded so figure labels like "UMAP3" or
+ * roman-numeral indices like "VIII" can't qualify.
  */
 function isAllCapsHeaderPhrase(text: string): boolean {
     if (!isAllCapsText(text)) return false;
     const tokens = text.split(/\s+/).filter(t => t.length > 0);
     let pureLetterTokens = 0;
+    let longestPureLetterToken = 0;
     for (const tok of tokens) {
         if (tok.length < 2) continue;
         if (!/^\p{L}+$/u.test(tok)) continue;
         pureLetterTokens++;
+        if (tok.length > longestPureLetterToken) longestPureLetterToken = tok.length;
     }
-    return pureLetterTokens >= 2;
+    if (pureLetterTokens >= 2) return true;
+    if (pureLetterTokens === 1 && longestPureLetterToken >= 6) return true;
+    return false;
 }
+
+/**
+ * Section-number outline detector. Matches numeric section prefixes that
+ * lead real headings — "2. BACKGROUND", "2.1 Race, Neighborhoods, and Police
+ * Stops", "3.1 “Stop and Frisk” in New York City", "3.4.5 Some Subsection" —
+ * followed by a capitalized word. Used to promote sans-on-serif (or
+ * vice-versa) section titles that carry no other style cue (no bold, no
+ * italic, same size as body).
+ *
+ * Constraints:
+ *   - Number with up to 3 dotted parts ("3", "3.4", "3.4.5"), optional
+ *     trailing period, then whitespace, then optionally an opening quote /
+ *     paren, then a Unicode capital. The 3-level cap avoids false hits on
+ *     dotted version strings; the optional quote allows titles that begin
+ *     with an emphasized phrase ("3.1 “Stop and Frisk”…").
+ */
+const SECTION_PREFIX_RE =
+    /^\s*\d+(?:\.\d+){0,3}\.?\s+["'“‘«(]?\p{Lu}/u;
+
+/**
+ * Icon / dingbat fonts that MuPDF's per-line font aggregation reports for
+ * bullet-led list items. When a line begins with a bullet glyph (e.g.
+ * U+F0B7 from `Symbol`) followed by body text in a real font, MuPDF's JSON
+ * walk reports the line font as the bullet font for the entire line — so
+ * the line "looks like" a header by font/size compared to body. Real
+ * headings don't use these fonts.
+ *
+ * Matches both bare names ("Symbol") and the common subset-prefix form
+ * ("ABCDEE+Symbol", "AAAAA+ZapfDingbats").
+ */
+const ICON_FONT_RE = /(?:^|\+)(?:Symbol|Wingdings|ZapfDingbats|Webdings|Marlett)\b/i;
 
 /**
  * Decide whether the body text on this page is itself all-caps. Sampled from
@@ -597,6 +637,14 @@ function isHeaderStyle(
     const lineStyle = extractLineStyle(line);
     if (!lineStyle) return false;
 
+    // Bullet-led list items: MuPDF's JSON walk aggregates the leading bullet
+    // glyph's font (Symbol / Wingdings / ZapfDingbats / etc.) over the whole
+    // line, so the line reads as "different font, possibly larger size" vs.
+    // body. Always reject — real headings don't use these fonts.
+    if (ICON_FONT_RE.test(lineStyle.font)) {
+        return false;
+    }
+
     // Not a header if it's a known body style
     if (matchesBodyStyle(lineStyle, bodyStyles)) {
         return false;
@@ -675,6 +723,23 @@ function isHeaderStyle(
         lineStyle.size <= primaryBodyStyle.size + 0.5 &&
         lineStyle.font !== primaryBodyStyle.font &&
         isAllCapsHeaderPhrase(phraseText)
+    ) {
+        isPotentialHeader = true;
+    }
+
+    // Rule 6: Same size, different font, section-number prefix (requires gap).
+    // Catches sans-on-serif (or serif-on-sans) section titles that carry no
+    // bold/italic/size cue — e.g. "2. BACKGROUND", "2.1 Race, Neighborhoods,
+    // and Police Stops", "3.1 Stop and Frisk in New York City". The numeric
+    // outline prefix is what makes the rule safe: body lines that happen to
+    // be in a different font (inline code, embedded glyphs) almost never
+    // start with a "N." or "N.M" outline.
+    if (
+        !isPotentialHeader &&
+        gapCheckPasses &&
+        Math.abs(lineStyle.size - primaryBodyStyle.size) < 0.5 &&
+        lineStyle.font !== primaryBodyStyle.font &&
+        SECTION_PREFIX_RE.test(text)
     ) {
         isPotentialHeader = true;
     }
