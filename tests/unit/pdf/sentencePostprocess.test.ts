@@ -21,6 +21,7 @@ import {
     mergedRangesValid,
     mergeDecimalNumberSplits,
     mergeLabelSentences,
+    mergeOrphanClosers,
     mergeReferenceListSentences,
     splitOnEnumeratedListAfterColon,
     splitTrailingNumericSubsectionLabel,
@@ -1794,5 +1795,119 @@ describe("mergeDecimalNumberSplits", () => {
         ]);
         const merged = mergeDecimalNumberSplits(ranges, text);
         expect(slice(text, merged)).toEqual(["cited as 1996. 2 also relevant."]);
+    });
+});
+
+describe("mergeOrphanClosers", () => {
+    it("merges a lone ']' onto a period-terminated previous range (the 57WFL3D9 p9 case)", () => {
+        const text =
+            "effect of .3 corresponds to a 35% increase in the probability of being stopped.]";
+        const ranges = rangesFromChunks(text, [
+            "effect of .3 corresponds to a 35% increase in the probability of being stopped.",
+            "]",
+        ]);
+        const merged = mergeOrphanClosers(ranges, text);
+        expect(slice(text, merged)).toEqual([
+            "effect of .3 corresponds to a 35% increase in the probability of being stopped.]",
+        ]);
+    });
+
+    it("merges a lone ')' onto a question-mark-terminated previous range", () => {
+        const text = "Was the experiment reproducible?)";
+        const ranges = rangesFromChunks(text, [
+            "Was the experiment reproducible?",
+            ")",
+        ]);
+        const merged = mergeOrphanClosers(ranges, text);
+        expect(slice(text, merged)).toEqual([
+            "Was the experiment reproducible?)",
+        ]);
+    });
+
+    it("merges a multi-closer tail '])' onto a period-terminated previous range", () => {
+        const text = "the model converges quickly.])";
+        const ranges = rangesFromChunks(text, [
+            "the model converges quickly.",
+            "])",
+        ]);
+        const merged = mergeOrphanClosers(ranges, text);
+        expect(slice(text, merged)).toEqual([
+            "the model converges quickly.])",
+        ]);
+    });
+
+    it("merges a CJK closer '」' onto a CJK terminator '。' previous range", () => {
+        const text = "彼は驚いて見た。」";
+        const ranges = rangesFromChunks(text, [
+            "彼は驚いて見た。",
+            "」",
+        ]);
+        const merged = mergeOrphanClosers(ranges, text);
+        expect(slice(text, merged)).toEqual(["彼は驚いて見た。」"]);
+    });
+
+    it("does NOT merge when the previous range is not sentence-final", () => {
+        const text = "an unfinished phrase ]";
+        const ranges = rangesFromChunks(text, [
+            "an unfinished phrase",
+            "]",
+        ]);
+        const merged = mergeOrphanClosers(ranges, text);
+        expect(slice(text, merged)).toEqual([
+            "an unfinished phrase",
+            "]",
+        ]);
+    });
+
+    it("does NOT merge a closer-only first range (no previous to absorb into)", () => {
+        const text = "] orphan at start.";
+        const ranges = rangesFromChunks(text, [
+            "]",
+            "orphan at start.",
+        ]);
+        const merged = mergeOrphanClosers(ranges, text);
+        expect(slice(text, merged)).toEqual([
+            "]",
+            "orphan at start.",
+        ]);
+    });
+
+    it("does NOT merge when the second range carries text beyond the closer", () => {
+        const text = "First sentence. ] then more text follows here.";
+        const ranges = rangesFromChunks(text, [
+            "First sentence.",
+            "] then more text follows here.",
+        ]);
+        const merged = mergeOrphanClosers(ranges, text);
+        expect(slice(text, merged)).toEqual([
+            "First sentence.",
+            "] then more text follows here.",
+        ]);
+    });
+
+    it("is a no-op when no closer-only ranges are present", () => {
+        const text = "First sentence. Second sentence.";
+        const ranges = rangesFromChunks(text, [
+            "First sentence.",
+            "Second sentence.",
+        ]);
+        const merged = mergeOrphanClosers(ranges, text);
+        expect(slice(text, merged)).toEqual([
+            "First sentence.",
+            "Second sentence.",
+        ]);
+    });
+
+    it("integrates through applyPostProcessing for the production over-split shape", () => {
+        const text =
+            "effect of .3 corresponds to a multiplicative effect of exp(.3) = 1.35, or a 35% increase in the probability of being stopped.]";
+        const ranges = rangesFromChunks(text, [
+            "effect of .3 corresponds to a multiplicative effect of exp(.3) = 1.35, or a 35% increase in the probability of being stopped.",
+            "]",
+        ]);
+        const out = applyPostProcessing(ranges, text);
+        expect(slice(text, out)).toEqual([
+            "effect of .3 corresponds to a multiplicative effect of exp(.3) = 1.35, or a 35% increase in the probability of being stopped.]",
+        ]);
     });
 });

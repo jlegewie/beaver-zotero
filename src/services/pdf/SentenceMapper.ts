@@ -126,7 +126,7 @@ export function simpleRegexSentenceSplit(text: string): SentenceRange[] {
  * straight + curly quotes, ASCII brackets, French guillemets, CJK brackets.
  * Extend only with concrete fixture evidence.
  */
-const SENTENCE_FINAL_CLOSERS = new Set([
+export const SENTENCE_FINAL_CLOSERS: ReadonlySet<string> = new Set([
     ")", "]", "}",
     '"', "'",   // straight ASCII quotes
     "”", "’",   // ” curly double, ’ curly single

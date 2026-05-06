@@ -16,7 +16,11 @@
  * boundaries.
  */
 
-import type { SentenceRange } from "./SentenceMapper";
+import {
+    hasSentenceFinalTerminator,
+    SENTENCE_FINAL_CLOSERS,
+    type SentenceRange,
+} from "./SentenceMapper";
 
 // ---------------------------------------------------------------------------
 // Pipeline composer
@@ -1100,6 +1104,62 @@ export const mergeDecimalNumberSplits: PostProcessStep = (ranges, text) => {
 };
 
 // ---------------------------------------------------------------------------
+// Step: merge orphan closer-only fragments back onto the previous sentence
+// ---------------------------------------------------------------------------
+
+/**
+ * sentencex emits a `.` (or `!`/`?`) as a sentence terminator even when the
+ * next non-space character is a closing bracket / paren / quote, so paragraph
+ * text that ends with `…stopped.]`, `…done.)`, `…said."`, `…見た。」` gets
+ * shredded into a normal sentence followed by a single-character closer-only
+ * fragment. Downstream that fragment becomes a 3-pt-wide one-glyph "sentence"
+ * in the visualizer / citations / search results.
+ *
+ * Merge any closer-only range onto the previous range, but only when the
+ * previous range was already sentence-final (terminator + optional closer
+ * stack). Both guards are required:
+ *
+ *   1. Range trimmed text is non-empty AND every character is in
+ *      `SENTENCE_FINAL_CLOSERS` (so multi-closer tails like `])` collapse too).
+ *   2. The previous range passes `hasSentenceFinalTerminator`, i.e. ends in
+ *      `.`/`!`/`?`/`…`/Myanmar `။`/etc. through any existing closer stack.
+ *
+ * Without guard 2 we would silently absorb stray closers after non-final
+ * fragments — a broader change than the production bug. With both guards the
+ * rule only fires on the `<sentence-terminator><closer>` shape that sentencex
+ * over-splits.
+ */
+function isOnlyClosers(text: string): boolean {
+    let start = 0;
+    let end = text.length;
+    while (start < end && /\s/.test(text[start])) start++;
+    while (end > start && /\s/.test(text[end - 1])) end--;
+    if (end <= start) return false;
+    for (let i = start; i < end; i++) {
+        if (!SENTENCE_FINAL_CLOSERS.has(text[i])) return false;
+    }
+    return true;
+}
+
+export const mergeOrphanClosers: PostProcessStep = (ranges, text) => {
+    if (ranges.length < 2) return ranges as SentenceRange[];
+    const out: SentenceRange[] = [];
+    for (const r of ranges) {
+        const prev = out.length > 0 ? out[out.length - 1] : null;
+        if (
+            prev &&
+            isOnlyClosers(text.slice(r.start, r.end)) &&
+            hasSentenceFinalTerminator(text.slice(prev.start, prev.end))
+        ) {
+            out[out.length - 1] = { start: prev.start, end: r.end };
+            continue;
+        }
+        out.push(r);
+    }
+    return out;
+};
+
+// ---------------------------------------------------------------------------
 // Pipeline registration
 // ---------------------------------------------------------------------------
 
@@ -1109,4 +1169,5 @@ const POST_PROCESS_STEPS: ReadonlyArray<PostProcessStep> = [
     splitOnEnumeratedListAfterColon,
     mergeDecimalNumberSplits,
     mergeReferenceListSentences,
+    mergeOrphanClosers,
 ];
