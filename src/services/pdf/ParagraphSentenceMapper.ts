@@ -43,6 +43,7 @@ import { detectParagraphs } from "./ParagraphDetector";
 import { detectColumns } from "./ColumnDetector";
 import { detectLinesOnPage } from "./LineDetector";
 import {
+    hasSentenceFinalTerminator,
     simpleRegexSentenceSplit,
     sentenceToBoxes,
     type PageText,
@@ -550,6 +551,10 @@ export function extractPageSentenceBBoxes(
     let unmappedParagraphs = 0;
     let degradedParagraphs = 0;
     const degradationNotes: DegradationNote[] = [];
+    // Uncapped — `degradationNotes` itself is bounded by MAX_DEGRADATION_NOTES,
+    // but the column-continuation pass needs to skip every degraded paragraph,
+    // not just the first 50.
+    const degradedItems = new Set<number>();
     const addNote = (note: DegradationNote) => {
         if (degradationNotes.length < MAX_DEGRADATION_NOTES) {
             degradationNotes.push(note);
@@ -569,6 +574,7 @@ export function extractPageSentenceBBoxes(
         // caller, so we emit a fallback covering the whole paragraph.
         if (detailedLines.length === 0) {
             unmappedParagraphs++;
+            degradedItems.add(i);
             addNote({ itemIndex: i, itemType: item.type, reason: "unmapped" });
             const fallback = fallbackSentenceFromItem(item, detailedPage.pageIndex, i);
             paragraphs.push({
@@ -590,6 +596,7 @@ export function extractPageSentenceBBoxes(
         const built = tryBuildParagraphText(detailedLines);
         if (!built.ok) {
             degradedParagraphs++;
+            degradedItems.add(i);
             addNote({
                 itemIndex: i,
                 itemType: item.type,
@@ -638,6 +645,7 @@ export function extractPageSentenceBBoxes(
         // addressable, but mark it degraded so the caller can tell.
         if (sentences.length === 0 && paragraphText.text.trim().length > 0) {
             degradedParagraphs++;
+            degradedItems.add(i);
             addNote({ itemIndex: i, itemType: item.type, reason: "empty_split" });
             const fallback = fallbackSentenceFromItem(item, detailedPage.pageIndex, i);
             paragraphs.push({ item, paragraphText, sentences: [fallback] });
@@ -649,6 +657,12 @@ export function extractPageSentenceBBoxes(
         flatSentences.push(...sentences);
     }
 
+    // Mutates `joinWithNext` on last sentences of paragraphs whose successor
+    // is the start of a sentence that crosses a column boundary. `paragraphs`
+    // and `flatSentences` share SentenceBBox object identity, so the flag is
+    // visible through both.
+    annotateColumnContinuations(paragraphs, splitter, degradedItems);
+
     return {
         pageIndex: detailedPage.pageIndex,
         width: detailedPage.width,
@@ -659,6 +673,128 @@ export function extractPageSentenceBBoxes(
         degradedParagraphs,
         degradationNotes,
     };
+}
+
+// ---------------------------------------------------------------------------
+// Column-continuation annotator (sets SentenceBBox.joinWithNext)
+// ---------------------------------------------------------------------------
+
+/**
+ * Hyphen-like characters that, at the very end of a paragraph, indicate the
+ * *word* (not just the sentence) continues into the next paragraph. We skip
+ * the join hint for these because word-level rejoining belongs upstream in
+ * paragraph-text construction, not in this sentence-level hint.
+ */
+const HYPHEN_LIKE_BREAK_CHARS = new Set([
+    "-",   // U+002D HYPHEN-MINUS
+    "‐",   // U+2010 HYPHEN
+    "‑",   // U+2011 NON-BREAKING HYPHEN
+    "‒",   // U+2012 FIGURE DASH
+    "–",   // U+2013 EN DASH
+    "—",   // U+2014 EM DASH
+    "­",   // U+00AD SOFT HYPHEN
+]);
+
+function endsInHyphen(text: string): boolean {
+    const trimmed = text.replace(/\s+$/u, "");
+    if (!trimmed) return false;
+    return HYPHEN_LIKE_BREAK_CHARS.has(trimmed[trimmed.length - 1]);
+}
+
+function startsWithLowercase(text: string): boolean {
+    const trimmed = text.replace(/^\s+/u, "");
+    if (!trimmed) return false;
+    return /^\p{Ll}/u.test(trimmed);
+}
+
+/**
+ * Decide whether a (last sentence, first sentence) pair across consecutive
+ * columns should be joined. Pure heuristic — no I/O.
+ */
+function shouldJoinAcrossColumns(
+    lastText: string,
+    firstText: string,
+    splitter: SentenceSplitter,
+): boolean {
+    if (endsInHyphen(lastText)) return false;
+    if (hasSentenceFinalTerminator(lastText)) return false;
+    if (!startsWithLowercase(firstText)) return false;
+
+    const left = lastText.replace(/\s+$/u, "");
+    const right = firstText.replace(/^\s+/u, "");
+    if (!left || !right) return false;
+    const combined = `${left} ${right}`;
+
+    const ranges = splitter(combined);
+    if (ranges.length !== 1) return false;
+
+    const r = ranges[0];
+    // Splitter must cover the whole combined string (allowing trailing
+    // whitespace, which `simpleRegexSentenceSplit` strips and sentencex may
+    // also exclude). We accept a single range that starts at 0 and reaches
+    // the trimmed end.
+    if (r.start !== 0) return false;
+    let end = combined.length;
+    while (end > 0 && /\s/.test(combined[end - 1])) end--;
+    return r.end >= end;
+}
+
+/**
+ * Set `SentenceBBox.joinWithNext = true` on the last sentence of each
+ * paragraph whose successor (in reading order) begins a sentence that
+ * **continues** the previous one across a column boundary.
+ *
+ * Conservative: requires strictly consecutive columns (`col` → `col + 1`),
+ * both sides body paragraphs, last sentence non-terminated, first sentence
+ * lowercase-starting, and the splitter must agree the combined text is one
+ * sentence. Only sets the flag — never writes `false` (omitted ≡ false per
+ * `SentenceBBox.joinWithNext` contract). Stale `true` values from prior calls
+ * on the same array are cleared at evaluation time so the helper is
+ * idempotent under repeated invocation.
+ *
+ * Mutates `paragraphs[i].sentences[last].joinWithNext` in place. Because the
+ * caller's `flatSentences` array shares SentenceBBox object identity with
+ * `paragraphs[i].sentences`, the flag is observable through both.
+ *
+ * @internal Public surface is `extractPageSentenceBBoxes`; this helper is
+ * exported for direct unit testing.
+ */
+export function annotateColumnContinuations(
+    paragraphs: ParagraphWithSentences[],
+    splitter: SentenceSplitter,
+    degradedItems: ReadonlySet<number>,
+): void {
+    for (let i = 0; i < paragraphs.length - 1; i++) {
+        const cur = paragraphs[i];
+        const next = paragraphs[i + 1];
+        const lastSentence = cur.sentences[cur.sentences.length - 1];
+
+        // Always clear any stale flag before re-evaluating; only set on
+        // success below. Prevents leftover `true` from a prior call on a
+        // mutated test array.
+        if (lastSentence) delete lastSentence.joinWithNext;
+
+        if (!lastSentence) continue;
+        if (cur.item.type !== "paragraph" || next.item.type !== "paragraph") {
+            continue;
+        }
+        if (next.item.columnIndex !== cur.item.columnIndex + 1) continue;
+        if (degradedItems.has(i) || degradedItems.has(i + 1)) continue;
+        if (lastSentence.kind === "heading") continue;
+        const firstSentence = next.sentences[0];
+        if (!firstSentence) continue;
+        if (firstSentence.kind === "heading") continue;
+
+        if (
+            shouldJoinAcrossColumns(
+                lastSentence.text,
+                firstSentence.text,
+                splitter,
+            )
+        ) {
+            lastSentence.joinWithNext = true;
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
