@@ -17,7 +17,7 @@
 
 import { getMuPDFWorkerClient } from "./MuPDFWorkerClient";
 import { resolveAnalysisPageIndices } from "./AnalysisWindow";
-import { MarginFilter } from "./MarginFilter";
+import { MarginFilter, getEffectiveRepeatThreshold } from "./MarginFilter";
 import {
     detectFilteredParagraphs,
     type FilteredParagraphResult,
@@ -131,7 +131,10 @@ export async function runSentenceExtractionPipeline(
     );
     const marginRemoval = MarginFilter.identifyElementsToRemove(
         marginAnalysis,
-        3,
+        getEffectiveRepeatThreshold({
+            totalPageCount: pageCount,
+            analysisPageCount: pagesForFilter.length,
+        }),
         true,
     );
 

@@ -199,7 +199,11 @@ async function pushOverlayToReader(
 async function loadAnalysisWindow(
     filePath: string,
     pageIndex: number,
-): Promise<{ pages: RawPageData[]; detailedTarget: RawPageDataDetailed }> {
+): Promise<{
+    pages: RawPageData[];
+    detailedTarget: RawPageDataDetailed;
+    totalPageCount: number;
+}> {
     const pdfData = await IOUtils.read(filePath);
     const client = getMuPDFWorkerClient();
     const pageCount = await client.getPageCount(pdfData);
@@ -208,7 +212,7 @@ async function loadAnalysisWindow(
         client.extractRawPages(pdfData, analysisIndices),
         client.extractRawPageDetailed(pdfData, pageIndex),
     ]);
-    return { pages: rawDoc.pages, detailedTarget };
+    return { pages: rawDoc.pages, detailedTarget, totalPageCount: pageCount };
 }
 
 /**
@@ -226,9 +230,12 @@ export async function visualizeCurrentPageColumns(): Promise<{
         const { reader, filePath, pageIndex } = ctx;
 
         logger(`[Visualizer] Loading PDF and extracting page ${pageIndex + 1}...`);
-        const { pages, detailedTarget } = await loadAnalysisWindow(filePath, pageIndex);
+        const { pages, detailedTarget, totalPageCount } = await loadAnalysisWindow(
+            filePath,
+            pageIndex,
+        );
 
-        const overlay = getColumnOverlay(pages, pageIndex, detailedTarget);
+        const overlay = getColumnOverlay(pages, pageIndex, detailedTarget, totalPageCount);
         if (overlay.rects.length === 0) {
             return {
                 success: true,
@@ -271,9 +278,12 @@ export async function visualizeCurrentPageLines(): Promise<{
         const { reader, filePath, pageIndex } = ctx;
 
         logger(`[Visualizer] Loading PDF and detecting lines on page ${pageIndex + 1}...`);
-        const { pages, detailedTarget } = await loadAnalysisWindow(filePath, pageIndex);
+        const { pages, detailedTarget, totalPageCount } = await loadAnalysisWindow(
+            filePath,
+            pageIndex,
+        );
 
-        const overlay = getLineOverlay(pages, pageIndex, detailedTarget);
+        const overlay = getLineOverlay(pages, pageIndex, detailedTarget, totalPageCount);
         if (overlay.rects.length === 0) {
             return {
                 success: true,
@@ -322,9 +332,12 @@ export async function visualizeCurrentPageParagraphs(): Promise<{
         const { reader, filePath, pageIndex } = ctx;
 
         logger(`[Visualizer] Loading PDF for paragraph detection on page ${pageIndex + 1}...`);
-        const { pages, detailedTarget } = await loadAnalysisWindow(filePath, pageIndex);
+        const { pages, detailedTarget, totalPageCount } = await loadAnalysisWindow(
+            filePath,
+            pageIndex,
+        );
 
-        const overlay = getParagraphOverlay(pages, pageIndex, detailedTarget);
+        const overlay = getParagraphOverlay(pages, pageIndex, detailedTarget, totalPageCount);
         if (overlay.rects.length === 0) {
             return {
                 success: true,
@@ -402,7 +415,12 @@ export async function visualizeCurrentPageSentences(): Promise<{
             normalizeLanguageCode(language),
         );
 
-        const overlay = getSentenceOverlay(detailedPage, rawDoc.pages, splitter);
+        const overlay = getSentenceOverlay(
+            detailedPage,
+            rawDoc.pages,
+            splitter,
+            pageCount,
+        );
         if (overlay.rects.length === 0) {
             return {
                 success: true,

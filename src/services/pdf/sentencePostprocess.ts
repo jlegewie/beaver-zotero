@@ -1061,6 +1061,45 @@ export const mergeReferenceListSentences: PostProcessStep = (ranges, text) => {
 };
 
 // ---------------------------------------------------------------------------
+// Step: merge sentence boundaries that fall inside decimal numbers
+// ---------------------------------------------------------------------------
+
+/**
+ * Re-join sentence ranges split on a decimal point.
+ *
+ * sentencex (in any language mode) treats `.` as a sentence terminator, so
+ * inputs like `1413. 74 kt` or `占比29. 4%、 30. 2%` — common in scientific
+ * Chinese where the typesetter inserted whitespace after each decimal — get
+ * shredded into one fragment per number. The pattern is unambiguous: when the
+ * left range ends with `\d\.\s*` and the right range begins with `\s*\d`, the
+ * boundary is inside a decimal number, not between sentences.
+ *
+ * Acceptable false-positive: `"…cited as 1996. 2 also relevant…"` — a
+ * sentence that legitimately ends with a digit-period followed by a sentence
+ * starting with a digit. Rare in practice; the merge is preferable to the
+ * over-split.
+ */
+export const mergeDecimalNumberSplits: PostProcessStep = (ranges, text) => {
+    if (ranges.length < 2) return ranges as SentenceRange[];
+    const merged: SentenceRange[] = [];
+    let pending: SentenceRange | null = null;
+    for (const r of ranges) {
+        if (pending) {
+            const left = text.slice(pending.start, pending.end);
+            const right = text.slice(r.start, r.end);
+            if (/\d\.\s*$/.test(left) && /^\s*\d/.test(right)) {
+                pending = { start: pending.start, end: r.end };
+                continue;
+            }
+            merged.push(pending);
+        }
+        pending = r;
+    }
+    if (pending) merged.push(pending);
+    return merged;
+};
+
+// ---------------------------------------------------------------------------
 // Pipeline registration
 // ---------------------------------------------------------------------------
 
@@ -1068,5 +1107,6 @@ const POST_PROCESS_STEPS: ReadonlyArray<PostProcessStep> = [
     splitTrailingNumericSubsectionLabel,
     mergeLabelSentences,
     splitOnEnumeratedListAfterColon,
+    mergeDecimalNumberSplits,
     mergeReferenceListSentences,
 ];

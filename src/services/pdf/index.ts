@@ -49,7 +49,11 @@ export { prewarmMuPDFWorker } from "./prewarm";
 export { DocumentAnalyzer } from "./DocumentAnalyzer";
 export type { TextLayerCheckOptions } from "./DocumentAnalyzer";
 export { StyleAnalyzer } from "./StyleAnalyzer";
-export { MarginFilter } from "./MarginFilter";
+export {
+    MarginFilter,
+    getEffectiveRepeatThreshold,
+    type RepeatThresholdInput,
+} from "./MarginFilter";
 export { PageExtractor } from "./PageExtractor";
 export { detectColumns, logColumnDetection } from "./ColumnDetector";
 export type { Rect, ColumnDetectionResult, ColumnDetectionOptions } from "./ColumnDetector";

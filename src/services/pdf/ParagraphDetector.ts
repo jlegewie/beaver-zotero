@@ -253,6 +253,27 @@ function isAllCapsText(text: string, minLetters: number = 3): boolean {
 }
 
 /**
+ * CJK content predicate. Returns true when the line text is predominantly
+ * Chinese / Japanese / Korean. Used as a script-specificity gate on the
+ * CJK-subset body fallback in `isHeaderStyle`.
+ *
+ * Threshold of 0.5 (CJK chars / total Unicode letters) keeps the predicate
+ * true for full CJK prose with embedded Latin tokens like "VOCs" or
+ * measurement units, and false for Latin prose with one or two incidental
+ * CJK glyphs.
+ */
+function hasCJKContent(text: string, threshold: number = 0.5): boolean {
+    // CJK Unified Ideographs (incl. extension-A), Compatibility Ideographs,
+    // Hiragana, Katakana, Hangul Syllables.
+    const cjkCount = (text.match(
+        /[぀-ヿ㐀-䶿一-鿿가-힯豈-﫿]/gu
+    ) || []).length;
+    const letterCount = (text.match(/\p{L}/gu) || []).length;
+    if (letterCount === 0) return false;
+    return cjkCount / letterCount >= threshold;
+}
+
+/**
  * Author-list shape detector. Bold subset fonts on cover pages frequently
  * encode the author block in the same `.B` face used for section titles, so
  * structural rules alone (same size, bold, gap, different font, < 200 chars)
@@ -352,6 +373,23 @@ function isAllCapsHeaderPhrase(text: string): boolean {
  */
 const SECTION_PREFIX_RE =
     /^\s*\d+(?:\.\d+){0,3}\.?\s+["'“‘«(]?\p{Lu}/u;
+
+/**
+ * CJK-aware numeric outline prefix. Same shape as `SECTION_PREFIX_RE` but
+ * accepts a CJK ideograph (`\p{Lo}`) after the prefix in addition to a
+ * Latin uppercase letter (`\p{Lu}`), and admits CJK opening brackets.
+ *
+ * Used by `looksLikeFragmentedCJKBody` so the fallback does not swallow
+ * CJK numbered headings like "2. 概述", "2.1 冷凝法", "3.4 膜分离机理"
+ * — the canonical `SECTION_PREFIX_RE` rejects these because Chinese
+ * characters are `\p{Lo}` (other letter, no case), not `\p{Lu}`.
+ *
+ * The guard sits AFTER `hasCJKContent`, so this regex only sees lines
+ * already gated to predominantly-CJK prose; broadening to `\p{Lo}` does
+ * not affect Latin-only documents.
+ */
+const NUMERIC_OUTLINE_PREFIX_CJK_RE =
+    /^\s*\d+(?:\.\d+){0,3}\.?\s+["'“‘«(「『（]?[\p{Lu}\p{Lo}]/u;
 
 /**
  * Icon / dingbat fonts that MuPDF's per-line font aggregation reports for
@@ -674,6 +712,50 @@ function calculateColumnThresholds(
 // ============================================================================
 
 /**
+ * Detect the CJK CID-subset fragmentation case in `isHeaderStyle`.
+ *
+ * PDFs produced from East-Asian typesetting sometimes fragment a single
+ * logical body font across many PDF font dictionaries that differ only in
+ * subset name (e.g. `FZSSK--GBK1-00+ZHNJFM-7`, `+ZHNJFO-12`, `+ZHNJFP-20`
+ * — same typeface, opaque CID-subset suffix). Lower-volume subsets fall
+ * below the analyzer's 15%-of-primary threshold and are excluded from
+ * bodyStyles, so a body-sized line in one of those subsets fails strict
+ * matching and gets misclassified as a heading by Rule 1.
+ *
+ * Three guards keep this narrow:
+ *   - CJK content. Latin / other-script lines never enter the fallback.
+ *   - No numeric outline prefix. Numbered section titles
+ *     ("2. BACKGROUND", "2.1 冷凝法") must still be allowed to reach the
+ *     header rules. Uses `NUMERIC_OUTLINE_PREFIX_CJK_RE` (CJK-aware)
+ *     instead of `SECTION_PREFIX_RE`, since Chinese characters are
+ *     `\p{Lo}` and would otherwise slip past the Latin-only guard.
+ *   - Fragmentation evidence. `bodyStyles` itself contains 2+ distinct
+ *     fonts at the line's exact (size, bold, italic) — i.e. the document
+ *     ALREADY shows subset fragmentation at this style class.
+ *
+ * Returning true means "treat as body" — the caller short-circuits before
+ * any Rule 1-6 evaluation.
+ */
+// Exported for unit tests only. Not part of the production API.
+export function looksLikeFragmentedCJKBody(
+    line: PageLine,
+    lineStyle: TextStyle,
+    bodyStyles: TextStyle[]
+): boolean {
+    const text = line.text.trim();
+    if (!hasCJKContent(text)) return false;
+    if (NUMERIC_OUTLINE_PREFIX_CJK_RE.test(text)) return false;
+
+    const sameDims = bodyStyles.filter(bs =>
+        Math.abs(bs.size - lineStyle.size) < 0.5 &&
+        bs.bold === lineStyle.bold &&
+        bs.italic === lineStyle.italic
+    );
+    const distinctFonts = new Set(sameDims.map(bs => bs.font));
+    return distinctFonts.size >= 2;
+}
+
+/**
  * Check if a line should be classified as a header
  */
 function isHeaderStyle(
@@ -704,6 +786,15 @@ function isHeaderStyle(
 
     // Not a header if it's a known body style
     if (matchesBodyStyle(lineStyle, bodyStyles)) {
+        return false;
+    }
+
+    // CJK CID-subset body fallback: the line uses a body-sized style class
+    // that bodyStyles already shows fragmented across 2+ fonts. The "new"
+    // font here is almost certainly another subset of the same logical
+    // body font, not a real heading. Narrow text guards (CJK content,
+    // no section prefix) keep this off Latin docs and preserve Rule 6.
+    if (looksLikeFragmentedCJKBody(line, lineStyle, bodyStyles)) {
         return false;
     }
 

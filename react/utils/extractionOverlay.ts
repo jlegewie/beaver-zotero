@@ -24,6 +24,7 @@ import {
     extractPageSentenceBBoxes,
     lineBBoxToRect,
     MarginFilter,
+    getEffectiveRepeatThreshold,
     pagesForFilterWithBridgedFonts,
     DEFAULT_MARGINS,
     DEFAULT_MARGIN_ZONE,
@@ -165,10 +166,12 @@ export function getColumnOverlay(
     pages: RawPageData[],
     pageIndex: number,
     detailedTargetPage?: RawPageDataDetailed,
+    totalPageCount?: number,
 ): OverlayResult {
     const filtered = detectFilteredParagraphs({
         pages: pagesForFilter(pages, pageIndex, detailedTargetPage),
         pageIndex,
+        totalPageCount,
     });
     const rects: OverlayRect[] = filtered.columnResult.columns.map((col, i) => ({
         rect: col,
@@ -202,10 +205,12 @@ export function getLineOverlay(
     pages: RawPageData[],
     pageIndex: number,
     detailedTargetPage?: RawPageDataDetailed,
+    totalPageCount?: number,
 ): OverlayResult {
     const filtered = detectFilteredParagraphs({
         pages: pagesForFilter(pages, pageIndex, detailedTargetPage),
         pageIndex,
+        totalPageCount,
     });
     const rects: OverlayRect[] = [];
     let groupCount = 0;
@@ -246,10 +251,12 @@ export function getParagraphOverlay(
     pages: RawPageData[],
     pageIndex: number,
     detailedTargetPage?: RawPageDataDetailed,
+    totalPageCount?: number,
 ): OverlayResult {
     const filtered = detectFilteredParagraphs({
         pages: pagesForFilter(pages, pageIndex, detailedTargetPage),
         pageIndex,
+        totalPageCount,
     });
     const rects: OverlayRect[] = filtered.paragraphResult.items.map((item, i) => {
         const isHeader = item.type === "header";
@@ -301,6 +308,7 @@ export function getSentenceOverlay(
     detailedPage: RawPageDataDetailed,
     pages: RawPageData[],
     splitter?: SentenceSplitter,
+    totalPageCount?: number,
 ): OverlayResult {
     // Run paragraph detection on the *detailed* page so its line bboxes
     // exactly match what the sentence mapper will look up (same MuPDF
@@ -308,6 +316,7 @@ export function getSentenceOverlay(
     const filtered = detectFilteredParagraphs({
         pages: pagesForFilter(pages, detailedPage.pageIndex, detailedPage),
         pageIndex: detailedPage.pageIndex,
+        totalPageCount,
     });
     const result = extractPageSentenceBBoxes(detailedPage, {
         splitter,
@@ -519,6 +528,7 @@ export function getRawLinesOverlay(rawPage: RawPageData): OverlayResult {
 export function getMarginsOverlay(
     pages: RawPageData[],
     pageIndex: number,
+    totalPageCount?: number,
 ): OverlayResult {
     const targetPage = pages.find((p) => p.pageIndex === pageIndex);
     if (!targetPage) {
@@ -533,7 +543,10 @@ export function getMarginsOverlay(
     );
     const removal: MarginRemovalResult = MarginFilter.identifyElementsToRemove(
         analysis,
-        3,
+        getEffectiveRepeatThreshold({
+            totalPageCount,
+            analysisPageCount: pages.length,
+        }),
         true,
     );
 
