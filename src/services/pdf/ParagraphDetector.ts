@@ -902,7 +902,8 @@ function processCurrentLinesAsItem(
     pageIndex: number,
     bodyStyles: TextStyle[] | null,
     settings: Required<ParagraphDetectionSettings>,
-    bodyAllCaps: boolean = false
+    bodyAllCaps: boolean = false,
+    prevDocLine: PageLine | null = null
 ): {
     pageContent: string;
     item: ContentItem;
@@ -915,9 +916,41 @@ function processCurrentLinesAsItem(
     // a. Check if all lines are headers. Pass the joined text so Rule 5's
     // multi-word all-caps phrase check sees the full heading even when it
     // wraps across lines (e.g. "THE MALIGNANCY OF SOCIAL\nFRONTIERS").
-    const isPotentialHeader = currentLines.every(l =>
+    let isPotentialHeader = currentLines.every(l =>
         isHeaderStyle(l, bodyStyles, settings, null, bodyAllCaps, rawItemText)
     );
+
+    // Bulleted-list wrap-continuation demotion: a single-line italic-only
+    // item that immediately follows an icon/dingbat-font line ending without
+    // terminal punctuation is almost always the wrapped continuation of the
+    // last bullet item, not a real subsection title. The column detector
+    // splits such lines into their own column when the wrap indents
+    // slightly. Real italic subsection titles appear after body text that
+    // ends a sentence, not after an icon-font line ending mid-phrase.
+    if (
+        isPotentialHeader &&
+        currentLines.length === 1 &&
+        prevDocLine &&
+        bodyStyles && bodyStyles.length > 0
+    ) {
+        const lineStyle = extractLineStyle(currentLines[0]);
+        const primaryBodyStyle = bodyStyles[0];
+        const prevStyle = extractLineStyle(prevDocLine);
+        const prevText = prevDocLine.text.trimEnd();
+        const prevEndsTerminator = /[.!?:;]["'”’)]?$/u.test(prevText);
+        if (
+            lineStyle &&
+            lineStyle.italic &&
+            !lineStyle.bold &&
+            Math.abs(lineStyle.size - primaryBodyStyle.size) < 0.5 &&
+            lineStyle.font !== primaryBodyStyle.font &&
+            prevStyle &&
+            ICON_FONT_RE.test(prevStyle.font) &&
+            !prevEndsTerminator
+        ) {
+            isPotentialHeader = false;
+        }
+    }
 
     // c. Finalize header decision
     let isHeader = false;
@@ -975,7 +1008,8 @@ function processColumnLines(
     settings: Required<ParagraphDetectionSettings>,
     itemCounters: ItemCounters,
     initialPageContent: string,
-    bodyAllCaps: boolean = false
+    bodyAllCaps: boolean = false,
+    prevDocLine: PageLine | null = null
 ): {
     pageContent: string;
     items: ContentItem[];
@@ -1020,7 +1054,8 @@ function processColumnLines(
                     pageIndex,
                     bodyStyles,
                     settings,
-                    bodyAllCaps
+                    bodyAllCaps,
+                    items.length === 0 ? prevDocLine : null
                 );
 
                 pageContent = result.pageContent;
@@ -1052,7 +1087,8 @@ function processColumnLines(
             pageIndex,
             bodyStyles,
             settings,
-            bodyAllCaps
+            bodyAllCaps,
+            items.length === 0 ? prevDocLine : null
         );
 
         pageContent = result.pageContent;
@@ -1118,7 +1154,10 @@ export function detectParagraphs(
     let totalParagraphs = 0;
     let totalHeaders = 0;
 
-    // Process each column
+    // Process each column. `prevDocLine` carries the previous column's last
+    // line into the next column so single-line first items can detect
+    // wrap-continuations of icon-font bullet lists across the column boundary.
+    let prevDocLine: PageLine | null = null;
     for (const colResult of lineResult.columnResults) {
         if (colResult.lines.length === 0) continue;
 
@@ -1140,7 +1179,8 @@ export function detectParagraphs(
             opts,
             itemCounters,
             pageContent,
-            bodyAllCaps
+            bodyAllCaps,
+            prevDocLine
         );
 
         pageContent = result.pageContent;
@@ -1150,6 +1190,7 @@ export function detectParagraphs(
         }
         totalParagraphs += result.paragraphCount;
         totalHeaders += result.headerCount;
+        prevDocLine = colResult.lines[colResult.lines.length - 1];
     }
 
     const baseResult: PageParagraphResult = {
