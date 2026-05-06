@@ -708,6 +708,28 @@ function startsWithLowercase(text: string): boolean {
 }
 
 /**
+ * Returns true when `text` has more `(` than `)` — i.e. it ends inside an
+ * unclosed parenthetical. Used as a structural continuation marker so the
+ * column-boundary heuristic accepts mid-parenthetical splits whose right side
+ * begins with a capitalized proper noun (e.g. "(for research on" / "NYC, see
+ * Durán-Narucki 2008).") instead of being blocked by the lowercase-start gate.
+ *
+ * Square brackets and braces are intentionally not counted — the only
+ * structurally common cross-column split shape we observe is round-paren
+ * citations, and broadening the rule would invite false positives without
+ * concrete fixture evidence.
+ */
+function hasUnclosedParen(text: string): boolean {
+    let depth = 0;
+    for (let i = 0; i < text.length; i++) {
+        const c = text[i];
+        if (c === "(") depth++;
+        else if (c === ")" && depth > 0) depth--;
+    }
+    return depth > 0;
+}
+
+/**
  * Decide whether a (last sentence, first sentence) pair across consecutive
  * columns should be joined. Pure heuristic — no I/O.
  */
@@ -718,7 +740,16 @@ function shouldJoinAcrossColumns(
 ): boolean {
     if (endsInHyphen(lastText)) return false;
     if (hasSentenceFinalTerminator(lastText)) return false;
-    if (!startsWithLowercase(firstText)) return false;
+    // Gate 7: next must look like a continuation. Default test is "starts with
+    // a lowercase letter". The unclosed-paren bypass covers the cross-column
+    // parenthetical-citation case (see `hasUnclosedParen`); the splitter check
+    // below still adjudicates either way.
+    if (
+        !startsWithLowercase(firstText) &&
+        !hasUnclosedParen(lastText)
+    ) {
+        return false;
+    }
 
     const left = lastText.replace(/\s+$/u, "");
     const right = firstText.replace(/^\s+/u, "");

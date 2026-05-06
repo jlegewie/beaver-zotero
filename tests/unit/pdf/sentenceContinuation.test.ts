@@ -216,6 +216,62 @@ describe("annotateColumnContinuations", () => {
         }
     });
 
+    it("sets the flag for capitalized continuation when CUR has an unclosed paren (parenthetical-citation case)", () => {
+        // From NLNMPWNQ p18: "(for research on" / "NYC, see Durán-Narucki 2008)."
+        const left = makeParagraph(0, [
+            makeSentence("other educational outcomes (for research on"),
+        ]);
+        const right = makeParagraph(1, [
+            makeSentence("NYC, see Durán-Narucki 2008)."),
+        ]);
+        annotateColumnContinuations(
+            [left, right],
+            simpleRegexSentenceSplit,
+            new Set(),
+        );
+        expect(left.sentences[0].joinWithNext).toBe(true);
+    });
+
+    it("does not engage the unclosed-paren bypass when parens are balanced", () => {
+        // Matched parens earlier in the text — depth ends at 0, gate 7 enforces
+        // the lowercase rule, capitalized next paragraph is rejected.
+        const left = makeParagraph(0, [
+            makeSentence("the report (Smith 2023) ended without terminator"),
+        ]);
+        const right = makeParagraph(1, [
+            makeSentence("New sentence starts here."),
+        ]);
+        annotateColumnContinuations(
+            [left, right],
+            simpleRegexSentenceSplit,
+            new Set(),
+        );
+        expect(left.sentences[0].joinWithNext).toBeUndefined();
+    });
+
+    it("unclosed-paren bypass still defers to splitter — internal terminator vetoes the join", () => {
+        // CUR has an unclosed `(`, NEXT capitalized — bypass passes gate 7,
+        // but the combined text contains an internal `. ` so splitter splits.
+        const stubSplitter = (text: string) => {
+            // Mimic a sentencex/regex split that breaks at the period before
+            // the capital letter even when the paren is unclosed.
+            const idx = text.indexOf(". ");
+            if (idx === -1) return [{ start: 0, end: text.length }];
+            return [
+                { start: 0, end: idx + 1 },
+                { start: idx + 2, end: text.length },
+            ];
+        };
+        const left = makeParagraph(0, [
+            makeSentence("first thought ended. (and continuing on"),
+        ]);
+        const right = makeParagraph(1, [
+            makeSentence("Second sentence here)"),
+        ]);
+        annotateColumnContinuations([left, right], stubSplitter, new Set());
+        expect(left.sentences[0].joinWithNext).toBeUndefined();
+    });
+
     it("leaves the flag unset when the splitter splits the combined text into 2+", () => {
         // Splitter sees a `.` mid-string — emits two ranges. The cheap gate
         // passes (last has no terminator, first lowercase) but stage 2 vetoes.
