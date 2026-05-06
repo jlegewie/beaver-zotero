@@ -117,17 +117,61 @@ describe('looksLikeFragmentedCJKBody', () => {
         });
     });
 
-    describe('guard 2: section-prefix preservation (Rule 6 must still fire)', () => {
-        it('does NOT fire on a section-prefix heading even when fragmentation is present', () => {
-            // Reviewer's specific concern: in a fragmented CJK document, a
-            // same-size / different-font / section-prefix heading must still
-            // reach Rule 6. SECTION_PREFIX_RE requires \p{Lu} after the
-            // numeric prefix, so "2. BACKGROUND" qualifies.
+    describe('guard 2: numeric-outline preservation (heading rules must still fire)', () => {
+        // Each case in this block must pass `hasCJKContent` first so guard 1
+        // doesn't short-circuit — otherwise the test would not actually
+        // exercise the numeric-outline guard. We pick CJK-mixed headings
+        // that the canonical SECTION_PREFIX_RE rejects (CJK characters are
+        // \p{Lo}, not \p{Lu}) to verify the CJK-aware NUMERIC_OUTLINE_PREFIX
+        // path inside `looksLikeFragmentedCJKBody`.
+
+        it('does NOT fire on "2.1 冷凝法" (digit prefix → CJK ideograph)', () => {
+            // Pure-CJK numbered subsection title: the most common CJK
+            // section-heading shape. SECTION_PREFIX_RE alone would not
+            // protect this because "冷" is \p{Lo}.
             const bodyStyles = [
                 bodyStyle(8, 'E-BZ+ZHNJFM-5'),
                 bodyStyle(8, 'FZSSK--GBK1-00+ZHNJFM-7'),
             ];
-            const line = makePageLine('2. BACKGROUND', { size: 8, font: 'C+Z-3' });
+            const line = makePageLine('2.1 冷凝法', { size: 8, font: 'C+Z-3' });
+            // Sanity-check guard 1 is satisfied — otherwise this test
+            // doesn't actually exercise the numeric-outline guard.
+            const cjkRatio = (line.text.match(/[一-鿿]/gu) || []).length /
+                (line.text.match(/\p{L}/gu) || []).length;
+            expect(cjkRatio).toBeGreaterThanOrEqual(0.5);
+            const result = looksLikeFragmentedCJKBody(
+                line,
+                lineStyle(8, 'C+Z-3'),
+                bodyStyles,
+            );
+            expect(result).toBe(false);
+        });
+
+        it('does NOT fire on "2. 概述" (digit prefix → CJK ideograph)', () => {
+            const bodyStyles = [
+                bodyStyle(8, 'E-BZ+ZHNJFM-5'),
+                bodyStyle(8, 'FZSSK--GBK1-00+ZHNJFM-7'),
+            ];
+            const line = makePageLine('2. 概述', { size: 8, font: 'C+Z-3' });
+            const result = looksLikeFragmentedCJKBody(
+                line,
+                lineStyle(8, 'C+Z-3'),
+                bodyStyles,
+            );
+            expect(result).toBe(false);
+        });
+
+        it('does NOT fire on "2 VOCs 挥发性有机物" (digit prefix → Latin uppercase, CJK content)', () => {
+            // Mixed CJK+Latin numbered heading whose first non-prefix
+            // character is a Latin uppercase letter — this case passes
+            // hasCJKContent (CJK majority by count) AND would have passed
+            // SECTION_PREFIX_RE on its own. Asserts we have not regressed
+            // the original Latin-uppercase coverage in the CJK-aware regex.
+            const bodyStyles = [
+                bodyStyle(8, 'E-BZ+ZHNJFM-5'),
+                bodyStyle(8, 'FZSSK--GBK1-00+ZHNJFM-7'),
+            ];
+            const line = makePageLine('2 VOCs 挥发性有机物', { size: 8, font: 'C+Z-3' });
             const result = looksLikeFragmentedCJKBody(
                 line,
                 lineStyle(8, 'C+Z-3'),

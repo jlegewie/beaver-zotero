@@ -375,6 +375,23 @@ const SECTION_PREFIX_RE =
     /^\s*\d+(?:\.\d+){0,3}\.?\s+["'“‘«(]?\p{Lu}/u;
 
 /**
+ * CJK-aware numeric outline prefix. Same shape as `SECTION_PREFIX_RE` but
+ * accepts a CJK ideograph (`\p{Lo}`) after the prefix in addition to a
+ * Latin uppercase letter (`\p{Lu}`), and admits CJK opening brackets.
+ *
+ * Used by `looksLikeFragmentedCJKBody` so the fallback does not swallow
+ * CJK numbered headings like "2. 概述", "2.1 冷凝法", "3.4 膜分离机理"
+ * — the canonical `SECTION_PREFIX_RE` rejects these because Chinese
+ * characters are `\p{Lo}` (other letter, no case), not `\p{Lu}`.
+ *
+ * The guard sits AFTER `hasCJKContent`, so this regex only sees lines
+ * already gated to predominantly-CJK prose; broadening to `\p{Lo}` does
+ * not affect Latin-only documents.
+ */
+const NUMERIC_OUTLINE_PREFIX_CJK_RE =
+    /^\s*\d+(?:\.\d+){0,3}\.?\s+["'“‘«(「『（]?[\p{Lu}\p{Lo}]/u;
+
+/**
  * Icon / dingbat fonts that MuPDF's per-line font aggregation reports for
  * bullet-led list items. When a line begins with a bullet glyph (e.g.
  * U+F0B7 from `Symbol`) followed by body text in a real font, MuPDF's JSON
@@ -707,8 +724,11 @@ function calculateColumnThresholds(
  *
  * Three guards keep this narrow:
  *   - CJK content. Latin / other-script lines never enter the fallback.
- *   - No section prefix. Rule 6 (same-size, different-font, section-number
- *     prefix) must still be allowed to fire even in fragmented documents.
+ *   - No numeric outline prefix. Numbered section titles
+ *     ("2. BACKGROUND", "2.1 冷凝法") must still be allowed to reach the
+ *     header rules. Uses `NUMERIC_OUTLINE_PREFIX_CJK_RE` (CJK-aware)
+ *     instead of `SECTION_PREFIX_RE`, since Chinese characters are
+ *     `\p{Lo}` and would otherwise slip past the Latin-only guard.
  *   - Fragmentation evidence. `bodyStyles` itself contains 2+ distinct
  *     fonts at the line's exact (size, bold, italic) — i.e. the document
  *     ALREADY shows subset fragmentation at this style class.
@@ -724,7 +744,7 @@ export function looksLikeFragmentedCJKBody(
 ): boolean {
     const text = line.text.trim();
     if (!hasCJKContent(text)) return false;
-    if (SECTION_PREFIX_RE.test(text)) return false;
+    if (NUMERIC_OUTLINE_PREFIX_CJK_RE.test(text)) return false;
 
     const sameDims = bodyStyles.filter(bs =>
         Math.abs(bs.size - lineStyle.size) < 0.5 &&
