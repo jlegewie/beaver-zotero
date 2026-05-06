@@ -259,17 +259,19 @@ function isAllCapsText(text: string, minLetters: number = 3): boolean {
  * can't tell them apart. Author lists, though, almost always carry one of
  * two distinctive token shapes that real section headings don't:
  *
- *   - 2+ dagger/double-dagger/section/pilcrow markers (typically corresponding-
- *     author and equal-contribution flags). Single markers can appear in
- *     normal text, so threshold is 2.
+ *   - 2+ tokens shaped `LettersMarker` — a name immediately followed by a
+ *     dagger/double-dagger/section/pilcrow/asterisk with no space between
+ *     (e.g. `Dogga†`, `Lawniczak*`). The "no space" requirement is the key
+ *     distinction from legal/policy headings like "§ 1983 and § 1985 Claims"
+ *     where the markers stand alone.
  *   - 3+ "≥3-letter word immediately followed by digits" patterns
  *     (e.g. `Dogga1, Cudini1, Farr1, Dara3`). Threshold is 3 so genetics
  *     headings like "BRCA1 and BRCA2" (2 hits) stay clean.
  */
 function looksLikeAuthorList(text: string): boolean {
-    const markers = (text.match(/[†‡§¶]/gu) || []).length;
-    if (markers >= 2) return true;
-    const namePlusDigit = (text.match(/\p{L}{3,}\d+(?=[,\s\)*†‡§¶]|$)/gu) || []).length;
+    const tightMarkers = (text.match(/\p{L}+[†‡§¶*]/gu) || []).length;
+    if (tightMarkers >= 2) return true;
+    const namePlusDigit = (text.match(/\p{L}{3,}\d+(?=[,\s)*†‡§¶]|$)/gu) || []).length;
     return namePlusDigit >= 3;
 }
 
@@ -760,6 +762,19 @@ function startNewItem(
         fontSizeBreak =
             fontSizeDiff > settings.fontSizeTolerance &&
             lineHeightDiff > settings.fontSizeTolerance;
+    }
+
+    // Drop-cap wraparound: when the previous line's bbox extends well below
+    // the current line's bottom, the current line is wrapping around a tall
+    // element (drop cap, large inline figure). Indent / early-end / font-size
+    // breaks in that case are geometric artefacts of the wraparound, not real
+    // paragraph boundaries — suppress them so the paragraph stays whole.
+    const prevExtendsBelow =
+        prevLine.bbox.b > line.bbox.b + line.bbox.height;
+    if (prevExtendsBelow) {
+        indentBreak = false;
+        earlyEndBreak = false;
+        fontSizeBreak = false;
     }
 
     // Combine signals

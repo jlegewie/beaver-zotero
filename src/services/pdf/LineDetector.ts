@@ -507,7 +507,20 @@ function mergeOverlappingLines(
                 const overlapProportion =
                     minHeight > 0 ? verticalOverlap / minHeight : 0;
 
-                if (overlapProportion > overlapThreshold) {
+                // Skip merge when one bbox is much taller than the other.
+                // This catches drop caps: a 5-line drop cap's tall bbox
+                // vertically encompasses every body line below it, and the
+                // overlap test alone would absorb them all into one merged
+                // "line", scrambling reading order. Sub/superscripts and
+                // inline math stay below this ratio and continue to merge.
+                const maxHeight = Math.max(
+                    currentLine.bbox.height,
+                    otherLine.bbox.height
+                );
+                const heightRatio =
+                    minHeight > 0 ? maxHeight / minHeight : Infinity;
+
+                if (overlapProportion > overlapThreshold && heightRatio <= 3) {
                     // Merge other into current
                     currentLine.spans = [...currentLine.spans, ...otherLine.spans];
                     currentLine.spans.sort((a, b) => a.lineBBox.l - b.lineBBox.l);
