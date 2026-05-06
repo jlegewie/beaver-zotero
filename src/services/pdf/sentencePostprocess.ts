@@ -607,11 +607,36 @@ const REF_NUMBERED_START_RE = new RegExp(`^\\s*${A1_CORE}`, "u");
 //   - generic `https?://` URL
 const REF_TAIL_B1_RE =
     /(?:\bdoi\.org\/\S+|\bhttps?:\/\/\S{6,}|\b10\.\d{4,9}\/\S+)/iu;
-// B2 — Volume(Issue): pages, with optional whitespace between the
-// volume and the issue parens. Some styles render `84 (408): 862–74`
-// (space) and others `46(4):613–40` (no space); both must match.
-const REF_TAIL_B2_RE =
-    /\b\d{1,4}\s*\(\d{1,3}\)\s*[:,]\s*\d{1,4}(?:\s*[-–]\s*\d{1,4})?/u;
+// B2 — Volume(Issue): pages, with two arms:
+//   1. **Digits in parens** (e.g. `46(4):613–40`, `13(12), 7082`,
+//      `84 (408): 862–74`) — page range optional. This is the canonical
+//      APA / journal style; digits-in-parens is a strong signal on its own.
+//   2. **Closed-list issue tokens** (months, seasons, Suppl., Pt., No.,
+//      Part) — page range REQUIRED. Some humanities/economics journals
+//      use a month or season name in place of an issue number, e.g.
+//      `Economica 47 (November): 387–406`, `Quarterly Journal 9 (Spring):
+//      100–120`, `Annu. Rev. 7 (Suppl.): 50–60`. The token list is
+//      intentionally enumerated rather than wildcard `[^)]+` to keep
+//      contrived prose like `bus 4 (red): 50–60 passengers` rejected
+//      (the wildcard form passes the A∧B classifier on numbered prose
+//      with adjacent letter-parens-colon-range shape).
+//
+// The enumerated tokens cover English month names (full + 3-letter
+// abbreviations), seasons, and supplement / part / number markers. Each
+// may be followed by an optional issue number (`Suppl. 2`, `Pt 3`).
+const REF_B2_ISSUE_TOKEN_RE_SRC =
+    `(?:January|February|March|April|May|June|July|August|September` +
+    `|October|November|December` +
+    `|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sept|Sep|Oct|Nov|Dec` +
+    `|Spring|Summer|Fall|Autumn|Winter` +
+    `|Suppl|Supplement|Pt|Part|No)` +
+    `\\.?(?:\\s+\\d{1,3})?`;
+const REF_TAIL_B2_RE = new RegExp(
+    `\\b\\d{1,4}\\s*` +
+        `(?:\\(\\d{1,3}\\)\\s*[:,]\\s*\\d{1,4}(?:\\s*[-–]\\s*\\d{1,4})?` +
+        `|\\(${REF_B2_ISSUE_TOKEN_RE_SRC}\\)\\s*[:,]\\s*\\d{1,4}\\s*[-–]\\s*\\d{1,4})`,
+    "u",
+);
 // B3 — colon-separated journal-style citation. Requires a **page range**
 // (hyphen-separated digits after the colon), so prose like
 // `"Smith, J. argues that the relevant threshold is 12:34 ..."` does not
@@ -657,7 +682,19 @@ const REF_TAIL_B7_RE =
 //
 //   2. The trailing numerics MUST form a page range (digits + dash + digits),
 //      not just `<Vol> <Pages>`. This body-position fallback intentionally
-//      only accepts range-shaped tail
+//      only accepts range-shaped tails — reference tails almost always end
+//      in a range; numbered prose with adjacent numbers (`Test. Cont. 100
+//      200 outcomes`) does not.
+//
+// **Volume slot is intentionally `\d{1,3}`, not `\d{1,4}`.** A 4-digit
+// volume cap re-opens the false-positive surface for numbered prose that
+// happens to chain abbreviations with a year-shaped 4-digit token plus a
+// page range — e.g. `[1] The Dept. Agric. 2023 50-60 survey ... [2] ...`.
+// The 3-digit cap excludes year tokens (1900-2099) from satisfying the
+// volume slot. A few biomedical / old physics journals (Biochim. Biophys.
+// Acta etc.) carry vol > 999, so we won't catch their full body-position
+// citations — that's an acceptable cost; B7 (end-anchored) still covers
+// most of them.
 const REF_BODY_JOURNAL_ABBREV_VOL_RE =
     /(?:\p{Lu}\p{L}{2,}\.\s+){2,}\d{1,3}\s+\d{1,5}\s*[–-]\s*\d{1,5}/u;
 

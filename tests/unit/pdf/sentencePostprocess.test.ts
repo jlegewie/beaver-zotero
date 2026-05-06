@@ -1165,6 +1165,92 @@ describe("mergeReferenceListSentences fallback path", () => {
 // and false-positive guards.
 // ---------------------------------------------------------------------------
 
+describe("hasReferenceTail B2 — closed-list issue tokens (months, seasons, Suppl./Pt.)", () => {
+    it("fires on `…Economica 47 (November): 387–406` (PZXKV348 Hendry-style)", () => {
+        const text =
+            "Hendry, David. 1980. \"Econometrices: Alchemy or Science?\" " +
+            "Economica 47 (November): 387–406.";
+        expect(hasReferenceTail(text)).toBe(true);
+    });
+
+    it("fires on `…Quarterly Journal 9 (Spring): 100–120`", () => {
+        const text =
+            "Author, A. 2024. \"Title.\" Quarterly Journal 9 (Spring): 100–120.";
+        expect(hasReferenceTail(text)).toBe(true);
+    });
+
+    it("fires on supplement / part / abbreviated-month forms", () => {
+        expect(
+            hasReferenceTail("...Annu. Rev. 7 (Suppl.): 50–60."),
+        ).toBe(true);
+        expect(
+            hasReferenceTail("...Journal X 5 (Suppl. 2): 100–110."),
+        ).toBe(true);
+        expect(
+            hasReferenceTail("...Journal Y 12 (Pt. 2): 50–80."),
+        ).toBe(true);
+        expect(
+            hasReferenceTail("...Journal Z 1 (Nov): 5–10."),
+        ).toBe(true);
+    });
+
+    it("still fires on canonical digit-issue tails (regression)", () => {
+        // Existing B2 cases must still match.
+        expect(
+            hasReferenceTail(
+                "Smith, J. (2023). Title. Applied Sciences, 13(12), 7082.",
+            ),
+        ).toBe(true);
+        expect(
+            hasReferenceTail(
+                "...Journal of Economic Perspectives 31(2):3–32.",
+            ),
+        ).toBe(true);
+        expect(hasReferenceTail("...84 (408): 862–74")).toBe(true);
+    });
+
+    it("does NOT fire on the reviewer-flagged prose shape", () => {
+        // Reviewer-flagged: numbered/list prose like
+        // `[1] Use bus 4 (red): 50–60 passengers` would have been
+        // accepted by a wildcard `[^)]+` letter arm. The closed token
+        // list rejects `(red)` because it isn't a known issue token.
+        expect(
+            hasReferenceTail("[1] Use bus 4 (red): 50–60 passengers"),
+        ).toBe(false);
+        expect(
+            hasReferenceTail("Bus 4 (red): 50–60 passengers"),
+        ).toBe(false);
+    });
+
+    it("does NOT fire on capital-token prose tokens that aren't real issue markers", () => {
+        // `(Bus 1)` and `(Conference Hall)` start with capitals but aren't
+        // in the citation issue-token list, so they're rejected.
+        expect(
+            hasReferenceTail("see Bus 4 (Bus 1): 50–60 passengers"),
+        ).toBe(false);
+        expect(
+            hasReferenceTail(
+                "conference 4 (Conference Hall): 50–60 attendees",
+            ),
+        ).toBe(false);
+    });
+
+    it("does NOT fire on contrived prose with letters in parens but no page range", () => {
+        // Even if the parens content matches an issue token, the page
+        // range is REQUIRED for the letter arm — `(November): 50` (no
+        // range) doesn't fire.
+        expect(
+            hasReferenceTail("issue 47 (November): 50 cards remained"),
+        ).toBe(false);
+    });
+
+    it("does NOT fire on letters in parens without colon/comma after", () => {
+        expect(
+            hasReferenceTail("we visited 5 (no really) and saw 50 things"),
+        ).toBe(false);
+    });
+});
+
 describe("hasReferenceTail B7 (old-style journal-abbrev tail)", () => {
     it("fires on `…J. Chem. Phys. 128 114114`", () => {
         const text =
@@ -1353,6 +1439,26 @@ describe("isReferenceParagraph — multi-numbered with body-level evidence (path
             "[2] Second step uses Item B. 67 890 measurements per cohort " +
             "with the same calibration.";
         expect(isReferenceParagraph(text)).toBe(false);
+    });
+
+    it("does NOT accept numbered prose with year-shaped 4-digit numbers + range", () => {
+        // Reviewer-flagged: a 4-digit-year token following two chained
+        // abbreviations and preceding a page range would have been
+        // accepted by a `\d{1,4}` volume slot. The 3-digit volume cap
+        // specifically prevents `2023`, `2008`, etc. from satisfying
+        // the volume slot and avoids classifying numbered prose as
+        // reference paragraphs.
+        const t1 =
+            "[1] The Dept. Agric. 2023 50-60 survey demonstrated reduced " +
+            "yield across the four-county trial region. " +
+            "[2] The Dept. Energy. 2024 70-80 survey extended the same " +
+            "methodology to a different sector.";
+        expect(isReferenceParagraph(t1)).toBe(false);
+
+        const t2 =
+            "[1] In trial, Test. Cont. 2008 100-200 outcomes were measured " +
+            "across the cohort. [2] Foo. Bar. 2010 50-60 outcomes followed.";
+        expect(isReferenceParagraph(t2)).toBe(false);
     });
 });
 
