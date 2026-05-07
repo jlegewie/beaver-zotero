@@ -356,11 +356,11 @@ export interface PartialSimplifiedTag {
 }
 
 /**
- * Detect a partial `<citation …>` or `<annotation …>` opener in `oldString`
- * that never closes before EOF, the next `<`, or a newline. The matcher's
- * raw-HTML expansion in `expandToRawHtml` requires complete self-closing
- * tags, so a partial like `<citation item_id="X"` (no `/>`) silently passes
- * through unchanged into the haystack search and produces a generic
+ * Detect a partial `<citation …>` or `<annotation …>` opener in `oldString`.
+ * The matcher's raw-HTML expansion in `expandToRawHtml` only rewrites complete
+ * simplified tags: citations must be self-closing (`/>`), while annotations
+ * must have a closing `</annotation>` pair. Malformed openers pass through
+ * unchanged into the haystack search and produce a generic
  * `old_string_not_found` error. This detector lets the validator/executor
  * surface a targeted message instead.
  *
@@ -374,7 +374,7 @@ export function detectPartialSimplifiedTag(
     oldString: string,
 ): PartialSimplifiedTag | null {
     if (!oldString) return null;
-    const openerRe = /<(citation|annotation)\b/g;
+    const openerRe = /<(citation|annotation)(?=\s|>|\/|$)/g;
     let m: RegExpExecArray | null;
     while ((m = openerRe.exec(oldString)) !== null) {
         const kind = m[1] as 'citation' | 'annotation';
@@ -387,13 +387,18 @@ export function detectPartialSimplifiedTag(
             // never terminated — the model truncated the tag.
             if (c === '<' || c === '\n') break;
             if (c === '/' && oldString[cursor + 1] === '>') {
-                closed = true;
+                closed = kind === 'citation';
                 cursor += 2;
                 break;
             }
             if (c === '>') {
-                closed = true;
                 cursor += 1;
+                if (kind === 'annotation') {
+                    const closeIdx = oldString.indexOf('</annotation>', cursor);
+                    if (closeIdx !== -1) {
+                        closed = true;
+                    }
+                }
                 break;
             }
             cursor++;

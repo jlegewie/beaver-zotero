@@ -434,10 +434,40 @@ describe('detectPartialSimplifiedTag', () => {
         expect(result?.snippet).toContain('<citation item_id="1-AAA"');
     });
 
+    it('detects a citation opener closed with > instead of />', () => {
+        const result = detectPartialSimplifiedTag('<citation item_id="1-AAA">');
+        expect(result).not.toBeNull();
+        expect(result?.kind).toBe('citation');
+        expect(result?.snippet).toContain('<citation item_id="1-AAA">');
+    });
+
     it('detects a bare <annotation opener', () => {
         const result = detectPartialSimplifiedTag('<annotation');
         expect(result).not.toBeNull();
         expect(result?.kind).toBe('annotation');
+    });
+
+    it('detects an annotation opener without a closing annotation tag', () => {
+        const result = detectPartialSimplifiedTag('<annotation id="a_1">');
+        expect(result).not.toBeNull();
+        expect(result?.kind).toBe('annotation');
+        expect(result?.snippet).toContain('<annotation id="a_1">');
+    });
+
+    it('detects a self-closing annotation tag as partial', () => {
+        const result = detectPartialSimplifiedTag('<annotation id="a_1"/>');
+        expect(result).not.toBeNull();
+        expect(result?.kind).toBe('annotation');
+    });
+
+    it('returns null for a complete annotation pair', () => {
+        const result = detectPartialSimplifiedTag('<annotation id="a_1">quoted text</annotation>');
+        expect(result).toBeNull();
+    });
+
+    it('does not treat annotation-image tags as annotation partials', () => {
+        const result = detectPartialSimplifiedTag('<annotation-image id="ai_1"/>');
+        expect(result).toBeNull();
     });
 
     it('returns null when a complete tag precedes a complete tag (no partials)', () => {
