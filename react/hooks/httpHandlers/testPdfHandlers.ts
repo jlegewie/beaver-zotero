@@ -674,13 +674,19 @@ export async function handleTestPdfExtractByLinesHttpRequest(request: any) {
     );
 }
 
-/** Dev-only `hasTextLayer` parity endpoint. */
+/**
+ * Dev-only `hasTextLayer` parity endpoint.
+ *
+ * `hasTextLayer` is a boolean projection of `analyzeOCRNeeds` (identical
+ * cost — same sampled-page analysis), so we run `analyzeOCRNeeds` and
+ * return `!needsOCR` rather than maintaining a redundant facade method.
+ */
 export async function handleTestPdfHasTextLayerHttpRequest(request: any) {
     const { PDFExtractor } = await import('../../../src/services/pdf');
     return runPdfExtractorCall(
         request,
-        (pdfData) => new PDFExtractor().hasTextLayer(pdfData),
-        (hasTextLayer) => ({ ok: true, hasTextLayer }),
+        (pdfData) => new PDFExtractor().analyzeOCRNeeds(pdfData),
+        (result) => ({ ok: true, hasTextLayer: !result.needsOCR }),
     );
 }
 

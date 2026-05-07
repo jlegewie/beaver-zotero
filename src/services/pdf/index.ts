@@ -195,14 +195,6 @@ export class PDFExtractor {
     }
 
     /**
-     * Check if a PDF has a text layer.
-     * Useful for determining if OCR is needed before full extraction.
-     */
-    async hasTextLayer(pdfData: Uint8Array | ArrayBuffer): Promise<boolean> {
-        return getMuPDFWorkerClient().hasTextLayer(pdfData);
-    }
-
-    /**
      * Perform detailed OCR detection analysis without full extraction.
      *
      * This method analyzes the document to determine if it needs OCR,

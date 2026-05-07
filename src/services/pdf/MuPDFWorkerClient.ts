@@ -514,7 +514,10 @@ export class MuPDFWorkerClient {
         });
     }
 
-    /** Cheap text-layer presence check. */
+    /**
+     * Boolean projection of `analyzeOCRNeeds` — same sampled-page analysis,
+     * metadata discarded. Prefer `analyzeOCRNeeds` when you need the reason.
+     */
     async hasTextLayer(pdfData: Uint8Array | ArrayBuffer): Promise<boolean> {
         const bytes =
             pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);

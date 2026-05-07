@@ -628,7 +628,6 @@ const result = await extractor.extractByLines(pdfData);
 const result = await extractor.extract(pdfData, { useLineDetection: true });
 
 // Checks
-const hasText = await extractor.hasTextLayer(pdfData);
 const pageCount = await extractor.getPageCount(pdfData);
 const ocrNeeds = await extractor.analyzeOCRNeeds(pdfData);
 ```
