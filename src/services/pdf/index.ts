@@ -56,7 +56,19 @@ export {
 } from "./MarginFilter";
 export { PageExtractor } from "./PageExtractor";
 export { detectColumns, logColumnDetection } from "./ColumnDetector";
-export type { Rect, ColumnDetectionResult, ColumnDetectionOptions } from "./ColumnDetector";
+export type {
+    Rect,
+    ColumnDetectionResult,
+    ColumnDetectionOptions,
+} from "./ColumnDetector";
+// Standalone figure-text detector. Not wired into the extraction
+// pipeline today — exported for future NonStandardContentRegion work.
+export { detectFigureTextColumns } from "./FigureTextFilter";
+export type {
+    FigureTextDetectionOptions,
+    FigureTextDetectionResult,
+    FigureTextReason,
+} from "./FigureTextFilter";
 export {
     detectLinesInColumn,
     detectLinesOnPage,
