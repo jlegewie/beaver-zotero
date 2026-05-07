@@ -1213,4 +1213,3 @@ export function logColumnDetection(
         }
     }
 }
-
