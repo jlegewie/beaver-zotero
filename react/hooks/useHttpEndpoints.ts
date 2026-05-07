@@ -57,7 +57,6 @@ import {
     handleTestNoteUndoHttpRequest,
 } from './httpHandlers/testNoteHandlers';
 import {
-    handleTestSentenceBBoxesHttpRequest,
     handleTestPdfPageCountHttpRequest,
     handleTestPdfPageLabelsHttpRequest,
     handleTestPdfRenderPagesHttpRequest,
@@ -71,7 +70,6 @@ import {
     handleTestPdfAnalyzeOcrHttpRequest,
     handleTestPdfSearchScoredHttpRequest,
     handleTestPdfSentenceBBoxesHttpRequest,
-    handleTestPdfSentenceBBoxesParityHttpRequest,
     handleTestPdfRenderOverlayHttpRequest,
     handleTestPdfPipelineTraceHttpRequest,
     handleTestPdfSmartRemovalSummaryHttpRequest,
@@ -156,8 +154,6 @@ const ENDPOINT_PATHS = [
     '/beaver/test/note-open-editor',
     '/beaver/test/note-close-editor',
     '/beaver/test/note-undo',
-    // Test-only endpoints (sentence bbox feasibility probe)
-    '/beaver/test/sentence-bboxes',
     // Test-only endpoints (MuPDF worker singleton stats / lifecycle)
     '/beaver/test/worker-stats',
     '/beaver/test/worker-mark-stale',
@@ -179,9 +175,6 @@ const ENDPOINT_PATHS = [
     '/beaver/test/pdf-analyze-ocr',
     '/beaver/test/pdf-search-scored',
     '/beaver/test/pdf-sentence-bboxes',
-    // Step-1 worker-vs-main-thread parity endpoint (temporary; remove
-    // after Step 6 migrates trace/debug to the worker).
-    '/beaver/test/pdf-sentence-bboxes-parity',
     '/beaver/test/pdf-render-page',
     // Bbox-overlay debugging (sentences/lines/paragraphs/columns/raw-lines/margins)
     '/beaver/test/pdf-render-overlay',
@@ -712,10 +705,6 @@ function registerEndpoints(): boolean {
         Zotero.Server.Endpoints['/beaver/test/note-undo'] =
             createEndpoint(handleTestNoteUndoHttpRequest);
 
-        // Sentence bbox feasibility probe (dev-only)
-        Zotero.Server.Endpoints['/beaver/test/sentence-bboxes'] =
-            createEndpoint(handleTestSentenceBBoxesHttpRequest);
-
         // MuPDF worker plumbing (dev-only)
         Zotero.Server.Endpoints['/beaver/test/pdf-page-count'] =
             createEndpoint(handleTestPdfPageCountHttpRequest);
@@ -756,10 +745,6 @@ function registerEndpoints(): boolean {
 
         Zotero.Server.Endpoints['/beaver/test/pdf-sentence-bboxes'] =
             createEndpoint(handleTestPdfSentenceBBoxesHttpRequest);
-
-        // Step-1 parity endpoint — see handler docstring.
-        Zotero.Server.Endpoints['/beaver/test/pdf-sentence-bboxes-parity'] =
-            createEndpoint(handleTestPdfSentenceBBoxesParityHttpRequest);
 
         Zotero.Server.Endpoints['/beaver/test/pdf-render-page'] =
             createEndpoint(handleTestPdfRenderPageHttpRequest);

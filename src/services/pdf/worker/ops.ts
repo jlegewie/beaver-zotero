@@ -23,10 +23,6 @@ import { detectColumns, logColumnDetection } from "../ColumnDetector";
 import { detectLinesOnPage, logLineDetection } from "../LineDetector";
 import type { PageLineResult } from "../LineDetector";
 import { SearchScorer } from "../SearchScorer";
-import { extractPageSentenceBBoxes } from "../ParagraphSentenceMapper";
-import { resolveAnalysisPageIndices } from "../AnalysisWindow";
-import { detectFilteredParagraphs } from "../FilteredParagraphPipeline";
-import { pagesForFilterWithBridgedFonts } from "../RawFontBridge";
 import type {
     DocumentAnalysis,
     ExtractionResult,
@@ -51,11 +47,15 @@ import {
     DEFAULT_SEARCH_SCORING_OPTIONS,
 } from "../types";
 import type { PageSentenceBBoxResult } from "../ParagraphSentenceMapper";
-import type { WorkerSentenceBBoxOptions } from "../sentenceTypes";
+import type {
+    SentenceBBoxTraceResult,
+    WorkerSentenceBBoxOptions,
+    WorkerSentenceBBoxTraceOptions,
+} from "../sentenceTypes";
 import { ERROR_CODES, workerError } from "./errors";
 import { acquireDoc, releaseDoc } from "./docCache";
 import { ensureApi } from "./wasmInit";
-import { resolveSplitter } from "./splitterResolver";
+import { runSentenceExtractionFromDoc } from "./sentenceExtraction";
 import {
     DEFAULT_PAGE_IMAGE_OPTIONS,
     collectDocumentInfo,
@@ -579,51 +579,54 @@ export async function opExtractSentenceBBoxes(
                 `Page index ${args.pageIndex} out of range (0..${pageCount - 1})`,
             );
         }
-        const detailed = extractRawPageDetailedFromDoc(doc, args.pageIndex, false);
-
         const opts = args.options ?? {};
-
-        // Resolve the splitter once per request (not per paragraph).
-        // Default to sentencex; `resolveSplitter` degrades to the regex
-        // splitter on init failure so a missing/broken WASM doesn't take
-        // out sentence-bbox extraction.
-        const splitter = await resolveSplitter(
-            opts.splitterConfig ?? { type: "sentencex" },
-        );
-
-        const analysisIndices = resolveAnalysisPageIndices(
-            args.pageIndex,
-            pageCount,
-            opts.analysisPageWindow,
-        );
-        // Walk every analysis page via JSON, then substitute the
-        // detailed target page (for bbox identity with the mapper) and
-        // bridge real font metadata onto it — without the bridge,
-        // heading detection is silently disabled on the target page.
-        // See `RawFontBridge.ts` for details.
-        const jsonPages = analysisIndices.map((i) => extractRawPageFromDoc(doc, i));
-        const pages = pagesForFilterWithBridgedFonts(
-            jsonPages,
-            args.pageIndex,
-            detailed,
-        );
-        const filtered = detectFilteredParagraphs({
-            pages,
+        const { result } = await runSentenceExtractionFromDoc({
+            doc,
             pageIndex: args.pageIndex,
-            totalPageCount: pageCount,
+            pageCount,
+            splitterConfig: opts.splitterConfig,
+            analysisPageWindow: opts.analysisPageWindow,
             paragraphSettings: opts.paragraphSettings,
-        });
-        // Strip `splitterConfig` before forwarding to the mapper — the
-        // mapper's `PageSentenceBBoxOptions` doesn't know about it, and
-        // we want a clean type boundary even though the unknown field
-        // would be harmless at runtime.
-        const { splitterConfig: _splitterConfig, ...mapperRest } = opts;
-        const result = extractPageSentenceBBoxes(detailed, {
-            ...mapperRest,
-            splitter,
-            precomputed: { paragraphResult: filtered.paragraphResult },
+            trace: false,
         });
         return { result };
+    } finally {
+        releaseDoc(doc);
+    }
+}
+
+export async function opExtractSentenceBBoxesTrace(
+    args: {
+        pdfData: Uint8Array | ArrayBuffer;
+        pageIndex: number;
+        options?: WorkerSentenceBBoxTraceOptions;
+    },
+): Promise<OpReply<SentenceBBoxTraceResult>> {
+    const doc = await acquireDoc(args.pdfData);
+    try {
+        const pageCount = doc.countPages();
+        if (
+            typeof args.pageIndex !== "number" ||
+            args.pageIndex < 0 ||
+            args.pageIndex >= pageCount
+        ) {
+            throw workerError(
+                ERROR_CODES.PAGE_OUT_OF_RANGE,
+                `Page index ${args.pageIndex} out of range (0..${pageCount - 1})`,
+            );
+        }
+        const opts = args.options ?? {};
+        const traceResult = await runSentenceExtractionFromDoc({
+            doc,
+            pageIndex: args.pageIndex,
+            pageCount,
+            splitterConfig: opts.splitterConfig,
+            analysisPageWindow: opts.analysisPageWindow,
+            paragraphSettings: opts.paragraphSettings,
+            trace: true,
+            recordSplitter: opts.recordSplitter,
+        });
+        return { result: traceResult };
     } finally {
         releaseDoc(doc);
     }

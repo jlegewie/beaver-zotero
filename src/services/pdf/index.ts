@@ -107,9 +107,6 @@ export type {
     ParagraphFeasibilityReport,
 } from "./ParagraphSentenceMapper";
 export {
-    getSentencexSplitter,
-    getSentenceSplitterWithFallback,
-    disposeSentencex,
     normalizeLanguageCode,
     buildByteOffsetTable,
     byteRangesToCharRanges,
@@ -128,16 +125,13 @@ export type {
     FilteredParagraphContext,
     FilteredParagraphResult,
 } from "./FilteredParagraphPipeline";
-export { runSentenceExtractionPipeline } from "./SentenceExtractionPipeline";
-export type {
-    SentencePipelineOptions,
-    SentencePipelineTrace,
-    SentencePipelineOutput,
-} from "./SentenceExtractionPipeline";
 export type {
     SentenceSplitterConfig,
     ExtractSentenceBBoxesArgs,
     WorkerSentenceBBoxOptions,
+    WorkerSentenceBBoxTraceOptions,
+    SentenceBBoxTrace,
+    SentenceBBoxTraceResult,
 } from "./sentenceTypes";
 
 /**

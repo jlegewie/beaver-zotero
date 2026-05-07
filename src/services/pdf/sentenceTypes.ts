@@ -22,6 +22,16 @@
  */
 
 import type { ParagraphDetectionSettings } from "./ParagraphDetector";
+import type { SentenceRange } from "./SentenceMapper";
+import type {
+    MarginAnalysis,
+    MarginRemovalResult,
+    RawDocumentData,
+    RawPageData,
+    RawPageDataDetailed,
+} from "./types";
+import type { FilteredParagraphResult } from "./FilteredParagraphPipeline";
+import type { PageSentenceBBoxResult } from "./ParagraphSentenceMapper";
 
 /**
  * Serializable splitter configuration. Crosses the worker boundary via
@@ -59,4 +69,52 @@ export interface WorkerSentenceBBoxOptions {
     splitterConfig?: SentenceSplitterConfig;
     paragraphSettings?: ParagraphDetectionSettings;
     analysisPageWindow?: number;
+}
+
+/**
+ * Trace-mode worker op input. Superset of `WorkerSentenceBBoxOptions` —
+ * crosses the worker boundary the same way; the only addition is
+ * `recordSplitter`, which tells the worker to wrap the resolved splitter
+ * and return the recorded `(text → ranges)` pairs in the trace payload.
+ */
+export interface WorkerSentenceBBoxTraceOptions extends WorkerSentenceBBoxOptions {
+    /**
+     * When true, the worker wraps the resolved splitter and returns the
+     * recorded `(text → ranges)` pairs in the trace payload. Used by
+     * fixture capture for hermetic unit-test replay.
+     */
+    recordSplitter?: boolean;
+}
+
+/**
+ * Intermediates surfaced by the trace-mode worker op
+ * `extractSentenceBBoxesTrace`.
+ *
+ * Mirrors what the main-thread `runSentenceExtractionPipeline()` used to
+ * return on its `trace` field, minus the redundant `sentenceResult` (the
+ * sentence result lives at the top level of `SentenceBBoxTraceResult`).
+ *
+ * **Map/Set across the worker boundary.** `marginAnalysis`,
+ * `marginRemoval`, and `filteredResult.styleProfile` carry `Map`/`Set`
+ * fields. `postMessage` preserves them via structured clone, but
+ * `JSON.stringify` does NOT — so any HTTP handler that returns the raw
+ * trace MUST flatten Map/Set fields to plain objects/arrays before
+ * writing the response.
+ */
+export interface SentenceBBoxTrace {
+    analysisPageIndices: number[];
+    rawDoc: RawDocumentData;
+    detailed: RawPageDataDetailed;
+    pagesForFilter: RawPageData[];
+    marginAnalysis: MarginAnalysis;
+    marginRemoval: MarginRemovalResult;
+    filteredResult: FilteredParagraphResult;
+    /** Present iff `WorkerSentenceBBoxTraceOptions.recordSplitter === true`. */
+    splitterRecording?: Array<{ text: string; ranges: SentenceRange[] }>;
+}
+
+/** Result envelope for `extractSentenceBBoxesTrace`. */
+export interface SentenceBBoxTraceResult {
+    result: PageSentenceBBoxResult;
+    trace: SentenceBBoxTrace;
 }

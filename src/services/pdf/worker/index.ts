@@ -26,6 +26,7 @@ import {
     opExtractRawPageDetailed,
     opExtractRawPages,
     opExtractSentenceBBoxes,
+    opExtractSentenceBBoxesTrace,
     opGetMetadata,
     opGetPageCount,
     opRenderPageToImage,
@@ -81,6 +82,8 @@ async function dispatch(op: string, args: Record<string, unknown> | undefined): 
             return await opSearch(a as Parameters<typeof opSearch>[0]);
         case "extractSentenceBBoxes":
             return await opExtractSentenceBBoxes(a as Parameters<typeof opExtractSentenceBBoxes>[0]);
+        case "extractSentenceBBoxesTrace":
+            return await opExtractSentenceBBoxesTrace(a as Parameters<typeof opExtractSentenceBBoxesTrace>[0]);
         default:
             throw new Error(`Unknown op: ${op}`);
     }

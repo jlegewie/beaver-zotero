@@ -14,9 +14,6 @@ import { logger } from "../../src/utils/logger";
 import {
     MuPDFService,
     getMuPDFWorkerClient,
-    getSentenceSplitterWithFallback,
-    normalizeLanguageCode,
-    resolveAnalysisPageIndices,
     Rect,
     RawPageData,
     RawPageDataDetailed,
@@ -25,16 +22,17 @@ import {
     DEFAULT_MARGINS,
     detectColumns,
 } from "../../src/services/pdf";
+import type { SentenceBBoxTraceResult } from "../../src/services/pdf";
 import { getItemLanguage } from "../../src/utils/zoteroUtils";
 import { getCurrentReaderAndWaitForView } from "./readerUtils";
 import { getPageViewportInfo } from "./pdfUtils";
 import { BeaverTemporaryAnnotations, ZoteroReader } from "./annotationUtils";
 import { ZoteroItemReference } from "../types/zotero";
 import {
-    getColumnOverlay,
-    getLineOverlay,
-    getParagraphOverlay,
-    getSentenceOverlay,
+    buildColumnOverlayFromTrace,
+    buildLineOverlayFromTrace,
+    buildParagraphOverlayFromTrace,
+    buildSentenceOverlayFromResult,
     OverlayResult,
 } from "./extractionOverlay";
 
@@ -188,31 +186,35 @@ async function pushOverlayToReader(
 }
 
 /**
- * Load the analysis-window pages and the detailed target page used by
- * the smart-filter overlay collectors. The detailed target page is
- * substituted into the window by the collectors before paragraph
- * detection — same thing `runSentenceExtractionPipeline` does, so
- * column / line / paragraph overlays mirror what the production sentence
- * pipeline sees on PDFs where the JSON walker and detailed walker
- * produce different glyph mappings (ligatures etc.).
+ * Run the worker `extractSentenceBBoxesTrace` op for the given page and
+ * return `{ result, trace }`. Single round-trip that drives every
+ * visualizer level (columns / lines / paragraphs / sentences) — the
+ * pure builders in `extractionOverlay.ts` then turn the returned trace
+ * into rects.
+ *
+ * Best-effort language lookup feeds sentencex; the worker falls back to
+ * the regex splitter on init failure, so this never throws on splitter
+ * issues.
  */
-async function loadAnalysisWindow(
+async function loadSentenceTrace(
     filePath: string,
     pageIndex: number,
-): Promise<{
-    pages: RawPageData[];
-    detailedTarget: RawPageDataDetailed;
-    totalPageCount: number;
-}> {
+    item: Zotero.Item,
+): Promise<SentenceBBoxTraceResult & { pdfData: Uint8Array }> {
     const pdfData = await IOUtils.read(filePath);
-    const client = getMuPDFWorkerClient();
-    const pageCount = await client.getPageCount(pdfData);
-    const analysisIndices = resolveAnalysisPageIndices(pageIndex, pageCount);
-    const [rawDoc, detailedTarget] = await Promise.all([
-        client.extractRawPages(pdfData, analysisIndices),
-        client.extractRawPageDetailed(pdfData, pageIndex),
-    ]);
-    return { pages: rawDoc.pages, detailedTarget, totalPageCount: pageCount };
+    let language: string | undefined;
+    try {
+        const raw = await getItemLanguage(item.libraryID, item.key);
+        if (raw) language = raw;
+    } catch {
+        // Best effort.
+    }
+    const out = await getMuPDFWorkerClient().extractSentenceBBoxesTrace(
+        pdfData,
+        pageIndex,
+        { splitterConfig: { type: "sentencex", language } },
+    );
+    return { ...out, pdfData };
 }
 
 /**
@@ -227,15 +229,12 @@ export async function visualizeCurrentPageColumns(): Promise<{
     try {
         const ctx = await resolveActiveReaderContext();
         if ("error" in ctx) return { success: false, message: ctx.error };
-        const { reader, filePath, pageIndex } = ctx;
+        const { reader, item, filePath, pageIndex } = ctx;
 
         logger(`[Visualizer] Loading PDF and extracting page ${pageIndex + 1}...`);
-        const { pages, detailedTarget, totalPageCount } = await loadAnalysisWindow(
-            filePath,
-            pageIndex,
-        );
+        const { trace } = await loadSentenceTrace(filePath, pageIndex, item);
 
-        const overlay = getColumnOverlay(pages, pageIndex, detailedTarget, totalPageCount);
+        const overlay = buildColumnOverlayFromTrace(trace);
         if (overlay.rects.length === 0) {
             return {
                 success: true,
@@ -275,15 +274,12 @@ export async function visualizeCurrentPageLines(): Promise<{
     try {
         const ctx = await resolveActiveReaderContext();
         if ("error" in ctx) return { success: false, message: ctx.error };
-        const { reader, filePath, pageIndex } = ctx;
+        const { reader, item, filePath, pageIndex } = ctx;
 
         logger(`[Visualizer] Loading PDF and detecting lines on page ${pageIndex + 1}...`);
-        const { pages, detailedTarget, totalPageCount } = await loadAnalysisWindow(
-            filePath,
-            pageIndex,
-        );
+        const { trace } = await loadSentenceTrace(filePath, pageIndex, item);
 
-        const overlay = getLineOverlay(pages, pageIndex, detailedTarget, totalPageCount);
+        const overlay = buildLineOverlayFromTrace(trace);
         if (overlay.rects.length === 0) {
             return {
                 success: true,
@@ -329,15 +325,12 @@ export async function visualizeCurrentPageParagraphs(): Promise<{
     try {
         const ctx = await resolveActiveReaderContext();
         if ("error" in ctx) return { success: false, message: ctx.error };
-        const { reader, filePath, pageIndex } = ctx;
+        const { reader, item, filePath, pageIndex } = ctx;
 
         logger(`[Visualizer] Loading PDF for paragraph detection on page ${pageIndex + 1}...`);
-        const { pages, detailedTarget, totalPageCount } = await loadAnalysisWindow(
-            filePath,
-            pageIndex,
-        );
+        const { trace } = await loadSentenceTrace(filePath, pageIndex, item);
 
-        const overlay = getParagraphOverlay(pages, pageIndex, detailedTarget, totalPageCount);
+        const overlay = buildParagraphOverlayFromTrace(trace);
         if (overlay.rects.length === 0) {
             return {
                 success: true,
@@ -387,39 +380,11 @@ export async function visualizeCurrentPageSentences(): Promise<{
         const { reader, item, filePath, pageIndex } = ctx;
 
         logger(`[Visualizer] Loading PDF and mapping sentences on page ${pageIndex + 1}...`);
-        const pdfData = await IOUtils.read(filePath);
+        const { result, trace } = await loadSentenceTrace(filePath, pageIndex, item);
 
-        // Route through the worker client so we share the worker doc cache
-        const client = getMuPDFWorkerClient();
-        const pageCount = await client.getPageCount(pdfData);
-        const analysisIndices = resolveAnalysisPageIndices(pageIndex, pageCount);
-        const rawDoc = await client.extractRawPages(pdfData, analysisIndices);
-        const detailedPage = await client.extractRawPageDetailed(pdfData, pageIndex);
-        const rawPage = rawDoc.pages.find((p) => p.pageIndex === pageIndex);
-        if (!rawPage) {
-            return {
-                success: false,
-                message: `Page ${pageIndex + 1} not in analysis window`,
-            };
-        }
-
-        // Best-effort language lookup; falls through to "en" via normalize.
-        let language: string | undefined;
-        try {
-            const raw = await getItemLanguage(item.libraryID, item.key);
-            if (raw) language = raw;
-        } catch {
-            // Best effort.
-        }
-        const splitter = await getSentenceSplitterWithFallback(
-            normalizeLanguageCode(language),
-        );
-
-        const overlay = getSentenceOverlay(
-            detailedPage,
-            rawDoc.pages,
-            splitter,
-            pageCount,
+        const overlay = buildSentenceOverlayFromResult(
+            result,
+            trace.analysisPageIndices.length,
         );
         if (overlay.rects.length === 0) {
             return {
@@ -432,13 +397,16 @@ export async function visualizeCurrentPageSentences(): Promise<{
         }
 
         // Sentence mapper coords share the page space, but the visualizer
-        // historically used the rawPage height for coordinate conversion;
-        // they're equal for non-rotated pages, but stick with rawPage for
-        // exact byte-for-byte parity with prior behavior.
-        const overlayWithRawHeight: OverlayResult = {
-            ...overlay,
-            pageHeight: rawPage.height,
-        };
+        // historically used the rawPage height (from the JSON-walked
+        // analysis window) for coordinate conversion; they're equal for
+        // non-rotated pages, but stick with rawPage for exact byte-for-byte
+        // parity with prior behavior.
+        const rawPage = trace.rawDoc.pages.find(
+            (p) => p.pageIndex === pageIndex,
+        );
+        const overlayWithRawHeight: OverlayResult = rawPage
+            ? { ...overlay, pageHeight: rawPage.height }
+            : overlay;
 
         const { viewBox } = await getPageViewportInfo(reader, pageIndex);
         const refs = await pushOverlayToReader(overlayWithRawHeight, reader, [

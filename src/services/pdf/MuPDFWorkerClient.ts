@@ -24,7 +24,11 @@ import {
     type PDFSearchResult,
 } from "./types";
 import type { PageSentenceBBoxResult } from "./ParagraphSentenceMapper";
-import type { WorkerSentenceBBoxOptions } from "./sentenceTypes";
+import type {
+    SentenceBBoxTraceResult,
+    WorkerSentenceBBoxOptions,
+    WorkerSentenceBBoxTraceOptions,
+} from "./sentenceTypes";
 
 const WORKER_URL = "chrome://beaver/content/scripts/mupdf-worker.js";
 
@@ -514,6 +518,43 @@ export class MuPDFWorkerClient {
         const bytes =
             pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
         return this.call<PageSentenceBBoxResult>("extractSentenceBBoxes", {
+            pdfData: bytes,
+            pageIndex,
+            options,
+        });
+    }
+
+    /**
+     * Trace-mode sentence extraction.
+     *
+     * Returns the production sentence result alongside the worker
+     * pipeline's intermediates (analysis-window indices, the JSON-walked
+     * raw doc, the detailed target page, font-bridged `pagesForFilter`,
+     * margin analysis/removal, and the filtered-paragraph result).
+     *
+     * Used by dev/debug surfaces — `/pdf-pipeline-trace`,
+     * `/pdf-render-overlay`, the reader visualizer, and fixture capture
+     * — so they all inspect the exact pipeline production used (no
+     * main-thread reconstruction that can drift).
+     *
+     * `options.recordSplitter: true` adds a `splitterRecording` field
+     * to the trace payload (deterministic deep-copies of every
+     * `(text → ranges)` pair the splitter produced) for hermetic
+     * unit-test replay in fixture capture.
+     *
+     * **Map/Set boundary.** `trace.marginAnalysis`, `trace.marginRemoval`,
+     * and `trace.filteredResult.styleProfile` carry `Map`/`Set` fields.
+     * `postMessage` preserves them via structured clone, but
+     * `JSON.stringify` does NOT — flatten before writing HTTP responses.
+     */
+    async extractSentenceBBoxesTrace(
+        pdfData: Uint8Array | ArrayBuffer,
+        pageIndex: number,
+        options?: WorkerSentenceBBoxTraceOptions,
+    ): Promise<SentenceBBoxTraceResult> {
+        const bytes =
+            pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
+        return this.call<SentenceBBoxTraceResult>("extractSentenceBBoxesTrace", {
             pdfData: bytes,
             pageIndex,
             options,

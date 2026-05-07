@@ -27,7 +27,6 @@ import {
     byteRangesToCharRanges,
     sentencexBoundariesToCharRanges,
     normalizeLanguageCode,
-    getSentenceSplitterWithFallback,
     type SentencexBoundary,
 } from '../../../src/services/pdf/SentencexSplitter';
 
@@ -451,20 +450,3 @@ describe('normalizeLanguageCode', () => {
     });
 });
 
-// ---------------------------------------------------------------------------
-// Wrapper composition: post-processing runs on splitter output
-// ---------------------------------------------------------------------------
-
-describe('getSentenceSplitterWithFallback wraps post-processing', () => {
-    it('merges a "Figure 1." label with the following sentence', async () => {
-        // ChromeUtils isn't available in vitest, so this resolves to the
-        // wrapped regex fallback. Both the WASM and fallback paths apply
-        // the same post-processing, so this is a representative smoke
-        // test for the wrapper composition.
-        const splitter = await getSentenceSplitterWithFallback('en');
-        const text = 'Figure 1. Effect of Operation Impact on Test Scores.';
-        const ranges = splitter(text);
-        expect(ranges.length).toBe(1);
-        expect(text.slice(ranges[0].start, ranges[0].end)).toBe(text);
-    });
-});

@@ -14,22 +14,16 @@
  */
 
 import {
-    detectFilteredParagraphs,
-    extractPageSentenceBBoxes,
     getMuPDFWorkerClient,
-    getSentenceSplitterWithFallback,
     normalizeLanguageCode,
     PageSentenceBBoxResult,
     RawBBox,
-    resolveAnalysisPageIndices,
     SentenceBBox,
-    SentenceRange,
-    SentenceSplitter,
 } from "../../src/services/pdf";
 import { getItemLanguage } from "../../src/utils/zoteroUtils";
 import { logger } from "../../src/utils/logger";
 import { resolveActiveReaderContext } from "./extractionVisualizer";
-import { buildSentenceOverlayFromResult, pagesForFilter } from "./extractionOverlay";
+import { buildSentenceOverlayFromResult } from "./extractionOverlay";
 import { drawBBoxOverlayPNG } from "./canvasOverlay";
 
 const FIXTURE_ROOT_PREF = "extensions.beaver.devFixtureRoot";
@@ -126,22 +120,8 @@ export async function createSentenceFixture(): Promise<CreateSentenceFixtureResu
         const pdfSha256 = await sha256Hex(pdfData);
 
         const client = getMuPDFWorkerClient();
-        const { pageCount, pageLabels } = await client.getMetadata(pdfData);
+        const { pageLabels } = await client.getMetadata(pdfData);
         const pageLabel = pageLabels[pageIndex] ?? null;
-
-        const analysisIndices = resolveAnalysisPageIndices(pageIndex, pageCount);
-        const rawDoc = await client.extractRawPages(pdfData, analysisIndices);
-        const detailedPage = await client.extractRawPageDetailed(
-            pdfData,
-            pageIndex,
-        );
-        const rawPage = rawDoc.pages.find((p) => p.pageIndex === pageIndex);
-        if (!rawPage) {
-            return {
-                ok: false,
-                message: `Page ${pageIndex + 1} not in analysis window`,
-            };
-        }
 
         let language: string | undefined;
         try {
@@ -151,29 +131,29 @@ export async function createSentenceFixture(): Promise<CreateSentenceFixtureResu
             // Best effort; splitter falls back to "en".
         }
         const normalizedLang = normalizeLanguageCode(language);
-        const realSplitter = await getSentenceSplitterWithFallback(normalizedLang);
 
-        // Wrap the splitter so we can persist its (text → ranges) outputs
-        // for hermetic unit-tier replay (sentencex needs chrome:// URLs
-        // that don't resolve in node Vitest).
-        const splitterRecording: Array<{ text: string; ranges: SentenceRange[] }> = [];
-        const recordingSplitter: SentenceSplitter = (text: string) => {
-            const ranges = realSplitter(text);
-            splitterRecording.push({ text, ranges });
-            return ranges;
-        };
-
-        // Mirror `getSentenceOverlay` exactly so captured output matches
-        // what the visualizer renders.
-        const filtered = detectFilteredParagraphs({
-            pages: pagesForFilter(rawDoc.pages, pageIndex, detailedPage),
+        // Single worker round-trip: production result + intermediates
+        // (rawDoc, detailedPage, font-bridged pagesForFilter, margin
+        // analysis/removal, filteredResult) + recorded splitter outputs
+        // for hermetic unit-tier replay. Same pipeline production uses.
+        const out = await client.extractSentenceBBoxesTrace(
+            pdfData,
             pageIndex,
-            totalPageCount: pageCount,
-        });
-        const result = extractPageSentenceBBoxes(detailedPage, {
-            splitter: recordingSplitter,
-            precomputed: { paragraphResult: filtered.paragraphResult },
-        });
+            {
+                splitterConfig: { type: "sentencex", language },
+                recordSplitter: true,
+            },
+        );
+        const result = out.result;
+        const trace = out.trace;
+        const rawPage = trace.rawDoc.pages.find((p) => p.pageIndex === pageIndex);
+        if (!rawPage) {
+            return {
+                ok: false,
+                message: `Page ${pageIndex + 1} not in analysis window`,
+            };
+        }
+        const splitterRecording = trace.splitterRecording ?? [];
 
         const expected = buildExpectedFromResult(result);
 
@@ -184,7 +164,10 @@ export async function createSentenceFixture(): Promise<CreateSentenceFixtureResu
             scale: 1.5,
             format: "png",
         });
-        const overlay = buildSentenceOverlayFromResult(result, rawDoc.pages.length);
+        const overlay = buildSentenceOverlayFromResult(
+            result,
+            trace.analysisPageIndices.length,
+        );
         const pagePngBytes = await drawBBoxOverlayPNG(
             pageImage.data,
             pageImage.width,
@@ -220,8 +203,8 @@ export async function createSentenceFixture(): Promise<CreateSentenceFixtureResu
         await IOUtils.writeJSON(
             PathUtils.join(folderPath, "raw-extraction.json"),
             {
-                rawPages: rawDoc.pages,
-                detailedPage,
+                rawPages: trace.rawDoc.pages,
+                detailedPage: trace.detailed,
                 pageIndex,
                 language: language ?? null,
                 splitterLanguage: normalizedLang,
