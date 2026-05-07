@@ -18,7 +18,6 @@ import {
     PageImageResult,
     PDFSearchOptions,
     PDFSearchResult,
-    DEFAULT_EXTRACTION_SETTINGS,
 } from "./types";
 import {
     extractPageSentenceBBoxes,
@@ -160,36 +159,17 @@ export type {
  * Usage:
  * ```typescript
  * const extractor = new PDFExtractor();
- * const result = await extractor.extract(pdfData, { pages: [0, 1, 2] });
+ * const result = await extractor.extractWithMeta(pdfData, {
+ *   pageRange: { startIndex: 0, endIndex: 2 },
+ * });
  * console.log(result.fullText);
  * ```
  */
 export class PDFExtractor {
     /**
-     * Extract text from a PDF file.
-     *
-     * @param pdfData - The PDF file as Uint8Array or ArrayBuffer
-     * @param settings - Extraction settings (set useLineDetection=true for line-level extraction)
-     * @returns Extraction result with pages, analysis, and full text
-     */
-    async extract(
-        pdfData: Uint8Array | ArrayBuffer,
-        settings: ExtractionSettings = {}
-    ): Promise<ExtractionResult> {
-        const opts = { ...DEFAULT_EXTRACTION_SETTINGS, ...settings };
-
-        // If line detection is requested, delegate to extractByLines
-        if (opts.useLineDetection) {
-            return this.extractByLines(pdfData, settings);
-        }
-
-        return getMuPDFWorkerClient().extract(pdfData, settings);
-    }
-
-    /**
      * Strict, fused extract for handlers that have deferred range validation
-     * to the worker. Returns the same `ExtractionResult` shape as `extract`
-     * (which already surfaces `analysis.pageCount` and `pageLabels`).
+     * to the worker. Returns an `ExtractionResult` with `analysis.pageCount`
+     * and `pageLabels` populated.
      *
      * Args:
      *  - `pageIndices` (mutually exclusive with `pageRange`): explicit
@@ -210,18 +190,6 @@ export class PDFExtractor {
         } = {}
     ): Promise<ExtractionResult> {
         return getMuPDFWorkerClient().extractWithMeta(pdfData, args);
-    }
-
-    /**
-     * Simple text extraction (convenience method).
-     * Returns just the plain text without detailed analysis.
-     */
-    async extractText(
-        pdfData: Uint8Array | ArrayBuffer,
-        settings: ExtractionSettings = {}
-    ): Promise<string> {
-        const result = await this.extract(pdfData, settings);
-        return result.fullText;
     }
 
     /**
@@ -512,41 +480,6 @@ export class PDFExtractor {
 // ============================================================================
 // Convenience Functions
 // ============================================================================
-
-/**
- * Extract text from a Zotero attachment item.
- *
- * @param item - Zotero attachment item
- * @param settings - Extraction settings
- * @returns Extraction result or null if file not found
- */
-export async function extractFromZoteroItem(
-    item: Zotero.Item,
-    settings: ExtractionSettings = {}
-): Promise<ExtractionResult | null> {
-    const path = await item.getFilePathAsync();
-    if (!path) {
-        return null;
-    }
-
-    const pdfData = await IOUtils.read(path);
-    const extractor = new PDFExtractor();
-    return extractor.extract(pdfData, settings);
-}
-
-/**
- * Extract plain text from a Zotero attachment item.
- * Simple convenience function for basic use cases.
- *
- * @param item - Zotero attachment item
- * @returns Plain text or null if file not found
- */
-export async function extractTextFromZoteroItem(
-    item: Zotero.Item
-): Promise<string | null> {
-    const result = await extractFromZoteroItem(item);
-    return result?.fullText ?? null;
-}
 
 /**
  * Extract high-quality content by lines from a Zotero attachment item.

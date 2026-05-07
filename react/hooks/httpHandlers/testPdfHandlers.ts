@@ -626,13 +626,22 @@ export async function handleTestPdfSearchHttpRequest(request: any) {
     }
 }
 
-/** Dev-only `extract` parity endpoint. Routes through PDFExtractor. */
+/**
+ * Dev-only `extractWithMeta` parity endpoint. Translates the legacy
+ * `settings.pages` array into the worker-side `pageIndices` arg so existing
+ * live-test bodies (which still pass `{ settings: { pages: [...] } }`) keep
+ * working.
+ */
 export async function handleTestPdfExtractHttpRequest(request: any) {
     const { PDFExtractor } = await import('../../../src/services/pdf');
-    const settings = request?.settings || {};
+    const settings = { ...(request?.settings || {}) };
+    const pageIndices: number[] | undefined = Array.isArray(settings.pages) && settings.pages.length > 0
+        ? settings.pages
+        : undefined;
+    delete settings.pages;
     return runPdfExtractorCall(
         request,
-        (pdfData) => new PDFExtractor().extract(pdfData, settings),
+        (pdfData) => new PDFExtractor().extractWithMeta(pdfData, { settings, pageIndices }),
         (result) => ({ ok: true, result }),
     );
 }
