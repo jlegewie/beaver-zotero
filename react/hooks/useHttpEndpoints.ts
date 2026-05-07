@@ -71,6 +71,7 @@ import {
     handleTestPdfAnalyzeOcrHttpRequest,
     handleTestPdfSearchScoredHttpRequest,
     handleTestPdfSentenceBBoxesHttpRequest,
+    handleTestPdfSentenceBBoxesParityHttpRequest,
     handleTestPdfRenderOverlayHttpRequest,
     handleTestPdfPipelineTraceHttpRequest,
     handleTestPdfSmartRemovalSummaryHttpRequest,
@@ -178,6 +179,9 @@ const ENDPOINT_PATHS = [
     '/beaver/test/pdf-analyze-ocr',
     '/beaver/test/pdf-search-scored',
     '/beaver/test/pdf-sentence-bboxes',
+    // Step-1 worker-vs-main-thread parity endpoint (temporary; remove
+    // after Step 6 migrates trace/debug to the worker).
+    '/beaver/test/pdf-sentence-bboxes-parity',
     '/beaver/test/pdf-render-page',
     // Bbox-overlay debugging (sentences/lines/paragraphs/columns/raw-lines/margins)
     '/beaver/test/pdf-render-overlay',
@@ -752,6 +756,10 @@ function registerEndpoints(): boolean {
 
         Zotero.Server.Endpoints['/beaver/test/pdf-sentence-bboxes'] =
             createEndpoint(handleTestPdfSentenceBBoxesHttpRequest);
+
+        // Step-1 parity endpoint — see handler docstring.
+        Zotero.Server.Endpoints['/beaver/test/pdf-sentence-bboxes-parity'] =
+            createEndpoint(handleTestPdfSentenceBBoxesParityHttpRequest);
 
         Zotero.Server.Endpoints['/beaver/test/pdf-render-page'] =
             createEndpoint(handleTestPdfRenderPageHttpRequest);

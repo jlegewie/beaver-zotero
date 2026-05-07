@@ -18,16 +18,11 @@ import {
     PDFSearchOptions,
     PDFSearchResult,
 } from "./types";
-import {
-    extractPageSentenceBBoxes,
-    type PageSentenceBBoxOptions,
-    type PageSentenceBBoxResult,
-} from "./ParagraphSentenceMapper";
-import {
-    getSentenceSplitterWithFallback,
-    normalizeLanguageCode,
-} from "./SentencexSplitter";
-import { runSentenceExtractionPipeline } from "./SentenceExtractionPipeline";
+import type { PageSentenceBBoxResult } from "./ParagraphSentenceMapper";
+import type {
+    ExtractSentenceBBoxesArgs,
+    SentenceSplitterConfig,
+} from "./sentenceTypes";
 
 // Re-export types and classes for convenience
 export * from "./types";
@@ -139,6 +134,11 @@ export type {
     SentencePipelineTrace,
     SentencePipelineOutput,
 } from "./SentenceExtractionPipeline";
+export type {
+    SentenceSplitterConfig,
+    ExtractSentenceBBoxesArgs,
+    WorkerSentenceBBoxOptions,
+} from "./sentenceTypes";
 
 /**
  * PDFExtractor - High-level API for extracting text from PDFs.
@@ -235,12 +235,21 @@ export class PDFExtractor {
     /**
      * Extract sentence-level bounding boxes for a single page.
      *
-     * Runs the paragraph-scoped sentence mapper pipeline:
-     *   1. Character-level walk via `MuPDFService.extractRawPageDetailed`.
-     *   2. Column + line + paragraph detection (existing detectors reused).
-     *   3. Per-paragraph sentence split (default: simple regex; callers can
-     *      inject their own via `options.splitter`).
-     *   4. Each sentence range resolved to one bbox per line-fragment.
+     * One worker round-trip — the worker owns analysis-window loading,
+     * detailed page extraction, font bridging, filtered paragraph
+     * detection, splitter resolution, and sentence mapping.
+     *
+     * Splitter resolution is described by a serializable
+     * `SentenceSplitterConfig`: `{ type: "sentencex", language? }` (default)
+     * or `{ type: "simple" }`. The worker resolves the actual splitter
+     * function internally and degrades to the regex splitter on sentencex
+     * init failure.
+     *
+     * **Language precedence.** When both `args.splitter` and `args.language`
+     * are provided, the explicit `splitter` config wins. `args.language`
+     * is only consulted when `args.splitter` is omitted entirely (in
+     * which case the facade defaults to
+     * `{ type: "sentencex", language: args.language }`).
      *
      * **Graceful degradation.** A paragraph that fails the precise mapping
      * path (unmapped, text/chars invariant violation, or empty-split)
@@ -249,16 +258,13 @@ export class PDFExtractor {
      * `result.degradedParagraphs`. The function never throws on correctness
      * traps; the whole-page answer is always usable.
      *
-     * @param pdfData - The PDF file as Uint8Array or ArrayBuffer
-     * @param pageIndex - 0-based page index
-     * @param options - Pipeline options (splitter, paragraph detector settings)
-     * @returns Sentences grouped by paragraph, plus a flat sentence list and
-     *          degradation counters.
-     *
      * @example
      * ```typescript
      * const extractor = new PDFExtractor();
-     * const result = await extractor.extractSentenceBBoxes(pdfData, 0);
+     * const result = await extractor.extractSentenceBBoxes(pdfData, {
+     *   pageIndex: 3,
+     *   splitter: { type: "sentencex", language: "en" },
+     * });
      * for (const sentence of result.sentences) {
      *   console.log(sentence.text, sentence.bboxes);
      * }
@@ -266,54 +272,16 @@ export class PDFExtractor {
      */
     async extractSentenceBBoxes(
         pdfData: Uint8Array | ArrayBuffer,
-        args: { pageIndex: number } & PageSentenceBBoxOptions
+        args: ExtractSentenceBBoxesArgs,
     ): Promise<PageSentenceBBoxResult> {
-        const client = getMuPDFWorkerClient();
-        const { pageIndex, ...options } = args;
-
-        // Splitter functions are not structurally cloneable across the
-        // worker boundary, so whenever we need to run a JS splitter we
-        // fetch the detailed page from the worker and run the mapper on
-        // the main thread. This applies to both caller-provided
-        // splitters and the default sentencex splitter (loaded via
-        // ChromeUtils.importESModule on the main thread). The sentencex
-        // module is cached after first init, so the WASM tax is paid
-        // once per session.
-        const splitter =
-            options.splitter ??
-            (await getSentenceSplitterWithFallback(
-                normalizeLanguageCode(options.language),
-            ));
-
-        // If the caller already ran their own paragraph pipeline (e.g.
-        // the trace endpoint, or an internal worker call passing a
-        // precomputed result through the worker boundary), keep the
-        // legacy single-page path — the precomputed paragraphResult
-        // already reflects whatever filtering they applied.
-        if (options.precomputed) {
-            const detailed = await client.extractRawPageDetailed(
-                pdfData,
-                pageIndex,
-            );
-            return extractPageSentenceBBoxes(detailed, { ...options, splitter });
-        }
-
-        // Otherwise: delegate to the shared sentence-extraction
-        // pipeline, which owns the analysis-window load, detailed-page
-        // substitution, filtered paragraph detection, and the final
-        // sentence mapping. This is the same orchestration the
-        // `/beaver/test/pdf-pipeline-trace` endpoint runs (with
-        // `trace: true`), so the debug endpoint always reflects what
-        // production actually does.
-        const { result } = await runSentenceExtractionPipeline({
+        const { pageIndex, splitter, language, ...rest } = args;
+        const splitterConfig: SentenceSplitterConfig =
+            splitter ?? { type: "sentencex", language };
+        return getMuPDFWorkerClient().extractSentenceBBoxes(
             pdfData,
             pageIndex,
-            splitter,
-            analysisPageWindow: options.analysisPageWindow,
-            paragraphSettings: options.paragraphSettings,
-            language: options.language,
-        });
-        return result;
+            { ...rest, splitterConfig },
+        );
     }
 
     /**

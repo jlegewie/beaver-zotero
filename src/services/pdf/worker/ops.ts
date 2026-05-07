@@ -50,10 +50,12 @@ import {
     DEFAULT_PDF_SEARCH_OPTIONS,
     DEFAULT_SEARCH_SCORING_OPTIONS,
 } from "../types";
-import type { PageSentenceBBoxOptions, PageSentenceBBoxResult } from "../ParagraphSentenceMapper";
+import type { PageSentenceBBoxResult } from "../ParagraphSentenceMapper";
+import type { WorkerSentenceBBoxOptions } from "../sentenceTypes";
 import { ERROR_CODES, workerError } from "./errors";
 import { acquireDoc, releaseDoc } from "./docCache";
 import { ensureApi } from "./wasmInit";
+import { resolveSplitter } from "./splitterResolver";
 import {
     DEFAULT_PAGE_IMAGE_OPTIONS,
     collectDocumentInfo,
@@ -561,7 +563,7 @@ export async function opExtractSentenceBBoxes(
     args: {
         pdfData: Uint8Array | ArrayBuffer;
         pageIndex: number;
-        options?: PageSentenceBBoxOptions;
+        options?: WorkerSentenceBBoxOptions;
     },
 ): Promise<OpReply<PageSentenceBBoxResult>> {
     const doc = await acquireDoc(args.pdfData);
@@ -579,16 +581,15 @@ export async function opExtractSentenceBBoxes(
         }
         const detailed = extractRawPageDetailedFromDoc(doc, args.pageIndex, false);
 
-        // If the caller passed a precomputed paragraphResult through the
-        // worker boundary, honor it. Otherwise resolve the analysis
-        // window, walk those pages once, and run the shared filtered
-        // pipeline so sentences exclude marginalia (matching production
-        // line extraction).
         const opts = args.options ?? {};
-        if (opts.precomputed) {
-            const result = extractPageSentenceBBoxes(detailed, opts);
-            return { result };
-        }
+
+        // Resolve the splitter once per request (not per paragraph).
+        // Default to sentencex; `resolveSplitter` degrades to the regex
+        // splitter on init failure so a missing/broken WASM doesn't take
+        // out sentence-bbox extraction.
+        const splitter = await resolveSplitter(
+            opts.splitterConfig ?? { type: "sentencex" },
+        );
 
         const analysisIndices = resolveAnalysisPageIndices(
             args.pageIndex,
@@ -612,8 +613,14 @@ export async function opExtractSentenceBBoxes(
             totalPageCount: pageCount,
             paragraphSettings: opts.paragraphSettings,
         });
+        // Strip `splitterConfig` before forwarding to the mapper — the
+        // mapper's `PageSentenceBBoxOptions` doesn't know about it, and
+        // we want a clean type boundary even though the unknown field
+        // would be harmless at runtime.
+        const { splitterConfig: _splitterConfig, ...mapperRest } = opts;
         const result = extractPageSentenceBBoxes(detailed, {
-            ...opts,
+            ...mapperRest,
+            splitter,
             precomputed: { paragraphResult: filtered.paragraphResult },
         });
         return { result };

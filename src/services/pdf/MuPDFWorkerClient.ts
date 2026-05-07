@@ -23,10 +23,8 @@ import {
     type PDFSearchOptions,
     type PDFSearchResult,
 } from "./types";
-import type {
-    PageSentenceBBoxOptions,
-    PageSentenceBBoxResult,
-} from "./ParagraphSentenceMapper";
+import type { PageSentenceBBoxResult } from "./ParagraphSentenceMapper";
+import type { WorkerSentenceBBoxOptions } from "./sentenceTypes";
 
 const WORKER_URL = "chrome://beaver/content/scripts/mupdf-worker.js";
 
@@ -497,29 +495,28 @@ export class MuPDFWorkerClient {
     /**
      * Sentence-bbox extraction with full mapper inside the worker.
      *
-     * Callers that need a custom `options.splitter` (a function value, not
-     * structurally cloneable) MUST route through the PR #2 split path:
-     * call `extractRawPageDetailed` here, then run `extractPageSentenceBBoxes`
-     * main-thread. `PDFExtractor.extractSentenceBBoxes` does this branch.
-     * If a caller reaches this method directly with a `splitter`, we strip
-     * it at runtime to avoid `DataCloneError` from postMessage; the worker
-     * then uses the default regex splitter. The runtime strip is defensive
-     * — direct callers should branch like PDFExtractor does.
+     * The splitter is described by a serializable `splitterConfig`
+     * (sentencex with language, or simple regex). The worker resolves
+     * the actual splitter function via its own `resolveSplitter`,
+     * including the sentencex→simple fallback on init failure.
+     *
+     * `options` is restricted to `WorkerSentenceBBoxOptions`: no
+     * function-valued `splitter` (not structurally cloneable) and no
+     * `precomputed` (the worker always runs the full filtered-paragraph
+     * pipeline; precomputed shortcuts live on the internal mapper
+     * contract and are used only by main-thread debug paths).
      */
     async extractSentenceBBoxes(
         pdfData: Uint8Array | ArrayBuffer,
         pageIndex: number,
-        options?: PageSentenceBBoxOptions,
+        options?: WorkerSentenceBBoxOptions,
     ): Promise<PageSentenceBBoxResult> {
         const bytes =
             pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
-        const { splitter: _drop, ...rest } = (options ?? {}) as PageSentenceBBoxOptions & {
-            splitter?: unknown;
-        };
         return this.call<PageSentenceBBoxResult>("extractSentenceBBoxes", {
             pdfData: bytes,
             pageIndex,
-            options: rest,
+            options,
         });
     }
 

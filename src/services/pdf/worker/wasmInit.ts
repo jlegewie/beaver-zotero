@@ -22,6 +22,7 @@
  */
 
 import { makeDocumentApi, type MuPDFApi, type LibMuPdf } from "./mupdfApi";
+import { loadWasmBinaryXHR } from "./wasmHelpers";
 
 const WASM_FACTORY_URL = "chrome:" + "//beaver/content/lib/mupdf-wasm.mjs";
 const WASM_BINARY_URL = "chrome:" + "//beaver/content/lib/mupdf-wasm.wasm";
@@ -37,34 +38,6 @@ if (typeof globalThis.$libmupdf_load_font_file !== "function") {
 let _libmupdf: LibMuPdf | null = null;
 let _initPromise: Promise<LibMuPdf> | null = null;
 let _api: MuPDFApi | null = null;
-
-function loadWasmBinaryXHR(url: string): Promise<ArrayBuffer> {
-    return new Promise((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhr.open("GET", url, true);
-        xhr.responseType = "arraybuffer";
-        xhr.onload = () => {
-            if (xhr.status === 200 || xhr.status === 0) {
-                const buf = xhr.response as ArrayBuffer;
-                const view = new Uint8Array(buf);
-                if (
-                    view[0] === 0x00 &&
-                    view[1] === 0x61 &&
-                    view[2] === 0x73 &&
-                    view[3] === 0x6d
-                ) {
-                    resolve(buf);
-                } else {
-                    reject(new Error("Invalid WASM magic number"));
-                }
-            } else {
-                reject(new Error(`XHR failed with status ${xhr.status}`));
-            }
-        };
-        xhr.onerror = () => reject(new Error("XHR network error"));
-        xhr.send();
-    });
-}
 
 export async function ensureInit(): Promise<LibMuPdf> {
     if (_libmupdf) return _libmupdf;

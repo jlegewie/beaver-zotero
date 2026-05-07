@@ -715,7 +715,31 @@ export async function handleTestPdfSearchScoredHttpRequest(request: any) {
     );
 }
 
-/** Dev-only `extractSentenceBBoxes` parity endpoint. */
+/**
+ * Dev-only `extractSentenceBBoxes` parity endpoint.
+ *
+ * Routes through `PDFExtractor.extractSentenceBBoxes` → MuPDF worker op
+ * (single round-trip; analysis-window load, font bridging, filtered
+ * paragraph detection, splitter resolution, and sentence mapping all run
+ * worker-side).
+ *
+ * Request body:
+ *   { library_id, zotero_key | raw_bytes_base64,
+ *     page_index: number,
+ *     options?: {
+ *       splitter?: SentenceSplitterConfig,   // serializable config:
+ *                                            //   { type: "sentencex", language?: string }
+ *                                            //   | { type: "simple" }
+ *                                            // Default: sentencex with `options.language`.
+ *       language?: string,                   // seeds sentencex when `splitter` is omitted.
+ *                                            // Ignored when an explicit `splitter` is given.
+ *       paragraphSettings?: ParagraphDetectionSettings,
+ *       analysisPageWindow?: number,
+ *     } }
+ *
+ * Response: `{ ok: true, result: PageSentenceBBoxResult }` or the
+ * structured `ExtractionError` envelope on failure.
+ */
 export async function handleTestPdfSentenceBBoxesHttpRequest(request: any) {
     const { PDFExtractor } = await import('../../../src/services/pdf');
     const pageIndex = Number(request?.page_index);
@@ -726,6 +750,116 @@ export async function handleTestPdfSentenceBBoxesHttpRequest(request: any) {
             new PDFExtractor().extractSentenceBBoxes(pdfData, { ...options, pageIndex }),
         (result) => ({ ok: true, result }),
     );
+}
+
+/**
+ * Dev-only Step-1 parity endpoint: side-by-side compare of the legacy
+ * main-thread `runSentenceExtractionPipeline()` and the new worker-side
+ * `getMuPDFWorkerClient().extractSentenceBBoxes()`. Used by
+ * `tests/live/extractSentenceBBoxesWorkerParity.live.test.ts` to gate
+ * the PDFExtractor flip — both must produce byte-identical output before
+ * the production facade switches over.
+ *
+ * Request body:
+ *   { library_id, zotero_key | raw_bytes_base64,
+ *     page_index: number,
+ *     language?: string,
+ *     analysis_page_window?: number }
+ *
+ * Response: `{ ok: true, mainThread, worker }` where each side is the
+ * full `PageSentenceBBoxResult` (or `{ ok: false, error }`).
+ *
+ * Temporary — delete after Step 6 migrates trace/debug to the worker.
+ */
+export async function handleTestPdfSentenceBBoxesParityHttpRequest(request: any) {
+    const {
+        runSentenceExtractionPipeline,
+        getMuPDFWorkerClient,
+        getSentenceSplitterWithFallback,
+        normalizeLanguageCode,
+        ExtractionError,
+    } = await import('../../../src/services/pdf');
+
+    const loaded = await loadPdfBytesForTestEndpoint(request);
+    if (!loaded.ok) return loaded;
+    const { pdfData } = loaded;
+
+    const pageIndex = Number(request?.page_index);
+    if (!Number.isInteger(pageIndex) || pageIndex < 0) {
+        return {
+            ok: false,
+            error: { name: 'Error', message: 'page_index (non-negative integer) is required' },
+        };
+    }
+
+    // Resolve language the same way the existing endpoints do — explicit
+    // `request.language` wins, then item language lookup, finally undefined
+    // (handled by `normalizeLanguageCode`'s "en" default).
+    let language: string | undefined =
+        typeof request?.language === 'string' ? request.language : undefined;
+    if (!language && request?.library_id != null && request?.zotero_key != null) {
+        try {
+            const { getItemLanguage } = await import('../../../src/utils/zoteroUtils');
+            const raw = await getItemLanguage(request.library_id, request.zotero_key);
+            if (raw) language = raw;
+        } catch {
+            // Best effort.
+        }
+    }
+    const analysisPageWindow =
+        request?.analysis_page_window != null
+            ? Number(request.analysis_page_window)
+            : undefined;
+
+    try {
+        // Side A: legacy main-thread pipeline with sentencex+fallback
+        // splitter (the production code path until the facade flip).
+        const splitter = await getSentenceSplitterWithFallback(
+            normalizeLanguageCode(language),
+        );
+        const mainThreadOut = await runSentenceExtractionPipeline({
+            pdfData,
+            pageIndex,
+            splitter,
+            analysisPageWindow,
+        });
+
+        // Side B: new worker op. Worker resolves the splitter internally
+        // from `splitterConfig`. Must produce byte-identical output when
+        // sentencex is available on both sides.
+        const workerResult = await getMuPDFWorkerClient().extractSentenceBBoxes(
+            pdfData,
+            pageIndex,
+            {
+                splitterConfig: { type: 'sentencex', language },
+                analysisPageWindow,
+            },
+        );
+
+        return {
+            ok: true,
+            mainThread: mainThreadOut.result,
+            worker: workerResult,
+        };
+    } catch (e: any) {
+        if (e instanceof ExtractionError) {
+            return {
+                ok: false,
+                error: {
+                    name: 'ExtractionError',
+                    code: e.code,
+                    message: e.message,
+                },
+            };
+        }
+        if (e instanceof RangeError) {
+            return {
+                ok: false,
+                error: { name: 'Error', message: e.message },
+            };
+        }
+        throw e;
+    }
 }
 
 /**

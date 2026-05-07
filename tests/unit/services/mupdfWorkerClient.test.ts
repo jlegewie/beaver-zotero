@@ -797,13 +797,15 @@ describe('MuPDFWorkerClient', () => {
             });
         });
 
-        it('strips a function-typed splitter at runtime (would crash structured-clone)', async () => {
+        it('forwards splitterConfig as a serializable object', async () => {
             const client = getMuPDFWorkerClient();
-            const splitter = () => [];
             const promise = client.extractSentenceBBoxes(
                 new Uint8Array([1]),
-                0,
-                { splitter } as any,
+                3,
+                {
+                    splitterConfig: { type: 'sentencex', language: 'de' },
+                    analysisPageWindow: 5,
+                },
             );
             const worker = MockWorker.instances[0];
             worker.replyToLast({
@@ -811,14 +813,46 @@ describe('MuPDFWorkerClient', () => {
                 result: { paragraphs: [], sentences: [] },
             });
             await promise;
-
             const [message] = worker.postMessage.mock.calls[0] as [
                 any,
                 Transferable[] | undefined,
             ];
-            // The wrapper must drop `splitter` before postMessage so a
-            // function-typed value never reaches structured-clone.
+            expect(message).toMatchObject({
+                op: 'extractSentenceBBoxes',
+                args: {
+                    pageIndex: 3,
+                    options: {
+                        splitterConfig: { type: 'sentencex', language: 'de' },
+                        analysisPageWindow: 5,
+                    },
+                },
+            });
+            // Function-typed `splitter` and `precomputed` are no longer part
+            // of the worker boundary — neither should appear on the wire.
             expect(message.args.options).not.toHaveProperty('splitter');
+            expect(message.args.options).not.toHaveProperty('precomputed');
+        });
+
+        it('forwards { type: "simple" } as splitterConfig', async () => {
+            const client = getMuPDFWorkerClient();
+            const promise = client.extractSentenceBBoxes(
+                new Uint8Array([1]),
+                0,
+                { splitterConfig: { type: 'simple' } },
+            );
+            const worker = MockWorker.instances[0];
+            worker.replyToLast({
+                ok: true,
+                result: { paragraphs: [], sentences: [] },
+            });
+            await promise;
+            const [message] = worker.postMessage.mock.calls[0] as [
+                any,
+                Transferable[] | undefined,
+            ];
+            expect(message.args.options.splitterConfig).toEqual({
+                type: 'simple',
+            });
         });
     });
 });
