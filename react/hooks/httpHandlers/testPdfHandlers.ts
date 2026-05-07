@@ -723,7 +723,7 @@ export async function handleTestPdfSentenceBBoxesHttpRequest(request: any) {
     return runPdfExtractorCall(
         request,
         (pdfData) =>
-            new PDFExtractor().extractSentenceBBoxes(pdfData, pageIndex, options),
+            new PDFExtractor().extractSentenceBBoxes(pdfData, { ...options, pageIndex }),
         (result) => ({ ok: true, result }),
     );
 }

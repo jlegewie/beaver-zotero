@@ -205,9 +205,9 @@ export class PDFExtractor {
      */
     async analyzeOCRNeeds(
         pdfData: Uint8Array | ArrayBuffer,
-        options: OCRDetectionOptions = {}
+        args: OCRDetectionOptions = {}
     ): Promise<OCRDetectionResult> {
-        return getMuPDFWorkerClient().analyzeOCRNeeds(pdfData, options);
+        return getMuPDFWorkerClient().analyzeOCRNeeds(pdfData, args);
     }
 
     /**
@@ -266,10 +266,10 @@ export class PDFExtractor {
      */
     async extractSentenceBBoxes(
         pdfData: Uint8Array | ArrayBuffer,
-        pageIndex: number,
-        options: PageSentenceBBoxOptions = {}
+        args: { pageIndex: number } & PageSentenceBBoxOptions
     ): Promise<PageSentenceBBoxResult> {
         const client = getMuPDFWorkerClient();
+        const { pageIndex, ...options } = args;
 
         // Splitter functions are not structurally cloneable across the
         // worker boundary, so whenever we need to run a JS splitter we
@@ -379,12 +379,11 @@ export class PDFExtractor {
      *
      * @param pdfData - The PDF file as Uint8Array or ArrayBuffer
      * @param query - Text to search for (literal phrase match)
-     * @param options - Search options including scoring configuration
-     * @param args - Pre-flight controls. `maxPageCount` short-circuits the
-     *               worker when the document exceeds the limit, returning a
-     *               flagged result (`exceedsPageCountLimit: true`) instead of
-     *               running the search. Sibling to `options` because it
-     *               gates dispatch, not result shape.
+     * @param args - Search options plus pre-flight controls. `maxPageCount`
+     *               short-circuits the worker when the document exceeds the
+     *               limit, returning a flagged result
+     *               (`exceedsPageCountLimit: true`) instead of running the
+     *               search.
      * @returns PDFSearchResult with ranked pages and hit positions
      *
      * @example
@@ -402,11 +401,11 @@ export class PDFExtractor {
     async search(
         pdfData: Uint8Array | ArrayBuffer,
         query: string,
-        options: PDFSearchOptions = {},
-        args: { maxPageCount?: number } = {}
+        args: PDFSearchOptions & { maxPageCount?: number } = {}
     ): Promise<PDFSearchResult> {
+        const { maxPageCount, ...options } = args;
         // search + score within one worker round-trip.
-        return getMuPDFWorkerClient().search(pdfData, query, options, args);
+        return getMuPDFWorkerClient().search(pdfData, query, options, { maxPageCount });
     }
 }
 

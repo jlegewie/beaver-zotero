@@ -196,8 +196,7 @@ export async function handleZoteroAttachmentSearchRequest(
         const searchResult = await extractor.search(
             pdfData,
             query,
-            { maxHitsPerPage: max_hits_per_page ?? 100 },
-            { maxPageCount },
+            { maxHitsPerPage: max_hits_per_page ?? 100, maxPageCount },
         );
 
         // 8. Worker page-count gate fired? Map to too_many_pages.
