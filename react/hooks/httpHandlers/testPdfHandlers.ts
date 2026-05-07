@@ -488,11 +488,16 @@ export async function handleTestPdfRenderPagesWithMetaHttpRequest(request: any) 
 }
 
 /**
- * Dev-only PDF raw-extract endpoint. Routes through `PDFExtractor`.
+ * Dev-only PDF raw-extract endpoint — primitive level.
+ *
+ * Calls `getMuPDFWorkerClient().extractRawPages` directly so the test
+ * exercises the same worker entry point production code uses (e.g.
+ * `SentenceExtractionPipeline`).
  */
 export async function handleTestPdfExtractRawHttpRequest(request: any) {
-    const { PDFExtractor, ExtractionError } = await import(
-        '../../../src/services/pdf'
+    const { ExtractionError } = await import('../../../src/services/pdf');
+    const { getMuPDFWorkerClient } = await import(
+        '../../../src/services/pdf/MuPDFWorkerClient'
     );
 
     const loaded = await loadPdfBytesForTestEndpoint(request);
@@ -504,7 +509,10 @@ export async function handleTestPdfExtractRawHttpRequest(request: any) {
         : undefined;
 
     try {
-        const result = await new PDFExtractor().extractRaw(pdfData, pageIndices);
+        const result = await getMuPDFWorkerClient().extractRawPages(
+            pdfData,
+            pageIndices,
+        );
         return { ok: true, result };
     } catch (e: any) {
         if (e instanceof ExtractionError) {

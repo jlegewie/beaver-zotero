@@ -10,7 +10,6 @@ import { getMuPDFWorkerClient } from "./MuPDFWorkerClient";
 import {
     ExtractionSettings,
     ExtractionResult,
-    RawDocumentData,
     OCRDetectionOptions,
     OCRDetectionResult,
     PageImageOptions,
@@ -246,17 +245,6 @@ export class PDFExtractor {
         pdfData: Uint8Array | ArrayBuffer
     ): Promise<PDFMetadata> {
         return getMuPDFWorkerClient().getMetadata(pdfData);
-    }
-
-    /**
-     * Get raw document data without processing.
-     * Useful for debugging or custom processing.
-     */
-    async extractRaw(
-        pdfData: Uint8Array | ArrayBuffer,
-        pageIndices?: number[]
-    ): Promise<RawDocumentData> {
-        return getMuPDFWorkerClient().extractRawPages(pdfData, pageIndices);
     }
 
     /**
