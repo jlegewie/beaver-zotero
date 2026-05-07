@@ -637,31 +637,23 @@ const ocrNeeds = await extractor.analyzeOCRNeeds(pdfData);
 Render PDF pages to PNG or JPEG images with configurable resolution.
 
 ```typescript
-// From Zotero item (recommended)
-import {
-  renderPageToImageFromZoteroItem,
-  renderPagesToImagesFromZoteroItem,
-} from "src/services/pdf";
-
-// Render first page at 150 DPI as PNG
-const result = await renderPageToImageFromZoteroItem(item, 0, { dpi: 150 });
-// result.data is Uint8Array of PNG bytes
-// result.width, result.height - image dimensions in pixels
-
-// Render pages 0-2 as JPEG thumbnails
-const results = await renderPagesToImagesFromZoteroItem(item, [0, 1, 2], {
-  scale: 0.5, // 50% size (36 DPI)
-  format: "jpeg",
-  jpegQuality: 85,
-});
-
-// Manual with raw PDF data
 const extractor = new PDFExtractor();
+
+// Render first page at 300 DPI as PNG
 const image = await extractor.renderPageToImage(pdfData, 0, {
   dpi: 300, // 300 DPI for high quality
   alpha: false, // Opaque background
   showExtras: true, // Include annotations
   format: "png",
+});
+// image.data is Uint8Array of PNG bytes
+// image.width, image.height - image dimensions in pixels
+
+// Render pages 0-2 as JPEG thumbnails
+const results = await extractor.renderPagesToImages(pdfData, [0, 1, 2], {
+  scale: 0.5, // 50% size (36 DPI)
+  format: "jpeg",
+  jpegQuality: 85,
 });
 
 // Render all pages

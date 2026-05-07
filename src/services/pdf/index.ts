@@ -28,12 +28,6 @@ import {
     normalizeLanguageCode,
 } from "./SentencexSplitter";
 import { runSentenceExtractionPipeline } from "./SentenceExtractionPipeline";
-// `getItemLanguage` is intentionally lazy-imported inside
-// `extractSentenceBBoxesFromZoteroItem` to keep the static import surface
-// of this barrel small. `zoteroUtils` transitively pulls in heavy modules
-// (Supabase client, webAPI) that throw on module load when env vars are
-// missing — undesirable for vitest cold paths and shutdown hooks that
-// just need `disposeSentencex`.
 
 // Re-export types and classes for convenience
 export * from "./types";
@@ -443,72 +437,6 @@ export class PDFExtractor {
 // ============================================================================
 
 /**
- * Render a page from a Zotero attachment item to an image.
- *
- * @param item - Zotero attachment item
- * @param pageIndex - Page index (0-based). Default: 0
- * @param options - Rendering options (scale, dpi, format, etc.)
- * @returns PageImageResult or null if file not found
- *
- * @example
- * ```typescript
- * // Render first page at 150 DPI
- * const result = await renderPageToImageFromZoteroItem(item, 0, { dpi: 150 });
- * if (result) {
- *   // result.data is a Uint8Array of PNG/JPEG bytes
- *   console.log(`Rendered: ${result.width}x${result.height}`);
- * }
- * ```
- */
-export async function renderPageToImageFromZoteroItem(
-    item: Zotero.Item,
-    pageIndex: number = 0,
-    options: PageImageOptions = {}
-): Promise<PageImageResult | null> {
-    const path = await item.getFilePathAsync();
-    if (!path) {
-        return null;
-    }
-
-    const pdfData = await IOUtils.read(path);
-    const extractor = new PDFExtractor();
-    return extractor.renderPageToImage(pdfData, pageIndex, options);
-}
-
-/**
- * Render multiple pages from a Zotero attachment item to images.
- *
- * @param item - Zotero attachment item
- * @param pageIndices - Pages to render (0-based). If undefined, renders all.
- * @param options - Rendering options (scale, dpi, format, etc.)
- * @returns Array of PageImageResult or null if file not found
- *
- * @example
- * ```typescript
- * // Render all pages as thumbnails (low resolution)
- * const results = await renderPagesToImagesFromZoteroItem(item, undefined, {
- *   scale: 0.25,
- *   format: "jpeg",
- *   jpegQuality: 75
- * });
- * ```
- */
-export async function renderPagesToImagesFromZoteroItem(
-    item: Zotero.Item,
-    pageIndices?: number[],
-    options: PageImageOptions = {}
-): Promise<PageImageResult[] | null> {
-    const path = await item.getFilePathAsync();
-    if (!path) {
-        return null;
-    }
-
-    const pdfData = await IOUtils.read(path);
-    const extractor = new PDFExtractor();
-    return extractor.renderPagesToImages(pdfData, pageIndices, options);
-}
-
-/**
  * Search for text within a PDF from a Zotero attachment item.
  *
  * Search Behavior:
@@ -552,65 +480,3 @@ export async function searchFromZoteroItem(
     return extractor.search(pdfData, query, options);
 }
 
-/**
- * Extract sentence-level bounding boxes for a single page of a Zotero
- * attachment item.
- *
- * Convenience wrapper around `PDFExtractor.extractSentenceBBoxes` that
- * reads the PDF file from disk. Returns `null` when the file is not
- * available locally. Graceful degradation applies — see the method docs
- * for details on `unmappedParagraphs` / `degradedParagraphs`.
- *
- * @param item - Zotero attachment item (must be a PDF)
- * @param pageIndex - 0-based page index
- * @param options - Pipeline options forwarded to `extractSentenceBBoxes`
- * @returns Sentences grouped by paragraph + flat sentence list, or `null`
- *          if the file cannot be read.
- *
- * @example
- * ```typescript
- * const result = await extractSentenceBBoxesFromZoteroItem(item, 0);
- * if (result) {
- *   for (const p of result.paragraphs) {
- *     console.log(`${p.item.type}: ${p.sentences.length} sentences`);
- *   }
- * }
- * ```
- */
-export async function extractSentenceBBoxesFromZoteroItem(
-    item: Zotero.Item,
-    pageIndex: number,
-    options: PageSentenceBBoxOptions = {}
-): Promise<PageSentenceBBoxResult | null> {
-    const path = await item.getFilePathAsync();
-    if (!path) {
-        return null;
-    }
-
-    // Resolve language from the parent regular item if the caller didn't
-    // pass one explicitly. `getItemLanguage` walks attachments → parent
-    // and returns the raw `language` field; `normalizeLanguageCode` (run
-    // inside the extractor) handles BCP-47 / ISO 639-2 / English-name
-    // variants. We resolve here rather than inside the extractor so that
-    // the extractor stays Zotero-item-agnostic.
-    let language = options.language;
-    if (language === undefined) {
-        try {
-            const { getItemLanguage } = await import(
-                "../../utils/zoteroUtils"
-            );
-            const raw = await getItemLanguage(item.libraryID, item.key);
-            if (raw) language = raw;
-        } catch {
-            // Field lookup is best effort — fall through to the "en"
-            // default applied by normalizeLanguageCode downstream.
-        }
-    }
-
-    const pdfData = await IOUtils.read(path);
-    const extractor = new PDFExtractor();
-    return extractor.extractSentenceBBoxes(pdfData, pageIndex, {
-        ...options,
-        language,
-    });
-}
