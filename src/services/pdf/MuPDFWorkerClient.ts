@@ -14,10 +14,10 @@ import {
     type RawPageDataDetailed,
     type PageImageOptions,
     type PageImageResult,
+    type PDFMetadata,
     type PDFPageSearchResult,
     type ExtractionSettings,
     type ExtractionResult,
-    type LineExtractionResult,
     type OCRDetectionOptions,
     type OCRDetectionResult,
     type PDFSearchOptions,
@@ -300,16 +300,19 @@ export class MuPDFWorkerClient {
         return result.count;
     }
 
-    /** Get page count + all custom page labels in one round-trip. */
-    async getPageCountAndLabels(
+    /**
+     * Get document-level metadata in a single doc-open.
+     *
+     * Returns page count, page labels, and cheap info-dict fields
+     * (title, author, format, etc.). Page-label collection requires a
+     * per-page load; the info-dict reads are essentially free.
+     */
+    async getMetadata(
         pdfData: Uint8Array | ArrayBuffer,
-    ): Promise<{ count: number; labels: Record<number, string> }> {
+    ): Promise<PDFMetadata> {
         const bytes =
             pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
-        return this.call<{ count: number; labels: Record<number, string> }>(
-            "getPageCountAndLabels",
-            { pdfData: bytes },
-        );
+        return this.call<PDFMetadata>("getMetadata", { pdfData: bytes });
     }
 
     /**
@@ -352,37 +355,16 @@ export class MuPDFWorkerClient {
     }
 
     /**
-     * Render multiple pages to images.
-     *
-     * Mirrors `MuPDFService.renderPagesToImages` semantics: invalid indices
-     * are silently filtered. The returned image bytes are transferred from
-     * the worker (the worker does not retain them after asPNG/asJPEG copies).
-     */
-    async renderPagesToImages(
-        pdfData: Uint8Array | ArrayBuffer,
-        pageIndices?: number[],
-        options?: PageImageOptions,
-    ): Promise<PageImageResult[]> {
-        const bytes =
-            pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
-        return this.call<PageImageResult[]>("renderPagesToImages", {
-            pdfData: bytes,
-            pageIndices,
-            options,
-        });
-    }
-
-    /**
      * Strict, fused render-pages variant for the agent images handler.
      *
-     * Combines page-count + page-labels + render in a single doc-open. Uses
+     * Fuses page-count + page-labels + render in a single doc-open. Uses
      * the worker's strict resolvers — explicit-but-all-invalid `pageIndices`
      * (or out-of-range `pageRange`) throws `ExtractionError(PAGE_OUT_OF_RANGE)`
      * with the worker's known `pageCount` in the error payload.
      *
      * Image buffers are transferred from the worker.
      */
-    async renderPagesToImagesWithMeta(
+    async renderPages(
         pdfData: Uint8Array | ArrayBuffer,
         args?: {
             pageIndices?: number[];
@@ -393,7 +375,7 @@ export class MuPDFWorkerClient {
         const bytes =
             pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
         return this.call<{ pageCount: number; pageLabels: Record<number, string>; pages: PageImageResult[] }>(
-            "renderPagesToImagesWithMeta",
+            "renderPages",
             {
                 pdfData: bytes,
                 pageIndices: args?.pageIndices,
@@ -407,8 +389,7 @@ export class MuPDFWorkerClient {
      * Render a single page to an image.
      *
      * Single-page op — out-of-range `pageIndex` throws
-     * `ExtractionError(PAGE_OUT_OF_RANGE)`. One doc-open per call (vs. the
-     * two-open cost of "getPageCountAndLabels + renderPagesToImages([idx])").
+     * `ExtractionError(PAGE_OUT_OF_RANGE)`. One doc-open per call.
      */
     async renderPageToImage(
         pdfData: Uint8Array | ArrayBuffer,
@@ -447,27 +428,6 @@ export class MuPDFWorkerClient {
     }
 
     /**
-     * Run the full extraction orchestration in the worker.
-     *
-     * Returns an `ExtractionResult` (or `LineExtractionResult` if
-     * `settings.useLineDetection` is true). Throws `ExtractionError(NO_TEXT_LAYER)`
-     * when `checkTextLayer` is enabled and the document needs OCR — the
-     * `ocrAnalysis`, `pageLabels`, and `pageCount` fields are preserved
-     * across the worker boundary via the payload-aware rehydrateError.
-     */
-    async extract(
-        pdfData: Uint8Array | ArrayBuffer,
-        settings?: ExtractionSettings,
-    ): Promise<ExtractionResult> {
-        const bytes =
-            pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
-        return this.call<ExtractionResult>("extract", {
-            pdfData: bytes,
-            settings,
-        });
-    }
-
-    /**
      * Strict, fused extract variant for the agent pages handler.
      *
      * Combines page-count + page-labels + OCR check + extract in a single
@@ -476,10 +436,10 @@ export class MuPDFWorkerClient {
      * `ExtractionError(PAGE_OUT_OF_RANGE)` with the worker's known `pageCount`
      * in the error payload (rehydrated by `rehydrateError`).
      *
-     * Rejects `settings.useLineDetection` — line-extraction callers must use
-     * `extractByLines` directly.
+     * Honors `settings.useLineDetection` — when true, the per-page loop
+     * runs line detection and `ProcessedPage.lines` is populated.
      */
-    async extractWithMeta(
+    async extract(
         pdfData: Uint8Array | ArrayBuffer,
         args?: {
             settings?: ExtractionSettings;
@@ -489,24 +449,11 @@ export class MuPDFWorkerClient {
     ): Promise<ExtractionResult> {
         const bytes =
             pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
-        return this.call<ExtractionResult>("extractWithMeta", {
+        return this.call<ExtractionResult>("extract", {
             pdfData: bytes,
             settings: args?.settings,
             pageIndices: args?.pageIndices,
             pageRange: args?.pageRange,
-        });
-    }
-
-    /** Line-detection variant of `extract`. */
-    async extractByLines(
-        pdfData: Uint8Array | ArrayBuffer,
-        settings?: ExtractionSettings,
-    ): Promise<LineExtractionResult> {
-        const bytes =
-            pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
-        return this.call<LineExtractionResult>("extractByLines", {
-            pdfData: bytes,
-            settings,
         });
     }
 
@@ -523,40 +470,27 @@ export class MuPDFWorkerClient {
         });
     }
 
-    /** Cheap text-layer presence check. */
-    async hasTextLayer(pdfData: Uint8Array | ArrayBuffer): Promise<boolean> {
-        const bytes =
-            pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
-        return this.call<boolean>("hasTextLayer", { pdfData: bytes });
-    }
-
     /**
      * Search + score within one round-trip.
      *
-     * `options.maxPageCount` is lifted to a top-level worker arg and stripped
-     * from the forwarded `options` payload. Keeps the `opSearch` worker-arg
-     * shape clean and lets the handler pass it through the existing options
-     * parameter without a separate signature change.
+     * `args.maxPageCount` is a pre-flight gate, not a search option — it lives
+     * outside `options` so the worker can short-circuit before running the
+     * search. When provided and exceeded, the worker returns a flagged result
+     * (`exceedsPageCountLimit: true`) the handler maps to `too_many_pages`.
      */
     async search(
         pdfData: Uint8Array | ArrayBuffer,
         query: string,
         options?: PDFSearchOptions,
+        args?: { maxPageCount?: number },
     ): Promise<PDFSearchResult> {
         const bytes =
             pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
-        let forwardedOptions: PDFSearchOptions | undefined = options;
-        let maxPageCount: number | undefined;
-        if (options && options.maxPageCount != null) {
-            const { maxPageCount: lifted, ...rest } = options;
-            maxPageCount = lifted;
-            forwardedOptions = rest;
-        }
         return this.call<PDFSearchResult>("search", {
             pdfData: bytes,
             query,
-            options: forwardedOptions,
-            maxPageCount,
+            options,
+            maxPageCount: args?.maxPageCount,
         });
     }
 

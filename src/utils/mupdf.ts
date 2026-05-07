@@ -7,15 +7,10 @@
 
 export {
     PDFExtractor,
-    extractFromZoteroItem,
-    extractTextFromZoteroItem,
     disposeMuPDF,
     disposeMuPDFWorker,
     MuPDFService,
 } from "../services/pdf";
-
-// Legacy alias for backward compatibility
-export { extractTextFromZoteroItem as extractPdfTextFromItem } from "../services/pdf";
 
 // Re-export getMuPDF for any code that needs the raw API
 export { getMuPDFAPI as getMuPDF } from "../services/pdf/MuPDFService";

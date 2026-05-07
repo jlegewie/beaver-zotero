@@ -36,10 +36,8 @@ export const DEFAULT_MARGIN_ZONE: MarginSettings = {
     bottom: 80,
 };
 
-/** Options for text extraction */
+/** Options for text extraction. Page selection lives on the args object of the calling op (e.g. `extract(args.pageIndices | args.pageRange)`), not here. */
 export interface ExtractionSettings {
-    /** Page indices to extract (0-based). If undefined, extracts all pages. */
-    pages?: number[];
     /** Whether to check for text layer before processing */
     checkTextLayer?: boolean;
     /** Minimum text per page to consider it has a text layer */
@@ -60,7 +58,6 @@ export interface ExtractionSettings {
 
 /** Default extraction settings */
 export const DEFAULT_EXTRACTION_SETTINGS: Required<ExtractionSettings> = {
-    pages: [],
     checkTextLayer: true,
     minTextPerPage: 100,
     margins: DEFAULT_MARGINS,
@@ -483,27 +480,6 @@ export interface ExtractionResult {
     };
 }
 
-/**
- * Line-based extraction result for high-quality content
- * Returns structured content by page with line-level granularity
- */
-export interface LineExtractionResult {
-    /** Processed pages with line information */
-    pages: ProcessedPage[];
-    /** Document-level analysis */
-    analysis: DocumentAnalysis;
-    /** Combined plain text from all pages */
-    fullText: string;
-    /** Page labels for all pages in the document (0-indexed → label string). Only non-empty labels included. */
-    pageLabels?: Record<number, string>;
-    /** Extraction metadata */
-    metadata: {
-        extractedAt: string;
-        version: string;
-        settings: ExtractionSettings;
-    };
-}
-
 // ============================================================================
 // OCR Detection Types
 // ============================================================================
@@ -682,6 +658,10 @@ export interface PDFPageSearchResult {
 
 /**
  * Options for PDF search.
+ *
+ * Page-count gating (`maxPageCount`) is NOT here — it's a pre-flight gate, not
+ * a search option. Pass it as the sibling `args.maxPageCount` parameter on
+ * `PDFExtractor.search` / `MuPDFWorkerClient.search`.
  */
 export interface PDFSearchOptions {
     /** Maximum hits per page (default: 100) */
@@ -690,20 +670,11 @@ export interface PDFSearchOptions {
     pages?: number[];
     /** Scoring options for ranking results */
     scoring?: SearchScoringOptions;
-    /**
-     * Page-count gate. When provided, the worker returns
-     * `{ exceedsPageCountLimit: true, totalPages, pages: [] }` early if the
-     * document has more pages than this — without running the search. Lets
-     * agent handlers skip an upfront `getPageCount` round-trip while still
-     * enforcing `maxPageCount`.
-     */
-    maxPageCount?: number;
 }
 
-/** Default search options. `maxPageCount` is intentionally omitted — handlers set it explicitly. */
-export const DEFAULT_PDF_SEARCH_OPTIONS: Required<Omit<PDFSearchOptions, 'scoring' | 'maxPageCount'>> & {
+/** Default search options. */
+export const DEFAULT_PDF_SEARCH_OPTIONS: Required<Omit<PDFSearchOptions, 'scoring'>> & {
     scoring: SearchScoringOptions;
-    maxPageCount?: number;
 } = {
     maxHitsPerPage: 100,
     pages: [],
@@ -806,9 +777,9 @@ export interface PDFSearchResult {
      */
     pages: ScoredPageSearchResult[];
     /**
-     * Set when `options.maxPageCount` was provided AND `totalPages` exceeded
-     * it. The worker short-circuits the search; handlers map this to the
-     * `too_many_pages` error response.
+     * Set when the caller provided `args.maxPageCount` AND `totalPages`
+     * exceeded it. The worker short-circuits the search; handlers map this
+     * to the `too_many_pages` error response.
      */
     exceedsPageCountLimit?: boolean;
     /** Search metadata */
@@ -869,4 +840,41 @@ export interface PageImageResult {
     scale: number;
     /** Effective DPI */
     dpi: number;
+}
+
+// ============================================================================
+// Document Metadata
+// ============================================================================
+
+/**
+ * Document-level PDF metadata returned by `PDFExtractor.getMetadata`.
+ *
+ * Cheap to collect: pulls the info dictionary and PDF format string via
+ * `doc.getMetadata(...)` (string lookups in the trailer/info dict). Page
+ * labels require a per-page load and are the only field with non-trivial
+ * cost. Info-dict fields are omitted when not present in the document.
+ */
+export interface PDFMetadata {
+    /** Total number of pages */
+    pageCount: number;
+    /** Custom page labels (0-indexed → label). Empty record if no labels. */
+    pageLabels: Record<number, string>;
+    /** PDF format string (e.g., "PDF 1.7") */
+    format?: string;
+    /** info:Title */
+    title?: string;
+    /** info:Author */
+    author?: string;
+    /** info:Subject */
+    subject?: string;
+    /** info:Keywords */
+    keywords?: string;
+    /** info:Creator (authoring tool, e.g. "Microsoft Word") */
+    creator?: string;
+    /** info:Producer (PDF generator, e.g. "Adobe Distiller") */
+    producer?: string;
+    /** info:CreationDate (raw PDF date string, e.g. "D:20240115103000Z") */
+    creationDate?: string;
+    /** info:ModDate (raw PDF date string) */
+    modDate?: string;
 }

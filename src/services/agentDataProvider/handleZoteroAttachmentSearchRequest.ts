@@ -193,10 +193,11 @@ export async function handleZoteroAttachmentSearchRequest(
         // `cachedMeta.page_count > maxPageCount` case before any worker call.
         const extractor = new PDFExtractor();
         const maxPageCount = !skip_local_limits ? getPref('maxPageCount') : undefined;
-        const searchResult = await extractor.search(pdfData, query, {
-            maxHitsPerPage: max_hits_per_page ?? 100,
-            maxPageCount,
-        });
+        const searchResult = await extractor.search(
+            pdfData,
+            query,
+            { maxHitsPerPage: max_hits_per_page ?? 100, maxPageCount },
+        );
 
         // 8. Worker page-count gate fired? Map to too_many_pages.
         if (searchResult.exceedsPageCountLimit) {

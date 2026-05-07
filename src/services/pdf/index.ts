@@ -10,15 +10,13 @@ import { getMuPDFWorkerClient } from "./MuPDFWorkerClient";
 import {
     ExtractionSettings,
     ExtractionResult,
-    LineExtractionResult,
-    RawDocumentData,
     OCRDetectionOptions,
     OCRDetectionResult,
     PageImageOptions,
     PageImageResult,
+    PDFMetadata,
     PDFSearchOptions,
     PDFSearchResult,
-    DEFAULT_EXTRACTION_SETTINGS,
 } from "./types";
 import {
     extractPageSentenceBBoxes,
@@ -30,12 +28,6 @@ import {
     normalizeLanguageCode,
 } from "./SentencexSplitter";
 import { runSentenceExtractionPipeline } from "./SentenceExtractionPipeline";
-// `getItemLanguage` is intentionally lazy-imported inside
-// `extractSentenceBBoxesFromZoteroItem` to keep the static import surface
-// of this barrel small. `zoteroUtils` transitively pulls in heavy modules
-// (Supabase client, webAPI) that throw on module load when env vars are
-// missing — undesirable for vitest cold paths and shutdown hooks that
-// just need `disposeSentencex`.
 
 // Re-export types and classes for convenience
 export * from "./types";
@@ -47,7 +39,6 @@ export {
 } from "./MuPDFWorkerClient";
 export { prewarmMuPDFWorker } from "./prewarm";
 export { DocumentAnalyzer } from "./DocumentAnalyzer";
-export type { TextLayerCheckOptions } from "./DocumentAnalyzer";
 export { StyleAnalyzer } from "./StyleAnalyzer";
 export {
     MarginFilter,
@@ -160,36 +151,17 @@ export type {
  * Usage:
  * ```typescript
  * const extractor = new PDFExtractor();
- * const result = await extractor.extract(pdfData, { pages: [0, 1, 2] });
+ * const result = await extractor.extract(pdfData, {
+ *   pageRange: { startIndex: 0, endIndex: 2 },
+ * });
  * console.log(result.fullText);
  * ```
  */
 export class PDFExtractor {
     /**
-     * Extract text from a PDF file.
-     *
-     * @param pdfData - The PDF file as Uint8Array or ArrayBuffer
-     * @param settings - Extraction settings (set useLineDetection=true for line-level extraction)
-     * @returns Extraction result with pages, analysis, and full text
-     */
-    async extract(
-        pdfData: Uint8Array | ArrayBuffer,
-        settings: ExtractionSettings = {}
-    ): Promise<ExtractionResult> {
-        const opts = { ...DEFAULT_EXTRACTION_SETTINGS, ...settings };
-
-        // If line detection is requested, delegate to extractByLines
-        if (opts.useLineDetection) {
-            return this.extractByLines(pdfData, settings);
-        }
-
-        return getMuPDFWorkerClient().extract(pdfData, settings);
-    }
-
-    /**
      * Strict, fused extract for handlers that have deferred range validation
-     * to the worker. Returns the same `ExtractionResult` shape as `extract`
-     * (which already surfaces `analysis.pageCount` and `pageLabels`).
+     * to the worker. Returns an `ExtractionResult` with `analysis.pageCount`
+     * and `pageLabels` populated.
      *
      * Args:
      *  - `pageIndices` (mutually exclusive with `pageRange`): explicit
@@ -199,9 +171,12 @@ export class PDFExtractor {
      *    the worker (avoids a main-thread page-count round-trip for
      *    open-ended end_page).
      *
-     * Rejects `settings.useLineDetection` — line callers use `extractByLines`.
+     * `settings.useLineDetection` is honored — when true, each
+     * `ProcessedPage.lines` is populated with bbox + fontSize + columnIndex
+     * metadata and `page.content` becomes the line texts joined with `\n`.
+     * `blocks` is left empty in that mode.
      */
-    async extractWithMeta(
+    async extract(
         pdfData: Uint8Array | ArrayBuffer,
         args: {
             settings?: ExtractionSettings;
@@ -209,55 +184,7 @@ export class PDFExtractor {
             pageRange?: { startIndex: number; endIndex?: number; maxPages?: number };
         } = {}
     ): Promise<ExtractionResult> {
-        return getMuPDFWorkerClient().extractWithMeta(pdfData, args);
-    }
-
-    /**
-     * Simple text extraction (convenience method).
-     * Returns just the plain text without detailed analysis.
-     */
-    async extractText(
-        pdfData: Uint8Array | ArrayBuffer,
-        settings: ExtractionSettings = {}
-    ): Promise<string> {
-        const result = await this.extract(pdfData, settings);
-        return result.fullText;
-    }
-
-    /**
-     * Extract high-quality content by page using line detection.
-     *
-     * This method provides superior text extraction by:
-     * - Detecting text lines within columns
-     * - Preserving proper reading order
-     * - Including line-level metadata (bbox, font size, column)
-     * - Maintaining structural information
-     *
-     * Use this when you need:
-     * - Precise text positioning
-     * - Line-by-line processing
-     * - High-fidelity text extraction for RAG/indexing
-     *
-     * @param pdfData - The PDF file as Uint8Array or ArrayBuffer
-     * @param settings - Extraction settings
-     * @returns Line-based extraction result with detailed page content
-     */
-    async extractByLines(
-        pdfData: Uint8Array | ArrayBuffer,
-        settings: ExtractionSettings = {}
-    ): Promise<LineExtractionResult> {
-        return getMuPDFWorkerClient().extractByLines(pdfData, {
-            ...settings,
-            useLineDetection: true,
-        });
-    }
-
-    /**
-     * Check if a PDF has a text layer.
-     * Useful for determining if OCR is needed before full extraction.
-     */
-    async hasTextLayer(pdfData: Uint8Array | ArrayBuffer): Promise<boolean> {
-        return getMuPDFWorkerClient().hasTextLayer(pdfData);
+        return getMuPDFWorkerClient().extract(pdfData, args);
     }
 
     /**
@@ -278,9 +205,9 @@ export class PDFExtractor {
      */
     async analyzeOCRNeeds(
         pdfData: Uint8Array | ArrayBuffer,
-        options: OCRDetectionOptions = {}
+        args: OCRDetectionOptions = {}
     ): Promise<OCRDetectionResult> {
-        return getMuPDFWorkerClient().analyzeOCRNeeds(pdfData, options);
+        return getMuPDFWorkerClient().analyzeOCRNeeds(pdfData, args);
     }
 
     /**
@@ -291,23 +218,18 @@ export class PDFExtractor {
     }
 
     /**
-     * Get page count and all page labels in a single metadata-only pass.
+     * Get document-level metadata in a single doc-open.
+     *
+     * Returns page count, page labels, and cheap info-dict fields
+     * (title, author, format, etc.). Page-label collection requires a
+     * per-page load; the info-dict reads are essentially free. Use
+     * `getPageCount` when you only need the count and want to skip the
+     * per-page label pass.
      */
-    async getPageCountAndLabels(
+    async getMetadata(
         pdfData: Uint8Array | ArrayBuffer
-    ): Promise<{ count: number; labels: Record<number, string> }> {
-        return getMuPDFWorkerClient().getPageCountAndLabels(pdfData);
-    }
-
-    /**
-     * Get raw document data without processing.
-     * Useful for debugging or custom processing.
-     */
-    async extractRaw(
-        pdfData: Uint8Array | ArrayBuffer,
-        pageIndices?: number[]
-    ): Promise<RawDocumentData> {
-        return getMuPDFWorkerClient().extractRawPages(pdfData, pageIndices);
+    ): Promise<PDFMetadata> {
+        return getMuPDFWorkerClient().getMetadata(pdfData);
     }
 
     /**
@@ -344,10 +266,10 @@ export class PDFExtractor {
      */
     async extractSentenceBBoxes(
         pdfData: Uint8Array | ArrayBuffer,
-        pageIndex: number,
-        options: PageSentenceBBoxOptions = {}
+        args: { pageIndex: number } & PageSentenceBBoxOptions
     ): Promise<PageSentenceBBoxResult> {
         const client = getMuPDFWorkerClient();
+        const { pageIndex, ...options } = args;
 
         // Splitter functions are not structurally cloneable across the
         // worker boundary, so whenever we need to run a JS splitter we
@@ -419,44 +341,17 @@ export class PDFExtractor {
     }
 
     /**
-     * Render multiple pages to images.
-     *
-     * @param pdfData - The PDF file as Uint8Array or ArrayBuffer
-     * @param pageIndices - Pages to render (0-based). If undefined, renders all.
-     * @param options - Rendering options (scale, dpi, format, etc.)
-     * @returns Array of PageImageResult
-     *
-     * @example
-     * ```typescript
-     * const extractor = new PDFExtractor();
-     * // Render first 3 pages at 2x scale as JPEG
-     * const results = await extractor.renderPagesToImages(pdfData, [0, 1, 2], {
-     *   scale: 2.0,
-     *   format: "jpeg",
-     *   jpegQuality: 90
-     * });
-     * ```
-     */
-    async renderPagesToImages(
-        pdfData: Uint8Array | ArrayBuffer,
-        pageIndices?: number[],
-        options: PageImageOptions = {}
-    ): Promise<PageImageResult[]> {
-        return getMuPDFWorkerClient().renderPagesToImages(pdfData, pageIndices, options);
-    }
-
-    /**
      * Strict, fused render-pages variant for the agent images handler.
      *
      * Returns `{ pageCount, pageLabels, pages }` from a single worker
      * round-trip.
      *
-     * Args mirror `extractWithMeta`. All-pages requests should pass
+     * Args mirror `extract`. All-pages requests should pass
      * `pageIndices: undefined` (or omit args entirely), NOT a pre-enumerated
      * list — that requires knowing pageCount upfront, which is what we're
      * trying to avoid.
      */
-    async renderPagesToImagesWithMeta(
+    async renderPages(
         pdfData: Uint8Array | ArrayBuffer,
         args: {
             pageIndices?: number[];
@@ -464,7 +359,7 @@ export class PDFExtractor {
             options?: PageImageOptions;
         } = {}
     ): Promise<{ pageCount: number; pageLabels: Record<number, string>; pages: PageImageResult[] }> {
-        return getMuPDFWorkerClient().renderPagesToImagesWithMeta(pdfData, args);
+        return getMuPDFWorkerClient().renderPages(pdfData, args);
     }
 
     /**
@@ -484,7 +379,11 @@ export class PDFExtractor {
      *
      * @param pdfData - The PDF file as Uint8Array or ArrayBuffer
      * @param query - Text to search for (literal phrase match)
-     * @param options - Search options including scoring configuration
+     * @param args - Search options plus pre-flight controls. `maxPageCount`
+     *               short-circuits the worker when the document exceeds the
+     *               limit, returning a flagged result
+     *               (`exceedsPageCountLimit: true`) instead of running the
+     *               search.
      * @returns PDFSearchResult with ranked pages and hit positions
      *
      * @example
@@ -502,245 +401,11 @@ export class PDFExtractor {
     async search(
         pdfData: Uint8Array | ArrayBuffer,
         query: string,
-        options: PDFSearchOptions = {}
+        args: PDFSearchOptions & { maxPageCount?: number } = {}
     ): Promise<PDFSearchResult> {
+        const { maxPageCount, ...options } = args;
         // search + score within one worker round-trip.
-        return getMuPDFWorkerClient().search(pdfData, query, options);
+        return getMuPDFWorkerClient().search(pdfData, query, options, { maxPageCount });
     }
 }
 
-// ============================================================================
-// Convenience Functions
-// ============================================================================
-
-/**
- * Extract text from a Zotero attachment item.
- *
- * @param item - Zotero attachment item
- * @param settings - Extraction settings
- * @returns Extraction result or null if file not found
- */
-export async function extractFromZoteroItem(
-    item: Zotero.Item,
-    settings: ExtractionSettings = {}
-): Promise<ExtractionResult | null> {
-    const path = await item.getFilePathAsync();
-    if (!path) {
-        return null;
-    }
-
-    const pdfData = await IOUtils.read(path);
-    const extractor = new PDFExtractor();
-    return extractor.extract(pdfData, settings);
-}
-
-/**
- * Extract plain text from a Zotero attachment item.
- * Simple convenience function for basic use cases.
- *
- * @param item - Zotero attachment item
- * @returns Plain text or null if file not found
- */
-export async function extractTextFromZoteroItem(
-    item: Zotero.Item
-): Promise<string | null> {
-    const result = await extractFromZoteroItem(item);
-    return result?.fullText ?? null;
-}
-
-/**
- * Extract high-quality content by lines from a Zotero attachment item.
- *
- * This provides the best quality extraction with line-level granularity,
- * proper reading order, and structural metadata for each line.
- *
- * @param item - Zotero attachment item
- * @param settings - Extraction settings
- * @returns Line-based extraction result or null if file not found
- */
-export async function extractByLinesFromZoteroItem(
-    item: Zotero.Item,
-    settings: ExtractionSettings = {}
-): Promise<LineExtractionResult | null> {
-    const path = await item.getFilePathAsync();
-    if (!path) {
-        return null;
-    }
-
-    const pdfData = await IOUtils.read(path);
-    const extractor = new PDFExtractor();
-    return extractor.extractByLines(pdfData, settings);
-}
-
-/**
- * Render a page from a Zotero attachment item to an image.
- *
- * @param item - Zotero attachment item
- * @param pageIndex - Page index (0-based). Default: 0
- * @param options - Rendering options (scale, dpi, format, etc.)
- * @returns PageImageResult or null if file not found
- *
- * @example
- * ```typescript
- * // Render first page at 150 DPI
- * const result = await renderPageToImageFromZoteroItem(item, 0, { dpi: 150 });
- * if (result) {
- *   // result.data is a Uint8Array of PNG/JPEG bytes
- *   console.log(`Rendered: ${result.width}x${result.height}`);
- * }
- * ```
- */
-export async function renderPageToImageFromZoteroItem(
-    item: Zotero.Item,
-    pageIndex: number = 0,
-    options: PageImageOptions = {}
-): Promise<PageImageResult | null> {
-    const path = await item.getFilePathAsync();
-    if (!path) {
-        return null;
-    }
-
-    const pdfData = await IOUtils.read(path);
-    const extractor = new PDFExtractor();
-    return extractor.renderPageToImage(pdfData, pageIndex, options);
-}
-
-/**
- * Render multiple pages from a Zotero attachment item to images.
- *
- * @param item - Zotero attachment item
- * @param pageIndices - Pages to render (0-based). If undefined, renders all.
- * @param options - Rendering options (scale, dpi, format, etc.)
- * @returns Array of PageImageResult or null if file not found
- *
- * @example
- * ```typescript
- * // Render all pages as thumbnails (low resolution)
- * const results = await renderPagesToImagesFromZoteroItem(item, undefined, {
- *   scale: 0.25,
- *   format: "jpeg",
- *   jpegQuality: 75
- * });
- * ```
- */
-export async function renderPagesToImagesFromZoteroItem(
-    item: Zotero.Item,
-    pageIndices?: number[],
-    options: PageImageOptions = {}
-): Promise<PageImageResult[] | null> {
-    const path = await item.getFilePathAsync();
-    if (!path) {
-        return null;
-    }
-
-    const pdfData = await IOUtils.read(path);
-    const extractor = new PDFExtractor();
-    return extractor.renderPagesToImages(pdfData, pageIndices, options);
-}
-
-/**
- * Search for text within a PDF from a Zotero attachment item.
- *
- * Search Behavior:
- * - Simple phrase search (grep-like) - matches literal text
- * - Case-insensitive matching
- * - No boolean operators (AND/OR) - for multiple terms, perform separate searches
- * - Returns whole pages ranked by match count (most matches first)
- * - Each hit includes QuadPoint coordinates for highlighting
- *
- * @param item - Zotero attachment item
- * @param query - Text to search for (literal phrase match)
- * @param options - Search options
- * @returns PDFSearchResult or null if file not found
- *
- * @example
- * ```typescript
- * const result = await searchFromZoteroItem(item, "machine learning");
- * if (result) {
- *   console.log(`Found ${result.totalMatches} matches in ${result.pagesWithMatches} pages`);
- *
- *   // Get top 3 pages with most matches
- *   const topPages = result.pages.slice(0, 3);
- *   for (const page of topPages) {
- *     console.log(`Page ${page.pageIndex + 1}: ${page.matchCount} matches`);
- *   }
- * }
- * ```
- */
-export async function searchFromZoteroItem(
-    item: Zotero.Item,
-    query: string,
-    options: PDFSearchOptions = {}
-): Promise<PDFSearchResult | null> {
-    const path = await item.getFilePathAsync();
-    if (!path) {
-        return null;
-    }
-
-    const pdfData = await IOUtils.read(path);
-    const extractor = new PDFExtractor();
-    return extractor.search(pdfData, query, options);
-}
-
-/**
- * Extract sentence-level bounding boxes for a single page of a Zotero
- * attachment item.
- *
- * Convenience wrapper around `PDFExtractor.extractSentenceBBoxes` that
- * reads the PDF file from disk. Returns `null` when the file is not
- * available locally. Graceful degradation applies — see the method docs
- * for details on `unmappedParagraphs` / `degradedParagraphs`.
- *
- * @param item - Zotero attachment item (must be a PDF)
- * @param pageIndex - 0-based page index
- * @param options - Pipeline options forwarded to `extractSentenceBBoxes`
- * @returns Sentences grouped by paragraph + flat sentence list, or `null`
- *          if the file cannot be read.
- *
- * @example
- * ```typescript
- * const result = await extractSentenceBBoxesFromZoteroItem(item, 0);
- * if (result) {
- *   for (const p of result.paragraphs) {
- *     console.log(`${p.item.type}: ${p.sentences.length} sentences`);
- *   }
- * }
- * ```
- */
-export async function extractSentenceBBoxesFromZoteroItem(
-    item: Zotero.Item,
-    pageIndex: number,
-    options: PageSentenceBBoxOptions = {}
-): Promise<PageSentenceBBoxResult | null> {
-    const path = await item.getFilePathAsync();
-    if (!path) {
-        return null;
-    }
-
-    // Resolve language from the parent regular item if the caller didn't
-    // pass one explicitly. `getItemLanguage` walks attachments → parent
-    // and returns the raw `language` field; `normalizeLanguageCode` (run
-    // inside the extractor) handles BCP-47 / ISO 639-2 / English-name
-    // variants. We resolve here rather than inside the extractor so that
-    // the extractor stays Zotero-item-agnostic.
-    let language = options.language;
-    if (language === undefined) {
-        try {
-            const { getItemLanguage } = await import(
-                "../../utils/zoteroUtils"
-            );
-            const raw = await getItemLanguage(item.libraryID, item.key);
-            if (raw) language = raw;
-        } catch {
-            // Field lookup is best effort — fall through to the "en"
-            // default applied by normalizeLanguageCode downstream.
-        }
-    }
-
-    const pdfData = await IOUtils.read(path);
-    const extractor = new PDFExtractor();
-    return extractor.extractSentenceBBoxes(pdfData, pageIndex, {
-        ...options,
-        language,
-    });
-}

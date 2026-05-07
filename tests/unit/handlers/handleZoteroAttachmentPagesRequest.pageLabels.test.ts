@@ -2,8 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Test-controlled mock state — reset in beforeEach.
 const mockState = {
-    extractWithMetaImpl: null as ((args: any) => Promise<any>) | null,
-    extractWithMetaCalls: [] as any[],
+    extractImpl: null as ((args: any) => Promise<any>) | null,
+    extractCalls: [] as any[],
 };
 
 vi.mock('../../../src/services/pdf', () => {
@@ -11,13 +11,13 @@ vi.mock('../../../src/services/pdf', () => {
         async getPageCount(): Promise<number> {
             return 3;
         }
-        async getPageCountAndLabels(): Promise<{ count: number; labels: Record<number, string> }> {
-            return { count: 3, labels: {} };
+        async getMetadata(): Promise<{ pageCount: number; pageLabels: Record<number, string> }> {
+            return { pageCount: 3, pageLabels: {} };
         }
-        async extractWithMeta(_pdfData: Uint8Array | ArrayBuffer, args: any): Promise<any> {
-            mockState.extractWithMetaCalls.push(args);
-            if (mockState.extractWithMetaImpl) {
-                return mockState.extractWithMetaImpl(args);
+        async extract(_pdfData: Uint8Array | ArrayBuffer, args: any): Promise<any> {
+            mockState.extractCalls.push(args);
+            if (mockState.extractImpl) {
+                return mockState.extractImpl(args);
             }
             return {
                 pages: [{ index: 0, label: '1', content: 'page-1', width: 100, height: 200 }],
@@ -75,8 +75,8 @@ describe('handleZoteroAttachmentPagesRequest page label persistence', () => {
 
     beforeEach(() => {
         vi.clearAllMocks();
-        mockState.extractWithMetaImpl = null;
-        mockState.extractWithMetaCalls = [];
+        mockState.extractImpl = null;
+        mockState.extractCalls = [];
         (globalThis as any).Zotero.__beaverShuttingDown = undefined;
     });
 
@@ -194,7 +194,7 @@ describe('handleZoteroAttachmentPagesRequest page label persistence', () => {
         return { cache };
     }
 
-    it('passes a pageRange to extractWithMeta for open-ended end_page (no upfront getPageCount)', async () => {
+    it('passes a pageRange to extract for open-ended end_page (no upfront getPageCount)', async () => {
         setupRequestScenario({ cachedPageCount: null });
 
         const response = await handleZoteroAttachmentPagesRequest({
@@ -211,18 +211,18 @@ describe('handleZoteroAttachmentPagesRequest page label persistence', () => {
             type: 'zotero_attachment_pages',
             total_pages: 3,
         });
-        expect(mockState.extractWithMetaCalls).toHaveLength(1);
-        expect(mockState.extractWithMetaCalls[0]).toMatchObject({
+        expect(mockState.extractCalls).toHaveLength(1);
+        expect(mockState.extractCalls[0]).toMatchObject({
             pageRange: { startIndex: 1, maxPages: 5 },
         });
         // No endIndex set — open-ended; worker resolves it.
-        expect(mockState.extractWithMetaCalls[0].pageRange.endIndex).toBeUndefined();
+        expect(mockState.extractCalls[0].pageRange.endIndex).toBeUndefined();
     });
 
     it('maps worker PAGE_OUT_OF_RANGE to page_out_of_range with total_pages from error.pageCount', async () => {
         setupRequestScenario({ cachedPageCount: null });
 
-        mockState.extractWithMetaImpl = async () => {
+        mockState.extractImpl = async () => {
             throw new ExtractionError(
                 ExtractionErrorCode.PAGE_OUT_OF_RANGE,
                 'All requested page indices are out of range or non-integer (document has 3 pages)',
@@ -264,8 +264,8 @@ describe('handleZoteroAttachmentPagesRequest page label persistence', () => {
             skip_local_limits: true,
         } as any);
 
-        expect(mockState.extractWithMetaCalls).toHaveLength(1);
-        expect(mockState.extractWithMetaCalls[0].pageRange).toEqual({
+        expect(mockState.extractCalls).toHaveLength(1);
+        expect(mockState.extractCalls[0].pageRange).toEqual({
             startIndex: 0,
             maxPages: 5,
         });
@@ -329,21 +329,21 @@ describe('handleZoteroAttachmentPagesRequest page label persistence', () => {
         // Must NOT short-circuit as too_many_pages; the worker should be
         // called with a clamped pageRange.
         expect(response).not.toMatchObject({ error_code: 'too_many_pages' });
-        expect(mockState.extractWithMetaCalls).toHaveLength(1);
-        expect(mockState.extractWithMetaCalls[0].pageRange).toEqual({
+        expect(mockState.extractCalls).toHaveLength(1);
+        expect(mockState.extractCalls[0].pageRange).toEqual({
             startIndex: 0,
             maxPages: 5,
         });
     });
 
     it('skips cache writes when shutdown is signalled mid-extraction', async () => {
-        // Regression: if Zotero begins teardown after extractWithMeta resolves,
+        // Regression: if Zotero begins teardown after extract resolves,
         // the cache writes (setMetadata, setContentPages) must not run — they
         // race the DB closing in onMainWindowUnload and risk crashing on shutdown.
         // Mirrors the sync.ts:266 / FileUploader.ts:338 shutdown-guard pattern.
         const { cache } = setupRequestScenario({ cachedPageCount: null });
 
-        mockState.extractWithMetaImpl = async () => {
+        mockState.extractImpl = async () => {
             // Simulate shutdown firing between extract resolution and the cache write.
             (globalThis as any).Zotero.__beaverShuttingDown = true;
             return {
@@ -440,6 +440,6 @@ describe('handleZoteroAttachmentPagesRequest page label persistence', () => {
             total_pages: 3,
         });
         // The worker should not have been called.
-        expect(mockState.extractWithMetaCalls).toHaveLength(0);
+        expect(mockState.extractCalls).toHaveLength(0);
     });
 });

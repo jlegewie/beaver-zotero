@@ -32,11 +32,11 @@ import type {
     ExtractionResult,
     ExtractionSettings,
     ExtractedLine,
-    LineExtractionResult,
     OCRDetectionOptions,
     OCRDetectionResult,
     PageImageOptions,
     PageImageResult,
+    PDFMetadata,
     PDFPageSearchResult,
     PDFSearchOptions,
     PDFSearchResult,
@@ -56,6 +56,7 @@ import { acquireDoc, releaseDoc } from "./docCache";
 import { ensureApi } from "./wasmInit";
 import {
     DEFAULT_PAGE_IMAGE_OPTIONS,
+    collectDocumentInfo,
     collectPageLabels,
     extractRawPageDetailedFromDoc,
     extractRawPageFromDoc,
@@ -86,14 +87,15 @@ export async function opGetPageCount(args: { pdfData: Uint8Array | ArrayBuffer }
     }
 }
 
-export async function opGetPageCountAndLabels(
+export async function opGetMetadata(
     args: { pdfData: Uint8Array | ArrayBuffer },
-): Promise<OpReply<{ count: number; labels: Record<number, string> }>> {
+): Promise<OpReply<PDFMetadata>> {
     const doc = await acquireDoc(args.pdfData);
     try {
-        const count = doc.countPages();
-        const labels = collectPageLabels(doc);
-        return { result: { count, labels } };
+        const pageCount = doc.countPages();
+        const pageLabels = collectPageLabels(doc);
+        const info = collectDocumentInfo(doc);
+        return { result: { pageCount, pageLabels, ...info } };
     } finally {
         releaseDoc(doc);
     }
@@ -136,38 +138,15 @@ export async function opExtractRawPageDetailed(
     }
 }
 
-export async function opRenderPagesToImages(
-    args: { pdfData: Uint8Array | ArrayBuffer; pageIndices?: number[]; options?: PageImageOptions },
-): Promise<OpReply<PageImageResult[]>> {
-    const api = await ensureApi();
-    const doc = await acquireDoc(args.pdfData);
-    try {
-        const opts = { ...DEFAULT_PAGE_IMAGE_OPTIONS, ...(args.options || {}) };
-        const pageCount = doc.countPages();
-        const indices = resolvePageIndices(pageCount, args.pageIndices);
-        const out: PageImageResult[] = [];
-        const transfer: Transferable[] = [];
-        for (const pageIndex of indices) {
-            const r = renderOnePage(api, doc, pageIndex, opts);
-            out.push(r);
-            transfer.push(r.data.buffer);
-        }
-        return { result: out, transfer };
-    } finally {
-        releaseDoc(doc);
-    }
-}
-
 /**
  * Strict, fused render-pages op for the images handler.
  *
- * Combines `getPageCountAndLabels` + `renderPagesToImages` into a single
- * doc-open. Returns metadata alongside the rendered pages so the handler
- * can populate `total_pages` and per-page `page_label` in the response
- * without an extra round-trip. Image buffers are transferred (per-page
- * `r.data.buffer`).
+ * Returns metadata alongside the rendered pages in a single doc-open so
+ * the handler can populate `total_pages` and per-page `page_label` in
+ * the response without an extra round-trip. Image buffers are
+ * transferred (per-page `r.data.buffer`).
  */
-export async function opRenderPagesToImagesWithMeta(
+export async function opRenderPages(
     args: {
         pdfData: Uint8Array | ArrayBuffer;
         pageIndices?: number[];
@@ -252,10 +231,12 @@ export async function opSearchPages(
 }
 
 /**
- * Shared body for `extract` / `extractByLines` / `extractWithMeta`. Differs
- * only in the per-page loop: column detection + PageExtractor (extract) vs
- * column + line detection (extractByLines). All other steps (raw extraction,
- * style + margin analysis, fullText assembly, analysis build) are identical.
+ * Shared body for `opExtract`. The per-page loop branches on
+ * `useLineDetection`: column detection + PageExtractor (block-based)
+ * vs column + line detection (line-based, populates `page.lines`). All
+ * other steps (raw extraction, style + margin analysis, fullText
+ * assembly, analysis build) are identical, and the result shape is the
+ * same `ExtractionResult` either way.
  *
  * The caller is responsible for opening the doc, resolving the page indices,
  * collecting page labels, and running the OCR text-layer check (NO_TEXT_LAYER
@@ -270,7 +251,7 @@ function runExtractFromIndices(
     pageCount: number,
     pageLabels: Record<number, string>,
     useLineDetection: boolean,
-): ExtractionResult | LineExtractionResult {
+): ExtractionResult {
     const rawPages: RawPageData[] = indices.map((i) => extractRawPageFromDoc(doc, i));
     const rawData: RawDocumentData = { pageCount, pages: rawPages };
 
@@ -379,98 +360,24 @@ function runExtractFromIndices(
         },
     };
 
-    return baseResult as ExtractionResult | LineExtractionResult;
-}
-
-/**
- * Legacy lenient pre-amble shared by `opExtract` / `opExtractByLines`. Runs
- * page-count + label collection + OCR check, then resolves indices using the
- * lenient `opts.pages?.length ? filter : undefined → resolvePageIndices`
- * semantics (empty filter → all pages). Preserved for callers that have not
- * been migrated to the strict resolver — dev tools, itemValidationManager,
- * getAttachmentFileStatus.
- */
-function runExtractCommon(
-    doc: DocumentLike,
-    settings: ExtractionSettings | undefined,
-    useLineDetection: boolean,
-): ExtractionResult | LineExtractionResult {
-    // Capture the caller-supplied threshold BEFORE the spread flattens it to
-    // the default. `getEffectiveRepeatThreshold` uses this to distinguish
-    // "user wanted 3" from "user omitted the field" so the short-doc
-    // relaxation only kicks in when no explicit value was provided.
-    const requestedRepeatThreshold = settings?.repeatThreshold;
-    const opts = { ...DEFAULT_EXTRACTION_SETTINGS, ...(settings || {}) };
-
-    const provider = rawPageProviderFromDoc(doc);
-    const docAnalyzer = new DocumentAnalyzer(provider);
-    const pageCount = docAnalyzer.getPageCount();
-    const pageLabels = collectPageLabels(doc);
-
-    if (opts.checkTextLayer) {
-        const ocr = docAnalyzer.getDetailedOCRAnalysis({ minTextPerPage: opts.minTextPerPage });
-        if (ocr.needsOCR) {
-            throw workerError(
-                ERROR_CODES.NO_TEXT_LAYER,
-                `Document may require OCR: ${ocr.primaryReason} (${Math.round(ocr.issueRatio * 100)}% of sampled pages have issues)`,
-                { ocrAnalysis: ocr, pageLabels, pageCount },
-            );
-        }
-    }
-
-    const pageIndices = opts.pages?.length
-        ? opts.pages.filter((i: number) => i >= 0 && i < pageCount)
-        : undefined;
-    const indices = resolvePageIndices(pageCount, pageIndices);
-
-    return runExtractFromIndices(
-        doc,
-        opts as any,
-        requestedRepeatThreshold,
-        indices,
-        pageCount,
-        pageLabels,
-        useLineDetection,
-    );
-}
-
-export async function opExtract(
-    args: { pdfData: Uint8Array | ArrayBuffer; settings?: ExtractionSettings },
-): Promise<OpReply<ExtractionResult | LineExtractionResult>> {
-    const useLineDetection = !!args.settings?.useLineDetection;
-    const doc = await acquireDoc(args.pdfData);
-    try {
-        const result = runExtractCommon(doc, args.settings, useLineDetection);
-        return { result };
-    } finally {
-        releaseDoc(doc);
-    }
-}
-
-export async function opExtractByLines(
-    args: { pdfData: Uint8Array | ArrayBuffer; settings?: ExtractionSettings },
-): Promise<OpReply<LineExtractionResult>> {
-    const doc = await acquireDoc(args.pdfData);
-    try {
-        const result = runExtractCommon(doc, args.settings, true) as LineExtractionResult;
-        return { result };
-    } finally {
-        releaseDoc(doc);
-    }
+    return baseResult as ExtractionResult;
 }
 
 /**
  * Strict, fused extract op for the agent handlers.
  *
- * Combines what the pages handler used to fetch as separate round-trips
- * (`getPageCountAndLabels` + `getPageCount` + `extract`) into a single
+ * Fuses page-count + page-labels + OCR check + extract into a single
  * doc-open. Uses the strict resolvers — explicit-but-all-invalid page
  * inputs throw PAGE_OUT_OF_RANGE with `{ pageCount }` in the payload so
  * handlers can populate `total_pages` in error responses.
  *
- * Rejects useLineDetection — line extraction must go through opExtractByLines.
+ * `settings.useLineDetection` is honored — when true, the per-page loop
+ * runs column + line detection instead of the block-based PageExtractor.
+ * The result is shaped identically either way (see `ExtractionResult`);
+ * the `lines` field on each `ProcessedPage` is populated only when line
+ * detection ran.
  */
-export async function opExtractWithMeta(
+export async function opExtract(
     args: {
         pdfData: Uint8Array | ArrayBuffer;
         settings?: ExtractionSettings;
@@ -478,16 +385,13 @@ export async function opExtractWithMeta(
         pageRange?: { startIndex: number; endIndex?: number; maxPages?: number };
     },
 ): Promise<OpReply<ExtractionResult>> {
-    if (args.settings?.useLineDetection) {
-        throw workerError(
-            ERROR_CODES.WASM_ERROR,
-            "opExtractWithMeta does not support useLineDetection — call opExtractByLines instead",
-        );
-    }
     const doc = await acquireDoc(args.pdfData);
     try {
         // Capture the caller-supplied threshold BEFORE the spread flattens
-        // it to the default — see runExtractCommon for the rationale.
+        // it to the default. `getEffectiveRepeatThreshold` uses this to
+        // distinguish "user wanted 3" from "user omitted the field" so the
+        // short-doc relaxation only kicks in when no explicit value was
+        // provided.
         const requestedRepeatThreshold = args.settings?.repeatThreshold;
         const opts = { ...DEFAULT_EXTRACTION_SETTINGS, ...(args.settings || {}) };
         const provider = rawPageProviderFromDoc(doc);
@@ -517,8 +421,8 @@ export async function opExtractWithMeta(
             indices,
             pageCount,
             pageLabels,
-            false,
-        ) as ExtractionResult;
+            !!opts.useLineDetection,
+        );
         return { result };
     } finally {
         releaseDoc(doc);
@@ -534,19 +438,6 @@ export async function opAnalyzeOCRNeeds(
         const analyzer = new DocumentAnalyzer(provider);
         const result = analyzer.getDetailedOCRAnalysis(args.options || {});
         return { result };
-    } finally {
-        releaseDoc(doc);
-    }
-}
-
-export async function opHasTextLayer(
-    args: { pdfData: Uint8Array | ArrayBuffer },
-): Promise<OpReply<boolean>> {
-    const doc = await acquireDoc(args.pdfData);
-    try {
-        const provider = rawPageProviderFromDoc(doc);
-        const analyzer = new DocumentAnalyzer(provider);
-        return { result: analyzer.hasTextLayer() };
     } finally {
         releaseDoc(doc);
     }

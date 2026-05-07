@@ -52,10 +52,10 @@ function makeCachedMeta(
     };
 }
 
-/** Minimal mock PDFExtractor — only `getPageCountAndLabels` is exercised here. */
-function makeMockExtractor(result: { count: number; labels: Record<number, string> } | Error) {
+/** Minimal mock PDFExtractor — only `getMetadata` is exercised here. */
+function makeMockExtractor(result: { pageCount: number; pageLabels: Record<number, string> } | Error) {
     return {
-        getPageCountAndLabels: vi.fn().mockImplementation(async () => {
+        getMetadata: vi.fn().mockImplementation(async () => {
             if (result instanceof Error) throw result;
             return result;
         }),
@@ -259,7 +259,7 @@ describe('ensurePageLabelsForResolution', () => {
             page_labels: { 0: 'i', 1: 'ii', 2: '1' },
             page_count: 3,
         });
-        const extractor = makeMockExtractor({ count: 999, labels: { 0: 'wrong' } });
+        const extractor = makeMockExtractor({ pageCount: 999, pageLabels: { 0: 'wrong' } });
 
         const result = await ensurePageLabelsForResolution('/data/test.pdf', cachedMeta, extractor);
 
@@ -267,7 +267,7 @@ describe('ensurePageLabelsForResolution', () => {
         expect(result.pageCount).toBe(3);
         expect(result.pdfData).toBeNull();
         // Should NOT call the extractor when cache has labels
-        expect(extractor.getPageCountAndLabels).not.toHaveBeenCalled();
+        expect(extractor.getMetadata).not.toHaveBeenCalled();
         expect(mockIOUtils.read).not.toHaveBeenCalled();
     });
 
@@ -278,22 +278,22 @@ describe('ensurePageLabelsForResolution', () => {
             page_labels: {},
             page_count: 5,
         });
-        const extractor = makeMockExtractor({ count: 999, labels: { 0: 'wrong' } });
+        const extractor = makeMockExtractor({ pageCount: 999, pageLabels: { 0: 'wrong' } });
 
         const result = await ensurePageLabelsForResolution('/data/test.pdf', cachedMeta, extractor);
 
         expect(result.labels).toBeNull();
         expect(result.pageCount).toBe(5);
         expect(result.pdfData).toBeNull();
-        expect(extractor.getPageCountAndLabels).not.toHaveBeenCalled();
+        expect(extractor.getMetadata).not.toHaveBeenCalled();
     });
 
     it('does an eager load when cachedMeta is null', async () => {
         const pdfBytes = new Uint8Array([1, 2, 3]);
         mockIOUtils.read.mockResolvedValueOnce(pdfBytes);
         const extractor = makeMockExtractor({
-            count: 42,
-            labels: { 0: 'i', 1: 'ii', 2: '1' },
+            pageCount: 42,
+            pageLabels: { 0: 'i', 1: 'ii', 2: '1' },
         });
 
         const result = await ensurePageLabelsForResolution('/data/test.pdf', null, extractor);
@@ -302,7 +302,7 @@ describe('ensurePageLabelsForResolution', () => {
         expect(result.pageCount).toBe(42);
         expect(result.pdfData).toBe(pdfBytes);
         expect(mockIOUtils.read).toHaveBeenCalledWith('/data/test.pdf');
-        expect(extractor.getPageCountAndLabels).toHaveBeenCalledWith(pdfBytes);
+        expect(extractor.getMetadata).toHaveBeenCalledWith(pdfBytes);
     });
 
     it('does an eager load when cachedMeta has null page_labels (never checked)', async () => {
@@ -310,8 +310,8 @@ describe('ensurePageLabelsForResolution', () => {
         const pdfBytes = new Uint8Array([1, 2, 3]);
         mockIOUtils.read.mockResolvedValueOnce(pdfBytes);
         const extractor = makeMockExtractor({
-            count: 10,
-            labels: { 0: '1' },
+            pageCount: 10,
+            pageLabels: { 0: '1' },
         });
 
         const result = await ensurePageLabelsForResolution('/data/test.pdf', cachedMeta, extractor);
@@ -319,12 +319,12 @@ describe('ensurePageLabelsForResolution', () => {
         expect(result.labels).toEqual({ 0: '1' });
         expect(result.pageCount).toBe(10);
         expect(result.pdfData).toBe(pdfBytes);
-        expect(extractor.getPageCountAndLabels).toHaveBeenCalledOnce();
+        expect(extractor.getMetadata).toHaveBeenCalledOnce();
     });
 
     it('normalises empty labels from eager load to null', async () => {
         mockIOUtils.read.mockResolvedValueOnce(new Uint8Array([1]));
-        const extractor = makeMockExtractor({ count: 5, labels: {} });
+        const extractor = makeMockExtractor({ pageCount: 5, pageLabels: {} });
 
         const result = await ensurePageLabelsForResolution('/data/test.pdf', null, extractor);
 

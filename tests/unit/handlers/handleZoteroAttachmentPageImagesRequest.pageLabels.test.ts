@@ -14,14 +14,14 @@ vi.mock('../../../src/services/pdf', () => {
             return mockState.cannedPageCount;
         }
 
-        async getPageCountAndLabels(): Promise<{ count: number; labels: Record<number, string> }> {
+        async getMetadata(): Promise<{ pageCount: number; pageLabels: Record<number, string> }> {
             return {
-                count: mockState.cannedPageCount,
-                labels: mockState.cannedPageLabels,
+                pageCount: mockState.cannedPageCount,
+                pageLabels: mockState.cannedPageLabels,
             };
         }
 
-        async renderPagesToImagesWithMeta(
+        async renderPages(
             _pdfData: Uint8Array | ArrayBuffer,
             args: any,
         ): Promise<{ pageCount: number; pageLabels: Record<number, string>; pages: any[] }> {

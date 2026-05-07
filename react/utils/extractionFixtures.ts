@@ -126,8 +126,7 @@ export async function createSentenceFixture(): Promise<CreateSentenceFixtureResu
         const pdfSha256 = await sha256Hex(pdfData);
 
         const client = getMuPDFWorkerClient();
-        const { count: pageCount, labels: pageLabels } =
-            await client.getPageCountAndLabels(pdfData);
+        const { pageCount, pageLabels } = await client.getMetadata(pdfData);
         const pageLabel = pageLabels[pageIndex] ?? null;
 
         const analysisIndices = resolveAnalysisPageIndices(pageIndex, pageCount);

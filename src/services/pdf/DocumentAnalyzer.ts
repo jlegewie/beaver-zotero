@@ -30,20 +30,6 @@ export interface RawPageProvider {
     extractRawPage(pageIndex: number, options?: { includeImages?: boolean }): RawPageData;
 }
 
-/** Legacy options interface for backward compatibility */
-export interface TextLayerCheckOptions {
-    /** Minimum text per page to consider it has a text layer */
-    minTextPerPage?: number;
-    /** Initial number of pages to sample */
-    sampleLimit?: number;
-    /** Expanded sample size for confirmation */
-    expandSampleLimit?: number;
-    /** Threshold to trigger expanded sampling */
-    scanThreshold?: number;
-    /** Final threshold to confirm no text layer */
-    confirmationThreshold?: number;
-}
-
 // ============================================================================
 // Text Quality Analysis
 // ============================================================================
@@ -506,64 +492,10 @@ export class DocumentAnalyzer {
     }
 
     /**
-     * Check if a PDF document lacks a text layer (likely needs OCR).
-     * Samples pages and uses multiple heuristics to detect scan-like documents.
-     *
-     * This is the main entry point for OCR detection.
-     *
-     * @param options - Detection options (supports both legacy and new options)
-     * @returns true if document likely needs OCR
-     */
-    hasNoTextLayer(options: TextLayerCheckOptions | OCRDetectionOptions = {}): boolean {
-        // Map legacy options to new format
-        const mappedOptions: OCRDetectionOptions = {
-            minTextPerPage: options.minTextPerPage,
-            sampleSize: (options as TextLayerCheckOptions).sampleLimit ??
-                (options as OCRDetectionOptions).sampleSize,
-            expandedSampleSize: (options as TextLayerCheckOptions).expandSampleLimit ??
-                (options as OCRDetectionOptions).expandedSampleSize,
-            // Legacy scanThreshold maps to expandUpperThreshold (old behavior)
-            expandUpperThreshold: (options as TextLayerCheckOptions).scanThreshold ??
-                (options as OCRDetectionOptions).expandUpperThreshold,
-            expandLowerThreshold: (options as OCRDetectionOptions).expandLowerThreshold,
-            confirmationThreshold: (options as TextLayerCheckOptions).confirmationThreshold ??
-                (options as OCRDetectionOptions).confirmationThreshold,
-        };
-
-        // Pass through new-format options
-        if ("maxWhitespaceRatio" in options) {
-            Object.assign(mappedOptions, {
-                maxWhitespaceRatio: options.maxWhitespaceRatio,
-                maxNewlineRatio: options.maxNewlineRatio,
-                minAlphanumericRatio: options.minAlphanumericRatio,
-                maxInvalidCharRatio: options.maxInvalidCharRatio,
-                minValidCharsToAccept: options.minValidCharsToAccept,
-                imageCoverageThreshold: options.imageCoverageThreshold,
-                maxLineOverlapRatio: options.maxLineOverlapRatio,
-                boundaryMargin: options.boundaryMargin,
-                checkBoundingBoxes: options.checkBoundingBoxes,
-            });
-        }
-
-        const result = this.analyzeOCRNeeds(mappedOptions);
-        return result.needsOCR;
-    }
-
-    /**
      * Get the page count of the document.
      */
     getPageCount(): number {
         return this.mupdf.getPageCount();
-    }
-
-    /**
-     * Quick check: Does the document have a text layer?
-     *
-     * @param options - Detection options
-     * @returns true if document has usable text layer
-     */
-    hasTextLayer(options: TextLayerCheckOptions | OCRDetectionOptions = {}): boolean {
-        return !this.hasNoTextLayer(options);
     }
 
     /**

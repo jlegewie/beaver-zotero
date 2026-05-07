@@ -628,7 +628,6 @@ const result = await extractor.extractByLines(pdfData);
 const result = await extractor.extract(pdfData, { useLineDetection: true });
 
 // Checks
-const hasText = await extractor.hasTextLayer(pdfData);
 const pageCount = await extractor.getPageCount(pdfData);
 const ocrNeeds = await extractor.analyzeOCRNeeds(pdfData);
 ```
@@ -638,35 +637,30 @@ const ocrNeeds = await extractor.analyzeOCRNeeds(pdfData);
 Render PDF pages to PNG or JPEG images with configurable resolution.
 
 ```typescript
-// From Zotero item (recommended)
-import {
-  renderPageToImageFromZoteroItem,
-  renderPagesToImagesFromZoteroItem,
-} from "src/services/pdf";
-
-// Render first page at 150 DPI as PNG
-const result = await renderPageToImageFromZoteroItem(item, 0, { dpi: 150 });
-// result.data is Uint8Array of PNG bytes
-// result.width, result.height - image dimensions in pixels
-
-// Render pages 0-2 as JPEG thumbnails
-const results = await renderPagesToImagesFromZoteroItem(item, [0, 1, 2], {
-  scale: 0.5, // 50% size (36 DPI)
-  format: "jpeg",
-  jpegQuality: 85,
-});
-
-// Manual with raw PDF data
 const extractor = new PDFExtractor();
+
+// Render first page at 300 DPI as PNG
 const image = await extractor.renderPageToImage(pdfData, 0, {
   dpi: 300, // 300 DPI for high quality
   alpha: false, // Opaque background
   showExtras: true, // Include annotations
   format: "png",
 });
+// image.data is Uint8Array of PNG bytes
+// image.width, image.height - image dimensions in pixels
 
-// Render all pages
-const allImages = await extractor.renderPagesToImages(pdfData);
+// Render pages 0-2 as JPEG thumbnails (fused with metadata in one round-trip)
+const { pageCount, pageLabels, pages } = await extractor.renderPages(
+  pdfData,
+  {
+    pageIndices: [0, 1, 2],
+    options: { scale: 0.5, format: "jpeg", jpegQuality: 85 },
+  },
+);
+
+// Render all pages — pass `pageIndices: undefined` (or omit) to avoid a
+// pageCount round-trip
+const all = await extractor.renderPages(pdfData);
 ```
 
 #### PageImageOptions
@@ -715,28 +709,44 @@ Search for text within PDFs with relevance-ranked results. The search uses MuPDF
 **Best Practices:**
 
 ```typescript
+const filePath = await attachment.getFilePathAsync();
+if (!filePath) {
+  throw new Error("Attachment file is unavailable");
+}
+
+const pdfData = await IOUtils.read(filePath);
+const extractor = new PDFExtractor();
+
 // ✅ Good: Specific phrase
-await searchFromZoteroItem(item, "random forest classifier");
+await extractor.search(pdfData, "random forest classifier");
 
 // ✅ Good: Key technical term
-await searchFromZoteroItem(item, "gradient descent");
+await extractor.search(pdfData, "gradient descent");
 
 // ✅ Good: Partial word to catch variations
-await searchFromZoteroItem(item, "optim"); // matches: optimize, optimization, optimal
+await extractor.search(pdfData, "optim"); // matches: optimize, optimization, optimal
 
 // ❌ Avoid: Very short queries (too many matches)
-await searchFromZoteroItem(item, "of"); // Matches everywhere
+await extractor.search(pdfData, "of"); // Matches everywhere
 
 // ❌ Avoid: Very long phrases (may not match exactly)
-await searchFromZoteroItem(item, "the implementation of our novel approach");
+await extractor.search(pdfData, "the implementation of our novel approach");
 ```
 
 **For Multiple Terms (Simulating AND):**
 
 ```typescript
+const filePath = await attachment.getFilePathAsync();
+if (!filePath) {
+  throw new Error("Attachment file is unavailable");
+}
+
+const pdfData = await IOUtils.read(filePath);
+const extractor = new PDFExtractor();
+
 // Search for pages containing BOTH terms
-const result1 = await searchFromZoteroItem(item, "machine learning");
-const result2 = await searchFromZoteroItem(item, "neural network");
+const result1 = await extractor.search(pdfData, "machine learning");
+const result2 = await extractor.search(pdfData, "neural network");
 
 // Find pages that appear in both results
 const pagesWithBoth = result1.pages.filter((p1) =>
@@ -747,10 +757,17 @@ const pagesWithBoth = result1.pages.filter((p1) =>
 #### Basic Usage
 
 ```typescript
-import { searchFromZoteroItem } from "src/services/pdf";
+import { PDFExtractor } from "src/services/pdf";
 
 // Simple search
-const result = await searchFromZoteroItem(item, "machine learning");
+const filePath = await attachment.getFilePathAsync();
+if (!filePath) {
+  throw new Error("Attachment file is unavailable");
+}
+
+const pdfData = await IOUtils.read(filePath);
+const extractor = new PDFExtractor();
+const result = await extractor.search(pdfData, "machine learning");
 
 if (result) {
   console.log(
@@ -823,7 +840,7 @@ The `√(text_length)` normalization prevents long pages from dominating results
 #### Customizing Scoring
 
 ```typescript
-const result = await searchFromZoteroItem(item, "query", {
+const result = await extractor.search(pdfData, "query", {
   scoring: {
     // Custom role weights
     roleWeights: {
@@ -919,12 +936,12 @@ interface ScoredSearchHit {
 
 ```typescript
 // Limit to first 50 pages for faster results
-const result = await searchFromZoteroItem(item, "query", {
+const result = await extractor.search(pdfData, "query", {
   pages: Array.from({ length: 50 }, (_, i) => i),
 });
 
 // Reduce max hits per page if you only need top results
-const result = await searchFromZoteroItem(item, "query", {
+const result = await extractor.search(pdfData, "query", {
   maxHitsPerPage: 20,
 });
 ```

@@ -346,8 +346,9 @@ export async function handleTestPdfPageCountHttpRequest(request: any) {
 }
 
 /**
- * Dev-only PDF page labels endpoint. Routes through `PDFExtractor`, which
- * delegates to the MuPDF worker.
+ * Dev-only PDF metadata endpoint. Routes through `PDFExtractor`, which
+ * delegates to the MuPDF worker. Returns page count, page labels, and
+ * cheap info-dict fields (title, author, format, etc.).
  */
 export async function handleTestPdfPageLabelsHttpRequest(request: any) {
     const { PDFExtractor, ExtractionError } = await import(
@@ -359,10 +360,8 @@ export async function handleTestPdfPageLabelsHttpRequest(request: any) {
     const { pdfData } = loaded;
 
     try {
-        const { count, labels } = await new PDFExtractor().getPageCountAndLabels(
-            pdfData,
-        );
-        return { ok: true, count, labels };
+        const metadata = await new PDFExtractor().getMetadata(pdfData);
+        return { ok: true, ...metadata };
     } catch (e: any) {
         if (e instanceof ExtractionError) {
             return {
@@ -379,8 +378,11 @@ export async function handleTestPdfPageLabelsHttpRequest(request: any) {
 }
 
 /**
- * Dev-only PDF render endpoint. Routes through `PDFExtractor`. Image bytes
- * are base64-encoded for JSON transport; live tests decode for parity.
+ * Dev-only PDF render endpoint. Routes through
+ * `PDFExtractor.renderPages` and discards the metadata — the legacy
+ * `{ ok, pages }` response shape is preserved for live-test parity.
+ * Image bytes are base64-encoded for JSON transport; live tests decode
+ * for parity.
  */
 export async function handleTestPdfRenderPagesHttpRequest(request: any) {
     const { PDFExtractor, ExtractionError } = await import(
@@ -397,12 +399,11 @@ export async function handleTestPdfRenderPagesHttpRequest(request: any) {
     const options = request?.options || {};
 
     try {
-        const results = await new PDFExtractor().renderPagesToImages(
+        const result = await new PDFExtractor().renderPages(
             pdfData,
-            pageIndices,
-            options,
+            { pageIndices, options },
         );
-        const pages = results.map((r) => ({
+        const pages = result.pages.map((r) => ({
             pageIndex: r.pageIndex,
             format: r.format,
             width: r.width,
@@ -430,8 +431,8 @@ export async function handleTestPdfRenderPagesHttpRequest(request: any) {
 
 /**
  * Dev-only fused render-pages endpoint exercising
- * `PDFExtractor.renderPagesToImagesWithMeta`. Returns metadata alongside
- * rendered pages so live tests can verify the fused-op shape end-to-end.
+ * `PDFExtractor.renderPages`. Returns metadata alongside rendered pages
+ * so live tests can verify the fused-op shape end-to-end.
  */
 export async function handleTestPdfRenderPagesWithMetaHttpRequest(request: any) {
     const { PDFExtractor, ExtractionError } = await import(
@@ -451,7 +452,7 @@ export async function handleTestPdfRenderPagesWithMetaHttpRequest(request: any) 
     const options = request?.options || {};
 
     try {
-        const result = await new PDFExtractor().renderPagesToImagesWithMeta(pdfData, {
+        const result = await new PDFExtractor().renderPages(pdfData, {
             pageIndices,
             pageRange,
             options,
@@ -489,11 +490,16 @@ export async function handleTestPdfRenderPagesWithMetaHttpRequest(request: any) 
 }
 
 /**
- * Dev-only PDF raw-extract endpoint. Routes through `PDFExtractor`.
+ * Dev-only PDF raw-extract endpoint — primitive level.
+ *
+ * Calls `getMuPDFWorkerClient().extractRawPages` directly so the test
+ * exercises the same worker entry point production code uses (e.g.
+ * `SentenceExtractionPipeline`).
  */
 export async function handleTestPdfExtractRawHttpRequest(request: any) {
-    const { PDFExtractor, ExtractionError } = await import(
-        '../../../src/services/pdf'
+    const { ExtractionError } = await import('../../../src/services/pdf');
+    const { getMuPDFWorkerClient } = await import(
+        '../../../src/services/pdf/MuPDFWorkerClient'
     );
 
     const loaded = await loadPdfBytesForTestEndpoint(request);
@@ -505,7 +511,10 @@ export async function handleTestPdfExtractRawHttpRequest(request: any) {
         : undefined;
 
     try {
-        const result = await new PDFExtractor().extractRaw(pdfData, pageIndices);
+        const result = await getMuPDFWorkerClient().extractRawPages(
+            pdfData,
+            pageIndices,
+        );
         return { ok: true, result };
     } catch (e: any) {
         if (e instanceof ExtractionError) {
@@ -626,35 +635,60 @@ export async function handleTestPdfSearchHttpRequest(request: any) {
     }
 }
 
-/** Dev-only `extract` parity endpoint. Routes through PDFExtractor. */
+/**
+ * Dev-only `extract` parity endpoint. Translates the legacy
+ * `settings.pages` array into the worker-side `pageIndices` arg so existing
+ * live-test bodies (which still pass `{ settings: { pages: [...] } }`) keep
+ * working.
+ */
 export async function handleTestPdfExtractHttpRequest(request: any) {
     const { PDFExtractor } = await import('../../../src/services/pdf');
-    const settings = request?.settings || {};
+    const settings = { ...(request?.settings || {}) };
+    const pageIndices: number[] | undefined = Array.isArray(settings.pages) && settings.pages.length > 0
+        ? settings.pages
+        : undefined;
+    delete settings.pages;
     return runPdfExtractorCall(
         request,
-        (pdfData) => new PDFExtractor().extract(pdfData, settings),
+        (pdfData) => new PDFExtractor().extract(pdfData, { settings, pageIndices }),
         (result) => ({ ok: true, result }),
     );
 }
 
-/** Dev-only `extractByLines` parity endpoint. */
+/**
+ * Dev-only line-extraction parity endpoint. Now backed by `extract`
+ * with `useLineDetection: true` — kept under the legacy route so existing
+ * live-test bodies (which still pass `{ settings: { pages: [...] } }`)
+ * keep working. The `settings.pages` array is translated into the
+ * worker-side `pageIndices` arg.
+ */
 export async function handleTestPdfExtractByLinesHttpRequest(request: any) {
     const { PDFExtractor } = await import('../../../src/services/pdf');
-    const settings = request?.settings || {};
+    const settings = { ...(request?.settings || {}), useLineDetection: true };
+    const pageIndices: number[] | undefined = Array.isArray(settings.pages) && settings.pages.length > 0
+        ? settings.pages
+        : undefined;
+    delete settings.pages;
     return runPdfExtractorCall(
         request,
-        (pdfData) => new PDFExtractor().extractByLines(pdfData, settings),
+        (pdfData) => new PDFExtractor().extract(pdfData, { settings, pageIndices }),
         (result) => ({ ok: true, result }),
     );
 }
 
-/** Dev-only `hasTextLayer` parity endpoint. */
+/**
+ * Dev-only `hasTextLayer` parity endpoint.
+ *
+ * `hasTextLayer` is a boolean projection of `analyzeOCRNeeds` (identical
+ * cost — same sampled-page analysis), so we run `analyzeOCRNeeds` and
+ * return `!needsOCR` rather than maintaining a redundant facade method.
+ */
 export async function handleTestPdfHasTextLayerHttpRequest(request: any) {
     const { PDFExtractor } = await import('../../../src/services/pdf');
     return runPdfExtractorCall(
         request,
-        (pdfData) => new PDFExtractor().hasTextLayer(pdfData),
-        (hasTextLayer) => ({ ok: true, hasTextLayer }),
+        (pdfData) => new PDFExtractor().analyzeOCRNeeds(pdfData),
+        (result) => ({ ok: true, hasTextLayer: !result.needsOCR }),
     );
 }
 
@@ -689,7 +723,7 @@ export async function handleTestPdfSentenceBBoxesHttpRequest(request: any) {
     return runPdfExtractorCall(
         request,
         (pdfData) =>
-            new PDFExtractor().extractSentenceBBoxes(pdfData, pageIndex, options),
+            new PDFExtractor().extractSentenceBBoxes(pdfData, { ...options, pageIndex }),
         (result) => ({ ok: true, result }),
     );
 }

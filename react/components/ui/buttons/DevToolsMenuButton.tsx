@@ -4,12 +4,10 @@ import { MenuItem } from '../menu/ContextMenu';
 import PdfIcon from '../../icons/PdfIcon';
 import SearchIcon from '../../icons/SearchIcon';
 import ToolsIcon from '../../icons/ToolsIcon';
-import { 
-    extractByLinesFromZoteroItem,
-    ExtractionError, 
+import {
+    ExtractionError,
     ExtractionErrorCode,
     PDFExtractor,
-    searchFromZoteroItem,
 } from '../../../../src/services/pdf';
 import {
     visualizeCurrentPageColumns,
@@ -161,12 +159,15 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
         console.log("[PDF Test] Starting line-based extraction for:", pdfItem.getField("title") || pdfItem.getDisplayTitle());
 
         try {
-            const result = await extractByLinesFromZoteroItem(pdfItem);
-            
-            if (!result) {
+            const path = await pdfItem.getFilePathAsync();
+            if (!path) {
                 console.log("[PDF Test] File not found");
                 return;
             }
+            const pdfData = await IOUtils.read(path);
+            const result = await new PDFExtractor().extract(pdfData, {
+                settings: { useLineDetection: true },
+            });
 
             console.log("[PDF Test] ✓ Extraction complete!");
             console.log(`[PDF Test] Document: ${result.analysis.pageCount} pages, ${result.fullText.length} chars total`);
@@ -461,12 +462,18 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
             }
             
             // Extract with line detection for current page only (skip OCR check for testing)
-            const result = await extractByLinesFromZoteroItem(item, {
-                pages: [currentPageIndex],
-                checkTextLayer: false,
+            const path = await item.getFilePathAsync();
+            if (!path) {
+                console.warn("[PDF Extractor] File not found");
+                return;
+            }
+            const pdfData = await IOUtils.read(path);
+            const result = await new PDFExtractor().extract(pdfData, {
+                pageIndices: [currentPageIndex],
+                settings: { useLineDetection: true, checkTextLayer: false },
             });
-            
-            if (!result || result.pages.length === 0) {
+
+            if (result.pages.length === 0) {
                 console.warn("[PDF Extractor] Extraction failed");
                 return;
             }
@@ -642,12 +649,13 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
         console.log(`[PDF Search Test] Query: "${query}"`);
 
         try {
-            const result = await searchFromZoteroItem(pdfItem, query);
-            
-            if (!result) {
+            const path = await pdfItem.getFilePathAsync();
+            if (!path) {
                 console.log("[PDF Search Test] File not found");
                 return;
             }
+            const pdfData = await IOUtils.read(path);
+            const result = await new PDFExtractor().search(pdfData, query);
 
             // Log summary
             console.log("\n" + "=".repeat(60));

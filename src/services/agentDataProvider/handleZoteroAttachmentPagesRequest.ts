@@ -195,7 +195,7 @@ export async function handleZoteroAttachmentPagesRequest(
         // entire document and have no cached page_count — needed to gate
         // `maxPageCount` before committing to a multi-thousand-page extract.
         // Bounded ranges (including all-pages-with-max_pages) get pageCount
-        // back inside `extractWithMeta`.
+        // back inside `extract`.
         const needsUpfrontPageCount =
             totalPages == null && effectivelyUnboundedExtract && !skip_local_limits;
         if (needsUpfrontPageCount) {
@@ -307,7 +307,7 @@ export async function handleZoteroAttachmentPagesRequest(
             }
         }
 
-        // 9. Cache miss — load bytes (if not already loaded) and call extractWithMeta.
+        // 9. Cache miss — load bytes (if not already loaded) and call extract.
         logger(
             `handleZoteroAttachmentPagesRequest: Cache miss for ${requestKey} pages ${startPage}-${requestedEndPage ?? '(end)'}`,
             3,
@@ -334,7 +334,7 @@ export async function handleZoteroAttachmentPagesRequest(
             }
         }
 
-        // Choose extractWithMeta arg shape based on what's known:
+        // Choose extract arg shape based on what's known:
         //   - effectively unbounded                → no pageIndices/pageRange (worker uses all)
         //   - all-pages with max_pages              → pageRange { startIndex: 0, maxPages } (worker clamps)
         //   - bounded both ends                     → pageRange { startIndex, endIndex, maxPages }
@@ -363,13 +363,13 @@ export async function handleZoteroAttachmentPagesRequest(
             extractArgs.pageRange = { startIndex: 0, maxPages: max_pages };
         }
         logger(
-            `handleZoteroAttachmentPagesRequest: extractWithMeta for ${requestKey} `
+            `handleZoteroAttachmentPagesRequest: extract for ${requestKey} `
             + `pageRange=${JSON.stringify(extractArgs.pageRange ?? null)} (allPages=${extractingAllPages}, max_pages=${max_pages ?? 'none'})`,
             3,
         );
-        const result = await extractor.extractWithMeta(pdfData, extractArgs);
+        const result = await extractor.extract(pdfData, extractArgs);
 
-        // The worker's extractWithMeta always populates analysis.pageCount.
+        // The worker's extract always populates analysis.pageCount.
         const resolvedPageCount = result.analysis.pageCount;
         totalPages = resolvedPageCount;
 

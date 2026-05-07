@@ -154,8 +154,17 @@ export interface PdfRenderPagesWithMetaResponse {
 
 export interface PdfPageLabelsResponse {
     ok: boolean;
-    count?: number;
-    labels?: Record<number, string>;
+    pageCount?: number;
+    pageLabels?: Record<number, string>;
+    format?: string;
+    title?: string;
+    author?: string;
+    subject?: string;
+    keywords?: string;
+    creator?: string;
+    producer?: string;
+    creationDate?: string;
+    modDate?: string;
     error?: { name: string; code?: string; message: string };
 }
 

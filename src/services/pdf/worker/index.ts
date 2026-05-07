@@ -23,17 +23,13 @@ import { ensureApi } from "./wasmInit";
 import {
     opAnalyzeOCRNeeds,
     opExtract,
-    opExtractByLines,
     opExtractRawPageDetailed,
     opExtractRawPages,
     opExtractSentenceBBoxes,
-    opExtractWithMeta,
+    opGetMetadata,
     opGetPageCount,
-    opGetPageCountAndLabels,
-    opHasTextLayer,
     opRenderPageToImage,
-    opRenderPagesToImages,
-    opRenderPagesToImagesWithMeta,
+    opRenderPages,
     opSearch,
     opSearchPages,
     type OpReply,
@@ -64,16 +60,14 @@ async function dispatch(op: string, args: Record<string, unknown> | undefined): 
         }
         case "getPageCount":
             return await opGetPageCount(a as Parameters<typeof opGetPageCount>[0]);
-        case "getPageCountAndLabels":
-            return await opGetPageCountAndLabels(a as Parameters<typeof opGetPageCountAndLabels>[0]);
+        case "getMetadata":
+            return await opGetMetadata(a as Parameters<typeof opGetMetadata>[0]);
         case "extractRawPages":
             return await opExtractRawPages(a as Parameters<typeof opExtractRawPages>[0]);
         case "extractRawPageDetailed":
             return await opExtractRawPageDetailed(a as Parameters<typeof opExtractRawPageDetailed>[0]);
-        case "renderPagesToImages":
-            return await opRenderPagesToImages(a as Parameters<typeof opRenderPagesToImages>[0]);
-        case "renderPagesToImagesWithMeta":
-            return await opRenderPagesToImagesWithMeta(a as Parameters<typeof opRenderPagesToImagesWithMeta>[0]);
+        case "renderPages":
+            return await opRenderPages(a as Parameters<typeof opRenderPages>[0]);
         case "renderPageToImage":
             return await opRenderPageToImage(a as Parameters<typeof opRenderPageToImage>[0]);
         case "searchPages":
@@ -81,14 +75,8 @@ async function dispatch(op: string, args: Record<string, unknown> | undefined): 
         // orchestration ops
         case "extract":
             return await opExtract(a as Parameters<typeof opExtract>[0]);
-        case "extractWithMeta":
-            return await opExtractWithMeta(a as Parameters<typeof opExtractWithMeta>[0]);
-        case "extractByLines":
-            return await opExtractByLines(a as Parameters<typeof opExtractByLines>[0]);
         case "analyzeOCRNeeds":
             return await opAnalyzeOCRNeeds(a as Parameters<typeof opAnalyzeOCRNeeds>[0]);
-        case "hasTextLayer":
-            return await opHasTextLayer(a as Parameters<typeof opHasTextLayer>[0]);
         case "search":
             return await opSearch(a as Parameters<typeof opSearch>[0]);
         case "extractSentenceBBoxes":
