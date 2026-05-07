@@ -769,16 +769,58 @@ describe('hanging-indent leader suppression', () => {
                     font: 'Times-Roman',
                 },
             ]);
-            const paragraphs = paragraphTexts(result, [BODY]);
-            // The heading itself is detected and split off (its "type"
-            // becomes "header", filtered out by paragraphTexts), so we
-            // expect at least the filler paragraph + the continuation
-            // paragraph — never a single merged paragraph that includes
-            // "2. Methods" together with the continuation body.
-            const merged = paragraphs.find(
-                p => p.includes('2. Methods') && p.includes('analytic procedure')
+            // Inspect ALL items (paragraphs + headers) directly so the
+            // assertion holds even though `paragraphTexts` would filter the
+            // heading out. The continuation must be in its own item, not
+            // the same item as the "2. Methods" heading.
+            const detection = detectParagraphs(result, [BODY]);
+            const headingItem = detection.items.find(it =>
+                it.text.includes('2. Methods'),
             );
-            expect(merged).toBeUndefined();
+            const contItem = detection.items.find(it =>
+                it.text.includes('analytic procedure'),
+            );
+            expect(headingItem).toBeDefined();
+            expect(contItem).toBeDefined();
+            expect(headingItem!.id).not.toBe(contItem!.id);
+            expect(headingItem!.text).not.toContain('analytic procedure');
+        });
+
+        it('smaller multi-span text leader, larger same-font indented continuation', () => {
+            // Smaller-text leader (size 8, two spans — marker + body) followed
+            // by a larger same-font indented continuation (size 10). The
+            // marker-aggregation safety net must NOT fire here because prev
+            // has more than one span — the artifact only manifests when
+            // MuPDF collapses the line into a single span. Without that
+            // narrowing, the rule would silently merge a footnote-styled
+            // leader with a body-styled wrap, which is not the layout we
+            // want to handle.
+            const result = makeColumnPageResult([
+                ...FILLERS,
+                {
+                    text: 'David Silver, Aja Huang, Chris J. Maddison,',
+                    l: 0,
+                    size: 8,
+                    font: 'Times-Roman',
+                    marker: { text: '6  ', size: 4, font: 'Times-Roman' },
+                },
+                {
+                    text: 'a body-sized continuation that should not merge',
+                    l: 10,
+                    size: 10,
+                    font: 'Times-Roman',
+                },
+            ]);
+            const detection = detectParagraphs(result, [BODY]);
+            const leaderItem = detection.items.find(it =>
+                it.text.includes('David Silver'),
+            );
+            const contItem = detection.items.find(it =>
+                it.text.includes('should not merge'),
+            );
+            expect(leaderItem).toBeDefined();
+            expect(contItem).toBeDefined();
+            expect(leaderItem!.id).not.toBe(contItem!.id);
         });
     });
 });

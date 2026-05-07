@@ -627,20 +627,26 @@ function extractLineStyle(line: PageLine): TextStyle | null {
 }
 
 /**
- * Style of the line's longest span by character count. Footnote markers are
- * typically short superscript spans at the start of the line ("6 " in size 4
- * before "David Silver…" in size 8); the first-span style therefore reflects
- * the marker, not the body text. The hanging-indent suppression compares the
- * continuation line against this dominant style so a leader line dominated
- * by its body text matches its wrapped continuation even when the marker
- * itself is in a different (smaller / italic / bold) style.
+ * Style of the line's longest span by trimmed character count. Footnote
+ * markers are typically short superscript spans at the start of the line
+ * ("6 " in size 4 before "David Silver…" in size 8); the first-span style
+ * therefore reflects the marker, not the body text. The hanging-indent
+ * suppression compares the continuation line against this dominant style so
+ * a leader line dominated by its body text matches its wrapped continuation
+ * even when the marker itself is in a different (smaller / italic / bold)
+ * style.
+ *
+ * Counts visible-text length (trimmed) rather than raw `span.text.length`
+ * so a long whitespace-only run can't beat a shorter body-text span. Falls
+ * back to `extractLineStyle` when every span is whitespace-only.
  */
 function dominantSpanStyleByCharCount(line: PageLine): TextStyle | null {
     if (line.spans.length === 0) return null;
     let best: TextStyle | null = null;
-    let bestChars = -1;
+    let bestChars = 0;
     for (const span of line.spans) {
-        const len = (span.text || "").length;
+        const len = (span.text || "").trim().length;
+        if (len === 0) continue;
         if (len > bestChars) {
             bestChars = len;
             best = extractSpanStyle(
@@ -651,7 +657,7 @@ function dominantSpanStyleByCharCount(line: PageLine): TextStyle | null {
             );
         }
     }
-    return best;
+    return best ?? extractLineStyle(line);
 }
 
 /**
@@ -1181,18 +1187,33 @@ function startNewItem(
                 // whole span. The dominant-by-char-count span style then
                 // reflects the marker (size ~4), not the body text (size ~8),
                 // and `sameStyle` against the body-styled continuation
-                // fails. Detect that case by fonts/bold/italic agreeing
-                // while prev's reported size is significantly smaller than
-                // the continuation — a discrepancy that doesn't occur when
-                // a leader and its wrap really differ in style (heading
-                // leaders read larger, not smaller).
+                // fails.
+                //
+                // Restrict the compensation to the structural shape of that
+                // artifact so it doesn't quietly re-open the style gate for
+                // legitimate small-text leaders followed by larger indented
+                // body. Required signals:
+                //   - prev has exactly ONE span (= MuPDF aggregated whatever
+                //     marker + body text spans existed into one);
+                //   - prev's bbox height matches the continuation's bbox
+                //     height (= the visual line height tracks the body
+                //     glyphs, not the misreported marker size);
+                //   - fonts / bold / italic agree;
+                //   - prev's reported size is significantly smaller than
+                //     the continuation (heading leaders read larger, not
+                //     smaller, so this never matches a heading false
+                //     positive).
                 const fontAndModMatch =
                     !!currStyle &&
                     !!prevDominant &&
                     currStyle.font === prevDominant.font &&
                     currStyle.bold === prevDominant.bold &&
                     currStyle.italic === prevDominant.italic;
+                const lineHeightsMatch =
+                    Math.abs(line.bbox.height - prevLine.bbox.height) < 1.0;
                 const markerSizeDiscrepancy =
+                    prevLine.spans.length === 1 &&
+                    lineHeightsMatch &&
                     fontAndModMatch &&
                     !!currStyle &&
                     !!prevDominant &&
