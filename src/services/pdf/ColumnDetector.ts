@@ -833,6 +833,28 @@ function mergeBlocks(
 }
 
 /**
+ * Heading-shape width threshold for the standalone-heading guard in
+ * `canJoinAsShortAdjacent`. A short block whose width is at or below this
+ * fraction of the host column counts as "heading-like enough" to be
+ * checked against opposite-side section context. Picked broader than the
+ * bridge merger's `2× narrower` heuristic so it catches multi-word
+ * headings ("2. Methods", "Results and discussion", "Supplementary
+ * methods") while still excluding ordinary indented first lines, which
+ * sit at ~0.9 of the column width.
+ */
+const HEADING_LIKE_WIDTH_RATIO = 0.65;
+
+/**
+ * Body-shape width threshold for the away-side block in the standalone-
+ * heading guard. Requires the away-side block to be at least this fraction
+ * of the host's width before counting it as "another body block in the
+ * same column" — which is what completes the section-heading sandwich
+ * pattern. Keeps the guard from firing when the away-side block is itself
+ * a short heading (e.g., a tail before the next section's heading).
+ */
+const BODY_SHAPE_WIDTH_RATIO = 0.7;
+
+/**
  * Short-block-merge predicate.
  *
  * Absorbs a short narrow block (paragraph-end ragged tail OR paragraph-start
@@ -846,11 +868,23 @@ function mergeBlocks(
  *   - they sit immediately above OR below each other within a gap budget
  *     that scales with the small block's own height (so single-line lines
  *     get caught regardless of font size / leading).
+ *
+ * Standalone-heading guard: if `small` is above `large` AND `small` is
+ * heading-shaped (≤ HEADING_LIKE_WIDTH_RATIO × `large.w`) AND the closest
+ * block above `small` in `large`'s column is body-shaped (≥
+ * BODY_SHAPE_WIDTH_RATIO × `large.w`) AND separated by a section-sized
+ * gap (> `bridgeVerticalGap`), `small` is the heading at the start of a
+ * new section sandwiched between two body blocks; reject the merge so the
+ * heading stays its own column rect. The guard is asymmetric: the
+ * heading-below-body mirror is geometrically unusual (headings precede
+ * their content) and not represented in any current fixture; extend
+ * symmetrically only when a real case demands it.
  */
 function canJoinAsShortAdjacent(
     b1: Rect,
     b2: Rect,
-    opts: Required<ColumnDetectionOptions>
+    opts: Required<ColumnDetectionOptions>,
+    allBlocks?: Rect[]
 ): boolean {
     const [small, large] = b1.w <= b2.w ? [b1, b2] : [b2, b1];
     if (!isHorizontallyContained(small, large, opts.edgeTolerance)) return false;
@@ -859,8 +893,74 @@ function canJoinAsShortAdjacent(
     const gapBelow = small.y - (large.y + large.h);
     const gapAbove = large.y - (small.y + small.h);
     if (gapBelow >= 0 && gapBelow <= gapBudget) return true;
-    if (gapAbove >= 0 && gapAbove <= gapBudget) return true;
+    if (gapAbove >= 0 && gapAbove <= gapBudget) {
+        if (allBlocks && looksLikeStandaloneHeadingAbove(small, large, allBlocks, opts)) {
+            return false;
+        }
+        return true;
+    }
     return false;
+}
+
+/**
+ * Returns true when `small` sits above `large` and looks like a
+ * standalone section heading: heading-shaped width, with a body-shaped
+ * block in `large`'s column above `small` separated by a section-sized
+ * gap. See `canJoinAsShortAdjacent` for the full rationale.
+ */
+function looksLikeStandaloneHeadingAbove(
+    small: Rect,
+    large: Rect,
+    allBlocks: Rect[],
+    opts: Required<ColumnDetectionOptions>
+): boolean {
+    if (small.w > HEADING_LIKE_WIDTH_RATIO * large.w) return false;
+    // Section headings sit flush with the column's left edge (same x as
+    // the host body); indented paragraph first-lines are offset from the
+    // column. Without this gate, the guard would reject legitimate
+    // indented short heads when the prior block above is body-shaped and
+    // separated by a section-sized gap (e.g. a section that begins
+    // directly with an indented first paragraph after a title).
+    const sameLeftEdgeAsHost =
+        Math.abs(small.x - large.x) <= opts.edgeTolerance;
+    if (!sameLeftEdgeAsHost) return false;
+
+    const minBodyWidth = BODY_SHAPE_WIDTH_RATIO * large.w;
+    let closestBottom = -Infinity;
+    let closestIsBody = false;
+    for (const block of allBlocks) {
+        if (block === small || block === large) continue;
+        const blockBottom = block.y + block.h;
+        if (blockBottom > small.y) continue; // must be strictly above small
+        if (blockBottom <= closestBottom) continue;
+        if (!isInColumnOf(block, large, opts)) continue;
+        closestBottom = blockBottom;
+        closestIsBody = block.w >= minBodyWidth;
+    }
+    if (closestBottom === -Infinity) return false;
+    if (!closestIsBody) return false;
+
+    const gap = small.y - closestBottom;
+    return gap > opts.bridgeVerticalGap;
+}
+
+/**
+ * Same-column-as test for the standalone-heading guard. A block is in
+ * `host`'s column if it shares a left or right edge within
+ * `edgeTolerance`, OR has ≥ 70% horizontal overlap with the host. The
+ * denominator is the host (not the candidate), so a narrow heading does
+ * not give a loose neighborhood when scanning for body-shaped neighbors.
+ */
+function isInColumnOf(
+    block: Rect,
+    host: Rect,
+    opts: Required<ColumnDetectionOptions>
+): boolean {
+    const sameLeft = Math.abs(block.x - host.x) <= opts.edgeTolerance;
+    const sameRight =
+        Math.abs(block.x + block.w - (host.x + host.w)) <= opts.edgeTolerance;
+    if (sameLeft || sameRight) return true;
+    return hasSignificantXOverlap(block, host, 0.7);
 }
 
 /**
@@ -1086,7 +1186,7 @@ function joinAndSort(
                     !(relaxed && crossesBridgeBoundary(upper, lower));
                 const relaxedMerge =
                     relaxed &&
-                    (canJoinAsShortAdjacent(block1, block2, opts) ||
+                    (canJoinAsShortAdjacent(block1, block2, opts, joined) ||
                      sameColumnAllowed);
 
                 if (!strictMerge && !relaxedMerge) continue;
