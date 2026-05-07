@@ -468,6 +468,76 @@ function isIconBulletLine(line: PageLine): boolean {
 }
 
 /**
+ * Numeric leader for hanging-indent items (footnotes, numbered lists). Three
+ * shapes, all anchored at the start of the line:
+ *   - Bracketed / parenthesised:  `[1]`, `(1)`  (1-3 digits, trailing space)
+ *   - Period/paren-suffixed:       `1.`, `1)`   (1-3 digits, trailing space)
+ *   - Bare footnote leader:        `6  David`   (1-3 digits, two-or-more
+ *                                  spaces, then a capital letter)
+ *
+ * Whitespace is required after every explicit-marker form so we don't match
+ * intra-token shapes like `2.1 Methods` (section numbers), `[12]Smith` (no
+ * space), or `1.23` (decimal). Two-space gap on the bare form discriminates
+ * footnote markers from single-space numeric headings (`2 Methods`).
+ *
+ * 1-3 digits avoids matching 4-digit years at the start of a line.
+ */
+const NUMERIC_LEADER_RE =
+    /^\s*(?:[(\[]\d{1,3}[)\]]\s+|\d{1,3}[.)]\s+|\d{1,3}\s{2,}\p{Lu})/u;
+
+/**
+ * Lettered leader for hanging-indent list items. Deliberately narrow to keep
+ * the false-positive surface tight — common abbreviations (`Dr.`, `Prof.`,
+ * `Fig.`, `et al.`) and section headings (`A. Methods`, `I. Introduction`)
+ * would all match a permissive 1-4 letter pattern.
+ *
+ *   - Bracketed / parenthesised single letter (both cases):  `(a)`, `[A]`
+ *   - Period/paren-suffixed lowercase single letter:          `a.`, `a)`
+ *     (uppercase forms `A.` / `B.` excluded — heading shapes)
+ *   - Lowercase Roman numerals i-x with separator:            `i.`, `ii)`,
+ *     `iv.`, `viii.`  (uppercase Roman excluded for the same reason)
+ *
+ * Whitespace required after the marker.
+ */
+const LETTERED_LEADER_RE =
+    /^\s*(?:[(\[][a-zA-Z][)\]]\s+|[a-z][.)]\s+|(?:i{1,3}|iv|v|vi{0,3}|ix|x)[.)]\s+)/u;
+
+/**
+ * Footnote / reference symbol marker — the traditional non-numeric footnote
+ * glyphs used when a paper exhausts the digit pool or prefers symbols.
+ */
+const SYMBOL_LEADER_RE = /^\s*[*†‡§¶#]\s+\S/u;
+
+/**
+ * Decide whether a line begins with a text-pattern hanging-indent leader —
+ * a numeric, lettered, or symbol marker that introduces a footnote or list
+ * item whose continuation lines are typically indented further right than
+ * the leader line itself. Used by the indent-break suppression in
+ * `startNewItem` to avoid splitting a single leader-led item across two
+ * paragraphs.
+ *
+ * Pure text-pattern check (no font signal) — the structural gates around the
+ * suppression block (hanging-range geometry, sentence-terminator on prev,
+ * style equality with prev's dominant span) carry the load against false
+ * positives.
+ *
+ * Control characters (`\p{Cc}`) are replaced with a single space before
+ * matching. PDF extraction occasionally emits non-printing codepoints (e.g.
+ * BELL `\x07`) between a footnote marker and its body text — observed on
+ * WZVA5ZF2 page 10 footnote 6 as `"6  \x07David Silver…"`. The
+ * normalization keeps the bare-numeric branch matching despite that noise
+ * without loosening the regex itself.
+ */
+function isTextHangingIndentLeader(line: PageLine): boolean {
+    const t = line.text.replace(/\p{Cc}/gu, " ");
+    return (
+        NUMERIC_LEADER_RE.test(t) ||
+        LETTERED_LEADER_RE.test(t) ||
+        SYMBOL_LEADER_RE.test(t)
+    );
+}
+
+/**
  * Decide whether the body text on this page is itself all-caps. Sampled from
  * lines that match a known body style. Used to gate the all-caps header
  * rule — without this, an all-caps document would promote every line.
@@ -554,6 +624,34 @@ function extractLineStyle(line: PageLine): TextStyle | null {
         firstSpan.fontStyle,
         firstSpan.size
     );
+}
+
+/**
+ * Style of the line's longest span by character count. Footnote markers are
+ * typically short superscript spans at the start of the line ("6 " in size 4
+ * before "David Silver…" in size 8); the first-span style therefore reflects
+ * the marker, not the body text. The hanging-indent suppression compares the
+ * continuation line against this dominant style so a leader line dominated
+ * by its body text matches its wrapped continuation even when the marker
+ * itself is in a different (smaller / italic / bold) style.
+ */
+function dominantSpanStyleByCharCount(line: PageLine): TextStyle | null {
+    if (line.spans.length === 0) return null;
+    let best: TextStyle | null = null;
+    let bestChars = -1;
+    for (const span of line.spans) {
+        const len = (span.text || "").length;
+        if (len > bestChars) {
+            bestChars = len;
+            best = extractSpanStyle(
+                span.fontName || "unknown",
+                span.fontWeight,
+                span.fontStyle,
+                span.size
+            );
+        }
+    }
+    return best;
 }
 
 /**
@@ -1034,33 +1132,81 @@ function startNewItem(
         indentExcess > columnThresholds.indentExcessThreshold &&
         indentExcessPrevLine > columnThresholds.indentExcessThreshold / 2;
 
-    // Bullet hanging-indent suppression. The column's leftEdgeMode picks
-    // the most common indent; when body or bullet-first-line lines
-    // outnumber wrap continuations (typical when a bulleted section shares
-    // a column with body paragraphs or a references list), continuations
-    // look "indented" relative to the mode and trigger a false indent
-    // break. Suppress only when the geometry, style, and textual cues all
-    // say "this is a hanging continuation, not a new paragraph": current
-    // line is body-styled, indent magnitude is in the typical hanging-
-    // indent range, prev is a recognized bullet line, and prev did not
-    // end with a sentence-final terminator. Mid-clause separators like
-    // `:` and `;` are kept allowed because bullets routinely wrap mid-
-    // clause (e.g. "• Slashing occurred at Canal street; person fit
+    // Leader hanging-indent suppression. The column's leftEdgeMode picks the
+    // most common indent; when leader-led lines (icon bullets, numbered
+    // footnotes, numbered/lettered list items) share a column with body
+    // paragraphs, their wrapped continuations look "indented" relative to the
+    // mode and trigger a false indent break. Suppress only when the geometry,
+    // style, and textual cues all say "this is a hanging continuation, not a
+    // new paragraph": indent magnitude in the typical hanging range, prev is
+    // a recognized leader, current line's style matches prev's dominant span
+    // style (or — for icon bullets only — matches a body style), and prev did
+    // not end with a sentence-final terminator. Mid-clause separators like
+    // `:` and `;` are kept allowed because leader items routinely wrap
+    // mid-clause (e.g. "• Slashing occurred at Canal street; person fit
     // description;" continues on the next line).
-    if (indentBreak && !gapBreak && bodyStyles && bodyStyles.length > 0) {
-        const currStyle = extractLineStyle(line);
+    //
+    // The style gate forks by leader type. Icon bullets sit in a bullet font
+    // (Symbol/Wingdings/…) while their body continuation is in a real body
+    // font, so they use the body-style fallback. Text-pattern leaders
+    // (numeric/lettered/symbol) share font and size with their continuation,
+    // so they require same-style match against prev's dominant span — which
+    // blocks heading-style false positives like "2. Methods" followed by an
+    // indented body paragraph (different size + bold). The marker-
+    // aggregation safety net below catches the degenerate single-span case
+    // without re-opening the heading false-positive surface.
+    //
+    // Prev is compared via its dominant span (largest by character count),
+    // not its first span, because footnote markers are short superscript
+    // spans whose style does not represent the body text of the leader line.
+    if (indentBreak && !gapBreak) {
         const isHangingIndent =
             indentExcessPrevLine > 0 && indentExcessPrevLine <= 30;
-        if (
-            currStyle &&
-            matchesBodyStyle(currStyle, bodyStyles) &&
-            isHangingIndent &&
-            isIconBulletLine(prevLine)
-        ) {
-            const prevText = prevLine.text.trimEnd();
-            const prevEndsSentence = /[.!?]["'”’)]?$/u.test(prevText);
-            if (!prevEndsSentence) {
-                indentBreak = false;
+        if (isHangingIndent) {
+            const prevIsIconBullet = isIconBulletLine(prevLine);
+            const prevIsTextLeader =
+                !prevIsIconBullet && isTextHangingIndentLeader(prevLine);
+            if (prevIsIconBullet || prevIsTextLeader) {
+                const currStyle = extractLineStyle(line);
+                const prevDominant = dominantSpanStyleByCharCount(prevLine);
+                const sameStyle = stylesEqual(currStyle, prevDominant);
+                const bodyStyleFallback =
+                    !!currStyle &&
+                    !!bodyStyles &&
+                    bodyStyles.length > 0 &&
+                    matchesBodyStyle(currStyle, bodyStyles);
+                // Marker-aggregation artifact compensation: MuPDF can emit a
+                // footnote leader line ("6  David Silver…") as a SINGLE span
+                // and report the small superscript marker's size for the
+                // whole span. The dominant-by-char-count span style then
+                // reflects the marker (size ~4), not the body text (size ~8),
+                // and `sameStyle` against the body-styled continuation
+                // fails. Detect that case by fonts/bold/italic agreeing
+                // while prev's reported size is significantly smaller than
+                // the continuation — a discrepancy that doesn't occur when
+                // a leader and its wrap really differ in style (heading
+                // leaders read larger, not smaller).
+                const fontAndModMatch =
+                    !!currStyle &&
+                    !!prevDominant &&
+                    currStyle.font === prevDominant.font &&
+                    currStyle.bold === prevDominant.bold &&
+                    currStyle.italic === prevDominant.italic;
+                const markerSizeDiscrepancy =
+                    fontAndModMatch &&
+                    !!currStyle &&
+                    !!prevDominant &&
+                    prevDominant.size < currStyle.size - 0.5;
+                const styleCompatible = prevIsIconBullet
+                    ? sameStyle || bodyStyleFallback
+                    : sameStyle || markerSizeDiscrepancy;
+                if (styleCompatible) {
+                    const prevText = prevLine.text.trimEnd();
+                    const prevEndsSentence = /[.!?]["'”’)]?$/u.test(prevText);
+                    if (!prevEndsSentence) {
+                        indentBreak = false;
+                    }
+                }
             }
         }
     }
