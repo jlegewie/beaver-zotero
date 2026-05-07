@@ -13,8 +13,15 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { looksLikeFragmentedCJKBody } from '../../../src/services/pdf/ParagraphDetector';
-import type { PageLine, DetectedSpan } from '../../../src/services/pdf/LineDetector';
+import {
+    looksLikeFragmentedCJKBody,
+    detectParagraphs,
+} from '../../../src/services/pdf/ParagraphDetector';
+import type {
+    PageLine,
+    DetectedSpan,
+    PageLineResult,
+} from '../../../src/services/pdf/LineDetector';
 import type { TextStyle } from '../../../src/services/pdf/types';
 
 // ---------------------------------------------------------------------------
@@ -229,6 +236,600 @@ describe('looksLikeFragmentedCJKBody', () => {
                 bodyStyles,
             );
             expect(result).toBe(false);
+        });
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Hanging-indent leader suppression
+// ---------------------------------------------------------------------------
+//
+// Tests below exercise the indent-break suppression in `startNewItem` for
+// leader-led items (footnotes, numbered/lettered/symbol lists). Each case
+// builds a single-column `PageLineResult` with several body-flush filler
+// lines so the column's `leftEdgeMode` lands at l=0; the leader pair under
+// test sits at the bottom. Without those filler lines the column mode could
+// land on the continuation indent and the indent break would never trigger.
+
+interface LeaderLineSpec {
+    text: string;
+    l: number;
+    r?: number;
+    size?: number;
+    font?: string;
+    bold?: boolean;
+    italic?: boolean;
+    /**
+     * Override the line bbox height (and the line.fontSize value) to a
+     * value independent of the span size. Used to mimic the MuPDF marker-
+     * aggregation artifact where a single span reports a tiny marker font
+     * size (e.g. 4) but the visual line height matches the body text.
+     */
+    bboxHeight?: number;
+    /**
+     * Optional leading span (e.g. superscripted footnote marker) prepended
+     * before the main text span. Used to verify that
+     * `dominantSpanStyleByCharCount` ignores short marker spans when
+     * comparing leader to continuation.
+     */
+    marker?: {
+        text: string;
+        size: number;
+        font?: string;
+        bold?: boolean;
+        italic?: boolean;
+    };
+}
+
+// Line bbox height tracks main span size so font-size + line-height shifts
+// between body (10pt) and footnote (8pt) bands trigger the splitter's
+// font-size break, mirroring real PDFs. Constant heights would collapse
+// every band into the same paragraph.
+function lineHeightFor(size: number): number {
+    return size + 2;
+}
+
+function makeMultiSpanLine(spec: LeaderLineSpec, top: number): PageLine {
+    const size = spec.size ?? 10;
+    const font = spec.font ?? 'Times-Roman';
+    const bold = spec.bold ?? false;
+    const italic = spec.italic ?? false;
+    const charWidth = size * 0.5;
+    const lineHeight = spec.bboxHeight ?? lineHeightFor(size);
+
+    const spans: DetectedSpan[] = [];
+    let cursor = spec.l;
+
+    if (spec.marker) {
+        const mWidth = spec.marker.text.length * (spec.marker.size * 0.5);
+        const markerSpan: DetectedSpan = {
+            text: spec.marker.text,
+            bbox: { x: cursor, y: top, w: mWidth, h: spec.marker.size },
+            lineBBox: {
+                l: cursor,
+                t: top,
+                r: cursor + mWidth,
+                b: top + spec.marker.size,
+                width: mWidth,
+                height: spec.marker.size,
+            },
+            size: spec.marker.size,
+            fontName: spec.marker.font ?? font,
+            fontWeight: spec.marker.bold ? 'bold' : 'normal',
+            fontStyle: spec.marker.italic ? 'italic' : 'normal',
+        };
+        spans.push(markerSpan);
+        cursor += mWidth;
+    }
+
+    const mainText = spec.text;
+    const mainWidth = mainText.length * charWidth;
+    const mainSpan: DetectedSpan = {
+        text: mainText,
+        bbox: { x: cursor, y: top, w: mainWidth, h: size },
+        lineBBox: {
+            l: cursor,
+            t: top,
+            r: cursor + mainWidth,
+            b: top + size,
+            width: mainWidth,
+            height: size,
+        },
+        size,
+        fontName: font,
+        fontWeight: bold ? 'bold' : 'normal',
+        fontStyle: italic ? 'italic' : 'normal',
+    };
+    spans.push(mainSpan);
+
+    const fullText = (spec.marker ? spec.marker.text : '') + mainText;
+    const r = spec.r ?? cursor + mainWidth;
+    return {
+        spans,
+        bboxes: spans.map(s => s.lineBBox),
+        bbox: {
+            l: spec.l,
+            t: top,
+            r,
+            b: top + lineHeight,
+            width: r - spec.l,
+            height: lineHeight,
+        },
+        text: fullText,
+        fontSize: size,
+    };
+}
+
+function makeColumnPageResult(specs: LeaderLineSpec[]): PageLineResult {
+    let cursorTop = 0;
+    const lines: PageLine[] = specs.map(s => {
+        const line = makeMultiSpanLine(s, cursorTop);
+        // Standard leading: line height + small inter-line gap.
+        cursorTop += line.bbox.height + 2;
+        return line;
+    });
+    const allLeft = Math.min(...lines.map(l => l.bbox.l));
+    const allRight = Math.max(...lines.map(l => l.bbox.r));
+    const allTop = Math.min(...lines.map(l => l.bbox.t));
+    const allBottom = Math.max(...lines.map(l => l.bbox.b));
+    return {
+        pageIndex: 0,
+        width: 612,
+        height: 792,
+        columnResults: [
+            {
+                column: {
+                    x: allLeft,
+                    y: allTop,
+                    w: allRight - allLeft,
+                    h: allBottom - allTop,
+                },
+                columnIndex: 0,
+                lines,
+            },
+        ],
+        allLines: lines,
+    };
+}
+
+function paragraphTexts(
+    pageResult: PageLineResult,
+    bodyStyles: TextStyle[] | null
+): string[] {
+    const result = detectParagraphs(pageResult, bodyStyles);
+    return result.items
+        .filter(it => it.type === 'paragraph')
+        .map(it => it.text.trim());
+}
+
+const BODY = bodyStyle(10, 'Times-Roman');
+const FOOTNOTE_BODY = bodyStyle(8, 'Times-Roman');
+
+// Filler body lines anchor the column's leftEdgeMode at l=0 so the
+// continuation's +10 pt indent reliably triggers the indent break. Without
+// enough fillers the median absolute deviation of left edges grows and the
+// indent break may not fire — defeating the point of the test.
+const FILLERS: LeaderLineSpec[] = Array.from({ length: 6 }, (_, i) => ({
+    text: `Filler body line number ${i + 1} that anchors the column left edge.`,
+    l: 0,
+    size: 10,
+    font: 'Times-Roman',
+}));
+
+// Test layout convention: every test layout consists of N filler body lines
+// (size 10, l=0) followed by a leader-block (leader + 1-2 continuation lines).
+// Expected paragraph counts depend on whether the leader-block style breaks
+// from the filler band:
+//   - When the leader-block matches the body style (size 10 same font), all
+//     fillers + leader merge into a single body paragraph; the continuation
+//     either joins it (suppression fires → 1 paragraph total) or splits off
+//     (suppression does not fire → 2 paragraphs total).
+//   - When the leader-block is a smaller footnote band (size 8), the size
+//     change splits fillers from the leader (font-size break), so the leader
+//     is its own paragraph that continuations either join (2 paragraphs total
+//     with fillers as the first) or split from (3 paragraphs total).
+describe('hanging-indent leader suppression', () => {
+    describe('positives — leader and continuation merge', () => {
+        it('numeric footnote leader with superscripted marker (multi-span)', () => {
+            // Two-span leader: smaller-size "6  " marker span followed by a
+            // longer body-text span. dominantSpanStyleByCharCount picks the
+            // body-text span (size 8) over the marker span (size 4) so the
+            // continuation (size 8) compares as same-style.
+            const result = makeColumnPageResult([
+                ...FILLERS,
+                {
+                    text: 'David Silver, Aja Huang, Chris J. Maddison, Arthur Guez,',
+                    l: 0,
+                    size: 8,
+                    marker: { text: '6  ', size: 4 },
+                },
+                {
+                    text: 'Marc Lanctot, Sander Dieleman, Dominik Grewe, John Nham,',
+                    l: 10,
+                    size: 8,
+                },
+                {
+                    text: 'Graepel, and Demis Hassabis, Mastering the game of Go.',
+                    l: 10,
+                    size: 8,
+                },
+            ]);
+            const paragraphs = paragraphTexts(result, [BODY, FOOTNOTE_BODY]);
+            // 6 fillers (size 10) → one paragraph; the size 8 footnote splits
+            // off via font-size break and then collapses into a single
+            // paragraph because suppression fires on both continuations.
+            expect(paragraphs.length).toBe(2);
+            expect(paragraphs[1]).toContain('David Silver');
+            expect(paragraphs[1]).toContain('Marc Lanctot');
+            expect(paragraphs[1]).toContain('Graepel');
+        });
+
+        it('numeric footnote leader, single-span marker-aggregation artifact (WZVA5ZF2 shape)', () => {
+            // MuPDF can emit a footnote leader as a SINGLE span and report
+            // the small marker's font size for the whole span (observed on
+            // WZVA5ZF2 page 10 footnote 6: line text "6  \x07David Silver…"
+            // arrives as one span with size: 4 even though the body text
+            // characters render at ~8pt). The dominant span style then
+            // misrepresents the leader's body text. The marker-size-
+            // discrepancy compensation kicks in: when fonts/bold/italic
+            // agree but prev's reported size is significantly smaller than
+            // the continuation, treat them as same-style.
+            const FOOTNOTE_FONT = 'MissionGothic-Light';
+            // Real WZVA5ZF2 RL32-RL34 all share bbox.height ≈ 9.55 even
+            // though RL32's reported font.size is 4 and RL33/RL34 are 8 —
+            // line height tracks the body text glyphs, not the marker.
+            // Modeling that here keeps the splitter's font-size break
+            // (which requires BOTH font-size and line-height to differ)
+            // from firing between the leader and continuation.
+            const FOOTNOTE_BBOX_H = 10;
+            const result = makeColumnPageResult([
+                ...FILLERS,
+                {
+                    text: '6  \x07David Silver, Aja Huang, Chris J. Maddison,',
+                    l: 0,
+                    size: 4,
+                    font: FOOTNOTE_FONT,
+                    bboxHeight: FOOTNOTE_BBOX_H,
+                },
+                {
+                    text: 'Marc Lanctot, Sander Dieleman, Dominik Grewe,',
+                    l: 10,
+                    size: 8,
+                    font: FOOTNOTE_FONT,
+                    bboxHeight: FOOTNOTE_BBOX_H,
+                },
+                {
+                    text: 'Graepel, and Demis Hassabis, Mastering the game.',
+                    l: 10,
+                    size: 8,
+                    font: FOOTNOTE_FONT,
+                    bboxHeight: FOOTNOTE_BBOX_H,
+                },
+            ]);
+            const paragraphs = paragraphTexts(result, [BODY]);
+            expect(paragraphs.length).toBe(2);
+            expect(paragraphs[1]).toContain('David Silver');
+            expect(paragraphs[1]).toContain('Marc Lanctot');
+            expect(paragraphs[1]).toContain('Graepel');
+        });
+
+        it('bracketed numeric list marker', () => {
+            const result = makeColumnPageResult([
+                ...FILLERS,
+                { text: '[12] First entry that wraps onto a continuation', l: 0 },
+                { text: 'and finishes here without a sentence break', l: 10 },
+            ]);
+            const paragraphs = paragraphTexts(result, [BODY]);
+            // Leader matches body style → fillers + leader + continuation
+            // collapse into a single paragraph.
+            expect(paragraphs.length).toBe(1);
+            expect(paragraphs[0]).toContain('[12]');
+            expect(paragraphs[0]).toContain('finishes here');
+        });
+
+        it('lettered list leader with parenthesised lowercase letter', () => {
+            const result = makeColumnPageResult([
+                ...FILLERS,
+                { text: '(a) First option that wraps to the next line', l: 0 },
+                { text: 'and continues with more detail here', l: 10 },
+            ]);
+            const paragraphs = paragraphTexts(result, [BODY]);
+            expect(paragraphs.length).toBe(1);
+            expect(paragraphs[0]).toContain('(a)');
+            expect(paragraphs[0]).toContain('more detail');
+        });
+
+        it('lowercase Roman numeral leader', () => {
+            const result = makeColumnPageResult([
+                ...FILLERS,
+                { text: 'iii. Third option that wraps onto a continuation', l: 0 },
+                { text: 'covering additional context here', l: 10 },
+            ]);
+            const paragraphs = paragraphTexts(result, [BODY]);
+            expect(paragraphs.length).toBe(1);
+            expect(paragraphs[0]).toContain('iii.');
+            expect(paragraphs[0]).toContain('additional context');
+        });
+
+        it('symbol footnote marker', () => {
+            const result = makeColumnPageResult([
+                ...FILLERS,
+                { text: '* See note above for important details on the', l: 0 },
+                { text: 'methodology used in this study and its limits', l: 10 },
+            ]);
+            const paragraphs = paragraphTexts(result, [BODY]);
+            expect(paragraphs.length).toBe(1);
+            expect(paragraphs[0]).toContain('*');
+            expect(paragraphs[0]).toContain('methodology');
+        });
+
+        it('icon-bullet body-style fallback (regression check)', () => {
+            // Leader is icon-font bullet; continuation is in body font/size.
+            // sameStyle is false (font differs), but matchesBodyStyle
+            // succeeds — the icon-bullet path uses the body-style fallback.
+            const result = makeColumnPageResult([
+                ...FILLERS,
+                {
+                    text: '• Bullet item that wraps to the next line',
+                    l: 0,
+                    size: 10,
+                    font: 'Symbol',
+                },
+                {
+                    text: 'and continues with body-styled wrap text',
+                    l: 10,
+                    size: 10,
+                    font: 'Times-Roman',
+                },
+            ]);
+            const paragraphs = paragraphTexts(result, [BODY]);
+            // Symbol-font leader merges with same-size body lines (icon
+            // bullets are short-circuited as not-a-header), and the
+            // continuation joins via the body-style fallback path.
+            expect(paragraphs.length).toBe(1);
+            expect(paragraphs[0]).toContain('Bullet item');
+            expect(paragraphs[0]).toContain('continues with body');
+        });
+    });
+
+    describe('negatives — split is preserved', () => {
+        it('leader line ends with a sentence terminator', () => {
+            const result = makeColumnPageResult([
+                ...FILLERS,
+                { text: '1. First item.', l: 0 },
+                { text: 'Indented next line that should not merge.', l: 10 },
+            ]);
+            const paragraphs = paragraphTexts(result, [BODY]);
+            // Fillers + leader merge (same body style, no break); continuation
+            // splits because the suppression's terminator gate blocks the merge.
+            expect(paragraphs.length).toBe(2);
+        });
+
+        it('non-leader line followed by an indented continuation', () => {
+            const result = makeColumnPageResult([
+                ...FILLERS,
+                { text: 'This is body text without any leader marker', l: 0 },
+                { text: 'And the next line is indented further right', l: 10 },
+            ]);
+            const paragraphs = paragraphTexts(result, [BODY]);
+            expect(paragraphs.length).toBe(2);
+        });
+
+        it('4-digit year at line start (numeric regex caps at 3 digits)', () => {
+            const result = makeColumnPageResult([
+                ...FILLERS,
+                { text: '2023 was a productive year for the team', l: 0 },
+                { text: 'in many ways across the organization', l: 10 },
+            ]);
+            const paragraphs = paragraphTexts(result, [BODY]);
+            expect(paragraphs.length).toBe(2);
+        });
+
+        it('bare digit + single space (numbered heading shape)', () => {
+            // "2 Methods" — single space between digit and capital, so the
+            // bare-numeric rule (which requires \s{2,}) does not fire.
+            const result = makeColumnPageResult([
+                ...FILLERS,
+                { text: '2 Methods of analysis', l: 0 },
+                { text: 'detailed in this section of the paper', l: 10 },
+            ]);
+            const paragraphs = paragraphTexts(result, [BODY]);
+            expect(paragraphs.length).toBe(2);
+        });
+
+        it('common abbreviations like Dr. and Prof.', () => {
+            const result = makeColumnPageResult([
+                ...FILLERS,
+                { text: 'Dr. Smith and Prof. Jones', l: 0 },
+                { text: 'collaborated extensively on this research', l: 10 },
+            ]);
+            const paragraphs = paragraphTexts(result, [BODY]);
+            expect(paragraphs.length).toBe(2);
+        });
+
+        it('uppercase letter heading like "A. Methods"', () => {
+            const result = makeColumnPageResult([
+                ...FILLERS,
+                { text: 'A. Methods', l: 0 },
+                { text: 'introduces the experimental approach', l: 10 },
+            ]);
+            const paragraphs = paragraphTexts(result, [BODY]);
+            expect(paragraphs.length).toBe(2);
+        });
+
+        it('uppercase Roman numeral heading like "I. Introduction"', () => {
+            const result = makeColumnPageResult([
+                ...FILLERS,
+                { text: 'I. Introduction', l: 0 },
+                { text: 'to the topic of this paper', l: 10 },
+            ]);
+            const paragraphs = paragraphTexts(result, [BODY]);
+            expect(paragraphs.length).toBe(2);
+        });
+
+        it('bracketed numeric without trailing whitespace', () => {
+            // "[12]Smith,..." — no space after `]`, so the numeric regex
+            // does not match. Indent break is preserved.
+            const result = makeColumnPageResult([
+                ...FILLERS,
+                { text: '[12]Smith, J., and Jones, K., a study', l: 0 },
+                { text: 'with additional indented continuation text', l: 10 },
+            ]);
+            const paragraphs = paragraphTexts(result, [BODY]);
+            expect(paragraphs.length).toBe(2);
+        });
+
+        it('section number "2.1 Methods" must not merge', () => {
+            const result = makeColumnPageResult([
+                ...FILLERS,
+                { text: '2.1 Methods', l: 0 },
+                { text: 'details the analytic procedure', l: 10 },
+            ]);
+            const paragraphs = paragraphTexts(result, [BODY]);
+            expect(paragraphs.length).toBe(2);
+        });
+
+        it('different font on continuation (sameStyle false, not in bodyStyles)', () => {
+            // Leader and continuation at the same size but different fonts,
+            // and continuation's font is not present in bodyStyles, so
+            // neither sameStyle nor the body-style fallback succeeds.
+            const result = makeColumnPageResult([
+                ...FILLERS,
+                {
+                    text: '1. First leader line in body font',
+                    l: 0,
+                    size: 10,
+                    font: 'Times-Roman',
+                },
+                {
+                    text: 'continuation set in a different font',
+                    l: 10,
+                    size: 10,
+                    font: 'Helvetica',
+                },
+            ]);
+            const paragraphs = paragraphTexts(result, [BODY]);
+            expect(paragraphs.length).toBe(2);
+        });
+
+        it('text leader does NOT use the body-style fallback', () => {
+            // Strict version of the previous test: leader is italic
+            // Times-Roman size 10 (NOT a heading — same size and same font
+            // as body), continuation is normal Times-Roman size 10 and
+            // matches BODY exactly. sameStyle fails because italic differs;
+            // matchesBodyStyle WOULD succeed for the continuation. The
+            // text-pattern leader path forbids the body-style fallback, so
+            // the suppression must NOT fire.
+            const result = makeColumnPageResult([
+                ...FILLERS,
+                {
+                    text: '1. First leader line, italic body-sized',
+                    l: 0,
+                    size: 10,
+                    font: 'Times-Roman',
+                    italic: true,
+                },
+                {
+                    text: 'continuation in plain body style',
+                    l: 10,
+                    size: 10,
+                    font: 'Times-Roman',
+                },
+            ]);
+            const paragraphs = paragraphTexts(result, [BODY]);
+            expect(paragraphs.length).toBe(2);
+            // The leader's italic line and the body continuation must be
+            // in different paragraphs.
+            const merged = paragraphs.find(
+                p =>
+                    p.includes('First leader line') &&
+                    p.includes('continuation in plain body')
+            );
+            expect(merged).toBeUndefined();
+        });
+
+        it('heading-style text leader followed by body-style continuation', () => {
+            // "2. Methods" rendered as a heading (bold size 14); continuation
+            // in body style. sameStyle is false (size differs); the
+            // body-style fallback would merge — but that fallback is gated
+            // OFF for text-pattern leaders, so the split is preserved.
+            const result = makeColumnPageResult([
+                ...FILLERS,
+                {
+                    text: '2. Methods',
+                    l: 0,
+                    size: 14,
+                    bold: true,
+                    font: 'Times-Bold',
+                },
+                {
+                    text: 'introduces the analytic procedure used here',
+                    l: 10,
+                    size: 10,
+                    font: 'Times-Roman',
+                },
+            ]);
+            // Inspect ALL items (paragraphs + headers) directly so the
+            // assertion holds even though `paragraphTexts` would filter the
+            // heading out. The continuation must be in its own item, not
+            // the same item as the "2. Methods" heading.
+            const detection = detectParagraphs(result, [BODY]);
+            const headingItem = detection.items.find(it =>
+                it.text.includes('2. Methods'),
+            );
+            const contItem = detection.items.find(it =>
+                it.text.includes('analytic procedure'),
+            );
+            expect(headingItem).toBeDefined();
+            expect(contItem).toBeDefined();
+            expect(headingItem!.id).not.toBe(contItem!.id);
+            expect(headingItem!.text).not.toContain('analytic procedure');
+        });
+
+        it('smaller multi-span text leader, larger same-font indented continuation', () => {
+            // Smaller-text leader (size 8, two spans — marker + body) followed
+            // by a larger same-font indented continuation (size 10). The
+            // marker-aggregation safety net must NOT fire here because prev
+            // has more than one span — the artifact only manifests when
+            // MuPDF collapses the line into a single span. Without that
+            // narrowing, the rule would silently merge a footnote-styled
+            // leader with a body-styled wrap, which is not the layout we
+            // want to handle.
+            //
+            // Leader and continuation share `bboxHeight` so the splitter's
+            // font-size break (which requires BOTH font-size AND line-
+            // height to differ) does not fire and silently rescue the
+            // test. With the safety net narrowed, only `spans.length === 1`
+            // separates a merge from a split here.
+            const SHARED_LINE_HEIGHT = 12;
+            const result = makeColumnPageResult([
+                ...FILLERS,
+                {
+                    text: 'David Silver, Aja Huang, Chris J. Maddison,',
+                    l: 0,
+                    size: 8,
+                    font: 'Times-Roman',
+                    bboxHeight: SHARED_LINE_HEIGHT,
+                    marker: { text: '6  ', size: 4, font: 'Times-Roman' },
+                },
+                {
+                    text: 'a body-sized continuation that should not merge',
+                    l: 10,
+                    size: 10,
+                    font: 'Times-Roman',
+                    bboxHeight: SHARED_LINE_HEIGHT,
+                },
+            ]);
+            const detection = detectParagraphs(result, [BODY]);
+            const leaderItem = detection.items.find(it =>
+                it.text.includes('David Silver'),
+            );
+            const contItem = detection.items.find(it =>
+                it.text.includes('should not merge'),
+            );
+            expect(leaderItem).toBeDefined();
+            expect(contItem).toBeDefined();
+            expect(leaderItem!.id).not.toBe(contItem!.id);
         });
     });
 });
