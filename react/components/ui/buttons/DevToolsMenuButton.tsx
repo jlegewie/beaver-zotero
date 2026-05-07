@@ -8,7 +8,6 @@ import {
     ExtractionError,
     ExtractionErrorCode,
     PDFExtractor,
-    searchFromZoteroItem,
 } from '../../../../src/services/pdf';
 import {
     visualizeCurrentPageColumns,
@@ -650,12 +649,13 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
         console.log(`[PDF Search Test] Query: "${query}"`);
 
         try {
-            const result = await searchFromZoteroItem(pdfItem, query);
-            
-            if (!result) {
+            const path = await pdfItem.getFilePathAsync();
+            if (!path) {
                 console.log("[PDF Search Test] File not found");
                 return;
             }
+            const pdfData = await IOUtils.read(path);
+            const result = await new PDFExtractor().search(pdfData, query);
 
             // Log summary
             console.log("\n" + "=".repeat(60));
