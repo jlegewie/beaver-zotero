@@ -524,10 +524,10 @@ export function resolvePageIndices(pageCount: number, pageIndices?: number[]): n
  *  - non-empty list, all indices invalid → throws PAGE_OUT_OF_RANGE
  *  - non-empty list, some valid          → returns filtered list
  *
- * Treats undefined and `[]` identically so a caller passing merged-defaults
- * (DEFAULT_EXTRACTION_SETTINGS.pages = []) is not punished for the empty
- * default. Filter requires Number.isInteger because structured-clone passes
- * NaN/0.5/Infinity through and `0.5 >= 0 && 0.5 < pageCount` is true.
+ * Treats undefined and `[]` identically so a caller passing an empty list as
+ * a "no filter" sentinel is not punished. Filter requires Number.isInteger
+ * because structured-clone passes NaN/0.5/Infinity through and
+ * `0.5 >= 0 && 0.5 < pageCount` is true.
  *
  * Throws workerError(PAGE_OUT_OF_RANGE, msg, { pageCount }) so the
  * MuPDFWorkerClient rehydrator can populate ExtractionError.pageCount,

@@ -381,6 +381,11 @@ export class PDFExtractor {
      * @param pdfData - The PDF file as Uint8Array or ArrayBuffer
      * @param query - Text to search for (literal phrase match)
      * @param options - Search options including scoring configuration
+     * @param args - Pre-flight controls. `maxPageCount` short-circuits the
+     *               worker when the document exceeds the limit, returning a
+     *               flagged result (`exceedsPageCountLimit: true`) instead of
+     *               running the search. Sibling to `options` because it
+     *               gates dispatch, not result shape.
      * @returns PDFSearchResult with ranked pages and hit positions
      *
      * @example
@@ -398,10 +403,11 @@ export class PDFExtractor {
     async search(
         pdfData: Uint8Array | ArrayBuffer,
         query: string,
-        options: PDFSearchOptions = {}
+        options: PDFSearchOptions = {},
+        args: { maxPageCount?: number } = {}
     ): Promise<PDFSearchResult> {
         // search + score within one worker round-trip.
-        return getMuPDFWorkerClient().search(pdfData, query, options);
+        return getMuPDFWorkerClient().search(pdfData, query, options, args);
     }
 }
 

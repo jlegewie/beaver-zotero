@@ -388,11 +388,9 @@ function runExtractFromIndices(
 
 /**
  * Legacy lenient pre-amble for `opExtract`. Runs page-count + label
- * collection + OCR check, then resolves indices using the lenient
- * `opts.pages?.length ? filter : undefined → resolvePageIndices`
- * semantics (empty filter → all pages). Preserved for callers that have not
- * been migrated to the strict resolver — itemValidationManager,
- * getAttachmentFileStatus.
+ * collection + OCR check, then extracts all pages. Page selection lives on
+ * the strict `extractWithMeta` path (args.pageIndices / args.pageRange);
+ * this lenient path is "all pages or nothing."
  */
 function runExtractCommon(
     doc: DocumentLike,
@@ -422,10 +420,7 @@ function runExtractCommon(
         }
     }
 
-    const pageIndices = opts.pages?.length
-        ? opts.pages.filter((i: number) => i >= 0 && i < pageCount)
-        : undefined;
-    const indices = resolvePageIndices(pageCount, pageIndices);
+    const indices = resolvePageIndices(pageCount);
 
     return runExtractFromIndices(
         doc,

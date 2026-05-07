@@ -527,30 +527,24 @@ export class MuPDFWorkerClient {
     /**
      * Search + score within one round-trip.
      *
-     * `options.maxPageCount` is lifted to a top-level worker arg and stripped
-     * from the forwarded `options` payload. Keeps the `opSearch` worker-arg
-     * shape clean and lets the handler pass it through the existing options
-     * parameter without a separate signature change.
+     * `args.maxPageCount` is a pre-flight gate, not a search option — it lives
+     * outside `options` so the worker can short-circuit before running the
+     * search. When provided and exceeded, the worker returns a flagged result
+     * (`exceedsPageCountLimit: true`) the handler maps to `too_many_pages`.
      */
     async search(
         pdfData: Uint8Array | ArrayBuffer,
         query: string,
         options?: PDFSearchOptions,
+        args?: { maxPageCount?: number },
     ): Promise<PDFSearchResult> {
         const bytes =
             pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
-        let forwardedOptions: PDFSearchOptions | undefined = options;
-        let maxPageCount: number | undefined;
-        if (options && options.maxPageCount != null) {
-            const { maxPageCount: lifted, ...rest } = options;
-            maxPageCount = lifted;
-            forwardedOptions = rest;
-        }
         return this.call<PDFSearchResult>("search", {
             pdfData: bytes,
             query,
-            options: forwardedOptions,
-            maxPageCount,
+            options,
+            maxPageCount: args?.maxPageCount,
         });
     }
 

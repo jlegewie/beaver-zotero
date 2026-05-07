@@ -696,12 +696,14 @@ describe('MuPDFWorkerClient', () => {
             expect(message).toMatchObject({ op: 'search', args: { query: 'foo' } });
         });
 
-        it('lifts options.maxPageCount to a top-level worker arg', async () => {
+        it('passes args.maxPageCount as a top-level worker arg', async () => {
             const client = getMuPDFWorkerClient();
-            const promise = client.search(new Uint8Array([1]), 'foo', {
-                maxHitsPerPage: 50,
-                maxPageCount: 100,
-            });
+            const promise = client.search(
+                new Uint8Array([1]),
+                'foo',
+                { maxHitsPerPage: 50 },
+                { maxPageCount: 100 },
+            );
             const worker = MockWorker.instances[0];
             worker.replyToLast({
                 ok: true,
@@ -716,8 +718,8 @@ describe('MuPDFWorkerClient', () => {
             });
             await promise;
             const [message] = worker.postMessage.mock.calls[0] as [any, any];
-            // maxPageCount lifted out of options into the top-level args; remaining
-            // options are forwarded as-is.
+            // maxPageCount lives at the top level of args (sibling to options),
+            // not inside the options bag.
             expect(message.args).toMatchObject({
                 query: 'foo',
                 maxPageCount: 100,
