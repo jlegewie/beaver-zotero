@@ -138,36 +138,13 @@ export async function opExtractRawPageDetailed(
     }
 }
 
-export async function opRenderPagesToImages(
-    args: { pdfData: Uint8Array | ArrayBuffer; pageIndices?: number[]; options?: PageImageOptions },
-): Promise<OpReply<PageImageResult[]>> {
-    const api = await ensureApi();
-    const doc = await acquireDoc(args.pdfData);
-    try {
-        const opts = { ...DEFAULT_PAGE_IMAGE_OPTIONS, ...(args.options || {}) };
-        const pageCount = doc.countPages();
-        const indices = resolvePageIndices(pageCount, args.pageIndices);
-        const out: PageImageResult[] = [];
-        const transfer: Transferable[] = [];
-        for (const pageIndex of indices) {
-            const r = renderOnePage(api, doc, pageIndex, opts);
-            out.push(r);
-            transfer.push(r.data.buffer);
-        }
-        return { result: out, transfer };
-    } finally {
-        releaseDoc(doc);
-    }
-}
-
 /**
  * Strict, fused render-pages op for the images handler.
  *
- * Combines `getMetadata` + `renderPagesToImages` into a single
- * doc-open. Returns metadata alongside the rendered pages so the handler
- * can populate `total_pages` and per-page `page_label` in the response
- * without an extra round-trip. Image buffers are transferred (per-page
- * `r.data.buffer`).
+ * Returns metadata alongside the rendered pages in a single doc-open so
+ * the handler can populate `total_pages` and per-page `page_label` in
+ * the response without an extra round-trip. Image buffers are
+ * transferred (per-page `r.data.buffer`).
  */
 export async function opRenderPagesToImagesWithMeta(
     args: {
@@ -387,66 +364,6 @@ function runExtractFromIndices(
 }
 
 /**
- * Legacy lenient pre-amble for `opExtract`. Runs page-count + label
- * collection + OCR check, then extracts all pages. Page selection lives on
- * the strict `extractWithMeta` path (args.pageIndices / args.pageRange);
- * this lenient path is "all pages or nothing."
- */
-function runExtractCommon(
-    doc: DocumentLike,
-    settings: ExtractionSettings | undefined,
-    useLineDetection: boolean,
-): ExtractionResult {
-    // Capture the caller-supplied threshold BEFORE the spread flattens it to
-    // the default. `getEffectiveRepeatThreshold` uses this to distinguish
-    // "user wanted 3" from "user omitted the field" so the short-doc
-    // relaxation only kicks in when no explicit value was provided.
-    const requestedRepeatThreshold = settings?.repeatThreshold;
-    const opts = { ...DEFAULT_EXTRACTION_SETTINGS, ...(settings || {}) };
-
-    const provider = rawPageProviderFromDoc(doc);
-    const docAnalyzer = new DocumentAnalyzer(provider);
-    const pageCount = docAnalyzer.getPageCount();
-    const pageLabels = collectPageLabels(doc);
-
-    if (opts.checkTextLayer) {
-        const ocr = docAnalyzer.getDetailedOCRAnalysis({ minTextPerPage: opts.minTextPerPage });
-        if (ocr.needsOCR) {
-            throw workerError(
-                ERROR_CODES.NO_TEXT_LAYER,
-                `Document may require OCR: ${ocr.primaryReason} (${Math.round(ocr.issueRatio * 100)}% of sampled pages have issues)`,
-                { ocrAnalysis: ocr, pageLabels, pageCount },
-            );
-        }
-    }
-
-    const indices = resolvePageIndices(pageCount);
-
-    return runExtractFromIndices(
-        doc,
-        opts as any,
-        requestedRepeatThreshold,
-        indices,
-        pageCount,
-        pageLabels,
-        useLineDetection,
-    );
-}
-
-export async function opExtract(
-    args: { pdfData: Uint8Array | ArrayBuffer; settings?: ExtractionSettings },
-): Promise<OpReply<ExtractionResult>> {
-    const useLineDetection = !!args.settings?.useLineDetection;
-    const doc = await acquireDoc(args.pdfData);
-    try {
-        const result = runExtractCommon(doc, args.settings, useLineDetection);
-        return { result };
-    } finally {
-        releaseDoc(doc);
-    }
-}
-
-/**
  * Strict, fused extract op for the agent handlers.
  *
  * Combines what the pages handler used to fetch as separate round-trips
@@ -472,7 +389,10 @@ export async function opExtractWithMeta(
     const doc = await acquireDoc(args.pdfData);
     try {
         // Capture the caller-supplied threshold BEFORE the spread flattens
-        // it to the default — see runExtractCommon for the rationale.
+        // it to the default. `getEffectiveRepeatThreshold` uses this to
+        // distinguish "user wanted 3" from "user omitted the field" so the
+        // short-doc relaxation only kicks in when no explicit value was
+        // provided.
         const requestedRepeatThreshold = args.settings?.repeatThreshold;
         const opts = { ...DEFAULT_EXTRACTION_SETTINGS, ...(args.settings || {}) };
         const provider = rawPageProviderFromDoc(doc);
@@ -519,19 +439,6 @@ export async function opAnalyzeOCRNeeds(
         const analyzer = new DocumentAnalyzer(provider);
         const result = analyzer.getDetailedOCRAnalysis(args.options || {});
         return { result };
-    } finally {
-        releaseDoc(doc);
-    }
-}
-
-export async function opHasTextLayer(
-    args: { pdfData: Uint8Array | ArrayBuffer },
-): Promise<OpReply<boolean>> {
-    const doc = await acquireDoc(args.pdfData);
-    try {
-        const provider = rawPageProviderFromDoc(doc);
-        const analyzer = new DocumentAnalyzer(provider);
-        return { result: analyzer.hasTextLayer() };
     } finally {
         releaseDoc(doc);
     }

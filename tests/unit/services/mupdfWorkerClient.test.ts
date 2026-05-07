@@ -322,38 +322,6 @@ describe('MuPDFWorkerClient', () => {
         });
     });
 
-    describe('renderPagesToImages', () => {
-        it('round-trips PageImageResult[] and does not transfer the input', async () => {
-            const client = getMuPDFWorkerClient();
-            const buf = new Uint8Array([1, 2, 3]);
-
-            const promise = client.renderPagesToImages(buf, [0]);
-            const worker = MockWorker.instances[0];
-            const cannedBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
-            const canned = [
-                {
-                    pageIndex: 0,
-                    data: cannedBytes,
-                    format: 'png' as const,
-                    width: 100,
-                    height: 100,
-                    scale: 1,
-                    dpi: 72,
-                },
-            ];
-            worker.replyToLast({ ok: true, result: canned });
-
-            await expect(promise).resolves.toEqual(canned);
-
-            const [message, transfer] = worker.postMessage.mock.calls[0] as [
-                any,
-                Transferable[] | undefined,
-            ];
-            expect(message).toMatchObject({ op: 'renderPagesToImages' });
-            expect(transfer).toBeUndefined();
-        });
-    });
-
     describe('renderPagesToImagesWithMeta', () => {
         it('round-trips { pageCount, pageLabels, pages } and forwards args', async () => {
             const client = getMuPDFWorkerClient();
@@ -474,6 +442,45 @@ describe('MuPDFWorkerClient', () => {
                 expect((err as ExtractionError).pageCount).toBe(3);
             }
         });
+
+        it('rehydrates NO_TEXT_LAYER with the full payload (ocrAnalysis/pageLabels/pageCount)', async () => {
+            const client = getMuPDFWorkerClient();
+            const promise = client.extractWithMeta(new Uint8Array([0]), {
+                settings: { checkTextLayer: true },
+            });
+            const worker = MockWorker.instances[0];
+            const ocrAnalysis = {
+                needsOCR: true,
+                primaryReason: 'image_only',
+                issueRatio: 0.95,
+            };
+            const pageLabels = { 0: 'i', 1: '1' };
+            worker.replyToLast({
+                ok: false,
+                error: {
+                    name: 'ExtractionError',
+                    code: 'NO_TEXT_LAYER',
+                    message: 'needs OCR',
+                    payload: {
+                        ocrAnalysis,
+                        pageLabels,
+                        pageCount: 50,
+                    },
+                },
+            });
+
+            await expect(promise).rejects.toBeInstanceOf(ExtractionError);
+            await expect(promise).rejects.toMatchObject({
+                name: 'ExtractionError',
+                code: ExtractionErrorCode.NO_TEXT_LAYER,
+                message: 'needs OCR',
+                // ExtractionError stores OCR data on `details` (per types.ts:599),
+                // even though the wire field is named `payload.ocrAnalysis`.
+                details: ocrAnalysis,
+                pageLabels,
+                pageCount: 50,
+            });
+        });
     });
 
     describe('searchPages', () => {
@@ -567,90 +574,6 @@ describe('MuPDFWorkerClient', () => {
                 code: ExtractionErrorCode.PAGE_OUT_OF_RANGE,
                 name: 'ExtractionError',
             });
-        });
-    });
-
-    describe('extract', () => {
-        it('round-trips an ExtractionResult', async () => {
-            const client = getMuPDFWorkerClient();
-            const promise = client.extract(new Uint8Array([1, 2]));
-            const worker = MockWorker.instances[0];
-            const canned = {
-                pages: [],
-                analysis: { pageCount: 0, hasTextLayer: true, styleProfile: {}, marginAnalysis: {} },
-                fullText: '',
-                pageLabels: undefined,
-                metadata: { extractedAt: 'now', version: '2.0.0', settings: {} },
-            };
-            worker.replyToLast({ ok: true, result: canned });
-            await expect(promise).resolves.toEqual(canned);
-
-            const [message, transfer] = worker.postMessage.mock.calls[0] as [
-                any,
-                Transferable[] | undefined,
-            ];
-            expect(message).toMatchObject({ op: 'extract' });
-            expect(transfer).toBeUndefined();
-        });
-
-        it('rehydrates NO_TEXT_LAYER with the full payload (ocrAnalysis/pageLabels/pageCount)', async () => {
-            const client = getMuPDFWorkerClient();
-            const promise = client.extract(new Uint8Array([0]));
-            const worker = MockWorker.instances[0];
-            const ocrAnalysis = {
-                needsOCR: true,
-                primaryReason: 'image_only',
-                issueRatio: 0.95,
-            };
-            const pageLabels = { 0: 'i', 1: '1' };
-            worker.replyToLast({
-                ok: false,
-                error: {
-                    name: 'ExtractionError',
-                    code: 'NO_TEXT_LAYER',
-                    message: 'needs OCR',
-                    payload: {
-                        ocrAnalysis,
-                        pageLabels,
-                        pageCount: 50,
-                    },
-                },
-            });
-
-            await expect(promise).rejects.toBeInstanceOf(ExtractionError);
-            await expect(promise).rejects.toMatchObject({
-                name: 'ExtractionError',
-                code: ExtractionErrorCode.NO_TEXT_LAYER,
-                message: 'needs OCR',
-                // ExtractionError stores OCR data on `details` (per types.ts:599),
-                // even though the wire field is named `payload.ocrAnalysis`.
-                details: ocrAnalysis,
-                pageLabels,
-                pageCount: 50,
-            });
-        });
-
-        it('does not transfer the input buffer', async () => {
-            const client = getMuPDFWorkerClient();
-            const promise = client.extract(new Uint8Array([1, 2, 3, 4]));
-            const worker = MockWorker.instances[0];
-            worker.replyToLast({ ok: true, result: { pages: [] } });
-            await promise;
-            const [, transfer] = worker.postMessage.mock.calls[0] as [
-                any,
-                Transferable[] | undefined,
-            ];
-            expect(transfer).toBeUndefined();
-        });
-    });
-
-    describe('hasTextLayer', () => {
-        it('round-trips a boolean', async () => {
-            const client = getMuPDFWorkerClient();
-            const promise = client.hasTextLayer(new Uint8Array([1]));
-            const worker = MockWorker.instances[0];
-            worker.replyToLast({ ok: true, result: true });
-            await expect(promise).resolves.toBe(true);
         });
     });
 

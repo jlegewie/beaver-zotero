@@ -22,16 +22,13 @@ import { enqueue } from "./opQueue";
 import { ensureApi } from "./wasmInit";
 import {
     opAnalyzeOCRNeeds,
-    opExtract,
     opExtractRawPageDetailed,
     opExtractRawPages,
     opExtractSentenceBBoxes,
     opExtractWithMeta,
     opGetMetadata,
     opGetPageCount,
-    opHasTextLayer,
     opRenderPageToImage,
-    opRenderPagesToImages,
     opRenderPagesToImagesWithMeta,
     opSearch,
     opSearchPages,
@@ -69,8 +66,6 @@ async function dispatch(op: string, args: Record<string, unknown> | undefined): 
             return await opExtractRawPages(a as Parameters<typeof opExtractRawPages>[0]);
         case "extractRawPageDetailed":
             return await opExtractRawPageDetailed(a as Parameters<typeof opExtractRawPageDetailed>[0]);
-        case "renderPagesToImages":
-            return await opRenderPagesToImages(a as Parameters<typeof opRenderPagesToImages>[0]);
         case "renderPagesToImagesWithMeta":
             return await opRenderPagesToImagesWithMeta(a as Parameters<typeof opRenderPagesToImagesWithMeta>[0]);
         case "renderPageToImage":
@@ -78,14 +73,10 @@ async function dispatch(op: string, args: Record<string, unknown> | undefined): 
         case "searchPages":
             return await opSearchPages(a as Parameters<typeof opSearchPages>[0]);
         // orchestration ops
-        case "extract":
-            return await opExtract(a as Parameters<typeof opExtract>[0]);
         case "extractWithMeta":
             return await opExtractWithMeta(a as Parameters<typeof opExtractWithMeta>[0]);
         case "analyzeOCRNeeds":
             return await opAnalyzeOCRNeeds(a as Parameters<typeof opAnalyzeOCRNeeds>[0]);
-        case "hasTextLayer":
-            return await opHasTextLayer(a as Parameters<typeof opHasTextLayer>[0]);
         case "search":
             return await opSearch(a as Parameters<typeof opSearch>[0]);
         case "extractSentenceBBoxes":

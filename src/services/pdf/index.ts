@@ -39,7 +39,6 @@ export {
 } from "./MuPDFWorkerClient";
 export { prewarmMuPDFWorker } from "./prewarm";
 export { DocumentAnalyzer } from "./DocumentAnalyzer";
-export type { TextLayerCheckOptions } from "./DocumentAnalyzer";
 export { StyleAnalyzer } from "./StyleAnalyzer";
 export {
     MarginFilter,

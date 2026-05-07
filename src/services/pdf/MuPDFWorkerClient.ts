@@ -355,27 +355,6 @@ export class MuPDFWorkerClient {
     }
 
     /**
-     * Render multiple pages to images.
-     *
-     * Mirrors `MuPDFService.renderPagesToImages` semantics: invalid indices
-     * are silently filtered. The returned image bytes are transferred from
-     * the worker (the worker does not retain them after asPNG/asJPEG copies).
-     */
-    async renderPagesToImages(
-        pdfData: Uint8Array | ArrayBuffer,
-        pageIndices?: number[],
-        options?: PageImageOptions,
-    ): Promise<PageImageResult[]> {
-        const bytes =
-            pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
-        return this.call<PageImageResult[]>("renderPagesToImages", {
-            pdfData: bytes,
-            pageIndices,
-            options,
-        });
-    }
-
-    /**
      * Strict, fused render-pages variant for the agent images handler.
      *
      * Combines page-count + page-labels + render in a single doc-open. Uses
@@ -410,8 +389,7 @@ export class MuPDFWorkerClient {
      * Render a single page to an image.
      *
      * Single-page op — out-of-range `pageIndex` throws
-     * `ExtractionError(PAGE_OUT_OF_RANGE)`. One doc-open per call (vs. the
-     * two-open cost of "getMetadata + renderPagesToImages([idx])").
+     * `ExtractionError(PAGE_OUT_OF_RANGE)`. One doc-open per call.
      */
     async renderPageToImage(
         pdfData: Uint8Array | ArrayBuffer,
@@ -446,28 +424,6 @@ export class MuPDFWorkerClient {
             query,
             pageIndices,
             maxHitsPerPage,
-        });
-    }
-
-    /**
-     * Run the full extraction orchestration in the worker.
-     *
-     * Returns an `ExtractionResult`. When `settings.useLineDetection` is
-     * true, each `ProcessedPage.lines` is populated. Throws
-     * `ExtractionError(NO_TEXT_LAYER)` when `checkTextLayer` is enabled
-     * and the document needs OCR — the `ocrAnalysis`, `pageLabels`, and
-     * `pageCount` fields are preserved across the worker boundary via
-     * the payload-aware rehydrateError.
-     */
-    async extract(
-        pdfData: Uint8Array | ArrayBuffer,
-        settings?: ExtractionSettings,
-    ): Promise<ExtractionResult> {
-        const bytes =
-            pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
-        return this.call<ExtractionResult>("extract", {
-            pdfData: bytes,
-            settings,
         });
     }
 
@@ -512,16 +468,6 @@ export class MuPDFWorkerClient {
             pdfData: bytes,
             options,
         });
-    }
-
-    /**
-     * Boolean projection of `analyzeOCRNeeds` — same sampled-page analysis,
-     * metadata discarded. Prefer `analyzeOCRNeeds` when you need the reason.
-     */
-    async hasTextLayer(pdfData: Uint8Array | ArrayBuffer): Promise<boolean> {
-        const bytes =
-            pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
-        return this.call<boolean>("hasTextLayer", { pdfData: bytes });
     }
 
     /**
