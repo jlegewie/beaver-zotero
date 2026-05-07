@@ -378,8 +378,11 @@ export async function handleTestPdfPageLabelsHttpRequest(request: any) {
 }
 
 /**
- * Dev-only PDF render endpoint. Routes through `PDFExtractor`. Image bytes
- * are base64-encoded for JSON transport; live tests decode for parity.
+ * Dev-only PDF render endpoint. Routes through
+ * `PDFExtractor.renderPagesToImagesWithMeta` and discards the metadata —
+ * the legacy `{ ok, pages }` response shape is preserved for live-test
+ * parity. Image bytes are base64-encoded for JSON transport; live tests
+ * decode for parity.
  */
 export async function handleTestPdfRenderPagesHttpRequest(request: any) {
     const { PDFExtractor, ExtractionError } = await import(
@@ -396,12 +399,11 @@ export async function handleTestPdfRenderPagesHttpRequest(request: any) {
     const options = request?.options || {};
 
     try {
-        const results = await new PDFExtractor().renderPagesToImages(
+        const result = await new PDFExtractor().renderPagesToImagesWithMeta(
             pdfData,
-            pageIndices,
-            options,
+            { pageIndices, options },
         );
-        const pages = results.map((r) => ({
+        const pages = result.pages.map((r) => ({
             pageIndex: r.pageIndex,
             format: r.format,
             width: r.width,

@@ -342,33 +342,6 @@ export class PDFExtractor {
     }
 
     /**
-     * Render multiple pages to images.
-     *
-     * @param pdfData - The PDF file as Uint8Array or ArrayBuffer
-     * @param pageIndices - Pages to render (0-based). If undefined, renders all.
-     * @param options - Rendering options (scale, dpi, format, etc.)
-     * @returns Array of PageImageResult
-     *
-     * @example
-     * ```typescript
-     * const extractor = new PDFExtractor();
-     * // Render first 3 pages at 2x scale as JPEG
-     * const results = await extractor.renderPagesToImages(pdfData, [0, 1, 2], {
-     *   scale: 2.0,
-     *   format: "jpeg",
-     *   jpegQuality: 90
-     * });
-     * ```
-     */
-    async renderPagesToImages(
-        pdfData: Uint8Array | ArrayBuffer,
-        pageIndices?: number[],
-        options: PageImageOptions = {}
-    ): Promise<PageImageResult[]> {
-        return getMuPDFWorkerClient().renderPagesToImages(pdfData, pageIndices, options);
-    }
-
-    /**
      * Strict, fused render-pages variant for the agent images handler.
      *
      * Returns `{ pageCount, pageLabels, pages }` from a single worker

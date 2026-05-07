@@ -649,15 +649,18 @@ const image = await extractor.renderPageToImage(pdfData, 0, {
 // image.data is Uint8Array of PNG bytes
 // image.width, image.height - image dimensions in pixels
 
-// Render pages 0-2 as JPEG thumbnails
-const results = await extractor.renderPagesToImages(pdfData, [0, 1, 2], {
-  scale: 0.5, // 50% size (36 DPI)
-  format: "jpeg",
-  jpegQuality: 85,
-});
+// Render pages 0-2 as JPEG thumbnails (fused with metadata in one round-trip)
+const { pageCount, pageLabels, pages } = await extractor.renderPagesToImagesWithMeta(
+  pdfData,
+  {
+    pageIndices: [0, 1, 2],
+    options: { scale: 0.5, format: "jpeg", jpegQuality: 85 },
+  },
+);
 
-// Render all pages
-const allImages = await extractor.renderPagesToImages(pdfData);
+// Render all pages — pass `pageIndices: undefined` (or omit) to avoid a
+// pageCount round-trip
+const all = await extractor.renderPagesToImagesWithMeta(pdfData);
 ```
 
 #### PageImageOptions
