@@ -220,7 +220,7 @@ describe('extractPageSentenceBBoxes', () => {
     it('supports precomputed paragraph results', () => {
         // We don't want to re-run detection; the caller may have already
         // done it. Call detectParagraphs directly with trackItemLines.
-        // This mirrors the production flow where extractWithMeta with
+        // This mirrors the production flow where extract with
         // useLineDetection already runs the line detector.
         const page = makeMultiBlockPage([
             [makeLine('Sentence one.', 100), makeLine('Sentence two.', 115)],

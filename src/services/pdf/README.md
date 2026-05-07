@@ -650,7 +650,7 @@ const image = await extractor.renderPageToImage(pdfData, 0, {
 // image.width, image.height - image dimensions in pixels
 
 // Render pages 0-2 as JPEG thumbnails (fused with metadata in one round-trip)
-const { pageCount, pageLabels, pages } = await extractor.renderPagesToImagesWithMeta(
+const { pageCount, pageLabels, pages } = await extractor.renderPages(
   pdfData,
   {
     pageIndices: [0, 1, 2],
@@ -660,7 +660,7 @@ const { pageCount, pageLabels, pages } = await extractor.renderPagesToImagesWith
 
 // Render all pages — pass `pageIndices: undefined` (or omit) to avoid a
 // pageCount round-trip
-const all = await extractor.renderPagesToImagesWithMeta(pdfData);
+const all = await extractor.renderPages(pdfData);
 ```
 
 #### PageImageOptions

@@ -12,7 +12,7 @@ vi.mock('../../../src/services/pdf', () => {
             return { pageCount: renderBytesByPage.size, pageLabels: {} };
         }
 
-        async renderPagesToImagesWithMeta(
+        async renderPages(
             _pdfData: Uint8Array | ArrayBuffer,
             args: any,
         ): Promise<{ pageCount: number; pageLabels: Record<number, string>; pages: any[] }> {

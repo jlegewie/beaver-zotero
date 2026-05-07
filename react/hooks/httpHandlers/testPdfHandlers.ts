@@ -379,10 +379,10 @@ export async function handleTestPdfPageLabelsHttpRequest(request: any) {
 
 /**
  * Dev-only PDF render endpoint. Routes through
- * `PDFExtractor.renderPagesToImagesWithMeta` and discards the metadata —
- * the legacy `{ ok, pages }` response shape is preserved for live-test
- * parity. Image bytes are base64-encoded for JSON transport; live tests
- * decode for parity.
+ * `PDFExtractor.renderPages` and discards the metadata — the legacy
+ * `{ ok, pages }` response shape is preserved for live-test parity.
+ * Image bytes are base64-encoded for JSON transport; live tests decode
+ * for parity.
  */
 export async function handleTestPdfRenderPagesHttpRequest(request: any) {
     const { PDFExtractor, ExtractionError } = await import(
@@ -399,7 +399,7 @@ export async function handleTestPdfRenderPagesHttpRequest(request: any) {
     const options = request?.options || {};
 
     try {
-        const result = await new PDFExtractor().renderPagesToImagesWithMeta(
+        const result = await new PDFExtractor().renderPages(
             pdfData,
             { pageIndices, options },
         );
@@ -431,8 +431,8 @@ export async function handleTestPdfRenderPagesHttpRequest(request: any) {
 
 /**
  * Dev-only fused render-pages endpoint exercising
- * `PDFExtractor.renderPagesToImagesWithMeta`. Returns metadata alongside
- * rendered pages so live tests can verify the fused-op shape end-to-end.
+ * `PDFExtractor.renderPages`. Returns metadata alongside rendered pages
+ * so live tests can verify the fused-op shape end-to-end.
  */
 export async function handleTestPdfRenderPagesWithMetaHttpRequest(request: any) {
     const { PDFExtractor, ExtractionError } = await import(
@@ -452,7 +452,7 @@ export async function handleTestPdfRenderPagesWithMetaHttpRequest(request: any) 
     const options = request?.options || {};
 
     try {
-        const result = await new PDFExtractor().renderPagesToImagesWithMeta(pdfData, {
+        const result = await new PDFExtractor().renderPages(pdfData, {
             pageIndices,
             pageRange,
             options,
@@ -636,7 +636,7 @@ export async function handleTestPdfSearchHttpRequest(request: any) {
 }
 
 /**
- * Dev-only `extractWithMeta` parity endpoint. Translates the legacy
+ * Dev-only `extract` parity endpoint. Translates the legacy
  * `settings.pages` array into the worker-side `pageIndices` arg so existing
  * live-test bodies (which still pass `{ settings: { pages: [...] } }`) keep
  * working.
@@ -650,13 +650,13 @@ export async function handleTestPdfExtractHttpRequest(request: any) {
     delete settings.pages;
     return runPdfExtractorCall(
         request,
-        (pdfData) => new PDFExtractor().extractWithMeta(pdfData, { settings, pageIndices }),
+        (pdfData) => new PDFExtractor().extract(pdfData, { settings, pageIndices }),
         (result) => ({ ok: true, result }),
     );
 }
 
 /**
- * Dev-only line-extraction parity endpoint. Now backed by `extractWithMeta`
+ * Dev-only line-extraction parity endpoint. Now backed by `extract`
  * with `useLineDetection: true` — kept under the legacy route so existing
  * live-test bodies (which still pass `{ settings: { pages: [...] } }`)
  * keep working. The `settings.pages` array is translated into the
@@ -671,7 +671,7 @@ export async function handleTestPdfExtractByLinesHttpRequest(request: any) {
     delete settings.pages;
     return runPdfExtractorCall(
         request,
-        (pdfData) => new PDFExtractor().extractWithMeta(pdfData, { settings, pageIndices }),
+        (pdfData) => new PDFExtractor().extract(pdfData, { settings, pageIndices }),
         (result) => ({ ok: true, result }),
     );
 }

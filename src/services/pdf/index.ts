@@ -151,7 +151,7 @@ export type {
  * Usage:
  * ```typescript
  * const extractor = new PDFExtractor();
- * const result = await extractor.extractWithMeta(pdfData, {
+ * const result = await extractor.extract(pdfData, {
  *   pageRange: { startIndex: 0, endIndex: 2 },
  * });
  * console.log(result.fullText);
@@ -176,7 +176,7 @@ export class PDFExtractor {
      * metadata and `page.content` becomes the line texts joined with `\n`.
      * `blocks` is left empty in that mode.
      */
-    async extractWithMeta(
+    async extract(
         pdfData: Uint8Array | ArrayBuffer,
         args: {
             settings?: ExtractionSettings;
@@ -184,7 +184,7 @@ export class PDFExtractor {
             pageRange?: { startIndex: number; endIndex?: number; maxPages?: number };
         } = {}
     ): Promise<ExtractionResult> {
-        return getMuPDFWorkerClient().extractWithMeta(pdfData, args);
+        return getMuPDFWorkerClient().extract(pdfData, args);
     }
 
     /**
@@ -346,12 +346,12 @@ export class PDFExtractor {
      * Returns `{ pageCount, pageLabels, pages }` from a single worker
      * round-trip.
      *
-     * Args mirror `extractWithMeta`. All-pages requests should pass
+     * Args mirror `extract`. All-pages requests should pass
      * `pageIndices: undefined` (or omit args entirely), NOT a pre-enumerated
      * list — that requires knowing pageCount upfront, which is what we're
      * trying to avoid.
      */
-    async renderPagesToImagesWithMeta(
+    async renderPages(
         pdfData: Uint8Array | ArrayBuffer,
         args: {
             pageIndices?: number[];
@@ -359,7 +359,7 @@ export class PDFExtractor {
             options?: PageImageOptions;
         } = {}
     ): Promise<{ pageCount: number; pageLabels: Record<number, string>; pages: PageImageResult[] }> {
-        return getMuPDFWorkerClient().renderPagesToImagesWithMeta(pdfData, args);
+        return getMuPDFWorkerClient().renderPages(pdfData, args);
     }
 
     /**

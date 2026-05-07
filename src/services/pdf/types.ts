@@ -36,7 +36,7 @@ export const DEFAULT_MARGIN_ZONE: MarginSettings = {
     bottom: 80,
 };
 
-/** Options for text extraction. Page selection lives on the args object of the calling op (e.g. `extractWithMeta(args.pageIndices | args.pageRange)`), not here. */
+/** Options for text extraction. Page selection lives on the args object of the calling op (e.g. `extract(args.pageIndices | args.pageRange)`), not here. */
 export interface ExtractionSettings {
     /** Whether to check for text layer before processing */
     checkTextLayer?: boolean;

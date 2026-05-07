@@ -357,14 +357,14 @@ export class MuPDFWorkerClient {
     /**
      * Strict, fused render-pages variant for the agent images handler.
      *
-     * Combines page-count + page-labels + render in a single doc-open. Uses
+     * Fuses page-count + page-labels + render in a single doc-open. Uses
      * the worker's strict resolvers — explicit-but-all-invalid `pageIndices`
      * (or out-of-range `pageRange`) throws `ExtractionError(PAGE_OUT_OF_RANGE)`
      * with the worker's known `pageCount` in the error payload.
      *
      * Image buffers are transferred from the worker.
      */
-    async renderPagesToImagesWithMeta(
+    async renderPages(
         pdfData: Uint8Array | ArrayBuffer,
         args?: {
             pageIndices?: number[];
@@ -375,7 +375,7 @@ export class MuPDFWorkerClient {
         const bytes =
             pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
         return this.call<{ pageCount: number; pageLabels: Record<number, string>; pages: PageImageResult[] }>(
-            "renderPagesToImagesWithMeta",
+            "renderPages",
             {
                 pdfData: bytes,
                 pageIndices: args?.pageIndices,
@@ -439,7 +439,7 @@ export class MuPDFWorkerClient {
      * Honors `settings.useLineDetection` — when true, the per-page loop
      * runs line detection and `ProcessedPage.lines` is populated.
      */
-    async extractWithMeta(
+    async extract(
         pdfData: Uint8Array | ArrayBuffer,
         args?: {
             settings?: ExtractionSettings;
@@ -449,7 +449,7 @@ export class MuPDFWorkerClient {
     ): Promise<ExtractionResult> {
         const bytes =
             pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
-        return this.call<ExtractionResult>("extractWithMeta", {
+        return this.call<ExtractionResult>("extract", {
             pdfData: bytes,
             settings: args?.settings,
             pageIndices: args?.pageIndices,

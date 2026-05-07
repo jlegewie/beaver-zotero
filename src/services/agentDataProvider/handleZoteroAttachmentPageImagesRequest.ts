@@ -186,7 +186,7 @@ export async function handleZoteroAttachmentPageImagesRequest(
         // 5c. Upfront getPageCount ONLY when rendering all pages and we have
         // no cached page_count — needed to gate `maxPageCount` before
         // committing to a multi-thousand-page render. Bounded requests get
-        // pageCount back inside `renderPagesToImagesWithMeta`.
+        // pageCount back inside `renderPages`.
         const needsUpfrontPageCount =
             totalPages == null && requestingAllPages && !skip_local_limits;
         if (needsUpfrontPageCount) {
@@ -294,11 +294,11 @@ export async function handleZoteroAttachmentPageImagesRequest(
 
         // 10. Render — fused metadata + render in one round-trip.
         logger(
-            `handleZoteroAttachmentPageImagesRequest: renderPagesToImagesWithMeta for ${requestKey} `
+            `handleZoteroAttachmentPageImagesRequest: renderPages for ${requestKey} `
             + `pageIndices=${JSON.stringify(pageIndicesArg ?? null)} (allPages=${requestingAllPages})`,
             3,
         );
-        const renderResult = await extractor.renderPagesToImagesWithMeta(pdfData, {
+        const renderResult = await extractor.renderPages(pdfData, {
             pageIndices: pageIndicesArg,
             options: renderOptions,
         });

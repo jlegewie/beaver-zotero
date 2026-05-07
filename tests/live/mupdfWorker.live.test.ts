@@ -142,7 +142,7 @@ describe('MuPDF worker smoke — PR #2 ops', () => {
         expect(page.data_byte_length).toBeGreaterThan(0);
     });
 
-    it('renderPagesToImagesWithMeta returns { pageCount, pageLabels, pages } in one round-trip', async () => {
+    it('renderPages returns { pageCount, pageLabels, pages } in one round-trip', async () => {
         const res = await pdfRenderPagesWithMeta(SMALL_PDF, { page_indices: [0] });
         expect(res.ok).toBe(true);
         expect(res.pageCount).toBe(SMALL_PDF_PAGE_COUNT);
@@ -153,14 +153,14 @@ describe('MuPDF worker smoke — PR #2 ops', () => {
         expect(page.data_byte_length).toBeGreaterThan(0);
     });
 
-    it('renderPagesToImagesWithMeta enumerates all pages when no pageIndices/pageRange given', async () => {
+    it('renderPages enumerates all pages when no pageIndices/pageRange given', async () => {
         const res = await pdfRenderPagesWithMeta(SMALL_PDF);
         expect(res.ok).toBe(true);
         expect(res.pageCount).toBe(SMALL_PDF_PAGE_COUNT);
         expect(res.pages?.length).toBe(SMALL_PDF_PAGE_COUNT);
     });
 
-    it('renderPagesToImagesWithMeta resolves an open-ended pageRange against pageCount', async () => {
+    it('renderPages resolves an open-ended pageRange against pageCount', async () => {
         // startIndex=0, no endIndex → worker uses pageCount-1.
         const res = await pdfRenderPagesWithMeta(SMALL_PDF, {
             page_range: { startIndex: 0, maxPages: 10 },
@@ -170,7 +170,7 @@ describe('MuPDF worker smoke — PR #2 ops', () => {
         expect(res.pages?.length).toBe(SMALL_PDF_PAGE_COUNT);
     });
 
-    it('renderPagesToImagesWithMeta throws PAGE_OUT_OF_RANGE for all-invalid explicit indices and carries pageCount in the payload', async () => {
+    it('renderPages throws PAGE_OUT_OF_RANGE for all-invalid explicit indices and carries pageCount in the payload', async () => {
         const res = await pdfRenderPagesWithMeta(SMALL_PDF, { page_indices: [99999] });
         expect(res.ok).toBe(false);
         expect(res.error?.code).toBe('PAGE_OUT_OF_RANGE');
@@ -248,7 +248,7 @@ describe('MuPDF worker smoke — orchestration ops', () => {
         });
     });
 
-    describe('extractWithMeta (useLineDetection)', () => {
+    describe('extract (useLineDetection)', () => {
         it('returns line-based extraction for a healthy PDF', async () => {
             const settings = { styleSampleSize: 0, useLineDetection: true };
             const res = await pdfExtractByLines(SMALL_PDF, { settings });

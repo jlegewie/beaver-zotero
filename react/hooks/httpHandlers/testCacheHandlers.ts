@@ -79,7 +79,7 @@ export async function handleTestCacheDeleteContentHttpRequest(request: any) {
  * the worker-side document cache.
  *
  * Lets manual-test runners (`docs-zotero/manual-tests-fused-worker-ops.md`)
- * verify "exactly one extractWithMeta dispatch", "no extra spawns", etc.
+ * verify "exactly one extract dispatch", "no extra spawns", etc.
  * without log grepping. POST `{ reset: true }` to zero counters first.
  *
  * `cacheStats` is `null` when no worker has spawned yet — the call must

@@ -146,7 +146,7 @@ export async function opExtractRawPageDetailed(
  * the response without an extra round-trip. Image buffers are
  * transferred (per-page `r.data.buffer`).
  */
-export async function opRenderPagesToImagesWithMeta(
+export async function opRenderPages(
     args: {
         pdfData: Uint8Array | ArrayBuffer;
         pageIndices?: number[];
@@ -231,9 +231,9 @@ export async function opSearchPages(
 }
 
 /**
- * Shared body for `extract` / `extractWithMeta`. Differs only in the
- * per-page loop: column detection + PageExtractor (block-based) vs
- * column + line detection (line-based, populates `page.lines`). All
+ * Shared body for `opExtract`. The per-page loop branches on
+ * `useLineDetection`: column detection + PageExtractor (block-based)
+ * vs column + line detection (line-based, populates `page.lines`). All
  * other steps (raw extraction, style + margin analysis, fullText
  * assembly, analysis build) are identical, and the result shape is the
  * same `ExtractionResult` either way.
@@ -366,8 +366,7 @@ function runExtractFromIndices(
 /**
  * Strict, fused extract op for the agent handlers.
  *
- * Combines what the pages handler used to fetch as separate round-trips
- * (`getMetadata` + `getPageCount` + `extract`) into a single
+ * Fuses page-count + page-labels + OCR check + extract into a single
  * doc-open. Uses the strict resolvers — explicit-but-all-invalid page
  * inputs throw PAGE_OUT_OF_RANGE with `{ pageCount }` in the payload so
  * handlers can populate `total_pages` in error responses.
@@ -378,7 +377,7 @@ function runExtractFromIndices(
  * the `lines` field on each `ProcessedPage` is populated only when line
  * detection ran.
  */
-export async function opExtractWithMeta(
+export async function opExtract(
     args: {
         pdfData: Uint8Array | ArrayBuffer;
         settings?: ExtractionSettings;

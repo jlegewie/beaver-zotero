@@ -165,7 +165,7 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
                 return;
             }
             const pdfData = await IOUtils.read(path);
-            const result = await new PDFExtractor().extractWithMeta(pdfData, {
+            const result = await new PDFExtractor().extract(pdfData, {
                 settings: { useLineDetection: true },
             });
 
@@ -468,7 +468,7 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
                 return;
             }
             const pdfData = await IOUtils.read(path);
-            const result = await new PDFExtractor().extractWithMeta(pdfData, {
+            const result = await new PDFExtractor().extract(pdfData, {
                 pageIndices: [currentPageIndex],
                 settings: { useLineDetection: true, checkTextLayer: false },
             });

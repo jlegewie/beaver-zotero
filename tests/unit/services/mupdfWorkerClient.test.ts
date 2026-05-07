@@ -322,12 +322,12 @@ describe('MuPDFWorkerClient', () => {
         });
     });
 
-    describe('renderPagesToImagesWithMeta', () => {
+    describe('renderPages', () => {
         it('round-trips { pageCount, pageLabels, pages } and forwards args', async () => {
             const client = getMuPDFWorkerClient();
             const buf = new Uint8Array([1, 2, 3]);
 
-            const promise = client.renderPagesToImagesWithMeta(buf, {
+            const promise = client.renderPages(buf, {
                 pageIndices: [0, 1],
                 options: { format: 'png' },
             });
@@ -357,7 +357,7 @@ describe('MuPDFWorkerClient', () => {
                 Transferable[] | undefined,
             ];
             expect(message).toMatchObject({
-                op: 'renderPagesToImagesWithMeta',
+                op: 'renderPages',
                 args: {
                     pageIndices: [0, 1],
                     options: { format: 'png' },
@@ -370,7 +370,7 @@ describe('MuPDFWorkerClient', () => {
         it('forwards a pageRange', async () => {
             const client = getMuPDFWorkerClient();
             const buf = new Uint8Array([1]);
-            const promise = client.renderPagesToImagesWithMeta(buf, {
+            const promise = client.renderPages(buf, {
                 pageRange: { startIndex: 0, endIndex: 2, maxPages: 5 },
             });
             const worker = MockWorker.instances[0];
@@ -388,11 +388,11 @@ describe('MuPDFWorkerClient', () => {
         });
     });
 
-    describe('extractWithMeta', () => {
-        it('forwards pageRange to op extractWithMeta', async () => {
+    describe('extract', () => {
+        it('forwards pageRange to op extract', async () => {
             const client = getMuPDFWorkerClient();
             const buf = new Uint8Array([1]);
-            const promise = client.extractWithMeta(buf, {
+            const promise = client.extract(buf, {
                 settings: { checkTextLayer: true },
                 pageRange: { startIndex: 0, maxPages: 2 },
             });
@@ -410,7 +410,7 @@ describe('MuPDFWorkerClient', () => {
             await promise;
             const [message] = worker.postMessage.mock.calls[0] as [any, any];
             expect(message).toMatchObject({
-                op: 'extractWithMeta',
+                op: 'extract',
                 args: {
                     settings: { checkTextLayer: true },
                     pageRange: { startIndex: 0, maxPages: 2 },
@@ -420,7 +420,7 @@ describe('MuPDFWorkerClient', () => {
 
         it('rehydrates PAGE_OUT_OF_RANGE with pageCount from worker payload', async () => {
             const client = getMuPDFWorkerClient();
-            const promise = client.extractWithMeta(new Uint8Array([1]), {
+            const promise = client.extract(new Uint8Array([1]), {
                 pageIndices: [99999],
             });
             const worker = MockWorker.instances[0];
@@ -445,7 +445,7 @@ describe('MuPDFWorkerClient', () => {
 
         it('rehydrates NO_TEXT_LAYER with the full payload (ocrAnalysis/pageLabels/pageCount)', async () => {
             const client = getMuPDFWorkerClient();
-            const promise = client.extractWithMeta(new Uint8Array([0]), {
+            const promise = client.extract(new Uint8Array([0]), {
                 settings: { checkTextLayer: true },
             });
             const worker = MockWorker.instances[0];
