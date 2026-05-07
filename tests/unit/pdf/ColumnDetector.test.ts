@@ -277,6 +277,97 @@ describe('detectColumns tail/head/paragraph merge for ragged-right text', () => 
         expect(rightCol.y).toBe(100);
         expect(rightCol.h).toBe(420);
     });
+
+    // -----------------------------------------------------------------
+    // Standalone-heading guard for canJoinAsShortAdjacent.
+    //
+    // The relaxed pass must not absorb a short narrow block that sits
+    // between two body-shaped blocks separated by a section-sized gap,
+    // because that pattern is a section heading at the start of a new
+    // section, not a paragraph fragment. The guard fires only when the
+    // small block is ABOVE the candidate host (heading-then-body) — see
+    // ColumnDetector.ts comments on canJoinAsShortAdjacent.
+    // -----------------------------------------------------------------
+
+    it('keeps a standalone Methods-shape heading separate from the body below (3WBRN8M8 p6)', () => {
+        // Geometry mirrors the failing fixture: bodyAbove ends well before
+        // a single-word heading, then body resumes just below the heading.
+        // Without the guard, Phase 4.5 absorbs Methods into bodyBelow.
+        const bodyAbove: Rect = { x: 72, y: 100, w: 425, h: 270 }; // bottom = 370
+        const methods:   Rect = { x: 72, y: 456, w: 48,  h: 16  }; // gap above ≈ 86
+        const bodyBelow: Rect = { x: 72, y: 490, w: 454, h: 200 }; // gap below = 18
+        const result = detectColumns(makeColumnPage([bodyAbove, methods, bodyBelow]));
+        // The three blocks must remain three distinct rects.
+        expect(result.columns.length).toBe(3);
+        // Stronger structural assertion: no single rect spans both Methods
+        // and the bottom of bodyBelow (would mean they merged).
+        for (const c of result.columns) {
+            const merged = c.y <= methods.y && c.y + c.h >= bodyBelow.y + bodyBelow.h;
+            expect(merged).toBe(false);
+        }
+    });
+
+    it('keeps a numbered ~60% width heading separate when sandwiched with section gap above', () => {
+        // "2. Methods" / "Results and discussion" shapes — too wide for
+        // the bridge merger's 2× gate but still well under 0.65 of the
+        // host. Section-sized gap above is the discriminator.
+        const bodyAbove: Rect = { x: 72, y: 100, w: 450, h: 270 }; // bottom = 370
+        const heading:   Rect = { x: 72, y: 456, w: 270, h: 16  }; // 270/450 = 0.6
+        const bodyBelow: Rect = { x: 72, y: 490, w: 454, h: 200 };
+        const result = detectColumns(makeColumnPage([bodyAbove, heading, bodyBelow]));
+        expect(result.columns.length).toBe(3);
+        for (const c of result.columns) {
+            const merged = c.y <= heading.y && c.y + c.h >= bodyBelow.y + bodyBelow.h;
+            expect(merged).toBe(false);
+        }
+    });
+
+    it('still merges a wide indented head when no section gap precedes it (regression for dedication shape)', () => {
+        // ~0.9 width head sits at the top of the column with no prior
+        // body block. The heading-width gate excludes it from the guard
+        // and the merge proceeds (locks in WUIJDNRF p4 dedication).
+        const head: Rect = { x: 144, y: 170, w: 390, h: 16 };       // 390/434 = 0.90
+        const body: Rect = { x: 108, y: 198, w: 434, h: 320 };
+        const result = detectColumns(makeColumnPage([head, body]));
+        expect(result.columns.length).toBe(1);
+        expect(result.columns[0].y).toBe(170);
+        expect(result.columns[0].y + result.columns[0].h).toBe(518);
+    });
+
+    it('still merges a narrow indented head when preceding block is offset (title-then-indented-paragraph)', () => {
+        // A section starts with an indented short first line directly
+        // beneath a wide title separated by a section-sized gap. The
+        // indented head shares NO left edge with its body, so the guard
+        // must NOT fire — otherwise we'd regress a common layout. Locks
+        // in the same-left-edge gate that distinguishes section headings
+        // (column-aligned) from indented paragraph heads (offset).
+        const title: Rect = { x: 72, y: 100, w: 450, h: 16 };  // wide
+        const head:  Rect = { x: 108, y: 200, w: 120, h: 16 }; // indented, narrow
+        const body:  Rect = { x: 72, y: 226, w: 450, h: 200 };
+        const result = detectColumns(makeColumnPage([title, head, body]));
+        // head + body must merge into one column; title stays separate.
+        expect(result.columns.length).toBe(2);
+        const titleCol = result.columns.find(c => c.y === 100)!;
+        expect(titleCol.h).toBe(16);
+        const bodyCol = result.columns.find(c => c.y === 200)!;
+        expect(bodyCol.y + bodyCol.h).toBe(426); // covers head + body
+    });
+
+    it('still merges a body + ragged tail before a wide next-section block', () => {
+        // body / short tail / large gap / wide next-section block. The
+        // away-side block is below the tail; the guard direction is
+        // "small above large" only, so the body+tail merge proceeds and
+        // the next section stays separate.
+        const body:    Rect = { x: 72, y: 100, w: 470, h: 200 };  // bottom = 300
+        const tail:    Rect = { x: 72, y: 310, w: 90,  h: 12  };  // small below body, gap=10
+        const nextSec: Rect = { x: 72, y: 380, w: 470, h: 100 };  // wide block, gap=58
+        const result = detectColumns(makeColumnPage([body, tail, nextSec]));
+        expect(result.columns.length).toBe(2);
+        const bodyCol = result.columns.find(c => c.y === 100)!;
+        expect(bodyCol.y + bodyCol.h).toBe(322); // covers tail
+        const nextCol = result.columns.find(c => c.y === 380)!;
+        expect(nextCol.h).toBe(100);
+    });
 });
 
 describe('detectColumns clipping respects custom header/footerMargin', () => {
