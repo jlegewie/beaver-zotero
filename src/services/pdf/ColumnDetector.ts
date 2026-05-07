@@ -215,15 +215,39 @@ export function pageIsBroken(
  * The heading doesn't span the full column width, but it's contained within
  * the paragraphs above and below, so they should all be one column.
  */
+/**
+ * Per-bridge-merged block flags recording which side(s) of the merged
+ * trio came from a SHORT block (bridge or short neighbor). These flags
+ * define where in the resulting bigMerge a section heading was absorbed:
+ *
+ *   - `headingAtTop`: above was short → the top of the merged rect
+ *     is a heading boundary; further merges with blocks ABOVE the merged
+ *     rect would cross the heading.
+ *   - `headingAtBottom`: below was short → the bottom is a heading
+ *     boundary; further merges with blocks BELOW would cross it.
+ *
+ * Used by Phase 4.5 to keep strict / same-column-paragraphs merges from
+ * extending a bridge-expanded block past what was a section break (e.g.
+ * UCZSE63I p28 — body block bridge-expanded past "References" heading
+ * mustn't grab the references list below).
+ */
+export interface BridgeFlags {
+    headingAtTop: boolean;
+    headingAtBottom: boolean;
+}
+
 function mergeBridgeElements(
     blocks: Rect[],
     opts: Required<ColumnDetectionOptions>
-): Rect[] {
-    if (blocks.length < 3) return blocks;
+): { blocks: Rect[]; bridgeFlags: Map<Rect, BridgeFlags> } {
+    if (blocks.length < 3) {
+        return { blocks, bridgeFlags: new Map() };
+    }
 
     // Iterate until no more merges can be done
     // This handles cases with multiple consecutive bridge elements
     let current = [...blocks];
+    const bridgeFlags = new Map<Rect, BridgeFlags>();
     let changed = true;
     let iterations = 0;
     const maxIterations = 20; // Safety limit
@@ -234,16 +258,19 @@ function mergeBridgeElements(
 
         const result = mergeBridgeElementsOnce(current, opts, opts.debug);
 
-        if (result.length < current.length) {
+        if (result.blocks.length < current.length) {
             changed = true;
-            current = result;
+            current = result.blocks;
+            for (const entry of result.newlyExpanded) {
+                bridgeFlags.set(entry.rect, entry.flags);
+            }
             if (opts.debug) {
-                console.log(`[Bridge] Iteration ${iterations}: merged ${current.length + 2} -> ${result.length} blocks`);
+                console.log(`[Bridge] Iteration ${iterations}: merged ${current.length + 2} -> ${result.blocks.length} blocks`);
             }
         }
     }
 
-    return current;
+    return { blocks: current, bridgeFlags };
 }
 
 /**
@@ -257,8 +284,8 @@ function mergeBridgeElementsOnce(
     blocks: Rect[],
     opts: Required<ColumnDetectionOptions>,
     debug: boolean = false
-): Rect[] {
-    if (blocks.length < 3) return blocks;
+): { blocks: Rect[]; newlyExpanded: Array<{ rect: Rect; flags: BridgeFlags }> } {
+    if (blocks.length < 3) return { blocks, newlyExpanded: [] };
 
     // Sort by vertical position
     const sorted = [...blocks].sort((a, b) => a.y - b.y);
@@ -270,6 +297,7 @@ function mergeBridgeElementsOnce(
         aboveIdx: number;
         belowIdx: number;
         mergedRect: Rect;
+        flags: BridgeFlags;
     }
     const mergeOps: MergeOp[] = [];
     const alreadyInMerge = new Set<number>(); // Indices already part of a merge
@@ -349,12 +377,33 @@ function mergeBridgeElementsOnce(
                         }
 
                         if (!intersectsOthers) {
+                            // Flag the merged trio's heading boundaries:
+                            // a side is a "heading boundary" when the
+                            // outer block on that side is BOTH short
+                            // (h ≤ maxBridgeHeight) AND much narrower than
+                            // the opposite side. The width gate
+                            // distinguishes a real section heading (narrow,
+                            // e.g. "References" w=79 on a 425-wide page)
+                            // from a paragraph-end ragged tail (still
+                            // close to column width). Without it, ordinary
+                            // body+tail bridge merges would mark the
+                            // bigMerge as having an absorbed heading and
+                            // block legitimate same-column merges in
+                            // Phase 4.5 (e.g. CZAA39JT p0).
+                            const headingAtTop =
+                                above.h <= opts.maxBridgeHeight &&
+                                above.w * 2 < below.w;
+                            const headingAtBottom =
+                                below.h <= opts.maxBridgeHeight &&
+                                below.w * 2 < above.w;
+                            const flags: BridgeFlags = { headingAtTop, headingAtBottom };
                             // Record this merge operation
                             mergeOps.push({
                                 bridgeIdx: i,
                                 aboveIdx: neighborAbove,
                                 belowIdx: neighborBelow,
                                 mergedRect,
+                                flags,
                             });
 
                             // Mark all three indices as part of a merge
@@ -374,6 +423,7 @@ function mergeBridgeElementsOnce(
 
     // Second pass: build the result
     const result: Rect[] = [];
+    const newlyExpanded: Array<{ rect: Rect; flags: BridgeFlags }> = [];
 
     // Add all blocks that weren't merged
     for (let i = 0; i < sorted.length; i++) {
@@ -385,13 +435,14 @@ function mergeBridgeElementsOnce(
     // Add all merged rects
     for (const op of mergeOps) {
         result.push(op.mergedRect);
+        newlyExpanded.push({ rect: op.mergedRect, flags: op.flags });
     }
 
     if (debug && mergeOps.length > 0) {
         console.log(`[Bridge] Pass complete: ${sorted.length} blocks -> ${result.length} blocks (${mergeOps.length} merges)`);
     }
 
-    return result;
+    return { blocks: result, newlyExpanded };
 }
 
 /**
@@ -490,12 +541,14 @@ export function detectColumns(
     }
 
     // Phase 4: Merge bridge elements (headings contained within column fragments)
-    const bridgeMerged = mergeBridgeElements(joinedBlocks, opts);
+    const { blocks: bridgeMerged, bridgeFlags } = mergeBridgeElements(joinedBlocks, opts);
 
     if (opts.debug && bridgeMerged.length !== joinedBlocks.length) {
         console.log(`[ColumnDetector] Page ${page.pageIndex}: After Phase 4 (bridge): ${bridgeMerged.length} blocks`);
         for (const b of bridgeMerged) {
-            console.log(`    x=${b.x.toFixed(0)}-${(b.x + b.w).toFixed(0)}, y=${b.y.toFixed(0)}, h=${b.h.toFixed(0)}`);
+            const flags = bridgeFlags.get(b);
+            const flagStr = flags ? ` [top=${flags.headingAtTop} bot=${flags.headingAtBottom}]` : '';
+            console.log(`    x=${b.x.toFixed(0)}-${(b.x + b.w).toFixed(0)}, y=${b.y.toFixed(0)}, h=${b.h.toFixed(0)}${flagStr}`);
         }
     }
 
@@ -506,7 +559,13 @@ export function detectColumns(
     //   (b) trailing ragged lines (paragraph endings) below a host column,
     //       which fail Phase-2's width-ratio gate and have no neighbor below
     //       for bridge merging to fire.
-    const rejoined = joinAndSort(bridgeMerged, opts, /* relaxed */ true);
+    //
+    // `bridgeFlags` is threaded through so iterative strict /
+    // same-column-paragraphs merges can't extend a bridge-expanded block in
+    // the direction where its bridge merge absorbed a heading (e.g.
+    // UCZSE63I p28: body bridge-merged past "References" heading at its
+    // bottom mustn't grab the references list below).
+    const rejoined = joinAndSort(bridgeMerged, opts, /* relaxed */ true, bridgeFlags);
 
     if (opts.debug && rejoined.length !== bridgeMerged.length) {
         console.log(`[ColumnDetector] Page ${page.pageIndex}: After Phase 4.5 (rejoin): ${rejoined.length} blocks`);
@@ -840,14 +899,26 @@ function canJoinAsSameColumnParagraphs(
  * Does NOT do final reading order sorting - that's done in Phase 5.
  *
  * When `relaxed=true`, the iterative second pass also accepts tail merges
- * via canJoinAsTail (with an intersectsOthers safety guard). Used for the
+ * via canJoinAsShortAdjacent / canJoinAsSameColumnParagraphs. Used for the
  * post-bridge re-join so paragraph fragments separated only by an absorbed
  * bridge get reunited and trailing ragged-right tails get absorbed.
+ *
+ * `bridgeFlags` (Phase 4.5 only) records, for each block the bridge merger
+ * produced, which side of the merged rect was a SHORT (heading-shape)
+ * block. Strict same-edge merges and `canJoinAsSameColumnParagraphs` are
+ * blocked when the merge would extend a bridge-expanded block in the
+ * direction of an absorbed heading — that fuses the next section in (e.g.
+ * UCZSE63I p28: body block bridge-merged past a "References" heading at
+ * its bottom would otherwise grab the references list below). Merges in
+ * the OPPOSITE direction stay enabled, so e.g. a chapter title absorbed
+ * at the top of a body block doesn't block the body from joining the
+ * next body paragraph below.
  */
 function joinAndSort(
     blocks: Rect[],
     opts: Required<ColumnDetectionOptions>,
-    relaxed: boolean = false
+    relaxed: boolean = false,
+    bridgeFlags?: Map<Rect, BridgeFlags>
 ): Rect[] {
     if (blocks.length === 0) return [];
 
@@ -870,6 +941,44 @@ function joinAndSort(
         blocks[i].w = maxX - minX;
     }
 
+    // Helpers for bridge-expanded direction tracking. Phase 4 marks a
+    // merged rect with `headingAtTop` / `headingAtBottom` when its bridge
+    // merge absorbed a SHORT (heading-shape) block on that side.
+    const flagsOf = (r: Rect): BridgeFlags =>
+        bridgeFlags?.get(r) ?? { headingAtTop: false, headingAtBottom: false };
+
+    /**
+     * Should we block a merge between `upper` (lower y) and `lower`
+     * (greater y) because of a bridge-absorbed heading at the boundary
+     * between them? Returns true if either:
+     *   - upper has `headingAtBottom` (its bottom is a section break)
+     *   - lower has `headingAtTop` (its top is a section break)
+     */
+    const crossesBridgeBoundary = (upper: Rect, lower: Rect): boolean => {
+        if (!bridgeFlags) return false;
+        return flagsOf(upper).headingAtBottom || flagsOf(lower).headingAtTop;
+    };
+
+    /**
+     * After merging two blocks vertically, propagate the OUTER bridge
+     * flags onto the union: the union's top side is the upper block's
+     * top, its bottom side is the lower block's bottom. The boundary
+     * between them disappears in the union, so any flag on that internal
+     * side is irrelevant for future merges.
+     */
+    const propagateFlags = (upper: Rect, lower: Rect, child: Rect): void => {
+        if (!bridgeFlags) return;
+        const upperFlags = flagsOf(upper);
+        const lowerFlags = flagsOf(lower);
+        const childFlags: BridgeFlags = {
+            headingAtTop: upperFlags.headingAtTop,
+            headingAtBottom: lowerFlags.headingAtBottom,
+        };
+        if (childFlags.headingAtTop || childFlags.headingAtBottom) {
+            bridgeFlags.set(child, childFlags);
+        }
+    };
+
     // Join vertically adjacent rectangles with similar edges
     // This is more thorough - try to join with ANY existing block, not just previous
     const joined: Rect[] = [];
@@ -891,21 +1000,41 @@ function joinAndSort(
             const gapBelow = block.y - (existingBlock.y + existingBlock.h);
             const gapAbove = existingBlock.y - (block.y + block.h);
 
-            if (gapBelow >= 0 && gapBelow <= opts.maxVerticalGap) {
-                // Block is below existing, merge
-                joined[j] = unionRect(existingBlock, block);
-                mergedWithExisting = true;
-                break;
-            } else if (gapAbove >= 0 && gapAbove <= opts.maxVerticalGap) {
-                // Block is above existing, merge
-                joined[j] = unionRect(existingBlock, block);
-                mergedWithExisting = true;
-                break;
+            const blockBelow = gapBelow >= 0 && gapBelow <= opts.maxVerticalGap;
+            const blockAbove = gapAbove >= 0 && gapAbove <= opts.maxVerticalGap;
+
+            if (!blockBelow && !blockAbove) continue;
+
+            // In the post-bridge pass, skip strict merges that would extend
+            // a bridge-expanded block past an absorbed heading boundary —
+            // see comment on `joinAndSort`. Direction-aware so e.g. a body
+            // block whose top absorbed a chapter heading can still merge
+            // with the next body paragraph below it (CZAA39JT p0), but a
+            // body block whose bottom absorbed a "References" heading
+            // can't grab the references list below (UCZSE63I p28).
+            if (relaxed) {
+                const upper = blockBelow ? existingBlock : block;
+                const lower = blockBelow ? block : existingBlock;
+                if (crossesBridgeBoundary(upper, lower)) continue;
             }
+
+            const upper = blockBelow ? existingBlock : block;
+            const lower = blockBelow ? block : existingBlock;
+            const merged = unionRect(existingBlock, block);
+            propagateFlags(upper, lower, merged);
+            joined[j] = merged;
+            mergedWithExisting = true;
+            break;
         }
 
         if (!mergedWithExisting) {
-            joined.push({ ...block });
+            // Preserve the original reference when it carries bridge flags
+            // so the tracking map keeps working; otherwise copy as before.
+            if (bridgeFlags?.has(block)) {
+                joined.push(block);
+            } else {
+                joined.push({ ...block });
+            }
         }
     }
 
@@ -928,17 +1057,37 @@ function joinAndSort(
                 const adjacentStrict =
                     (gapBelow >= 0 && gapBelow <= opts.maxVerticalGap) ||
                     (gapAbove >= 0 && gapAbove <= opts.maxVerticalGap);
-                const strictMerge = sameLeftEdge && sameRightEdge && adjacentStrict;
+                let strictMerge = sameLeftEdge && sameRightEdge && adjacentStrict;
+
+                // Identify upper / lower for boundary check (only meaningful
+                // when blocks are vertically adjacent).
+                const block1IsUpper = gapBelow >= 0;
+                const upper = block1IsUpper ? block1 : block2;
+                const lower = block1IsUpper ? block2 : block1;
+
+                // In the post-bridge pass, skip strict / same-column-paragraphs
+                // merges that would cross a bridge-expanded heading boundary.
+                if (relaxed && adjacentStrict && crossesBridgeBoundary(upper, lower)) {
+                    strictMerge = false;
+                }
 
                 // Relaxed merges (only enabled in the post-bridge re-run):
                 //  - canJoinAsShortAdjacent: short narrow tails / indented
-                //    paragraph-start heads, contained in adjacent wider host.
+                //    paragraph-start heads, contained in adjacent wider
+                //    host. Allowed across bridge-expanded blocks because
+                //    absorbing a small tail doesn't cross another section.
                 //  - canJoinAsSameColumnParagraphs: two tall same-column
-                //    paragraph blocks separated by a small gap.
+                //    paragraph blocks separated by a small gap. Skipped
+                //    when the gap crosses a bridge-expanded heading
+                //    boundary (UCZSE63I p28: body-after-heading mustn't
+                //    grab the next-section first block).
+                const sameColumnAllowed =
+                    canJoinAsSameColumnParagraphs(block1, block2, opts) &&
+                    !(relaxed && crossesBridgeBoundary(upper, lower));
                 const relaxedMerge =
                     relaxed &&
                     (canJoinAsShortAdjacent(block1, block2, opts) ||
-                     canJoinAsSameColumnParagraphs(block1, block2, opts));
+                     sameColumnAllowed);
 
                 if (!strictMerge && !relaxedMerge) continue;
 
@@ -958,6 +1107,7 @@ function joinAndSort(
                     if (intersectsOthers) continue;
                 }
 
+                propagateFlags(upper, lower, unionBlock);
                 joined[i] = unionBlock;
                 joined.splice(j, 1);
                 changed = true;

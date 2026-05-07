@@ -79,6 +79,17 @@ interface ColumnThresholds {
     rightEdgeMad: number;
     indentExcessThreshold: number;
     earlyEndExcessThreshold: number;
+    /**
+     * Per-column gap threshold above which the gap counts as a paragraph
+     * break. Falls back to the page-wide value when the column has too
+     * few gaps to estimate locally. Per-column matters when a single page
+     * mixes content with very different leading (e.g. body text at ~13pt
+     * gap and a references list with ~4pt continuation gaps) — using only
+     * the page-wide median lets the dense list drag the threshold below
+     * the body's normal gap and split every body line into its own
+     * paragraph.
+     */
+    gapExcessThreshold: number;
 }
 
 /**
@@ -697,6 +708,28 @@ function calculateColumnThresholds(
         0.2 * columnWidth
     );
 
+    // Per-column gap threshold. Compute over THIS column's line gaps only,
+    // so a dense neighbour column (e.g. references list with tight
+    // continuation spacing) doesn't drag the cutoff below this column's
+    // own normal leading. Fall back to the page-wide value when the
+    // column has fewer than 3 gaps to keep the estimate stable.
+    const colGaps: number[] = [];
+    for (let i = 0; i < lines.length - 1; i++) {
+        const gap = lines[i + 1].bbox.t - lines[i].bbox.b;
+        if (gap < 50 && gap > -5) colGaps.push(gap);
+    }
+    let gapExcessThreshold = pageThresholds.gapExcessThreshold;
+    if (colGaps.length >= 3) {
+        const colMedianGap = median(colGaps);
+        const minMeaningfulIncrease = Math.max(1.0, 0.08 * pageThresholds.medianHeight);
+        gapExcessThreshold = Math.max(
+            settings.minGapPx,
+            colMedianGap + minMeaningfulIncrease,
+            colMedianGap * 1.25,
+            0.4 * pageThresholds.medianHeight
+        );
+    }
+
     return {
         leftEdgeMode,
         rightEdgeMode,
@@ -704,6 +737,7 @@ function calculateColumnThresholds(
         rightEdgeMad,
         indentExcessThreshold,
         earlyEndExcessThreshold,
+        gapExcessThreshold,
     };
 }
 
@@ -957,9 +991,12 @@ function startNewItem(
     if (i === 0) return true;
     if (!prevLine) return true;
 
-    // (a) Vertical gap signal
+    // (a) Vertical gap signal. Use the column-local threshold so a dense
+    // neighbour column (e.g. references list) can't drag the cutoff below
+    // this column's own normal leading and split every line into its own
+    // paragraph (UCZSE63I p28 body shape).
     const spacingTop = line.bbox.t - prevLine.bbox.b;
-    const gapBreak = spacingTop > pageThresholds.gapExcessThreshold;
+    const gapBreak = spacingTop > columnThresholds.gapExcessThreshold;
 
     // Header detection. Compute prev first so we can relax the gap
     // requirement when the current line follows a header — handles
