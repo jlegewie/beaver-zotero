@@ -10,7 +10,6 @@ import { getMuPDFWorkerClient } from "./MuPDFWorkerClient";
 import {
     ExtractionSettings,
     ExtractionResult,
-    LineExtractionResult,
     RawDocumentData,
     OCRDetectionOptions,
     OCRDetectionResult,
@@ -179,7 +178,10 @@ export class PDFExtractor {
      *    the worker (avoids a main-thread page-count round-trip for
      *    open-ended end_page).
      *
-     * Rejects `settings.useLineDetection` — line callers use `extractByLines`.
+     * `settings.useLineDetection` is honored — when true, each
+     * `ProcessedPage.lines` is populated with bbox + fontSize + columnIndex
+     * metadata and `page.content` becomes the line texts joined with `\n`.
+     * `blocks` is left empty in that mode.
      */
     async extractWithMeta(
         pdfData: Uint8Array | ArrayBuffer,
@@ -190,34 +192,6 @@ export class PDFExtractor {
         } = {}
     ): Promise<ExtractionResult> {
         return getMuPDFWorkerClient().extractWithMeta(pdfData, args);
-    }
-
-    /**
-     * Extract high-quality content by page using line detection.
-     *
-     * This method provides superior text extraction by:
-     * - Detecting text lines within columns
-     * - Preserving proper reading order
-     * - Including line-level metadata (bbox, font size, column)
-     * - Maintaining structural information
-     *
-     * Use this when you need:
-     * - Precise text positioning
-     * - Line-by-line processing
-     * - High-fidelity text extraction for RAG/indexing
-     *
-     * @param pdfData - The PDF file as Uint8Array or ArrayBuffer
-     * @param settings - Extraction settings
-     * @returns Line-based extraction result with detailed page content
-     */
-    async extractByLines(
-        pdfData: Uint8Array | ArrayBuffer,
-        settings: ExtractionSettings = {}
-    ): Promise<LineExtractionResult> {
-        return getMuPDFWorkerClient().extractByLines(pdfData, {
-            ...settings,
-            useLineDetection: true,
-        });
     }
 
     /**
@@ -480,30 +454,6 @@ export class PDFExtractor {
 // ============================================================================
 // Convenience Functions
 // ============================================================================
-
-/**
- * Extract high-quality content by lines from a Zotero attachment item.
- *
- * This provides the best quality extraction with line-level granularity,
- * proper reading order, and structural metadata for each line.
- *
- * @param item - Zotero attachment item
- * @param settings - Extraction settings
- * @returns Line-based extraction result or null if file not found
- */
-export async function extractByLinesFromZoteroItem(
-    item: Zotero.Item,
-    settings: ExtractionSettings = {}
-): Promise<LineExtractionResult | null> {
-    const path = await item.getFilePathAsync();
-    if (!path) {
-        return null;
-    }
-
-    const pdfData = await IOUtils.read(path);
-    const extractor = new PDFExtractor();
-    return extractor.extractByLines(pdfData, settings);
-}
 
 /**
  * Render a page from a Zotero attachment item to an image.

@@ -637,24 +637,6 @@ describe('MuPDFWorkerClient', () => {
         });
     });
 
-    describe('extractByLines', () => {
-        it('round-trips a LineExtractionResult', async () => {
-            const client = getMuPDFWorkerClient();
-            const promise = client.extractByLines(new Uint8Array([1]));
-            const worker = MockWorker.instances[0];
-            worker.replyToLast({
-                ok: true,
-                result: { pages: [], analysis: {}, fullText: '', metadata: {} },
-            });
-            await promise;
-            const [message] = worker.postMessage.mock.calls[0] as [
-                any,
-                Transferable[] | undefined,
-            ];
-            expect(message).toMatchObject({ op: 'extractByLines' });
-        });
-    });
-
     describe('hasTextLayer', () => {
         it('round-trips a boolean', async () => {
             const client = getMuPDFWorkerClient();

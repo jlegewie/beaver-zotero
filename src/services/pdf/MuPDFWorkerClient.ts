@@ -17,7 +17,6 @@ import {
     type PDFPageSearchResult,
     type ExtractionSettings,
     type ExtractionResult,
-    type LineExtractionResult,
     type OCRDetectionOptions,
     type OCRDetectionResult,
     type PDFSearchOptions,
@@ -449,11 +448,12 @@ export class MuPDFWorkerClient {
     /**
      * Run the full extraction orchestration in the worker.
      *
-     * Returns an `ExtractionResult` (or `LineExtractionResult` if
-     * `settings.useLineDetection` is true). Throws `ExtractionError(NO_TEXT_LAYER)`
-     * when `checkTextLayer` is enabled and the document needs OCR — the
-     * `ocrAnalysis`, `pageLabels`, and `pageCount` fields are preserved
-     * across the worker boundary via the payload-aware rehydrateError.
+     * Returns an `ExtractionResult`. When `settings.useLineDetection` is
+     * true, each `ProcessedPage.lines` is populated. Throws
+     * `ExtractionError(NO_TEXT_LAYER)` when `checkTextLayer` is enabled
+     * and the document needs OCR — the `ocrAnalysis`, `pageLabels`, and
+     * `pageCount` fields are preserved across the worker boundary via
+     * the payload-aware rehydrateError.
      */
     async extract(
         pdfData: Uint8Array | ArrayBuffer,
@@ -476,8 +476,8 @@ export class MuPDFWorkerClient {
      * `ExtractionError(PAGE_OUT_OF_RANGE)` with the worker's known `pageCount`
      * in the error payload (rehydrated by `rehydrateError`).
      *
-     * Rejects `settings.useLineDetection` — line-extraction callers must use
-     * `extractByLines` directly.
+     * Honors `settings.useLineDetection` — when true, the per-page loop
+     * runs line detection and `ProcessedPage.lines` is populated.
      */
     async extractWithMeta(
         pdfData: Uint8Array | ArrayBuffer,
@@ -494,19 +494,6 @@ export class MuPDFWorkerClient {
             settings: args?.settings,
             pageIndices: args?.pageIndices,
             pageRange: args?.pageRange,
-        });
-    }
-
-    /** Line-detection variant of `extract`. */
-    async extractByLines(
-        pdfData: Uint8Array | ArrayBuffer,
-        settings?: ExtractionSettings,
-    ): Promise<LineExtractionResult> {
-        const bytes =
-            pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
-        return this.call<LineExtractionResult>("extractByLines", {
-            pdfData: bytes,
-            settings,
         });
     }
 

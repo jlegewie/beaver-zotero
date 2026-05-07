@@ -248,7 +248,7 @@ describe('MuPDF worker smoke — orchestration ops', () => {
         });
     });
 
-    describe('extractByLines', () => {
+    describe('extractWithMeta (useLineDetection)', () => {
         it('returns line-based extraction for a healthy PDF', async () => {
             const settings = { styleSampleSize: 0, useLineDetection: true };
             const res = await pdfExtractByLines(SMALL_PDF, { settings });

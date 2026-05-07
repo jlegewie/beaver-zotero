@@ -483,27 +483,6 @@ export interface ExtractionResult {
     };
 }
 
-/**
- * Line-based extraction result for high-quality content
- * Returns structured content by page with line-level granularity
- */
-export interface LineExtractionResult {
-    /** Processed pages with line information */
-    pages: ProcessedPage[];
-    /** Document-level analysis */
-    analysis: DocumentAnalysis;
-    /** Combined plain text from all pages */
-    fullText: string;
-    /** Page labels for all pages in the document (0-indexed → label string). Only non-empty labels included. */
-    pageLabels?: Record<number, string>;
-    /** Extraction metadata */
-    metadata: {
-        extractedAt: string;
-        version: string;
-        settings: ExtractionSettings;
-    };
-}
-
 // ============================================================================
 // OCR Detection Types
 // ============================================================================

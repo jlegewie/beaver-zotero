@@ -32,7 +32,6 @@ import type {
     ExtractionResult,
     ExtractionSettings,
     ExtractedLine,
-    LineExtractionResult,
     OCRDetectionOptions,
     OCRDetectionResult,
     PageImageOptions,
@@ -252,10 +251,12 @@ export async function opSearchPages(
 }
 
 /**
- * Shared body for `extract` / `extractByLines` / `extractWithMeta`. Differs
- * only in the per-page loop: column detection + PageExtractor (extract) vs
- * column + line detection (extractByLines). All other steps (raw extraction,
- * style + margin analysis, fullText assembly, analysis build) are identical.
+ * Shared body for `extract` / `extractWithMeta`. Differs only in the
+ * per-page loop: column detection + PageExtractor (block-based) vs
+ * column + line detection (line-based, populates `page.lines`). All
+ * other steps (raw extraction, style + margin analysis, fullText
+ * assembly, analysis build) are identical, and the result shape is the
+ * same `ExtractionResult` either way.
  *
  * The caller is responsible for opening the doc, resolving the page indices,
  * collecting page labels, and running the OCR text-layer check (NO_TEXT_LAYER
@@ -270,7 +271,7 @@ function runExtractFromIndices(
     pageCount: number,
     pageLabels: Record<number, string>,
     useLineDetection: boolean,
-): ExtractionResult | LineExtractionResult {
+): ExtractionResult {
     const rawPages: RawPageData[] = indices.map((i) => extractRawPageFromDoc(doc, i));
     const rawData: RawDocumentData = { pageCount, pages: rawPages };
 
@@ -379,22 +380,22 @@ function runExtractFromIndices(
         },
     };
 
-    return baseResult as ExtractionResult | LineExtractionResult;
+    return baseResult as ExtractionResult;
 }
 
 /**
- * Legacy lenient pre-amble shared by `opExtract` / `opExtractByLines`. Runs
- * page-count + label collection + OCR check, then resolves indices using the
- * lenient `opts.pages?.length ? filter : undefined → resolvePageIndices`
+ * Legacy lenient pre-amble for `opExtract`. Runs page-count + label
+ * collection + OCR check, then resolves indices using the lenient
+ * `opts.pages?.length ? filter : undefined → resolvePageIndices`
  * semantics (empty filter → all pages). Preserved for callers that have not
- * been migrated to the strict resolver — dev tools, itemValidationManager,
+ * been migrated to the strict resolver — itemValidationManager,
  * getAttachmentFileStatus.
  */
 function runExtractCommon(
     doc: DocumentLike,
     settings: ExtractionSettings | undefined,
     useLineDetection: boolean,
-): ExtractionResult | LineExtractionResult {
+): ExtractionResult {
     // Capture the caller-supplied threshold BEFORE the spread flattens it to
     // the default. `getEffectiveRepeatThreshold` uses this to distinguish
     // "user wanted 3" from "user omitted the field" so the short-doc
@@ -436,23 +437,11 @@ function runExtractCommon(
 
 export async function opExtract(
     args: { pdfData: Uint8Array | ArrayBuffer; settings?: ExtractionSettings },
-): Promise<OpReply<ExtractionResult | LineExtractionResult>> {
+): Promise<OpReply<ExtractionResult>> {
     const useLineDetection = !!args.settings?.useLineDetection;
     const doc = await acquireDoc(args.pdfData);
     try {
         const result = runExtractCommon(doc, args.settings, useLineDetection);
-        return { result };
-    } finally {
-        releaseDoc(doc);
-    }
-}
-
-export async function opExtractByLines(
-    args: { pdfData: Uint8Array | ArrayBuffer; settings?: ExtractionSettings },
-): Promise<OpReply<LineExtractionResult>> {
-    const doc = await acquireDoc(args.pdfData);
-    try {
-        const result = runExtractCommon(doc, args.settings, true) as LineExtractionResult;
         return { result };
     } finally {
         releaseDoc(doc);
@@ -468,7 +457,11 @@ export async function opExtractByLines(
  * inputs throw PAGE_OUT_OF_RANGE with `{ pageCount }` in the payload so
  * handlers can populate `total_pages` in error responses.
  *
- * Rejects useLineDetection — line extraction must go through opExtractByLines.
+ * `settings.useLineDetection` is honored — when true, the per-page loop
+ * runs column + line detection instead of the block-based PageExtractor.
+ * The result is shaped identically either way (see `ExtractionResult`);
+ * the `lines` field on each `ProcessedPage` is populated only when line
+ * detection ran.
  */
 export async function opExtractWithMeta(
     args: {
@@ -478,12 +471,6 @@ export async function opExtractWithMeta(
         pageRange?: { startIndex: number; endIndex?: number; maxPages?: number };
     },
 ): Promise<OpReply<ExtractionResult>> {
-    if (args.settings?.useLineDetection) {
-        throw workerError(
-            ERROR_CODES.WASM_ERROR,
-            "opExtractWithMeta does not support useLineDetection — call opExtractByLines instead",
-        );
-    }
     const doc = await acquireDoc(args.pdfData);
     try {
         // Capture the caller-supplied threshold BEFORE the spread flattens
@@ -517,8 +504,8 @@ export async function opExtractWithMeta(
             indices,
             pageCount,
             pageLabels,
-            false,
-        ) as ExtractionResult;
+            !!opts.useLineDetection,
+        );
         return { result };
     } finally {
         releaseDoc(doc);

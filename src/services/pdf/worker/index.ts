@@ -23,7 +23,6 @@ import { ensureApi } from "./wasmInit";
 import {
     opAnalyzeOCRNeeds,
     opExtract,
-    opExtractByLines,
     opExtractRawPageDetailed,
     opExtractRawPages,
     opExtractSentenceBBoxes,
@@ -83,8 +82,6 @@ async function dispatch(op: string, args: Record<string, unknown> | undefined): 
             return await opExtract(a as Parameters<typeof opExtract>[0]);
         case "extractWithMeta":
             return await opExtractWithMeta(a as Parameters<typeof opExtractWithMeta>[0]);
-        case "extractByLines":
-            return await opExtractByLines(a as Parameters<typeof opExtractByLines>[0]);
         case "analyzeOCRNeeds":
             return await opAnalyzeOCRNeeds(a as Parameters<typeof opAnalyzeOCRNeeds>[0]);
         case "hasTextLayer":
