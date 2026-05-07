@@ -526,6 +526,17 @@ describe('expandToRawHtml', () => {
         expect(() => expandToRawHtml(input, metadata, 'old')).toThrow(/old_string/);
     });
 
+    it('names the offending item_id in the old-context error message', () => {
+        // The error must quote the offending tag so the model knows which
+        // citation in old_string couldn't be resolved.
+        const metadata: SimplificationMetadata = { elements: new Map() };
+        const input = '<citation item_id="1-NEW1" page="42" label="New Ref"/>';
+        expect(() => expandToRawHtml(input, metadata, 'old'))
+            .toThrow(/item_id="1-NEW1"/);
+        expect(() => expandToRawHtml(input, metadata, 'old'))
+            .toThrow(/page="42"/);
+    });
+
     // ---- New citation: att_id ----
 
     it('creates new citation from att_id in new context', () => {
@@ -554,12 +565,21 @@ describe('expandToRawHtml', () => {
         expect(() => expandToRawHtml(input, metadata, 'old')).toThrow(/old_string/);
     });
 
+    it('names the offending att_id in the old-context error message', () => {
+        const metadata: SimplificationMetadata = { elements: new Map() };
+        const input = '<citation att_id="1-ATT1" label="From Attachment"/>';
+        expect(() => expandToRawHtml(input, metadata, 'old'))
+            .toThrow(/att_id="1-ATT1"/);
+    });
+
     // ---- New citation: error cases ----
 
     it('throws for unknown citation ref in old context', () => {
         const metadata: SimplificationMetadata = { elements: new Map() };
         const input = '<citation item_id="1-NONEXIST" label="?" ref="c_NONEXIST_0"/>';
-        expect(() => expandToRawHtml(input, metadata, 'old')).toThrow(/Unknown citation ref/);
+        // The thrown message names the offending ref so the model can self-correct.
+        expect(() => expandToRawHtml(input, metadata, 'old'))
+            .toThrow(/ref="c_NONEXIST_0"/);
     });
 
     it('treats fabricated ref as new citation in new context', () => {
@@ -3023,6 +3043,32 @@ describe('encodeTextEntities', () => {
         expect(decoded).toBe("Dashti's \"memoir\"");
         const reencoded = encodeTextEntities(decoded);
         expect(reencoded).toBe(original);
+    });
+
+    it('encodes literal & to &amp; in text segments', () => {
+        expect(encodeTextEntities('Smith & Jones')).toBe('Smith &amp; Jones');
+    });
+
+    it('does not double-encode known entities in text segments', () => {
+        const known = 'a &amp; b &lt; c &gt; d &quot; e &apos; f &nbsp; g &#x27; h &#39; i &#34;';
+        expect(encodeTextEntities(known)).toBe(known);
+    });
+
+    it('encodes & in unknown entity-like sequences (e.g., &foo;)', () => {
+        // PM serialization encodes `&` in `&foo;` as `&amp;foo;`. We mirror
+        // that so the matcher can bridge the drift.
+        expect(encodeTextEntities('see &foo; here')).toBe('see &amp;foo; here');
+    });
+
+    it('does not touch & inside HTML tag attributes', () => {
+        const input = '<a href="?a=1&b=2">link</a>';
+        // The `&` is inside the tag, so the tag-skip behavior preserves it.
+        expect(encodeTextEntities(input)).toBe(input);
+    });
+
+    it('encodes & alongside apostrophe in the same text segment', () => {
+        expect(encodeTextEntities("R&D's plan"))
+            .toBe('R&amp;D&#x27;s plan');
     });
 });
 

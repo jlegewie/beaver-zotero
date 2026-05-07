@@ -345,3 +345,65 @@ export function applyOldStringEnrichment(
     const enriched = enrichOldStringCitationRefs(oldString, metadata);
     return enriched ?? oldString;
 }
+
+// =============================================================================
+// Partial Simplified-Tag Detection
+// =============================================================================
+
+export interface PartialSimplifiedTag {
+    kind: 'citation' | 'annotation';
+    snippet: string;
+}
+
+/**
+ * Detect a partial `<citation …>` or `<annotation …>` opener in `oldString`
+ * that never closes before EOF, the next `<`, or a newline. The matcher's
+ * raw-HTML expansion in `expandToRawHtml` requires complete self-closing
+ * tags, so a partial like `<citation item_id="X"` (no `/>`) silently passes
+ * through unchanged into the haystack search and produces a generic
+ * `old_string_not_found` error. This detector lets the validator/executor
+ * surface a targeted message instead.
+ *
+ * Detection is intentionally narrow: only unclosed `<citation` /
+ * `<annotation` openers count. Generic unmatched-attribute heuristics on
+ * prose (e.g. `label="..."` without a tag context) are excluded because
+ * they misclassify normal text. Returns the first partial encountered, or
+ * `null` when every opener closes cleanly.
+ */
+export function detectPartialSimplifiedTag(
+    oldString: string,
+): PartialSimplifiedTag | null {
+    if (!oldString) return null;
+    const openerRe = /<(citation|annotation)\b/g;
+    let m: RegExpExecArray | null;
+    while ((m = openerRe.exec(oldString)) !== null) {
+        const kind = m[1] as 'citation' | 'annotation';
+        const start = m.index;
+        let cursor = start + m[0].length;
+        let closed = false;
+        while (cursor < oldString.length) {
+            const c = oldString[cursor];
+            // A new `<` or a newline before any close means the opener was
+            // never terminated — the model truncated the tag.
+            if (c === '<' || c === '\n') break;
+            if (c === '/' && oldString[cursor + 1] === '>') {
+                closed = true;
+                cursor += 2;
+                break;
+            }
+            if (c === '>') {
+                closed = true;
+                cursor += 1;
+                break;
+            }
+            cursor++;
+        }
+        if (!closed) {
+            return {
+                kind,
+                snippet: oldString.slice(start, Math.min(cursor, start + 60)),
+            };
+        }
+    }
+    return null;
+}

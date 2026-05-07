@@ -113,6 +113,17 @@ describe('findBestMatch strategies', () => {
         expect(result?.normalizeAnchor("it's")).not.toBe("it's");
     });
 
+    it('entity_encode: matches when note has &amp; but needle has literal &', () => {
+        const result = match(makeInput({
+            oldString: 'Smith & Jones',
+            newString: 'Smith and Jones',
+            strippedHtml: '<p>Smith &amp; Jones (1999)</p>',
+        }));
+        expect(result?.strategy).toBe('entity_encode');
+        expect(result?.expandedOld).toBe('Smith &amp; Jones');
+        expect(result?.expandedNew).toBe('Smith and Jones');
+    });
+
     it('nfkc: matches when note has half-width form but needle has full-width', () => {
         const result = match(makeInput({
             oldString: '（ア）',  // full-width parens

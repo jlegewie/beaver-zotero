@@ -125,18 +125,59 @@ export const ENTITY_FORMS: readonly EntityForm[] = ['hex', 'decimal', 'named'];
  * Used when the model's old_string has literal chars but the note still
  * has entity-encoded forms (before PM normalization).
  *
+ * Also encodes literal `&` to `&amp;` in text segments, but only when the
+ * `&` does not begin a known entity. PM serialization (`innerHTML`) emits
+ * `&amp;` for any literal `&` and preserves only a closed allowlist of
+ * known entities verbatim, so the closed allowlist here mirrors that
+ * behavior. `&` encoding has no per-form variant — there is no
+ * named/decimal/hex alternative spelling for `&amp;` — so the form
+ * parameter only affects apostrophe/quote encoding.
+ *
  * Supports multiple entity spellings (hex, decimal, named) because
  * imported/pasted HTML may use any form:
  *   hex:     &#x27; / &quot;   (most common)
  *   decimal: &#39;  / &#34;
  *   named:   &apos; / &quot;   (HTML5; &quot; is the only named form for ")
  */
+// Entities that PM/innerHTML emits verbatim in note HTML. An open
+// `&[a-zA-Z]+;` pattern would be too broad — it would silently skip unknown
+// entity-likes (e.g. `&foo;`) that PM serialization actually encodes as
+// `&amp;foo;`.
+const KNOWN_ENTITY_RE = /&(?:amp|lt|gt|quot|apos|nbsp|#\d+|#x[0-9A-Fa-f]+);/y;
+
+function encodeAmpersands(text: string): string {
+    if (text.indexOf('&') === -1) return text;
+    let out = '';
+    let i = 0;
+    while (i < text.length) {
+        if (text[i] === '&') {
+            KNOWN_ENTITY_RE.lastIndex = i;
+            const m = KNOWN_ENTITY_RE.exec(text);
+            if (m) {
+                out += m[0];
+                i += m[0].length;
+                continue;
+            }
+            out += '&amp;';
+            i++;
+            continue;
+        }
+        out += text[i];
+        i++;
+    }
+    return out;
+}
+
 export function encodeTextEntities(s: string, form: EntityForm = 'hex'): string {
     const apos = form === 'hex' ? '&#x27;' : form === 'decimal' ? '&#39;' : '&apos;';
     const quot = form === 'hex' ? '&quot;' : form === 'decimal' ? '&#34;' : '&quot;';
     const parts = s.split(/(<[^>]*>)/);
     for (let i = 0; i < parts.length; i += 2) {
-        parts[i] = parts[i].replace(/'/g, apos).replace(/"/g, quot);
+        // Encode `&` first so the apostrophe/quote replacements below don't
+        // turn the new `&amp;` / `&#x27;` / `&quot;` outputs into double-
+        // encoded forms. The allowlist ensures `&` we emit here passes
+        // through `encodeAmpersands` unchanged on a hypothetical second pass.
+        parts[i] = encodeAmpersands(parts[i]).replace(/'/g, apos).replace(/"/g, quot);
     }
     return parts.join('');
 }

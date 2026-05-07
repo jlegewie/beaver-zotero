@@ -21,12 +21,18 @@ vi.mock('../../../src/utils/noteHtmlSimplifier', () => ({
     normalizeNoteHtml: vi.fn((html: string) => html),
 }));
 
-vi.mock('../../../src/utils/editNoteValidation', () => {
+vi.mock('../../../src/utils/editNoteValidation', async () => {
     // `applyOldStringEnrichment` delegates to `enrichOldStringCitationRefs`,
     // mirroring the production wrapper so existing tests that mock
     // `enrichOldStringCitationRefs` (including `.toHaveBeenCalled()` assertions)
     // keep working without change.
     const enrichMock = vi.fn(() => null as string | null);
+    // Re-export the real `detectPartialSimplifiedTag` so the validator and
+    // executor can recognize partial citation/annotation openers in old_string
+    // even with this module mocked. Pure string analysis, no side effects.
+    const actual = await vi.importActual<typeof import('../../../src/utils/editNoteValidation')>(
+        '../../../src/utils/editNoteValidation'
+    );
     return {
         validateNewString: vi.fn(() => null),
         checkNewCitationItemsExist: vi.fn(() => null),
@@ -37,6 +43,7 @@ vi.mock('../../../src/utils/editNoteValidation', () => {
             const enriched = enrichMock(oldString, metadata);
             return enriched ?? oldString;
         }),
+        detectPartialSimplifiedTag: actual.detectPartialSimplifiedTag,
     };
 });
 
@@ -497,6 +504,25 @@ describe('validateEditNoteAction — failures', () => {
         }]);
     });
 
+    it('partial_simplified_tag (partial citation opener in old_string)', async () => {
+        // expandToRawHtml leaves partial tags untransformed (its regex
+        // requires a complete `/>` close), so the matcher misses and the
+        // detector should fire before the generic zero-match hint.
+        vi.mocked(countOccurrences).mockReturnValueOnce(0);
+        const response = await handleAgentActionValidateRequest(makeValidateRequest({
+            action_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                old_string: '<citation item_id="1-AAAAAAAA"',
+                new_string: '<citation item_id="1-BBBBBBBB"/>',
+            },
+        }));
+        expect(response.valid).toBe(false);
+        expect(response.error_code).toBe('partial_simplified_tag');
+        expect(response.error).toContain('Citation tags are atomic');
+        expect(response.error).toContain('1-AAAAAAAA');
+    });
+
     it('ambiguous_match (multiple matches, no str_replace_all)', async () => {
         vi.mocked(countOccurrences).mockReturnValueOnce(3);
         const response = await handleAgentActionValidateRequest(makeValidateRequest());
@@ -607,6 +633,21 @@ describe('executeEditNoteAction — failures', () => {
         const response = await handleAgentActionExecuteRequest(makeExecuteRequest());
         expect(response.success).toBe(false);
         expect(response.error_code).toBe('old_string_not_found');
+    });
+
+    it('partial_simplified_tag (executor defense-in-depth)', async () => {
+        vi.mocked(countOccurrences).mockReturnValueOnce(0);
+        const response = await handleAgentActionExecuteRequest(makeExecuteRequest({
+            action_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                old_string: '<citation item_id="1-AAAAAAAA"',
+                new_string: '<citation item_id="1-BBBBBBBB"/>',
+            },
+        }));
+        expect(response.success).toBe(false);
+        expect(response.error_code).toBe('partial_simplified_tag');
+        expect(response.error).toContain('1-AAAAAAAA');
     });
 
     it('ambiguous_match', async () => {
