@@ -36,6 +36,7 @@ import type {
     OCRDetectionResult,
     PageImageOptions,
     PageImageResult,
+    PDFMetadata,
     PDFPageSearchResult,
     PDFSearchOptions,
     PDFSearchResult,
@@ -55,6 +56,7 @@ import { acquireDoc, releaseDoc } from "./docCache";
 import { ensureApi } from "./wasmInit";
 import {
     DEFAULT_PAGE_IMAGE_OPTIONS,
+    collectDocumentInfo,
     collectPageLabels,
     extractRawPageDetailedFromDoc,
     extractRawPageFromDoc,
@@ -85,14 +87,15 @@ export async function opGetPageCount(args: { pdfData: Uint8Array | ArrayBuffer }
     }
 }
 
-export async function opGetPageCountAndLabels(
+export async function opGetMetadata(
     args: { pdfData: Uint8Array | ArrayBuffer },
-): Promise<OpReply<{ count: number; labels: Record<number, string> }>> {
+): Promise<OpReply<PDFMetadata>> {
     const doc = await acquireDoc(args.pdfData);
     try {
-        const count = doc.countPages();
-        const labels = collectPageLabels(doc);
-        return { result: { count, labels } };
+        const pageCount = doc.countPages();
+        const pageLabels = collectPageLabels(doc);
+        const info = collectDocumentInfo(doc);
+        return { result: { pageCount, pageLabels, ...info } };
     } finally {
         releaseDoc(doc);
     }
@@ -160,7 +163,7 @@ export async function opRenderPagesToImages(
 /**
  * Strict, fused render-pages op for the images handler.
  *
- * Combines `getPageCountAndLabels` + `renderPagesToImages` into a single
+ * Combines `getMetadata` + `renderPagesToImages` into a single
  * doc-open. Returns metadata alongside the rendered pages so the handler
  * can populate `total_pages` and per-page `page_label` in the response
  * without an extra round-trip. Image buffers are transferred (per-page
@@ -452,7 +455,7 @@ export async function opExtract(
  * Strict, fused extract op for the agent handlers.
  *
  * Combines what the pages handler used to fetch as separate round-trips
- * (`getPageCountAndLabels` + `getPageCount` + `extract`) into a single
+ * (`getMetadata` + `getPageCount` + `extract`) into a single
  * doc-open. Uses the strict resolvers — explicit-but-all-invalid page
  * inputs throw PAGE_OUT_OF_RANGE with `{ pageCount }` in the payload so
  * handlers can populate `total_pages` in error responses.

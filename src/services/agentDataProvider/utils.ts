@@ -391,13 +391,13 @@ function fileStatusFromCache(record: AttachmentFileCacheRecord, isPrimary: boole
  * Extract page labels from PDF data using MuPDF.
  * Returns the label mapping (empty {} if no custom labels or on error).
  *
- * Routes through `PDFExtractor.getPageCountAndLabels`, which delegates to
- * the MuPDF worker.
+ * Routes through `PDFExtractor.getMetadata`, which delegates to the
+ * MuPDF worker.
  */
 async function extractPageLabelsFromData(pdfData: Uint8Array): Promise<Record<number, string>> {
     try {
-        const { labels } = await new PDFExtractor().getPageCountAndLabels(pdfData);
-        return labels;
+        const { pageLabels } = await new PDFExtractor().getMetadata(pdfData);
+        return pageLabels;
     } catch {
         return {};
     }

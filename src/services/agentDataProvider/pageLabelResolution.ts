@@ -157,7 +157,7 @@ export interface PageLabelLoadResult {
  * Resolution order:
  *   1. Cached metadata (any non-null `page_labels`, including `{}` which means
  *      "already checked, no custom labels")
- *   2. Eager metadata-only load via `PDFExtractor.getPageCountAndLabels` —
+ *   2. Eager metadata-only load via `PDFExtractor.getMetadata` —
  *      opens the PDF once, reads the catalog, closes. No text extraction.
  *   3. Returns `labels: null` on failure; caller falls back to numeric resolution.
  *
@@ -185,9 +185,9 @@ export async function ensurePageLabelsForResolution(
     // 2. Eager metadata-only load
     try {
         const pdfData = await IOUtils.read(filePath);
-        const { count, labels } = await extractor.getPageCountAndLabels(pdfData);
-        const normalised = Object.keys(labels).length > 0 ? labels : null;
-        return { labels: normalised, pageCount: count, pdfData };
+        const { pageCount, pageLabels } = await extractor.getMetadata(pdfData);
+        const normalised = Object.keys(pageLabels).length > 0 ? pageLabels : null;
+        return { labels: normalised, pageCount, pdfData };
     } catch (error) {
         logger(`ensurePageLabelsForResolution: eager load failed for ${filePath}: ${error}`, 1);
         return { labels: null, pageCount: null, pdfData: null };

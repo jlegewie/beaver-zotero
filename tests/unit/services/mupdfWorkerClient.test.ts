@@ -196,28 +196,35 @@ describe('MuPDFWorkerClient', () => {
     // PR #2 — broaden the worker surface
     // -----------------------------------------------------------------------
 
-    describe('getPageCountAndLabels', () => {
-        it('round-trips count + labels and posts without a transfer list', async () => {
+    describe('getMetadata', () => {
+        it('round-trips PDFMetadata and posts without a transfer list', async () => {
             const client = getMuPDFWorkerClient();
             const buf = new Uint8Array([1, 2, 3]);
 
-            const promise = client.getPageCountAndLabels(buf);
+            const promise = client.getMetadata(buf);
             const worker = MockWorker.instances[0];
             worker.replyToLast({
                 ok: true,
-                result: { count: 3, labels: { 0: 'i', 1: 'ii' } },
+                result: {
+                    pageCount: 3,
+                    pageLabels: { 0: 'i', 1: 'ii' },
+                    title: 'Example Doc',
+                    format: 'PDF 1.7',
+                },
             });
 
             await expect(promise).resolves.toEqual({
-                count: 3,
-                labels: { 0: 'i', 1: 'ii' },
+                pageCount: 3,
+                pageLabels: { 0: 'i', 1: 'ii' },
+                title: 'Example Doc',
+                format: 'PDF 1.7',
             });
 
             const [message, transfer] = worker.postMessage.mock.calls[0] as [
                 any,
                 Transferable[] | undefined,
             ];
-            expect(message).toMatchObject({ op: 'getPageCountAndLabels' });
+            expect(message).toMatchObject({ op: 'getMetadata' });
             expect(transfer).toBeUndefined();
         });
     });

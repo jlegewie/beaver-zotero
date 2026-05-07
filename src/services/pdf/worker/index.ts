@@ -27,8 +27,8 @@ import {
     opExtractRawPages,
     opExtractSentenceBBoxes,
     opExtractWithMeta,
+    opGetMetadata,
     opGetPageCount,
-    opGetPageCountAndLabels,
     opHasTextLayer,
     opRenderPageToImage,
     opRenderPagesToImages,
@@ -63,8 +63,8 @@ async function dispatch(op: string, args: Record<string, unknown> | undefined): 
         }
         case "getPageCount":
             return await opGetPageCount(a as Parameters<typeof opGetPageCount>[0]);
-        case "getPageCountAndLabels":
-            return await opGetPageCountAndLabels(a as Parameters<typeof opGetPageCountAndLabels>[0]);
+        case "getMetadata":
+            return await opGetMetadata(a as Parameters<typeof opGetMetadata>[0]);
         case "extractRawPages":
             return await opExtractRawPages(a as Parameters<typeof opExtractRawPages>[0]);
         case "extractRawPageDetailed":

@@ -346,8 +346,9 @@ export async function handleTestPdfPageCountHttpRequest(request: any) {
 }
 
 /**
- * Dev-only PDF page labels endpoint. Routes through `PDFExtractor`, which
- * delegates to the MuPDF worker.
+ * Dev-only PDF metadata endpoint. Routes through `PDFExtractor`, which
+ * delegates to the MuPDF worker. Returns page count, page labels, and
+ * cheap info-dict fields (title, author, format, etc.).
  */
 export async function handleTestPdfPageLabelsHttpRequest(request: any) {
     const { PDFExtractor, ExtractionError } = await import(
@@ -359,10 +360,8 @@ export async function handleTestPdfPageLabelsHttpRequest(request: any) {
     const { pdfData } = loaded;
 
     try {
-        const { count, labels } = await new PDFExtractor().getPageCountAndLabels(
-            pdfData,
-        );
-        return { ok: true, count, labels };
+        const metadata = await new PDFExtractor().getMetadata(pdfData);
+        return { ok: true, ...metadata };
     } catch (e: any) {
         if (e instanceof ExtractionError) {
             return {

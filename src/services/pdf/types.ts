@@ -849,3 +849,40 @@ export interface PageImageResult {
     /** Effective DPI */
     dpi: number;
 }
+
+// ============================================================================
+// Document Metadata
+// ============================================================================
+
+/**
+ * Document-level PDF metadata returned by `PDFExtractor.getMetadata`.
+ *
+ * Cheap to collect: pulls the info dictionary and PDF format string via
+ * `doc.getMetadata(...)` (string lookups in the trailer/info dict). Page
+ * labels require a per-page load and are the only field with non-trivial
+ * cost. Info-dict fields are omitted when not present in the document.
+ */
+export interface PDFMetadata {
+    /** Total number of pages */
+    pageCount: number;
+    /** Custom page labels (0-indexed → label). Empty record if no labels. */
+    pageLabels: Record<number, string>;
+    /** PDF format string (e.g., "PDF 1.7") */
+    format?: string;
+    /** info:Title */
+    title?: string;
+    /** info:Author */
+    author?: string;
+    /** info:Subject */
+    subject?: string;
+    /** info:Keywords */
+    keywords?: string;
+    /** info:Creator (authoring tool, e.g. "Microsoft Word") */
+    creator?: string;
+    /** info:Producer (PDF generator, e.g. "Adobe Distiller") */
+    producer?: string;
+    /** info:CreationDate (raw PDF date string, e.g. "D:20240115103000Z") */
+    creationDate?: string;
+    /** info:ModDate (raw PDF date string) */
+    modDate?: string;
+}

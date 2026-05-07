@@ -11,8 +11,8 @@ vi.mock('../../../src/services/pdf', () => {
         async getPageCount(): Promise<number> {
             return 3;
         }
-        async getPageCountAndLabels(): Promise<{ count: number; labels: Record<number, string> }> {
-            return { count: 3, labels: {} };
+        async getMetadata(): Promise<{ pageCount: number; pageLabels: Record<number, string> }> {
+            return { pageCount: 3, pageLabels: {} };
         }
         async extractWithMeta(_pdfData: Uint8Array | ArrayBuffer, args: any): Promise<any> {
             mockState.extractWithMetaCalls.push(args);

@@ -15,6 +15,7 @@ import {
     OCRDetectionResult,
     PageImageOptions,
     PageImageResult,
+    PDFMetadata,
     PDFSearchOptions,
     PDFSearchResult,
 } from "./types";
@@ -233,12 +234,18 @@ export class PDFExtractor {
     }
 
     /**
-     * Get page count and all page labels in a single metadata-only pass.
+     * Get document-level metadata in a single doc-open.
+     *
+     * Returns page count, page labels, and cheap info-dict fields
+     * (title, author, format, etc.). Page-label collection requires a
+     * per-page load; the info-dict reads are essentially free. Use
+     * `getPageCount` when you only need the count and want to skip the
+     * per-page label pass.
      */
-    async getPageCountAndLabels(
+    async getMetadata(
         pdfData: Uint8Array | ArrayBuffer
-    ): Promise<{ count: number; labels: Record<number, string> }> {
-        return getMuPDFWorkerClient().getPageCountAndLabels(pdfData);
+    ): Promise<PDFMetadata> {
+        return getMuPDFWorkerClient().getMetadata(pdfData);
     }
 
     /**

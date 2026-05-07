@@ -103,11 +103,11 @@ describe('MuPDF worker smoke — PR #2 ops', () => {
         skipIfNoZotero(ctx, available);
     });
 
-    it('getPageCountAndLabels returns count + labels', async () => {
+    it('getMetadata returns pageCount + pageLabels', async () => {
         const res = await pdfPageLabels(SMALL_PDF);
         expect(res.ok).toBe(true);
-        expect(res.count).toBe(SMALL_PDF_PAGE_COUNT);
-        expect(res.labels).toBeDefined();
+        expect(res.pageCount).toBe(SMALL_PDF_PAGE_COUNT);
+        expect(res.pageLabels).toBeDefined();
     });
 
     it('extractRawPages returns blocks for every page', async () => {
@@ -467,10 +467,10 @@ describe('MuPDF worker — doc cache', () => {
     });
 
     it('multi-call pattern on the same attachment hits cache on every reuse', async () => {
-        // The pages handler typically issues getPageCountAndLabels +
-        // getPageCount + (extract). Here we simulate the multi-call
-        // pattern with two cheap ops: page count and page labels. Both
-        // share the same pdfData, so the second one should be a cache hit.
+        // The pages handler typically issues getMetadata + getPageCount
+        // + (extract). Here we simulate the multi-call pattern with two
+        // cheap ops: page count and metadata. Both share the same
+        // pdfData, so the second one should be a cache hit.
         await workerStats({ reset: true });
         await workerCacheClear({ resetCounters: true });
 

@@ -14,6 +14,7 @@ import {
     type RawPageDataDetailed,
     type PageImageOptions,
     type PageImageResult,
+    type PDFMetadata,
     type PDFPageSearchResult,
     type ExtractionSettings,
     type ExtractionResult,
@@ -299,16 +300,19 @@ export class MuPDFWorkerClient {
         return result.count;
     }
 
-    /** Get page count + all custom page labels in one round-trip. */
-    async getPageCountAndLabels(
+    /**
+     * Get document-level metadata in a single doc-open.
+     *
+     * Returns page count, page labels, and cheap info-dict fields
+     * (title, author, format, etc.). Page-label collection requires a
+     * per-page load; the info-dict reads are essentially free.
+     */
+    async getMetadata(
         pdfData: Uint8Array | ArrayBuffer,
-    ): Promise<{ count: number; labels: Record<number, string> }> {
+    ): Promise<PDFMetadata> {
         const bytes =
             pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
-        return this.call<{ count: number; labels: Record<number, string> }>(
-            "getPageCountAndLabels",
-            { pdfData: bytes },
-        );
+        return this.call<PDFMetadata>("getMetadata", { pdfData: bytes });
     }
 
     /**
@@ -407,7 +411,7 @@ export class MuPDFWorkerClient {
      *
      * Single-page op — out-of-range `pageIndex` throws
      * `ExtractionError(PAGE_OUT_OF_RANGE)`. One doc-open per call (vs. the
-     * two-open cost of "getPageCountAndLabels + renderPagesToImages([idx])").
+     * two-open cost of "getMetadata + renderPagesToImages([idx])").
      */
     async renderPageToImage(
         pdfData: Uint8Array | ArrayBuffer,

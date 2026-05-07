@@ -3,7 +3,7 @@
  *
  * Keeps an opened MuPDF `DocumentLike` alive for a short window after each op
  * so the next op against the same bytes reuses it. Multi-call patterns (one
- * handler firing `getPageCountAndLabels` + `getPageCount` + `extractWithMeta`
+ * handler firing `getMetadata` + `getPageCount` + `extractWithMeta`
  * on the same `pdfData`) and back-to-back HTTP requests on the same
  * attachment skip the parse on every call after the first.
  *

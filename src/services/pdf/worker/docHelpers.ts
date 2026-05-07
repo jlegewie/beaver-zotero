@@ -438,6 +438,58 @@ export function searchPageInDoc(
     }
 }
 
+/**
+ * Read cheap document-level info-dict fields via `doc.getMetadata`.
+ *
+ * Each lookup is a string read from the PDF trailer/info dictionary —
+ * no page loading or content parsing. Missing keys come back as
+ * undefined/empty and are dropped from the result so callers can
+ * spread the object without overwriting with empties.
+ *
+ * Mirrors MuPDF's standard metadata key naming (`format`, `info:Title`,
+ * `info:Author`, etc.).
+ */
+export function collectDocumentInfo(doc: DocumentLike): {
+    format?: string;
+    title?: string;
+    author?: string;
+    subject?: string;
+    keywords?: string;
+    creator?: string;
+    producer?: string;
+    creationDate?: string;
+    modDate?: string;
+} {
+    const read = (key: string): string | undefined => {
+        try {
+            const v = doc.getMetadata(key);
+            return v && v.length > 0 ? v : undefined;
+        } catch {
+            return undefined;
+        }
+    };
+    const info: ReturnType<typeof collectDocumentInfo> = {};
+    const format = read("format");
+    if (format) info.format = format;
+    const title = read("info:Title");
+    if (title) info.title = title;
+    const author = read("info:Author");
+    if (author) info.author = author;
+    const subject = read("info:Subject");
+    if (subject) info.subject = subject;
+    const keywords = read("info:Keywords");
+    if (keywords) info.keywords = keywords;
+    const creator = read("info:Creator");
+    if (creator) info.creator = creator;
+    const producer = read("info:Producer");
+    if (producer) info.producer = producer;
+    const creationDate = read("info:CreationDate");
+    if (creationDate) info.creationDate = creationDate;
+    const modDate = read("info:ModDate");
+    if (modDate) info.modDate = modDate;
+    return info;
+}
+
 /** Collect every page's label into a record. Mirrors MuPDFService.getAllPageLabels. */
 export function collectPageLabels(doc: DocumentLike): Record<number, string> {
     const count = doc.countPages();
