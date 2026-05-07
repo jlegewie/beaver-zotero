@@ -795,6 +795,13 @@ describe('hanging-indent leader suppression', () => {
             // narrowing, the rule would silently merge a footnote-styled
             // leader with a body-styled wrap, which is not the layout we
             // want to handle.
+            //
+            // Leader and continuation share `bboxHeight` so the splitter's
+            // font-size break (which requires BOTH font-size AND line-
+            // height to differ) does not fire and silently rescue the
+            // test. With the safety net narrowed, only `spans.length === 1`
+            // separates a merge from a split here.
+            const SHARED_LINE_HEIGHT = 12;
             const result = makeColumnPageResult([
                 ...FILLERS,
                 {
@@ -802,6 +809,7 @@ describe('hanging-indent leader suppression', () => {
                     l: 0,
                     size: 8,
                     font: 'Times-Roman',
+                    bboxHeight: SHARED_LINE_HEIGHT,
                     marker: { text: '6  ', size: 4, font: 'Times-Roman' },
                 },
                 {
@@ -809,6 +817,7 @@ describe('hanging-indent leader suppression', () => {
                     l: 10,
                     size: 10,
                     font: 'Times-Roman',
+                    bboxHeight: SHARED_LINE_HEIGHT,
                 },
             ]);
             const detection = detectParagraphs(result, [BODY]);
