@@ -72,6 +72,15 @@ const PARSE_MIDDOT_WRAPPED = new RegExp(
     "u",
 );
 
+/**
+ * Bare-Roman gatekeeper pattern. Permissive (accepts e.g. "iiii", "vx"); the
+ * strict Roman validator (`ROMAN_RE` below) rejects malformed strings inside
+ * `parseRoman`, so anything that survives both into `pageNumberElements` is
+ * a real Roman page number. Reused by `isBareRoman` so script-bucketing in
+ * `identifyElementsToRemove` matches the same shape the gatekeeper recognized.
+ */
+const BARE_ROMAN_RE = /^[ivxlcdm]+$/iu;
+
 /** Patterns the gatekeeper accepts. Always run on digit-normalized text. */
 const PAGE_NUMBER_PATTERNS: RegExp[] = [
     /^\d+$/u,
@@ -84,7 +93,7 @@ const PAGE_NUMBER_PATTERNS: RegExp[] = [
     /^第\s*\d+\s*(?:页|頁)$/u,
     /^\d+\s*(?:页|頁|쪽|ページ)$/u,
     MIDDOT_WRAPPED_RE,
-    /^[ivxlcdm]+$/iu,
+    BARE_ROMAN_RE,
 ];
 
 // Parser-specific regexes (anchored, with capture groups). Same source of
@@ -182,6 +191,22 @@ function parsePageNumber(text: string): number | null {
     if (middot) return parseInt(middot[1], 10);
 
     return parseRoman(cleaned);
+}
+
+/**
+ * True when the cleaned text is a bare Roman page number (e.g. "iii", "iv").
+ * Uses the same digit-normalization + trim + lowercase pipeline as the rest
+ * of the page-number classifiers so callers can pass raw element text.
+ *
+ * Used to split parser-only page-number candidates by numeral system before
+ * the increasing-sequence check, so a Roman preface followed by an Arabic
+ * body (the standard dissertation / book layout) is recognized as two
+ * sequences instead of one non-monotone list.
+ */
+function isBareRoman(text: string): boolean {
+    const cleaned = normalizeDigits(text).trim().toLowerCase();
+    if (!cleaned) return false;
+    return BARE_ROMAN_RE.test(cleaned);
 }
 
 /**
@@ -595,74 +620,100 @@ export class MarginFilter {
                     }
                 }
 
-                // Collapse to one candidate per page BEFORE the
-                // increasing-sequence check. If a page emits two numeric
-                // margin elements (e.g. `1` in left header + `1` in right
-                // header), the raw value list `[1, 1, 2, 2, 3, 3, …]`
-                // never strictly increases and a real page sequence is
-                // missed. Pick the lowest value per page — for the typical
-                // failure shape (two slots showing the same page number)
-                // the choice doesn't matter; for the rarer case of two
-                // legitimately-different numbers per page, the lowest is
-                // the better proxy for "the page label."
-                const perPage = new Map<number, { el: MarginElement; value: number }>();
+                // Partition into bare-Roman vs non-Roman buckets so a
+                // document with a Roman preface (iii, iv, …) followed by
+                // an Arabic body (1, 2, …) — the standard dissertation,
+                // thesis, and book layout — isn't rejected because the
+                // concatenated value list resets at the script boundary
+                // (e.g. [3,4,5,…,11,1,2,3,…] never strictly increases).
+                // Each bucket runs the existing per-page collapse +
+                // distinct-page guard + isIncreasingSequence + marking
+                // pass independently. When only one bucket is non-empty
+                // (the overwhelmingly common single-script case), the
+                // surviving bucket runs the same code path it always did.
+                const romanBucket: typeof pageNumberElements = [];
+                const nonRomanBucket: typeof pageNumberElements = [];
                 for (const entry of pageNumberElements) {
-                    const existing = perPage.get(entry.el.pageIndex);
-                    if (!existing || entry.value < existing.value) {
-                        perPage.set(entry.el.pageIndex, entry);
+                    if (isBareRoman(entry.el.text)) {
+                        romanBucket.push(entry);
+                    } else {
+                        nonRomanBucket.push(entry);
                     }
                 }
-                const oneCandidatePerPage = Array.from(perPage.values());
 
-                // Distinct-page guard: count distinct pages, not raw
-                // element count. With the relaxed threshold of 2, a single
-                // page that emits two numeric-looking margin elements
-                // would otherwise pass the gate and be classified as a
-                // "sequence" of length 1.
-                if (oneCandidatePerPage.length >= requiredForPosition) {
+                for (const bucketElements of [romanBucket, nonRomanBucket]) {
+                    if (bucketElements.length === 0) continue;
+
+                    // Collapse to one candidate per page BEFORE the
+                    // increasing-sequence check. If a page emits two
+                    // numeric margin elements (e.g. `1` in left header +
+                    // `1` in right header), the raw value list
+                    // `[1, 1, 2, 2, 3, 3, …]` never strictly increases
+                    // and a real page sequence is missed. Pick the lowest
+                    // value per page — for the typical failure shape
+                    // (two slots showing the same page number) the choice
+                    // doesn't matter; for the rarer case of two
+                    // legitimately-different numbers per page, the lowest
+                    // is the better proxy for "the page label."
+                    const perPage = new Map<number, { el: MarginElement; value: number }>();
+                    for (const entry of bucketElements) {
+                        const existing = perPage.get(entry.el.pageIndex);
+                        if (!existing || entry.value < existing.value) {
+                            perPage.set(entry.el.pageIndex, entry);
+                        }
+                    }
+                    const oneCandidatePerPage = Array.from(perPage.values());
+
+                    // Distinct-page guard: count distinct pages, not raw
+                    // element count. With the relaxed threshold of 2, a
+                    // single page that emits two numeric-looking margin
+                    // elements would otherwise pass the gate and be
+                    // classified as a "sequence" of length 1.
+                    if (oneCandidatePerPage.length < requiredForPosition) continue;
+
                     // Sort by page index
                     oneCandidatePerPage.sort((a, b) => a.el.pageIndex - b.el.pageIndex);
 
                     // Check if values form an increasing sequence (one per page)
                     const values = oneCandidatePerPage.map((p) => p.value);
+                    if (!isIncreasingSequence(values)) continue;
 
-                    if (isIncreasingSequence(values)) {
-                        // These are page numbers - mark all for removal
-                        // (use ALL elements on the matched pages, not just
-                        // the per-page picks, so co-located variants both
-                        // get cleaned up).
-                        const matchedPageIndices = new Set(
-                            oneCandidatePerPage.map((p) => p.el.pageIndex),
-                        );
-                        const seenTexts = new Set<string>();
-                        for (const { el } of pageNumberElements) {
-                            if (!matchedPageIndices.has(el.pageIndex)) continue;
-                            const normalized = normalizeText(el.text);
+                    // These are page numbers - mark all bucket-local
+                    // elements on the matched pages. Iterating the
+                    // bucket (not the combined `pageNumberElements`)
+                    // keeps cross-bucket text from being marked when a
+                    // page legitimately carries both scripts.
+                    const matchedPageIndices = new Set(
+                        oneCandidatePerPage.map((p) => p.el.pageIndex),
+                    );
+                    const seenTexts = new Set<string>();
+                    for (const { el } of bucketElements) {
+                        if (!matchedPageIndices.has(el.pageIndex)) continue;
+                        const normalized = normalizeText(el.text);
 
-                            if (!seenTexts.has(normalized) && !textsToRemove.has(normalized)) {
-                                seenTexts.add(normalized);
+                        if (!seenTexts.has(normalized) && !textsToRemove.has(normalized)) {
+                            seenTexts.add(normalized);
 
-                                candidates.push({
-                                    text: normalized,
-                                    originalText: el.text,
-                                    pageIndices: [el.pageIndex],
-                                    reason: "page_number",
-                                    position,
-                                });
-                            }
-
-                            textsToRemove.add(normalized);
-
-                            if (!removalsByPage.has(el.pageIndex)) {
-                                removalsByPage.set(el.pageIndex, new Set());
-                            }
-                            removalsByPage.get(el.pageIndex)!.add(normalized);
+                            candidates.push({
+                                text: normalized,
+                                originalText: el.text,
+                                pageIndices: [el.pageIndex],
+                                reason: "page_number",
+                                position,
+                            });
                         }
 
-                        // Log the page number sequence detection (development only)
-                        if (process.env.NODE_ENV === "development") {
-                            console.log(`[MarginFilter] Detected page number sequence in ${position} zone: ${values.slice(0, 5).join(", ")}...`);
+                        textsToRemove.add(normalized);
+
+                        if (!removalsByPage.has(el.pageIndex)) {
+                            removalsByPage.set(el.pageIndex, new Set());
                         }
+                        removalsByPage.get(el.pageIndex)!.add(normalized);
+                    }
+
+                    // Log the page number sequence detection (development only)
+                    if (process.env.NODE_ENV === "development") {
+                        console.log(`[MarginFilter] Detected page number sequence in ${position} zone: ${values.slice(0, 5).join(", ")}...`);
                     }
                 }
             }

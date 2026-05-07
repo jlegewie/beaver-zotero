@@ -116,6 +116,49 @@ describe("sequence detection — bare digits and romans (parser-only path)", () 
 });
 
 // ---------------------------------------------------------------------------
+// Two valid page-number runs in the same margin position, split by numeral
+// system (Roman preface + Arabic body — standard dissertation/book layout).
+// Concatenating their parsed values would produce a non-monotone list, so
+// the sequence detector must validate each numeral system independently.
+// ---------------------------------------------------------------------------
+
+describe("two page-number runs in the same margin position split by numeral system", () => {
+    it("detects both Roman and Arabic sequences when concatenation would fail", () => {
+        // Pages 0–4: iii, iv, v, vi, vii (Roman, parsed values 3,4,5,6,7).
+        // Pages 5–9: 1, 2, 3, 4, 5 (Arabic). Concatenated values are
+        // [3,4,5,6,7,1,2,3,4,5] — NOT strictly increasing — so a single-
+        // bucket validator would reject the whole thing. Per-script
+        // bucketing detects both runs.
+        const out = MarginFilter.identifyElementsToRemove(
+            oneTextPerPage(
+                ["iii", "iv", "v", "vi", "vii", "1", "2", "3", "4", "5"],
+                "bottom",
+            ),
+            3,
+            true,
+        );
+
+        const pageNumberTexts = out.candidates
+            .filter((c) => c.reason === "page_number")
+            .map((c) => c.text);
+        expect(pageNumberTexts).toContain("iii");
+        expect(pageNumberTexts).toContain("vii");
+        expect(pageNumberTexts).toContain("1");
+        expect(pageNumberTexts).toContain("5");
+
+        expect(out.textsToRemove.has("iii")).toBe(true);
+        expect(out.textsToRemove.has("vii")).toBe(true);
+        expect(out.textsToRemove.has("1")).toBe(true);
+        expect(out.textsToRemove.has("5")).toBe(true);
+
+        expect(out.removalsByPage.get(0)?.has("iii")).toBe(true);
+        expect(out.removalsByPage.get(4)?.has("vii")).toBe(true);
+        expect(out.removalsByPage.get(5)?.has("1")).toBe(true);
+        expect(out.removalsByPage.get(9)?.has("5")).toBe(true);
+    });
+});
+
+// ---------------------------------------------------------------------------
 // Step 1: the original bug — "X of 13"
 // ---------------------------------------------------------------------------
 
