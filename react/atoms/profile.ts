@@ -11,6 +11,16 @@ export const isProfileInvalidAtom = atom<boolean>(false);
 export const isProfileLoadedAtom = atom<boolean>(false);
 export const profileWithPlanAtom = atom<SafeProfileWithPlan | null>(null);
 
+// Profile sync status. After a successful initial load this is the only signal of a refresh
+// failure — profileWithPlanAtom and isProfileLoadedAtom are not torn down on transient errors.
+// Reset to {kind:'ok'} on logout / SIGNED_OUT / account switch (see useAuth.ts).
+export type ProfileSyncStatus =
+    | { kind: 'ok' }
+    | { kind: 'transient'; message: string; attempt: number; offline: boolean }
+    | { kind: 'fatal'; message: string };
+
+export const profileSyncStatusAtom = atom<ProfileSyncStatus>({ kind: 'ok' });
+
 // Data migration state
 export const isMigratingDataAtom = atom<boolean>(false);
 export const requiredDataVersionAtom = atom<number>(0);

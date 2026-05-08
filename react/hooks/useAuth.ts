@@ -20,7 +20,11 @@ import {
 import { supabase } from '../../src/services/supabaseClient';
 import { logger } from '../../src/utils/logger';
 import type { AuthChangeEvent, Session } from '@supabase/supabase-js';
-import { profileWithPlanAtom, isProfileLoadedAtom } from '../atoms/profile';
+import {
+    profileWithPlanAtom,
+    isProfileLoadedAtom,
+    profileSyncStatusAtom,
+} from '../atoms/profile';
 import { store } from '../store';
 
 // Track if auth listener has been initialized globally
@@ -54,6 +58,7 @@ export function useAuth() {
     const userRef = useRef(user);
     const setProfileWithPlan = useSetAtom(profileWithPlanAtom);
     const setIsProfileLoaded = useSetAtom(isProfileLoadedAtom);
+    const setProfileSyncStatus = useSetAtom(profileSyncStatusAtom);
     
     // Keep refs updated with the latest atom values
     useEffect(() => {
@@ -119,6 +124,16 @@ export function useAuth() {
                 setUser(null);
             }
         }
+
+        // Account switch: if the user.id actually changed (and there was a prior user),
+        // clear the previous profile so the new user's fetch in useProfileSync starts clean.
+        // Without this, the prior profile briefly renders before the new fetch lands.
+        if (currentUserId && newUserId && currentUserId !== newUserId) {
+            logger(`auth: user changed (${currentUserId} -> ${newUserId}); clearing previous profile state`);
+            setProfileWithPlan(null);
+            setIsProfileLoaded(false);
+            setProfileSyncStatus({ kind: 'ok' });
+        }
         // else {
         //     logger(`auth: skipping user update for ${event}`);
         // }
@@ -131,8 +146,14 @@ export function useAuth() {
         // Note: authMethod (user's login method preference) is intentionally untouched.
         if (event === 'SIGNED_OUT' || (event === 'INITIAL_SESSION' && !newSession)) {
             resetLoginFormState(store.set);
+            // Clear profile state on external sign-out / cold start with no session.
+            // Pairs with useProfileSync's invariant of not flipping isProfileLoaded false on
+            // refresh failures — these supabase events are the authoritative reset signal.
+            setProfileWithPlan(null);
+            setIsProfileLoaded(false);
+            setProfileSyncStatus({ kind: 'ok' });
         }
-    }, [setSession, setUser]);
+    }, [setSession, setUser, setProfileWithPlan, setIsProfileLoaded, setProfileSyncStatus]);
     
     useEffect(() => {
         // Increment reference count
