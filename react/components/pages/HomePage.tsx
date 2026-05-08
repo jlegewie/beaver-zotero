@@ -9,6 +9,7 @@ import DragDropWrapper from "../input/DragDropWrapper";
 import PreviewAndPopupContainer from "../PreviewAndPopupContainer";
 import FileStatusBar from "../status/FileStatusBar";
 import { threadWarningsAtom } from "../../atoms/warnings";
+import { libraryHasItemsAtom } from "../../atoms/zoteroContext";
 
 interface HomePageProps {
     isWindow?: boolean;
@@ -20,6 +21,11 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false, inputRef }) => {
     const actions = useAtomValue(actionsForContextAtom);
     const allWarnings = useAtomValue(threadWarningsAtom);
     const hasCreditInfoWarning = allWarnings.some((w) => w.type === 'credit_info');
+    // All current global/context actions assume the library has items, so they
+    // are hidden when the probe has confirmed an empty library. `null` (probe
+    // still pending) keeps actions visible to avoid a brief flicker on launch.
+    const libraryHasItems = useAtomValue(libraryHasItemsAtom);
+    const showActions = libraryHasItems !== false && actions.length > 0;
 
     return (
         <div
@@ -40,7 +46,7 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false, inputRef }) => {
                 </DragDropWrapper>
 
                 {/* Action suggestions */}
-                {actions.length > 0 && (
+                {showActions && (
                     <ActionSuggestions showGlobal={false} />
                 )}
 
