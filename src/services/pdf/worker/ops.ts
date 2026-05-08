@@ -9,8 +9,8 @@
  * directly from cached ops.
  *
  * IMPORTANT: do NOT import from `../index` (the barrel). It re-exports
- * MuPDFService, MuPDFWorkerClient, and the getPref-using PDFExtractor —
- * none of which are worker-safe. Import analyzers and types directly:
+ * `MuPDFWorkerClient` and the getPref-using `PDFExtractor` — neither of
+ * which is worker-safe. Import analyzers and types directly:
  *   import { StyleAnalyzer } from "../StyleAnalyzer";
  *   import type { RawPageData, ExtractionResult } from "../types";
  */
@@ -487,13 +487,11 @@ export async function opSearch(
         const limit = typeof opts.maxHitsPerPage === "number" && opts.maxHitsPerPage > 0
             ? opts.maxHitsPerPage
             : 100;
-        // Parity with main-thread `PDFExtractor.search`
-        // (`src/services/pdf/index.ts:813-816`): when `opts.pages` has length
-        // but every entry is out-of-range, the main-thread filter produces
-        // `[]` which `MuPDFService.searchPages` then treats as "all pages"
-        // via its own `?.length` falsy-fallback. Reproduce that two-stage
-        // behavior here so a stale `opts.pages` doesn't silently turn into
-        // a no-result search on the worker path.
+        // When `opts.pages` has length but every entry is out-of-range,
+        // treat as "search all pages" rather than returning zero hits — a
+        // stale `opts.pages` shouldn't silently produce a no-result
+        // search. (Empty/undefined `opts.pages` already means "all pages"
+        // via `resolvePageIndices`.)
         let indices: number[];
         if (opts.pages?.length) {
             const filtered = opts.pages.filter((i: number) => i >= 0 && i < totalPages);

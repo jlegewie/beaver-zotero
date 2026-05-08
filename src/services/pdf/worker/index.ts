@@ -3,9 +3,9 @@
  * addon/content/modules/mupdf-worker.mjs — see git history pre-PR#3).
  *
  * IMPORTANT: do NOT import from `../index` (the barrel). It re-exports
- * MuPDFService, MuPDFWorkerClient, the getPref-using PDFExtractor, and
- * the logger — none of which are worker-safe. Worker code imports
- * analyzers and types directly:
+ * `MuPDFWorkerClient`, the getPref-using `PDFExtractor`, and the logger —
+ * none of which are worker-safe. Worker code imports analyzers and types
+ * directly:
  *   import { StyleAnalyzer } from "../StyleAnalyzer";
  *   import type { RawPageData, ExtractionResult } from "../types";
  *

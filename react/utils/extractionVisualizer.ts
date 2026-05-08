@@ -12,11 +12,8 @@
 
 import { logger } from "../../src/utils/logger";
 import {
-    MuPDFService,
     getMuPDFWorkerClient,
     Rect,
-    RawPageData,
-    RawPageDataDetailed,
     PageExtractor,
     MarginFilter,
     DEFAULT_MARGINS,
@@ -493,13 +490,16 @@ export async function extractCurrentPageContent(): Promise<PageExtractionResult>
         logger(`[Extractor] Loading PDF and extracting page ${pageIndex + 1}...`);
         const pdfData = await IOUtils.read(filePath);
 
-        const mupdf = new MuPDFService();
-        await mupdf.open(pdfData);
-        let rawPage: RawPageData;
-        try {
-            rawPage = mupdf.extractRawPage(pageIndex);
-        } finally {
-            mupdf.close();
+        const { pages, pageCount } = await getMuPDFWorkerClient().extractRawPages(
+            pdfData,
+            [pageIndex],
+        );
+        const rawPage = pages[0];
+        if (!rawPage) {
+            return {
+                success: false,
+                message: `Page ${pageIndex + 1} out of range (1..${pageCount})`,
+            };
         }
 
         const filteredPage = MarginFilter.filterPageByMargins(rawPage, DEFAULT_MARGINS);

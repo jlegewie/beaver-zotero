@@ -32,9 +32,7 @@ export type {
     PDFLogSink,
     PDFWorkerClientSlot,
     PDFWorkerUrls,
-    MuPDFLoaderModule,
 } from "./config";
-export { MuPDFService, disposeMuPDF } from "./MuPDFService";
 export {
     MuPDFWorkerClient,
     getMuPDFWorkerClient,
@@ -146,9 +144,8 @@ export type {
  * PDFExtractor - High-level API for extracting text from PDFs.
  *
  * Every method delegates to the shared MuPDF worker (see
- * `getMuPDFWorkerClient()`). This class is a thin worker facade — for
- * synchronous main-thread access (e.g. dev tooling like
- * `extractionVisualizer.ts`), use `MuPDFService` directly.
+ * `getMuPDFWorkerClient()`) so the heavy WASM work runs off the Zotero UI
+ * thread. This class is a thin worker facade.
  *
  * Usage:
  * ```typescript

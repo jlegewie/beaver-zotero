@@ -26,17 +26,6 @@ export interface PDFWorkerClientSlot {
     set(client: unknown | undefined): void;
 }
 
-/**
- * Subset of the MuPDF loader module the package consumes. The host loads
- * the loader (e.g. via `ChromeUtils.importESModule(...)`) and returns
- * whatever it found — the package only depends on `init`/`dispose`.
- */
-export interface MuPDFLoaderModule {
-    /** Returns the MuPDFAPI; concrete shape is typed at the call site. */
-    init: (baseUrl: string) => Promise<unknown>;
-    dispose: () => Promise<void>;
-}
-
 /** Worker-side URLs sent to the worker as the first message after spawn. */
 export interface PDFWorkerUrls {
     mupdfWasmFactoryUrl: string;
@@ -57,12 +46,6 @@ export interface PDFConfig {
 
     /** URLs forwarded to the worker via the configure message. */
     worker: PDFWorkerUrls;
-
-    /** Main-thread MuPDFService — inject the loader, not just URLs. */
-    mupdfService: {
-        loadLoader: () => Promise<MuPDFLoaderModule>;
-        baseUrl: string;
-    };
 }
 
 let _config: PDFConfig | null = null;

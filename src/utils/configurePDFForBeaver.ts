@@ -15,12 +15,8 @@
  *  - webpack (`react/`): from `react/index.tsx` at module-init time.
  */
 
-import { configurePDF, type MuPDFLoaderModule } from "../services/pdf/config";
+import { configurePDF } from "../services/pdf/config";
 import { logger } from "./logger";
-
-declare const ChromeUtils: {
-    importESModule: (url: string) => any;
-};
 
 /**
  * Install the PDF package config for Beaver. Idempotent — a later call
@@ -46,15 +42,6 @@ export function configurePDFForBeaver(): void {
                 "chrome://beaver/content/lib/sentencex/sentencex_wasm.js",
             sentencexWasmBinaryUrl:
                 "chrome://beaver/content/lib/sentencex/sentencex_wasm_bg.wasm",
-        },
-        mupdfService: {
-            loadLoader: async (): Promise<MuPDFLoaderModule> => {
-                const { MuPDFLoader } = ChromeUtils.importESModule(
-                    "chrome://beaver/content/modules/mupdf-loader.mjs",
-                );
-                return MuPDFLoader as MuPDFLoaderModule;
-            },
-            baseUrl: "chrome://beaver/content/",
         },
     });
 }

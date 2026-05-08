@@ -1,7 +1,7 @@
 /**
  * Mock-config helper for unit tests of the PDF package.
  *
- * The PDF package requires `configurePDF()` before any worker / loader op.
+ * The PDF package requires `configurePDF()` before any worker op.
  * Production wires it via `src/utils/configurePDFForBeaver.ts`; unit tests
  * supply a mock here so they can drive the surface without Zotero or
  * `chrome://` URLs.
@@ -54,13 +54,6 @@ export function configurePDFForTests(opts: ConfigureForTestsOptions = {}): {
             mupdfWasmBinaryUrl: "test://mupdf.wasm",
             sentencexWasmFactoryUrl: "test://sentencex.js",
             sentencexWasmBinaryUrl: "test://sentencex.wasm",
-        },
-        mupdfService: {
-            loadLoader: async () => ({
-                init: async () => ({}),
-                dispose: async () => {},
-            }),
-            baseUrl: "test://",
         },
     };
 

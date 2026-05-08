@@ -20,10 +20,11 @@ import type {
 import { DEFAULT_OCR_DETECTION_OPTIONS, bboxToTuple } from "./types";
 
 /**
- * Minimal interface that DocumentAnalyzer needs — implemented by
- * `MuPDFService` (main thread) and by a worker-side adapter that wraps an
- * open `Document`. Decouples the analyzer from the MuPDF lifecycle so the
- * same code runs in both contexts.
+ * Minimal interface that DocumentAnalyzer needs — implemented by a
+ * worker-side adapter that wraps an open `Document`. Decouples the analyzer
+ * from the MuPDF lifecycle so the same code can be reused outside the
+ * worker (e.g. against a pre-extracted `RawDocumentData`) without dragging
+ * in the MuPDF/WASM stack.
  */
 export interface RawPageProvider {
     getPageCount(): number;

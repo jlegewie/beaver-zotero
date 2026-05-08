@@ -338,9 +338,9 @@ export class MuPDFWorkerClient {
     /**
      * Extract raw structured-text pages.
      *
-     * Mirrors `MuPDFService.extractRawPages` semantics: invalid indices in
-     * `pageIndices` are silently filtered, an empty/undefined `pageIndices`
-     * means "all pages."
+     * Index handling (see `worker/docHelpers.ts:resolvePageIndices`): invalid
+     * indices in `pageIndices` are silently filtered out, and an
+     * empty/undefined `pageIndices` means "all pages."
      */
     async extractRawPages(
         pdfData: Uint8Array | ArrayBuffer,
@@ -428,8 +428,8 @@ export class MuPDFWorkerClient {
     /**
      * Search a PDF for a literal phrase. Returns unscored, page-level hits.
      *
-     * Mirrors `MuPDFService.searchPages` semantics: invalid indices are
-     * silently filtered.
+     * Index handling (see `worker/docHelpers.ts:resolvePageIndices`): invalid
+     * indices in `pageIndices` are silently filtered.
      */
     async searchPages(
         pdfData: Uint8Array | ArrayBuffer,
@@ -787,10 +787,9 @@ export function getMuPDFWorkerClient(): MuPDFWorkerClient {
  * Dispose the singleton MuPDFWorkerClient. Safe to call multiple times.
  *
  * Early-returns when the package was never configured (e.g. error paths
- * during shutdown that run before `configurePDF` ever fired). The
- * async-signature is kept for parity with `disposeMuPDF()` even though the
- * underlying `worker.terminate()` is synchronous — this keeps the call
- * sites uniform (`Promise.all([disposeMuPDF(), disposeMuPDFWorker()])`).
+ * during shutdown that run before `configurePDF` ever fired). The async
+ * signature lets callers `await` it uniformly with other shutdown steps,
+ * even though the underlying `worker.terminate()` is synchronous.
  */
 export async function disposeMuPDFWorker(): Promise<void> {
     if (!isConfigured()) return;

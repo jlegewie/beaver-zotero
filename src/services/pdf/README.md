@@ -34,10 +34,10 @@ Phase 3: Page Processing (filtering, line detection, extraction)
 
 #### Phase 1: Raw Extraction
 
-- **Module**: `MuPDFService.ts`
+- **Module**: `worker/docHelpers.ts` (called via `MuPDFWorkerClient`)
 - **Purpose**: Single-pass extraction of all structured text from MuPDF
 - **Output**: `RawDocumentData` with raw blocks, lines, spans, and bboxes
-- **Why**: Minimizes WASM calls; all analysis works from this cached data
+- **Why**: All MuPDF/WASM work runs in a worker so the UI thread stays free; analysis modules work from this cached data without re-entering the worker
 
 #### Phase 2: Document Analysis
 
@@ -65,9 +65,14 @@ Phase 3: Page Processing (filtering, line detection, extraction)
 
 ```
 src/services/pdf/
-├── index.ts                    # Main API entry point
+├── index.ts                    # Main API entry point (PDFExtractor facade)
 ├── types.ts                    # All TypeScript interfaces
-├── MuPDFService.ts            # WASM bridge (low-level)
+├── MuPDFWorkerClient.ts        # Main-thread worker proxy (postMessage RPC)
+├── worker/
+│   ├── index.ts                # Worker entry point
+│   ├── ops.ts                  # Worker-side op handlers
+│   ├── docHelpers.ts           # MuPDF/WASM bridge (worker-only)
+│   └── mupdfApi.ts             # MuPDF API wrappers
 ├── DocumentAnalyzer.ts        # Text layer & OCR detection
 ├── StyleAnalyzer.ts           # Font/style analysis
 ├── MarginFilter.ts            # Header/footer removal
@@ -78,9 +83,6 @@ src/services/pdf/
 ├── SearchScorer.ts            # Search result scoring & ranking
 └── README.md                  # This file
 
-addon/content/modules/
-└── mupdf-loader.mjs           # WASM loader (ES module)
-
 react/utils/
 └── extractionVisualizer.ts    # Debug visualization tools
 ```
@@ -89,8 +91,8 @@ react/utils/
 
 | Module                | Responsibility      | Input                  | Output                     |
 | --------------------- | ------------------- | ---------------------- | -------------------------- |
-| **MuPDFService**      | WASM interaction    | PDF bytes              | `RawPageData[]`            |
-| **DocumentAnalyzer**  | Text layer checks   | `MuPDFService`         | Boolean, page count        |
+| **MuPDFWorkerClient** | WASM interaction (worker-side) | PDF bytes   | `RawPageData[]`            |
+| **DocumentAnalyzer**  | Text layer checks   | `RawPageData[]`        | Boolean, page count        |
 | **StyleAnalyzer**     | Typography analysis | `RawPageData[]`        | `StyleProfile`             |
 | **MarginFilter**      | Smart filtering     | `RawPageData[]`        | `MarginRemovalResult`      |
 | **ColumnDetector**    | Layout detection    | `RawPageData`          | `ColumnDetectionResult`    |
@@ -403,12 +405,14 @@ export async function visualizeCurrentPageSections(): Promise<{
     const reader = await getCurrentReaderAndWaitForView(undefined, true);
     const currentPageIndex = /* get from pdfViewer */;
 
-    // 2. Load PDF and extract
+    // 2. Load PDF and extract one page via the worker
     const pdfData = await IOUtils.read(filePath);
-    const mupdf = new MuPDFService();
-    await mupdf.open(pdfData);
-    const rawPage = mupdf.extractRawPage(currentPageIndex);
-    mupdf.close();
+    const { pages } = await getMuPDFWorkerClient().extractRawPages(
+        pdfData,
+        [currentPageIndex],
+    );
+    const rawPage = pages[0];
+    if (!rawPage) throw new Error("page out of range");
 
     // 3. Run detection pipeline
     const filteredPage = MarginFilter.filterPageByMargins(rawPage, DEFAULT_MARGINS);
@@ -546,7 +550,7 @@ console.groupEnd();
 #### Issue: "needsPassword is not a function"
 
 **Cause**: JSM module caching  
-**Solution**: Restart Zotero or use metadata fallback in `MuPDFService.ts`
+**Solution**: Restart Zotero or use metadata fallback in `worker/docHelpers.ts`
 
 #### Issue: False "No text layer" detection
 
@@ -1016,7 +1020,7 @@ When adding features:
 ### WASM Initialization Errors
 
 **Symptom**: `$libmupdf_load_font_file is not a function`  
-**Fix**: Already handled with stub in `mupdf-loader.mjs`
+**Fix**: Already handled with a stub in the worker's MuPDF API wrapper (`worker/mupdfApi.ts`).
 
 ### Memory Issues
 

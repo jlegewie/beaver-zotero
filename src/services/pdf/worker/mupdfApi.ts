@@ -1,13 +1,9 @@
 /**
- * MuPDF API wrappers ported from `addon/content/modules/mupdf-loader.mjs`.
+ * MuPDF API wrappers (Document/Page/StructuredText/Pixmap/ColorSpace/Matrix).
  *
  * The worker is self-contained by design — these wrappers are the only
- * surface that touches libmupdf-wasm. Every Document/Page/StructuredText/
- * Pixmap/ColorSpace/Matrix routine used by orchestration ops must be in
- * this file.
- *
- * Bundled successor to addon/content/modules/mupdf-worker.mjs (see git
- * history pre-PR#3 for the original hand-ported version).
+ * surface that touches libmupdf-wasm. Every routine used by orchestration
+ * ops must be in this file.
  */
 
 /**

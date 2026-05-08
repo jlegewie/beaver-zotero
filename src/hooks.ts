@@ -10,7 +10,7 @@ import { uiManager } from "../react/ui/UIManager";
 import { getPref, setPref } from "./utils/prefs";
 import { addPendingVersionNotification } from "./utils/versionNotificationPrefs";
 import { getAllVersionUpdateMessageVersions } from "../react/constants/versionUpdateMessages";
-import { disposeMuPDF, disposeMuPDFWorker } from "./utils/mupdf";
+import { disposeMuPDFWorker } from "./services/pdf";
 import { configurePDFForBeaver } from "./utils/configurePDFForBeaver";
 import { registerBeaverProtocolHandler, unregisterBeaverProtocolHandler } from "./services/protocolHandler";
 import { cancelAllActiveTasks } from "./utils/backgroundTasks";
@@ -451,13 +451,9 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         // stale held-lock cannot block authentication on the next load.
         await cleanupSupabaseWindowState(win);
 
-        // 2. Dispose MuPDF WASM module to release native resources.
-        //    Sentencex now lives inside the worker and dies with
-        //    `worker.terminate()` (covered by `disposeMuPDFWorker`).
-        await Promise.all([
-            withShutdownTimeout(disposeMuPDF(), "disposeMuPDF"),
-            withShutdownTimeout(disposeMuPDFWorker(), "disposeMuPDFWorker"),
-        ]);
+        // 2. Terminate the MuPDF worker. Sentencex lives inside the worker
+        //    and dies with `worker.terminate()`.
+        await withShutdownTimeout(disposeMuPDFWorker(), "disposeMuPDFWorker");
 
         // 3. Clear attachment file cache
         if (addon.attachmentFileCache) {
@@ -633,8 +629,7 @@ async function onShutdown(): Promise<void> {
             await cleanupSupabaseWindowState(Zotero.getMainWindow());
         } catch (_e) { /* may not be available during shutdown */ }
     
-        await disposeMuPDF();
-        await Promise.all([disposeMuPDF(), disposeMuPDFWorker()]);
+        await disposeMuPDFWorker();
 
         if (addon.attachmentFileCache) {
             addon.attachmentFileCache.clearMemoryCache();
