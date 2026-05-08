@@ -441,7 +441,11 @@ export function expandToRawHtml(
                 // Fall through to new-citation handling below.
                 if (context === 'old') {
                     throw new Error(
-                        `Unknown citation ref="${ref}". Cannot modify citation references not present in the note.`
+                        `Citation ref="${ref}" referenced in old_string was not found `
+                        + 'in the note\'s existing citations. To reference an existing '
+                        + 'citation, copy its full <citation .../> tag (including `ref`) '
+                        + 'verbatim from read_note. New citations (without a ref) can only '
+                        + 'appear in new_string.'
                     );
                 }
                 logger(`expandToRawHtml: Unknown ref="${ref}" in new_string — treating as new citation`, 1);
@@ -449,9 +453,27 @@ export function expandToRawHtml(
 
             // Case 2: New citation (no ref, or fabricated ref) — only allowed in new_string
             if (context === 'old') {
+                // Quote the offending tag back to the model so the error names
+                // which citation in old_string couldn't be resolved. Without
+                // this, the validator's `applyOldStringEnrichment` silently
+                // no-ops and the model only sees the generic "no ref" message,
+                // never learning which identifier was unresolvable.
+                const ident = itemId
+                    ? `item_id="${itemId}"`
+                    : attId
+                        ? `att_id="${attId}"`
+                        : externalId
+                            ? `external_id="${externalId}"`
+                            : items
+                                ? `items="${items}"`
+                                : 'unknown';
+                const pageAttr = extractAttr(attrStr, 'page');
+                const pageStr = pageAttr ? ` page="${pageAttr}"` : '';
                 throw new Error(
-                    'Error: New citations (without a ref) can only appear in new_string, not old_string. '
-                    + 'To reference an existing citation, include its ref attribute.'
+                    `Citation \`<citation ${ident}${pageStr}/>\` referenced in old_string `
+                    + 'was not found in the note. To reference an existing citation, copy '
+                    + 'its full <citation .../> tag (including `ref`) verbatim from '
+                    + 'read_note. New citations (without a ref) can only appear in new_string.'
                 );
             }
             // New citations from the model always use 1-based page numbers → translate

@@ -12,6 +12,8 @@ import {
     validateNewString,
     checkNewCitationItemsExist,
     applyOldStringEnrichment,
+    detectPartialSimplifiedTag,
+    type PartialSimplifiedTag,
 } from '../../../utils/editNoteValidation';
 import {
     expandToRawHtml,
@@ -107,6 +109,25 @@ function getExternalRefContext(): ExternalRefContext {
         externalRefs: store.get(externalReferenceMappingAtom),
         externalItemMapping: store.get(externalReferenceItemMappingAtom),
     };
+}
+
+/**
+ * Build the error message for a partial `<citation …>` / `<annotation …>` opener
+ * in `old_string`. Surfaces the actionable rewrite hint (use the FULL tag from
+ * `read_note`) so the model can self-correct on the next turn instead of
+ * reading the generic zero-match hint.
+ */
+function buildPartialSimplifiedTagMessage(partial: PartialSimplifiedTag): string {
+    return (
+        `${partial.kind === 'citation' ? 'Citation' : 'Annotation'} tags are atomic — `
+        + `the matcher cannot match a partial tag. Found a partial opener in old_string: `
+        + `\`${partial.snippet}\`.\n`
+        + 'To rename across all citations, use `str_replace_all` on the FULL '
+        + '`<citation .../>` tag from `read_note` (including `ref`), not on a prefix.\n'
+        + 'To replace a citation, copy the full tag (including `ref`) as old_string '
+        + 'and write a new `<citation item_id="..." page="..."/>` (without `ref`) as '
+        + 'new_string. The `ref` attribute is read-only.'
+    );
 }
 
 /**
@@ -503,6 +524,22 @@ async function validateEditNoteAction(
     //     wins. See editNoteMatcher.ts for the full chain.
     const match = findBestMatch(matchInput, base);
     if (!match) {
+        // 13a. Distinct error for partial citation/annotation openers in
+        //      old_string. `expandToRawHtml`'s regex requires a complete
+        //      self-closing tag, so a partial like `<citation item_id="X"`
+        //      passes through into the haystack search and produces a
+        //      generic miss. Surface a targeted hint instead.
+        const partial = detectPartialSimplifiedTag(old_string ?? '');
+        if (partial) {
+            return {
+                type: 'agent_action_validate_response',
+                request_id: request.request_id,
+                valid: false,
+                error: buildPartialSimplifiedTagMessage(partial),
+                error_code: 'partial_simplified_tag',
+                preference: 'always_ask',
+            };
+        }
         const hint = buildZeroMatchHint(simplified, old_string ?? '');
         return {
             type: 'agent_action_validate_response',
@@ -796,6 +833,18 @@ async function executeEditNoteAction(
     //    edit) so we re-match here against the current HTML.
     const match = findBestMatch(matchInput, base);
     if (!match) {
+        // Defense-in-depth: same partial-tag check as the validator (step 13a)
+        // — the executor may receive un-normalized action_data on stale paths.
+        const partial = detectPartialSimplifiedTag(old_string ?? '');
+        if (partial) {
+            return {
+                type: 'agent_action_execute_response',
+                request_id: request.request_id,
+                success: false,
+                error: buildPartialSimplifiedTagMessage(partial),
+                error_code: 'partial_simplified_tag',
+            };
+        }
         const hint = buildExecutionZeroMatchHint(simplified, old_string ?? '');
         return {
             type: 'agent_action_execute_response',
