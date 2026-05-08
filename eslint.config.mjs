@@ -93,13 +93,20 @@ export default tseslint.config(
                                 "Worker code must not import Beaver app utilities (src/utils).",
                         },
                         {
-                            // src/services/* — sibling Beaver services. Worker code
-                            // imports PDF-package internals via `../X`; this glob
-                            // catches attempted reach-arounds like
-                            // `../../../services/database`.
-                            group: ["../../../services/*"],
+                            // Anything reachable via `../..` leaves the PDF
+                            // package — sibling Beaver services like
+                            // `../../database`, `../../agentService`, …
+                            // PDF-package internals are still allowed via
+                            // `./X` and `../X`. The longer-form
+                            // `../../../services/*` is a redundant catch
+                            // for the same target, kept for clarity.
+                            group: [
+                                "../../*",
+                                "../../**",
+                                "../../../services/*",
+                            ],
                             message:
-                                "Worker code must not import sibling Beaver services. Use `../X` for PDF-package internals.",
+                                "Worker code must not leave src/services/pdf. Use `./X` or `../X` for PDF-package internals only.",
                         },
                         {
                             // react/* — webpack-only bundle (DOM/Zotero APIs).

@@ -23,7 +23,7 @@ import {
 } from "./docCache";
 import { enqueue } from "./opQueue";
 import { ensureApi } from "./wasmInit";
-import { setWorkerUrls, type WorkerUrls } from "./config";
+import { isWorkerConfigured, setWorkerUrls, type WorkerUrls } from "./config";
 import {
     opAnalyzeOCRNeeds,
     opExtract,
@@ -129,6 +129,23 @@ workerSelf.onmessage = (event: MessageEvent) => {
 
     const { id, op, args } = data as IncomingOpMessage;
     if (typeof id !== "number" || typeof op !== "string") {
+        return;
+    }
+
+    // Fail-fast: every op (including the doc-cache RPCs `__cacheStats` /
+    // `__cacheClear` which never touch WASM URLs) requires a prior
+    // configure frame. Without this guard those two would silently run
+    // pre-config, weakening the configure-before-op contract.
+    if (!isWorkerConfigured()) {
+        workerSelf.postMessage({
+            id,
+            ok: false,
+            error: {
+                name: "Error",
+                message:
+                    "MuPDF worker received op before configure message",
+            },
+        });
         return;
     }
 
