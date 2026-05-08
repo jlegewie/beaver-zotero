@@ -96,9 +96,8 @@ const FirstRunPage: React.FC<FirstRunPageProps> = () => {
             <div className="text-lg font-semibold">Ideas for your library</div>
         </div>
     ) : isLibraryEmpty ? (
-        <div className="display-flex flex-col gap-2 py-2 mt-3">
-            <div className="text-lg font-semibold">Let&apos;s start your library</div>
-            <div>Beaver helps you discover, read, and organize research. Tell us what you&apos;re working on and we&apos;ll find a starting set of papers for you.</div>
+        <div className="display-flex flex-col gap-2 py-2 mt-2">
+            <div>Tell us what you&apos;re researching and we&apos;ll find recent, highly-cited papers to start your library.</div>
         </div>
     ) : (
         <div className="display-flex flex-col gap-2 py-2 mt-3">
@@ -110,6 +109,9 @@ const FirstRunPage: React.FC<FirstRunPageProps> = () => {
     const footerLabel = isSuggestionsMode
         ? 'Cancel'
         : isLibraryEmpty ? 'Skip for now' : 'Skip';
+    // Empty-library skip is a secondary path — the primary CTA lives inside
+    // EmptyLibraryDiscovery. Other onboarding screens keep the solid default.
+    const footerButtonVariant = !isSuggestionsMode && isLibraryEmpty ? 'ghost' : 'solid';
 
     return (
         <div
@@ -170,6 +172,8 @@ const FirstRunPage: React.FC<FirstRunPageProps> = () => {
                 onButtonClick={handleFooterClick}
                 isLoading={isWaitingForLibraryProbe || (isLoading && !isLibraryEmpty) || isCompleting}
                 disabled={isWaitingForLibraryProbe || isCompleting}
+                buttonVariant={footerButtonVariant}
+                hideRightIcon={footerButtonVariant === 'ghost'}
             />
         </div>
     );
