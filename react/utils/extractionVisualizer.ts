@@ -13,11 +13,8 @@
 import { logger } from "../../src/utils/logger";
 import {
     getMuPDFWorkerClient,
+    PDFExtractor,
     Rect,
-    PageExtractor,
-    MarginFilter,
-    DEFAULT_MARGINS,
-    detectColumns,
 } from "../../src/services/pdf";
 import type { SentenceBBoxTraceResult } from "../../src/services/pdf";
 import { getItemLanguage } from "../../src/utils/zoteroUtils";
@@ -490,28 +487,19 @@ export async function extractCurrentPageContent(): Promise<PageExtractionResult>
         logger(`[Extractor] Loading PDF and extracting page ${pageIndex + 1}...`);
         const pdfData = await IOUtils.read(filePath);
 
-        const { pages, pageCount } = await getMuPDFWorkerClient().extractRawPages(
-            pdfData,
-            [pageIndex],
-        );
-        const rawPage = pages[0];
-        if (!rawPage) {
+        const result = await new PDFExtractor().extract(pdfData, {
+            pageIndices: [pageIndex],
+        });
+        const processedPage = result.pages[0];
+        if (!processedPage) {
             return {
                 success: false,
-                message: `Page ${pageIndex + 1} out of range (1..${pageCount})`,
+                message: `Page ${pageIndex + 1} not extracted`,
             };
         }
 
-        const filteredPage = MarginFilter.filterPageByMargins(rawPage, DEFAULT_MARGINS);
-        const columnResult = detectColumns(filteredPage);
-        logger(`[Extractor] Found ${columnResult.columns.length} column(s)`);
-
-        const pageExtractor = new PageExtractor({});
-        const processedPage = pageExtractor.extractPageWithColumns(
-            filteredPage,
-            columnResult,
-            true,
-        );
+        const columns = processedPage.columns ?? [];
+        logger(`[Extractor] Found ${columns.length} column(s)`);
         logger(
             `[Extractor] Page ${pageIndex + 1} content extracted (${processedPage.content.length} chars)`,
         );
@@ -522,8 +510,8 @@ export async function extractCurrentPageContent(): Promise<PageExtractionResult>
             pageIndex,
             pageNumber: pageIndex + 1,
             content: processedPage.content,
-            columnCount: columnResult.columns.length,
-            columns: processedPage.columns,
+            columnCount: columns.length,
+            columns,
         };
     } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
