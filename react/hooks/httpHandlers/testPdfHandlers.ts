@@ -658,16 +658,22 @@ export async function handleTestPdfSentenceBBoxesHttpRequest(request: any) {
  *                                         // capped at 50.
  *
  * Level dispatch notes:
- *   - `sentences` runs through `runSentenceExtractionPipeline`
- *     so the rects drawn on the PNG are byte-for-byte the bboxes the
- *     production sentence pipeline produced.
- *   - `columns`, `lines`, `paragraphs`, `margins` route through
- *     `detectFilteredParagraphs` (inside the per-level overlay collectors)
- *     so they reflect the same smart cross-page filter the production
- *     sentence pipeline uses.
- *   - `raw-lines` deliberately stays on a single-page unfiltered extract —
- *     its purpose is to expose the pre-filter MuPDF lines so an agent can
- *     see what the margin filter did or didn't catch.
+ *   - `sentences`, `columns`, `lines`, `paragraphs`, `margins` all share
+ *     a single `extractSentenceBBoxesTrace` worker round-trip; each
+ *     level then turns the returned `result` / `trace` into rects via
+ *     a pure builder in `extractionOverlay.ts`
+ *     (`buildSentenceOverlayFromResult`, `build{Column,Line,Paragraph,
+ *     Margins}OverlayFromTrace`). The rects are byte-for-byte the
+ *     intermediates the production sentence pipeline produced — same
+ *     analysis window, same smart cross-page margin filter, same
+ *     style profile. Cost note: non-sentence levels still pay for
+ *     splitting + mapping inside the worker; intentional initial
+ *     trade-off for parity, with a lighter `extractLayoutTrace` op as
+ *     a possible follow-up if it ever bites.
+ *   - `raw-lines` deliberately stays on a single-page unfiltered extract
+ *     (`extractRawPages([pageIndex])`) — its purpose is to expose the
+ *     pre-filter MuPDF lines so an agent can see what the margin filter
+ *     did or didn't catch.
  *
  * Response: `{ ok: true, image_base64, width, height, page_width,
  *   page_height, group_count, stats, rects }`. `rects` carries the
