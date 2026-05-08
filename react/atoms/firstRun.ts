@@ -352,10 +352,11 @@ function buildEmptyLibraryDiscoverPrompt(interest: string): string {
     const trimmed = interest.trim();
     return (
         `My research interest: ${trimmed}\n\n` +
-        `Use external search to find recent, highly-cited papers in this area. ` +
-        `Prefer the last 5 years and seminal work that anyone starting in this area should know. ` +
-        `Return up to 10 papers, each with title, first author, year, citation count, ` +
-        `and a one-sentence description of why it matters.`
+        `Use external topic-based search to find recent, highly-cited papers in this area. ` +
+        `Search broadly and return up to 10 papers. Prefer researh from the last ` +
+        `5 years and focus on seminal work that anyone starting in this area should know. ` +
+        `Each paper should have title, first author, year, citation count, and a one-sentence ` +
+        `description of why it matters. Conclude with a TL;DR summary of the results.`
     );
 }
 
