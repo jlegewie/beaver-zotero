@@ -5,10 +5,9 @@
  * worker boundary as a plain object) into a synchronous
  * `SentenceSplitter` function the mapper can invoke.
  *
- * Mirrors the main-thread `getSentenceSplitterWithFallback` semantics:
- * if sentencex init fails, log a warning and fall back to the regex
- * splitter so sentence-bbox extraction keeps working in degraded
- * environments (missing .wasm, broken WASM packaging, etc.).
+ * Fallback semantics: if sentencex init fails, log a warning and fall
+ * back to the regex splitter so sentence-bbox extraction keeps working in
+ * degraded environments (missing .wasm, broken WASM packaging, etc.).
  *
  * The returned splitter is invoked once per paragraph during mapping —
  * `applyPostProcessing` is applied here so the caller (the mapper)
@@ -39,8 +38,7 @@ export async function resolveSplitter(
         };
     }
 
-    // sentencex with simple-regex fallback (mirrors main-thread
-    // getSentenceSplitterWithFallback). The init failure is logged via
+    // sentencex with simple-regex fallback. The init failure is logged via
     // the worker's log channel so the cause is still visible upstream.
     try {
         const mod = await ensureSentencex();

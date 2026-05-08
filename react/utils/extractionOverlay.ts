@@ -125,18 +125,18 @@ export interface OverlayResult {
 }
 
 // ---------------------------------------------------------------------------
-// Sentence builder — pre-existed before Stage 4. Sister to the new
-// `build*FromTrace` builders below; takes the production result directly
-// (without trace) since /pdf-sentence-bboxes endpoints already had it.
+// Sentence builder — sister to the `build*FromTrace` builders below.
+// Takes the production sentence result directly (without trace), which is
+// what `/beaver/test/pdf-sentence-bboxes` and the trace overlay path both
+// already have.
 // ---------------------------------------------------------------------------
 
 /**
  * Build a sentence overlay from an already-computed `PageSentenceBBoxResult`.
  *
- * Used by the `/beaver/test/pdf-render-overlay` endpoint to feed the result
- * from `runSentenceExtractionPipeline` (production orchestration) into the
- * shared rect-building loop. Same rect/color/label/group semantics as
- * `getSentenceOverlay`.
+ * Used by the `/beaver/test/pdf-render-overlay` endpoint to feed the worker
+ * sentence result into the shared rect-building loop. Same
+ * rect/color/label/group semantics as the old `getSentenceOverlay` helper.
  */
 export function buildSentenceOverlayFromResult(
     result: PageSentenceBBoxResult,

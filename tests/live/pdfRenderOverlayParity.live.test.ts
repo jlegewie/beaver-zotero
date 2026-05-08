@@ -1,11 +1,12 @@
 /**
  * Live parity check for `/beaver/test/pdf-render-overlay` (sentences).
  *
- * The render-overlay endpoint and `/beaver/test/pdf-sentence-bboxes` both
- * route through `runSentenceExtractionPipeline`, so for the same item/page
- * the overlay rects MUST match production sentence bboxes — fragment by
- * fragment, in order. If this test fails, the overlay endpoint has drifted
- * from production.
+ * The render-overlay endpoint uses the worker trace op and
+ * `/beaver/test/pdf-sentence-bboxes` uses the production worker op. Both
+ * share the same worker-side sentence extraction helper, so for the same
+ * item/page the overlay rects MUST match production sentence bboxes —
+ * fragment by fragment, in order. If this test fails, the overlay endpoint
+ * has drifted from production.
  *
  * Rects are compared *as ordered fragment arrays per group*, not as a
  * geometric union — collapsing two adjacent fragments into one bbox would

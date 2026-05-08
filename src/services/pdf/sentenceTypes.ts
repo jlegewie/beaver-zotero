@@ -90,9 +90,9 @@ export interface WorkerSentenceBBoxTraceOptions extends WorkerSentenceBBoxOption
  * Intermediates surfaced by the trace-mode worker op
  * `extractSentenceBBoxesTrace`.
  *
- * Mirrors what the main-thread `runSentenceExtractionPipeline()` used to
- * return on its `trace` field, minus the redundant `sentenceResult` (the
- * sentence result lives at the top level of `SentenceBBoxTraceResult`).
+ * Mirrors the intermediates surfaced by the worker-side sentence extraction
+ * helper, with the sentence result living at the top level of
+ * `SentenceBBoxTraceResult`.
  *
  * **Map/Set across the worker boundary.** `marginAnalysis`,
  * `marginRemoval`, and `filteredResult.styleProfile` carry `Map`/`Set`

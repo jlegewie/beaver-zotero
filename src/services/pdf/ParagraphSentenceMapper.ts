@@ -468,10 +468,11 @@ function resolveSentencesInParagraph(
 export interface PageSentenceBBoxOptions {
     /**
      * Splitter callback. Defaults to `simpleRegexSentenceSplit` at this
-     * layer; production callers should construct a sentencex-backed
-     * splitter via `getSentenceSplitterWithFallback(language)` and pass
-     * it in. The default is kept regex-only so the mapper module has no
-     * implicit WASM dependency and stays trivially testable.
+     * layer. Worker callers resolve a sentencex-backed splitter from a
+     * serializable config before invoking the mapper; tests and fixture
+     * replay can still pass function-valued splitters directly. The
+     * default is kept regex-only so the mapper module has no implicit WASM
+     * dependency and stays trivially testable.
      */
     splitter?: SentenceSplitter;
     /**
