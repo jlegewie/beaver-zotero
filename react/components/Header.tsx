@@ -14,7 +14,7 @@ import { isThreadListViewAtom } from '../atoms/ui';
 import UserAccountMenuButton from './ui/buttons/UserAccountMenuButton';
 import DevToolsMenuButton from './ui/buttons/DevToolsMenuButton';
 import ThreadMenuButton from './ui/buttons/ThreadMenuButton';
-import { hasCompletedOnboardingAtom, isDatabaseSyncSupportedAtom, updateRequiredAtom, isProfileLoadedAtom } from '../atoms/profile';
+import { hasCompletedOnboardingAtom, isDatabaseSyncSupportedAtom, updateRequiredAtom, isProfileLoadedAtom, profileSyncStatusAtom } from '../atoms/profile';
 import { isFirstRunVisibleAtom } from '../atoms/firstRun';
 import { getWindowFromElement } from '../utils/windowContext';
 import { currentMessageContentAtom } from '../atoms/messageComposition';
@@ -39,7 +39,21 @@ const Header: React.FC<HeaderProps> = ({ onClose, isWindow = false }) => {
     const threadId = useAtomValue(currentThreadIdAtom);
     const [isThreadListView, setIsThreadListView] = useAtom(isThreadListViewAtom);
     const isFirstRunVisible = useAtomValue(isFirstRunVisibleAtom);
+    const profileSyncStatus = useAtomValue(profileSyncStatusAtom);
     const closeButtonRef = useRef<HTMLButtonElement>(null);
+
+    // Reconnecting / sync-issue indicator: only shown after the profile is loaded
+    // (cold-start covered by ProfileLoadingPage). Visible for both transient retries
+    // and fatal non-transient errors.
+    const showReconnectingIndicator = isAuthenticated && isProfileLoaded && profileSyncStatus.kind !== 'ok';
+    const reconnectingTooltip =
+        profileSyncStatus.kind === 'transient' && profileSyncStatus.offline
+            ? "You're offline"
+            : profileSyncStatus.kind === 'transient'
+                ? `Reconnecting…${profileSyncStatus.attempt > 1 ? ` (attempt ${profileSyncStatus.attempt})` : ''}`
+                : profileSyncStatus.kind === 'fatal'
+                    ? 'Profile sync issue'
+                    : '';
 
     const handleNewThread = async () => {
         setIsThreadListView(false);
@@ -112,7 +126,24 @@ const Header: React.FC<HeaderProps> = ({ onClose, isWindow = false }) => {
 
             {/* Right side: Current Context & Global Actions */}
             {isAuthenticated && (
-                <div className="display-flex gap-4">
+                <div className="display-flex gap-4 items-center">
+                    {/* Reconnecting indicator: subtle dot shown while a profile refresh is failing
+                        or the browser reports offline. Hidden during initial load and on success. */}
+                    {showReconnectingIndicator && (
+                        <Tooltip content={reconnectingTooltip} showArrow singleLine>
+                            <div
+                                aria-label={reconnectingTooltip}
+                                className="reconnecting-indicator"
+                                style={{
+                                    width: 8,
+                                    height: 8,
+                                    borderRadius: 8,
+                                    backgroundColor: 'var(--color-yellow-50, #d9a300)',
+                                    opacity: 0.8,
+                                }}
+                            />
+                        </Tooltip>
+                    )}
                     {/* Embedding index status for users without databaseSync */}
                     {!isDatabaseSyncSupported && hasCompletedOnboarding && !updateRequired && (!isWaitingForProfile || isProfileLoaded) && !isFirstRunVisible && (
                         <EmbeddingIndexStatusButton />
