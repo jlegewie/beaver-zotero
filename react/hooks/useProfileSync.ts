@@ -176,7 +176,14 @@ export const useProfileSync = () => {
                 const delay = computeRetryDelay(retryAttemptsRef.current - 1);
                 retryTimeoutRef.current = setTimeout(() => {
                     retryTimeoutRef.current = null;
-                    syncProfileData(userId);
+                    // If another refresh is already running (e.g. periodic interval fired),
+                    // queue the retry to run after it finishes. The in-flight finally block
+                    // will see forcedRefreshPendingRef and re-invoke syncProfileData.
+                    if (isRefreshingRef.current) {
+                        forcedRefreshPendingRef.current = true;
+                    } else {
+                        syncProfileData(userId);
+                    }
                 }, delay);
             } else {
                 logger(`useProfileSync: Non-transient error during fetch for ${userId}: ${message}`, 3);

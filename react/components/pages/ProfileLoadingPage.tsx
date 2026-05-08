@@ -36,7 +36,7 @@ const ProfileLoadingPage: React.FC = () => {
             ? "Beaver will reconnect automatically when your connection returns."
             : isTransient
                 ? status.attempt >= 2
-                    ? `Trying again… (attempt ${status.attempt + 1})`
+                    ? `Trying again… (attempt ${status.attempt})`
                     : "Re-establishing connection to the Beaver service."
                 : "Loading your profile…";
 

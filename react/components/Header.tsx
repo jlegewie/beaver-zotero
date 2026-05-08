@@ -50,7 +50,7 @@ const Header: React.FC<HeaderProps> = ({ onClose, isWindow = false }) => {
         profileSyncStatus.kind === 'transient' && profileSyncStatus.offline
             ? "You're offline"
             : profileSyncStatus.kind === 'transient'
-                ? `Reconnecting…${profileSyncStatus.attempt > 1 ? ` (attempt ${profileSyncStatus.attempt + 1})` : ''}`
+                ? `Reconnecting…${profileSyncStatus.attempt > 1 ? ` (attempt ${profileSyncStatus.attempt})` : ''}`
                 : profileSyncStatus.kind === 'fatal'
                     ? 'Profile sync issue'
                     : '';
