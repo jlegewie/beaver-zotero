@@ -6,6 +6,7 @@
  */
 
 import type { RawPageData, RawBlock, RawLine, RawBBox } from "./types";
+import { pdfLog } from "./logging";
 
 // ============================================================================
 // Types
@@ -265,7 +266,7 @@ function mergeBridgeElements(
                 bridgeFlags.set(entry.rect, entry.flags);
             }
             if (opts.debug) {
-                console.log(`[Bridge] Iteration ${iterations}: merged ${current.length + 2} -> ${result.blocks.length} blocks`);
+                pdfLog(`[Bridge] Iteration ${iterations}: merged ${current.length + 2} -> ${result.blocks.length} blocks`, 3);
             }
         }
     }
@@ -315,8 +316,8 @@ function mergeBridgeElementsOnce(
             const neighborBelow = findClosestBlockBelow(sorted, i, opts, alreadyInMerge);
 
             if (debug) {
-                console.log(`[Bridge] Checking block ${i} (h=${block.h.toFixed(0)}): ` +
-                    `above=${neighborAbove}, below=${neighborBelow}`);
+                pdfLog(`[Bridge] Checking block ${i} (h=${block.h.toFixed(0)}): ` +
+                    `above=${neighborAbove}, below=${neighborBelow}`, 3);
             }
 
             if (neighborAbove !== null && neighborBelow !== null) {
@@ -336,11 +337,11 @@ function mergeBridgeElementsOnce(
                 );
 
                 if (debug) {
-                    console.log(`  overlapWithAbove=${overlapWithAbove}, overlapWithBelow=${overlapWithBelow}`);
-                    console.log(`  containedInWider=${containedInWider} (wider=${above.w >= below.w ? 'above' : 'below'})`);
-                    console.log(`  block: x=${block.x.toFixed(0)}-${(block.x + block.w).toFixed(0)}, w=${block.w.toFixed(0)}`);
-                    console.log(`  above: x=${above.x.toFixed(0)}-${(above.x + above.w).toFixed(0)}, w=${above.w.toFixed(0)}`);
-                    console.log(`  below: x=${below.x.toFixed(0)}-${(below.x + below.w).toFixed(0)}, w=${below.w.toFixed(0)}`);
+                    pdfLog(`  overlapWithAbove=${overlapWithAbove}, overlapWithBelow=${overlapWithBelow}`, 3);
+                    pdfLog(`  containedInWider=${containedInWider} (wider=${above.w >= below.w ? 'above' : 'below'})`, 3);
+                    pdfLog(`  block: x=${block.x.toFixed(0)}-${(block.x + block.w).toFixed(0)}, w=${block.w.toFixed(0)}`, 3);
+                    pdfLog(`  above: x=${above.x.toFixed(0)}-${(above.x + above.w).toFixed(0)}, w=${above.w.toFixed(0)}`, 3);
+                    pdfLog(`  below: x=${below.x.toFixed(0)}-${(below.x + below.w).toFixed(0)}, w=${below.w.toFixed(0)}`, 3);
                 }
 
                 // Merge if bridge overlaps with neighbors OR is contained in wider
@@ -354,7 +355,7 @@ function mergeBridgeElementsOnce(
                     const neighborsOverlap = hasSignificantXOverlap(above, below, 0.7);
 
                     if (debug) {
-                        console.log(`  sameLeftEdge=${sameLeftEdge}, sameRightEdge=${sameRightEdge}, neighborsOverlap=${neighborsOverlap}`);
+                        pdfLog(`  sameLeftEdge=${sameLeftEdge}, sameRightEdge=${sameRightEdge}, neighborsOverlap=${neighborsOverlap}`, 3);
                     }
 
                     if (sameLeftEdge || (sameRightEdge && neighborsOverlap)) {
@@ -373,7 +374,7 @@ function mergeBridgeElementsOnce(
                         });
 
                         if (debug) {
-                            console.log(`  intersectsOthers=${intersectsOthers}`);
+                            pdfLog(`  intersectsOthers=${intersectsOthers}`, 3);
                         }
 
                         if (!intersectsOthers) {
@@ -412,7 +413,7 @@ function mergeBridgeElementsOnce(
                             alreadyInMerge.add(neighborBelow);
 
                             if (debug) {
-                                console.log(`  ✓ WILL MERGE: blocks ${neighborAbove}, ${i}, ${neighborBelow}`);
+                                pdfLog(`  ✓ WILL MERGE: blocks ${neighborAbove}, ${i}, ${neighborBelow}`, 3);
                             }
                         }
                     }
@@ -439,7 +440,7 @@ function mergeBridgeElementsOnce(
     }
 
     if (debug && mergeOps.length > 0) {
-        console.log(`[Bridge] Pass complete: ${sorted.length} blocks -> ${result.length} blocks (${mergeOps.length} merges)`);
+        pdfLog(`[Bridge] Pass complete: ${sorted.length} blocks -> ${result.length} blocks (${mergeOps.length} merges)`, 3);
     }
 
     return { blocks: result, newlyExpanded };
@@ -517,7 +518,7 @@ export function detectColumns(
     // Check if page is broken
     const isBroken = pageIsBroken(page);
     if (isBroken) {
-        console.warn(`[ColumnDetector] Page ${page.pageIndex} appears broken (font encoding issues)`);
+        pdfLog(`[ColumnDetector] Page ${page.pageIndex} appears broken (font encoding issues)`, 2);
     }
 
     // Phase 1: Extract & filter text blocks
@@ -534,9 +535,9 @@ export function detectColumns(
     const joinedBlocks = joinAndSort(mergedBlocks, opts);
 
     if (opts.debug) {
-        console.log(`[ColumnDetector] Page ${page.pageIndex}: After Phase 3 (join): ${joinedBlocks.length} blocks`);
+        pdfLog(`[ColumnDetector] Page ${page.pageIndex}: After Phase 3 (join): ${joinedBlocks.length} blocks`, 3);
         for (const b of joinedBlocks) {
-            console.log(`    x=${b.x.toFixed(0)}-${(b.x + b.w).toFixed(0)}, y=${b.y.toFixed(0)}, h=${b.h.toFixed(0)}`);
+            pdfLog(`    x=${b.x.toFixed(0)}-${(b.x + b.w).toFixed(0)}, y=${b.y.toFixed(0)}, h=${b.h.toFixed(0)}`, 3);
         }
     }
 
@@ -544,11 +545,11 @@ export function detectColumns(
     const { blocks: bridgeMerged, bridgeFlags } = mergeBridgeElements(joinedBlocks, opts);
 
     if (opts.debug && bridgeMerged.length !== joinedBlocks.length) {
-        console.log(`[ColumnDetector] Page ${page.pageIndex}: After Phase 4 (bridge): ${bridgeMerged.length} blocks`);
+        pdfLog(`[ColumnDetector] Page ${page.pageIndex}: After Phase 4 (bridge): ${bridgeMerged.length} blocks`, 3);
         for (const b of bridgeMerged) {
             const flags = bridgeFlags.get(b);
             const flagStr = flags ? ` [top=${flags.headingAtTop} bot=${flags.headingAtBottom}]` : '';
-            console.log(`    x=${b.x.toFixed(0)}-${(b.x + b.w).toFixed(0)}, y=${b.y.toFixed(0)}, h=${b.h.toFixed(0)}${flagStr}`);
+            pdfLog(`    x=${b.x.toFixed(0)}-${(b.x + b.w).toFixed(0)}, y=${b.y.toFixed(0)}, h=${b.h.toFixed(0)}${flagStr}`, 3);
         }
     }
 
@@ -568,9 +569,9 @@ export function detectColumns(
     const rejoined = joinAndSort(bridgeMerged, opts, /* relaxed */ true, bridgeFlags);
 
     if (opts.debug && rejoined.length !== bridgeMerged.length) {
-        console.log(`[ColumnDetector] Page ${page.pageIndex}: After Phase 4.5 (rejoin): ${rejoined.length} blocks`);
+        pdfLog(`[ColumnDetector] Page ${page.pageIndex}: After Phase 4.5 (rejoin): ${rejoined.length} blocks`, 3);
         for (const b of rejoined) {
-            console.log(`    x=${b.x.toFixed(0)}-${(b.x + b.w).toFixed(0)}, y=${b.y.toFixed(0)}, h=${b.h.toFixed(0)}`);
+            pdfLog(`    x=${b.x.toFixed(0)}-${(b.x + b.w).toFixed(0)}, y=${b.y.toFixed(0)}, h=${b.h.toFixed(0)}`, 3);
         }
     }
 
@@ -1298,17 +1299,19 @@ export function logColumnDetection(
 ): void {
     if (process.env.NODE_ENV !== "development") return;
 
-    console.log(
+    pdfLog(
         `[ColumnDetector] Page ${pageIndex}: ${result.columnCount} column(s) detected` +
-            (result.isBroken ? " [BROKEN]" : "")
+            (result.isBroken ? " [BROKEN]" : ""),
+        3,
     );
 
     if (result.columns.length > 0) {
         for (let i = 0; i < result.columns.length; i++) {
             const col = result.columns[i];
-            console.log(
+            pdfLog(
                 `    Column ${i + 1}: x=${col.x.toFixed(0)}, y=${col.y.toFixed(0)}, ` +
-                    `w=${col.w.toFixed(0)}, h=${col.h.toFixed(0)}`
+                    `w=${col.w.toFixed(0)}, h=${col.h.toFixed(0)}`,
+                3,
             );
         }
     }

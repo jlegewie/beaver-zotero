@@ -1,19 +1,22 @@
 /**
  * PDF package configuration.
  *
- * Module-scope config that lets the package run without referencing Zotero,
- * Firefox/XULRunner globals (`ChromeUtils`), or Beaver utilities. The host
- * application (Beaver, here — see `src/utils/configurePDFForBeaver.ts`)
- * calls `configurePDF()` once during startup with all the URLs, accessors,
- * and sinks the package needs.
+ * Module-scope config that lets the package run without referencing the
+ * host application or its runtime globals. The host calls `configurePDF()`
+ * once during startup with all the URLs, accessors, and sinks the package
+ * needs.
  *
- * Each bundle (esbuild `src/`, webpack `react/`) has its own copy of this
- * module. Both must be configured. The cross-bundle `MuPDFWorkerClient`
- * singleton is shared via the `workerClientSlot` accessor (which the host
- * implements over a shared global slot like `Zotero.__beaverMuPDFWorkerClient`).
+ * If the host loads this package into more than one bundle (e.g. a separate
+ * main-thread bundle and UI bundle), each bundle has its own copy of this
+ * module and must be configured independently. The cross-bundle
+ * `MuPDFWorkerClient` singleton is shared via the `workerClientSlot`
+ * accessor (which the host implements over a shared global slot).
  */
 
-/** Logger sink shape — matches Beaver's `(msg, level)` signature. */
+import { setPDFLogger } from "./logging";
+
+/** Logger sink shape — `(msg, level)` where `level` follows the
+ * 1=error / 2=warn / 3=info convention this package emits. */
 export type PDFLogSink = (msg: string, level: number) => void;
 
 /**
@@ -41,7 +44,7 @@ export interface PDFConfig {
     getWorkerHost: () => Window | null;
     /** Cross-bundle singleton slot accessor. */
     workerClientSlot: PDFWorkerClientSlot;
-    /** Logger sink — same `(msg, level)` shape as Beaver's `logger`. */
+    /** Logger sink (see `PDFLogSink`). */
     log: PDFLogSink;
 
     /** URLs forwarded to the worker via the configure message. */
@@ -52,11 +55,16 @@ let _config: PDFConfig | null = null;
 
 /**
  * Install the package configuration. Idempotent — a later call replaces
- * the prior config. Beaver may call this from both `onStartup()` and
- * `onMainWindowLoad()` (macOS close-last-window-then-reopen).
+ * the prior config. Hosts may call this more than once (e.g. on app
+ * startup and again on window reload) without ill effect.
+ *
+ * Also installs the analyzer-module log sink (see `./logging.ts`) so
+ * bare `pdfLog()` calls from ColumnDetector / MarginFilter / etc. land
+ * in the host-configured destination.
  */
 export function configurePDF(cfg: PDFConfig): void {
     _config = cfg;
+    setPDFLogger((msg, level) => cfg.log(msg, level));
 }
 
 /**

@@ -18,6 +18,7 @@
 import type { PageLine, LineBBox, PageLineResult, ColumnLineResult } from "./LineDetector";
 import type { TextStyle, StyleProfile } from "./types";
 import type { Rect } from "./ColumnDetector";
+import { pdfLog } from "./logging";
 
 // ============================================================================
 // Types
@@ -1608,9 +1609,10 @@ export function detectParagraphs(
 export function logParagraphDetection(result: PageParagraphResult): void {
     if (process.env.NODE_ENV !== "development") return;
 
-    console.log(
+    pdfLog(
         `[ParagraphDetector] Page ${result.pageIndex}: ` +
-            `${result.items.length} items (${result.paragraphCount} paragraphs, ${result.headerCount} headers)`
+            `${result.items.length} items (${result.paragraphCount} paragraphs, ${result.headerCount} headers)`,
+        3,
     );
 
     // Log first few items as preview
@@ -1620,13 +1622,14 @@ export function logParagraphDetection(result: PageParagraphResult): void {
         const typeLabel = item.type === "header" ? "H" : "P";
         const textPreview =
             item.text.length > 60 ? item.text.slice(0, 60) + "..." : item.text;
-        console.log(
-            `    [${typeLabel}${item.idx}] Col ${item.columnIndex + 1}: "${textPreview}"`
+        pdfLog(
+            `    [${typeLabel}${item.idx}] Col ${item.columnIndex + 1}: "${textPreview}"`,
+            3,
         );
     }
 
     if (result.items.length > previewCount) {
-        console.log(`    ... and ${result.items.length - previewCount} more items`);
+        pdfLog(`    ... and ${result.items.length - previewCount} more items`, 3);
     }
 }
 

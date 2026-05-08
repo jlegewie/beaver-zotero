@@ -1429,95 +1429,69 @@ export async function handleTestPdfSmartRemovalSummaryHttpRequest(request: any) 
     const { getMuPDFWorkerClient } = await import(
         '../../../src/services/pdf/MuPDFWorkerClient'
     );
-    const {
-        MarginFilter,
-        DEFAULT_MARGIN_ZONE,
-        DEFAULT_ANALYSIS_WINDOW_CAP,
-        getEffectiveRepeatThreshold,
-    } = await import('../../../src/services/pdf');
 
     const loaded = await loadPdfBytesForTestEndpoint(request);
     if (!loaded.ok) return loaded;
     const { pdfData } = loaded;
 
-    // Pass through "did the caller set this?" so the helper can apply the
+    // Pass through "did the caller set this?" so the worker can apply the
     // adaptive default for short docs without overriding explicit values.
-    const requestedRepeatThreshold =
+    const repeatThreshold =
         Number.isInteger(request?.repeat_threshold) && request.repeat_threshold > 0
             ? request.repeat_threshold
             : undefined;
     const detectPageSequences = request?.detect_page_sequences !== false;
 
-    const client = getMuPDFWorkerClient();
-    const totalPages = await client.getPageCount(pdfData);
-
-    // Resolve which pages to scan.
-    let analysisIndices: number[];
-    if (Array.isArray(request?.page_indices)) {
-        analysisIndices = (request.page_indices as unknown[])
-            .map((n) => Number(n))
-            .filter((n) => Number.isInteger(n) && n >= 0 && n < totalPages);
-    } else if (request?.page_range && typeof request.page_range === 'object') {
-        const start = Math.max(0, Number(request.page_range.start) || 0);
-        const end = Math.min(
-            totalPages - 1,
-            Number(
-                request.page_range.end ?? request.page_range.endIndex ?? totalPages - 1,
+    let pageRange: { start: number; end: number } | undefined;
+    if (request?.page_range && typeof request.page_range === 'object') {
+        pageRange = {
+            start: Number(request.page_range.start) || 0,
+            end: Number(
+                request.page_range.end ??
+                    request.page_range.endIndex ??
+                    Number.MAX_SAFE_INTEGER,
             ),
-        );
-        analysisIndices = [];
-        for (let i = start; i <= end; i++) analysisIndices.push(i);
-    } else {
-        analysisIndices = [];
-        for (let i = 0; i < totalPages; i++) analysisIndices.push(i);
-    }
-    // Cap at DEFAULT_ANALYSIS_WINDOW_CAP to bound latency. Slice the
-    // first N requested pages rather than centering — the caller chose
-    // which pages to scan, and centering an explicit list/range would
-    // silently drop pages the caller asked for.
-    if (analysisIndices.length > DEFAULT_ANALYSIS_WINDOW_CAP) {
-        analysisIndices = analysisIndices.slice(0, DEFAULT_ANALYSIS_WINDOW_CAP);
-    }
-    if (analysisIndices.length === 0) {
-        return {
-            ok: false,
-            error: { name: 'Error', message: 'No valid pages to analyze' },
         };
     }
 
-    const rawDoc = await client.extractRawPages(pdfData, analysisIndices);
-    const marginAnalysis = MarginFilter.collectMarginElements(
-        rawDoc.pages,
-        DEFAULT_MARGIN_ZONE,
-    );
-    const removal = MarginFilter.identifyElementsToRemove(
-        marginAnalysis,
-        getEffectiveRepeatThreshold({
-            requested: requestedRepeatThreshold,
-            totalPageCount: totalPages,
-            analysisPageCount: analysisIndices.length,
-        }),
-        detectPageSequences,
-    );
+    try {
+        const { totalPages, analysisPages, result } =
+            await getMuPDFWorkerClient().analyzeMarginRemoval(pdfData, {
+                pageIndices: Array.isArray(request?.page_indices)
+                    ? (request.page_indices as unknown[]).map((n) => Number(n))
+                    : undefined,
+                pageRange,
+                repeatThreshold,
+                detectPageSequences,
+            });
 
-    const removalsByPage: Record<string, string[]> = {};
-    for (const [pageIdx, texts] of removal.removalsByPage) {
-        removalsByPage[String(pageIdx)] = Array.from(texts);
+        const removalsByPage: Record<string, string[]> = {};
+        for (const [pageIdx, texts] of result.removalsByPage) {
+            removalsByPage[String(pageIdx)] = Array.from(texts);
+        }
+
+        return {
+            ok: true,
+            total_pages: totalPages,
+            analysis_pages: analysisPages,
+            candidates: result.candidates.map((c) => ({
+                text: c.text,
+                originalText: c.originalText,
+                reason: c.reason,
+                position: c.position,
+                pageIndices: c.pageIndices,
+            })),
+            removalsByPage,
+        };
+    } catch (e: any) {
+        return {
+            ok: false,
+            error: {
+                name: e?.name ?? 'Error',
+                message: e?.message ?? String(e),
+            },
+        };
     }
-
-    return {
-        ok: true,
-        total_pages: totalPages,
-        analysis_pages: analysisIndices,
-        candidates: removal.candidates.map((c) => ({
-            text: c.text,
-            originalText: c.originalText,
-            reason: c.reason,
-            position: c.position,
-            pageIndices: c.pageIndices,
-        })),
-        removalsByPage,
-    };
 }
 
 /**

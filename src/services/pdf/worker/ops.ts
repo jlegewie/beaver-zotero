@@ -30,6 +30,8 @@ import type {
     ExtractionResult,
     ExtractionSettings,
     ExtractedLine,
+    MarginRemovalResult,
+    MarginSettings,
     OCRDetectionOptions,
     OCRDetectionResult,
     PageImageOptions,
@@ -45,9 +47,11 @@ import type {
 } from "../types";
 import {
     DEFAULT_EXTRACTION_SETTINGS,
+    DEFAULT_MARGIN_ZONE,
     DEFAULT_PDF_SEARCH_OPTIONS,
     DEFAULT_SEARCH_SCORING_OPTIONS,
 } from "../types";
+import { DEFAULT_ANALYSIS_WINDOW_CAP } from "../AnalysisWindow";
 import type { PageSentenceBBoxResult } from "../ParagraphSentenceMapper";
 import type {
     SentenceBBoxTraceResult,
@@ -590,6 +594,103 @@ export async function opExtractSentenceBBoxes(
             trace: false,
         });
         return { result };
+    } finally {
+        releaseDoc(doc);
+    }
+}
+
+/**
+ * Cross-page margin-removal analysis without column / line / paragraph
+ * detection or rendering. Backs the dev-only `/pdf-smart-removal-summary`
+ * triage endpoint — keeps the analysis pass off the main thread (the
+ * handler used to ship raw pages back and re-run the same MarginFilter
+ * passes on the UI thread).
+ *
+ * Page resolution mirrors the legacy handler: explicit `pageIndices` wins,
+ * else `pageRange` (inclusive `start..end`), else all pages. Out-of-range
+ * entries are silently filtered. The slice is then capped at
+ * `DEFAULT_ANALYSIS_WINDOW_CAP` (slice from the start, not centered — the
+ * caller chose which pages to scan and centering would silently drop
+ * pages they asked for).
+ *
+ * `MarginRemovalResult.removalsByPage` and `textsToRemove` carry
+ * `Map`/`Set` fields. `postMessage` preserves them via structured clone,
+ * but `JSON.stringify` does NOT — flatten before writing HTTP responses.
+ */
+export async function opAnalyzeMarginRemoval(
+    args: {
+        pdfData: Uint8Array | ArrayBuffer;
+        pageIndices?: number[];
+        pageRange?: { start: number; end: number };
+        repeatThreshold?: number;
+        detectPageSequences?: boolean;
+        marginZone?: MarginSettings;
+    },
+): Promise<OpReply<{
+    totalPages: number;
+    analysisPages: number[];
+    result: MarginRemovalResult;
+}>> {
+    const doc = await acquireDoc(args.pdfData);
+    try {
+        const totalPages = doc.countPages();
+
+        let analysisIndices: number[];
+        if (Array.isArray(args.pageIndices)) {
+            analysisIndices = args.pageIndices
+                .map((n) => Number(n))
+                .filter((n) => Number.isInteger(n) && n >= 0 && n < totalPages);
+        } else if (args.pageRange && typeof args.pageRange === "object") {
+            const start = Math.max(0, Number(args.pageRange.start) || 0);
+            const end = Math.min(totalPages - 1, Number(args.pageRange.end));
+            analysisIndices = [];
+            for (let i = start; i <= end; i++) analysisIndices.push(i);
+        } else {
+            analysisIndices = [];
+            for (let i = 0; i < totalPages; i++) analysisIndices.push(i);
+        }
+        if (analysisIndices.length > DEFAULT_ANALYSIS_WINDOW_CAP) {
+            analysisIndices = analysisIndices.slice(0, DEFAULT_ANALYSIS_WINDOW_CAP);
+        }
+        if (analysisIndices.length === 0) {
+            throw workerError(
+                ERROR_CODES.PAGE_OUT_OF_RANGE,
+                "No valid pages to analyze",
+                { pageCount: totalPages },
+            );
+        }
+
+        const pages: RawPageData[] = analysisIndices.map((i) =>
+            extractRawPageFromDoc(doc, i),
+        );
+        const marginZone = args.marginZone ?? DEFAULT_MARGIN_ZONE;
+        const requestedRepeatThreshold =
+            Number.isInteger(args.repeatThreshold) &&
+            (args.repeatThreshold as number) > 0
+                ? args.repeatThreshold
+                : undefined;
+        const detectPageSequences = args.detectPageSequences !== false;
+
+        const marginAnalysis = MarginFilter.collectMarginElements(
+            pages,
+            marginZone,
+        );
+        const result = MarginFilter.identifyElementsToRemove(
+            marginAnalysis,
+            getEffectiveRepeatThreshold({
+                requested: requestedRepeatThreshold,
+                totalPageCount: totalPages,
+                analysisPageCount: analysisIndices.length,
+            }),
+            detectPageSequences,
+        );
+        return {
+            result: {
+                totalPages,
+                analysisPages: analysisIndices,
+                result,
+            },
+        };
     } finally {
         releaseDoc(doc);
     }

@@ -2,16 +2,18 @@
  * MuPDFWorkerClient — main-thread client for the MuPDF WASM worker.
  *
  * Cross-bundle singleton: the client lives in a slot supplied by
- * `getConfig().workerClientSlot` (Beaver wires this to
- * `Zotero.__beaverMuPDFWorkerClient`). Both bundles — esbuild `src/` and
- * webpack `react/` — import this file transitively and must therefore
- * share one client; module-scope state would create one worker per bundle
- * and shutdown would only dispose the esbuild copy.
+ * `getConfig().workerClientSlot` — the host wires this to a shared
+ * global so every bundle that imports this file (transitively or
+ * directly) sees the same client. Module-scope state would otherwise
+ * create one worker per bundle and shutdown would only dispose one of
+ * them.
  */
 import { getConfig, isConfigured } from "./config";
 import {
     ExtractionError,
     ExtractionErrorCode,
+    type MarginRemovalResult,
+    type MarginSettings,
     type RawDocumentData,
     type RawPageDataDetailed,
     type PageImageOptions,
@@ -120,9 +122,9 @@ export class MuPDFWorkerClient {
     private disposed = false;
 
     /**
-     * Cumulative counters used by the dev-only `/beaver/test/worker-stats`
-     * endpoint to verify dispatch fan-out without log grepping. Incremented
-     * in `call()` (per-op) and `ensureWorker()` (spawn).
+     * Cumulative counters surfaced via `getStats()` so a host can verify
+     * dispatch fan-out without log grepping. Incremented in `call()`
+     * (per-op) and `ensureWorker()` (spawn).
      */
     private spawnCount = 0;
     private retryCount = 0;
@@ -352,6 +354,42 @@ export class MuPDFWorkerClient {
             pdfData: bytes,
             pageIndices,
         });
+    }
+
+    /**
+     * Cross-page margin-removal analysis without extraction or rendering.
+     *
+     * Backs the dev-only `/pdf-smart-removal-summary` triage endpoint.
+     * Page resolution: explicit `pageIndices` wins, else `pageRange`
+     * (inclusive `start..end`), else all pages. Out-of-range entries are
+     * silently filtered, then capped at `DEFAULT_ANALYSIS_WINDOW_CAP`.
+     *
+     * **Map/Set boundary.** `result.removalsByPage` and `result.textsToRemove`
+     * carry `Map`/`Set` fields. `postMessage` preserves them via structured
+     * clone, but `JSON.stringify` does NOT — flatten before writing HTTP
+     * responses.
+     */
+    async analyzeMarginRemoval(
+        pdfData: Uint8Array | ArrayBuffer,
+        args: {
+            pageIndices?: number[];
+            pageRange?: { start: number; end: number };
+            repeatThreshold?: number;
+            detectPageSequences?: boolean;
+            marginZone?: MarginSettings;
+        } = {},
+    ): Promise<{
+        totalPages: number;
+        analysisPages: number[];
+        result: MarginRemovalResult;
+    }> {
+        const bytes =
+            pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
+        return this.call<{
+            totalPages: number;
+            analysisPages: number[];
+            result: MarginRemovalResult;
+        }>("analyzeMarginRemoval", { pdfData: bytes, ...args });
     }
 
     /**
@@ -585,9 +623,9 @@ export class MuPDFWorkerClient {
     }
 
     /**
-     * Test-only: snapshot of dispatch / spawn counters. Surfaced via the
-     * dev-only `/beaver/test/worker-stats` HTTP endpoint so manual-test
-     * runners can verify fan-out without grepping logs.
+     * Test-only: snapshot of dispatch / spawn counters. Hosts can expose
+     * this through a debug endpoint so manual-test runners can verify
+     * fan-out without grepping logs.
      */
     getStats(): {
         hasWorker: boolean;
@@ -771,8 +809,9 @@ function rehydrateError(payload: WorkerErrorPayload | undefined): Error {
 
 /**
  * Get (or lazily spawn) the cross-bundle MuPDFWorkerClient singleton. The
- * actual storage location lives in `getConfig().workerClientSlot` — Beaver
- * wires that to `Zotero.__beaverMuPDFWorkerClient` via `configurePDFForBeaver`.
+ * actual storage location lives in `getConfig().workerClientSlot` — the
+ * host wires that slot to a shared global so every bundle resolves to the
+ * same client instance.
  */
 export function getMuPDFWorkerClient(): MuPDFWorkerClient {
     const slot = getConfig().workerClientSlot;

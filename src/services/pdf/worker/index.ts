@@ -1,6 +1,5 @@
 /**
- * MuPDF WASM module worker (bundled successor to
- * addon/content/modules/mupdf-worker.mjs — see git history pre-PR#3).
+ * MuPDF WASM module worker entry point.
  *
  * IMPORTANT: do NOT import from `../index` (the barrel). It re-exports
  * `MuPDFWorkerClient` (and the `PDFExtractor` facade that wraps it), which
@@ -10,7 +9,7 @@
  *   import { StyleAnalyzer } from "../StyleAnalyzer";
  *   import type { RawPageData, ExtractionResult } from "../types";
  *
- * Built by the second esbuild entry in zotero-plugin.config.ts.
+ * Built as a separate worker bundle by the host's build system.
  *
  * Configuration: the main-thread client posts a `configure` message as the
  * first frame after spawning this worker (see `MuPDFWorkerClient.ensureWorker`).
@@ -25,7 +24,19 @@ import {
 import { enqueue } from "./opQueue";
 import { ensureApi } from "./wasmInit";
 import { isWorkerConfigured, setWorkerUrls, type WorkerUrls } from "./config";
+import { setPDFLogger } from "../logging";
+import { postLog } from "./errors";
+
+// Route analyzer-module logs through the existing `postLog` channel so the
+// main-thread `MuPDFWorkerClient` forwards them to the host-configured
+// `PDFConfig.log` sink. Installed eagerly at module load — the main-thread
+// onmessage handler is the only thing in this file that depends on the
+// worker `configure` frame; analyzer logs work as soon as ops start running.
+setPDFLogger((msg, level) => {
+    postLog(level === 1 ? "error" : level === 2 ? "warn" : "info", msg);
+});
 import {
+    opAnalyzeMarginRemoval,
     opAnalyzeOCRNeeds,
     opExtract,
     opExtractRawPageDetailed,
@@ -89,6 +100,8 @@ async function dispatch(op: string, args: Record<string, unknown> | undefined): 
             return await opExtractSentenceBBoxes(a as Parameters<typeof opExtractSentenceBBoxes>[0]);
         case "extractSentenceBBoxesTrace":
             return await opExtractSentenceBBoxesTrace(a as Parameters<typeof opExtractSentenceBBoxesTrace>[0]);
+        case "analyzeMarginRemoval":
+            return await opAnalyzeMarginRemoval(a as Parameters<typeof opAnalyzeMarginRemoval>[0]);
         default:
             throw new Error(`Unknown op: ${op}`);
     }

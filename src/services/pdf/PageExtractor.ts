@@ -27,6 +27,7 @@ import { styleToKey } from "./types";
 import { StyleAnalyzer } from "./StyleAnalyzer";
 import { MarginFilter } from "./MarginFilter";
 import type { Rect, ColumnDetectionResult } from "./ColumnDetector";
+import { pdfLog } from "./logging";
 
 // ============================================================================
 // Helper Functions
@@ -211,8 +212,9 @@ export class PageExtractor {
         if (process.env.NODE_ENV === "development") {
             const unassignedCount = allBlocks.length - assignedBlocks.size;
             if (unassignedCount > 0) {
-                console.debug(
-                    `[PageExtractor] Page ${rawPage.pageIndex}: ${unassignedCount} block(s) not in any column (excluded)`
+                pdfLog(
+                    `[PageExtractor] Page ${rawPage.pageIndex}: ${unassignedCount} block(s) not in any column (excluded)`,
+                    3,
                 );
             }
         }

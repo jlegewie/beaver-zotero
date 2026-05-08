@@ -20,6 +20,7 @@
 
 import type { RawPageData, RawBlock, RawLine, RawBBox } from "./types";
 import type { Rect } from "./ColumnDetector";
+import { pdfLog } from "./logging";
 
 // ============================================================================
 // Types
@@ -634,14 +635,16 @@ export function detectLinesOnPage(
 export function logLineDetection(result: PageLineResult): void {
     if (process.env.NODE_ENV !== "development") return;
 
-    console.log(
+    pdfLog(
         `[LineDetector] Page ${result.pageIndex}: ${result.allLines.length} lines detected ` +
-            `across ${result.columnResults.length} column(s)`
+            `across ${result.columnResults.length} column(s)`,
+        3,
     );
 
     for (const colResult of result.columnResults) {
-        console.log(
-            `    Column ${colResult.columnIndex + 1}: ${colResult.lines.length} lines`
+        pdfLog(
+            `    Column ${colResult.columnIndex + 1}: ${colResult.lines.length} lines`,
+            3,
         );
 
         // Log first few lines as preview
@@ -652,14 +655,15 @@ export function logLineDetection(result: PageLineResult): void {
                 line.text.length > 60
                     ? line.text.slice(0, 60) + "..."
                     : line.text;
-            console.log(
+            pdfLog(
                 `      Line ${i + 1}: "${textPreview}" ` +
-                    `(y=${line.bbox.t.toFixed(0)}, h=${line.bbox.height.toFixed(1)})`
+                    `(y=${line.bbox.t.toFixed(0)}, h=${line.bbox.height.toFixed(1)})`,
+                3,
             );
         }
 
         if (colResult.lines.length > previewCount) {
-            console.log(`      ... and ${colResult.lines.length - previewCount} more lines`);
+            pdfLog(`      ... and ${colResult.lines.length - previewCount} more lines`, 3);
         }
     }
 }
