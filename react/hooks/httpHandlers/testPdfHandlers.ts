@@ -837,10 +837,11 @@ export async function handleTestPdfRenderOverlayHttpRequest(request: any) {
         }
     }
 
-    const rendered = await client.renderPageToImage(pdfData, pageIndex, {
-        dpi,
-        format: 'png',
+    const renderOut = await client.renderPages(pdfData, {
+        pageIndices: [pageIndex],
+        options: { dpi, format: 'png' },
     });
+    const rendered = renderOut.pages[0];
 
     const overlayed = await drawBBoxOverlayPNG(
         rendered.data,
@@ -1494,30 +1495,3 @@ export async function handleTestPdfSmartRemovalSummaryHttpRequest(request: any) 
     }
 }
 
-/**
- * Dev-only single-page render endpoint — required for the carry-forward
- * `renderPageToImage` PAGE_OUT_OF_RANGE parity case (the plural endpoint
- * silently filters invalid indices and cannot exercise the throw).
- */
-export async function handleTestPdfRenderPageHttpRequest(request: any) {
-    const { PDFExtractor } = await import('../../../src/services/pdf');
-    const pageIndex = Number(request?.page_index);
-    const options = request?.options || {};
-    return runPdfExtractorCall(
-        request,
-        (pdfData) => new PDFExtractor().renderPageToImage(pdfData, pageIndex, options),
-        (r) => ({
-            ok: true,
-            result: {
-                pageIndex: r.pageIndex,
-                format: r.format,
-                width: r.width,
-                height: r.height,
-                scale: r.scale,
-                dpi: r.dpi,
-                data_base64: uint8ToBase64ForTest(r.data),
-                data_byte_length: r.data.byteLength,
-            },
-        }),
-    );
-}

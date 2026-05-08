@@ -444,26 +444,6 @@ export class MuPDFWorkerClient {
     }
 
     /**
-     * Render a single page to an image.
-     *
-     * Single-page op — out-of-range `pageIndex` throws
-     * `ExtractionError(PAGE_OUT_OF_RANGE)`. One doc-open per call.
-     */
-    async renderPageToImage(
-        pdfData: Uint8Array | ArrayBuffer,
-        pageIndex: number,
-        options?: PageImageOptions,
-    ): Promise<PageImageResult> {
-        const bytes =
-            pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
-        return this.call<PageImageResult>("renderPageToImage", {
-            pdfData: bytes,
-            pageIndex,
-            options,
-        });
-    }
-
-    /**
      * Search a PDF for a literal phrase. Returns unscored, page-level hits.
      *
      * Index handling (see `worker/docHelpers.ts:resolvePageIndices`): invalid

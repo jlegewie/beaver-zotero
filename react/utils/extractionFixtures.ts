@@ -160,10 +160,11 @@ export async function createSentenceFixture(): Promise<CreateSentenceFixtureResu
         // Render preview PNG, then paint the sentence overlay on top so the
         // captured page image visually matches what the live visualizer
         // shows in the reader.
-        const pageImage = await client.renderPageToImage(pdfData, pageIndex, {
-            scale: 1.5,
-            format: "png",
+        const renderOut = await client.renderPages(pdfData, {
+            pageIndices: [pageIndex],
+            options: { scale: 1.5, format: "png" },
         });
+        const pageImage = renderOut.pages[0];
         const overlay = buildSentenceOverlayFromResult(
             result,
             trace.analysisPageIndices.length,

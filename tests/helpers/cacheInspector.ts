@@ -435,27 +435,6 @@ export async function pdfRenderOverlay(
     });
 }
 
-/**
- * Single-page render — exercises the dedicated `renderPageToImage` op.
- * The plural endpoint silently filters invalid indices, so this is the
- * only way to test PAGE_OUT_OF_RANGE parity.
- */
-export interface PdfRenderPageResponse {
-    ok: boolean;
-    result?: PdfRenderPagePayload;
-    error?: PdfErrorEnvelope;
-}
-
-export async function pdfRenderPage(
-    attachment: AttachmentFixture,
-    body: { page_index: number; options?: PdfPageImageOptions },
-): Promise<PdfRenderPageResponse> {
-    return post<PdfRenderPageResponse>('/beaver/test/pdf-render-page', {
-        library_id: attachment.library_id,
-        zotero_key: attachment.zotero_key,
-        ...body,
-    });
-}
 
 /** Decode a base64 image payload from `pdfRenderPages` for byte-level checks. */
 export function decodeRenderPayload(payload: PdfRenderPagePayload): Uint8Array {

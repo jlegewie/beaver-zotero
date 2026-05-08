@@ -193,7 +193,7 @@ ProcessedPage; // { index, content, lines[], columns[] }
 ExtractionResult; // Result of PDFExtractor.extract (with or without useLineDetection)
 PageSentenceBBoxResult; // Result of PDFExtractor.extractSentenceBBoxes
 PDFSearchResult; // Result of PDFExtractor.search
-PageImageResult; // Result of PDFExtractor.renderPageToImage
+PageImageResult; // Per-page entry in PDFExtractor.renderPages result.pages
 ```
 
 ### 3. Text Layer Detection
@@ -709,13 +709,17 @@ Render PDF pages to PNG or JPEG images with configurable resolution.
 ```typescript
 const extractor = new PDFExtractor();
 
-// Render first page at 300 DPI as PNG
-const image = await extractor.renderPageToImage(pdfData, 0, {
-  dpi: 300, // 300 DPI for high quality
-  alpha: false, // Opaque background
-  showExtras: true, // Include annotations
-  format: "png",
+// Render first page at 300 DPI as PNG (single-page render uses pageIndices: [n])
+const single = await extractor.renderPages(pdfData, {
+  pageIndices: [0],
+  options: {
+    dpi: 300, // 300 DPI for high quality
+    alpha: false, // Opaque background
+    showExtras: true, // Include annotations
+    format: "png",
+  },
 });
+const image = single.pages[0];
 // image.data is Uint8Array of PNG bytes
 // image.width, image.height - image dimensions in pixels
 

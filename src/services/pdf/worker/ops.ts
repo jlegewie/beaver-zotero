@@ -187,31 +187,6 @@ export async function opRenderPages(
     }
 }
 
-export async function opRenderPageToImage(
-    args: { pdfData: Uint8Array | ArrayBuffer; pageIndex: number; options?: PageImageOptions },
-): Promise<OpReply<PageImageResult>> {
-    const api = await ensureApi();
-    const doc = await acquireDoc(args.pdfData);
-    try {
-        const pageCount = doc.countPages();
-        if (
-            typeof args.pageIndex !== "number" ||
-            args.pageIndex < 0 ||
-            args.pageIndex >= pageCount
-        ) {
-            throw workerError(
-                ERROR_CODES.PAGE_OUT_OF_RANGE,
-                `Page index ${args.pageIndex} out of range (0..${pageCount - 1})`,
-            );
-        }
-        const opts = { ...DEFAULT_PAGE_IMAGE_OPTIONS, ...(args.options || {}) };
-        const result = renderOnePage(api, doc, args.pageIndex, opts);
-        return { result, transfer: [result.data.buffer] };
-    } finally {
-        releaseDoc(doc);
-    }
-}
-
 export async function opSearchPages(
     args: {
         pdfData: Uint8Array | ArrayBuffer;

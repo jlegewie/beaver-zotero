@@ -73,7 +73,6 @@ import {
     handleTestPdfRenderOverlayHttpRequest,
     handleTestPdfPipelineTraceHttpRequest,
     handleTestPdfSmartRemovalSummaryHttpRequest,
-    handleTestPdfRenderPageHttpRequest,
 } from './httpHandlers/testPdfHandlers';
 import type {
     WSZoteroDataRequest,
@@ -175,7 +174,6 @@ const ENDPOINT_PATHS = [
     '/beaver/test/pdf-analyze-ocr',
     '/beaver/test/pdf-search-scored',
     '/beaver/test/pdf-sentence-bboxes',
-    '/beaver/test/pdf-render-page',
     // Bbox-overlay debugging (sentences/lines/paragraphs/columns/raw-lines/margins)
     '/beaver/test/pdf-render-overlay',
     // Per-page pipeline trace (every stage, JSON-only)
@@ -745,9 +743,6 @@ function registerEndpoints(): boolean {
 
         Zotero.Server.Endpoints['/beaver/test/pdf-sentence-bboxes'] =
             createEndpoint(handleTestPdfSentenceBBoxesHttpRequest);
-
-        Zotero.Server.Endpoints['/beaver/test/pdf-render-page'] =
-            createEndpoint(handleTestPdfRenderPageHttpRequest);
 
         // Bbox overlay endpoint — paints columns/lines/paragraphs/sentences/
         // raw-lines/margins on a rendered page PNG for headless agent

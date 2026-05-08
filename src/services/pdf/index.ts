@@ -284,30 +284,6 @@ export class PDFExtractor {
     }
 
     /**
-     * Render a single page to an image.
-     *
-     * @param pdfData - The PDF file as Uint8Array or ArrayBuffer
-     * @param pageIndex - Page index (0-based)
-     * @param options - Rendering options (scale, dpi, format, etc.)
-     * @returns PageImageResult with image data and metadata
-     *
-     * @example
-     * ```typescript
-     * const extractor = new PDFExtractor();
-     * // Render at 150 DPI as PNG
-     * const result = await extractor.renderPageToImage(pdfData, 0, { dpi: 150 });
-     * console.log(`Image: ${result.width}x${result.height} @ ${result.dpi} DPI`);
-     * ```
-     */
-    async renderPageToImage(
-        pdfData: Uint8Array | ArrayBuffer,
-        pageIndex: number,
-        options: PageImageOptions = {}
-    ): Promise<PageImageResult> {
-        return getMuPDFWorkerClient().renderPageToImage(pdfData, pageIndex, options);
-    }
-
-    /**
      * Strict, fused render-pages variant for the agent images handler.
      *
      * Returns `{ pageCount, pageLabels, pages }` from a single worker
@@ -317,6 +293,8 @@ export class PDFExtractor {
      * `pageIndices: undefined` (or omit args entirely), NOT a pre-enumerated
      * list — that requires knowing pageCount upfront, which is what we're
      * trying to avoid.
+     *
+     * For single-page renders, pass `pageIndices: [n]` and read `pages[0]`.
      */
     async renderPages(
         pdfData: Uint8Array | ArrayBuffer,

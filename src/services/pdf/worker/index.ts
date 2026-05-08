@@ -45,7 +45,6 @@ import {
     opExtractSentenceBBoxesTrace,
     opGetMetadata,
     opGetPageCount,
-    opRenderPageToImage,
     opRenderPages,
     opSearch,
     opSearchPages,
@@ -85,8 +84,6 @@ async function dispatch(op: string, args: Record<string, unknown> | undefined): 
             return await opExtractRawPageDetailed(a as Parameters<typeof opExtractRawPageDetailed>[0]);
         case "renderPages":
             return await opRenderPages(a as Parameters<typeof opRenderPages>[0]);
-        case "renderPageToImage":
-            return await opRenderPageToImage(a as Parameters<typeof opRenderPageToImage>[0]);
         case "searchPages":
             return await opSearchPages(a as Parameters<typeof opSearchPages>[0]);
         // orchestration ops

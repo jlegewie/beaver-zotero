@@ -588,61 +588,6 @@ describe('MuPDFWorkerClient', () => {
         });
     });
 
-    // -----------------------------------------------------------------------
-    // PR #2 — renderPageToImage (carry-forward op; required so the TS port
-    // cannot silently regress the dedicated single-page render or its
-    // PAGE_OUT_OF_RANGE behavior).
-    // -----------------------------------------------------------------------
-
-    describe('renderPageToImage', () => {
-        it('round-trips a single PageImageResult', async () => {
-            const client = getMuPDFWorkerClient();
-            const buf = new Uint8Array([1, 2, 3]);
-
-            const promise = client.renderPageToImage(buf, 0);
-            const worker = MockWorker.instances[0];
-            const cannedBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
-            const canned = {
-                pageIndex: 0,
-                data: cannedBytes,
-                format: 'png' as const,
-                width: 100,
-                height: 100,
-                scale: 1,
-                dpi: 72,
-            };
-            worker.replyToLast({ ok: true, result: canned });
-
-            await expect(promise).resolves.toEqual(canned);
-
-            const [message, transfer] = worker.opCall(0);
-            expect(message).toMatchObject({
-                op: 'renderPageToImage',
-                args: { pageIndex: 0 },
-            });
-            expect(transfer).toBeUndefined();
-        });
-
-        it('rehydrates PAGE_OUT_OF_RANGE for an out-of-bounds index', async () => {
-            const client = getMuPDFWorkerClient();
-            const promise = client.renderPageToImage(new Uint8Array([0]), 99999);
-            const worker = MockWorker.instances[0];
-            worker.replyToLast({
-                ok: false,
-                error: {
-                    name: 'ExtractionError',
-                    code: 'PAGE_OUT_OF_RANGE',
-                    message: 'Page index 99999 out of range (0..0)',
-                },
-            });
-            await expect(promise).rejects.toBeInstanceOf(ExtractionError);
-            await expect(promise).rejects.toMatchObject({
-                code: ExtractionErrorCode.PAGE_OUT_OF_RANGE,
-                name: 'ExtractionError',
-            });
-        });
-    });
-
     describe('analyzeOCRNeeds', () => {
         it('round-trips an OCRDetectionResult', async () => {
             const client = getMuPDFWorkerClient();
