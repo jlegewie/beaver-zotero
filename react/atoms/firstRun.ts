@@ -419,6 +419,7 @@ export const submitEmptyLibraryDiscoverAtom = atom(
                     card_kind: 'discover_research',
                     topic_label: interest,
                     collection_name: null,
+                    empty_library: true,
                 },
             );
 
