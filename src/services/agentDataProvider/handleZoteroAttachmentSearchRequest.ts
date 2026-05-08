@@ -20,7 +20,14 @@ import {
 } from '../agentProtocol';
 import { PDFExtractor, ExtractionError, ExtractionErrorCode } from '../pdf';
 import { makeRemoteFilePath } from '../attachmentFileCache';
-import { validateZoteroItemReference, backfillMetadataForError, loadPdfData, checkRemotePdfSize, isRemoteAccessAvailable } from './utils';
+import {
+    validateZoteroItemReference,
+    backfillMetadataForError,
+    loadPdfData,
+    checkRemotePdfSize,
+    isRemoteAccessAvailable,
+    preflightCachedPdfMeta,
+} from './utils';
 
 
 /**
@@ -144,24 +151,28 @@ export async function handleZoteroAttachmentSearchRequest(
         const cache = Zotero.Beaver?.attachmentFileCache;
         const cachedMeta = cache ? await cache.getMetadata(zoteroItem.id, effectiveFilePath).catch(() => null) : null;
 
-        if (cachedMeta) {
-            if (cachedMeta.is_encrypted) {
-                return errorResponse('PDF is password-protected', 'encrypted');
-            }
-            if (cachedMeta.is_invalid) {
-                return errorResponse('PDF file is invalid or corrupted', 'invalid_pdf');
-            }
-            if (cachedMeta.needs_ocr) {
-                return errorResponse('PDF requires OCR (no text layer) — text search unavailable', 'no_text_layer', cachedMeta.page_count ?? null);
-            }
-            if (!skip_local_limits && cachedMeta.page_count != null) {
-                const maxPageCount = getPref('maxPageCount');
-                if (cachedMeta.page_count > maxPageCount) {
+        const preflight = preflightCachedPdfMeta(cachedMeta, {
+            checkOcr: true,
+            applyPageCountCap: !skip_local_limits,
+            maxPageCount: getPref('maxPageCount'),
+        });
+        if (preflight) {
+            switch (preflight.code) {
+                case 'encrypted':
+                    return errorResponse('PDF is password-protected', 'encrypted');
+                case 'invalid_pdf':
+                    return errorResponse('PDF file is invalid or corrupted', 'invalid_pdf');
+                case 'no_text_layer':
                     return errorResponse(
-                        `PDF has ${cachedMeta.page_count} pages, which exceeds the ${maxPageCount}-page limit`,
-                        'too_many_pages'
+                        'PDF requires OCR (no text layer) — text search unavailable',
+                        'no_text_layer',
+                        preflight.pageCount,
                     );
-                }
+                case 'too_many_pages':
+                    return errorResponse(
+                        `PDF has ${preflight.pageCount} pages, which exceeds the ${preflight.maxPageCount}-page limit`,
+                        'too_many_pages',
+                    );
             }
         }
 

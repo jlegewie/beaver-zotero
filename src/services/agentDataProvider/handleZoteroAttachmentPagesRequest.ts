@@ -18,9 +18,18 @@ import {
     WSPageContent,
 } from '../agentProtocol';
 import { PDFExtractor, ExtractionError, ExtractionErrorCode } from '../pdf';
-import { EXTRACTION_VERSION, makeRemoteFilePath } from '../attachmentFileCache';
+import { makeRemoteFilePath } from '../attachmentFileCache';
 import type { CachedPageContent } from '../attachmentFileCache';
-import { resolveToPdfAttachment, validateZoteroItemReference, backfillMetadataForError, loadPdfData, checkRemotePdfSize, isRemoteAccessAvailable } from './utils';
+import {
+    resolveToPdfAttachment,
+    validateZoteroItemReference,
+    backfillMetadataForError,
+    loadPdfData,
+    checkRemotePdfSize,
+    isRemoteAccessAvailable,
+    preflightCachedPdfMeta,
+    persistMetadataToCache,
+} from './utils';
 import { ensurePageLabelsForResolution, resolvePageValue, InvalidPageValueError } from './pageLabelResolution';
 
 
@@ -142,26 +151,28 @@ export async function handleZoteroAttachmentPagesRequest(
         const extractingAllPages = start_page == null && end_page == null;
         const hasMaxPagesCap = !!(max_pages && max_pages > 0);
         const effectivelyUnboundedExtract = extractingAllPages && !hasMaxPagesCap;
-        if (cachedMeta) {
-            if (cachedMeta.is_encrypted) {
-                return errorResponse(`The PDF file for ${pdfKey} is password-protected`, 'encrypted');
-            }
-            if (cachedMeta.is_invalid) {
-                return errorResponse(`The PDF file for ${pdfKey} is invalid or corrupted`, 'invalid_pdf');
-            }
-            if (cachedMeta.needs_ocr) {
-                return errorResponse(`The PDF file for ${pdfKey} requires OCR (no text layer)`, 'no_text_layer', cachedMeta.page_count ?? null);
-            }
-            // Page-count gate: only fires for requests that would extract the
-            // entire document. `max_pages` already bounds the extract size.
-            if (!skip_local_limits && effectivelyUnboundedExtract && cachedMeta.page_count != null) {
-                const maxPageCount = getPref('maxPageCount');
-                if (cachedMeta.page_count > maxPageCount) {
+        const preflight = preflightCachedPdfMeta(cachedMeta, {
+            checkOcr: true,
+            applyPageCountCap: !skip_local_limits && effectivelyUnboundedExtract,
+            maxPageCount: getPref('maxPageCount'),
+        });
+        if (preflight) {
+            switch (preflight.code) {
+                case 'encrypted':
+                    return errorResponse(`The PDF file for ${pdfKey} is password-protected`, 'encrypted');
+                case 'invalid_pdf':
+                    return errorResponse(`The PDF file for ${pdfKey} is invalid or corrupted`, 'invalid_pdf');
+                case 'no_text_layer':
                     return errorResponse(
-                        `The PDF file for ${pdfKey} has ${cachedMeta.page_count} pages, which exceeds the ${maxPageCount}-page limit`,
-                        'too_many_pages'
+                        `The PDF file for ${pdfKey} requires OCR (no text layer)`,
+                        'no_text_layer',
+                        preflight.pageCount,
                     );
-                }
+                case 'too_many_pages':
+                    return errorResponse(
+                        `The PDF file for ${pdfKey} has ${preflight.pageCount} pages, which exceeds the ${preflight.maxPageCount}-page limit`,
+                        'too_many_pages',
+                    );
             }
         }
 
@@ -388,90 +399,57 @@ export async function handleZoteroAttachmentPagesRequest(
         }));
 
         // 10b. Write-through: persist metadata and content cache.
-        // Skip during shutdown — DB writes here race Zotero's teardown
-        // (same guard as sync.ts:266 and FileUploader.ts:338).
-        if (cache && !Zotero.__beaverShuttingDown) {
-            try {
-                // Always persist metadata after successful extraction.
-                // This handler produces document-level properties (page_labels)
-                // that lightweight handlers (search, images, file-status) don't
-                // capture, so we must always write — even when a prior handler
-                // already seeded metadata with those fields as null.
-                let file_mtime_ms = 0;
-                let file_size_bytes = 0;
-                if (!isRemoteOnly) {
-                    const stat = await IOUtils.stat(filePath!);
-                    file_mtime_ms = stat.lastModified ?? 0;
-                    file_size_bytes = stat.size ?? 0;
-                }
-                // Recheck after the stat await — shutdown can race in
-                // during the I/O. Without this the entry-guard above
-                // doesn't cover writes whose preceding awaits yielded.
-                if (Zotero.__beaverShuttingDown) {
-                    logger(`handleZoteroAttachmentPagesRequest: skipping cache writes for ${requestKey} — shutdown signalled during stat`, 3);
-                    return {
-                        type: 'zotero_attachment_pages',
-                        request_id,
-                        attachment,
-                        pages,
-                        total_pages: resolvedPageCount,
-                    };
-                }
-                // page_labels semantics:
-                // - null => not checked yet (lightweight metadata path)
-                // - {} => checked, no custom labels found
-                // - populated object => checked, custom labels found
-                const persistedPageLabels = result.pageLabels && Object.keys(result.pageLabels).length > 0
-                    ? result.pageLabels
-                    : {};
-                await cache.setMetadata({
-                    item_id: pdfItem.id,
-                    library_id: pdfItem.libraryID,
-                    zotero_key: pdfItem.key,
-                    file_path: effectiveFilePath,
-                    file_mtime_ms,
-                    file_size_bytes,
-                    content_type: pdfItem.attachmentContentType || 'application/pdf',
+        // This handler produces document-level properties (page_labels) that
+        // lightweight handlers (search, images, file-status) don't capture,
+        // so we must always write — even when a prior handler already seeded
+        // metadata with those fields as null.
+        //
+        // `persistMetadataToCache` handles the entry/post-stat shutdown
+        // re-check internally; on shutdown or any failure it returns false,
+        // and we must NOT proceed to `setContentPages` against a closing DB.
+        if (cache) {
+            // page_labels semantics:
+            // - null => not checked yet (lightweight metadata path)
+            // - {} => checked, no custom labels found
+            // - populated object => checked, custom labels found
+            const persistedPageLabels = result.pageLabels && Object.keys(result.pageLabels).length > 0
+                ? result.pageLabels
+                : {};
+            const metadataPersisted = await persistMetadataToCache(
+                pdfItem,
+                effectiveFilePath,
+                pdfItem.attachmentContentType || 'application/pdf',
+                {
                     page_count: resolvedPageCount,
                     page_labels: persistedPageLabels,
                     has_text_layer: true,
                     needs_ocr: false,
                     is_encrypted: false,
                     is_invalid: false,
-                    extraction_version: EXTRACTION_VERSION,
-                });
+                },
+            );
 
-                // Recheck after the metadata write — shutdown can race in
-                // between the two awaits. Without this, setContentPages
-                // would still run against the closing DB.
-                if (Zotero.__beaverShuttingDown) {
-                    logger(`handleZoteroAttachmentPagesRequest: skipping content-page write for ${requestKey} — shutdown signalled after metadata write`, 3);
-                    return {
-                        type: 'zotero_attachment_pages',
-                        request_id,
-                        attachment,
-                        pages,
-                        total_pages: resolvedPageCount,
-                    };
+            if (metadataPersisted && !Zotero.__beaverShuttingDown) {
+                try {
+                    const contentPages: CachedPageContent[] = result.pages.map((p) => ({
+                        index: p.index,
+                        label: p.label,
+                        content: p.content,
+                        width: p.width,
+                        height: p.height,
+                    }));
+                    await cache.setContentPages(
+                        pdfItem.libraryID,
+                        pdfItem.key,
+                        effectiveFilePath,
+                        resolvedPageCount,
+                        contentPages,
+                    );
+                } catch (error) {
+                    logger(`handleZoteroAttachmentPagesRequest: content-page write error: ${error}`, 1);
                 }
-
-                // Persist content pages
-                const contentPages: CachedPageContent[] = result.pages.map((p) => ({
-                    index: p.index,
-                    label: p.label,
-                    content: p.content,
-                    width: p.width,
-                    height: p.height,
-                }));
-                await cache.setContentPages(
-                    pdfItem.libraryID,
-                    pdfItem.key,
-                    effectiveFilePath,
-                    resolvedPageCount,
-                    contentPages
-                );
-            } catch (error) {
-                logger(`handleZoteroAttachmentPagesRequest: cache write error: ${error}`, 1);
+            } else if (!metadataPersisted) {
+                logger(`handleZoteroAttachmentPagesRequest: skipping setContentPages for ${requestKey} — metadata persistence skipped/failed`, 3);
             }
         }
 
