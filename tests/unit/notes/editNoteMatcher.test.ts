@@ -45,7 +45,7 @@ import {
     expandBase,
     type MatchInput,
     type BaseExpansion,
-} from '../../../src/services/agentDataProvider/actions/editNoteMatcher';
+} from '../../../src/utils/editNoteMatcher';
 import { expandToRawHtml } from '../../../src/utils/noteCitationExpand';
 import type { EditNoteOperation } from '../../../react/types/agentActions/editNote';
 

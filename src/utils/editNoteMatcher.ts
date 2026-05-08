@@ -1,10 +1,9 @@
 /**
  * Ranked matcher for `edit_note` `old_string` lookup.
  *
- * Replaces a hand-rolled 13-layer fallback cascade with a single table of
- * normalization strategies. Each strategy attempts one transformation; the
- * first one that yields at least one match wins. Disambiguation of multi-match
- * results is the caller's responsibility — strategies never decide between
+ * Each strategy attempts one transformation; the first one that yields
+ * at least one match wins. Disambiguation of multi-match results
+ * is the caller's responsibility — strategies never decide between
  * multiple occurrences.
  *
  * Strategies are tried in this order (ranked most- to least-specific):
@@ -34,12 +33,12 @@
 import {
     countOccurrences,
     type SimplificationMetadata,
-} from '../../../utils/noteHtmlSimplifier';
-import { stripNoteWrapperDiv } from '../../../utils/noteWrapper';
+} from './noteHtmlSimplifier';
+import { stripNoteWrapperDiv } from './noteWrapper';
 import {
     expandToRawHtml,
     type ExternalRefContext,
-} from '../../../utils/noteCitationExpand';
+} from './noteCitationExpand';
 import {
     decodeHtmlEntities,
     encodeTextEntities,
@@ -48,12 +47,12 @@ import {
     hasWhitespaceOrNbsp,
     normalizeWS,
     WS_OR_NBSP_CLASS,
-} from '../../../utils/noteHtmlEntities';
+} from './noteHtmlEntities';
 import {
     stripPartialSimplifiedElements,
     stripSpuriousWrappingTags,
-} from '../../../utils/editNoteStrippers';
-import type { EditNoteOperation } from '../../../../react/types/agentActions/editNote';
+} from './editNoteStrippers';
+import type { EditNoteOperation } from '../../react/types/agentActions/editNote';
 
 // =============================================================================
 // Types

@@ -2129,3 +2129,70 @@ describe('deletion undo with edit footer (regression)', () => {
         }
     });
 });
+
+
+// =============================================================================
+// Section: Manual-Apply uses the full ranked matcher (cross-bundle parity)
+// =============================================================================
+
+describe('manual-Apply uses the full ranked matcher', () => {
+    it('whitespace_relaxed: applies when old_string has extra spaces and note has single spaces', async () => {
+        // Needle has multiple consecutive spaces; haystack (note) has single
+        // spaces. Pre-refactor this fell through `exact` and the entity
+        // loops, both of which preserve whitespace, and the executor threw.
+        // After the refactor `whitespace_relaxed` folds the runs and finds
+        // the unique match.
+        const note = wrap(
+            '<p>The annual report describes how rural districts implemented the new curriculum.</p>'
+        );
+        const { item } = await applyEdit({
+            noteHtml: note,
+            oldString: 'rural   districts implemented   the new curriculum',
+            newString: 'urban districts adopted the new framework',
+        });
+
+        // Replacement happened.
+        expect(item._getHtml()).toContain('urban districts adopted the new framework');
+        expect(item._getHtml()).not.toContain('rural districts implemented the new curriculum');
+    });
+
+    it('trim_trailing_newlines: applies when old_string has trailing \\n the note does not have', async () => {
+        // Needle ends with extra \n that the note does not contain — the
+        // matcher's `trim_trailing_newlines` strategy strips them. The
+        // pre-refactor inline loop had no such fallback.
+        const note = wrap(
+            '<p>First paragraph for the trailing-newline regression test.</p>'
+        );
+        const { item } = await applyEdit({
+            noteHtml: note,
+            oldString: '<p>First paragraph for the trailing-newline regression test.</p>\n\n',
+            newString: '<p>First paragraph (replaced via trim_trailing_newlines).</p>',
+        });
+
+        expect(item._getHtml()).toContain('replaced via trim_trailing_newlines');
+        expect(item._getHtml()).not.toContain('regression test');
+    });
+
+    it('zero-match path: thrown error carries error_code "old_string_not_found"', async () => {
+        const note = wrap('<p>Body text that exists in the note for length.</p>');
+        const item = createMockNoteItem(note);
+        (Zotero.Items.getByLibraryAndKeyAsync as any).mockResolvedValue(item);
+
+        const action = makeAction(
+            1,
+            'TESTKEY',
+            'a sentence that is genuinely not present anywhere in the note body',
+            'replacement',
+        );
+
+        let caught: any;
+        try {
+            await executeEditNoteAction(action);
+        } catch (e) {
+            caught = e;
+        }
+
+        expect(caught).toBeDefined();
+        expect(caught.code).toBe('old_string_not_found');
+    });
+});
