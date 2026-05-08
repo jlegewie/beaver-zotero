@@ -453,7 +453,7 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
 
                 {/* Network error state — replaces empty state when fetch failed transiently */}
                 {!isLoading && threads.length === 0 && fetchError && (
-                    <div className="display-flex flex-col items-center justify-center gap-2 py-6 text-center px-3">
+                    <div className="display-flex flex-col items-center justify-center gap-2 py-6 text-center px-3 mt-2">
                         <span className="font-color-primary font-semibold text-sm">
                             {fetchError.offline ? "You're offline" : "Couldn't load chats"}
                         </span>
