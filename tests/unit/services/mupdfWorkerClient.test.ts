@@ -809,7 +809,7 @@ describe('MuPDFWorkerClient', () => {
                 3,
                 {
                     splitterConfig: { type: 'sentencex', language: 'de' },
-                    analysisPageWindow: 5,
+                    analysisWindow: 5,
                 },
             );
             const worker = MockWorker.instances[0];
@@ -825,7 +825,7 @@ describe('MuPDFWorkerClient', () => {
                     pageIndex: 3,
                     options: {
                         splitterConfig: { type: 'sentencex', language: 'de' },
-                        analysisPageWindow: 5,
+                        analysisWindow: 5,
                     },
                 },
             });

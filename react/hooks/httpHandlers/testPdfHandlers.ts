@@ -617,7 +617,7 @@ export async function handleTestPdfSearchScoredHttpRequest(request: any) {
  *       language?: string,                   // seeds sentencex when `splitter` is omitted.
  *                                            // Ignored when an explicit `splitter` is given.
  *       paragraphSettings?: ParagraphDetectionSettings,
- *       analysisPageWindow?: number,
+ *       analysisWindow?: number,
  *     } }
  *
  * Response: `{ ok: true, result: PageSentenceBBoxResult }` or the
@@ -771,7 +771,7 @@ export async function handleTestPdfRenderOverlayHttpRequest(request: any) {
                 // Best effort.
             }
         }
-        const analysisPageWindow =
+        const analysisWindow =
             request?.analysis_page_window != null
                 ? Number(request.analysis_page_window)
                 : undefined;
@@ -782,7 +782,7 @@ export async function handleTestPdfRenderOverlayHttpRequest(request: any) {
                 pageIndex,
                 {
                     splitterConfig: { type: 'sentencex', language },
-                    analysisPageWindow,
+                    analysisWindow,
                 },
             );
             switch (level) {
@@ -941,7 +941,7 @@ export async function handleTestPdfPipelineTraceHttpRequest(request: any) {
         }
     }
 
-    const analysisPageWindow =
+    const analysisWindow =
         request?.analysis_page_window != null
             ? Number(request.analysis_page_window)
             : undefined;
@@ -954,7 +954,7 @@ export async function handleTestPdfPipelineTraceHttpRequest(request: any) {
             pageIndex,
             {
                 splitterConfig: { type: 'sentencex', language },
-                analysisPageWindow,
+                analysisWindow,
             },
         );
         result = out.result;

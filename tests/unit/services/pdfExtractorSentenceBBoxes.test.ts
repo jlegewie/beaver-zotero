@@ -197,13 +197,13 @@ describe('PDFExtractor.extractSentenceBBoxes — single worker round-trip', () =
         });
     });
 
-    it('forwards paragraphSettings and analysisPageWindow on the wire', async () => {
+    it('forwards paragraphSettings and analysisWindow on the wire', async () => {
         const promise = new PDFExtractor().extractSentenceBBoxes(
             new Uint8Array([1]),
             {
                 pageIndex: 7,
                 paragraphSettings: { headingFontSizeBoost: 1.2 } as any,
-                analysisPageWindow: 5,
+                analysisWindow: 5,
             },
         );
         const worker = MockWorker.instances[0];
@@ -215,7 +215,7 @@ describe('PDFExtractor.extractSentenceBBoxes — single worker round-trip', () =
             pageIndex: 7,
             options: {
                 paragraphSettings: { headingFontSizeBoost: 1.2 },
-                analysisPageWindow: 5,
+                analysisWindow: 5,
             },
         });
     });

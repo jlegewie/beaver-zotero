@@ -119,9 +119,14 @@ export {
 } from "./SentencexSplitter";
 export type { SentencexBoundary } from "./SentencexSplitter";
 export {
-    resolveAnalysisPageIndices,
+    resolveAnalysisPages,
     DEFAULT_ANALYSIS_WINDOW_CAP,
 } from "./AnalysisWindow";
+export { buildPageAnalysisContext } from "./PageAnalysisContext";
+export type {
+    PageAnalysisContext,
+    PageAnalysisContextInput,
+} from "./PageAnalysisContext";
 export { detectFilteredParagraphs } from "./FilteredParagraphPipeline";
 export {
     bridgeDetailedPageFonts,
@@ -181,6 +186,13 @@ export class PDFExtractor {
             settings?: ExtractionSettings;
             pageIndices?: number[];
             pageRange?: { startIndex: number; endIndex?: number; maxPages?: number };
+            /**
+             * Cross-page analysis window for margin smart-removal and
+             * the document-wide style profile. `0` (default) analyzes
+             * only the requested target pages; `N>0` adds ±N neighbors
+             * around each target; `Infinity` covers the whole doc.
+             */
+            analysisWindow?: number;
         } = {}
     ): Promise<ExtractionResult> {
         return getMuPDFWorkerClient().extract(pdfData, args);

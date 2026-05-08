@@ -7,8 +7,7 @@
  * barrel inside the worker).
  */
 
-import { MarginFilter, getEffectiveRepeatThreshold } from "./MarginFilter";
-import { StyleAnalyzer } from "./StyleAnalyzer";
+import { MarginFilter } from "./MarginFilter";
 import { detectColumns, type ColumnDetectionResult } from "./ColumnDetector";
 import { detectLinesOnPage, type PageLineResult } from "./LineDetector";
 import {
@@ -24,13 +23,14 @@ import {
     type RawPageData,
     type StyleProfile,
 } from "./types";
+import { buildPageAnalysisContext } from "./PageAnalysisContext";
 
 export interface FilteredParagraphContext {
     /**
      * Pages that participate in cross-page analysis (margin smart
      * removal, document-wide style profile). The caller is responsible
      * for resolving the analysis window — typically via
-     * `resolveAnalysisPageIndices` in `AnalysisWindow.ts`.
+     * `resolveAnalysisPages` in `AnalysisWindow.ts`.
      */
     pages: RawPageData[];
     /**
@@ -110,20 +110,24 @@ export function detectFilteredParagraphs(
     const margins = ctx.margins ?? DEFAULT_MARGINS;
     const marginZone = ctx.marginZone ?? DEFAULT_MARGIN_ZONE;
 
-    const marginRemoval =
-        ctx.marginRemoval ??
-        MarginFilter.identifyElementsToRemove(
-            MarginFilter.collectMarginElements(ctx.pages, marginZone),
-            getEffectiveRepeatThreshold({
-                requested: ctx.repeatThreshold,
-                totalPageCount: ctx.totalPageCount,
-                analysisPageCount: ctx.pages.length,
-            }),
-            ctx.detectPageSequences ?? true,
-        );
-
-    const styleProfile =
-        ctx.styleProfile ?? new StyleAnalyzer().analyze(ctx.pages, 4, 0.15, 0);
+    // Compute defaults for any missing overrides via the shared
+    // PageAnalysisContext helper so extract and the sentence pipeline
+    // produce identical styleProfile / marginRemoval values when fed
+    // the same analysis pages. Skipped when both overrides are
+    // supplied (trace mode pre-computes them upstream).
+    let styleProfile = ctx.styleProfile;
+    let marginRemoval = ctx.marginRemoval;
+    if (!styleProfile || !marginRemoval) {
+        const computed = buildPageAnalysisContext({
+            pages: ctx.pages,
+            totalPageCount: ctx.totalPageCount ?? ctx.pages.length,
+            marginZone,
+            repeatThreshold: ctx.repeatThreshold,
+            detectPageSequences: ctx.detectPageSequences,
+        });
+        styleProfile = styleProfile ?? computed.styleProfile;
+        marginRemoval = marginRemoval ?? computed.marginRemoval;
+    }
 
     const filteredPage = MarginFilter.filterPageWithSmartRemoval(
         targetPage,

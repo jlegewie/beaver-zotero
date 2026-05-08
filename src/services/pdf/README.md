@@ -626,10 +626,12 @@ reader.
 
 ### Optimization Tips
 
-1. **Sample instead of analyzing all pages**:
+1. **Tune the cross-page analysis window**:
 
    ```typescript
-   styleSampleSize: 100; // Default: don't analyze 500+ page books
+   // Default: analyze only requested pages (cheapest).
+   // Wider window improves margin smart-removal + body-style detection.
+   await extractor.extract(pdfData, { pageRange, analysisWindow: 5 });
    ```
 
 2. **Cache extraction results**:

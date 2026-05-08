@@ -50,8 +50,6 @@ export interface ExtractionSettings {
     repeatThreshold?: number;
     /** Whether to detect and remove page number sequences */
     detectPageSequences?: boolean;
-    /** Number of pages to sample for style analysis (0 = all pages) */
-    styleSampleSize?: number;
     /** Use line detection for high-quality extraction (default: false) */
     useLineDetection?: boolean;
 }
@@ -64,7 +62,6 @@ export const DEFAULT_EXTRACTION_SETTINGS: Required<ExtractionSettings> = {
     marginZone: DEFAULT_MARGIN_ZONE,
     repeatThreshold: 3,
     detectPageSequences: true,
-    styleSampleSize: 100,
     useLineDetection: false,
 };
 

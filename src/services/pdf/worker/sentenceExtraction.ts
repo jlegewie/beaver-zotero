@@ -36,13 +36,12 @@
 
 import { extractPageSentenceBBoxes } from "../ParagraphSentenceMapper";
 import type { PageSentenceBBoxResult } from "../ParagraphSentenceMapper";
-import { resolveAnalysisPageIndices } from "../AnalysisWindow";
+import { resolveAnalysisPages } from "../AnalysisWindow";
 import {
     detectFilteredParagraphs,
 } from "../FilteredParagraphPipeline";
 import { pagesForFilterWithBridgedFonts } from "../RawFontBridge";
-import { MarginFilter, getEffectiveRepeatThreshold } from "../MarginFilter";
-import { DEFAULT_MARGIN_ZONE } from "../types";
+import { buildPageAnalysisContext } from "../PageAnalysisContext";
 import type {
     SentenceRange,
     SentenceSplitter,
@@ -61,7 +60,7 @@ interface BaseArgs {
     pageIndex: number;
     pageCount: number;
     splitterConfig?: SentenceSplitterConfig;
-    analysisPageWindow?: number;
+    analysisWindow?: number;
     paragraphSettings?: ParagraphDetectionSettings;
 }
 
@@ -79,7 +78,7 @@ export async function runSentenceExtractionFromDoc(
         pageIndex,
         pageCount,
         splitterConfig,
-        analysisPageWindow,
+        analysisWindow,
         paragraphSettings,
         trace: wantTrace,
         recordSplitter,
@@ -114,11 +113,11 @@ export async function runSentenceExtractionFromDoc(
     const detailed = extractRawPageDetailedFromDoc(doc, pageIndex, false);
 
     // Analysis window for cross-page smart margin removal + style profile.
-    const analysisPageIndices = resolveAnalysisPageIndices(
-        pageIndex,
-        pageCount,
-        analysisPageWindow,
-    );
+    const analysisPageIndices = resolveAnalysisPages({
+        targetPageIndices: [pageIndex],
+        totalPageCount: pageCount,
+        analysisWindow,
+    });
     const jsonPages = analysisPageIndices.map((i) =>
         extractRawPageFromDoc(doc, i),
     );
@@ -150,18 +149,10 @@ export async function runSentenceExtractionFromDoc(
     // return them; `detectFilteredParagraphs` would otherwise compute
     // identical values internally from `pagesForFilter`. Computing from
     // `jsonPages` instead would silently diverge on the target page.
-    const marginAnalysis = MarginFilter.collectMarginElements(
-        pagesForFilter,
-        DEFAULT_MARGIN_ZONE,
-    );
-    const marginRemoval = MarginFilter.identifyElementsToRemove(
-        marginAnalysis,
-        getEffectiveRepeatThreshold({
-            totalPageCount: pageCount,
-            analysisPageCount: pagesForFilter.length,
-        }),
-        true,
-    );
+    const { marginAnalysis, marginRemoval } = buildPageAnalysisContext({
+        pages: pagesForFilter,
+        totalPageCount: pageCount,
+    });
     const filteredResult = detectFilteredParagraphs({
         pages: pagesForFilter,
         pageIndex,

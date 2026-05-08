@@ -21,6 +21,8 @@ import { DocumentAnalyzer } from "../DocumentAnalyzer";
 import { StyleAnalyzer } from "../StyleAnalyzer";
 import { MarginFilter, getEffectiveRepeatThreshold } from "../MarginFilter";
 import { PageExtractor } from "../PageExtractor";
+import { buildPageAnalysisContext } from "../PageAnalysisContext";
+import { resolveAnalysisPages } from "../AnalysisWindow";
 import { detectColumns, logColumnDetection } from "../ColumnDetector";
 import { detectLinesOnPage, logLineDetection } from "../LineDetector";
 import type { PageLineResult } from "../LineDetector";
@@ -221,58 +223,69 @@ export async function opSearchPages(
  * assembly, analysis build) are identical, and the result shape is the
  * same `ExtractionResult` either way.
  *
- * The caller is responsible for opening the doc, resolving the page indices,
- * collecting page labels, and running the OCR text-layer check (NO_TEXT_LAYER
- * needs `pageLabels` and `pageCount` in its payload, which the caller already
- * has). This helper just turns those inputs into an ExtractionResult.
+ * The caller is responsible for opening the doc, resolving target +
+ * analysis indices, collecting page labels, and running the OCR
+ * text-layer check (NO_TEXT_LAYER needs `pageLabels` and `pageCount`
+ * in its payload, which the caller already has).
+ *
+ * Index sets:
+ *  - `targetIndices` — pages to process and emit in the result.
+ *  - `analysisIndices` — superset used for cross-page style + margin
+ *    analysis. With `analysisWindow=0` this equals `targetIndices`;
+ *    with `N>0` it adds neighbors so margin smart-removal and the
+ *    body-style estimate see more of the document. Walked once; the
+ *    target loop reuses the cached pages.
  */
 function runExtractFromIndices(
     doc: DocumentLike,
-    opts: Required<Omit<ExtractionSettings, 'pages' | 'useLineDetection' | 'minTextPerPage' | 'styleSampleSize'>> & ExtractionSettings,
+    opts: Required<Omit<ExtractionSettings, 'pages' | 'useLineDetection' | 'minTextPerPage'>> & ExtractionSettings,
     requestedRepeatThreshold: number | undefined,
-    indices: number[],
+    targetIndices: number[],
+    analysisIndices: number[],
     pageCount: number,
     pageLabels: Record<number, string>,
     useLineDetection: boolean,
 ): ExtractionResult {
-    const rawPages: RawPageData[] = indices.map((i) => extractRawPageFromDoc(doc, i));
-    const rawData: RawDocumentData = { pageCount, pages: rawPages };
-
-    const styleAnalyzer = new StyleAnalyzer();
-    const styleProfile = styleAnalyzer.analyze(
-        rawData.pages,
-        4,
-        0.15,
-        opts.styleSampleSize,
+    // Walk the analysis union once; targets are guaranteed to be in it
+    // (resolveAnalysisPages always includes them), so the output loop
+    // looks them up in the pre-walked map without re-extracting.
+    const analysisPages: RawPageData[] = analysisIndices.map((i) =>
+        extractRawPageFromDoc(doc, i),
     );
+    const analysisPageByIndex = new Map<number, RawPageData>(
+        analysisPages.map((p) => [p.pageIndex, p]),
+    );
+
+    const { styleProfile, marginAnalysis, marginRemoval } = buildPageAnalysisContext({
+        pages: analysisPages,
+        totalPageCount: pageCount,
+        marginZone: opts.marginZone,
+        repeatThreshold: requestedRepeatThreshold,
+        detectPageSequences: opts.detectPageSequences,
+    });
     StyleAnalyzer.logStyleProfile(styleProfile);
-
-    const marginAnalysis = MarginFilter.collectMarginElements(rawData.pages, opts.marginZone);
-    const removalResult = MarginFilter.identifyElementsToRemove(
-        marginAnalysis,
-        getEffectiveRepeatThreshold({
-            requested: requestedRepeatThreshold,
-            totalPageCount: pageCount,
-            analysisPageCount: rawData.pages.length,
-        }),
-        opts.detectPageSequences,
-    );
-    MarginFilter.logRemovalCandidates(removalResult);
+    MarginFilter.logRemovalCandidates(marginRemoval);
 
     const pages: ProcessedPage[] = [];
-    if (useLineDetection) {
-        for (const rawPage of rawData.pages) {
-            const filteredPage = MarginFilter.filterPageWithSmartRemoval(
-                rawPage,
-                opts.margins,
-                opts.marginZone,
-                removalResult,
-            );
-            const columnResult = detectColumns(filteredPage, {
-                headerMargin: opts.margins.top,
-                footerMargin: opts.margins.bottom,
-            });
-            logColumnDetection(rawPage.pageIndex, columnResult);
+    const pageExtractor = useLineDetection
+        ? null
+        : new PageExtractor({ styleProfile });
+
+    for (const i of targetIndices) {
+        const rawPage = analysisPageByIndex.get(i)!;
+        const filteredPage = MarginFilter.filterPageWithSmartRemoval(
+            rawPage,
+            opts.margins,
+            opts.marginZone,
+            marginRemoval,
+        );
+        const columnResult = detectColumns(filteredPage, {
+            headerMargin: opts.margins.top,
+            footerMargin: opts.margins.bottom,
+        });
+        logColumnDetection(rawPage.pageIndex, columnResult);
+
+        if (useLineDetection) {
             const lineResult: PageLineResult = detectLinesOnPage(filteredPage, columnResult.columns);
             logLineDetection(lineResult);
 
@@ -303,28 +316,16 @@ function runExtractFromIndices(
                 })),
                 lines: extractedLines,
             } as ProcessedPage);
-        }
-    } else {
-        const pageExtractor = new PageExtractor({ styleProfile });
-        for (const rawPage of rawData.pages) {
-            const filteredPage = MarginFilter.filterPageWithSmartRemoval(
-                rawPage,
-                opts.margins,
-                opts.marginZone,
-                removalResult,
+        } else {
+            pages.push(
+                pageExtractor!.extractPageWithColumns(filteredPage, columnResult, true),
             );
-            const columnResult = detectColumns(filteredPage, {
-                headerMargin: opts.margins.top,
-                footerMargin: opts.margins.bottom,
-            });
-            logColumnDetection(rawPage.pageIndex, columnResult);
-            pages.push(pageExtractor.extractPageWithColumns(filteredPage, columnResult, true));
         }
     }
 
     const fullText = pages.map((p) => p.content).join("\n\n");
     const analysis: DocumentAnalysis = {
-        pageCount: rawData.pageCount,
+        pageCount,
         hasTextLayer: true,
         styleProfile,
         marginAnalysis,
@@ -366,6 +367,7 @@ export async function opExtract(
         settings?: ExtractionSettings;
         pageIndices?: number[];
         pageRange?: { startIndex: number; endIndex?: number; maxPages?: number };
+        analysisWindow?: number;
     },
 ): Promise<OpReply<ExtractionResult>> {
     const doc = await acquireDoc(args.pdfData);
@@ -393,15 +395,22 @@ export async function opExtract(
             }
         }
 
-        const indices = args.pageRange
+        const targetIndices = args.pageRange
             ? resolvePageRangeOrThrow(pageCount, args.pageRange)
             : resolveExplicitPageIndicesOrThrow(pageCount, args.pageIndices);
+
+        const analysisIndices = resolveAnalysisPages({
+            targetPageIndices: targetIndices,
+            totalPageCount: pageCount,
+            analysisWindow: args.analysisWindow,
+        });
 
         const result = runExtractFromIndices(
             doc,
             opts as any,
             requestedRepeatThreshold,
-            indices,
+            targetIndices,
+            analysisIndices,
             pageCount,
             pageLabels,
             !!opts.useLineDetection,
@@ -564,7 +573,7 @@ export async function opExtractSentenceBBoxes(
             pageIndex: args.pageIndex,
             pageCount,
             splitterConfig: opts.splitterConfig,
-            analysisPageWindow: opts.analysisPageWindow,
+            analysisWindow: opts.analysisWindow,
             paragraphSettings: opts.paragraphSettings,
             trace: false,
         });
@@ -697,7 +706,7 @@ export async function opExtractSentenceBBoxesTrace(
             pageIndex: args.pageIndex,
             pageCount,
             splitterConfig: opts.splitterConfig,
-            analysisPageWindow: opts.analysisPageWindow,
+            analysisWindow: opts.analysisWindow,
             paragraphSettings: opts.paragraphSettings,
             trace: true,
             recordSplitter: opts.recordSplitter,

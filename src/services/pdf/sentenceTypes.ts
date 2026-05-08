@@ -54,7 +54,7 @@ export interface ExtractSentenceBBoxesArgs {
     splitter?: SentenceSplitterConfig;
     language?: string;
     paragraphSettings?: ParagraphDetectionSettings;
-    analysisPageWindow?: number;
+    analysisWindow?: number;
 }
 
 /**
@@ -68,7 +68,7 @@ export interface ExtractSentenceBBoxesArgs {
 export interface WorkerSentenceBBoxOptions {
     splitterConfig?: SentenceSplitterConfig;
     paragraphSettings?: ParagraphDetectionSettings;
-    analysisPageWindow?: number;
+    analysisWindow?: number;
 }
 
 /**

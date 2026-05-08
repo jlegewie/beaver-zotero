@@ -213,8 +213,7 @@ describe('MuPDF worker smoke — orchestration ops', () => {
 
     describe('extract', () => {
         it('returns page-level extraction for a healthy PDF', async () => {
-            const settings = { styleSampleSize: 0 };
-            const res = await pdfExtract(SMALL_PDF, { settings });
+            const res = await pdfExtract(SMALL_PDF, {});
             expect(res.ok).toBe(true);
 
             const result = res.result;
@@ -249,7 +248,7 @@ describe('MuPDF worker smoke — orchestration ops', () => {
 
     describe('extract (useLineDetection)', () => {
         it('returns line-based extraction for a healthy PDF', async () => {
-            const settings = { styleSampleSize: 0, useLineDetection: true };
+            const settings = { useLineDetection: true };
             const res = await pdfExtractByLines(SMALL_PDF, { settings });
             expect(res.ok).toBe(true);
 
