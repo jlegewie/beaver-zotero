@@ -26,6 +26,14 @@ import type {
 
 // Re-export types and classes for convenience
 export * from "./types";
+export { configurePDF, isConfigured } from "./config";
+export type {
+    PDFConfig,
+    PDFLogSink,
+    PDFWorkerClientSlot,
+    PDFWorkerUrls,
+    MuPDFLoaderModule,
+} from "./config";
 export { MuPDFService, disposeMuPDF } from "./MuPDFService";
 export {
     MuPDFWorkerClient,

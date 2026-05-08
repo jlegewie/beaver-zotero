@@ -8,14 +8,13 @@
  *     ExtractionError on the main side.
  *   - postMessage is called WITHOUT a transfer list (regression guard for
  *     the buffer-reuse issue documented in the plan).
- *   - The singleton is parked on `Zotero.__beaverMuPDFWorkerClient` and
- *     `disposeMuPDFWorker` clears it.
+ *   - The singleton is parked in the configured slot (Beaver wires this
+ *     to `Zotero.__beaverMuPDFWorkerClient`) and `disposeMuPDFWorker`
+ *     clears it.
+ *   - Spawn posts a `configure` frame as the first message before any op.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
-vi.mock('../../../src/utils/logger', () => ({
-    logger: vi.fn(),
-}));
+import { configurePDFForTests } from '../../helpers/configurePDFForTests';
 
 import {
     getMuPDFWorkerClient,
@@ -28,27 +27,43 @@ import {
 
 // ---------------------------------------------------------------------------
 // MockWorker — captures postMessage calls + lets the test queue up replies.
+// The configure handshake (first message after spawn) is recorded
+// separately on `configureMessages` and excluded from `posted` so existing
+// op-focused assertions don't have to skip an off-by-one.
 // ---------------------------------------------------------------------------
 class MockWorker {
     static instances: MockWorker[] = [];
     onmessage: ((event: { data: any }) => void) | null = null;
     onerror: ((event: any) => void) | null = null;
     onmessageerror: ((event: any) => void) | null = null;
+    posted: Array<{ message: any; transfer: Transferable[] | undefined }> = [];
+    configureMessages: any[] = [];
     postMessage = vi.fn((message: any, transfer?: Transferable[]) => {
+        if (message?.kind === 'configure') {
+            this.configureMessages.push(message);
+            return;
+        }
         this.posted.push({ message, transfer });
     });
     terminate = vi.fn();
-    posted: Array<{ message: any; transfer: Transferable[] | undefined }> = [];
 
     constructor(public url: string, public options: any) {
         MockWorker.instances.push(this);
     }
 
-    /** Helper: deliver a reply to the most recently posted message. */
+    /** Helper: deliver a reply to the most recently posted op message. */
     replyToLast(reply: any): void {
         const last = this.posted[this.posted.length - 1];
         const id = (last?.message as { id: number } | undefined)?.id;
         this.onmessage?.({ data: { id, ...reply } });
+    }
+
+    /** Returns the [message, transfer] tuple for the Nth op message. */
+    opCall(
+        n: number,
+    ): [any, Transferable[] | undefined] {
+        const e = this.posted[n];
+        return [e?.message, e?.transfer];
     }
 }
 
@@ -57,8 +72,18 @@ function setupZoteroMainWindowWithMockWorker() {
         Worker: MockWorker,
     };
     (globalThis as any).Zotero = (globalThis as any).Zotero ?? {};
+    // The package no longer reads Zotero.getMainWindow directly — it goes
+    // through getConfig().getWorkerHost. The configure-for-tests helper
+    // wires both `getWorkerHost` and the singleton slot to this Zotero
+    // global so existing assertions (`Zotero.__beaverMuPDFWorkerClient`)
+    // continue to inspect the same storage.
     (globalThis as any).Zotero.getMainWindow = vi.fn(() => win);
     (globalThis as any).Zotero.__beaverMuPDFWorkerClient = undefined;
+    configurePDFForTests({
+        slotHost: (globalThis as any).Zotero,
+        slotKey: '__beaverMuPDFWorkerClient',
+        getWorkerHost: () => win,
+    });
     return win;
 }
 
@@ -87,6 +112,27 @@ describe('MuPDFWorkerClient', () => {
         await expect(promise).resolves.toBe(42);
     });
 
+    it('posts a configure frame as the first message after spawn, before any op', async () => {
+        const client = getMuPDFWorkerClient();
+        const promise = client.getPageCount(new Uint8Array([0]));
+        const worker = MockWorker.instances[0];
+
+        // First raw call to postMessage is the configure handshake.
+        const firstCall = worker.postMessage.mock.calls[0];
+        expect(firstCall[0]).toMatchObject({ kind: 'configure' });
+        expect((firstCall[0] as any).urls).toMatchObject({
+            mupdfWasmFactoryUrl: expect.any(String),
+            mupdfWasmBinaryUrl: expect.any(String),
+            sentencexWasmFactoryUrl: expect.any(String),
+            sentencexWasmBinaryUrl: expect.any(String),
+        });
+        // The op then follows.
+        expect(worker.posted[0].message).toMatchObject({ op: 'getPageCount' });
+
+        worker.replyToLast({ ok: true, result: { count: 1 } });
+        await promise;
+    });
+
     it('passes the PDF bytes to the worker WITHOUT a transfer list', async () => {
         const client = getMuPDFWorkerClient();
         const buf = new Uint8Array([1, 2, 3, 4]);
@@ -98,12 +144,11 @@ describe('MuPDFWorkerClient', () => {
 
         // Regression guard: buffer-reuse callers (handlers that call
         // getPageCount then renderPagesToImages with the same `pdfData`)
-        // would see a detached ArrayBuffer if we transferred.
-        expect(worker.postMessage).toHaveBeenCalledTimes(1);
-        const [, transfer] = worker.postMessage.mock.calls[0] as [
-            any,
-            Transferable[] | undefined,
-        ];
+        // would see a detached ArrayBuffer if we transferred. The
+        // configure frame is excluded from `posted`, so a single op call
+        // should appear here.
+        expect(worker.posted).toHaveLength(1);
+        const [, transfer] = worker.opCall(0);
         expect(transfer).toBeUndefined();
     });
 
@@ -129,8 +174,16 @@ describe('MuPDFWorkerClient', () => {
         });
     });
 
-    it('routes log messages to the logger and does not consume pending entries', async () => {
-        const { logger } = await import('../../../src/utils/logger');
+    it('routes log messages through the configured log sink and does not consume pending entries', async () => {
+        const logSpy = vi.fn();
+        // Reconfigure with a spy log sink for this test.
+        configurePDFForTests({
+            slotHost: (globalThis as any).Zotero,
+            slotKey: '__beaverMuPDFWorkerClient',
+            getWorkerHost: () => (globalThis as any).Zotero.getMainWindow(),
+            log: logSpy,
+        });
+
         const client = getMuPDFWorkerClient();
         const buf = new Uint8Array([0]);
 
@@ -146,10 +199,10 @@ describe('MuPDFWorkerClient', () => {
         worker.replyToLast({ ok: true, result: { count: 7 } });
 
         await expect(promise).resolves.toBe(7);
-        expect(vi.mocked(logger)).toHaveBeenCalledWith('hello from worker', 2);
+        expect(logSpy).toHaveBeenCalledWith('hello from worker', 2);
     });
 
-    it('parks the singleton on Zotero.__beaverMuPDFWorkerClient', () => {
+    it('parks the singleton in the configured slot (Zotero.__beaverMuPDFWorkerClient)', () => {
         const client = getMuPDFWorkerClient();
         expect((globalThis as any).Zotero.__beaverMuPDFWorkerClient).toBe(
             client,
@@ -192,6 +245,37 @@ describe('MuPDFWorkerClient', () => {
         ).toBeUndefined();
     });
 
+    it('stale-worker retry re-posts a configure frame to the freshly-spawned worker', async () => {
+        const client = getMuPDFWorkerClient();
+        // Spawn the first worker via a real dispatch. Don't reply — we
+        // want to mark stale while the op is in-flight so the retry path
+        // fires.
+        const promise = client.getPageCount(new Uint8Array([0]));
+        const first = MockWorker.instances[0];
+        expect(first).toBeDefined();
+        expect(first.configureMessages).toHaveLength(1);
+
+        // Simulate a worker death (test-only entry point that drives the
+        // same code path as a real onerror/onmessageerror). The pending
+        // RPC rejects with StaleWorkerError; `call()` catches that and
+        // retries by re-dispatching, which respawns a fresh worker.
+        client.markStaleForTest('test-induced');
+
+        // The retry dispatch is async (the catch handler runs after the
+        // microtask queue flushes the rejection). Flush so the second
+        // worker is observable.
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        const second = MockWorker.instances[1];
+        expect(second).toBeDefined();
+        // The retry must re-configure: the new worker has its own URL
+        // state and was just spawned with no prior config message.
+        expect(second.configureMessages).toHaveLength(1);
+        second.replyToLast({ ok: true, result: { count: 9 } });
+
+        await expect(promise).resolves.toBe(9);
+    });
+
     // -----------------------------------------------------------------------
     // PR #2 — broaden the worker surface
     // -----------------------------------------------------------------------
@@ -220,10 +304,7 @@ describe('MuPDFWorkerClient', () => {
                 format: 'PDF 1.7',
             });
 
-            const [message, transfer] = worker.postMessage.mock.calls[0] as [
-                any,
-                Transferable[] | undefined,
-            ];
+            const [message, transfer] = worker.opCall(0);
             expect(message).toMatchObject({ op: 'getMetadata' });
             expect(transfer).toBeUndefined();
         });
@@ -252,10 +333,7 @@ describe('MuPDFWorkerClient', () => {
 
             await expect(promise).resolves.toEqual(canned);
 
-            const [message, transfer] = worker.postMessage.mock.calls[0] as [
-                any,
-                Transferable[] | undefined,
-            ];
+            const [message, transfer] = worker.opCall(0);
             expect(message).toMatchObject({
                 op: 'extractRawPages',
                 args: { pageIndices: [0] },
@@ -314,10 +392,7 @@ describe('MuPDFWorkerClient', () => {
             worker.replyToLast({ ok: true, result: { pageIndex: 0 } });
             await promise;
 
-            const [, transfer] = worker.postMessage.mock.calls[0] as [
-                any,
-                Transferable[] | undefined,
-            ];
+            const [, transfer] = worker.opCall(0);
             expect(transfer).toBeUndefined();
         });
     });
@@ -352,10 +427,7 @@ describe('MuPDFWorkerClient', () => {
 
             await expect(promise).resolves.toEqual(canned);
 
-            const [message, transfer] = worker.postMessage.mock.calls[0] as [
-                any,
-                Transferable[] | undefined,
-            ];
+            const [message, transfer] = worker.opCall(0);
             expect(message).toMatchObject({
                 op: 'renderPages',
                 args: {
@@ -379,7 +451,7 @@ describe('MuPDFWorkerClient', () => {
                 result: { pageCount: 5, pageLabels: {}, pages: [] },
             });
             await promise;
-            const [message] = worker.postMessage.mock.calls[0] as [any, any];
+            const [message] = worker.opCall(0);
             expect(message.args.pageRange).toEqual({
                 startIndex: 0,
                 endIndex: 2,
@@ -408,7 +480,7 @@ describe('MuPDFWorkerClient', () => {
                 },
             });
             await promise;
-            const [message] = worker.postMessage.mock.calls[0] as [any, any];
+            const [message] = worker.opCall(0);
             expect(message).toMatchObject({
                 op: 'extract',
                 args: {
@@ -508,10 +580,7 @@ describe('MuPDFWorkerClient', () => {
 
             await expect(promise).resolves.toEqual(canned);
 
-            const [message] = worker.postMessage.mock.calls[0] as [
-                any,
-                Transferable[] | undefined,
-            ];
+            const [message] = worker.opCall(0);
             expect(message).toMatchObject({
                 op: 'searchPages',
                 args: { query: 'foo' },
@@ -546,10 +615,7 @@ describe('MuPDFWorkerClient', () => {
 
             await expect(promise).resolves.toEqual(canned);
 
-            const [message, transfer] = worker.postMessage.mock.calls[0] as [
-                any,
-                Transferable[] | undefined,
-            ];
+            const [message, transfer] = worker.opCall(0);
             expect(message).toMatchObject({
                 op: 'renderPageToImage',
                 args: { pageIndex: 0 },
@@ -612,10 +678,7 @@ describe('MuPDFWorkerClient', () => {
             worker.replyToLast({ ok: true, result: canned });
             await expect(promise).resolves.toEqual(canned);
 
-            const [message] = worker.postMessage.mock.calls[0] as [
-                any,
-                Transferable[] | undefined,
-            ];
+            const [message] = worker.opCall(0);
             expect(message).toMatchObject({ op: 'search', args: { query: 'foo' } });
         });
 
@@ -640,7 +703,7 @@ describe('MuPDFWorkerClient', () => {
                 },
             });
             await promise;
-            const [message] = worker.postMessage.mock.calls[0] as [any, any];
+            const [message] = worker.opCall(0);
             // maxPageCount lives at the top level of args (sibling to options),
             // not inside the options bag.
             expect(message.args).toMatchObject({
@@ -787,10 +850,7 @@ describe('MuPDFWorkerClient', () => {
                 },
             });
             await promise;
-            const [message] = worker.postMessage.mock.calls[0] as [
-                any,
-                Transferable[] | undefined,
-            ];
+            const [message] = worker.opCall(0);
             expect(message).toMatchObject({
                 op: 'extractSentenceBBoxes',
                 args: { pageIndex: 0 },
@@ -813,10 +873,7 @@ describe('MuPDFWorkerClient', () => {
                 result: { paragraphs: [], sentences: [] },
             });
             await promise;
-            const [message] = worker.postMessage.mock.calls[0] as [
-                any,
-                Transferable[] | undefined,
-            ];
+            const [message] = worker.opCall(0);
             expect(message).toMatchObject({
                 op: 'extractSentenceBBoxes',
                 args: {
@@ -846,10 +903,7 @@ describe('MuPDFWorkerClient', () => {
                 result: { paragraphs: [], sentences: [] },
             });
             await promise;
-            const [message] = worker.postMessage.mock.calls[0] as [
-                any,
-                Transferable[] | undefined,
-            ];
+            const [message] = worker.opCall(0);
             expect(message.args.options.splitterConfig).toEqual({
                 type: 'simple',
             });

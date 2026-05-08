@@ -54,4 +54,62 @@ export default tseslint.config(
             "@typescript-eslint/no-non-null-assertion": "off",
         },
     },
+    // The MuPDF worker bundle is a separate execution context: no DOM, no
+    // window, no Zotero. It must not import the PDF index barrel (re-exports
+    // PDFExtractor, MuPDFService, the logger — none of which are
+    // worker-safe) or any Beaver app utilities. Worker-safe internals
+    // (analyzers, types, mappers) are still allowed via direct subpath
+    // imports like `../types`, `../StyleAnalyzer`.
+    //
+    // Path math reminder — relative specifiers from a file at
+    // `src/services/pdf/worker/<file>.ts`:
+    //   ../X            → src/services/pdf/X      (PDF package internals — OK)
+    //   ../../X         → src/services/X          (sibling of pdf — none today)
+    //   ../../../X      → src/X                   (Beaver app dirs)
+    //   ../../../../X   → repo-root/X             (e.g. `react/`)
+    {
+        files: ["src/services/pdf/worker/**/*.ts"],
+        rules: {
+            "no-restricted-imports": [
+                "error",
+                {
+                    paths: [
+                        {
+                            name: "../index",
+                            message:
+                                "Worker code must not import the PDF barrel.",
+                        },
+                        {
+                            name: "../index.ts",
+                            message:
+                                "Worker code must not import the PDF barrel.",
+                        },
+                    ],
+                    patterns: [
+                        {
+                            // src/utils/* — Beaver app utilities (logger, prefs, …).
+                            group: ["../../../utils/*"],
+                            message:
+                                "Worker code must not import Beaver app utilities (src/utils).",
+                        },
+                        {
+                            // src/services/* — sibling Beaver services. Worker code
+                            // imports PDF-package internals via `../X`; this glob
+                            // catches attempted reach-arounds like
+                            // `../../../services/database`.
+                            group: ["../../../services/*"],
+                            message:
+                                "Worker code must not import sibling Beaver services. Use `../X` for PDF-package internals.",
+                        },
+                        {
+                            // react/* — webpack-only bundle (DOM/Zotero APIs).
+                            group: ["../../../../react/*"],
+                            message:
+                                "Worker code must not import the webpack-only React bundle.",
+                        },
+                    ],
+                },
+            ],
+        },
+    },
 );

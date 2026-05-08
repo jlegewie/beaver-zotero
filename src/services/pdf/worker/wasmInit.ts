@@ -1,20 +1,19 @@
 /**
  * MuPDF WASM bootstrap inside the worker bundle.
  *
- * Keeping the chrome:// WASM factory dynamic at bundle time:
+ * Keeping the WASM factory URL dynamic at bundle time:
  *
- *   1. The actual mechanism is the indirection through a `const` variable —
- *      `await import(WASM_FACTORY_URL)` is a dynamic import whose specifier
- *      isn't a string literal at the call site, so esbuild leaves it alone.
+ *   1. The actual mechanism is the indirection through a local `const`
+ *      variable — `await import(factoryUrl)` is a dynamic import whose
+ *      specifier isn't a string literal at the call site, so esbuild
+ *      leaves it alone.
  *   2. `external: ["chrome://*"]` in zotero-plugin.config.ts is the
  *      belt-and-braces backup that catches any static `import "chrome://..."`
  *      a future refactor might introduce. (Esbuild requires `external` to be
  *      `string[]`; a regex like /^chrome:/ is rejected.)
  *
- * The `"chrome:" + "//..."` literal-splitting below is a historical guard
- * from the pre-implementation spike — esbuild constant-folds it back to the
- * full literal in the emitted bundle, so it does NOT contribute to defeating
- * static analysis. Kept only because it's harmless and self-documenting.
+ * URLs come from the configure message (see `./config.ts` and `./index.ts`)
+ * — the package no longer hardcodes any `chrome://` paths.
  *
  * Workers don't have ChromeUtils/NetUtil and `fetch('chrome://...')` is
  * unreliable in worker scope, so XHR is the only reliable path for the
@@ -23,9 +22,7 @@
 
 import { makeDocumentApi, type MuPDFApi, type LibMuPdf } from "./mupdfApi";
 import { loadWasmBinaryXHR } from "./wasmHelpers";
-
-const WASM_FACTORY_URL = "chrome:" + "//beaver/content/lib/mupdf-wasm.mjs";
-const WASM_BINARY_URL = "chrome:" + "//beaver/content/lib/mupdf-wasm.wasm";
+import { getWorkerUrls } from "./config";
 
 // MuPDF font-loading callback (must be installed before WASM init).
 declare const globalThis: { $libmupdf_load_font_file?: (name: string) => null };
@@ -44,17 +41,23 @@ export async function ensureInit(): Promise<LibMuPdf> {
     if (_initPromise) return _initPromise;
 
     _initPromise = (async () => {
-        const wasmBinary = await loadWasmBinaryXHR(WASM_BINARY_URL);
+        const urls = getWorkerUrls();
+        // Local consts — keeps the dynamic-import specifier non-literal at
+        // the call site (see file header).
+        const factoryUrl = urls.mupdfWasmFactoryUrl;
+        const binaryUrl = urls.mupdfWasmBinaryUrl;
+
+        const wasmBinary = await loadWasmBinaryXHR(binaryUrl);
         const wasmConfig = {
             wasmBinary,
             locateFile: (path: string) =>
-                path && path.endsWith(".wasm") ? WASM_BINARY_URL : path,
+                path && path.endsWith(".wasm") ? binaryUrl : path,
         };
 
         // Dynamic import of the WASM factory at runtime — see file header.
         // esbuild leaves this dynamic because the specifier is a variable.
         const mod: { default: (config: unknown) => Promise<LibMuPdf> } =
-            await import(WASM_FACTORY_URL);
+            await import(factoryUrl);
         const wasmFactory = mod.default;
 
         const libmupdf = await wasmFactory(wasmConfig);

@@ -22,6 +22,7 @@ import type {
     RawPageDataDetailed,
 } from "./types";
 import { ExtractionError, ExtractionErrorCode, DEFAULT_PAGE_IMAGE_OPTIONS } from "./types";
+import { getConfig, isConfigured } from "./config";
 
 // ============================================================================
 // Structured Text Options
@@ -189,11 +190,10 @@ export async function getMuPDFAPI(): Promise<MuPDFAPI> {
         return mupdfPromise;
     }
 
+    const { mupdfService } = getConfig();
     mupdfPromise = (async () => {
-        const { MuPDFLoader } = ChromeUtils.importESModule(
-            "chrome://beaver/content/modules/mupdf-loader.mjs"
-        );
-        return MuPDFLoader.init("chrome://beaver/content/") as Promise<MuPDFAPI>;
+        const loader = await mupdfService.loadLoader();
+        return loader.init(mupdfService.baseUrl) as Promise<MuPDFAPI>;
     })();
 
     return mupdfPromise;
@@ -201,16 +201,19 @@ export async function getMuPDFAPI(): Promise<MuPDFAPI> {
 
 /**
  * Dispose the cached MuPDF module.
- * Call during plugin shutdown.
+ * Call during plugin shutdown. Early-returns when the package was never
+ * configured (e.g. shutdown error paths that run before configurePDF).
  */
 export async function disposeMuPDF(): Promise<void> {
     if (!mupdfPromise) return;
+    if (!isConfigured()) {
+        mupdfPromise = null;
+        return;
+    }
 
     try {
-        const { MuPDFLoader } = ChromeUtils.importESModule(
-            "chrome://beaver/content/modules/mupdf-loader.mjs"
-        );
-        await MuPDFLoader.dispose();
+        const loader = await getConfig().mupdfService.loadLoader();
+        await loader.dispose();
     } catch {
         // Silently fail if loader is already gone
     }

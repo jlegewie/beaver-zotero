@@ -9,8 +9,11 @@
  *   import { StyleAnalyzer } from "../StyleAnalyzer";
  *   import type { RawPageData, ExtractionResult } from "../types";
  *
- * Built by the second esbuild entry in zotero-plugin.config.ts. Output
- * lands at `chrome://beaver/content/scripts/mupdf-worker.js`.
+ * Built by the second esbuild entry in zotero-plugin.config.ts.
+ *
+ * Configuration: the main-thread client posts a `configure` message as the
+ * first frame after spawning this worker (see `MuPDFWorkerClient.ensureWorker`).
+ * Op messages received before configure throw via `getWorkerUrls()`.
  */
 
 import {
@@ -20,6 +23,7 @@ import {
 } from "./docCache";
 import { enqueue } from "./opQueue";
 import { ensureApi } from "./wasmInit";
+import { setWorkerUrls, type WorkerUrls } from "./config";
 import {
     opAnalyzeOCRNeeds,
     opExtract,
@@ -89,11 +93,18 @@ async function dispatch(op: string, args: Record<string, unknown> | undefined): 
     }
 }
 
-interface IncomingMessage {
+interface IncomingOpMessage {
     id?: number;
     op?: string;
     args?: Record<string, unknown>;
 }
+
+interface IncomingConfigureMessage {
+    kind: "configure";
+    urls: WorkerUrls;
+}
+
+type IncomingMessage = IncomingOpMessage | IncomingConfigureMessage;
 
 interface ExtractionErrorLike {
     name?: string;
@@ -106,7 +117,17 @@ workerSelf.onmessage = (event: MessageEvent) => {
     const data = event.data as IncomingMessage | null;
     if (!data || typeof data !== "object") return;
 
-    const { id, op, args } = data;
+    // Configure frame — first message posted by MuPDFWorkerClient.ensureWorker
+    // immediately after spawn. No reply.
+    if ((data as IncomingConfigureMessage).kind === "configure") {
+        const cfg = data as IncomingConfigureMessage;
+        if (cfg.urls && typeof cfg.urls === "object") {
+            setWorkerUrls(cfg.urls);
+        }
+        return;
+    }
+
+    const { id, op, args } = data as IncomingOpMessage;
     if (typeof id !== "number" || typeof op !== "string") {
         return;
     }

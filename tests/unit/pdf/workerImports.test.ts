@@ -73,9 +73,14 @@ describe('mupdf-worker.js bundle', () => {
         }
     });
 
-    it('preserves the chrome:// WASM factory URL (dynamic import survived bundling)', () => {
+    it('does not bundle any chrome:// Beaver URLs (worker is decoupled — URLs arrive via the configure message)', () => {
+        // After the PDF package decoupling, the worker no longer hardcodes
+        // any `chrome://beaver/...` URLs. They arrive at runtime via the
+        // configure message posted by `MuPDFWorkerClient.ensureWorker`
+        // (sourced from `src/utils/configurePDFForBeaver.ts`). If a URL
+        // shows up here, something in `worker/` is still referencing the
+        // old hardcoded constants instead of `getWorkerUrls()`.
         const source = readFileSync(WORKER_BUNDLE, 'utf-8');
-        expect(source).toContain('chrome://beaver/content/lib/mupdf-wasm.mjs');
-        expect(source).toContain('chrome://beaver/content/lib/mupdf-wasm.wasm');
+        expect(source).not.toContain('chrome://beaver/');
     });
 });

@@ -1,12 +1,13 @@
 /**
  * sentencex-wasm bootstrap inside the worker bundle.
  *
- * Mirrors `wasmInit.ts` line-for-line:
- *   1. Const-indirected `chrome://` URL keeps esbuild from rewriting the
- *      dynamic import. `external: ["chrome://*"]` in the worker entry of
- *      `zotero-plugin.config.ts` is the belt-and-braces backup that
- *      catches any static `import "chrome://..."` a future refactor
- *      might introduce.
+ * Mirrors `wasmInit.ts`:
+ *   1. URLs come from the configure message (see `./config.ts` and
+ *      `./index.ts`). The local `const` indirection at the call site keeps
+ *      esbuild from rewriting the dynamic import. `external: ["chrome://*"]`
+ *      in the worker entry of `zotero-plugin.config.ts` is the
+ *      belt-and-braces backup that catches any static
+ *      `import "chrome://..."` a future refactor might introduce.
  *   2. Workers don't have ChromeUtils/NetUtil and `fetch('chrome://...')`
  *      is unreliable in worker scope, so XHR is the only reliable path
  *      for the WASM binary (shared via `./wasmHelpers`).
@@ -19,12 +20,8 @@
  */
 
 import { loadWasmBinaryXHR } from "./wasmHelpers";
+import { getWorkerUrls } from "./config";
 import type { SentencexBoundary } from "../sentencexShared";
-
-const WASM_FACTORY_URL =
-    "chrome:" + "//beaver/content/lib/sentencex/sentencex_wasm.js";
-const WASM_BINARY_URL =
-    "chrome:" + "//beaver/content/lib/sentencex/sentencex_wasm_bg.wasm";
 
 /** The minimal wasm-bindgen module surface the splitter resolver uses. */
 export interface SentencexModule {
@@ -53,13 +50,19 @@ export async function ensureSentencex(): Promise<SentencexModule> {
     if (_initPromise) return _initPromise;
 
     _initPromise = (async () => {
-        const wasmBinary = await loadWasmBinaryXHR(WASM_BINARY_URL);
+        const urls = getWorkerUrls();
+        // Local consts — keeps the dynamic-import specifier non-literal at
+        // the call site (see file header).
+        const factoryUrl = urls.sentencexWasmFactoryUrl;
+        const binaryUrl = urls.sentencexWasmBinaryUrl;
+
+        const wasmBinary = await loadWasmBinaryXHR(binaryUrl);
 
         // Dynamic import of the wasm-bindgen factory at runtime — the
         // const-indirected specifier defeats esbuild's static analysis,
         // so the bundler leaves it alone (see file header).
         const mod: SentencexFactory = (await import(
-            WASM_FACTORY_URL
+            factoryUrl
         )) as SentencexFactory;
 
         // initSync, NOT default — avoids the shim's import.meta.url / fetch path

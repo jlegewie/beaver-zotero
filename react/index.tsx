@@ -1,6 +1,7 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { Provider } from 'jotai';
+import { configurePDFForBeaver } from '../src/utils/configurePDFForBeaver';
 import LibrarySidebar from './components/LibrarySidebar';
 import { useZoteroSync } from './hooks/useZoteroSync';
 import { useEmbeddingIndex } from './hooks/useEmbeddingIndex';
@@ -27,6 +28,12 @@ import { useReaderVisualizerActionHandler } from './hooks/useReaderVisualizerAct
 import { useOnboardingPopups } from './hooks/useOnboardingPopups';
 import { BeaverTemporaryAnnotations } from './utils/annotationUtils';
 
+// Configure the PDF package (webpack bundle copy). The esbuild bundle
+// configures its own copy from `src/hooks.ts`. Both must run because each
+// bundle has its own module-scope config in `src/services/pdf/config.ts`.
+// The cross-bundle `MuPDFWorkerClient` singleton is shared via
+// `Zotero.__beaverMuPDFWorkerClient` regardless.
+configurePDFForBeaver();
 
 /**
  * Component to initialize global hooks that should only run once.

@@ -15,10 +15,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
-vi.mock('../../../src/utils/logger', () => ({
-    logger: vi.fn(),
-}));
+import { configurePDFForTests } from '../../helpers/configurePDFForTests';
 
 import { disposeMuPDFWorker } from '../../../src/services/pdf/MuPDFWorkerClient';
 import { PDFExtractor } from '../../../src/services/pdf';
@@ -28,21 +25,31 @@ class MockWorker {
     onmessage: ((event: { data: any }) => void) | null = null;
     onerror: ((event: any) => void) | null = null;
     onmessageerror: ((event: any) => void) | null = null;
+    posted: Array<{ message: any; transfer: Transferable[] | undefined }> = [];
+    configureMessages: any[] = [];
     postMessage = vi.fn((message: any, transfer?: Transferable[]) => {
+        if (message?.kind === 'configure') {
+            this.configureMessages.push(message);
+            return;
+        }
         this.posted.push({ message, transfer });
     });
     terminate = vi.fn();
-    posted: Array<{ message: any; transfer: Transferable[] | undefined }> = [];
 
     constructor(public url: string, public options: any) {
         MockWorker.instances.push(this);
     }
 
-    /** Helper: deliver a reply to the most recently posted message. */
+    /** Helper: deliver a reply to the most recently posted op message. */
     replyToLast(reply: any): void {
         const last = this.posted[this.posted.length - 1];
         const id = (last?.message as { id: number } | undefined)?.id;
         this.onmessage?.({ data: { id, ...reply } });
+    }
+
+    opCall(n: number): [any, Transferable[] | undefined] {
+        const e = this.posted[n];
+        return [e?.message, e?.transfer];
     }
 }
 
@@ -51,6 +58,11 @@ function setupZoteroMainWindowWithMockWorker() {
     (globalThis as any).Zotero = (globalThis as any).Zotero ?? {};
     (globalThis as any).Zotero.getMainWindow = vi.fn(() => win);
     (globalThis as any).Zotero.__beaverMuPDFWorkerClient = undefined;
+    configurePDFForTests({
+        slotHost: (globalThis as any).Zotero,
+        slotKey: '__beaverMuPDFWorkerClient',
+        getWorkerHost: () => win,
+    });
 }
 
 const FAKE_RESULT = {
@@ -81,9 +93,10 @@ describe('PDFExtractor.extractSentenceBBoxes — single worker round-trip', () =
         worker.replyToLast({ ok: true, result: FAKE_RESULT });
         await promise;
 
-        // Exactly one posted message, and it's the worker op we expect.
-        expect(worker.postMessage).toHaveBeenCalledTimes(1);
-        const [message] = worker.postMessage.mock.calls[0] as [any, any];
+        // Exactly one posted op message (configure handshake is excluded
+        // from `posted`), and it's the worker op we expect.
+        expect(worker.posted).toHaveLength(1);
+        const [message] = worker.opCall(0);
         expect(message).toMatchObject({
             op: 'extractSentenceBBoxes',
             args: { pageIndex: 0 },
@@ -107,7 +120,7 @@ describe('PDFExtractor.extractSentenceBBoxes — single worker round-trip', () =
         worker.replyToLast({ ok: true, result: FAKE_RESULT });
         await promise;
 
-        const [message] = worker.postMessage.mock.calls[0] as [any, any];
+        const [message] = worker.opCall(0);
         expect(message.args.options.splitterConfig).toEqual({
             type: 'sentencex',
             language: undefined,
@@ -123,7 +136,7 @@ describe('PDFExtractor.extractSentenceBBoxes — single worker round-trip', () =
         worker.replyToLast({ ok: true, result: FAKE_RESULT });
         await promise;
 
-        const [message] = worker.postMessage.mock.calls[0] as [any, any];
+        const [message] = worker.opCall(0);
         expect(message.args.options.splitterConfig).toEqual({
             type: 'sentencex',
             language: 'fr',
@@ -139,7 +152,7 @@ describe('PDFExtractor.extractSentenceBBoxes — single worker round-trip', () =
         worker.replyToLast({ ok: true, result: FAKE_RESULT });
         await promise;
 
-        const [message] = worker.postMessage.mock.calls[0] as [any, any];
+        const [message] = worker.opCall(0);
         expect(message.args.options.splitterConfig).toEqual({ type: 'simple' });
     });
 
@@ -155,7 +168,7 @@ describe('PDFExtractor.extractSentenceBBoxes — single worker round-trip', () =
         worker.replyToLast({ ok: true, result: FAKE_RESULT });
         await promise;
 
-        const [message] = worker.postMessage.mock.calls[0] as [any, any];
+        const [message] = worker.opCall(0);
         expect(message.args.options.splitterConfig).toEqual({
             type: 'sentencex',
             language: 'de',
@@ -177,7 +190,7 @@ describe('PDFExtractor.extractSentenceBBoxes — single worker round-trip', () =
         worker.replyToLast({ ok: true, result: FAKE_RESULT });
         await promise;
 
-        const [message] = worker.postMessage.mock.calls[0] as [any, any];
+        const [message] = worker.opCall(0);
         expect(message.args.options.splitterConfig).toEqual({
             type: 'sentencex',
             language: 'de',
@@ -197,7 +210,7 @@ describe('PDFExtractor.extractSentenceBBoxes — single worker round-trip', () =
         worker.replyToLast({ ok: true, result: FAKE_RESULT });
         await promise;
 
-        const [message] = worker.postMessage.mock.calls[0] as [any, any];
+        const [message] = worker.opCall(0);
         expect(message.args).toMatchObject({
             pageIndex: 7,
             options: {

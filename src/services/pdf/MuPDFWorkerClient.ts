@@ -1,12 +1,14 @@
 /**
  * MuPDFWorkerClient — main-thread client for the MuPDF WASM worker.
  *
- * Cross-bundle singleton: the client lives on `Zotero.__beaverMuPDFWorkerClient`
- * because both bundles (esbuild `src/` and webpack `react/`) import this file
- * transitively. Module-scope state would create one worker per bundle and
- * `src/hooks.ts` would only dispose the esbuild copy.
+ * Cross-bundle singleton: the client lives in a slot supplied by
+ * `getConfig().workerClientSlot` (Beaver wires this to
+ * `Zotero.__beaverMuPDFWorkerClient`). Both bundles — esbuild `src/` and
+ * webpack `react/` — import this file transitively and must therefore
+ * share one client; module-scope state would create one worker per bundle
+ * and shutdown would only dispose the esbuild copy.
  */
-import { logger } from "../../utils/logger";
+import { getConfig, isConfigured } from "./config";
 import {
     ExtractionError,
     ExtractionErrorCode,
@@ -29,8 +31,6 @@ import type {
     WorkerSentenceBBoxOptions,
     WorkerSentenceBBoxTraceOptions,
 } from "./sentenceTypes";
-
-const WORKER_URL = "chrome://beaver/content/scripts/mupdf-worker.js";
 
 interface PendingEntry {
     resolve: (value: any) => void;
@@ -138,7 +138,8 @@ export class MuPDFWorkerClient {
         if (this.disposed) {
             throw new Error("MuPDFWorkerClient: client has been disposed");
         }
-        const mainWindow = (Zotero.getMainWindow?.() ?? null) as Window | null;
+        const cfg = getConfig();
+        const mainWindow = cfg.getWorkerHost();
         if (!mainWindow) {
             throw new Error(
                 "MuPDFWorkerClient: no main window available to spawn worker",
@@ -163,22 +164,29 @@ export class MuPDFWorkerClient {
             );
         }
 
-        const worker = new WorkerCtor(WORKER_URL, { type: "module" });
+        const worker = new WorkerCtor(cfg.workerUrl, { type: "module" });
         this.spawnCount++;
         this.lastSpawnTime = Date.now();
-        logger(`[MuPDFWorkerClient] spawned new worker`, 3);
+        cfg.log(`[MuPDFWorkerClient] spawned new worker`, 3);
         (worker as any).onmessage = (event: MessageEvent) =>
             this.onWorkerMessage(event);
         (worker as any).onerror = (event: any) => {
             const message = event?.message || "worker onerror";
-            logger(`[MuPDFWorkerClient] worker.onerror: ${message}`, 1);
+            cfg.log(`[MuPDFWorkerClient] worker.onerror: ${message}`, 1);
             this.markStale(`worker.onerror: ${message}`);
         };
         (worker as any).onmessageerror = (event: any) => {
             const message = event?.message || "worker onmessageerror";
-            logger(`[MuPDFWorkerClient] worker.onmessageerror: ${message}`, 1);
+            cfg.log(`[MuPDFWorkerClient] worker.onmessageerror: ${message}`, 1);
             this.markStale(`worker.onmessageerror: ${message}`);
         };
+
+        // Configure the worker before any op is dispatched. FIFO message
+        // ordering on a single Worker guarantees the configure frame is
+        // processed before any subsequent op postMessage. Stale-worker
+        // retries flow through this same path, so retried ops are
+        // automatically preceded by a fresh configure.
+        worker.postMessage({ kind: "configure", urls: cfg.worker });
 
         this.worker = worker;
         this.spawnedFromWindowInternal = mainWindow;
@@ -193,14 +201,14 @@ export class MuPDFWorkerClient {
         if ((data as WorkerLogMessage).kind === "log") {
             const log = data as WorkerLogMessage;
             const level = log.level === "error" ? 1 : log.level === "warn" ? 2 : 3;
-            logger(log.msg, level);
+            getConfig().log(log.msg, level);
             return;
         }
 
         const reply = data as WorkerSuccessReply | WorkerFailureReply;
         const entry = this.pending.get(reply.id);
         if (!entry) {
-            logger(
+            getConfig().log(
                 `[MuPDFWorkerClient] received reply for unknown id ${reply.id}`,
                 2,
             );
@@ -234,7 +242,14 @@ export class MuPDFWorkerClient {
 
         const pendingCount = this.pending.size;
         if (pendingCount > 0 || w) {
-            logger(`[MuPDFWorkerClient] markStale (${reason}); rejecting ${pendingCount} pending`, 2);
+            // Log only when configured. markStale can be reached during
+            // shutdown teardown after configure has been wiped.
+            if (isConfigured()) {
+                getConfig().log(
+                    `[MuPDFWorkerClient] markStale (${reason}); rejecting ${pendingCount} pending`,
+                    2,
+                );
+            }
         }
 
         const stale = new StaleWorkerError(`stale worker: ${reason}`);
@@ -251,7 +266,7 @@ export class MuPDFWorkerClient {
      */
     async call<T>(op: string, args: Record<string, unknown> = {}): Promise<T> {
         this.dispatchCounts[op] = (this.dispatchCounts[op] ?? 0) + 1;
-        logger(`[MuPDFWorkerClient] dispatch op=${op}`, 3);
+        getConfig().log(`[MuPDFWorkerClient] dispatch op=${op}`, 3);
         try {
             return await this.dispatch<T>(op, args);
         } catch (e) {
@@ -261,7 +276,10 @@ export class MuPDFWorkerClient {
             // cleanup — propagate the StaleWorkerError instead.
             if (e instanceof StaleWorkerError && !this.disposed) {
                 this.retryCount++;
-                logger(`[MuPDFWorkerClient] retry op=${op} after stale worker`, 2);
+                getConfig().log(
+                    `[MuPDFWorkerClient] retry op=${op} after stale worker`,
+                    2,
+                );
                 return await this.dispatch<T>(op, args);
             }
             throw e;
@@ -633,7 +651,7 @@ export class MuPDFWorkerClient {
                 {},
             );
         } catch (e) {
-            logger(`[MuPDFWorkerClient] getCacheStats failed: ${e}`, 2);
+            getConfig().log(`[MuPDFWorkerClient] getCacheStats failed: ${e}`, 2);
             return null;
         }
     }
@@ -658,7 +676,10 @@ export class MuPDFWorkerClient {
                 { resetCounters: opts.resetCounters !== false },
             );
         } catch (e) {
-            logger(`[MuPDFWorkerClient] clearWorkerCacheForTest failed: ${e}`, 2);
+            getConfig().log(
+                `[MuPDFWorkerClient] clearWorkerCacheForTest failed: ${e}`,
+                2,
+            );
             return null;
         }
     }
@@ -673,7 +694,7 @@ export class MuPDFWorkerClient {
         if (this.disposed) return null;
         const w = this.worker;
         if (!w) return null;
-        const mainWindow = (Zotero.getMainWindow?.() ?? null) as Window | null;
+        const mainWindow = isConfigured() ? getConfig().getWorkerHost() : null;
         if (
             mainWindow &&
             this.spawnedFromWindowInternal &&
@@ -717,8 +738,11 @@ export class MuPDFWorkerClient {
         // refuses to retry / respawn.
         this.disposed = true;
         this.markStale("dispose");
-        if ((Zotero as any).__beaverMuPDFWorkerClient === this) {
-            (Zotero as any).__beaverMuPDFWorkerClient = undefined;
+        if (isConfigured()) {
+            const slot = getConfig().workerClientSlot;
+            if (slot.get() === this) {
+                slot.set(undefined);
+            }
         }
     }
 }
@@ -746,29 +770,33 @@ function rehydrateError(payload: WorkerErrorPayload | undefined): Error {
 }
 
 /**
- * Get (or lazily spawn) the cross-bundle MuPDFWorkerClient singleton.
+ * Get (or lazily spawn) the cross-bundle MuPDFWorkerClient singleton. The
+ * actual storage location lives in `getConfig().workerClientSlot` — Beaver
+ * wires that to `Zotero.__beaverMuPDFWorkerClient` via `configurePDFForBeaver`.
  */
 export function getMuPDFWorkerClient(): MuPDFWorkerClient {
-    const slot = (Zotero as any).__beaverMuPDFWorkerClient as
-        | MuPDFWorkerClient
-        | undefined;
-    if (slot) return slot;
+    const slot = getConfig().workerClientSlot;
+    const existing = slot.get() as MuPDFWorkerClient | undefined;
+    if (existing) return existing;
     const client = new MuPDFWorkerClient();
-    (Zotero as any).__beaverMuPDFWorkerClient = client;
+    slot.set(client);
     return client;
 }
 
 /**
  * Dispose the singleton MuPDFWorkerClient. Safe to call multiple times.
  *
- * Async-signature for parity with `disposeMuPDF()` even though the underlying
- * `worker.terminate()` is synchronous — this keeps the call sites uniform
- * (`Promise.all([disposeMuPDF(), disposeMuPDFWorker()])`).
+ * Early-returns when the package was never configured (e.g. error paths
+ * during shutdown that run before `configurePDF` ever fired). The
+ * async-signature is kept for parity with `disposeMuPDF()` even though the
+ * underlying `worker.terminate()` is synchronous — this keeps the call
+ * sites uniform (`Promise.all([disposeMuPDF(), disposeMuPDFWorker()])`).
  */
 export async function disposeMuPDFWorker(): Promise<void> {
-    const slot = (Zotero as any).__beaverMuPDFWorkerClient as
+    if (!isConfigured()) return;
+    const existing = getConfig().workerClientSlot.get() as
         | MuPDFWorkerClient
         | undefined;
-    if (!slot) return;
-    slot.dispose();
+    if (!existing) return;
+    existing.dispose();
 }

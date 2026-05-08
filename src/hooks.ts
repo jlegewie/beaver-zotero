@@ -11,6 +11,7 @@ import { getPref, setPref } from "./utils/prefs";
 import { addPendingVersionNotification } from "./utils/versionNotificationPrefs";
 import { getAllVersionUpdateMessageVersions } from "../react/constants/versionUpdateMessages";
 import { disposeMuPDF, disposeMuPDFWorker } from "./utils/mupdf";
+import { configurePDFForBeaver } from "./utils/configurePDFForBeaver";
 import { registerBeaverProtocolHandler, unregisterBeaverProtocolHandler } from "./services/protocolHandler";
 import { cancelAllActiveTasks } from "./utils/backgroundTasks";
 import { initContextMenus, cleanupContextMenus } from "./modules/zoteroContextMenu";
@@ -214,6 +215,11 @@ async function onStartup() {
     initLocale();
     ztoolkit.log("Startup");
 
+    // -------- Configure the PDF package (esbuild bundle copy) --------
+    // Idempotent. Must run before any PDF op. The webpack bundle calls the
+    // same adapter from `react/index.tsx` for its own copy of the config.
+    configurePDFForBeaver();
+
     // -------- Store plugin version --------
     addon.pluginVersion = version;
     ztoolkit.log(`Plugin version: ${version}`);
@@ -310,6 +316,13 @@ async function onStartup() {
 async function onMainWindowLoad(win: Window): Promise<void> {
     // Create ztoolkit for every window
     addon.data.ztoolkit = createZToolkit();
+
+    // Re-configure the PDF package on every main-window load. Required for
+    // the macOS close-last-window-then-reopen lifecycle (see CLAUDE.md):
+    // `onStartup()` does not re-run, but the package's module-scope config
+    // and the worker's per-window state must be valid for the new window.
+    // Idempotent — `configurePDF()` overwrites prior config.
+    configurePDFForBeaver();
 
     registerMainWindowFtl(win);
 
