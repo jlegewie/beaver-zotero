@@ -7,16 +7,25 @@ import {
     submitEmptyLibraryDiscoverAtom,
 } from '../../../atoms/firstRun';
 import Button from '../../ui/Button';
-import { ArrowRightIcon, GlobalSearchIcon, Spinner } from '../../icons/icons';
+import { ArrowRightIcon, Spinner } from '../../icons/icons';
 import { logger } from '../../../../src/utils/logger';
 
 /**
  * Empty-library first-run experience: research-interest textarea + submit
- * button. Submitting opens a new thread with web search enabled and runs the
- * discovery prompt; the existing `discover_research` follow-ups (NextStepsPanel)
- * surface "save the top results to a new collection" — which imports items
- * into Zotero, the natural starter step for an empty library.
+ * button + example-topic chips. Submitting opens a new thread with web search
+ * enabled and runs the discovery prompt; the existing `discover_research`
+ * follow-ups (NextStepsPanel) surface "save the top results to a new
+ * collection" — which imports items into Zotero, the natural starter step
+ * for an empty library.
  */
+const EXAMPLE_TOPICS = [
+    'Social media and teen mental health',
+    'mRNA cancer vaccines',
+    'Coral reef restoration',
+    'How LLMs hallucinate',
+    'Psychedelics for depression',
+];
+
 const EmptyLibraryDiscovery: React.FC = () => {
     const [interest, setInterest] = useAtom(emptyLibraryDiscoverInputAtom);
     const isSubmitting = useAtomValue(emptyLibraryDiscoverSubmittingAtom);
@@ -53,17 +62,22 @@ const EmptyLibraryDiscovery: React.FC = () => {
         e.target.style.height = `${e.target.scrollHeight}px`;
     };
 
+    const handleChipClick = (topic: string) => {
+        if (isSubmitting) return;
+        setInterest(topic);
+        textareaRef.current?.focus();
+    };
+
     return (
-        <div className="display-flex flex-col gap-3">
-            <div className="display-flex flex-row items-center gap-2 mt-2 mb-1">
-                <GlobalSearchIcon width={14} height={14} className="font-color-primary" />
-                <div className="text-base font-semibold">
-                    Tell us what you&apos;re researching
-                </div>
-            </div>
-            <div className="text-base font-color-secondary mb-1">
-                Beaver will find recent, highly-cited papers in your area to get your library started.
-            </div>
+        <div className="display-flex flex-col gap-4 mt-1">
+            <style>
+                {`
+                .empty-library-discover-input::placeholder {
+                    color: var(--fill-secondary);
+                    opacity: 1;
+                }
+                `}
+            </style>
 
             <div className="user-message-display">
                 <textarea
@@ -71,16 +85,31 @@ const EmptyLibraryDiscovery: React.FC = () => {
                     value={interest}
                     onChange={handleChange}
                     onKeyDown={handleKeyDown}
-                    placeholder="e.g. machine learning for protein structure prediction"
-                    className="chat-input"
+                    placeholder="Describe what you're researching…"
+                    className="chat-input empty-library-discover-input"
                     rows={3}
                     maxLength={EMPTY_LIBRARY_DISCOVER_MAX_LENGTH}
                     disabled={isSubmitting}
-                    style={{ minHeight: '80px' }}
+                    style={{ minHeight: '72px' }}
                 />
             </div>
 
-            <div className="display-flex flex-row items-center justify-end">
+            <div className="display-flex flex-row items-center justify-center gap-25 flex-wrap">
+                {EXAMPLE_TOPICS.map((topic) => (
+                    <Button
+                        key={topic}
+                        variant="surface-light"
+                        onClick={() => handleChipClick(topic)}
+                        disabled={isSubmitting}
+                        className="fit-content"
+                        style={{ padding: '2px 8px', fontSize: '0.875rem' }}
+                    >
+                        {topic}
+                    </Button>
+                ))}
+            </div>
+
+            <div className="display-flex flex-row items-center justify-end mt-1">
                 <Button
                     variant="solid"
                     onClick={() => void handleSubmit()}
@@ -91,6 +120,12 @@ const EmptyLibraryDiscovery: React.FC = () => {
                     Discover papers
                 </Button>
             </div>
+
+            {isSubmitting && trimmed.length > 0 && (
+                <div className="font-color-secondary text-sm mt-1">
+                    Finding recent work on {trimmed}…
+                </div>
+            )}
         </div>
     );
 };

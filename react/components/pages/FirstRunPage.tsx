@@ -55,7 +55,8 @@ const FirstRunPage: React.FC<FirstRunPageProps> = () => {
     const [footerError, setFooterError] = useState<string | null>(null);
 
     // Re-run the loader when libraryHasItems flips so an empty-library user
-    // who adds their first item transitions out of the static info-card state.
+    // who adds their first item transitions from the discovery textarea
+    // into the regular suggestion-card flow.
     useEffect(() => {
         void load();
     }, [load, libraryHasItems]);
