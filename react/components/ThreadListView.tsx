@@ -12,6 +12,9 @@ import { getDateGroup } from '../utils/dateUtils';
 import { formatTimeAgo } from '../utils/formatTimeAgo';
 import Button from './ui/Button';
 import { clearRecentChatsCache } from './RecentChats';
+import { isTransientNetworkError } from '../utils/isTransientNetworkError';
+
+type FetchError = { offline: boolean } | null;
 
 interface ThreadListViewProps {
     isWindow?: boolean;
@@ -72,6 +75,7 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
     const [isLoading, setIsLoading] = useState(false);
     const [hasMore, setHasMore] = useState(false);
     const [nextCursor, setNextCursor] = useState<string | null>(null);
+    const [fetchError, setFetchError] = useState<FetchError>(null);
 
     const [searchQuery, setSearchQuery] = useState('');
     const [activeQuery, setActiveQuery] = useState('');
@@ -94,6 +98,7 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
             setThreads(cached.threads);
             setHasMore(cached.hasMore);
             setNextCursor(cached.nextCursor);
+            setFetchError(null);
             return;
         }
 
@@ -134,8 +139,15 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
                     timestamp: Date.now(),
                 });
             }
+            setFetchError(null);
         } catch (error) {
             console.error('Error fetching threads:', error);
+            if (isTransientNetworkError(error)) {
+                const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
+                setFetchError({ offline });
+            } else {
+                setFetchError(null);
+            }
         } finally {
             setIsLoading(false);
         }
@@ -211,8 +223,13 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
                 nextCursor: response.next_cursor,
                 timestamp: Date.now(),
             });
+            setFetchError(null);
         } catch (error) {
             console.error('Error loading more threads:', error);
+            if (isTransientNetworkError(error)) {
+                const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
+                setFetchError({ offline });
+            }
         } finally {
             setIsLoading(false);
         }
@@ -434,8 +451,31 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
                     );
                 })}
 
+                {/* Network error state — replaces empty state when fetch failed transiently */}
+                {!isLoading && threads.length === 0 && fetchError && (
+                    <div className="display-flex flex-col items-center justify-center gap-2 py-6 text-center px-3">
+                        <span className="font-color-primary font-semibold text-sm">
+                            {fetchError.offline ? "You're offline" : "Couldn't load chats"}
+                        </span>
+                        <span className="font-color-tertiary text-sm">
+                            {fetchError.offline
+                                ? 'Reconnect to load your chats.'
+                                : 'Check your connection and try again.'}
+                        </span>
+                        <Button
+                            variant="outline"
+                            onClick={() => fetchThreads(activeQuery)}
+                            disabled={isLoading}
+                            type="button"
+                            loading={isLoading}
+                        >
+                            Try again
+                        </Button>
+                    </div>
+                )}
+
                 {/* Empty state */}
-                {!isLoading && threads.length === 0 && (
+                {!isLoading && threads.length === 0 && !fetchError && (
                     <div className="display-flex items-center justify-center py-6">
                         <span className="font-color-tertiary text-sm">
                             {activeQuery ? 'No matching chats' : 'No chats yet'}
@@ -450,8 +490,25 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
                     </div>
                 )}
 
+                {/* Inline network error — when we already have some threads but a refresh / load-more failed */}
+                {threads.length > 0 && fetchError && !isLoading && (
+                    <div className="display-flex items-center gap-2 px-3 py-2">
+                        <span className="font-color-tertiary text-sm flex-1">
+                            {fetchError.offline ? "You're offline." : "Couldn't reach the server."}
+                        </span>
+                        <Button
+                            variant="outline"
+                            onClick={() => fetchThreads(activeQuery)}
+                            disabled={isLoading}
+                            type="button"
+                        >
+                            Try again
+                        </Button>
+                    </div>
+                )}
+
                 {/* Show more */}
-                {hasMore && (
+                {hasMore && !fetchError && (
                     <div className="display-flex justify-start p-2 ml-2 pb-3">
                         <Button
                             variant="outline"
