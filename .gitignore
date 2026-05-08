@@ -37,3 +37,6 @@ reactBundle.js.map
 # Zotero documentation
 docs-zotero
 /tests/manual/*
+
+# Sentence-extraction regression fixtures (real PDFs — local-only)
+/tests/fixtures/pdfs/sentences/
