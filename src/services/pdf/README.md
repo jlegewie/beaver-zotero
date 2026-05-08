@@ -99,10 +99,9 @@ src/services/pdf/
 ├── RawFontBridge.ts               # Bridge per-char font info into detailed pages
 ├── SentenceMapper.ts              # Span-level sentence → bbox mapping
 ├── ParagraphSentenceMapper.ts     # Paragraph-level sentence → bbox mapping
-├── SentencexSplitter.ts           # sentencex wrapper + byte/char range conversion
+├── SentencexSplitter.ts           # sentencex byte/char range conversion + language normalization
 ├── sentenceTypes.ts               # Sentence-pipeline types
 ├── sentencePostprocess.ts         # Sentence-output post-processing
-├── sentencexShared.ts             # Shared helpers between splitter and worker
 └── README.md                      # This file
 
 react/utils/

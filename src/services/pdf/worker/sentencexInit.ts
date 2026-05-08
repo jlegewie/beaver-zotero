@@ -21,7 +21,7 @@
 
 import { loadWasmBinaryXHR } from "./wasmHelpers";
 import { getWorkerUrls } from "./config";
-import type { SentencexBoundary } from "../sentencexShared";
+import type { SentencexBoundary } from "../SentencexSplitter";
 
 /** The minimal wasm-bindgen module surface the splitter resolver uses. */
 export interface SentencexModule {

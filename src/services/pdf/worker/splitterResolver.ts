@@ -23,7 +23,7 @@ import { applyPostProcessing } from "../sentencePostprocess";
 import {
     normalizeLanguageCode,
     sentencexBoundariesToCharRanges,
-} from "../sentencexShared";
+} from "../SentencexSplitter";
 import type { SentenceSplitterConfig } from "../sentenceTypes";
 import { ensureSentencex } from "./sentencexInit";
 import { postLog } from "./errors";
