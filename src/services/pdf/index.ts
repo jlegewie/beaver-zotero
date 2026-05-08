@@ -140,7 +140,6 @@ export type {
     SentenceSplitterConfig,
     ExtractSentenceBBoxesArgs,
     WorkerSentenceBBoxOptions,
-    WorkerSentenceBBoxTraceOptions,
     SentenceBBoxTrace,
     SentenceBBoxTraceResult,
 } from "./sentenceTypes";
@@ -285,13 +284,17 @@ export class PDFExtractor {
         pdfData: Uint8Array | ArrayBuffer,
         args: ExtractSentenceBBoxesArgs,
     ): Promise<PageSentenceBBoxResult> {
-        const { pageIndex, splitter, language, ...rest } = args;
+        const { pageIndex, splitter, language, paragraphSettings, analysisWindow } = args;
         const splitterConfig: SentenceSplitterConfig =
             splitter ?? { type: "sentencex", language };
+        // Forward only the named production fields. Spreading `...rest` would
+        // let an `any`-typed or request-derived `args` object leak `debug: true`
+        // through to the worker call, silently turning this method's
+        // `Promise<PageSentenceBBoxResult>` into a trace envelope at runtime.
         return getMuPDFWorkerClient().extractSentenceBBoxes(
             pdfData,
             pageIndex,
-            { ...rest, splitterConfig },
+            { splitterConfig, paragraphSettings, analysisWindow },
         );
     }
 

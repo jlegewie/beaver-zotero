@@ -659,7 +659,7 @@ export async function handleTestPdfSentenceBBoxesHttpRequest(request: any) {
  *
  * Level dispatch notes:
  *   - `sentences`, `columns`, `lines`, `paragraphs`, `margins` all share
- *     a single `extractSentenceBBoxesTrace` worker round-trip; each
+ *     a single `extractSentenceBBoxes` debug-mode worker round-trip; each
  *     level then turns the returned `result` / `trace` into rects via
  *     a pure builder in `extractionOverlay.ts`
  *     (`buildSentenceOverlayFromResult`, `build{Column,Line,Paragraph,
@@ -749,7 +749,7 @@ export async function handleTestPdfRenderOverlayHttpRequest(request: any) {
         }
     } else {
         // sentences / columns / lines / paragraphs / margins: one worker
-        // round-trip via `extractSentenceBBoxesTrace`. The worker owns
+        // round-trip via `extractSentenceBBoxes(..., { debug: true })`. The worker owns
         // the full pipeline (analysis window, font bridging, margin
         // analysis, filtered-paragraph detection, splitter resolution,
         // sentence mapping); main-thread builders below convert the
@@ -777,12 +777,13 @@ export async function handleTestPdfRenderOverlayHttpRequest(request: any) {
                 : undefined;
 
         try {
-            const out = await client.extractSentenceBBoxesTrace(
+            const out = await client.extractSentenceBBoxes(
                 pdfData,
                 pageIndex,
                 {
                     splitterConfig: { type: 'sentencex', language },
                     analysisWindow,
+                    debug: true,
                 },
             );
             switch (level) {
@@ -949,12 +950,13 @@ export async function handleTestPdfPipelineTraceHttpRequest(request: any) {
     let result: PageSentenceBBoxResult;
     let trace: SentenceBBoxTrace;
     try {
-        const out = await getMuPDFWorkerClient().extractSentenceBBoxesTrace(
+        const out = await getMuPDFWorkerClient().extractSentenceBBoxes(
             pdfData,
             pageIndex,
             {
                 splitterConfig: { type: 'sentencex', language },
                 analysisWindow,
+                debug: true,
             },
         );
         result = out.result;

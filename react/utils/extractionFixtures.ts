@@ -136,11 +136,12 @@ export async function createSentenceFixture(): Promise<CreateSentenceFixtureResu
         // (rawDoc, detailedPage, font-bridged pagesForFilter, margin
         // analysis/removal, filteredResult) + recorded splitter outputs
         // for hermetic unit-tier replay. Same pipeline production uses.
-        const out = await client.extractSentenceBBoxesTrace(
+        const out = await client.extractSentenceBBoxes(
             pdfData,
             pageIndex,
             {
                 splitterConfig: { type: "sentencex", language },
+                debug: true,
                 recordSplitter: true,
             },
         );

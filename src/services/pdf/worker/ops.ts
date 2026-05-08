@@ -58,7 +58,6 @@ import type { PageSentenceBBoxResult } from "../ParagraphSentenceMapper";
 import type {
     SentenceBBoxTraceResult,
     WorkerSentenceBBoxOptions,
-    WorkerSentenceBBoxTraceOptions,
 } from "../sentenceTypes";
 import { ERROR_CODES, workerError } from "./errors";
 import { acquireDoc, releaseDoc } from "./docCache";
@@ -547,13 +546,40 @@ export async function opSearch(
     }
 }
 
+/**
+ * Sentence-level bbox extraction for a single page.
+ *
+ * Production by default. When `options.debug === true`, the op also returns the
+ * pipeline intermediates (analysis-window indices, raw doc, detailed page,
+ * font-bridged `pagesForFilter`, margin analysis/removal, filtered-paragraph
+ * result). The two narrowing overloads key off the `debug` literal so callers
+ * see the right return type without runtime branching.
+ *
+ * `recordSplitter` is only representable on the debug variant — the
+ * discriminated `WorkerSentenceBBoxOptions` union forbids it on production
+ * calls.
+ */
+export async function opExtractSentenceBBoxes(
+    args: {
+        pdfData: Uint8Array | ArrayBuffer;
+        pageIndex: number;
+        options?: WorkerSentenceBBoxOptions & { debug?: false };
+    },
+): Promise<OpReply<PageSentenceBBoxResult>>;
+export async function opExtractSentenceBBoxes(
+    args: {
+        pdfData: Uint8Array | ArrayBuffer;
+        pageIndex: number;
+        options: WorkerSentenceBBoxOptions & { debug: true };
+    },
+): Promise<OpReply<SentenceBBoxTraceResult>>;
 export async function opExtractSentenceBBoxes(
     args: {
         pdfData: Uint8Array | ArrayBuffer;
         pageIndex: number;
         options?: WorkerSentenceBBoxOptions;
     },
-): Promise<OpReply<PageSentenceBBoxResult>> {
+): Promise<OpReply<PageSentenceBBoxResult | SentenceBBoxTraceResult>> {
     const doc = await acquireDoc(args.pdfData);
     try {
         const pageCount = doc.countPages();
@@ -567,14 +593,29 @@ export async function opExtractSentenceBBoxes(
                 `Page index ${args.pageIndex} out of range (0..${pageCount - 1})`,
             );
         }
-        const opts = args.options ?? {};
+        const opts = args.options;
+        // Branch on the literal debug value — `runSentenceExtractionFromDoc`
+        // overloads on `trace: true | false` and rejects a widened boolean.
+        if (opts?.debug) {
+            const traceResult = await runSentenceExtractionFromDoc({
+                doc,
+                pageIndex: args.pageIndex,
+                pageCount,
+                splitterConfig: opts.splitterConfig,
+                analysisWindow: opts.analysisWindow,
+                paragraphSettings: opts.paragraphSettings,
+                trace: true,
+                recordSplitter: opts.recordSplitter,
+            });
+            return { result: traceResult };
+        }
         const { result } = await runSentenceExtractionFromDoc({
             doc,
             pageIndex: args.pageIndex,
             pageCount,
-            splitterConfig: opts.splitterConfig,
-            analysisWindow: opts.analysisWindow,
-            paragraphSettings: opts.paragraphSettings,
+            splitterConfig: opts?.splitterConfig,
+            analysisWindow: opts?.analysisWindow,
+            paragraphSettings: opts?.paragraphSettings,
             trace: false,
         });
         return { result };
@@ -680,39 +721,3 @@ export async function opAnalyzeMarginRemoval(
     }
 }
 
-export async function opExtractSentenceBBoxesTrace(
-    args: {
-        pdfData: Uint8Array | ArrayBuffer;
-        pageIndex: number;
-        options?: WorkerSentenceBBoxTraceOptions;
-    },
-): Promise<OpReply<SentenceBBoxTraceResult>> {
-    const doc = await acquireDoc(args.pdfData);
-    try {
-        const pageCount = doc.countPages();
-        if (
-            typeof args.pageIndex !== "number" ||
-            args.pageIndex < 0 ||
-            args.pageIndex >= pageCount
-        ) {
-            throw workerError(
-                ERROR_CODES.PAGE_OUT_OF_RANGE,
-                `Page index ${args.pageIndex} out of range (0..${pageCount - 1})`,
-            );
-        }
-        const opts = args.options ?? {};
-        const traceResult = await runSentenceExtractionFromDoc({
-            doc,
-            pageIndex: args.pageIndex,
-            pageCount,
-            splitterConfig: opts.splitterConfig,
-            analysisWindow: opts.analysisWindow,
-            paragraphSettings: opts.paragraphSettings,
-            trace: true,
-            recordSplitter: opts.recordSplitter,
-        });
-        return { result: traceResult };
-    } finally {
-        releaseDoc(doc);
-    }
-}

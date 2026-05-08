@@ -219,4 +219,29 @@ describe('PDFExtractor.extractSentenceBBoxes — single worker round-trip', () =
             },
         });
     });
+
+    // The facade forwards only named production fields to the worker call
+    // (`splitterConfig`, `paragraphSettings`, `analysisWindow`). A
+    // request-derived or `any`-typed args object cannot leak `debug: true`
+    // through the facade — that would silently turn the
+    // `Promise<PageSentenceBBoxResult>` return into a trace envelope at
+    // runtime.
+    it('does NOT leak unknown fields from the public args (e.g. debug)', async () => {
+        const permissiveArgs = {
+            pageIndex: 0,
+            // Type-erase to simulate a request-derived caller.
+            ...({ debug: true, recordSplitter: true } as any),
+        };
+        const promise = new PDFExtractor().extractSentenceBBoxes(
+            new Uint8Array([1]),
+            permissiveArgs as any,
+        );
+        const worker = MockWorker.instances[0];
+        worker.replyToLast({ ok: true, result: FAKE_RESULT });
+        await promise;
+
+        const [message] = worker.opCall(0);
+        expect(message.args.options).not.toHaveProperty('debug');
+        expect(message.args.options).not.toHaveProperty('recordSplitter');
+    });
 });

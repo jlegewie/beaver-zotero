@@ -853,5 +853,79 @@ describe('MuPDFWorkerClient', () => {
                 type: 'simple',
             });
         });
+
+        // Debug-mode coverage. The trace path was previously a separate
+        // worker op (`extractSentenceBBoxesTrace`); it now collapses into
+        // this same op behind `options.debug: true`. Without these tests
+        // the consolidation could silently drop the trace path from unit
+        // coverage.
+        it('debug: true posts the production op string with options.debug and resolves to the trace envelope', async () => {
+            const client = getMuPDFWorkerClient();
+            const promise = client.extractSentenceBBoxes(
+                new Uint8Array([1]),
+                2,
+                { debug: true },
+            );
+            const worker = MockWorker.instances[0];
+            const traceReply = {
+                result: {
+                    paragraphs: [],
+                    sentences: [],
+                    unmappedParagraphs: 0,
+                    degradedParagraphs: 0,
+                },
+                trace: {
+                    analysisPageIndices: [2],
+                    rawDoc: { pageCount: 1, pages: [] },
+                    detailed: { pageIndex: 2, pageNumber: 3, width: 0, height: 0, blocks: [] },
+                    pagesForFilter: [],
+                    marginAnalysis: { elements: new Map(), counts: { top: 0, bottom: 0, left: 0, right: 0 } },
+                    marginRemoval: {
+                        candidates: [],
+                        textsToRemove: new Set(),
+                        removalsByPage: new Map(),
+                    },
+                    filteredResult: {},
+                },
+            };
+            worker.replyToLast({ ok: true, result: traceReply });
+            const out = await promise;
+            const [message] = worker.opCall(0);
+            // Same op string as production — the merge collapses both modes
+            // behind one dispatcher case.
+            expect(message).toMatchObject({
+                op: 'extractSentenceBBoxes',
+                args: { pageIndex: 2, options: { debug: true } },
+            });
+            // The promise resolves to the trace envelope shape.
+            expect(out).toHaveProperty('result');
+            expect(out).toHaveProperty('trace');
+            expect((out as { trace: { analysisPageIndices: number[] } }).trace.analysisPageIndices).toEqual([2]);
+        });
+
+        it('debug: true forwards recordSplitter alongside the production fields', async () => {
+            const client = getMuPDFWorkerClient();
+            const promise = client.extractSentenceBBoxes(
+                new Uint8Array([1]),
+                0,
+                {
+                    splitterConfig: { type: 'sentencex', language: 'en' },
+                    debug: true,
+                    recordSplitter: true,
+                },
+            );
+            const worker = MockWorker.instances[0];
+            worker.replyToLast({
+                ok: true,
+                result: { result: { paragraphs: [], sentences: [] }, trace: {} },
+            });
+            await promise;
+            const [message] = worker.opCall(0);
+            expect(message.args.options).toMatchObject({
+                splitterConfig: { type: 'sentencex', language: 'en' },
+                debug: true,
+                recordSplitter: true,
+            });
+        });
     });
 });

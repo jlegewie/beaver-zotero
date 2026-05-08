@@ -42,7 +42,6 @@ import {
     opExtractRawPageDetailed,
     opExtractRawPages,
     opExtractSentenceBBoxes,
-    opExtractSentenceBBoxesTrace,
     opGetMetadata,
     opGetPageCount,
     opRenderPages,
@@ -95,8 +94,6 @@ async function dispatch(op: string, args: Record<string, unknown> | undefined): 
             return await opSearch(a as Parameters<typeof opSearch>[0]);
         case "extractSentenceBBoxes":
             return await opExtractSentenceBBoxes(a as Parameters<typeof opExtractSentenceBBoxes>[0]);
-        case "extractSentenceBBoxesTrace":
-            return await opExtractSentenceBBoxesTrace(a as Parameters<typeof opExtractSentenceBBoxesTrace>[0]);
         case "analyzeMarginRemoval":
             return await opAnalyzeMarginRemoval(a as Parameters<typeof opAnalyzeMarginRemoval>[0]);
         default:

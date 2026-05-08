@@ -31,7 +31,6 @@ import type { PageSentenceBBoxResult } from "./ParagraphSentenceMapper";
 import type {
     SentenceBBoxTraceResult,
     WorkerSentenceBBoxOptions,
-    WorkerSentenceBBoxTraceOptions,
 } from "./sentenceTypes";
 
 interface PendingEntry {
@@ -548,6 +547,26 @@ export class MuPDFWorkerClient {
      * the actual splitter function via its own `resolveSplitter`,
      * including the sentencex→simple fallback on init failure.
      *
+     * `options` is the discriminated `WorkerSentenceBBoxOptions` union:
+     * production calls (`debug?: false`) return `PageSentenceBBoxResult`;
+     * debug calls (`debug: true`) return `SentenceBBoxTraceResult` =
+     * `{ result, trace }` with all pipeline intermediates
+     * (analysis-window indices, raw doc, detailed page, font-bridged
+     * `pagesForFilter`, margin analysis/removal, filtered-paragraph
+     * result). `recordSplitter` is only representable on the debug variant.
+     *
+     * The two narrowing overloads key off the `debug` literal so callers
+     * see the right return type without runtime branching. Callers passing
+     * an options *variable* whose `debug` has widened to `boolean` must
+     * `as const` the literal or type the variable as one of the union
+     * variants.
+     *
+     * **Map/Set boundary (debug only).** `trace.marginAnalysis`,
+     * `trace.marginRemoval`, and `trace.filteredResult.styleProfile` carry
+     * `Map`/`Set` fields. `postMessage` preserves them via structured
+     * clone, but `JSON.stringify` does NOT — flatten before writing HTTP
+     * responses.
+     *
      * `options` is restricted to `WorkerSentenceBBoxOptions`: no
      * function-valued `splitter` (not structurally cloneable) and no
      * `precomputed` (the worker always runs the full filtered-paragraph
@@ -557,52 +576,24 @@ export class MuPDFWorkerClient {
     async extractSentenceBBoxes(
         pdfData: Uint8Array | ArrayBuffer,
         pageIndex: number,
-        options?: WorkerSentenceBBoxOptions,
-    ): Promise<PageSentenceBBoxResult> {
-        const bytes =
-            pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
-        return this.call<PageSentenceBBoxResult>("extractSentenceBBoxes", {
-            pdfData: bytes,
-            pageIndex,
-            options,
-        });
-    }
-
-    /**
-     * Trace-mode sentence extraction.
-     *
-     * Returns the production sentence result alongside the worker
-     * pipeline's intermediates (analysis-window indices, the JSON-walked
-     * raw doc, the detailed target page, font-bridged `pagesForFilter`,
-     * margin analysis/removal, and the filtered-paragraph result).
-     *
-     * Used by dev/debug surfaces — `/pdf-pipeline-trace`,
-     * `/pdf-render-overlay`, the reader visualizer, and fixture capture
-     * — so they all inspect the exact pipeline production used (no
-     * main-thread reconstruction that can drift).
-     *
-     * `options.recordSplitter: true` adds a `splitterRecording` field
-     * to the trace payload (deterministic deep-copies of every
-     * `(text → ranges)` pair the splitter produced) for hermetic
-     * unit-test replay in fixture capture.
-     *
-     * **Map/Set boundary.** `trace.marginAnalysis`, `trace.marginRemoval`,
-     * and `trace.filteredResult.styleProfile` carry `Map`/`Set` fields.
-     * `postMessage` preserves them via structured clone, but
-     * `JSON.stringify` does NOT — flatten before writing HTTP responses.
-     */
-    async extractSentenceBBoxesTrace(
+        options?: WorkerSentenceBBoxOptions & { debug?: false },
+    ): Promise<PageSentenceBBoxResult>;
+    async extractSentenceBBoxes(
         pdfData: Uint8Array | ArrayBuffer,
         pageIndex: number,
-        options?: WorkerSentenceBBoxTraceOptions,
-    ): Promise<SentenceBBoxTraceResult> {
+        options: WorkerSentenceBBoxOptions & { debug: true },
+    ): Promise<SentenceBBoxTraceResult>;
+    async extractSentenceBBoxes(
+        pdfData: Uint8Array | ArrayBuffer,
+        pageIndex: number,
+        options?: WorkerSentenceBBoxOptions,
+    ): Promise<PageSentenceBBoxResult | SentenceBBoxTraceResult> {
         const bytes =
             pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
-        return this.call<SentenceBBoxTraceResult>("extractSentenceBBoxesTrace", {
-            pdfData: bytes,
-            pageIndex,
-            options,
-        });
+        return this.call<PageSentenceBBoxResult | SentenceBBoxTraceResult>(
+            "extractSentenceBBoxes",
+            { pdfData: bytes, pageIndex, options },
+        );
     }
 
     /** Force WASM init in the worker. Useful for tests and pre-warm. */

@@ -13,7 +13,9 @@
  *   - `ExtractSentenceBBoxesArgs` — public PDFExtractor facade input. Uses
  *     `splitter` for ergonomics; PDFExtractor immediately translates that
  *     into a `splitterConfig` before calling the worker client.
- *   - `WorkerSentenceBBoxOptions` — worker-boundary input shape. Uses
+ *   - `WorkerSentenceBBoxOptions` — worker-boundary input shape. Discriminated
+ *     union over `debug`: production variant (`debug?: false`) cannot carry
+ *     `recordSplitter`; debug variant (`debug: true`) may. Uses
  *     `splitterConfig` (no name collision with the function-valued
  *     `splitter` field on the internal mapper contract
  *     `PageSentenceBBoxOptions`).
@@ -58,37 +60,38 @@ export interface ExtractSentenceBBoxesArgs {
 }
 
 /**
- * Cloneable input to the worker op `extractSentenceBBoxes`. Used by the
- * worker client and the worker dispatcher. Does NOT carry the
- * function-valued `splitter` (would break `postMessage`) and does NOT
- * carry `precomputed` (the worker always runs the full filtered-paragraph
- * pipeline; precomputed shortcuts live on the internal mapper contract
- * `PageSentenceBBoxOptions` and are used only by main-thread debug paths).
+ * Shared production fields for `WorkerSentenceBBoxOptions`. The full type is
+ * a discriminated union over `debug` — see below.
  */
-export interface WorkerSentenceBBoxOptions {
+interface WorkerSentenceBBoxBaseOptions {
     splitterConfig?: SentenceSplitterConfig;
     paragraphSettings?: ParagraphDetectionSettings;
     analysisWindow?: number;
 }
 
 /**
- * Trace-mode worker op input. Superset of `WorkerSentenceBBoxOptions` —
- * crosses the worker boundary the same way; the only addition is
- * `recordSplitter`, which tells the worker to wrap the resolved splitter
- * and return the recorded `(text → ranges)` pairs in the trace payload.
+ * Cloneable input to the worker op `extractSentenceBBoxes`. Used by the
+ * worker client and the worker dispatcher. Does NOT carry the
+ * function-valued `splitter` (would break `postMessage`) and does NOT
+ * carry `precomputed` (the worker always runs the full filtered-paragraph
+ * pipeline; precomputed shortcuts live on the internal mapper contract
+ * `PageSentenceBBoxOptions` and are used only by main-thread debug paths).
+ *
+ * Discriminated by `debug`: production calls (`debug?: false`) cannot
+ * carry `recordSplitter`; debug calls (`debug: true`) may. The op /
+ * worker-client method narrow the return type via overloads keyed off the
+ * `debug` literal — production returns `PageSentenceBBoxResult`, debug
+ * returns `SentenceBBoxTraceResult`. Callers passing an options *variable*
+ * whose `debug` has widened to `boolean` must `as const` the literal or
+ * type the variable as one of the union variants.
  */
-export interface WorkerSentenceBBoxTraceOptions extends WorkerSentenceBBoxOptions {
-    /**
-     * When true, the worker wraps the resolved splitter and returns the
-     * recorded `(text → ranges)` pairs in the trace payload. Used by
-     * fixture capture for hermetic unit-test replay.
-     */
-    recordSplitter?: boolean;
-}
+export type WorkerSentenceBBoxOptions =
+    | (WorkerSentenceBBoxBaseOptions & { debug?: false; recordSplitter?: never })
+    | (WorkerSentenceBBoxBaseOptions & { debug: true; recordSplitter?: boolean });
 
 /**
- * Intermediates surfaced by the trace-mode worker op
- * `extractSentenceBBoxesTrace`.
+ * Intermediates surfaced by the worker op `extractSentenceBBoxes` when
+ * called with `debug: true`.
  *
  * Mirrors the intermediates surfaced by the worker-side sentence extraction
  * helper, with the sentence result living at the top level of
@@ -109,11 +112,11 @@ export interface SentenceBBoxTrace {
     marginAnalysis: MarginAnalysis;
     marginRemoval: MarginRemovalResult;
     filteredResult: FilteredParagraphResult;
-    /** Present iff `WorkerSentenceBBoxTraceOptions.recordSplitter === true`. */
+    /** Present iff the debug-variant `recordSplitter === true`. */
     splitterRecording?: Array<{ text: string; ranges: SentenceRange[] }>;
 }
 
-/** Result envelope for `extractSentenceBBoxesTrace`. */
+/** Result envelope returned by `extractSentenceBBoxes` when `debug: true`. */
 export interface SentenceBBoxTraceResult {
     result: PageSentenceBBoxResult;
     trace: SentenceBBoxTrace;

@@ -2,8 +2,8 @@
  * Worker-side shared helper for sentence-level bbox extraction.
  *
  * Single source of truth for the per-page sentence pipeline. Used by
- * both `opExtractSentenceBBoxes` (production, compact result) and
- * `opExtractSentenceBBoxesTrace` (debug, result + intermediates).
+ * `opExtractSentenceBBoxes` in both production mode (compact result) and
+ * debug mode (`options.debug: true`, result + intermediates).
  *
  * Pipeline stages:
  *   1. Resolve splitter from config (sentencex with simple fallback).
