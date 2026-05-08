@@ -18,6 +18,8 @@ import { sendWSMessageAtom } from './agentRunAtoms';
 import { newThreadAtom } from './threads';
 import { profileWithPlanAtom, isDeviceAuthorizedAtom, isDatabaseSyncSupportedAtom } from './profile';
 import { libraryHasItemsAtom } from './zoteroContext';
+import { isWebSearchAllowedAtom, isWebSearchEnabledAtom } from './ui';
+import { beaverDefaultModelAtom, updateSelectedModelAtom } from './models';
 import { ChargingPermissions } from '../../src/services/agentProtocol';
 import { logger } from '../../src/utils/logger';
 
@@ -125,56 +127,33 @@ export const isFirstRunVisibleAtom = atom((get) => {
 
 /**
  * Set when the first-run loader sees an empty library and skips the backend
- * call. FirstRunPage uses this to render non-clickable info cards instead of
- * suggestion cards. Cleared once the library has items and we fetch normally.
+ * call. FirstRunPage uses this to render the empty-library discovery flow
+ * (research-interest textarea) instead of suggestion cards. Cleared once
+ * the library has items and we fetch normally.
  */
 export const firstRunLibraryEmptyAtom = atom<boolean>(false);
 
 /**
- * Hand-authored cards shown when the user's library is empty on first run.
- * Non-clickable — they explain what Beaver can do once items are added.
+ * Session-only textarea state for the empty-library discovery flow on
+ * FirstRunPage. Persisted across renders but not across sessions, so the
+ * field clears if the user dismisses and returns later.
  */
-export const EMPTY_LIBRARY_FIRST_RUN_CARDS: SuggestionCard[] = [
-    {
-        kind: 'discover_research',
-        slot_index: 0,
-        title: 'Discover research in any field',
-        description: 'Ask Beaver to find recent, highly-cited papers on any topic you are exploring.',
-        description_segments: [
-            { text: 'Ask Beaver to find ', emphasized: false },
-            { text: 'recent, highly-cited papers', emphasized: true },
-            { text: ' on any topic you are exploring.', emphasized: false },
-        ],
-        prompt: '',
-        attachments: null,
-    },
-    {
-        kind: 'literature_review',
-        slot_index: 1,
-        title: 'Explore a research question',
-        description: 'Describe what you are working on — Beaver surfaces key papers and themes.',
-        description_segments: [
-            { text: 'Describe what you are working on — Beaver surfaces ', emphasized: false },
-            { text: 'key papers and themes', emphasized: true },
-            { text: '.', emphasized: false },
-        ],
-        prompt: '',
-        attachments: null,
-    },
-    {
-        kind: 'reading_assistant',
-        slot_index: 2,
-        title: 'Save items, then dive deeper',
-        description: 'Use the Zotero connector to add papers. Beaver helps you read, compare, and organize.',
-        description_segments: [
-            { text: 'Use the Zotero connector to add papers. Beaver helps you ', emphasized: false },
-            { text: 'read, compare, and organize', emphasized: true },
-            { text: '.', emphasized: false },
-        ],
-        prompt: '',
-        attachments: null,
-    },
-];
+export const emptyLibraryDiscoverInputAtom = atom<string>('');
+
+/**
+ * In-flight flag for the empty-library discovery submission. Disables the
+ * button + textarea while the network call to mark first-run complete and
+ * the WS dispatch are running.
+ */
+export const emptyLibraryDiscoverSubmittingAtom = atom<boolean>(false);
+
+/**
+ * Maximum length of the research-interest textarea. Mirrors a typical
+ * single-paragraph description; long enough for "computational models of
+ * adaptation in coastal communities under climate stress" without becoming
+ * a free-form essay.
+ */
+export const EMPTY_LIBRARY_DISCOVER_MAX_LENGTH = 500;
 
 async function fetchAndPersist(set: any): Promise<void> {
     set(firstRunSuggestionsLoadingAtom, true);
@@ -210,9 +189,10 @@ export const loadFirstRunSuggestionsAtom = atom(null, async (get, set) => {
         return;
     }
 
-    // Empty library: skip the backend entirely and render static info cards.
-    // The notifier-driven libraryHasItemsAtom flips to true when the user adds
-    // their first item; FirstRunPage re-invokes this loader on that change.
+    // Empty library: skip the backend entirely and render the discovery
+    // textarea. The notifier-driven libraryHasItemsAtom flips to true when
+    // the user adds their first item; FirstRunPage re-invokes this loader
+    // on that change.
     if (!libraryHasItems) {
         set(firstRunLibraryEmptyAtom, true);
         return;
@@ -352,5 +332,101 @@ export const submitFirstRunCardAtom = atom(
                 collection_name: collectionName,
             },
         );
+    },
+);
+
+const FIRST_RUN_DISCOVER_PERMISSIONS_OVERRIDE: Partial<ChargingPermissions> = {
+    confirm_extraction_costs: false,
+    confirm_external_search_costs: false,
+};
+
+/**
+ * Build the discovery prompt sent on behalf of an empty-library user. The
+ * user's interest is treated as the topic; the prompt asks for an external
+ * search so the run produces a starter set of papers the existing
+ * `discover_research` follow-ups can act on (saving to a new collection
+ * imports the items into Zotero — the natural next step for an empty
+ * library).
+ */
+function buildEmptyLibraryDiscoverPrompt(interest: string): string {
+    const trimmed = interest.trim();
+    return (
+        `My research interest: ${trimmed}\n\n` +
+        `Use external topic-based search to find recent, highly-cited papers in this area. ` +
+        `Search broadly and return up to 10 papers. Prefer researh from the last ` +
+        `5 years and focus on seminal work that anyone starting in this area should know. ` +
+        `Each paper should have title, first author, year, citation count, and a one-sentence ` +
+        `description of why it matters. Conclude with a TL;DR summary of the results.`
+    );
+}
+
+/**
+ * Empty-library discovery submission. Mirrors `submitFirstRunCardAtom` but
+ * sources the prompt from the user's research-interest textarea, enables
+ * web search for the run, and tags the origin as a `discover_research` card
+ * so NextStepsPanel surfaces the "save top results to a new collection"
+ * follow-up — that's the path that imports items into the empty library.
+ */
+export const submitEmptyLibraryDiscoverAtom = atom(
+    null,
+    async (get, set) => {
+        const interest = get(emptyLibraryDiscoverInputAtom).trim();
+        if (interest.length === 0) return;
+        if (get(emptyLibraryDiscoverSubmittingAtom)) return;
+
+        set(emptyLibraryDiscoverSubmittingAtom, true);
+        try {
+            const isSuggestionsMode = get(firstRunSuggestionsModeAtom);
+
+            // The empty-library discovery prompt explicitly requires external
+            // search. Returning users may have selected a BYOK/custom model
+            // after onboarding, so switch to an included Beaver model before
+            // stamping completion or starting the run.
+            if (!get(isWebSearchAllowedAtom)) {
+                const beaverDefaultModel = get(beaverDefaultModelAtom);
+                if (!beaverDefaultModel) {
+                    logger(
+                        'firstRun: empty-library discovery blocked because web search is unavailable',
+                        1,
+                    );
+                    return;
+                }
+                set(updateSelectedModelAtom, {
+                    ...beaverDefaultModel,
+                    access_mode: 'app_key',
+                });
+            }
+
+            set(isWebSearchEnabledAtom, true);
+
+            if (!isSuggestionsMode) {
+                await set(markFirstRunCompleteAtom, 'empty_library_discover');
+            }
+
+            await set(newThreadAtom, { skipAutoPopulate: true });
+
+            const runId = uuidv4();
+            set(firstRunReturnRequestedAtom, false);
+
+            const prompt = buildEmptyLibraryDiscoverPrompt(interest);
+
+            await set(
+                sendWSMessageAtom,
+                prompt,
+                runId,
+                FIRST_RUN_DISCOVER_PERMISSIONS_OVERRIDE,
+                {
+                    kind: 'first_run_card',
+                    card_kind: 'discover_research',
+                    topic_label: interest,
+                    collection_name: null,
+                    empty_library: true,
+                },
+            );
+
+            set(emptyLibraryDiscoverInputAtom, '');
+        } finally {
+            set(emptyLibraryDiscoverSubmittingAtom, false);
+        }
     },
 );
