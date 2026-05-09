@@ -182,15 +182,9 @@ export class PDFExtractor {
      *   - `"paragraph"` (default): line + paragraph detection via
      *     `FilteredParagraphPipeline`, with headers prefixed `## ` and
      *     paragraphs separated by `\n\n`. `ProcessedPage.blocks` is left
-     *     empty (matches the `useLineDetection: true` convention).
+     *     empty.
      *   - `"block"`: legacy `PageExtractor.extractPageWithColumns` — blocks
      *     joined with `\n\n`. Kept reachable as an escape hatch.
-     *
-     * `settings.useLineDetection` is honored on the block engine — when
-     * true, each `ProcessedPage.lines` is populated with bbox + fontSize +
-     * columnIndex metadata and `page.content` becomes the line texts joined
-     * with `\n`. `blocks` is left empty. Incompatible with
-     * `markdown.engine === "paragraph"`.
      *
      * `paragraphSettings` is forwarded to `detectFilteredParagraphs` for the
      * paragraph and structured engines.
@@ -229,12 +223,6 @@ export class PDFExtractor {
             throw new Error(
                 "PDFExtractor.extract: markdown.engine is not applicable " +
                 "when mode='structured'",
-            );
-        }
-        if (explicitEngine === "paragraph" && args.settings?.useLineDetection) {
-            throw new Error(
-                "PDFExtractor.extract: markdown.engine='paragraph' is " +
-                "incompatible with settings.useLineDetection=true",
             );
         }
 

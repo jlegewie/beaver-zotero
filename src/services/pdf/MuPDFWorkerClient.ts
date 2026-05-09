@@ -474,10 +474,6 @@ export class MuPDFWorkerClient {
      * `ExtractionError(PAGE_OUT_OF_RANGE)` with the worker's known `pageCount`
      * in the error payload (rehydrated by `rehydrateError`).
      *
-     * Honors `settings.useLineDetection` (markdown / block engine only) —
-     * when true, the per-page loop runs line detection and
-     * `ProcessedPage.lines` is populated.
-     *
      * `mode === "structured"` enables sentence-level extraction. The result
      * is the same `ExtractionResult` shape; per-page sentence /
      * paragraph / column / line data lives on `ProcessedPage`. Pass the

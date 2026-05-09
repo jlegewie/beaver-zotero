@@ -660,14 +660,6 @@ reader.
    });
    ```
 
-4. **Use `useLineDetection` when you need positional metadata**:
-   ```typescript
-   // Each ProcessedPage.lines is populated with bbox + fontSize + columnIndex
-   const result = await new PDFExtractor().extract(pdfData, {
-     settings: { useLineDetection: true },
-   });
-   ```
-
 ---
 
 ## API Quick Reference
@@ -688,11 +680,6 @@ const result = await extractor.extract(pdfData, { pageIndices: [0, 1, 2] });
 // Open-ended range (resolved inside the worker — no pageCount round-trip)
 const result = await extractor.extract(pdfData, {
   pageRange: { startIndex: 0, maxPages: 10 },
-});
-
-// Line-level extraction (populates ProcessedPage.lines with bbox metadata)
-const result = await extractor.extract(pdfData, {
-  settings: { useLineDetection: true },
 });
 
 // Document metadata + page labels in one round-trip
@@ -1126,16 +1113,6 @@ When adding features:
 
 **Symptom**: Browser crashes on large PDFs  
 **Fix**: Process in chunks using `pageIndices` (or `pageRange`):
-
-```typescript
-for (let i = 0; i < pageCount; i += 10) {
-  const chunk = await extractor.extract(pdfData, {
-    pageIndices: Array.from({ length: 10 }, (_, j) => i + j),
-    settings: { useLineDetection: true },
-  });
-  // Process chunk
-}
-```
 
 ### Incorrect Text Order
 

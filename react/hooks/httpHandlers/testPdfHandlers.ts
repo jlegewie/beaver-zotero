@@ -539,27 +539,6 @@ export async function handleTestPdfExtractHttpRequest(request: any) {
 }
 
 /**
- * Dev-only line-extraction parity endpoint. Now backed by `extract`
- * with `useLineDetection: true` — kept under the legacy route so existing
- * live-test bodies (which still pass `{ settings: { pages: [...] } }`)
- * keep working. The `settings.pages` array is translated into the
- * worker-side `pageIndices` arg.
- */
-export async function handleTestPdfExtractByLinesHttpRequest(request: any) {
-    const { PDFExtractor } = await import('../../../src/services/pdf');
-    const settings = { ...(request?.settings || {}), useLineDetection: true };
-    const pageIndices: number[] | undefined = Array.isArray(settings.pages) && settings.pages.length > 0
-        ? settings.pages
-        : undefined;
-    delete settings.pages;
-    return runPdfExtractorCall(
-        request,
-        (pdfData) => new PDFExtractor().extract(pdfData, { settings, pageIndices }),
-        (result) => ({ ok: true, result }),
-    );
-}
-
-/**
  * Dev-only paragraph-engine extract endpoint.
  *
  * Routes through `PDFExtractor.extract` with `markdown: { engine: "paragraph" }`,

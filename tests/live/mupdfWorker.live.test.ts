@@ -33,7 +33,6 @@ import {
     pdfExtractRawDetailed,
     pdfSearch,
     pdfExtract,
-    pdfExtractByLines,
     pdfHasTextLayer,
     pdfAnalyzeOcr,
     pdfSearchScored,
@@ -243,21 +242,6 @@ describe('MuPDF worker smoke — orchestration ops', () => {
             expect(typeof ocr.primaryReason).toBe('string');
             expect(typeof res.error!.payload!.pageCount).toBe('number');
             expect(res.error!.payload!.pageLabels).toBeDefined();
-        });
-    });
-
-    describe('extract (useLineDetection)', () => {
-        it('returns line-based extraction for a healthy PDF', async () => {
-            const settings = { useLineDetection: true };
-            const res = await pdfExtractByLines(SMALL_PDF, { settings });
-            expect(res.ok).toBe(true);
-
-            const result = res.result;
-            expect(result.pages.length).toBe(SMALL_PDF_PAGE_COUNT);
-            expect(typeof result.fullText).toBe('string');
-            for (const page of result.pages) {
-                expect(Array.isArray(page.lines)).toBe(true);
-            }
         });
     });
 

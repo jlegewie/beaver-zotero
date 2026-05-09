@@ -59,8 +59,6 @@ export interface ExtractionSettings {
     repeatThreshold?: number;
     /** Whether to detect and remove page number sequences */
     detectPageSequences?: boolean;
-    /** Use line detection for high-quality extraction (default: false) */
-    useLineDetection?: boolean;
 }
 
 /** Default extraction settings */
@@ -71,7 +69,6 @@ export const DEFAULT_EXTRACTION_SETTINGS: Required<ExtractionSettings> = {
     marginZone: DEFAULT_MARGIN_ZONE,
     repeatThreshold: 3,
     detectPageSequences: true,
-    useLineDetection: false,
 };
 
 // ============================================================================
@@ -432,7 +429,7 @@ export interface ProcessedPage {
     content: string;
     /** Detected columns (in reading order) */
     columns?: ColumnBBox[];
-    /** Detected lines (only present if useLineDetection=true) */
+    /** Detected lines (populated by `mode: "structured"`) */
     lines?: ExtractedLine[];
 
     // ------------------------------------------------------------------
@@ -553,15 +550,12 @@ export interface ExtractionResult {
         settings: ExtractionSettings;
         /**
          * Engine that produced the result.
-         *  - `"block"` / `"block-with-lines"` / `"paragraph"`: markdown-mode
-         *    engines (mode `"markdown"`).
+         *  - `"block"` / `"paragraph"`: markdown-mode engines (mode `"markdown"`).
          *  - `"structured"`: sentence-level extraction (mode `"structured"`).
          *
-         * `"block-with-lines"` is the dev `useLineDetection` path on top of
-         * the block engine. Optional so legacy callers / tests don't need
-         * to populate it.
+         * Optional so legacy callers / tests don't need to populate it.
          */
-        engine?: "block" | "block-with-lines" | "paragraph" | "structured";
+        engine?: "block" | "paragraph" | "structured";
         /**
          * Per-phase worker timings. Optional — populated by `opExtract` /
          * `runExtractFromIndices`; absent on direct ExtractionResult literals

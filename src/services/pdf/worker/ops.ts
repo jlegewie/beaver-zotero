@@ -24,7 +24,6 @@ import { PageExtractor } from "../PageExtractor";
 import { buildPageAnalysisContext } from "../PageAnalysisContext";
 import { resolveAnalysisPages } from "../AnalysisWindow";
 import { detectColumns, logColumnDetection } from "../ColumnDetector";
-import { detectLinesOnPage, logLineDetection } from "../LineDetector";
 import type { PageLineResult } from "../LineDetector";
 import { detectFilteredParagraphs } from "../FilteredParagraphPipeline";
 import { SearchScorer } from "../SearchScorer";
@@ -223,9 +222,7 @@ export async function opSearchPages(
 
 /**
  * Project a `PageLineResult` into the flat `ExtractedLine[]` shape that
- * lives on `ProcessedPage.lines`. Shared by the block-engine
- * `useLineDetection` branch and the structured-engine branch — the
- * projection is identical.
+ * lives on `ProcessedPage.lines`. Used by the structured-engine branch.
  */
 function flattenColumnLines(lineResult: PageLineResult): ExtractedLine[] {
     const out: ExtractedLine[] = [];
@@ -243,14 +240,12 @@ function flattenColumnLines(lineResult: PageLineResult): ExtractedLine[] {
 }
 
 /**
- * Shared body for `opExtract`. The per-page loop has four branches keyed
+ * Shared body for `opExtract`. The per-page loop has three branches keyed
  * off `engine`:
  *   - `"paragraph"` → `detectFilteredParagraphs` produces
  *     `paragraphResult.pageContent` (`## ` headers, `\n\n` separators);
  *     `ProcessedPage.blocks` is left empty.
- *   - `"block"` + `useLineDetection` → column + line detection (line-based);
- *     populates `page.lines`; `blocks: []`.
- *   - `"block"` (default) → column detection + PageExtractor (block-based).
+ *   - `"block"` → column detection + PageExtractor (block-based).
  *   - `"structured"` → `extractSentencesForPage` (per-page detailed walk
  *     + sentence mapping). Populates `paragraphs`, `sentences`,
  *     `columns`, `lines`, plus paragraph-engine `content`. `blocks: []`.
@@ -258,12 +253,12 @@ function flattenColumnLines(lineResult: PageLineResult): ExtractedLine[] {
  *     walk is the dominant cost — multi-page structured extracts pay
  *     N× this per the `targetIndices` length.
  *
- * The combinations `engine === "paragraph"` && `useLineDetection` and
- * `engine === "structured"` && `markdown.engine` are rejected upstream by
- * `opExtract`. All other steps (raw extraction, style + margin analysis,
- * fullText assembly, analysis build) are identical, and the result shape
- * is the same `ExtractionResult` for every branch — `version` and
- * `engine` come from this single metadata builder.
+ * The combination `engine === "structured"` && `markdown.engine` is
+ * rejected upstream by `opExtract`. All other steps (raw extraction,
+ * style + margin analysis, fullText assembly, analysis build) are
+ * identical, and the result shape is the same `ExtractionResult` for
+ * every branch — `version` and `engine` come from this single metadata
+ * builder.
  *
  * The caller is responsible for opening the doc, resolving target +
  * analysis indices, collecting page labels, running the OCR text-layer
@@ -281,13 +276,12 @@ function flattenColumnLines(lineResult: PageLineResult): ExtractedLine[] {
  */
 export function runExtractFromIndices(
     doc: DocumentLike,
-    opts: Required<Omit<ExtractionSettings, 'pages' | 'useLineDetection' | 'minTextPerPage'>> & ExtractionSettings,
+    opts: Required<Omit<ExtractionSettings, 'pages' | 'minTextPerPage'>> & ExtractionSettings,
     requestedRepeatThreshold: number | undefined,
     targetIndices: number[],
     analysisIndices: number[],
     pageCount: number,
     pageLabels: Record<number, string>,
-    useLineDetection: boolean,
     engine: "block" | "paragraph" | "structured",
     paragraphSettings?: ParagraphDetectionSettings,
     splitter?: SentenceSplitter,
@@ -326,8 +320,8 @@ export function runExtractFromIndices(
         // page text via `paragraphResult.pageContent` (headers prefixed `## `,
         // paragraphs separated by `\n\n`). `detectFilteredParagraphs` accepts
         // the precomputed `marginRemoval` and `styleProfile` so it skips
-        // re-running cross-page analysis. `blocks: []` matches the
-        // `useLineDetection: true` convention.
+        // re-running cross-page analysis. `blocks: []` because content is
+        // emitted via `pageContent` rather than per-block.
         for (const i of targetIndices) {
             const tPage = performance.now();
             const rawPage = analysisPageByIndex.get(i)!;
@@ -407,9 +401,7 @@ export function runExtractFromIndices(
             perPageMs.push(performance.now() - tPage);
         }
     } else {
-        const pageExtractor = useLineDetection
-            ? null
-            : new PageExtractor({ styleProfile });
+        const pageExtractor = new PageExtractor({ styleProfile });
 
         for (const i of targetIndices) {
             const tPage = performance.now();
@@ -426,32 +418,9 @@ export function runExtractFromIndices(
             });
             logColumnDetection(rawPage.pageIndex, columnResult);
 
-            if (useLineDetection) {
-                const lineResult: PageLineResult = detectLinesOnPage(filteredPage, columnResult.columns);
-                logLineDetection(lineResult);
-
-                const extractedLines = flattenColumnLines(lineResult);
-                const content = extractedLines.map((l) => l.text).join("\n");
-                pages.push({
-                    index: rawPage.pageIndex,
-                    label: rawPage.label,
-                    width: rawPage.width,
-                    height: rawPage.height,
-                    blocks: [],
-                    content,
-                    columns: columnResult.columns.map((col) => ({
-                        l: col.x,
-                        t: col.y,
-                        r: col.x + col.w,
-                        b: col.y + col.h,
-                    })),
-                    lines: extractedLines,
-                } as ProcessedPage);
-            } else {
-                pages.push(
-                    pageExtractor!.extractPageWithColumns(filteredPage, columnResult, true),
-                );
-            }
+            pages.push(
+                pageExtractor.extractPageWithColumns(filteredPage, columnResult, true),
+            );
             perPageMs.push(performance.now() - tPage);
         }
     }
@@ -464,19 +433,8 @@ export function runExtractFromIndices(
         marginAnalysis,
     };
 
-    const finalSettings = { ...opts, useLineDetection };
-    // Resolve the engine name for `metadata.engine`. The dev `useLineDetection`
-    // path is a block-engine variant, recorded as a distinct value so timing
-    // comparisons don't lump line-only output in with default block output.
-    // Structured mode (sentence-level extraction) is its own value.
-    const recordedEngine: "block" | "block-with-lines" | "paragraph" | "structured" =
-        engine === "structured"
-            ? "structured"
-            : engine === "paragraph"
-                ? "paragraph"
-                : useLineDetection
-                    ? "block-with-lines"
-                    : "block";
+    const finalSettings = { ...opts };
+    const recordedEngine: "block" | "paragraph" | "structured" = engine;
 
     const totalMs = performance.now() - tStart;
     const baseResult: ExtractionResult = {
@@ -523,17 +481,13 @@ export function runExtractFromIndices(
  *     N× this per the requested page count.
  *
  * `markdown.engine` selects the markdown engine when `mode === "markdown"`:
- *   - `"paragraph"` (default when `useLineDetection` is off): line +
- *     paragraph detection via `detectFilteredParagraphs`.
- *     `ProcessedPage.content` is `paragraphResult.pageContent`
- *     (markdown-shaped with `## ` headers and `\n\n` paragraph
- *     separators); `blocks: []`.
+ *   - `"paragraph"` (default): line + paragraph detection via
+ *     `detectFilteredParagraphs`. `ProcessedPage.content` is
+ *     `paragraphResult.pageContent` (markdown-shaped with `## ` headers
+ *     and `\n\n` paragraph separators); `blocks: []`.
  *   - `"block"`: block-based PageExtractor.
  *
  * Rejected combinations:
- *   - `markdown.engine === "paragraph"` && `settings.useLineDetection
- *     === true` — both control the terminal stage that produces
- *     `ProcessedPage.content`.
  *   - `mode === "structured"` && `markdown.engine` is set —
  *     `markdown.engine` is meaningless in structured mode.
  *
@@ -555,11 +509,10 @@ export async function opExtract(
         analysisWindow?: number;
     },
 ): Promise<OpReply<ExtractionResult>> {
-    // Defense in depth: the facade enforces these too, but the worker is
+    // Defense in depth: the facade enforces this too, but the worker is
     // reachable directly via the worker-client RPC and any future caller
     // (e.g. tests) shouldn't be able to slip past the contract.
     const explicitEngine = args.markdown?.engine;
-    const useLineDetection = !!args.settings?.useLineDetection;
     const isStructured = args.mode === "structured";
 
     if (isStructured && explicitEngine) {
@@ -567,21 +520,13 @@ export async function opExtract(
             "opExtract: markdown.engine is not applicable when mode='structured'",
         );
     }
-    if (explicitEngine === "paragraph" && useLineDetection) {
-        throw new Error(
-            "opExtract: markdown.engine='paragraph' is incompatible " +
-            "with settings.useLineDetection=true",
-        );
-    }
 
     // Resolve the engine for the helper:
     //   structured mode → "structured".
-    //   markdown mode: explicit `markdown.engine` wins; useLineDetection
-    //   without an explicit engine forces "block" (it is a block-engine
-    //   variant); otherwise default to "paragraph".
+    //   markdown mode: explicit `markdown.engine` wins; default "paragraph".
     const engine: "block" | "paragraph" | "structured" = isStructured
         ? "structured"
-        : (explicitEngine ?? (useLineDetection ? "block" : "paragraph"));
+        : (explicitEngine ?? "paragraph");
 
     const tOpStart = performance.now();
     const tDocOpenStart = performance.now();
@@ -637,7 +582,6 @@ export async function opExtract(
             analysisIndices,
             pageCount,
             pageLabels,
-            !!opts.useLineDetection,
             engine,
             args.paragraphSettings,
             splitter,

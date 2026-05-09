@@ -326,17 +326,6 @@ export async function pdfExtract(
     });
 }
 
-export async function pdfExtractByLines(
-    attachment: AttachmentFixture,
-    body: { settings?: Record<string, unknown> } = {},
-): Promise<PdfExtractResponse> {
-    return post<PdfExtractResponse>('/beaver/test/pdf-extract-by-lines', {
-        library_id: attachment.library_id,
-        zotero_key: attachment.zotero_key,
-        ...body,
-    });
-}
-
 export async function pdfExtractParagraph(
     attachment: AttachmentFixture,
     body: { settings?: Record<string, unknown> } = {},
