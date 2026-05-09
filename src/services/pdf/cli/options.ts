@@ -64,10 +64,21 @@ export function parsePageRange(value: string): PageRangeOpt {
 }
 
 export function parseAnalysisWindow(value: string): number {
-    const n = Number(value);
-    if (!Number.isFinite(n) || n < 0) {
+    // Accept the literal "Infinity" / "inf" as a special case so
+    // `Number(value)` produces +Infinity rather than NaN. The downstream
+    // op layer (`resolveAnalysisPages`) explicitly handles Infinity.
+    const lower = value.trim().toLowerCase();
+    const n =
+        lower === "infinity" || lower === "inf" ? Number.POSITIVE_INFINITY : Number(value);
+    if (Number.isNaN(n) || n < 0) {
         throw new Error(
             `--analysis-window must be a non-negative number (or "Infinity"), got "${value}"`,
+        );
+    }
+    // Finite values must also be integers (the op rejects fractional windows).
+    if (Number.isFinite(n) && !Number.isInteger(n)) {
+        throw new Error(
+            `--analysis-window must be a non-negative integer (or "Infinity"), got "${value}"`,
         );
     }
     return n;

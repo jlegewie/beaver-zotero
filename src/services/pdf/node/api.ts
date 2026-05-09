@@ -8,6 +8,13 @@
  * Imports ops directly from `../worker/ops` — never from
  * `../index` (the barrel), which would pull `MuPDFWorkerClient` into the
  * Node graph and try to spawn a Web Worker.
+ *
+ * Concurrency: every op call is funneled through the worker `enqueue`
+ * FIFO. The shared WASM heap state (`_wasm_string`, `_wasm_matrix`,
+ * `createBuffer` allocations, `_wasm_drop_document`) is not safe across
+ * concurrent ops, and Node callers can absolutely race them via
+ * `Promise.all` (the `info` command does exactly that). The worker
+ * dispatcher uses the same queue, so this matches the worker contract.
  */
 import { ensureExtractionRuntime } from "./bootstrap";
 import {
@@ -19,6 +26,7 @@ import {
     opGetPageCount,
     opRenderPages,
 } from "../worker/ops";
+import { enqueue } from "../worker/opQueue";
 import type {
     ExtractionResult,
     ExtractionSettings,
@@ -78,19 +86,19 @@ export async function getPageCount(
     pdfData: PdfBytes,
 ): Promise<{ count: number }> {
     await ensureExtractionRuntime();
-    const reply = await opGetPageCount({ pdfData });
+    const reply = await enqueue(() => opGetPageCount({ pdfData }));
     return reply.result;
 }
 
 export async function getMetadata(pdfData: PdfBytes): Promise<PDFMetadata> {
     await ensureExtractionRuntime();
-    const reply = await opGetMetadata({ pdfData });
+    const reply = await enqueue(() => opGetMetadata({ pdfData }));
     return reply.result;
 }
 
 export async function extractPdf(input: ExtractInput): Promise<ExtractionResult> {
     await ensureExtractionRuntime();
-    const reply = await opExtract(input);
+    const reply = await enqueue(() => opExtract(input));
     return reply.result;
 }
 
@@ -98,7 +106,7 @@ export async function analyzeLayout(
     input: AnalyzeLayoutInput,
 ): Promise<LayoutAnalysisResult> {
     await ensureExtractionRuntime();
-    const reply = await opAnalyzeLayout(input);
+    const reply = await enqueue(() => opAnalyzeLayout(input));
     return reply.result;
 }
 
@@ -106,7 +114,7 @@ export async function renderPages(
     input: RenderPagesInput,
 ): Promise<RenderPagesResult> {
     await ensureExtractionRuntime();
-    const reply = await opRenderPages(input);
+    const reply = await enqueue(() => opRenderPages(input));
     return reply.result;
 }
 
@@ -116,11 +124,9 @@ export async function extractRawPageDetailed(
     includeImages = false,
 ): Promise<RawPageDataDetailed> {
     await ensureExtractionRuntime();
-    const reply = await opExtractRawPageDetailed({
-        pdfData,
-        pageIndex,
-        includeImages,
-    });
+    const reply = await enqueue(() =>
+        opExtractRawPageDetailed({ pdfData, pageIndex, includeImages }),
+    );
     return reply.result;
 }
 
@@ -129,6 +135,6 @@ export async function analyzeOCRNeeds(
     options?: OCRDetectionOptions,
 ): Promise<OCRDetectionResult> {
     await ensureExtractionRuntime();
-    const reply = await opAnalyzeOCRNeeds({ pdfData, options });
+    const reply = await enqueue(() => opAnalyzeOCRNeeds({ pdfData, options }));
     return reply.result;
 }

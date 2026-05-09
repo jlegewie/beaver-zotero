@@ -343,3 +343,145 @@ describe('buildProgram', () => {
         ]);
     });
 });
+
+describe('runCli — error envelope from option parsing', () => {
+    // Regression: overlay and raw-detailed previously parsed argv-derived
+    // options BEFORE the try block, so a bad `--page`/`--level` produced
+    // commander's plain-text failure path even when `--json` was set.
+    // Now those parses live inside the command try, so structured envelopes
+    // are guaranteed.
+    it('overlay --page abc --json writes a structured error envelope', async () => {
+        const { deps, stderr } = makeDeps();
+        const code = await runCli(
+            [
+                'overlay',
+                'fake.pdf',
+                '--page',
+                'abc',
+                '--level',
+                'sentences',
+                '--out',
+                '/tmp/out.png',
+                '--json',
+            ],
+            deps,
+        );
+        expect(code).toBe(1);
+        const env = JSON.parse(stderr.text()) as {
+            ok: boolean;
+            error: { message: string };
+        };
+        expect(env.ok).toBe(false);
+        expect(env.error.message).toContain('--page');
+    });
+
+    it('overlay --level garbage --json writes a structured error envelope', async () => {
+        const { deps, stderr } = makeDeps();
+        const code = await runCli(
+            [
+                'overlay',
+                'fake.pdf',
+                '--page',
+                '0',
+                '--level',
+                'garbage',
+                '--out',
+                '/tmp/out.png',
+                '--json',
+            ],
+            deps,
+        );
+        expect(code).toBe(1);
+        const env = JSON.parse(stderr.text()) as {
+            ok: boolean;
+            error: { message: string };
+        };
+        expect(env.ok).toBe(false);
+        expect(env.error.message).toContain('--level');
+    });
+
+    it('raw-detailed --page abc --json writes a structured error envelope', async () => {
+        const { deps, stderr } = makeDeps();
+        const code = await runCli(
+            ['raw-detailed', 'fake.pdf', '--page', 'abc', '--json'],
+            deps,
+        );
+        expect(code).toBe(1);
+        const env = JSON.parse(stderr.text()) as {
+            ok: boolean;
+            error: { message: string };
+        };
+        expect(env.ok).toBe(false);
+        expect(env.error.message).toContain('--page');
+    });
+});
+
+describe('runCli — analysis window accepts Infinity', () => {
+    // Regression: parseAnalysisWindow used Number.isFinite which rejects
+    // Infinity even though the error message and downstream
+    // resolveAnalysisPages explicitly support it.
+    it('extract --analysis-window Infinity passes Infinity to extractPdf', async () => {
+        const { deps, api } = makeDeps();
+        api.extractPdf.mockResolvedValue({
+            pages: [{ index: 0 }],
+            analysis: {},
+            fullText: '',
+            metadata: {},
+        });
+        const code = await runCli(
+            [
+                'extract',
+                'fake.pdf',
+                '--pages',
+                '0',
+                '--analysis-window',
+                'Infinity',
+                '--json',
+            ],
+            deps,
+        );
+        expect(code).toBe(0);
+        expect(api.extractPdf.mock.calls[0][0].analysisWindow).toBe(
+            Number.POSITIVE_INFINITY,
+        );
+    });
+
+    it('extract --analysis-window 0 still works (lower bound)', async () => {
+        const { deps, api } = makeDeps();
+        api.extractPdf.mockResolvedValue({
+            pages: [],
+            analysis: {},
+            fullText: '',
+            metadata: {},
+        });
+        const code = await runCli(
+            ['extract', 'fake.pdf', '--pages', '0', '--analysis-window', '0', '--json'],
+            deps,
+        );
+        expect(code).toBe(0);
+        expect(api.extractPdf.mock.calls[0][0].analysisWindow).toBe(0);
+    });
+
+    it('extract --analysis-window -1 rejects via structured envelope', async () => {
+        const { deps, stderr } = makeDeps();
+        const code = await runCli(
+            ['extract', 'fake.pdf', '--pages', '0', '--analysis-window', '-1', '--json'],
+            deps,
+        );
+        expect(code).toBe(1);
+        const env = JSON.parse(stderr.text()) as { error: { message: string } };
+        expect(env.error.message).toContain('--analysis-window');
+    });
+
+    it('extract --analysis-window 2.5 rejects via structured envelope (must be integer)', async () => {
+        const { deps, stderr } = makeDeps();
+        const code = await runCli(
+            ['extract', 'fake.pdf', '--pages', '0', '--analysis-window', '2.5', '--json'],
+            deps,
+        );
+        expect(code).toBe(1);
+        const env = JSON.parse(stderr.text()) as { error: { message: string } };
+        expect(env.error.message).toContain('--analysis-window');
+    });
+});
+

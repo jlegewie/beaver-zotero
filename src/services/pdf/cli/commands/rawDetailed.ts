@@ -22,14 +22,17 @@ export function buildRawDetailedCommand(deps: CliDeps): Command {
         .option("--pretty", "pretty-print JSON output (only with --json)")
         .action(async (pdfPath: string, opts: Record<string, string | boolean | undefined>) => {
             let bytes: Uint8Array | undefined;
-            const pageIndex = parsePageInt(String(opts.page));
             const includeImages = !!opts.includeImages;
             const effective: Record<string, unknown> = {
                 file: pdfPath,
-                pageIndex,
                 includeImages,
             };
             try {
+                // Parse `--page` inside the try so structured `--json`
+                // errors surface bad input instead of commander's
+                // plain-text failure path.
+                const pageIndex = parsePageInt(String(opts.page));
+                effective.pageIndex = pageIndex;
                 bytes = await deps.loadPdf(pdfPath);
                 const result = await deps.api.extractRawPageDetailed(
                     bytes,

@@ -89,16 +89,21 @@ export function buildOverlayCommand(deps: CliDeps): Command {
         .option("--pretty", "pretty-print JSON output (only with --json)")
         .action(async (pdfPath: string, opts: Record<string, string | boolean | undefined>) => {
             let bytes: Uint8Array | undefined;
-            const pageIndex = parsePageInt(String(opts.page));
-            const level = parseLevel(String(opts.level));
             const outPath = String(opts.out);
+            // `effective` is filled progressively so it's still useful in
+            // the error envelope even when option parsing throws.
             const effective: Record<string, unknown> = {
                 file: pdfPath,
-                pageIndex,
-                level,
                 out: outPath,
             };
             try {
+                // Parse argv-derived options inside the try so that
+                // structured `--json` errors surface bad input instead of
+                // commander's plain-text failure path.
+                const pageIndex = parsePageInt(String(opts.page));
+                const level = parseLevel(String(opts.level));
+                effective.pageIndex = pageIndex;
+                effective.level = level;
                 bytes = await deps.loadPdf(pdfPath);
 
                 // Render the page first so we have target image dims.
