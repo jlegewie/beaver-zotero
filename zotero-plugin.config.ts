@@ -95,6 +95,11 @@ export default defineConfig({
     },
   },
 
+  server: {
+    // Allow multiple Zotero instances (one per git worktree) to run side-by-side.
+    startArgs: ["-no-remote"],
+  },
+
   // If you need to see a more detailed log, uncomment the following line:
   // logLevel: "trace",
 });
