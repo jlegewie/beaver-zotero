@@ -184,17 +184,12 @@ export class PDFExtractor {
      * the upcoming sentence + bbox path and currently throws.
      *
      * `markdown.engine` selects the markdown engine when `mode === "markdown"`:
-     *   - `"block"` (default): `PageExtractor.extractPageWithColumns` —
-     *     today's production behavior, blocks joined with `\n\n`.
-     *   - `"paragraph"`: line + paragraph detection via
+     *   - `"paragraph"` (default): line + paragraph detection via
      *     `FilteredParagraphPipeline`, with headers prefixed `## ` and
      *     paragraphs separated by `\n\n`. `ProcessedPage.blocks` is left
-     *     empty (matches `useLineDetection: true` convention).
-     *
-     * The combination `markdown.engine = "paragraph"` with
-     * `settings.useLineDetection = true` is rejected — both control the
-     * terminal stage that produces `ProcessedPage.content`, so picking one
-     * silently would hide intent.
+     *     empty (matches the `useLineDetection: true` convention).
+     *   - `"block"`: legacy `PageExtractor.extractPageWithColumns` — blocks
+     *     joined with `\n\n`. Kept reachable as an escape hatch.
      */
     async extract(
         pdfData: Uint8Array | ArrayBuffer,
@@ -219,8 +214,8 @@ export class PDFExtractor {
                 "use extractSentenceBBoxes for sentence-level extraction",
             );
         }
-        const engine = args.markdown?.engine ?? "block";
-        if (engine === "paragraph" && args.settings?.useLineDetection) {
+        const explicitEngine = args.markdown?.engine;
+        if (explicitEngine === "paragraph" && args.settings?.useLineDetection) {
             throw new Error(
                 "PDFExtractor.extract: markdown.engine='paragraph' is " +
                 "incompatible with settings.useLineDetection=true",

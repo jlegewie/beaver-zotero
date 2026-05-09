@@ -19,8 +19,14 @@ import { logger } from '../utils/logger';
 /**
  * Bump this when the extraction output semantics change.
  * All cached data with a different version will be treated as stale.
+ *
+ * Version history:
+ *   '2' → Support for Cyrillic PDFs.
+ *   '3' → Enhanced markdown output (paragraph-aware markdown extraction 
+ *         with line + paragraph detection, headers as `## ...`,
+ *         paragraph-aware breaks).
  */
-export const EXTRACTION_VERSION = '2';
+export const EXTRACTION_VERSION = '3';
 
 /** Maximum entries in the in-memory metadata cache. */
 const MEMORY_CACHE_MAX = 500;

@@ -404,7 +404,7 @@ export function runExtractFromIndices(
         pageLabels: Object.keys(pageLabels).length > 0 ? pageLabels : undefined,
         metadata: {
             extractedAt: new Date().toISOString(),
-            version: "2.0.0",
+            version: "2.1.0",
             settings: finalSettings,
             engine: recordedEngine,
             // `docOpenMs` is unknown to this helper (the doc is already open
@@ -466,13 +466,18 @@ export async function opExtract(
             "use extractSentenceBBoxes for sentence-level extraction",
         );
     }
-    const engine: "block" | "paragraph" = args.markdown?.engine ?? "block";
-    if (engine === "paragraph" && args.settings?.useLineDetection) {
+    const explicitEngine = args.markdown?.engine;
+    const useLineDetection = !!args.settings?.useLineDetection;
+    if (explicitEngine === "paragraph" && useLineDetection) {
         throw new Error(
             "opExtract: markdown.engine='paragraph' is incompatible " +
             "with settings.useLineDetection=true",
         );
     }
+    // Default is "paragraph"; useLineDetection without an explicit engine
+    // forces "block" since useLineDetection is a block-engine variant.
+    const engine: "block" | "paragraph" = explicitEngine
+        ?? (useLineDetection ? "block" : "paragraph");
 
     const tOpStart = performance.now();
     const tDocOpenStart = performance.now();
