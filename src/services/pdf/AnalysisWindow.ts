@@ -5,21 +5,11 @@
  *
  * One knob: `analysisWindow`. `0` analyzes only the targets;
  * `N > 0` expands ±N around each target and unions; `Infinity` covers
- * the whole document. The 50-page cap that previously narrowed
- * "whole document" requests stays as a constant for the dev-only
- * `opAnalyzeMarginRemoval` endpoint and is NOT consulted by
- * `resolveAnalysisPages` — callers control cost by choosing N.
+ * the whole document. Callers control cost by choosing N — there is
+ * no hidden cap.
  *
  * Worker-safe: depends only on plain numbers; no PDF or DOM modules.
  */
-
-/**
- * Default cap on analysis-window size (pages). Used **only** by the
- * dev-only `opAnalyzeMarginRemoval` endpoint as a guardrail against
- * walking entire large PDFs through the diagnostic surface.
- * `resolveAnalysisPages` does not consult this constant.
- */
-export const DEFAULT_ANALYSIS_WINDOW_CAP = 50;
 
 /**
  * Resolve the page indices that should be scanned for cross-page

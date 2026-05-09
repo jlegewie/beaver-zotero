@@ -12,14 +12,10 @@ import { getConfig, isConfigured } from "./config";
 import {
     ExtractionError,
     ExtractionErrorCode,
-    type MarginRemovalResult,
-    type MarginSettings,
-    type RawDocumentData,
     type RawPageDataDetailed,
     type PageImageOptions,
     type PageImageResult,
     type PDFMetadata,
-    type PDFPageSearchResult,
     type ExtractionSettings,
     type ExtractionResult,
     type LayoutAnalysisResult,
@@ -339,61 +335,6 @@ export class MuPDFWorkerClient {
     }
 
     /**
-     * Extract raw structured-text pages.
-     *
-     * Index handling (see `worker/docHelpers.ts:resolvePageIndices`): invalid
-     * indices in `pageIndices` are silently filtered out, and an
-     * empty/undefined `pageIndices` means "all pages."
-     */
-    async extractRawPages(
-        pdfData: Uint8Array | ArrayBuffer,
-        pageIndices?: number[],
-    ): Promise<RawDocumentData> {
-        const bytes =
-            pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
-        return this.call<RawDocumentData>("extractRawPages", {
-            pdfData: bytes,
-            pageIndices,
-        });
-    }
-
-    /**
-     * Cross-page margin-removal analysis without extraction or rendering.
-     *
-     * Backs the dev-only `/pdf-smart-removal-summary` triage endpoint.
-     * Page resolution: explicit `pageIndices` wins, else `pageRange`
-     * (inclusive `start..end`), else all pages. Out-of-range entries are
-     * silently filtered, then capped at `DEFAULT_ANALYSIS_WINDOW_CAP`.
-     *
-     * **Map/Set boundary.** `result.removalsByPage` and `result.textsToRemove`
-     * carry `Map`/`Set` fields. `postMessage` preserves them via structured
-     * clone, but `JSON.stringify` does NOT — flatten before writing HTTP
-     * responses.
-     */
-    async analyzeMarginRemoval(
-        pdfData: Uint8Array | ArrayBuffer,
-        args: {
-            pageIndices?: number[];
-            pageRange?: { start: number; end: number };
-            repeatThreshold?: number;
-            detectPageSequences?: boolean;
-            marginZone?: MarginSettings;
-        } = {},
-    ): Promise<{
-        totalPages: number;
-        analysisPages: number[];
-        result: MarginRemovalResult;
-    }> {
-        const bytes =
-            pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
-        return this.call<{
-            totalPages: number;
-            analysisPages: number[];
-            result: MarginRemovalResult;
-        }>("analyzeMarginRemoval", { pdfData: bytes, ...args });
-    }
-
-    /**
      * Extract one page with full per-character detail (quad + bbox).
      *
      * Single-page op — out-of-range `pageIndex` throws
@@ -442,28 +383,6 @@ export class MuPDFWorkerClient {
                 options: args?.options,
             },
         );
-    }
-
-    /**
-     * Search a PDF for a literal phrase. Returns unscored, page-level hits.
-     *
-     * Index handling (see `worker/docHelpers.ts:resolvePageIndices`): invalid
-     * indices in `pageIndices` are silently filtered.
-     */
-    async searchPages(
-        pdfData: Uint8Array | ArrayBuffer,
-        query: string,
-        pageIndices?: number[],
-        maxHitsPerPage?: number,
-    ): Promise<PDFPageSearchResult[]> {
-        const bytes =
-            pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
-        return this.call<PDFPageSearchResult[]>("searchPages", {
-            pdfData: bytes,
-            query,
-            pageIndices,
-            maxHitsPerPage,
-        });
     }
 
     /**

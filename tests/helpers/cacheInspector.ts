@@ -168,22 +168,6 @@ export interface PdfPageLabelsResponse {
     error?: { name: string; code?: string; message: string };
 }
 
-export interface PdfExtractRawResponse {
-    ok: boolean;
-    result?: {
-        pageCount: number;
-        pages: Array<{
-            pageIndex: number;
-            pageNumber: number;
-            width: number;
-            height: number;
-            label?: string;
-            blocks: unknown[];
-        }>;
-    };
-    error?: { name: string; code?: string; message: string };
-}
-
 export interface PdfExtractRawDetailedResponse {
     ok: boolean;
     result?: {
@@ -194,22 +178,6 @@ export interface PdfExtractRawDetailedResponse {
         label?: string;
         blocks: unknown[];
     };
-    error?: { name: string; code?: string; message: string };
-}
-
-export interface PdfSearchResponse {
-    ok: boolean;
-    pages?: Array<{
-        pageIndex: number;
-        label?: string;
-        matchCount: number;
-        hits: Array<{
-            quads: number[][];
-            bbox: { x: number; y: number; w: number; h: number };
-        }>;
-        width: number;
-        height: number;
-    }>;
     error?: { name: string; code?: string; message: string };
 }
 
@@ -258,17 +226,6 @@ export async function pdfRenderPagesWithMeta(
     });
 }
 
-export async function pdfExtractRaw(
-    attachment: AttachmentFixture,
-    body: { page_indices?: number[] } = {},
-): Promise<PdfExtractRawResponse> {
-    return post<PdfExtractRawResponse>('/beaver/test/pdf-extract-raw', {
-        library_id: attachment.library_id,
-        zotero_key: attachment.zotero_key,
-        ...body,
-    });
-}
-
 export async function pdfExtractRawDetailed(
     attachment: AttachmentFixture,
     body: { page_index: number; include_images?: boolean },
@@ -281,21 +238,6 @@ export async function pdfExtractRawDetailed(
             ...body,
         },
     );
-}
-
-export async function pdfSearch(
-    attachment: AttachmentFixture,
-    body: {
-        query: string;
-        page_indices?: number[];
-        max_hits_per_page?: number;
-    },
-): Promise<PdfSearchResponse> {
-    return post<PdfSearchResponse>('/beaver/test/pdf-search', {
-        library_id: attachment.library_id,
-        zotero_key: attachment.zotero_key,
-        ...body,
-    });
 }
 
 export interface PdfErrorEnvelope {
@@ -421,7 +363,6 @@ export async function pdfRenderOverlay(
             | 'lines'
             | 'paragraphs'
             | 'sentences'
-            | 'raw-lines'
             | 'margins';
         dpi?: number;
         language?: string;

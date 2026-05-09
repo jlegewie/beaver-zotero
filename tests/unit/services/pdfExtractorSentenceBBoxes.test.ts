@@ -3,7 +3,7 @@
  * production sentence-level extraction path.
  *
  * The key regression check: the facade dispatches exactly one `extract`
- * worker op — NOT a fan-out of `getPageCount` / `extractRawPages` /
+ * worker op — NOT a fan-out of `getPageCount` /
  * `extractRawPageDetailed` / `extractSentenceBBoxesDebug` calls. Also
  * verifies that the public `structured.splitter` / `structured.language`
  * args are translated to a serializable `splitterConfig` on the wire,
@@ -137,7 +137,6 @@ describe('PDFExtractor.extract({ mode: "structured" }) — single worker round-t
             (p) => (p.message as { op: string }).op,
         );
         expect(ops).not.toContain('getPageCount');
-        expect(ops).not.toContain('extractRawPages');
         expect(ops).not.toContain('extractRawPageDetailed');
         expect(ops).not.toContain('extractSentenceBBoxesDebug');
     });

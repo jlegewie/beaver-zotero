@@ -119,10 +119,7 @@ export {
     byteRangesToCharRanges,
 } from "./SentencexSplitter";
 export type { SentencexBoundary } from "./SentencexSplitter";
-export {
-    resolveAnalysisPages,
-    DEFAULT_ANALYSIS_WINDOW_CAP,
-} from "./AnalysisWindow";
+export { resolveAnalysisPages } from "./AnalysisWindow";
 export { buildPageAnalysisContext } from "./PageAnalysisContext";
 export type {
     PageAnalysisContext,

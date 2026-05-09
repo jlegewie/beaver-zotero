@@ -2,9 +2,9 @@
  * Extraction Overlay — shared bbox source-of-truth.
  *
  * Computes per-level bounding-box overlays (columns / lines / paragraphs /
- * sentences / raw-lines / margins) for a single PDF page, returning plain
- * rect data in MuPDF top-left point coordinates. No DOM, no Zotero reader,
- * no annotations.
+ * sentences / margins) for a single PDF page, returning plain rect data
+ * in MuPDF top-left point coordinates. No DOM, no Zotero reader, no
+ * annotations.
  *
  * Two consumers:
  *   1. `extractionVisualizer.ts` — converts these rects into Zotero
@@ -16,8 +16,8 @@
  * Filter alignment: columns / lines / paragraphs / sentences all route
  * through `detectFilteredParagraphs`, so every overlay reflects what the
  * production sentence pipeline sees (cross-page smart margin removal,
- * document-wide style profile). `raw-lines` and `margins` deliberately
- * skip that filter — their purpose is to expose pre-filter state.
+ * document-wide style profile). `margins` deliberately skips that filter
+ * — its purpose is to expose the pre-removal classification.
  */
 import {
     lineBBoxToRect,
@@ -25,7 +25,6 @@ import {
     DEFAULT_MARGINS,
     DEFAULT_MARGIN_ZONE,
     Rect,
-    RawPageData,
     SentenceBBox,
 } from "../../src/services/pdf";
 import type {
@@ -40,7 +39,6 @@ export type OverlayLevel =
     | "lines"
     | "paragraphs"
     | "sentences"
-    | "raw-lines"
     | "margins";
 
 // Color palette — kept in one place so the visualizer and the canvas
@@ -56,14 +54,6 @@ export const OVERLAY_COLORS = {
     // Fallback sentences (unmapped / invariant violation / empty split)
     // render in a muted color so they stand out against precise ones.
     sentenceDegraded: "#8e8e93",
-    // Raw-lines view: one shade per margin zone so an agent can see at a
-    // glance which lines the simple margin filter would treat as marginalia
-    // vs. content. Inside-content lines reuse the line color.
-    rawLineInside: "#ff9500",
-    rawLineMarginTop: "#5ac8fa",
-    rawLineMarginBottom: "#5ac8fa",
-    rawLineMarginLeft: "#ff3b30",
-    rawLineMarginRight: "#ff3b30",
     // Margins view: zones drawn very faintly; lines colored by removal
     // outcome. Page-numbers gray (matches degraded), repeats purple,
     // marginalia kept-but-not-removed in yellow as a "watch this" cue.
@@ -103,7 +93,7 @@ export interface OverlayRect {
     /** True for fallback / degraded fallbacks (sentences only today). */
     degraded?: boolean;
     /**
-     * Margin-zone classification (raw-lines / margins overlays only).
+     * Margin-zone classification (margins overlay only).
      * `null` means the bbox overlaps the content area; otherwise the
      * bbox is fully inside that margin zone under the chosen thresholds.
      */
@@ -251,83 +241,6 @@ function computeDegradedSentenceIndices(
         flatIdx += pws.sentences.length;
     }
     return out;
-}
-
-// ---------------------------------------------------------------------------
-// Debug-oriented collectors
-// ---------------------------------------------------------------------------
-
-/**
- * Raw-lines overlay: every line MuPDF emitted, *before* margin filtering,
- * color-coded by margin-zone classification (top/bottom/left/right/inside).
- */
-export function getRawLinesOverlay(rawPage: RawPageData): OverlayResult {
-    const rects: OverlayRect[] = [];
-    const counts = {
-        lines: 0,
-        inContent: 0,
-        inMarginTop: 0,
-        inMarginBottom: 0,
-        inMarginLeft: 0,
-        inMarginRight: 0,
-    };
-
-    for (const block of rawPage.blocks) {
-        if (block.type !== "text" || !block.lines) continue;
-        for (const line of block.lines) {
-            const position = MarginFilter.getMarginPosition(
-                line.bbox,
-                rawPage.width,
-                rawPage.height,
-                DEFAULT_MARGINS,
-            );
-            counts.lines++;
-            let color: string;
-            switch (position) {
-                case "top":
-                    color = OVERLAY_COLORS.rawLineMarginTop;
-                    counts.inMarginTop++;
-                    break;
-                case "bottom":
-                    color = OVERLAY_COLORS.rawLineMarginBottom;
-                    counts.inMarginBottom++;
-                    break;
-                case "left":
-                    color = OVERLAY_COLORS.rawLineMarginLeft;
-                    counts.inMarginLeft++;
-                    break;
-                case "right":
-                    color = OVERLAY_COLORS.rawLineMarginRight;
-                    counts.inMarginRight++;
-                    break;
-                default:
-                    color = OVERLAY_COLORS.rawLineInside;
-                    counts.inContent++;
-            }
-            rects.push({
-                rect: {
-                    x: line.bbox.x,
-                    y: line.bbox.y,
-                    w: line.bbox.w,
-                    h: line.bbox.h,
-                },
-                color,
-                label: `L${counts.lines}`,
-                group: counts.lines - 1,
-                marginPosition: position,
-            });
-        }
-    }
-
-    return {
-        level: "raw-lines",
-        pageIndex: rawPage.pageIndex,
-        pageWidth: rawPage.width,
-        pageHeight: rawPage.height,
-        groupCount: rects.length,
-        rects,
-        stats: counts,
-    };
 }
 
 // ---------------------------------------------------------------------------

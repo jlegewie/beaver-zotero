@@ -29,9 +29,7 @@ import {
     pdfPageLabels,
     pdfRenderPages,
     pdfRenderPagesWithMeta,
-    pdfExtractRaw,
     pdfExtractRawDetailed,
-    pdfSearch,
     pdfExtract,
     pdfHasTextLayer,
     pdfAnalyzeOcr,
@@ -108,28 +106,6 @@ describe('MuPDF worker smoke — PR #2 ops', () => {
         expect(res.pageLabels).toBeDefined();
     });
 
-    it('extractRawPages returns blocks for every page', async () => {
-        const res = await pdfExtractRaw(NORMAL_PDF);
-        expect(res.ok).toBe(true);
-        const doc = res.result!;
-        expect(doc.pageCount).toBe(NORMAL_PDF_PAGE_COUNT);
-        expect(doc.pages.length).toBe(NORMAL_PDF_PAGE_COUNT);
-        for (const page of doc.pages) {
-            expect(typeof page.pageIndex).toBe('number');
-            expect(page.width).toBeGreaterThan(0);
-            expect(page.height).toBeGreaterThan(0);
-            expect(Array.isArray(page.blocks)).toBe(true);
-        }
-    });
-
-    it('extractRawPages silently filters invalid indices', async () => {
-        const res = await pdfExtractRaw(SMALL_PDF, { page_indices: [0, 99999] });
-        expect(res.ok).toBe(true);
-        const pages = res.result!.pages;
-        expect(pages.length).toBe(1);
-        expect(pages[0].pageIndex).toBe(0);
-    });
-
     it('renderPagesToImages produces a non-empty image', async () => {
         const res = await pdfRenderPages(SMALL_PDF, { page_indices: [0] });
         expect(res.ok).toBe(true);
@@ -191,18 +167,6 @@ describe('MuPDF worker smoke — PR #2 ops', () => {
         expect(res.error?.code).toBe('PAGE_OUT_OF_RANGE');
     });
 
-    it('searchPages returns hits with quad coordinates', async () => {
-        const res = await pdfSearch(NORMAL_PDF, { query: 'the' });
-        expect(res.ok).toBe(true);
-        expect(Array.isArray(res.pages)).toBe(true);
-        // Most papers contain "the" — guard with a >= check to avoid flake.
-        expect(res.pages!.length).toBeGreaterThan(0);
-        for (const page of res.pages!) {
-            expect(typeof page.pageIndex).toBe('number');
-            expect(page.matchCount).toBeGreaterThan(0);
-            expect(page.hits.length).toBe(page.matchCount);
-        }
-    });
 });
 
 describe('MuPDF worker smoke — orchestration ops', () => {

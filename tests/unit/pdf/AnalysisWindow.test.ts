@@ -1,8 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-    resolveAnalysisPages,
-    DEFAULT_ANALYSIS_WINDOW_CAP,
-} from "../../../src/services/pdf/AnalysisWindow";
+import { resolveAnalysisPages } from "../../../src/services/pdf/AnalysisWindow";
 
 describe("resolveAnalysisPages", () => {
     describe("N=0: targets only", () => {
@@ -229,15 +226,14 @@ describe("resolveAnalysisPages", () => {
             expect(Math.max(...out)).toBeLessThan(5);
         });
 
-        it("does not consult DEFAULT_ANALYSIS_WINDOW_CAP — wide windows pass through", () => {
+        it("applies no hidden cap — wide windows pass through", () => {
             const out = resolveAnalysisPages({
                 targetPageIndices: [500],
                 totalPageCount: 1000,
                 analysisWindow: 100,
             });
-            // 100 + 100 + 1 = 201 pages, well above the legacy cap of 50.
+            // 100 + 100 + 1 = 201 pages — callers control cost via N.
             expect(out.length).toBe(201);
-            expect(DEFAULT_ANALYSIS_WINDOW_CAP).toBe(50);
         });
     });
 });

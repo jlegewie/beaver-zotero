@@ -310,38 +310,6 @@ describe('MuPDFWorkerClient', () => {
         });
     });
 
-    describe('extractRawPages', () => {
-        it('round-trips RawDocumentData and posts without a transfer list', async () => {
-            const client = getMuPDFWorkerClient();
-            const buf = new Uint8Array([1, 2, 3]);
-
-            const promise = client.extractRawPages(buf, [0]);
-            const worker = MockWorker.instances[0];
-            const canned = {
-                pageCount: 1,
-                pages: [
-                    {
-                        pageIndex: 0,
-                        pageNumber: 1,
-                        width: 612,
-                        height: 792,
-                        blocks: [],
-                    },
-                ],
-            };
-            worker.replyToLast({ ok: true, result: canned });
-
-            await expect(promise).resolves.toEqual(canned);
-
-            const [message, transfer] = worker.opCall(0);
-            expect(message).toMatchObject({
-                op: 'extractRawPages',
-                args: { pageIndices: [0] },
-            });
-            expect(transfer).toBeUndefined();
-        });
-    });
-
     describe('extractRawPageDetailed', () => {
         it('round-trips RawPageDataDetailed', async () => {
             const client = getMuPDFWorkerClient();
@@ -551,39 +519,6 @@ describe('MuPDFWorkerClient', () => {
                 details: ocrAnalysis,
                 pageLabels,
                 pageCount: 50,
-            });
-        });
-    });
-
-    describe('searchPages', () => {
-        it('round-trips PDFPageSearchResult[]', async () => {
-            const client = getMuPDFWorkerClient();
-            const buf = new Uint8Array([1, 2]);
-
-            const promise = client.searchPages(buf, 'foo');
-            const worker = MockWorker.instances[0];
-            const canned = [
-                {
-                    pageIndex: 2,
-                    matchCount: 1,
-                    hits: [
-                        {
-                            quads: [[0, 0, 1, 0, 0, 1, 1, 1]],
-                            bbox: { x: 0, y: 0, w: 1, h: 1 },
-                        },
-                    ],
-                    width: 612,
-                    height: 792,
-                },
-            ];
-            worker.replyToLast({ ok: true, result: canned });
-
-            await expect(promise).resolves.toEqual(canned);
-
-            const [message] = worker.opCall(0);
-            expect(message).toMatchObject({
-                op: 'searchPages',
-                args: { query: 'foo' },
             });
         });
     });
