@@ -24,7 +24,7 @@ import {
     setCachedSentencex,
 } from "../worker/apiCache";
 import type { SentencexModule } from "../worker/sentencexInit";
-import { setPDFLogger } from "../logging";
+import { setPDFLogger, type PDFLogLevel } from "../logging";
 import { defaultWasmDir } from "./paths";
 
 interface SentencexFactory extends SentencexModule {
@@ -39,6 +39,30 @@ declare const globalThis: {
 let _loggerInstalled = false;
 let _mupdfPromise: Promise<void> | null = null;
 let _sentencexPromise: Promise<void> | null = null;
+
+export type CliLogLevel = "error" | "warn" | "info" | "silent";
+
+// `PDFLogLevel` is `1 (error) | 2 (warn) | 3 (info)`. We extend with `0` to
+// model "silent" (drop everything) at the sink. Default = warn so analyzer
+// errors and warnings still surface but the chatty info-level doc-cache and
+// trace lines stay quiet for agent / piped usage.
+let _maxLevel: 0 | PDFLogLevel = 2;
+
+const LEVEL_TO_NUM: Record<CliLogLevel, 0 | PDFLogLevel> = {
+    silent: 0,
+    error: 1,
+    warn: 2,
+    info: 3,
+};
+
+/**
+ * Set the stderr log threshold for the Node CLI. Lines emitted via
+ * `pdfLog()` / worker-side `postLog()` whose level exceeds this threshold
+ * are dropped at the sink. Idempotent; the latest call wins.
+ */
+export function setCliLogLevel(level: CliLogLevel): void {
+    _maxLevel = LEVEL_TO_NUM[level];
+}
 
 function resolveWasmDir(): string {
     return process.env.BEAVER_EXTRACT_WASM_DIR || defaultWasmDir;
@@ -67,6 +91,9 @@ function ensureNodeRuntimeShims(): void {
 function ensureLoggerInstalled(): void {
     if (_loggerInstalled) return;
     setPDFLogger((msg, level) => {
+        // Filter at the sink so the worker / analyzer call sites stay
+        // unchanged and the threshold can be adjusted at runtime.
+        if (level > _maxLevel) return;
         const prefix = level === 1 ? "ERROR" : level === 2 ? "WARN" : "INFO";
         process.stderr.write(`[pdf:${prefix}] ${msg}\n`);
     });

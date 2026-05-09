@@ -111,6 +111,25 @@ stats, and effective options for offline diffing.
 | -------------------------- | ------------------------------------ | ------------------------------------ |
 | `BEAVER_EXTRACT_WASM_DIR`  | `<repo>/addon/content/lib`           | Override WASM file directory.        |
 
+### Logging
+
+The CLI writes structured log lines to **stderr** via the package's shared
+log sink (analyzer modules + worker doc-cache + WASM bootstrap all route
+through it). JSON output on stdout is unaffected.
+
+Control verbosity with the global `--log-level` flag, placed **before** the
+subcommand:
+
+```bash
+npm run beaver-extract -- --log-level info  info "$PDF"   # full trace
+npm run beaver-extract -- --log-level warn  info "$PDF"   # default
+npm run beaver-extract -- --log-level silent info "$PDF"  # quiet
+```
+
+Levels: `error | warn | info | silent`. Default is `warn`, so analyzer
+errors and warnings still surface but the chatty `[pdf:INFO]` doc-cache
+and trace lines stay out of pipe-friendly output.
+
 ## Testing
 
 ```bash

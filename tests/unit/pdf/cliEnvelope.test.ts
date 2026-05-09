@@ -485,3 +485,32 @@ describe('runCli — analysis window accepts Infinity', () => {
     });
 });
 
+describe('runCli — --log-level global option', () => {
+    it('accepts each valid level when placed before the subcommand', async () => {
+        for (const level of ['error', 'warn', 'info', 'silent']) {
+            const { deps, api } = makeDeps();
+            api.getPageCount.mockResolvedValue({ count: 1 });
+            api.getMetadata.mockResolvedValue({ pageCount: 1, pageLabels: {} });
+            const code = await runCli(
+                ['--log-level', level, 'info', 'fake.pdf', '--json'],
+                deps,
+            );
+            expect(code).toBe(0);
+        }
+    });
+
+    it('rejects an unknown level with a non-zero exit code', async () => {
+        const { deps, api } = makeDeps();
+        const code = await runCli(
+            ['--log-level', 'loud', 'info', 'fake.pdf', '--json'],
+            deps,
+        );
+        // commander resolves `InvalidArgumentError` from option parsing to
+        // its own exitCode (1) and writes the message via its internal
+        // output writer (not `deps.stderr`). What matters here is the
+        // non-zero exit and that the action never ran.
+        expect(code).not.toBe(0);
+        expect(api.getPageCount).not.toHaveBeenCalled();
+        expect(api.getMetadata).not.toHaveBeenCalled();
+    });
+});
