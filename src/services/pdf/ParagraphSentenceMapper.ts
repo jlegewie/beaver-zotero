@@ -477,10 +477,10 @@ export interface PageSentenceBBoxOptions {
     splitter?: SentenceSplitter;
     /**
      * BCP-47 / ISO 639-1 language code, used by callers higher up the
-     * stack (e.g. `PDFExtractor.extractSentenceBBoxes`) to construct a
-     * language-tuned splitter. This field is informational at the
-     * mapper layer — if `splitter` is set it takes precedence and
-     * `language` is ignored.
+     * stack (e.g. `PDFExtractor.extract({ mode: "structured" })`) to
+     * construct a language-tuned splitter. This field is informational
+     * at the mapper layer — if `splitter` is set it takes precedence
+     * and `language` is ignored.
      */
     language?: string;
     /** Forwarded to `detectParagraphs`. */
@@ -498,7 +498,8 @@ export interface PageSentenceBBoxOptions {
      * Cross-page analysis window for smart-removal and document-wide
      * style profiling. Currently informational at this layer (the
      * worker resolves the analysis page set upstream); kept here for
-     * documentation parity with `PDFExtractor.extractSentenceBBoxes`.
+     * documentation parity with `PDFExtractor.extract({ mode:
+     * "structured" })`.
      *   - 0 (default) = analyze only the target page
      *   - positive N  = ±N pages around the target page
      *   - Infinity    = whole document

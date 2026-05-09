@@ -1,13 +1,13 @@
 /**
- * Unit tests for `PDFExtractor.extractSentenceBBoxes` after the worker flip.
+ * Unit tests for `PDFExtractor.extract({ mode: "structured" })` — the
+ * production sentence-level extraction path.
  *
- * The key regression check: the facade dispatches exactly one
- * `extractSentenceBBoxes` worker op — NOT three separate
- * `getPageCount` / `extractRawPages` / `extractRawPageDetailed` calls
- * (which is what the pre-flip main-thread path did). It also verifies
- * that the public `splitter: SentenceSplitterConfig` arg is translated
- * to a serializable `splitterConfig` on the wire, including the
- * "explicit splitter wins over args.language" precedence rule.
+ * The key regression check: the facade dispatches exactly one `extract`
+ * worker op — NOT a fan-out of `getPageCount` / `extractRawPages` /
+ * `extractRawPageDetailed` / `extractSentenceBBoxesDebug` calls. Also
+ * verifies that the public `structured.splitter` / `structured.language`
+ * args are translated to a serializable `splitterConfig` on the wire,
+ * including the "explicit splitter wins over language" precedence rule.
  *
  * Uses the same MockWorker pattern as `mupdfWorkerClient.test.ts` so we
  * observe the actual `postMessage` payload — not just whether some
@@ -65,14 +65,47 @@ function setupZoteroMainWindowWithMockWorker() {
     });
 }
 
-const FAKE_RESULT = {
-    paragraphs: [],
-    sentences: [],
-    unmappedParagraphs: 0,
-    degradedParagraphs: 0,
+const FAKE_EXTRACTION_RESULT = {
+    pages: [
+        {
+            index: 0,
+            label: undefined,
+            width: 612,
+            height: 792,
+            blocks: [],
+            content: '## Title\n\nA sentence.',
+            columns: [],
+            lines: [],
+            paragraphs: [],
+            sentences: [],
+            unmappedParagraphs: 0,
+            degradedParagraphs: 0,
+            degradationNotes: [],
+        },
+    ],
+    analysis: {
+        pageCount: 1,
+        hasTextLayer: true,
+        styleProfile: {} as any,
+        marginAnalysis: {} as any,
+    },
+    fullText: '## Title\n\nA sentence.',
+    metadata: {
+        extractedAt: new Date().toISOString(),
+        version: '2.2.0',
+        settings: {},
+        engine: 'structured',
+        timings: {
+            totalMs: 0,
+            docOpenMs: 0,
+            walkMs: 0,
+            analysisMs: 0,
+            perPageMs: [0],
+        },
+    },
 };
 
-describe('PDFExtractor.extractSentenceBBoxes — single worker round-trip', () => {
+describe('PDFExtractor.extract({ mode: "structured" }) — single worker round-trip', () => {
     beforeEach(() => {
         MockWorker.instances.length = 0;
         setupZoteroMainWindowWithMockWorker();
@@ -83,14 +116,14 @@ describe('PDFExtractor.extractSentenceBBoxes — single worker round-trip', () =
         delete (globalThis as any).Zotero.__beaverMuPDFWorkerClient;
     });
 
-    it('dispatches exactly one extractSentenceBBoxes op (no fan-out)', async () => {
-        const promise = new PDFExtractor().extractSentenceBBoxes(
-            new Uint8Array([1, 2, 3]),
-            { pageIndex: 0 },
-        );
+    it('dispatches exactly one extract op (no fan-out)', async () => {
+        const promise = new PDFExtractor().extract(new Uint8Array([1, 2, 3]), {
+            mode: 'structured',
+            pageIndices: [0],
+        });
         const worker = MockWorker.instances[0];
         expect(worker).toBeDefined();
-        worker.replyToLast({ ok: true, result: FAKE_RESULT });
+        worker.replyToLast({ ok: true, result: FAKE_EXTRACTION_RESULT });
         await promise;
 
         // Exactly one posted op message (configure handshake is excluded
@@ -98,8 +131,8 @@ describe('PDFExtractor.extractSentenceBBoxes — single worker round-trip', () =
         expect(worker.posted).toHaveLength(1);
         const [message] = worker.opCall(0);
         expect(message).toMatchObject({
-            op: 'extractSentenceBBoxes',
-            args: { pageIndex: 0 },
+            op: 'extract',
+            args: { mode: 'structured', pageIndices: [0] },
         });
 
         // None of the legacy main-thread fan-out ops appear on the wire.
@@ -109,139 +142,142 @@ describe('PDFExtractor.extractSentenceBBoxes — single worker round-trip', () =
         expect(ops).not.toContain('getPageCount');
         expect(ops).not.toContain('extractRawPages');
         expect(ops).not.toContain('extractRawPageDetailed');
+        expect(ops).not.toContain('extractSentenceBBoxesDebug');
     });
 
     it('defaults splitter to { type: "sentencex", language: undefined } when none provided', async () => {
-        const promise = new PDFExtractor().extractSentenceBBoxes(
-            new Uint8Array([1]),
-            { pageIndex: 0 },
-        );
+        const promise = new PDFExtractor().extract(new Uint8Array([1]), {
+            mode: 'structured',
+            pageIndices: [0],
+        });
         const worker = MockWorker.instances[0];
-        worker.replyToLast({ ok: true, result: FAKE_RESULT });
+        worker.replyToLast({ ok: true, result: FAKE_EXTRACTION_RESULT });
         await promise;
 
         const [message] = worker.opCall(0);
-        expect(message.args.options.splitterConfig).toEqual({
+        expect(message.args.structured.splitterConfig).toEqual({
             type: 'sentencex',
             language: undefined,
         });
     });
 
-    it('uses args.language to seed sentencex when splitter is omitted', async () => {
-        const promise = new PDFExtractor().extractSentenceBBoxes(
-            new Uint8Array([1]),
-            { pageIndex: 0, language: 'fr' },
-        );
+    it('uses structured.language to seed sentencex when splitter is omitted', async () => {
+        const promise = new PDFExtractor().extract(new Uint8Array([1]), {
+            mode: 'structured',
+            pageIndices: [0],
+            structured: { language: 'fr' },
+        });
         const worker = MockWorker.instances[0];
-        worker.replyToLast({ ok: true, result: FAKE_RESULT });
+        worker.replyToLast({ ok: true, result: FAKE_EXTRACTION_RESULT });
         await promise;
 
         const [message] = worker.opCall(0);
-        expect(message.args.options.splitterConfig).toEqual({
+        expect(message.args.structured.splitterConfig).toEqual({
             type: 'sentencex',
             language: 'fr',
         });
     });
 
     it('forwards { type: "simple" } verbatim', async () => {
-        const promise = new PDFExtractor().extractSentenceBBoxes(
-            new Uint8Array([1]),
-            { pageIndex: 0, splitter: { type: 'simple' } },
-        );
+        const promise = new PDFExtractor().extract(new Uint8Array([1]), {
+            mode: 'structured',
+            pageIndices: [0],
+            structured: { splitter: { type: 'simple' } },
+        });
         const worker = MockWorker.instances[0];
-        worker.replyToLast({ ok: true, result: FAKE_RESULT });
+        worker.replyToLast({ ok: true, result: FAKE_EXTRACTION_RESULT });
         await promise;
 
         const [message] = worker.opCall(0);
-        expect(message.args.options.splitterConfig).toEqual({ type: 'simple' });
+        expect(message.args.structured.splitterConfig).toEqual({
+            type: 'simple',
+        });
     });
 
     it('forwards an explicit sentencex language verbatim', async () => {
-        const promise = new PDFExtractor().extractSentenceBBoxes(
-            new Uint8Array([1]),
-            {
-                pageIndex: 0,
+        const promise = new PDFExtractor().extract(new Uint8Array([1]), {
+            mode: 'structured',
+            pageIndices: [0],
+            structured: {
                 splitter: { type: 'sentencex', language: 'de' },
             },
-        );
+        });
         const worker = MockWorker.instances[0];
-        worker.replyToLast({ ok: true, result: FAKE_RESULT });
+        worker.replyToLast({ ok: true, result: FAKE_EXTRACTION_RESULT });
         await promise;
 
         const [message] = worker.opCall(0);
-        expect(message.args.options.splitterConfig).toEqual({
+        expect(message.args.structured.splitterConfig).toEqual({
             type: 'sentencex',
             language: 'de',
         });
     });
 
-    it('honors splitter precedence: explicit splitter.language wins over args.language', async () => {
-        // Both fields set: the explicit splitter config must win — args.language
-        // is only consulted when `splitter` is omitted entirely.
-        const promise = new PDFExtractor().extractSentenceBBoxes(
-            new Uint8Array([1]),
-            {
-                pageIndex: 0,
+    it('honors splitter precedence: explicit structured.splitter wins over structured.language', async () => {
+        const promise = new PDFExtractor().extract(new Uint8Array([1]), {
+            mode: 'structured',
+            pageIndices: [0],
+            structured: {
                 splitter: { type: 'sentencex', language: 'de' },
                 language: 'en',
             },
-        );
+        });
         const worker = MockWorker.instances[0];
-        worker.replyToLast({ ok: true, result: FAKE_RESULT });
+        worker.replyToLast({ ok: true, result: FAKE_EXTRACTION_RESULT });
         await promise;
 
         const [message] = worker.opCall(0);
-        expect(message.args.options.splitterConfig).toEqual({
+        expect(message.args.structured.splitterConfig).toEqual({
             type: 'sentencex',
             language: 'de',
         });
     });
 
     it('forwards paragraphSettings and analysisWindow on the wire', async () => {
-        const promise = new PDFExtractor().extractSentenceBBoxes(
-            new Uint8Array([1]),
-            {
-                pageIndex: 7,
-                paragraphSettings: { headingFontSizeBoost: 1.2 } as any,
-                analysisWindow: 5,
-            },
-        );
+        const promise = new PDFExtractor().extract(new Uint8Array([1]), {
+            mode: 'structured',
+            pageIndices: [7],
+            paragraphSettings: { headingFontSizeBoost: 1.2 } as any,
+            analysisWindow: 5,
+        });
         const worker = MockWorker.instances[0];
-        worker.replyToLast({ ok: true, result: FAKE_RESULT });
+        worker.replyToLast({ ok: true, result: FAKE_EXTRACTION_RESULT });
         await promise;
 
         const [message] = worker.opCall(0);
         expect(message.args).toMatchObject({
-            pageIndex: 7,
-            options: {
-                paragraphSettings: { headingFontSizeBoost: 1.2 },
-                analysisWindow: 5,
-            },
+            mode: 'structured',
+            pageIndices: [7],
+            paragraphSettings: { headingFontSizeBoost: 1.2 },
+            analysisWindow: 5,
         });
     });
 
-    // The facade forwards only named production fields to the worker call
-    // (`splitterConfig`, `paragraphSettings`, `analysisWindow`). A
-    // request-derived or `any`-typed args object cannot leak `debug: true`
-    // through the facade — that would silently turn the
-    // `Promise<PageSentenceBBoxResult>` return into a trace envelope at
-    // runtime.
-    it('does NOT leak unknown fields from the public args (e.g. debug)', async () => {
-        const permissiveArgs = {
-            pageIndex: 0,
-            // Type-erase to simulate a request-derived caller.
-            ...({ debug: true, recordSplitter: true } as any),
-        };
-        const promise = new PDFExtractor().extractSentenceBBoxes(
-            new Uint8Array([1]),
-            permissiveArgs as any,
-        );
+    it('does NOT carry a `structured` field on the wire when mode is markdown', async () => {
+        const promise = new PDFExtractor().extract(new Uint8Array([1]), {
+            mode: 'markdown',
+            pageIndices: [0],
+        });
         const worker = MockWorker.instances[0];
-        worker.replyToLast({ ok: true, result: FAKE_RESULT });
+        worker.replyToLast({ ok: true, result: FAKE_EXTRACTION_RESULT });
         await promise;
 
         const [message] = worker.opCall(0);
-        expect(message.args.options).not.toHaveProperty('debug');
-        expect(message.args.options).not.toHaveProperty('recordSplitter');
+        expect(message.args.structured).toBeUndefined();
+    });
+
+    it('returns the ExtractionResult shape with structured fields populated', async () => {
+        const promise = new PDFExtractor().extract(new Uint8Array([1]), {
+            mode: 'structured',
+            pageIndices: [0],
+        });
+        const worker = MockWorker.instances[0];
+        worker.replyToLast({ ok: true, result: FAKE_EXTRACTION_RESULT });
+        const result = await promise;
+
+        expect(result.metadata.engine).toBe('structured');
+        expect(result.metadata.version).toBe('2.2.0');
+        expect(result.pages[0]).toHaveProperty('sentences');
+        expect(result.pages[0]).toHaveProperty('paragraphs');
     });
 });

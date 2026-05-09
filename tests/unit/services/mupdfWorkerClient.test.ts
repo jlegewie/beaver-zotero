@@ -780,91 +780,17 @@ describe('MuPDFWorkerClient', () => {
         });
     });
 
-    describe('extractSentenceBBoxes', () => {
-        it('round-trips a PageSentenceBBoxResult', async () => {
-            const client = getMuPDFWorkerClient();
-            const promise = client.extractSentenceBBoxes(new Uint8Array([1]), 0);
-            const worker = MockWorker.instances[0];
-            worker.replyToLast({
-                ok: true,
-                result: {
-                    paragraphs: [],
-                    sentences: [],
-                    unmappedParagraphs: 0,
-                    degradedParagraphs: 0,
-                },
-            });
-            await promise;
-            const [message] = worker.opCall(0);
-            expect(message).toMatchObject({
-                op: 'extractSentenceBBoxes',
-                args: { pageIndex: 0 },
-            });
-        });
+    describe('extractSentenceBBoxesDebug', () => {
+        // Production sentence-level extraction goes through `extract({ mode:
+        // "structured" })` (covered in `pdfExtractorSentenceBBoxes.test.ts`).
+        // This op is debug-only — the worker always returns
+        // `SentenceBBoxTraceResult = { result, trace }`.
 
-        it('forwards splitterConfig as a serializable object', async () => {
+        it('round-trips a SentenceBBoxTraceResult', async () => {
             const client = getMuPDFWorkerClient();
-            const promise = client.extractSentenceBBoxes(
-                new Uint8Array([1]),
-                3,
-                {
-                    splitterConfig: { type: 'sentencex', language: 'de' },
-                    analysisWindow: 5,
-                },
-            );
-            const worker = MockWorker.instances[0];
-            worker.replyToLast({
-                ok: true,
-                result: { paragraphs: [], sentences: [] },
-            });
-            await promise;
-            const [message] = worker.opCall(0);
-            expect(message).toMatchObject({
-                op: 'extractSentenceBBoxes',
-                args: {
-                    pageIndex: 3,
-                    options: {
-                        splitterConfig: { type: 'sentencex', language: 'de' },
-                        analysisWindow: 5,
-                    },
-                },
-            });
-            // Function-typed `splitter` and `precomputed` are no longer part
-            // of the worker boundary — neither should appear on the wire.
-            expect(message.args.options).not.toHaveProperty('splitter');
-            expect(message.args.options).not.toHaveProperty('precomputed');
-        });
-
-        it('forwards { type: "simple" } as splitterConfig', async () => {
-            const client = getMuPDFWorkerClient();
-            const promise = client.extractSentenceBBoxes(
+            const promise = client.extractSentenceBBoxesDebug(
                 new Uint8Array([1]),
                 0,
-                { splitterConfig: { type: 'simple' } },
-            );
-            const worker = MockWorker.instances[0];
-            worker.replyToLast({
-                ok: true,
-                result: { paragraphs: [], sentences: [] },
-            });
-            await promise;
-            const [message] = worker.opCall(0);
-            expect(message.args.options.splitterConfig).toEqual({
-                type: 'simple',
-            });
-        });
-
-        // Debug-mode coverage. The trace path was previously a separate
-        // worker op (`extractSentenceBBoxesTrace`); it now collapses into
-        // this same op behind `options.debug: true`. Without these tests
-        // the consolidation could silently drop the trace path from unit
-        // coverage.
-        it('debug: true posts the production op string with options.debug and resolves to the trace envelope', async () => {
-            const client = getMuPDFWorkerClient();
-            const promise = client.extractSentenceBBoxes(
-                new Uint8Array([1]),
-                2,
-                { debug: true },
             );
             const worker = MockWorker.instances[0];
             const traceReply = {
@@ -875,9 +801,9 @@ describe('MuPDFWorkerClient', () => {
                     degradedParagraphs: 0,
                 },
                 trace: {
-                    analysisPageIndices: [2],
+                    analysisPageIndices: [0],
                     rawDoc: { pageCount: 1, pages: [] },
-                    detailed: { pageIndex: 2, pageNumber: 3, width: 0, height: 0, blocks: [] },
+                    detailed: { pageIndex: 0, pageNumber: 1, width: 0, height: 0, blocks: [] },
                     pagesForFilter: [],
                     marginAnalysis: { elements: new Map(), counts: { top: 0, bottom: 0, left: 0, right: 0 } },
                     marginRemoval: {
@@ -891,26 +817,75 @@ describe('MuPDFWorkerClient', () => {
             worker.replyToLast({ ok: true, result: traceReply });
             const out = await promise;
             const [message] = worker.opCall(0);
-            // Same op string as production — the merge collapses both modes
-            // behind one dispatcher case.
             expect(message).toMatchObject({
-                op: 'extractSentenceBBoxes',
-                args: { pageIndex: 2, options: { debug: true } },
+                op: 'extractSentenceBBoxesDebug',
+                args: { pageIndex: 0 },
             });
             // The promise resolves to the trace envelope shape.
             expect(out).toHaveProperty('result');
             expect(out).toHaveProperty('trace');
-            expect((out as { trace: { analysisPageIndices: number[] } }).trace.analysisPageIndices).toEqual([2]);
+            expect((out as { trace: { analysisPageIndices: number[] } }).trace.analysisPageIndices).toEqual([0]);
         });
 
-        it('debug: true forwards recordSplitter alongside the production fields', async () => {
+        it('forwards splitterConfig as a serializable object', async () => {
             const client = getMuPDFWorkerClient();
-            const promise = client.extractSentenceBBoxes(
+            const promise = client.extractSentenceBBoxesDebug(
+                new Uint8Array([1]),
+                3,
+                {
+                    splitterConfig: { type: 'sentencex', language: 'de' },
+                    analysisWindow: 5,
+                },
+            );
+            const worker = MockWorker.instances[0];
+            worker.replyToLast({
+                ok: true,
+                result: { result: { paragraphs: [], sentences: [] }, trace: {} },
+            });
+            await promise;
+            const [message] = worker.opCall(0);
+            expect(message).toMatchObject({
+                op: 'extractSentenceBBoxesDebug',
+                args: {
+                    pageIndex: 3,
+                    options: {
+                        splitterConfig: { type: 'sentencex', language: 'de' },
+                        analysisWindow: 5,
+                    },
+                },
+            });
+            // Function-typed `splitter` and `precomputed` are not part of
+            // the worker boundary — neither should appear on the wire.
+            expect(message.args.options).not.toHaveProperty('splitter');
+            expect(message.args.options).not.toHaveProperty('precomputed');
+        });
+
+        it('forwards { type: "simple" } as splitterConfig', async () => {
+            const client = getMuPDFWorkerClient();
+            const promise = client.extractSentenceBBoxesDebug(
+                new Uint8Array([1]),
+                0,
+                { splitterConfig: { type: 'simple' } },
+            );
+            const worker = MockWorker.instances[0];
+            worker.replyToLast({
+                ok: true,
+                result: { result: { paragraphs: [], sentences: [] }, trace: {} },
+            });
+            await promise;
+            const [message] = worker.opCall(0);
+            expect(message.args.options.splitterConfig).toEqual({
+                type: 'simple',
+            });
+        });
+
+        it('forwards recordSplitter alongside the splitter config', async () => {
+            const client = getMuPDFWorkerClient();
+            const promise = client.extractSentenceBBoxesDebug(
                 new Uint8Array([1]),
                 0,
                 {
                     splitterConfig: { type: 'sentencex', language: 'en' },
-                    debug: true,
                     recordSplitter: true,
                 },
             );
@@ -923,7 +898,6 @@ describe('MuPDFWorkerClient', () => {
             const [message] = worker.opCall(0);
             expect(message.args.options).toMatchObject({
                 splitterConfig: { type: 'sentencex', language: 'en' },
-                debug: true,
                 recordSplitter: true,
             });
         });

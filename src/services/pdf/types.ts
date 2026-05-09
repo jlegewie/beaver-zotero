@@ -2,7 +2,16 @@
  * PDF Extraction Types
  *
  * Core type definitions for the PDF text extraction pipeline.
+ *
+ * NOTE: `ProcessedPage` references `ParagraphWithSentences` and
+ * `DegradationNote` from `./ParagraphSentenceMapper`. These are pulled in via
+ * `import type` so the imports erase at runtime — no real cycle.
  */
+
+import type {
+    DegradationNote,
+    ParagraphWithSentences,
+} from "./ParagraphSentenceMapper";
 
 // ============================================================================
 // Settings & Options
@@ -425,6 +434,45 @@ export interface ProcessedPage {
     columns?: ColumnBBox[];
     /** Detected lines (only present if useLineDetection=true) */
     lines?: ExtractedLine[];
+
+    // ------------------------------------------------------------------
+    // Structured-mode-only fields. Populated when the producing
+    // `extract` call ran with `mode: "structured"`. Always-on in that
+    // mode (no opt-in flag); markdown-mode results leave them
+    // undefined.
+    // ------------------------------------------------------------------
+
+    /**
+     * Paragraphs with their sentences. Same `ParagraphWithSentences[]`
+     * shape returned by the single-page sentence mapper. Each entry
+     * carries the underlying `ContentItem`, the paragraph text +
+     * source-map, and the sentence list.
+     */
+    paragraphs?: ParagraphWithSentences[];
+    /**
+     * Flattened `SentenceBBox[]` across all paragraphs in reading order.
+     * Convenient for callers that don't care which paragraph a
+     * sentence came from.
+     */
+    sentences?: SentenceBBox[];
+    /**
+     * Paragraphs the mapper could not resolve to detailed lines.
+     * Indicates bbox-matching drift between the JSON pass and the
+     * detailed walk. Each unmapped paragraph still contributes a
+     * fallback whole-paragraph sentence.
+     */
+    unmappedParagraphs?: number;
+    /**
+     * Paragraphs that hit a text/chars invariant violation. Each
+     * degraded paragraph contributes a fallback whole-paragraph
+     * sentence using `ContentItem.text`.
+     */
+    degradedParagraphs?: number;
+    /**
+     * Per-degradation diagnostic notes (bounded). Useful for surfacing
+     * concrete reasons in dev dashboards / logs.
+     */
+    degradationNotes?: DegradationNote[];
 }
 
 // ============================================================================
@@ -504,11 +552,16 @@ export interface ExtractionResult {
         version: string;
         settings: ExtractionSettings;
         /**
-         * Markdown engine that produced the result. `"block-with-lines"` is
-         * the dev `useLineDetection` path on top of the block engine.
-         * Optional so legacy callers / tests don't need to populate it.
+         * Engine that produced the result.
+         *  - `"block"` / `"block-with-lines"` / `"paragraph"`: markdown-mode
+         *    engines (mode `"markdown"`).
+         *  - `"structured"`: sentence-level extraction (mode `"structured"`).
+         *
+         * `"block-with-lines"` is the dev `useLineDetection` path on top of
+         * the block engine. Optional so legacy callers / tests don't need
+         * to populate it.
          */
-        engine?: "block" | "block-with-lines" | "paragraph";
+        engine?: "block" | "block-with-lines" | "paragraph" | "structured";
         /**
          * Per-phase worker timings. Optional — populated by `opExtract` /
          * `runExtractFromIndices`; absent on direct ExtractionResult literals

@@ -190,8 +190,13 @@ ProcessedPage; // { index, content, lines[], columns[] }
 #### Results
 
 ```typescript
-ExtractionResult; // Result of PDFExtractor.extract (with or without useLineDetection)
-PageSentenceBBoxResult; // Result of PDFExtractor.extractSentenceBBoxes
+ExtractionResult; // Result of PDFExtractor.extract — markdown OR structured mode.
+                  // Structured mode populates pages[i].sentences / paragraphs /
+                  // unmappedParagraphs / degradedParagraphs / degradationNotes
+                  // alongside the same content / columns / lines fields.
+SentenceBBoxTraceResult; // Result of getMuPDFWorkerClient().extractSentenceBBoxesDebug
+                         // — single-page debug envelope { result, trace } used by
+                         // the visualizer / fixture capture / pipeline-trace endpoints.
 PDFSearchResult; // Result of PDFExtractor.search
 PageImageResult; // Per-page entry in PDFExtractor.renderPages result.pages
 ```
@@ -697,11 +702,34 @@ const meta = await extractor.getMetadata(pdfData);
 const pageCount = await extractor.getPageCount(pdfData);
 const ocrNeeds = await extractor.analyzeOCRNeeds(pdfData);
 
-// Sentence-level bboxes for a single page
-const sentences = await extractor.extractSentenceBBoxes(pdfData, {
-  pageIndex: 0,
-  splitter: { type: "sentencex", language: "en" },
+// Sentence-level extraction — production multi-page entry point.
+// Returns the same `ExtractionResult` shape; structured-mode page data
+// lives on `pages[i].sentences` / `paragraphs` / `columns` / `lines`
+// alongside paragraph-engine `content`. Per-page detailed walk is the
+// dominant cost — budget accordingly for large ranges.
+const structured = await extractor.extract(pdfData, {
+  mode: "structured",
+  pageIndices: [0, 1, 2],
+  structured: { language: "en" },
 });
+for (const page of structured.pages) {
+  for (const sentence of page.sentences ?? []) {
+    console.log(sentence.text, sentence.bboxes);
+  }
+}
+
+// Single-page debug surface (visualizer / fixture capture /
+// pipeline-trace endpoints). Returns `{ result, trace }` with all
+// pipeline intermediates (raw doc, detailed page, font-bridged
+// pagesForFilter, margin analysis/removal, filtered-paragraph result).
+// Not a parity oracle for the production multi-page structured path —
+// see worker/sentenceExtraction.ts for the divergence rationale.
+import { getMuPDFWorkerClient } from "../../src/services/pdf";
+const debug = await getMuPDFWorkerClient().extractSentenceBBoxesDebug(
+  pdfData,
+  0,
+  { splitterConfig: { type: "sentencex", language: "en" } },
+);
 ```
 
 ### Page Image Rendering

@@ -225,7 +225,7 @@ describe("runExtractFromIndices: paragraph engine", () => {
 });
 
 describe("PDFExtractor.extract: argument guards", () => {
-    it("rejects mode='structured'", async () => {
+    it("rejects mode='structured' with markdown.engine set", async () => {
         const { PDFExtractor } = await import(
             "../../../src/services/pdf/index"
         );
@@ -233,8 +233,11 @@ describe("PDFExtractor.extract: argument guards", () => {
         await expect(
             new PDFExtractor().extract(fakeData, {
                 mode: "structured",
+                markdown: { engine: "paragraph" },
             }),
-        ).rejects.toThrow(/structured mode not yet implemented/);
+        ).rejects.toThrow(
+            /markdown\.engine is not applicable when mode='structured'/,
+        );
     });
 
     it("rejects engine='paragraph' with useLineDetection=true", async () => {

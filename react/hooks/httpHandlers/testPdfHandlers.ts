@@ -419,7 +419,7 @@ export async function handleTestPdfExtractRawHttpRequest(request: any) {
  *
  * Calls `getMuPDFWorkerClient().extractRawPageDetailed` directly (the worker
  * validates `pageIndex` and emits PAGE_OUT_OF_RANGE). Bypasses
- * `PDFExtractor.extractSentenceBBoxes` so the test exercises the raw
+ * `extract({ mode: "structured" })` so the test exercises the raw
  * detailed page, not the sentence mapper.
  */
 export async function handleTestPdfExtractRawDetailedHttpRequest(request: any) {
@@ -626,12 +626,14 @@ export async function handleTestPdfSearchScoredHttpRequest(request: any) {
 }
 
 /**
- * Dev-only `extractSentenceBBoxes` parity endpoint.
+ * Dev-only sentence-bboxes parity endpoint.
  *
- * Routes through `PDFExtractor.extractSentenceBBoxes` → MuPDF worker op
- * (single round-trip; analysis-window load, font bridging, filtered
- * paragraph detection, splitter resolution, and sentence mapping all run
- * worker-side).
+ * Routes through `PDFExtractor.extract({ mode: "structured", pageIndices:
+ * [n] })` → MuPDF worker op (single round-trip; analysis-window load, font
+ * bridging, filtered paragraph detection, splitter resolution, and
+ * sentence mapping all run worker-side). The wire response is shaped like
+ * the legacy `PageSentenceBBoxResult` for backwards compat with existing
+ * live tests / external clients — read fields off `pages[0]`.
  *
  * Request body:
  *   { library_id, zotero_key | raw_bytes_base64,
@@ -647,8 +649,8 @@ export async function handleTestPdfSearchScoredHttpRequest(request: any) {
  *       analysisWindow?: number,
  *     } }
  *
- * Response: `{ ok: true, result: PageSentenceBBoxResult }` or the
- * structured `ExtractionError` envelope on failure.
+ * Response: `{ ok: true, result: PageSentenceBBoxResult }` (legacy shape)
+ * or the structured `ExtractionError` envelope on failure.
  */
 export async function handleTestPdfSentenceBBoxesHttpRequest(request: any) {
     const { PDFExtractor } = await import('../../../src/services/pdf');
@@ -657,8 +659,43 @@ export async function handleTestPdfSentenceBBoxesHttpRequest(request: any) {
     return runPdfExtractorCall(
         request,
         (pdfData) =>
-            new PDFExtractor().extractSentenceBBoxes(pdfData, { ...options, pageIndex }),
-        (result) => ({ ok: true, result }),
+            new PDFExtractor().extract(pdfData, {
+                mode: 'structured',
+                pageIndices: [pageIndex],
+                paragraphSettings: options.paragraphSettings,
+                analysisWindow: options.analysisWindow,
+                structured: {
+                    splitter: options.splitter,
+                    language: options.language,
+                },
+            }),
+        (extraction) => {
+            const page = extraction.pages[0];
+            if (!page) {
+                return {
+                    ok: false,
+                    error: {
+                        name: 'Error',
+                        message: `page_index ${pageIndex} not extracted`,
+                    },
+                };
+            }
+            // Reshape to the legacy PageSentenceBBoxResult contract so
+            // existing callers keep working without a wire change.
+            return {
+                ok: true,
+                result: {
+                    pageIndex: page.index,
+                    width: page.width,
+                    height: page.height,
+                    paragraphs: page.paragraphs ?? [],
+                    sentences: page.sentences ?? [],
+                    unmappedParagraphs: page.unmappedParagraphs ?? 0,
+                    degradedParagraphs: page.degradedParagraphs ?? 0,
+                    degradationNotes: page.degradationNotes ?? [],
+                },
+            };
+        },
     );
 }
 
@@ -686,17 +723,14 @@ export async function handleTestPdfSentenceBBoxesHttpRequest(request: any) {
  *
  * Level dispatch notes:
  *   - `sentences`, `columns`, `lines`, `paragraphs`, `margins` all share
- *     a single `extractSentenceBBoxes` debug-mode worker round-trip; each
+ *     a single `extractSentenceBBoxesDebug` worker round-trip; each
  *     level then turns the returned `result` / `trace` into rects via
  *     a pure builder in `extractionOverlay.ts`
  *     (`buildSentenceOverlayFromResult`, `build{Column,Line,Paragraph,
- *     Margins}OverlayFromTrace`). The rects are byte-for-byte the
- *     intermediates the production sentence pipeline produced — same
- *     analysis window, same smart cross-page margin filter, same
- *     style profile. Cost note: non-sentence levels still pay for
- *     splitting + mapping inside the worker; intentional initial
- *     trade-off for parity, with a lighter `extractLayoutTrace` op as
- *     a possible follow-up if it ever bites.
+ *     Margins}OverlayFromTrace`). Cost note: non-sentence levels still
+ *     pay for splitting + mapping inside the worker; intentional
+ *     initial trade-off for parity, with a lighter `extractLayoutTrace`
+ *     op as a possible follow-up if it ever bites.
  *   - `raw-lines` deliberately stays on a single-page unfiltered extract
  *     (`extractRawPages([pageIndex])`) — its purpose is to expose the
  *     pre-filter MuPDF lines so an agent can see what the margin filter
@@ -776,7 +810,7 @@ export async function handleTestPdfRenderOverlayHttpRequest(request: any) {
         }
     } else {
         // sentences / columns / lines / paragraphs / margins: one worker
-        // round-trip via `extractSentenceBBoxes(..., { debug: true })`. The worker owns
+        // round-trip via `extractSentenceBBoxesDebug`. The worker owns
         // the full pipeline (analysis window, font bridging, margin
         // analysis, filtered-paragraph detection, splitter resolution,
         // sentence mapping); main-thread builders below convert the
@@ -804,13 +838,12 @@ export async function handleTestPdfRenderOverlayHttpRequest(request: any) {
                 : undefined;
 
         try {
-            const out = await client.extractSentenceBBoxes(
+            const out = await client.extractSentenceBBoxesDebug(
                 pdfData,
                 pageIndex,
                 {
                     splitterConfig: { type: 'sentencex', language },
                     analysisWindow,
-                    debug: true,
                 },
             );
             switch (level) {
@@ -977,13 +1010,12 @@ export async function handleTestPdfPipelineTraceHttpRequest(request: any) {
     let result: PageSentenceBBoxResult;
     let trace: SentenceBBoxTrace;
     try {
-        const out = await getMuPDFWorkerClient().extractSentenceBBoxes(
+        const out = await getMuPDFWorkerClient().extractSentenceBBoxesDebug(
             pdfData,
             pageIndex,
             {
                 splitterConfig: { type: 'sentencex', language },
                 analysisWindow,
-                debug: true,
             },
         );
         result = out.result;

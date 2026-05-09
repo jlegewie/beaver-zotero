@@ -180,8 +180,8 @@ async function pushOverlayToReader(
 }
 
 /**
- * Run the worker `extractSentenceBBoxes` op (debug mode) for the given page
- * and return `{ result, trace }`. Single round-trip that drives every
+ * Run the worker `extractSentenceBBoxesDebug` op for the given page and
+ * return `{ result, trace }`. Single round-trip that drives every
  * visualizer level (columns / lines / paragraphs / sentences) — the
  * pure builders in `extractionOverlay.ts` then turn the returned trace
  * into rects.
@@ -203,10 +203,10 @@ async function loadSentenceTrace(
     } catch {
         // Best effort.
     }
-    const out = await getMuPDFWorkerClient().extractSentenceBBoxes(
+    const out = await getMuPDFWorkerClient().extractSentenceBBoxesDebug(
         pdfData,
         pageIndex,
-        { splitterConfig: { type: "sentencex", language }, debug: true },
+        { splitterConfig: { type: "sentencex", language } },
     );
     return { ...out, pdfData };
 }

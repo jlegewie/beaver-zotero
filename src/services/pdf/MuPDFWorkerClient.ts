@@ -27,11 +27,12 @@ import {
     type PDFSearchOptions,
     type PDFSearchResult,
 } from "./types";
-import type { PageSentenceBBoxResult } from "./ParagraphSentenceMapper";
 import type {
     SentenceBBoxTraceResult,
-    WorkerSentenceBBoxOptions,
+    SentenceSplitterConfig,
+    WorkerSentenceBBoxDebugOptions,
 } from "./sentenceTypes";
+import type { ParagraphDetectionSettings } from "./ParagraphDetector";
 
 interface PendingEntry {
     resolve: (value: any) => void;
@@ -473,15 +474,25 @@ export class MuPDFWorkerClient {
      * `ExtractionError(PAGE_OUT_OF_RANGE)` with the worker's known `pageCount`
      * in the error payload (rehydrated by `rehydrateError`).
      *
-     * Honors `settings.useLineDetection` — when true, the per-page loop
-     * runs line detection and `ProcessedPage.lines` is populated.
+     * Honors `settings.useLineDetection` (markdown / block engine only) —
+     * when true, the per-page loop runs line detection and
+     * `ProcessedPage.lines` is populated.
+     *
+     * `mode === "structured"` enables sentence-level extraction. The result
+     * is the same `ExtractionResult` shape; per-page sentence /
+     * paragraph / column / line data lives on `ProcessedPage`. Pass the
+     * splitter as a serializable `structured.splitterConfig` (the
+     * facade does the `splitter`/`language` translation before crossing
+     * the worker boundary).
      */
     async extract(
         pdfData: Uint8Array | ArrayBuffer,
         args?: {
             mode?: "markdown" | "structured";
             markdown?: { engine?: "block" | "paragraph" };
+            structured?: { splitterConfig?: SentenceSplitterConfig };
             settings?: ExtractionSettings;
+            paragraphSettings?: ParagraphDetectionSettings;
             pageIndices?: number[];
             pageRange?: { startIndex: number; endIndex?: number; maxPages?: number };
             /**
@@ -499,7 +510,9 @@ export class MuPDFWorkerClient {
             pdfData: bytes,
             mode: args?.mode,
             markdown: args?.markdown,
+            structured: args?.structured,
             settings: args?.settings,
+            paragraphSettings: args?.paragraphSettings,
             pageIndices: args?.pageIndices,
             pageRange: args?.pageRange,
             analysisWindow: args?.analysisWindow,
@@ -544,58 +557,43 @@ export class MuPDFWorkerClient {
     }
 
     /**
-     * Sentence-bbox extraction with full mapper inside the worker.
+     * Single-page sentence-bbox extraction with pipeline intermediates.
+     * Debug-only — production sentence-level extraction goes through
+     * `extract({ mode: "structured" })` which returns the same
+     * `ExtractionResult` shape with `pages[i].sentences` populated.
+     *
+     * Powers the dev visualizer / fixture capture / pipeline-trace
+     * endpoints. Returns `SentenceBBoxTraceResult = { result, trace }`
+     * with `result` being the production sentence result and `trace`
+     * carrying all pipeline intermediates (analysis-window indices, raw
+     * doc, detailed page, font-bridged `pagesForFilter`, margin
+     * analysis/removal, filtered-paragraph result).
      *
      * The splitter is described by a serializable `splitterConfig`
      * (sentencex with language, or simple regex). The worker resolves
      * the actual splitter function via its own `resolveSplitter`,
      * including the sentencex→simple fallback on init failure.
      *
-     * `options` is the discriminated `WorkerSentenceBBoxOptions` union:
-     * production calls (`debug?: false`) return `PageSentenceBBoxResult`;
-     * debug calls (`debug: true`) return `SentenceBBoxTraceResult` =
-     * `{ result, trace }` with all pipeline intermediates
-     * (analysis-window indices, raw doc, detailed page, font-bridged
-     * `pagesForFilter`, margin analysis/removal, filtered-paragraph
-     * result). `recordSplitter` is only representable on the debug variant.
-     *
-     * The two narrowing overloads key off the `debug` literal so callers
-     * see the right return type without runtime branching. Callers passing
-     * an options *variable* whose `debug` has widened to `boolean` must
-     * `as const` the literal or type the variable as one of the union
-     * variants.
-     *
-     * **Map/Set boundary (debug only).** `trace.marginAnalysis`,
-     * `trace.marginRemoval`, and `trace.filteredResult.styleProfile` carry
-     * `Map`/`Set` fields. `postMessage` preserves them via structured
-     * clone, but `JSON.stringify` does NOT — flatten before writing HTTP
-     * responses.
-     *
-     * `options` is restricted to `WorkerSentenceBBoxOptions`: no
+     * `options` is restricted to `WorkerSentenceBBoxDebugOptions`: no
      * function-valued `splitter` (not structurally cloneable) and no
      * `precomputed` (the worker always runs the full filtered-paragraph
-     * pipeline; precomputed shortcuts live on the internal mapper
-     * contract and are used only by main-thread debug paths).
+     * pipeline). When `recordSplitter === true`, `trace.splitterRecording`
+     * carries the `(text → ranges)` pairs for fixture replay.
+     *
+     * **Map/Set boundary.** `trace.marginAnalysis`, `trace.marginRemoval`,
+     * and `trace.filteredResult.styleProfile` carry `Map`/`Set` fields.
+     * `postMessage` preserves them via structured clone, but
+     * `JSON.stringify` does NOT — flatten before writing HTTP responses.
      */
-    async extractSentenceBBoxes(
+    async extractSentenceBBoxesDebug(
         pdfData: Uint8Array | ArrayBuffer,
         pageIndex: number,
-        options?: WorkerSentenceBBoxOptions & { debug?: false },
-    ): Promise<PageSentenceBBoxResult>;
-    async extractSentenceBBoxes(
-        pdfData: Uint8Array | ArrayBuffer,
-        pageIndex: number,
-        options: WorkerSentenceBBoxOptions & { debug: true },
-    ): Promise<SentenceBBoxTraceResult>;
-    async extractSentenceBBoxes(
-        pdfData: Uint8Array | ArrayBuffer,
-        pageIndex: number,
-        options?: WorkerSentenceBBoxOptions,
-    ): Promise<PageSentenceBBoxResult | SentenceBBoxTraceResult> {
+        options?: WorkerSentenceBBoxDebugOptions,
+    ): Promise<SentenceBBoxTraceResult> {
         const bytes =
             pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
-        return this.call<PageSentenceBBoxResult | SentenceBBoxTraceResult>(
-            "extractSentenceBBoxes",
+        return this.call<SentenceBBoxTraceResult>(
+            "extractSentenceBBoxesDebug",
             { pdfData: bytes, pageIndex, options },
         );
     }

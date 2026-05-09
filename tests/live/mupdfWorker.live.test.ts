@@ -321,7 +321,7 @@ describe('MuPDF worker smoke — orchestration ops', () => {
         });
     });
 
-    describe('extractSentenceBBoxes', () => {
+    describe('structured extract (sentence-level)', () => {
         it('returns sentences with bboxes for a healthy PDF page', async () => {
             const res = await pdfSentenceBBoxes(SMALL_PDF, { page_index: 0 });
             expect(res.ok).toBe(true);
