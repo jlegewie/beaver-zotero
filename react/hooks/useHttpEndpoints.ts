@@ -66,6 +66,7 @@ import {
     handleTestPdfSearchHttpRequest,
     handleTestPdfExtractHttpRequest,
     handleTestPdfExtractByLinesHttpRequest,
+    handleTestPdfExtractParagraphHttpRequest,
     handleTestPdfHasTextLayerHttpRequest,
     handleTestPdfAnalyzeOcrHttpRequest,
     handleTestPdfSearchScoredHttpRequest,
@@ -170,6 +171,7 @@ const ENDPOINT_PATHS = [
     // orchestration parity endpoints
     '/beaver/test/pdf-extract',
     '/beaver/test/pdf-extract-by-lines',
+    '/beaver/test/pdf-extract-paragraph',
     '/beaver/test/pdf-has-text-layer',
     '/beaver/test/pdf-analyze-ocr',
     '/beaver/test/pdf-search-scored',
@@ -731,6 +733,9 @@ function registerEndpoints(): boolean {
 
         Zotero.Server.Endpoints['/beaver/test/pdf-extract-by-lines'] =
             createEndpoint(handleTestPdfExtractByLinesHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/pdf-extract-paragraph'] =
+            createEndpoint(handleTestPdfExtractParagraphHttpRequest);
 
         Zotero.Server.Endpoints['/beaver/test/pdf-has-text-layer'] =
             createEndpoint(handleTestPdfHasTextLayerHttpRequest);

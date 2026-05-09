@@ -479,6 +479,8 @@ export class MuPDFWorkerClient {
     async extract(
         pdfData: Uint8Array | ArrayBuffer,
         args?: {
+            mode?: "markdown" | "structured";
+            markdown?: { engine?: "block" | "paragraph" };
             settings?: ExtractionSettings;
             pageIndices?: number[];
             pageRange?: { startIndex: number; endIndex?: number; maxPages?: number };
@@ -495,6 +497,8 @@ export class MuPDFWorkerClient {
             pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
         return this.call<ExtractionResult>("extract", {
             pdfData: bytes,
+            mode: args?.mode,
+            markdown: args?.markdown,
             settings: args?.settings,
             pageIndices: args?.pageIndices,
             pageRange: args?.pageRange,

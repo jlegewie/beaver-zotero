@@ -560,6 +560,33 @@ export async function handleTestPdfExtractByLinesHttpRequest(request: any) {
 }
 
 /**
+ * Dev-only paragraph-engine extract endpoint.
+ *
+ * Routes through `PDFExtractor.extract` with `markdown: { engine: "paragraph" }`,
+ * exercising the line + paragraph detection path. `settings.pages` is
+ * translated into the worker-side `pageIndices` arg for parity with the
+ * existing extract endpoints. The response echoes `engine: "paragraph"` so a
+ * caller diffing block vs. paragraph output can attribute results.
+ */
+export async function handleTestPdfExtractParagraphHttpRequest(request: any) {
+    const { PDFExtractor } = await import('../../../src/services/pdf');
+    const settings = { ...(request?.settings || {}) };
+    const pageIndices: number[] | undefined = Array.isArray(settings.pages) && settings.pages.length > 0
+        ? settings.pages
+        : undefined;
+    delete settings.pages;
+    return runPdfExtractorCall(
+        request,
+        (pdfData) => new PDFExtractor().extract(pdfData, {
+            markdown: { engine: 'paragraph' },
+            settings,
+            pageIndices,
+        }),
+        (result) => ({ ok: true, engine: 'paragraph', result }),
+    );
+}
+
+/**
  * Dev-only `hasTextLayer` parity endpoint.
  *
  * `hasTextLayer` is a boolean projection of `analyzeOCRNeeds` (identical

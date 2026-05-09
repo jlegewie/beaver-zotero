@@ -178,10 +178,29 @@ export class PDFExtractor {
      * `ProcessedPage.lines` is populated with bbox + fontSize + columnIndex
      * metadata and `page.content` becomes the line texts joined with `\n`.
      * `blocks` is left empty in that mode.
+     *
+     * `mode` selects the output product. `"markdown"` (default) returns
+     * `ExtractionResult` with per-page text. `"structured"` is reserved for
+     * the upcoming sentence + bbox path and currently throws.
+     *
+     * `markdown.engine` selects the markdown engine when `mode === "markdown"`:
+     *   - `"block"` (default): `PageExtractor.extractPageWithColumns` —
+     *     today's production behavior, blocks joined with `\n\n`.
+     *   - `"paragraph"`: line + paragraph detection via
+     *     `FilteredParagraphPipeline`, with headers prefixed `## ` and
+     *     paragraphs separated by `\n\n`. `ProcessedPage.blocks` is left
+     *     empty (matches `useLineDetection: true` convention).
+     *
+     * The combination `markdown.engine = "paragraph"` with
+     * `settings.useLineDetection = true` is rejected — both control the
+     * terminal stage that produces `ProcessedPage.content`, so picking one
+     * silently would hide intent.
      */
     async extract(
         pdfData: Uint8Array | ArrayBuffer,
         args: {
+            mode?: "markdown" | "structured";
+            markdown?: { engine?: "block" | "paragraph" };
             settings?: ExtractionSettings;
             pageIndices?: number[];
             pageRange?: { startIndex: number; endIndex?: number; maxPages?: number };
@@ -194,6 +213,19 @@ export class PDFExtractor {
             analysisWindow?: number;
         } = {}
     ): Promise<ExtractionResult> {
+        if (args.mode === "structured") {
+            throw new Error(
+                "PDFExtractor.extract: structured mode not yet implemented; " +
+                "use extractSentenceBBoxes for sentence-level extraction",
+            );
+        }
+        const engine = args.markdown?.engine ?? "block";
+        if (engine === "paragraph" && args.settings?.useLineDetection) {
+            throw new Error(
+                "PDFExtractor.extract: markdown.engine='paragraph' is " +
+                "incompatible with settings.useLineDetection=true",
+            );
+        }
         return getMuPDFWorkerClient().extract(pdfData, args);
     }
 
