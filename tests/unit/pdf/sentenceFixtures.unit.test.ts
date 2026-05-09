@@ -223,8 +223,7 @@ interface ActualLikeResult {
         kind?: 'text' | 'heading';
         joinWithNext?: boolean;
     }>;
-    degradedParagraphs: number;
-    unmappedParagraphs: number;
+    degradation?: { count: number; notes: unknown[] };
 }
 
 function writeUpdatedExpected(fx: LoadedFixture, actual: ActualLikeResult): void {
@@ -253,8 +252,7 @@ function buildExpectedFromActual(
     return {
         paragraphCount: actual.paragraphs.length,
         stats: {
-            degradedParagraphs: actual.degradedParagraphs,
-            unmappedParagraphs: actual.unmappedParagraphs,
+            degradation: actual.degradation?.count ?? 0,
         },
         sentences: actual.sentences.map((s, idx) => {
             const out: FixtureFile['expected']['sentences'][number] = {

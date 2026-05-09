@@ -148,7 +148,9 @@ export function buildSentenceOverlayFromResult(
     result: PageSentenceBBoxResult,
     analysisPagesScanned?: number,
 ): OverlayResult {
-    const degradedItemIndices = new Set(result.degradationNotes.map((n) => n.itemIndex));
+    const degradedItemIndices = new Set(
+        (result.degradation?.notes ?? []).map((n) => n.itemIndex),
+    );
     const degradedSentenceIndices = computeDegradedSentenceIndices(
         result.paragraphs,
         degradedItemIndices,
@@ -215,8 +217,7 @@ export function buildSentenceOverlayFromResult(
             sentences: result.sentences.length,
             headings: headingCount,
             paragraphs: result.paragraphs.length,
-            degradedParagraphs: result.degradedParagraphs,
-            unmappedParagraphs: result.unmappedParagraphs,
+            degradation: result.degradation?.count ?? 0,
             analysisPagesScanned,
         },
     };
@@ -448,9 +449,7 @@ export function buildSentenceOverlayFromPage(page: ProcessedPage): OverlayResult
         height: page.height,
         paragraphs: page.paragraphs ?? [],
         sentences: page.sentences ?? [],
-        unmappedParagraphs: page.unmappedParagraphs ?? 0,
-        degradedParagraphs: page.degradedParagraphs ?? 0,
-        degradationNotes: page.degradationNotes ?? [],
+        degradation: page.degradation,
     };
     return buildSentenceOverlayFromResult(projected);
 }

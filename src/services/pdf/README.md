@@ -192,8 +192,9 @@ ProcessedPage; // { index, content, lines[], columns[] }
 ```typescript
 ExtractionResult; // Result of PDFExtractor.extract — markdown OR structured mode.
                   // Structured mode populates pages[i].sentences / paragraphs /
-                  // unmappedParagraphs / degradedParagraphs / degradationNotes
-                  // alongside the same content / columns / lines fields.
+                  // degradation alongside the same content / columns / lines
+                  // fields. `degradation` is omitted on pages where no
+                  // paragraph fell back to a whole-paragraph bbox.
 LayoutAnalysisResult; // Result of PDFExtractor.analyzeLayout — pre-extraction
                       // analysis context (styleProfile + marginAnalysis +
                       // marginRemoval) plus the JSON-walked target pages. Same

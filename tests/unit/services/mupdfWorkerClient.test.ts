@@ -797,8 +797,6 @@ describe('MuPDFWorkerClient', () => {
                 result: {
                     paragraphs: [],
                     sentences: [],
-                    unmappedParagraphs: 0,
-                    degradedParagraphs: 0,
                 },
                 trace: {
                     analysisPageIndices: [0],

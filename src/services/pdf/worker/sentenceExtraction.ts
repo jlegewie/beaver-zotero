@@ -34,8 +34,8 @@
  * parity oracle for structured extraction. The bar for structured is
  * "no extraction-quality regression on representative fixtures" (no
  * added margin junk, no lost body paragraphs, no worse heading/body
- * classification, no measurable rise in `unmappedParagraphs` /
- * `degradedParagraphs`). See `tests/unit/pdf/sentenceFixtures` for
+ * classification, no measurable rise in `degradation.count`). See
+ * `tests/unit/pdf/sentenceFixtures` for
  * the regression surface.
  *
  * In `recordSplitter: true` mode (only available with `trace: true`),

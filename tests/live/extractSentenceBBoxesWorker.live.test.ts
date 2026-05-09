@@ -2,11 +2,10 @@
  * Live tests for the worker-backed sentence-level extraction with each
  * `SentenceSplitterConfig` variant.
  *
- * `/beaver/test/pdf-sentence-bboxes` now routes through `PDFExtractor.extract({
+ * `/beaver/test/pdf-sentence-bboxes` routes through `PDFExtractor.extract({
  * mode: "structured" })` (single worker round-trip; per-page detailed
  * walk + paragraph + sentence mapping all run worker-side). The wire
- * response is reshaped to the legacy `PageSentenceBBoxResult` contract
- * for backwards compat.
+ * response is shaped as `PageSentenceBBoxResult`.
  *
  * This suite exercises both splitter configs against a real fixture page
  * and asserts:

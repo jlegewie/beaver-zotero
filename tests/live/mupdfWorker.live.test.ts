@@ -313,8 +313,11 @@ describe('MuPDF worker smoke — orchestration ops', () => {
             const result = res.result;
             expect(Array.isArray(result.paragraphs)).toBe(true);
             expect(Array.isArray(result.sentences)).toBe(true);
-            expect(typeof result.unmappedParagraphs).toBe('number');
-            expect(typeof result.degradedParagraphs).toBe('number');
+            // `degradation` is optional — omitted when no paragraphs degraded.
+            if (result.degradation !== undefined) {
+                expect(typeof result.degradation.count).toBe('number');
+                expect(Array.isArray(result.degradation.notes)).toBe(true);
+            }
             for (const sentence of result.sentences) {
                 expect(typeof sentence.text).toBe('string');
                 expect(Array.isArray(sentence.bboxes)).toBe(true);

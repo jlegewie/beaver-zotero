@@ -610,9 +610,8 @@ export async function handleTestPdfSearchScoredHttpRequest(request: any) {
  * Routes through `PDFExtractor.extract({ mode: "structured", pageIndices:
  * [n] })` → MuPDF worker op (single round-trip; analysis-window load, font
  * bridging, filtered paragraph detection, splitter resolution, and
- * sentence mapping all run worker-side). The wire response is shaped like
- * the legacy `PageSentenceBBoxResult` for backwards compat with existing
- * live tests / external clients — read fields off `pages[0]`.
+ * sentence mapping all run worker-side). The wire response is shaped as
+ * `PageSentenceBBoxResult` — read fields off `pages[0]`.
  *
  * Request body:
  *   { library_id, zotero_key | raw_bytes_base64,
@@ -628,8 +627,8 @@ export async function handleTestPdfSearchScoredHttpRequest(request: any) {
  *       analysisWindow?: number,
  *     } }
  *
- * Response: `{ ok: true, result: PageSentenceBBoxResult }` (legacy shape)
- * or the structured `ExtractionError` envelope on failure.
+ * Response: `{ ok: true, result: PageSentenceBBoxResult }` or the
+ * structured `ExtractionError` envelope on failure.
  */
 export async function handleTestPdfSentenceBBoxesHttpRequest(request: any) {
     const { PDFExtractor } = await import('../../../src/services/pdf');
@@ -659,8 +658,8 @@ export async function handleTestPdfSentenceBBoxesHttpRequest(request: any) {
                     },
                 };
             }
-            // Reshape to the legacy PageSentenceBBoxResult contract so
-            // existing callers keep working without a wire change.
+            // Reshape into PageSentenceBBoxResult so callers can
+            // consume the same shape the producer returns.
             return {
                 ok: true,
                 result: {
@@ -669,9 +668,7 @@ export async function handleTestPdfSentenceBBoxesHttpRequest(request: any) {
                     height: page.height,
                     paragraphs: page.paragraphs ?? [],
                     sentences: page.sentences ?? [],
-                    unmappedParagraphs: page.unmappedParagraphs ?? 0,
-                    degradedParagraphs: page.degradedParagraphs ?? 0,
-                    degradationNotes: page.degradationNotes ?? [],
+                    degradation: page.degradation,
                 },
             };
         },
@@ -970,7 +967,7 @@ export async function handleTestPdfRenderOverlayHttpRequest(request: any) {
  *                                         // keep only triage facts (counts,
  *                                         // candidates, finalKept=false lines,
  *                                         // lines_dropped_by_columns,
- *                                         // degradationNotes). Typical 10–50×
+ *                                         // degradation.notes). Typical 10–50×
  *                                         // smaller payload.
  *
  * Response shape (selected fields):
@@ -1285,7 +1282,7 @@ export async function handleTestPdfPipelineTraceHttpRequest(request: any) {
 
     // Mark which paragraphs degraded so we can flag fallback sentences.
     const degradedItemIndices = new Set(
-        sentenceResult.degradationNotes.map((n) => n.itemIndex),
+        (sentenceResult.degradation?.notes ?? []).map((n) => n.itemIndex),
     );
     const sentencesOut: Array<{
         idx: number;
@@ -1415,9 +1412,10 @@ export async function handleTestPdfPipelineTraceHttpRequest(request: any) {
             sentence_stats: {
                 sentences: sentenceResult.sentences.length,
                 paragraphs: sentenceResult.paragraphs.length,
-                degradedParagraphs: sentenceResult.degradedParagraphs,
-                unmappedParagraphs: sentenceResult.unmappedParagraphs,
-                degradationNotes: sentenceResult.degradationNotes,
+                degradation: {
+                    count: sentenceResult.degradation?.count ?? 0,
+                    notes: sentenceResult.degradation?.notes ?? [],
+                },
             },
         };
     }
@@ -1473,9 +1471,10 @@ export async function handleTestPdfPipelineTraceHttpRequest(request: any) {
         sentence_stats: {
             sentences: sentenceResult.sentences.length,
             paragraphs: sentenceResult.paragraphs.length,
-            degradedParagraphs: sentenceResult.degradedParagraphs,
-            unmappedParagraphs: sentenceResult.unmappedParagraphs,
-            degradationNotes: sentenceResult.degradationNotes,
+            degradation: {
+                count: sentenceResult.degradation?.count ?? 0,
+                notes: sentenceResult.degradation?.notes ?? [],
+            },
         },
     };
 }

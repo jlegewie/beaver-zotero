@@ -457,9 +457,7 @@ export function runExtractFromIndices(
                 lines: flattenColumnLines(filteredResult.lineResult),
                 paragraphs: sentenceResult.paragraphs,
                 sentences: sentenceResult.sentences,
-                unmappedParagraphs: sentenceResult.unmappedParagraphs,
-                degradedParagraphs: sentenceResult.degradedParagraphs,
-                degradationNotes: sentenceResult.degradationNotes,
+                degradation: sentenceResult.degradation,
             } as ProcessedPage);
             perPageMs.push(performance.now() - tPage);
         }

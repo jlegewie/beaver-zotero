@@ -78,9 +78,6 @@ const FAKE_EXTRACTION_RESULT = {
             lines: [],
             paragraphs: [],
             sentences: [],
-            unmappedParagraphs: 0,
-            degradedParagraphs: 0,
-            degradationNotes: [],
         },
     ],
     analysis: {

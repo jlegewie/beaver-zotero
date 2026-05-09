@@ -9,7 +9,7 @@
  */
 
 import type {
-    DegradationNote,
+    DegradationSummary,
     ParagraphWithSentences,
 } from "./ParagraphSentenceMapper";
 
@@ -453,23 +453,12 @@ export interface ProcessedPage {
      */
     sentences?: SentenceBBox[];
     /**
-     * Paragraphs the mapper could not resolve to detailed lines.
-     * Indicates bbox-matching drift between the JSON pass and the
-     * detailed walk. Each unmapped paragraph still contributes a
-     * fallback whole-paragraph sentence.
+     * Paragraphs that fell back from precise sentence-level mapping to a
+     * single whole-paragraph bbox (bbox-lookup miss, text/chars invariant
+     * violation, or empty splitter result — distinguished by
+     * `notes[i].reason`). Omitted when no paragraphs degraded.
      */
-    unmappedParagraphs?: number;
-    /**
-     * Paragraphs that hit a text/chars invariant violation. Each
-     * degraded paragraph contributes a fallback whole-paragraph
-     * sentence using `ContentItem.text`.
-     */
-    degradedParagraphs?: number;
-    /**
-     * Per-degradation diagnostic notes (bounded). Useful for surfacing
-     * concrete reasons in dev dashboards / logs.
-     */
-    degradationNotes?: DegradationNote[];
+    degradation?: DegradationSummary;
 }
 
 // ============================================================================

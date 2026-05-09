@@ -116,6 +116,25 @@ export interface DegradationNote {
     message?: string;
 }
 
+/**
+ * Summary of paragraphs on a page that fell back from precise sentence-level
+ * mapping to a single whole-paragraph bbox. The producer omits the field
+ * entirely when no paragraphs degraded — callers should use
+ * `result.degradation?.count ?? 0` and `result.degradation?.notes ?? []`.
+ *
+ * The per-reason classification (`unmapped` / `invariant_violation` /
+ * `empty_split`) lives on each `DegradationNote.reason`. `count` reflects
+ * the total across all reasons; `notes` is bounded by
+ * `MAX_DEGRADATION_NOTES` so per-reason histograms over `notes` may
+ * undercount on pathological pages — `count` is always exact.
+ */
+export interface DegradationSummary {
+    /** Total paragraphs that fell back to a whole-paragraph bbox. */
+    count: number;
+    /** Per-paragraph diagnostic notes (capped at `MAX_DEGRADATION_NOTES`). */
+    notes: DegradationNote[];
+}
+
 /** Result of running the full paragraph-scoped sentence pipeline on a page. */
 export interface PageSentenceBBoxResult {
     pageIndex: number;
@@ -131,23 +150,14 @@ export interface PageSentenceBBoxResult {
      */
     sentences: SentenceBBox[];
     /**
-     * Paragraphs the mapper could not resolve to detailed lines.
-     * Non-zero values here usually indicate bbox-matching drift between the
-     * JSON pass and the walk pass (see `buildDetailedLineLookup`).
-     * These paragraphs contribute a fallback sentence instead of being dropped.
+     * Paragraphs that fell back from precise sentence-level mapping to a
+     * single whole-paragraph bbox (bbox-lookup miss, text/chars invariant
+     * violation, or empty splitter result — distinguished by
+     * `notes[i].reason`). Omitted when no paragraphs degraded; callers
+     * should read it as `result.degradation?.count ?? 0` /
+     * `result.degradation?.notes ?? []`.
      */
-    unmappedParagraphs: number;
-    /**
-     * Paragraphs that hit a text/chars invariant violation (ligature or
-     * astral-plane edge case). These paragraphs contribute a fallback
-     * whole-paragraph bbox using the `ContentItem.text` as the sentence text.
-     */
-    degradedParagraphs: number;
-    /**
-     * Per-degradation notes for logging / diagnostics. Bounded; see
-     * `MAX_DEGRADATION_NOTES`.
-     */
-    degradationNotes: DegradationNote[];
+    degradation?: DegradationSummary;
 }
 
 /** Cap on diagnostic notes to avoid unbounded memory on pathological PDFs. */
@@ -194,7 +204,7 @@ export function buildDetailedLineLookup(
  * Each `PageLine.spans` has a `bbox` that was copied verbatim from the raw
  * line it was built from. We look that bbox up in `detailedLookup` to
  * recover the corresponding `RawLineDetailed`. Missing lookups are skipped
- * (and surfaced to the caller through `unmappedParagraphs`), which keeps the
+ * (and surfaced to the caller through `result.degradation`), which keeps the
  * pipeline resilient when a single span drifts.
  *
  * Span-level ordering: within a single `PageLine`, spans are sorted left-to
@@ -360,8 +370,8 @@ export function tryBuildParagraphText(
  * Produces one whole-paragraph rectangle using the `ContentItem.bbox`
  * (already merged across all lines by the paragraph detector) and the
  * `ContentItem.text` as the sentence text. Callers can tell this apart
- * from a precise result by looking at `PageSentenceBBoxResult.degradedParagraphs`
- * or `.degradationNotes`.
+ * from a precise result by looking at `PageSentenceBBoxResult.degradation`
+ * (count + per-paragraph notes).
  */
 function fallbackSentenceFromItem(
     item: ContentItem,
@@ -552,8 +562,7 @@ export function extractPageSentenceBBoxes(
 
     const paragraphs: ParagraphWithSentences[] = [];
     const flatSentences: SentenceBBox[] = [];
-    let unmappedParagraphs = 0;
-    let degradedParagraphs = 0;
+    let degradedCount = 0;
     const degradationNotes: DegradationNote[] = [];
     // Uncapped — `degradationNotes` itself is bounded by MAX_DEGRADATION_NOTES,
     // but the column-continuation pass needs to skip every degraded paragraph,
@@ -577,7 +586,7 @@ export function extractPageSentenceBBoxes(
         // detailed line. We still want a usable SentenceBBox for the
         // caller, so we emit a fallback covering the whole paragraph.
         if (detailedLines.length === 0) {
-            unmappedParagraphs++;
+            degradedCount++;
             degradedItems.add(i);
             addNote({ itemIndex: i, itemType: item.type, reason: "unmapped" });
             const fallback = fallbackSentenceFromItem(item, detailedPage.pageIndex, i);
@@ -599,7 +608,7 @@ export function extractPageSentenceBBoxes(
         // crash the whole page.
         const built = tryBuildParagraphText(detailedLines);
         if (!built.ok) {
-            degradedParagraphs++;
+            degradedCount++;
             degradedItems.add(i);
             addNote({
                 itemIndex: i,
@@ -648,7 +657,7 @@ export function extractPageSentenceBBoxes(
         // with real content. Emit one fallback so the paragraph is still
         // addressable, but mark it degraded so the caller can tell.
         if (sentences.length === 0 && paragraphText.text.trim().length > 0) {
-            degradedParagraphs++;
+            degradedCount++;
             degradedItems.add(i);
             addNote({ itemIndex: i, itemType: item.type, reason: "empty_split" });
             const fallback = fallbackSentenceFromItem(item, detailedPage.pageIndex, i);
@@ -673,9 +682,10 @@ export function extractPageSentenceBBoxes(
         height: detailedPage.height,
         paragraphs,
         sentences: flatSentences,
-        unmappedParagraphs,
-        degradedParagraphs,
-        degradationNotes,
+        degradation:
+            degradedCount > 0
+                ? { count: degradedCount, notes: degradationNotes }
+                : undefined,
     };
 }
 
@@ -857,14 +867,15 @@ export interface ParagraphFeasibilityReport {
     totalParagraphs: number;
     totalHeaders: number;
     mappedParagraphs: number;
-    unmappedParagraphs: number;
-    degradedParagraphs: number;
+    /**
+     * Degradation summary copied from `extractPageSentenceBBoxes`. Omitted
+     * when no paragraphs degraded.
+     */
+    degradation?: DegradationSummary;
     totalSentences: number;
     multiFragmentSentences: number;
     invariantHolds: boolean;
     allBBoxesInPage: boolean;
-    /** Diagnostic notes for degraded paragraphs (capped). */
-    degradationNotes: DegradationNote[];
     /** First N paragraphs with their sentence summaries, for inspection. */
     paragraphs: Array<{
         index: number;
@@ -964,13 +975,11 @@ export function buildParagraphFeasibilityReport(
         totalParagraphs,
         totalHeaders,
         mappedParagraphs: result.paragraphs.length,
-        unmappedParagraphs: result.unmappedParagraphs,
-        degradedParagraphs: result.degradedParagraphs,
+        degradation: result.degradation,
         totalSentences: result.sentences.length,
         multiFragmentSentences: multi,
         invariantHolds,
         allBBoxesInPage,
-        degradationNotes: result.degradationNotes,
         paragraphs: previews,
     };
 }

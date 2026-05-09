@@ -94,10 +94,15 @@ function normalizeLiveResult(result: any): ActualSentenceResult {
             text: String(s.text ?? ''),
         })),
     }));
+    const deg = result?.degradation;
     return {
         sentences,
         paragraphs,
-        degradedParagraphs: Number(result?.degradedParagraphs ?? 0),
-        unmappedParagraphs: Number(result?.unmappedParagraphs ?? 0),
+        degradation: deg
+            ? {
+                  count: Number(deg.count ?? 0),
+                  notes: Array.isArray(deg.notes) ? deg.notes : [],
+              }
+            : undefined,
     };
 }

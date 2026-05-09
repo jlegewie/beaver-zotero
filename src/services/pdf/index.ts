@@ -109,6 +109,9 @@ export type {
     PageSentenceBBoxResult,
     PageSentenceBBoxOptions,
     ParagraphFeasibilityReport,
+    DegradationSummary,
+    DegradationNote,
+    DegradationReason,
 } from "./ParagraphSentenceMapper";
 export {
     normalizeLanguageCode,

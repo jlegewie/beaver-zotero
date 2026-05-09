@@ -370,8 +370,7 @@ export async function visualizeCurrentPageSentences(): Promise<{
     sentences?: number;
     headings?: number;
     paragraphs?: number;
-    degradedParagraphs?: number;
-    unmappedParagraphs?: number;
+    degradation?: number;
     pageIndex?: number;
 }> {
     try {
@@ -403,11 +402,8 @@ export async function visualizeCurrentPageSentences(): Promise<{
         const sentences = Number(overlay.stats.sentences ?? 0);
         const headings = Number(overlay.stats.headings ?? 0);
         const paragraphs = Number(overlay.stats.paragraphs ?? 0);
-        const degraded = Number(overlay.stats.degradedParagraphs ?? 0);
-        const unmapped = Number(overlay.stats.unmappedParagraphs ?? 0);
-        const tail = degraded > 0 || unmapped > 0
-            ? ` (degraded: ${degraded}, unmapped: ${unmapped})`
-            : "";
+        const degradation = Number(overlay.stats.degradation ?? 0);
+        const tail = degradation > 0 ? ` (degradation: ${degradation})` : "";
         const headingTail = headings > 0 ? ` (${headings} heading${headings === 1 ? "" : "s"})` : "";
         const message = `Page ${pageIndex + 1}: ${sentences} sentences${headingTail} in ${paragraphs} paragraphs${tail}`;
         logger(`[Visualizer] ${message}`);
@@ -417,8 +413,7 @@ export async function visualizeCurrentPageSentences(): Promise<{
             sentences,
             headings,
             paragraphs,
-            degradedParagraphs: degraded,
-            unmappedParagraphs: unmapped,
+            degradation,
             pageIndex,
         };
     } catch (error) {
