@@ -19,6 +19,7 @@ import type {
     PageSentenceBBoxResult,
     SentenceBBoxTrace,
 } from '../../../src/services/pdf';
+import { projectAnalyzeLayout } from '../../../src/services/pdf/debug/analyzeLayoutProjection';
 
 
 // =============================================================================
@@ -154,6 +155,11 @@ async function runPdfExtractorCall<T>(
  * Request body:
  *   { library_id, zotero_key }     // read attachment bytes
  *   { raw_bytes_base64 }            // bypass attachment-type check
+ *
+ * @deprecated Prefer `npm run beaver-extract -- info <pdf>`. The CLI runs
+ *   the same extraction code in Node and avoids the Zotero round-trip.
+ *   This endpoint is kept for live tests that exercise Zotero attachment
+ *   resolution.
  */
 export async function handleTestPdfPageCountHttpRequest(request: any) {
     const { PDFExtractor, ExtractionError } = await import(
@@ -231,6 +237,8 @@ export async function handleTestPdfPageCountHttpRequest(request: any) {
  * Dev-only PDF metadata endpoint. Routes through `PDFExtractor`, which
  * delegates to the MuPDF worker. Returns page count, page labels, and
  * cheap info-dict fields (title, author, format, etc.).
+ *
+ * @deprecated Prefer `npm run beaver-extract -- info <pdf>`.
  */
 export async function handleTestPdfPageLabelsHttpRequest(request: any) {
     const { PDFExtractor, ExtractionError } = await import(
@@ -265,6 +273,9 @@ export async function handleTestPdfPageLabelsHttpRequest(request: any) {
  * `{ ok, pages }` response shape is preserved for live-test parity.
  * Image bytes are base64-encoded for JSON transport; live tests decode
  * for parity.
+ *
+ * @deprecated Prefer `npm run beaver-extract -- render <pdf> --pages 0 --out <dir>`.
+ *   The CLI writes PNGs to disk and avoids the base64 round-trip.
  */
 export async function handleTestPdfRenderPagesHttpRequest(request: any) {
     const { PDFExtractor, ExtractionError } = await import(
@@ -315,6 +326,8 @@ export async function handleTestPdfRenderPagesHttpRequest(request: any) {
  * Dev-only fused render-pages endpoint exercising
  * `PDFExtractor.renderPages`. Returns metadata alongside rendered pages
  * so live tests can verify the fused-op shape end-to-end.
+ *
+ * @deprecated Prefer `npm run beaver-extract -- render <pdf> --pages <list> --out <dir> --json`.
  */
 export async function handleTestPdfRenderPagesWithMetaHttpRequest(request: any) {
     const { PDFExtractor, ExtractionError } = await import(
@@ -378,6 +391,8 @@ export async function handleTestPdfRenderPagesWithMetaHttpRequest(request: any) 
  * validates `pageIndex` and emits PAGE_OUT_OF_RANGE). Bypasses
  * `extract({ mode: "structured" })` so the test exercises the raw
  * detailed page, not the sentence mapper.
+ *
+ * @deprecated Prefer `npm run beaver-extract -- raw-detailed <pdf> --page <n> --json`.
  */
 export async function handleTestPdfExtractRawDetailedHttpRequest(request: any) {
     const { ExtractionError } = await import('../../../src/services/pdf');
@@ -425,6 +440,9 @@ export async function handleTestPdfExtractRawDetailedHttpRequest(request: any) {
  * `settings.pages` array into the worker-side `pageIndices` arg so existing
  * live-test bodies (which still pass `{ settings: { pages: [...] } }`) keep
  * working.
+ *
+ * @deprecated Prefer `npm run beaver-extract -- extract <pdf> --pages <list> --json`.
+ *   The CLI defaults to `--mode structured`, matching production extraction.
  */
 export async function handleTestPdfExtractHttpRequest(request: any) {
     const { PDFExtractor } = await import('../../../src/services/pdf');
@@ -448,6 +466,8 @@ export async function handleTestPdfExtractHttpRequest(request: any) {
  * translated into the worker-side `pageIndices` arg for parity with the
  * existing extract endpoints. Engine attribution is on `result.metadata.engine`
  * — no separate wrapper-level field, so consumers have one source of truth.
+ *
+ * @deprecated Prefer `npm run beaver-extract -- extract <pdf> --mode markdown --pages <list> --json`.
  */
 export async function handleTestPdfExtractParagraphHttpRequest(request: any) {
     const { PDFExtractor } = await import('../../../src/services/pdf');
@@ -514,6 +534,9 @@ export async function handleTestPdfSearchScoredHttpRequest(request: any) {
  * bridging, filtered paragraph detection, splitter resolution, and
  * sentence mapping all run worker-side). The wire response is shaped as
  * `PageSentenceBBoxResult` — read fields off `pages[0]`.
+ *
+ * @deprecated Prefer `npm run beaver-extract -- extract <pdf> --pages <n> --json`.
+ *   Sentence bboxes live on `result.pages[0].sentences`.
  *
  * Request body:
  *   { library_id, zotero_key | raw_bytes_base64,
@@ -583,6 +606,12 @@ export async function handleTestPdfSentenceBBoxesHttpRequest(request: any) {
  * Renders one page via MuPDF and paints column/line/paragraph/sentence
  * bboxes on top, returning a base64 PNG. Lets headless agents iterate on
  * extraction code: edit → wait for plugin reload → POST → inspect image.
+ *
+ * @deprecated Prefer `npm run beaver-extract -- overlay <pdf> --page <n> --level <level> --out <png>`.
+ *   The CLI writes the PNG directly to disk (no base64 round-trip) and
+ *   composites via sharp instead of OffscreenCanvas. The shared
+ *   `debug/overlayBuilders.ts` rect builders are byte-identical between
+ *   the two surfaces.
  *
  * Request body:
  *   { library_id, zotero_key | raw_bytes_base64,
@@ -1351,6 +1380,10 @@ export async function handleTestPdfPipelineTraceHttpRequest(request: any) {
  * analysis context production extract uses for the same `settings` /
  * `page_indices` / `analysis_window`.
  *
+ * @deprecated Prefer `npm run beaver-extract -- analyze-layout <pdf> --pages <list> --json`.
+ *   Wire shape comes from the shared `debug/analyzeLayoutProjection.ts`,
+ *   so this endpoint and the CLI emit the exact same JSON.
+ *
  * Use this to inspect prod-side margin candidates, removal decisions,
  * and font/style profile without paying for per-page extraction. Same
  * input contract as `extract`'s wire format — `page_range` uses
@@ -1437,46 +1470,9 @@ export async function handleTestPdfAnalyzeLayoutHttpRequest(request: any) {
         });
 
         // Flatten Map/Set fields — `JSON.stringify` would otherwise serialize
-        // them as `{}`. Cover ALL four fields documented in
-        // `LayoutAnalysisResult`'s file comment.
-        const styleCounts: Record<string, { count: number; style: unknown }> = {};
-        for (const [key, value] of result.analysis.styleProfile.styleCounts) {
-            styleCounts[key] = value;
-        }
-        const elements: Record<string, unknown[]> = {};
-        for (const [pos, list] of result.analysis.marginAnalysis.elements) {
-            elements[pos] = list;
-        }
-        const removalsByPage: Record<string, string[]> = {};
-        for (const [pageIdx, texts] of result.analysis.marginRemoval.removalsByPage) {
-            removalsByPage[String(pageIdx)] = Array.from(texts);
-        }
-        const textsToRemove = Array.from(result.analysis.marginRemoval.textsToRemove);
-
-        return {
-            ok: true,
-            page_count: result.pageCount,
-            analysis_page_indices: result.analysisPageIndices,
-            pages: result.pages,
-            page_labels: result.pageLabels,
-            analysis: {
-                style_profile: {
-                    primaryBodyStyle: result.analysis.styleProfile.primaryBodyStyle,
-                    bodyStyles: result.analysis.styleProfile.bodyStyles,
-                    styleCounts,
-                },
-                margin_analysis: {
-                    elements,
-                    counts: result.analysis.marginAnalysis.counts,
-                },
-                margin_removal: {
-                    candidates: result.analysis.marginRemoval.candidates,
-                    removalsByPage,
-                    textsToRemove,
-                },
-            },
-            metadata: result.metadata,
-        };
+        // them as `{}`. The CLI `analyze-layout` command consumes the same
+        // projection so wire shape stays in lockstep across both surfaces.
+        return { ok: true, ...projectAnalyzeLayout(result) };
     } catch (e: any) {
         if (e instanceof ExtractionError) {
             if (e.code === ExtractionErrorCode.PAGE_OUT_OF_RANGE) {

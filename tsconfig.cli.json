@@ -1,0 +1,23 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "target": "ES2022",
+    "lib": ["ES2022", "WebWorker", "DOM"],
+    "types": [],
+    "noEmit": true
+  },
+  "include": [
+    "src/services/pdf/node",
+    "src/services/pdf/cli",
+    "src/services/pdf/worker",
+    "src/services/pdf/debug",
+    "tests/unit/pdf/cliEnvelope.test.ts",
+    "tests/unit/pdf/debugOverlayBuilders.test.ts",
+    "tests/unit/pdf/nodeApiSerialization.test.ts",
+    "tests/unit/pdf/overlaySvg.test.ts",
+    "tests/smoke"
+  ],
+  "exclude": ["build", "addon", "node_modules"]
+}

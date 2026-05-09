@@ -15,12 +15,17 @@
  *      directly instead of the default `__wbg_init` export, which
  *      avoids the shim's `import.meta.url` / `fetch(.wasm)` path.
  *
+ * Cache state lives in `./apiCache.ts` so the Node CLI bootstrap can
+ * pre-populate it via fs-based loading; subsequent `ensureSentencex()`
+ * calls then short-circuit on the cached value.
+ *
  * No dispose op: the module's WASM memory is owned by this worker scope
  * and dies with `worker.terminate()` (driven by `MuPDFWorkerClient.dispose`).
  */
 
 import { loadWasmBinaryXHR } from "./wasmHelpers";
 import { getWorkerUrls } from "./config";
+import { getCachedSentencex, setCachedSentencex } from "./apiCache";
 import type { SentencexBoundary } from "../SentencexSplitter";
 
 /** The minimal wasm-bindgen module surface the splitter resolver uses. */
@@ -42,11 +47,11 @@ interface SentencexFactory extends SentencexModule {
     initSync: (config: { module: ArrayBuffer | WebAssembly.Module }) => unknown;
 }
 
-let _module: SentencexModule | null = null;
 let _initPromise: Promise<SentencexModule> | null = null;
 
 export async function ensureSentencex(): Promise<SentencexModule> {
-    if (_module) return _module;
+    const cached = getCachedSentencex();
+    if (cached) return cached;
     if (_initPromise) return _initPromise;
 
     _initPromise = (async () => {
@@ -68,8 +73,8 @@ export async function ensureSentencex(): Promise<SentencexModule> {
         // initSync, NOT default — avoids the shim's import.meta.url / fetch path
         mod.initSync({ module: wasmBinary });
 
-        _module = mod;
-        return _module;
+        setCachedSentencex(mod);
+        return mod;
     })();
 
     try {

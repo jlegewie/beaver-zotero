@@ -18,11 +18,20 @@
  * Workers don't have ChromeUtils/NetUtil and `fetch('chrome://...')` is
  * unreliable in worker scope, so XHR is the only reliable path for the
  * WASM binary.
+ *
+ * Cache state lives in `./apiCache.ts` so the Node CLI bootstrap can
+ * pre-populate it via fs-based loading; subsequent `ensureApi()` calls
+ * then short-circuit on the cached value.
  */
 
 import { makeDocumentApi, type MuPDFApi, type LibMuPdf } from "./mupdfApi";
 import { loadWasmBinaryXHR } from "./wasmHelpers";
 import { getWorkerUrls } from "./config";
+import {
+    getCachedApi,
+    getCachedLibMuPdf,
+    setCachedApi,
+} from "./apiCache";
 
 // MuPDF font-loading callback (must be installed before WASM init).
 declare const globalThis: { $libmupdf_load_font_file?: (name: string) => null };
@@ -32,12 +41,11 @@ if (typeof globalThis.$libmupdf_load_font_file !== "function") {
     };
 }
 
-let _libmupdf: LibMuPdf | null = null;
 let _initPromise: Promise<LibMuPdf> | null = null;
-let _api: MuPDFApi | null = null;
 
 export async function ensureInit(): Promise<LibMuPdf> {
-    if (_libmupdf) return _libmupdf;
+    const cached = getCachedLibMuPdf();
+    if (cached) return cached;
     if (_initPromise) return _initPromise;
 
     _initPromise = (async () => {
@@ -62,7 +70,6 @@ export async function ensureInit(): Promise<LibMuPdf> {
 
         const libmupdf = await wasmFactory(wasmConfig);
         libmupdf._wasm_init_context();
-        _libmupdf = libmupdf;
         return libmupdf;
     })();
 
@@ -80,10 +87,13 @@ export async function ensureInit(): Promise<LibMuPdf> {
  * `makeDocumentApi` allocates real WASM heap on construction (the
  * `_wasm_string` scratch slot, the `_wasm_matrix` writer, ColorSpace
  * pointers). Calling it per-op would leak those allocations on every
- * request, so the API is cached for the worker's lifetime.
+ * request, so the API is cached for the worker's lifetime in `apiCache`.
  */
 export async function ensureApi(): Promise<MuPDFApi> {
+    const cached = getCachedApi();
+    if (cached) return cached;
     const libmupdf = await ensureInit();
-    if (!_api) _api = makeDocumentApi(libmupdf);
-    return _api;
+    const api = makeDocumentApi(libmupdf);
+    setCachedApi(api, libmupdf);
+    return api;
 }

@@ -19,5 +19,10 @@
     "noEmit": true
   },
   "include": ["src", "react", "typings", "node_modules/zotero-types"],
-  "exclude": ["build", "addon"]
+  "exclude": [
+    "build",
+    "addon",
+    "src/services/pdf/node",
+    "src/services/pdf/cli"
+  ]
 }

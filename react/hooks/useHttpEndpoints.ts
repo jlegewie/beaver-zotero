@@ -1,11 +1,21 @@
 /**
  * Hook to register HTTP endpoints for local FrontendCapability.
- * 
+ *
  * This hook registers HTTP endpoints on Zotero's local server (port 23119)
  * that expose the agent data provider handlers. The endpoints are only
  * registered when the user is authenticated and the React store is available.
- * 
+ *
  * Endpoints are unregistered when the hook unmounts (e.g., user logs out).
+ *
+ * `/beaver/test/pdf-*` endpoints
+ * ------------------------------
+ * The pure PDF extraction endpoints (page count, render, extract,
+ * analyze-layout, render-overlay, sentence bboxes, etc.) have CLI
+ * equivalents — see `docs-zotero/beaver-extract-cli.md` for the mapping.
+ * Prefer the CLI for new debugging work; it skips the Zotero round-trip
+ * and runs the same extraction code in Node. Endpoints that exercise
+ * Zotero state (cache, notes, editor, item resolution, worker lifecycle)
+ * stay HTTP-only.
  */
 
 import { useEffect } from 'react';
