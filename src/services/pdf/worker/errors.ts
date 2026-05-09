@@ -7,7 +7,8 @@
  * also re-export plain string constants for convenience.
  */
 import { ExtractionErrorCode } from "../types";
-import { workerSelf } from "./workerScope";
+import { getWorkerSelf } from "./workerScope";
+import { pdfLog, type PDFLogLevel } from "../logging";
 
 export const ERROR_CODES = ExtractionErrorCode;
 
@@ -48,15 +49,31 @@ export function workerError(
 
 export type WorkerLogLevel = "warn" | "info" | "error";
 
+const LEVEL_TO_PDF: Record<WorkerLogLevel, PDFLogLevel> = {
+    error: 1,
+    warn: 2,
+    info: 3,
+};
+
 /**
  * Out-of-band log message to the main thread. Best-effort; never throws.
- * Main-side `MuPDFWorkerClient.onWorkerMessage` branches on `kind === "log"`
+ *
+ * In Worker context: posts `{ kind: "log", level, msg }` to the main
+ * thread; `MuPDFWorkerClient.onWorkerMessage` branches on `kind === "log"`
  * before the id-keyed reply path.
+ *
+ * Outside Worker context (Node CLI): routes through `pdfLog()` so analyzer
+ * log lines reach the host-installed logger instead of being dropped.
  */
 export function postLog(level: WorkerLogLevel, msg: string): void {
-    try {
-        workerSelf.postMessage({ kind: "log", level, msg });
-    } catch (_) {
-        // best-effort
+    const ws = getWorkerSelf();
+    if (ws) {
+        try {
+            ws.postMessage({ kind: "log", level, msg });
+        } catch (_) {
+            // best-effort
+        }
+        return;
     }
+    pdfLog(msg, LEVEL_TO_PDF[level]);
 }

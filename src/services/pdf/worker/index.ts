@@ -47,7 +47,13 @@ import {
     opSearch,
     type OpReply,
 } from "./ops";
-import { workerSelf } from "./workerScope";
+import { requireWorkerSelf } from "./workerScope";
+
+// Worker-context guard: this file is the worker bundle entry, so `self`
+// must exist. `requireWorkerSelf()` throws fast if it doesn't, surfacing
+// any accidental Node-side import as a clear error rather than a silent
+// `ReferenceError` later.
+const workerSelf = requireWorkerSelf();
 
 // ---------------------------------------------------------------------------
 // Dispatcher — returns { result, transfer? }. The onmessage success branch
