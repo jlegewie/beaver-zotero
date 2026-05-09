@@ -42,8 +42,8 @@ interface FixtureSentenceExpected {
 interface FixtureExpected {
     paragraphCount: number;
     stats: {
-        degradedParagraphs: number;
-        unmappedParagraphs: number;
+        /** Total paragraphs that fell back to a whole-paragraph bbox. */
+        degradation: number;
     };
     sentences: FixtureSentenceExpected[];
 }
@@ -63,7 +63,7 @@ interface FixtureSourceMeta {
 }
 
 interface FixtureFile {
-    schema: 1;
+    schema: 2;
     createdAt: string;
     source: FixtureSourceMeta;
     extractor: {
@@ -136,12 +136,11 @@ export async function createSentenceFixture(): Promise<CreateSentenceFixtureResu
         // (rawDoc, detailedPage, font-bridged pagesForFilter, margin
         // analysis/removal, filteredResult) + recorded splitter outputs
         // for hermetic unit-tier replay. Same pipeline production uses.
-        const out = await client.extractSentenceBBoxes(
+        const out = await client.extractSentenceBBoxesDebug(
             pdfData,
             pageIndex,
             {
                 splitterConfig: { type: "sentencex", language },
-                debug: true,
                 recordSplitter: true,
             },
         );
@@ -216,7 +215,7 @@ export async function createSentenceFixture(): Promise<CreateSentenceFixtureResu
 
         // Build fixture.json.
         const fixture: FixtureFile = {
-            schema: 1,
+            schema: 2,
             createdAt: new Date().toISOString(),
             source: {
                 libraryID: item.libraryID,
@@ -302,8 +301,7 @@ function buildExpectedFromResult(
     return {
         paragraphCount: result.paragraphs.length,
         stats: {
-            degradedParagraphs: result.degradedParagraphs,
-            unmappedParagraphs: result.unmappedParagraphs,
+            degradation: result.degradation?.count ?? 0,
         },
         sentences,
     };

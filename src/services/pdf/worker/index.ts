@@ -36,17 +36,15 @@ setPDFLogger((msg, level) => {
     postLog(level === 1 ? "error" : level === 2 ? "warn" : "info", msg);
 });
 import {
-    opAnalyzeMarginRemoval,
+    opAnalyzeLayout,
     opAnalyzeOCRNeeds,
     opExtract,
     opExtractRawPageDetailed,
-    opExtractRawPages,
-    opExtractSentenceBBoxes,
+    opExtractSentenceBBoxesDebug,
     opGetMetadata,
     opGetPageCount,
     opRenderPages,
     opSearch,
-    opSearchPages,
     type OpReply,
 } from "./ops";
 import { workerSelf } from "./workerScope";
@@ -77,14 +75,10 @@ async function dispatch(op: string, args: Record<string, unknown> | undefined): 
             return await opGetPageCount(a as Parameters<typeof opGetPageCount>[0]);
         case "getMetadata":
             return await opGetMetadata(a as Parameters<typeof opGetMetadata>[0]);
-        case "extractRawPages":
-            return await opExtractRawPages(a as Parameters<typeof opExtractRawPages>[0]);
         case "extractRawPageDetailed":
             return await opExtractRawPageDetailed(a as Parameters<typeof opExtractRawPageDetailed>[0]);
         case "renderPages":
             return await opRenderPages(a as Parameters<typeof opRenderPages>[0]);
-        case "searchPages":
-            return await opSearchPages(a as Parameters<typeof opSearchPages>[0]);
         // orchestration ops
         case "extract":
             return await opExtract(a as Parameters<typeof opExtract>[0]);
@@ -92,10 +86,10 @@ async function dispatch(op: string, args: Record<string, unknown> | undefined): 
             return await opAnalyzeOCRNeeds(a as Parameters<typeof opAnalyzeOCRNeeds>[0]);
         case "search":
             return await opSearch(a as Parameters<typeof opSearch>[0]);
-        case "extractSentenceBBoxes":
-            return await opExtractSentenceBBoxes(a as Parameters<typeof opExtractSentenceBBoxes>[0]);
-        case "analyzeMarginRemoval":
-            return await opAnalyzeMarginRemoval(a as Parameters<typeof opAnalyzeMarginRemoval>[0]);
+        case "extractSentenceBBoxesDebug":
+            return await opExtractSentenceBBoxesDebug(a as Parameters<typeof opExtractSentenceBBoxesDebug>[0]);
+        case "analyzeLayout":
+            return await opAnalyzeLayout(a as Parameters<typeof opAnalyzeLayout>[0]);
         default:
             throw new Error(`Unknown op: ${op}`);
     }

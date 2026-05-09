@@ -105,12 +105,11 @@ describe("runExtractFromIndices: metadata.timings + metadata.engine", () => {
     });
 
     it.each([
-        ["block", false, "block"],
-        ["paragraph", false, "paragraph"],
-        ["block", true, "block-with-lines"],
+        ["block", "block"],
+        ["paragraph", "paragraph"],
     ] as const)(
-        "records engine=%s (useLineDetection=%s) → metadata.engine=%s",
-        (engine, useLineDetection, expectedEngine) => {
+        "records engine=%s → metadata.engine=%s",
+        (engine, expectedEngine) => {
             const doc = makeDocStub();
             const opts = { ...DEFAULT_EXTRACTION_SETTINGS };
             const result = runExtractFromIndices(
@@ -121,7 +120,6 @@ describe("runExtractFromIndices: metadata.timings + metadata.engine", () => {
                 [0],
                 1,
                 {},
-                useLineDetection,
                 engine,
             );
             expect(result.metadata.engine).toBe(expectedEngine);
@@ -139,7 +137,6 @@ describe("runExtractFromIndices: metadata.timings + metadata.engine", () => {
             [0],
             1,
             {},
-            false,
             "paragraph",
         );
         const t = result.metadata.timings!;
@@ -162,7 +159,6 @@ describe("runExtractFromIndices: metadata.timings + metadata.engine", () => {
             [0, 1, 2],
             3,
             {},
-            false,
             "paragraph",
         );
         expect(result.pages).toHaveLength(3);
@@ -183,7 +179,6 @@ describe("runExtractFromIndices: metadata.timings + metadata.engine", () => {
             [0, 1],
             2,
             {},
-            false,
             "paragraph",
         );
         const t = result.metadata.timings!;

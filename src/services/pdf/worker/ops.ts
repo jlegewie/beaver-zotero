@@ -24,7 +24,6 @@ import { PageExtractor } from "../PageExtractor";
 import { buildPageAnalysisContext } from "../PageAnalysisContext";
 import { resolveAnalysisPages } from "../AnalysisWindow";
 import { detectColumns, logColumnDetection } from "../ColumnDetector";
-import { detectLinesOnPage, logLineDetection } from "../LineDetector";
 import type { PageLineResult } from "../LineDetector";
 import { detectFilteredParagraphs } from "../FilteredParagraphPipeline";
 import { SearchScorer } from "../SearchScorer";
@@ -33,8 +32,9 @@ import type {
     ExtractionResult,
     ExtractionSettings,
     ExtractedLine,
+    LayoutAnalysisResult,
+    MarginAnalysis,
     MarginRemovalResult,
-    MarginSettings,
     OCRDetectionOptions,
     OCRDetectionResult,
     PageImageOptions,
@@ -44,9 +44,9 @@ import type {
     PDFSearchOptions,
     PDFSearchResult,
     ProcessedPage,
-    RawDocumentData,
     RawPageData,
     RawPageDataDetailed,
+    StyleProfile,
 } from "../types";
 import {
     DEFAULT_EXTRACTION_SETTINGS,
@@ -54,16 +54,21 @@ import {
     DEFAULT_PDF_SEARCH_OPTIONS,
     DEFAULT_SEARCH_SCORING_OPTIONS,
 } from "../types";
-import { DEFAULT_ANALYSIS_WINDOW_CAP } from "../AnalysisWindow";
-import type { PageSentenceBBoxResult } from "../ParagraphSentenceMapper";
 import type {
     SentenceBBoxTraceResult,
-    WorkerSentenceBBoxOptions,
+    WorkerSentenceBBoxDebugOptions,
 } from "../sentenceTypes";
 import { ERROR_CODES, workerError } from "./errors";
 import { acquireDoc, releaseDoc } from "./docCache";
 import { ensureApi } from "./wasmInit";
-import { runSentenceExtractionFromDoc } from "./sentenceExtraction";
+import {
+    extractSentencesForPage,
+    runSentenceExtractionFromDoc,
+} from "./sentenceExtraction";
+import { resolveSplitter } from "./splitterResolver";
+import type { SentenceSplitter } from "../SentenceMapper";
+import type { ParagraphDetectionSettings } from "../ParagraphDetector";
+import type { SentenceSplitterConfig } from "../sentenceTypes";
 import {
     DEFAULT_PAGE_IMAGE_OPTIONS,
     collectDocumentInfo,
@@ -106,20 +111,6 @@ export async function opGetMetadata(
         const pageLabels = collectPageLabels(doc);
         const info = collectDocumentInfo(doc);
         return { result: { pageCount, pageLabels, ...info } };
-    } finally {
-        releaseDoc(doc);
-    }
-}
-
-export async function opExtractRawPages(
-    args: { pdfData: Uint8Array | ArrayBuffer; pageIndices?: number[] },
-): Promise<OpReply<RawDocumentData>> {
-    const doc = await acquireDoc(args.pdfData);
-    try {
-        const pageCount = doc.countPages();
-        const indices = resolvePageIndices(pageCount, args.pageIndices);
-        const pages = indices.map((i) => extractRawPageFromDoc(doc, i));
-        return { result: { pageCount, pages } as RawDocumentData };
     } finally {
         releaseDoc(doc);
     }
@@ -189,75 +180,37 @@ export async function opRenderPages(
     }
 }
 
-export async function opSearchPages(
-    args: {
-        pdfData: Uint8Array | ArrayBuffer;
-        query: string;
-        pageIndices?: number[];
-        maxHitsPerPage?: number;
-    },
-): Promise<OpReply<PDFPageSearchResult[]>> {
-    const doc = await acquireDoc(args.pdfData);
-    const limit = typeof args.maxHitsPerPage === "number" && args.maxHitsPerPage > 0
-        ? args.maxHitsPerPage
-        : 100;
-    try {
-        const pageCount = doc.countPages();
-        const indices = resolvePageIndices(pageCount, args.pageIndices);
-        const results: PDFPageSearchResult[] = [];
-        for (const pageIndex of indices) {
-            const r = searchPageInDoc(doc, pageIndex, args.query, limit);
-            if (r.matchCount > 0) results.push(r);
-        }
-        return { result: results };
-    } finally {
-        releaseDoc(doc);
-    }
-}
-
 /**
- * Shared body for `opExtract`. The per-page loop has three branches:
- *   - `engine === "paragraph"` → `detectFilteredParagraphs` produces a
- *     `paragraphResult.pageContent` (`## ` headers, `\n\n` separators) and
- *     `ProcessedPage.blocks` is left empty.
- *   - `useLineDetection` (block engine + flag) → column + line detection
- *     (line-based, populates `page.lines`).
- *   - default → column detection + PageExtractor (block-based).
+ * Shared analysis-context prefix for `runExtractFromIndices` and
+ * `opAnalyzeLayout`. Walks the analysis-window pages once and runs the
+ * cross-page `buildPageAnalysisContext` (StyleAnalyzer + MarginFilter)
+ * over them.
  *
- * The combination `engine === "paragraph"` && `useLineDetection` is rejected
- * upstream by `opExtract`. All other steps (raw extraction, style + margin
- * analysis, fullText assembly, analysis build) are identical, and the result
- * shape is the same `ExtractionResult` for every branch.
+ * Both extract and analyzeLayout call this so they see the SAME
+ * `marginRemoval` / `marginAnalysis` / `styleProfile` for the same input
+ * `analysisIndices`. This is what guarantees the margins overlay (built
+ * on `analyzeLayout`'s output) and structured extract agree on a given
+ * page's filter decisions.
  *
- * The caller is responsible for opening the doc, resolving target +
- * analysis indices, collecting page labels, and running the OCR
- * text-layer check (NO_TEXT_LAYER needs `pageLabels` and `pageCount`
- * in its payload, which the caller already has).
- *
- * Index sets:
- *  - `targetIndices` — pages to process and emit in the result.
- *  - `analysisIndices` — superset used for cross-page style + margin
- *    analysis. With `analysisWindow=0` this equals `targetIndices`;
- *    with `N>0` it adds neighbors so margin smart-removal and the
- *    body-style estimate see more of the document. Walked once; the
- *    target loop reuses the cached pages.
+ * Caller resolves `analysisIndices` (typically via `resolveAnalysisPages`)
+ * and supplies the document's total `pageCount` (so
+ * `getEffectiveRepeatThreshold` can apply the short-doc relaxation).
  */
-export function runExtractFromIndices(
+function buildAnalysisFromDoc(
     doc: DocumentLike,
-    opts: Required<Omit<ExtractionSettings, 'pages' | 'useLineDetection' | 'minTextPerPage'>> & ExtractionSettings,
+    opts: ExtractionSettings,
     requestedRepeatThreshold: number | undefined,
-    targetIndices: number[],
     analysisIndices: number[],
     pageCount: number,
-    pageLabels: Record<number, string>,
-    useLineDetection: boolean,
-    engine: "block" | "paragraph",
-): ExtractionResult {
-    const tStart = performance.now();
-
-    // Walk the analysis union once; targets are guaranteed to be in it
-    // (resolveAnalysisPages always includes them), so the output loop
-    // looks them up in the pre-walked map without re-extracting.
+): {
+    analysisPages: RawPageData[];
+    analysisPageByIndex: Map<number, RawPageData>;
+    styleProfile: StyleProfile;
+    marginAnalysis: MarginAnalysis;
+    marginRemoval: MarginRemovalResult;
+    walkMs: number;
+    analysisMs: number;
+} {
     const tWalkStart = performance.now();
     const analysisPages: RawPageData[] = analysisIndices.map((i) =>
         extractRawPageFromDoc(doc, i),
@@ -279,6 +232,106 @@ export function runExtractFromIndices(
     StyleAnalyzer.logStyleProfile(styleProfile);
     MarginFilter.logRemovalCandidates(marginRemoval);
 
+    return {
+        analysisPages,
+        analysisPageByIndex,
+        styleProfile,
+        marginAnalysis,
+        marginRemoval,
+        walkMs,
+        analysisMs,
+    };
+}
+
+/**
+ * Project a `PageLineResult` into the flat `ExtractedLine[]` shape that
+ * lives on `ProcessedPage.lines`. Used by the structured-engine branch.
+ */
+function flattenColumnLines(lineResult: PageLineResult): ExtractedLine[] {
+    const out: ExtractedLine[] = [];
+    for (const colResult of lineResult.columnResults) {
+        for (const line of colResult.lines) {
+            out.push({
+                text: line.text,
+                bbox: line.bbox,
+                fontSize: line.fontSize,
+                columnIndex: colResult.columnIndex,
+            });
+        }
+    }
+    return out;
+}
+
+/**
+ * Shared body for `opExtract`. The per-page loop has three branches keyed
+ * off `engine`:
+ *   - `"paragraph"` → `detectFilteredParagraphs` produces
+ *     `paragraphResult.pageContent` (`## ` headers, `\n\n` separators);
+ *     `ProcessedPage.blocks` is left empty.
+ *   - `"block"` → column detection + PageExtractor (block-based).
+ *   - `"structured"` → `extractSentencesForPage` (per-page detailed walk
+ *     + sentence mapping). Populates `paragraphs`, `sentences`,
+ *     `columns`, `lines`, plus paragraph-engine `content`. `blocks: []`.
+ *     Requires `splitter` (resolved by the caller). Per-page detailed
+ *     walk is the dominant cost — multi-page structured extracts pay
+ *     N× this per the `targetIndices` length.
+ *
+ * The combination `engine === "structured"` && `markdown.engine` is
+ * rejected upstream by `opExtract`. All other steps (raw extraction,
+ * style + margin analysis, fullText assembly, analysis build) are
+ * identical, and the result shape is the same `ExtractionResult` for
+ * every branch — `version` and `engine` come from this single metadata
+ * builder.
+ *
+ * The caller is responsible for opening the doc, resolving target +
+ * analysis indices, collecting page labels, running the OCR text-layer
+ * check, and (for structured engine) resolving the splitter. NO_TEXT_LAYER
+ * needs `pageLabels` and `pageCount` in its payload, which the caller
+ * already has.
+ *
+ * Index sets:
+ *  - `targetIndices` — pages to process and emit in the result.
+ *  - `analysisIndices` — superset used for cross-page style + margin
+ *    analysis. With `analysisWindow=0` this equals `targetIndices`;
+ *    with `N>0` it adds neighbors so margin smart-removal and the
+ *    body-style estimate see more of the document. Walked once; the
+ *    target loop reuses the cached pages.
+ */
+export function runExtractFromIndices(
+    doc: DocumentLike,
+    opts: Required<Omit<ExtractionSettings, 'pages' | 'minTextPerPage'>> & ExtractionSettings,
+    requestedRepeatThreshold: number | undefined,
+    targetIndices: number[],
+    analysisIndices: number[],
+    pageCount: number,
+    pageLabels: Record<number, string>,
+    engine: "block" | "paragraph" | "structured",
+    paragraphSettings?: ParagraphDetectionSettings,
+    splitter?: SentenceSplitter,
+): ExtractionResult {
+    const tStart = performance.now();
+
+    // Walk the analysis union once; targets are guaranteed to be in it
+    // (resolveAnalysisPages always includes them), so the output loop
+    // looks them up in the pre-walked map without re-extracting. Same
+    // helper `opAnalyzeLayout` calls — keeps the prefix byte-identical
+    // between extract and analyze.
+    const {
+        analysisPages,
+        analysisPageByIndex,
+        styleProfile,
+        marginAnalysis,
+        marginRemoval,
+        walkMs,
+        analysisMs,
+    } = buildAnalysisFromDoc(
+        doc,
+        opts,
+        requestedRepeatThreshold,
+        analysisIndices,
+        pageCount,
+    );
+
     const pages: ProcessedPage[] = [];
     const perPageMs: number[] = [];
 
@@ -287,8 +340,8 @@ export function runExtractFromIndices(
         // page text via `paragraphResult.pageContent` (headers prefixed `## `,
         // paragraphs separated by `\n\n`). `detectFilteredParagraphs` accepts
         // the precomputed `marginRemoval` and `styleProfile` so it skips
-        // re-running cross-page analysis. `blocks: []` matches the
-        // `useLineDetection: true` convention.
+        // re-running cross-page analysis. `blocks: []` because content is
+        // emitted via `pageContent` rather than per-block.
         for (const i of targetIndices) {
             const tPage = performance.now();
             const rawPage = analysisPageByIndex.get(i)!;
@@ -299,6 +352,7 @@ export function runExtractFromIndices(
                 styleProfile,
                 margins: opts.margins,
                 marginZone: opts.marginZone,
+                paragraphSettings,
             });
             logColumnDetection(rawPage.pageIndex, filtered.columnResult);
             pages.push({
@@ -317,10 +371,55 @@ export function runExtractFromIndices(
             } as ProcessedPage);
             perPageMs.push(performance.now() - tPage);
         }
+    } else if (engine === "structured") {
+        // Structured engine: per-page detailed walk + paragraph-scoped
+        // sentence mapping. Reuses the shared analysis context so margin
+        // removal and the style profile run only once across the multi-page
+        // extract. `content` is populated from the same paragraph result
+        // the sentence mapper consumes, so structured-mode `fullText`
+        // matches paragraph-engine markdown for the same pages.
+        if (!splitter) {
+            throw new Error(
+                "runExtractFromIndices: engine='structured' requires a resolved `splitter` argument",
+            );
+        }
+        for (const i of targetIndices) {
+            const tPage = performance.now();
+            const rawPage = analysisPageByIndex.get(i)!;
+            const { sentenceResult, filteredResult } = extractSentencesForPage({
+                doc,
+                pageIndex: rawPage.pageIndex,
+                analysisPages,
+                splitter,
+                paragraphSettings,
+                marginRemoval,
+                styleProfile,
+                margins: opts.margins,
+                marginZone: opts.marginZone,
+            });
+            logColumnDetection(rawPage.pageIndex, filteredResult.columnResult);
+            pages.push({
+                index: sentenceResult.pageIndex,
+                label: rawPage.label,
+                width: sentenceResult.width,
+                height: sentenceResult.height,
+                blocks: [],
+                content: filteredResult.paragraphResult.pageContent,
+                columns: filteredResult.columnResult.columns.map((col) => ({
+                    l: col.x,
+                    t: col.y,
+                    r: col.x + col.w,
+                    b: col.y + col.h,
+                })),
+                lines: flattenColumnLines(filteredResult.lineResult),
+                paragraphs: sentenceResult.paragraphs,
+                sentences: sentenceResult.sentences,
+                degradation: sentenceResult.degradation,
+            } as ProcessedPage);
+            perPageMs.push(performance.now() - tPage);
+        }
     } else {
-        const pageExtractor = useLineDetection
-            ? null
-            : new PageExtractor({ styleProfile });
+        const pageExtractor = new PageExtractor({ styleProfile });
 
         for (const i of targetIndices) {
             const tPage = performance.now();
@@ -337,42 +436,9 @@ export function runExtractFromIndices(
             });
             logColumnDetection(rawPage.pageIndex, columnResult);
 
-            if (useLineDetection) {
-                const lineResult: PageLineResult = detectLinesOnPage(filteredPage, columnResult.columns);
-                logLineDetection(lineResult);
-
-                const extractedLines: ExtractedLine[] = [];
-                for (const colResult of lineResult.columnResults) {
-                    for (const line of colResult.lines) {
-                        extractedLines.push({
-                            text: line.text,
-                            bbox: line.bbox,
-                            fontSize: line.fontSize,
-                            columnIndex: colResult.columnIndex,
-                        });
-                    }
-                }
-                const content = extractedLines.map((l) => l.text).join("\n");
-                pages.push({
-                    index: rawPage.pageIndex,
-                    label: rawPage.label,
-                    width: rawPage.width,
-                    height: rawPage.height,
-                    blocks: [],
-                    content,
-                    columns: columnResult.columns.map((col) => ({
-                        l: col.x,
-                        t: col.y,
-                        r: col.x + col.w,
-                        b: col.y + col.h,
-                    })),
-                    lines: extractedLines,
-                } as ProcessedPage);
-            } else {
-                pages.push(
-                    pageExtractor!.extractPageWithColumns(filteredPage, columnResult, true),
-                );
-            }
+            pages.push(
+                pageExtractor.extractPageWithColumns(filteredPage, columnResult, true),
+            );
             perPageMs.push(performance.now() - tPage);
         }
     }
@@ -385,16 +451,8 @@ export function runExtractFromIndices(
         marginAnalysis,
     };
 
-    const finalSettings = { ...opts, useLineDetection };
-    // Resolve the engine name for `metadata.engine`. The dev `useLineDetection`
-    // path is a block-engine variant, recorded as a distinct value so timing
-    // comparisons don't lump line-only output in with default block output.
-    const recordedEngine: "block" | "block-with-lines" | "paragraph" =
-        engine === "paragraph"
-            ? "paragraph"
-            : useLineDetection
-                ? "block-with-lines"
-                : "block";
+    const finalSettings = { ...opts };
+    const recordedEngine: "block" | "paragraph" | "structured" = engine;
 
     const totalMs = performance.now() - tStart;
     const baseResult: ExtractionResult = {
@@ -404,7 +462,7 @@ export function runExtractFromIndices(
         pageLabels: Object.keys(pageLabels).length > 0 ? pageLabels : undefined,
         metadata: {
             extractedAt: new Date().toISOString(),
-            version: "2.1.0",
+            version: "2.2.0",
             settings: finalSettings,
             engine: recordedEngine,
             // `docOpenMs` is unknown to this helper (the doc is already open
@@ -431,53 +489,62 @@ export function runExtractFromIndices(
  * inputs throw PAGE_OUT_OF_RANGE with `{ pageCount }` in the payload so
  * handlers can populate `total_pages` in error responses.
  *
- * `mode` selects the output product. `"markdown"` (default) returns
- * `ExtractionResult` with per-page text. `"structured"` is reserved for
- * the upcoming sentence + bbox path and currently throws.
+ * `mode` selects the output product:
+ *   - `"markdown"` (default) returns per-page text via the markdown
+ *     engines below.
+ *   - `"structured"` returns the same `ExtractionResult` shape with
+ *     `pages[i].sentences` / `paragraphs` / `columns` / `lines`
+ *     populated alongside paragraph-engine `content`. Per-page detailed
+ *     walk is the dominant cost — multi-page structured extracts pay
+ *     N× this per the requested page count.
  *
  * `markdown.engine` selects the markdown engine when `mode === "markdown"`:
- *   - `"block"` (default): block-based PageExtractor — today's prod path.
- *   - `"paragraph"`: line + paragraph detection via `detectFilteredParagraphs`.
- *     `ProcessedPage.content` is `paragraphResult.pageContent` (markdown-shaped
- *     with `## ` headers and `\n\n` paragraph separators); `blocks: []`.
+ *   - `"paragraph"` (default): line + paragraph detection via
+ *     `detectFilteredParagraphs`. `ProcessedPage.content` is
+ *     `paragraphResult.pageContent` (markdown-shaped with `## ` headers
+ *     and `\n\n` paragraph separators); `blocks: []`.
+ *   - `"block"`: block-based PageExtractor.
  *
- * The combination `markdown.engine = "paragraph"` with
- * `settings.useLineDetection = true` is rejected — both control the terminal
- * stage that produces `ProcessedPage.content`. `settings.useLineDetection`
- * remains honored only for the block engine path.
+ * Rejected combinations:
+ *   - `mode === "structured"` && `markdown.engine` is set —
+ *     `markdown.engine` is meaningless in structured mode.
+ *
+ * `structured.splitterConfig` (only consulted when `mode ===
+ * "structured"`) is a serializable splitter config — the worker
+ * resolves the actual splitter via `resolveSplitter`. Default:
+ * `{ type: "sentencex" }`.
  */
 export async function opExtract(
     args: {
         pdfData: Uint8Array | ArrayBuffer;
         mode?: "markdown" | "structured";
         markdown?: { engine?: "block" | "paragraph" };
+        structured?: { splitterConfig?: SentenceSplitterConfig };
         settings?: ExtractionSettings;
+        paragraphSettings?: ParagraphDetectionSettings;
         pageIndices?: number[];
         pageRange?: { startIndex: number; endIndex?: number; maxPages?: number };
         analysisWindow?: number;
     },
 ): Promise<OpReply<ExtractionResult>> {
-    // Defense in depth: the facade enforces these too, but the worker is
+    // Defense in depth: the facade enforces this too, but the worker is
     // reachable directly via the worker-client RPC and any future caller
     // (e.g. tests) shouldn't be able to slip past the contract.
-    if (args.mode === "structured") {
-        throw new Error(
-            "opExtract: structured mode not yet implemented; " +
-            "use extractSentenceBBoxes for sentence-level extraction",
-        );
-    }
     const explicitEngine = args.markdown?.engine;
-    const useLineDetection = !!args.settings?.useLineDetection;
-    if (explicitEngine === "paragraph" && useLineDetection) {
+    const isStructured = args.mode === "structured";
+
+    if (isStructured && explicitEngine) {
         throw new Error(
-            "opExtract: markdown.engine='paragraph' is incompatible " +
-            "with settings.useLineDetection=true",
+            "opExtract: markdown.engine is not applicable when mode='structured'",
         );
     }
-    // Default is "paragraph"; useLineDetection without an explicit engine
-    // forces "block" since useLineDetection is a block-engine variant.
-    const engine: "block" | "paragraph" = explicitEngine
-        ?? (useLineDetection ? "block" : "paragraph");
+
+    // Resolve the engine for the helper:
+    //   structured mode → "structured".
+    //   markdown mode: explicit `markdown.engine` wins; default "paragraph".
+    const engine: "block" | "paragraph" | "structured" = isStructured
+        ? "structured"
+        : (explicitEngine ?? "paragraph");
 
     const tOpStart = performance.now();
     const tDocOpenStart = performance.now();
@@ -517,6 +584,14 @@ export async function opExtract(
             analysisWindow: args.analysisWindow,
         });
 
+        // Resolve the splitter once per request when running structured
+        // mode. The helper reuses it across all target pages.
+        const splitter = isStructured
+            ? await resolveSplitter(
+                  args.structured?.splitterConfig ?? { type: "sentencex" },
+              )
+            : undefined;
+
         const result = runExtractFromIndices(
             doc,
             opts as any,
@@ -525,8 +600,9 @@ export async function opExtract(
             analysisIndices,
             pageCount,
             pageLabels,
-            !!opts.useLineDetection,
             engine,
+            args.paragraphSettings,
+            splitter,
         );
         // `runExtractFromIndices` measures the phases it owns; `docOpenMs`
         // and the op-level `totalMs` (which includes the OCR check) are
@@ -536,6 +612,132 @@ export async function opExtract(
             result.metadata.timings.docOpenMs = docOpenMs;
             result.metadata.timings.totalMs = performance.now() - tOpStart;
         }
+        return { result };
+    } finally {
+        releaseDoc(doc);
+    }
+}
+
+/**
+ * Document-wide style + margin analysis without per-page extraction.
+ *
+ * Runs the EXACT prefix `opExtract` runs (acquireDoc → page count → page
+ * labels → settings merge → optional OCR check → target/analysis index
+ * resolution → JSON walk → `buildPageAnalysisContext`) and returns the
+ * `styleProfile` / `marginAnalysis` / `marginRemoval` it would have
+ * passed to per-page processing. Does NOT run line/column/paragraph
+ * detection, the filter pipeline, or sentence mapping.
+ *
+ * Argument shape mirrors `opExtract`'s pre-extraction fields exactly so
+ * callers can re-run the analysis context for the same `settings` /
+ * `pageIndices` / `analysisWindow` they used for an extract call and
+ * trust the output is byte-identical.
+ *
+ * Backs the dev-only `/beaver/test/pdf-analyze-layout` endpoint and the
+ * `level: "margins"` branch of `/beaver/test/pdf-render-overlay`.
+ *
+ * **Map/Set boundary.** `result.analysis.styleProfile.styleCounts`,
+ * `result.analysis.marginAnalysis.elements`,
+ * `result.analysis.marginRemoval.removalsByPage`, and
+ * `result.analysis.marginRemoval.textsToRemove` carry `Map`/`Set` fields.
+ * `postMessage` preserves them via structured clone, but
+ * `JSON.stringify` does NOT — flatten before writing HTTP responses.
+ */
+export async function opAnalyzeLayout(
+    args: {
+        pdfData: Uint8Array | ArrayBuffer;
+        settings?: ExtractionSettings;
+        pageIndices?: number[];
+        pageRange?: { startIndex: number; endIndex?: number; maxPages?: number };
+        analysisWindow?: number;
+    },
+): Promise<OpReply<LayoutAnalysisResult>> {
+    const tOpStart = performance.now();
+    const tDocOpenStart = performance.now();
+    const doc = await acquireDoc(args.pdfData);
+    const docOpenMs = performance.now() - tDocOpenStart;
+    try {
+        // Same prefix as `opExtract`: capture caller-supplied threshold
+        // before defaults flatten it; merge defaults; collect labels;
+        // optional OCR gate.
+        const requestedRepeatThreshold = args.settings?.repeatThreshold;
+        const opts = { ...DEFAULT_EXTRACTION_SETTINGS, ...(args.settings || {}) };
+        const provider = rawPageProviderFromDoc(doc);
+        const docAnalyzer = new DocumentAnalyzer(provider);
+        const pageCount = docAnalyzer.getPageCount();
+        const pageLabels = collectPageLabels(doc);
+
+        if (opts.checkTextLayer) {
+            const ocr = docAnalyzer.getDetailedOCRAnalysis({
+                minTextPerPage: opts.minTextPerPage,
+            });
+            if (ocr.needsOCR) {
+                throw workerError(
+                    ERROR_CODES.NO_TEXT_LAYER,
+                    `Document may require OCR: ${ocr.primaryReason} (${Math.round(ocr.issueRatio * 100)}% of sampled pages have issues)`,
+                    { ocrAnalysis: ocr, pageLabels, pageCount },
+                );
+            }
+        }
+
+        const targetIndices = args.pageRange
+            ? resolvePageRangeOrThrow(pageCount, args.pageRange)
+            : resolveExplicitPageIndicesOrThrow(pageCount, args.pageIndices);
+
+        const analysisIndices = resolveAnalysisPages({
+            targetPageIndices: targetIndices,
+            totalPageCount: pageCount,
+            analysisWindow: args.analysisWindow,
+        });
+
+        const {
+            analysisPageByIndex,
+            styleProfile,
+            marginAnalysis,
+            marginRemoval,
+            walkMs,
+            analysisMs,
+        } = buildAnalysisFromDoc(
+            doc,
+            opts,
+            requestedRepeatThreshold,
+            analysisIndices,
+            pageCount,
+        );
+
+        // Project analysis-window pages → target-page subset, in target
+        // order. `resolveAnalysisPages` guarantees every target index is
+        // present in the analysis union, so the lookups never miss.
+        const pages: RawPageData[] = targetIndices.map(
+            (i) => analysisPageByIndex.get(i)!,
+        );
+
+        const result: LayoutAnalysisResult = {
+            pages,
+            pageCount,
+            pageLabels:
+                Object.keys(pageLabels).length > 0 ? pageLabels : undefined,
+            analysisPageIndices: analysisIndices,
+            analysis: {
+                styleProfile,
+                marginAnalysis,
+                marginRemoval,
+            },
+            metadata: {
+                extractedAt: new Date().toISOString(),
+                // Mirrors the version `runExtractFromIndices` writes so
+                // analyze + extract advance together when the analysis
+                // context build changes.
+                version: "2.2.0",
+                settings: opts,
+                timings: {
+                    docOpenMs,
+                    walkMs,
+                    analysisMs,
+                    totalMs: performance.now() - tOpStart,
+                },
+            },
+        };
         return { result };
     } finally {
         releaseDoc(doc);
@@ -613,7 +815,8 @@ export async function opSearch(
             indices = Array.from({ length: totalPages }, (_, i) => i);
         }
 
-        // Step 1: search (inline of opSearchPages — share the open doc)
+        // Step 1: per-page search — share the already-open doc with the
+        // raw-page extraction in step 2 and the scoring pass in step 3.
         const pageResults: PDFPageSearchResult[] = [];
         for (const pageIndex of indices) {
             const r = searchPageInDoc(doc, pageIndex, args.query, limit);
@@ -669,39 +872,25 @@ export async function opSearch(
 }
 
 /**
- * Sentence-level bbox extraction for a single page.
+ * Single-page sentence-level bbox extraction with intermediates surfaced.
+ * Debug-only — production sentence-level extraction goes through
+ * `opExtract` with `mode: "structured"` (multi-page, returns
+ * `ExtractionResult` with `pages[i].sentences`).
  *
- * Production by default. When `options.debug === true`, the op also returns the
- * pipeline intermediates (analysis-window indices, raw doc, detailed page,
- * font-bridged `pagesForFilter`, margin analysis/removal, filtered-paragraph
- * result). The two narrowing overloads key off the `debug` literal so callers
- * see the right return type without runtime branching.
- *
- * `recordSplitter` is only representable on the debug variant — the
- * discriminated `WorkerSentenceBBoxOptions` union forbids it on production
- * calls.
+ * Powers the dev visualizer / fixture capture / pipeline-trace
+ * endpoints: returns the production sentence result PLUS the pipeline
+ * intermediates (analysis-window indices, raw doc, detailed page,
+ * font-bridged `pagesForFilter`, margin analysis/removal,
+ * filtered-paragraph result). When `options.recordSplitter === true`,
+ * also returns the `(text → ranges)` pairs from the resolved splitter.
  */
-export async function opExtractSentenceBBoxes(
+export async function opExtractSentenceBBoxesDebug(
     args: {
         pdfData: Uint8Array | ArrayBuffer;
         pageIndex: number;
-        options?: WorkerSentenceBBoxOptions & { debug?: false };
+        options?: WorkerSentenceBBoxDebugOptions;
     },
-): Promise<OpReply<PageSentenceBBoxResult>>;
-export async function opExtractSentenceBBoxes(
-    args: {
-        pdfData: Uint8Array | ArrayBuffer;
-        pageIndex: number;
-        options: WorkerSentenceBBoxOptions & { debug: true };
-    },
-): Promise<OpReply<SentenceBBoxTraceResult>>;
-export async function opExtractSentenceBBoxes(
-    args: {
-        pdfData: Uint8Array | ArrayBuffer;
-        pageIndex: number;
-        options?: WorkerSentenceBBoxOptions;
-    },
-): Promise<OpReply<PageSentenceBBoxResult | SentenceBBoxTraceResult>> {
+): Promise<OpReply<SentenceBBoxTraceResult>> {
     const doc = await acquireDoc(args.pdfData);
     try {
         const pageCount = doc.countPages();
@@ -716,128 +905,17 @@ export async function opExtractSentenceBBoxes(
             );
         }
         const opts = args.options;
-        // Branch on the literal debug value — `runSentenceExtractionFromDoc`
-        // overloads on `trace: true | false` and rejects a widened boolean.
-        if (opts?.debug) {
-            const traceResult = await runSentenceExtractionFromDoc({
-                doc,
-                pageIndex: args.pageIndex,
-                pageCount,
-                splitterConfig: opts.splitterConfig,
-                analysisWindow: opts.analysisWindow,
-                paragraphSettings: opts.paragraphSettings,
-                trace: true,
-                recordSplitter: opts.recordSplitter,
-            });
-            return { result: traceResult };
-        }
-        const { result } = await runSentenceExtractionFromDoc({
+        const traceResult = await runSentenceExtractionFromDoc({
             doc,
             pageIndex: args.pageIndex,
             pageCount,
             splitterConfig: opts?.splitterConfig,
             analysisWindow: opts?.analysisWindow,
             paragraphSettings: opts?.paragraphSettings,
-            trace: false,
+            trace: true,
+            recordSplitter: opts?.recordSplitter,
         });
-        return { result };
-    } finally {
-        releaseDoc(doc);
-    }
-}
-
-/**
- * Cross-page margin-removal analysis without column / line / paragraph
- * detection or rendering. Backs the dev-only `/pdf-smart-removal-summary`
- * triage endpoint — keeps the analysis pass off the main thread (the
- * handler used to ship raw pages back and re-run the same MarginFilter
- * passes on the UI thread).
- *
- * Page resolution mirrors the legacy handler: explicit `pageIndices` wins,
- * else `pageRange` (inclusive `start..end`), else all pages. Out-of-range
- * entries are silently filtered. The slice is then capped at
- * `DEFAULT_ANALYSIS_WINDOW_CAP` (slice from the start, not centered — the
- * caller chose which pages to scan and centering would silently drop
- * pages they asked for).
- *
- * `MarginRemovalResult.removalsByPage` and `textsToRemove` carry
- * `Map`/`Set` fields. `postMessage` preserves them via structured clone,
- * but `JSON.stringify` does NOT — flatten before writing HTTP responses.
- */
-export async function opAnalyzeMarginRemoval(
-    args: {
-        pdfData: Uint8Array | ArrayBuffer;
-        pageIndices?: number[];
-        pageRange?: { start: number; end: number };
-        repeatThreshold?: number;
-        detectPageSequences?: boolean;
-        marginZone?: MarginSettings;
-    },
-): Promise<OpReply<{
-    totalPages: number;
-    analysisPages: number[];
-    result: MarginRemovalResult;
-}>> {
-    const doc = await acquireDoc(args.pdfData);
-    try {
-        const totalPages = doc.countPages();
-
-        let analysisIndices: number[];
-        if (Array.isArray(args.pageIndices)) {
-            analysisIndices = args.pageIndices
-                .map((n) => Number(n))
-                .filter((n) => Number.isInteger(n) && n >= 0 && n < totalPages);
-        } else if (args.pageRange && typeof args.pageRange === "object") {
-            const start = Math.max(0, Number(args.pageRange.start) || 0);
-            const end = Math.min(totalPages - 1, Number(args.pageRange.end));
-            analysisIndices = [];
-            for (let i = start; i <= end; i++) analysisIndices.push(i);
-        } else {
-            analysisIndices = [];
-            for (let i = 0; i < totalPages; i++) analysisIndices.push(i);
-        }
-        if (analysisIndices.length > DEFAULT_ANALYSIS_WINDOW_CAP) {
-            analysisIndices = analysisIndices.slice(0, DEFAULT_ANALYSIS_WINDOW_CAP);
-        }
-        if (analysisIndices.length === 0) {
-            throw workerError(
-                ERROR_CODES.PAGE_OUT_OF_RANGE,
-                "No valid pages to analyze",
-                { pageCount: totalPages },
-            );
-        }
-
-        const pages: RawPageData[] = analysisIndices.map((i) =>
-            extractRawPageFromDoc(doc, i),
-        );
-        const marginZone = args.marginZone ?? DEFAULT_MARGIN_ZONE;
-        const requestedRepeatThreshold =
-            Number.isInteger(args.repeatThreshold) &&
-            (args.repeatThreshold as number) > 0
-                ? args.repeatThreshold
-                : undefined;
-        const detectPageSequences = args.detectPageSequences !== false;
-
-        const marginAnalysis = MarginFilter.collectMarginElements(
-            pages,
-            marginZone,
-        );
-        const result = MarginFilter.identifyElementsToRemove(
-            marginAnalysis,
-            getEffectiveRepeatThreshold({
-                requested: requestedRepeatThreshold,
-                totalPageCount: totalPages,
-                analysisPageCount: analysisIndices.length,
-            }),
-            detectPageSequences,
-        );
-        return {
-            result: {
-                totalPages,
-                analysisPages: analysisIndices,
-                result,
-            },
-        };
+        return { result: traceResult };
     } finally {
         releaseDoc(doc);
     }

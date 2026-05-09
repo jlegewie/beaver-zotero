@@ -1,26 +1,21 @@
 /**
  * Public API types for sentence-level bbox extraction.
  *
- * Lives outside `types.ts` because `ExtractSentenceBBoxesArgs` and
- * `WorkerSentenceBBoxOptions` reference `ParagraphDetectionSettings`
- * (from `./ParagraphDetector`), which already depends on `types.ts`.
- * Using `import type` keeps this file structural-only so the dependency
- * graph stays acyclic.
+ * Lives outside `types.ts` because `WorkerSentenceBBoxDebugOptions` and the
+ * trace envelope reference `ParagraphDetectionSettings` (from
+ * `./ParagraphDetector`) and `FilteredParagraphResult` (from
+ * `./FilteredParagraphPipeline`), both of which already depend on
+ * `types.ts`. Using `import type` keeps this file structural-only so the
+ * dependency graph stays acyclic.
  *
- * Three distinct types deliberately:
+ * Two distinct types:
  *
  *   - `SentenceSplitterConfig` — serializable, crosses the worker boundary.
- *   - `ExtractSentenceBBoxesArgs` — public PDFExtractor facade input. Uses
- *     `splitter` for ergonomics; PDFExtractor immediately translates that
- *     into a `splitterConfig` before calling the worker client.
- *   - `WorkerSentenceBBoxOptions` — worker-boundary input shape. Discriminated
- *     union over `debug`: production variant (`debug?: false`) cannot carry
- *     `recordSplitter`; debug variant (`debug: true`) may. Uses
- *     `splitterConfig` (no name collision with the function-valued
- *     `splitter` field on the internal mapper contract
- *     `PageSentenceBBoxOptions`).
- *
- * The two meanings of "splitter" never coexist in shared types.
+ *   - `WorkerSentenceBBoxDebugOptions` — debug-only worker op input. The
+ *     production sentence path lives on `extract({ mode: "structured" })`
+ *     (see `types.ts` for `ProcessedPage` sentence fields); this options
+ *     type is for the dev-only `extractSentenceBBoxesDebug` op that
+ *     surfaces single-page intermediates.
  */
 
 import type { ParagraphDetectionSettings } from "./ParagraphDetector";
@@ -44,58 +39,32 @@ export type SentenceSplitterConfig =
     | { type: "simple" };
 
 /**
- * Public input shape for `PDFExtractor.extractSentenceBBoxes`.
+ * Cloneable input to the dev-only worker op `extractSentenceBBoxesDebug`.
+ * Used by the worker client and the worker dispatcher.
  *
- * When both `splitter` and `language` are provided, the explicit
- * `splitter.language` wins. `language` is only consulted when the
- * caller omits `splitter` entirely (in which case the facade defaults
- * to `{ type: "sentencex", language }`).
+ * Does NOT carry the function-valued `splitter` (would break
+ * `postMessage`) and does NOT carry `precomputed` (the worker always runs
+ * the full filtered-paragraph pipeline; precomputed shortcuts live on the
+ * internal mapper contract `PageSentenceBBoxOptions` and are used only by
+ * main-thread debug paths).
+ *
+ * The op is implicitly debug — there is no production variant. Production
+ * sentence-level extraction goes through `extract({ mode: "structured" })`.
  */
-export interface ExtractSentenceBBoxesArgs {
-    pageIndex: number;
-    splitter?: SentenceSplitterConfig;
-    language?: string;
-    paragraphSettings?: ParagraphDetectionSettings;
-    analysisWindow?: number;
-}
-
-/**
- * Shared production fields for `WorkerSentenceBBoxOptions`. The full type is
- * a discriminated union over `debug` — see below.
- */
-interface WorkerSentenceBBoxBaseOptions {
+export interface WorkerSentenceBBoxDebugOptions {
     splitterConfig?: SentenceSplitterConfig;
     paragraphSettings?: ParagraphDetectionSettings;
     analysisWindow?: number;
+    /**
+     * When true, the worker wraps the resolved splitter and returns the
+     * recorded `(text → ranges)` pairs in the trace payload. Used by
+     * fixture capture for hermetic unit-test replay.
+     */
+    recordSplitter?: boolean;
 }
 
 /**
- * Cloneable input to the worker op `extractSentenceBBoxes`. Used by the
- * worker client and the worker dispatcher. Does NOT carry the
- * function-valued `splitter` (would break `postMessage`) and does NOT
- * carry `precomputed` (the worker always runs the full filtered-paragraph
- * pipeline; precomputed shortcuts live on the internal mapper contract
- * `PageSentenceBBoxOptions` and are used only by main-thread debug paths).
- *
- * Discriminated by `debug`: production calls (`debug?: false`) cannot
- * carry `recordSplitter`; debug calls (`debug: true`) may. The op /
- * worker-client method narrow the return type via overloads keyed off the
- * `debug` literal — production returns `PageSentenceBBoxResult`, debug
- * returns `SentenceBBoxTraceResult`. Callers passing an options *variable*
- * whose `debug` has widened to `boolean` must `as const` the literal or
- * type the variable as one of the union variants.
- */
-export type WorkerSentenceBBoxOptions =
-    | (WorkerSentenceBBoxBaseOptions & { debug?: false; recordSplitter?: never })
-    | (WorkerSentenceBBoxBaseOptions & { debug: true; recordSplitter?: boolean });
-
-/**
- * Intermediates surfaced by the worker op `extractSentenceBBoxes` when
- * called with `debug: true`.
- *
- * Mirrors the intermediates surfaced by the worker-side sentence extraction
- * helper, with the sentence result living at the top level of
- * `SentenceBBoxTraceResult`.
+ * Intermediates surfaced by the dev-only `extractSentenceBBoxesDebug` op.
  *
  * **Map/Set across the worker boundary.** `marginAnalysis`,
  * `marginRemoval`, and `filteredResult.styleProfile` carry `Map`/`Set`
@@ -112,11 +81,11 @@ export interface SentenceBBoxTrace {
     marginAnalysis: MarginAnalysis;
     marginRemoval: MarginRemovalResult;
     filteredResult: FilteredParagraphResult;
-    /** Present iff the debug-variant `recordSplitter === true`. */
+    /** Present iff `recordSplitter === true` on the call. */
     splitterRecording?: Array<{ text: string; ranges: SentenceRange[] }>;
 }
 
-/** Result envelope returned by `extractSentenceBBoxes` when `debug: true`. */
+/** Result envelope returned by `extractSentenceBBoxesDebug`. */
 export interface SentenceBBoxTraceResult {
     result: PageSentenceBBoxResult;
     trace: SentenceBBoxTrace;

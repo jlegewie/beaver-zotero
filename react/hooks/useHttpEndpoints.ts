@@ -61,11 +61,8 @@ import {
     handleTestPdfPageLabelsHttpRequest,
     handleTestPdfRenderPagesHttpRequest,
     handleTestPdfRenderPagesWithMetaHttpRequest,
-    handleTestPdfExtractRawHttpRequest,
     handleTestPdfExtractRawDetailedHttpRequest,
-    handleTestPdfSearchHttpRequest,
     handleTestPdfExtractHttpRequest,
-    handleTestPdfExtractByLinesHttpRequest,
     handleTestPdfExtractParagraphHttpRequest,
     handleTestPdfHasTextLayerHttpRequest,
     handleTestPdfAnalyzeOcrHttpRequest,
@@ -73,7 +70,7 @@ import {
     handleTestPdfSentenceBBoxesHttpRequest,
     handleTestPdfRenderOverlayHttpRequest,
     handleTestPdfPipelineTraceHttpRequest,
-    handleTestPdfSmartRemovalSummaryHttpRequest,
+    handleTestPdfAnalyzeLayoutHttpRequest,
 } from './httpHandlers/testPdfHandlers';
 import type {
     WSZoteroDataRequest,
@@ -165,23 +162,21 @@ const ENDPOINT_PATHS = [
     '/beaver/test/pdf-page-labels',
     '/beaver/test/pdf-render-pages',
     '/beaver/test/pdf-render-pages-with-meta',
-    '/beaver/test/pdf-extract-raw',
     '/beaver/test/pdf-extract-raw-detailed',
-    '/beaver/test/pdf-search',
     // orchestration parity endpoints
     '/beaver/test/pdf-extract',
-    '/beaver/test/pdf-extract-by-lines',
     '/beaver/test/pdf-extract-paragraph',
     '/beaver/test/pdf-has-text-layer',
     '/beaver/test/pdf-analyze-ocr',
     '/beaver/test/pdf-search-scored',
     '/beaver/test/pdf-sentence-bboxes',
-    // Bbox-overlay debugging (sentences/lines/paragraphs/columns/raw-lines/margins)
+    // Bbox-overlay debugging (sentences/lines/paragraphs/columns/margins)
     '/beaver/test/pdf-render-overlay',
     // Per-page pipeline trace (every stage, JSON-only)
     '/beaver/test/pdf-pipeline-trace',
-    // Cross-page smart-removal candidate summary (no rendering)
-    '/beaver/test/pdf-smart-removal-summary',
+    // Document-wide style + margin analysis context (mirrors what
+    // `extract({ mode: "structured" })` builds before per-page processing)
+    '/beaver/test/pdf-analyze-layout',
 ] as const;
 
 /**
@@ -718,21 +713,12 @@ function registerEndpoints(): boolean {
         Zotero.Server.Endpoints['/beaver/test/pdf-render-pages-with-meta'] =
             createEndpoint(handleTestPdfRenderPagesWithMetaHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/pdf-extract-raw'] =
-            createEndpoint(handleTestPdfExtractRawHttpRequest);
-
         Zotero.Server.Endpoints['/beaver/test/pdf-extract-raw-detailed'] =
             createEndpoint(handleTestPdfExtractRawDetailedHttpRequest);
-
-        Zotero.Server.Endpoints['/beaver/test/pdf-search'] =
-            createEndpoint(handleTestPdfSearchHttpRequest);
 
         // orchestration parity endpoints
         Zotero.Server.Endpoints['/beaver/test/pdf-extract'] =
             createEndpoint(handleTestPdfExtractHttpRequest);
-
-        Zotero.Server.Endpoints['/beaver/test/pdf-extract-by-lines'] =
-            createEndpoint(handleTestPdfExtractByLinesHttpRequest);
 
         Zotero.Server.Endpoints['/beaver/test/pdf-extract-paragraph'] =
             createEndpoint(handleTestPdfExtractParagraphHttpRequest);
@@ -750,8 +736,7 @@ function registerEndpoints(): boolean {
             createEndpoint(handleTestPdfSentenceBBoxesHttpRequest);
 
         // Bbox overlay endpoint — paints columns/lines/paragraphs/sentences/
-        // raw-lines/margins on a rendered page PNG for headless agent
-        // debugging.
+        // margins on a rendered page PNG for headless agent debugging.
         Zotero.Server.Endpoints['/beaver/test/pdf-render-overlay'] =
             createEndpoint(handleTestPdfRenderOverlayHttpRequest);
 
@@ -761,10 +746,13 @@ function registerEndpoints(): boolean {
         Zotero.Server.Endpoints['/beaver/test/pdf-pipeline-trace'] =
             createEndpoint(handleTestPdfPipelineTraceHttpRequest);
 
-        // Cross-page smart-removal summary — no extraction, no rendering;
-        // just the candidates + per-page removal map.
-        Zotero.Server.Endpoints['/beaver/test/pdf-smart-removal-summary'] =
-            createEndpoint(handleTestPdfSmartRemovalSummaryHttpRequest);
+        // Full analysis context (style profile + margin analysis + margin
+        // removal) computed by the same prefix `extract({ mode:
+        // "structured" })` runs before per-page processing. Backs the
+        // `level: "margins"` overlay and is also exposed standalone for
+        // debugging.
+        Zotero.Server.Endpoints['/beaver/test/pdf-analyze-layout'] =
+            createEndpoint(handleTestPdfAnalyzeLayoutHttpRequest);
     }
 
     logger(`useHttpEndpoints: Registered ${ENDPOINT_PATHS.length} HTTP endpoints`, 3);

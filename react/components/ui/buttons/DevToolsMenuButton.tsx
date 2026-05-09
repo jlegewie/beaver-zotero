@@ -166,7 +166,7 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
             }
             const pdfData = await IOUtils.read(path);
             const result = await new PDFExtractor().extract(pdfData, {
-                settings: { useLineDetection: true },
+                mode: "structured",
             });
 
             console.log("[PDF Test] ✓ Extraction complete!");
@@ -270,9 +270,9 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
         const result = await visualizeCurrentPageSentences();
         if (result.success) {
             console.log(`[PDF Visualizer] ${result.message}`);
-            if (result.degradedParagraphs || result.unmappedParagraphs) {
+            if (result.degradation) {
                 console.warn(
-                    `[PDF Visualizer] Degradation: ${result.degradedParagraphs ?? 0} degraded, ${result.unmappedParagraphs ?? 0} unmapped paragraphs (fallback whole-paragraph bboxes shown in gray)`,
+                    `[PDF Visualizer] Degradation: ${result.degradation} paragraphs fell back to whole-paragraph bboxes (shown in gray)`,
                 );
             }
         } else {
@@ -461,7 +461,7 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
                 return;
             }
             
-            // Extract with line detection for current page only (skip OCR check for testing)
+            // Extract structured (sentence-level) for current page only (skip OCR check for testing)
             const path = await item.getFilePathAsync();
             if (!path) {
                 console.warn("[PDF Extractor] File not found");
@@ -469,8 +469,9 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
             }
             const pdfData = await IOUtils.read(path);
             const result = await new PDFExtractor().extract(pdfData, {
+                mode: "structured",
                 pageIndices: [currentPageIndex],
-                settings: { useLineDetection: true, checkTextLayer: false },
+                settings: { checkTextLayer: false },
             });
 
             if (result.pages.length === 0) {

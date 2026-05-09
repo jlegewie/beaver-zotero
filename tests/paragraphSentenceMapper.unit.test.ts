@@ -183,7 +183,7 @@ describe('extractPageSentenceBBoxes', () => {
         ]);
         const result = extractPageSentenceBBoxes(page);
         expect(result.pageIndex).toBe(0);
-        expect(result.unmappedParagraphs).toBe(0);
+        expect(result.degradation).toBeUndefined();
         expect(result.paragraphs.length).toBeGreaterThanOrEqual(1);
         const totalSentences = result.sentences.length;
         expect(totalSentences).toBeGreaterThanOrEqual(2);
@@ -220,8 +220,8 @@ describe('extractPageSentenceBBoxes', () => {
     it('supports precomputed paragraph results', () => {
         // We don't want to re-run detection; the caller may have already
         // done it. Call detectParagraphs directly with trackItemLines.
-        // This mirrors the production flow where extract with
-        // useLineDetection already runs the line detector.
+        // This mirrors the production flow where the structured engine
+        // already runs the line detector.
         const page = makeMultiBlockPage([
             [makeLine('Sentence one.', 100), makeLine('Sentence two.', 115)],
         ]);
@@ -237,7 +237,7 @@ describe('extractPageSentenceBBoxes', () => {
         const result = extractPageSentenceBBoxes(page, {
             precomputed: { paragraphResult: paraResult },
         });
-        expect(result.unmappedParagraphs).toBe(0);
+        expect(result.degradation).toBeUndefined();
         expect(result.sentences.length).toBeGreaterThanOrEqual(2);
     });
 
@@ -256,7 +256,7 @@ describe('extractPageSentenceBBoxes', () => {
     it('degrades gracefully on a text/chars invariant violation', () => {
         // Corrupt ONE line in a multi-line paragraph: drop its last char.
         // The pipeline should NOT throw; it should return a fallback
-        // sentence for that paragraph and mark it in degradationNotes.
+        // sentence for that paragraph and mark it in degradation.notes.
         const lineA = makeLine('First line of a paragraph', 100);
         const lineB = makeLine('Second line broken.', 115);
         lineB.chars = lineB.chars.slice(0, -1); // invariant violated
@@ -268,9 +268,9 @@ describe('extractPageSentenceBBoxes', () => {
         expect(result.paragraphs.length).toBeGreaterThanOrEqual(1);
         expect(result.sentences.length).toBeGreaterThanOrEqual(1);
         // Degradation is counted and reported.
-        expect(result.degradedParagraphs).toBeGreaterThanOrEqual(1);
-        expect(result.degradationNotes.length).toBeGreaterThanOrEqual(1);
-        const note = result.degradationNotes[0];
+        expect(result.degradation?.count ?? 0).toBeGreaterThanOrEqual(1);
+        expect(result.degradation?.notes.length ?? 0).toBeGreaterThanOrEqual(1);
+        const note = result.degradation!.notes[0];
         expect(note.reason).toBe('invariant_violation');
         expect(note.message).toMatch(/text\/chars length mismatch/);
     });
@@ -281,7 +281,7 @@ describe('extractPageSentenceBBoxes', () => {
         // the detectors lines with different bboxes via a precomputed
         // paragraph result whose span bboxes don't match anything in the
         // detailed lookup. The mapper should emit fallback sentences and
-        // increment unmappedParagraphs rather than crash.
+        // tag the items as `unmapped` in degradation.notes rather than crash.
         const realLines = [makeLine('Real content here.', 100)];
         const page = makeMultiBlockPage([realLines]);
 
@@ -315,11 +315,11 @@ describe('extractPageSentenceBBoxes', () => {
         });
 
         // At least one unmapped paragraph with a fallback sentence.
-        expect(result.unmappedParagraphs).toBeGreaterThanOrEqual(1);
+        expect(result.degradation?.count ?? 0).toBeGreaterThanOrEqual(1);
         expect(result.sentences.length).toBeGreaterThanOrEqual(1);
-        // First degradation note has reason 'unmapped'.
+        // At least one degradation note has reason 'unmapped'.
         expect(
-            result.degradationNotes.some((n) => n.reason === 'unmapped'),
+            (result.degradation?.notes ?? []).some((n) => n.reason === 'unmapped'),
         ).toBe(true);
         // Every paragraph in the output has at least one sentence — even
         // the degraded ones, because fallbacks are emitted.
@@ -346,8 +346,8 @@ describe('extractPageSentenceBBoxes', () => {
 
         // All broken lines become degraded paragraphs, but the notes
         // array is capped.
-        expect(result.degradedParagraphs).toBeGreaterThanOrEqual(NUM);
-        expect(result.degradationNotes.length).toBeLessThanOrEqual(50);
+        expect(result.degradation?.count ?? 0).toBeGreaterThanOrEqual(NUM);
+        expect(result.degradation?.notes.length ?? 0).toBeLessThanOrEqual(50);
         // Every paragraph still has a fallback sentence.
         for (const p of result.paragraphs) {
             expect(p.sentences.length).toBe(1);
@@ -371,7 +371,7 @@ describe('buildParagraphFeasibilityReport', () => {
         const report = buildParagraphFeasibilityReport(page);
         expect(report.invariantHolds).toBe(true);
         expect(report.allBBoxesInPage).toBe(true);
-        expect(report.unmappedParagraphs).toBe(0);
+        expect(report.degradation).toBeUndefined();
         expect(report.mappedParagraphs).toBeGreaterThanOrEqual(2);
         expect(report.totalSentences).toBeGreaterThanOrEqual(3);
     });

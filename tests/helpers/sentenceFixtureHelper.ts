@@ -43,8 +43,8 @@ export interface FixtureSentenceExpected {
 export interface FixtureExpected {
     paragraphCount: number;
     stats: {
-        degradedParagraphs: number;
-        unmappedParagraphs: number;
+        /** Total paragraphs that fell back to a whole-paragraph bbox. */
+        degradation: number;
     };
     sentences: FixtureSentenceExpected[];
 }
@@ -64,7 +64,7 @@ export interface FixtureSourceMeta {
 }
 
 export interface FixtureFile {
-    schema: 1;
+    schema: 2;
     createdAt: string;
     source: FixtureSourceMeta;
     extractor: { gitSha: string | null; marginsPreset: 'default' };
@@ -97,10 +97,21 @@ export function loadFixtures(rootDir: string): LoadedFixture[] {
         if (!fs.statSync(folder).isDirectory()) continue;
         const fixtureJson = path.join(folder, 'fixture.json');
         if (!fs.existsSync(fixtureJson)) continue;
-        const fixture = JSON.parse(
+        const parsed = JSON.parse(
             fs.readFileSync(fixtureJson, 'utf8'),
-        ) as FixtureFile;
-        entries.push({ folder, folderName: name, fixture });
+        ) as { schema?: unknown } & Partial<FixtureFile>;
+        const schema = parsed.schema;
+        if (schema === 1) {
+            throw new Error(
+                `Fixture ${name} is on schema 1 — run \`npx tsx tests/scripts/migrateSentenceFixtures.ts\` to migrate.`,
+            );
+        }
+        if (schema !== 2) {
+            throw new Error(
+                `Fixture ${name} has unknown schema ${JSON.stringify(schema)} — only schema 2 is supported.`,
+            );
+        }
+        entries.push({ folder, folderName: name, fixture: parsed as FixtureFile });
     }
     // Stable order so test output is deterministic.
     entries.sort((a, b) => a.folderName.localeCompare(b.folderName));
@@ -120,8 +131,11 @@ export interface ActualSentenceResult {
         // Cross-paragraph continuation hint. Omitted ≡ false.
         joinWithNext?: boolean;
     }>;
-    degradedParagraphs: number;
-    unmappedParagraphs: number;
+    /**
+     * Producer-shaped degradation summary. Omitted when no paragraphs
+     * degraded; the comparator reads it as `actual.degradation?.count ?? 0`.
+     */
+    degradation?: { count: number; notes: unknown[] };
 }
 
 export interface MatchOptions {
@@ -140,7 +154,7 @@ export interface MatchOptions {
  *  2. Per-sentence text whitespace-normalized equality.
  *  3. Per-sentence paragraphIndex exact equality.
  *  4. Per-sentence bbox count exact; per-bbox |Δ| ≤ tolerancePt for x/y/w/h.
- *  5. Stats may improve but not regress (degraded / unmapped paragraph counts).
+ *  5. Degradation count may improve but not regress.
  */
 export function expectSentencesMatch(
     actual: ActualSentenceResult,
@@ -149,15 +163,11 @@ export function expectSentencesMatch(
 ): void {
     const failures: string[] = [];
 
-    // Stats regression check.
-    if (actual.degradedParagraphs > expected.stats.degradedParagraphs) {
+    // Degradation regression check.
+    const actualDegradation = actual.degradation?.count ?? 0;
+    if (actualDegradation > expected.stats.degradation) {
         failures.push(
-            `degradedParagraphs regressed: ${actual.degradedParagraphs} > ${expected.stats.degradedParagraphs}`,
-        );
-    }
-    if (actual.unmappedParagraphs > expected.stats.unmappedParagraphs) {
-        failures.push(
-            `unmappedParagraphs regressed: ${actual.unmappedParagraphs} > ${expected.stats.unmappedParagraphs}`,
+            `degradation regressed: ${actualDegradation} > ${expected.stats.degradation}`,
         );
     }
 

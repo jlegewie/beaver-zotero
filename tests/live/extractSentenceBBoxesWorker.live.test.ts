@@ -1,10 +1,14 @@
 /**
- * Live tests for the worker-backed `PDFExtractor.extractSentenceBBoxes`
- * with each `SentenceSplitterConfig` variant.
+ * Live tests for the worker-backed sentence-level extraction with each
+ * `SentenceSplitterConfig` variant.
  *
- * After Step 1, `/beaver/test/pdf-sentence-bboxes` routes through the
- * worker op. This suite exercises both splitter configs against a real
- * fixture page and asserts:
+ * `/beaver/test/pdf-sentence-bboxes` routes through `PDFExtractor.extract({
+ * mode: "structured" })` (single worker round-trip; per-page detailed
+ * walk + paragraph + sentence mapping all run worker-side). The wire
+ * response is shaped as `PageSentenceBBoxResult`.
+ *
+ * This suite exercises both splitter configs against a real fixture page
+ * and asserts:
  *   - both variants succeed end-to-end,
  *   - sentencex output ≠ simple output for at least one fixture (so we
  *     know sentencex actually ran inside the worker — not silently
@@ -35,7 +39,7 @@ const fixtures = loadFixtures(fixtureRoot);
 // `loadFixtures` makes this deterministic.
 const probeFixture = fixtures[0];
 
-describe('extractSentenceBBoxes worker — splitter config (live)', () => {
+describe('structured extract worker — splitter config (live)', () => {
     beforeEach((ctx) => {
         skipIfNoZotero(ctx, available);
     });

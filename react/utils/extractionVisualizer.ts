@@ -12,21 +12,20 @@
 
 import { logger } from "../../src/utils/logger";
 import {
-    getMuPDFWorkerClient,
     PDFExtractor,
     Rect,
 } from "../../src/services/pdf";
-import type { SentenceBBoxTraceResult } from "../../src/services/pdf";
+import type { ProcessedPage } from "../../src/services/pdf";
 import { getItemLanguage } from "../../src/utils/zoteroUtils";
 import { getCurrentReaderAndWaitForView } from "./readerUtils";
 import { getPageViewportInfo } from "./pdfUtils";
 import { BeaverTemporaryAnnotations, ZoteroReader } from "./annotationUtils";
 import { ZoteroItemReference } from "../types/zotero";
 import {
-    buildColumnOverlayFromTrace,
-    buildLineOverlayFromTrace,
-    buildParagraphOverlayFromTrace,
-    buildSentenceOverlayFromResult,
+    buildColumnOverlayFromPage,
+    buildLineOverlayFromPage,
+    buildParagraphOverlayFromPage,
+    buildSentenceOverlayFromPage,
     OverlayResult,
 } from "./extractionOverlay";
 
@@ -180,21 +179,25 @@ async function pushOverlayToReader(
 }
 
 /**
- * Run the worker `extractSentenceBBoxes` op (debug mode) for the given page
- * and return `{ result, trace }`. Single round-trip that drives every
- * visualizer level (columns / lines / paragraphs / sentences) — the
- * pure builders in `extractionOverlay.ts` then turn the returned trace
+ * Run the structured-mode extract for a single page and return the
+ * `ProcessedPage`. Single worker round-trip that drives every visualizer
+ * level (columns / lines / paragraphs / sentences) — the pure
+ * `*FromPage` builders in `extractionOverlay.ts` then turn the result
  * into rects.
+ *
+ * Routes through `PDFExtractor.extract({ mode: "structured" })` so what
+ * the visualizer paints is byte-identical to what production extraction
+ * produces for the same page.
  *
  * Best-effort language lookup feeds sentencex; the worker falls back to
  * the regex splitter on init failure, so this never throws on splitter
  * issues.
  */
-async function loadSentenceTrace(
+async function loadStructuredPage(
     filePath: string,
     pageIndex: number,
     item: Zotero.Item,
-): Promise<SentenceBBoxTraceResult & { pdfData: Uint8Array }> {
+): Promise<ProcessedPage> {
     const pdfData = await IOUtils.read(filePath);
     let language: string | undefined;
     try {
@@ -203,12 +206,18 @@ async function loadSentenceTrace(
     } catch {
         // Best effort.
     }
-    const out = await getMuPDFWorkerClient().extractSentenceBBoxes(
-        pdfData,
-        pageIndex,
-        { splitterConfig: { type: "sentencex", language }, debug: true },
-    );
-    return { ...out, pdfData };
+    const result = await new PDFExtractor().extract(pdfData, {
+        mode: "structured",
+        pageIndices: [pageIndex],
+        structured: { language },
+    });
+    const page = result.pages[0];
+    if (!page) {
+        throw new Error(
+            `Structured extract returned no page for index ${pageIndex}`,
+        );
+    }
+    return page;
 }
 
 /**
@@ -226,9 +235,9 @@ export async function visualizeCurrentPageColumns(): Promise<{
         const { reader, item, filePath, pageIndex } = ctx;
 
         logger(`[Visualizer] Loading PDF and extracting page ${pageIndex + 1}...`);
-        const { trace } = await loadSentenceTrace(filePath, pageIndex, item);
+        const page = await loadStructuredPage(filePath, pageIndex, item);
 
-        const overlay = buildColumnOverlayFromTrace(trace);
+        const overlay = buildColumnOverlayFromPage(page);
         if (overlay.rects.length === 0) {
             return {
                 success: true,
@@ -242,10 +251,7 @@ export async function visualizeCurrentPageColumns(): Promise<{
         const refs = await pushOverlayToReader(overlay, reader, [viewBox[0], viewBox[1]]);
         BeaverTemporaryAnnotations.addToTracking(refs);
 
-        const message =
-            overlay.stats.broken === 1
-                ? `Page ${pageIndex + 1}: ${overlay.groupCount} column(s) detected [BROKEN PAGE]`
-                : `Page ${pageIndex + 1}: ${overlay.groupCount} column(s) detected`;
+        const message = `Page ${pageIndex + 1}: ${overlay.groupCount} column(s) detected`;
         logger(`[Visualizer] ${message}`);
         return { success: true, message, columns: overlay.groupCount, pageIndex };
     } catch (error) {
@@ -271,9 +277,9 @@ export async function visualizeCurrentPageLines(): Promise<{
         const { reader, item, filePath, pageIndex } = ctx;
 
         logger(`[Visualizer] Loading PDF and detecting lines on page ${pageIndex + 1}...`);
-        const { trace } = await loadSentenceTrace(filePath, pageIndex, item);
+        const page = await loadStructuredPage(filePath, pageIndex, item);
 
-        const overlay = buildLineOverlayFromTrace(trace);
+        const overlay = buildLineOverlayFromPage(page);
         if (overlay.rects.length === 0) {
             return {
                 success: true,
@@ -322,9 +328,9 @@ export async function visualizeCurrentPageParagraphs(): Promise<{
         const { reader, item, filePath, pageIndex } = ctx;
 
         logger(`[Visualizer] Loading PDF for paragraph detection on page ${pageIndex + 1}...`);
-        const { trace } = await loadSentenceTrace(filePath, pageIndex, item);
+        const page = await loadStructuredPage(filePath, pageIndex, item);
 
-        const overlay = buildParagraphOverlayFromTrace(trace);
+        const overlay = buildParagraphOverlayFromPage(page);
         if (overlay.rects.length === 0) {
             return {
                 success: true,
@@ -364,8 +370,7 @@ export async function visualizeCurrentPageSentences(): Promise<{
     sentences?: number;
     headings?: number;
     paragraphs?: number;
-    degradedParagraphs?: number;
-    unmappedParagraphs?: number;
+    degradation?: number;
     pageIndex?: number;
 }> {
     try {
@@ -374,12 +379,9 @@ export async function visualizeCurrentPageSentences(): Promise<{
         const { reader, item, filePath, pageIndex } = ctx;
 
         logger(`[Visualizer] Loading PDF and mapping sentences on page ${pageIndex + 1}...`);
-        const { result, trace } = await loadSentenceTrace(filePath, pageIndex, item);
+        const page = await loadStructuredPage(filePath, pageIndex, item);
 
-        const overlay = buildSentenceOverlayFromResult(
-            result,
-            trace.analysisPageIndices.length,
-        );
+        const overlay = buildSentenceOverlayFromPage(page);
         if (overlay.rects.length === 0) {
             return {
                 success: true,
@@ -390,20 +392,8 @@ export async function visualizeCurrentPageSentences(): Promise<{
             };
         }
 
-        // Sentence mapper coords share the page space, but the visualizer
-        // historically used the rawPage height (from the JSON-walked
-        // analysis window) for coordinate conversion; they're equal for
-        // non-rotated pages, but stick with rawPage for exact byte-for-byte
-        // parity with prior behavior.
-        const rawPage = trace.rawDoc.pages.find(
-            (p) => p.pageIndex === pageIndex,
-        );
-        const overlayWithRawHeight: OverlayResult = rawPage
-            ? { ...overlay, pageHeight: rawPage.height }
-            : overlay;
-
         const { viewBox } = await getPageViewportInfo(reader, pageIndex);
-        const refs = await pushOverlayToReader(overlayWithRawHeight, reader, [
+        const refs = await pushOverlayToReader(overlay, reader, [
             viewBox[0],
             viewBox[1],
         ]);
@@ -412,11 +402,8 @@ export async function visualizeCurrentPageSentences(): Promise<{
         const sentences = Number(overlay.stats.sentences ?? 0);
         const headings = Number(overlay.stats.headings ?? 0);
         const paragraphs = Number(overlay.stats.paragraphs ?? 0);
-        const degraded = Number(overlay.stats.degradedParagraphs ?? 0);
-        const unmapped = Number(overlay.stats.unmappedParagraphs ?? 0);
-        const tail = degraded > 0 || unmapped > 0
-            ? ` (degraded: ${degraded}, unmapped: ${unmapped})`
-            : "";
+        const degradation = Number(overlay.stats.degradation ?? 0);
+        const tail = degradation > 0 ? ` (degradation: ${degradation})` : "";
         const headingTail = headings > 0 ? ` (${headings} heading${headings === 1 ? "" : "s"})` : "";
         const message = `Page ${pageIndex + 1}: ${sentences} sentences${headingTail} in ${paragraphs} paragraphs${tail}`;
         logger(`[Visualizer] ${message}`);
@@ -426,8 +413,7 @@ export async function visualizeCurrentPageSentences(): Promise<{
             sentences,
             headings,
             paragraphs,
-            degradedParagraphs: degraded,
-            unmappedParagraphs: unmapped,
+            degradation,
             pageIndex,
         };
     } catch (error) {

@@ -2,7 +2,16 @@
  * PDF Extraction Types
  *
  * Core type definitions for the PDF text extraction pipeline.
+ *
+ * NOTE: `ProcessedPage` references `ParagraphWithSentences` and
+ * `DegradationNote` from `./ParagraphSentenceMapper`. These are pulled in via
+ * `import type` so the imports erase at runtime — no real cycle.
  */
+
+import type {
+    DegradationSummary,
+    ParagraphWithSentences,
+} from "./ParagraphSentenceMapper";
 
 // ============================================================================
 // Settings & Options
@@ -50,8 +59,6 @@ export interface ExtractionSettings {
     repeatThreshold?: number;
     /** Whether to detect and remove page number sequences */
     detectPageSequences?: boolean;
-    /** Use line detection for high-quality extraction (default: false) */
-    useLineDetection?: boolean;
 }
 
 /** Default extraction settings */
@@ -62,7 +69,6 @@ export const DEFAULT_EXTRACTION_SETTINGS: Required<ExtractionSettings> = {
     marginZone: DEFAULT_MARGIN_ZONE,
     repeatThreshold: 3,
     detectPageSequences: true,
-    useLineDetection: false,
 };
 
 // ============================================================================
@@ -423,8 +429,36 @@ export interface ProcessedPage {
     content: string;
     /** Detected columns (in reading order) */
     columns?: ColumnBBox[];
-    /** Detected lines (only present if useLineDetection=true) */
+    /** Detected lines (populated by `mode: "structured"`) */
     lines?: ExtractedLine[];
+
+    // ------------------------------------------------------------------
+    // Structured-mode-only fields. Populated when the producing
+    // `extract` call ran with `mode: "structured"`. Always-on in that
+    // mode (no opt-in flag); markdown-mode results leave them
+    // undefined.
+    // ------------------------------------------------------------------
+
+    /**
+     * Paragraphs with their sentences. Same `ParagraphWithSentences[]`
+     * shape returned by the single-page sentence mapper. Each entry
+     * carries the underlying `ContentItem`, the paragraph text +
+     * source-map, and the sentence list.
+     */
+    paragraphs?: ParagraphWithSentences[];
+    /**
+     * Flattened `SentenceBBox[]` across all paragraphs in reading order.
+     * Convenient for callers that don't care which paragraph a
+     * sentence came from.
+     */
+    sentences?: SentenceBBox[];
+    /**
+     * Paragraphs that fell back from precise sentence-level mapping to a
+     * single whole-paragraph bbox (bbox-lookup miss, text/chars invariant
+     * violation, or empty splitter result — distinguished by
+     * `notes[i].reason`). Omitted when no paragraphs degraded.
+     */
+    degradation?: DegradationSummary;
 }
 
 // ============================================================================
@@ -504,17 +538,95 @@ export interface ExtractionResult {
         version: string;
         settings: ExtractionSettings;
         /**
-         * Markdown engine that produced the result. `"block-with-lines"` is
-         * the dev `useLineDetection` path on top of the block engine.
+         * Engine that produced the result.
+         *  - `"block"` / `"paragraph"`: markdown-mode engines (mode `"markdown"`).
+         *  - `"structured"`: sentence-level extraction (mode `"structured"`).
+         *
          * Optional so legacy callers / tests don't need to populate it.
          */
-        engine?: "block" | "block-with-lines" | "paragraph";
+        engine?: "block" | "paragraph" | "structured";
         /**
          * Per-phase worker timings. Optional — populated by `opExtract` /
          * `runExtractFromIndices`; absent on direct ExtractionResult literals
          * built in tests or fixtures.
          */
         timings?: ExtractionTimings;
+    };
+}
+
+// ============================================================================
+// Layout Analysis Result (analyzeLayout op)
+// ============================================================================
+
+/**
+ * Per-phase worker timings for a single `analyzeLayout` call. Subset of
+ * `ExtractionTimings` covering the prefix that `opExtract` and
+ * `opAnalyzeLayout` share — there is no per-page processing in
+ * `analyzeLayout`, so `perPageMs` is intentionally omitted.
+ */
+export interface LayoutAnalysisTimings {
+    /** Total worker op duration (entry to return). */
+    totalMs: number;
+    /** Time inside `acquireDoc`. Cold-cache only. */
+    docOpenMs: number;
+    /** Walk over `analysisIndices` (`extractRawPageFromDoc` per page). */
+    walkMs: number;
+    /** `buildPageAnalysisContext` (StyleAnalyzer + cross-page MarginFilter). */
+    analysisMs: number;
+}
+
+/**
+ * Result of a single `analyzeLayout` call. Mirrors `ExtractionResult`'s
+ * field naming where applicable.
+ *
+ * Output is byte-identical to the analysis context built by
+ * `extract({ mode: "structured" })` for the same `settings` +
+ * `pageIndices` + `analysisWindow` — the worker prefix is shared via
+ * `buildAnalysisFromDoc`.
+ *
+ * **Map/Set boundary.** `analysis.styleProfile.styleCounts`,
+ * `analysis.marginAnalysis.elements`,
+ * `analysis.marginRemoval.removalsByPage`, and
+ * `analysis.marginRemoval.textsToRemove` carry `Map`/`Set` fields.
+ * `postMessage` preserves them via structured clone, but
+ * `JSON.stringify` does NOT — flatten before writing HTTP responses.
+ */
+export interface LayoutAnalysisResult {
+    /**
+     * Target pages, JSON-walked (pre-filter). Same `RawPageData` shape
+     * `extractRawPageFromDoc` produces.
+     */
+    pages: RawPageData[];
+    /** Page count of the source document. */
+    pageCount: number;
+    /**
+     * Full-document page labels. Same shape as `ExtractionResult.pageLabels`
+     * — collected via `collectPageLabels(doc)` over all pages so the field
+     * is symmetric with extract.
+     */
+    pageLabels?: Record<number, string>;
+    /** Analysis-window indices used (target pages + neighbors). */
+    analysisPageIndices: number[];
+    /**
+     * Document-wide analysis output. Same builders as
+     * `extract({ mode: "structured" })` — populated by
+     * `buildPageAnalysisContext`.
+     */
+    analysis: {
+        styleProfile: StyleProfile;
+        marginAnalysis: MarginAnalysis;
+        marginRemoval: MarginRemovalResult;
+    };
+    metadata: {
+        extractedAt: string;
+        version: string;
+        /**
+         * Resolved settings (defaults merged in). Overlay builders read
+         * `settings.margins` and `settings.marginZone` from here so
+         * custom margins flow through to the rendered overlay.
+         */
+        settings: ExtractionSettings;
+        timings: LayoutAnalysisTimings;
     };
 }
 

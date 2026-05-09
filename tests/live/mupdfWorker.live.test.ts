@@ -29,11 +29,8 @@ import {
     pdfPageLabels,
     pdfRenderPages,
     pdfRenderPagesWithMeta,
-    pdfExtractRaw,
     pdfExtractRawDetailed,
-    pdfSearch,
     pdfExtract,
-    pdfExtractByLines,
     pdfHasTextLayer,
     pdfAnalyzeOcr,
     pdfSearchScored,
@@ -109,28 +106,6 @@ describe('MuPDF worker smoke — PR #2 ops', () => {
         expect(res.pageLabels).toBeDefined();
     });
 
-    it('extractRawPages returns blocks for every page', async () => {
-        const res = await pdfExtractRaw(NORMAL_PDF);
-        expect(res.ok).toBe(true);
-        const doc = res.result!;
-        expect(doc.pageCount).toBe(NORMAL_PDF_PAGE_COUNT);
-        expect(doc.pages.length).toBe(NORMAL_PDF_PAGE_COUNT);
-        for (const page of doc.pages) {
-            expect(typeof page.pageIndex).toBe('number');
-            expect(page.width).toBeGreaterThan(0);
-            expect(page.height).toBeGreaterThan(0);
-            expect(Array.isArray(page.blocks)).toBe(true);
-        }
-    });
-
-    it('extractRawPages silently filters invalid indices', async () => {
-        const res = await pdfExtractRaw(SMALL_PDF, { page_indices: [0, 99999] });
-        expect(res.ok).toBe(true);
-        const pages = res.result!.pages;
-        expect(pages.length).toBe(1);
-        expect(pages[0].pageIndex).toBe(0);
-    });
-
     it('renderPagesToImages produces a non-empty image', async () => {
         const res = await pdfRenderPages(SMALL_PDF, { page_indices: [0] });
         expect(res.ok).toBe(true);
@@ -192,18 +167,6 @@ describe('MuPDF worker smoke — PR #2 ops', () => {
         expect(res.error?.code).toBe('PAGE_OUT_OF_RANGE');
     });
 
-    it('searchPages returns hits with quad coordinates', async () => {
-        const res = await pdfSearch(NORMAL_PDF, { query: 'the' });
-        expect(res.ok).toBe(true);
-        expect(Array.isArray(res.pages)).toBe(true);
-        // Most papers contain "the" — guard with a >= check to avoid flake.
-        expect(res.pages!.length).toBeGreaterThan(0);
-        for (const page of res.pages!) {
-            expect(typeof page.pageIndex).toBe('number');
-            expect(page.matchCount).toBeGreaterThan(0);
-            expect(page.hits.length).toBe(page.matchCount);
-        }
-    });
 });
 
 describe('MuPDF worker smoke — orchestration ops', () => {
@@ -243,21 +206,6 @@ describe('MuPDF worker smoke — orchestration ops', () => {
             expect(typeof ocr.primaryReason).toBe('string');
             expect(typeof res.error!.payload!.pageCount).toBe('number');
             expect(res.error!.payload!.pageLabels).toBeDefined();
-        });
-    });
-
-    describe('extract (useLineDetection)', () => {
-        it('returns line-based extraction for a healthy PDF', async () => {
-            const settings = { useLineDetection: true };
-            const res = await pdfExtractByLines(SMALL_PDF, { settings });
-            expect(res.ok).toBe(true);
-
-            const result = res.result;
-            expect(result.pages.length).toBe(SMALL_PDF_PAGE_COUNT);
-            expect(typeof result.fullText).toBe('string');
-            for (const page of result.pages) {
-                expect(Array.isArray(page.lines)).toBe(true);
-            }
         });
     });
 
@@ -321,7 +269,7 @@ describe('MuPDF worker smoke — orchestration ops', () => {
         });
     });
 
-    describe('extractSentenceBBoxes', () => {
+    describe('structured extract (sentence-level)', () => {
         it('returns sentences with bboxes for a healthy PDF page', async () => {
             const res = await pdfSentenceBBoxes(SMALL_PDF, { page_index: 0 });
             expect(res.ok).toBe(true);
@@ -329,8 +277,11 @@ describe('MuPDF worker smoke — orchestration ops', () => {
             const result = res.result;
             expect(Array.isArray(result.paragraphs)).toBe(true);
             expect(Array.isArray(result.sentences)).toBe(true);
-            expect(typeof result.unmappedParagraphs).toBe('number');
-            expect(typeof result.degradedParagraphs).toBe('number');
+            // `degradation` is optional — omitted when no paragraphs degraded.
+            if (result.degradation !== undefined) {
+                expect(typeof result.degradation.count).toBe('number');
+                expect(Array.isArray(result.degradation.notes)).toBe(true);
+            }
             for (const sentence of result.sentences) {
                 expect(typeof sentence.text).toBe('string');
                 expect(Array.isArray(sentence.bboxes)).toBe(true);

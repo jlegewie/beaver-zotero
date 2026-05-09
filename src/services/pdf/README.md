@@ -190,8 +190,20 @@ ProcessedPage; // { index, content, lines[], columns[] }
 #### Results
 
 ```typescript
-ExtractionResult; // Result of PDFExtractor.extract (with or without useLineDetection)
-PageSentenceBBoxResult; // Result of PDFExtractor.extractSentenceBBoxes
+ExtractionResult; // Result of PDFExtractor.extract — markdown OR structured mode.
+                  // Structured mode populates pages[i].sentences / paragraphs /
+                  // degradation alongside the same content / columns / lines
+                  // fields. `degradation` is omitted on pages where no
+                  // paragraph fell back to a whole-paragraph bbox.
+LayoutAnalysisResult; // Result of PDFExtractor.analyzeLayout — pre-extraction
+                      // analysis context (styleProfile + marginAnalysis +
+                      // marginRemoval) plus the JSON-walked target pages. Same
+                      // shared prefix structured extract runs, so the analysis
+                      // context is byte-identical for the same settings /
+                      // pageIndices / analysisWindow.
+SentenceBBoxTraceResult; // Result of getMuPDFWorkerClient().extractSentenceBBoxesDebug
+                         // — single-page debug envelope { result, trace } used by
+                         // fixture capture and the pipeline-trace endpoint.
 PDFSearchResult; // Result of PDFExtractor.search
 PageImageResult; // Per-page entry in PDFExtractor.renderPages result.pages
 ```
@@ -434,14 +446,16 @@ export async function visualizeCurrentPageSections(): Promise<{
     const reader = await getCurrentReaderAndWaitForView(undefined, true);
     const currentPageIndex = /* get from pdfViewer */;
 
-    // 2. Load PDF and extract one page via the worker
+    // 2. Load PDF and run the production analysis prefix for one page
+    //    via the worker — same shared analysis context structured extract
+    //    uses, so the visualizer matches what production sees.
     const pdfData = await IOUtils.read(filePath);
-    const { pages } = await getMuPDFWorkerClient().extractRawPages(
-        pdfData,
-        [currentPageIndex],
-    );
-    const rawPage = pages[0];
+    const layout = await new PDFExtractor().analyzeLayout(pdfData, {
+        pageIndices: [currentPageIndex],
+    });
+    const rawPage = layout.pages[0];
     if (!rawPage) throw new Error("page out of range");
+    const { styleProfile } = layout.analysis;
 
     // 3. Run detection pipeline
     const filteredPage = MarginFilter.filterPageByMargins(rawPage, DEFAULT_MARGINS);
@@ -470,15 +484,14 @@ export async function visualizeCurrentPageSections(): Promise<{
 
 ### 1. Processing Raw Data
 
-**Always work from `RawPageData`** to avoid repeated WASM calls:
+**Always work from a single analysis context** to avoid repeated WASM calls:
 
 ```typescript
-// ✅ Good: Single extraction, multiple analyses
-const rawData = mupdf.extractRawPages();
-const styleProfile = StyleAnalyzer.analyze(rawData.pages);
-const marginAnalysis = MarginFilter.collectMarginElements(rawData.pages);
+// ✅ Good: Single worker call surfaces the analysis context production uses
+const layout = await new PDFExtractor().analyzeLayout(pdfData);
+const { styleProfile, marginAnalysis, marginRemoval } = layout.analysis;
 
-// ❌ Bad: Multiple extractions
+// ❌ Bad: Multiple extractions / re-walking the doc per analyzer
 const styleProfile = StyleAnalyzer.analyze(mupdf); // Extracts internally
 const marginAnalysis = MarginFilter.analyze(mupdf); // Extracts again
 ```
@@ -655,14 +668,6 @@ reader.
    });
    ```
 
-4. **Use `useLineDetection` when you need positional metadata**:
-   ```typescript
-   // Each ProcessedPage.lines is populated with bbox + fontSize + columnIndex
-   const result = await new PDFExtractor().extract(pdfData, {
-     settings: { useLineDetection: true },
-   });
-   ```
-
 ---
 
 ## API Quick Reference
@@ -685,11 +690,6 @@ const result = await extractor.extract(pdfData, {
   pageRange: { startIndex: 0, maxPages: 10 },
 });
 
-// Line-level extraction (populates ProcessedPage.lines with bbox metadata)
-const result = await extractor.extract(pdfData, {
-  settings: { useLineDetection: true },
-});
-
 // Document metadata + page labels in one round-trip
 const meta = await extractor.getMetadata(pdfData);
 
@@ -697,11 +697,51 @@ const meta = await extractor.getMetadata(pdfData);
 const pageCount = await extractor.getPageCount(pdfData);
 const ocrNeeds = await extractor.analyzeOCRNeeds(pdfData);
 
-// Sentence-level bboxes for a single page
-const sentences = await extractor.extractSentenceBBoxes(pdfData, {
-  pageIndex: 0,
-  splitter: { type: "sentencex", language: "en" },
+// Sentence-level extraction — production multi-page entry point.
+// Returns the same `ExtractionResult` shape; structured-mode page data
+// lives on `pages[i].sentences` / `paragraphs` / `columns` / `lines`
+// alongside paragraph-engine `content`. Per-page detailed walk is the
+// dominant cost — budget accordingly for large ranges.
+const structured = await extractor.extract(pdfData, {
+  mode: "structured",
+  pageIndices: [0, 1, 2],
+  structured: { language: "en" },
 });
+for (const page of structured.pages) {
+  for (const sentence of page.sentences ?? []) {
+    console.log(sentence.text, sentence.bboxes);
+  }
+}
+
+// Document-wide style + margin analysis context only — no per-page
+// extraction. Runs the EXACT shared analysis prefix `extract({ mode:
+// "structured" })` runs (page count, page labels, optional OCR check,
+// JSON walk over the analysis window, `buildPageAnalysisContext`).
+// Output is byte-identical to what production extract sees pre-filter.
+// Use this for debugging margin / style decisions without paying for
+// per-page processing.
+const layout = await extractor.analyzeLayout(pdfData, {
+  pageIndices: [3],
+  analysisWindow: 5,
+});
+console.log(layout.analysis.styleProfile.primaryBodyStyle);
+for (const c of layout.analysis.marginRemoval.candidates) {
+  console.log(c.text, c.reason, c.pageIndices);
+}
+
+// Single-page debug surface (fixture capture / pipeline-trace endpoint).
+// Returns `{ result, trace }` with all pipeline intermediates (raw doc,
+// detailed page, font-bridged pagesForFilter, margin analysis/removal,
+// filtered-paragraph result). Not a parity oracle for the production
+// multi-page structured path — see worker/sentenceExtraction.ts for
+// the divergence rationale. For analysis-context parity, prefer
+// `analyzeLayout` above.
+import { getMuPDFWorkerClient } from "../../src/services/pdf";
+const debug = await getMuPDFWorkerClient().extractSentenceBBoxesDebug(
+  pdfData,
+  0,
+  { splitterConfig: { type: "sentencex", language: "en" } },
+);
 ```
 
 ### Page Image Rendering
@@ -1098,16 +1138,6 @@ When adding features:
 
 **Symptom**: Browser crashes on large PDFs  
 **Fix**: Process in chunks using `pageIndices` (or `pageRange`):
-
-```typescript
-for (let i = 0; i < pageCount; i += 10) {
-  const chunk = await extractor.extract(pdfData, {
-    pageIndices: Array.from({ length: 10 }, (_, j) => i + j),
-    settings: { useLineDetection: true },
-  });
-  // Process chunk
-}
-```
 
 ### Incorrect Text Order
 

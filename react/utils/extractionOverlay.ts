@@ -2,9 +2,9 @@
  * Extraction Overlay — shared bbox source-of-truth.
  *
  * Computes per-level bounding-box overlays (columns / lines / paragraphs /
- * sentences / raw-lines / margins) for a single PDF page, returning plain
- * rect data in MuPDF top-left point coordinates. No DOM, no Zotero reader,
- * no annotations.
+ * sentences / margins) for a single PDF page, returning plain rect data
+ * in MuPDF top-left point coordinates. No DOM, no Zotero reader, no
+ * annotations.
  *
  * Two consumers:
  *   1. `extractionVisualizer.ts` — converts these rects into Zotero
@@ -16,8 +16,8 @@
  * Filter alignment: columns / lines / paragraphs / sentences all route
  * through `detectFilteredParagraphs`, so every overlay reflects what the
  * production sentence pipeline sees (cross-page smart margin removal,
- * document-wide style profile). `raw-lines` and `margins` deliberately
- * skip that filter — their purpose is to expose pre-filter state.
+ * document-wide style profile). `margins` deliberately skips that filter
+ * — its purpose is to expose the pre-removal classification.
  */
 import {
     lineBBoxToRect,
@@ -25,13 +25,13 @@ import {
     DEFAULT_MARGINS,
     DEFAULT_MARGIN_ZONE,
     Rect,
-    RawPageData,
     SentenceBBox,
 } from "../../src/services/pdf";
 import type {
+    LayoutAnalysisResult,
     MarginPosition,
     PageSentenceBBoxResult,
-    SentenceBBoxTrace,
+    ProcessedPage,
 } from "../../src/services/pdf";
 
 export type OverlayLevel =
@@ -39,7 +39,6 @@ export type OverlayLevel =
     | "lines"
     | "paragraphs"
     | "sentences"
-    | "raw-lines"
     | "margins";
 
 // Color palette — kept in one place so the visualizer and the canvas
@@ -55,14 +54,6 @@ export const OVERLAY_COLORS = {
     // Fallback sentences (unmapped / invariant violation / empty split)
     // render in a muted color so they stand out against precise ones.
     sentenceDegraded: "#8e8e93",
-    // Raw-lines view: one shade per margin zone so an agent can see at a
-    // glance which lines the simple margin filter would treat as marginalia
-    // vs. content. Inside-content lines reuse the line color.
-    rawLineInside: "#ff9500",
-    rawLineMarginTop: "#5ac8fa",
-    rawLineMarginBottom: "#5ac8fa",
-    rawLineMarginLeft: "#ff3b30",
-    rawLineMarginRight: "#ff3b30",
     // Margins view: zones drawn very faintly; lines colored by removal
     // outcome. Page-numbers gray (matches degraded), repeats purple,
     // marginalia kept-but-not-removed in yellow as a "watch this" cue.
@@ -102,7 +93,7 @@ export interface OverlayRect {
     /** True for fallback / degraded fallbacks (sentences only today). */
     degraded?: boolean;
     /**
-     * Margin-zone classification (raw-lines / margins overlays only).
+     * Margin-zone classification (margins overlay only).
      * `null` means the bbox overlaps the content area; otherwise the
      * bbox is fully inside that margin zone under the chosen thresholds.
      */
@@ -132,17 +123,24 @@ export interface OverlayResult {
 // ---------------------------------------------------------------------------
 
 /**
- * Build a sentence overlay from an already-computed `PageSentenceBBoxResult`.
+ * Build a sentence overlay from a `PageSentenceBBoxResult`.
  *
- * Used by the `/beaver/test/pdf-render-overlay` endpoint to feed the worker
- * sentence result into the shared rect-building loop. Same
- * rect/color/label/group semantics as the old `getSentenceOverlay` helper.
+ * Shared rect-construction loop used by the `ProcessedPage`-based
+ * visualizer wrapper above and by fixture capture (which still needs
+ * the trace-flavored result for splitter recording).
+ *
+ * `analysisPagesScanned` is the optional analysis-window-size diagnostic
+ * stat surfaced on `stats.analysisPagesScanned`. Callers that have it
+ * (fixture capture from the trace) pass it through; callers that don't
+ * (the production-mode visualizer wrapper) omit it.
  */
 export function buildSentenceOverlayFromResult(
     result: PageSentenceBBoxResult,
-    analysisPagesScanned: number,
+    analysisPagesScanned?: number,
 ): OverlayResult {
-    const degradedItemIndices = new Set(result.degradationNotes.map((n) => n.itemIndex));
+    const degradedItemIndices = new Set(
+        (result.degradation?.notes ?? []).map((n) => n.itemIndex),
+    );
     const degradedSentenceIndices = computeDegradedSentenceIndices(
         result.paragraphs,
         degradedItemIndices,
@@ -209,8 +207,7 @@ export function buildSentenceOverlayFromResult(
             sentences: result.sentences.length,
             headings: headingCount,
             paragraphs: result.paragraphs.length,
-            degradedParagraphs: result.degradedParagraphs,
-            unmappedParagraphs: result.unmappedParagraphs,
+            degradation: result.degradation?.count ?? 0,
             analysisPagesScanned,
         },
     };
@@ -247,252 +244,198 @@ function computeDegradedSentenceIndices(
 }
 
 // ---------------------------------------------------------------------------
-// Debug-oriented collectors
+// Pure builders — consume `ProcessedPage` from a structured-mode extract
+// (`extract({ mode: "structured", pageIndices: [n] })`). What the visualizer
+// paints is byte-identical to what production produces for that page.
+//
+// `margins` is built by `buildMarginsOverlayFromAnalysis` (further below),
+// which consumes a `LayoutAnalysisResult` from `analyzeLayout`. Same
+// shared analysis prefix structured extract uses, so the margin
+// candidates / removal decisions are byte-identical to what production
+// extract sees pre-filter.
 // ---------------------------------------------------------------------------
 
 /**
- * Raw-lines overlay: every line MuPDF emitted, *before* margin filtering,
- * color-coded by margin-zone classification (top/bottom/left/right/inside).
+ * Column overlay from a structured-mode `ProcessedPage`. Reads
+ * `page.columns` (`ColumnBBox[]`, `{l,t,r,b}`) and converts to the
+ * `Rect` shape (`{x,y,w,h}`) the overlay uses.
  */
-export function getRawLinesOverlay(rawPage: RawPageData): OverlayResult {
-    const rects: OverlayRect[] = [];
-    const counts = {
-        lines: 0,
-        inContent: 0,
-        inMarginTop: 0,
-        inMarginBottom: 0,
-        inMarginLeft: 0,
-        inMarginRight: 0,
-    };
-
-    for (const block of rawPage.blocks) {
-        if (block.type !== "text" || !block.lines) continue;
-        for (const line of block.lines) {
-            const position = MarginFilter.getMarginPosition(
-                line.bbox,
-                rawPage.width,
-                rawPage.height,
-                DEFAULT_MARGINS,
-            );
-            counts.lines++;
-            let color: string;
-            switch (position) {
-                case "top":
-                    color = OVERLAY_COLORS.rawLineMarginTop;
-                    counts.inMarginTop++;
-                    break;
-                case "bottom":
-                    color = OVERLAY_COLORS.rawLineMarginBottom;
-                    counts.inMarginBottom++;
-                    break;
-                case "left":
-                    color = OVERLAY_COLORS.rawLineMarginLeft;
-                    counts.inMarginLeft++;
-                    break;
-                case "right":
-                    color = OVERLAY_COLORS.rawLineMarginRight;
-                    counts.inMarginRight++;
-                    break;
-                default:
-                    color = OVERLAY_COLORS.rawLineInside;
-                    counts.inContent++;
-            }
-            rects.push({
-                rect: {
-                    x: line.bbox.x,
-                    y: line.bbox.y,
-                    w: line.bbox.w,
-                    h: line.bbox.h,
-                },
-                color,
-                label: `L${counts.lines}`,
-                group: counts.lines - 1,
-                marginPosition: position,
-            });
-        }
-    }
-
-    return {
-        level: "raw-lines",
-        pageIndex: rawPage.pageIndex,
-        pageWidth: rawPage.width,
-        pageHeight: rawPage.height,
-        groupCount: rects.length,
-        rects,
-        stats: counts,
-    };
-}
-
-// ---------------------------------------------------------------------------
-// Pure builders — consume `SentenceBBoxTrace` from the worker. No worker
-// calls, no main-thread re-running of detection. The legacy `get*Overlay`
-// helpers were deleted in Stage 4 once the menu visualizer migrated.
-// ---------------------------------------------------------------------------
-
-/**
- * Column overlay from a worker trace. Same rects / colors / labels as
- * `getColumnOverlay`; reads `trace.filteredResult.{columnResult,filteredPage}`
- * directly — no re-running.
- */
-export function buildColumnOverlayFromTrace(
-    trace: SentenceBBoxTrace,
-): OverlayResult {
-    const { filteredResult } = trace;
-    const rects: OverlayRect[] = filteredResult.columnResult.columns.map(
-        (col, i) => ({
-            rect: col,
-            color: OVERLAY_COLORS.column,
-            label: `C${i + 1}`,
-            group: i,
-        }),
-    );
+export function buildColumnOverlayFromPage(page: ProcessedPage): OverlayResult {
+    const columns = page.columns ?? [];
+    const rects: OverlayRect[] = columns.map((col, i) => ({
+        rect: { x: col.l, y: col.t, w: col.r - col.l, h: col.b - col.t },
+        color: OVERLAY_COLORS.column,
+        label: `C${i + 1}`,
+        group: i,
+    }));
     return {
         level: "columns",
-        pageIndex: filteredResult.filteredPage.pageIndex,
-        pageWidth: filteredResult.filteredPage.width,
-        pageHeight: filteredResult.filteredPage.height,
+        pageIndex: page.index,
+        pageWidth: page.width,
+        pageHeight: page.height,
         groupCount: rects.length,
         rects,
         stats: {
             columns: rects.length,
-            broken: filteredResult.columnResult.isBroken ? 1 : 0,
-            analysisPagesScanned: trace.analysisPageIndices.length,
         },
     };
 }
 
 /**
- * Line overlay from a worker trace. Reads
- * `trace.filteredResult.{lineResult,filteredPage}`.
+ * Line overlay from a structured-mode `ProcessedPage`. Reads `page.lines`
+ * (flat `ExtractedLine[]` already in reading order; column grouping
+ * survives via `columnIndex`).
  */
-export function buildLineOverlayFromTrace(
-    trace: SentenceBBoxTrace,
-): OverlayResult {
-    const { filteredResult } = trace;
-    const rects: OverlayRect[] = [];
-    let groupCount = 0;
-    for (const colResult of filteredResult.lineResult.columnResults) {
-        for (const line of colResult.lines) {
-            groupCount++;
-            rects.push({
-                rect: lineBBoxToRect(line.bbox),
-                color: OVERLAY_COLORS.line,
-                label: `L${groupCount}`,
-                group: groupCount - 1,
-            });
-        }
-    }
+export function buildLineOverlayFromPage(page: ProcessedPage): OverlayResult {
+    const lines = page.lines ?? [];
+    const rects: OverlayRect[] = lines.map((line, i) => ({
+        rect: lineBBoxToRect(line.bbox),
+        color: OVERLAY_COLORS.line,
+        label: `L${i + 1}`,
+        group: i,
+    }));
+    const distinctColumns = new Set(lines.map((l) => l.columnIndex)).size;
     return {
         level: "lines",
-        pageIndex: filteredResult.filteredPage.pageIndex,
-        pageWidth: filteredResult.filteredPage.width,
-        pageHeight: filteredResult.filteredPage.height,
-        groupCount,
-        rects,
-        stats: {
-            lines: groupCount,
-            columns: filteredResult.columnResult.columns.length,
-            analysisPagesScanned: trace.analysisPageIndices.length,
-        },
-    };
-}
-
-/**
- * Paragraph overlay from a worker trace. Reads
- * `trace.filteredResult.{paragraphResult,filteredPage}`.
- */
-export function buildParagraphOverlayFromTrace(
-    trace: SentenceBBoxTrace,
-): OverlayResult {
-    const { filteredResult } = trace;
-    const rects: OverlayRect[] = filteredResult.paragraphResult.items.map(
-        (item, i) => {
-            const isHeader = item.type === "header";
-            return {
-                rect: {
-                    x: item.bbox.l,
-                    y: item.bbox.t,
-                    w: item.bbox.width,
-                    h: item.bbox.height,
-                },
-                color: isHeader
-                    ? OVERLAY_COLORS.header
-                    : OVERLAY_COLORS.paragraph,
-                label: `${isHeader ? "H" : "P"}${item.idx + 1}`,
-                group: i,
-            };
-        },
-    );
-    return {
-        level: "paragraphs",
-        pageIndex: filteredResult.filteredPage.pageIndex,
-        pageWidth: filteredResult.filteredPage.width,
-        pageHeight: filteredResult.filteredPage.height,
+        pageIndex: page.index,
+        pageWidth: page.width,
+        pageHeight: page.height,
         groupCount: rects.length,
         rects,
         stats: {
-            paragraphs: filteredResult.paragraphResult.paragraphCount,
-            headers: filteredResult.paragraphResult.headerCount,
-            analysisPagesScanned: trace.analysisPageIndices.length,
+            lines: rects.length,
+            columns: distinctColumns,
         },
     };
 }
 
 /**
- * Margins overlay from a worker trace. Reads `trace.marginRemoval` +
- * `trace.pagesForFilter` for line classification. The simple-margin /
- * smart-zone box outlines are derived from the target page in
- * `pagesForFilter`. Same rects / colors / labels as `getMarginsOverlay`.
+ * Paragraph overlay from a structured-mode `ProcessedPage`. Reads
+ * `page.paragraphs[i].item` (the `ContentItem` carrying `type` /
+ * `bbox` / `idx`).
  */
-export function buildMarginsOverlayFromTrace(
-    trace: SentenceBBoxTrace,
+export function buildParagraphOverlayFromPage(
+    page: ProcessedPage,
 ): OverlayResult {
-    const pageIndex = trace.detailed.pageIndex;
-    const targetPage = trace.pagesForFilter.find(
-        (p) => p.pageIndex === pageIndex,
-    );
+    const paragraphs = page.paragraphs ?? [];
+    let headerCount = 0;
+    let bodyCount = 0;
+    const rects: OverlayRect[] = paragraphs.map((pws, i) => {
+        const item = pws.item;
+        const isHeader = item.type === "header";
+        if (isHeader) headerCount++;
+        else bodyCount++;
+        return {
+            rect: {
+                x: item.bbox.l,
+                y: item.bbox.t,
+                w: item.bbox.width,
+                h: item.bbox.height,
+            },
+            color: isHeader ? OVERLAY_COLORS.header : OVERLAY_COLORS.paragraph,
+            label: `${isHeader ? "H" : "P"}${item.idx + 1}`,
+            group: i,
+        };
+    });
+    return {
+        level: "paragraphs",
+        pageIndex: page.index,
+        pageWidth: page.width,
+        pageHeight: page.height,
+        groupCount: rects.length,
+        rects,
+        stats: {
+            paragraphs: bodyCount,
+            headers: headerCount,
+        },
+    };
+}
+
+/**
+ * Sentence overlay from a structured-mode `ProcessedPage`. Thin wrapper
+ * over `buildSentenceOverlayFromResult`.
+ */
+export function buildSentenceOverlayFromPage(page: ProcessedPage): OverlayResult {
+    const projected: PageSentenceBBoxResult = {
+        pageIndex: page.index,
+        width: page.width,
+        height: page.height,
+        paragraphs: page.paragraphs ?? [],
+        sentences: page.sentences ?? [],
+        degradation: page.degradation,
+    };
+    return buildSentenceOverlayFromResult(projected);
+}
+
+/**
+ * Margins overlay from a `LayoutAnalysisResult`. Reads
+ * `result.analysis.marginRemoval` for the per-page removal map +
+ * cross-page candidate list, and looks the target page up in
+ * `result.pages` for blocks/lines + dimensions. The
+ * simple-margin / smart-zone box outlines and per-line classification
+ * read `margins` / `marginZone` from `result.metadata.settings` so
+ * custom settings flow through to the rendered overlay (defaults apply
+ * only when the field is unset).
+ *
+ * `pageIndex` selects which target page (analyzeLayout returns
+ * multi-page; the overlay is single-page).
+ *
+ * Output is byte-identical to the prior trace-based builder when
+ * `analyzeLayout` runs with default settings — the structured-extract
+ * analysis context build is the source of truth for both. With custom
+ * settings, this builder draws/classifies against the actual settings
+ * the analysis used (the prior builder hard-coded defaults and would
+ * have silently mismatched).
+ */
+export function buildMarginsOverlayFromAnalysis(
+    result: LayoutAnalysisResult,
+    pageIndex: number,
+): OverlayResult {
+    const targetPage = result.pages.find((p) => p.pageIndex === pageIndex);
     if (!targetPage) {
         throw new Error(
-            `buildMarginsOverlayFromTrace: page ${pageIndex} not present in trace.pagesForFilter`,
+            `buildMarginsOverlayFromAnalysis: page ${pageIndex} not present in result.pages`,
         );
     }
-    const removal = trace.marginRemoval;
+    const removal = result.analysis.marginRemoval;
+    const margins = result.metadata.settings.margins ?? DEFAULT_MARGINS;
+    const marginZone = result.metadata.settings.marginZone ?? DEFAULT_MARGIN_ZONE;
 
     const rects: OverlayRect[] = [];
     let groupIdx = 0;
 
     // Margin zones — drawn first so lines render on top.
     const buildZoneRects = (
-        margins: typeof DEFAULT_MARGIN_ZONE,
+        m: typeof DEFAULT_MARGIN_ZONE,
     ): Array<{ pos: MarginPosition; rect: Rect }> => [
         {
             pos: "top",
-            rect: { x: 0, y: 0, w: targetPage.width, h: margins.top },
+            rect: { x: 0, y: 0, w: targetPage.width, h: m.top },
         },
         {
             pos: "bottom",
             rect: {
                 x: 0,
-                y: targetPage.height - margins.bottom,
+                y: targetPage.height - m.bottom,
                 w: targetPage.width,
-                h: margins.bottom,
+                h: m.bottom,
             },
         },
         {
             pos: "left",
-            rect: { x: 0, y: 0, w: margins.left, h: targetPage.height },
+            rect: { x: 0, y: 0, w: m.left, h: targetPage.height },
         },
         {
             pos: "right",
             rect: {
-                x: targetPage.width - margins.right,
+                x: targetPage.width - m.right,
                 y: 0,
-                w: margins.right,
+                w: m.right,
                 h: targetPage.height,
             },
         },
     ];
-    for (const z of buildZoneRects(DEFAULT_MARGIN_ZONE)) {
+    for (const z of buildZoneRects(marginZone)) {
         rects.push({
             rect: z.rect,
             color: OVERLAY_COLORS.marginZone,
@@ -500,7 +443,7 @@ export function buildMarginsOverlayFromTrace(
             group: groupIdx++,
         });
     }
-    for (const z of buildZoneRects(DEFAULT_MARGINS)) {
+    for (const z of buildZoneRects(margins)) {
         rects.push({
             rect: z.rect,
             color: OVERLAY_COLORS.marginZone,
@@ -532,7 +475,7 @@ export function buildMarginsOverlayFromTrace(
                 line.bbox,
                 targetPage.width,
                 targetPage.height,
-                DEFAULT_MARGIN_ZONE,
+                marginZone,
             );
             if (!zonePosition) continue;
 
@@ -583,7 +526,7 @@ export function buildMarginsOverlayFromTrace(
             pageNumbers: pageNumberCount,
             repeats: repeatCount,
             keptInMargin: keptInZoneCount,
-            analysisPagesScanned: trace.analysisPageIndices.length,
+            analysisPagesScanned: result.analysisPageIndices.length,
         },
     };
 }

@@ -7,12 +7,11 @@
  */
 
 import {
-    buildColumnOverlayFromTrace,
-    buildLineOverlayFromTrace,
-    buildParagraphOverlayFromTrace,
-    buildMarginsOverlayFromTrace,
-    buildSentenceOverlayFromResult,
-    getRawLinesOverlay,
+    buildColumnOverlayFromPage,
+    buildLineOverlayFromPage,
+    buildParagraphOverlayFromPage,
+    buildSentenceOverlayFromPage,
+    buildMarginsOverlayFromAnalysis,
 } from '../../utils/extractionOverlay';
 import type { OverlayResult } from '../../utils/extractionOverlay';
 import { drawBBoxOverlayPNG } from '../../utils/canvasOverlay';
@@ -373,53 +372,11 @@ export async function handleTestPdfRenderPagesWithMetaHttpRequest(request: any) 
 }
 
 /**
- * Dev-only PDF raw-extract endpoint — primitive level.
- *
- * Calls `getMuPDFWorkerClient().extractRawPages` directly so the test
- * exercises the same worker entry point production code uses (e.g.
- * `SentenceExtractionPipeline`).
- */
-export async function handleTestPdfExtractRawHttpRequest(request: any) {
-    const { ExtractionError } = await import('../../../src/services/pdf');
-    const { getMuPDFWorkerClient } = await import(
-        '../../../src/services/pdf/MuPDFWorkerClient'
-    );
-
-    const loaded = await loadPdfBytesForTestEndpoint(request);
-    if (!loaded.ok) return loaded;
-    const { pdfData } = loaded;
-
-    const pageIndices: number[] | undefined = Array.isArray(request?.page_indices)
-        ? request.page_indices
-        : undefined;
-
-    try {
-        const result = await getMuPDFWorkerClient().extractRawPages(
-            pdfData,
-            pageIndices,
-        );
-        return { ok: true, result };
-    } catch (e: any) {
-        if (e instanceof ExtractionError) {
-            return {
-                ok: false,
-                error: {
-                    name: 'ExtractionError',
-                    code: e.code,
-                    message: e.message,
-                },
-            };
-        }
-        throw e;
-    }
-}
-
-/**
  * Dev-only PDF detailed-extract endpoint — primitive level.
  *
  * Calls `getMuPDFWorkerClient().extractRawPageDetailed` directly (the worker
  * validates `pageIndex` and emits PAGE_OUT_OF_RANGE). Bypasses
- * `PDFExtractor.extractSentenceBBoxes` so the test exercises the raw
+ * `extract({ mode: "structured" })` so the test exercises the raw
  * detailed page, not the sentence mapper.
  */
 export async function handleTestPdfExtractRawDetailedHttpRequest(request: any) {
@@ -464,61 +421,6 @@ export async function handleTestPdfExtractRawDetailedHttpRequest(request: any) {
 }
 
 /**
- * Dev-only PDF search endpoint — primitive level (no SearchScorer).
- *
- * Calls `getMuPDFWorkerClient().searchPages` directly. Bypasses
- * `PDFExtractor.search` so the test exercises the raw `searchPages`
- * primitive, not the scored search pipeline.
- */
-export async function handleTestPdfSearchHttpRequest(request: any) {
-    const { ExtractionError } = await import('../../../src/services/pdf');
-    const { getMuPDFWorkerClient } = await import(
-        '../../../src/services/pdf/MuPDFWorkerClient'
-    );
-
-    const loaded = await loadPdfBytesForTestEndpoint(request);
-    if (!loaded.ok) return loaded;
-    const { pdfData } = loaded;
-
-    const query: unknown = request?.query;
-    if (typeof query !== 'string' || query.length === 0) {
-        return {
-            ok: false,
-            error: { name: 'Error', message: 'query (non-empty string) is required' },
-        };
-    }
-    const pageIndices: number[] | undefined = Array.isArray(request?.page_indices)
-        ? request.page_indices
-        : undefined;
-    const maxHitsPerPage =
-        typeof request?.max_hits_per_page === 'number'
-            ? request.max_hits_per_page
-            : undefined;
-
-    try {
-        const pages = await getMuPDFWorkerClient().searchPages(
-            pdfData,
-            query,
-            pageIndices,
-            maxHitsPerPage,
-        );
-        return { ok: true, pages };
-    } catch (e: any) {
-        if (e instanceof ExtractionError) {
-            return {
-                ok: false,
-                error: {
-                    name: 'ExtractionError',
-                    code: e.code,
-                    message: e.message,
-                },
-            };
-        }
-        throw e;
-    }
-}
-
-/**
  * Dev-only `extract` parity endpoint. Translates the legacy
  * `settings.pages` array into the worker-side `pageIndices` arg so existing
  * live-test bodies (which still pass `{ settings: { pages: [...] } }`) keep
@@ -527,27 +429,6 @@ export async function handleTestPdfSearchHttpRequest(request: any) {
 export async function handleTestPdfExtractHttpRequest(request: any) {
     const { PDFExtractor } = await import('../../../src/services/pdf');
     const settings = { ...(request?.settings || {}) };
-    const pageIndices: number[] | undefined = Array.isArray(settings.pages) && settings.pages.length > 0
-        ? settings.pages
-        : undefined;
-    delete settings.pages;
-    return runPdfExtractorCall(
-        request,
-        (pdfData) => new PDFExtractor().extract(pdfData, { settings, pageIndices }),
-        (result) => ({ ok: true, result }),
-    );
-}
-
-/**
- * Dev-only line-extraction parity endpoint. Now backed by `extract`
- * with `useLineDetection: true` — kept under the legacy route so existing
- * live-test bodies (which still pass `{ settings: { pages: [...] } }`)
- * keep working. The `settings.pages` array is translated into the
- * worker-side `pageIndices` arg.
- */
-export async function handleTestPdfExtractByLinesHttpRequest(request: any) {
-    const { PDFExtractor } = await import('../../../src/services/pdf');
-    const settings = { ...(request?.settings || {}), useLineDetection: true };
     const pageIndices: number[] | undefined = Array.isArray(settings.pages) && settings.pages.length > 0
         ? settings.pages
         : undefined;
@@ -626,12 +507,13 @@ export async function handleTestPdfSearchScoredHttpRequest(request: any) {
 }
 
 /**
- * Dev-only `extractSentenceBBoxes` parity endpoint.
+ * Dev-only sentence-bboxes parity endpoint.
  *
- * Routes through `PDFExtractor.extractSentenceBBoxes` → MuPDF worker op
- * (single round-trip; analysis-window load, font bridging, filtered
- * paragraph detection, splitter resolution, and sentence mapping all run
- * worker-side).
+ * Routes through `PDFExtractor.extract({ mode: "structured", pageIndices:
+ * [n] })` → MuPDF worker op (single round-trip; analysis-window load, font
+ * bridging, filtered paragraph detection, splitter resolution, and
+ * sentence mapping all run worker-side). The wire response is shaped as
+ * `PageSentenceBBoxResult` — read fields off `pages[0]`.
  *
  * Request body:
  *   { library_id, zotero_key | raw_bytes_base64,
@@ -657,8 +539,41 @@ export async function handleTestPdfSentenceBBoxesHttpRequest(request: any) {
     return runPdfExtractorCall(
         request,
         (pdfData) =>
-            new PDFExtractor().extractSentenceBBoxes(pdfData, { ...options, pageIndex }),
-        (result) => ({ ok: true, result }),
+            new PDFExtractor().extract(pdfData, {
+                mode: 'structured',
+                pageIndices: [pageIndex],
+                paragraphSettings: options.paragraphSettings,
+                analysisWindow: options.analysisWindow,
+                structured: {
+                    splitter: options.splitter,
+                    language: options.language,
+                },
+            }),
+        (extraction) => {
+            const page = extraction.pages[0];
+            if (!page) {
+                return {
+                    ok: false,
+                    error: {
+                        name: 'Error',
+                        message: `page_index ${pageIndex} not extracted`,
+                    },
+                };
+            }
+            // Reshape into PageSentenceBBoxResult so callers can
+            // consume the same shape the producer returns.
+            return {
+                ok: true,
+                result: {
+                    pageIndex: page.index,
+                    width: page.width,
+                    height: page.height,
+                    paragraphs: page.paragraphs ?? [],
+                    sentences: page.sentences ?? [],
+                    degradation: page.degradation,
+                },
+            };
+        },
     );
 }
 
@@ -672,43 +587,50 @@ export async function handleTestPdfSentenceBBoxesHttpRequest(request: any) {
  * Request body:
  *   { library_id, zotero_key | raw_bytes_base64,
  *     page_index: number,
- *     level: "columns" | "lines" | "paragraphs" | "sentences"
- *          | "raw-lines" | "margins",
+ *     level: "columns" | "lines" | "paragraphs" | "sentences" | "margins",
  *     dpi?: number,                       // default 144
  *     language?: string,                  // sentences only; falls back to item lang
- *     analysis_page_window?: number }     // applies to all levels except
- *                                         // raw-lines: ±N pages around
- *                                         // page_index for cross-page repeat /
- *                                         // page-number detection and
- *                                         // document-wide style profiling.
- *                                         // 0 (default) = whole document,
- *                                         // capped at 50.
+ *     analysis_page_window?: number,      // ±N pages around page_index for
+ *                                         // cross-page repeat / page-number
+ *                                         // detection and document-wide
+ *                                         // style profiling. 0 (default) =
+ *                                         // target page only, no neighbors.
+ *                                         // Pass Infinity for the whole
+ *                                         // document.
+ *     settings?: ExtractionSettings }     // margins level only — forwarded
+ *                                         // to `analyzeLayout` so the
+ *                                         // overlay can be drawn against
+ *                                         // the same custom margins /
+ *                                         // marginZone / repeatThreshold
+ *                                         // used for the matching extract
+ *                                         // call.
  *
  * Level dispatch notes:
- *   - `sentences`, `columns`, `lines`, `paragraphs`, `margins` all share
- *     a single `extractSentenceBBoxes` debug-mode worker round-trip; each
- *     level then turns the returned `result` / `trace` into rects via
- *     a pure builder in `extractionOverlay.ts`
- *     (`buildSentenceOverlayFromResult`, `build{Column,Line,Paragraph,
- *     Margins}OverlayFromTrace`). The rects are byte-for-byte the
- *     intermediates the production sentence pipeline produced — same
- *     analysis window, same smart cross-page margin filter, same
- *     style profile. Cost note: non-sentence levels still pay for
- *     splitting + mapping inside the worker; intentional initial
- *     trade-off for parity, with a lighter `extractLayoutTrace` op as
- *     a possible follow-up if it ever bites.
- *   - `raw-lines` deliberately stays on a single-page unfiltered extract
- *     (`extractRawPages([pageIndex])`) — its purpose is to expose the
- *     pre-filter MuPDF lines so an agent can see what the margin filter
- *     did or didn't catch.
+ *   - `sentences`, `columns`, `lines`, `paragraphs` route through
+ *     `PDFExtractor.extract({ mode: "structured", pageIndices: [n] })`
+ *     and project the resulting `ProcessedPage` into rects via the pure
+ *     `build{Sentence,Column,Line,Paragraph}OverlayFromPage` builders in
+ *     `extractionOverlay.ts`. This is the same worker op production
+ *     uses, so what the overlay paints is byte-identical to what an
+ *     extraction call for the same page produces.
+ *   - `margins` routes through `PDFExtractor.analyzeLayout` (which runs
+ *     the same shared analysis prefix structured extract runs) and
+ *     surfaces `marginAnalysis` / `marginRemoval` for the requested
+ *     page. Accepts an optional `settings` field so the overlay can be
+ *     drawn against the same custom margins / repeatThreshold
+ *     used for the matching extract call.
  *
  * Response: `{ ok: true, image_base64, width, height, page_width,
  *   page_height, group_count, stats, rects }`. `rects` carries the
  *   underlying bbox data so callers can also debug numerically.
  */
 export async function handleTestPdfRenderOverlayHttpRequest(request: any) {
-    const { getMuPDFWorkerClient, ExtractionError, ExtractionErrorCode } =
-        await import('../../../src/services/pdf');
+    const {
+        getMuPDFWorkerClient,
+        PDFExtractor,
+        ExtractionError,
+        ExtractionErrorCode,
+    } = await import('../../../src/services/pdf');
 
     const loaded = await loadPdfBytesForTestEndpoint(request);
     if (!loaded.ok) return loaded;
@@ -727,7 +649,6 @@ export async function handleTestPdfRenderOverlayHttpRequest(request: any) {
         level !== 'lines' &&
         level !== 'paragraphs' &&
         level !== 'sentences' &&
-        level !== 'raw-lines' &&
         level !== 'margins'
     ) {
         return {
@@ -735,7 +656,7 @@ export async function handleTestPdfRenderOverlayHttpRequest(request: any) {
             error: {
                 name: 'Error',
                 message:
-                    'level must be one of: columns | lines | paragraphs | sentences | raw-lines | margins',
+                    'level must be one of: columns | lines | paragraphs | sentences | margins',
             },
         };
     }
@@ -743,126 +664,118 @@ export async function handleTestPdfRenderOverlayHttpRequest(request: any) {
 
     const client = getMuPDFWorkerClient();
 
-    let overlay: OverlayResult;
-    if (level === 'raw-lines') {
-        // Pre-filter view — single page, no smart removal. The other
-        // levels deliberately route through the worker trace op so they
-        // inspect the exact pipeline production used.
+    // Best-effort item-language lookup feeds sentencex; the worker falls
+    // back to the regex splitter on init failure, so language resolution
+    // never throws.
+    let language: string | undefined =
+        typeof request?.language === 'string' ? request.language : undefined;
+    if (!language && request?.library_id != null && request?.zotero_key != null) {
         try {
-            const rawDoc = await client.extractRawPages(pdfData, [pageIndex]);
-            const rawPage = rawDoc.pages[0];
-            if (!rawPage) {
-                return {
-                    ok: false,
-                    error: { name: 'Error', message: `page_index ${pageIndex} out of range` },
-                };
-            }
-            overlay = getRawLinesOverlay(rawPage);
-        } catch (e) {
-            if (e instanceof ExtractionError) {
-                if (e.code === ExtractionErrorCode.PAGE_OUT_OF_RANGE) {
-                    return { ok: false, error: { name: 'Error', message: e.message } };
-                }
+            const { getItemLanguage } = await import('../../../src/utils/zoteroUtils');
+            const raw = await getItemLanguage(request.library_id, request.zotero_key);
+            if (raw) language = raw;
+        } catch {
+            // Best effort.
+        }
+    }
+    const analysisWindow =
+        request?.analysis_page_window != null
+            ? Number(request.analysis_page_window)
+            : undefined;
+
+    let overlay: OverlayResult;
+    try {
+        if (level === 'margins') {
+            // Margins level routes through the production-parity
+            // `analyzeLayout` op — same shared analysis prefix
+            // structured extract uses (page count, page labels,
+            // optional OCR check, JSON walk over the analysis
+            // window, `buildPageAnalysisContext`). What the overlay
+            // paints matches what `extract({ mode: "structured" })`
+            // would see for the same `page_index` /
+            // `analysis_window` / `settings`.
+            //
+            // Forward `request.settings` so debugging an
+            // extraction call with custom margins / marginZone /
+            // repeatThreshold sees the overlay drawn against those
+            // same values (the builder reads `result.metadata.settings`
+            // for zone rects and per-line classification).
+            const settings =
+                request?.settings && typeof request.settings === 'object'
+                    ? request.settings
+                    : undefined;
+            const out = await new PDFExtractor().analyzeLayout(pdfData, {
+                pageIndices: [pageIndex],
+                analysisWindow,
+                settings,
+            });
+            overlay = buildMarginsOverlayFromAnalysis(out, pageIndex);
+        } else {
+            // sentences / columns / lines / paragraphs: one worker
+            // round-trip via the production structured-mode extract.
+            // Same op production uses — what we paint here matches
+            // what `extract({ mode: "structured" })` produces for
+            // the same page byte-for-byte.
+            const result = await new PDFExtractor().extract(pdfData, {
+                mode: 'structured',
+                pageIndices: [pageIndex],
+                structured: { language },
+                analysisWindow,
+            });
+            const page = result.pages[0];
+            if (!page) {
                 return {
                     ok: false,
                     error: {
-                        name: 'ExtractionError',
-                        code: e.code,
-                        message: e.message,
+                        name: 'Error',
+                        message: `page_index ${pageIndex} not extracted`,
                     },
                 };
             }
-            throw e;
-        }
-    } else {
-        // sentences / columns / lines / paragraphs / margins: one worker
-        // round-trip via `extractSentenceBBoxes(..., { debug: true })`. The worker owns
-        // the full pipeline (analysis window, font bridging, margin
-        // analysis, filtered-paragraph detection, splitter resolution,
-        // sentence mapping); main-thread builders below convert the
-        // returned trace/result into rects.
-        //
-        // Cost note (intentional): non-sentence levels still pay for
-        // sentence splitting + mapping inside the worker. That keeps
-        // dev tools inspecting the exact production pipeline; if the
-        // overhead matters in the future, a lighter `extractLayoutTrace`
-        // op is a clean follow-up.
-        let language: string | undefined =
-            typeof request?.language === 'string' ? request.language : undefined;
-        if (!language && request?.library_id != null && request?.zotero_key != null) {
-            try {
-                const { getItemLanguage } = await import('../../../src/utils/zoteroUtils');
-                const raw = await getItemLanguage(request.library_id, request.zotero_key);
-                if (raw) language = raw;
-            } catch {
-                // Best effort.
-            }
-        }
-        const analysisWindow =
-            request?.analysis_page_window != null
-                ? Number(request.analysis_page_window)
-                : undefined;
-
-        try {
-            const out = await client.extractSentenceBBoxes(
-                pdfData,
-                pageIndex,
-                {
-                    splitterConfig: { type: 'sentencex', language },
-                    analysisWindow,
-                    debug: true,
-                },
-            );
             switch (level) {
                 case 'sentences':
-                    overlay = buildSentenceOverlayFromResult(
-                        out.result,
-                        out.trace.analysisPageIndices.length,
-                    );
+                    overlay = buildSentenceOverlayFromPage(page);
                     break;
                 case 'columns':
-                    overlay = buildColumnOverlayFromTrace(out.trace);
+                    overlay = buildColumnOverlayFromPage(page);
                     break;
                 case 'lines':
-                    overlay = buildLineOverlayFromTrace(out.trace);
+                    overlay = buildLineOverlayFromPage(page);
                     break;
-                case 'paragraphs':
-                    overlay = buildParagraphOverlayFromTrace(out.trace);
-                    break;
-                default: // 'margins'
-                    overlay = buildMarginsOverlayFromTrace(out.trace);
+                default: // 'paragraphs'
+                    overlay = buildParagraphOverlayFromPage(page);
                     break;
             }
-        } catch (e) {
-            if (e instanceof RangeError) {
+        }
+    } catch (e) {
+        if (e instanceof RangeError) {
+            return {
+                ok: false,
+                error: { name: 'Error', message: e.message },
+            };
+        }
+        if (e instanceof ExtractionError) {
+            // Wire-compat: pre-migration the analysis-window resolver
+            // threw RangeError for invalid pageIndex (mapped to
+            // `name:'Error'`). The worker path now produces
+            // ExtractionError(PAGE_OUT_OF_RANGE) for the same case —
+            // surface the legacy wire shape.
+            if (e.code === ExtractionErrorCode.PAGE_OUT_OF_RANGE) {
                 return {
                     ok: false,
                     error: { name: 'Error', message: e.message },
                 };
             }
-            if (e instanceof ExtractionError) {
-                // Wire-compat: pre-migration the analysis-window resolver
-                // threw RangeError for invalid pageIndex (mapped to
-                // `name:'Error'`). The worker path now produces
-                // ExtractionError(PAGE_OUT_OF_RANGE) for the same case —
-                // surface the legacy wire shape.
-                if (e.code === ExtractionErrorCode.PAGE_OUT_OF_RANGE) {
-                    return {
-                        ok: false,
-                        error: { name: 'Error', message: e.message },
-                    };
-                }
-                return {
-                    ok: false,
-                    error: {
-                        name: 'ExtractionError',
-                        code: e.code,
-                        message: e.message,
-                    },
-                };
-            }
-            throw e;
+            return {
+                ok: false,
+                error: {
+                    name: 'ExtractionError',
+                    code: e.code,
+                    message: e.message,
+                },
+            };
         }
+        throw e;
     }
 
     const renderOut = await client.renderPages(pdfData, {
@@ -906,14 +819,17 @@ export async function handleTestPdfRenderOverlayHttpRequest(request: any) {
  *   { library_id, zotero_key | raw_bytes_base64,
  *     page_index: number,
  *     language?: string,                 // for sentence splitter
- *     analysis_page_window?: number,     // ±N pages for smart removal;
- *                                        // 0 (default) = whole doc, capped 50
+ *     analysis_page_window?: number,     // ±N pages around page_index for
+ *                                        // cross-page smart removal.
+ *                                        // 0 (default) = target page only,
+ *                                        // no neighbors. Pass Infinity for
+ *                                        // the whole document.
  *     include_chars?: boolean,           // include per-char quads on raw_lines
  *     summary?: boolean }                 // omit text bodies / chars / topStyles,
  *                                         // keep only triage facts (counts,
  *                                         // candidates, finalKept=false lines,
  *                                         // lines_dropped_by_columns,
- *                                         // degradationNotes). Typical 10–50×
+ *                                         // degradation.notes). Typical 10–50×
  *                                         // smaller payload.
  *
  * Response shape (selected fields):
@@ -977,13 +893,12 @@ export async function handleTestPdfPipelineTraceHttpRequest(request: any) {
     let result: PageSentenceBBoxResult;
     let trace: SentenceBBoxTrace;
     try {
-        const out = await getMuPDFWorkerClient().extractSentenceBBoxes(
+        const out = await getMuPDFWorkerClient().extractSentenceBBoxesDebug(
             pdfData,
             pageIndex,
             {
                 splitterConfig: { type: 'sentencex', language },
                 analysisWindow,
-                debug: true,
             },
         );
         result = out.result;
@@ -1229,7 +1144,7 @@ export async function handleTestPdfPipelineTraceHttpRequest(request: any) {
 
     // Mark which paragraphs degraded so we can flag fallback sentences.
     const degradedItemIndices = new Set(
-        sentenceResult.degradationNotes.map((n) => n.itemIndex),
+        (sentenceResult.degradation?.notes ?? []).map((n) => n.itemIndex),
     );
     const sentencesOut: Array<{
         idx: number;
@@ -1359,9 +1274,10 @@ export async function handleTestPdfPipelineTraceHttpRequest(request: any) {
             sentence_stats: {
                 sentences: sentenceResult.sentences.length,
                 paragraphs: sentenceResult.paragraphs.length,
-                degradedParagraphs: sentenceResult.degradedParagraphs,
-                unmappedParagraphs: sentenceResult.unmappedParagraphs,
-                degradationNotes: sentenceResult.degradationNotes,
+                degradation: {
+                    count: sentenceResult.degradation?.count ?? 0,
+                    notes: sentenceResult.degradation?.notes ?? [],
+                },
             },
         };
     }
@@ -1417,103 +1333,173 @@ export async function handleTestPdfPipelineTraceHttpRequest(request: any) {
         sentence_stats: {
             sentences: sentenceResult.sentences.length,
             paragraphs: sentenceResult.paragraphs.length,
-            degradedParagraphs: sentenceResult.degradedParagraphs,
-            unmappedParagraphs: sentenceResult.unmappedParagraphs,
-            degradationNotes: sentenceResult.degradationNotes,
+            degradation: {
+                count: sentenceResult.degradation?.count ?? 0,
+                notes: sentenceResult.degradation?.notes ?? [],
+            },
         },
     };
 }
 
 /**
- * Dev-only smart-removal summary endpoint. Cross-page repeating-text /
- * page-number analysis only — no column / line / paragraph detection,
- * no rendering. Useful for "is this watermark present on N pages?"
- * triage in a single call without paying for full extraction.
+ * Dev-only document-wide style + margin analysis endpoint.
+ *
+ * Routes through `PDFExtractor.analyzeLayout` which runs the EXACT
+ * shared analysis prefix `extract({ mode: "structured" })` runs (page
+ * count, page labels, optional OCR check, JSON walk over the analysis
+ * window, `buildPageAnalysisContext`). Output is byte-identical to the
+ * analysis context production extract uses for the same `settings` /
+ * `page_indices` / `analysis_window`.
+ *
+ * Use this to inspect prod-side margin candidates, removal decisions,
+ * and font/style profile without paying for per-page extraction. Same
+ * input contract as `extract`'s wire format — `page_range` uses
+ * `start_index` / `end_index` / `max_pages`. For triage parity with the
+ * old smart-removal-summary endpoint, pass
+ * `settings.checkTextLayer: false` plus the desired
+ * `settings.repeatThreshold` / `settings.detectPageSequences` and read
+ * `result.analysis.marginRemoval`.
  *
  * Request body:
  *   { library_id, zotero_key | raw_bytes_base64,
- *     page_indices?: number[],            // explicit list to scan; if
- *                                         //   omitted, all pages (capped at
- *                                         //   DEFAULT_ANALYSIS_WINDOW_CAP)
- *     page_range?: { start, end },        // alternative to page_indices
- *     repeat_threshold?: number,          // min pages for "repeat"
- *                                         //   classification. Omitted:
- *                                         //   adaptive default — for ≤6
- *                                         //   page docs, top/bottom uses 2
- *                                         //   (catches alternating verso/
- *                                         //   recto headers), left/right
- *                                         //   stays at 3. Longer docs use
- *                                         //   3 everywhere. Explicit
- *                                         //   value: applied to all
- *                                         //   positions.
- *     detect_page_sequences?: boolean }   // run page-number sequence
- *                                         //   detection (default true)
+ *     page_indices?: number[],                      // OR
+ *     page_range?: { start_index, end_index?, max_pages? },
+ *     analysis_window?: number,                     // ±N pages around each
+ *                                                   // target. 0 (default) =
+ *                                                   // target pages only,
+ *                                                   // no neighbors. Pass
+ *                                                   // Infinity for the whole
+ *                                                   // document. Mirrors
+ *                                                   // `extract`'s argument.
+ *     settings?: ExtractionSettings }               // margins, marginZone, etc.
  *
- * Response:
+ * Response — Map/Set fields are flattened to plain JSON:
  *   { ok: true,
- *     analysis_pages: number[],
- *     candidates: [{ text, originalText, reason, position, pageIndices }],
- *     removalsByPage: { [pageIndex]: string[] } }
+ *     page_count: number,
+ *     analysis_page_indices: number[],
+ *     pages: RawPageData[],
+ *     page_labels?: { [pageIndex]: string },
+ *     analysis: {
+ *       style_profile: { primaryBodyStyle, bodyStyles, styleCounts },
+ *       margin_analysis: { elements, counts },
+ *       margin_removal: { candidates, removalsByPage, textsToRemove }
+ *     },
+ *     metadata: { extractedAt, version, settings, timings } }
  */
-export async function handleTestPdfSmartRemovalSummaryHttpRequest(request: any) {
-    const { getMuPDFWorkerClient } = await import(
-        '../../../src/services/pdf/MuPDFWorkerClient'
+export async function handleTestPdfAnalyzeLayoutHttpRequest(request: any) {
+    const { PDFExtractor, ExtractionError, ExtractionErrorCode } = await import(
+        '../../../src/services/pdf'
     );
 
     const loaded = await loadPdfBytesForTestEndpoint(request);
     if (!loaded.ok) return loaded;
     const { pdfData } = loaded;
 
-    // Pass through "did the caller set this?" so the worker can apply the
-    // adaptive default for short docs without overriding explicit values.
-    const repeatThreshold =
-        Number.isInteger(request?.repeat_threshold) && request.repeat_threshold > 0
-            ? request.repeat_threshold
-            : undefined;
-    const detectPageSequences = request?.detect_page_sequences !== false;
+    const pageIndices: number[] | undefined = Array.isArray(request?.page_indices)
+        ? (request.page_indices as unknown[]).map((n) => Number(n))
+        : undefined;
 
-    let pageRange: { start: number; end: number } | undefined;
+    let pageRange:
+        | { startIndex: number; endIndex?: number; maxPages?: number }
+        | undefined;
     if (request?.page_range && typeof request.page_range === 'object') {
+        const r = request.page_range;
+        // Pass `Number(...)` straight through — `resolvePageRangeOrThrow` is
+        // strict and rejects NaN / negative / out-of-range with a structured
+        // ExtractionError. Coercing to 0 here would silently re-route an
+        // agent's typo to page 0.
         pageRange = {
-            start: Number(request.page_range.start) || 0,
-            end: Number(
-                request.page_range.end ??
-                    request.page_range.endIndex ??
-                    Number.MAX_SAFE_INTEGER,
-            ),
+            startIndex: Number(r.start_index ?? r.startIndex),
         };
+        if (r.end_index != null || r.endIndex != null) {
+            pageRange.endIndex = Number(r.end_index ?? r.endIndex);
+        }
+        if (r.max_pages != null || r.maxPages != null) {
+            pageRange.maxPages = Number(r.max_pages ?? r.maxPages);
+        }
     }
 
-    try {
-        const { totalPages, analysisPages, result } =
-            await getMuPDFWorkerClient().analyzeMarginRemoval(pdfData, {
-                pageIndices: Array.isArray(request?.page_indices)
-                    ? (request.page_indices as unknown[]).map((n) => Number(n))
-                    : undefined,
-                pageRange,
-                repeatThreshold,
-                detectPageSequences,
-            });
+    const analysisWindow =
+        request?.analysis_window != null
+            ? Number(request.analysis_window)
+            : undefined;
+    const settings =
+        request?.settings && typeof request.settings === 'object'
+            ? request.settings
+            : undefined;
 
+    try {
+        const result = await new PDFExtractor().analyzeLayout(pdfData, {
+            settings,
+            pageIndices,
+            pageRange,
+            analysisWindow,
+        });
+
+        // Flatten Map/Set fields — `JSON.stringify` would otherwise serialize
+        // them as `{}`. Cover ALL four fields documented in
+        // `LayoutAnalysisResult`'s file comment.
+        const styleCounts: Record<string, { count: number; style: unknown }> = {};
+        for (const [key, value] of result.analysis.styleProfile.styleCounts) {
+            styleCounts[key] = value;
+        }
+        const elements: Record<string, unknown[]> = {};
+        for (const [pos, list] of result.analysis.marginAnalysis.elements) {
+            elements[pos] = list;
+        }
         const removalsByPage: Record<string, string[]> = {};
-        for (const [pageIdx, texts] of result.removalsByPage) {
+        for (const [pageIdx, texts] of result.analysis.marginRemoval.removalsByPage) {
             removalsByPage[String(pageIdx)] = Array.from(texts);
         }
+        const textsToRemove = Array.from(result.analysis.marginRemoval.textsToRemove);
 
         return {
             ok: true,
-            total_pages: totalPages,
-            analysis_pages: analysisPages,
-            candidates: result.candidates.map((c) => ({
-                text: c.text,
-                originalText: c.originalText,
-                reason: c.reason,
-                position: c.position,
-                pageIndices: c.pageIndices,
-            })),
-            removalsByPage,
+            page_count: result.pageCount,
+            analysis_page_indices: result.analysisPageIndices,
+            pages: result.pages,
+            page_labels: result.pageLabels,
+            analysis: {
+                style_profile: {
+                    primaryBodyStyle: result.analysis.styleProfile.primaryBodyStyle,
+                    bodyStyles: result.analysis.styleProfile.bodyStyles,
+                    styleCounts,
+                },
+                margin_analysis: {
+                    elements,
+                    counts: result.analysis.marginAnalysis.counts,
+                },
+                margin_removal: {
+                    candidates: result.analysis.marginRemoval.candidates,
+                    removalsByPage,
+                    textsToRemove,
+                },
+            },
+            metadata: result.metadata,
         };
     } catch (e: any) {
+        if (e instanceof ExtractionError) {
+            if (e.code === ExtractionErrorCode.PAGE_OUT_OF_RANGE) {
+                return { ok: false, error: { name: 'Error', message: e.message } };
+            }
+            // Same payload shape `runPdfExtractorCall` writes (lines
+            // 130-134). The rehydrated client-side `ExtractionError` carries
+            // OCR data on `e.details` (types.ts), which the wire layer
+            // surfaces as `ocrAnalysis` for self-documenting JSON.
+            return {
+                ok: false,
+                error: {
+                    name: 'ExtractionError',
+                    code: e.code,
+                    message: e.message,
+                    payload: {
+                        ocrAnalysis: e.details,
+                        pageLabels: e.pageLabels,
+                        pageCount: e.pageCount,
+                    },
+                },
+            };
+        }
         return {
             ok: false,
             error: {
@@ -1523,4 +1509,3 @@ export async function handleTestPdfSmartRemovalSummaryHttpRequest(request: any) 
         };
     }
 }
-

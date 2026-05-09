@@ -298,8 +298,7 @@ describe("end-to-end: cross-line marker is absent from final SentenceBBox", () =
         });
 
         // Pipeline did not degrade.
-        expect(result.degradedParagraphs).toBe(0);
-        expect(result.unmappedParagraphs).toBe(0);
+        expect(result.degradation).toBeUndefined();
 
         // We expect at least two sentences. The relevant ones are the
         // first ending at "factor." and the next starting with "The".

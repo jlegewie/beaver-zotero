@@ -145,7 +145,6 @@ describe("runExtractFromIndices: paragraph engine", () => {
             [0],
             1,
             {},
-            false,
             "paragraph",
         );
         expect(result.pages).toHaveLength(1);
@@ -168,7 +167,6 @@ describe("runExtractFromIndices: paragraph engine", () => {
             [0],
             1,
             {},
-            false,
             "block",
         );
         const paragraphResult = runExtractFromIndices(
@@ -179,7 +177,6 @@ describe("runExtractFromIndices: paragraph engine", () => {
             [0],
             1,
             {},
-            false,
             "paragraph",
         );
 
@@ -193,8 +190,8 @@ describe("runExtractFromIndices: paragraph engine", () => {
         expect(blockResult.pages[0].height).toBe(
             paragraphResult.pages[0].height,
         );
-        // Paragraph engine leaves blocks empty by contract (same convention
-        // as `useLineDetection: true`).
+        // Paragraph engine leaves blocks empty by contract because content is
+        // emitted via `pageContent` rather than per-block.
         expect(paragraphResult.pages[0].blocks).toEqual([]);
         // Paragraph engine produces non-empty content for this synthetic page.
         // (Block engine's content depends on column detection succeeding on
@@ -213,7 +210,6 @@ describe("runExtractFromIndices: paragraph engine", () => {
             [0, 1],
             2,
             {},
-            false,
             "paragraph",
         );
         expect(result.pages).toHaveLength(2);
@@ -225,7 +221,7 @@ describe("runExtractFromIndices: paragraph engine", () => {
 });
 
 describe("PDFExtractor.extract: argument guards", () => {
-    it("rejects mode='structured'", async () => {
+    it("rejects mode='structured' with markdown.engine set", async () => {
         const { PDFExtractor } = await import(
             "../../../src/services/pdf/index"
         );
@@ -233,22 +229,11 @@ describe("PDFExtractor.extract: argument guards", () => {
         await expect(
             new PDFExtractor().extract(fakeData, {
                 mode: "structured",
-            }),
-        ).rejects.toThrow(/structured mode not yet implemented/);
-    });
-
-    it("rejects engine='paragraph' with useLineDetection=true", async () => {
-        const { PDFExtractor } = await import(
-            "../../../src/services/pdf/index"
-        );
-        const fakeData = new Uint8Array([0]);
-        await expect(
-            new PDFExtractor().extract(fakeData, {
                 markdown: { engine: "paragraph" },
-                settings: { useLineDetection: true },
             }),
         ).rejects.toThrow(
-            /engine='paragraph' is incompatible with settings\.useLineDetection=true/,
+            /markdown\.engine is not applicable when mode='structured'/,
         );
     });
+
 });
