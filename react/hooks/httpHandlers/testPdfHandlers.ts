@@ -19,6 +19,7 @@ import type {
     PageSentenceBBoxResult,
     SentenceBBoxTrace,
 } from '../../../src/services/pdf';
+import { projectAnalyzeLayout } from '../../../src/services/pdf/debug/analyzeLayoutProjection';
 
 
 // =============================================================================
@@ -1471,9 +1472,6 @@ export async function handleTestPdfAnalyzeLayoutHttpRequest(request: any) {
         // Flatten Map/Set fields — `JSON.stringify` would otherwise serialize
         // them as `{}`. The CLI `analyze-layout` command consumes the same
         // projection so wire shape stays in lockstep across both surfaces.
-        const { projectAnalyzeLayout } = await import(
-            '../../../src/services/pdf/debug/analyzeLayoutProjection'
-        );
         return { ok: true, ...projectAnalyzeLayout(result) };
     } catch (e: any) {
         if (e instanceof ExtractionError) {
