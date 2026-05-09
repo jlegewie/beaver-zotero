@@ -565,8 +565,8 @@ export async function handleTestPdfExtractByLinesHttpRequest(request: any) {
  * Routes through `PDFExtractor.extract` with `markdown: { engine: "paragraph" }`,
  * exercising the line + paragraph detection path. `settings.pages` is
  * translated into the worker-side `pageIndices` arg for parity with the
- * existing extract endpoints. The response echoes `engine: "paragraph"` so a
- * caller diffing block vs. paragraph output can attribute results.
+ * existing extract endpoints. Engine attribution is on `result.metadata.engine`
+ * — no separate wrapper-level field, so consumers have one source of truth.
  */
 export async function handleTestPdfExtractParagraphHttpRequest(request: any) {
     const { PDFExtractor } = await import('../../../src/services/pdf');
@@ -582,7 +582,7 @@ export async function handleTestPdfExtractParagraphHttpRequest(request: any) {
             settings,
             pageIndices,
         }),
-        (result) => ({ ok: true, engine: 'paragraph', result }),
+        (result) => ({ ok: true, result }),
     );
 }
 

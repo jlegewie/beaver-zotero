@@ -32,6 +32,7 @@
         "test:live": "vitest run --config vitest.live.config.ts",
         "test:integration": "vitest run --config vitest.integration.config.ts",
         "test:all": "npm test && npm run test:live && npm run test:integration",
+        "bench:pdf": "BEAVER_BENCH=1 vitest run --config vitest.live.config.ts tests/live/markdownEnginesBench.live.test.ts",
         "test:watch": "vitest",
         "update-deps": "npm update --save",
         "build-react": "webpack --config webpack.config.js",

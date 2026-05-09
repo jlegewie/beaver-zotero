@@ -253,16 +253,21 @@ export function runExtractFromIndices(
     useLineDetection: boolean,
     engine: "block" | "paragraph",
 ): ExtractionResult {
+    const tStart = performance.now();
+
     // Walk the analysis union once; targets are guaranteed to be in it
     // (resolveAnalysisPages always includes them), so the output loop
     // looks them up in the pre-walked map without re-extracting.
+    const tWalkStart = performance.now();
     const analysisPages: RawPageData[] = analysisIndices.map((i) =>
         extractRawPageFromDoc(doc, i),
     );
     const analysisPageByIndex = new Map<number, RawPageData>(
         analysisPages.map((p) => [p.pageIndex, p]),
     );
+    const walkMs = performance.now() - tWalkStart;
 
+    const tAnalysisStart = performance.now();
     const { styleProfile, marginAnalysis, marginRemoval } = buildPageAnalysisContext({
         pages: analysisPages,
         totalPageCount: pageCount,
@@ -270,10 +275,12 @@ export function runExtractFromIndices(
         repeatThreshold: requestedRepeatThreshold,
         detectPageSequences: opts.detectPageSequences,
     });
+    const analysisMs = performance.now() - tAnalysisStart;
     StyleAnalyzer.logStyleProfile(styleProfile);
     MarginFilter.logRemovalCandidates(marginRemoval);
 
     const pages: ProcessedPage[] = [];
+    const perPageMs: number[] = [];
 
     if (engine === "paragraph") {
         // Paragraph engine: line + paragraph detection produces markdown-shaped
@@ -283,6 +290,7 @@ export function runExtractFromIndices(
         // re-running cross-page analysis. `blocks: []` matches the
         // `useLineDetection: true` convention.
         for (const i of targetIndices) {
+            const tPage = performance.now();
             const rawPage = analysisPageByIndex.get(i)!;
             const filtered = detectFilteredParagraphs({
                 pages: analysisPages,
@@ -307,6 +315,7 @@ export function runExtractFromIndices(
                     b: col.y + col.h,
                 })),
             } as ProcessedPage);
+            perPageMs.push(performance.now() - tPage);
         }
     } else {
         const pageExtractor = useLineDetection
@@ -314,6 +323,7 @@ export function runExtractFromIndices(
             : new PageExtractor({ styleProfile });
 
         for (const i of targetIndices) {
+            const tPage = performance.now();
             const rawPage = analysisPageByIndex.get(i)!;
             const filteredPage = MarginFilter.filterPageWithSmartRemoval(
                 rawPage,
@@ -363,6 +373,7 @@ export function runExtractFromIndices(
                     pageExtractor!.extractPageWithColumns(filteredPage, columnResult, true),
                 );
             }
+            perPageMs.push(performance.now() - tPage);
         }
     }
 
@@ -375,7 +386,18 @@ export function runExtractFromIndices(
     };
 
     const finalSettings = { ...opts, useLineDetection };
-    const baseResult = {
+    // Resolve the engine name for `metadata.engine`. The dev `useLineDetection`
+    // path is a block-engine variant, recorded as a distinct value so timing
+    // comparisons don't lump line-only output in with default block output.
+    const recordedEngine: "block" | "block-with-lines" | "paragraph" =
+        engine === "paragraph"
+            ? "paragraph"
+            : useLineDetection
+                ? "block-with-lines"
+                : "block";
+
+    const totalMs = performance.now() - tStart;
+    const baseResult: ExtractionResult = {
         pages,
         analysis,
         fullText,
@@ -384,10 +406,21 @@ export function runExtractFromIndices(
             extractedAt: new Date().toISOString(),
             version: "2.0.0",
             settings: finalSettings,
+            engine: recordedEngine,
+            // `docOpenMs` is unknown to this helper (the doc is already open
+            // when we're called). `opExtract` writes it onto the returned
+            // result after we return. Default to 0 so the field always exists.
+            timings: {
+                totalMs,
+                docOpenMs: 0,
+                walkMs,
+                analysisMs,
+                perPageMs,
+            },
         },
     };
 
-    return baseResult as ExtractionResult;
+    return baseResult;
 }
 
 /**
@@ -441,7 +474,10 @@ export async function opExtract(
         );
     }
 
+    const tOpStart = performance.now();
+    const tDocOpenStart = performance.now();
     const doc = await acquireDoc(args.pdfData);
+    const docOpenMs = performance.now() - tDocOpenStart;
     try {
         // Capture the caller-supplied threshold BEFORE the spread flattens
         // it to the default. `getEffectiveRepeatThreshold` uses this to
@@ -487,6 +523,14 @@ export async function opExtract(
             !!opts.useLineDetection,
             engine,
         );
+        // `runExtractFromIndices` measures the phases it owns; `docOpenMs`
+        // and the op-level `totalMs` (which includes the OCR check) are
+        // known only here. Mutate the timings record we just got back —
+        // it's a fresh object built inside the helper, so this is safe.
+        if (result.metadata.timings) {
+            result.metadata.timings.docOpenMs = docOpenMs;
+            result.metadata.timings.totalMs = performance.now() - tOpStart;
+        }
         return { result };
     } finally {
         releaseDoc(doc);

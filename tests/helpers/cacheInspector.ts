@@ -337,6 +337,17 @@ export async function pdfExtractByLines(
     });
 }
 
+export async function pdfExtractParagraph(
+    attachment: AttachmentFixture,
+    body: { settings?: Record<string, unknown> } = {},
+): Promise<PdfExtractResponse> {
+    return post<PdfExtractResponse>('/beaver/test/pdf-extract-paragraph', {
+        library_id: attachment.library_id,
+        zotero_key: attachment.zotero_key,
+        ...body,
+    });
+}
+
 export async function pdfHasTextLayer(
     attachment: AttachmentFixture,
 ): Promise<{ ok: boolean; hasTextLayer?: boolean; error?: PdfErrorEnvelope }> {
