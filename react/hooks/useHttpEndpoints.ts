@@ -73,6 +73,7 @@ import {
     handleTestPdfRenderOverlayHttpRequest,
     handleTestPdfPipelineTraceHttpRequest,
     handleTestPdfSmartRemovalSummaryHttpRequest,
+    handleTestPdfAnalyzeLayoutHttpRequest,
 } from './httpHandlers/testPdfHandlers';
 import type {
     WSZoteroDataRequest,
@@ -180,6 +181,9 @@ const ENDPOINT_PATHS = [
     '/beaver/test/pdf-pipeline-trace',
     // Cross-page smart-removal candidate summary (no rendering)
     '/beaver/test/pdf-smart-removal-summary',
+    // Document-wide style + margin analysis context (mirrors what
+    // `extract({ mode: "structured" })` builds before per-page processing)
+    '/beaver/test/pdf-analyze-layout',
 ] as const;
 
 /**
@@ -760,6 +764,14 @@ function registerEndpoints(): boolean {
         // just the candidates + per-page removal map.
         Zotero.Server.Endpoints['/beaver/test/pdf-smart-removal-summary'] =
             createEndpoint(handleTestPdfSmartRemovalSummaryHttpRequest);
+
+        // Full analysis context (style profile + margin analysis + margin
+        // removal) computed by the same prefix `extract({ mode:
+        // "structured" })` runs before per-page processing. Backs the
+        // `level: "margins"` overlay and is also exposed standalone for
+        // debugging.
+        Zotero.Server.Endpoints['/beaver/test/pdf-analyze-layout'] =
+            createEndpoint(handleTestPdfAnalyzeLayoutHttpRequest);
     }
 
     logger(`useHttpEndpoints: Registered ${ENDPOINT_PATHS.length} HTTP endpoints`, 3);

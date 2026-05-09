@@ -566,6 +566,82 @@ export interface ExtractionResult {
 }
 
 // ============================================================================
+// Layout Analysis Result (analyzeLayout op)
+// ============================================================================
+
+/**
+ * Per-phase worker timings for a single `analyzeLayout` call. Subset of
+ * `ExtractionTimings` covering the prefix that `opExtract` and
+ * `opAnalyzeLayout` share — there is no per-page processing in
+ * `analyzeLayout`, so `perPageMs` is intentionally omitted.
+ */
+export interface LayoutAnalysisTimings {
+    /** Total worker op duration (entry to return). */
+    totalMs: number;
+    /** Time inside `acquireDoc`. Cold-cache only. */
+    docOpenMs: number;
+    /** Walk over `analysisIndices` (`extractRawPageFromDoc` per page). */
+    walkMs: number;
+    /** `buildPageAnalysisContext` (StyleAnalyzer + cross-page MarginFilter). */
+    analysisMs: number;
+}
+
+/**
+ * Result of a single `analyzeLayout` call. Mirrors `ExtractionResult`'s
+ * field naming where applicable.
+ *
+ * Output is byte-identical to the analysis context built by
+ * `extract({ mode: "structured" })` for the same `settings` +
+ * `pageIndices` + `analysisWindow` — the worker prefix is shared via
+ * `buildAnalysisFromDoc`.
+ *
+ * **Map/Set boundary.** `analysis.styleProfile.styleCounts`,
+ * `analysis.marginAnalysis.elements`,
+ * `analysis.marginRemoval.removalsByPage`, and
+ * `analysis.marginRemoval.textsToRemove` carry `Map`/`Set` fields.
+ * `postMessage` preserves them via structured clone, but
+ * `JSON.stringify` does NOT — flatten before writing HTTP responses.
+ */
+export interface LayoutAnalysisResult {
+    /**
+     * Target pages, JSON-walked (pre-filter). Same `RawPageData` shape
+     * `extractRawPageFromDoc` produces.
+     */
+    pages: RawPageData[];
+    /** Page count of the source document. */
+    pageCount: number;
+    /**
+     * Full-document page labels. Same shape as `ExtractionResult.pageLabels`
+     * — collected via `collectPageLabels(doc)` over all pages so the field
+     * is symmetric with extract.
+     */
+    pageLabels?: Record<number, string>;
+    /** Analysis-window indices used (target pages + neighbors). */
+    analysisPageIndices: number[];
+    /**
+     * Document-wide analysis output. Same builders as
+     * `extract({ mode: "structured" })` — populated by
+     * `buildPageAnalysisContext`.
+     */
+    analysis: {
+        styleProfile: StyleProfile;
+        marginAnalysis: MarginAnalysis;
+        marginRemoval: MarginRemovalResult;
+    };
+    metadata: {
+        extractedAt: string;
+        version: string;
+        /**
+         * Resolved settings (defaults merged in). Overlay builders read
+         * `settings.margins` and `settings.marginZone` from here so
+         * custom margins flow through to the rendered overlay.
+         */
+        settings: ExtractionSettings;
+        timings: LayoutAnalysisTimings;
+    };
+}
+
+// ============================================================================
 // OCR Detection Types
 // ============================================================================
 

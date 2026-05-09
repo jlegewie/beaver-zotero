@@ -36,6 +36,7 @@ setPDFLogger((msg, level) => {
     postLog(level === 1 ? "error" : level === 2 ? "warn" : "info", msg);
 });
 import {
+    opAnalyzeLayout,
     opAnalyzeMarginRemoval,
     opAnalyzeOCRNeeds,
     opExtract,
@@ -96,6 +97,8 @@ async function dispatch(op: string, args: Record<string, unknown> | undefined): 
             return await opExtractSentenceBBoxesDebug(a as Parameters<typeof opExtractSentenceBBoxesDebug>[0]);
         case "analyzeMarginRemoval":
             return await opAnalyzeMarginRemoval(a as Parameters<typeof opAnalyzeMarginRemoval>[0]);
+        case "analyzeLayout":
+            return await opAnalyzeLayout(a as Parameters<typeof opAnalyzeLayout>[0]);
         default:
             throw new Error(`Unknown op: ${op}`);
     }

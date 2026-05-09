@@ -32,6 +32,8 @@ import type {
     ExtractionResult,
     ExtractionSettings,
     ExtractedLine,
+    LayoutAnalysisResult,
+    MarginAnalysis,
     MarginRemovalResult,
     MarginSettings,
     OCRDetectionOptions,
@@ -46,6 +48,7 @@ import type {
     RawDocumentData,
     RawPageData,
     RawPageDataDetailed,
+    StyleProfile,
 } from "../types";
 import {
     DEFAULT_EXTRACTION_SETTINGS,
@@ -221,6 +224,69 @@ export async function opSearchPages(
 }
 
 /**
+ * Shared analysis-context prefix for `runExtractFromIndices` and
+ * `opAnalyzeLayout`. Walks the analysis-window pages once and runs the
+ * cross-page `buildPageAnalysisContext` (StyleAnalyzer + MarginFilter)
+ * over them.
+ *
+ * Both extract and analyzeLayout call this so they see the SAME
+ * `marginRemoval` / `marginAnalysis` / `styleProfile` for the same input
+ * `analysisIndices`. This is what guarantees the margins overlay (built
+ * on `analyzeLayout`'s output) and structured extract agree on a given
+ * page's filter decisions.
+ *
+ * Caller resolves `analysisIndices` (typically via `resolveAnalysisPages`)
+ * and supplies the document's total `pageCount` (so
+ * `getEffectiveRepeatThreshold` can apply the short-doc relaxation).
+ */
+function buildAnalysisFromDoc(
+    doc: DocumentLike,
+    opts: ExtractionSettings,
+    requestedRepeatThreshold: number | undefined,
+    analysisIndices: number[],
+    pageCount: number,
+): {
+    analysisPages: RawPageData[];
+    analysisPageByIndex: Map<number, RawPageData>;
+    styleProfile: StyleProfile;
+    marginAnalysis: MarginAnalysis;
+    marginRemoval: MarginRemovalResult;
+    walkMs: number;
+    analysisMs: number;
+} {
+    const tWalkStart = performance.now();
+    const analysisPages: RawPageData[] = analysisIndices.map((i) =>
+        extractRawPageFromDoc(doc, i),
+    );
+    const analysisPageByIndex = new Map<number, RawPageData>(
+        analysisPages.map((p) => [p.pageIndex, p]),
+    );
+    const walkMs = performance.now() - tWalkStart;
+
+    const tAnalysisStart = performance.now();
+    const { styleProfile, marginAnalysis, marginRemoval } = buildPageAnalysisContext({
+        pages: analysisPages,
+        totalPageCount: pageCount,
+        marginZone: opts.marginZone,
+        repeatThreshold: requestedRepeatThreshold,
+        detectPageSequences: opts.detectPageSequences,
+    });
+    const analysisMs = performance.now() - tAnalysisStart;
+    StyleAnalyzer.logStyleProfile(styleProfile);
+    MarginFilter.logRemovalCandidates(marginRemoval);
+
+    return {
+        analysisPages,
+        analysisPageByIndex,
+        styleProfile,
+        marginAnalysis,
+        marginRemoval,
+        walkMs,
+        analysisMs,
+    };
+}
+
+/**
  * Project a `PageLineResult` into the flat `ExtractedLine[]` shape that
  * lives on `ProcessedPage.lines`. Used by the structured-engine branch.
  */
@@ -290,27 +356,24 @@ export function runExtractFromIndices(
 
     // Walk the analysis union once; targets are guaranteed to be in it
     // (resolveAnalysisPages always includes them), so the output loop
-    // looks them up in the pre-walked map without re-extracting.
-    const tWalkStart = performance.now();
-    const analysisPages: RawPageData[] = analysisIndices.map((i) =>
-        extractRawPageFromDoc(doc, i),
+    // looks them up in the pre-walked map without re-extracting. Same
+    // helper `opAnalyzeLayout` calls — keeps the prefix byte-identical
+    // between extract and analyze.
+    const {
+        analysisPages,
+        analysisPageByIndex,
+        styleProfile,
+        marginAnalysis,
+        marginRemoval,
+        walkMs,
+        analysisMs,
+    } = buildAnalysisFromDoc(
+        doc,
+        opts,
+        requestedRepeatThreshold,
+        analysisIndices,
+        pageCount,
     );
-    const analysisPageByIndex = new Map<number, RawPageData>(
-        analysisPages.map((p) => [p.pageIndex, p]),
-    );
-    const walkMs = performance.now() - tWalkStart;
-
-    const tAnalysisStart = performance.now();
-    const { styleProfile, marginAnalysis, marginRemoval } = buildPageAnalysisContext({
-        pages: analysisPages,
-        totalPageCount: pageCount,
-        marginZone: opts.marginZone,
-        repeatThreshold: requestedRepeatThreshold,
-        detectPageSequences: opts.detectPageSequences,
-    });
-    const analysisMs = performance.now() - tAnalysisStart;
-    StyleAnalyzer.logStyleProfile(styleProfile);
-    MarginFilter.logRemovalCandidates(marginRemoval);
 
     const pages: ProcessedPage[] = [];
     const perPageMs: number[] = [];
@@ -594,6 +657,132 @@ export async function opExtract(
             result.metadata.timings.docOpenMs = docOpenMs;
             result.metadata.timings.totalMs = performance.now() - tOpStart;
         }
+        return { result };
+    } finally {
+        releaseDoc(doc);
+    }
+}
+
+/**
+ * Document-wide style + margin analysis without per-page extraction.
+ *
+ * Runs the EXACT prefix `opExtract` runs (acquireDoc → page count → page
+ * labels → settings merge → optional OCR check → target/analysis index
+ * resolution → JSON walk → `buildPageAnalysisContext`) and returns the
+ * `styleProfile` / `marginAnalysis` / `marginRemoval` it would have
+ * passed to per-page processing. Does NOT run line/column/paragraph
+ * detection, the filter pipeline, or sentence mapping.
+ *
+ * Argument shape mirrors `opExtract`'s pre-extraction fields exactly so
+ * callers can re-run the analysis context for the same `settings` /
+ * `pageIndices` / `analysisWindow` they used for an extract call and
+ * trust the output is byte-identical.
+ *
+ * Backs the dev-only `/beaver/test/pdf-analyze-layout` endpoint and the
+ * `level: "margins"` branch of `/beaver/test/pdf-render-overlay`.
+ *
+ * **Map/Set boundary.** `result.analysis.styleProfile.styleCounts`,
+ * `result.analysis.marginAnalysis.elements`,
+ * `result.analysis.marginRemoval.removalsByPage`, and
+ * `result.analysis.marginRemoval.textsToRemove` carry `Map`/`Set` fields.
+ * `postMessage` preserves them via structured clone, but
+ * `JSON.stringify` does NOT — flatten before writing HTTP responses.
+ */
+export async function opAnalyzeLayout(
+    args: {
+        pdfData: Uint8Array | ArrayBuffer;
+        settings?: ExtractionSettings;
+        pageIndices?: number[];
+        pageRange?: { startIndex: number; endIndex?: number; maxPages?: number };
+        analysisWindow?: number;
+    },
+): Promise<OpReply<LayoutAnalysisResult>> {
+    const tOpStart = performance.now();
+    const tDocOpenStart = performance.now();
+    const doc = await acquireDoc(args.pdfData);
+    const docOpenMs = performance.now() - tDocOpenStart;
+    try {
+        // Same prefix as `opExtract`: capture caller-supplied threshold
+        // before defaults flatten it; merge defaults; collect labels;
+        // optional OCR gate.
+        const requestedRepeatThreshold = args.settings?.repeatThreshold;
+        const opts = { ...DEFAULT_EXTRACTION_SETTINGS, ...(args.settings || {}) };
+        const provider = rawPageProviderFromDoc(doc);
+        const docAnalyzer = new DocumentAnalyzer(provider);
+        const pageCount = docAnalyzer.getPageCount();
+        const pageLabels = collectPageLabels(doc);
+
+        if (opts.checkTextLayer) {
+            const ocr = docAnalyzer.getDetailedOCRAnalysis({
+                minTextPerPage: opts.minTextPerPage,
+            });
+            if (ocr.needsOCR) {
+                throw workerError(
+                    ERROR_CODES.NO_TEXT_LAYER,
+                    `Document may require OCR: ${ocr.primaryReason} (${Math.round(ocr.issueRatio * 100)}% of sampled pages have issues)`,
+                    { ocrAnalysis: ocr, pageLabels, pageCount },
+                );
+            }
+        }
+
+        const targetIndices = args.pageRange
+            ? resolvePageRangeOrThrow(pageCount, args.pageRange)
+            : resolveExplicitPageIndicesOrThrow(pageCount, args.pageIndices);
+
+        const analysisIndices = resolveAnalysisPages({
+            targetPageIndices: targetIndices,
+            totalPageCount: pageCount,
+            analysisWindow: args.analysisWindow,
+        });
+
+        const {
+            analysisPageByIndex,
+            styleProfile,
+            marginAnalysis,
+            marginRemoval,
+            walkMs,
+            analysisMs,
+        } = buildAnalysisFromDoc(
+            doc,
+            opts,
+            requestedRepeatThreshold,
+            analysisIndices,
+            pageCount,
+        );
+
+        // Project analysis-window pages → target-page subset, in target
+        // order. `resolveAnalysisPages` guarantees every target index is
+        // present in the analysis union, so the lookups never miss.
+        const pages: RawPageData[] = targetIndices.map(
+            (i) => analysisPageByIndex.get(i)!,
+        );
+
+        const result: LayoutAnalysisResult = {
+            pages,
+            pageCount,
+            pageLabels:
+                Object.keys(pageLabels).length > 0 ? pageLabels : undefined,
+            analysisPageIndices: analysisIndices,
+            analysis: {
+                styleProfile,
+                marginAnalysis,
+                marginRemoval,
+            },
+            metadata: {
+                extractedAt: new Date().toISOString(),
+                // Mirrors the version `runExtractFromIndices` writes so
+                // analyze + extract advance together when the analysis
+                // context build changes.
+                version: "2.2.0",
+                settings: opts,
+                timings: {
+                    docOpenMs,
+                    walkMs,
+                    analysisMs,
+                    totalMs: performance.now() - tOpStart,
+                },
+            },
+        };
         return { result };
     } finally {
         releaseDoc(doc);

@@ -11,7 +11,7 @@ import {
     buildLineOverlayFromPage,
     buildParagraphOverlayFromPage,
     buildSentenceOverlayFromPage,
-    buildMarginsOverlayFromTrace,
+    buildMarginsOverlayFromAnalysis,
     getRawLinesOverlay,
 } from '../../utils/extractionOverlay';
 import type { OverlayResult } from '../../utils/extractionOverlay';
@@ -692,13 +692,21 @@ export async function handleTestPdfSentenceBBoxesHttpRequest(request: any) {
  *          | "raw-lines" | "margins",
  *     dpi?: number,                       // default 144
  *     language?: string,                  // sentences only; falls back to item lang
- *     analysis_page_window?: number }     // applies to all levels except
+ *     analysis_page_window?: number,      // applies to all levels except
  *                                         // raw-lines: ±N pages around
  *                                         // page_index for cross-page repeat /
  *                                         // page-number detection and
  *                                         // document-wide style profiling.
- *                                         // 0 (default) = whole document,
- *                                         // capped at 50.
+ *                                         // 0 (default) = target page only,
+ *                                         // no neighbors. Pass Infinity for
+ *                                         // the whole document.
+ *     settings?: ExtractionSettings }     // margins level only — forwarded
+ *                                         // to `analyzeLayout` so the
+ *                                         // overlay can be drawn against
+ *                                         // the same custom margins /
+ *                                         // marginZone / repeatThreshold
+ *                                         // an used for the matching
+ *                                         // extract call.
  *
  * Level dispatch notes:
  *   - `sentences`, `columns`, `lines`, `paragraphs` route through
@@ -708,10 +716,12 @@ export async function handleTestPdfSentenceBBoxesHttpRequest(request: any) {
  *     `extractionOverlay.ts`. This is the same worker op production
  *     uses, so what the overlay paints is byte-identical to what an
  *     extraction call for the same page produces.
- *   - `margins` stays on `extractSentenceBBoxesDebug` because its
- *     purpose is to surface pre-filter `marginAnalysis` /
- *     `marginRemoval` intermediates that the production result
- *     deliberately does not expose.
+ *   - `margins` routes through `PDFExtractor.analyzeLayout` (which runs
+ *     the same shared analysis prefix structured extract runs) and
+ *     surfaces `marginAnalysis` / `marginRemoval` for the requested
+ *     page. Accepts an optional `settings` field so the overlay can be
+ *     drawn against the same custom margins / repeatThreshold
+ *     used for the matching extract call.
  *   - `raw-lines` deliberately stays on a single-page unfiltered extract
  *     (`extractRawPages([pageIndex])`) — its purpose is to expose the
  *     pre-filter MuPDF lines so an agent can see what the margin filter
@@ -816,19 +826,30 @@ export async function handleTestPdfRenderOverlayHttpRequest(request: any) {
 
         try {
             if (level === 'margins') {
-                // Margins level needs pre-filter intermediates
-                // (`marginAnalysis` / `marginRemoval` /
-                // `pagesForFilter`) that the production result does not
-                // expose. Stays on the dev-only single-page debug op.
-                const out = await client.extractSentenceBBoxesDebug(
-                    pdfData,
-                    pageIndex,
-                    {
-                        splitterConfig: { type: 'sentencex', language },
-                        analysisWindow,
-                    },
-                );
-                overlay = buildMarginsOverlayFromTrace(out.trace);
+                // Margins level routes through the production-parity
+                // `analyzeLayout` op — same shared analysis prefix
+                // structured extract uses (page count, page labels,
+                // optional OCR check, JSON walk over the analysis
+                // window, `buildPageAnalysisContext`). What the overlay
+                // paints matches what `extract({ mode: "structured" })`
+                // would see for the same `page_index` /
+                // `analysis_window` / `settings`.
+                //
+                // Forward `request.settings` so debugging an
+                // extraction call with custom margins / marginZone /
+                // repeatThreshold sees the overlay drawn against those
+                // same values (the builder reads `result.metadata.settings`
+                // for zone rects and per-line classification).
+                const settings =
+                    request?.settings && typeof request.settings === 'object'
+                        ? request.settings
+                        : undefined;
+                const out = await new PDFExtractor().analyzeLayout(pdfData, {
+                    pageIndices: [pageIndex],
+                    analysisWindow,
+                    settings,
+                });
+                overlay = buildMarginsOverlayFromAnalysis(out, pageIndex);
             } else {
                 // sentences / columns / lines / paragraphs: one worker
                 // round-trip via the production structured-mode extract.
@@ -939,8 +960,11 @@ export async function handleTestPdfRenderOverlayHttpRequest(request: any) {
  *   { library_id, zotero_key | raw_bytes_base64,
  *     page_index: number,
  *     language?: string,                 // for sentence splitter
- *     analysis_page_window?: number,     // ±N pages for smart removal;
- *                                        // 0 (default) = whole doc, capped 50
+ *     analysis_page_window?: number,     // ±N pages around page_index for
+ *                                        // cross-page smart removal.
+ *                                        // 0 (default) = target page only,
+ *                                        // no neighbors. Pass Infinity for
+ *                                        // the whole document.
  *     include_chars?: boolean,           // include per-char quads on raw_lines
  *     summary?: boolean }                 // omit text bodies / chars / topStyles,
  *                                         // keep only triage facts (counts,
@@ -1556,3 +1580,168 @@ export async function handleTestPdfSmartRemovalSummaryHttpRequest(request: any) 
     }
 }
 
+/**
+ * Dev-only document-wide style + margin analysis endpoint.
+ *
+ * Routes through `PDFExtractor.analyzeLayout` which runs the EXACT
+ * shared analysis prefix `extract({ mode: "structured" })` runs (page
+ * count, page labels, optional OCR check, JSON walk over the analysis
+ * window, `buildPageAnalysisContext`). Output is byte-identical to the
+ * analysis context production extract uses for the same `settings` /
+ * `page_indices` / `analysis_window`.
+ *
+ * Use this to inspect prod-side margin candidates, removal decisions,
+ * and font/style profile without paying for per-page extraction. Same
+ * input contract as `extract`'s wire format — `page_range` uses
+ * `start_index` / `end_index` / `max_pages`, NOT the
+ * `pdf-smart-removal-summary` shape.
+ *
+ * Request body:
+ *   { library_id, zotero_key | raw_bytes_base64,
+ *     page_indices?: number[],                      // OR
+ *     page_range?: { start_index, end_index?, max_pages? },
+ *     analysis_window?: number,                     // ±N pages around each
+ *                                                   // target. 0 (default) =
+ *                                                   // target pages only,
+ *                                                   // no neighbors. Pass
+ *                                                   // Infinity for the whole
+ *                                                   // document. Mirrors
+ *                                                   // `extract`'s argument.
+ *     settings?: ExtractionSettings }               // margins, marginZone, etc.
+ *
+ * Response — Map/Set fields are flattened to plain JSON:
+ *   { ok: true,
+ *     page_count: number,
+ *     analysis_page_indices: number[],
+ *     pages: RawPageData[],
+ *     page_labels?: { [pageIndex]: string },
+ *     analysis: {
+ *       style_profile: { primaryBodyStyle, bodyStyles, styleCounts },
+ *       margin_analysis: { elements, counts },
+ *       margin_removal: { candidates, removalsByPage, textsToRemove }
+ *     },
+ *     metadata: { extractedAt, version, settings, timings } }
+ */
+export async function handleTestPdfAnalyzeLayoutHttpRequest(request: any) {
+    const { PDFExtractor, ExtractionError, ExtractionErrorCode } = await import(
+        '../../../src/services/pdf'
+    );
+
+    const loaded = await loadPdfBytesForTestEndpoint(request);
+    if (!loaded.ok) return loaded;
+    const { pdfData } = loaded;
+
+    const pageIndices: number[] | undefined = Array.isArray(request?.page_indices)
+        ? (request.page_indices as unknown[]).map((n) => Number(n))
+        : undefined;
+
+    let pageRange:
+        | { startIndex: number; endIndex?: number; maxPages?: number }
+        | undefined;
+    if (request?.page_range && typeof request.page_range === 'object') {
+        const r = request.page_range;
+        // Pass `Number(...)` straight through — `resolvePageRangeOrThrow` is
+        // strict and rejects NaN / negative / out-of-range with a structured
+        // ExtractionError. Coercing to 0 here would silently re-route an
+        // agent's typo to page 0.
+        pageRange = {
+            startIndex: Number(r.start_index ?? r.startIndex),
+        };
+        if (r.end_index != null || r.endIndex != null) {
+            pageRange.endIndex = Number(r.end_index ?? r.endIndex);
+        }
+        if (r.max_pages != null || r.maxPages != null) {
+            pageRange.maxPages = Number(r.max_pages ?? r.maxPages);
+        }
+    }
+
+    const analysisWindow =
+        request?.analysis_window != null
+            ? Number(request.analysis_window)
+            : undefined;
+    const settings =
+        request?.settings && typeof request.settings === 'object'
+            ? request.settings
+            : undefined;
+
+    try {
+        const result = await new PDFExtractor().analyzeLayout(pdfData, {
+            settings,
+            pageIndices,
+            pageRange,
+            analysisWindow,
+        });
+
+        // Flatten Map/Set fields — `JSON.stringify` would otherwise serialize
+        // them as `{}`. Cover ALL four fields documented in
+        // `LayoutAnalysisResult`'s file comment.
+        const styleCounts: Record<string, { count: number; style: unknown }> = {};
+        for (const [key, value] of result.analysis.styleProfile.styleCounts) {
+            styleCounts[key] = value;
+        }
+        const elements: Record<string, unknown[]> = {};
+        for (const [pos, list] of result.analysis.marginAnalysis.elements) {
+            elements[pos] = list;
+        }
+        const removalsByPage: Record<string, string[]> = {};
+        for (const [pageIdx, texts] of result.analysis.marginRemoval.removalsByPage) {
+            removalsByPage[String(pageIdx)] = Array.from(texts);
+        }
+        const textsToRemove = Array.from(result.analysis.marginRemoval.textsToRemove);
+
+        return {
+            ok: true,
+            page_count: result.pageCount,
+            analysis_page_indices: result.analysisPageIndices,
+            pages: result.pages,
+            page_labels: result.pageLabels,
+            analysis: {
+                style_profile: {
+                    primaryBodyStyle: result.analysis.styleProfile.primaryBodyStyle,
+                    bodyStyles: result.analysis.styleProfile.bodyStyles,
+                    styleCounts,
+                },
+                margin_analysis: {
+                    elements,
+                    counts: result.analysis.marginAnalysis.counts,
+                },
+                margin_removal: {
+                    candidates: result.analysis.marginRemoval.candidates,
+                    removalsByPage,
+                    textsToRemove,
+                },
+            },
+            metadata: result.metadata,
+        };
+    } catch (e: any) {
+        if (e instanceof ExtractionError) {
+            if (e.code === ExtractionErrorCode.PAGE_OUT_OF_RANGE) {
+                return { ok: false, error: { name: 'Error', message: e.message } };
+            }
+            // Same payload shape `runPdfExtractorCall` writes (lines
+            // 130-134). The rehydrated client-side `ExtractionError` carries
+            // OCR data on `e.details` (types.ts), which the wire layer
+            // surfaces as `ocrAnalysis` for self-documenting JSON.
+            return {
+                ok: false,
+                error: {
+                    name: 'ExtractionError',
+                    code: e.code,
+                    message: e.message,
+                    payload: {
+                        ocrAnalysis: e.details,
+                        pageLabels: e.pageLabels,
+                        pageCount: e.pageCount,
+                    },
+                },
+            };
+        }
+        return {
+            ok: false,
+            error: {
+                name: e?.name ?? 'Error',
+                message: e?.message ?? String(e),
+            },
+        };
+    }
+}

@@ -29,10 +29,10 @@ import {
     SentenceBBox,
 } from "../../src/services/pdf";
 import type {
+    LayoutAnalysisResult,
     MarginPosition,
     PageSentenceBBoxResult,
     ProcessedPage,
-    SentenceBBoxTrace,
 } from "../../src/services/pdf";
 
 export type OverlayLevel =
@@ -334,10 +334,11 @@ export function getRawLinesOverlay(rawPage: RawPageData): OverlayResult {
 // (`extract({ mode: "structured", pageIndices: [n] })`). What the visualizer
 // paints is byte-identical to what production produces for that page.
 //
-// `margins` stays on the worker trace (`buildMarginsOverlayFromTrace`
-// below) because its purpose is to surface pre-filter intermediates
-// (`marginAnalysis` / `marginRemoval`) that the production result
-// deliberately does not expose.
+// `margins` is built by `buildMarginsOverlayFromAnalysis` (further below),
+// which consumes a `LayoutAnalysisResult` from `analyzeLayout`. Same
+// shared analysis prefix structured extract uses, so the margin
+// candidates / removal decisions are byte-identical to what production
+// extract sees pre-filter.
 // ---------------------------------------------------------------------------
 
 /**
@@ -455,60 +456,74 @@ export function buildSentenceOverlayFromPage(page: ProcessedPage): OverlayResult
 }
 
 /**
- * Margins overlay from a worker trace. Reads `trace.marginRemoval` +
- * `trace.pagesForFilter` for line classification. The simple-margin /
- * smart-zone box outlines are derived from the target page in
- * `pagesForFilter`. Same rects / colors / labels as `getMarginsOverlay`.
+ * Margins overlay from a `LayoutAnalysisResult`. Reads
+ * `result.analysis.marginRemoval` for the per-page removal map +
+ * cross-page candidate list, and looks the target page up in
+ * `result.pages` for blocks/lines + dimensions. The
+ * simple-margin / smart-zone box outlines and per-line classification
+ * read `margins` / `marginZone` from `result.metadata.settings` so
+ * custom settings flow through to the rendered overlay (defaults apply
+ * only when the field is unset).
+ *
+ * `pageIndex` selects which target page (analyzeLayout returns
+ * multi-page; the overlay is single-page).
+ *
+ * Output is byte-identical to the prior trace-based builder when
+ * `analyzeLayout` runs with default settings — the structured-extract
+ * analysis context build is the source of truth for both. With custom
+ * settings, this builder draws/classifies against the actual settings
+ * the analysis used (the prior builder hard-coded defaults and would
+ * have silently mismatched).
  */
-export function buildMarginsOverlayFromTrace(
-    trace: SentenceBBoxTrace,
+export function buildMarginsOverlayFromAnalysis(
+    result: LayoutAnalysisResult,
+    pageIndex: number,
 ): OverlayResult {
-    const pageIndex = trace.detailed.pageIndex;
-    const targetPage = trace.pagesForFilter.find(
-        (p) => p.pageIndex === pageIndex,
-    );
+    const targetPage = result.pages.find((p) => p.pageIndex === pageIndex);
     if (!targetPage) {
         throw new Error(
-            `buildMarginsOverlayFromTrace: page ${pageIndex} not present in trace.pagesForFilter`,
+            `buildMarginsOverlayFromAnalysis: page ${pageIndex} not present in result.pages`,
         );
     }
-    const removal = trace.marginRemoval;
+    const removal = result.analysis.marginRemoval;
+    const margins = result.metadata.settings.margins ?? DEFAULT_MARGINS;
+    const marginZone = result.metadata.settings.marginZone ?? DEFAULT_MARGIN_ZONE;
 
     const rects: OverlayRect[] = [];
     let groupIdx = 0;
 
     // Margin zones — drawn first so lines render on top.
     const buildZoneRects = (
-        margins: typeof DEFAULT_MARGIN_ZONE,
+        m: typeof DEFAULT_MARGIN_ZONE,
     ): Array<{ pos: MarginPosition; rect: Rect }> => [
         {
             pos: "top",
-            rect: { x: 0, y: 0, w: targetPage.width, h: margins.top },
+            rect: { x: 0, y: 0, w: targetPage.width, h: m.top },
         },
         {
             pos: "bottom",
             rect: {
                 x: 0,
-                y: targetPage.height - margins.bottom,
+                y: targetPage.height - m.bottom,
                 w: targetPage.width,
-                h: margins.bottom,
+                h: m.bottom,
             },
         },
         {
             pos: "left",
-            rect: { x: 0, y: 0, w: margins.left, h: targetPage.height },
+            rect: { x: 0, y: 0, w: m.left, h: targetPage.height },
         },
         {
             pos: "right",
             rect: {
-                x: targetPage.width - margins.right,
+                x: targetPage.width - m.right,
                 y: 0,
-                w: margins.right,
+                w: m.right,
                 h: targetPage.height,
             },
         },
     ];
-    for (const z of buildZoneRects(DEFAULT_MARGIN_ZONE)) {
+    for (const z of buildZoneRects(marginZone)) {
         rects.push({
             rect: z.rect,
             color: OVERLAY_COLORS.marginZone,
@@ -516,7 +531,7 @@ export function buildMarginsOverlayFromTrace(
             group: groupIdx++,
         });
     }
-    for (const z of buildZoneRects(DEFAULT_MARGINS)) {
+    for (const z of buildZoneRects(margins)) {
         rects.push({
             rect: z.rect,
             color: OVERLAY_COLORS.marginZone,
@@ -548,7 +563,7 @@ export function buildMarginsOverlayFromTrace(
                 line.bbox,
                 targetPage.width,
                 targetPage.height,
-                DEFAULT_MARGIN_ZONE,
+                marginZone,
             );
             if (!zonePosition) continue;
 
@@ -599,7 +614,7 @@ export function buildMarginsOverlayFromTrace(
             pageNumbers: pageNumberCount,
             repeats: repeatCount,
             keptInMargin: keptInZoneCount,
-            analysisPagesScanned: trace.analysisPageIndices.length,
+            analysisPagesScanned: result.analysisPageIndices.length,
         },
     };
 }

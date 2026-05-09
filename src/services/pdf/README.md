@@ -194,9 +194,15 @@ ExtractionResult; // Result of PDFExtractor.extract — markdown OR structured m
                   // Structured mode populates pages[i].sentences / paragraphs /
                   // unmappedParagraphs / degradedParagraphs / degradationNotes
                   // alongside the same content / columns / lines fields.
+LayoutAnalysisResult; // Result of PDFExtractor.analyzeLayout — pre-extraction
+                      // analysis context (styleProfile + marginAnalysis +
+                      // marginRemoval) plus the JSON-walked target pages. Same
+                      // shared prefix structured extract runs, so the analysis
+                      // context is byte-identical for the same settings /
+                      // pageIndices / analysisWindow.
 SentenceBBoxTraceResult; // Result of getMuPDFWorkerClient().extractSentenceBBoxesDebug
                          // — single-page debug envelope { result, trace } used by
-                         // the visualizer / fixture capture / pipeline-trace endpoints.
+                         // fixture capture and the pipeline-trace endpoint.
 PDFSearchResult; // Result of PDFExtractor.search
 PageImageResult; // Per-page entry in PDFExtractor.renderPages result.pages
 ```
@@ -705,12 +711,29 @@ for (const page of structured.pages) {
   }
 }
 
-// Single-page debug surface (visualizer / fixture capture /
-// pipeline-trace endpoints). Returns `{ result, trace }` with all
-// pipeline intermediates (raw doc, detailed page, font-bridged
-// pagesForFilter, margin analysis/removal, filtered-paragraph result).
-// Not a parity oracle for the production multi-page structured path —
-// see worker/sentenceExtraction.ts for the divergence rationale.
+// Document-wide style + margin analysis context only — no per-page
+// extraction. Runs the EXACT shared analysis prefix `extract({ mode:
+// "structured" })` runs (page count, page labels, optional OCR check,
+// JSON walk over the analysis window, `buildPageAnalysisContext`).
+// Output is byte-identical to what production extract sees pre-filter.
+// Use this for debugging margin / style decisions without paying for
+// per-page processing.
+const layout = await extractor.analyzeLayout(pdfData, {
+  pageIndices: [3],
+  analysisWindow: 5,
+});
+console.log(layout.analysis.styleProfile.primaryBodyStyle);
+for (const c of layout.analysis.marginRemoval.candidates) {
+  console.log(c.text, c.reason, c.pageIndices);
+}
+
+// Single-page debug surface (fixture capture / pipeline-trace endpoint).
+// Returns `{ result, trace }` with all pipeline intermediates (raw doc,
+// detailed page, font-bridged pagesForFilter, margin analysis/removal,
+// filtered-paragraph result). Not a parity oracle for the production
+// multi-page structured path — see worker/sentenceExtraction.ts for
+// the divergence rationale. For analysis-context parity, prefer
+// `analyzeLayout` above.
 import { getMuPDFWorkerClient } from "../../src/services/pdf";
 const debug = await getMuPDFWorkerClient().extractSentenceBBoxesDebug(
   pdfData,

@@ -10,6 +10,7 @@ import { getMuPDFWorkerClient } from "./MuPDFWorkerClient";
 import {
     ExtractionSettings,
     ExtractionResult,
+    LayoutAnalysisResult,
     OCRDetectionOptions,
     OCRDetectionResult,
     PageImageOptions,
@@ -247,6 +248,50 @@ export class PDFExtractor {
             pageRange: args.pageRange,
             analysisWindow: args.analysisWindow,
         });
+    }
+
+    /**
+     * Document-wide style + margin analysis without per-page extraction.
+     *
+     * Runs the EXACT shared analysis prefix `extract` runs (page count,
+     * page labels, optional OCR check, JSON walk over the analysis
+     * window, `buildPageAnalysisContext`) and returns the analysis
+     * context extract would have passed to per-page processing
+     * (`styleProfile`, `marginAnalysis`, `marginRemoval`) plus the
+     * JSON-walked target pages.
+     *
+     * Output is byte-identical to the analysis context built by
+     * `extract({ mode: "structured" })` for the same `settings` /
+     * `pageIndices` / `analysisWindow`. Use this when debugging margin
+     * or style decisions to inspect what the production extract
+     * pipeline saw before per-page processing.
+     *
+     * Args mirror the pre-extraction subset of `extract`'s args
+     * (`mode` / `markdown` / `structured` / `paragraphSettings` are
+     * extraction-engine concerns and intentionally absent here).
+     *
+     * @example
+     * ```typescript
+     * const analysis = await new PDFExtractor().analyzeLayout(pdfData, {
+     *   pageIndices: [3],
+     * });
+     * console.log(analysis.analysis.styleProfile.primaryBodyStyle);
+     * for (const c of analysis.analysis.marginRemoval.candidates) {
+     *   console.log(c.text, c.reason, c.pageIndices);
+     * }
+     * ```
+     */
+    async analyzeLayout(
+        pdfData: Uint8Array | ArrayBuffer,
+        args: {
+            settings?: ExtractionSettings;
+            pageIndices?: number[];
+            pageRange?: { startIndex: number; endIndex?: number; maxPages?: number };
+            /** Same semantics as `extract({ analysisWindow })`. */
+            analysisWindow?: number;
+        } = {},
+    ): Promise<LayoutAnalysisResult> {
+        return getMuPDFWorkerClient().analyzeLayout(pdfData, args);
     }
 
     /**

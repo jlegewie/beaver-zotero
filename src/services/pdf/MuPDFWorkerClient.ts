@@ -22,6 +22,7 @@ import {
     type PDFPageSearchResult,
     type ExtractionSettings,
     type ExtractionResult,
+    type LayoutAnalysisResult,
     type OCRDetectionOptions,
     type OCRDetectionResult,
     type PDFSearchOptions,
@@ -509,6 +510,49 @@ export class MuPDFWorkerClient {
             structured: args?.structured,
             settings: args?.settings,
             paragraphSettings: args?.paragraphSettings,
+            pageIndices: args?.pageIndices,
+            pageRange: args?.pageRange,
+            analysisWindow: args?.analysisWindow,
+        });
+    }
+
+    /**
+     * Document-wide style + margin analysis without per-page extraction.
+     *
+     * Runs the EXACT shared analysis prefix `extract` runs (page count,
+     * page labels, optional OCR check, JSON walk over the analysis
+     * window, `buildPageAnalysisContext`). Returns the analysis context
+     * extract would have passed to per-page processing
+     * (`styleProfile`, `marginAnalysis`, `marginRemoval`) plus the
+     * JSON-walked target pages.
+     *
+     * Output is byte-identical to the analysis context built by
+     * `extract({ mode: "structured" })` for the same `settings` /
+     * `pageIndices` / `analysisWindow`. Use this to inspect what the
+     * production extract pipeline saw before per-page processing.
+     *
+     * **Map/Set boundary.** `result.analysis.styleProfile.styleCounts`,
+     * `result.analysis.marginAnalysis.elements`,
+     * `result.analysis.marginRemoval.removalsByPage`, and
+     * `result.analysis.marginRemoval.textsToRemove` carry `Map`/`Set`
+     * fields. `postMessage` preserves them via structured clone, but
+     * `JSON.stringify` does NOT — flatten before writing HTTP responses.
+     */
+    async analyzeLayout(
+        pdfData: Uint8Array | ArrayBuffer,
+        args?: {
+            settings?: ExtractionSettings;
+            pageIndices?: number[];
+            pageRange?: { startIndex: number; endIndex?: number; maxPages?: number };
+            /** Same semantics as `extract({ analysisWindow })`. */
+            analysisWindow?: number;
+        },
+    ): Promise<LayoutAnalysisResult> {
+        const bytes =
+            pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
+        return this.call<LayoutAnalysisResult>("analyzeLayout", {
+            pdfData: bytes,
+            settings: args?.settings,
             pageIndices: args?.pageIndices,
             pageRange: args?.pageRange,
             analysisWindow: args?.analysisWindow,
