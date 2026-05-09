@@ -31,6 +31,7 @@ import {
 import type {
     MarginPosition,
     PageSentenceBBoxResult,
+    ProcessedPage,
     SentenceBBoxTrace,
 } from "../../src/services/pdf";
 
@@ -132,15 +133,20 @@ export interface OverlayResult {
 // ---------------------------------------------------------------------------
 
 /**
- * Build a sentence overlay from an already-computed `PageSentenceBBoxResult`.
+ * Build a sentence overlay from a `PageSentenceBBoxResult`.
  *
- * Used by the `/beaver/test/pdf-render-overlay` endpoint to feed the worker
- * sentence result into the shared rect-building loop. Same
- * rect/color/label/group semantics as the old `getSentenceOverlay` helper.
+ * Shared rect-construction loop used by the `ProcessedPage`-based
+ * visualizer wrapper above and by fixture capture (which still needs
+ * the trace-flavored result for splitter recording).
+ *
+ * `analysisPagesScanned` is the optional analysis-window-size diagnostic
+ * stat surfaced on `stats.analysisPagesScanned`. Callers that have it
+ * (fixture capture from the trace) pass it through; callers that don't
+ * (the production-mode visualizer wrapper) omit it.
  */
 export function buildSentenceOverlayFromResult(
     result: PageSentenceBBoxResult,
-    analysisPagesScanned: number,
+    analysisPagesScanned?: number,
 ): OverlayResult {
     const degradedItemIndices = new Set(result.degradationNotes.map((n) => n.itemIndex));
     const degradedSentenceIndices = computeDegradedSentenceIndices(
@@ -324,118 +330,128 @@ export function getRawLinesOverlay(rawPage: RawPageData): OverlayResult {
 }
 
 // ---------------------------------------------------------------------------
-// Pure builders — consume `SentenceBBoxTrace` from the worker. No worker
-// calls, no main-thread re-running of detection. The legacy `get*Overlay`
-// helpers were deleted in Stage 4 once the menu visualizer migrated.
+// Pure builders — consume `ProcessedPage` from a structured-mode extract
+// (`extract({ mode: "structured", pageIndices: [n] })`). What the visualizer
+// paints is byte-identical to what production produces for that page.
+//
+// `margins` stays on the worker trace (`buildMarginsOverlayFromTrace`
+// below) because its purpose is to surface pre-filter intermediates
+// (`marginAnalysis` / `marginRemoval`) that the production result
+// deliberately does not expose.
 // ---------------------------------------------------------------------------
 
 /**
- * Column overlay from a worker trace. Same rects / colors / labels as
- * `getColumnOverlay`; reads `trace.filteredResult.{columnResult,filteredPage}`
- * directly — no re-running.
+ * Column overlay from a structured-mode `ProcessedPage`. Reads
+ * `page.columns` (`ColumnBBox[]`, `{l,t,r,b}`) and converts to the
+ * `Rect` shape (`{x,y,w,h}`) the overlay uses.
  */
-export function buildColumnOverlayFromTrace(
-    trace: SentenceBBoxTrace,
-): OverlayResult {
-    const { filteredResult } = trace;
-    const rects: OverlayRect[] = filteredResult.columnResult.columns.map(
-        (col, i) => ({
-            rect: col,
-            color: OVERLAY_COLORS.column,
-            label: `C${i + 1}`,
-            group: i,
-        }),
-    );
+export function buildColumnOverlayFromPage(page: ProcessedPage): OverlayResult {
+    const columns = page.columns ?? [];
+    const rects: OverlayRect[] = columns.map((col, i) => ({
+        rect: { x: col.l, y: col.t, w: col.r - col.l, h: col.b - col.t },
+        color: OVERLAY_COLORS.column,
+        label: `C${i + 1}`,
+        group: i,
+    }));
     return {
         level: "columns",
-        pageIndex: filteredResult.filteredPage.pageIndex,
-        pageWidth: filteredResult.filteredPage.width,
-        pageHeight: filteredResult.filteredPage.height,
+        pageIndex: page.index,
+        pageWidth: page.width,
+        pageHeight: page.height,
         groupCount: rects.length,
         rects,
         stats: {
             columns: rects.length,
-            broken: filteredResult.columnResult.isBroken ? 1 : 0,
-            analysisPagesScanned: trace.analysisPageIndices.length,
         },
     };
 }
 
 /**
- * Line overlay from a worker trace. Reads
- * `trace.filteredResult.{lineResult,filteredPage}`.
+ * Line overlay from a structured-mode `ProcessedPage`. Reads `page.lines`
+ * (flat `ExtractedLine[]` already in reading order; column grouping
+ * survives via `columnIndex`).
  */
-export function buildLineOverlayFromTrace(
-    trace: SentenceBBoxTrace,
-): OverlayResult {
-    const { filteredResult } = trace;
-    const rects: OverlayRect[] = [];
-    let groupCount = 0;
-    for (const colResult of filteredResult.lineResult.columnResults) {
-        for (const line of colResult.lines) {
-            groupCount++;
-            rects.push({
-                rect: lineBBoxToRect(line.bbox),
-                color: OVERLAY_COLORS.line,
-                label: `L${groupCount}`,
-                group: groupCount - 1,
-            });
-        }
-    }
+export function buildLineOverlayFromPage(page: ProcessedPage): OverlayResult {
+    const lines = page.lines ?? [];
+    const rects: OverlayRect[] = lines.map((line, i) => ({
+        rect: lineBBoxToRect(line.bbox),
+        color: OVERLAY_COLORS.line,
+        label: `L${i + 1}`,
+        group: i,
+    }));
+    const distinctColumns = new Set(lines.map((l) => l.columnIndex)).size;
     return {
         level: "lines",
-        pageIndex: filteredResult.filteredPage.pageIndex,
-        pageWidth: filteredResult.filteredPage.width,
-        pageHeight: filteredResult.filteredPage.height,
-        groupCount,
-        rects,
-        stats: {
-            lines: groupCount,
-            columns: filteredResult.columnResult.columns.length,
-            analysisPagesScanned: trace.analysisPageIndices.length,
-        },
-    };
-}
-
-/**
- * Paragraph overlay from a worker trace. Reads
- * `trace.filteredResult.{paragraphResult,filteredPage}`.
- */
-export function buildParagraphOverlayFromTrace(
-    trace: SentenceBBoxTrace,
-): OverlayResult {
-    const { filteredResult } = trace;
-    const rects: OverlayRect[] = filteredResult.paragraphResult.items.map(
-        (item, i) => {
-            const isHeader = item.type === "header";
-            return {
-                rect: {
-                    x: item.bbox.l,
-                    y: item.bbox.t,
-                    w: item.bbox.width,
-                    h: item.bbox.height,
-                },
-                color: isHeader
-                    ? OVERLAY_COLORS.header
-                    : OVERLAY_COLORS.paragraph,
-                label: `${isHeader ? "H" : "P"}${item.idx + 1}`,
-                group: i,
-            };
-        },
-    );
-    return {
-        level: "paragraphs",
-        pageIndex: filteredResult.filteredPage.pageIndex,
-        pageWidth: filteredResult.filteredPage.width,
-        pageHeight: filteredResult.filteredPage.height,
+        pageIndex: page.index,
+        pageWidth: page.width,
+        pageHeight: page.height,
         groupCount: rects.length,
         rects,
         stats: {
-            paragraphs: filteredResult.paragraphResult.paragraphCount,
-            headers: filteredResult.paragraphResult.headerCount,
-            analysisPagesScanned: trace.analysisPageIndices.length,
+            lines: rects.length,
+            columns: distinctColumns,
         },
     };
+}
+
+/**
+ * Paragraph overlay from a structured-mode `ProcessedPage`. Reads
+ * `page.paragraphs[i].item` (the `ContentItem` carrying `type` /
+ * `bbox` / `idx`).
+ */
+export function buildParagraphOverlayFromPage(
+    page: ProcessedPage,
+): OverlayResult {
+    const paragraphs = page.paragraphs ?? [];
+    let headerCount = 0;
+    let bodyCount = 0;
+    const rects: OverlayRect[] = paragraphs.map((pws, i) => {
+        const item = pws.item;
+        const isHeader = item.type === "header";
+        if (isHeader) headerCount++;
+        else bodyCount++;
+        return {
+            rect: {
+                x: item.bbox.l,
+                y: item.bbox.t,
+                w: item.bbox.width,
+                h: item.bbox.height,
+            },
+            color: isHeader ? OVERLAY_COLORS.header : OVERLAY_COLORS.paragraph,
+            label: `${isHeader ? "H" : "P"}${item.idx + 1}`,
+            group: i,
+        };
+    });
+    return {
+        level: "paragraphs",
+        pageIndex: page.index,
+        pageWidth: page.width,
+        pageHeight: page.height,
+        groupCount: rects.length,
+        rects,
+        stats: {
+            paragraphs: bodyCount,
+            headers: headerCount,
+        },
+    };
+}
+
+/**
+ * Sentence overlay from a structured-mode `ProcessedPage`. Thin wrapper
+ * over `buildSentenceOverlayFromResult`.
+ */
+export function buildSentenceOverlayFromPage(page: ProcessedPage): OverlayResult {
+    const projected: PageSentenceBBoxResult = {
+        pageIndex: page.index,
+        width: page.width,
+        height: page.height,
+        paragraphs: page.paragraphs ?? [],
+        sentences: page.sentences ?? [],
+        unmappedParagraphs: page.unmappedParagraphs ?? 0,
+        degradedParagraphs: page.degradedParagraphs ?? 0,
+        degradationNotes: page.degradationNotes ?? [],
+    };
+    return buildSentenceOverlayFromResult(projected);
 }
 
 /**

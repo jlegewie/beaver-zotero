@@ -7,11 +7,11 @@
  */
 
 import {
-    buildColumnOverlayFromTrace,
-    buildLineOverlayFromTrace,
-    buildParagraphOverlayFromTrace,
+    buildColumnOverlayFromPage,
+    buildLineOverlayFromPage,
+    buildParagraphOverlayFromPage,
+    buildSentenceOverlayFromPage,
     buildMarginsOverlayFromTrace,
-    buildSentenceOverlayFromResult,
     getRawLinesOverlay,
 } from '../../utils/extractionOverlay';
 import type { OverlayResult } from '../../utils/extractionOverlay';
@@ -722,15 +722,17 @@ export async function handleTestPdfSentenceBBoxesHttpRequest(request: any) {
  *                                         // capped at 50.
  *
  * Level dispatch notes:
- *   - `sentences`, `columns`, `lines`, `paragraphs`, `margins` all share
- *     a single `extractSentenceBBoxesDebug` worker round-trip; each
- *     level then turns the returned `result` / `trace` into rects via
- *     a pure builder in `extractionOverlay.ts`
- *     (`buildSentenceOverlayFromResult`, `build{Column,Line,Paragraph,
- *     Margins}OverlayFromTrace`). Cost note: non-sentence levels still
- *     pay for splitting + mapping inside the worker; intentional
- *     initial trade-off for parity, with a lighter `extractLayoutTrace`
- *     op as a possible follow-up if it ever bites.
+ *   - `sentences`, `columns`, `lines`, `paragraphs` route through
+ *     `PDFExtractor.extract({ mode: "structured", pageIndices: [n] })`
+ *     and project the resulting `ProcessedPage` into rects via the pure
+ *     `build{Sentence,Column,Line,Paragraph}OverlayFromPage` builders in
+ *     `extractionOverlay.ts`. This is the same worker op production
+ *     uses, so what the overlay paints is byte-identical to what an
+ *     extraction call for the same page produces.
+ *   - `margins` stays on `extractSentenceBBoxesDebug` because its
+ *     purpose is to surface pre-filter `marginAnalysis` /
+ *     `marginRemoval` intermediates that the production result
+ *     deliberately does not expose.
  *   - `raw-lines` deliberately stays on a single-page unfiltered extract
  *     (`extractRawPages([pageIndex])`) — its purpose is to expose the
  *     pre-filter MuPDF lines so an agent can see what the margin filter
@@ -741,8 +743,12 @@ export async function handleTestPdfSentenceBBoxesHttpRequest(request: any) {
  *   underlying bbox data so callers can also debug numerically.
  */
 export async function handleTestPdfRenderOverlayHttpRequest(request: any) {
-    const { getMuPDFWorkerClient, ExtractionError, ExtractionErrorCode } =
-        await import('../../../src/services/pdf');
+    const {
+        getMuPDFWorkerClient,
+        PDFExtractor,
+        ExtractionError,
+        ExtractionErrorCode,
+    } = await import('../../../src/services/pdf');
 
     const loaded = await loadPdfBytesForTestEndpoint(request);
     if (!loaded.ok) return loaded;
@@ -809,18 +815,10 @@ export async function handleTestPdfRenderOverlayHttpRequest(request: any) {
             throw e;
         }
     } else {
-        // sentences / columns / lines / paragraphs / margins: one worker
-        // round-trip via `extractSentenceBBoxesDebug`. The worker owns
-        // the full pipeline (analysis window, font bridging, margin
-        // analysis, filtered-paragraph detection, splitter resolution,
-        // sentence mapping); main-thread builders below convert the
-        // returned trace/result into rects.
-        //
-        // Cost note (intentional): non-sentence levels still pay for
-        // sentence splitting + mapping inside the worker. That keeps
-        // dev tools inspecting the exact production pipeline; if the
-        // overhead matters in the future, a lighter `extractLayoutTrace`
-        // op is a clean follow-up.
+        // Resolve language + analysis window once — both branches below
+        // forward them through. Best-effort item-language lookup feeds
+        // sentencex; the worker falls back to the regex splitter on init
+        // failure, so language resolution never throws.
         let language: string | undefined =
             typeof request?.language === 'string' ? request.language : undefined;
         if (!language && request?.library_id != null && request?.zotero_key != null) {
@@ -838,33 +836,56 @@ export async function handleTestPdfRenderOverlayHttpRequest(request: any) {
                 : undefined;
 
         try {
-            const out = await client.extractSentenceBBoxesDebug(
-                pdfData,
-                pageIndex,
-                {
-                    splitterConfig: { type: 'sentencex', language },
+            if (level === 'margins') {
+                // Margins level needs pre-filter intermediates
+                // (`marginAnalysis` / `marginRemoval` /
+                // `pagesForFilter`) that the production result does not
+                // expose. Stays on the dev-only single-page debug op.
+                const out = await client.extractSentenceBBoxesDebug(
+                    pdfData,
+                    pageIndex,
+                    {
+                        splitterConfig: { type: 'sentencex', language },
+                        analysisWindow,
+                    },
+                );
+                overlay = buildMarginsOverlayFromTrace(out.trace);
+            } else {
+                // sentences / columns / lines / paragraphs: one worker
+                // round-trip via the production structured-mode extract.
+                // Same op production uses — what we paint here matches
+                // what `extract({ mode: "structured" })` produces for
+                // the same page byte-for-byte.
+                const result = await new PDFExtractor().extract(pdfData, {
+                    mode: 'structured',
+                    pageIndices: [pageIndex],
+                    structured: { language },
                     analysisWindow,
-                },
-            );
-            switch (level) {
-                case 'sentences':
-                    overlay = buildSentenceOverlayFromResult(
-                        out.result,
-                        out.trace.analysisPageIndices.length,
-                    );
-                    break;
-                case 'columns':
-                    overlay = buildColumnOverlayFromTrace(out.trace);
-                    break;
-                case 'lines':
-                    overlay = buildLineOverlayFromTrace(out.trace);
-                    break;
-                case 'paragraphs':
-                    overlay = buildParagraphOverlayFromTrace(out.trace);
-                    break;
-                default: // 'margins'
-                    overlay = buildMarginsOverlayFromTrace(out.trace);
-                    break;
+                });
+                const page = result.pages[0];
+                if (!page) {
+                    return {
+                        ok: false,
+                        error: {
+                            name: 'Error',
+                            message: `page_index ${pageIndex} not extracted`,
+                        },
+                    };
+                }
+                switch (level) {
+                    case 'sentences':
+                        overlay = buildSentenceOverlayFromPage(page);
+                        break;
+                    case 'columns':
+                        overlay = buildColumnOverlayFromPage(page);
+                        break;
+                    case 'lines':
+                        overlay = buildLineOverlayFromPage(page);
+                        break;
+                    default: // 'paragraphs'
+                        overlay = buildParagraphOverlayFromPage(page);
+                        break;
+                }
             }
         } catch (e) {
             if (e instanceof RangeError) {
