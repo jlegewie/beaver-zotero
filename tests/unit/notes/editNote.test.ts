@@ -44,6 +44,7 @@ vi.mock('../../../src/utils/editNoteValidation', async () => {
             return enriched ?? oldString;
         }),
         detectPartialSimplifiedTag: actual.detectPartialSimplifiedTag,
+        buildPartialSimplifiedTagMessage: actual.buildPartialSimplifiedTagMessage,
     };
 });
 

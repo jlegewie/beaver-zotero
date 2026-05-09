@@ -13,7 +13,7 @@ import {
     checkNewCitationItemsExist,
     applyOldStringEnrichment,
     detectPartialSimplifiedTag,
-    type PartialSimplifiedTag,
+    buildPartialSimplifiedTagMessage,
 } from '../../../utils/editNoteValidation';
 import {
     expandToRawHtml,
@@ -43,7 +43,7 @@ import {
     findBestMatch,
     type BaseExpansion,
     type MatchInput,
-} from './editNoteMatcher';
+} from '../../../utils/editNoteMatcher';
 import { clearNoteEditorSelection } from '../../../../react/utils/sourceUtils';
 import { store } from '../../../../react/store';
 import { currentThreadIdAtom } from '../../../../react/atoms/threads';
@@ -109,25 +109,6 @@ function getExternalRefContext(): ExternalRefContext {
         externalRefs: store.get(externalReferenceMappingAtom),
         externalItemMapping: store.get(externalReferenceItemMappingAtom),
     };
-}
-
-/**
- * Build the error message for a partial `<citation …>` / `<annotation …>` opener
- * in `old_string`. Surfaces the actionable rewrite hint (use the FULL tag from
- * `read_note`) so the model can self-correct on the next turn instead of
- * reading the generic zero-match hint.
- */
-function buildPartialSimplifiedTagMessage(partial: PartialSimplifiedTag): string {
-    return (
-        `${partial.kind === 'citation' ? 'Citation' : 'Annotation'} tags are atomic — `
-        + `the matcher cannot match a partial tag. Found a partial opener in old_string: `
-        + `\`${partial.snippet}\`.\n`
-        + 'To rename across all citations, use `str_replace_all` on the FULL '
-        + '`<citation .../>` tag from `read_note` (including `ref`), not on a prefix.\n'
-        + 'To replace a citation, copy the full tag (including `ref`) as old_string '
-        + 'and write a new `<citation item_id="..." page="..."/>` (without `ref`) as '
-        + 'new_string. The `ref` attribute is read-only.'
-    );
 }
 
 /**

@@ -8,14 +8,17 @@ import type { EditNoteResultData, EditNoteOperation } from '../types/agentAction
 import { logger } from '../../src/utils/logger';
 import {
     getOrSimplify,
-    countOccurrences,
     invalidateSimplificationCache,
 } from '../../src/utils/noteHtmlSimplifier';
-import { checkDuplicateCitations } from '../../src/utils/editNoteValidation';
+import {
+    checkDuplicateCitations,
+    detectPartialSimplifiedTag,
+    buildPartialSimplifiedTagMessage,
+} from '../../src/utils/editNoteValidation';
 import { findRangeByContexts } from '../../src/utils/editNoteRawPosition';
 import {
-    expandToRawHtml,
     preloadPageLabelsForNewCitations,
+    expandToRawHtml,
     type ExternalRefContext,
 } from '../../src/utils/noteCitationExpand';
 import {
@@ -30,11 +33,13 @@ import {
     rebuildDataCitationItems,
     hasSchemaVersionWrapper,
 } from '../../src/utils/noteWrapper';
+import { decodeHtmlEntities } from '../../src/utils/noteHtmlEntities';
 import {
-    decodeHtmlEntities,
-    encodeTextEntities,
-    ENTITY_FORMS,
-} from '../../src/utils/noteHtmlEntities';
+    expandBase,
+    findBestMatch,
+    type BaseExpansion,
+    type MatchInput,
+} from '../../src/utils/editNoteMatcher';
 import {
     resolveEditTargetAtRuntime,
     buildExecutionZeroMatchHint,
@@ -262,57 +267,62 @@ export async function executeEditNoteAction(
 
     // ── String replacement mode (default) ──
 
-    // 6. Expand old_string and new_string to raw HTML
-    let expandedOld: string;
-    let expandedNew: string;
-    try {
-        expandedOld = expandToRawHtml(old_string ?? '', metadata, 'old');
-        expandedNew = expandToRawHtml(new_string, metadata, 'new', externalRefContext);
-    } catch (e: any) {
-        throw new Error(e.message || String(e));
-    }
-
-    // 6b. Strip data-citation-items from raw HTML for matching.
-    //     Snapshot the cache first so rebuild can preserve itemData for
-    //     URIs that don't resolve in the current library.
+    // 6. Strip data-citation-items from raw HTML for matching.
+    //    Snapshot the cache first so rebuild can preserve itemData for
+    //    URIs that don't resolve in the current library.
     const existingCitationCache = extractDataCitationItems(oldHtml);
     const strippedHtml = stripDataCitationItems(oldHtml);
 
-    // 7. Count occurrences — if zero, retry with entity-decoded or entity-encoded
-    // strings. PM may have decoded entities (&#x27; → ') since the model read the
-    // note, or the model may have used literal chars while the note has entities.
-    let matchCount = countOccurrences(strippedHtml, expandedOld);
-    if (matchCount === 0) {
-        // Forward: model used &#x27; but note has ' (PM decoded)
-        const decodedOld = decodeHtmlEntities(expandedOld);
-        if (decodedOld !== expandedOld && countOccurrences(strippedHtml, decodedOld) > 0) {
-            expandedOld = decodedOld;
-            expandedNew = decodeHtmlEntities(expandedNew);
-            if (target_before_context != null) target_before_context = decodeHtmlEntities(target_before_context);
-            if (target_after_context != null) target_after_context = decodeHtmlEntities(target_after_context);
-            matchCount = countOccurrences(strippedHtml, expandedOld);
-        }
-    }
-    if (matchCount === 0) {
-        // Reverse: model used ' but note has entity-encoded form (pre-PM).
-        // Try all common entity spellings (&#x27;, &#39;, &apos;).
-        for (const form of ENTITY_FORMS) {
-            const encodedOld = encodeTextEntities(expandedOld, form);
-            if (encodedOld !== expandedOld && countOccurrences(strippedHtml, encodedOld) > 0) {
-                expandedOld = encodedOld;
-                expandedNew = encodeTextEntities(expandedNew, form);
-                if (target_before_context != null) target_before_context = encodeTextEntities(target_before_context, form);
-                if (target_after_context != null) target_after_context = encodeTextEntities(target_after_context, form);
-                matchCount = countOccurrences(strippedHtml, expandedOld);
-                break;
-            }
-        }
+    // 7. Run the ranked matcher (same chain the validator and WS executor use).
+    //    Defense-in-depth: validator normally normalizes via normalized_action_data,
+    //    but the note may have drifted between validation and execution
+    //    (PM re-normalization, concurrent edit) so we re-match here against
+    //    the current HTML.
+    const matchInput: MatchInput = {
+        oldString: old_string ?? '',
+        newString: new_string,
+        operation,
+        metadata,
+        simplified,
+        strippedHtml,
+        externalRefContext,
+    };
+    let base: BaseExpansion;
+    try {
+        base = expandBase(matchInput);
+    } catch (e: any) {
+        const err = new Error(e.message || String(e));
+        (err as any).code = 'expansion_failed';
+        throw err;
     }
 
-    // 8. Zero matches
-    if (matchCount === 0) {
-        throw new Error(buildExecutionZeroMatchHint(simplified, old_string ?? '').message);
+    const match = findBestMatch(matchInput, base);
+    if (!match) {
+        // Defense-in-depth: same partial-tag check as the WS executor
+        // (editNote.ts:836-847) — the executor may receive un-normalized
+        // action_data on stale paths.
+        const partial = detectPartialSimplifiedTag(old_string ?? '');
+        if (partial) {
+            const err = new Error(buildPartialSimplifiedTagMessage(partial));
+            (err as any).code = 'partial_simplified_tag';
+            throw err;
+        }
+        const hint = buildExecutionZeroMatchHint(simplified, old_string ?? '');
+        const err = new Error(hint.message);
+        (err as any).code = 'old_string_not_found';
+        if (hint.candidates.length > 0) (err as any).candidates = hint.candidates;
+        throw err;
     }
+
+    // 7a. Transform validator-supplied context anchors the same way the
+    //     matcher transformed the haystack needle (entity decode/encode, NFKC).
+    //     Mutation-style strategies use identity, so this is a no-op for them.
+    if (target_before_context != null) target_before_context = match.normalizeAnchor(target_before_context);
+    if (target_after_context != null) target_after_context = match.normalizeAnchor(target_after_context);
+
+    const expandedOld = match.expandedOld;
+    const expandedNew = match.expandedNew;
+    const matchCount = match.matchCount;
 
     // 9. Perform replacement and capture context
     let newHtml: string;

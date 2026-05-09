@@ -324,6 +324,7 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
                     setAgentActionsToError([action.id], errorMessage, {
                         stack_trace: stackTrace,
                         error_name: error?.name,
+                        error_code: error?.code,
                     });
                 }
             }
@@ -497,6 +498,7 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
                     setAgentActionsToError([action.id], errorMessage, {
                         stack_trace: stackTrace,
                         error_name: error?.name,
+                        error_code: error?.code,
                     });
                 }
             }
