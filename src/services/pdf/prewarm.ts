@@ -1,5 +1,5 @@
 import { getMuPDFWorkerClient } from "./MuPDFWorkerClient";
-import { logger } from "../../utils/logger";
+import { getConfig } from "./config";
 
 /**
  * Idempotently warm the MuPDF worker. Safe to call from any path; cheap
@@ -9,5 +9,5 @@ import { logger } from "../../utils/logger";
 export function prewarmMuPDFWorker(): void {
     getMuPDFWorkerClient()
         .ping()
-        .catch((e) => logger("MuPDF pre-warm failed: " + e, 2));
+        .catch((e) => getConfig().log("MuPDF pre-warm failed: " + e, 2));
 }

@@ -337,6 +337,17 @@ export async function pdfExtractByLines(
     });
 }
 
+export async function pdfExtractParagraph(
+    attachment: AttachmentFixture,
+    body: { settings?: Record<string, unknown> } = {},
+): Promise<PdfExtractResponse> {
+    return post<PdfExtractResponse>('/beaver/test/pdf-extract-paragraph', {
+        library_id: attachment.library_id,
+        zotero_key: attachment.zotero_key,
+        ...body,
+    });
+}
+
 export async function pdfHasTextLayer(
     attachment: AttachmentFixture,
 ): Promise<{ ok: boolean; hasTextLayer?: boolean; error?: PdfErrorEnvelope }> {
@@ -435,27 +446,6 @@ export async function pdfRenderOverlay(
     });
 }
 
-/**
- * Single-page render — exercises the dedicated `renderPageToImage` op.
- * The plural endpoint silently filters invalid indices, so this is the
- * only way to test PAGE_OUT_OF_RANGE parity.
- */
-export interface PdfRenderPageResponse {
-    ok: boolean;
-    result?: PdfRenderPagePayload;
-    error?: PdfErrorEnvelope;
-}
-
-export async function pdfRenderPage(
-    attachment: AttachmentFixture,
-    body: { page_index: number; options?: PdfPageImageOptions },
-): Promise<PdfRenderPageResponse> {
-    return post<PdfRenderPageResponse>('/beaver/test/pdf-render-page', {
-        library_id: attachment.library_id,
-        zotero_key: attachment.zotero_key,
-        ...body,
-    });
-}
 
 /** Decode a base64 image payload from `pdfRenderPages` for byte-level checks. */
 export function decodeRenderPayload(payload: PdfRenderPagePayload): Uint8Array {
@@ -510,85 +500,6 @@ export async function resolveItem(
     return post('/beaver/test/resolve-item', {
         library_id: libraryId,
         zotero_key: key,
-    });
-}
-
-// ---------------------------------------------------------------------------
-// Sentence bbox feasibility probe
-// ---------------------------------------------------------------------------
-
-export interface SentenceBBoxReportSentence {
-    index: number;
-    text: string;
-    numBBoxes: number;
-    unionBBox: { x: number; y: number; w: number; h: number };
-}
-
-export interface SentenceBBoxReport {
-    pageIndex: number;
-    totalChars: number;
-    totalLines: number;
-    totalSentences: number;
-    multiFragmentSentences: number;
-    pageTextLength: number;
-    invariantHolds: boolean;
-    allBBoxesInPage: boolean;
-    sentences: SentenceBBoxReportSentence[];
-}
-
-export interface ParagraphSentenceReportParagraph {
-    index: number;
-    itemType: 'paragraph' | 'header';
-    numLines: number;
-    paragraphText: string;
-    numSentences: number;
-    sentences: Array<{
-        text: string;
-        numBBoxes: number;
-        unionBBox: { x: number; y: number; w: number; h: number };
-    }>;
-}
-
-export interface ParagraphSentenceBBoxReport {
-    pageIndex: number;
-    totalParagraphs: number;
-    totalHeaders: number;
-    mappedParagraphs: number;
-    unmappedParagraphs: number;
-    totalSentences: number;
-    multiFragmentSentences: number;
-    invariantHolds: boolean;
-    allBBoxesInPage: boolean;
-    paragraphs: ParagraphSentenceReportParagraph[];
-}
-
-export interface SentenceBBoxResponse {
-    ok?: boolean;
-    error?: string;
-    page_count?: number;
-    page_width?: number;
-    page_height?: number;
-    num_blocks?: number;
-    timings_ms?: {
-        walk: number;
-        page_mapper: number;
-        paragraph_mapper: number;
-    };
-    report?: SentenceBBoxReport;
-    paragraph_report?: ParagraphSentenceBBoxReport;
-}
-
-export async function getSentenceBBoxReport(
-    libraryId: number,
-    key: string,
-    pageIndex = 0,
-    mode: 'page' | 'paragraph' | 'both' = 'both',
-): Promise<SentenceBBoxResponse> {
-    return post<SentenceBBoxResponse>('/beaver/test/sentence-bboxes', {
-        library_id: libraryId,
-        zotero_key: key,
-        page_index: pageIndex,
-        mode,
     });
 }
 

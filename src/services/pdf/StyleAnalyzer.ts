@@ -16,6 +16,7 @@ import type {
     StyleProfile,
 } from "./types";
 import { styleToKey } from "./types";
+import { pdfLog } from "./logging";
 
 /** Minimum characters in a span to include in analysis */
 const DEFAULT_MIN_CHARS = 4;
@@ -234,12 +235,12 @@ export class StyleAnalyzer {
     static logStyleProfile(profile: StyleProfile): void {
         if (process.env.NODE_ENV !== "development") return;
 
-        console.log("[StyleAnalyzer] Style analysis:");
-        console.log(`  Primary body style: ${styleToKey(profile.primaryBodyStyle)}`);
-        console.log(`  Body styles count: ${profile.bodyStyles.length}`);
+        pdfLog("[StyleAnalyzer] Style analysis:", 3);
+        pdfLog(`  Primary body style: ${styleToKey(profile.primaryBodyStyle)}`, 3);
+        pdfLog(`  Body styles count: ${profile.bodyStyles.length}`, 3);
 
         // Log top 10 styles by character count
-        console.log("\n[StyleAnalyzer] Top styles by character count:");
+        pdfLog("\n[StyleAnalyzer] Top styles by character count:", 3);
         const sorted = Array.from(profile.styleCounts.entries())
             .sort((a, b) => b[1].count - a[1].count)
             .slice(0, 10);
@@ -247,8 +248,8 @@ export class StyleAnalyzer {
         for (const [key, { count, style }] of sorted) {
             const isBody = profile.bodyStyles.some(s => styleToKey(s) === key);
             const marker = isBody ? "[BODY]" : "";
-            console.log(`    ${key}: ${count} chars ${marker}`);
-            console.log(`      Font: ${style.font}, Size: ${style.size}, Bold: ${style.bold}, Italic: ${style.italic}`);
+            pdfLog(`    ${key}: ${count} chars ${marker}`, 3);
+            pdfLog(`      Font: ${style.font}, Size: ${style.size}, Bold: ${style.bold}, Italic: ${style.italic}`, 3);
         }
     }
 }

@@ -1,76 +1,95 @@
 /**
- * Analysis Window — single source of truth for resolving the per-page
- * analysis window used by cross-page extraction stages (margin
- * smart-removal, document-wide style profile, page-number sequence
- * detection).
+ * Analysis Window — single source of truth for resolving the cross-page
+ * analysis page set used by margin smart-removal and the document-wide
+ * style profile.
+ *
+ * One knob: `analysisWindow`. `0` analyzes only the targets;
+ * `N > 0` expands ±N around each target and unions; `Infinity` covers
+ * the whole document. The 50-page cap that previously narrowed
+ * "whole document" requests stays as a constant for the dev-only
+ * `opAnalyzeMarginRemoval` endpoint and is NOT consulted by
+ * `resolveAnalysisPages` — callers control cost by choosing N.
  *
  * Worker-safe: depends only on plain numbers; no PDF or DOM modules.
  */
 
-/** Default cap on analysis-window size (pages). Centered on `pageIndex`. */
+/**
+ * Default cap on analysis-window size (pages). Used **only** by the
+ * dev-only `opAnalyzeMarginRemoval` endpoint as a guardrail against
+ * walking entire large PDFs through the diagnostic surface.
+ * `resolveAnalysisPages` does not consult this constant.
+ */
 export const DEFAULT_ANALYSIS_WINDOW_CAP = 50;
 
 /**
  * Resolve the page indices that should be scanned for cross-page
- * analysis when extracting a single target page.
+ * analysis (margin smart-removal, document-wide style profile).
  *
- * - `analysisPageWindow` undefined or 0 → whole document.
- * - Positive N                            → window `[pageIndex-N, pageIndex+N]`
- *                                            clipped to document bounds.
- * - If the resulting window exceeds `cap`, it's narrowed to `cap` pages
- *   centered on `pageIndex` (clipped to bounds).
- * - The returned array always includes `pageIndex` and is sorted
- *   ascending.
+ * Algorithm: union of `[t-N, t+N]` clipped to `[0, pageCount-1]` for
+ * every `t in targetPageIndices`. `N=0` returns the targets unchanged;
+ * `N=Infinity` returns the whole document.
  *
- * **Throws** on invalid input:
- *   - `pageIndex < 0`
- *   - `pageIndex >= pageCount`
- *   - `pageCount <= 0`
+ * Validation:
+ *   - `pageCount` must be a positive integer.
+ *   - `analysisWindow` must satisfy
+ *     `(Number.isInteger(N) || N === Infinity) && N >= 0`. Fractional
+ *     `N` would emit fractional page indices through `t±N` and break
+ *     downstream `extractRawPageFromDoc` calls.
+ *   - Every target must be a non-negative integer in `[0, pageCount-1]`.
+ *     Worker ops apply user-facing validation upstream
+ *     (`resolveExplicitPageIndicesOrThrow` /
+ *     `resolvePageRangeOrThrow`); this helper assumes its targets are
+ *     already valid in the caller's contract sense and throws
+ *     `RangeError` on contract violations.
  *
- * Rationale for throw-not-empty: every existing call site already
- * translates out-of-range pages into an error response. Throwing lets
- * callers wrap a single try/catch around the helper instead of
- * branching on an empty-array sentinel.
+ * Window expansion clips at document bounds (no throw on near-boundary
+ * targets).
  */
-export function resolveAnalysisPageIndices(
-    pageIndex: number,
-    pageCount: number,
-    analysisPageWindow?: number,
-    cap: number = DEFAULT_ANALYSIS_WINDOW_CAP,
-): number[] {
-    if (!Number.isInteger(pageCount) || pageCount <= 0) {
+export function resolveAnalysisPages(args: {
+    targetPageIndices: number[];
+    totalPageCount: number;
+    analysisWindow?: number;
+}): number[] {
+    const { targetPageIndices, totalPageCount, analysisWindow = 0 } = args;
+
+    if (!Number.isInteger(totalPageCount) || totalPageCount <= 0) {
         throw new RangeError(
-            `resolveAnalysisPageIndices: pageCount must be a positive integer (got ${pageCount})`,
-        );
-    }
-    if (!Number.isInteger(pageIndex) || pageIndex < 0 || pageIndex >= pageCount) {
-        throw new RangeError(
-            `resolveAnalysisPageIndices: page_index ${pageIndex} out of range (pageCount=${pageCount})`,
+            `resolveAnalysisPages: totalPageCount must be a positive integer (got ${totalPageCount})`,
         );
     }
 
-    let lo: number;
-    let hi: number;
-    if (Number.isInteger(analysisPageWindow) && (analysisPageWindow as number) > 0) {
-        const w = analysisPageWindow as number;
-        lo = Math.max(0, pageIndex - w);
-        hi = Math.min(pageCount - 1, pageIndex + w);
-    } else {
-        lo = 0;
-        hi = pageCount - 1;
+    if (
+        !(
+            (Number.isInteger(analysisWindow) || analysisWindow === Infinity) &&
+            analysisWindow >= 0
+        )
+    ) {
+        throw new RangeError(
+            `resolveAnalysisPages: analysisWindow must be a non-negative integer or Infinity (got ${analysisWindow})`,
+        );
     }
 
-    if (hi - lo + 1 > cap) {
-        // Center the cap on pageIndex; clip to bounds.
-        const half = Math.floor(cap / 2);
-        lo = Math.max(0, pageIndex - half);
-        hi = Math.min(pageCount - 1, lo + cap - 1);
-        // Re-clip lo if hi hit the upper bound (keeps the cap centered
-        // when pageIndex is near the end of the document).
-        lo = Math.max(0, hi - cap + 1);
+    if (!Array.isArray(targetPageIndices) || targetPageIndices.length === 0) {
+        throw new RangeError(
+            "resolveAnalysisPages: targetPageIndices must be a non-empty array",
+        );
     }
 
-    const out: number[] = [];
-    for (let i = lo; i <= hi; i++) out.push(i);
-    return out;
+    for (const t of targetPageIndices) {
+        if (!Number.isInteger(t) || t < 0 || t >= totalPageCount) {
+            throw new RangeError(
+                `resolveAnalysisPages: target page ${t} out of range (totalPageCount=${totalPageCount})`,
+            );
+        }
+    }
+
+    const set = new Set<number>();
+    for (const t of targetPageIndices) {
+        const lo = Math.max(0, t - analysisWindow);
+        const hi = Math.min(totalPageCount - 1, t + analysisWindow);
+        for (let i = lo; i <= hi; i++) set.add(i);
+    }
+
+    return [...set].sort((a, b) => a - b);
 }
+

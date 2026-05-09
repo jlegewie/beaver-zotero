@@ -3,9 +3,9 @@
  *
  * For each captured fixture under `tests/fixtures/pdfs/sentences/`, this
  * suite calls `/beaver/test/pdf-sentence-bboxes` (which routes through
- * the production `runSentenceExtractionPipeline`) and compares the live
+ * the production worker sentence extraction op) and compares the live
  * output against `fixture.json#expected`. End-to-end coverage: PDF bytes
- * → MuPDF wrapper → paragraph detection → sentencex splitter → mapper.
+ * → MuPDF worker → paragraph detection → sentencex splitter → mapper.
  *
  * Catches what the unit tier cannot:
  *  - MuPDF wrapper drift (ligatures, char/quad indexing)

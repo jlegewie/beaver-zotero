@@ -10,8 +10,8 @@ import { uiManager } from "../react/ui/UIManager";
 import { getPref, setPref } from "./utils/prefs";
 import { addPendingVersionNotification } from "./utils/versionNotificationPrefs";
 import { getAllVersionUpdateMessageVersions } from "../react/constants/versionUpdateMessages";
-import { disposeMuPDF, disposeMuPDFWorker } from "./utils/mupdf";
-import { disposeSentencex } from "./services/pdf";
+import { disposeMuPDFWorker } from "./services/pdf";
+import { configurePDFForBeaver } from "./utils/configurePDFForBeaver";
 import { registerBeaverProtocolHandler, unregisterBeaverProtocolHandler } from "./services/protocolHandler";
 import { cancelAllActiveTasks } from "./utils/backgroundTasks";
 import { initContextMenus, cleanupContextMenus } from "./modules/zoteroContextMenu";
@@ -215,6 +215,11 @@ async function onStartup() {
     initLocale();
     ztoolkit.log("Startup");
 
+    // -------- Configure the PDF package (esbuild bundle copy) --------
+    // Idempotent. Must run before any PDF op. The webpack bundle calls the
+    // same adapter from `react/index.tsx` for its own copy of the config.
+    configurePDFForBeaver();
+
     // -------- Store plugin version --------
     addon.pluginVersion = version;
     ztoolkit.log(`Plugin version: ${version}`);
@@ -311,6 +316,13 @@ async function onStartup() {
 async function onMainWindowLoad(win: Window): Promise<void> {
     // Create ztoolkit for every window
     addon.data.ztoolkit = createZToolkit();
+
+    // Re-configure the PDF package on every main-window load. Required for
+    // the macOS close-last-window-then-reopen lifecycle (see CLAUDE.md):
+    // `onStartup()` does not re-run, but the package's module-scope config
+    // and the worker's per-window state must be valid for the new window.
+    // Idempotent — `configurePDF()` overwrites prior config.
+    configurePDFForBeaver();
 
     registerMainWindowFtl(win);
 
@@ -439,15 +451,9 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         // stale held-lock cannot block authentication on the next load.
         await cleanupSupabaseWindowState(win);
 
-        // 2. Dispose MuPDF WASM module to release native resources
-        await Promise.all([
-            withShutdownTimeout(disposeMuPDF(), "disposeMuPDF"),
-            withShutdownTimeout(disposeMuPDFWorker(), "disposeMuPDFWorker"),
-        ]);
-
-        // 2b. Dispose sentencex-wasm sentence segmenter so its WASM
-        //     instance can be GC'd alongside MuPDF.
-        await withShutdownTimeout(disposeSentencex(), "disposeSentencex");
+        // 2. Terminate the MuPDF worker. Sentencex lives inside the worker
+        //    and dies with `worker.terminate()`.
+        await withShutdownTimeout(disposeMuPDFWorker(), "disposeMuPDFWorker");
 
         // 3. Clear attachment file cache
         if (addon.attachmentFileCache) {
@@ -623,9 +629,7 @@ async function onShutdown(): Promise<void> {
             await cleanupSupabaseWindowState(Zotero.getMainWindow());
         } catch (_e) { /* may not be available during shutdown */ }
     
-        await disposeMuPDF();
-        await disposeSentencex();
-        await Promise.all([disposeMuPDF(), disposeMuPDFWorker()]);
+        await disposeMuPDFWorker();
 
         if (addon.attachmentFileCache) {
             addon.attachmentFileCache.clearMemoryCache();

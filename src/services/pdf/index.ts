@@ -18,20 +18,21 @@ import {
     PDFSearchOptions,
     PDFSearchResult,
 } from "./types";
-import {
-    extractPageSentenceBBoxes,
-    type PageSentenceBBoxOptions,
-    type PageSentenceBBoxResult,
-} from "./ParagraphSentenceMapper";
-import {
-    getSentenceSplitterWithFallback,
-    normalizeLanguageCode,
-} from "./SentencexSplitter";
-import { runSentenceExtractionPipeline } from "./SentenceExtractionPipeline";
+import type { PageSentenceBBoxResult } from "./ParagraphSentenceMapper";
+import type {
+    ExtractSentenceBBoxesArgs,
+    SentenceSplitterConfig,
+} from "./sentenceTypes";
 
 // Re-export types and classes for convenience
 export * from "./types";
-export { MuPDFService, disposeMuPDF } from "./MuPDFService";
+export { configurePDF, isConfigured } from "./config";
+export type {
+    PDFConfig,
+    PDFLogSink,
+    PDFWorkerClientSlot,
+    PDFWorkerUrls,
+} from "./config";
 export {
     MuPDFWorkerClient,
     getMuPDFWorkerClient,
@@ -112,18 +113,20 @@ export type {
     ParagraphFeasibilityReport,
 } from "./ParagraphSentenceMapper";
 export {
-    getSentencexSplitter,
-    getSentenceSplitterWithFallback,
-    disposeSentencex,
     normalizeLanguageCode,
     buildByteOffsetTable,
     byteRangesToCharRanges,
 } from "./SentencexSplitter";
 export type { SentencexBoundary } from "./SentencexSplitter";
 export {
-    resolveAnalysisPageIndices,
+    resolveAnalysisPages,
     DEFAULT_ANALYSIS_WINDOW_CAP,
 } from "./AnalysisWindow";
+export { buildPageAnalysisContext } from "./PageAnalysisContext";
+export type {
+    PageAnalysisContext,
+    PageAnalysisContextInput,
+} from "./PageAnalysisContext";
 export { detectFilteredParagraphs } from "./FilteredParagraphPipeline";
 export {
     bridgeDetailedPageFonts,
@@ -133,20 +136,20 @@ export type {
     FilteredParagraphContext,
     FilteredParagraphResult,
 } from "./FilteredParagraphPipeline";
-export { runSentenceExtractionPipeline } from "./SentenceExtractionPipeline";
 export type {
-    SentencePipelineOptions,
-    SentencePipelineTrace,
-    SentencePipelineOutput,
-} from "./SentenceExtractionPipeline";
+    SentenceSplitterConfig,
+    ExtractSentenceBBoxesArgs,
+    WorkerSentenceBBoxOptions,
+    SentenceBBoxTrace,
+    SentenceBBoxTraceResult,
+} from "./sentenceTypes";
 
 /**
  * PDFExtractor - High-level API for extracting text from PDFs.
  *
  * Every method delegates to the shared MuPDF worker (see
- * `getMuPDFWorkerClient()`). This class is a thin worker facade — for
- * synchronous main-thread access (e.g. dev tooling like
- * `extractionVisualizer.ts`), use `MuPDFService` directly.
+ * `getMuPDFWorkerClient()`) so the heavy WASM work runs off the Zotero UI
+ * thread. This class is a thin worker facade.
  *
  * Usage:
  * ```typescript
@@ -175,15 +178,49 @@ export class PDFExtractor {
      * `ProcessedPage.lines` is populated with bbox + fontSize + columnIndex
      * metadata and `page.content` becomes the line texts joined with `\n`.
      * `blocks` is left empty in that mode.
+     *
+     * `mode` selects the output product. `"markdown"` (default) returns
+     * `ExtractionResult` with per-page text. `"structured"` is reserved for
+     * the upcoming sentence + bbox path and currently throws.
+     *
+     * `markdown.engine` selects the markdown engine when `mode === "markdown"`:
+     *   - `"paragraph"` (default): line + paragraph detection via
+     *     `FilteredParagraphPipeline`, with headers prefixed `## ` and
+     *     paragraphs separated by `\n\n`. `ProcessedPage.blocks` is left
+     *     empty (matches the `useLineDetection: true` convention).
+     *   - `"block"`: legacy `PageExtractor.extractPageWithColumns` — blocks
+     *     joined with `\n\n`. Kept reachable as an escape hatch.
      */
     async extract(
         pdfData: Uint8Array | ArrayBuffer,
         args: {
+            mode?: "markdown" | "structured";
+            markdown?: { engine?: "block" | "paragraph" };
             settings?: ExtractionSettings;
             pageIndices?: number[];
             pageRange?: { startIndex: number; endIndex?: number; maxPages?: number };
+            /**
+             * Cross-page analysis window for margin smart-removal and
+             * the document-wide style profile. `0` (default) analyzes
+             * only the requested target pages; `N>0` adds ±N neighbors
+             * around each target; `Infinity` covers the whole doc.
+             */
+            analysisWindow?: number;
         } = {}
     ): Promise<ExtractionResult> {
+        if (args.mode === "structured") {
+            throw new Error(
+                "PDFExtractor.extract: structured mode not yet implemented; " +
+                "use extractSentenceBBoxes for sentence-level extraction",
+            );
+        }
+        const explicitEngine = args.markdown?.engine;
+        if (explicitEngine === "paragraph" && args.settings?.useLineDetection) {
+            throw new Error(
+                "PDFExtractor.extract: markdown.engine='paragraph' is " +
+                "incompatible with settings.useLineDetection=true",
+            );
+        }
         return getMuPDFWorkerClient().extract(pdfData, args);
     }
 
@@ -235,12 +272,21 @@ export class PDFExtractor {
     /**
      * Extract sentence-level bounding boxes for a single page.
      *
-     * Runs the paragraph-scoped sentence mapper pipeline:
-     *   1. Character-level walk via `MuPDFService.extractRawPageDetailed`.
-     *   2. Column + line + paragraph detection (existing detectors reused).
-     *   3. Per-paragraph sentence split (default: simple regex; callers can
-     *      inject their own via `options.splitter`).
-     *   4. Each sentence range resolved to one bbox per line-fragment.
+     * One worker round-trip — the worker owns analysis-window loading,
+     * detailed page extraction, font bridging, filtered paragraph
+     * detection, splitter resolution, and sentence mapping.
+     *
+     * Splitter resolution is described by a serializable
+     * `SentenceSplitterConfig`: `{ type: "sentencex", language? }` (default)
+     * or `{ type: "simple" }`. The worker resolves the actual splitter
+     * function internally and degrades to the regex splitter on sentencex
+     * init failure.
+     *
+     * **Language precedence.** When both `args.splitter` and `args.language`
+     * are provided, the explicit `splitter` config wins. `args.language`
+     * is only consulted when `args.splitter` is omitted entirely (in
+     * which case the facade defaults to
+     * `{ type: "sentencex", language: args.language }`).
      *
      * **Graceful degradation.** A paragraph that fails the precise mapping
      * path (unmapped, text/chars invariant violation, or empty-split)
@@ -249,16 +295,13 @@ export class PDFExtractor {
      * `result.degradedParagraphs`. The function never throws on correctness
      * traps; the whole-page answer is always usable.
      *
-     * @param pdfData - The PDF file as Uint8Array or ArrayBuffer
-     * @param pageIndex - 0-based page index
-     * @param options - Pipeline options (splitter, paragraph detector settings)
-     * @returns Sentences grouped by paragraph, plus a flat sentence list and
-     *          degradation counters.
-     *
      * @example
      * ```typescript
      * const extractor = new PDFExtractor();
-     * const result = await extractor.extractSentenceBBoxes(pdfData, 0);
+     * const result = await extractor.extractSentenceBBoxes(pdfData, {
+     *   pageIndex: 3,
+     *   splitter: { type: "sentencex", language: "en" },
+     * });
      * for (const sentence of result.sentences) {
      *   console.log(sentence.text, sentence.bboxes);
      * }
@@ -266,78 +309,20 @@ export class PDFExtractor {
      */
     async extractSentenceBBoxes(
         pdfData: Uint8Array | ArrayBuffer,
-        args: { pageIndex: number } & PageSentenceBBoxOptions
+        args: ExtractSentenceBBoxesArgs,
     ): Promise<PageSentenceBBoxResult> {
-        const client = getMuPDFWorkerClient();
-        const { pageIndex, ...options } = args;
-
-        // Splitter functions are not structurally cloneable across the
-        // worker boundary, so whenever we need to run a JS splitter we
-        // fetch the detailed page from the worker and run the mapper on
-        // the main thread. This applies to both caller-provided
-        // splitters and the default sentencex splitter (loaded via
-        // ChromeUtils.importESModule on the main thread). The sentencex
-        // module is cached after first init, so the WASM tax is paid
-        // once per session.
-        const splitter =
-            options.splitter ??
-            (await getSentenceSplitterWithFallback(
-                normalizeLanguageCode(options.language),
-            ));
-
-        // If the caller already ran their own paragraph pipeline (e.g.
-        // the trace endpoint, or an internal worker call passing a
-        // precomputed result through the worker boundary), keep the
-        // legacy single-page path — the precomputed paragraphResult
-        // already reflects whatever filtering they applied.
-        if (options.precomputed) {
-            const detailed = await client.extractRawPageDetailed(
-                pdfData,
-                pageIndex,
-            );
-            return extractPageSentenceBBoxes(detailed, { ...options, splitter });
-        }
-
-        // Otherwise: delegate to the shared sentence-extraction
-        // pipeline, which owns the analysis-window load, detailed-page
-        // substitution, filtered paragraph detection, and the final
-        // sentence mapping. This is the same orchestration the
-        // `/beaver/test/pdf-pipeline-trace` endpoint runs (with
-        // `trace: true`), so the debug endpoint always reflects what
-        // production actually does.
-        const { result } = await runSentenceExtractionPipeline({
+        const { pageIndex, splitter, language, paragraphSettings, analysisWindow } = args;
+        const splitterConfig: SentenceSplitterConfig =
+            splitter ?? { type: "sentencex", language };
+        // Forward only the named production fields. Spreading `...rest` would
+        // let an `any`-typed or request-derived `args` object leak `debug: true`
+        // through to the worker call, silently turning this method's
+        // `Promise<PageSentenceBBoxResult>` into a trace envelope at runtime.
+        return getMuPDFWorkerClient().extractSentenceBBoxes(
             pdfData,
             pageIndex,
-            splitter,
-            analysisPageWindow: options.analysisPageWindow,
-            paragraphSettings: options.paragraphSettings,
-            language: options.language,
-        });
-        return result;
-    }
-
-    /**
-     * Render a single page to an image.
-     *
-     * @param pdfData - The PDF file as Uint8Array or ArrayBuffer
-     * @param pageIndex - Page index (0-based)
-     * @param options - Rendering options (scale, dpi, format, etc.)
-     * @returns PageImageResult with image data and metadata
-     *
-     * @example
-     * ```typescript
-     * const extractor = new PDFExtractor();
-     * // Render at 150 DPI as PNG
-     * const result = await extractor.renderPageToImage(pdfData, 0, { dpi: 150 });
-     * console.log(`Image: ${result.width}x${result.height} @ ${result.dpi} DPI`);
-     * ```
-     */
-    async renderPageToImage(
-        pdfData: Uint8Array | ArrayBuffer,
-        pageIndex: number,
-        options: PageImageOptions = {}
-    ): Promise<PageImageResult> {
-        return getMuPDFWorkerClient().renderPageToImage(pdfData, pageIndex, options);
+            { splitterConfig, paragraphSettings, analysisWindow },
+        );
     }
 
     /**
@@ -350,6 +335,8 @@ export class PDFExtractor {
      * `pageIndices: undefined` (or omit args entirely), NOT a pre-enumerated
      * list — that requires knowing pageCount upfront, which is what we're
      * trying to avoid.
+     *
+     * For single-page renders, pass `pageIndices: [n]` and read `pages[0]`.
      */
     async renderPages(
         pdfData: Uint8Array | ArrayBuffer,

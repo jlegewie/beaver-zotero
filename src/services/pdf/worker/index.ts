@@ -1,16 +1,19 @@
 /**
- * MuPDF WASM module worker (bundled successor to
- * addon/content/modules/mupdf-worker.mjs — see git history pre-PR#3).
+ * MuPDF WASM module worker entry point.
  *
  * IMPORTANT: do NOT import from `../index` (the barrel). It re-exports
- * MuPDFService, MuPDFWorkerClient, the getPref-using PDFExtractor, and
- * the logger — none of which are worker-safe. Worker code imports
- * analyzers and types directly:
+ * `MuPDFWorkerClient` (and the `PDFExtractor` facade that wraps it), which
+ * is the *main-thread* worker proxy: it calls `new Worker(...)` against
+ * URLs supplied by `getConfig()` and would try to spawn a worker from
+ * inside this worker. Worker code imports analyzers and types directly:
  *   import { StyleAnalyzer } from "../StyleAnalyzer";
  *   import type { RawPageData, ExtractionResult } from "../types";
  *
- * Built by the second esbuild entry in zotero-plugin.config.ts. Output
- * lands at `chrome://beaver/content/scripts/mupdf-worker.js`.
+ * Built as a separate worker bundle by the host's build system.
+ *
+ * Configuration: the main-thread client posts a `configure` message as the
+ * first frame after spawning this worker (see `MuPDFWorkerClient.ensureWorker`).
+ * Op messages received before configure throw via `getWorkerUrls()`.
  */
 
 import {
@@ -20,7 +23,20 @@ import {
 } from "./docCache";
 import { enqueue } from "./opQueue";
 import { ensureApi } from "./wasmInit";
+import { isWorkerConfigured, setWorkerUrls, type WorkerUrls } from "./config";
+import { setPDFLogger } from "../logging";
+import { postLog } from "./errors";
+
+// Route analyzer-module logs through the existing `postLog` channel so the
+// main-thread `MuPDFWorkerClient` forwards them to the host-configured
+// `PDFConfig.log` sink. Installed eagerly at module load — the main-thread
+// onmessage handler is the only thing in this file that depends on the
+// worker `configure` frame; analyzer logs work as soon as ops start running.
+setPDFLogger((msg, level) => {
+    postLog(level === 1 ? "error" : level === 2 ? "warn" : "info", msg);
+});
 import {
+    opAnalyzeMarginRemoval,
     opAnalyzeOCRNeeds,
     opExtract,
     opExtractRawPageDetailed,
@@ -28,7 +44,6 @@ import {
     opExtractSentenceBBoxes,
     opGetMetadata,
     opGetPageCount,
-    opRenderPageToImage,
     opRenderPages,
     opSearch,
     opSearchPages,
@@ -68,8 +83,6 @@ async function dispatch(op: string, args: Record<string, unknown> | undefined): 
             return await opExtractRawPageDetailed(a as Parameters<typeof opExtractRawPageDetailed>[0]);
         case "renderPages":
             return await opRenderPages(a as Parameters<typeof opRenderPages>[0]);
-        case "renderPageToImage":
-            return await opRenderPageToImage(a as Parameters<typeof opRenderPageToImage>[0]);
         case "searchPages":
             return await opSearchPages(a as Parameters<typeof opSearchPages>[0]);
         // orchestration ops
@@ -81,16 +94,25 @@ async function dispatch(op: string, args: Record<string, unknown> | undefined): 
             return await opSearch(a as Parameters<typeof opSearch>[0]);
         case "extractSentenceBBoxes":
             return await opExtractSentenceBBoxes(a as Parameters<typeof opExtractSentenceBBoxes>[0]);
+        case "analyzeMarginRemoval":
+            return await opAnalyzeMarginRemoval(a as Parameters<typeof opAnalyzeMarginRemoval>[0]);
         default:
             throw new Error(`Unknown op: ${op}`);
     }
 }
 
-interface IncomingMessage {
+interface IncomingOpMessage {
     id?: number;
     op?: string;
     args?: Record<string, unknown>;
 }
+
+interface IncomingConfigureMessage {
+    kind: "configure";
+    urls: WorkerUrls;
+}
+
+type IncomingMessage = IncomingOpMessage | IncomingConfigureMessage;
 
 interface ExtractionErrorLike {
     name?: string;
@@ -103,8 +125,35 @@ workerSelf.onmessage = (event: MessageEvent) => {
     const data = event.data as IncomingMessage | null;
     if (!data || typeof data !== "object") return;
 
-    const { id, op, args } = data;
+    // Configure frame — first message posted by MuPDFWorkerClient.ensureWorker
+    // immediately after spawn. No reply.
+    if ((data as IncomingConfigureMessage).kind === "configure") {
+        const cfg = data as IncomingConfigureMessage;
+        if (cfg.urls && typeof cfg.urls === "object") {
+            setWorkerUrls(cfg.urls);
+        }
+        return;
+    }
+
+    const { id, op, args } = data as IncomingOpMessage;
     if (typeof id !== "number" || typeof op !== "string") {
+        return;
+    }
+
+    // Fail-fast: every op (including the doc-cache RPCs `__cacheStats` /
+    // `__cacheClear` which never touch WASM URLs) requires a prior
+    // configure frame. Without this guard those two would silently run
+    // pre-config, weakening the configure-before-op contract.
+    if (!isWorkerConfigured()) {
+        workerSelf.postMessage({
+            id,
+            ok: false,
+            error: {
+                name: "Error",
+                message:
+                    "MuPDF worker received op before configure message",
+            },
+        });
         return;
     }
 

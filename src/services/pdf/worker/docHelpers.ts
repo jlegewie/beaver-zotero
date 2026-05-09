@@ -2,7 +2,8 @@
  * Shared helpers used by every worker op. Extracted so orchestration ops
  * compose them within a single doc-open.
  *
- * The structured-text option strings mirror `src/services/pdf/MuPDFService.ts`.
+ * Owns the MuPDF/WASM bridge: structured-text option strings, raw-page
+ * normalization, image rendering, search, and page-label collection.
  */
 
 import type {
@@ -84,9 +85,8 @@ export function bboxFromQuads(quads: QuadTuple[]): RawBBox {
 }
 
 /**
- * Open a PDF document and run the encryption check, mirroring
- * MuPDFService.open() semantics. Throws workerError on encrypted /
- * invalid input. Returns the open `doc` on success.
+ * Open a PDF document and run the encryption check. Throws workerError
+ * on encrypted / invalid input. Returns the open `doc` on success.
  */
 export async function openDocSafe(pdfData: Uint8Array | ArrayBuffer): Promise<DocumentLike> {
     const { Document } = await ensureApi();
@@ -109,7 +109,8 @@ export async function openDocSafe(pdfData: Uint8Array | ArrayBuffer): Promise<Do
         );
     }
 
-    // Encryption check — mirrors the swallow-and-continue at MuPDFService.ts:267-272.
+    // Encryption check — swallow API-shape failures and continue. Some
+    // builds of MuPDF lack `needsPassword`; treat that as "not encrypted."
     try {
         if (typeof doc.needsPassword === "function") {
             if (doc.needsPassword()) {
@@ -154,9 +155,8 @@ export async function openDocSafe(pdfData: Uint8Array | ArrayBuffer): Promise<Do
 export const openDocUncached = openDocSafe;
 
 /**
- * Extract a single page's structured-text JSON. Mirrors
- * `MuPDFService.extractRawPage(pageIndex, options)` exactly — including the
- * `includeImages` switch to STRUCTURED_TEXT_OPTIONS_WITH_IMAGES.
+ * Extract a single page's structured-text JSON. Honours the
+ * `includeImages` switch by selecting STRUCTURED_TEXT_OPTIONS_WITH_IMAGES.
  *
  * Critical: `DocumentAnalyzer.getDetailedOCRAnalysis` calls with
  * `{ includeImages: true }` and inspects image blocks to detect scanned-page
@@ -204,8 +204,8 @@ export function extractRawPageFromDoc(
 }
 
 /**
- * Extract detailed (character-level) page data. Mirrors
- * `MuPDFService.extractRawPageDetailed(pageIndex, options)`.
+ * Extract detailed (character-level) page data, including per-character
+ * quad and bbox metadata.
  */
 export function extractRawPageDetailedFromDoc(
     doc: DocumentLike,
@@ -351,7 +351,7 @@ export function extractRawPageDetailedFromDoc(
     }
 }
 
-/** Render a single page to PNG/JPEG. Mirrors MuPDFService.renderPageToImage internals. */
+/** Render a single page to PNG/JPEG. */
 export function renderOnePage(
     api: MuPDFApi,
     doc: DocumentLike,
@@ -399,7 +399,7 @@ export function renderOnePage(
     }
 }
 
-/** Search a single page. Mirrors MuPDFService.searchPage internals. */
+/** Search a single page for a literal phrase; returns hits with QuadPoints. */
 export function searchPageInDoc(
     doc: DocumentLike,
     pageIndex: number,
@@ -490,7 +490,7 @@ export function collectDocumentInfo(doc: DocumentLike): {
     return info;
 }
 
-/** Collect every page's label into a record. Mirrors MuPDFService.getAllPageLabels. */
+/** Collect every page's label into a record keyed by 0-based page index. */
 export function collectPageLabels(doc: DocumentLike): Record<number, string> {
     const count = doc.countPages();
     const labels: Record<number, string> = {};
@@ -508,7 +508,11 @@ export function collectPageLabels(doc: DocumentLike): Record<number, string> {
     return labels;
 }
 
-/** Resolve `pageIndices` to a concrete in-bounds list. Mirrors filter semantics in MuPDFService. */
+/**
+ * Resolve `pageIndices` to a concrete in-bounds list. An empty/undefined
+ * `pageIndices` means "all pages"; explicit indices are silently filtered
+ * to those in range.
+ */
 export function resolvePageIndices(pageCount: number, pageIndices?: number[]): number[] {
     return pageIndices && pageIndices.length
         ? pageIndices.filter((i) => i >= 0 && i < pageCount)
@@ -627,8 +631,8 @@ export function resolvePageRangeOrThrow(
 }
 
 /**
- * Build a RawPageProvider over an open Document. Lets DocumentAnalyzer run
- * inside the worker without a MuPDFService dependency.
+ * Build a RawPageProvider over an open Document. Lets DocumentAnalyzer
+ * run inside the worker against an already-open `doc` (no extra opens).
  */
 export function rawPageProviderFromDoc(doc: DocumentLike): RawPageProvider {
     return {

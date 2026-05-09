@@ -50,8 +50,6 @@ export interface ExtractionSettings {
     repeatThreshold?: number;
     /** Whether to detect and remove page number sequences */
     detectPageSequences?: boolean;
-    /** Number of pages to sample for style analysis (0 = all pages) */
-    styleSampleSize?: number;
     /** Use line detection for high-quality extraction (default: false) */
     useLineDetection?: boolean;
 }
@@ -64,7 +62,6 @@ export const DEFAULT_EXTRACTION_SETTINGS: Required<ExtractionSettings> = {
     marginZone: DEFAULT_MARGIN_ZONE,
     repeatThreshold: 3,
     detectPageSequences: true,
-    styleSampleSize: 100,
     useLineDetection: false,
 };
 
@@ -462,6 +459,35 @@ export interface DocumentAnalysis {
 // Final Extraction Result
 // ============================================================================
 
+/**
+ * Per-phase worker timings for a single `extract` call. All values are
+ * milliseconds (`performance.now()` deltas measured inside the worker).
+ *
+ * Recorded for both markdown engines so cross-engine comparisons stay
+ * apples-to-apples. Optional on `ExtractionResult.metadata` so older
+ * callers and tests that don't need timings don't have to populate them.
+ */
+export interface ExtractionTimings {
+    /** Total worker op duration (entry to return). */
+    totalMs: number;
+    /**
+     * Time inside `acquireDoc`. Cold-cache only — warm-cache hits resolve in
+     * microseconds because the doc is reused. Useful as a baseline for the
+     * cost of opening a fresh PDF.
+     */
+    docOpenMs: number;
+    /** Walk over `analysisIndices` (`extractRawPageFromDoc` per page). */
+    walkMs: number;
+    /** `buildPageAnalysisContext` (StyleAnalyzer + cross-page MarginFilter). */
+    analysisMs: number;
+    /**
+     * Per-target-page processing time. `length === pages.length`. Indexed
+     * positionally with `pages` (NOT by document-page index). The engines
+     * actually diverge inside this loop, so this is the field to compare.
+     */
+    perPageMs: number[];
+}
+
 /** The complete extraction result */
 export interface ExtractionResult {
     /** Processed pages */
@@ -477,6 +503,18 @@ export interface ExtractionResult {
         extractedAt: string;
         version: string;
         settings: ExtractionSettings;
+        /**
+         * Markdown engine that produced the result. `"block-with-lines"` is
+         * the dev `useLineDetection` path on top of the block engine.
+         * Optional so legacy callers / tests don't need to populate it.
+         */
+        engine?: "block" | "block-with-lines" | "paragraph";
+        /**
+         * Per-phase worker timings. Optional — populated by `opExtract` /
+         * `runExtractFromIndices`; absent on direct ExtractionResult literals
+         * built in tests or fixtures.
+         */
+        timings?: ExtractionTimings;
     };
 }
 

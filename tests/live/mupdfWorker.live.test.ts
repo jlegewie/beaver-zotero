@@ -38,7 +38,6 @@ import {
     pdfAnalyzeOcr,
     pdfSearchScored,
     pdfSentenceBBoxes,
-    pdfRenderPage,
     workerCacheClear,
     workerMarkStale,
     workerStats,
@@ -214,8 +213,7 @@ describe('MuPDF worker smoke — orchestration ops', () => {
 
     describe('extract', () => {
         it('returns page-level extraction for a healthy PDF', async () => {
-            const settings = { styleSampleSize: 0 };
-            const res = await pdfExtract(SMALL_PDF, { settings });
+            const res = await pdfExtract(SMALL_PDF, {});
             expect(res.ok).toBe(true);
 
             const result = res.result;
@@ -250,7 +248,7 @@ describe('MuPDF worker smoke — orchestration ops', () => {
 
     describe('extract (useLineDetection)', () => {
         it('returns line-based extraction for a healthy PDF', async () => {
-            const settings = { styleSampleSize: 0, useLineDetection: true };
+            const settings = { useLineDetection: true };
             const res = await pdfExtractByLines(SMALL_PDF, { settings });
             expect(res.ok).toBe(true);
 
@@ -346,24 +344,6 @@ describe('MuPDF worker smoke — orchestration ops', () => {
         });
     });
 
-    describe('renderPageToImage', () => {
-        it('renders a single page', async () => {
-            const res = await pdfRenderPage(SMALL_PDF, { page_index: 0 });
-            expect(res.ok).toBe(true);
-
-            const result = res.result!;
-            expect(result.pageIndex).toBe(0);
-            expect(result.width).toBeGreaterThan(0);
-            expect(result.height).toBeGreaterThan(0);
-            expect(result.data_byte_length).toBeGreaterThan(0);
-        });
-
-        it('throws PAGE_OUT_OF_RANGE for an invalid index', async () => {
-            const res = await pdfRenderPage(SMALL_PDF, { page_index: 99999 });
-            expect(res.ok).toBe(false);
-            expect(res.error?.code).toBe('PAGE_OUT_OF_RANGE');
-        });
-    });
 });
 
 // ---------------------------------------------------------------------------

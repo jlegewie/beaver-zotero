@@ -17,6 +17,7 @@ import type {
     RemovalCandidate,
     MarginRemovalResult,
 } from "./types";
+import { pdfLog } from "./logging";
 
 // ============================================================================
 // Page Number Detection — multilingual prefixes, anchored parser
@@ -713,7 +714,7 @@ export class MarginFilter {
 
                     // Log the page number sequence detection (development only)
                     if (process.env.NODE_ENV === "development") {
-                        console.log(`[MarginFilter] Detected page number sequence in ${position} zone: ${values.slice(0, 5).join(", ")}...`);
+                        pdfLog(`[MarginFilter] Detected page number sequence in ${position} zone: ${values.slice(0, 5).join(", ")}...`, 3);
                     }
                 }
             }
@@ -790,11 +791,11 @@ export class MarginFilter {
         if (process.env.NODE_ENV !== "development") return;
 
         if (result.candidates.length === 0) {
-            console.log("[MarginFilter] No margin elements identified for removal");
+            pdfLog("[MarginFilter] No margin elements identified for removal", 3);
             return;
         }
 
-        console.log(`[MarginFilter] Identified ${result.candidates.length} elements for removal:`);
+        pdfLog(`[MarginFilter] Identified ${result.candidates.length} elements for removal:`, 3);
 
         // Group by position for cleaner output
         const byPosition = new Map<MarginPosition, RemovalCandidate[]>();
@@ -806,7 +807,7 @@ export class MarginFilter {
         }
 
         for (const [position, candidates] of byPosition) {
-            console.log(`\n  ${position.toUpperCase()} zone:`);
+            pdfLog(`\n  ${position.toUpperCase()} zone:`, 3);
 
             for (const candidate of candidates) {
                 const pages = candidate.pageIndices;
@@ -817,7 +818,7 @@ export class MarginFilter {
                 const reasonTag = candidate.reason === "page_number" ? " [PAGE#]" : "";
                 const displayText = candidate.originalText.slice(0, 50);
 
-                console.log(`    "${displayText}"${reasonTag} (${pageStr})`);
+                pdfLog(`    "${displayText}"${reasonTag} (${pageStr})`, 3);
             }
         }
     }

@@ -445,7 +445,7 @@ export function sentenceToBoxes(
 /**
  * Produce `SentenceBBox[]` for a detailed page.
  *
- * @param page     - Output of `MuPDFService.extractRawPageDetailed`.
+ * @param page     - Output of `MuPDFWorkerClient.extractRawPageDetailed`.
  * @param splitter - Sentence splitter callback. Defaults to
  *                   `simpleRegexSentenceSplit` for feasibility testing.
  */

@@ -34,10 +34,10 @@ Phase 3: Page Processing (filtering, line detection, extraction)
 
 #### Phase 1: Raw Extraction
 
-- **Module**: `MuPDFService.ts`
+- **Module**: `worker/docHelpers.ts` (called via `MuPDFWorkerClient`)
 - **Purpose**: Single-pass extraction of all structured text from MuPDF
 - **Output**: `RawDocumentData` with raw blocks, lines, spans, and bboxes
-- **Why**: Minimizes WASM calls; all analysis works from this cached data
+- **Why**: All MuPDF/WASM work runs in a worker so the UI thread stays free; analysis modules work from this cached data without re-entering the worker
 
 #### Phase 2: Document Analysis
 
@@ -65,39 +65,67 @@ Phase 3: Page Processing (filtering, line detection, extraction)
 
 ```
 src/services/pdf/
-├── index.ts                    # Main API entry point
-├── types.ts                    # All TypeScript interfaces
-├── MuPDFService.ts            # WASM bridge (low-level)
-├── DocumentAnalyzer.ts        # Text layer & OCR detection
-├── StyleAnalyzer.ts           # Font/style analysis
-├── MarginFilter.ts            # Header/footer removal
-├── ColumnDetector.ts          # Multi-column layout detection
-├── LineDetector.ts            # Line detection within columns
-├── ParagraphDetector.ts       # Paragraph/heading grouping
-├── PageExtractor.ts           # Final page processing
-├── SearchScorer.ts            # Search result scoring & ranking
-└── README.md                  # This file
-
-addon/content/modules/
-└── mupdf-loader.mjs           # WASM loader (ES module)
+├── index.ts                       # Main API entry point (PDFExtractor facade + barrel re-exports)
+├── types.ts                       # Shared TypeScript interfaces
+├── config.ts                      # Cross-bundle config (worker URLs, log sink, client slot)
+├── MuPDFWorkerClient.ts           # Main-thread worker proxy (postMessage RPC)
+├── prewarm.ts                     # Eager worker spawn helper
+├── worker/
+│   ├── index.ts                   # Worker entry point + dispatcher
+│   ├── ops.ts                     # Worker-side op handlers
+│   ├── opQueue.ts                 # Per-worker op serialization queue
+│   ├── config.ts                  # Worker-side URL/config storage
+│   ├── docCache.ts                # Short-lived in-worker doc cache (acquireDoc/releaseDoc)
+│   ├── docHelpers.ts              # MuPDF/WASM bridge (worker-only)
+│   ├── mupdfApi.ts                # MuPDF API wrappers
+│   ├── wasmInit.ts                # MuPDF WASM bootstrap
+│   ├── wasmHelpers.ts             # WASM utility helpers
+│   ├── workerScope.ts             # Worker globalThis typing
+│   ├── errors.ts                  # Worker-side error envelopes
+│   ├── sentenceExtraction.ts      # Worker-side sentence-bbox pipeline
+│   ├── sentencexInit.ts           # sentencex bootstrap (lazy, with fallback)
+│   └── splitterResolver.ts        # Resolves SentenceSplitterConfig → splitter fn
+├── DocumentAnalyzer.ts            # Text layer & OCR detection
+├── StyleAnalyzer.ts               # Font/style analysis
+├── MarginFilter.ts                # Header/footer removal
+├── ColumnDetector.ts              # Multi-column layout detection
+├── LineDetector.ts                # Line detection within columns
+├── ParagraphDetector.ts           # Paragraph/heading grouping
+├── PageExtractor.ts               # Final page processing
+├── SearchScorer.ts                # Search result scoring & ranking
+├── AnalysisWindow.ts              # Page-window resolution for analysis
+├── FigureTextFilter.ts            # Standalone figure-text column detector
+├── FilteredParagraphPipeline.ts   # Margin + column + line + paragraph fused pipeline
+├── RawFontBridge.ts               # Bridge per-char font info into detailed pages
+├── SentenceMapper.ts              # Span-level sentence → bbox mapping
+├── ParagraphSentenceMapper.ts     # Paragraph-level sentence → bbox mapping
+├── SentencexSplitter.ts           # sentencex byte/char range conversion + language normalization
+├── sentenceTypes.ts               # Sentence-pipeline types
+├── sentencePostprocess.ts         # Sentence-output post-processing
+└── README.md                      # This file
 
 react/utils/
-└── extractionVisualizer.ts    # Debug visualization tools
+├── extractionVisualizer.ts        # Debug visualization tools (overlay annotations)
+├── extractionOverlay.ts           # Reader overlay rendering
+└── extractionFixtures.ts          # Fixture helpers for sentence-pipeline tests
 ```
 
 ### Module Responsibilities
 
-| Module                | Responsibility      | Input                  | Output                     |
-| --------------------- | ------------------- | ---------------------- | -------------------------- |
-| **MuPDFService**      | WASM interaction    | PDF bytes              | `RawPageData[]`            |
-| **DocumentAnalyzer**  | Text layer checks   | `MuPDFService`         | Boolean, page count        |
-| **StyleAnalyzer**     | Typography analysis | `RawPageData[]`        | `StyleProfile`             |
-| **MarginFilter**      | Smart filtering     | `RawPageData[]`        | `MarginRemovalResult`      |
-| **ColumnDetector**    | Layout detection    | `RawPageData`          | `ColumnDetectionResult`    |
-| **LineDetector**      | Line extraction     | `RawPageData`, columns | `PageLineResult`           |
-| **ParagraphDetector** | Semantic grouping   | `PageLineResult`       | `PageParagraphResult`      |
-| **PageExtractor**     | Orchestration       | All above              | `ProcessedPage`            |
-| **SearchScorer**      | Search scoring      | `RawPageData[]`, hits  | `ScoredPageSearchResult[]` |
+| Module                       | Responsibility                                  | Input                                  | Output                          |
+| ---------------------------- | ----------------------------------------------- | -------------------------------------- | ------------------------------- |
+| **MuPDFWorkerClient**        | Main-thread proxy: `postMessage` RPC + transfer | PDF bytes, op args                     | Op replies                      |
+| **worker/ops + docHelpers**  | WASM interaction (worker-side)                  | PDF bytes                              | `RawPageData[]`                 |
+| **DocumentAnalyzer**         | Text layer checks                               | `RawPageData[]`                        | Boolean, page count             |
+| **StyleAnalyzer**            | Typography analysis                             | `RawPageData[]`                        | `StyleProfile`                  |
+| **MarginFilter**             | Smart filtering                                 | `RawPageData[]`                        | `MarginRemovalResult`           |
+| **ColumnDetector**           | Layout detection                                | `RawPageData`                          | `ColumnDetectionResult`         |
+| **LineDetector**             | Line extraction                                 | `RawPageData`, columns                 | `PageLineResult`                |
+| **ParagraphDetector**        | Semantic grouping                               | `PageLineResult`                       | `PageParagraphResult`           |
+| **PageExtractor**            | Orchestration                                   | All above                              | `ProcessedPage`                 |
+| **SearchScorer**             | Search scoring                                  | `RawPageData[]`, hits                  | `ScoredPageSearchResult[]`      |
+| **FilteredParagraphPipeline**| Margin → column → line → paragraph fused        | `RawPageData`, detailed page, settings | `FilteredParagraphResult`       |
+| **ParagraphSentenceMapper**  | Paragraph + splitter → sentence bboxes          | filtered paragraphs, splitter          | `PageSentenceBBoxResult`        |
 
 ---
 
@@ -162,8 +190,10 @@ ProcessedPage; // { index, content, lines[], columns[] }
 #### Results
 
 ```typescript
-ExtractionResult; // Standard extraction
-LineExtractionResult; // Line-based extraction (same structure)
+ExtractionResult; // Result of PDFExtractor.extract (with or without useLineDetection)
+PageSentenceBBoxResult; // Result of PDFExtractor.extractSentenceBBoxes
+PDFSearchResult; // Result of PDFExtractor.search
+PageImageResult; // Per-page entry in PDFExtractor.renderPages result.pages
 ```
 
 ### 3. Text Layer Detection
@@ -333,18 +363,19 @@ export interface ProcessedPage {
 }
 ```
 
-3. **Integrate in `index.ts`**:
+3. **Integrate in the worker pipeline**:
+
+The fused `extract` op runs inside the worker. Wire new analyzers into
+`worker/ops.ts` (or `PageExtractor.ts`) so they execute alongside the
+existing column/line/paragraph passes:
 
 ```typescript
-import { detectSections } from "./SectionDetector";
+import { detectSections } from "../SectionDetector";
 
-// In extractByLines():
-for (const rawPage of rawData.pages) {
-  // ... existing code
-  const lineResult = detectLinesOnPage(filteredPage, columnResult.columns);
+// Inside the per-page loop in worker/ops.ts → opExtract
+for (const rawPage of rawPages) {
+  // ... existing column/line/paragraph detection
   const sectionResult = detectSections(lineResult, styleProfile);
-
-  // Add to processed page
   processedPage.sections = sectionResult.sections;
 }
 ```
@@ -403,12 +434,14 @@ export async function visualizeCurrentPageSections(): Promise<{
     const reader = await getCurrentReaderAndWaitForView(undefined, true);
     const currentPageIndex = /* get from pdfViewer */;
 
-    // 2. Load PDF and extract
+    // 2. Load PDF and extract one page via the worker
     const pdfData = await IOUtils.read(filePath);
-    const mupdf = new MuPDFService();
-    await mupdf.open(pdfData);
-    const rawPage = mupdf.extractRawPage(currentPageIndex);
-    mupdf.close();
+    const { pages } = await getMuPDFWorkerClient().extractRawPages(
+        pdfData,
+        [currentPageIndex],
+    );
+    const rawPage = pages[0];
+    if (!rawPage) throw new Error("page out of range");
 
     // 3. Run detection pipeline
     const filteredPage = MarginFilter.filterPageByMargins(rawPage, DEFAULT_MARGINS);
@@ -533,20 +566,31 @@ console.groupEnd();
 
 ### Visualization Tools
 
-**Use the PDF test menu** in the UI:
+The plugin's **Dev Tools menu** (`react/components/ui/buttons/DevToolsMenuButton.tsx`,
+visible only in dev builds) exposes the PDF debug actions:
 
-1. **Test PDF Extraction**: Extract entire document with line detection
-2. **Extract Current Page**: Single page with full line metadata
-3. **Visualize Columns**: Blue overlays showing detected columns
-4. **Visualize Lines**: Orange overlays for each detected line
-5. **Visualize Paragraphs**: Green (paragraphs) and purple (headers)
+1. **Test PDF Extraction**: Extract the selected attachment via `PDFExtractor.extract`
+2. **Extract Current Page**: Run extraction on the single page open in the reader
+3. **Test PDF Search**: `PDFExtractor.search` against the selected attachment
+4. **Test OCR Detection**: `PDFExtractor.analyzeOCRNeeds` against the selected attachment
+5. **Visualize Columns**: Blue overlays showing detected columns
+6. **Visualize Lines**: Orange overlays for each detected line
+7. **Visualize Paragraphs**: Green (paragraphs) and purple (headers)
+8. **Visualize Sentences**: Per-sentence overlays from the sentence-bbox pipeline
+9. **Clear Visualization**: Remove all temporary overlay annotations
+
+For non-UI debugging, the dev-only HTTP endpoints under `/beaver/test/*`
+(see `react/hooks/useHttpEndpoints.ts` and
+`docs-zotero/pdf-extraction-debug-endpoints.md`) let you POST a payload
+and read back JSON / base64-encoded overlay images without driving the
+reader.
 
 ### Common Issues
 
 #### Issue: "needsPassword is not a function"
 
 **Cause**: JSM module caching  
-**Solution**: Restart Zotero or use metadata fallback in `MuPDFService.ts`
+**Solution**: Restart Zotero or use metadata fallback in `worker/docHelpers.ts`
 
 #### Issue: False "No text layer" detection
 
@@ -582,33 +626,41 @@ console.groupEnd();
 
 ### Optimization Tips
 
-1. **Sample instead of analyzing all pages**:
+1. **Tune the cross-page analysis window**:
 
    ```typescript
-   styleSampleSize: 100; // Default: don't analyze 500+ page books
+   // Default: analyze only requested pages (cheapest).
+   // Wider window improves margin smart-removal + body-style detection.
+   await extractor.extract(pdfData, { pageRange, analysisWindow: 5 });
    ```
 
 2. **Cache extraction results**:
 
    ```typescript
-   const cachedResult = await extractByLinesFromZoteroItem(item);
-   // Store in Map<itemID, LineExtractionResult>
+   const cachedResult = await new PDFExtractor().extract(pdfData);
+   // Store in Map<itemID, ExtractionResult>
    ```
 
 3. **Use page ranges for progressive loading**:
 
    ```typescript
    // Load first 10 pages immediately
-   const preview = await extractor.extractByLines(pdfData, {
-     pages: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+   const preview = await new PDFExtractor().extract(pdfData, {
+     pageIndices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
    });
-   // Load rest in background
+   // Load rest in background — `pageRange` defers range resolution to the
+   // worker so we don't need a separate getPageCount round-trip:
+   const rest = await new PDFExtractor().extract(pdfData, {
+     pageRange: { startIndex: 10 },
+   });
    ```
 
-4. **Skip checks when safe**:
+4. **Use `useLineDetection` when you need positional metadata**:
    ```typescript
-   // If you already know it has a text layer
-   const result = await extractor.extract(pdfData, { checkTextLayer: false });
+   // Each ProcessedPage.lines is populated with bbox + fontSize + columnIndex
+   const result = await new PDFExtractor().extract(pdfData, {
+     settings: { useLineDetection: true },
+   });
    ```
 
 ---
@@ -618,18 +670,38 @@ console.groupEnd();
 ### Main Extraction Methods
 
 ```typescript
-// High-level (recommended)
-const result = await extractByLinesFromZoteroItem(item);
-const result = await extractByLinesFromZoteroItem(item, { pages: [0, 1, 2] });
+import { PDFExtractor } from "src/services/pdf";
 
-// Manual
 const extractor = new PDFExtractor();
-const result = await extractor.extractByLines(pdfData);
-const result = await extractor.extract(pdfData, { useLineDetection: true });
 
-// Checks
+// Whole document
+const result = await extractor.extract(pdfData);
+
+// Explicit page list
+const result = await extractor.extract(pdfData, { pageIndices: [0, 1, 2] });
+
+// Open-ended range (resolved inside the worker — no pageCount round-trip)
+const result = await extractor.extract(pdfData, {
+  pageRange: { startIndex: 0, maxPages: 10 },
+});
+
+// Line-level extraction (populates ProcessedPage.lines with bbox metadata)
+const result = await extractor.extract(pdfData, {
+  settings: { useLineDetection: true },
+});
+
+// Document metadata + page labels in one round-trip
+const meta = await extractor.getMetadata(pdfData);
+
+// Cheap checks
 const pageCount = await extractor.getPageCount(pdfData);
 const ocrNeeds = await extractor.analyzeOCRNeeds(pdfData);
+
+// Sentence-level bboxes for a single page
+const sentences = await extractor.extractSentenceBBoxes(pdfData, {
+  pageIndex: 0,
+  splitter: { type: "sentencex", language: "en" },
+});
 ```
 
 ### Page Image Rendering
@@ -639,13 +711,17 @@ Render PDF pages to PNG or JPEG images with configurable resolution.
 ```typescript
 const extractor = new PDFExtractor();
 
-// Render first page at 300 DPI as PNG
-const image = await extractor.renderPageToImage(pdfData, 0, {
-  dpi: 300, // 300 DPI for high quality
-  alpha: false, // Opaque background
-  showExtras: true, // Include annotations
-  format: "png",
+// Render first page at 300 DPI as PNG (single-page render uses pageIndices: [n])
+const single = await extractor.renderPages(pdfData, {
+  pageIndices: [0],
+  options: {
+    dpi: 300, // 300 DPI for high quality
+    alpha: false, // Opaque background
+    showExtras: true, // Include annotations
+    format: "png",
+  },
 });
+const image = single.pages[0];
 // image.data is Uint8Array of PNG bytes
 // image.width, image.height - image dimensions in pixels
 
@@ -995,7 +1071,7 @@ When adding features:
 
 1. **Add types first** in `types.ts`
 2. **Create focused module** for the new functionality
-3. **Write tests** using the PDF test menu
+3. **Write tests** under `tests/unit/pdf/` (and the sentence-pipeline fixture suite under `tests/unit/pdf/sentenceFixtures` where applicable); use the Dev Tools menu actions for live spot-checks
 4. **Add visualization** for debugging
 5. **Document in this README**
 6. **Update USAGE.md** if it affects the public API
@@ -1016,17 +1092,18 @@ When adding features:
 ### WASM Initialization Errors
 
 **Symptom**: `$libmupdf_load_font_file is not a function`  
-**Fix**: Already handled with stub in `mupdf-loader.mjs`
+**Fix**: Already handled with a stub in the worker's MuPDF API wrapper (`worker/mupdfApi.ts`).
 
 ### Memory Issues
 
 **Symptom**: Browser crashes on large PDFs  
-**Fix**: Process in chunks using `pages` option:
+**Fix**: Process in chunks using `pageIndices` (or `pageRange`):
 
 ```typescript
 for (let i = 0; i < pageCount; i += 10) {
-  const chunk = await extractor.extractByLines(pdfData, {
-    pages: Array.from({ length: 10 }, (_, j) => i + j),
+  const chunk = await extractor.extract(pdfData, {
+    pageIndices: Array.from({ length: 10 }, (_, j) => i + j),
+    settings: { useLineDetection: true },
   });
   // Process chunk
 }

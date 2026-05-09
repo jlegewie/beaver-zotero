@@ -1,10 +1,11 @@
 /**
  * Live parity check for `/beaver/test/pdf-pipeline-trace`.
  *
- * Both `/beaver/test/pdf-pipeline-trace` and `/beaver/test/pdf-sentence-bboxes`
- * route through `runSentenceExtractionPipeline`, so for the same item/page
- * they MUST produce the same sentence output. If this test fails, the
- * trace endpoint has drifted from production.
+ * `/beaver/test/pdf-pipeline-trace` uses the worker trace op and
+ * `/beaver/test/pdf-sentence-bboxes` uses the production worker op. Both
+ * share the same worker-side sentence extraction helper, so for the same
+ * item/page they MUST produce the same sentence output. If this test
+ * fails, the trace endpoint has drifted from production.
  *
  * Run with: `npm run test:live -- pdfPipelineTrace`
  */

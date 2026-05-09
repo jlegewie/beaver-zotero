@@ -468,10 +468,11 @@ function resolveSentencesInParagraph(
 export interface PageSentenceBBoxOptions {
     /**
      * Splitter callback. Defaults to `simpleRegexSentenceSplit` at this
-     * layer; production callers should construct a sentencex-backed
-     * splitter via `getSentenceSplitterWithFallback(language)` and pass
-     * it in. The default is kept regex-only so the mapper module has no
-     * implicit WASM dependency and stays trivially testable.
+     * layer. Worker callers resolve a sentencex-backed splitter from a
+     * serializable config before invoking the mapper; tests and fixture
+     * replay can still pass function-valued splitters directly. The
+     * default is kept regex-only so the mapper module has no implicit WASM
+     * dependency and stays trivially testable.
      */
     splitter?: SentenceSplitter;
     /**
@@ -495,12 +496,14 @@ export interface PageSentenceBBoxOptions {
     };
     /**
      * Cross-page analysis window for smart-removal and document-wide
-     * style profiling.
-     *   - undefined / 0 = whole document (capped at
-     *     `DEFAULT_ANALYSIS_WINDOW_CAP` centered on the target page)
-     *   - positive N    = ±N pages around the target page (still capped)
+     * style profiling. Currently informational at this layer (the
+     * worker resolves the analysis page set upstream); kept here for
+     * documentation parity with `PDFExtractor.extractSentenceBBoxes`.
+     *   - 0 (default) = analyze only the target page
+     *   - positive N  = ±N pages around the target page
+     *   - Infinity    = whole document
      */
-    analysisPageWindow?: number;
+    analysisWindow?: number;
 }
 
 /**

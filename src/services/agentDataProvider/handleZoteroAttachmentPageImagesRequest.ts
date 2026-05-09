@@ -18,8 +18,17 @@ import {
     WSPageImage,
 } from '../agentProtocol';
 import { PDFExtractor, ExtractionError, ExtractionErrorCode } from '../pdf';
-import { EXTRACTION_VERSION, makeRemoteFilePath, isRemoteFilePath } from '../attachmentFileCache';
-import { resolveToPdfAttachment, validateZoteroItemReference, backfillMetadataForError, loadPdfData, checkRemotePdfSize, isRemoteAccessAvailable } from './utils';
+import { makeRemoteFilePath } from '../attachmentFileCache';
+import {
+    resolveToPdfAttachment,
+    validateZoteroItemReference,
+    backfillMetadataForError,
+    loadPdfData,
+    checkRemotePdfSize,
+    isRemoteAccessAvailable,
+    preflightCachedPdfMeta,
+    persistMetadataToCache,
+} from './utils';
 import { ensurePageLabelsForResolution, resolvePageValue, InvalidPageValueError } from './pageLabelResolution';
 
 // Convert raw bytes to base64 in 32 KB chunks
@@ -139,22 +148,25 @@ export async function handleZoteroAttachmentPageImagesRequest(
         // Determine once whether this is an all-pages request
         const requestingAllPages = !pages || pages.length === 0;
 
-        if (cachedMeta) {
-            if (cachedMeta.is_encrypted) {
-                return errorResponse(`The PDF file for ${pdfKey} is password-protected`, 'encrypted');
-            }
-            if (cachedMeta.is_invalid) {
-                return errorResponse(`The PDF file for ${pdfKey} is invalid or corrupted`, 'invalid_pdf');
-            }
-            // Check page count limit only for all-pages requests (not targeted page access)
-            if (!skip_local_limits && requestingAllPages && cachedMeta.page_count != null) {
-                const maxPageCount = getPref('maxPageCount');
-                if (cachedMeta.page_count > maxPageCount) {
+        // Image rendering does not require a text layer, so checkOcr is false.
+        const preflight = preflightCachedPdfMeta(cachedMeta, {
+            checkOcr: false,
+            applyPageCountCap: !skip_local_limits && requestingAllPages,
+            maxPageCount: getPref('maxPageCount'),
+        });
+        if (preflight) {
+            switch (preflight.code) {
+                case 'encrypted':
+                    return errorResponse(`The PDF file for ${pdfKey} is password-protected`, 'encrypted');
+                case 'invalid_pdf':
+                    return errorResponse(`The PDF file for ${pdfKey} is invalid or corrupted`, 'invalid_pdf');
+                case 'too_many_pages':
                     return errorResponse(
-                        `The PDF file for ${pdfKey} has ${cachedMeta.page_count} pages, which exceeds the ${maxPageCount}-page limit`,
-                        'too_many_pages'
+                        `The PDF file for ${pdfKey} has ${preflight.pageCount} pages, which exceeds the ${preflight.maxPageCount}-page limit`,
+                        'too_many_pages',
                     );
-                }
+                // 'no_text_layer' cannot occur here (checkOcr: false). Any future
+                // change to checkOcr must add a branch.
             }
         }
 
@@ -342,7 +354,6 @@ export async function handleZoteroAttachmentPageImagesRequest(
         // Skip cache writes during shutdown — DB writes here race Zotero's
         // teardown (same guard as sync.ts:266 and FileUploader.ts:338).
         const canSafelyExtendCache = cache != null
-            && !Zotero.__beaverShuttingDown
             && cachedMeta != null
             && cachedMeta.needs_ocr === false
             && cachedMeta.is_encrypted === false
@@ -354,41 +365,20 @@ export async function handleZoteroAttachmentPageImagesRequest(
             );
         }
         if (canSafelyExtendCache) {
-            try {
-                let file_mtime_ms = 0;
-                let file_size_bytes = 0;
-                if (!isRemoteFilePath(effectiveFilePath) && filePath) {
-                    const stat = await IOUtils.stat(filePath);
-                    file_mtime_ms = stat.lastModified ?? 0;
-                    file_size_bytes = stat.size ?? 0;
-                }
-                // Recheck after the stat await — shutdown can race in
-                // during the I/O. Without this the entry-guard above
-                // doesn't cover writes whose preceding awaits yielded.
-                if (Zotero.__beaverShuttingDown) {
-                    logger(`handleZoteroAttachmentPageImagesRequest: skipping metadata write for ${requestKey} — shutdown signalled during stat`, 3);
-                } else {
-                    const persistedPageLabels = Object.keys(renderResult.pageLabels).length > 0 ? renderResult.pageLabels : {};
-                    await cache!.setMetadata({
-                        item_id: pdfItem.id,
-                        library_id: pdfItem.libraryID,
-                        zotero_key: pdfItem.key,
-                        file_path: effectiveFilePath,
-                        file_mtime_ms,
-                        file_size_bytes,
-                        content_type: pdfItem.attachmentContentType || 'application/pdf',
-                        page_count: renderResult.pageCount,
-                        page_labels: persistedPageLabels,
-                        has_text_layer: cachedMeta!.has_text_layer,
-                        needs_ocr: cachedMeta!.needs_ocr,
-                        is_encrypted: false,
-                        is_invalid: false,
-                        extraction_version: EXTRACTION_VERSION,
-                    });
-                }
-            } catch (error) {
-                logger(`handleZoteroAttachmentPageImagesRequest: cache write error: ${error}`, 1);
-            }
+            const persistedPageLabels = Object.keys(renderResult.pageLabels).length > 0 ? renderResult.pageLabels : {};
+            await persistMetadataToCache(
+                pdfItem,
+                effectiveFilePath,
+                pdfItem.attachmentContentType || 'application/pdf',
+                {
+                    page_count: renderResult.pageCount,
+                    page_labels: persistedPageLabels,
+                    has_text_layer: cachedMeta!.has_text_layer,
+                    needs_ocr: cachedMeta!.needs_ocr,
+                    is_encrypted: false,
+                    is_invalid: false,
+                },
+            );
         }
 
         return {

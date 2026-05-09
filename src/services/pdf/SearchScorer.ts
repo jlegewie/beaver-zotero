@@ -31,6 +31,7 @@ import {
     DEFAULT_SEARCH_ROLE_WEIGHTS,
 } from "./types";
 import { StyleAnalyzer } from "./StyleAnalyzer";
+import { pdfLog } from "./logging";
 
 /**
  * Check if two bounding boxes overlap.
@@ -247,10 +248,13 @@ export class SearchScorer {
     static logScoredResult(result: ScoredPageSearchResult): void {
         if (process.env.NODE_ENV !== "development") return;
 
-        console.group(`Page ${result.pageIndex + 1} (score: ${result.score.toFixed(2)})`);
-        console.log(`  Matches: ${result.matchCount}`);
-        console.log(`  Raw score: ${result.rawScore.toFixed(2)}`);
-        console.log(`  Text length: ${result.textLength}`);
+        // Flat sequence of log lines — the sink-based logger has no
+        // grouping primitive, so the prior `console.group` becomes a
+        // header line.
+        pdfLog(`Page ${result.pageIndex + 1} (score: ${result.score.toFixed(2)})`, 3);
+        pdfLog(`  Matches: ${result.matchCount}`, 3);
+        pdfLog(`  Raw score: ${result.rawScore.toFixed(2)}`, 3);
+        pdfLog(`  Text length: ${result.textLength}`, 3);
 
         // Group hits by role
         const byRole = new Map<TextRole, number>();
@@ -258,11 +262,9 @@ export class SearchScorer {
             byRole.set(hit.role, (byRole.get(hit.role) || 0) + 1);
         }
 
-        console.log("  Hits by role:");
+        pdfLog("  Hits by role:", 3);
         for (const [role, count] of byRole) {
-            console.log(`    ${role}: ${count}`);
+            pdfLog(`    ${role}: ${count}`, 3);
         }
-
-        console.groupEnd();
     }
 }

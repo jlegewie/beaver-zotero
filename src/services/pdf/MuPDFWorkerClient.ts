@@ -1,15 +1,19 @@
 /**
  * MuPDFWorkerClient — main-thread client for the MuPDF WASM worker.
  *
- * Cross-bundle singleton: the client lives on `Zotero.__beaverMuPDFWorkerClient`
- * because both bundles (esbuild `src/` and webpack `react/`) import this file
- * transitively. Module-scope state would create one worker per bundle and
- * `src/hooks.ts` would only dispose the esbuild copy.
+ * Cross-bundle singleton: the client lives in a slot supplied by
+ * `getConfig().workerClientSlot` — the host wires this to a shared
+ * global so every bundle that imports this file (transitively or
+ * directly) sees the same client. Module-scope state would otherwise
+ * create one worker per bundle and shutdown would only dispose one of
+ * them.
  */
-import { logger } from "../../utils/logger";
+import { getConfig, isConfigured } from "./config";
 import {
     ExtractionError,
     ExtractionErrorCode,
+    type MarginRemovalResult,
+    type MarginSettings,
     type RawDocumentData,
     type RawPageDataDetailed,
     type PageImageOptions,
@@ -23,12 +27,11 @@ import {
     type PDFSearchOptions,
     type PDFSearchResult,
 } from "./types";
+import type { PageSentenceBBoxResult } from "./ParagraphSentenceMapper";
 import type {
-    PageSentenceBBoxOptions,
-    PageSentenceBBoxResult,
-} from "./ParagraphSentenceMapper";
-
-const WORKER_URL = "chrome://beaver/content/scripts/mupdf-worker.js";
+    SentenceBBoxTraceResult,
+    WorkerSentenceBBoxOptions,
+} from "./sentenceTypes";
 
 interface PendingEntry {
     resolve: (value: any) => void;
@@ -118,9 +121,9 @@ export class MuPDFWorkerClient {
     private disposed = false;
 
     /**
-     * Cumulative counters used by the dev-only `/beaver/test/worker-stats`
-     * endpoint to verify dispatch fan-out without log grepping. Incremented
-     * in `call()` (per-op) and `ensureWorker()` (spawn).
+     * Cumulative counters surfaced via `getStats()` so a host can verify
+     * dispatch fan-out without log grepping. Incremented in `call()`
+     * (per-op) and `ensureWorker()` (spawn).
      */
     private spawnCount = 0;
     private retryCount = 0;
@@ -136,7 +139,8 @@ export class MuPDFWorkerClient {
         if (this.disposed) {
             throw new Error("MuPDFWorkerClient: client has been disposed");
         }
-        const mainWindow = (Zotero.getMainWindow?.() ?? null) as Window | null;
+        const cfg = getConfig();
+        const mainWindow = cfg.getWorkerHost();
         if (!mainWindow) {
             throw new Error(
                 "MuPDFWorkerClient: no main window available to spawn worker",
@@ -161,22 +165,29 @@ export class MuPDFWorkerClient {
             );
         }
 
-        const worker = new WorkerCtor(WORKER_URL, { type: "module" });
+        const worker = new WorkerCtor(cfg.workerUrl, { type: "module" });
         this.spawnCount++;
         this.lastSpawnTime = Date.now();
-        logger(`[MuPDFWorkerClient] spawned new worker`, 3);
+        cfg.log(`[MuPDFWorkerClient] spawned new worker`, 3);
         (worker as any).onmessage = (event: MessageEvent) =>
             this.onWorkerMessage(event);
         (worker as any).onerror = (event: any) => {
             const message = event?.message || "worker onerror";
-            logger(`[MuPDFWorkerClient] worker.onerror: ${message}`, 1);
+            cfg.log(`[MuPDFWorkerClient] worker.onerror: ${message}`, 1);
             this.markStale(`worker.onerror: ${message}`);
         };
         (worker as any).onmessageerror = (event: any) => {
             const message = event?.message || "worker onmessageerror";
-            logger(`[MuPDFWorkerClient] worker.onmessageerror: ${message}`, 1);
+            cfg.log(`[MuPDFWorkerClient] worker.onmessageerror: ${message}`, 1);
             this.markStale(`worker.onmessageerror: ${message}`);
         };
+
+        // Configure the worker before any op is dispatched. FIFO message
+        // ordering on a single Worker guarantees the configure frame is
+        // processed before any subsequent op postMessage. Stale-worker
+        // retries flow through this same path, so retried ops are
+        // automatically preceded by a fresh configure.
+        worker.postMessage({ kind: "configure", urls: cfg.worker });
 
         this.worker = worker;
         this.spawnedFromWindowInternal = mainWindow;
@@ -191,14 +202,14 @@ export class MuPDFWorkerClient {
         if ((data as WorkerLogMessage).kind === "log") {
             const log = data as WorkerLogMessage;
             const level = log.level === "error" ? 1 : log.level === "warn" ? 2 : 3;
-            logger(log.msg, level);
+            getConfig().log(log.msg, level);
             return;
         }
 
         const reply = data as WorkerSuccessReply | WorkerFailureReply;
         const entry = this.pending.get(reply.id);
         if (!entry) {
-            logger(
+            getConfig().log(
                 `[MuPDFWorkerClient] received reply for unknown id ${reply.id}`,
                 2,
             );
@@ -232,7 +243,14 @@ export class MuPDFWorkerClient {
 
         const pendingCount = this.pending.size;
         if (pendingCount > 0 || w) {
-            logger(`[MuPDFWorkerClient] markStale (${reason}); rejecting ${pendingCount} pending`, 2);
+            // Log only when configured. markStale can be reached during
+            // shutdown teardown after configure has been wiped.
+            if (isConfigured()) {
+                getConfig().log(
+                    `[MuPDFWorkerClient] markStale (${reason}); rejecting ${pendingCount} pending`,
+                    2,
+                );
+            }
         }
 
         const stale = new StaleWorkerError(`stale worker: ${reason}`);
@@ -249,7 +267,7 @@ export class MuPDFWorkerClient {
      */
     async call<T>(op: string, args: Record<string, unknown> = {}): Promise<T> {
         this.dispatchCounts[op] = (this.dispatchCounts[op] ?? 0) + 1;
-        logger(`[MuPDFWorkerClient] dispatch op=${op}`, 3);
+        getConfig().log(`[MuPDFWorkerClient] dispatch op=${op}`, 3);
         try {
             return await this.dispatch<T>(op, args);
         } catch (e) {
@@ -259,7 +277,10 @@ export class MuPDFWorkerClient {
             // cleanup — propagate the StaleWorkerError instead.
             if (e instanceof StaleWorkerError && !this.disposed) {
                 this.retryCount++;
-                logger(`[MuPDFWorkerClient] retry op=${op} after stale worker`, 2);
+                getConfig().log(
+                    `[MuPDFWorkerClient] retry op=${op} after stale worker`,
+                    2,
+                );
                 return await this.dispatch<T>(op, args);
             }
             throw e;
@@ -318,9 +339,9 @@ export class MuPDFWorkerClient {
     /**
      * Extract raw structured-text pages.
      *
-     * Mirrors `MuPDFService.extractRawPages` semantics: invalid indices in
-     * `pageIndices` are silently filtered, an empty/undefined `pageIndices`
-     * means "all pages."
+     * Index handling (see `worker/docHelpers.ts:resolvePageIndices`): invalid
+     * indices in `pageIndices` are silently filtered out, and an
+     * empty/undefined `pageIndices` means "all pages."
      */
     async extractRawPages(
         pdfData: Uint8Array | ArrayBuffer,
@@ -332,6 +353,42 @@ export class MuPDFWorkerClient {
             pdfData: bytes,
             pageIndices,
         });
+    }
+
+    /**
+     * Cross-page margin-removal analysis without extraction or rendering.
+     *
+     * Backs the dev-only `/pdf-smart-removal-summary` triage endpoint.
+     * Page resolution: explicit `pageIndices` wins, else `pageRange`
+     * (inclusive `start..end`), else all pages. Out-of-range entries are
+     * silently filtered, then capped at `DEFAULT_ANALYSIS_WINDOW_CAP`.
+     *
+     * **Map/Set boundary.** `result.removalsByPage` and `result.textsToRemove`
+     * carry `Map`/`Set` fields. `postMessage` preserves them via structured
+     * clone, but `JSON.stringify` does NOT — flatten before writing HTTP
+     * responses.
+     */
+    async analyzeMarginRemoval(
+        pdfData: Uint8Array | ArrayBuffer,
+        args: {
+            pageIndices?: number[];
+            pageRange?: { start: number; end: number };
+            repeatThreshold?: number;
+            detectPageSequences?: boolean;
+            marginZone?: MarginSettings;
+        } = {},
+    ): Promise<{
+        totalPages: number;
+        analysisPages: number[];
+        result: MarginRemovalResult;
+    }> {
+        const bytes =
+            pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
+        return this.call<{
+            totalPages: number;
+            analysisPages: number[];
+            result: MarginRemovalResult;
+        }>("analyzeMarginRemoval", { pdfData: bytes, ...args });
     }
 
     /**
@@ -386,30 +443,10 @@ export class MuPDFWorkerClient {
     }
 
     /**
-     * Render a single page to an image.
-     *
-     * Single-page op — out-of-range `pageIndex` throws
-     * `ExtractionError(PAGE_OUT_OF_RANGE)`. One doc-open per call.
-     */
-    async renderPageToImage(
-        pdfData: Uint8Array | ArrayBuffer,
-        pageIndex: number,
-        options?: PageImageOptions,
-    ): Promise<PageImageResult> {
-        const bytes =
-            pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
-        return this.call<PageImageResult>("renderPageToImage", {
-            pdfData: bytes,
-            pageIndex,
-            options,
-        });
-    }
-
-    /**
      * Search a PDF for a literal phrase. Returns unscored, page-level hits.
      *
-     * Mirrors `MuPDFService.searchPages` semantics: invalid indices are
-     * silently filtered.
+     * Index handling (see `worker/docHelpers.ts:resolvePageIndices`): invalid
+     * indices in `pageIndices` are silently filtered.
      */
     async searchPages(
         pdfData: Uint8Array | ArrayBuffer,
@@ -442,18 +479,30 @@ export class MuPDFWorkerClient {
     async extract(
         pdfData: Uint8Array | ArrayBuffer,
         args?: {
+            mode?: "markdown" | "structured";
+            markdown?: { engine?: "block" | "paragraph" };
             settings?: ExtractionSettings;
             pageIndices?: number[];
             pageRange?: { startIndex: number; endIndex?: number; maxPages?: number };
+            /**
+             * Cross-page analysis window for margin smart-removal and
+             * the document-wide style profile. `0` (default) analyzes
+             * only the requested target pages; `N>0` adds ±N neighbors
+             * around each target; `Infinity` covers the whole doc.
+             */
+            analysisWindow?: number;
         },
     ): Promise<ExtractionResult> {
         const bytes =
             pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
         return this.call<ExtractionResult>("extract", {
             pdfData: bytes,
+            mode: args?.mode,
+            markdown: args?.markdown,
             settings: args?.settings,
             pageIndices: args?.pageIndices,
             pageRange: args?.pageRange,
+            analysisWindow: args?.analysisWindow,
         });
     }
 
@@ -497,30 +546,58 @@ export class MuPDFWorkerClient {
     /**
      * Sentence-bbox extraction with full mapper inside the worker.
      *
-     * Callers that need a custom `options.splitter` (a function value, not
-     * structurally cloneable) MUST route through the PR #2 split path:
-     * call `extractRawPageDetailed` here, then run `extractPageSentenceBBoxes`
-     * main-thread. `PDFExtractor.extractSentenceBBoxes` does this branch.
-     * If a caller reaches this method directly with a `splitter`, we strip
-     * it at runtime to avoid `DataCloneError` from postMessage; the worker
-     * then uses the default regex splitter. The runtime strip is defensive
-     * — direct callers should branch like PDFExtractor does.
+     * The splitter is described by a serializable `splitterConfig`
+     * (sentencex with language, or simple regex). The worker resolves
+     * the actual splitter function via its own `resolveSplitter`,
+     * including the sentencex→simple fallback on init failure.
+     *
+     * `options` is the discriminated `WorkerSentenceBBoxOptions` union:
+     * production calls (`debug?: false`) return `PageSentenceBBoxResult`;
+     * debug calls (`debug: true`) return `SentenceBBoxTraceResult` =
+     * `{ result, trace }` with all pipeline intermediates
+     * (analysis-window indices, raw doc, detailed page, font-bridged
+     * `pagesForFilter`, margin analysis/removal, filtered-paragraph
+     * result). `recordSplitter` is only representable on the debug variant.
+     *
+     * The two narrowing overloads key off the `debug` literal so callers
+     * see the right return type without runtime branching. Callers passing
+     * an options *variable* whose `debug` has widened to `boolean` must
+     * `as const` the literal or type the variable as one of the union
+     * variants.
+     *
+     * **Map/Set boundary (debug only).** `trace.marginAnalysis`,
+     * `trace.marginRemoval`, and `trace.filteredResult.styleProfile` carry
+     * `Map`/`Set` fields. `postMessage` preserves them via structured
+     * clone, but `JSON.stringify` does NOT — flatten before writing HTTP
+     * responses.
+     *
+     * `options` is restricted to `WorkerSentenceBBoxOptions`: no
+     * function-valued `splitter` (not structurally cloneable) and no
+     * `precomputed` (the worker always runs the full filtered-paragraph
+     * pipeline; precomputed shortcuts live on the internal mapper
+     * contract and are used only by main-thread debug paths).
      */
     async extractSentenceBBoxes(
         pdfData: Uint8Array | ArrayBuffer,
         pageIndex: number,
-        options?: PageSentenceBBoxOptions,
-    ): Promise<PageSentenceBBoxResult> {
+        options?: WorkerSentenceBBoxOptions & { debug?: false },
+    ): Promise<PageSentenceBBoxResult>;
+    async extractSentenceBBoxes(
+        pdfData: Uint8Array | ArrayBuffer,
+        pageIndex: number,
+        options: WorkerSentenceBBoxOptions & { debug: true },
+    ): Promise<SentenceBBoxTraceResult>;
+    async extractSentenceBBoxes(
+        pdfData: Uint8Array | ArrayBuffer,
+        pageIndex: number,
+        options?: WorkerSentenceBBoxOptions,
+    ): Promise<PageSentenceBBoxResult | SentenceBBoxTraceResult> {
         const bytes =
             pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
-        const { splitter: _drop, ...rest } = (options ?? {}) as PageSentenceBBoxOptions & {
-            splitter?: unknown;
-        };
-        return this.call<PageSentenceBBoxResult>("extractSentenceBBoxes", {
-            pdfData: bytes,
-            pageIndex,
-            options: rest,
-        });
+        return this.call<PageSentenceBBoxResult | SentenceBBoxTraceResult>(
+            "extractSentenceBBoxes",
+            { pdfData: bytes, pageIndex, options },
+        );
     }
 
     /** Force WASM init in the worker. Useful for tests and pre-warm. */
@@ -529,9 +606,9 @@ export class MuPDFWorkerClient {
     }
 
     /**
-     * Test-only: snapshot of dispatch / spawn counters. Surfaced via the
-     * dev-only `/beaver/test/worker-stats` HTTP endpoint so manual-test
-     * runners can verify fan-out without grepping logs.
+     * Test-only: snapshot of dispatch / spawn counters. Hosts can expose
+     * this through a debug endpoint so manual-test runners can verify
+     * fan-out without grepping logs.
      */
     getStats(): {
         hasWorker: boolean;
@@ -595,7 +672,7 @@ export class MuPDFWorkerClient {
                 {},
             );
         } catch (e) {
-            logger(`[MuPDFWorkerClient] getCacheStats failed: ${e}`, 2);
+            getConfig().log(`[MuPDFWorkerClient] getCacheStats failed: ${e}`, 2);
             return null;
         }
     }
@@ -620,7 +697,10 @@ export class MuPDFWorkerClient {
                 { resetCounters: opts.resetCounters !== false },
             );
         } catch (e) {
-            logger(`[MuPDFWorkerClient] clearWorkerCacheForTest failed: ${e}`, 2);
+            getConfig().log(
+                `[MuPDFWorkerClient] clearWorkerCacheForTest failed: ${e}`,
+                2,
+            );
             return null;
         }
     }
@@ -635,7 +715,7 @@ export class MuPDFWorkerClient {
         if (this.disposed) return null;
         const w = this.worker;
         if (!w) return null;
-        const mainWindow = (Zotero.getMainWindow?.() ?? null) as Window | null;
+        const mainWindow = isConfigured() ? getConfig().getWorkerHost() : null;
         if (
             mainWindow &&
             this.spawnedFromWindowInternal &&
@@ -679,8 +759,11 @@ export class MuPDFWorkerClient {
         // refuses to retry / respawn.
         this.disposed = true;
         this.markStale("dispose");
-        if ((Zotero as any).__beaverMuPDFWorkerClient === this) {
-            (Zotero as any).__beaverMuPDFWorkerClient = undefined;
+        if (isConfigured()) {
+            const slot = getConfig().workerClientSlot;
+            if (slot.get() === this) {
+                slot.set(undefined);
+            }
         }
     }
 }
@@ -708,29 +791,33 @@ function rehydrateError(payload: WorkerErrorPayload | undefined): Error {
 }
 
 /**
- * Get (or lazily spawn) the cross-bundle MuPDFWorkerClient singleton.
+ * Get (or lazily spawn) the cross-bundle MuPDFWorkerClient singleton. The
+ * actual storage location lives in `getConfig().workerClientSlot` — the
+ * host wires that slot to a shared global so every bundle resolves to the
+ * same client instance.
  */
 export function getMuPDFWorkerClient(): MuPDFWorkerClient {
-    const slot = (Zotero as any).__beaverMuPDFWorkerClient as
-        | MuPDFWorkerClient
-        | undefined;
-    if (slot) return slot;
+    const slot = getConfig().workerClientSlot;
+    const existing = slot.get() as MuPDFWorkerClient | undefined;
+    if (existing) return existing;
     const client = new MuPDFWorkerClient();
-    (Zotero as any).__beaverMuPDFWorkerClient = client;
+    slot.set(client);
     return client;
 }
 
 /**
  * Dispose the singleton MuPDFWorkerClient. Safe to call multiple times.
  *
- * Async-signature for parity with `disposeMuPDF()` even though the underlying
- * `worker.terminate()` is synchronous — this keeps the call sites uniform
- * (`Promise.all([disposeMuPDF(), disposeMuPDFWorker()])`).
+ * Early-returns when the package was never configured (e.g. error paths
+ * during shutdown that run before `configurePDF` ever fired). The async
+ * signature lets callers `await` it uniformly with other shutdown steps,
+ * even though the underlying `worker.terminate()` is synchronous.
  */
 export async function disposeMuPDFWorker(): Promise<void> {
-    const slot = (Zotero as any).__beaverMuPDFWorkerClient as
+    if (!isConfigured()) return;
+    const existing = getConfig().workerClientSlot.get() as
         | MuPDFWorkerClient
         | undefined;
-    if (!slot) return;
-    slot.dispose();
+    if (!existing) return;
+    existing.dispose();
 }
