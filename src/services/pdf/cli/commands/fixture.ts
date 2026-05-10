@@ -65,7 +65,7 @@ import { join, resolve as resolvePath } from "node:path";
 import { existsSync } from "node:fs";
 
 const DEFAULT_BBOX_TOL_PT = 0.5;
-/** Render scale for preview PNGs. Matches the legacy `extractionFixtures.ts` value. */
+/** Render scale for preview PNGs. */
 const PREVIEW_RENDER_SCALE = 1.5;
 
 function resolveDefaultRoot(): string {
@@ -505,8 +505,7 @@ function buildListCommand(deps: CliDeps): Command {
 
 /**
  * Render one preview-p<n>.png per captured page, with the sentence-level
- * overlay composited on top. Mirrors the legacy reader-side
- * `extractionFixtures.ts` behavior (1.5x render scale, sentence overlay).
+ * overlay composited on top.
  *
  * Returns the absolute paths written, in the same order as `pageIndices`.
  * Pages that aren't present in `result.pages` are skipped silently — that

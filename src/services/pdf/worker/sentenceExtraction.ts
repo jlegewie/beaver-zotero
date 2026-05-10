@@ -35,16 +35,7 @@
  * "no extraction-quality regression on representative fixtures" (no
  * added margin junk, no lost body paragraphs, no worse heading/body
  * classification, no measurable rise in `degradation.count`). See
- * `tests/unit/pdf/sentenceFixtures` for
- * the regression surface.
- *
- * In `recordSplitter: true` mode (only available with `trace: true`),
- * the resolved splitter is wrapped to capture `(text → ranges)` pairs
- * which are returned in `trace.splitterRecording`. Used by fixture
- * capture for hermetic unit-test replay. Ranges are deep-copied (`{
- * start, end }`) before pushing — the splitter's returned array could
- * be mutated downstream, and copying keeps fixture capture
- * deterministic across the postMessage boundary.
+ * `tests/smoke/extractFixtures.smoke.test.ts` for the regression surface.
  *
  * Caller is responsible for `acquireDoc`/`releaseDoc` and pageIndex
  * validation. These helpers trust their inputs.
@@ -59,10 +50,7 @@ import {
 } from "../FilteredParagraphPipeline";
 import { pagesForFilterWithBridgedFonts } from "../RawFontBridge";
 import { buildPageAnalysisContext } from "../PageAnalysisContext";
-import type {
-    SentenceRange,
-    SentenceSplitter,
-} from "../SentenceMapper";
+import type { SentenceSplitter } from "../SentenceMapper";
 import type { ParagraphDetectionSettings } from "../ParagraphDetector";
 import type {
     SentenceSplitterConfig,
@@ -158,10 +146,10 @@ export async function runSentenceExtractionFromDoc(
     args: BaseArgs & { trace?: false },
 ): Promise<{ result: PageSentenceBBoxResult }>;
 export async function runSentenceExtractionFromDoc(
-    args: BaseArgs & { trace: true; recordSplitter?: boolean },
+    args: BaseArgs & { trace: true },
 ): Promise<SentenceBBoxTraceResult>;
 export async function runSentenceExtractionFromDoc(
-    args: BaseArgs & { trace?: boolean; recordSplitter?: boolean },
+    args: BaseArgs & { trace?: boolean },
 ): Promise<{ result: PageSentenceBBoxResult } | SentenceBBoxTraceResult> {
     const {
         doc,
@@ -173,32 +161,12 @@ export async function runSentenceExtractionFromDoc(
         margins,
         marginZone,
         trace: wantTrace,
-        recordSplitter,
     } = args;
 
     // Resolve the splitter once per request (not per paragraph).
-    const innerSplitter = await resolveSplitter(
+    const splitter: SentenceSplitter = await resolveSplitter(
         splitterConfig ?? { type: "sentencex" },
     );
-
-    // When recording is requested (only meaningful in trace mode), wrap
-    // the splitter and deep-copy each `ranges` array — the splitter's
-    // returned array could be mutated downstream, and copying keeps
-    // fixture capture deterministic across postMessage.
-    let splitter: SentenceSplitter = innerSplitter;
-    let recordings: Array<{ text: string; ranges: SentenceRange[] }> | undefined;
-    if (wantTrace && recordSplitter) {
-        const buf: Array<{ text: string; ranges: SentenceRange[] }> = [];
-        recordings = buf;
-        splitter = (text, ctx): SentenceRange[] => {
-            const ranges = innerSplitter(text, ctx);
-            buf.push({
-                text,
-                ranges: ranges.map((r) => ({ start: r.start, end: r.end })),
-            });
-            return ranges;
-        };
-    }
 
     // Detailed target page (per-character quads + bbox identity for the
     // mapper). Walked once and substituted into the analysis window.
@@ -285,7 +253,6 @@ export async function runSentenceExtractionFromDoc(
             marginAnalysis,
             marginRemoval,
             filteredResult,
-            splitterRecording: recordings,
         },
     };
 }

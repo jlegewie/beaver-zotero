@@ -812,27 +812,5 @@ describe('MuPDFWorkerClient', () => {
             });
         });
 
-        it('forwards recordSplitter alongside the splitter config', async () => {
-            const client = getMuPDFWorkerClient();
-            const promise = client.extractSentenceBBoxesDebug(
-                new Uint8Array([1]),
-                0,
-                {
-                    splitterConfig: { type: 'sentencex', language: 'en' },
-                    recordSplitter: true,
-                },
-            );
-            const worker = MockWorker.instances[0];
-            worker.replyToLast({
-                ok: true,
-                result: { result: { paragraphs: [], sentences: [] }, trace: {} },
-            });
-            await promise;
-            const [message] = worker.opCall(0);
-            expect(message.args.options).toMatchObject({
-                splitterConfig: { type: 'sentencex', language: 'en' },
-                recordSplitter: true,
-            });
-        });
     });
 });

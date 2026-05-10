@@ -873,12 +873,10 @@ export async function opSearch(
  * `opExtract` with `mode: "structured"` (multi-page, returns
  * `ExtractionResult` with `pages[i].sentences`).
  *
- * Powers the dev visualizer / fixture capture / pipeline-trace
- * endpoints: returns the production sentence result PLUS the pipeline
- * intermediates (analysis-window indices, raw doc, detailed page,
- * font-bridged `pagesForFilter`, margin analysis/removal,
- * filtered-paragraph result). When `options.recordSplitter === true`,
- * also returns the `(text → ranges)` pairs from the resolved splitter.
+ * Powers the dev visualizer / pipeline-trace endpoints: returns the
+ * production sentence result PLUS the pipeline intermediates
+ * (analysis-window indices, raw doc, detailed page, font-bridged
+ * `pagesForFilter`, margin analysis/removal, filtered-paragraph result).
  */
 export async function opExtractSentenceBBoxesDebug(
     args: {
@@ -909,7 +907,6 @@ export async function opExtractSentenceBBoxesDebug(
             analysisWindow: opts?.analysisWindow,
             paragraphSettings: opts?.paragraphSettings,
             trace: true,
-            recordSplitter: opts?.recordSplitter,
         });
         return { result: traceResult };
     } finally {

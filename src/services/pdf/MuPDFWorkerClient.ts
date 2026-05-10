@@ -536,8 +536,7 @@ export class MuPDFWorkerClient {
      * `options` is restricted to `WorkerSentenceBBoxDebugOptions`: no
      * function-valued `splitter` (not structurally cloneable) and no
      * `precomputed` (the worker always runs the full filtered-paragraph
-     * pipeline). When `recordSplitter === true`, `trace.splitterRecording`
-     * carries the `(text → ranges)` pairs for fixture replay.
+     * pipeline).
      *
      * **Map/Set boundary.** `trace.marginAnalysis`, `trace.marginRemoval`,
      * and `trace.filteredResult.styleProfile` carry `Map`/`Set` fields.

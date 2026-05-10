@@ -19,7 +19,6 @@
  */
 
 import type { ParagraphDetectionSettings } from "./ParagraphDetector";
-import type { SentenceRange } from "./SentenceMapper";
 import type {
     MarginAnalysis,
     MarginRemovalResult,
@@ -55,12 +54,6 @@ export interface WorkerSentenceBBoxDebugOptions {
     splitterConfig?: SentenceSplitterConfig;
     paragraphSettings?: ParagraphDetectionSettings;
     analysisWindow?: number;
-    /**
-     * When true, the worker wraps the resolved splitter and returns the
-     * recorded `(text → ranges)` pairs in the trace payload. Used by
-     * fixture capture for hermetic unit-test replay.
-     */
-    recordSplitter?: boolean;
 }
 
 /**
@@ -81,8 +74,6 @@ export interface SentenceBBoxTrace {
     marginAnalysis: MarginAnalysis;
     marginRemoval: MarginRemovalResult;
     filteredResult: FilteredParagraphResult;
-    /** Present iff `recordSplitter === true` on the call. */
-    splitterRecording?: Array<{ text: string; ranges: SentenceRange[] }>;
 }
 
 /** Result envelope returned by `extractSentenceBBoxesDebug`. */

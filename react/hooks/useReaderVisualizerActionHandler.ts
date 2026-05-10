@@ -16,7 +16,6 @@ import {
     clearVisualizationAnnotations,
     resolveActiveReaderContext,
 } from '../utils/extractionVisualizer';
-import { createSentenceFixture } from '../utils/extractionFixtures';
 import { copyToClipboard } from '../utils/clipboard';
 import { getItemLanguage } from '../../src/utils/zoteroUtils';
 import { logger } from '../../src/utils/logger';
@@ -50,12 +49,6 @@ export function useReaderVisualizerActionHandler() {
                 case 'clear': {
                     await clearVisualizationAnnotations();
                     logger('[ReaderVisualizer] cleared');
-                    return;
-                }
-                case 'create-or-update-sentence-fixture': {
-                    const r = await createSentenceFixture();
-                    logger(`[ReaderVisualizer] create-or-update-sentence-fixture: ${r.message}`);
-                    if (!r.ok) Zotero.alert(Zotero.getMainWindow(), 'Beaver Sentence Test', r.message);
                     return;
                 }
                 case 'copy-fixture-capture-command': {
