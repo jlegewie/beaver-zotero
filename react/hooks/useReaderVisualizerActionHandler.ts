@@ -61,7 +61,7 @@ export function useReaderVisualizerActionHandler() {
                 case 'copy-fixture-capture-command': {
                     const r = await copyFixtureCaptureCommand();
                     logger(`[ReaderVisualizer] copy-fixture-capture-command: ${r.message}`);
-                    Zotero.alert(Zotero.getMainWindow(), 'Beaver Extract Fixture', r.message);
+                    // Zotero.alert(Zotero.getMainWindow(), 'Beaver Extract Fixture', r.message);
                     return;
                 }
             }
@@ -99,6 +99,7 @@ async function copyFixtureCaptureCommand(): Promise<{ ok: boolean; message: stri
         `--id ${id}`,
         `--pages ${pageIndex}`,
         '--root tests/fixtures/pdfs/extract',
+        '--preview',
     ];
     if (language) parts.push(`--language ${shellQuote(language)}`);
     parts.push('--update');
