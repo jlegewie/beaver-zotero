@@ -106,8 +106,7 @@ src/services/pdf/
 
 react/utils/
 ├── extractionVisualizer.ts        # Debug visualization tools (overlay annotations)
-├── extractionOverlay.ts           # Reader overlay rendering
-└── extractionFixtures.ts          # Fixture helpers for sentence-pipeline tests
+└── extractionOverlay.ts           # Reader overlay rendering
 ```
 
 ### Module Responsibilities
@@ -1111,7 +1110,7 @@ When adding features:
 
 1. **Add types first** in `types.ts`
 2. **Create focused module** for the new functionality
-3. **Write tests** under `tests/unit/pdf/` (and the sentence-pipeline fixture suite under `tests/unit/pdf/sentenceFixtures` where applicable); use the Dev Tools menu actions for live spot-checks
+3. **Write tests** under `tests/unit/pdf/` (and the BeaverExtract fixture suite at `tests/smoke/extractFixtures.smoke.test.ts` where applicable); use the Dev Tools menu actions for live spot-checks
 4. **Add visualization** for debugging
 5. **Document in this README**
 6. **Update USAGE.md** if it affects the public API

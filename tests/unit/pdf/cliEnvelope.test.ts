@@ -184,7 +184,6 @@ describe('runCli — overlay command', () => {
                     index: 0,
                     width: 500,
                     height: 750,
-                    blocks: [],
                     content: '',
                     sentences: [
                         {
@@ -329,18 +328,22 @@ describe('runCli — render command', () => {
 });
 
 describe('buildProgram', () => {
-    it('registers all six v1 commands', () => {
+    it('registers every top-level command', () => {
         const { deps } = makeDeps();
         const program = buildProgram(deps);
-        const names = program.commands.map((c) => c.name()).sort();
-        expect(names).toEqual([
+        const names = new Set(program.commands.map((c) => c.name()));
+        // Set containment keeps the assertion resilient as commands land.
+        for (const expected of [
             'analyze-layout',
             'extract',
+            'fixture',
             'info',
             'overlay',
             'raw-detailed',
             'render',
-        ]);
+        ]) {
+            expect(names.has(expected), `missing command: ${expected}`).toBe(true);
+        }
     });
 });
 

@@ -21,7 +21,6 @@ function basePage(): ProcessedPage {
         index: 0,
         width: 600,
         height: 800,
-        blocks: [],
         content: '',
     };
 }

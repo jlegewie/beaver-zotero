@@ -68,6 +68,7 @@ npm run beaver-extract -- overlay --help
 | `analyze-layout` | Document-wide style + margin analysis.                 |
 | `raw-detailed`   | Per-character quad info for one page.                  |
 | `render`         | Render one or more pages to PNG.                       |
+| `fixture`        | Manage extraction-regression fixtures (see below).     |
 
 Overlay levels: `columns | lines | paragraphs | sentences | margins`.
 
@@ -130,6 +131,56 @@ Levels: `error | warn | info | silent`. Default is `warn`, so analyzer
 errors and warnings still surface but the chatty `[pdf:INFO]` doc-cache
 and trace lines stay out of pipe-friendly output.
 
+## Fixtures
+
+Regression fixtures for the structured-mode extract pipeline live in two
+parallel corpus roots:
+
+- `tests/fixtures/pdfs/extract-public/` — committed, redistributable.
+  Required for CI; missing or invalid fixtures fail the smoke tier.
+- `tests/fixtures/pdfs/extract/` — gitignored, larger private/local corpus.
+
+The default `--root` for every `fixture` subcommand is the public corpus.
+Pass `--root tests/fixtures/pdfs/extract` to target the private one.
+
+### Subcommands
+
+```bash
+# Capture a fresh fixture (single page, document-wide analysis context).
+# Default --analysis-scope is "document"; pass --analysis-window <n> for
+# a finite window. Mutually exclusive with --analysis-scope.
+npm run beaver-extract -- fixture capture paper.pdf \
+    --pages 14 \
+    --id paper__p14
+
+# Read-only diff against the captured `expected` snapshot.
+npm run beaver-extract -- fixture evaluate paper__p14
+
+# Rebaseline `expected` (preserves the stored config). Idempotent —
+# re-running with no algorithm change writes nothing.
+npm run beaver-extract -- fixture update paper__p14
+
+# Replace config (page indices, settings, splitter). Use --update to
+# allow overwriting the stored fixture; capture-time flags become the
+# new stored config.
+npm run beaver-extract -- fixture capture paper.pdf \
+    --id paper__p14 --pages 13,14 --update
+
+# List fixture ids under a corpus root.
+npm run beaver-extract -- fixture list --json --pretty
+```
+
+Multi-page fixtures: `--pages 13,14`, naming convention `paperKey__p13-14`
+or `paperKey__intro-p0-2`. Reserve them for cases where correctness
+depends on neighboring emitted pages (cross-column continuation,
+front-matter / body transitions, page-label issues).
+
+The smoke tier runs every fixture in both corpora when present:
+
+```bash
+npm run test:cli-smoke
+```
+
 ## Testing
 
 ```bash
@@ -161,7 +212,13 @@ src/services/pdf/
 ├── debug/              # browser-safe shared debug helpers
 │   ├── overlayBuilders.ts
 │   ├── overlaySvg.ts
-│   └── analyzeLayoutProjection.ts
+│   ├── analyzeLayoutProjection.ts
+│   └── extractionSnapshot.ts   # projection + structural diff for fixtures
+├── cli/fixture/        # fixture file format + helpers (Node-only)
+│   ├── fixtureFile.ts          # atomic read/write, _shared/ dedup
+│   ├── fixtureSchema.ts        # validators with targeted errors
+│   ├── fingerprints.ts         # wasm + git + version provenance
+│   └── analysisScope.ts        # AnalysisScope <-> internal translation
 └── worker/             # MuPDF worker ops, reused as-is from Node
 ```
 

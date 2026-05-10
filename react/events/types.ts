@@ -35,9 +35,9 @@ export interface BeaverEvents {
             | 'paragraphs'
             | 'sentences'
             | 'clear'
-            | 'create-or-update-sentence-fixture';
+            | 'copy-fixture-capture-command';
     };
-    focusInput: {};
+    focusInput: Record<string, never>;
 }
 
 export type BeaverEventName = keyof BeaverEvents;

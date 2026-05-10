@@ -182,8 +182,7 @@ export class PDFExtractor {
      * `markdown.engine` selects the markdown engine when `mode === "markdown"`:
      *   - `"paragraph"` (default): line + paragraph detection via
      *     `FilteredParagraphPipeline`, with headers prefixed `## ` and
-     *     paragraphs separated by `\n\n`. `ProcessedPage.blocks` is left
-     *     empty.
+     *     paragraphs separated by `\n\n`.
      *   - `"block"`: legacy `PageExtractor.extractPageWithColumns` — blocks
      *     joined with `\n\n`. Kept reachable as an escape hatch.
      *

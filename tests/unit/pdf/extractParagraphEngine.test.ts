@@ -151,7 +151,6 @@ describe("runExtractFromIndices: paragraph engine", () => {
         const page = result.pages[0];
         expect(page.content).toContain("## Section Title");
         expect(page.content).toContain("\n\n");
-        expect(page.blocks).toEqual([]);
         expect(page.lines).toBeUndefined();
     });
 
@@ -190,9 +189,6 @@ describe("runExtractFromIndices: paragraph engine", () => {
         expect(blockResult.pages[0].height).toBe(
             paragraphResult.pages[0].height,
         );
-        // Paragraph engine leaves blocks empty by contract because content is
-        // emitted via `pageContent` rather than per-block.
-        expect(paragraphResult.pages[0].blocks).toEqual([]);
         // Paragraph engine produces non-empty content for this synthetic page.
         // (Block engine's content depends on column detection succeeding on
         // the synthetic input; that's not what this test is exercising.)

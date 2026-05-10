@@ -14,9 +14,11 @@
     "src/services/pdf/worker",
     "src/services/pdf/debug",
     "tests/unit/pdf/cliEnvelope.test.ts",
+    "tests/unit/pdf/cliFixtureCommand.test.ts",
     "tests/unit/pdf/debugOverlayBuilders.test.ts",
     "tests/unit/pdf/nodeApiSerialization.test.ts",
     "tests/unit/pdf/overlaySvg.test.ts",
+    "tests/helpers/extractFixtureLoader.ts",
     "tests/smoke"
   ],
   "exclude": ["build", "addon", "node_modules"]

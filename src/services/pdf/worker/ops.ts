@@ -266,12 +266,11 @@ function flattenColumnLines(lineResult: PageLineResult): ExtractedLine[] {
  * Shared body for `opExtract`. The per-page loop has three branches keyed
  * off `engine`:
  *   - `"paragraph"` → `detectFilteredParagraphs` produces
- *     `paragraphResult.pageContent` (`## ` headers, `\n\n` separators);
- *     `ProcessedPage.blocks` is left empty.
+ *     `paragraphResult.pageContent` (`## ` headers, `\n\n` separators).
  *   - `"block"` → column detection + PageExtractor (block-based).
  *   - `"structured"` → `extractSentencesForPage` (per-page detailed walk
  *     + sentence mapping). Populates `paragraphs`, `sentences`,
- *     `columns`, `lines`, plus paragraph-engine `content`. `blocks: []`.
+ *     `columns`, `lines`, plus paragraph-engine `content`.
  *     Requires `splitter` (resolved by the caller). Per-page detailed
  *     walk is the dominant cost — multi-page structured extracts pay
  *     N× this per the `targetIndices` length.
@@ -340,8 +339,7 @@ export function runExtractFromIndices(
         // page text via `paragraphResult.pageContent` (headers prefixed `## `,
         // paragraphs separated by `\n\n`). `detectFilteredParagraphs` accepts
         // the precomputed `marginRemoval` and `styleProfile` so it skips
-        // re-running cross-page analysis. `blocks: []` because content is
-        // emitted via `pageContent` rather than per-block.
+        // re-running cross-page analysis.
         for (const i of targetIndices) {
             const tPage = performance.now();
             const rawPage = analysisPageByIndex.get(i)!;
@@ -360,7 +358,6 @@ export function runExtractFromIndices(
                 label: rawPage.label,
                 width: rawPage.width,
                 height: rawPage.height,
-                blocks: [],
                 content: filtered.paragraphResult.pageContent,
                 columns: filtered.columnResult.columns.map((col) => ({
                     l: col.x,
@@ -403,7 +400,6 @@ export function runExtractFromIndices(
                 label: rawPage.label,
                 width: sentenceResult.width,
                 height: sentenceResult.height,
-                blocks: [],
                 content: filteredResult.paragraphResult.pageContent,
                 columns: filteredResult.columnResult.columns.map((col) => ({
                     l: col.x,
@@ -502,7 +498,7 @@ export function runExtractFromIndices(
  *   - `"paragraph"` (default): line + paragraph detection via
  *     `detectFilteredParagraphs`. `ProcessedPage.content` is
  *     `paragraphResult.pageContent` (markdown-shaped with `## ` headers
- *     and `\n\n` paragraph separators); `blocks: []`.
+ *     and `\n\n` paragraph separators).
  *   - `"block"`: block-based PageExtractor.
  *
  * Rejected combinations:
@@ -877,12 +873,10 @@ export async function opSearch(
  * `opExtract` with `mode: "structured"` (multi-page, returns
  * `ExtractionResult` with `pages[i].sentences`).
  *
- * Powers the dev visualizer / fixture capture / pipeline-trace
- * endpoints: returns the production sentence result PLUS the pipeline
- * intermediates (analysis-window indices, raw doc, detailed page,
- * font-bridged `pagesForFilter`, margin analysis/removal,
- * filtered-paragraph result). When `options.recordSplitter === true`,
- * also returns the `(text → ranges)` pairs from the resolved splitter.
+ * Powers the dev visualizer / pipeline-trace endpoints: returns the
+ * production sentence result PLUS the pipeline intermediates
+ * (analysis-window indices, raw doc, detailed page, font-bridged
+ * `pagesForFilter`, margin analysis/removal, filtered-paragraph result).
  */
 export async function opExtractSentenceBBoxesDebug(
     args: {
@@ -913,7 +907,6 @@ export async function opExtractSentenceBBoxesDebug(
             analysisWindow: opts?.analysisWindow,
             paragraphSettings: opts?.paragraphSettings,
             trace: true,
-            recordSplitter: opts?.recordSplitter,
         });
         return { result: traceResult };
     } finally {

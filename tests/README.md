@@ -247,11 +247,20 @@ Integration tests exercise full pipelines. Same prerequisites as live tests plus
 - Run: `npm run test:live` (or target just this file: `npx vitest run --config vitest.live.config.ts tests/live/editNote.live.test.ts`).
 - Each test seeds and deletes its own notes — no manual fixture setup required.
 
-### Sentence-extraction regression fixtures
+### BeaverExtract regression fixtures
 
-`tests/unit/pdf/sentenceFixtures.unit.test.ts` and `tests/live/sentenceFixtures.live.test.ts` lock in sentence-level PDF extraction output against real PDF pages. Capture is one click from the reader (right-click → "Create/Update Sentence Test"); fixtures live under `tests/fixtures/pdfs/sentences/` (gitignored). Failure messages emit `libraryID`/`key`/`pageIndex` plus a `zotero://select` link so the failure flows directly into the debug endpoints.
+`tests/smoke/extractFixtures.smoke.test.ts` runs every fixture under `tests/fixtures/pdfs/extract-public/` (committed) and `tests/fixtures/pdfs/extract/` (gitignored, larger private corpus) through the structured-mode extract pipeline and diffs against the captured `expected` snapshot.
 
-See **[docs-zotero/pdf-extraction-debug-endpoints.md](../docs-zotero/pdf-extraction-debug-endpoints.md#sentence-extraction-regression-tests)** for the full capture / update / failure-flow guide.
+Capture, evaluate, and rebaseline via the `beaver-extract` CLI:
+
+```bash
+npm run beaver-extract -- fixture capture <pdf> --pages 0 --id <id>
+npm run beaver-extract -- fixture evaluate <id>
+npm run beaver-extract -- fixture update <id>
+npm run test:cli-smoke
+```
+
+The reader's dev menu has a "Copy Fixture Capture Command" item that builds the right `beaver-extract fixture capture --update` invocation for the active page and copies it to the clipboard.
 
 ## Conventions
 

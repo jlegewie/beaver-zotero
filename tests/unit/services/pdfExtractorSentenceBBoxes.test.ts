@@ -72,7 +72,6 @@ const FAKE_EXTRACTION_RESULT = {
             label: undefined,
             width: 612,
             height: 792,
-            blocks: [],
             content: '## Title\n\nA sentence.',
             columns: [],
             lines: [],
