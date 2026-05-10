@@ -423,8 +423,6 @@ export interface ProcessedPage {
     /** Page dimensions */
     width: number;
     height: number;
-    /** Processed text blocks */
-    blocks: ProcessedBlock[];
     /** Plain text content (in reading order) */
     content: string;
     /** Detected columns (in reading order) */

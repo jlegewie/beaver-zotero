@@ -62,7 +62,6 @@ function pageWithSentences(): unknown {
         index: 0,
         width: 595,
         height: 842,
-        blocks: [],
         content: 'Hello.',
         sentences: [
             {

@@ -184,7 +184,6 @@ describe('runCli — overlay command', () => {
                     index: 0,
                     width: 500,
                     height: 750,
-                    blocks: [],
                     content: '',
                     sentences: [
                         {

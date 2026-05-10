@@ -153,7 +153,6 @@ export class PageExtractor {
             label: rawPage.label,
             width: rawPage.width,
             height: rawPage.height,
-            blocks,
             content,
         };
     }
@@ -232,7 +231,6 @@ export class PageExtractor {
             label: rawPage.label,
             width: rawPage.width,
             height: rawPage.height,
-            blocks: orderedBlocks,
             content,
             columns: columnBBoxes,
         };
