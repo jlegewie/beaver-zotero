@@ -89,9 +89,16 @@ export function buildOverlaySvg(opts: OverlaySvgOptions): string {
         const labelH = fontSize + padY * 2;
         // Position above the rect when there's room, otherwise inside it.
         const labelY = y < labelH ? y : y - labelH;
+        // SVG uses the default alphabetic baseline (`dominant-baseline`
+        // is not reliably honored by librsvg/sharp). With alphabetic
+        // baseline, the `y` we pass to `<text>` is the *baseline*, and
+        // glyphs extend upward by ~ascent and downward by ~descent.
+        // Position the baseline near the bottom of the label background
+        // so the glyph cap sits at ~labelY + padY (inside the rect).
+        const textY = labelY + padY + fontSize * 0.85;
         labelFragments.push(
             `<rect x="${x.toFixed(2)}" y="${labelY.toFixed(2)}" width="${labelW.toFixed(2)}" height="${labelH.toFixed(2)}" fill="${r.color}" />`,
-            `<text x="${(x + padX).toFixed(2)}" y="${(labelY + padY).toFixed(2)}" font-family="sans-serif" font-weight="bold" font-size="${fontSize}" fill="#ffffff" dominant-baseline="hanging">${labelText}</text>`,
+            `<text x="${(x + padX).toFixed(2)}" y="${textY.toFixed(2)}" font-family="sans-serif" font-weight="bold" font-size="${fontSize}" fill="#ffffff">${labelText}</text>`,
         );
     }
 

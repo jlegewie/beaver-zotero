@@ -2,7 +2,7 @@
   "schema": 1,
   "id": "legewie-fagan__p0",
   "capturedAt": "2026-05-09T23:00:12.965Z",
-  "updatedAt": "2026-05-10T01:15:07.066Z",
+  "updatedAt": "2026-05-10T01:22:28.991Z",
   "pdfSha256": "d86a26bf17a0e19194abe41f10b32b4cf86e8caddf3c854773802e5a76b607cf",
   "pdfBytes": 50492,
   "config": {
@@ -17,7 +17,7 @@
     "paragraphSettings": {}
   },
   "fingerprints": {
-    "extractorGitSha": "571d089a",
+    "extractorGitSha": "3f4796f0",
     "extractorVersion": "0.19.1-beta.1",
     "mupdfWasmSha256": "202c1dc9703cc003d4c14050db2bac937a9151dd79e719ae0cf1741080fbf19e",
     "sentencexWasmSha256": "cd6114eed20aafefcc047f9048f901b8de595299c093e6be513e6f4b55cb2528"
