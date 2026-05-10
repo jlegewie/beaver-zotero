@@ -33,6 +33,7 @@ import {
 import {
     PUBLIC_FIXTURE_ROOT_REL,
     ensureSharedPdf,
+    ensureSourcePdfLink,
     fixtureLocation,
     listFixtureIds,
     readFixture,
@@ -40,6 +41,7 @@ import {
     semanticallyEqual,
     sharedPdfPath,
     writeFixtureFile,
+    writeSourcePdfPageLinks,
 } from "../fixture/fixtureFile";
 import {
     FIXTURE_SCHEMA_VERSION,
@@ -218,10 +220,22 @@ function buildCaptureCommand(deps: CliDeps): Command {
                       )
                     : [];
 
+                const sourcePdfLink = ensureSourcePdfLink(loc, sha, (msg) =>
+                    deps.stderr.write(`[${opts.id}] warning: ${msg}\n`),
+                );
+                const pageLinks = writeSourcePdfPageLinks(
+                    loc,
+                    sha,
+                    config.pageIndices,
+                    (msg) => deps.stderr.write(`[${opts.id}] warning: ${msg}\n`),
+                );
+
                 emitSuccess(deps, opts, pdfPath, bytes, effective, {
                     folder: loc.folder,
                     fixtureJson: loc.fixtureJson,
                     sharedPdf: sharedPdfPath(root, sha),
+                    sourcePdfLink,
+                    pageLinks,
                     pageCount: expected.perPage.length,
                     sentenceCount: expected.totals.sentenceCount,
                     wrote,
@@ -430,10 +444,22 @@ function buildUpdateCommand(deps: CliDeps): Command {
                       )
                     : [];
 
+                const sourcePdfLink = ensureSourcePdfLink(loc, previous.pdfSha256, (msg) =>
+                    deps.stderr.write(`[${id}] warning: ${msg}\n`),
+                );
+                const pageLinks = writeSourcePdfPageLinks(
+                    loc,
+                    previous.pdfSha256,
+                    previous.config.pageIndices,
+                    (msg) => deps.stderr.write(`[${id}] warning: ${msg}\n`),
+                );
+
                 emitSuccess(deps, opts, id, undefined, effective, {
                     id,
                     wrote,
                     previews: previewPaths,
+                    sourcePdfLink,
+                    pageLinks,
                     capturedAt: previous.capturedAt,
                     updatedAt: wrote ? candidate.updatedAt : previous.updatedAt,
                 });

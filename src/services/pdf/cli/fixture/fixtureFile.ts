@@ -13,15 +13,19 @@
 import {
     constants as fsConstants,
     existsSync,
+    lstatSync,
     mkdirSync,
     readFileSync,
     readdirSync,
+    readlinkSync,
     renameSync,
     statSync,
+    symlinkSync,
+    unlinkSync,
     writeFileSync,
     writeFileSync as writeFileSyncPlain,
 } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 
 import { pdfSha256 } from "../io";
 import { validateFixture, type CapturedFixture } from "./fixtureSchema";
@@ -134,6 +138,126 @@ export function ensureSharedPdf(root: string, bytes: Uint8Array): string {
     mkdirSync(dirname(path), { recursive: true });
     writeFileSyncPlain(path, bytes);
     return sha;
+}
+
+/**
+ * Create or refresh a relative symlink at `<folder>/source.pdf` pointing to
+ * the dedup-keyed PDF in `_shared/`. Lets developers click through to the
+ * source PDF from a fixture folder without hunting for the sha256 filename.
+ *
+ * Relative target keeps the corpus portable (a moved or copied corpus root
+ * stays valid). Idempotent: skips when an existing symlink already matches;
+ * replaces any stale symlink.
+ *
+ * Returns the symlink path. Returns `null` and writes a warning to `stderr`
+ * if symlink creation fails (e.g. Windows without symlink permission) — the
+ * fixture itself is unaffected.
+ */
+export function ensureSourcePdfLink(
+    loc: FixtureLocation,
+    sha: string,
+    onWarning?: (msg: string) => void,
+): string | null {
+    const target = sharedPdfPath(loc.root, sha);
+    const linkPath = join(loc.folder, "source.pdf");
+    const relTarget = relative(loc.folder, target);
+
+    try {
+        const stat = lstatSync(linkPath);
+        if (stat.isSymbolicLink()) {
+            if (readlinkSync(linkPath) === relTarget) return linkPath;
+        }
+        unlinkSync(linkPath);
+    } catch {
+        // doesn't exist — fall through and create
+    }
+
+    mkdirSync(loc.folder, { recursive: true });
+    try {
+        symlinkSync(relTarget, linkPath);
+        return linkPath;
+    } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        onWarning?.(`failed to create source.pdf symlink at ${linkPath}: ${msg}`);
+        return null;
+    }
+}
+
+/**
+ * Write per-page macOS `.webloc` files (XML plist) under the fixture folder
+ * that, when double-clicked, open the source PDF at the captured page in the
+ * system's default URL handler.
+ *
+ * Files are named `source-p<pageIndex>.webloc` to match the 0-indexed
+ * `pageIndices` and the companion `preview-p<n>.png` overlay images. The PDF
+ * `#page=` fragment is 1-indexed per the PDF Open Parameters spec, so the
+ * URL contains `pageIndex + 1`.
+ *
+ * Caveats:
+ *   - macOS Preview ignores `#page=` fragments — Skim, Chrome, Safari, and
+ *     Firefox all honor them.
+ *   - macOS-specific format. On Linux/Windows the files are inert.
+ *
+ * Returns the absolute paths written. Per-file failures route through
+ * `onWarning` and don't block the rest.
+ */
+export function writeSourcePdfPageLinks(
+    loc: FixtureLocation,
+    sha: string,
+    pageIndices: number[],
+    onWarning?: (msg: string) => void,
+): string[] {
+    if (pageIndices.length === 0) return [];
+    const url = pathToFileUrl(sharedPdfPath(loc.root, sha));
+    mkdirSync(loc.folder, { recursive: true });
+
+    const written: string[] = [];
+    for (const pageIndex of pageIndices) {
+        const linkPath = join(loc.folder, `source-p${pageIndex}.webloc`);
+        const body = buildWeblocXml(`${url}#page=${pageIndex + 1}`);
+        try {
+            writeFileSync(linkPath, body, "utf8");
+            written.push(linkPath);
+        } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            onWarning?.(`failed to write ${linkPath}: ${msg}`);
+        }
+    }
+    return written;
+}
+
+/**
+ * POSIX-only: percent-encode each path segment but preserve the `/`
+ * structure, then prepend `file://`. Encoding per-segment avoids
+ * double-encoding the path separator that `encodeURIComponent` would
+ * otherwise mangle.
+ */
+function pathToFileUrl(absPath: string): string {
+    const encoded = absPath.split("/").map(encodeURIComponent).join("/");
+    return `file://${encoded}`;
+}
+
+function buildWeblocXml(url: string): string {
+    return [
+        `<?xml version="1.0" encoding="UTF-8"?>`,
+        `<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">`,
+        `<plist version="1.0">`,
+        `<dict>`,
+        `\t<key>URL</key>`,
+        `\t<string>${escapeXml(url)}</string>`,
+        `</dict>`,
+        `</plist>`,
+        ``,
+    ].join("\n");
+}
+
+function escapeXml(s: string): string {
+    return s
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&apos;");
 }
 
 /**
