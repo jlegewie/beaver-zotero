@@ -230,6 +230,77 @@ describe('fixture capture', () => {
         expect(env.error.message).toMatch(/mutually exclusive/);
     });
 
+    it('reports wrote=true when --update actually rewrites a changed fixture', async () => {
+        // Regression: previously `wrote` was recomputed by re-reading the
+        // just-written file and comparing to itself, so existing-and-changed
+        // captures always reported wrote=false.
+        const { deps: capDeps } = makeDeps();
+        const baseArgs = [
+            'fixture',
+            'capture',
+            'fake.pdf',
+            '--root',
+            tmpRoot,
+            '--id',
+            'wrote__p0',
+            '--pages',
+            '0',
+            '--json',
+        ];
+        expect(await runCli(baseArgs, capDeps)).toBe(0);
+
+        // Re-capture with --update and a mutated extract result.
+        const mutated = pageWithSentences() as Record<string, unknown>;
+        const sentences = (mutated.sentences as Record<string, unknown>[]).slice();
+        sentences[0] = { ...sentences[0], text: 'Mutated sentence.' };
+        mutated.sentences = sentences;
+        mutated.content = 'Mutated content.';
+
+        const { deps: updateDeps, stdout } = makeDeps({
+            extractPdf: vi.fn().mockResolvedValue({
+                pages: [mutated],
+                analysis: {},
+                fullText: 'Mutated content.',
+                metadata: {},
+            }),
+        });
+        const code = await runCli([...baseArgs, '--update'], updateDeps);
+        expect(code).toBe(0);
+        const env = JSON.parse(stdout.text()) as {
+            ok: boolean;
+            result: { wrote: boolean; capturedAt: string; updatedAt: string };
+        };
+        expect(env.ok).toBe(true);
+        expect(env.result.wrote).toBe(true);
+        expect(env.result.updatedAt).not.toBe(env.result.capturedAt);
+    });
+
+    it('reports wrote=false when --update on an unchanged fixture is a true no-op', async () => {
+        const { deps: capDeps } = makeDeps();
+        const baseArgs = [
+            'fixture',
+            'capture',
+            'fake.pdf',
+            '--root',
+            tmpRoot,
+            '--id',
+            'noop__p0',
+            '--pages',
+            '0',
+            '--json',
+        ];
+        expect(await runCli(baseArgs, capDeps)).toBe(0);
+
+        const { deps: updateDeps, stdout } = makeDeps();
+        const code = await runCli([...baseArgs, '--update'], updateDeps);
+        expect(code).toBe(0);
+        const env = JSON.parse(stdout.text()) as {
+            ok: boolean;
+            result: { wrote: boolean };
+        };
+        expect(env.result.wrote).toBe(false);
+    });
+
     it('stores --analysis-window N as { window: N } in the fixture config', async () => {
         const { deps } = makeDeps();
         const code = await runCli(
@@ -252,6 +323,76 @@ describe('fixture capture', () => {
         expect(code).toBe(0);
         const fix = readFixtureJson('win5');
         expect(fix.config.analysisScope).toEqual({ window: 5 });
+    });
+
+    it('renders preview-p<n>.png for each captured page when --preview is set', async () => {
+        const { deps, api } = makeDeps();
+        api.renderPages.mockResolvedValue({
+            pageCount: 1,
+            pageLabels: {},
+            pages: [
+                {
+                    pageIndex: 0,
+                    data: new Uint8Array([0x89, 0x50, 0x4e, 0x47]),
+                    width: 800,
+                    height: 1200,
+                    format: 'png',
+                    scale: 1.5,
+                    dpi: 108,
+                },
+            ],
+        });
+
+        const code = await runCli(
+            [
+                'fixture',
+                'capture',
+                'fake.pdf',
+                '--root',
+                tmpRoot,
+                '--id',
+                'preview__p0',
+                '--pages',
+                '0',
+                '--preview',
+                '--json',
+            ],
+            deps,
+        );
+        expect(code).toBe(0);
+        expect(api.renderPages).toHaveBeenCalledTimes(1);
+        expect(api.renderPages.mock.calls[0][0]).toMatchObject({
+            pageIndices: [0],
+            options: { scale: 1.5, format: 'png' },
+        });
+        expect(deps.drawOverlay).toHaveBeenCalledTimes(1);
+        expect(deps.writePngFile).toHaveBeenCalledWith(
+            join(tmpRoot, 'preview__p0', 'preview-p0.png'),
+            expect.any(Uint8Array),
+        );
+    });
+
+    it('does NOT render preview by default (off without --preview)', async () => {
+        const { deps, api } = makeDeps();
+        const code = await runCli(
+            [
+                'fixture',
+                'capture',
+                'fake.pdf',
+                '--root',
+                tmpRoot,
+                '--id',
+                'no-preview__p0',
+                '--pages',
+                '0',
+                '--json',
+            ],
+            deps,
+        );
+        expect(code).toBe(0);
+        expect(api.renderPages).not.toHaveBeenCalled();
+        expect(deps.drawOverlay).not.toHaveBeenCalled();
+        expect(deps.writePngFile).not.toHaveBeenCalled();
     });
 });
 

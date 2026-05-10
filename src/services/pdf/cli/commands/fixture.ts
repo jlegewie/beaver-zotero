@@ -51,14 +51,21 @@ import {
     formatDiffs,
     projectExtractionSnapshot,
 } from "../../debug/extractionSnapshot";
+import { buildSentenceOverlayFromPage } from "../../debug/overlayBuilders";
 import type { ExtractInput } from "../../node/api";
-import type { ExtractionSettings } from "../../types";
+import type {
+    ExtractionResult,
+    ExtractionSettings,
+    ProcessedPage,
+} from "../../types";
 import type { ParagraphDetectionSettings } from "../../ParagraphDetector";
 import type { SentenceSplitterConfig } from "../../sentenceTypes";
 import { join, resolve as resolvePath } from "node:path";
 import { existsSync } from "node:fs";
 
 const DEFAULT_BBOX_TOL_PT = 0.5;
+/** Render scale for preview PNGs. Matches the legacy `extractionFixtures.ts` value. */
+const PREVIEW_RENDER_SCALE = 1.5;
 
 function resolveDefaultRoot(): string {
     // Resolve against process.cwd() so a dev's relative invocations work,
@@ -113,6 +120,11 @@ function buildCaptureCommand(deps: CliDeps): Command {
             "--update",
             "allow replacing an existing fixture (config-changing path)",
         )
+        .option(
+            "--preview",
+            "render preview-p<n>.png with sentence overlay per captured page",
+            false,
+        )
         .option("--json", "emit a structured JSON envelope")
         .option("--pretty", "pretty-print JSON output (only with --json)")
         .action(async (pdfPath: string, opts: CaptureOpts) => {
@@ -156,6 +168,7 @@ function buildCaptureCommand(deps: CliDeps): Command {
 
                 const now = new Date().toISOString();
                 let fixture: CapturedFixture;
+                let wrote = false;
                 if (exists) {
                     const previous = readFixture(root, opts.id);
                     const candidate: CapturedFixture = {
@@ -176,6 +189,7 @@ function buildCaptureCommand(deps: CliDeps): Command {
                     } else {
                         fixture = candidate;
                         writeFixtureFile(loc, fixture);
+                        wrote = true;
                     }
                 } else {
                     fixture = {
@@ -191,7 +205,18 @@ function buildCaptureCommand(deps: CliDeps): Command {
                         expected,
                     };
                     writeFixtureFile(loc, fixture);
+                    wrote = true;
                 }
+
+                const previewPaths = opts.preview
+                    ? await renderPreviewsForFixture(
+                          deps,
+                          bytes,
+                          loc.folder,
+                          result,
+                          config.pageIndices,
+                      )
+                    : [];
 
                 emitSuccess(deps, opts, pdfPath, bytes, effective, {
                     folder: loc.folder,
@@ -199,11 +224,8 @@ function buildCaptureCommand(deps: CliDeps): Command {
                     sharedPdf: sharedPdfPath(root, sha),
                     pageCount: expected.perPage.length,
                     sentenceCount: expected.totals.sentenceCount,
-                    wrote: !exists || !semanticallyEqual(readFixture(root, opts.id), {
-                        ...fixture,
-                        // Force the comparison after the write to detect a true no-op
-                        // (this branch only matters when exists && wrote)
-                    }),
+                    wrote,
+                    previews: previewPaths,
                     capturedAt: fixture.capturedAt,
                     updatedAt: fixture.updatedAt,
                 });
@@ -226,6 +248,7 @@ interface CaptureOpts {
     paragraphSettings?: string;
     bboxTolerance?: string;
     update?: boolean;
+    preview?: boolean;
     json?: boolean;
     pretty?: boolean;
 }
@@ -361,6 +384,11 @@ function buildUpdateCommand(deps: CliDeps): Command {
             "--root <dir>",
             `corpus root (default: ${PUBLIC_FIXTURE_ROOT_REL})`,
         )
+        .option(
+            "--preview",
+            "re-render preview-p<n>.png with sentence overlay per captured page",
+            false,
+        )
         .option("--json", "emit a structured JSON envelope")
         .option("--pretty", "pretty-print JSON output (only with --json)")
         .action(async (id: string, opts: UpdateOpts) => {
@@ -385,15 +413,27 @@ function buildUpdateCommand(deps: CliDeps): Command {
                     fingerprints,
                     updatedAt: now,
                 };
+                const loc = fixtureLocation(root, id);
                 let wrote = false;
                 if (!semanticallyEqual(previous, candidate)) {
-                    const loc = fixtureLocation(root, id);
                     writeFixtureFile(loc, candidate);
                     wrote = true;
                 }
+
+                const previewPaths = opts.preview
+                    ? await renderPreviewsForFixture(
+                          deps,
+                          pdfBytes,
+                          loc.folder,
+                          result,
+                          previous.config.pageIndices,
+                      )
+                    : [];
+
                 emitSuccess(deps, opts, id, undefined, effective, {
                     id,
                     wrote,
+                    previews: previewPaths,
                     capturedAt: previous.capturedAt,
                     updatedAt: wrote ? candidate.updatedAt : previous.updatedAt,
                 });
@@ -406,6 +446,7 @@ function buildUpdateCommand(deps: CliDeps): Command {
 
 interface UpdateOpts {
     root?: string;
+    preview?: boolean;
     json?: boolean;
     pretty?: boolean;
 }
@@ -450,6 +491,51 @@ function buildListCommand(deps: CliDeps): Command {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Render one preview-p<n>.png per captured page, with the sentence-level
+ * overlay composited on top. Mirrors the legacy reader-side
+ * `extractionFixtures.ts` behavior (1.5x render scale, sentence overlay).
+ *
+ * Returns the absolute paths written, in the same order as `pageIndices`.
+ * Pages that aren't present in `result.pages` are skipped silently — that
+ * shouldn't happen because the same `extractPdf` call produced the result,
+ * but we don't want a missing page to crash the capture command.
+ */
+async function renderPreviewsForFixture(
+    deps: CliDeps,
+    pdfBytes: Uint8Array,
+    fixtureFolder: string,
+    result: ExtractionResult,
+    pageIndices: number[],
+): Promise<string[]> {
+    const rendered = await deps.api.renderPages({
+        pdfData: pdfBytes,
+        pageIndices,
+        options: { scale: PREVIEW_RENDER_SCALE, format: "png" },
+    });
+    const paths: string[] = [];
+    for (const pageIndex of pageIndices) {
+        const renderedPage = rendered.pages.find((p) => p.pageIndex === pageIndex);
+        const ppage: ProcessedPage | undefined = result.pages.find(
+            (p) => p.index === pageIndex,
+        );
+        if (!renderedPage || !ppage) continue;
+        const overlay = buildSentenceOverlayFromPage(ppage);
+        const composited = await deps.drawOverlay(
+            renderedPage.data,
+            renderedPage.width,
+            renderedPage.height,
+            overlay.pageWidth,
+            overlay.pageHeight,
+            overlay.rects,
+        );
+        const outPath = join(fixtureFolder, `preview-p${pageIndex}.png`);
+        await deps.writePngFile(outPath, composited);
+        paths.push(outPath);
+    }
+    return paths;
+}
 
 function buildExtractInput(pdfBytes: Uint8Array, config: FixtureConfig): ExtractInput {
     return {
@@ -565,6 +651,3 @@ function renderSuccessPlain(deps: CliDeps, result: unknown): void {
     }
 }
 
-// silence unused import warning when join() is unused above; keep available for
-// future fixture-folder absolute-path display.
-void join;
