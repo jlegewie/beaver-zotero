@@ -842,24 +842,41 @@ export async function handleTestPdfRenderOverlayHttpRequest(request: any) {
 }
 
 /**
- * Dev-only pipeline-trace endpoint
+ * Dev-only extract-trace endpoint — trace variant of structured extraction.
+ *
+ * Same request body as `pdf-sentence-bboxes` plus top-level `settings`
+ * and `mode`. An agent can swap the URL between the two endpoints
+ * without restructuring the body.
  *
  * Request body:
  *   { library_id, zotero_key | raw_bytes_base64,
  *     page_index: number,
- *     language?: string,                 // for sentence splitter
- *     analysis_page_window?: number,     // ±N pages around page_index for
- *                                        // cross-page smart removal.
- *                                        // 0 (default) = target page only,
- *                                        // no neighbors. Pass Infinity for
- *                                        // the whole document.
+ *     settings?: ExtractionSettings,     // top-level (matches analyze-layout / render-overlay).
+ *                                        // Honored: margins, marginZone, repeatThreshold,
+ *                                        // detectPageSequences. Ignored: checkTextLayer,
+ *                                        // minTextPerPage (those gate the document at extract()
+ *                                        // entry, before any single-page trace runs — silently
+ *                                        // ignored here, not an error).
+ *     options?: {
+ *       splitter?: SentenceSplitterConfig,   // serializable config:
+ *                                            //   { type: "sentencex", language? } | { type: "simple" }
+ *                                            // Default: sentencex with `options.language`.
+ *       language?: string,                   // seeds sentencex when `splitter` is omitted.
+ *                                            // Falls back to the Zotero item's language when
+ *                                            // both are absent. Ignored when an explicit
+ *                                            // `splitter` is given.
+ *       analysisWindow?: number,             // ±N pages around page_index for cross-page
+ *                                            // smart removal. 0 (default) = target page only.
+ *                                            // Pass Infinity for the whole document.
+ *       paragraphSettings?: ParagraphDetectionSettings,
+ *     },
  *     include_chars?: boolean,           // include per-char quads on raw_lines
- *     summary?: boolean }                 // omit text bodies / chars / topStyles,
- *                                         // keep only triage facts (counts,
- *                                         // candidates, finalKept=false lines,
- *                                         // lines_dropped_by_columns,
- *                                         // degradation.notes). Typical 10–50×
- *                                         // smaller payload.
+ *     mode?: "full" | "triage" }         // "full" (default) returns raw_lines, columns,
+ *                                        //   paragraphs, sentences, etc. in full detail.
+ *                                        // "triage" omits text bodies / chars / topStyles
+ *                                        //   and keeps only triage facts (counts, candidates,
+ *                                        //   finalKept=false lines, lines_dropped_by_columns,
+ *                                        //   degradation.notes). Typical 10–50× smaller payload.
  *
  * Response shape (selected fields):
  *   { ok: true, page_index, page_width, page_height,
@@ -872,8 +889,11 @@ export async function handleTestPdfRenderOverlayHttpRequest(request: any) {
  *     paragraphs: [{ id, type, columnIdx, lineIds, text, bbox, role }],
  *     sentences: [{ idx, text, paragraphId, bboxes, degraded }],
  *     sentence_stats }
+ *
+ * Triage mode echoes `mode: "triage"` on the response (replacing the legacy
+ * `mode: "summary"` shape).
  */
-export async function handleTestPdfPipelineTraceHttpRequest(request: any) {
+export async function handleTestPdfExtractTraceHttpRequest(request: any) {
     const {
         MarginFilter,
         StyleAnalyzer,
@@ -895,29 +915,65 @@ export async function handleTestPdfPipelineTraceHttpRequest(request: any) {
         };
     }
     const includeChars = request?.include_chars === true;
-    const summary = request?.summary === true;
+    const triage = request?.mode === 'triage';
 
     // ------------------------------------------------------------------
-    // Resolve language for sentencex (worker resolves the splitter
-    // internally from `splitterConfig`). Then run the worker trace op
+    // Resolve splitter, analysis window, paragraph settings, and the
+    // honored ExtractionSettings fields. Then run the worker trace op
     // for the production pipeline + intermediates in one round-trip.
     // ------------------------------------------------------------------
-    let language: string | undefined =
-        typeof request?.language === 'string' ? request.language : undefined;
-    if (!language && request?.library_id != null && request?.zotero_key != null) {
-        try {
-            const { getItemLanguage } = await import('../../../src/utils/zoteroUtils');
-            const raw = await getItemLanguage(request.library_id, request.zotero_key);
-            if (raw) language = raw;
-        } catch {
-            // Best effort.
+    const opts = (request?.options ?? {}) as {
+        splitter?: { type: 'sentencex'; language?: string } | { type: 'simple' };
+        language?: string;
+        analysisWindow?: number;
+        paragraphSettings?: unknown;
+    };
+
+    // Resolve a splitter config. Explicit `options.splitter` wins. Otherwise
+    // build a sentencex config seeded by `options.language`, falling back to
+    // the Zotero item's language when both are absent.
+    let splitterConfig:
+        | { type: 'sentencex'; language?: string }
+        | { type: 'simple' }
+        | undefined = opts.splitter;
+    if (!splitterConfig) {
+        let language: string | undefined =
+            typeof opts.language === 'string' ? opts.language : undefined;
+        if (!language && request?.library_id != null && request?.zotero_key != null) {
+            try {
+                const { getItemLanguage } = await import('../../../src/utils/zoteroUtils');
+                const raw = await getItemLanguage(request.library_id, request.zotero_key);
+                if (raw) language = raw;
+            } catch {
+                // Best effort.
+            }
         }
+        splitterConfig = { type: 'sentencex', language };
     }
 
     const analysisWindow =
-        request?.analysis_page_window != null
-            ? Number(request.analysis_page_window)
+        opts.analysisWindow != null ? Number(opts.analysisWindow) : undefined;
+
+    // ExtractionSettings — only the four layout-related fields are forwarded.
+    // checkTextLayer / minTextPerPage gate the document at extract() entry
+    // and don't apply to a single-page trace; silently ignored.
+    const settings =
+        request?.settings && typeof request.settings === 'object'
+            ? (request.settings as {
+                  margins?: unknown;
+                  marginZone?: unknown;
+                  repeatThreshold?: number;
+                  detectPageSequences?: boolean;
+              })
             : undefined;
+    const customMargins = (settings?.margins ?? undefined) as
+        | typeof DEFAULT_MARGINS
+        | undefined;
+    const customMarginZone = (settings?.marginZone ?? undefined) as
+        | typeof DEFAULT_MARGIN_ZONE
+        | undefined;
+    const marginsToUse = customMargins ?? DEFAULT_MARGINS;
+    const marginZoneToUse = customMarginZone ?? DEFAULT_MARGIN_ZONE;
 
     let result: PageSentenceBBoxResult;
     let trace: SentenceBBoxTrace;
@@ -926,8 +982,13 @@ export async function handleTestPdfPipelineTraceHttpRequest(request: any) {
             pdfData,
             pageIndex,
             {
-                splitterConfig: { type: 'sentencex', language },
+                splitterConfig,
                 analysisWindow,
+                paragraphSettings: opts.paragraphSettings as never,
+                margins: customMargins,
+                marginZone: customMarginZone,
+                repeatThreshold: settings?.repeatThreshold,
+                detectPageSequences: settings?.detectPageSequences,
             },
         );
         result = out.result;
@@ -1035,20 +1096,20 @@ export async function handleTestPdfPipelineTraceHttpRequest(request: any) {
                 line.bbox,
                 targetPage.width,
                 targetPage.height,
-                DEFAULT_MARGINS,
+                marginsToUse,
             );
             const inSmartZone =
                 MarginFilter.getMarginPosition(
                     line.bbox,
                     targetPage.width,
                     targetPage.height,
-                    DEFAULT_MARGIN_ZONE,
+                    marginZoneToUse,
                 ) !== null;
             const keptBySimple = MarginFilter.isInsideContentArea(
                 line,
                 targetPage.width,
                 targetPage.height,
-                DEFAULT_MARGINS,
+                marginsToUse,
             );
             const smartReason = inSmartZone
                 ? targetPageRemovals.has(normalized)
@@ -1251,7 +1312,7 @@ export async function handleTestPdfPipelineTraceHttpRequest(request: any) {
         pageIndices: c.pageIndices,
     }));
 
-    if (summary) {
+    if (triage) {
         // Triage view
         const finalDropped = rawLineEntries
             .filter((e) => !e.marginFilter.finalKept)
@@ -1265,7 +1326,7 @@ export async function handleTestPdfPipelineTraceHttpRequest(request: any) {
             }));
         return {
             ok: true,
-            mode: 'summary',
+            mode: 'triage',
             page_index: pageIndex,
             page_width: targetPage.width,
             page_height: targetPage.height,

@@ -873,7 +873,7 @@ export async function opSearch(
  * `opExtract` with `mode: "structured"` (multi-page, returns
  * `ExtractionResult` with `pages[i].sentences`).
  *
- * Powers the dev visualizer / pipeline-trace endpoints: returns the
+ * Powers the dev visualizer / extract-trace endpoints: returns the
  * production sentence result PLUS the pipeline intermediates
  * (analysis-window indices, raw doc, detailed page, font-bridged
  * `pagesForFilter`, margin analysis/removal, filtered-paragraph result).
@@ -906,6 +906,10 @@ export async function opExtractSentenceBBoxesDebug(
             splitterConfig: opts?.splitterConfig,
             analysisWindow: opts?.analysisWindow,
             paragraphSettings: opts?.paragraphSettings,
+            margins: opts?.margins,
+            marginZone: opts?.marginZone,
+            repeatThreshold: opts?.repeatThreshold,
+            detectPageSequences: opts?.detectPageSequences,
             trace: true,
         });
         return { result: traceResult };

@@ -20,7 +20,7 @@
  *     the analysis-context build, then delegates to
  *     `extractSentencesForPage`. In trace mode it also returns the
  *     pipeline intermediates needed by dev surfaces (visualizer,
- *     fixture capture, pipeline-trace endpoint).
+ *     fixture capture, extract-trace endpoint).
  *
  * **Quality bar, not parity.** The structured multi-page caller
  * (`runExtractFromIndices` in `worker/ops.ts`) computes
@@ -140,6 +140,17 @@ interface BaseArgs {
     /** Caller-supplied extraction margins. Defaulted by the caller if absent. */
     margins?: MarginSettings;
     marginZone?: MarginSettings;
+    /**
+     * Smart-removal candidate frequency cutoff. Forwarded to
+     * `buildPageAnalysisContext`; falsy / undefined falls back to that
+     * helper's default.
+     */
+    repeatThreshold?: number;
+    /**
+     * Whether to detect ascending page-number sequences in margins.
+     * Forwarded to `buildPageAnalysisContext`; defaults to `true` there.
+     */
+    detectPageSequences?: boolean;
 }
 
 export async function runSentenceExtractionFromDoc(
@@ -160,6 +171,8 @@ export async function runSentenceExtractionFromDoc(
         paragraphSettings,
         margins,
         marginZone,
+        repeatThreshold,
+        detectPageSequences,
         trace: wantTrace,
     } = args;
 
@@ -200,6 +213,8 @@ export async function runSentenceExtractionFromDoc(
             pages: pagesForFilter,
             totalPageCount: pageCount,
             marginZone,
+            repeatThreshold,
+            detectPageSequences,
         });
         const filtered = detectFilteredParagraphs({
             pages: pagesForFilter,
@@ -227,6 +242,8 @@ export async function runSentenceExtractionFromDoc(
             pages: pagesForFilter,
             totalPageCount: pageCount,
             marginZone,
+            repeatThreshold,
+            detectPageSequences,
         });
     const filteredResult = detectFilteredParagraphs({
         pages: pagesForFilter,

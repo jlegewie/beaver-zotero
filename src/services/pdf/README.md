@@ -202,7 +202,7 @@ LayoutAnalysisResult; // Result of PDFExtractor.analyzeLayout — pre-extraction
                       // pageIndices / analysisWindow.
 SentenceBBoxTraceResult; // Result of getMuPDFWorkerClient().extractSentenceBBoxesDebug
                          // — single-page debug envelope { result, trace } used by
-                         // fixture capture and the pipeline-trace endpoint.
+                         // fixture capture and the extract-trace endpoint.
 PDFSearchResult; // Result of PDFExtractor.search
 PageImageResult; // Per-page entry in PDFExtractor.renderPages result.pages
 ```
@@ -728,7 +728,7 @@ for (const c of layout.analysis.marginRemoval.candidates) {
   console.log(c.text, c.reason, c.pageIndices);
 }
 
-// Single-page debug surface (fixture capture / pipeline-trace endpoint).
+// Single-page debug surface (fixture capture / extract-trace endpoint).
 // Returns `{ result, trace }` with all pipeline intermediates (raw doc,
 // detailed page, font-bridged pagesForFilter, margin analysis/removal,
 // filtered-paragraph result). Not a parity oracle for the production

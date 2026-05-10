@@ -1,13 +1,13 @@
 /**
- * Live parity check for `/beaver/test/pdf-pipeline-trace`.
+ * Live parity check for `/beaver/test/pdf-extract-trace`.
  *
- * `/beaver/test/pdf-pipeline-trace` uses the worker trace op and
+ * `/beaver/test/pdf-extract-trace` uses the worker trace op and
  * `/beaver/test/pdf-sentence-bboxes` uses the production worker op. Both
  * share the same worker-side sentence extraction helper, so for the same
  * item/page they MUST produce the same sentence output. If this test
  * fails, the trace endpoint has drifted from production.
  *
- * Run with: `npm run test:live -- pdfPipelineTrace`
+ * Run with: `npm run test:live -- pdfExtractTrace`
  */
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
@@ -42,11 +42,11 @@ interface TraceResponse {
     error?: { name: string; code?: string; message: string };
 }
 
-async function pdfPipelineTrace(
+async function pdfExtractTrace(
     attachment: { library_id: number; zotero_key: string },
     body: Record<string, unknown>,
 ): Promise<TraceResponse> {
-    return post<TraceResponse>('/beaver/test/pdf-pipeline-trace', {
+    return post<TraceResponse>('/beaver/test/pdf-extract-trace', {
         library_id: attachment.library_id,
         zotero_key: attachment.zotero_key,
         ...body,
@@ -58,7 +58,7 @@ beforeAll(async () => {
     available = await isZoteroAvailable();
 });
 
-describe('pdf-pipeline-trace ↔ pdf-sentence-bboxes parity', () => {
+describe('pdf-extract-trace ↔ pdf-sentence-bboxes parity', () => {
     beforeEach((ctx) => {
         skipIfNoZotero(ctx, available);
     });
@@ -67,7 +67,7 @@ describe('pdf-pipeline-trace ↔ pdf-sentence-bboxes parity', () => {
         it(`emits the same sentences as pdf-sentence-bboxes (${fixture.description})`, async () => {
             const pageIndex = 0;
             const [traceRes, prodRes] = await Promise.all([
-                pdfPipelineTrace(fixture, { page_index: pageIndex }),
+                pdfExtractTrace(fixture, { page_index: pageIndex }),
                 pdfSentenceBBoxes(fixture, { page_index: pageIndex }),
             ]);
 
@@ -98,7 +98,7 @@ describe('pdf-pipeline-trace ↔ pdf-sentence-bboxes parity', () => {
         });
 
         it(`cross-stage links are well-formed (${fixture.description})`, async () => {
-            const res = await pdfPipelineTrace(fixture, { page_index: 0 });
+            const res = await pdfExtractTrace(fixture, { page_index: 0 });
             expect(res.ok).toBe(true);
 
             const rawLineIds = new Set(
@@ -139,7 +139,7 @@ describe('pdf-pipeline-trace ↔ pdf-sentence-bboxes parity', () => {
     }
 
     it('returns ok:false with a structured error for an out-of-range page', async () => {
-        const res = await pdfPipelineTrace(SMALL_PDF, { page_index: 99999 });
+        const res = await pdfExtractTrace(SMALL_PDF, { page_index: 99999 });
         expect(res.ok).toBe(false);
         expect(res.error).toBeDefined();
         // RangeError from resolveAnalysisPageIndices → name:'Error'.

@@ -22,6 +22,7 @@ import type { ParagraphDetectionSettings } from "./ParagraphDetector";
 import type {
     MarginAnalysis,
     MarginRemovalResult,
+    MarginSettings,
     RawDocumentData,
     RawPageData,
     RawPageDataDetailed,
@@ -49,11 +50,21 @@ export type SentenceSplitterConfig =
  *
  * The op is implicitly debug — there is no production variant. Production
  * sentence-level extraction goes through `extract({ mode: "structured" })`.
+ *
+ * The four settings fields below are the worker-clonable subset of
+ * `ExtractionSettings` that affect single-page layout/filtering. The OCR
+ * fields (`checkTextLayer`, `minTextPerPage`) are intentionally excluded —
+ * they gate the document at `extract()` entry, before any single-page
+ * trace runs.
  */
 export interface WorkerSentenceBBoxDebugOptions {
     splitterConfig?: SentenceSplitterConfig;
     paragraphSettings?: ParagraphDetectionSettings;
     analysisWindow?: number;
+    margins?: MarginSettings;
+    marginZone?: MarginSettings;
+    repeatThreshold?: number;
+    detectPageSequences?: boolean;
 }
 
 /**

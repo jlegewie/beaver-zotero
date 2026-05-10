@@ -10,7 +10,7 @@
  * the full column set. The candidate list is reserved for future
  * `NonStandardContentRegion` integration; today it is exposed solely
  * as a debugging signal via the column-detector wrapper and the
- * `pdf-pipeline-trace` endpoint.
+ * `pdf-extract-trace` endpoint.
  *
  * Intent of the heuristic (preserved here for future activation):
  * candidates are columns that, on a page exhibiting clustered tiny

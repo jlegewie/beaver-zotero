@@ -521,7 +521,7 @@ export class MuPDFWorkerClient {
      * `extract({ mode: "structured" })` which returns the same
      * `ExtractionResult` shape with `pages[i].sentences` populated.
      *
-     * Powers the dev visualizer / fixture capture / pipeline-trace
+     * Powers the dev visualizer / fixture capture / extract-trace
      * endpoints. Returns `SentenceBBoxTraceResult = { result, trace }`
      * with `result` being the production sentence result and `trace`
      * carrying all pipeline intermediates (analysis-window indices, raw

@@ -79,7 +79,7 @@ import {
     handleTestPdfSearchScoredHttpRequest,
     handleTestPdfSentenceBBoxesHttpRequest,
     handleTestPdfRenderOverlayHttpRequest,
-    handleTestPdfPipelineTraceHttpRequest,
+    handleTestPdfExtractTraceHttpRequest,
     handleTestPdfAnalyzeLayoutHttpRequest,
 } from './httpHandlers/testPdfHandlers';
 import type {
@@ -182,8 +182,8 @@ const ENDPOINT_PATHS = [
     '/beaver/test/pdf-sentence-bboxes',
     // Bbox-overlay debugging (sentences/lines/paragraphs/columns/margins)
     '/beaver/test/pdf-render-overlay',
-    // Per-page pipeline trace (every stage, JSON-only)
-    '/beaver/test/pdf-pipeline-trace',
+    // Per-page extract trace (every stage, JSON-only)
+    '/beaver/test/pdf-extract-trace',
     // Document-wide style + margin analysis context (mirrors what
     // `extract({ mode: "structured" })` builds before per-page processing)
     '/beaver/test/pdf-analyze-layout',
@@ -750,11 +750,11 @@ function registerEndpoints(): boolean {
         Zotero.Server.Endpoints['/beaver/test/pdf-render-overlay'] =
             createEndpoint(handleTestPdfRenderOverlayHttpRequest);
 
-        // Per-page pipeline trace — emits every stage of the extraction
+        // Per-page extract trace — emits every stage of the extraction
         // pipeline as JSON with cross-stage IDs, so an agent can trace
         // one piece of text from raw line through paragraphs to sentences.
-        Zotero.Server.Endpoints['/beaver/test/pdf-pipeline-trace'] =
-            createEndpoint(handleTestPdfPipelineTraceHttpRequest);
+        Zotero.Server.Endpoints['/beaver/test/pdf-extract-trace'] =
+            createEndpoint(handleTestPdfExtractTraceHttpRequest);
 
         // Full analysis context (style profile + margin analysis + margin
         // removal) computed by the same prefix `extract({ mode:
