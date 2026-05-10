@@ -35,7 +35,8 @@ export interface BeaverEvents {
             | 'paragraphs'
             | 'sentences'
             | 'clear'
-            | 'create-or-update-sentence-fixture';
+            | 'create-or-update-sentence-fixture'
+            | 'copy-fixture-capture-command';
     };
     focusInput: {};
 }

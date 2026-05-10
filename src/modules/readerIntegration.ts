@@ -44,7 +44,8 @@ function dispatchVisualizerAction(
         | 'paragraphs'
         | 'sentences'
         | 'clear'
-        | 'create-or-update-sentence-fixture',
+        | 'create-or-update-sentence-fixture'
+        | 'copy-fixture-capture-command',
 ): void {
     const win = Zotero.getMainWindow();
     const eventBus = win?.__beaverEventBus;
@@ -207,6 +208,12 @@ function onCreateViewContextMenu(event: any): void {
                 persistent: true,
                 onCommand: () =>
                     dispatchVisualizerAction('create-or-update-sentence-fixture'),
+            },
+            {
+                label: 'Copy Fixture Capture Command',
+                persistent: true,
+                onCommand: () =>
+                    dispatchVisualizerAction('copy-fixture-capture-command'),
             },
         );
     }
