@@ -209,6 +209,7 @@ async function loadStructuredPage(
     const result = await new PDFExtractor().extract(pdfData, {
         mode: "structured",
         pageIndices: [pageIndex],
+        analysisWindow: Number.POSITIVE_INFINITY,
         structured: { language },
     });
     const page = result.pages[0];
