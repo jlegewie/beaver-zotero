@@ -40,3 +40,6 @@ docs-zotero
 
 # Sentence-extraction regression fixtures (real PDFs — local-only)
 /tests/fixtures/pdfs/sentences/
+
+# BeaverExtract regression fixtures
+/tests/fixtures/pdfs/extract/

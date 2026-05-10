@@ -1,0 +1,1120 @@
+{
+  "schema": 1,
+  "id": "legewie-fagan__p0",
+  "capturedAt": "2026-05-09T23:00:12.965Z",
+  "updatedAt": "2026-05-09T23:00:12.965Z",
+  "pdfSha256": "d86a26bf17a0e19194abe41f10b32b4cf86e8caddf3c854773802e5a76b607cf",
+  "pdfBytes": 50492,
+  "config": {
+    "pageIndices": [
+      0
+    ],
+    "analysisScope": "document",
+    "splitterConfig": {
+      "type": "sentencex"
+    },
+    "settings": {},
+    "paragraphSettings": {}
+  },
+  "fingerprints": {
+    "extractorGitSha": "2ecc3640",
+    "extractorVersion": "0.19.1-beta.1",
+    "mupdfWasmSha256": "202c1dc9703cc003d4c14050db2bac937a9151dd79e719ae0cf1741080fbf19e",
+    "sentencexWasmSha256": "cd6114eed20aafefcc047f9048f901b8de595299c093e6be513e6f4b55cb2528"
+  },
+  "tolerance": {
+    "bboxAbsPt": 0.5
+  },
+  "expected": {
+    "perPage": [
+      {
+        "pageIndex": 0,
+        "pageWidth": 486,
+        "pageHeight": 711,
+        "content": "Legewie and Fagan 231\n\nstrongly agree or from uncomfortable to comfortable. They include: “I feel welcome in my school” (factor loading .61), “Discipline in my school is fair” (factor loading .52), “My teachers inspire me to learn” (factor loading .60), “The adults at my school look out for me” (factor loading .64), and “The adults at my school help me understand what I need to do to succeed in school” (factor loading .62). The variables cover different aspects of schoolrelated attitudes and trust. Our results suggest the five items belong to the same factor.11 The factor score from the exploratory maximum likelihood factor analysis can be understood as an index for positive attitudes and trust toward school and teachers. Third, we use school attendance to measure system avoidance based on administrative data from the NYCDOE. Our measure is defined as the attendance rate for a specific school year using days on the roll as the denominator. We scale the variable from 0 to 100 percent. On average, the attendance rate is 92 percent with a standard deviation of 7.6.\n\n## Sample And Summary Statistics\n\nWe restrict student data in several ways to obtain our primary analysis sample of 285,439 students who were exposed to Operation Impact, with over 827,922 student-year observations. First, we restrict our sample to African American and Hispanic students, because the sample size of White and Asian students living in impact zones is too small to support our analysis.12 Second, we exclude students who did not participate in the yearly state test in grades 3 to 8. Third, we limit our analysis to students age 9 to 15. The number of cases for younger and older students is insufficient to obtain age-specific estimates. Fourth, as part of our estimation strategy, we restrict our sample to areas designated as impact zones at least once. Finally, we exclude 2.6 percent of observations with missing data on any of the relevant variables.\n\nAppendix Table A1 reports student-level summary statistics. It compares all students age 9 to 15 who participated in the yearly state\n\nexam with our analytic sample restricted to areas that were part of Operation Impact at some point in time. The proportion of White students is far lower among students in impact zones, whereas the share of African American and Hispanic students is higher compared to the general student population. Students in impact zones are more likely to receive free or reduced lunch and to score lower on the English Language Art and Mathematics Tests. Students in impact zones live in neighborhoods with a higher poverty rate, a smaller proportion of White residents, a higher share of minority groups, and substantially higher crime rates.\n\n## Results\n\nWe begin with two regression models that estimate the effect of Operation Impact on ELA test scores for African American boys. Figure 1 presents the results; Appendix Tables A2 and A3 show the corresponding regression tables. The findings are striking. African American boys age 9 and 10 are unaffected by the police surge, with small and statistically insignificant effect estimates. As they grow older, however, African American boys begin to experience a negative effect of living in areas designated as impact zones and subject to increased police activity. At age 12, this effect is modest in size and statistically significant for the difference-in-differences model with and without student fixed effects. For 13- to 15-year-old students, the effect is substantial. For 15-year-old students, exposure to impact zones for one school year decreased ELA test scores by –.136 in the difference-in-differences model without student fixed effects and by –.150 in our preferred model with student fixed effects. These estimates refer to the relative increase in the intensity of police activity related to Operation Impact of around 30 percent in pedestrian stops and arrests for low-level crimes. The size of the effect corresponds to a fifth of the Black-White test-score gap (.72 standard deviations in our sample). It is similar in size to some of the most popular programs designed to increase educational achievement. For example, it is comparable to the",
+        "paragraphCount": 8,
+        "sentenceCount": 37,
+        "degradedParagraphs": 0,
+        "sentences": [
+          {
+            "index": 0,
+            "paragraphIndex": 0,
+            "sentenceIndex": 0,
+            "kind": "text",
+            "text": "Legewie and Fagan\t 231",
+            "bboxes": [
+              {
+                "x": 51.486,
+                "y": 33.995,
+                "w": 81.522,
+                "h": 10.638
+              },
+              {
+                "x": 419.991,
+                "y": 33.995,
+                "w": 15.012,
+                "h": 10.611
+              }
+            ]
+          },
+          {
+            "index": 1,
+            "paragraphIndex": 1,
+            "sentenceIndex": 0,
+            "kind": "text",
+            "text": "strongly agree or from uncomfortable to com- fortable.",
+            "bboxes": [
+              {
+                "x": 51.486,
+                "y": 65.027,
+                "w": 182.54,
+                "h": 11.07
+              },
+              {
+                "x": 51.486,
+                "y": 77.027,
+                "w": 33.2,
+                "h": 11.07
+              }
+            ]
+          },
+          {
+            "index": 2,
+            "paragraphIndex": 1,
+            "sentenceIndex": 1,
+            "kind": "text",
+            "text": "They include: “I feel welcome in my  school” (factor loading .61), “Discipline in my  school is fair” (factor loading .52), “My teach- ers inspire me to learn” (factor loading .60),  “The adults at my school look out for me”  (factor loading .64), and “The adults at my  school help me understand what I need to do  to succeed in school” (factor loading .62).",
+            "bboxes": [
+              {
+                "x": 87.136,
+                "y": 77.027,
+                "w": 149.37,
+                "h": 11.07
+              },
+              {
+                "x": 51.486,
+                "y": 89.027,
+                "w": 185.04,
+                "h": 11.07
+              },
+              {
+                "x": 51.486,
+                "y": 101.027,
+                "w": 182.52,
+                "h": 11.07
+              },
+              {
+                "x": 51.486,
+                "y": 113.027,
+                "w": 185,
+                "h": 11.07
+              },
+              {
+                "x": 51.486,
+                "y": 125.027,
+                "w": 185.04,
+                "h": 11.07
+              },
+              {
+                "x": 51.486,
+                "y": 137.027,
+                "w": 184.99,
+                "h": 11.07
+              },
+              {
+                "x": 51.486,
+                "y": 149.027,
+                "w": 185.02,
+                "h": 11.07
+              },
+              {
+                "x": 51.486,
+                "y": 161.027,
+                "w": 164.98,
+                "h": 11.07
+              }
+            ]
+          },
+          {
+            "index": 3,
+            "paragraphIndex": 1,
+            "sentenceIndex": 2,
+            "kind": "text",
+            "text": "The  variables cover different aspects of school- related attitudes and trust.",
+            "bboxes": [
+              {
+                "x": 218.576,
+                "y": 161.027,
+                "w": 17.95,
+                "h": 11.07
+              },
+              {
+                "x": 51.486,
+                "y": 173.027,
+                "w": 182.51,
+                "h": 11.07
+              },
+              {
+                "x": 51.486,
+                "y": 185.027,
+                "w": 103.17,
+                "h": 11.07
+              }
+            ]
+          },
+          {
+            "index": 4,
+            "paragraphIndex": 1,
+            "sentenceIndex": 3,
+            "kind": "text",
+            "text": "Our results suggest  the five items belong to the same factor.",
+            "bboxes": [
+              {
+                "x": 157.456,
+                "y": 185.027,
+                "w": 79.06,
+                "h": 11.07
+              },
+              {
+                "x": 51.486,
+                "y": 197.027,
+                "w": 158.54,
+                "h": 11.07
+              }
+            ]
+          },
+          {
+            "index": 5,
+            "paragraphIndex": 1,
+            "sentenceIndex": 4,
+            "kind": "text",
+            "text": "The  factor score from the exploratory maximum  likelihood factor analysis can be understood  as an index for positive attitudes and trust  toward school and teachers.",
+            "bboxes": [
+              {
+                "x": 218.546,
+                "y": 197.027,
+                "w": 17.95,
+                "h": 11.07
+              },
+              {
+                "x": 51.486,
+                "y": 209.027,
+                "w": 184.99,
+                "h": 11.07
+              },
+              {
+                "x": 51.486,
+                "y": 221.027,
+                "w": 185.01,
+                "h": 11.07
+              },
+              {
+                "x": 51.486,
+                "y": 233.027,
+                "w": 184.99,
+                "h": 11.07
+              },
+              {
+                "x": 51.486,
+                "y": 245.027,
+                "w": 117.97,
+                "h": 11.07
+              }
+            ]
+          },
+          {
+            "index": 6,
+            "paragraphIndex": 1,
+            "sentenceIndex": 5,
+            "kind": "text",
+            "text": "Third, we use  school attendance to measure system avoid- ance based on administrative data from the  NYCDOE.",
+            "bboxes": [
+              {
+                "x": 174.406,
+                "y": 245.027,
+                "w": 62.07,
+                "h": 11.07
+              },
+              {
+                "x": 51.486,
+                "y": 257.027,
+                "w": 182.52,
+                "h": 11.07
+              },
+              {
+                "x": 51.486,
+                "y": 269.027,
+                "w": 185.04,
+                "h": 11.07
+              },
+              {
+                "x": 51.486,
+                "y": 281.027,
+                "w": 43.86,
+                "h": 11.07
+              }
+            ]
+          },
+          {
+            "index": 7,
+            "paragraphIndex": 1,
+            "sentenceIndex": 6,
+            "kind": "text",
+            "text": "Our measure is defined as the  attendance rate for a specific school year  using days on the roll as the denominator.",
+            "bboxes": [
+              {
+                "x": 100.926,
+                "y": 281.027,
+                "w": 135.58,
+                "h": 11.07
+              },
+              {
+                "x": 51.486,
+                "y": 293.027,
+                "w": 185.02,
+                "h": 11.07
+              },
+              {
+                "x": 51.486,
+                "y": 305.027,
+                "w": 166.92,
+                "h": 11.07
+              }
+            ]
+          },
+          {
+            "index": 8,
+            "paragraphIndex": 1,
+            "sentenceIndex": 7,
+            "kind": "text",
+            "text": "We  scale the variable from 0 to 100 percent.",
+            "bboxes": [
+              {
+                "x": 220.956,
+                "y": 305.027,
+                "w": 15.53,
+                "h": 11.07
+              },
+              {
+                "x": 51.486,
+                "y": 317.027,
+                "w": 166.84,
+                "h": 11.07
+              }
+            ]
+          },
+          {
+            "index": 9,
+            "paragraphIndex": 1,
+            "sentenceIndex": 8,
+            "kind": "text",
+            "text": "On  average, the attendance rate is 92 percent with  a standard deviation of 7.6.",
+            "bboxes": [
+              {
+                "x": 221.836,
+                "y": 317.027,
+                "w": 14.67,
+                "h": 11.07
+              },
+              {
+                "x": 51.486,
+                "y": 329.027,
+                "w": 185,
+                "h": 11.07
+              },
+              {
+                "x": 51.486,
+                "y": 341.027,
+                "w": 108.52,
+                "h": 11.07
+              }
+            ]
+          },
+          {
+            "index": 10,
+            "paragraphIndex": 2,
+            "sentenceIndex": 0,
+            "kind": "heading",
+            "text": "Sample And Summary  Statistics",
+            "bboxes": [
+              {
+                "x": 51.486,
+                "y": 369.617,
+                "w": 152.508,
+                "h": 14.352
+              },
+              {
+                "x": 51.486,
+                "y": 383.621,
+                "w": 70.692,
+                "h": 14.352
+              }
+            ]
+          },
+          {
+            "index": 11,
+            "paragraphIndex": 3,
+            "sentenceIndex": 0,
+            "kind": "text",
+            "text": "We restrict student data in several ways to  obtain our primary analysis sample of 285,439  students who were exposed to Operation  Impact, with over 827,922 student-year  observations.",
+            "bboxes": [
+              {
+                "x": 51.486,
+                "y": 401.027,
+                "w": 185.04,
+                "h": 11.07
+              },
+              {
+                "x": 51.486,
+                "y": 413.027,
+                "w": 185.03,
+                "h": 11.07
+              },
+              {
+                "x": 51.486,
+                "y": 425.027,
+                "w": 184.83,
+                "h": 11.07
+              },
+              {
+                "x": 51.486,
+                "y": 437.027,
+                "w": 184.86,
+                "h": 11.07
+              },
+              {
+                "x": 51.486,
+                "y": 449.027,
+                "w": 53.05,
+                "h": 11.07
+              }
+            ]
+          },
+          {
+            "index": 12,
+            "paragraphIndex": 3,
+            "sentenceIndex": 1,
+            "kind": "text",
+            "text": "First, we restrict our sample to  African American and Hispanic students,  because the sample size of White and Asian  students living in impact zones is too small to  support our analysis.",
+            "bboxes": [
+              {
+                "x": 107.826,
+                "y": 449.027,
+                "w": 128.66,
+                "h": 11.07
+              },
+              {
+                "x": 51.486,
+                "y": 461.027,
+                "w": 184.85,
+                "h": 11.07
+              },
+              {
+                "x": 51.486,
+                "y": 473.027,
+                "w": 184.99,
+                "h": 11.07
+              },
+              {
+                "x": 51.486,
+                "y": 485.027,
+                "w": 185.02,
+                "h": 11.07
+              },
+              {
+                "x": 51.486,
+                "y": 497.027,
+                "w": 87.35,
+                "h": 11.07
+              }
+            ]
+          },
+          {
+            "index": 13,
+            "paragraphIndex": 3,
+            "sentenceIndex": 2,
+            "kind": "text",
+            "text": "Second, we exclude  students who did not participate in the yearly  state test in grades 3 to 8.",
+            "bboxes": [
+              {
+                "x": 149.992,
+                "y": 497.027,
+                "w": 86.5,
+                "h": 11.07
+              },
+              {
+                "x": 51.482,
+                "y": 509.027,
+                "w": 185,
+                "h": 11.07
+              },
+              {
+                "x": 51.482,
+                "y": 521.027,
+                "w": 103,
+                "h": 11.07
+              }
+            ]
+          },
+          {
+            "index": 14,
+            "paragraphIndex": 3,
+            "sentenceIndex": 3,
+            "kind": "text",
+            "text": "Third, we limit our  analysis to students age 9 to 15.",
+            "bboxes": [
+              {
+                "x": 157.072,
+                "y": 521.027,
+                "w": 79.42,
+                "h": 11.07
+              },
+              {
+                "x": 51.482,
+                "y": 533.027,
+                "w": 130.42,
+                "h": 11.07
+              }
+            ]
+          },
+          {
+            "index": 15,
+            "paragraphIndex": 3,
+            "sentenceIndex": 4,
+            "kind": "text",
+            "text": "The number  of cases for younger and older students is  insufficient to obtain age-specific estimates.",
+            "bboxes": [
+              {
+                "x": 184.802,
+                "y": 533.027,
+                "w": 51.68,
+                "h": 11.07
+              },
+              {
+                "x": 51.482,
+                "y": 545.027,
+                "w": 185.03,
+                "h": 11.07
+              },
+              {
+                "x": 51.482,
+                "y": 557.027,
+                "w": 182.5,
+                "h": 11.07
+              }
+            ]
+          },
+          {
+            "index": 16,
+            "paragraphIndex": 3,
+            "sentenceIndex": 5,
+            "kind": "text",
+            "text": "Fourth, as part of our estimation strategy, we  restrict our sample to areas designated as  impact zones at least once.",
+            "bboxes": [
+              {
+                "x": 51.482,
+                "y": 569.027,
+                "w": 184.98,
+                "h": 11.07
+              },
+              {
+                "x": 51.482,
+                "y": 581.027,
+                "w": 185.01,
+                "h": 11.07
+              },
+              {
+                "x": 51.482,
+                "y": 593.027,
+                "w": 104.16,
+                "h": 11.07
+              }
+            ]
+          },
+          {
+            "index": 17,
+            "paragraphIndex": 3,
+            "sentenceIndex": 6,
+            "kind": "text",
+            "text": "Finally, we exclude  2.6 percent of observations with missing data  on any of the relevant variables.",
+            "bboxes": [
+              {
+                "x": 157.452,
+                "y": 593.027,
+                "w": 79.07,
+                "h": 11.07
+              },
+              {
+                "x": 51.482,
+                "y": 605.027,
+                "w": 185.01,
+                "h": 11.07
+              },
+              {
+                "x": 51.482,
+                "y": 617.027,
+                "w": 129.55,
+                "h": 11.07
+              }
+            ]
+          },
+          {
+            "index": 18,
+            "paragraphIndex": 4,
+            "sentenceIndex": 0,
+            "kind": "text",
+            "text": "Appendix Table A1 reports student-level  summary statistics.",
+            "bboxes": [
+              {
+                "x": 63.482,
+                "y": 629.027,
+                "w": 173.01,
+                "h": 11.07
+              },
+              {
+                "x": 51.482,
+                "y": 641.027,
+                "w": 77.46,
+                "h": 11.07
+              }
+            ]
+          },
+          {
+            "index": 19,
+            "paragraphIndex": 4,
+            "sentenceIndex": 1,
+            "kind": "text",
+            "text": "It compares all students  age 9 to 15 who participated in the yearly state",
+            "bboxes": [
+              {
+                "x": 133.832,
+                "y": 641.027,
+                "w": 102.68,
+                "h": 11.07
+              },
+              {
+                "x": 51.482,
+                "y": 653.027,
+                "w": 182.48,
+                "h": 11.07
+              }
+            ],
+            "joinWithNext": true
+          },
+          {
+            "index": 20,
+            "paragraphIndex": 5,
+            "sentenceIndex": 0,
+            "kind": "text",
+            "text": "exam with our analytic sample restricted to  areas that were part of Operation Impact at  some point in time.",
+            "bboxes": [
+              {
+                "x": 251.992,
+                "y": 65.027,
+                "w": 185.03,
+                "h": 11.07
+              },
+              {
+                "x": 251.992,
+                "y": 77.027,
+                "w": 185.03,
+                "h": 11.07
+              },
+              {
+                "x": 251.992,
+                "y": 89.027,
+                "w": 79.42,
+                "h": 11.07
+              }
+            ]
+          },
+          {
+            "index": 21,
+            "paragraphIndex": 5,
+            "sentenceIndex": 1,
+            "kind": "text",
+            "text": "The proportion of White  students is far lower among students in impact  zones, whereas the share of African American  and Hispanic students is higher compared to  the general student population.",
+            "bboxes": [
+              {
+                "x": 334.861,
+                "y": 89.027,
+                "w": 102.15,
+                "h": 11.07
+              },
+              {
+                "x": 251.992,
+                "y": 101.027,
+                "w": 185.01,
+                "h": 11.07
+              },
+              {
+                "x": 251.992,
+                "y": 113.027,
+                "w": 184.99,
+                "h": 11.07
+              },
+              {
+                "x": 251.992,
+                "y": 125.027,
+                "w": 185.04,
+                "h": 11.07
+              },
+              {
+                "x": 251.992,
+                "y": 137.027,
+                "w": 130.01,
+                "h": 11.07
+              }
+            ]
+          },
+          {
+            "index": 22,
+            "paragraphIndex": 5,
+            "sentenceIndex": 2,
+            "kind": "text",
+            "text": "Students in  impact zones are more likely to receive free or  reduced lunch and to score lower on the Eng- lish Language Art and Mathematics Tests.",
+            "bboxes": [
+              {
+                "x": 387.531,
+                "y": 137.027,
+                "w": 49.46,
+                "h": 11.07
+              },
+              {
+                "x": 251.992,
+                "y": 149.027,
+                "w": 184.99,
+                "h": 11.07
+              },
+              {
+                "x": 251.992,
+                "y": 161.027,
+                "w": 182.52,
+                "h": 11.07
+              },
+              {
+                "x": 251.992,
+                "y": 173.027,
+                "w": 163.89,
+                "h": 11.07
+              }
+            ]
+          },
+          {
+            "index": 23,
+            "paragraphIndex": 5,
+            "sentenceIndex": 3,
+            "kind": "text",
+            "text": "Stu- dents in impact zones live in neighborhoods  with a higher poverty rate, a smaller proportion  of White residents, a higher share of minority  groups, and substantially higher crime rates.",
+            "bboxes": [
+              {
+                "x": 418.141,
+                "y": 173.027,
+                "w": 16.37,
+                "h": 11.07
+              },
+              {
+                "x": 251.992,
+                "y": 185.027,
+                "w": 185.02,
+                "h": 11.07
+              },
+              {
+                "x": 251.992,
+                "y": 197.027,
+                "w": 185.04,
+                "h": 11.07
+              },
+              {
+                "x": 251.992,
+                "y": 209.027,
+                "w": 184.98,
+                "h": 11.07
+              },
+              {
+                "x": 251.992,
+                "y": 221.027,
+                "w": 173.77,
+                "h": 11.07
+              }
+            ]
+          },
+          {
+            "index": 24,
+            "paragraphIndex": 6,
+            "sentenceIndex": 0,
+            "kind": "heading",
+            "text": "Results",
+            "bboxes": [
+              {
+                "x": 252,
+                "y": 249.617,
+                "w": 54.228,
+                "h": 14.352
+              }
+            ]
+          },
+          {
+            "index": 25,
+            "paragraphIndex": 7,
+            "sentenceIndex": 0,
+            "kind": "text",
+            "text": "We begin with two regression models that  estimate the effect of Operation Impact on  ELA test scores for African American boys.",
+            "bboxes": [
+              {
+                "x": 252,
+                "y": 269.027,
+                "w": 185.03,
+                "h": 11.07
+              },
+              {
+                "x": 252,
+                "y": 281.027,
+                "w": 185.03,
+                "h": 11.07
+              },
+              {
+                "x": 252,
+                "y": 293.027,
+                "w": 182.49,
+                "h": 11.07
+              }
+            ]
+          },
+          {
+            "index": 26,
+            "paragraphIndex": 7,
+            "sentenceIndex": 1,
+            "kind": "text",
+            "text": "Figure 1 presents the results; Appendix Tables  A2 and A3 show the corresponding regres- sion tables.",
+            "bboxes": [
+              {
+                "x": 252,
+                "y": 305.027,
+                "w": 185,
+                "h": 11.07
+              },
+              {
+                "x": 252,
+                "y": 317.027,
+                "w": 182.49,
+                "h": 11.07
+              },
+              {
+                "x": 252,
+                "y": 329.027,
+                "w": 45.27,
+                "h": 11.07
+              }
+            ]
+          },
+          {
+            "index": 27,
+            "paragraphIndex": 7,
+            "sentenceIndex": 2,
+            "kind": "text",
+            "text": "The findings are striking.",
+            "bboxes": [
+              {
+                "x": 299.86,
+                "y": 329.027,
+                "w": 101.91,
+                "h": 11.07
+              }
+            ]
+          },
+          {
+            "index": 28,
+            "paragraphIndex": 7,
+            "sentenceIndex": 3,
+            "kind": "text",
+            "text": "African  American boys age 9 and 10 are unaffected  by the police surge, with small and statisti- cally insignificant effect estimates.",
+            "bboxes": [
+              {
+                "x": 403.99,
+                "y": 329.027,
+                "w": 33.04,
+                "h": 11.07
+              },
+              {
+                "x": 252,
+                "y": 341.027,
+                "w": 185.04,
+                "h": 11.07
+              },
+              {
+                "x": 252,
+                "y": 353.027,
+                "w": 182.54,
+                "h": 11.07
+              },
+              {
+                "x": 252,
+                "y": 365.027,
+                "w": 145.54,
+                "h": 11.07
+              }
+            ]
+          },
+          {
+            "index": 29,
+            "paragraphIndex": 7,
+            "sentenceIndex": 4,
+            "kind": "text",
+            "text": "As they  grow older, however, African American boys  begin to experience a negative effect of living  in areas designated as impact zones and sub- ject to increased police activity.",
+            "bboxes": [
+              {
+                "x": 401.59,
+                "y": 365.027,
+                "w": 35.43,
+                "h": 11.07
+              },
+              {
+                "x": 252,
+                "y": 377.027,
+                "w": 184.99,
+                "h": 11.07
+              },
+              {
+                "x": 252,
+                "y": 389.027,
+                "w": 185.04,
+                "h": 11.07
+              },
+              {
+                "x": 252,
+                "y": 401.027,
+                "w": 182.49,
+                "h": 11.07
+              },
+              {
+                "x": 252,
+                "y": 413.027,
+                "w": 133.63,
+                "h": 11.07
+              }
+            ]
+          },
+          {
+            "index": 30,
+            "paragraphIndex": 7,
+            "sentenceIndex": 5,
+            "kind": "text",
+            "text": "At age 12,  this effect is modest in size and statistically  significant for the difference-in-differences  model with and without student fixed effects.",
+            "bboxes": [
+              {
+                "x": 389.42,
+                "y": 413.027,
+                "w": 47.56,
+                "h": 11.07
+              },
+              {
+                "x": 252,
+                "y": 425.027,
+                "w": 185.02,
+                "h": 11.07
+              },
+              {
+                "x": 252,
+                "y": 437.027,
+                "w": 185.01,
+                "h": 11.07
+              },
+              {
+                "x": 252,
+                "y": 449.027,
+                "w": 182.51,
+                "h": 11.07
+              }
+            ]
+          },
+          {
+            "index": 31,
+            "paragraphIndex": 7,
+            "sentenceIndex": 6,
+            "kind": "text",
+            "text": "For 13- to 15-year-old students, the effect is  substantial.",
+            "bboxes": [
+              {
+                "x": 252,
+                "y": 461.027,
+                "w": 184.99,
+                "h": 11.07
+              },
+              {
+                "x": 252,
+                "y": 473.027,
+                "w": 45.28,
+                "h": 11.07
+              }
+            ]
+          },
+          {
+            "index": 32,
+            "paragraphIndex": 7,
+            "sentenceIndex": 7,
+            "kind": "text",
+            "text": "For 15-year-old students, expo- sure to impact zones for one school year  decreased ELA test scores by –.136 in the  difference-in-differences model without stu- dent fixed effects and by –.150 in our pre- ferred model with student fixed effects.",
+            "bboxes": [
+              {
+                "x": 301.99,
+                "y": 473.027,
+                "w": 132.52,
+                "h": 11.07
+              },
+              {
+                "x": 252,
+                "y": 485.027,
+                "w": 184.99,
+                "h": 11.07
+              },
+              {
+                "x": 252,
+                "y": 497.027,
+                "w": 185.02,
+                "h": 11.07
+              },
+              {
+                "x": 252,
+                "y": 509.027,
+                "w": 182.52,
+                "h": 11.07
+              },
+              {
+                "x": 252,
+                "y": 521.027,
+                "w": 182.51,
+                "h": 11.07
+              },
+              {
+                "x": 252,
+                "y": 533.027,
+                "w": 156.51,
+                "h": 11.07
+              }
+            ]
+          },
+          {
+            "index": 33,
+            "paragraphIndex": 7,
+            "sentenceIndex": 8,
+            "kind": "text",
+            "text": "These  estimates refer to the relative increase in the  intensity of police activity related to Opera- tion Impact of around 30 percent in pedes- trian stops and arrests for low-level crimes.",
+            "bboxes": [
+              {
+                "x": 410.62,
+                "y": 533.027,
+                "w": 26.38,
+                "h": 11.07
+              },
+              {
+                "x": 252,
+                "y": 545.027,
+                "w": 185,
+                "h": 11.07
+              },
+              {
+                "x": 252,
+                "y": 557.027,
+                "w": 182.53,
+                "h": 11.07
+              },
+              {
+                "x": 252,
+                "y": 569.027,
+                "w": 182.49,
+                "h": 11.07
+              },
+              {
+                "x": 252,
+                "y": 581.027,
+                "w": 182.5,
+                "h": 11.07
+              }
+            ]
+          },
+          {
+            "index": 34,
+            "paragraphIndex": 7,
+            "sentenceIndex": 9,
+            "kind": "text",
+            "text": "The size of the effect corresponds to a fifth of  the Black-White test-score gap (.72 standard  deviations in our sample).",
+            "bboxes": [
+              {
+                "x": 252,
+                "y": 593.027,
+                "w": 185.05,
+                "h": 11.07
+              },
+              {
+                "x": 252,
+                "y": 605.027,
+                "w": 184.99,
+                "h": 11.07
+              },
+              {
+                "x": 252,
+                "y": 617.027,
+                "w": 104.72,
+                "h": 11.07
+              }
+            ]
+          },
+          {
+            "index": 35,
+            "paragraphIndex": 7,
+            "sentenceIndex": 10,
+            "kind": "text",
+            "text": "It is similar in size  to some of the most popular programs  designed to increase educational achieve- ment.",
+            "bboxes": [
+              {
+                "x": 359.5,
+                "y": 617.027,
+                "w": 77.51,
+                "h": 11.07
+              },
+              {
+                "x": 252,
+                "y": 629.027,
+                "w": 185.07,
+                "h": 11.07
+              },
+              {
+                "x": 252,
+                "y": 641.027,
+                "w": 182.66,
+                "h": 11.07
+              },
+              {
+                "x": 252,
+                "y": 653.027,
+                "w": 22.5,
+                "h": 11.07
+              }
+            ]
+          },
+          {
+            "index": 36,
+            "paragraphIndex": 7,
+            "sentenceIndex": 11,
+            "kind": "text",
+            "text": "For example, it is comparable to the",
+            "bboxes": [
+              {
+                "x": 278.91,
+                "y": 653.027,
+                "w": 155.61,
+                "h": 11.07
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "totals": {
+      "paragraphCount": 8,
+      "sentenceCount": 37,
+      "degradedParagraphs": 0
+    }
+  }
+}
