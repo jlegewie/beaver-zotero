@@ -22,12 +22,16 @@ export const CreateNotePreview: React.FC<CreateNotePreviewProps> = ({
 }) => {
     const trimmedContent = content.replace(/^\n+/, '');
 
+    if (!trimmedContent) {
+        return null;
+    }
+
     return (
         <div className="display-flex flex-col">
             <div className={`display-flex flex-col px-25 pt-2 gap-2 ${isStreaming ? 'pb-2' : ''}`}>
                 <div className="markdown note-body">
                     <MarkdownRenderer
-                        content={trimmedContent || (isStreaming ? '_Generating..._' : '_No content yet._')}
+                        content={trimmedContent}
                         enableNoteBlocks={false}
                     />
                 </div>
