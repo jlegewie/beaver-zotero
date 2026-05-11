@@ -35,26 +35,6 @@ function dispatchReaderAction(
     }));
 }
 
-// Dev-only: dispatch an extraction-visualizer action so the React layer
-// (which owns the visualizer code in the webpack bundle) can run it.
-function dispatchVisualizerAction(
-    action:
-        | 'columns'
-        | 'lines'
-        | 'paragraphs'
-        | 'sentences'
-        | 'clear'
-        | 'copy-fixture-capture-command',
-): void {
-    const win = Zotero.getMainWindow();
-    const eventBus = win?.__beaverEventBus;
-    if (!eventBus) return;
-
-    eventBus.dispatchEvent(new win.CustomEvent('readerVisualizerAction', {
-        detail: { action },
-    }));
-}
-
 // ---------------------------------------------------------------------------
 // Text selection popup handler
 // ---------------------------------------------------------------------------
@@ -172,44 +152,6 @@ function onCreateViewContextMenu(event: any): void {
         },
     );
 
-    // Dev-only: extraction visualizer controls. A second `append` call
-    // becomes a new item group, which the reader renders with a separator
-    // above it. Dropped from production builds at compile time.
-    if (process.env.NODE_ENV === 'development') {
-        append(
-            {
-                label: 'Visualize Columns',
-                persistent: true,
-                onCommand: () => dispatchVisualizerAction('columns'),
-            },
-            {
-                label: 'Visualize Lines',
-                persistent: true,
-                onCommand: () => dispatchVisualizerAction('lines'),
-            },
-            {
-                label: 'Visualize Paragraphs',
-                persistent: true,
-                onCommand: () => dispatchVisualizerAction('paragraphs'),
-            },
-            {
-                label: 'Visualize Sentences',
-                persistent: true,
-                onCommand: () => dispatchVisualizerAction('sentences'),
-            },
-            {
-                label: 'Clear Visualization',
-                persistent: true,
-                onCommand: () => dispatchVisualizerAction('clear'),
-            },
-            {
-                label: 'Copy Fixture Capture Commands',
-                persistent: true,
-                onCommand: () =>
-                    dispatchVisualizerAction('copy-fixture-capture-command'),
-            },
-        );
-    }
 }
 
 // ---------------------------------------------------------------------------

@@ -105,6 +105,26 @@ function injectIntoExistingReader(reader: any): void {
     }
 }
 
+// Dev-only: dispatch an extraction-visualizer action so the React layer
+// (which owns the visualizer code in the webpack bundle) can run it.
+function dispatchVisualizerAction(
+    action:
+        | 'columns'
+        | 'lines'
+        | 'paragraphs'
+        | 'sentences'
+        | 'clear'
+        | 'copy-fixture-capture-command',
+): void {
+    const win = Zotero.getMainWindow();
+    const eventBus = win?.__beaverEventBus;
+    if (!eventBus) return;
+
+    eventBus.dispatchEvent(new win.CustomEvent('readerVisualizerAction', {
+        detail: { action },
+    }));
+}
+
 // ---------------------------------------------------------------------------
 // Menu builder
 // ---------------------------------------------------------------------------
@@ -187,6 +207,33 @@ function openBeaverMenu(reader: any, anchorButton: HTMLElement): void {
         openPreferencesWindow('actions');
     });
     popup.appendChild(addItem);
+
+    // ---- Dev-only: extraction visualizer controls (PDF only) ----
+    // Dropped from production builds at compile time.
+    if (process.env.NODE_ENV === 'development' && isPdf) {
+        popup.appendChild(xulDoc.createXULElement('menuseparator'));
+
+        const visualizerItems: Array<{
+            label: string;
+            action: Parameters<typeof dispatchVisualizerAction>[0];
+        }> = [
+            { label: 'Visualize Columns', action: 'columns' },
+            { label: 'Visualize Lines', action: 'lines' },
+            { label: 'Visualize Paragraphs', action: 'paragraphs' },
+            { label: 'Visualize Sentences', action: 'sentences' },
+            { label: 'Clear Visualization', action: 'clear' },
+            { label: 'Copy Fixture Capture Commands', action: 'copy-fixture-capture-command' },
+        ];
+
+        for (const { label, action } of visualizerItems) {
+            const menuitem = xulDoc.createXULElement('menuitem');
+            menuitem.setAttribute('label', label);
+            menuitem.addEventListener('command', () => {
+                dispatchVisualizerAction(action);
+            });
+            popup.appendChild(menuitem);
+        }
+    }
 
     // ---- Position & open ----
     const btnRect = anchorButton.getBoundingClientRect();
