@@ -39,3 +39,11 @@ npm run beaver-extract -- fixture update <id>
 
 The smoke tier (`npm run test:cli-smoke`) runs every fixture in this corpus
 plus any present in the private corpus.
+
+## OCR-detection fixtures
+
+The same corpus also hosts OCR-detection regression fixtures
+(`ocr.json`), managed by `beaver-extract ocr-fixture …`. OCR fixtures
+are keyed by paperKey alone (no `__pN` suffix) because the detector is
+document-wide, and they share `_shared/<sha>.pdf` with extract fixtures.
+See `src/services/pdf/cli/README.md` for the command surface.

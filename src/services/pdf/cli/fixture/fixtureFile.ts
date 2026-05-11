@@ -154,7 +154,7 @@ export function ensureSharedPdf(root: string, bytes: Uint8Array): string {
  * fixture itself is unaffected.
  */
 export function ensureSourcePdfLink(
-    loc: FixtureLocation,
+    loc: Pick<FixtureLocation, "root" | "folder">,
     sha: string,
     onWarning?: (msg: string) => void,
 ): string | null {

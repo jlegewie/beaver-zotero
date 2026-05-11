@@ -65,10 +65,13 @@ export function useReaderVisualizerActionHandler() {
 }
 
 /**
- * Build a `beaver-extract fixture capture --update …` command targeting the
- * current reader page and copy it to the clipboard. The dev pastes it into a
- * terminal at the repo root to capture/refresh a fixture under
- * `tests/fixtures/pdfs/extract-public/`.
+ * Build a combined `beaver-extract fixture capture --update …` (page-scoped)
+ * and `beaver-extract ocr-fixture capture --update …` (document-wide)
+ * command targeting the current reader page and copy them to the clipboard.
+ *
+ * Both target the private corpus and reuse the same `_shared/<sha>.pdf`
+ * — `ensureSharedPdf` is a no-op on the second command, so the PDF binary
+ * is not duplicated on disk.
  */
 async function copyFixtureCaptureCommand(): Promise<{ ok: boolean; message: string }> {
     const ctx = await resolveActiveReaderContext();
@@ -82,27 +85,42 @@ async function copyFixtureCaptureCommand(): Promise<{ ok: boolean; message: stri
         // Best effort — language is optional on the CLI flag.
     }
 
-    const id = `${item.key}__p${pageIndex}`;
-    // Always target the private (gitignored) corpus so reader-driven
-    // captures don't accidentally land in the committed public fixture set.
-    const parts = [
+    const PRIVATE_ROOT = 'tests/fixtures/pdfs/extract';
+
+    // 1) Extract fixture — page-scoped, id `paperKey__pN`.
+    const extractId = `${item.key}__p${pageIndex}`;
+    const extractParts = [
         'npm run beaver-extract --',
         'fixture capture',
         shellQuote(filePath),
-        `--id ${id}`,
+        `--id ${extractId}`,
         `--pages ${pageIndex}`,
-        '--root tests/fixtures/pdfs/extract',
+        `--root ${PRIVATE_ROOT}`,
         '--preview',
     ];
-    if (language) parts.push(`--language ${shellQuote(language)}`);
-    parts.push('--update');
-    const command = parts.join(' ');
+    if (language) extractParts.push(`--language ${shellQuote(language)}`);
+    extractParts.push('--update');
+    const extractCmd = extractParts.join(' ');
+
+    // 2) OCR fixture — document-wide, id `paperKey` (no `__pN`). Reuses
+    //    `_shared/<sha>.pdf` written by the extract capture above.
+    const ocrParts = [
+        'npm run beaver-extract --',
+        'ocr-fixture capture',
+        shellQuote(filePath),
+        `--id ${item.key}`,
+        `--root ${PRIVATE_ROOT}`,
+        '--update',
+    ];
+    const ocrCmd = ocrParts.join(' ');
+
+    const command = `${extractCmd} \\\n  && ${ocrCmd}`;
 
     const ok = await copyToClipboard(command);
     if (!ok) {
         return {
             ok: false,
-            message: `Failed to copy command. Run manually:\n\n${command}`,
+            message: `Failed to copy commands. Run manually:\n\n${command}`,
         };
     }
     return {

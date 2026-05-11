@@ -203,7 +203,7 @@ function onCreateViewContextMenu(event: any): void {
                 onCommand: () => dispatchVisualizerAction('clear'),
             },
             {
-                label: 'Copy Fixture Capture Command',
+                label: 'Copy Fixture Capture Commands',
                 persistent: true,
                 onCommand: () =>
                     dispatchVisualizerAction('copy-fixture-capture-command'),

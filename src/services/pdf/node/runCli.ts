@@ -24,6 +24,7 @@ import { buildAnalyzeLayoutCommand } from "../cli/commands/analyzeLayout";
 import { buildExtractCommand } from "../cli/commands/extract";
 import { buildFixtureCommand } from "../cli/commands/fixture";
 import { buildInfoCommand } from "../cli/commands/info";
+import { buildOcrFixtureCommand } from "../cli/commands/ocrFixture";
 import { buildOverlayCommand } from "../cli/commands/overlay";
 import { buildRawDetailedCommand } from "../cli/commands/rawDetailed";
 import { buildRenderCommand } from "../cli/commands/render";
@@ -82,7 +83,8 @@ export function buildProgram(deps: CliDeps): Command {
         .addCommand(buildAnalyzeLayoutCommand(deps))
         .addCommand(buildRawDetailedCommand(deps))
         .addCommand(buildRenderCommand(deps))
-        .addCommand(buildFixtureCommand(deps));
+        .addCommand(buildFixtureCommand(deps))
+        .addCommand(buildOcrFixtureCommand(deps));
     program.exitOverride();
     return program;
 }
