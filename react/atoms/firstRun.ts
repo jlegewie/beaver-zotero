@@ -17,7 +17,7 @@ import {
 import { sendWSMessageAtom } from './agentRunAtoms';
 import { newThreadAtom } from './threads';
 import { profileWithPlanAtom, isDeviceAuthorizedAtom, isDatabaseSyncSupportedAtom } from './profile';
-import { libraryHasItemsAtom } from './zoteroContext';
+import { libraryItemCountAtom, SMALL_LIBRARY_THRESHOLD } from './zoteroContext';
 import { isWebSearchAllowedAtom, isWebSearchEnabledAtom } from './ui';
 import { beaverDefaultModelAtom, updateSelectedModelAtom } from './models';
 import { ChargingPermissions } from '../../src/services/agentProtocol';
@@ -177,27 +177,27 @@ async function fetchAndPersist(set: any): Promise<void> {
  * (24h TTL, same install) → network.
  */
 export const loadFirstRunSuggestionsAtom = atom(null, async (get, set) => {
-    if (get(firstRunSuggestionsLoadingAtom)) return;
-    if (get(firstRunSuggestionsAtom)) return;
-
-    const libraryHasItems = get(libraryHasItemsAtom);
+    const libraryItemCount = get(libraryItemCountAtom);
 
     // The library item probe is still pending. FirstRunPage keeps the existing
     // loading surface visible until this resolves.
-    if (libraryHasItems === null) {
+    if (libraryItemCount === null) {
         set(firstRunLibraryEmptyAtom, false);
         return;
     }
 
-    // Empty library: skip the backend entirely and render the discovery
-    // textarea. The notifier-driven libraryHasItemsAtom flips to true when
-    // the user adds their first item; FirstRunPage re-invokes this loader
-    // on that change.
-    if (!libraryHasItems) {
+    // Empty AND small libraries: skip the backend entirely and render the
+    // discovery textarea
+    if (libraryItemCount < SMALL_LIBRARY_THRESHOLD) {
+        set(firstRunSuggestionsAtom, null);
         set(firstRunLibraryEmptyAtom, true);
         return;
     }
     set(firstRunLibraryEmptyAtom, false);
+
+    if (get(firstRunSuggestionsLoadingAtom)) return;
+
+    if (get(firstRunSuggestionsAtom)) return;
 
     const cached = readCachedSuggestions();
     if (cached) {
@@ -213,12 +213,13 @@ export const loadFirstRunSuggestionsAtom = atom(null, async (get, set) => {
  * Force a refetch, bypassing the prefs cache. Used by the dev refresh button.
  */
 export const refreshFirstRunSuggestionsAtom = atom(null, async (get, set) => {
-    const libraryHasItems = get(libraryHasItemsAtom);
-    if (libraryHasItems === null) {
+    const libraryItemCount = get(libraryItemCountAtom);
+    if (libraryItemCount === null) {
         set(firstRunLibraryEmptyAtom, false);
         return;
     }
-    if (!libraryHasItems) {
+    if (libraryItemCount < SMALL_LIBRARY_THRESHOLD) {
+        set(firstRunSuggestionsAtom, null);
         set(firstRunLibraryEmptyAtom, true);
         return;
     }

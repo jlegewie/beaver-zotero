@@ -13,7 +13,7 @@ import {
     padWithFallbackCards,
     MAX_VISIBLE_FIRST_RUN_CARDS,
 } from '../../atoms/firstRun';
-import { libraryHasItemsAtom } from '../../atoms/zoteroContext';
+import { libraryItemCountAtom } from '../../atoms/zoteroContext';
 import { remainingBeaverCreditsAtom } from '../../atoms/profile';
 import SuggestionCardButton from './firstRun/SuggestionCardButton';
 import SuggestionCardSkeleton from './firstRun/SuggestionCardSkeleton';
@@ -43,7 +43,7 @@ const FirstRunPage: React.FC<FirstRunPageProps> = () => {
     const isLoading = useAtomValue(firstRunSuggestionsLoadingAtom);
     const error = useAtomValue(firstRunSuggestionsErrorAtom);
     const isLibraryEmpty = useAtomValue(firstRunLibraryEmptyAtom);
-    const libraryHasItems = useAtomValue(libraryHasItemsAtom);
+    const libraryItemCount = useAtomValue(libraryItemCountAtom);
     const remainingCredits = useAtomValue(remainingBeaverCreditsAtom);
     const isSuggestionsMode = useAtomValue(firstRunSuggestionsModeAtom);
     const load = useSetAtom(loadFirstRunSuggestionsAtom);
@@ -54,12 +54,14 @@ const FirstRunPage: React.FC<FirstRunPageProps> = () => {
     const [isCompleting, setIsCompleting] = useState(false);
     const [footerError, setFooterError] = useState<string | null>(null);
 
-    // Re-run the loader when libraryHasItems flips so an empty-library user
-    // who adds their first item transitions from the discovery textarea
-    // into the regular suggestion-card flow.
+    // Re-run the loader when the library item count changes so a small- or
+    // empty-library user who imports more items transitions from the
+    // discovery textarea into the regular suggestion-card flow once the
+    // count crosses `SMALL_LIBRARY_THRESHOLD`. The count atom is clamped at
+    // the threshold so this dependency stops firing once we cross it.
     useEffect(() => {
         void load();
-    }, [load, libraryHasItems]);
+    }, [load, libraryItemCount]);
 
     const handleFooterClick = async () => {
         if (isCompleting) return;
@@ -85,7 +87,7 @@ const FirstRunPage: React.FC<FirstRunPageProps> = () => {
     };
 
     const backendCards = suggestions?.cards ?? [];
-    const isWaitingForLibraryProbe = libraryHasItems === null;
+    const isWaitingForLibraryProbe = libraryItemCount === null;
     const showSkeletons = !isLibraryEmpty && (isWaitingForLibraryProbe || isLoading) && backendCards.length === 0;
     const useFallback = !isLibraryEmpty && !isLoading && (!!error || backendCards.length < 3);
     const cards = (useFallback ? padWithFallbackCards(backendCards) : backendCards)
