@@ -69,6 +69,7 @@ npm run beaver-extract -- overlay --help
 | `raw-detailed`   | Per-character quad info for one page.                  |
 | `render`         | Render one or more pages to PNG.                       |
 | `fixture`        | Manage extraction-regression fixtures (see below).     |
+| `ocr-fixture`    | Manage OCR-detection regression fixtures (see below).  |
 
 Overlay levels: `columns | lines | paragraphs | sentences | margins`.
 
@@ -180,6 +181,41 @@ The smoke tier runs every fixture in both corpora when present:
 ```bash
 npm run test:cli-smoke
 ```
+
+## OCR-detection fixtures
+
+`ocr-fixture` is the parallel command group for `analyzeOCRNeeds`
+regression fixtures. OCR detection is document-wide, so each fixture
+covers a whole PDF — not a page list — and the fixture id is the
+paperKey only (no `__pN` suffix). Both extract and OCR fixtures live in
+the same corpus roots and share `_shared/<sha>.pdf`; they're
+distinguished by file name (`fixture.json` vs `ocr.json`).
+
+```bash
+# Capture (default --root is the public corpus).
+npm run beaver-extract -- ocr-fixture capture paper.pdf --id paperKey
+
+# Capture a false-positive case with a human-readable note.
+npm run beaver-extract -- ocr-fixture capture scan.pdf --id scanKey \
+    --notes "false positive — should be false"
+
+# Read-only diff.
+npm run beaver-extract -- ocr-fixture evaluate paperKey
+
+# Rebaseline. Preserves notes by default; replace with --notes "..." or
+# drop with --clear-notes.
+npm run beaver-extract -- ocr-fixture update paperKey
+
+# List OCR fixture ids under a corpus root.
+npm run beaver-extract -- ocr-fixture list --json --pretty
+```
+
+Fixture file (`ocr.json`) stores both the user's `OCRDetectionOptions`
+overrides (stable across default-value drift) and the merged
+`effectiveOptions` actually passed to `analyzeOCRNeeds`. A drift in
+`DEFAULT_OCR_DETECTION_OPTIONS` will surface as an explicit
+`config.effectiveOptions.<knob>` diff, distinguishing it from real
+detector behavior changes.
 
 ## Testing
 
