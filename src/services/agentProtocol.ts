@@ -508,6 +508,12 @@ export interface WSZoteroDataRequest extends WSBaseEvent {
     include_attachments: boolean;
     /** Whether to include parents of the items */
     include_parents: boolean;
+    /**
+     * Whether to include child notes of referenced regular items.
+     * Optional; older backends may omit it. When undefined, default to true
+     * to match the new backend default.
+     */
+    include_notes?: boolean;
     /** References to fetch data for */
     items: ZoteroItemReference[];
     /**

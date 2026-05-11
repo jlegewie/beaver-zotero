@@ -22,6 +22,11 @@ import {
 export interface LookupZoteroReferencesOptions {
     include_attachments: boolean;
     include_parents: boolean;
+    /**
+     * When true and a referenced item is a regular item, include its child
+     * notes in the response. Defaults to true when omitted.
+     */
+    include_notes?: boolean;
     file_status_level?: FileStatusLevel;  // default: 'lightweight'
 }
 
@@ -106,9 +111,11 @@ export async function lookupZoteroReferences(
         await Zotero.Items.loadDataTypes(primaryItems, ["primaryData", "creators", "itemData", "childItems", "tags", "collections", "relations"]);
     }
 
-    // Phase 3: Collect all parent/attachment IDs first, then batch load
+    // Phase 3: Collect all parent/attachment/note IDs first, then batch load
     const parentIdsToLoad = new Set<number>();
     const attachmentIdsToLoad = new Set<number>();
+    const noteIdsToLoad = new Set<number>();
+    const includeChildNotes = options.include_notes !== false;
 
     // First pass: collect IDs and categorize items
     for (const reference of references) {
@@ -137,6 +144,15 @@ export async function lookupZoteroReferences(
                     const attachmentIds = zoteroItem.getAttachments();
                     for (const attachmentId of attachmentIds) {
                         attachmentIdsToLoad.add(attachmentId);
+                    }
+                }
+                // Collect child note IDs for batch loading so the agent can
+                // discover sibling notes attached to the same item without a
+                // separate search.
+                if (includeChildNotes) {
+                    const noteIds = zoteroItem.getNotes();
+                    for (const noteId of noteIds) {
+                        noteIdsToLoad.add(noteId);
                     }
                 }
             } else if (zoteroItem.isNote()) {
@@ -168,14 +184,20 @@ export async function lookupZoteroReferences(
         }
     }
 
-    // Batch load parents and attachments in parallel
-    const [parentItemsArray, attachmentItemsArray] = await Promise.all([
+    // Batch load parents, attachments, and child notes in parallel
+    const [parentItemsArray, attachmentItemsArray, noteItemsArray] = await Promise.all([
         parentIdsToLoad.size > 0 ? Zotero.Items.getAsync([...parentIdsToLoad]) : Promise.resolve([]),
-        attachmentIdsToLoad.size > 0 ? Zotero.Items.getAsync([...attachmentIdsToLoad]) : Promise.resolve([])
+        attachmentIdsToLoad.size > 0 ? Zotero.Items.getAsync([...attachmentIdsToLoad]) : Promise.resolve([]),
+        noteIdsToLoad.size > 0 ? Zotero.Items.getAsync([...noteIdsToLoad]) : Promise.resolve([])
     ]);
 
-    // Create lookup maps
+    // Create lookup maps. Index primary items too so child notes discovered
+    // for a referenced regular item can resolve `note.parentID` → the
+    // referenced item without an additional load.
     const parentItemsById = new Map<number, Zotero.Item>();
+    for (const item of primaryItems) {
+        if (item) parentItemsById.set(item.id, item);
+    }
     for (const item of parentItemsArray) {
         if (item) parentItemsById.set(item.id, item);
     }
@@ -185,7 +207,12 @@ export async function lookupZoteroReferences(
         if (item) attachmentItemsById.set(item.id, item);
     }
 
-    // Second pass: add parents and attachments using the pre-loaded items
+    const noteItemsById = new Map<number, Zotero.Item>();
+    for (const item of noteItemsArray) {
+        if (item) noteItemsById.set(item.id, item);
+    }
+
+    // Second pass: add parents, attachments, and child notes using the pre-loaded items
     for (const reference of references) {
         const zoteroItem = referenceToItem.get(makeKey(reference.library_id, reference.zotero_key));
         if (!zoteroItem) continue;
@@ -214,6 +241,21 @@ export async function lookupZoteroReferences(
                             if (!attachmentKeys.has(attKey)) {
                                 attachmentKeys.add(attKey);
                                 attachmentsToSerialize.push(attachment);
+                            }
+                        }
+                    }
+                }
+                // Add child notes when requested. Each note will be serialized
+                // with parent_item_id pointing back to this regular item.
+                if (includeChildNotes) {
+                    const noteIds = zoteroItem.getNotes();
+                    for (const noteId of noteIds) {
+                        const note = noteItemsById.get(noteId);
+                        if (note) {
+                            const noteKey = makeKey(note.libraryID, note.key);
+                            if (!noteKeys.has(noteKey)) {
+                                noteKeys.add(noteKey);
+                                notesToSerialize.push(note);
                             }
                         }
                     }
