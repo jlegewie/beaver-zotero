@@ -171,6 +171,11 @@ npm run beaver-extract -- fixture capture paper.pdf \
 npm run beaver-extract -- fixture list --json --pretty
 ```
 
+`capture` refuses scanned PDFs by default: it runs `analyzeOCRNeeds`
+first and bails out with a pointer to `ocr-fixture capture` if the PDF
+needs OCR. Pass `--allow-ocr` to override — useful for mixed scan/text
+PDFs where the text-bearing pages are still worth baselining.
+
 Multi-page fixtures: `--pages 13,14`, naming convention `paperKey__p13-14`
 or `paperKey__intro-p0-2`. Reserve them for cases where correctness
 depends on neighboring emitted pages (cross-column continuation,

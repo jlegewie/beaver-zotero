@@ -121,6 +121,11 @@ function buildCaptureCommand(deps: CliDeps): Command {
             "allow replacing an existing fixture (config-changing path)",
         )
         .option(
+            "--allow-ocr",
+            "skip the OCR pre-check (use only for mixed scan/text PDFs)",
+            false,
+        )
+        .option(
             "--preview",
             "render preview-p<n>.png with sentence overlay per captured page",
             false,
@@ -154,6 +159,16 @@ function buildCaptureCommand(deps: CliDeps): Command {
                     throw new Error(
                         `fixture exists at ${loc.fixtureJson}; pass --update to replace config, or use \`fixture update ${opts.id}\` to rebaseline only \`expected\``,
                     );
+                }
+
+                // Refuse to capture an extraction fixture from a scanned PDF
+                if (!opts.allowOcr) {
+                    const ocr = await deps.api.analyzeOCRNeeds(bytes);
+                    if (ocr.needsOCR) {
+                        throw new Error(
+                            `PDF needs OCR (${ocr.primaryReason}); use \`ocr-fixture capture\` for OCR-detection fixtures, or pass --allow-ocr to capture anyway`,
+                        );
+                    }
                 }
 
                 const result = await deps.api.extractPdf(buildExtractInput(bytes, config));
@@ -253,6 +268,7 @@ interface CaptureOpts {
     paragraphSettings?: string;
     bboxTolerance?: string;
     update?: boolean;
+    allowOcr?: boolean;
     preview?: boolean;
     json?: boolean;
     pretty?: boolean;
