@@ -142,7 +142,11 @@ export class PageExtractor {
     extractPage(rawPage: RawPageData): ProcessedPage {
         // Apply margin filtering if configured
         const pageToProcess = this.margins
-            ? MarginFilter.filterPageByMargins(rawPage, this.margins)
+            ? MarginFilter.filterPageByMargins(
+                rawPage,
+                this.margins,
+                this.styleProfile?.bodyStyles,
+            )
             : rawPage;
 
         const blocks = this.processBlocks(pageToProcess.blocks);

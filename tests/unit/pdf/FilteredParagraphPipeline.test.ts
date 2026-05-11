@@ -107,6 +107,9 @@ describe("detectFilteredParagraphs", () => {
         it("drops a line entirely inside the simple right-margin zone", () => {
             // Place a watermark at x exactly on the right-margin boundary
             // (page width 612, right margin 25 → boundary at 587, inclusive).
+            // The body-style spare is style-aware, so we give the page enough
+            // body text that the watermark style (different font and size)
+            // falls below the 15% body-threshold and is not mistaken for body.
             const watermarkX = PAGE_W - DEFAULT_MARGINS.right; // 587
             const watermark: RawLine = {
                 wmode: 0,
@@ -122,10 +125,14 @@ describe("detectFilteredParagraphs", () => {
                 y: 200,
                 text: "Watermark",
             };
+            const bodyText =
+                "Paragraph filler text that is long enough to make body the dominant style in this synthetic page.";
             const pages = [
                 makePage(0, [
-                    bodyLine("First line of body text.", 200),
-                    bodyLine("Second line of body text.", 220),
+                    bodyLine(bodyText, 200),
+                    bodyLine(bodyText, 220),
+                    bodyLine(bodyText, 240),
+                    bodyLine(bodyText, 260),
                     watermark,
                 ]),
             ];
@@ -134,7 +141,7 @@ describe("detectFilteredParagraphs", () => {
                 .map((l) => l.text)
                 .join(" ");
             expect(allLineTexts).not.toContain("Watermark");
-            expect(allLineTexts).toContain("First line");
+            expect(allLineTexts).toContain("Paragraph filler");
         });
     });
 

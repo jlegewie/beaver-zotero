@@ -5,8 +5,9 @@
  * sorted in natural reading order.
  */
 
-import type { RawPageData, RawBlock, RawLine, RawBBox } from "./types";
+import type { RawPageData, RawBlock, RawLine, RawBBox, TextStyle } from "./types";
 import { pdfLog } from "./logging";
+import { StyleAnalyzer } from "./StyleAnalyzer";
 
 // ============================================================================
 // Types
@@ -44,6 +45,12 @@ export interface ColumnDetectionOptions {
     maxBridgeHeight?: number;
     /** Maximum vertical gap when using bridge merging (default: 30pt) */
     bridgeVerticalGap?: number;
+    /**
+     * Document body styles. When supplied, the header/footer clip spares
+     * blocks/lines whose font matches a body style. Relevant for tight-margin
+     * layouts with body text within ~20-30pt of the page edge.
+     */
+    bodyStyles?: TextStyle[];
     /** Enable debug logging for column detection */
     debug?: boolean;
 }
@@ -55,6 +62,7 @@ const DEFAULT_OPTIONS: Required<ColumnDetectionOptions> = {
     maxVerticalGap: 10,
     maxBridgeHeight: 50,
     bridgeVerticalGap: 30,
+    bodyStyles: [],
     debug: false,
 };
 
@@ -105,6 +113,25 @@ function hasSignificantXOverlap(r1: Rect, r2: Rect, minOverlapRatio: number = 0.
     // Check if overlap is significant relative to the narrower block
     const minWidth = Math.min(r1.w, r2.w);
     return overlapWidth >= minWidth * minOverlapRatio;
+}
+
+/**
+ * Check whether any line in `block` looks like body content (style +
+ * substance). Used by `extractFilteredBlocks` to spare blocks whose
+ * lines are content even when the block bbox lies entirely within the
+ * header/footer clip. Short body-styled tokens (e.g. a body-font page
+ * number "17" at the very bottom of a page) are NOT enough to spare a
+ * block — see `StyleAnalyzer.looksLikeBodyContent`.
+ */
+function blockHasBodyContentLine(
+    block: RawBlock,
+    bodyStyles: TextStyle[]
+): boolean {
+    if (!block.lines || bodyStyles.length === 0) return false;
+    for (const line of block.lines) {
+        if (StyleAnalyzer.looksLikeBodyContent(line, bodyStyles)) return true;
+    }
+    return false;
 }
 
 /** Check if two blocks are in the same column (share a common edge) */
@@ -596,15 +623,21 @@ function extractFilteredBlocks(
         y0: opts.headerMargin,
         y1: page.height - opts.footerMargin,
     };
+    const bodyStyles = opts.bodyStyles;
+    const hasBodyStyles = bodyStyles.length > 0;
 
     const filteredBlocks: Rect[] = [];
 
     for (const block of page.blocks) {
         if (block.type !== "text" || !block.lines) continue;
 
-        // Check if block is within clipping area
+        // Header/footer clip. skipped when the block has body-styled lines.
         const blockRect = bboxToRect(block.bbox);
-        if (blockRect.y + blockRect.h < clip.y0 || blockRect.y > clip.y1) {
+        const blockOutsideClip =
+            blockRect.y + blockRect.h < clip.y0 || blockRect.y > clip.y1;
+        const blockHasBodyLine =
+            hasBodyStyles && blockHasBodyContentLine(block, bodyStyles);
+        if (blockOutsideClip && !blockHasBodyLine) {
             continue; // Block is entirely in header/footer
         }
 
@@ -634,8 +667,12 @@ function extractFilteredBlocks(
             if (alnumCount >= 2 || (alnumCount >= 1 && totalLength >= 3)) {
                 const lineRect = bboxToRect(line.bbox);
 
-                // Clip to content area
-                if (lineRect.y + lineRect.h >= clip.y0 && lineRect.y <= clip.y1) {
+                // Clip to content area. Body-content lines are spared from the clip.
+                const lineInsideClip =
+                    lineRect.y + lineRect.h >= clip.y0 && lineRect.y <= clip.y1;
+                const lineIsBodyContent =
+                    hasBodyStyles && StyleAnalyzer.looksLikeBodyContent(line, bodyStyles);
+                if (lineInsideClip || lineIsBodyContent) {
                     validRect = unionRect(validRect, lineRect);
                 }
             }

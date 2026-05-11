@@ -11,7 +11,7 @@
 import { describe, it, expect } from 'vitest';
 import { detectColumns } from '../../../src/services/pdf/ColumnDetector';
 import type { Rect } from '../../../src/services/pdf/ColumnDetector';
-import type { RawBlock, RawLine, RawPageData } from '../../../src/services/pdf/types';
+import type { RawBlock, RawLine, RawPageData, TextStyle } from '../../../src/services/pdf/types';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -409,5 +409,136 @@ describe('detectColumns clipping respects custom header/footerMargin', () => {
         const result = detectColumns(page, { headerMargin: 40, footerMargin: 40 });
         const bottomMost = Math.max(...result.columns.map(c => c.y + c.h));
         expect(bottomMost).toBeLessThanOrEqual(height - 40);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Body-style spare in the header/footer clip
+//
+// Tight-margin journal/magazine layouts place body text within ~20–30pt of
+// the page edge.
+// ---------------------------------------------------------------------------
+
+function makeBlockWithFont(
+    rect: Rect,
+    fontName: string,
+    fontSize: number,
+    text = 'body text',
+): RawBlock {
+    const line: RawLine = {
+        wmode: 0,
+        bbox: rect,
+        font: {
+            name: fontName,
+            family: fontName,
+            weight: 'normal',
+            style: 'normal',
+            size: fontSize,
+        },
+        x: rect.x,
+        y: rect.y,
+        text,
+    };
+    return { type: 'text', bbox: rect, lines: [line] };
+}
+
+const BODY_STYLE: TextStyle = {
+    size: 9,
+    font: 'MinionPro-Regular',
+    bold: false,
+    italic: false,
+};
+
+describe('detectColumns body-style spare on header/footer clip', () => {
+    it('keeps a body-styled block whose bbox sits entirely below the footer clip', () => {
+        // Page height 647pt with footerMargin 40 → clip.y1 = 607. The block
+        // at y=609 is entirely below the clip. Without `bodyStyles` the
+        // clip drops it (the existing behavior for non-body blocks);
+        // with `bodyStyles` it is kept.
+        const height = 647;
+        const body: Rect = { x: 45, y: 100, w: 360, h: 400 };
+        const tailBody: Rect = { x: 45, y: 609, w: 360, h: 19 };
+        const page: RawPageData = {
+            pageIndex: 0,
+            pageNumber: 1,
+            width: 432,
+            height,
+            blocks: [
+                makeBlockWithFont(body, 'MinionPro-Regular', 9),
+                makeBlockWithFont(tailBody, 'MinionPro-Regular', 9),
+            ],
+        };
+
+        const withoutSpare = detectColumns(page, {
+            headerMargin: 40,
+            footerMargin: 40,
+        });
+        const withoutBottom = Math.max(
+            ...withoutSpare.columns.map((c) => c.y + c.h),
+        );
+        expect(withoutBottom).toBeLessThan(609);
+
+        const withSpare = detectColumns(page, {
+            headerMargin: 40,
+            footerMargin: 40,
+            bodyStyles: [BODY_STYLE],
+        });
+        const withBottom = Math.max(...withSpare.columns.map((c) => c.y + c.h));
+        expect(withBottom).toBeGreaterThanOrEqual(609);
+    });
+
+    it('still drops a non-body-styled block entirely inside the footer margin', () => {
+        // A small-font footnote / page number block below the clip whose
+        // style differs from body should remain dropped even when the
+        // caller supplies bodyStyles.
+        const height = 647;
+        const body: Rect = { x: 45, y: 100, w: 360, h: 400 };
+        const pageNumber: Rect = { x: 396, y: 615, w: 9, h: 8 };
+        const page: RawPageData = {
+            pageIndex: 0,
+            pageNumber: 1,
+            width: 432,
+            height,
+            blocks: [
+                makeBlockWithFont(body, 'MinionPro-Regular', 9),
+                // Smaller font → not a body style → clip still drops it.
+                makeBlockWithFont(pageNumber, 'MinionPro-Regular', 6, '45'),
+            ],
+        };
+        const result = detectColumns(page, {
+            headerMargin: 40,
+            footerMargin: 40,
+            bodyStyles: [BODY_STYLE],
+        });
+        const bottomMost = Math.max(...result.columns.map((c) => c.y + c.h));
+        expect(bottomMost).toBeLessThan(615);
+    });
+
+    it('drops a body-font page number block below the clip (substance gate)', () => {
+        // Page number rendered in the body font size at the very bottom
+        // of the page. Style alone would falsely spare it via the body-
+        // style rule; the substance gate (≥2 words AND ≥8 alnum chars)
+        // keeps it out of column detection.
+        const height = 841;
+        const body: Rect = { x: 45, y: 100, w: 360, h: 600 };
+        const pageNumber: Rect = { x: 292, y: 808, w: 10, h: 9 };
+        const page: RawPageData = {
+            pageIndex: 0,
+            pageNumber: 1,
+            width: 595,
+            height,
+            blocks: [
+                makeBlockWithFont(body, 'MinionPro-Regular', 9),
+                // Body font + body size but a single token "17" → not body content.
+                makeBlockWithFont(pageNumber, 'MinionPro-Regular', 9, '17'),
+            ],
+        };
+        const result = detectColumns(page, {
+            headerMargin: 40,
+            footerMargin: 40,
+            bodyStyles: [BODY_STYLE],
+        });
+        const bottomMost = Math.max(...result.columns.map((c) => c.y + c.h));
+        expect(bottomMost).toBeLessThan(808);
     });
 });

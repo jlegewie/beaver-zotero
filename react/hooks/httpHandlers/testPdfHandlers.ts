@@ -1055,6 +1055,12 @@ export async function handleTestPdfExtractTraceHttpRequest(request: any) {
     }
     const targetPageRemovals =
         smartRemoval.removalsByPage.get(pageIndex) ?? new Set<string>();
+    // Body styles drive the simple-margin spare — keeping `keptBySimple`
+    // honest with the production pipeline (`MarginFilter
+    // .filterPageWithSmartRemoval` now spares body-styled lines from the
+    // simple-margin drop). Sourced from the trace's filtered result so the
+    // trace shares the production-side style profile.
+    const traceBodyStyles = trace.filteredResult.styleProfile.bodyStyles;
 
     // ------------------------------------------------------------------
     // Stage 2: enumerate raw lines on the target page with stable IDs and
@@ -1105,12 +1111,14 @@ export async function handleTestPdfExtractTraceHttpRequest(request: any) {
                     targetPage.height,
                     marginZoneToUse,
                 ) !== null;
-            const keptBySimple = MarginFilter.isInsideContentArea(
-                line,
-                targetPage.width,
-                targetPage.height,
-                marginsToUse,
-            );
+            const keptBySimple =
+                MarginFilter.isInsideContentArea(
+                    line,
+                    targetPage.width,
+                    targetPage.height,
+                    marginsToUse,
+                )
+                || StyleAnalyzer.looksLikeBodyContent(line, traceBodyStyles);
             const smartReason = inSmartZone
                 ? targetPageRemovals.has(normalized)
                     ? reasonByText.get(normalized) ?? 'repeat'

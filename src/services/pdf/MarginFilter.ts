@@ -16,8 +16,10 @@ import type {
     MarginAnalysis,
     RemovalCandidate,
     MarginRemovalResult,
+    TextStyle,
 } from "./types";
 import { pdfLog } from "./logging";
+import { StyleAnalyzer } from "./StyleAnalyzer";
 
 // ============================================================================
 // Page Number Detection — multilingual prefixes, anchored parser
@@ -423,10 +425,15 @@ export class MarginFilter {
 
     /**
      * Simple filter: Filter a page's lines to exclude those entirely in margins.
+     *
+     * `bodyStyles` (optional) spares lines whose font matches the document's
+     * body styles even when their bbox is entirely within the simple-margin
+     * band.
      */
     static filterPageByMargins(
         page: RawPageData,
-        margins: MarginSettings
+        margins: MarginSettings,
+        bodyStyles?: TextStyle[]
     ): RawPageData {
         const filteredBlocks = page.blocks.map(block => {
             if (block.type !== "text" || !block.lines) {
@@ -435,6 +442,7 @@ export class MarginFilter {
 
             const filteredLines = block.lines.filter(line =>
                 this.isInsideContentArea(line, page.width, page.height, margins)
+                || (bodyStyles && StyleAnalyzer.looksLikeBodyContent(line, bodyStyles))
             );
 
             return {
@@ -726,12 +734,17 @@ export class MarginFilter {
     /**
      * Filter a page using smart removal results.
      * Removes lines that match identified repeating/page-number elements.
+     *
+     * `bodyStyles` (optional) spares the simple-margin drop for lines whose
+     * font matches a document body style, so tight-margin layouts
+     * keep body text packed near the page edge.
      */
     static filterPageWithSmartRemoval(
         page: RawPageData,
         margins: MarginSettings,
         marginZone: MarginSettings,
-        removalResult: MarginRemovalResult
+        removalResult: MarginRemovalResult,
+        bodyStyles?: TextStyle[]
     ): RawPageData {
         const pageRemovals = removalResult.removalsByPage.get(page.pageIndex);
 
@@ -741,12 +754,19 @@ export class MarginFilter {
             }
 
             const filteredLines = block.lines.filter(line => {
-                // Always remove if entirely in simple margins
+                // Drop if entirely in simple margins UNLESS the line looks
+                // like body content packed near the page edge: same font
+                // as a body style AND substantive multi-word text. Single-
+                // token strings in the body font (page numbers, short
+                // labels) are still treated as marginalia.
                 if (!this.isInsideContentArea(line, page.width, page.height, margins)) {
-                    return false;
+                    if (!bodyStyles || !StyleAnalyzer.looksLikeBodyContent(line, bodyStyles)) {
+                        return false;
+                    }
                 }
 
-                // Check if line is in margin zone and matches removal candidate
+                // Check if line is in margin zone and matches removal candidate.
+                // Smart-removal still applies to body-styled lines.
                 if (pageRemovals && pageRemovals.size > 0) {
                     const position = getMarginPosition(
                         line.bbox,

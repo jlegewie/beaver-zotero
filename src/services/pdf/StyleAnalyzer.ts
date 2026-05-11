@@ -27,7 +27,7 @@ const DEFAULT_THRESHOLD_PERC = 0.15;
 /**
  * Extract TextStyle from a raw line's font information.
  */
-function extractStyle(line: RawLine): TextStyle {
+export function extractStyle(line: RawLine): TextStyle {
     const font = line.font;
 
     // Handle missing font info
@@ -198,6 +198,43 @@ export class StyleAnalyzer {
     static isBodyStyle(style: TextStyle, profile: StyleProfile): boolean {
         const key = styleToKey(style);
         return profile.bodyStyles.some(s => styleToKey(s) === key);
+    }
+
+    /**
+     * Check whether a raw line's font matches one of the document's body
+     * styles. Used by the margin filter + column detector to spare body-
+     * styled content that lives inside the simple-margin band.
+     */
+    static isLineBodyStyled(line: RawLine, bodyStyles: TextStyle[]): boolean {
+        if (!bodyStyles || bodyStyles.length === 0) return false;
+        const key = styleToKey(extractStyle(line));
+        return bodyStyles.some((s) => styleToKey(s) === key);
+    }
+
+    /**
+     * Predicate used by the margin filter / column detector to decide
+     * whether a line should be spared from the simple-margin drop on the
+     * basis of "this looks like body content packed near the page edge".
+     *
+     * Two signals combined:
+     *  - **Style**: the line's font matches a document body style
+     *    (`isLineBodyStyled`).
+     *  - **Substance**: the text has at least two word tokens AND at
+     *    least 8 alphanumeric characters. Short tokens that happen to
+     *    share body style sail through.
+     */
+    static looksLikeBodyContent(
+        line: RawLine,
+        bodyStyles: TextStyle[]
+    ): boolean {
+        if (!StyleAnalyzer.isLineBodyStyled(line, bodyStyles)) return false;
+        const text = (line.text || "").trim();
+        const alnumMatches = text.match(/[\p{L}\p{N}]/gu);
+        if (!alnumMatches || alnumMatches.length < 8) return false;
+        const tokens = text
+            .split(/\s+/)
+            .filter((t) => /[\p{L}\p{N}]/u.test(t));
+        return tokens.length >= 2;
     }
 
     /**

@@ -425,10 +425,12 @@ export function runExtractFromIndices(
                 opts.margins,
                 opts.marginZone,
                 marginRemoval,
+                styleProfile.bodyStyles,
             );
             const columnResult = detectColumns(filteredPage, {
                 headerMargin: opts.margins.top,
                 footerMargin: opts.margins.bottom,
+                bodyStyles: styleProfile.bodyStyles,
             });
             logColumnDetection(rawPage.pageIndex, columnResult);
 

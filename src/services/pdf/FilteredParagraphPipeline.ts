@@ -134,11 +134,13 @@ export function detectFilteredParagraphs(
         margins,
         marginZone,
         marginRemoval,
+        styleProfile.bodyStyles,
     );
 
     const columnResult = detectColumns(filteredPage, {
         headerMargin: margins.top,
         footerMargin: margins.bottom,
+        bodyStyles: styleProfile.bodyStyles,
     });
 
     let lineResult: PageLineResult;

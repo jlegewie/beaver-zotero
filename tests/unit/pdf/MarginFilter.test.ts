@@ -15,7 +15,11 @@ import type {
     MarginAnalysis,
     MarginElement,
     MarginPosition,
+    MarginRemovalResult,
+    RawBlock,
     RawLine,
+    RawPageData,
+    TextStyle,
 } from "../../../src/services/pdf/types";
 
 // ---------------------------------------------------------------------------
@@ -741,5 +745,269 @@ describe("split-line alternating headers (5I23IGRY shape)", () => {
         expect(out.candidates.some(
             (c) => c.reason === "repeat" && /·\d+·/.test(c.originalText),
         )).toBe(true);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Body-style spare — tight-margin layouts
+// ---------------------------------------------------------------------------
+
+const BODY_STYLE: TextStyle = {
+    size: 9,
+    font: "MinionPro-Regular",
+    bold: false,
+    italic: false,
+};
+
+function makeStyledLine(
+    text: string,
+    x: number,
+    y: number,
+    w: number,
+    fontName: string,
+    fontSize: number,
+): RawLine {
+    return {
+        wmode: 0,
+        bbox: { x, y, w, h: 9 },
+        font: {
+            name: fontName,
+            family: fontName,
+            weight: "normal",
+            style: "normal",
+            size: fontSize,
+        },
+        x,
+        y,
+        text,
+    };
+}
+
+function makePageWithLines(lines: RawLine[]): RawPageData {
+    const block: RawBlock = {
+        type: "text",
+        bbox: {
+            x: Math.min(...lines.map((L) => L.bbox.x)),
+            y: Math.min(...lines.map((L) => L.bbox.y)),
+            w: 400,
+            h: PAGE_H,
+        },
+        lines,
+    };
+    return {
+        pageIndex: 0,
+        pageNumber: 1,
+        width: PAGE_W,
+        height: PAGE_H,
+        blocks: [block],
+    };
+}
+
+const EMPTY_REMOVAL: MarginRemovalResult = {
+    candidates: [],
+    textsToRemove: new Set(),
+    removalsByPage: new Map(),
+};
+
+describe("filterPageWithSmartRemoval — body-style spare", () => {
+    it("spares a body-styled line that is entirely in the bottom-margin band", () => {
+        // Page 792pt tall, simple bottom margin 40pt → margin band starts at y=752.
+        // Body line at y=755 is entirely in the bottom margin.
+        const bodyLine = makeStyledLine(
+            "ture must be understood within the larger",
+            45,
+            755,
+            300,
+            "MinionPro-Regular",
+            9,
+        );
+        const page = makePageWithLines([bodyLine]);
+        const margins = { left: 25, top: 40, right: 25, bottom: 40 };
+        const zone = { left: 60, top: 80, right: 60, bottom: 80 };
+
+        const without = MarginFilter.filterPageWithSmartRemoval(
+            page,
+            margins,
+            zone,
+            EMPTY_REMOVAL,
+        );
+        // No bodyStyles → simple filter drops the line as before.
+        expect(without.blocks).toHaveLength(0);
+
+        const withBody = MarginFilter.filterPageWithSmartRemoval(
+            page,
+            margins,
+            zone,
+            EMPTY_REMOVAL,
+            [BODY_STYLE],
+        );
+        expect(withBody.blocks).toHaveLength(1);
+        expect(withBody.blocks[0].lines).toHaveLength(1);
+        expect(withBody.blocks[0].lines![0].text).toBe(
+            "ture must be understood within the larger",
+        );
+    });
+
+    it("still drops non-body-styled marginalia (smaller font / different style) from the margin band", () => {
+        // "index.html" footnote-style line in the bottom margin, smaller
+        // font than body — typical for hyperlink footers / running URLs.
+        const marginaliaLine = makeStyledLine(
+            "index.html",
+            45,
+            755,
+            60,
+            "MinionPro-Regular",
+            7, // ≠ body size 9
+        );
+        const page = makePageWithLines([marginaliaLine]);
+        const margins = { left: 25, top: 40, right: 25, bottom: 40 };
+        const zone = { left: 60, top: 80, right: 60, bottom: 80 };
+
+        const filtered = MarginFilter.filterPageWithSmartRemoval(
+            page,
+            margins,
+            zone,
+            EMPTY_REMOVAL,
+            [BODY_STYLE],
+        );
+        expect(filtered.blocks).toHaveLength(0);
+    });
+
+    it("drops a body-font page number from the margin band (style match alone isn't enough — substance check)", () => {
+        // Page number "17" rendered in the body font size in the bottom-
+        // margin band. Style alone would falsely spare this; the substance
+        // gate (≥2 words AND ≥8 alnum chars) keeps it out of extraction.
+        // Mirrors the DPKD3QHI page-17 regression where smart-removal's
+        // page-number sequence detector missed the bottom-margin sequence.
+        const pageNumberLine = makeStyledLine(
+            "17",
+            292,
+            760,
+            10,
+            "MinionPro-Regular",
+            9, // body size + body font
+        );
+        const page = makePageWithLines([pageNumberLine]);
+        const margins = { left: 25, top: 40, right: 25, bottom: 40 };
+        const zone = { left: 60, top: 80, right: 60, bottom: 80 };
+
+        const filtered = MarginFilter.filterPageWithSmartRemoval(
+            page,
+            margins,
+            zone,
+            EMPTY_REMOVAL,
+            [BODY_STYLE],
+        );
+        expect(filtered.blocks).toHaveLength(0);
+    });
+
+    it("drops a single-token body-font label like 'ESSAY' from the margin band (1 word fails the substance gate)", () => {
+        const labelLine = makeStyledLine(
+            "ESSAY",
+            528,
+            760,
+            32,
+            "MinionPro-Regular",
+            9,
+        );
+        const page = makePageWithLines([labelLine]);
+        const margins = { left: 25, top: 40, right: 25, bottom: 40 };
+        const zone = { left: 60, top: 80, right: 60, bottom: 80 };
+
+        const filtered = MarginFilter.filterPageWithSmartRemoval(
+            page,
+            margins,
+            zone,
+            EMPTY_REMOVAL,
+            [BODY_STYLE],
+        );
+        expect(filtered.blocks).toHaveLength(0);
+    });
+
+    it("smart-removal still beats the body-style spare (repeating body-styled header)", () => {
+        // Body-styled line that ALSO matches a smart-removal candidate
+        // (e.g. a section header that repeats across pages). The smart-
+        // removal pass should still drop it.
+        const repeatingHeader = makeStyledLine(
+            "Repeating Header",
+            45,
+            755,
+            120,
+            "MinionPro-Regular",
+            9,
+        );
+        const page = makePageWithLines([repeatingHeader]);
+        const margins = { left: 25, top: 40, right: 25, bottom: 40 };
+        const zone = { left: 60, top: 80, right: 60, bottom: 80 };
+
+        const removal: MarginRemovalResult = {
+            candidates: [
+                {
+                    text: "repeating header",
+                    originalText: "Repeating Header",
+                    reason: "repeat",
+                    position: "bottom",
+                    pageIndices: [0, 1, 2],
+                },
+            ],
+            textsToRemove: new Set(["repeating header"]),
+            removalsByPage: new Map([[0, new Set(["repeating header"])]]),
+        };
+
+        const filtered = MarginFilter.filterPageWithSmartRemoval(
+            page,
+            margins,
+            zone,
+            removal,
+            [BODY_STYLE],
+        );
+        expect(filtered.blocks).toHaveLength(0);
+    });
+
+    it("keeps body-styled content normally inside the content area (regression: spare doesn't change in-content behavior)", () => {
+        const inBody = makeStyledLine(
+            "Inside the content area",
+            45,
+            400,
+            200,
+            "MinionPro-Regular",
+            9,
+        );
+        const page = makePageWithLines([inBody]);
+        const margins = { left: 25, top: 40, right: 25, bottom: 40 };
+        const zone = { left: 60, top: 80, right: 60, bottom: 80 };
+
+        const filtered = MarginFilter.filterPageWithSmartRemoval(
+            page,
+            margins,
+            zone,
+            EMPTY_REMOVAL,
+            [BODY_STYLE],
+        );
+        expect(filtered.blocks).toHaveLength(1);
+        expect(filtered.blocks[0].lines).toHaveLength(1);
+    });
+});
+
+describe("filterPageByMargins — body-style spare", () => {
+    it("spares a body-styled line in the simple-margin band", () => {
+        const bodyLine = makeStyledLine(
+            "As a case study, we utilize the Charlie Hebdo attack",
+            45,
+            760,
+            350,
+            "MinionPro-Regular",
+            9,
+        );
+        const page = makePageWithLines([bodyLine]);
+        const margins = { left: 25, top: 40, right: 25, bottom: 40 };
+
+        const without = MarginFilter.filterPageByMargins(page, margins);
+        expect(without.blocks).toHaveLength(0);
+
+        const withBody = MarginFilter.filterPageByMargins(page, margins, [
+            BODY_STYLE,
+        ]);
+        expect(withBody.blocks).toHaveLength(1);
     });
 });
