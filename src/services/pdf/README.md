@@ -68,12 +68,14 @@ src/services/pdf/
 ├── index.ts                       # Main API entry point (PDFExtractor facade + barrel re-exports)
 ├── types.ts                       # Shared TypeScript interfaces
 ├── config.ts                      # Cross-bundle config (worker URLs, log sink, client slot)
+├── logging.ts                     # Cross-bundle log sink for analyzer modules
 ├── MuPDFWorkerClient.ts           # Main-thread worker proxy (postMessage RPC)
 ├── prewarm.ts                     # Eager worker spawn helper
 ├── worker/
 │   ├── index.ts                   # Worker entry point + dispatcher
 │   ├── ops.ts                     # Worker-side op handlers
 │   ├── opQueue.ts                 # Per-worker op serialization queue
+│   ├── apiCache.ts                # Module-level cache for MuPDF + sentencex handles (shared by worker + Node CLI)
 │   ├── config.ts                  # Worker-side URL/config storage
 │   ├── docCache.ts                # Short-lived in-worker doc cache (acquireDoc/releaseDoc)
 │   ├── docHelpers.ts              # MuPDF/WASM bridge (worker-only)
@@ -92,6 +94,8 @@ src/services/pdf/
 ├── LineDetector.ts                # Line detection within columns
 ├── ParagraphDetector.ts           # Paragraph/heading grouping
 ├── PageExtractor.ts               # Final page processing
+├── PageAnalysisContext.ts         # Shared cross-page StyleAnalyzer + MarginFilter pass
+├── PageRotationNormalizer.ts      # Rotated-text-frame normalization for the paragraph/sentence stack
 ├── SearchScorer.ts                # Search result scoring & ranking
 ├── AnalysisWindow.ts              # Page-window resolution for analysis
 ├── FigureTextFilter.ts            # Standalone figure-text column detector
@@ -102,6 +106,9 @@ src/services/pdf/
 ├── SentencexSplitter.ts           # sentencex byte/char range conversion + language normalization
 ├── sentenceTypes.ts               # Sentence-pipeline types
 ├── sentencePostprocess.ts         # Sentence-output post-processing
+├── cli/                           # Local Node CLI surface (commander + per-command files; see cli/README.md)
+├── node/                          # Node runtime (MuPDF + sentencex bootstrap, sharp overlay, in-process runCli)
+├── debug/                         # Browser-safe shared debug helpers (overlay builders, snapshots, diffs)
 └── README.md                      # This file
 
 react/utils/

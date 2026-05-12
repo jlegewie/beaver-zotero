@@ -30,7 +30,7 @@ arguments to `tsx` instead of consuming them.
 ### One-line examples
 
 ```bash
-SMOKE=tests/fixtures/pdfs/sentences/_shared/0a3a5c40534376346b36c03c4469694674fd85ea1493c493be7c777df1ea4561.pdf
+SMOKE=tests/fixtures/pdfs/extract-public/_shared/d86a26bf17a0e19194abe41f10b32b4cf86e8caddf3c854773802e5a76b607cf.pdf
 
 # Page count + metadata
 npm run beaver-extract -- info "$SMOKE"
@@ -239,27 +239,42 @@ native deps.
 ```
 src/services/pdf/
 ├── cli/                # commander + per-command files (this dir)
-│   ├── main.ts         # 5-line wrapper around runCli
-│   ├── commands/       # one file per command
-│   ├── envelope.ts     # success/error JSON envelope builders
-│   ├── io.ts           # loadPdf, writePngFile, writeJsonFile, pdfSha256
-│   ├── options.ts      # --pages, --page-range, --analysis-window parsers
-│   └── runCliTypes.ts  # CliDeps interface
+│   ├── main.ts                  # 5-line wrapper around runCli
+│   ├── envelope.ts              # success/error JSON envelope builders
+│   ├── io.ts                    # loadPdf, writePngFile, writeJsonFile, pdfSha256
+│   ├── options.ts               # --pages, --page-range, --analysis-window parsers
+│   ├── runCliTypes.ts           # CliDeps interface
+│   ├── commands/                # one file per command
+│   │   ├── _sharedHelpers.ts        # shared envelope plumbing (emitSuccess/emitFailure)
+│   │   ├── info.ts                  # `info`
+│   │   ├── extract.ts               # `extract`
+│   │   ├── overlay.ts               # `overlay`
+│   │   ├── analyzeLayout.ts         # `analyze-layout`
+│   │   ├── rawDetailed.ts           # `raw-detailed`
+│   │   ├── render.ts                # `render`
+│   │   ├── fixture.ts               # `fixture {capture,evaluate,update,list}`
+│   │   └── ocrFixture.ts            # `ocr-fixture {capture,evaluate,update,list}`
+│   └── fixture/                 # extract + OCR fixture file format (Node-only)
+│       ├── fixtureFile.ts           # atomic read/write, _shared/ dedup
+│       ├── fixtureSchema.ts         # validators with targeted errors
+│       ├── fingerprints.ts          # wasm + git + version provenance
+│       ├── ocrFixtureFile.ts        # OCR fixture read/write + _shared/ link
+│       ├── ocrFixtureSchema.ts      # OCR fixture validators
+│       ├── ocrFingerprints.ts       # OCR fingerprints (drops sentencex sha)
+│       └── analysisScope.ts         # AnalysisScope <-> internal translation
 ├── node/               # Node runtime (MuPDF + sentencex bootstrap, sharp overlay)
-│   ├── bootstrap.ts    # ensureMuPDFNode, ensureSentencexNode
-│   ├── api.ts          # typed Node API: extractPdf, renderPages, ...
-│   ├── overlayPng.ts   # sharp + SVG composite
-│   └── runCli.ts       # in-process runCli(argv, deps) test seam
+│   ├── index.ts                 # Node entry barrel
+│   ├── bootstrap.ts             # ensureMuPDFNode, ensureSentencexNode, setCliLogLevel
+│   ├── paths.ts                 # WASM dir resolution (BEAVER_EXTRACT_WASM_DIR)
+│   ├── api.ts                   # typed Node API: extractPdf, renderPages, ...
+│   ├── overlayPng.ts            # sharp + SVG composite
+│   └── runCli.ts                # in-process runCli(argv, deps) test seam
 ├── debug/              # browser-safe shared debug helpers
 │   ├── overlayBuilders.ts
 │   ├── overlaySvg.ts
 │   ├── analyzeLayoutProjection.ts
-│   └── extractionSnapshot.ts   # projection + structural diff for fixtures
-├── cli/fixture/        # fixture file format + helpers (Node-only)
-│   ├── fixtureFile.ts          # atomic read/write, _shared/ dedup
-│   ├── fixtureSchema.ts        # validators with targeted errors
-│   ├── fingerprints.ts         # wasm + git + version provenance
-│   └── analysisScope.ts        # AnalysisScope <-> internal translation
+│   ├── extractionSnapshot.ts    # projection + structural diff for extract fixtures
+│   └── ocrSnapshot.ts           # projection + diff for OCR fixtures
 └── worker/             # MuPDF worker ops, reused as-is from Node
 ```
 
