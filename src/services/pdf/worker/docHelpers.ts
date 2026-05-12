@@ -21,6 +21,7 @@ import type {
 import type { RawPageProvider } from "../DocumentAnalyzer";
 import type {
     DocumentLike,
+    FontApi,
     MuPDFApi,
     QuadTuple,
     RectTuple,
@@ -251,13 +252,37 @@ export function extractRawPageFromDoc(
 }
 
 /**
+ * Derive a `family` string from a raw PostScript font name, mirroring
+ * how the JSON walker normalizes it (strips style suffixes like Bold,
+ * Italic, Oblique, the `MT`/`PS` PostScript tags, and anything after the
+ * first comma). Returns the raw name unchanged when the regex strips
+ * everything.
+ */
+function deriveFontFamily(name: string): string {
+    return (
+        name
+            .split(",")[0]
+            .replace(/(?:[-+])?(?:Bold|Italic|Oblique|Regular|MT|PS).*$/i, "")
+            .trim() || name
+    );
+}
+
+/**
  * Extract detailed (character-level) page data, including per-character
  * quad and bbox metadata.
+ *
+ * `fontApi` is required to populate line `font.name` / `family` /
+ * `weight` / `style`. Without it (or in test contexts where the WASM
+ * font helpers aren't available) the per-line `font` falls back to
+ * empty defaults — every text line ends up with `name: ""`, breaking
+ * style-based heading detection downstream. The structured extract
+ * passes the live API; debug paths must do the same.
  */
 export function extractRawPageDetailedFromDoc(
     doc: DocumentLike,
     pageIndex: number,
     includeImages: boolean,
+    fontApi?: FontApi,
 ): RawPageDataDetailed {
     const page = doc.loadPage(pageIndex);
     try {
@@ -280,6 +305,35 @@ export function extractRawPageDetailedFromDoc(
         const blocks: RawBlock[] = [];
         let currentBlock: (RawBlock & { type: "text"; lines: RawLineDetailed[] }) | null = null;
         let currentLine: RawLineDetailed | null = null;
+
+        // Memoize per-fontPtr lookups. A typical text-heavy page has
+        // thousands of chars sharing a handful of fonts; without caching
+        // we'd pay one wasm call per char per attribute.
+        type CachedFont = {
+            name: string;
+            family: string;
+            weight: "bold" | "normal";
+            style: "italic" | "normal";
+        };
+        const fontCache = new Map<number, CachedFont>();
+        const lookupFont = (fontPtr: number): CachedFont => {
+            const cached = fontCache.get(fontPtr);
+            if (cached) return cached;
+            let entry: CachedFont;
+            if (fontApi && fontPtr) {
+                const name = fontApi.getName(fontPtr);
+                entry = {
+                    name,
+                    family: deriveFontFamily(name),
+                    weight: fontApi.isBold(fontPtr) ? "bold" : "normal",
+                    style: fontApi.isItalic(fontPtr) ? "italic" : "normal",
+                };
+            } else {
+                entry = { name: "", family: "", weight: "normal", style: "normal" };
+            }
+            fontCache.set(fontPtr, entry);
+            return entry;
+        };
 
         try {
             stext.walk({
@@ -324,7 +378,7 @@ export function extractRawPageDetailedFromDoc(
                     }
                     currentLine = null;
                 },
-                onChar: (rune, _origin, font, size, quad) => {
+                onChar: (rune, _origin, fontPtr, size, quad) => {
                     if (!currentLine) return;
                     currentLine.text += rune;
                     currentLine.chars.push({
@@ -333,48 +387,22 @@ export function extractRawPageDetailedFromDoc(
                         bbox: bboxFromQuad(quad),
                     } as RawChar);
                     // Populate the line's font from the first char.
-                    const fontObj = font as unknown as {
-                        getName?: () => string;
-                        isBold?: () => boolean;
-                        isItalic?: () => boolean;
-                    };
-                    if (currentLine.chars.length === 1 && fontObj) {
-                        try {
-                            const name = typeof fontObj.getName === "function"
-                                ? fontObj.getName()
-                                : "";
-                            const isBold = typeof fontObj.isBold === "function"
-                                ? fontObj.isBold()
-                                : /bold/i.test(name);
-                            const isItalic = typeof fontObj.isItalic === "function"
-                                ? fontObj.isItalic()
-                                : /italic|oblique/i.test(name);
-                            // Family is the part before any comma / "MT" /
-                            // "PS" PostScript suffix, mirroring how the
-                            // JSON walker derives it.
-                            const family = name
-                                .split(",")[0]
-                                .replace(/(?:[-+])?(?:Bold|Italic|Oblique|Regular|MT|PS).*$/i, "")
-                                .trim() || name;
-                            currentLine.font = {
-                                name,
-                                family,
-                                weight: isBold ? "bold" : "normal",
-                                style: isItalic ? "italic" : "normal",
-                                // Mirror the JSON walker's `(int)size` truncation
-                                // (`extractRawPageFromDoc` -> `stext.asJSON()`).
-                                // Without this, body text reported as 9.96 here
-                                // rounds to 10 while the same text on JSON-walk
-                                // pages rounds to 9, breaking body-style
-                                // matching when the detailed page is substituted
-                                // into a JSON-walk analysis window.
-                                size: typeof size === "number" ? Math.trunc(size) : 0,
-                            };
-                        } catch {
-                            // Best effort — leave defaults if Font API
-                            // throws (won't happen with mupdf-wasm but
-                            // future-proof against binding changes).
-                        }
+                    if (currentLine.chars.length === 1) {
+                        const f = lookupFont(typeof fontPtr === "number" ? fontPtr : 0);
+                        currentLine.font = {
+                            name: f.name,
+                            family: f.family,
+                            weight: f.weight,
+                            style: f.style,
+                            // Mirror the JSON walker's `(int)size` truncation
+                            // (`extractRawPageFromDoc` -> `stext.asJSON()`).
+                            // Without this, body text reported as 9.96 here
+                            // rounds to 10 while the same text on JSON-walk
+                            // pages rounds to 9, breaking body-style
+                            // matching when the detailed page is substituted
+                            // into a JSON-walk analysis window.
+                            size: typeof size === "number" ? Math.trunc(size) : 0,
+                        };
                     }
                 },
                 onImageBlock: (bbox) => {
