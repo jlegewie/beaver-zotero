@@ -23,6 +23,7 @@ import {
     profileSyncStatusAtom,
 } from '../atoms/profile';
 import { isTransientNetworkError } from '../utils/isTransientNetworkError';
+import { store } from '../store';
 
 // Adaptive refresh intervals based on sidebar visibility
 const ACTIVE_REFRESH_INTERVAL = 15 * 60 * 1000; // 15 minutes when sidebar is visible
@@ -129,6 +130,23 @@ export const useProfileSync = () => {
                 setPref("onboardingSignInTextShown", true);
             }
 
+            // Persist the authenticated email as the install's account sentinel.
+            // Onboarding pages also write this, but already-authorized users
+            // skip onboarding — without this, the SignInForm mismatch prompt
+            // wouldn't fire on later switches. Deferred until profile validates
+            // so a 403 ZoteroInstanceMismatchError doesn't stick a rejected
+            // email into the pref.
+            //
+            // Re-read the userAtom from the store (rather than the closed-over
+            // `user`) and confirm it still matches the userId this fetch was
+            // started for. A stale refresh that began before sign-out + account
+            // switch could otherwise resume here and write the previous user's
+            // email back over the freshly cleared sentinel.
+            const currentUser = store.get(userAtom);
+            if (currentUser?.id === userId && currentUser.email && getPref("userEmail") !== currentUser.email) {
+                setPref("userEmail", currentUser.email);
+            }
+
             setIsProfileLoaded(true);
             setIsProfileInvalid(false);
             setIsWaitingForProfile(false);
@@ -196,7 +214,7 @@ export const useProfileSync = () => {
                 setTimeout(() => syncProfileData(userId), 0);
             }
         }
-    }, [setProfileWithPlan, setIsProfileLoaded, setIsProfileInvalid, setIsWaitingForProfile, setModels, setIsMigratingData, setRequiredDataVersion, setMinimumFrontendVersion, setLocalZoteroLibraries, setProfileSyncStatus, logout]);
+    }, [user, setProfileWithPlan, setIsProfileLoaded, setIsProfileInvalid, setIsWaitingForProfile, setModels, setIsMigratingData, setRequiredDataVersion, setMinimumFrontendVersion, setLocalZoteroLibraries, setProfileSyncStatus, logout]);
 
     const refreshProfile = useCallback(async (force = false) => {
         if (!user) return;

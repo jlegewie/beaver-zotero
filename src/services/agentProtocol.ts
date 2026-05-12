@@ -508,6 +508,12 @@ export interface WSZoteroDataRequest extends WSBaseEvent {
     include_attachments: boolean;
     /** Whether to include parents of the items */
     include_parents: boolean;
+    /**
+     * Whether to include child notes of referenced regular items.
+     * Optional; older backends may omit it. When undefined, default to true
+     * to match the new backend default.
+     */
+    include_notes?: boolean;
     /** References to fetch data for */
     items: ZoteroItemReference[];
     /**
@@ -1063,6 +1069,12 @@ export interface WSAgentActionExecuteRequest extends WSBaseEvent {
     action_data: Record<string, any>;
     /** Timeout in seconds for the frontend to complete execution (default: 25 seconds) */
     timeout_seconds?: number;
+    /** Agent action ID */
+    action_id?: string;
+    /** Run ID */
+    run_id?: string;
+    /** Thread ID */
+    thread_id?: string;
 }
 
 /** Response to agent action execution request */

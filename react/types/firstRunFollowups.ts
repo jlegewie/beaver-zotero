@@ -14,6 +14,22 @@ export interface FirstRunFollowup {
     promptWithTopic?: string;
 }
 
+/**
+ * Curated follow-ups for the empty-library discovery flow.
+ */
+export const EMPTY_LIBRARY_DISCOVER_FOLLOWUPS: FirstRunFollowup[] = [
+    {
+        id: 'save_top_to_collection',
+        title: 'Save the top results to a new collection',
+        prompt: 'Create a new Zotero collection for this research and save the top results into it. Pick a clear, descriptive name for the collection.',
+    },
+    {
+        id: 'synthesis_note',
+        title: 'Create a summary note with key findings',
+        prompt: 'Write a Zotero note that summarizes the key findings, methods, and open questions across the top results above. Group related papers together, use short section headings, and cite each paper referenced. Save the note to my library.',
+    },
+];
+
 export const FIRST_RUN_FOLLOWUPS: Record<CardKind, FirstRunFollowup[]> = {
     reading_assistant: [
         {
@@ -109,4 +125,17 @@ export function renderFollowup(
         title: fillTemplate(titleSource, topic, collection),
         prompt: fillTemplate(promptSource, topic, collection),
     };
+}
+
+/**
+ * Resolve the follow-up list for a given run. Empty-library runs get the
+ * curated bootstrapping list regardless of `card_kind`; everything else
+ * falls back to the per-card-kind list.
+ */
+export function getFollowupsForCardKind(
+    cardKind: CardKind,
+    emptyLibrary: boolean,
+): FirstRunFollowup[] {
+    if (emptyLibrary) return EMPTY_LIBRARY_DISCOVER_FOLLOWUPS;
+    return FIRST_RUN_FOLLOWUPS[cardKind] ?? [];
 }

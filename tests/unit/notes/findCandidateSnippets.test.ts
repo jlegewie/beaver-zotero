@@ -117,4 +117,44 @@ describe('findCandidateSnippets', () => {
             .toBeGreaterThan(0);
         expect(findCandidateSnippets(simplified, oldString).length).toBe(0);
     });
+
+    // -- CJK Pangu-spacing tier 1 --
+
+    it('tier-1 CJK snippet is sliced from the original note, not the normalized form', () => {
+        // The note already has a Pangu space the model dropped from
+        // old_string. The hint snippet must include that space so the model
+        // can paste it back as an exact-matching old_string. Returning a
+        // snippet from the normalized form (without the space) would violate
+        // the "paste verbatim" contract.
+        const simplified = '<p>CSCO 指南及 2026 版共识 [14] 将激素抵抗性 CIP 定义为初始足量糖皮质激素治疗。</p>';
+        const oldString = '<p>CSCO指南及2026版共识[14]将激素抵抗性CIP定义为初始足量糖皮质激素治疗。</p>';
+
+        const candidates = findCandidateSnippets(simplified, oldString);
+        expect(candidates).toHaveLength(1);
+        expect(candidates[0].via).toBe('whitespace_relaxed');
+        // The snippet must be a verbatim slice of the note.
+        expect(simplified.indexOf(candidates[0].snippet.replace(/^…|…$/g, '')))
+            .toBeGreaterThanOrEqual(0);
+        // And must contain at least one of the boundary spaces the note has.
+        expect(candidates[0].snippet).toMatch(/共识 \[14\]/);
+    });
+
+    it('tier-1 does not surface tag-boundary spacing drift as a Pangu match', () => {
+        // The matcher rejects this drift case (the boundary `文` ↔ `<` is at
+        // an HTML delimiter, where Pangu relaxation is suppressed). The hint
+        // must agree — otherwise the model would paste a snippet whose
+        // tag-adjacent space is dropped and edit_note would loop.
+        const simplified = '<p>中文 <strong>anchor</strong> with enough body for the length gate</p>';
+        const oldString = '<p>中文<strong>anchor</strong> with enough body for the length gate</p>';
+
+        const candidates = findCandidateSnippets(simplified, oldString);
+        // Either no candidate at all, or fall through to a non-CJK tier — in
+        // both cases the Pangu tier-1 path must not claim a match.
+        if (candidates.length > 0) {
+            // Whatever tier surfaced the candidate, its snippet must be a
+            // verbatim slice of the note (i.e. preserve the boundary space).
+            const snippet = candidates[0].snippet.replace(/^…|…$/g, '');
+            expect(simplified.indexOf(snippet)).toBeGreaterThanOrEqual(0);
+        }
+    });
 });

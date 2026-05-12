@@ -369,7 +369,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = ({
         if (item.isNote()) {
             logger(`ZoteroCitation: Note Link (${item.id})`);
             if (typeof Zotero.Notes?.open === 'function') {
-                await Zotero.Notes.open(item.id);
+                await Zotero.Notes.open(item.id, undefined);
             } else {
                 await Zotero.getActiveZoteroPane().openNoteWindow(item.id);
             }

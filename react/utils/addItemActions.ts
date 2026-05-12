@@ -5,6 +5,7 @@ import { getZoteroTargetContext } from '../../src/utils/zoteroUtils';
 import { scheduleBackgroundTask, generateTaskId, isPdfFetchInProgress, deduplicatedSync } from '../../src/utils/backgroundTasks';
 import { ensureItemSynced } from '../../src/utils/sync';
 import { TimingAccumulator } from '../../src/utils/timing';
+import { emitAttachmentResolved } from './attachmentResolvedEvent';
 
 const SAVE_ATTACHMENTS_WITH_TRANSLATORS = false;
 
@@ -37,6 +38,12 @@ export interface ImportItemOptions {
      * creation, collection attach, PDF check) so callers can surface them.
      */
     timing?: TimingAccumulator;
+    /** Agent action ID */
+    actionId?: string;
+    /** Run ID */
+    runId?: string;
+    /** Thread ID */
+    threadId?: string;
 }
 
 /**
@@ -180,24 +187,35 @@ async function importFromUrl(url: string, libraryId: number): Promise<Zotero.Ite
 
 /**
  * Helper to attach a PDF from a URL to an existing item.
- * @returns true if attachment was successful, false otherwise
+ *
+ * Bounded by a 30s timeout via `withTimeout`.
+ *
+ * @returns the newly attached Zotero attachment item, or null on failure/timeout.
  */
-async function attachPdfFromUrl(parentItem: Zotero.Item, url: string, libraryId: number): Promise<boolean> {
+async function attachPdfFromUrl(
+    parentItem: Zotero.Item,
+    url: string,
+    libraryId: number,
+): Promise<Zotero.Item | null> {
     try {
-        await Zotero.Attachments.importFromURL({
-            libraryID: libraryId,
-            url: url,
-            parentItemID: parentItem.id,
-            title: "Full Text PDF",
-            contentType: "application/pdf",
-            saveOptions: {
-                skipSelect: true // Don't select the new attachment in the UI
-            }
-        });
-        return true;
-    } catch (e) {
-        logger(`Failed to attach PDF from ${url}: ${e}`, 1);
-        return false;
+        const attachment = await withTimeout(
+            Zotero.Attachments.importFromURL({
+                libraryID: libraryId,
+                url: url,
+                parentItemID: parentItem.id,
+                title: "Full Text PDF",
+                contentType: "application/pdf",
+                saveOptions: {
+                    skipSelect: true // Don't select the new attachment in the UI
+                }
+            }),
+            30000,
+            `Attach PDF from ${url}`,
+        );
+        return attachment || null;
+    } catch (e: any) {
+        logger(`Failed to attach PDF from ${url}: ${e?.message || e}`, 1);
+        return null;
     }
 }
 
@@ -383,6 +401,9 @@ export async function createZoteroItem(reference: ExternalReference, options?: I
                 openAccessUrl: reference.open_access_url,
                 fallbackUrl: reference.url,
                 fileAvailable: reference.is_open_access,
+                actionId: options?.actionId,
+                runId: options?.runId,
+                threadId: options?.threadId,
             });
         }
     }
@@ -489,27 +510,45 @@ export async function applyCreateItemData(
     const existingAttachments = item.getAttachments();
     const existingPdfAttachments = await filterPdfAttachments(existingAttachments);
     timing?.record('pdf_check_ms', Date.now() - pdfCheckStart);
-    const attachmentKeys = existingPdfAttachments.length > 0 
-        ? existingPdfAttachments.map(a => a.key).join(',') 
-        : '';
-    
+
     // Schedule PDF fetching as background task (non-blocking)
     // Only if no PDF exists and we have potential sources
-    if (existingPdfAttachments.length === 0 && !isPdfFetchInProgress(libraryId, itemKey)) {
-        const pdfUrl = itemData.open_access_url || proposedData.downloaded_url;
-        
-        // Schedule background PDF fetch
-        schedulePdfFetchTask(libraryId, itemKey, {
-            openAccessUrl: pdfUrl,
-            fallbackUrl: itemData.url,
-            fileAvailable: proposedData.file_available,
-        });
+    let didScheduleBgFetch = false;
+    let fetchAlreadyInProgress = false;
+    if (existingPdfAttachments.length === 0) {
+        if (isPdfFetchInProgress(libraryId, itemKey)) {
+            fetchAlreadyInProgress = true;
+        } else {
+            const pdfUrl = itemData.open_access_url || proposedData.downloaded_url;
+            schedulePdfFetchTask(libraryId, itemKey, {
+                openAccessUrl: pdfUrl,
+                fallbackUrl: itemData.url,
+                fileAvailable: proposedData.file_available,
+                actionId: options?.actionId,
+                runId: options?.runId,
+                threadId: options?.threadId,
+            });
+            didScheduleBgFetch = true;
+        }
+    }
+
+    // Compute initial attachment_status
+    let attachmentStatus: CreateItemResultData['attachment_status'];
+    let attachmentKey: string | undefined;
+    if (existingPdfAttachments.length > 0) {
+        attachmentStatus = 'available';
+        attachmentKey = `${libraryId}-${existingPdfAttachments[0].key}`;
+    } else if (didScheduleBgFetch || fetchAlreadyInProgress) {
+        attachmentStatus = 'pending';
+    } else {
+        attachmentStatus = 'none';
     }
 
     return {
         library_id: libraryId,
         zotero_key: itemKey,
-        attachment_keys: attachmentKeys
+        attachment_status: attachmentStatus,
+        attachment_key: attachmentKey,
     };
 }
 
@@ -533,6 +572,16 @@ interface PdfFetchOptions {
     openAccessUrl?: string;
     fallbackUrl?: string;
     fileAvailable?: boolean;
+    /**
+     * Optional correlation IDs. When provided, the background task emits an
+     * attachment_resolved ws event on completion (success or failure) so the
+     * backend can update the matching agent action and surface the result to
+     * the model mid-turn. Dropped silently if the ws is not connected; the
+     * backend's safety-net lookup at the next user message handles that case.
+     */
+    actionId?: string;
+    runId?: string;
+    threadId?: string;
 }
 
 /**
@@ -550,84 +599,157 @@ function schedulePdfFetchTask(
         taskId,
         'pdf_fetch',
         async (signal: AbortSignal) => {
-            const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryId, itemKey);
-            if (!item) {
-                throw new Error(`Item not found: ${libraryId}-${itemKey}`);
-            }
+            let item: Zotero.Item | null = null;
+            let attachedPdf: Zotero.Item | null = null;
+            // Strategy 3 uses withTimeout to bound `addAvailableFile`, but the
+            // underlying Zotero operation is NOT cancelled when the wrapper
+            // rejects
+            let strategy3TimedOut = false;
 
-            // Check if cancelled or PDF was attached in the meantime
-            if (signal.aborted) return;
-            const attachmentIds = await item.getAttachments();
-            const pdfAttachments = await filterPdfAttachments(attachmentIds);
-            if (pdfAttachments.length > 0) {
-                logger(`schedulePdfFetchTask: Item already has PDF, skipping`, 2);
-                return;
-            }
-
-            let pdfAttached = false;
-
-            // Strategy 1: Try open access URL if available
-            // The presence of an openAccessUrl is sufficient evidence that a PDF may be available,
-            // so we try it regardless of the fileAvailable flag
-            if (!signal.aborted && options.openAccessUrl) {
-                logger(`schedulePdfFetchTask: Trying open access URL: ${options.openAccessUrl}`, 2);
-                pdfAttached = await attachPdfFromUrl(item, options.openAccessUrl, libraryId);
-                if (pdfAttached) {
-                    logger(`schedulePdfFetchTask: Successfully attached PDF from open access URL`, 2);
+            try {
+                const fetched = await Zotero.Items.getByLibraryAndKeyAsync(libraryId, itemKey);
+                if (!fetched) {
+                    throw new Error(`Item not found: ${libraryId}-${itemKey}`);
                 }
-            }
+                item = fetched;
 
-            // Strategy 2: Try fallback URL if different from open access URL
-            // This is a less reliable source (general article URL), so only try when fileAvailable hints a PDF exists
-            if (!signal.aborted && !pdfAttached && options.fallbackUrl && options.fileAvailable) {
-                // Only try if different from openAccessUrl (avoid duplicate attempts)
-                if (options.fallbackUrl !== options.openAccessUrl) {
-                    logger(`schedulePdfFetchTask: Trying fallback URL: ${options.fallbackUrl}`, 2);
-                    pdfAttached = await attachPdfFromUrl(item, options.fallbackUrl, libraryId);
-                    if (pdfAttached) {
-                        logger(`schedulePdfFetchTask: Successfully attached PDF from fallback URL`, 2);
+                // Check if cancelled or PDF was attached in the meantime
+                if (signal.aborted) return;
+                const attachmentIds = await item.getAttachments();
+                const pdfAttachments = await filterPdfAttachments(attachmentIds);
+                if (pdfAttachments.length > 0) {
+                    logger(`schedulePdfFetchTask: Item already has PDF, skipping`, 2);
+                    // Capture for the finally so we emit `available`. The PDF
+                    // may have been attached out-of-band (e.g. translator) and
+                    // the backend may still have us marked `pending`.
+                    attachedPdf = pdfAttachments[0];
+                    return;
+                }
+
+                // Strategy 1: Try open access URL if available
+                // The presence of an openAccessUrl is sufficient evidence that a PDF may be available,
+                // so we try it regardless of the fileAvailable flag
+                if (!signal.aborted && options.openAccessUrl) {
+                    logger(`schedulePdfFetchTask: Trying open access URL: ${options.openAccessUrl}`, 2);
+                    attachedPdf = await attachPdfFromUrl(item, options.openAccessUrl, libraryId);
+                    if (attachedPdf) {
+                        logger(`schedulePdfFetchTask: Successfully attached PDF from open access URL`, 2);
                     }
                 }
-            }
 
-            // Strategy 3: Use Zotero's addAvailableFile (Unpaywall, DOI lookup, etc.)
-            if (!signal.aborted && !pdfAttached) {
-                try {
-                    logger(`schedulePdfFetchTask: Trying addAvailableFile for ${itemKey}`, 2);
-                    const attachment = await withTimeout(
-                        (Zotero.Attachments as any).addAvailableFile(item),
-                        30000,
-                        'Find PDF'
-                    );
-                    if (attachment) {
-                        logger(`schedulePdfFetchTask: Found PDF via addAvailableFile`, 2);
-                        pdfAttached = true;
+                // Strategy 2: Try fallback URL if different from open access URL
+                // This is a less reliable source (general article URL), so only try when fileAvailable hints a PDF exists
+                if (!signal.aborted && !attachedPdf && options.fallbackUrl && options.fileAvailable) {
+                    // Only try if different from openAccessUrl (avoid duplicate attempts)
+                    if (options.fallbackUrl !== options.openAccessUrl) {
+                        logger(`schedulePdfFetchTask: Trying fallback URL: ${options.fallbackUrl}`, 2);
+                        attachedPdf = await attachPdfFromUrl(item, options.fallbackUrl, libraryId);
+                        if (attachedPdf) {
+                            logger(`schedulePdfFetchTask: Successfully attached PDF from fallback URL`, 2);
+                        }
                     }
-                } catch (e: any) {
-                    logger(`schedulePdfFetchTask: addAvailableFile failed: ${e?.message || e}`, 2);
                 }
-            }
 
-            if (signal.aborted) return;
-
-            if (pdfAttached) {
-                // Sync the item to ensure the new attachment is sent to backend
-                // This is important because the initial sync may have run before PDF was attached
-                // Uses deduplication to avoid concurrent syncs for the same item
-                try {
-                    logger(`schedulePdfFetchTask: Syncing item after PDF attachment`, 2);
-                    await deduplicatedSync(
-                        libraryId,
-                        itemKey,
-                        async () => { await ensureItemSynced(libraryId, itemKey); },
-                        { queueIfInFlight: true }
-                    );
-                } catch (e: any) {
-                    logger(`schedulePdfFetchTask: Post-PDF sync failed: ${e?.message || e}`, 1);
-                    // Don't throw - the PDF was attached successfully, sync failure is non-fatal
+                // Strategy 3: Use Zotero's addAvailableFile (Unpaywall, DOI lookup, etc.)
+                // Runs unconditionally as long as no PDF is attached yet — can succeed
+                // even when no open-access URL was advertised by OpenAlex.
+                if (!signal.aborted && !attachedPdf) {
+                    try {
+                        logger(`schedulePdfFetchTask: Trying addAvailableFile for ${itemKey}`, 2);
+                        const attachment = await withTimeout(
+                            (Zotero.Attachments as any).addAvailableFile(item),
+                            30000,
+                            'Find PDF'
+                        );
+                        if (attachment) {
+                            logger(`schedulePdfFetchTask: Found PDF via addAvailableFile`, 2);
+                            attachedPdf = attachment as Zotero.Item;
+                        }
+                    } catch (e: any) {
+                        const msg: string = e?.message || String(e);
+                        if (msg.includes('timed out')) {
+                            strategy3TimedOut = true;
+                        }
+                        logger(`schedulePdfFetchTask: addAvailableFile failed: ${msg}`, 2);
+                    }
                 }
-            } else {
-                logger(`schedulePdfFetchTask: No PDF found for ${itemKey}`, 2);
+
+                if (signal.aborted) return;
+
+                if (attachedPdf) {
+                    // Sync the item to ensure the new attachment is sent to backend.
+                    // The initial sync may have run before the PDF was attached.
+                    try {
+                        logger(`schedulePdfFetchTask: Syncing item after PDF attachment`, 2);
+                        await deduplicatedSync(
+                            libraryId,
+                            itemKey,
+                            async () => { await ensureItemSynced(libraryId, itemKey); },
+                            { queueIfInFlight: true }
+                        );
+                    } catch (e: any) {
+                        logger(`schedulePdfFetchTask: Post-PDF sync failed: ${e?.message || e}`, 1);
+                        // Don't throw — the PDF was attached successfully, sync failure is non-fatal
+                    }
+                } else {
+                    logger(`schedulePdfFetchTask: No PDF found for ${itemKey}`, 2);
+                }
+            } catch (e: any) {
+                // Early failure path (e.g. item lookup threw). attachedPdf
+                // stays null so finally emits `failed`.
+                logger(
+                    `schedulePdfFetchTask: ${itemKey} task body threw: ${e?.message || e}`,
+                    1,
+                );
+            } finally {
+                // Always emit the attachment_resolved ws event
+                if (!signal.aborted) {
+                    // If we don't yet have a PDF, re-check attachments
+                    if (!attachedPdf && item) {
+                        try {
+                            const currentAttachmentIds = await item.getAttachments();
+                            const currentPdfs = await filterPdfAttachments(currentAttachmentIds);
+                            if (currentPdfs.length > 0) {
+                                attachedPdf = currentPdfs[0];
+                                logger(
+                                    `schedulePdfFetchTask: Re-check found PDF for ${itemKey} (key=${attachedPdf.key})`,
+                                    2,
+                                );
+                            }
+                        } catch (e: any) {
+                            logger(
+                                `schedulePdfFetchTask: Re-check getAttachments failed for ${itemKey}: ${e?.message || e}`,
+                                2,
+                            );
+                        }
+                    }
+
+                    if (attachedPdf) {
+                        emitAttachmentResolved({
+                            threadId: options.threadId,
+                            actionId: options.actionId,
+                            libraryId,
+                            zoteroKey: itemKey,
+                            attachmentStatus: 'available',
+                            attachmentKey: `${libraryId}-${attachedPdf.key}`,
+                        });
+                    } else if (strategy3TimedOut) {
+                        // The underlying addAvailableFile is still in flight
+                        logger(
+                            `schedulePdfFetchTask: ${itemKey} addAvailableFile timed out; scheduling re-check`,
+                            2,
+                        );
+                        schedulePdfFetchRecheckTask(libraryId, itemKey, options);
+                    } else {
+                        emitAttachmentResolved({
+                            threadId: options.threadId,
+                            actionId: options.actionId,
+                            libraryId,
+                            zoteroKey: itemKey,
+                            attachmentStatus: 'failed',
+                        });
+                    }
+                }
             }
         },
         {
@@ -635,6 +757,102 @@ function schedulePdfFetchTask(
             libraryId,
             progressMessage: 'Finding PDF...',
         }
+    );
+}
+
+/**
+ * Delay before re-checking attachments after a Strategy 3 timeout
+ */
+const STRATEGY3_RECHECK_DELAY_MS = 60_000;
+
+/**
+ * Schedule a deferred re-check after Strategy 3 (`addAvailableFile`) timed out.
+ * Strategy 3's underlying op continues running past `withTimeout`'s rejection,
+ * so a PDF may attach shortly after we returned from the bounded wait. This
+ * task waits ~60s, re-queries attachments, and emits the final terminal status.
+ */
+function schedulePdfFetchRecheckTask(
+    libraryId: number,
+    itemKey: string,
+    options: PdfFetchOptions,
+): void {
+    const taskId = `pdf_fetch_recheck-${libraryId}-${itemKey}-${Date.now()}`;
+    scheduleBackgroundTask(
+        taskId,
+        'pdf_fetch',
+        async (signal: AbortSignal) => {
+            // Abortable sleep — resolves early if the task is cancelled.
+            if (!signal.aborted) {
+                await new Promise<void>((resolve) => {
+                    const timerId = setTimeout(resolve, STRATEGY3_RECHECK_DELAY_MS);
+                    signal.addEventListener(
+                        'abort',
+                        () => {
+                            clearTimeout(timerId);
+                            resolve();
+                        },
+                        { once: true },
+                    );
+                });
+            }
+            if (signal.aborted) return;
+            // Hard stop if the plugin is being disabled or the app is
+            // quitting — don't emit ws events from a shutting-down plugin.
+            if ((Zotero as any).__beaverShuttingDown) {
+                logger(
+                    `schedulePdfFetchRecheckTask: ${itemKey} skipped, plugin shutting down`,
+                    2,
+                );
+                return;
+            }
+
+            let item: Zotero.Item | null = null;
+            try {
+                const fetched = await Zotero.Items.getByLibraryAndKeyAsync(libraryId, itemKey);
+                item = fetched || null;
+            } catch (e: any) {
+                logger(
+                    `schedulePdfFetchRecheckTask: ${itemKey} item lookup failed: ${e?.message || e}`,
+                    1,
+                );
+            }
+            if (signal.aborted) return;
+
+            let resolvedPdf: Zotero.Item | null = null;
+            if (item) {
+                try {
+                    const ids = await item.getAttachments();
+                    const pdfs = await filterPdfAttachments(ids);
+                    if (pdfs.length > 0) {
+                        resolvedPdf = pdfs[0];
+                    }
+                } catch (e: any) {
+                    logger(
+                        `schedulePdfFetchRecheckTask: ${itemKey} getAttachments failed: ${e?.message || e}`,
+                        2,
+                    );
+                }
+            }
+            if (signal.aborted) return;
+
+            emitAttachmentResolved({
+                threadId: options.threadId,
+                actionId: options.actionId,
+                libraryId,
+                zoteroKey: itemKey,
+                attachmentStatus: resolvedPdf ? 'available' : 'failed',
+                attachmentKey: resolvedPdf ? `${libraryId}-${resolvedPdf.key}` : undefined,
+            });
+            logger(
+                `schedulePdfFetchRecheckTask: ${itemKey} resolved as ${resolvedPdf ? 'available' : 'failed'}`,
+                2,
+            );
+        },
+        {
+            itemKey,
+            libraryId,
+            progressMessage: 'Re-checking PDF...',
+        },
     );
 }
 

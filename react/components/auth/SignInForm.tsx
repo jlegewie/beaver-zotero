@@ -18,6 +18,7 @@ import { OTPVerification } from './OTPVerification'
 import { sendOTP, verifyOTP, getOTPErrorMessage, isServiceUnavailableError, SERVICE_UNAVAILABLE_MESSAGE } from './otp'
 import { getPref } from '../../../src/utils/prefs'
 import { logger } from '../../../src/utils/logger'
+import { performAccountSwitchAtom } from '../../atoms/accountSwitch'
 
 interface SignInFormProps {
   setErrorMsg: (errorMsg: string | null) => void;
@@ -36,6 +37,7 @@ export default function SignInForm({ setErrorMsg, emailInputRef }: SignInFormPro
   const [resendCountdown, setResendCountdown] = useAtom(otpResendCountdownAtom)
   const [isWaitingForProfile, setIsWaitingForProfile] = useAtom(isWaitingForProfileAtom)
   const resetLoginForm = useSetAtom(resetLoginFormAtom)
+  const performAccountSwitch = useSetAtom(performAccountSwitchAtom)
   
   // Store the associated email at mount time for error messages
   const [associatedEmail] = useState<string | undefined>(() => getPref("userEmail"))
@@ -109,6 +111,35 @@ export default function SignInForm({ setErrorMsg, emailInputRef }: SignInFormPro
     }
   }, [resendCountdown])
 
+  /**
+   * If a previous account is signed in here and the entered email differs,
+   * confirm with the user before clearing local Beaver settings. Returns true
+   * if auth should proceed (no switch needed, or switch confirmed); false if
+   * the user cancelled and the form should stay put.
+   */
+  const confirmAccountSwitchIfNeeded = useCallback((): boolean => {
+    const storedUserEmail = getPref("userEmail");
+    if (!storedUserEmail || storedUserEmail.toLowerCase() === email.toLowerCase()) {
+      return true;
+    }
+    const buttonIndex = Zotero.Prompt.confirm({
+      window: Zotero.getMainWindow(),
+      title: "Switch Beaver account?",
+      text:
+        `This Zotero is currently associated with ${storedUserEmail}.\n\n` +
+        `Continuing will remove the saved API keys for that account. ` +
+        `Your custom prompts, actions, instructions, and ` +
+        `other configurations are preserved on this device.`,
+      button0: "Switch Account",
+      button1: Zotero.Prompt.BUTTON_TITLE_CANCEL,
+      defaultButton: 1,
+    });
+    if (buttonIndex !== 0) return false;
+    logger(`SignInForm: account switch confirmed (${storedUserEmail} -> ${email})`, 2);
+    performAccountSwitch();
+    return true;
+  }, [email, performAccountSwitch])
+
   // Handle email code sign-in
   const handleSendEmailCode = useCallback(async () => {
     if (!email) {
@@ -116,18 +147,11 @@ export default function SignInForm({ setErrorMsg, emailInputRef }: SignInFormPro
       return
     }
 
-    // Check if Zotero instance is already associated with another account
-    const storedUserEmail = getPref("userEmail");
-    if (storedUserEmail && storedUserEmail.toLowerCase() !== email.toLowerCase()) {
-      const errorMessage = `This Zotero instance is already associated with another Beaver account. Please sign in with the correct account (${storedUserEmail}).`;
-      setError(errorMessage);
-      setErrorMsg(errorMessage);
-      return;
-    }
-    
+    if (!confirmAccountSwitchIfNeeded()) return;
+
     setIsLoading(true)
     setError(null)
-    
+
     try {
       await sendOTP(email, { shouldCreateUser: false })
       setAuthMethod('code')
@@ -141,30 +165,21 @@ export default function SignInForm({ setErrorMsg, emailInputRef }: SignInFormPro
     } finally {
       setIsLoading(false)
     }
-  }, [email, setErrorMsg])
+  }, [email, setErrorMsg, confirmAccountSwitchIfNeeded])
 
   // Handle OTP verification
   const handleVerifyOTP = useCallback(async (otpCode: string) => {
-    // Check if Zotero instance is already associated with another account
-    const storedUserEmail = getPref("userEmail");
-    if (storedUserEmail && storedUserEmail.toLowerCase() !== email.toLowerCase()) {
-      const errorMessage = `This Zotero instance is already associated with another Beaver account. Please sign in with the correct account (${storedUserEmail}).`;
-      setError(errorMessage);
-      setErrorMsg(errorMessage);
-      // Return to email page
-      setAuthMethod('initial');
-      setStep('method-selection');
-      return; // Early return - error is already handled locally
-    }
-
     setIsLoading(true)
     setError(null)
     setErrorMsg(null)
-    
+
     try {
       await verifyOTP(email, otpCode, 'email')
       logger('SignInForm: OTP verification succeeded, waiting for profile');
-      // Wait for useProfileSync to fetch the profile
+      // Wait for useProfileSync to fetch the profile. The userEmail sentinel
+      // is persisted there once the backend confirms this Zotero install is
+      // valid for the account — writing it here would stick the rejected
+      // email if the profile fetch later 403s on ZoteroInstanceMismatchError.
       setIsWaitingForProfile(true);
       // isLoading will be set to false when profile loads or timeout occurs
     } catch (error) {
@@ -186,31 +201,27 @@ export default function SignInForm({ setErrorMsg, emailInputRef }: SignInFormPro
   // Handle password sign-in
   const handlePasswordSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+
+    if (!confirmAccountSwitchIfNeeded()) return;
+
     setIsLoading(true)
     setError(null)
     setErrorMsg(null)
 
-    // Check if Zotero instance is already associated with another account
-    const storedUserEmail = getPref("userEmail");
-    if (storedUserEmail && storedUserEmail.toLowerCase() !== email.toLowerCase()) {
-      const errorMessage = `This Zotero instance is already associated with another Beaver account. Please sign in with the correct account (${storedUserEmail}).`;
-      setError(errorMessage);
-      setErrorMsg(errorMessage);
-      setIsLoading(false)
-      return;
-    }
-    
     try {
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
       })
-      
+
       if (error) throw error
-      
+
       if (data.user) {
         logger('SignInForm: password sign-in succeeded, waiting for profile');
-        // Wait for useProfileSync to fetch the profile
+        // Wait for useProfileSync to fetch the profile. The userEmail sentinel
+        // is persisted there once the backend confirms this Zotero install is
+        // valid for the account — writing it here would stick the rejected
+        // email if the profile fetch later 403s on ZoteroInstanceMismatchError.
         setIsWaitingForProfile(true);
         // isLoading will be set to false when profile loads or timeout occurs
       }
@@ -310,8 +321,6 @@ export default function SignInForm({ setErrorMsg, emailInputRef }: SignInFormPro
                   ? <span>Invalid email address. Signup <span className="text-link-red cursor-pointer" onClick={() => Zotero.launchURL(process.env.WEBAPP_BASE_URL + '/join')}>here</span>.</span>
                   : error.includes('not linked to your account')
                   ? <span>This Zotero instance is not linked to your Beaver account. <span className="text-link-red cursor-pointer" onClick={() => Zotero.launchURL(process.env.WEBAPP_BASE_URL + '/docs/multiple-devices#this-zotero-instance-is-not-linked-to-your-account')}>Learn more</span>.</span>
-                  : error.includes('already associated with another Beaver account')
-                  ? <span>This Zotero instance is already associated with {associatedEmail ? <strong>{associatedEmail}</strong> : 'another account'}. <span className="text-link-red cursor-pointer" onClick={() => Zotero.launchURL(process.env.WEBAPP_BASE_URL + '/docs/multiple-devices#this-zotero-instance-is-already-associated-with-another-beaver-account')}>Learn more</span>.</span>
                   : error}
               </p>
             )}
@@ -368,8 +377,6 @@ export default function SignInForm({ setErrorMsg, emailInputRef }: SignInFormPro
               <p className='text-xs font-color-red mt-2'>
                 {error.includes('not linked to your account')
                   ? <span>This Zotero instance is not linked to your account. <span className="text-link-red cursor-pointer" onClick={() => Zotero.launchURL(process.env.WEBAPP_BASE_URL + '/docs/multiple-devices#this-zotero-instance-is-not-linked-to-your-account')}>Learn more</span>.</span>
-                  : error.includes('already associated with another Beaver account')
-                  ? <span>This Zotero instance is already associated with {associatedEmail ? <strong>{associatedEmail}</strong> : 'another account'}. <span className="text-link-red cursor-pointer" onClick={() => Zotero.launchURL(process.env.WEBAPP_BASE_URL + '/docs/multiple-devices#this-zotero-instance-is-already-associated-with-another-beaver-account')}>Learn more</span>.</span>
                   : error}
               </p>
             )}

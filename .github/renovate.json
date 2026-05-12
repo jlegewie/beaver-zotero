@@ -11,6 +11,8 @@
     "schedule:weekly"
   ],
   "labels": ["dependencies"],
+  "minimumReleaseAge": "7 days",
+  "internalChecksFilter": "strict",
   "packageRules": [
     {
       "matchPackageNames": [

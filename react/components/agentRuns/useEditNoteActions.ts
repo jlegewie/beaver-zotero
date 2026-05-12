@@ -289,6 +289,7 @@ export function useEditNoteActions({
             setAgentActionsToError([action.id], errorMessage, {
                 stack_trace: stackTrace,
                 error_name: error?.name,
+                error_code: error?.code,
             });
         } finally {
             setIsProcessingAction(false);

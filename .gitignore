@@ -49,3 +49,6 @@ docs-zotero
 # and the deduped _shared/<sha>.pdf remain tracked.
 /tests/fixtures/pdfs/extract-public/*/source.pdf
 /tests/fixtures/pdfs/extract-public/*/preview-p*.png
+
+# BeaverExtract benchmarks
+/tests/live/.bench-results/

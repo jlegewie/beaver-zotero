@@ -33,6 +33,7 @@ import {
     toggleAnnotationPanelVisibilityAtom
 } from '../../atoms/messageUIState';
 import { markExternalReferenceImportedAtom } from '../../atoms/externalReferences';
+import { currentThreadIdAtom } from '../../atoms/threads';
 import { ToolDisplayFooter } from '../messages/ToolDisplayFooter';
 import AgentActionItemButtons from './AgentActionItemButtons';
 import ReferenceMetadataDisplay from '../externalReferences/ReferenceMetadataDisplay';
@@ -171,6 +172,9 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
     const setAgentActionsToError = useSetAtom(setAgentActionsToErrorAtom);
     const undoAgentAction = useSetAtom(undoAgentActionAtom);
     const markExternalReferenceImported = useSetAtom(markExternalReferenceImportedAtom);
+    // Active thread ID — used to stamp the background PDF fetch so the
+    // attachment_resolved ws event can route back to the live agent run.
+    const threadId = useAtomValue(currentThreadIdAtom);
 
     // Panel state management
     const togglePanelVisibility = useSetAtom(toggleAnnotationPanelVisibilityAtom);
@@ -211,10 +215,15 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
             markExternalReferenceImported(action.proposed_data.item.source_id, itemRef);
         }
 
-        // Acknowledge the action with the existing item reference
+        // Acknowledge the action with the existing item reference.
+        // The matched library item already exists, so the PDF state is
+        // whatever it is on disk; we leave attachment_status as 'none' here
+        // and let any subsequent lookup observe the current state. (No new
+        // bg fetch is scheduled when we auto-acknowledge an existing match.)
         const resultData: CreateItemResultData = {
             library_id: itemRef.library_id,
-            zotero_key: itemRef.zotero_key
+            zotero_key: itemRef.zotero_key,
+            attachment_status: 'none',
         };
 
         await ackAgentActions(runId, [{
@@ -230,9 +239,15 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
         setBusyState({ key: groupId, annotationId: action.id, isBusy: true });
 
         try {
-            // Create the item in Zotero with full post-processing
-            // applyCreateItemData handles library/collection resolution internally
-            const result: CreateItemResultData = await applyCreateItemData(action.proposed_data);
+            // Create the item in Zotero with full post-processing.
+            // applyCreateItemData handles library/collection resolution internally.
+            // Thread action/run/thread IDs so the background PDF fetch can emit
+            // attachment_resolved back to this thread on completion.
+            const result: CreateItemResultData = await applyCreateItemData(action.proposed_data, {
+                actionId: action.id,
+                runId,
+                threadId: threadId ?? undefined,
+            });
 
             logger(`handleApplyItem: created item ${action.id}: ${JSON.stringify(result)}`, 1);
 
@@ -272,7 +287,7 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
         } finally {
             setBusyState({ key: groupId, annotationId: action.id, isBusy: false });
         }
-    }, [ackAgentActions, groupId, markExternalReferenceImported, runId, setBusyState, setAgentActionsToError]);
+    }, [ackAgentActions, groupId, markExternalReferenceImported, runId, threadId, setBusyState, setAgentActionsToError]);
 
     /**
      * Apply all pending items
@@ -309,10 +324,15 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
                 const batchResults = await Promise.all(
                     batch.map(async (action) => {
                         try {
-                            // Create the item in Zotero with full post-processing
-                            // applyCreateItemData handles library/collection resolution internally
-                            const result: CreateItemResultData = await applyCreateItemData(action.proposed_data);
-                            
+                            // Create the item in Zotero with full post-processing.
+                            // Pass action/run/thread IDs so the background PDF
+                            // fetch can emit attachment_resolved back to this thread.
+                            const result: CreateItemResultData = await applyCreateItemData(action.proposed_data, {
+                                actionId: action.id,
+                                runId,
+                                threadId: threadId ?? undefined,
+                            });
+
                             // Update external reference cache
                             if (action.proposed_data.item.source_id) {
                                 markExternalReferenceImported(action.proposed_data.item.source_id, {
@@ -385,7 +405,7 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
             logger(`handleApplyAll: unexpected error: ${error}`, 1);
             setPanelState({ key: groupId, updates: { isApplying: false } });
         }
-    }, [ackAgentActions, actions, groupId, markExternalReferenceImported, runId, setPanelState, setAgentActionsToError, setBusyState]);
+    }, [ackAgentActions, actions, groupId, markExternalReferenceImported, runId, threadId, setPanelState, setAgentActionsToError, setBusyState]);
 
     /**
      * Handle rejecting an item (for pending items) or deleting (for applied items)

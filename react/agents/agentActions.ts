@@ -385,9 +385,9 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
             resultData = {
                 zotero_key: String(zoteroKey),
                 library_id: typeof libraryId === 'number' ? libraryId : Number(libraryId ?? 0),
-                attachment_keys: resultData.attachment_keys ?? resultData.attachmentKeys,
-                file_hash: resultData.file_hash ?? resultData.fileHash,
-                storage_path: resultData.storage_path ?? resultData.storagePath,
+                attachment_status: resultData.attachment_status ?? resultData.attachmentStatus ?? 'none',
+                attachment_key: resultData.attachment_key ?? resultData.attachmentKey,
+                attachment_resolved_at: resultData.attachment_resolved_at ?? resultData.attachmentResolvedAt,
             };
         }
     }

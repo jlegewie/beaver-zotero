@@ -240,14 +240,16 @@ async function handleZoteroDataHttpRequest(request: any) {
         items: request.items,
         include_attachments: request.include_attachments,
         include_parents: request.include_parents,
+        include_notes: request.include_notes,
         file_status_level: request.file_status_level,
     };
-    
+
     const response = await handleZoteroDataRequest(wsRequest);
-    
+
     return {
         items: response.items,
         attachments: response.attachments,
+        notes: response.notes,
         errors: response.errors,
     };
 }

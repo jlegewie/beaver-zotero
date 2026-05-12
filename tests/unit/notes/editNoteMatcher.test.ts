@@ -45,7 +45,7 @@ import {
     expandBase,
     type MatchInput,
     type BaseExpansion,
-} from '../../../src/services/agentDataProvider/actions/editNoteMatcher';
+} from '../../../src/utils/editNoteMatcher';
 import { expandToRawHtml } from '../../../src/utils/noteCitationExpand';
 import type { EditNoteOperation } from '../../../react/types/agentActions/editNote';
 
@@ -1120,6 +1120,119 @@ describe('whitespace_relaxed strategy', () => {
         } finally {
             mocked.mockImplementation((s: string) => s);
         }
+    });
+
+    // -- CJK ↔ ASCII boundary spacing (Pangu drift) --
+
+    it('matches needle with added space at CJK ↔ ASCII boundary', () => {
+        // Model wrote `共识 [14]` / `1.5 mg/kg/d 欠充分` (boundary spaces).
+        // Note has the same content without boundary spaces.
+        const rawSlice = '<p>CSCO指南及2026版共识[14]将激素抵抗性CIP定义为：本例初始甲泼尼龙约1.5 mg/kg/d欠充分。</p>';
+        const html = `<div data-schema-version="9">${rawSlice}</div>`;
+        const result = match(makeInput({
+            oldString: '<p>CSCO 指南及 2026 版共识 [14] 将激素抵抗性 CIP 定义为：本例初始甲泼尼龙约 1.5 mg/kg/d 欠充分。</p>',
+            newString: 'x',
+            strippedHtml: html,
+        }));
+        expect(result?.strategy).toBe('whitespace_relaxed');
+        expect(result?.expandedOld).toBe(rawSlice);
+        expect(html.indexOf(result!.expandedOld)).toBeGreaterThanOrEqual(0);
+    });
+
+    it('matches needle missing CJK ↔ ASCII boundary spaces present in the note', () => {
+        // Symmetric reverse: needle has NO boundary spaces but the note does.
+        // The strategy must still enter (no whitespace in needle) via the
+        // CJK-boundary short-circuit.
+        const rawSlice = '<p>共识 [14] 将激素抵抗性 CIP 定义为初始足量糖皮质激素治疗。</p>';
+        const html = `<div data-schema-version="9">${rawSlice}</div>`;
+        const result = match(makeInput({
+            oldString: '<p>共识[14]将激素抵抗性CIP定义为初始足量糖皮质激素治疗。</p>',
+            newString: 'x',
+            strippedHtml: html,
+        }));
+        expect(result?.strategy).toBe('whitespace_relaxed');
+        expect(result?.expandedOld).toBe(rawSlice);
+    });
+
+    it('preserves required whitespace inside a pure-ASCII run when only the CJK boundary drifted', () => {
+        // `1.5 mg/kg/d` is ASCII-internal — its space must NOT be folded away.
+        // Only the boundary between `约` (CJK) ↔ `1.5` (ASCII) and between
+        // `mg/kg/d` (ASCII) ↔ `欠充分` (CJK) is optional.
+        const rawSlice = '<p>本例初始甲泼尼龙约1.5 mg/kg/d欠充分，需要更高起始剂量。</p>';
+        const html = `<div data-schema-version="9">${rawSlice}</div>`;
+        const result = match(makeInput({
+            oldString: '<p>本例初始甲泼尼龙约 1.5 mg/kg/d 欠充分，需要更高起始剂量。</p>',
+            newString: 'x',
+            strippedHtml: html,
+        }));
+        expect(result?.strategy).toBe('whitespace_relaxed');
+        expect(result?.expandedOld).toBe(rawSlice);
+        // Internal `1.5 mg/kg/d` whitespace survives — needle without the
+        // internal space should NOT match if it dropped the ASCII-internal space.
+        const wrongNeedle = match(makeInput({
+            oldString: '<p>本例初始甲泼尼龙约 1.5mg/kg/d 欠充分，需要更高起始剂量。</p>',
+            newString: 'x',
+            strippedHtml: html,
+        }));
+        expect(wrongNeedle).toBeNull();
+    });
+
+    it('rejects multi-occurrence Pangu drift (uniqueness gate)', () => {
+        // Two raw-distinct occurrences of the same CJK-spaced phrase; the
+        // regex finds both, and the strategy must refuse rather than guess.
+        const rawSlice = '<p>共识[14]将激素抵抗性CIP定义为初始足量糖皮质激素治疗。</p>';
+        const html = `<div data-schema-version="9">${rawSlice}${rawSlice}</div>`;
+        const result = match(makeInput({
+            oldString: '<p>共识 [14] 将激素抵抗性 CIP 定义为初始足量糖皮质激素治疗。</p>',
+            newString: 'x',
+            strippedHtml: html,
+        }));
+        expect(result).toBeNull();
+    });
+
+    it('does not insert CJK relaxation inside HTML attribute values', () => {
+        // Pangu relaxation must be confined to visible prose. A needle
+        // `title="中文"` whose attribute value happens to end at a CJK ↔ `"`
+        // boundary must NOT match a haystack `title="中文 "` (attribute drift)
+        // — replacing markup whose attribute value isn't the requested anchor
+        // would silently mutate metadata the user didn't ask to touch.
+        const rawSlice = '<span title="中文 ">long visible body for the length gate here</span>';
+        const html = `<div data-schema-version="9">${rawSlice}</div>`;
+        const result = match(makeInput({
+            oldString: '<span title="中文">long visible body for the length gate here</span>',
+            newString: 'x',
+            strippedHtml: html,
+        }));
+        expect(result).toBeNull();
+    });
+
+    it('does not insert CJK relaxation at tag-delimiter boundaries', () => {
+        // The boundary `文` (CJK) ↔ `<` (tag-open) must not become optional
+        // whitespace — would let `中文<strong>` match `中文 <strong>` even
+        // when the model intentionally placed the inline tag flush.
+        const rawSlice = '<p>中文 <strong>anchor</strong> with enough body for the length gate</p>';
+        const html = `<div data-schema-version="9">${rawSlice}</div>`;
+        const result = match(makeInput({
+            oldString: '<p>中文<strong>anchor</strong> with enough body for the length gate</p>',
+            newString: 'x',
+            strippedHtml: html,
+        }));
+        expect(result).toBeNull();
+    });
+
+    it('relaxes visible-prose CJK boundaries even when needle contains HTML tags', () => {
+        // Regression guard: the inTag tracking must not block relaxation in
+        // text nodes between tags. The boundary `识` ↔ `[` is in prose
+        // (outside any tag) and must still relax.
+        const rawSlice = '<p>CSCO指南及2026版共识[14]将激素抵抗性CIP定义为初始足量糖皮质激素治疗。</p>';
+        const html = `<div data-schema-version="9">${rawSlice}</div>`;
+        const result = match(makeInput({
+            oldString: '<p>CSCO 指南及 2026 版共识 [14] 将激素抵抗性 CIP 定义为初始足量糖皮质激素治疗。</p>',
+            newString: 'x',
+            strippedHtml: html,
+        }));
+        expect(result?.strategy).toBe('whitespace_relaxed');
+        expect(result?.expandedOld).toBe(rawSlice);
     });
 });
 
