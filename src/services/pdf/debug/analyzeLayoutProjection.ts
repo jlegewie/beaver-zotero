@@ -29,6 +29,7 @@ export interface AnalyzeLayoutWire {
         margin_removal: {
             candidates: LayoutAnalysisResult["analysis"]["marginRemoval"]["candidates"];
             removalsByPage: Record<string, string[]>;
+            offMarginPageNumberRemovals: Record<string, string[]>;
             textsToRemove: string[];
         };
     };
@@ -50,6 +51,10 @@ export function projectAnalyzeLayout(
     for (const [pageIdx, texts] of result.analysis.marginRemoval.removalsByPage) {
         removalsByPage[String(pageIdx)] = Array.from(texts);
     }
+    const offMarginPageNumberRemovals: Record<string, string[]> = {};
+    for (const [pageIdx, texts] of result.analysis.marginRemoval.offMarginPageNumberRemovals) {
+        offMarginPageNumberRemovals[String(pageIdx)] = Array.from(texts);
+    }
     const textsToRemove = Array.from(result.analysis.marginRemoval.textsToRemove);
 
     return {
@@ -70,6 +75,7 @@ export function projectAnalyzeLayout(
             margin_removal: {
                 candidates: result.analysis.marginRemoval.candidates,
                 removalsByPage,
+                offMarginPageNumberRemovals,
                 textsToRemove,
             },
         },

@@ -1055,6 +1055,9 @@ export async function handleTestPdfExtractTraceHttpRequest(request: any) {
     }
     const targetPageRemovals =
         smartRemoval.removalsByPage.get(pageIndex) ?? new Set<string>();
+    const targetPageOffMarginPageNumbers =
+        smartRemoval.offMarginPageNumberRemovals.get(pageIndex)
+        ?? new Set<string>();
     // Body styles drive the simple-margin spare — keeping `keptBySimple`
     // honest with the production pipeline (`MarginFilter
     // .filterPageWithSmartRemoval` now spares body-styled lines from the
@@ -1119,11 +1122,17 @@ export async function handleTestPdfExtractTraceHttpRequest(request: any) {
                     marginsToUse,
                 )
                 || StyleAnalyzer.looksLikeBodyContent(line, traceBodyStyles);
-            const smartReason = inSmartZone
-                ? targetPageRemovals.has(normalized)
-                    ? reasonByText.get(normalized) ?? 'repeat'
-                    : null
+            // Smart-removal verdict: in-zone removals follow the
+            // existing rule; off-margin page-number removals bypass the
+            // zone gate so the trace reflects production behavior
+            // (production drops them regardless of margin zone).
+            const inZoneRemoval = inSmartZone && targetPageRemovals.has(normalized)
+                ? reasonByText.get(normalized) ?? 'repeat'
                 : null;
+            const offMarginRemoval = targetPageOffMarginPageNumbers.has(normalized)
+                ? ('page_number' as const)
+                : null;
+            const smartReason = inZoneRemoval ?? offMarginRemoval;
             const finalKept = keptBySimple && smartReason === null;
 
             const entry: RawLineEntry = {

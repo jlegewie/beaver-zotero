@@ -339,6 +339,19 @@ export interface MarginAnalysis {
     elements: Map<MarginPosition, MarginElement[]>;
     /** Total elements found per zone */
     counts: Record<MarginPosition, number>;
+    /**
+     * Short page-number-pattern lines that fell **outside** every margin
+     * zone but still match `isPageNumberPattern` (bare digits, romans,
+     * `Page N`, …). Captured so the sequence-detection pass in
+     * `identifyElementsToRemove` can pick up page numbers placed at a
+     * "natural footer" position the smart zone misses — common in JSTOR
+     * / digital-archive scans where the archive watermark sits below
+     * the original page number and pushes the visual page bottom
+     * further down. `position` on each element is synthesized to `top`
+     * or `bottom` from the page midline so cross-position logic
+     * downstream still has a side to bucket against.
+     */
+    offMarginPageNumberCandidates: MarginElement[];
 }
 
 /**
@@ -367,6 +380,17 @@ export interface MarginRemovalResult {
     textsToRemove: Set<string>;
     /** Map of pageIndex -> set of texts to remove on that page */
     removalsByPage: Map<number, Set<string>>;
+    /**
+     * Off-margin page-number removals, keyed by pageIndex. The per-page
+     * smart-removal filter drops these matches **regardless of margin
+     * zone position** — the cross-page monotone sequence + tight y
+     * cluster used to identify them is a strong enough signal that the
+     * margin-zone gate is not needed. Empty when no off-margin page
+     * sequence was detected. Kept separate from `removalsByPage` so the
+     * standard in-zone path (which protects matching body text outside
+     * the zone) stays untouched.
+     */
+    offMarginPageNumberRemovals: Map<number, Set<string>>;
 }
 
 // ============================================================================

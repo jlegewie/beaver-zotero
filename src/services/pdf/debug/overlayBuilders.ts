@@ -457,11 +457,16 @@ export function buildMarginsOverlayFromAnalysis(
     }
 
     // Lines on this page that landed in a smart-margin zone — color by
-    // smart-removal outcome.
+    // smart-removal outcome. Also paint off-margin page-number drops so
+    // the overlay reflects what production drops (those lines fall
+    // outside every margin zone but are dropped via cross-page sequence
+    // detection — without this branch they'd render as plain body).
     let pageNumberCount = 0;
     let repeatCount = 0;
     let keptInZoneCount = 0;
     const pageRemovals = removal.removalsByPage.get(pageIndex) ?? new Set();
+    const offMarginPageNumbers =
+        removal.offMarginPageNumberRemovals.get(pageIndex) ?? new Set();
 
     const reasonByText = new Map<string, "page_number" | "repeat">();
     for (const c of removal.candidates) {
@@ -481,15 +486,17 @@ export function buildMarginsOverlayFromAnalysis(
                 targetPage.height,
                 marginZone,
             );
-            if (!zonePosition) continue;
-
             const normalized = trimmed.toLowerCase();
+            const isOffMarginPageNumber = !zonePosition
+                && offMarginPageNumbers.has(normalized);
+            if (!zonePosition && !isOffMarginPageNumber) continue;
+
             const reason = reasonByText.get(normalized);
             const willBeRemoved = pageRemovals.has(normalized);
 
             let color: string;
             let label: string;
-            if (reason === "page_number") {
+            if (reason === "page_number" || isOffMarginPageNumber) {
                 color = OVERLAY_COLORS.marginCandidatePageNumber;
                 label = `PN`;
                 pageNumberCount++;

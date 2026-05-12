@@ -464,6 +464,13 @@ export class MarginFilter {
 
     /**
      * Smart filter: Collect all elements in margin zones for analysis.
+     *
+     * Also collects `offMarginPageNumberCandidates` — short
+     * `isPageNumberPattern` lines that fell outside every margin zone.
+     * These feed an additional sequence-detection pass in
+     * `identifyElementsToRemove` so page numbers placed at a "natural
+     * footer" position the smart zone misses (e.g. JSTOR scans where a
+     * watermark sits below the original page number) still get caught.
      */
     static collectMarginElements(
         pages: RawPageData[],
@@ -475,6 +482,7 @@ export class MarginFilter {
             ["left", []],
             ["right", []],
         ]);
+        const offMarginPageNumberCandidates: MarginElement[] = [];
 
         for (const page of pages) {
             for (const block of page.blocks) {
@@ -499,6 +507,22 @@ export class MarginFilter {
                             pageIndex: page.pageIndex,
                             line,
                         });
+                    } else if (isPageNumberPattern(trimmedText)) {
+                        // Synthesize a top/bottom position from the page
+                        // midline so the cross-position bucketing in
+                        // identifyElementsToRemove has a side to group
+                        // against. The whole-line bbox is what we own;
+                        // pick top half / bottom half by y center.
+                        const yCenter = line.bbox.y + line.bbox.h / 2;
+                        const synthesizedPosition: MarginPosition =
+                            yCenter < page.height / 2 ? "top" : "bottom";
+                        offMarginPageNumberCandidates.push({
+                            text: trimmedText,
+                            position: synthesizedPosition,
+                            bbox: line.bbox,
+                            pageIndex: page.pageIndex,
+                            line,
+                        });
                     }
                 }
             }
@@ -511,7 +535,7 @@ export class MarginFilter {
             right: elements.get("right")!.length,
         };
 
-        return { elements, counts };
+        return { elements, counts, offMarginPageNumberCandidates };
     }
 
     /**
@@ -535,6 +559,7 @@ export class MarginFilter {
         const candidates: RemovalCandidate[] = [];
         const textsToRemove = new Set<string>();
         const removalsByPage = new Map<number, Set<string>>();
+        const offMarginPageNumberRemovals = new Map<number, Set<string>>();
 
         // Process each margin position
         for (const [position, elements] of analysis.elements) {
@@ -728,7 +753,130 @@ export class MarginFilter {
             }
         }
 
-        return { candidates, textsToRemove, removalsByPage };
+        // Off-margin page-number sequence pass.
+        //
+        // Lines that fall outside every margin zone but match a
+        // page-number pattern (collected in
+        // `analysis.offMarginPageNumberCandidates`) are checked for a
+        // cross-page monotone increasing sequence clustered at a
+        // consistent y position. The "consistent y" requirement is the
+        // key safeguard against false positives: a bare number that
+        // happens to appear in body text on multiple pages almost never
+        // also lands at the same y position as a true page-number
+        // footer line.
+        //
+        // Matched texts are written to `offMarginPageNumberRemovals`
+        // so the per-page filter can drop them without consulting the
+        // margin-zone check (which is exactly the gate that missed
+        // them upstream).
+        if (detectPageSequences && analysis.offMarginPageNumberCandidates.length > 0) {
+            const requiredForPosition =
+                typeof requiredCount === "number"
+                    ? requiredCount
+                    : requiredCount.topBottom;
+            // y bucket resolution. 10pt is wide enough to absorb
+            // minor per-page jitter (descender/ascender drift) and
+            // narrow enough that body-text bare-numerics with even a
+            // line of vertical drift won't cluster.
+            const Y_BUCKET_PT = 10;
+
+            type Bucket = { side: MarginPosition; entries: MarginElement[] };
+            const yBuckets = new Map<string, Bucket>();
+            for (const el of analysis.offMarginPageNumberCandidates) {
+                const yKey = Math.round(el.bbox.y / Y_BUCKET_PT);
+                const sideKey = `${el.position}:${yKey}`;
+                let bucket = yBuckets.get(sideKey);
+                if (!bucket) {
+                    bucket = { side: el.position, entries: [] };
+                    yBuckets.set(sideKey, bucket);
+                }
+                bucket.entries.push(el);
+            }
+
+            for (const { side, entries } of yBuckets.values()) {
+                if (entries.length < requiredForPosition) continue;
+
+                const pageNumberElements: { el: MarginElement; value: number }[] = [];
+                for (const el of entries) {
+                    const value = parsePageNumber(el.text);
+                    if (value !== null) {
+                        pageNumberElements.push({ el, value });
+                    }
+                }
+                if (pageNumberElements.length === 0) continue;
+
+                // Mirror the in-zone path: partition Roman vs non-Roman
+                // so a Roman preface + Arabic body isn't rejected by a
+                // single concatenated value list.
+                const romanBucket: typeof pageNumberElements = [];
+                const nonRomanBucket: typeof pageNumberElements = [];
+                for (const entry of pageNumberElements) {
+                    if (isBareRoman(entry.el.text)) {
+                        romanBucket.push(entry);
+                    } else {
+                        nonRomanBucket.push(entry);
+                    }
+                }
+
+                for (const bucketElements of [romanBucket, nonRomanBucket]) {
+                    if (bucketElements.length === 0) continue;
+
+                    // Collapse to one entry per page (lowest value) so
+                    // a page that emits two numeric off-margin lines
+                    // doesn't break the strict-increase check.
+                    const perPage = new Map<number, { el: MarginElement; value: number }>();
+                    for (const entry of bucketElements) {
+                        const existing = perPage.get(entry.el.pageIndex);
+                        if (!existing || entry.value < existing.value) {
+                            perPage.set(entry.el.pageIndex, entry);
+                        }
+                    }
+                    const oneCandidatePerPage = Array.from(perPage.values());
+                    if (oneCandidatePerPage.length < requiredForPosition) continue;
+                    oneCandidatePerPage.sort((a, b) => a.el.pageIndex - b.el.pageIndex);
+                    const values = oneCandidatePerPage.map((p) => p.value);
+                    if (!isIncreasingSequence(values)) continue;
+
+                    const matchedPageIndices = new Set(
+                        oneCandidatePerPage.map((p) => p.el.pageIndex),
+                    );
+                    const seenTexts = new Set<string>();
+                    for (const { el } of bucketElements) {
+                        if (!matchedPageIndices.has(el.pageIndex)) continue;
+                        const normalized = normalizeText(el.text);
+
+                        if (!seenTexts.has(normalized)) {
+                            seenTexts.add(normalized);
+                            candidates.push({
+                                text: normalized,
+                                originalText: el.text,
+                                pageIndices: [el.pageIndex],
+                                reason: "page_number",
+                                position: side,
+                            });
+                        }
+
+                        textsToRemove.add(normalized);
+
+                        if (!offMarginPageNumberRemovals.has(el.pageIndex)) {
+                            offMarginPageNumberRemovals.set(el.pageIndex, new Set());
+                        }
+                        offMarginPageNumberRemovals.get(el.pageIndex)!.add(normalized);
+                    }
+
+                    if (process.env.NODE_ENV === "development") {
+                        pdfLog(`[MarginFilter] Detected off-margin page number sequence (${side}): ${values.slice(0, 5).join(", ")}...`, 3);
+                    }
+                }
+            }
+        }
+
+        return {
+            candidates,
+            textsToRemove,
+            removalsByPage,
+            offMarginPageNumberRemovals,
+        };
     }
 
     /**
@@ -747,6 +895,8 @@ export class MarginFilter {
         bodyStyles?: TextStyle[]
     ): RawPageData {
         const pageRemovals = removalResult.removalsByPage.get(page.pageIndex);
+        const offMarginPageNumbers =
+            removalResult.offMarginPageNumberRemovals.get(page.pageIndex);
 
         const filteredBlocks = page.blocks.map(block => {
             if (block.type !== "text" || !block.lines) {
@@ -780,6 +930,18 @@ export class MarginFilter {
                         if (pageRemovals.has(normalized)) {
                             return false;
                         }
+                    }
+                }
+
+                // Off-margin page-number drops bypass the zone gate.
+                // These texts were identified by a cross-page monotone
+                // sequence at a tight y cluster, which is already a
+                // strong enough signal — the zone gate is what missed
+                // them upstream.
+                if (offMarginPageNumbers && offMarginPageNumbers.size > 0) {
+                    const normalized = normalizeText(line.text || "");
+                    if (offMarginPageNumbers.has(normalized)) {
+                        return false;
                     }
                 }
 

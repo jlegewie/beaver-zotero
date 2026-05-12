@@ -82,7 +82,7 @@ function oneTextPerPage(
         left: elements.get("left")!.length,
         right: elements.get("right")!.length,
     };
-    return { elements, counts };
+    return { elements, counts, offMarginPageNumberCandidates: [] };
 }
 
 // ---------------------------------------------------------------------------
@@ -286,6 +286,7 @@ describe("co-located page-number families in the same zone", () => {
                 ["right", []],
             ]),
             counts: { top: elements.length, bottom: 0, left: 0, right: 0 },
+            offMarginPageNumberCandidates: [],
         };
         const out = MarginFilter.identifyElementsToRemove(analysis, 3, true);
         // Page K family → repeat
@@ -596,6 +597,7 @@ describe("page-number-sequence distinct-page guard", () => {
         const analysis: MarginAnalysis = {
             elements,
             counts: { top: 2, bottom: 0, left: 0, right: 0 },
+            offMarginPageNumberCandidates: [],
         };
         const out = MarginFilter.identifyElementsToRemove(
             analysis,
@@ -645,10 +647,194 @@ describe("page-number-sequence distinct-page guard", () => {
         const analysis: MarginAnalysis = {
             elements,
             counts: { top: 6, bottom: 0, left: 0, right: 0 },
+            offMarginPageNumberCandidates: [],
         };
         const out = MarginFilter.identifyElementsToRemove(analysis, 3, true);
         // Sequence detected → page_number candidates emitted.
         expect(out.candidates.some((c) => c.reason === "page_number")).toBe(true);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Off-margin page-number sequences — page numbers placed at a "natural
+// footer" position that the smart-removal zone misses (common in JSTOR /
+// digital-archive scans where the archive watermark sits below the
+// original page number). Detection should pick them up on cross-page
+// monotone increase clustered at a consistent y position; non-monotone
+// or scattered numerics must NOT be misclassified.
+// ---------------------------------------------------------------------------
+
+describe("off-margin page-number sequence — natural-footer layout", () => {
+    /**
+     * Build an analysis with N off-margin page-number candidates,
+     * one per page, all at the same y position. Mirrors the JSTOR
+     * footer-with-watermark layout where the page number sits just
+     * above the watermark but outside the margin zone.
+     */
+    function buildOffMargin(
+        texts: string[],
+        opts: { y?: number; jitter?: number } = {},
+    ): MarginAnalysis {
+        const { y = 620, jitter = 0 } = opts;
+        const offMargin: MarginElement[] = [];
+        texts.forEach((text, pageIndex) => {
+            const lineY = y + (jitter ? pageIndex * jitter : 0);
+            const line = makeLine(text, 100, lineY);
+            offMargin.push({
+                text,
+                // Page midline = PAGE_H/2 = 396. y=620 > 396 → bottom.
+                position: lineY < PAGE_H / 2 ? "top" : "bottom",
+                bbox: line.bbox,
+                pageIndex,
+                line,
+            });
+        });
+        return {
+            elements: new Map<MarginPosition, MarginElement[]>([
+                ["top", []],
+                ["bottom", []],
+                ["left", []],
+                ["right", []],
+            ]),
+            counts: { top: 0, bottom: 0, left: 0, right: 0 },
+            offMarginPageNumberCandidates: offMargin,
+        };
+    }
+
+    it("detects monotone sequence at consistent y outside margin zone", () => {
+        // 5 pages of bare-digit page numbers at y=620 (page midline=396
+        // so synthesized side=bottom). Bottom margin zone of 80pt
+        // starts at y=712 → these candidates are off-margin.
+        const analysis = buildOffMargin(["1199", "1200", "1201", "1202", "1203"]);
+        const out = MarginFilter.identifyElementsToRemove(analysis, 3, true);
+
+        const pageNumberCandidate = out.candidates.find(
+            (c) => c.reason === "page_number" && c.text === "1199",
+        );
+        expect(pageNumberCandidate).toBeDefined();
+        expect(pageNumberCandidate!.position).toBe("bottom");
+
+        // Off-margin removals populated per-page (so the per-page
+        // filter can drop them without consulting the margin zone).
+        expect(out.offMarginPageNumberRemovals.get(0)?.has("1199")).toBe(true);
+        expect(out.offMarginPageNumberRemovals.get(4)?.has("1203")).toBe(true);
+
+        // textsToRemove tracks them for debug visibility too.
+        expect(out.textsToRemove.has("1199")).toBe(true);
+        expect(out.textsToRemove.has("1203")).toBe(true);
+
+        // The general per-page removals path is NOT used for off-margin
+        // entries (those need bypass-zone logic at filter time).
+        expect(out.removalsByPage.has(0)).toBe(false);
+    });
+
+    it("ignores off-margin numerics that don't form an increasing sequence", () => {
+        // Five short numbers at consistent y, but values jump around
+        // (e.g. table values across pages, not page numbers).
+        const analysis = buildOffMargin(["299", "495", "911", "364", "405"]);
+        const out = MarginFilter.identifyElementsToRemove(analysis, 3, true);
+
+        expect(out.candidates.some((c) => c.reason === "page_number")).toBe(false);
+        expect(out.offMarginPageNumberRemovals.size).toBe(0);
+    });
+
+    it("ignores off-margin numerics that drift across y buckets", () => {
+        // Monotone values but each page's numeric lands at a different
+        // y position (50pt drift per page). Cluster gate prevents these
+        // from being treated as page numbers.
+        const analysis = buildOffMargin(
+            ["1", "2", "3", "4", "5"],
+            { y: 300, jitter: 50 },
+        );
+        const out = MarginFilter.identifyElementsToRemove(analysis, 3, true);
+        expect(out.candidates.some((c) => c.reason === "page_number")).toBe(false);
+    });
+
+    it("respects the requiredCount threshold on off-margin sequences", () => {
+        // Only 2 distinct pages. Default threshold of 3 should miss it;
+        // explicit threshold of 2 should catch it.
+        const analysis = buildOffMargin(["1", "2"]);
+        const outDefault = MarginFilter.identifyElementsToRemove(analysis, 3, true);
+        expect(outDefault.candidates.some((c) => c.reason === "page_number")).toBe(false);
+
+        const outRelaxed = MarginFilter.identifyElementsToRemove(analysis, 2, true);
+        expect(outRelaxed.candidates.some((c) => c.reason === "page_number")).toBe(true);
+    });
+
+    it("collectMarginElements promotes off-margin page-number lines", () => {
+        // End-to-end: build a RawPageData with the page number drawn
+        // at a natural footer position outside the margin zone, then
+        // verify collectMarginElements drops it into the off-margin
+        // candidate bucket (not the regular position elements).
+        const pages: RawPageData[] = [];
+        for (let pageIndex = 0; pageIndex < 4; pageIndex++) {
+            const pageNumberLine = makeLine(String(1199 + pageIndex), 100, 620);
+            const bodyLine = makeLine("body text on this page", 60, 300);
+            const block: RawBlock = {
+                type: "text",
+                bbox: { x: 0, y: 0, w: PAGE_W, h: PAGE_H },
+                lines: [bodyLine, pageNumberLine],
+            };
+            pages.push({
+                pageIndex,
+                pageNumber: pageIndex + 1,
+                width: PAGE_W,
+                height: PAGE_H,
+                blocks: [block],
+            });
+        }
+        const marginZone = { left: 60, top: 80, right: 60, bottom: 80 };
+        const analysis = MarginFilter.collectMarginElements(pages, marginZone);
+
+        // No regular margin elements (everything is mid-page).
+        expect(analysis.counts).toEqual({ top: 0, bottom: 0, left: 0, right: 0 });
+
+        // 4 off-margin page-number candidates collected.
+        expect(analysis.offMarginPageNumberCandidates).toHaveLength(4);
+
+        // Sequence pass picks them up and writes the per-page removal map.
+        const removal = MarginFilter.identifyElementsToRemove(analysis, 3, true);
+        for (let p = 0; p < 4; p++) {
+            expect(removal.offMarginPageNumberRemovals.get(p)?.has(String(1199 + p)))
+                .toBe(true);
+        }
+    });
+
+    it("filterPageWithSmartRemoval drops off-margin page numbers without zone gate", () => {
+        // Single page with the page number "1228" at y=620 — outside
+        // every margin zone (bottom zone starts at y=712, page is 792).
+        const pageNumberLine = makeStyledLine("1228", 100, 620, 20, "T", 10);
+        const bodyLine = makeStyledLine("body content", 60, 300, 250, "T", 10);
+        const page = makePageWithLines([bodyLine, pageNumberLine]);
+        const margins = { left: 25, top: 40, right: 25, bottom: 40 };
+        const zone = { left: 60, top: 80, right: 60, bottom: 80 };
+
+        const removal: MarginRemovalResult = {
+            candidates: [
+                {
+                    text: "1228",
+                    originalText: "1228",
+                    reason: "page_number",
+                    position: "bottom",
+                    pageIndices: [0],
+                },
+            ],
+            textsToRemove: new Set(["1228"]),
+            removalsByPage: new Map(),
+            offMarginPageNumberRemovals: new Map([[0, new Set(["1228"])]]),
+        };
+
+        const filtered = MarginFilter.filterPageWithSmartRemoval(
+            page,
+            margins,
+            zone,
+            removal,
+        );
+        const remainingTexts = filtered.blocks
+            .flatMap((b) => (b.type === "text" ? b.lines ?? [] : []))
+            .map((L) => L.text);
+        expect(remainingTexts).toContain("body content");
+        expect(remainingTexts).not.toContain("1228");
     });
 });
 
@@ -703,7 +889,7 @@ describe("split-line alternating headers (5I23IGRY shape)", () => {
         }
 
         const counts = { top: top.length, bottom: 0, left: 0, right: 0 };
-        return { elements, counts };
+        return { elements, counts, offMarginPageNumberCandidates: [] };
     }
 
     it("relaxed threshold (4-page short doc) catches both verso and recto text repeats AND middot stripe", () => {
@@ -807,6 +993,7 @@ const EMPTY_REMOVAL: MarginRemovalResult = {
     candidates: [],
     textsToRemove: new Set(),
     removalsByPage: new Map(),
+    offMarginPageNumberRemovals: new Map(),
 };
 
 describe("filterPageWithSmartRemoval — body-style spare", () => {
@@ -952,6 +1139,7 @@ describe("filterPageWithSmartRemoval — body-style spare", () => {
             ],
             textsToRemove: new Set(["repeating header"]),
             removalsByPage: new Map([[0, new Set(["repeating header"])]]),
+            offMarginPageNumberRemovals: new Map(),
         };
 
         const filtered = MarginFilter.filterPageWithSmartRemoval(
