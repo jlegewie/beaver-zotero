@@ -9,6 +9,7 @@
 import type {
     RawBBox,
     RawBlock,
+    RawLine,
     RawPageData,
     RawPageDataDetailed,
     RawLineDetailed,
@@ -26,6 +27,11 @@ import type {
 } from "./mupdfApi";
 import { ERROR_CODES, postLog, workerError } from "./errors";
 import { ensureApi } from "./wasmInit";
+import {
+    aspectRatioRotation,
+    dirToRotation,
+    type RotationAngle,
+} from "../PageRotationNormalizer";
 
 const STRUCTURED_TEXT_OPTIONS = "preserve-whitespace";
 const STRUCTURED_TEXT_OPTIONS_WITH_IMAGES = "preserve-whitespace,preserve-images";
@@ -187,13 +193,54 @@ export function extractRawPageFromDoc(
         const stext = page.toStructuredText(stextOptions);
         try {
             const json = JSON.parse(stext.asJSON());
+            const blocks = (json.blocks || []) as RawBlock[];
+
+            // Parallel walk just to capture per-line `dir` so the
+            // JSON-pass lines can carry a sign-precise `rotation`
+            // angle (the JSON serializer truncates bbox floats to
+            // integers and never emits `dir`). Match by in-order
+            // index, not by bbox key — both walks iterate the same
+            // in-memory `stext` tree in identical order, so the n-th
+            // text line of the n-th text block matches one-to-one.
+            // Aspect-ratio fallback only fires if the parallel walk
+            // somehow emits fewer lines than the JSON pass.
+            const walkDirs: RotationAngle[][] = [];
+            let currentBlockDirs: RotationAngle[] | null = null;
+            stext.walk({
+                beginTextBlock: () => {
+                    currentBlockDirs = [];
+                    walkDirs.push(currentBlockDirs);
+                },
+                endTextBlock: () => {
+                    currentBlockDirs = null;
+                },
+                beginLine: (_bbox, _wmode, dir) => {
+                    if (currentBlockDirs) {
+                        currentBlockDirs.push(dirToRotation(dir[0], dir[1]));
+                    }
+                },
+            });
+
+            let textBlockIdx = 0;
+            for (const block of blocks) {
+                if (block.type !== "text") continue;
+                const lines = block.lines as RawLine[] | undefined;
+                const dirs = walkDirs[textBlockIdx++];
+                if (!lines) continue;
+                for (let i = 0; i < lines.length; i++) {
+                    const line = lines[i];
+                    const fromDir = dirs?.[i];
+                    line.rotation = fromDir ?? aspectRatioRotation(line.bbox);
+                }
+            }
+
             return {
                 pageIndex,
                 pageNumber: pageIndex + 1,
                 width,
                 height,
                 label,
-                blocks: (json.blocks || []) as RawBlock[],
+                blocks,
             };
         } finally {
             stext.destroy();
@@ -249,7 +296,7 @@ export function extractRawPageDetailedFromDoc(
                         currentBlock = null;
                     }
                 },
-                beginLine: (bbox, wmode) => {
+                beginLine: (bbox, wmode, dir) => {
                     currentLine = {
                         wmode,
                         bbox: tupleToBBox(bbox),
@@ -263,6 +310,11 @@ export function extractRawPageDetailedFromDoc(
                         x: bbox[0],
                         y: bbox[1],
                         text: "",
+                        // Snap MuPDF's writing-direction vector to the
+                        // nearest cardinal so downstream rotation
+                        // normalization gets a stable, sign-precise
+                        // angle. See `PageRotationNormalizer`.
+                        rotation: dirToRotation(dir[0], dir[1]),
                         chars: [] as RawChar[],
                     } as RawLineDetailed;
                 },

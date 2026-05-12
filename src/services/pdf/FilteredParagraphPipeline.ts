@@ -24,6 +24,11 @@ import {
     type StyleProfile,
 } from "./types";
 import { buildPageAnalysisContext } from "./PageAnalysisContext";
+import {
+    detectDominantTextOrientation,
+    rotateRawPage,
+    type RotationAngle,
+} from "./PageRotationNormalizer";
 
 export interface FilteredParagraphContext {
     /**
@@ -87,6 +92,26 @@ export interface FilteredParagraphResult {
     columnResult: ColumnDetectionResult;
     /** Line detection on the filtered page. */
     lineResult: PageLineResult;
+    /**
+     * Rotation applied to the target page before column / paragraph
+     * detection (0 = no rotation; pipeline ran in MuPDF frame).
+     *
+     * Detected per-target-page from the dominant text writing
+     * direction. When non-zero, every emitted bbox in
+     * `paragraphResult` / `columnResult` / `lineResult` is in the
+     * **upright working frame** (`width`/`height` swapped for 90/270).
+     * Downstream emit sites must inverse-rotate using `sourceWidth` /
+     * `sourceHeight` so consumers see MuPDF coords.
+     *
+     * The sentence mapper reads this off `precomputed` to normalize
+     * its detailed page input symmetrically before
+     * `buildDetailedLineLookup`.
+     */
+    pageRotation: RotationAngle;
+    /** Original MuPDF dims (only meaningful when `pageRotation !== 0`). */
+    sourceWidth: number;
+    /** Original MuPDF dims (only meaningful when `pageRotation !== 0`). */
+    sourceHeight: number;
 }
 
 /**
@@ -96,12 +121,21 @@ export interface FilteredParagraphResult {
  * column pages return a well-formed `paragraphResult` with empty
  * `items` and `itemLines` arrays — callers can pass it as `precomputed`
  * to the sentence mapper without special-casing.
+ *
+ * Rotation handling: when the target page's dominant text orientation
+ * is non-zero, the target is rotated into an upright working frame
+ * **before** margin filtering / column / paragraph detection. The
+ * analysis-window pages stay in raw MuPDF frame (only their text and
+ * font signals feed `marginRemoval` / `styleProfile`, both of which
+ * are frame-agnostic). The result echoes `pageRotation` /
+ * `sourceWidth` / `sourceHeight` so emit sites can inverse-rotate
+ * outputs back to MuPDF coords.
  */
 export function detectFilteredParagraphs(
     ctx: FilteredParagraphContext,
 ): FilteredParagraphResult {
-    const targetPage = ctx.pages.find((p) => p.pageIndex === ctx.pageIndex);
-    if (!targetPage) {
+    const rawTargetPage = ctx.pages.find((p) => p.pageIndex === ctx.pageIndex);
+    if (!rawTargetPage) {
         throw new Error(
             `detectFilteredParagraphs: page_index ${ctx.pageIndex} not present in supplied pages`,
         );
@@ -115,6 +149,12 @@ export function detectFilteredParagraphs(
     // produce identical styleProfile / marginRemoval values when fed
     // the same analysis pages. Skipped when both overrides are
     // supplied (trace mode pre-computes them upstream).
+    //
+    // Frame rule: `marginRemoval` and `styleProfile` are text/font-
+    // based (not geometric) and stay frame-agnostic. They are always
+    // computed from the raw analysis-window pages, before any
+    // rotation normalization. The geometric `MarginFilter` /
+    // `ColumnDetector` consume the (possibly rotated) target page.
     let styleProfile = ctx.styleProfile;
     let marginRemoval = ctx.marginRemoval;
     if (!styleProfile || !marginRemoval) {
@@ -128,6 +168,14 @@ export function detectFilteredParagraphs(
         styleProfile = styleProfile ?? computed.styleProfile;
         marginRemoval = marginRemoval ?? computed.marginRemoval;
     }
+
+    // Detect dominant text orientation on the raw target page and
+    // rotate into the upright working frame if needed. Detection runs
+    // against the raw bboxes so the marginZone exclusion uses the
+    // original page geometry.
+    const pageRotation = detectDominantTextOrientation(rawTargetPage, marginZone);
+    const rotated = rotateRawPage(rawTargetPage, pageRotation);
+    const targetPage = rotated.page;
 
     const filteredPage = MarginFilter.filterPageWithSmartRemoval(
         targetPage,
@@ -177,6 +225,9 @@ export function detectFilteredParagraphs(
         styleProfile,
         columnResult,
         lineResult,
+        pageRotation,
+        sourceWidth: rotated.sourceWidth,
+        sourceHeight: rotated.sourceHeight,
     };
 }
 

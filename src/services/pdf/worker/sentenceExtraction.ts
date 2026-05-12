@@ -125,7 +125,12 @@ export function extractSentencesForPage(args: {
     const sentenceResult = extractPageSentenceBBoxes(detailed, {
         paragraphSettings: args.paragraphSettings,
         splitter: args.splitter,
-        precomputed: { paragraphResult: filteredResult.paragraphResult },
+        precomputed: {
+            paragraphResult: filteredResult.paragraphResult,
+            pageRotation: filteredResult.pageRotation,
+            sourceWidth: filteredResult.sourceWidth,
+            sourceHeight: filteredResult.sourceHeight,
+        },
     });
     return { sentenceResult, filteredResult };
 }
@@ -228,7 +233,12 @@ export async function runSentenceExtractionFromDoc(
         const result = extractPageSentenceBBoxes(detailed, {
             paragraphSettings,
             splitter,
-            precomputed: { paragraphResult: filtered.paragraphResult },
+            precomputed: {
+                paragraphResult: filtered.paragraphResult,
+                pageRotation: filtered.pageRotation,
+                sourceWidth: filtered.sourceWidth,
+                sourceHeight: filtered.sourceHeight,
+            },
         });
         return { result };
     }
@@ -257,7 +267,12 @@ export async function runSentenceExtractionFromDoc(
     const result = extractPageSentenceBBoxes(detailed, {
         paragraphSettings,
         splitter,
-        precomputed: { paragraphResult: filteredResult.paragraphResult },
+        precomputed: {
+            paragraphResult: filteredResult.paragraphResult,
+            pageRotation: filteredResult.pageRotation,
+            sourceWidth: filteredResult.sourceWidth,
+            sourceHeight: filteredResult.sourceHeight,
+        },
     });
 
     return {

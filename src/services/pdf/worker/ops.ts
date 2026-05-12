@@ -26,6 +26,11 @@ import { resolveAnalysisPages } from "../AnalysisWindow";
 import { detectColumns, logColumnDetection } from "../ColumnDetector";
 import type { PageLineResult } from "../LineDetector";
 import { detectFilteredParagraphs } from "../FilteredParagraphPipeline";
+import {
+    inverseRotateLineBBox,
+    inverseRotateRawBBox,
+    type RotationAngle,
+} from "../PageRotationNormalizer";
 import { SearchScorer } from "../SearchScorer";
 import type {
     DocumentAnalysis,
@@ -246,20 +251,61 @@ function buildAnalysisFromDoc(
 /**
  * Project a `PageLineResult` into the flat `ExtractedLine[]` shape that
  * lives on `ProcessedPage.lines`. Used by the structured-engine branch.
+ *
+ * When `pageRotation` is non-zero, the line bboxes (currently in the
+ * upright working frame) are inverse-rotated back to MuPDF coords so
+ * `ProcessedPage.lines[].bbox` stays in the same frame as
+ * `ProcessedPage.width`/`height` and the annotation layer.
  */
-function flattenColumnLines(lineResult: PageLineResult): ExtractedLine[] {
+function flattenColumnLines(
+    lineResult: PageLineResult,
+    pageRotation: RotationAngle = 0,
+    sourceWidth = lineResult.width,
+    sourceHeight = lineResult.height,
+): ExtractedLine[] {
     const out: ExtractedLine[] = [];
     for (const colResult of lineResult.columnResults) {
         for (const line of colResult.lines) {
             out.push({
                 text: line.text,
-                bbox: line.bbox,
+                bbox:
+                    pageRotation === 0
+                        ? line.bbox
+                        : inverseRotateLineBBox(
+                              line.bbox,
+                              pageRotation,
+                              sourceWidth,
+                              sourceHeight,
+                          ),
                 fontSize: line.fontSize,
                 columnIndex: colResult.columnIndex,
             });
         }
     }
     return out;
+}
+
+/**
+ * Inverse-rotate a column rect (`{x, y, w, h}` in upright frame) back
+ * to MuPDF coords and project into the `{l, t, r, b}` shape stored on
+ * `ProcessedPage.columns`.
+ */
+function projectColumnRect(
+    col: { x: number; y: number; w: number; h: number },
+    pageRotation: RotationAngle,
+    sourceWidth: number,
+    sourceHeight: number,
+): { l: number; t: number; r: number; b: number } {
+    const bb =
+        pageRotation === 0
+            ? { x: col.x, y: col.y, w: col.w, h: col.h }
+            : inverseRotateRawBBox(
+                  { x: col.x, y: col.y, w: col.w, h: col.h },
+                  pageRotation,
+                  sourceWidth,
+                  sourceHeight,
+              );
+    return { l: bb.x, t: bb.y, r: bb.x + bb.w, b: bb.y + bb.h };
 }
 
 /**
@@ -356,15 +402,22 @@ export function runExtractFromIndices(
             pages.push({
                 index: rawPage.pageIndex,
                 label: rawPage.label,
+                // Always MuPDF-frame dims (rawPage came pre-rotation).
                 width: rawPage.width,
                 height: rawPage.height,
                 content: filtered.paragraphResult.pageContent,
-                columns: filtered.columnResult.columns.map((col) => ({
-                    l: col.x,
-                    t: col.y,
-                    r: col.x + col.w,
-                    b: col.y + col.h,
-                })),
+                // Column rects come out of the (possibly normalized)
+                // pipeline in the upright working frame; project back
+                // to MuPDF coords using the same source dims the
+                // pipeline reported.
+                columns: filtered.columnResult.columns.map((col) =>
+                    projectColumnRect(
+                        col,
+                        filtered.pageRotation,
+                        filtered.sourceWidth,
+                        filtered.sourceHeight,
+                    ),
+                ),
             } as ProcessedPage);
             perPageMs.push(performance.now() - tPage);
         }
@@ -398,16 +451,25 @@ export function runExtractFromIndices(
             pages.push({
                 index: sentenceResult.pageIndex,
                 label: rawPage.label,
+                // sentenceResult.width/height are already in MuPDF
+                // frame (the mapper reports source dims).
                 width: sentenceResult.width,
                 height: sentenceResult.height,
                 content: filteredResult.paragraphResult.pageContent,
-                columns: filteredResult.columnResult.columns.map((col) => ({
-                    l: col.x,
-                    t: col.y,
-                    r: col.x + col.w,
-                    b: col.y + col.h,
-                })),
-                lines: flattenColumnLines(filteredResult.lineResult),
+                columns: filteredResult.columnResult.columns.map((col) =>
+                    projectColumnRect(
+                        col,
+                        filteredResult.pageRotation,
+                        filteredResult.sourceWidth,
+                        filteredResult.sourceHeight,
+                    ),
+                ),
+                lines: flattenColumnLines(
+                    filteredResult.lineResult,
+                    filteredResult.pageRotation,
+                    filteredResult.sourceWidth,
+                    filteredResult.sourceHeight,
+                ),
                 paragraphs: sentenceResult.paragraphs,
                 sentences: sentenceResult.sentences,
                 degradation: sentenceResult.degradation,

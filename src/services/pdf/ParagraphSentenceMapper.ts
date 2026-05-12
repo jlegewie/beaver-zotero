@@ -50,6 +50,12 @@ import {
     type SentenceRange,
     type SentenceSplitter,
 } from "./SentenceMapper";
+import {
+    inverseRotateLineBBox,
+    inverseRotateRawBBox,
+    rotateRawPageDetailed,
+    type RotationAngle,
+} from "./PageRotationNormalizer";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -500,9 +506,22 @@ export interface PageSentenceBBoxOptions {
      * pre-computed result. Useful when the caller already ran the line /
      * paragraph pipeline for other reasons and wants to add sentence bboxes
      * without re-doing detection.
+     *
+     * Rotation handshake: when `pageRotation !== 0`, the supplied
+     * `paragraphResult` is in the **upright working frame** (the
+     * upstream `FilteredParagraphPipeline` rotated the raw page before
+     * column/paragraph detection). The mapper normalizes the
+     * `detailedPage` argument with the same rotation before
+     * `buildDetailedLineLookup` so the bbox-key invariant holds, then
+     * inverse-rotates every emitted bbox back to MuPDF frame using
+     * `sourceWidth` / `sourceHeight`. Omitting these (or leaving
+     * `pageRotation = 0`) preserves the existing un-rotated path.
      */
     precomputed?: {
         paragraphResult: PageParagraphResult;
+        pageRotation?: RotationAngle;
+        sourceWidth?: number;
+        sourceHeight?: number;
     };
     /**
      * Cross-page analysis window for smart-removal and document-wide
@@ -526,10 +545,26 @@ export interface PageSentenceBBoxOptions {
  * interfere with one another.
  */
 export function extractPageSentenceBBoxes(
-    detailedPage: RawPageDataDetailed,
+    detailedPageInput: RawPageDataDetailed,
     options: PageSentenceBBoxOptions = {},
 ): PageSentenceBBoxResult {
     const splitter = options.splitter ?? simpleRegexSentenceSplit;
+
+    // Rotation handshake. When the caller pre-rotated their raw page
+    // for column/paragraph detection, mirror the same rotation here so
+    // the detailed lines used by `buildDetailedLineLookup` live in the
+    // same frame as the precomputed paragraph lines they need to match
+    // against. `sourceWidth` / `sourceHeight` are the original MuPDF
+    // dims used to inverse-rotate every output bbox at the end.
+    const pageRotation: RotationAngle = options.precomputed?.pageRotation ?? 0;
+    const sourceWidth =
+        options.precomputed?.sourceWidth ?? detailedPageInput.width;
+    const sourceHeight =
+        options.precomputed?.sourceHeight ?? detailedPageInput.height;
+    const detailedPage =
+        pageRotation === 0
+            ? detailedPageInput
+            : rotateRawPageDetailed(detailedPageInput, pageRotation).page;
 
     // 1. Column + line detection.
     //    `RawPageDataDetailed` is structurally a `RawPageData`, so the
@@ -674,12 +709,60 @@ export function extractPageSentenceBBoxes(
     // is the start of a sentence that crosses a column boundary. `paragraphs`
     // and `flatSentences` share SentenceBBox object identity, so the flag is
     // visible through both.
+    //
+    // Runs BEFORE the inverse-rotation step so the LTR geometric gate
+    // in `nextStartsStrictlyRightOfPrev` (and similar geometric
+    // heuristics) operates on upright bboxes — that's the frame those
+    // gates were tuned for.
     annotateColumnContinuations(paragraphs, splitter, degradedItems);
+
+    // Inverse-rotate every emitted bbox back to MuPDF frame so
+    // downstream consumers (annotation rendering via
+    // `applyRotationToBoundingBox`, search scoring, etc.) see the
+    // same coord system regardless of whether the pipeline normalized
+    // internally. `paragraphs` and `flatSentences` share SentenceBBox
+    // identity — mutate once and both views update.
+    if (pageRotation !== 0) {
+        for (const p of paragraphs) {
+            // ContentItem.bbox first: fallbackSentenceFromItem would
+            // re-derive bboxes from it (already executed), but the
+            // outward-facing `item.bbox` itself must also be MuPDF-frame.
+            p.item.bbox = inverseRotateLineBBox(
+                p.item.bbox,
+                pageRotation,
+                sourceWidth,
+                sourceHeight,
+            );
+            for (const s of p.sentences) {
+                for (let i = 0; i < s.bboxes.length; i++) {
+                    s.bboxes[i] = inverseRotateRawBBox(
+                        s.bboxes[i],
+                        pageRotation,
+                        sourceWidth,
+                        sourceHeight,
+                    );
+                }
+                if (s.fragments) {
+                    for (const frag of s.fragments) {
+                        frag.bbox = inverseRotateRawBBox(
+                            frag.bbox,
+                            pageRotation,
+                            sourceWidth,
+                            sourceHeight,
+                        );
+                    }
+                }
+            }
+        }
+    }
 
     return {
         pageIndex: detailedPage.pageIndex,
-        width: detailedPage.width,
-        height: detailedPage.height,
+        // Report MuPDF-frame dims so downstream consumers (e.g. the
+        // annotation layer's `applyRotationToBoundingBox`) get the
+        // pre-normalization page geometry.
+        width: sourceWidth,
+        height: sourceHeight,
         paragraphs,
         sentences: flatSentences,
         degradation:

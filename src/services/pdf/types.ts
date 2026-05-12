@@ -119,6 +119,22 @@ export interface RawLine {
     y: number;
     /** Text content */
     text: string;
+    /**
+     * Snapped angle (degrees) the writing direction is rotated from
+     * upright in MuPDF's (top-left origin, y-down) frame. Derived from
+     * the per-line `dir` vector emitted by `stext.walk` (or, when only
+     * JSON-pass data is available, from bbox aspect ratio).
+     *
+     * Mapping (from observed `dir`):
+     * - `[ 1,  0]` → 0   (upright body text)
+     * - `[ 0,  1]` → 90  (writes downward — e.g. /Rotate-90 page body)
+     * - `[-1,  0]` → 180
+     * - `[ 0, -1]` → 270 (writes upward — e.g. side-rotated figure caption)
+     *
+     * Default 0 keeps existing fixtures and synthesized RawLine inputs
+     * (which never set this field) on the unrotated path.
+     */
+    rotation?: 0 | 90 | 180 | 270;
 }
 
 /**
