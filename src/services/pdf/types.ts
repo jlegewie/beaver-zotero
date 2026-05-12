@@ -508,6 +508,60 @@ export interface DocumentAnalysis {
 // ============================================================================
 
 /**
+ * Per-target-page phase breakdown for structured-mode extraction.
+ *
+ * Lets a profiler attribute the per-page cost to the WASM detailed walk,
+ * the font bridge, the filtered-paragraph pipeline (column/line/paragraph
+ * detection), and the sentence mapper. `charCount` / `lineCount` /
+ * `paragraphCount` are emitted in the same struct so bottleneck ms can
+ * be normalized per 1k chars / per line / per paragraph without a
+ * second pass over the result.
+ *
+ * Only populated by the structured branch of `runExtractFromIndices`.
+ * Markdown branches leave `ExtractionTimings.perPagePhases` undefined.
+ */
+export interface StructuredPagePhaseTimings {
+    /**
+     * Document-page index this entry describes. Pairs positionally with
+     * the same-index entry of `ExtractionTimings.perPageMs` and
+     * `ExtractionResult.pages[]`.
+     */
+    pageIndex: number;
+    /**
+     * `extractRawPageDetailedFromDoc` for the target page — the WASM
+     * per-character walk. Typically the dominant cost on text-dense
+     * pages (per-char round-trips through the Emscripten bridge).
+     */
+    detailedWalkMs: number;
+    /**
+     * `pagesForFilterWithBridgedFonts` — propagates font metadata from
+     * the JSON-walked analysis page onto the detailed target page.
+     * O(N_detailed × N_json) today.
+     */
+    fontBridgeMs: number;
+    /** Total `detectFilteredParagraphs` time, including sub-phases below. */
+    filteredParagraphsMs: number;
+    /** `MarginFilter.filterPageWithSmartRemoval` inside the pipeline. */
+    marginFilterMs: number;
+    /** `detectColumns` inside the pipeline. */
+    columnDetectMs: number;
+    /** `detectLinesOnPage` inside the pipeline. */
+    lineDetectMs: number;
+    /** `detectParagraphs` inside the pipeline. */
+    paragraphDetectMs: number;
+    /** `extractPageSentenceBBoxes` — paragraph → sentence bbox mapping. */
+    sentenceMapMs: number;
+    /** Total character count on the target page (post-detailed-walk). */
+    charCount: number;
+    /** Total line count on the target page (post-detailed-walk). */
+    lineCount: number;
+    /** Paragraph count emitted by the filtered-paragraph pipeline. */
+    paragraphCount: number;
+    /** Degradation count from the sentence mapper (0 on the happy path). */
+    degradationCount: number;
+}
+
+/**
  * Per-phase worker timings for a single `extract` call. All values are
  * milliseconds (`performance.now()` deltas measured inside the worker).
  *
@@ -534,6 +588,13 @@ export interface ExtractionTimings {
      * actually diverge inside this loop, so this is the field to compare.
      */
     perPageMs: number[];
+    /**
+     * Per-target-page phase breakdown. Populated only for structured-mode
+     * extracts; undefined for markdown engines. Same length and index
+     * convention as `perPageMs` so callers can join the two arrays
+     * positionally.
+     */
+    perPagePhases?: StructuredPagePhaseTimings[];
 }
 
 /** The complete extraction result */

@@ -75,6 +75,28 @@ export interface FilteredParagraphContext {
     paragraphSettings?: ParagraphDetectionSettings;
 }
 
+/**
+ * Per-phase timings emitted by `detectFilteredParagraphs`. All values
+ * are `performance.now()` deltas in milliseconds. Populated whether or
+ * not the caller pre-supplied `marginRemoval` / `styleProfile`; the
+ * `analysisContextMs` field carries the cost of the auto-compute path
+ * (zero when both overrides are supplied).
+ */
+export interface FilteredParagraphTimings {
+    /** `buildPageAnalysisContext` when invoked internally (else 0). */
+    analysisContextMs: number;
+    /** Rotation detect + `rotateRawPage`. */
+    rotationMs: number;
+    /** `MarginFilter.filterPageWithSmartRemoval`. */
+    marginFilterMs: number;
+    /** `detectColumns`. */
+    columnDetectMs: number;
+    /** `detectLinesOnPage` (0 when no columns were found). */
+    lineDetectMs: number;
+    /** `detectParagraphs` (0 when no columns / no lines). */
+    paragraphDetectMs: number;
+}
+
 export interface FilteredParagraphResult {
     /**
      * Paragraph detection result with `itemLines` populated, ready to
@@ -112,6 +134,12 @@ export interface FilteredParagraphResult {
     sourceWidth: number;
     /** Original MuPDF dims (only meaningful when `pageRotation !== 0`). */
     sourceHeight: number;
+    /**
+     * Phase timings for the filtered-paragraph pipeline. Populated on
+     * every call so downstream profilers can sum sub-phases without
+     * conditional logic.
+     */
+    timings: FilteredParagraphTimings;
 }
 
 /**
@@ -157,7 +185,9 @@ export function detectFilteredParagraphs(
     // `ColumnDetector` consume the (possibly rotated) target page.
     let styleProfile = ctx.styleProfile;
     let marginRemoval = ctx.marginRemoval;
+    let analysisContextMs = 0;
     if (!styleProfile || !marginRemoval) {
+        const tAnalysis = performance.now();
         const computed = buildPageAnalysisContext({
             pages: ctx.pages,
             totalPageCount: ctx.totalPageCount ?? ctx.pages.length,
@@ -165,6 +195,7 @@ export function detectFilteredParagraphs(
             repeatThreshold: ctx.repeatThreshold,
             detectPageSequences: ctx.detectPageSequences,
         });
+        analysisContextMs = performance.now() - tAnalysis;
         styleProfile = styleProfile ?? computed.styleProfile;
         marginRemoval = marginRemoval ?? computed.marginRemoval;
     }
@@ -173,10 +204,13 @@ export function detectFilteredParagraphs(
     // rotate into the upright working frame if needed. Detection runs
     // against the raw bboxes so the marginZone exclusion uses the
     // original page geometry.
+    const tRotation = performance.now();
     const pageRotation = detectDominantTextOrientation(rawTargetPage, marginZone);
     const rotated = rotateRawPage(rawTargetPage, pageRotation);
     const targetPage = rotated.page;
+    const rotationMs = performance.now() - tRotation;
 
+    const tMarginFilter = performance.now();
     const filteredPage = MarginFilter.filterPageWithSmartRemoval(
         targetPage,
         margins,
@@ -184,19 +218,27 @@ export function detectFilteredParagraphs(
         marginRemoval,
         styleProfile.bodyStyles,
     );
+    const marginFilterMs = performance.now() - tMarginFilter;
 
+    const tColumnDetect = performance.now();
     const columnResult = detectColumns(filteredPage, {
         headerMargin: margins.top,
         footerMargin: margins.bottom,
         bodyStyles: styleProfile.bodyStyles,
     });
+    const columnDetectMs = performance.now() - tColumnDetect;
 
     let lineResult: PageLineResult;
     let paragraphResult: PageParagraphResult;
+    let lineDetectMs = 0;
+    let paragraphDetectMs = 0;
 
     if (columnResult.columns.length > 0) {
+        const tLineDetect = performance.now();
         lineResult = detectLinesOnPage(filteredPage, columnResult.columns);
+        lineDetectMs = performance.now() - tLineDetect;
         if (lineResult.allLines.length > 0) {
+            const tParagraphDetect = performance.now();
             paragraphResult = detectParagraphs(
                 lineResult,
                 styleProfile.bodyStyles,
@@ -204,6 +246,7 @@ export function detectFilteredParagraphs(
                 { paragraph: 0, header: 0 },
                 { trackItemLines: true },
             );
+            paragraphDetectMs = performance.now() - tParagraphDetect;
         } else {
             paragraphResult = emptyParagraphResult(filteredPage);
         }
@@ -228,6 +271,14 @@ export function detectFilteredParagraphs(
         pageRotation,
         sourceWidth: rotated.sourceWidth,
         sourceHeight: rotated.sourceHeight,
+        timings: {
+            analysisContextMs,
+            rotationMs,
+            marginFilterMs,
+            columnDetectMs,
+            lineDetectMs,
+            paragraphDetectMs,
+        },
     };
 }
 

@@ -160,6 +160,76 @@ describe('runCli — extract command', () => {
     });
 });
 
+describe('runCli — profile command', () => {
+    it('reports cold totalMs from CLI wall time instead of worker timings only', async () => {
+        const { deps, stdout, api } = makeDeps();
+        const nowSpy = vi
+            .spyOn(performance, 'now')
+            .mockReturnValueOnce(100)
+            .mockReturnValueOnce(250);
+
+        api.extractPdf.mockResolvedValue({
+            pages: [{ index: 0 }],
+            analysis: {},
+            fullText: '',
+            metadata: {
+                timings: {
+                    totalMs: 10,
+                    docOpenMs: 2,
+                    walkMs: 3,
+                    analysisMs: 4,
+                    perPageMs: [1],
+                    perPagePhases: [
+                        {
+                            detailedWalkMs: 1,
+                            fontBridgeMs: 0,
+                            filteredParagraphsMs: 0,
+                            marginFilterMs: 0,
+                            columnDetectMs: 0,
+                            lineDetectMs: 0,
+                            paragraphDetectMs: 0,
+                            sentenceMapMs: 0,
+                            charCount: 100,
+                            lineCount: 1,
+                            paragraphCount: 1,
+                            degradationCount: 0,
+                        },
+                    ],
+                },
+            },
+        });
+
+        try {
+            const code = await runCli(['profile', 'fake.pdf', '--json'], deps);
+            expect(code).toBe(0);
+        } finally {
+            nowSpy.mockRestore();
+        }
+
+        const env = JSON.parse(stdout.text()) as {
+            result: {
+                runs: Array<{
+                    cliWallMs: number;
+                    timings: { totalMs: number };
+                }>;
+                aggregated: {
+                    topLevel: {
+                        totalMs: number;
+                        workerTotalMs: number;
+                        runtimeOverheadMs: number;
+                    };
+                };
+            };
+        };
+
+        expect(env.result.runs[0].cliWallMs).toBe(150);
+        expect(env.result.runs[0].timings.totalMs).toBe(10);
+        expect(env.result.aggregated.topLevel.totalMs).toBe(150);
+        expect(env.result.aggregated.topLevel.workerTotalMs).toBe(10);
+        expect(env.result.aggregated.topLevel.runtimeOverheadMs).toBe(140);
+    });
+});
+
 describe('runCli — overlay command', () => {
     it('runs structured extract → builder → drawOverlay → writePngFile (and sidecar)', async () => {
         const { deps, api } = makeDeps();
@@ -339,6 +409,7 @@ describe('buildProgram', () => {
             'fixture',
             'info',
             'overlay',
+            'profile',
             'raw-detailed',
             'render',
         ]) {

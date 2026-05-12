@@ -60,6 +60,8 @@ import type {
     MarginRemovalResult,
     MarginSettings,
     RawPageData,
+    RawPageDataDetailed,
+    StructuredPagePhaseTimings,
     StyleProfile,
 } from "../types";
 import { extractRawPageDetailedFromDoc, extractRawPageFromDoc } from "./docHelpers";
@@ -102,17 +104,25 @@ export function extractSentencesForPage(args: {
 }): {
     sentenceResult: PageSentenceBBoxResult;
     filteredResult: FilteredParagraphResult;
+    phaseTimings: StructuredPagePhaseTimings;
 } {
+    const tDetailed = performance.now();
     const detailed = extractRawPageDetailedFromDoc(
         args.doc,
         args.pageIndex,
         false,
     );
+    const detailedWalkMs = performance.now() - tDetailed;
+
+    const tFontBridge = performance.now();
     const pagesForFilter = pagesForFilterWithBridgedFonts(
         args.analysisPages,
         args.pageIndex,
         detailed,
     );
+    const fontBridgeMs = performance.now() - tFontBridge;
+
+    const tFiltered = performance.now();
     const filteredResult = detectFilteredParagraphs({
         pages: pagesForFilter,
         pageIndex: args.pageIndex,
@@ -122,6 +132,9 @@ export function extractSentencesForPage(args: {
         marginZone: args.marginZone,
         paragraphSettings: args.paragraphSettings,
     });
+    const filteredParagraphsMs = performance.now() - tFiltered;
+
+    const tSentence = performance.now();
     const sentenceResult = extractPageSentenceBBoxes(detailed, {
         paragraphSettings: args.paragraphSettings,
         splitter: args.splitter,
@@ -132,7 +145,47 @@ export function extractSentencesForPage(args: {
             sourceHeight: filteredResult.sourceHeight,
         },
     });
-    return { sentenceResult, filteredResult };
+    const sentenceMapMs = performance.now() - tSentence;
+
+    const { charCount, lineCount } = countDetailedPageSizes(detailed);
+    const phaseTimings: StructuredPagePhaseTimings = {
+        pageIndex: args.pageIndex,
+        detailedWalkMs,
+        fontBridgeMs,
+        filteredParagraphsMs,
+        marginFilterMs: filteredResult.timings.marginFilterMs,
+        columnDetectMs: filteredResult.timings.columnDetectMs,
+        lineDetectMs: filteredResult.timings.lineDetectMs,
+        paragraphDetectMs: filteredResult.timings.paragraphDetectMs,
+        sentenceMapMs,
+        charCount,
+        lineCount,
+        paragraphCount: filteredResult.paragraphResult.paragraphCount ?? 0,
+        degradationCount: sentenceResult.degradation?.count ?? 0,
+    };
+
+    return { sentenceResult, filteredResult, phaseTimings };
+}
+
+/**
+ * Sum char and line counts across every text block on a detailed page.
+ * Used as the normalization denominator for per-phase profile output —
+ * `<phase>Ms / charCount * 1000` gives ms-per-1k-chars and makes
+ * cross-page comparisons size-invariant.
+ */
+function countDetailedPageSizes(
+    page: RawPageDataDetailed,
+): { charCount: number; lineCount: number } {
+    let charCount = 0;
+    let lineCount = 0;
+    for (const block of page.blocks) {
+        if (block.type !== "text" || !block.lines) continue;
+        for (const line of block.lines) {
+            lineCount++;
+            charCount += line.chars?.length ?? 0;
+        }
+    }
+    return { charCount, lineCount };
 }
 
 interface BaseArgs {

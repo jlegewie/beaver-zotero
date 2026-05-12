@@ -26,6 +26,7 @@ import { buildFixtureCommand } from "../cli/commands/fixture";
 import { buildInfoCommand } from "../cli/commands/info";
 import { buildOcrFixtureCommand } from "../cli/commands/ocrFixture";
 import { buildOverlayCommand } from "../cli/commands/overlay";
+import { buildProfileCommand } from "../cli/commands/profile";
 import { buildRawDetailedCommand } from "../cli/commands/rawDetailed";
 import { buildRenderCommand } from "../cli/commands/render";
 
@@ -81,6 +82,7 @@ export function buildProgram(deps: CliDeps): Command {
         .addCommand(buildExtractCommand(deps))
         .addCommand(buildOverlayCommand(deps))
         .addCommand(buildAnalyzeLayoutCommand(deps))
+        .addCommand(buildProfileCommand(deps))
         .addCommand(buildRawDetailedCommand(deps))
         .addCommand(buildRenderCommand(deps))
         .addCommand(buildFixtureCommand(deps))
