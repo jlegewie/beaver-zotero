@@ -6,8 +6,8 @@ import { currentMessageContentAtom } from '../../../atoms/messageComposition';
 import { sendWSMessageAtom } from '../../../atoms/agentRunAtoms';
 import { PromptOrigin } from '../../../agents/types';
 import {
-    FIRST_RUN_FOLLOWUPS,
     FirstRunFollowup,
+    getFollowupsForCardKind,
     renderFollowup,
 } from '../../../types/firstRunFollowups';
 import Button from '../../ui/Button';
@@ -44,7 +44,7 @@ const NextStepsPanel: React.FC<NextStepsPanelProps> = ({ origin, onDismiss }) =>
     const sendWSMessage = useSetAtom(sendWSMessageAtom);
     const messageContent = useAtomValue(currentMessageContentAtom);
 
-    const followups = FIRST_RUN_FOLLOWUPS[origin.card_kind] ?? [];
+    const followups = getFollowupsForCardKind(origin.card_kind, !!origin.empty_library);
 
     // Auto-dismiss when the user types a follow-up. Capture the initial value
     // so we don't dismiss on the first render if the input is already non-empty
@@ -69,6 +69,7 @@ const NextStepsPanel: React.FC<NextStepsPanelProps> = ({ origin, onDismiss }) =>
             followup_id: fu.id,
             topic_label: origin.topic_label ?? null,
             collection_name: origin.collection_name ?? null,
+            empty_library: origin.empty_library ?? false,
         });
     };
 

@@ -12,6 +12,7 @@ import { scrollToBottom } from '../utils/scrollToBottom';
 import { userScrolledAtom, windowUserScrolledAtom, isSkippedFilesDialogVisibleAtom, isThreadListViewAtom } from '../atoms/ui';
 import HomePage from './pages/HomePage';
 import LoginPage from './pages/LoginPage';
+import ProfileLoadingPage from './pages/ProfileLoadingPage';
 import OnboardingRouter from './pages/OnboardingRouter';
 import DeviceAuthorizationPage from './pages/DeviceAuthorizationPage';
 import { isAuthenticatedAtom } from '../atoms/auth';
@@ -116,12 +117,25 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
         );
     }
 
-    {/* Login page */}
-    if (!isAuthenticated || !isProfileLoaded) {
+    {/* Login page — only when there is no session at all. */}
+    if (!isAuthenticated) {
         return (
             <div className="bg-sidepane h-full w-full display-flex flex-col min-w-0 relative">
                 <Header isWindow={isWindow} />
                 <LoginPage emailInputRef={loginEmailRef} />
+                <DialogContainer />
+            </div>
+        );
+    }
+
+    {/* Profile loading / connecting / offline / fatal-error page.
+        Authenticated but profile not yet loaded — renders before LoginPage was the bug
+        cause when a transient network failure cleared isProfileLoaded. */}
+    if (!isProfileLoaded) {
+        return (
+            <div className="bg-sidepane h-full w-full display-flex flex-col min-w-0 relative">
+                <Header isWindow={isWindow} />
+                <ProfileLoadingPage />
                 <DialogContainer />
             </div>
         );

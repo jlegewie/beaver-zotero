@@ -33,6 +33,7 @@ import {
     ackAgentActionsAtom,
 } from '../../agents/agentActions';
 import { CreateItemResultData } from '../../types/agentActions/items';
+import { currentThreadIdAtom } from '../../atoms/threads';
 
 /** Display mode for action buttons */
 export type ButtonDisplayMode = 'full' | 'icon-only' | 'none';
@@ -78,6 +79,9 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
     const markExternalReferenceImported = useSetAtom(markExternalReferenceImportedAtom);
     const getPendingCreateItemAction = useAtomValue(getPendingCreateItemActionBySourceIdAtom);
     const ackAgentActions = useSetAtom(ackAgentActionsAtom);
+    // Active thread ID — used to stamp the background PDF fetch so the
+    // attachment_resolved ws event can route back to the live agent run.
+    const threadId = useAtomValue(currentThreadIdAtom);
     
     // Get cached reference directly from the cache for this item's source_id
     const sourceId = item.source_id;
@@ -102,32 +106,60 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
      */
     const handleImport = useCallback(async () => {
         if (isImporting || isLoading) return;
-        
+
         setIsImporting(true);
         try {
             logger(`ActionButtons: Importing item "${item.title}"`, 1);
-            
+
+            // Look up the matching pending agent action up front so we can pass
+            // its id/run_id into createZoteroItem. This lets the background PDF
+            // fetch correlate its attachment_resolved ws event back to the right
+            // action server-side.
+            const matchingAction = item.source_id ? getPendingCreateItemAction(item.source_id) : null;
+
             // createZoteroItem handles library/collection resolution internally
-            const newItem = await createZoteroItem(item);
-            
+            // and (since skipBackgroundPdfFetch defaults to false) schedules its
+            // own PDF fetch.
+            const newItem = await createZoteroItem(item, {
+                actionId: matchingAction?.id,
+                runId: matchingAction?.run_id,
+                threadId: threadId ?? undefined,
+            });
+
             // Use the item's actual library ID (may differ from user library if in group)
             const libraryId = newItem.libraryID;
             const newZoteroRef = {
                 library_id: libraryId,
                 zotero_key: newItem.key
             };
-            
-            // Update cache
+
+            // Compute initial attachment_status by inspecting what
+            // createZoteroItem actually did. Mirror applyCreateItemData's logic:
+            // PDF present → "available"; otherwise a bg fetch was scheduled (the
+            // default) → "pending".
+            const attachmentIds = newItem.getAttachments();
+            const attachmentItems = await Promise.all(
+                attachmentIds.map((id) => Zotero.Items.getAsync(id))
+            );
+            const existingPdf = attachmentItems.find(
+                (a) => a && !a.deleted && a.isPDFAttachment()
+            );
+            const attachmentStatus: CreateItemResultData['attachment_status'] = existingPdf
+                ? 'available'
+                : 'pending';
+            const attachmentKey = existingPdf ? `${libraryId}-${existingPdf.key}` : undefined;
+
+            // Update cache + acknowledge matching pending agent action.
             if (item.source_id) {
                 markExternalReferenceImported(item.source_id, newZoteroRef);
-                
-                // Check for matching pending agent action and acknowledge it
-                const matchingAction = getPendingCreateItemAction(item.source_id);
+
                 if (matchingAction) {
                     logger(`ActionButtons: Found matching agent action ${matchingAction.id}, acknowledging`, 1);
                     const resultData: CreateItemResultData = {
                         library_id: libraryId,
-                        zotero_key: newItem.key
+                        zotero_key: newItem.key,
+                        attachment_status: attachmentStatus,
+                        attachment_key: attachmentKey,
                     };
                     ackAgentActions(matchingAction.run_id, [{
                         action_id: matchingAction.id,
@@ -137,36 +169,36 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
                     });
                 }
             }
-            
+
             // Sync the newly created item to backend immediately
             // This ensures it's available for follow-up AI queries
             ensureItemSynced(libraryId, newItem.key).catch(err => {
                 logger(`ActionButtons: Failed to sync imported item: ${err.message}`, 2);
             });
-            
+
             // Update local state to switch from Import to Reveal button
             setZoteroItemRef(newZoteroRef);
             setItemExists(true);
-            
+
             // Check for best attachment
             if (newItem.isRegularItem()) {
                 const attachment = await newItem.getBestAttachment();
                 setBestAttachment(attachment || null);
             }
-            
+
             // Select the new item in Zotero
             const ZoteroPane = Zotero.getMainWindow()?.ZoteroPane;
             if (ZoteroPane) {
                 ZoteroPane.selectItem(newItem.id);
             }
-            
+
             logger(`ActionButtons: Successfully imported "${item.title}" (key: ${newItem.key})`, 1);
         } catch (error) {
             logger(`ActionButtons: Failed to import "${item.title}": ${error}`, 1);
         } finally {
             setIsImporting(false);
         }
-    }, [item, isImporting, isLoading, markExternalReferenceImported, getPendingCreateItemAction, ackAgentActions]);
+    }, [item, isImporting, isLoading, threadId, markExternalReferenceImported, getPendingCreateItemAction, ackAgentActions]);
     
     // React to cache changes (e.g., when item is deleted and cache is invalidated)
     useEffect(() => {

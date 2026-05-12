@@ -1,6 +1,6 @@
 import React from "react";
 import { Spinner, ArrowRightIcon, ArrowLeftIcon } from "../../icons/icons";
-import Button from "../../ui/Button";
+import Button, { ButtonVariant } from "../../ui/Button";
 
 interface OnboardingFooterProps {
     /** Message displayed on the left side of the footer */
@@ -21,6 +21,14 @@ interface OnboardingFooterProps {
     onBackClick?: () => void;
     /** Label for the back button */
     backButtonLabel?: string;
+    /** Visual style for the action button. Defaults to 'solid' so existing
+     *  onboarding pages keep their primary CTA. Pass 'ghost' (or another
+     *  low-emphasis variant) on screens where the action is a Skip/Cancel
+     *  rather than the primary path. */
+    buttonVariant?: ButtonVariant;
+    /** Hide the right-side arrow/spinner icon. Pair with `buttonVariant='ghost'`
+     *  for a clean text-link look. The spinner is still shown when loading. */
+    hideRightIcon?: boolean;
 }
 
 /**
@@ -36,8 +44,15 @@ const OnboardingFooter: React.FC<OnboardingFooterProps> = ({
     showTerms = false,
     showBackButton = false,
     onBackClick,
-    backButtonLabel = "Back"
+    backButtonLabel = "Back",
+    buttonVariant = "solid",
+    hideRightIcon = false,
 }) => {
+    const rightIcon = isLoading
+        ? Spinner
+        : hideRightIcon
+            ? undefined
+            : ArrowRightIcon;
     return (
         <div className="p-4 border-top-quinary">
             <div className="display-flex flex-row items-center gap-4">
@@ -81,9 +96,9 @@ const OnboardingFooter: React.FC<OnboardingFooterProps> = ({
 
                 {/* Action button */}
                 <Button
-                    variant="solid"
+                    variant={buttonVariant}
                     className="fit-content whitespace-nowrap"
-                    rightIcon={isLoading ? Spinner : ArrowRightIcon}
+                    rightIcon={rightIcon}
                     onClick={onButtonClick}
                     disabled={disabled || isLoading}
                 >

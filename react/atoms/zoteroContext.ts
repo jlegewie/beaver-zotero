@@ -42,9 +42,20 @@ export const currentNoteItemAtom = atom<Zotero.Item | null>(null);
 // --- Recently Added Items (today) ---
 export const recentlyAddedTodayCountAtom = atom<number>(0);
 
-// --- Library has any regular items (across non-feed libraries) ---
-// null means the async DB probe has not completed yet.
-export const libraryHasItemsAtom = atom<boolean | null>(null);
+// --- Library item count (across non-feed libraries) ---
+export const SMALL_LIBRARY_THRESHOLD = 10;
+
+// Clamped item count: 0..SMALL_LIBRARY_THRESHOLD. `null` means the async DB
+// probe has not completed yet
+export const libraryItemCountAtom = atom<number | null>(null);
+
+// Derived: `null` while probe pending, `false` when probe found 0 items,
+// `true` for any non-zero count
+export const libraryHasItemsAtom = atom<boolean | null>((get) => {
+    const count = get(libraryItemCountAtom);
+    if (count === null) return null;
+    return count > 0;
+});
 
 // --- Derived Context ---
 export type ZoteroContextType =

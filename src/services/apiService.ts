@@ -41,6 +41,12 @@ export class ApiService {
     }
 
     private classifyRefreshError(error: unknown): SessionExpiredError | SessionRefreshError {
+        // When the OS reports we're offline, no supabase classification can prove the session
+        // is permanently gone. Always treat as transient so callers don't trigger logout.
+        if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+            return this.createSessionRefreshError('Offline', 0);
+        }
+
         if (isAuthRetryableFetchError(error)) {
             return this.createSessionRefreshError(error.message, error.status);
         }
@@ -109,11 +115,24 @@ export class ApiService {
             : `${method}: ${endpoint}`;
 
         const makeRequest = async (headers: Record<string, string>): Promise<Response> => {
-            return await fetch(`${this.baseUrl}${endpoint}`, {
-                method,
-                headers,
-                body: bodyText
-            });
+            try {
+                return await fetch(`${this.baseUrl}${endpoint}`, {
+                    method,
+                    headers,
+                    body: bodyText
+                });
+            } catch (e) {
+                // fetch throws TypeError on network failure (offline, DNS, TLS, aborted).
+                // We reuse SessionRefreshError as the typed transient signal even though
+                // this isn't actually a session-refresh path — callers (useProfileSync,
+                // sync.ts) treat SessionRefreshError as retryable, which is the desired
+                // behavior here. If the type-name mismatch becomes confusing, introduce
+                // a generic TransientNetworkError class and update isTransientNetworkError.
+                if (e instanceof TypeError) {
+                    throw new SessionRefreshError(e.message || 'Network request failed', 0, 'Network Error');
+                }
+                throw e;
+            }
         };
 
         let headers = await this.getAuthHeaders();

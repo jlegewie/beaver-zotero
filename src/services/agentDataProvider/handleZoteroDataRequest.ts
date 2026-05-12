@@ -22,6 +22,7 @@ export async function handleZoteroDataRequest(request: WSZoteroDataRequest): Pro
     const result = await lookupZoteroReferences(request.items, {
         include_attachments: request.include_attachments,
         include_parents: request.include_parents,
+        include_notes: request.include_notes ?? true,
         file_status_level: request.file_status_level,
     });
 

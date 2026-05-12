@@ -343,3 +343,17 @@ export const setApiKeyAtom = atom(
         }
     }
 );
+
+/**
+ * Reset in-memory model state to a fresh-install baseline. Used on account
+ * switch.
+ */
+export const resetUserModelStateAtom = atom(
+    null,
+    (_, set) => {
+        set(googleApiKeyAtom, '');
+        set(openAiApiKeyAtom, '');
+        set(anthropicApiKeyAtom, '');
+        set(selectedModelAtom, null);
+    }
+);

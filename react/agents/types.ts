@@ -84,6 +84,8 @@ export type PromptOrigin =
         card_kind: CardKind;
         topic_label?: string | null;
         collection_name?: string | null;
+        /** Set when this run was launched from an empty library. */
+        empty_library?: boolean;
     }
     | {
         kind: 'first_run_followup';
@@ -91,6 +93,7 @@ export type PromptOrigin =
         followup_id: string;
         topic_label?: string | null;
         collection_name?: string | null;
+        empty_library?: boolean;
     };
 
 export function isFirstRunOrigin(origin: PromptOrigin | undefined | null): boolean {

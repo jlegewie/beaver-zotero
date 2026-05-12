@@ -121,7 +121,8 @@ import {
 import { loadFullItemDataWithAllTypes } from '../../src/utils/zoteroUtils';
 import { dismissDiffPreview } from '../utils/noteEditorDiffPreview';
 import { store } from '../store';
-import { searchableLibraryIdsAtom, syncWithZoteroAtom } from './profile';
+import { profileSyncStatusAtom, searchableLibraryIdsAtom, syncWithZoteroAtom } from './profile';
+import { triggerProfileRefresh } from '../hooks/useProfileSync';
 import { syncingItemFilterAsync } from '../../src/utils/sync';
 import { safeIsInTrash } from '../../src/utils/zoteroUtils';
 import { wasItemAddedBeforeLastSync } from '../utils/sourceUtils';
@@ -1014,7 +1015,15 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             logger('WS onReady:', data, 1);
             set(isWSReadyAtom, true);
             set(wsReadyDataAtom, data);
-            
+
+            // A successful WS handshake proves the backend is reachable and the session is valid.
+            // If the profile sync was stuck in transient/fatal (and its retry backoff or the OS
+            // online event hasn't cleared it), force a refresh so the header indicator drops
+            // promptly instead of lingering until the next backoff tick.
+            if (store.get(profileSyncStatusAtom).kind !== 'ok') {
+                triggerProfileRefresh();
+            }
+
             // Show popup if subscription is active but using frontend processing
             if (data.subscriptionStatus === SubscriptionStatus.ACTIVE &&
                 store.get(isDatabaseSyncSupportedAtom) &&

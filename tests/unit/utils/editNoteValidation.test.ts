@@ -27,7 +27,10 @@ vi.mock('../../../src/utils/logger', () => ({ logger: vi.fn() }));
 // Imports
 // =============================================================================
 
-import { enrichOldStringCitationRefs } from '../../../src/utils/editNoteValidation';
+import {
+    enrichOldStringCitationRefs,
+    detectPartialSimplifiedTag,
+} from '../../../src/utils/editNoteValidation';
 import type { SimplificationMetadata } from '../../../src/utils/noteHtmlSimplifier';
 
 // =============================================================================
@@ -409,5 +412,107 @@ describe('enrichOldStringCitationRefs (combined)', () => {
 
     it('returns null on empty input', () => {
         expect(enrichOldStringCitationRefs('', buildMetadata([]))).toBeNull();
+    });
+});
+
+// =============================================================================
+// detectPartialSimplifiedTag
+// =============================================================================
+
+describe('detectPartialSimplifiedTag', () => {
+    it('returns null for a complete self-closing citation tag', () => {
+        const result = detectPartialSimplifiedTag(
+            '<p>foo <citation item_id="1-AAA" page="3"/> bar</p>',
+        );
+        expect(result).toBeNull();
+    });
+
+    it('detects an unclosed citation opener at end of string', () => {
+        const result = detectPartialSimplifiedTag('<citation item_id="1-AAA"');
+        expect(result).not.toBeNull();
+        expect(result?.kind).toBe('citation');
+        expect(result?.snippet).toContain('<citation item_id="1-AAA"');
+    });
+
+    it('detects a citation opener closed with > instead of />', () => {
+        const result = detectPartialSimplifiedTag('<citation item_id="1-AAA">');
+        expect(result).not.toBeNull();
+        expect(result?.kind).toBe('citation');
+        expect(result?.snippet).toContain('<citation item_id="1-AAA">');
+    });
+
+    it('detects a bare <annotation opener', () => {
+        const result = detectPartialSimplifiedTag('<annotation');
+        expect(result).not.toBeNull();
+        expect(result?.kind).toBe('annotation');
+    });
+
+    it('detects an annotation opener without a closing annotation tag', () => {
+        const result = detectPartialSimplifiedTag('<annotation id="a_1">');
+        expect(result).not.toBeNull();
+        expect(result?.kind).toBe('annotation');
+        expect(result?.snippet).toContain('<annotation id="a_1">');
+    });
+
+    it('detects a self-closing annotation tag as partial', () => {
+        const result = detectPartialSimplifiedTag('<annotation id="a_1"/>');
+        expect(result).not.toBeNull();
+        expect(result?.kind).toBe('annotation');
+    });
+
+    it('returns null for a complete annotation pair', () => {
+        const result = detectPartialSimplifiedTag('<annotation id="a_1">quoted text</annotation>');
+        expect(result).toBeNull();
+    });
+
+    it('does not treat annotation-image tags as annotation partials', () => {
+        const result = detectPartialSimplifiedTag('<annotation-image id="ai_1"/>');
+        expect(result).toBeNull();
+    });
+
+    it('returns null when a complete tag precedes a complete tag (no partials)', () => {
+        const result = detectPartialSimplifiedTag(
+            '<citation item_id="1-AAA" ref="c_0"/><citation item_id="1-BBB" ref="c_1"/>',
+        );
+        expect(result).toBeNull();
+    });
+
+    it('detects the partial when one complete tag precedes one partial tag', () => {
+        const result = detectPartialSimplifiedTag(
+            '<citation item_id="1-AAA" ref="c_0"/> and <citation item_id="1-BBB"',
+        );
+        expect(result).not.toBeNull();
+        expect(result?.kind).toBe('citation');
+        expect(result?.snippet).toContain('1-BBB');
+    });
+
+    it('treats a newline before close as partial (model truncated mid-tag)', () => {
+        const result = detectPartialSimplifiedTag(
+            '<citation item_id="1-AAA"\n<p>continued</p>',
+        );
+        expect(result).not.toBeNull();
+        expect(result?.kind).toBe('citation');
+    });
+
+    it('returns null for normal prose containing < characters (e.g., math)', () => {
+        const result = detectPartialSimplifiedTag(
+            '<p>where x < 5 and y > 10, see also <em>note</em></p>',
+        );
+        expect(result).toBeNull();
+    });
+
+    it('returns null on empty input', () => {
+        expect(detectPartialSimplifiedTag('')).toBeNull();
+    });
+
+    it('returns null when neither citation nor annotation opener is present', () => {
+        expect(detectPartialSimplifiedTag('<p><strong>bold</strong></p>')).toBeNull();
+    });
+
+    it('snippet is bounded to 60 chars from the opener', () => {
+        const longAttrs = 'item_id="1-AAA" data-very-long-attribute-value="' + 'x'.repeat(200);
+        const result = detectPartialSimplifiedTag(`<citation ${longAttrs}`);
+        expect(result).not.toBeNull();
+        expect(result!.snippet.length).toBeLessThanOrEqual(60);
     });
 });

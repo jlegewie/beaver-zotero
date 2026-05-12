@@ -9,7 +9,8 @@ import {
     selectedTagsAtom,
     currentNoteItemAtom,
     recentlyAddedTodayCountAtom,
-    libraryHasItemsAtom,
+    libraryItemCountAtom,
+    SMALL_LIBRARY_THRESHOLD,
     LibraryTreeRowType,
 } from '../atoms/zoteroContext';
 
@@ -32,11 +33,16 @@ function isNoteTabType(type: string): boolean {
 }
 
 /**
- * Cheap "has any regular item" probe across non-feed libraries. Used by the
- * first-run gate so we skip FirstRunPage on truly empty libraries (HomePage
- * has a better empty-state for that case).
+ * Cheap regular-item count probe across non-feed libraries. Used by the
+ * first-run gate to route truly empty AND small libraries to the discovery
+ * flow (suggestion cards on a 3-paper library produce overblown "Synthesize
+ * what your library says about X" framing).
+ *
+ * Returns the count clamped to `cap` — the SQL `LIMIT cap` stops the scan
+ * early, so the query stays cheap on a 50k-item library while still letting
+ * the caller distinguish 0/1/.../cap.
  */
-async function queryLibraryHasItems(): Promise<boolean> {
+async function queryLibraryItemCount(cap: number): Promise<number> {
     const sql = `SELECT 1 FROM items i
         JOIN libraries l ON l.libraryID = i.libraryID
         WHERE l.type != 'feed'
@@ -45,12 +51,12 @@ async function queryLibraryHasItems(): Promise<boolean> {
               WHERE typeName IN ('note', 'attachment', 'annotation')
           )
           AND i.itemID NOT IN (SELECT itemID FROM deletedItems)
-        LIMIT 1`;
-    let found = false;
-    await Zotero.DB.queryAsync(sql, [], {
-        onRow: () => { found = true; },
+        LIMIT ?`;
+    let count = 0;
+    await Zotero.DB.queryAsync(sql, [cap], {
+        onRow: () => { count++; },
     });
-    return found;
+    return count;
 }
 
 /**
@@ -136,7 +142,7 @@ export function useZoteroContext() {
     const setSelectedTags = useSetAtom(selectedTagsAtom);
     const setNoteItem = useSetAtom(currentNoteItemAtom);
     const setRecentlyAddedTodayCount = useSetAtom(recentlyAddedTodayCountAtom);
-    const setLibraryHasItems = useSetAtom(libraryHasItemsAtom);
+    const setLibraryItemCount = useSetAtom(libraryItemCountAtom);
 
     useEffect(() => {
         const mainWindow = Zotero.getMainWindow();
@@ -200,13 +206,16 @@ export function useZoteroContext() {
             moduleItemNotifierId = null;
         }
 
-        // Tracked locally so 'modify' (frequent) can skip the query when we
-        // already know the library has regular items — modify can only flip
-        // false->true (via restore-from-trash), never true->false.
-        let libraryHasItemsLocal = false;
-        const refreshLibraryHasItems = async () => {
-            libraryHasItemsLocal = await queryLibraryHasItems();
-            setLibraryHasItems(libraryHasItemsLocal);
+        // Tracked locally so 'modify' (frequent) can skip the query once the
+        // library has crossed the threshold — modify can only grow the count
+        // (via restore-from-trash), never shrink it, so we can stop re-probing
+        // once we already know the library is at-or-above the threshold.
+        let libraryItemCountLocal = 0;
+        const refreshLibraryItemCount = async () => {
+            libraryItemCountLocal = await queryLibraryItemCount(
+                SMALL_LIBRARY_THRESHOLD,
+            );
+            setLibraryItemCount(libraryItemCountLocal);
         };
 
         const itemObserver: { notify: _ZoteroTypes.Notifier.Notify } = {
@@ -221,13 +230,21 @@ export function useZoteroContext() {
                     setRecentlyAddedTodayCount(count);
                     // 'add' fires for notes/attachments/annotations too, which
                     // don't count as regular items — re-query rather than assume.
-                    await refreshLibraryHasItems();
+                    // Skip once the library is at-or-above the threshold;
+                    // further adds can't cross any first-run boundary.
+                    if (libraryItemCountLocal < SMALL_LIBRARY_THRESHOLD) {
+                        await refreshLibraryItemCount();
+                    }
                 } else if (event === 'delete' || event === 'trash') {
-                    await refreshLibraryHasItems();
-                } else if (event === 'modify' && !libraryHasItemsLocal) {
-                    // Restore-from-trash fires only 'modify' on item (no 'trash'
-                    // event). Skip when already true: modify cannot flip true->false.
-                    await refreshLibraryHasItems();
+                    await refreshLibraryItemCount();
+                } else if (
+                    event === 'modify'
+                    && libraryItemCountLocal < SMALL_LIBRARY_THRESHOLD
+                ) {
+                    // Restore-from-trash fires only 'modify' on item (no
+                    // 'trash' event). Skip once we've crossed the threshold:
+                    // modify can only grow the count.
+                    await refreshLibraryItemCount();
                 }
             },
         };
@@ -330,7 +347,7 @@ export function useZoteroContext() {
         }
 
         queryRecentlyAddedTodayCount().then(setRecentlyAddedTodayCount);
-        refreshLibraryHasItems();
+        refreshLibraryItemCount();
 
         // --- Cleanup ---
         return () => {
@@ -355,6 +372,6 @@ export function useZoteroContext() {
         setSelectedTags,
         setNoteItem,
         setRecentlyAddedTodayCount,
-        setLibraryHasItems,
+        setLibraryItemCount,
     ]);
 }
