@@ -378,7 +378,25 @@ export function extractRawPageDetailedFromDoc(
                     }
                     currentLine = null;
                 },
-                onChar: (rune, _origin, fontPtr, size, quad) => {
+                onLineFont: (fontPtr, size) => {
+                    if (!currentLine) return;
+                    const f = lookupFont(typeof fontPtr === "number" ? fontPtr : 0);
+                    currentLine.font = {
+                        name: f.name,
+                        family: f.family,
+                        weight: f.weight,
+                        style: f.style,
+                        // Mirror the JSON walker's `(int)size` truncation
+                        // (`extractRawPageFromDoc` -> `stext.asJSON()`).
+                        // Without this, body text reported as 9.96 here
+                        // rounds to 10 while the same text on JSON-walk
+                        // pages rounds to 9, breaking body-style
+                        // matching when the detailed page is substituted
+                        // into a JSON-walk analysis window.
+                        size: typeof size === "number" ? Math.trunc(size) : 0,
+                    };
+                },
+                onChar: (rune, quad) => {
                     if (!currentLine) return;
                     currentLine.text += rune;
                     currentLine.chars.push({
@@ -386,24 +404,6 @@ export function extractRawPageDetailedFromDoc(
                         quad,
                         bbox: bboxFromQuad(quad),
                     } as RawChar);
-                    // Populate the line's font from the first char.
-                    if (currentLine.chars.length === 1) {
-                        const f = lookupFont(typeof fontPtr === "number" ? fontPtr : 0);
-                        currentLine.font = {
-                            name: f.name,
-                            family: f.family,
-                            weight: f.weight,
-                            style: f.style,
-                            // Mirror the JSON walker's `(int)size` truncation
-                            // (`extractRawPageFromDoc` -> `stext.asJSON()`).
-                            // Without this, body text reported as 9.96 here
-                            // rounds to 10 while the same text on JSON-walk
-                            // pages rounds to 9, breaking body-style
-                            // matching when the detailed page is substituted
-                            // into a JSON-walk analysis window.
-                            size: typeof size === "number" ? Math.trunc(size) : 0,
-                        };
-                    }
                 },
                 onImageBlock: (bbox) => {
                     if (includeImages) {

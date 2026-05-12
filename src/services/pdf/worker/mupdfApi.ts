@@ -103,15 +103,15 @@ export interface StructuredTextWalker {
     beginTextBlock?(bbox: RectTuple): void;
     endTextBlock?(): void;
     beginLine?(bbox: RectTuple, wmode: number, dir: [number, number]): void;
+    /**
+     * Fires once per non-empty line, before any `onChar` for that line.
+     * Reports the first character's font pointer and size — emitted once
+     * here instead of per-char because every consumer treats line-level
+     * font as a property of the line, not the character.
+     */
+    onLineFont?(fontPtr: number, size: number): void;
     endLine?(): void;
-    onChar?(
-        rune: string,
-        origin: [number, number],
-        fontPtr: number,
-        size: number,
-        quad: QuadTuple,
-        color: number,
-    ): void;
+    onChar?(rune: string, quad: QuadTuple): void;
     onImageBlock?(bbox: RectTuple, transform: unknown, image: unknown): void;
 }
 
@@ -479,22 +479,33 @@ export function makeDocumentApi(libmupdf: LibMuPdf): MuPDFApi {
                         if (walker.beginLine) {
                             walker.beginLine(lineBBox, lineWmode, lineDir);
                         }
-                        if (walker.onChar) {
+                        if (walker.onChar || walker.onLineFont) {
                             let ch = libmupdf._wasm_stext_line_get_first_char(line);
-                            while (ch) {
-                                const runeCode = libmupdf._wasm_stext_char_get_c(ch);
-                                const rune = String.fromCharCode(runeCode);
-                                const originPtr = libmupdf._wasm_stext_char_get_origin(ch) >> 2;
-                                const origin: [number, number] = [
-                                    libmupdf.HEAPF32[originPtr + 0],
-                                    libmupdf.HEAPF32[originPtr + 1],
-                                ];
+                            // Font/size are line-level in every consumer
+                            // today, so we read them only off the first
+                            // char and skip the per-char WASM trampolines
+                            // for the rest of the line.
+                            if (ch && walker.onLineFont) {
                                 const fontPtr = libmupdf._wasm_stext_char_get_font(ch);
                                 const size = libmupdf._wasm_stext_char_get_size(ch);
-                                const quad = fromQuad(libmupdf._wasm_stext_char_get_quad(ch));
-                                const color = libmupdf._wasm_stext_char_get_argb(ch);
-                                walker.onChar(rune, origin, fontPtr, size, quad, color);
-                                ch = libmupdf._wasm_stext_char_get_next(ch);
+                                walker.onLineFont(fontPtr, size);
+                            }
+                            if (walker.onChar) {
+                                while (ch) {
+                                    const runeCode = libmupdf._wasm_stext_char_get_c(ch);
+                                    // fromCodePoint (not fromCharCode) so
+                                    // non-BMP characters (emoji, U+1D400
+                                    // math bold, extended CJK) survive
+                                    // intact. Without this the rune is
+                                    // truncated to a single UTF-16 unit
+                                    // and the `text.length === chars.length`
+                                    // invariant in ParagraphSentenceMapper
+                                    // fails, forcing a degradation fallback.
+                                    const rune = String.fromCodePoint(runeCode);
+                                    const quad = fromQuad(libmupdf._wasm_stext_char_get_quad(ch));
+                                    walker.onChar(rune, quad);
+                                    ch = libmupdf._wasm_stext_char_get_next(ch);
+                                }
                             }
                         }
                         if (walker.endLine) {
