@@ -182,8 +182,9 @@ export function buildSentenceOverlayFromResult(
             label = `${label}↪`;
         }
 
+        const joinTail = sentence.joinWithNext ? " ↪" : "";
         const annotationText =
-            `page ${result.pageIndex + 1}, para ${sentence.paragraphIndex + 1}, s${sentence.sentenceIndex + 1}\n` +
+            `page ${result.pageIndex + 1}, para ${sentence.paragraphIndex + 1}, s${sentence.sentenceIndex + 1}${joinTail}\n` +
             sentence.text;
 
         sentence.bboxes.forEach((bb, fragIdx) => {

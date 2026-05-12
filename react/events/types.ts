@@ -35,7 +35,8 @@ export interface BeaverEvents {
             | 'paragraphs'
             | 'sentences'
             | 'clear'
-            | 'copy-fixture-capture-command';
+            | 'copy-extract-fixture-command'
+            | 'copy-ocr-fixture-command';
     };
     focusInput: Record<string, never>;
 }

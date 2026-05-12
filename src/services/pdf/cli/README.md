@@ -30,7 +30,7 @@ arguments to `tsx` instead of consuming them.
 ### One-line examples
 
 ```bash
-SMOKE=tests/fixtures/pdfs/sentences/_shared/0a3a5c40534376346b36c03c4469694674fd85ea1493c493be7c777df1ea4561.pdf
+SMOKE=tests/fixtures/pdfs/extract-public/_shared/d86a26bf17a0e19194abe41f10b32b4cf86e8caddf3c854773802e5a76b607cf.pdf
 
 # Page count + metadata
 npm run beaver-extract -- info "$SMOKE"
@@ -50,6 +50,9 @@ npm run beaver-extract -- render "$SMOKE" --pages 0,1,2 --out /tmp/render/
 
 # Per-character quad info for one page
 npm run beaver-extract -- raw-detailed "$SMOKE" --page 0 --json
+
+# Per-phase timing breakdown for structured extract (1 cold + 2 warm runs)
+npm run beaver-extract -- profile "$SMOKE" --pages 0,1 --repeat 3
 ```
 
 For per-command help, append `--help`:
@@ -64,6 +67,7 @@ npm run beaver-extract -- overlay --help
 | ---------------- | ------------------------------------------------------ |
 | `info`           | Page count + metadata (title, author, page labels).    |
 | `extract`        | Full structured (default) or markdown extract.         |
+| `profile`        | Structured extract with per-phase timing breakdown.    |
 | `overlay`        | Render one page with extraction overlays composited.   |
 | `analyze-layout` | Document-wide style + margin analysis.                 |
 | `raw-detailed`   | Per-character quad info for one page.                  |
@@ -106,6 +110,114 @@ Failure envelope (written to stderr; process exits non-zero):
 
 `overlay --sidecar-json` writes a companion `<out>.json` with rect data,
 stats, and effective options for offline diffing.
+
+## Profiling structured extract
+
+`profile` runs the same pipeline as `extract --mode structured` and
+surfaces CLI wall time plus the per-phase timing breakdown the worker
+records on `result.metadata.timings`. Use it to identify bottlenecks,
+prioritize optimization work, and verify that a refactor didn't regress.
+
+```bash
+# Cold run + 2 warm runs over pages 0 and 1
+npm run beaver-extract -- profile "$PDF" --pages 0,1 --repeat 3
+
+# Whole document; JSON for diffing
+npm run beaver-extract -- profile "$PDF" --repeat 3 --json --pretty > before.json
+# ... change code ...
+npm run beaver-extract -- profile "$PDF" --repeat 3 --json --pretty > after.json
+```
+
+Flags:
+
+| Flag | Purpose |
+| ---- | ------- |
+| `--pages <list>` / `--page-range <s>:<e>` | Narrow the target pages. Same parsers as `extract`. |
+| `--analysis-window <n>` | Forwarded to the analysis-context prefix. |
+| `--repeat <N>` | Re-run the same extract N times. Run 1 is reported as **cold**; runs 2..N are averaged as **warm-cache**. The doc cache and the splitter are warm after the first run, so warm averages reflect the steady-state hot path. |
+| `--language <lang>` | Splitter language code (forwarded to `sentencex`). |
+| `--settings <path>` / `--paragraph-settings <path>` | JSON-file overrides. |
+| `--json` / `--pretty` | Emit a machine-readable envelope instead of the human report. |
+
+Human report shape (cold + warm sections, abbreviated):
+
+```
+beaver-extract profile — <pdf>
+runs: 3 (1 cold, 2 warm)
+
+cold run (1st execution):
+  totalMs=305ms  worker=114ms  runtimeOverhead=191ms  docOpen=8ms  walk=35ms  analysis=4ms
+  pages=10  chars=26581
+  phase                  total     /page   share  per1kchars
+  detailedWalk             35.96ms    3.60ms   56.6%    1.35ms/1k
+  fontBridge                0.52ms    0.05ms    0.8%    0.02ms/1k
+  filteredParagraphs       13.82ms    1.38ms   21.7%    0.52ms/1k
+    marginFilter            0.19ms    0.02ms     -      0.01ms/1k
+    columnDetect            4.03ms    0.40ms     -      0.15ms/1k
+    lineDetect              1.47ms    0.15ms     -      0.06ms/1k
+    paragraphDetect         7.56ms    0.76ms     -      0.28ms/1k
+  sentenceMap              13.22ms    1.32ms   20.8%    0.50ms/1k
+
+warm-cache avg (2 runs):
+  ...
+```
+
+Columns:
+
+- **total** — sum across all profiled target pages.
+- **/page** — `total / pages`, comparable across documents of similar layout.
+- **share** — share of the structured-loop budget (`detailedWalk +
+  fontBridge + filteredParagraphs + sentenceMap`). The nested
+  sub-phases of `filteredParagraphs` show `-` because including them
+  would double-count their parent.
+- **per1kchars** — `total / charCount × 1000`. The only column that
+  normalizes for document size, so use it for cross-document
+  comparisons.
+
+`totalMs` is measured around the full CLI-side `extractPdf` call, so the
+cold run includes runtime initialization such as MuPDF and sentence
+splitter loading. `worker`, `docOpen`, `walk` (JSON walk over analysis
+pages), and `analysis` (`buildPageAnalysisContext` — StyleAnalyzer +
+cross-page MarginFilter) come from worker timings and are reported in
+the top-level line because they are paid once across all target pages.
+
+JSON envelope shape (`--json`):
+
+```json
+{
+  "ok": true,
+  "result": {
+    "runs": [
+      {
+        "runIndex": 0,
+        "cold": true,
+        "cliWallMs": ...,
+        "timings": { "totalMs": ..., "perPagePhases": [{ "pageIndex": 0, "detailedWalkMs": ..., ... }] },
+        "pageCount": 10
+      }
+    ],
+    "aggregated": { "scope": "warm-avg", "phases": [...], "topLevel": {...} }
+  }
+}
+```
+
+The raw `perPagePhases[]` entries on each run carry `charCount`,
+`lineCount`, `paragraphCount`, and `degradationCount` alongside the
+ms fields so you can chart timing vs. page complexity offline.
+
+### Stable methodology for tracking improvements
+
+- Always use the **warm** average for steady-state numbers — the cold
+  run is dominated by WASM initialization and the first doc-cache miss.
+- Use `--repeat 3` minimum; bigger N reduces variance but the cache is
+  already warm after run 2.
+- Pin the corpus: capture a baseline JSON for the same set of PDFs
+  before and after a change, then diff the `aggregated.phases` block.
+- The dominant phases are usually **`detailedWalk`** and
+  **`filteredParagraphs.{column,line,paragraph}Detect`** — the first
+  is WASM/MuPDF cost, the second is JS cost on the target page.
+  `fontBridge` is typically <1% and should not be optimized
+  speculatively.
 
 ## Configuration
 
@@ -239,27 +351,42 @@ native deps.
 ```
 src/services/pdf/
 ├── cli/                # commander + per-command files (this dir)
-│   ├── main.ts         # 5-line wrapper around runCli
-│   ├── commands/       # one file per command
-│   ├── envelope.ts     # success/error JSON envelope builders
-│   ├── io.ts           # loadPdf, writePngFile, writeJsonFile, pdfSha256
-│   ├── options.ts      # --pages, --page-range, --analysis-window parsers
-│   └── runCliTypes.ts  # CliDeps interface
+│   ├── main.ts                  # 5-line wrapper around runCli
+│   ├── envelope.ts              # success/error JSON envelope builders
+│   ├── io.ts                    # loadPdf, writePngFile, writeJsonFile, pdfSha256
+│   ├── options.ts               # --pages, --page-range, --analysis-window parsers
+│   ├── runCliTypes.ts           # CliDeps interface
+│   ├── commands/                # one file per command
+│   │   ├── _sharedHelpers.ts        # shared envelope plumbing (emitSuccess/emitFailure)
+│   │   ├── info.ts                  # `info`
+│   │   ├── extract.ts               # `extract`
+│   │   ├── overlay.ts               # `overlay`
+│   │   ├── analyzeLayout.ts         # `analyze-layout`
+│   │   ├── rawDetailed.ts           # `raw-detailed`
+│   │   ├── render.ts                # `render`
+│   │   ├── fixture.ts               # `fixture {capture,evaluate,update,list}`
+│   │   └── ocrFixture.ts            # `ocr-fixture {capture,evaluate,update,list}`
+│   └── fixture/                 # extract + OCR fixture file format (Node-only)
+│       ├── fixtureFile.ts           # atomic read/write, _shared/ dedup
+│       ├── fixtureSchema.ts         # validators with targeted errors
+│       ├── fingerprints.ts          # wasm + git + version provenance
+│       ├── ocrFixtureFile.ts        # OCR fixture read/write + _shared/ link
+│       ├── ocrFixtureSchema.ts      # OCR fixture validators
+│       ├── ocrFingerprints.ts       # OCR fingerprints (drops sentencex sha)
+│       └── analysisScope.ts         # AnalysisScope <-> internal translation
 ├── node/               # Node runtime (MuPDF + sentencex bootstrap, sharp overlay)
-│   ├── bootstrap.ts    # ensureMuPDFNode, ensureSentencexNode
-│   ├── api.ts          # typed Node API: extractPdf, renderPages, ...
-│   ├── overlayPng.ts   # sharp + SVG composite
-│   └── runCli.ts       # in-process runCli(argv, deps) test seam
+│   ├── index.ts                 # Node entry barrel
+│   ├── bootstrap.ts             # ensureMuPDFNode, ensureSentencexNode, setCliLogLevel
+│   ├── paths.ts                 # WASM dir resolution (BEAVER_EXTRACT_WASM_DIR)
+│   ├── api.ts                   # typed Node API: extractPdf, renderPages, ...
+│   ├── overlayPng.ts            # sharp + SVG composite
+│   └── runCli.ts                # in-process runCli(argv, deps) test seam
 ├── debug/              # browser-safe shared debug helpers
 │   ├── overlayBuilders.ts
 │   ├── overlaySvg.ts
 │   ├── analyzeLayoutProjection.ts
-│   └── extractionSnapshot.ts   # projection + structural diff for fixtures
-├── cli/fixture/        # fixture file format + helpers (Node-only)
-│   ├── fixtureFile.ts          # atomic read/write, _shared/ dedup
-│   ├── fixtureSchema.ts        # validators with targeted errors
-│   ├── fingerprints.ts         # wasm + git + version provenance
-│   └── analysisScope.ts        # AnalysisScope <-> internal translation
+│   ├── extractionSnapshot.ts    # projection + structural diff for extract fixtures
+│   └── ocrSnapshot.ts           # projection + diff for OCR fixtures
 └── worker/             # MuPDF worker ops, reused as-is from Node
 ```
 

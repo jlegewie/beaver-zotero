@@ -51,10 +51,14 @@ export function useReaderVisualizerActionHandler() {
                     logger('[ReaderVisualizer] cleared');
                     return;
                 }
-                case 'copy-fixture-capture-command': {
-                    const r = await copyFixtureCaptureCommand();
-                    logger(`[ReaderVisualizer] copy-fixture-capture-command: ${r.message}`);
-                    // Zotero.alert(Zotero.getMainWindow(), 'Beaver Extract Fixture', r.message);
+                case 'copy-extract-fixture-command': {
+                    const r = await copyExtractFixtureCommand();
+                    logger(`[ReaderVisualizer] copy-extract-fixture-command: ${r.message}`);
+                    return;
+                }
+                case 'copy-ocr-fixture-command': {
+                    const r = await copyOcrFixtureCommand();
+                    logger(`[ReaderVisualizer] copy-ocr-fixture-command: ${r.message}`);
                     return;
                 }
             }
@@ -64,16 +68,14 @@ export function useReaderVisualizerActionHandler() {
     }, []);
 }
 
+const PRIVATE_ROOT = 'tests/fixtures/pdfs/extract';
+
 /**
- * Build a combined `beaver-extract fixture capture --update …` (page-scoped)
- * and `beaver-extract ocr-fixture capture --update …` (document-wide)
- * command targeting the current reader page and copy them to the clipboard.
- *
- * Both target the private corpus and reuse the same `_shared/<sha>.pdf`
- * — `ensureSharedPdf` is a no-op on the second command, so the PDF binary
- * is not duplicated on disk.
+ * Build a `beaver-extract fixture capture --update …` command (page-scoped,
+ * id `paperKey__pN`) targeting the current reader page and copy it to the
+ * clipboard.
  */
-async function copyFixtureCaptureCommand(): Promise<{ ok: boolean; message: string }> {
+async function copyExtractFixtureCommand(): Promise<{ ok: boolean; message: string }> {
     const ctx = await resolveActiveReaderContext();
     if ('error' in ctx) return { ok: false, message: ctx.error };
     const { item, filePath, pageIndex } = ctx;
@@ -85,11 +87,8 @@ async function copyFixtureCaptureCommand(): Promise<{ ok: boolean; message: stri
         // Best effort — language is optional on the CLI flag.
     }
 
-    const PRIVATE_ROOT = 'tests/fixtures/pdfs/extract';
-
-    // 1) Extract fixture — page-scoped, id `paperKey__pN`.
     const extractId = `${item.key}__p${pageIndex}`;
-    const extractParts = [
+    const parts = [
         'npm run beaver-extract --',
         'fixture capture',
         shellQuote(filePath),
@@ -98,13 +97,25 @@ async function copyFixtureCaptureCommand(): Promise<{ ok: boolean; message: stri
         `--root ${PRIVATE_ROOT}`,
         '--preview',
     ];
-    if (language) extractParts.push(`--language ${shellQuote(language)}`);
-    extractParts.push('--update');
-    const extractCmd = extractParts.join(' ');
+    if (language) parts.push(`--language ${shellQuote(language)}`);
+    parts.push('--update');
+    const command = parts.join(' ');
 
-    // 2) OCR fixture — document-wide, id `paperKey` (no `__pN`). Reuses
-    //    `_shared/<sha>.pdf` written by the extract capture above.
-    const ocrParts = [
+    return copyCommand(command);
+}
+
+/**
+ * Build a `beaver-extract ocr-fixture capture --update …` command
+ * (document-wide, id `paperKey`) for the current reader item and copy it to
+ * the clipboard. Reuses `_shared/<sha>.pdf` when an extract fixture has
+ * already been captured for the same PDF.
+ */
+async function copyOcrFixtureCommand(): Promise<{ ok: boolean; message: string }> {
+    const ctx = await resolveActiveReaderContext();
+    if ('error' in ctx) return { ok: false, message: ctx.error };
+    const { item, filePath } = ctx;
+
+    const parts = [
         'npm run beaver-extract --',
         'ocr-fixture capture',
         shellQuote(filePath),
@@ -112,15 +123,17 @@ async function copyFixtureCaptureCommand(): Promise<{ ok: boolean; message: stri
         `--root ${PRIVATE_ROOT}`,
         '--update',
     ];
-    const ocrCmd = ocrParts.join(' ');
+    const command = parts.join(' ');
 
-    const command = `${extractCmd} \\\n  && ${ocrCmd}`;
+    return copyCommand(command);
+}
 
+async function copyCommand(command: string): Promise<{ ok: boolean; message: string }> {
     const ok = await copyToClipboard(command);
     if (!ok) {
         return {
             ok: false,
-            message: `Failed to copy commands. Run manually:\n\n${command}`,
+            message: `Failed to copy command. Run manually:\n\n${command}`,
         };
     }
     return {

@@ -51,6 +51,7 @@ import type {
     ProcessedPage,
     RawPageData,
     RawPageDataDetailed,
+    StructuredPagePhaseTimings,
     StyleProfile,
 } from "../types";
 import {
@@ -379,6 +380,10 @@ export function runExtractFromIndices(
 
     const pages: ProcessedPage[] = [];
     const perPageMs: number[] = [];
+    // Per-page phase breakdown — only populated by the structured branch.
+    // Stays undefined on the final result for markdown engines so the
+    // typings (perPagePhases: optional) match the engine's actual output.
+    const perPagePhases: StructuredPagePhaseTimings[] = [];
 
     if (engine === "paragraph") {
         // Paragraph engine: line + paragraph detection produces markdown-shaped
@@ -436,17 +441,18 @@ export function runExtractFromIndices(
         for (const i of targetIndices) {
             const tPage = performance.now();
             const rawPage = analysisPageByIndex.get(i)!;
-            const { sentenceResult, filteredResult } = extractSentencesForPage({
-                doc,
-                pageIndex: rawPage.pageIndex,
-                analysisPages,
-                splitter,
-                paragraphSettings,
-                marginRemoval,
-                styleProfile,
-                margins: opts.margins,
-                marginZone: opts.marginZone,
-            });
+            const { sentenceResult, filteredResult, phaseTimings } =
+                extractSentencesForPage({
+                    doc,
+                    pageIndex: rawPage.pageIndex,
+                    analysisPages,
+                    splitter,
+                    paragraphSettings,
+                    marginRemoval,
+                    styleProfile,
+                    margins: opts.margins,
+                    marginZone: opts.marginZone,
+                });
             logColumnDetection(rawPage.pageIndex, filteredResult.columnResult);
             pages.push({
                 index: sentenceResult.pageIndex,
@@ -475,6 +481,7 @@ export function runExtractFromIndices(
                 degradation: sentenceResult.degradation,
             } as ProcessedPage);
             perPageMs.push(performance.now() - tPage);
+            perPagePhases.push(phaseTimings);
         }
     } else {
         const pageExtractor = new PageExtractor({ styleProfile });
@@ -534,6 +541,14 @@ export function runExtractFromIndices(
                 walkMs,
                 analysisMs,
                 perPageMs,
+                // Only emit the structured per-page phase array when
+                // the structured branch ran. Markdown engines never push
+                // into `perPagePhases`, so it stays empty there and we
+                // omit the field entirely — undefined signals "no phase
+                // breakdown available" to downstream consumers.
+                ...(perPagePhases.length > 0
+                    ? { perPagePhases }
+                    : {}),
             },
         },
     };

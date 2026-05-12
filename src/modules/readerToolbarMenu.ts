@@ -114,7 +114,8 @@ function dispatchVisualizerAction(
         | 'paragraphs'
         | 'sentences'
         | 'clear'
-        | 'copy-fixture-capture-command',
+        | 'copy-extract-fixture-command'
+        | 'copy-ocr-fixture-command',
 ): void {
     const win = Zotero.getMainWindow();
     const eventBus = win?.__beaverEventBus;
@@ -222,7 +223,8 @@ function openBeaverMenu(reader: any, anchorButton: HTMLElement): void {
             { label: 'Visualize Paragraphs', action: 'paragraphs' },
             { label: 'Visualize Sentences', action: 'sentences' },
             { label: 'Clear Visualization', action: 'clear' },
-            { label: 'Copy Fixture Capture Commands', action: 'copy-fixture-capture-command' },
+            { label: 'Copy Extract Fixture Command', action: 'copy-extract-fixture-command' },
+            { label: 'Copy OCR Fixture Command', action: 'copy-ocr-fixture-command' },
         ];
 
         for (const { label, action } of visualizerItems) {
