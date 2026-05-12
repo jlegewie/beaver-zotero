@@ -48,16 +48,72 @@ vi.mock('../../../src/utils/editNoteValidation', async () => {
     };
 });
 
-vi.mock('../../../src/utils/noteHtmlEntities', () => ({
-    decodeHtmlEntities: vi.fn((s: string) => s),
-    encodeTextEntities: vi.fn((s: string) => s),
-    ENTITY_FORMS: ['hex', 'decimal', 'named'],
-    foldTypographicQuotes: vi.fn((s: string) => s),
-    normalizeWS: vi.fn((s: string) =>
-        s.replace(/(?:\s|&nbsp;)+/g, ' ').trim()),
-    hasWhitespaceOrNbsp: vi.fn((s: string) => /(?:\s|&nbsp;)/.test(s)),
-    WS_OR_NBSP_CLASS: '(?:\\s|&nbsp;)',
-}));
+vi.mock('../../../src/utils/noteHtmlEntities', () => {
+    // Mirrors the production CJK range in `noteHtmlEntities.ts`. Built from
+    // a concatenated source so ESLint's `no-irregular-whitespace` rule does
+    // not flag the literal U+3000 ideographic space at the range start.
+    const CJK_RE = new RegExp(
+        '[\\u3000-\\u303F'
+        + '\\u3040-\\u30FF'
+        + '\\u31F0-\\u31FF'
+        + '\\u3400-\\u4DBF'
+        + '\\u4E00-\\u9FFF'
+        + '\\uA960-\\uA97F'
+        + '\\uAC00-\\uD7AF'
+        + '\\uF900-\\uFAFF'
+        + '\\uFF00-\\uFFEF]',
+    );
+    const isCjkChar = (ch: string) => !!ch && CJK_RE.test(ch);
+    return {
+        decodeHtmlEntities: vi.fn((s: string) => s),
+        encodeTextEntities: vi.fn((s: string) => s),
+        ENTITY_FORMS: ['hex', 'decimal', 'named'],
+        foldTypographicQuotes: vi.fn((s: string) => s),
+        normalizeWS: vi.fn((s: string) =>
+            s.replace(/(?:\s|&nbsp;)+/g, ' ').trim()),
+        hasWhitespaceOrNbsp: vi.fn((s: string) => /(?:\s|&nbsp;)/.test(s)),
+        isCjkChar: vi.fn(isCjkChar),
+        hasCjkAsciiBoundary: vi.fn((s: string) => {
+            for (let i = 1; i < s.length; i++) {
+                const a = s.charAt(i - 1);
+                const b = s.charAt(i);
+                if (/\s/.test(a) || /\s/.test(b)) continue;
+                if (isCjkChar(a) !== isCjkChar(b)) return true;
+            }
+            return false;
+        }),
+        normalizeCjkSpacing: vi.fn((s: string) => {
+            // Tag-aware: skip boundary drops inside <...> tags and at HTML
+            // delimiter chars, mirroring the production behavior so the
+            // editNote unit tests load the matcher under a faithful stub.
+            const isHtmlDelim = (ch: string) => /[<>="'/]/.test(ch);
+            const collapsed = s.replace(/(?:\s|&nbsp;)+/g, ' ').trim();
+            let out = '';
+            let inTag = false;
+            for (let i = 0; i < collapsed.length; i++) {
+                const ch = collapsed.charAt(i);
+                if (ch === '<') inTag = true;
+                if (ch === ' ' && !inTag) {
+                    const prev = i > 0 ? collapsed.charAt(i - 1) : '';
+                    const next = i + 1 < collapsed.length ? collapsed.charAt(i + 1) : '';
+                    if (
+                        prev && next
+                        && !isHtmlDelim(prev) && !isHtmlDelim(next)
+                        && isCjkChar(prev) !== isCjkChar(next)
+                    ) continue;
+                }
+                out += ch;
+                if (ch === '>') inTag = false;
+            }
+            return out;
+        }),
+        normalizeCjkSpacingMapped: vi.fn((s: string) => ({
+            text: s,
+            indexMap: Array.from({ length: s.length + 1 }, (_, k) => k),
+        })),
+        WS_OR_NBSP_CLASS: '(?:\\s|&nbsp;)',
+    };
+});
 
 vi.mock('../../../src/utils/noteWrapper', () => ({
     stripDataCitationItems: vi.fn((html: string) => html),

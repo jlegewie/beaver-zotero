@@ -26,8 +26,14 @@
  *  12. whitespace_relaxed       — allow whitespace runs to vary between needle
  *                                 and note (NBSP vs space, literal `&nbsp;`
  *                                 entity vs space, extra newlines, tab/space
- *                                 drift). Gated on uniqueness and a non-ws
- *                                 character floor; conservative last resort.
+ *                                 drift). Also tolerates "Pangu spacing" drift
+ *                                 at CJK ↔ non-CJK character boundaries: a
+ *                                 needle `共识 [14]` matches a note `共识[14]`
+ *                                 and vice versa, because language models
+ *                                 silently insert / drop boundary spaces when
+ *                                 reproducing mixed-script text. Gated on
+ *                                 uniqueness and a non-ws character floor;
+ *                                 conservative last resort.
  */
 
 import {
@@ -44,7 +50,10 @@ import {
     encodeTextEntities,
     ENTITY_FORMS,
     foldTypographicQuotes,
+    hasCjkAsciiBoundary,
     hasWhitespaceOrNbsp,
+    isCjkChar,
+    normalizeCjkSpacing,
     normalizeWS,
     WS_OR_NBSP_CLASS,
 } from './noteHtmlEntities';
@@ -771,18 +780,99 @@ function escapeRegExp(s: string): string {
 }
 
 /**
- * Build a regex that matches the needle with any non-empty whitespace run
- * substituted for each whitespace span. The whitespace class includes both
- * regex `\s` and the literal HTML entity `&nbsp;` so the strategy folds drift
- * between regular spaces and `&nbsp;`-encoded spaces in either direction
- * (model needle vs. note haystack). Non-whitespace segments are regex-escaped
+ * Build a regex that matches the needle with whitespace runs allowed to vary,
+ * and additionally tolerates Pangu-style spacing drift at CJK ↔ non-CJK
+ * character boundaries.
+ *
+ * Two relaxations are applied:
+ * 1. Whitespace runs in the needle become `\s+` (or `\s*` if at least one
+ *    side of the run is CJK — needles with a space between `识` and `[` must
+ *    still match notes that elide that space).
+ * 2. Adjacent non-whitespace characters whose scripts differ (one CJK, one
+ *    not) get an optional `\s*` inserted between them — needles WITHOUT a
+ *    boundary space must still match notes that have one.
+ *
+ * Both relaxations apply ONLY to visible prose. While walking inside an HTML
+ * tag (between `<` and the matching `>`) or when either side of a boundary is
+ * an HTML delimiter (`< > = " ' /`), the relaxation is suppressed so that
+ * needles like `<span title="中文">` cannot match `<span title="中文 ">` —
+ * attribute and tag markup must match byte-for-byte.
+ *
+ * The whitespace class includes both regex `\s` and the literal HTML entity
+ * `&nbsp;` so drift between regular spaces and `&nbsp;`-encoded spaces also
+ * folds. Non-whitespace runs that don't cross a CJK boundary are regex-escaped
  * and must match byte-for-byte. Caller guarantees first/last char of `needle`
- * is non-whitespace; the split never yields leading/trailing empties.
+ * is non-whitespace.
  */
-const NEEDLE_WS_SPLIT = new RegExp(`${WS_OR_NBSP_CLASS}+`, 'g');
+const HTML_DELIM_PATTERN = /[<>="'/]/;
+const NBSP_ENTITY = '&nbsp;';
+const isHtmlDelim = (ch: string): boolean => HTML_DELIM_PATTERN.test(ch);
+
 function buildWhitespaceRelaxedPattern(needle: string): RegExp {
-    const segments = needle.split(NEEDLE_WS_SPLIT).map(escapeRegExp);
-    return new RegExp(segments.join(`${WS_OR_NBSP_CLASS}+`), 'g');
+    const parts: string[] = [];
+    let literalBuf = '';
+    const flushLiteral = () => {
+        if (literalBuf) {
+            parts.push(escapeRegExp(literalBuf));
+            literalBuf = '';
+        }
+    };
+
+    let inTag = false;
+    let i = 0;
+    while (i < needle.length) {
+        // Whitespace run (regex `\s` or literal `&nbsp;` entity) anchored at i.
+        let runLen = 0;
+        while (i + runLen < needle.length) {
+            if (/\s/.test(needle.charAt(i + runLen))) {
+                runLen += 1;
+            } else if (needle.substring(i + runLen, i + runLen + NBSP_ENTITY.length) === NBSP_ENTITY) {
+                runLen += NBSP_ENTITY.length;
+            } else {
+                break;
+            }
+        }
+        if (runLen > 0) {
+            flushLiteral();
+            const before = i > 0 ? needle.charAt(i - 1) : '';
+            const after = needle.charAt(i + runLen);
+            const crossesCjkBoundary = !inTag
+                && !!before && !!after
+                && !isHtmlDelim(before) && !isHtmlDelim(after)
+                && isCjkChar(before) !== isCjkChar(after);
+            parts.push(`${WS_OR_NBSP_CLASS}${crossesCjkBoundary ? '*' : '+'}`);
+            i += runLen;
+            continue;
+        }
+
+        const ch = needle.charAt(i);
+        literalBuf += ch;
+        // Update tag state. The boundary check below sees the POST-update
+        // state, so HTML delimiters and tag interiors never trigger CJK
+        // relaxation.
+        if (ch === '<') inTag = true;
+        else if (ch === '>') inTag = false;
+
+        const next = needle.charAt(i + 1);
+        const nextStartsWs = !!next && (
+            /\s/.test(next)
+            || needle.substring(i + 1, i + 1 + NBSP_ENTITY.length) === NBSP_ENTITY
+        );
+        if (
+            next
+            && !nextStartsWs
+            && !inTag
+            && !isHtmlDelim(ch)
+            && !isHtmlDelim(next)
+            && isCjkChar(ch) !== isCjkChar(next)
+        ) {
+            flushLiteral();
+            parts.push(`${WS_OR_NBSP_CLASS}*`);
+        }
+        i += 1;
+    }
+    flushLiteral();
+    return new RegExp(parts.join(''), 'g');
 }
 
 const whitespaceRelaxedStrategy: Strategy = {
@@ -802,13 +892,21 @@ const whitespaceRelaxedStrategy: Strategy = {
         if (!/\S/.test(first) || !/\S/.test(last)) return null;
 
         // Defensive: if the needle has no whitespace at all (and no literal
-        // `&nbsp;`), `exact` would already have matched. Skip to keep the
-        // strategy focused. Using `hasWhitespaceOrNbsp` here matters for the
-        // symmetric direction where the needle's only whitespace is `&nbsp;`
-        // and the haystack uses regular spaces.
-        if (!hasWhitespaceOrNbsp(needle)) return null;
+        // `&nbsp;`) AND no CJK ↔ non-CJK boundary, `exact` would already have
+        // matched. Skip to keep the strategy focused. The CJK-boundary check
+        // is what lets `共识[14]` enter the strategy even though it has no
+        // whitespace — the haystack may have `共识 [14]` (Pangu spacing the
+        // model dropped). Using `hasWhitespaceOrNbsp` covers the symmetric
+        // case where the needle's only whitespace is `&nbsp;`.
+        const needleHasWs = hasWhitespaceOrNbsp(needle);
+        const needleHasCjkBoundary = hasCjkAsciiBoundary(needle);
+        if (!needleHasWs && !needleHasCjkBoundary) return null;
 
-        const normalizedOld = normalizeWS(needle);
+        // Use the CJK-aware normalizer so the length/uniqueness gates below
+        // treat Pangu spacing as a non-difference (otherwise `共识 [14]` and
+        // `共识[14]` would normalize differently and fail the sanity check
+        // even when the regex correctly matched).
+        const normalizedOld = normalizeCjkSpacing(needle);
         if (normalizedOld.length < MIN_WS_RELAXED_NORMALIZED_LENGTH) return null;
         if (normalizedOld.replace(/\s/g, '').length < MIN_WS_RELAXED_NON_WS_LENGTH) return null;
 
@@ -829,15 +927,16 @@ const whitespaceRelaxedStrategy: Strategy = {
         // Normalized-space uniqueness: catches scenarios where the regex
         // happened to find a single shape but the model's reference is
         // ambiguous because the normalized form repeats elsewhere.
-        const normalizedHaystack = normalizeWS(input.strippedHtml);
+        const normalizedHaystack = normalizeCjkSpacing(input.strippedHtml);
         const normFirst = normalizedHaystack.indexOf(normalizedOld);
         if (normFirst === -1) return null;
         if (normalizedHaystack.indexOf(normalizedOld, normFirst + 1) !== -1) return null;
 
-        // Sanity: the matched raw slice must normalize to the same form as the
-        // needle. Guards against adversarial input where the regex engine
-        // interpreted the pattern differently than `normalizeWS` would.
-        if (normalizeWS(actualRawSlice) !== normalizedOld) return null;
+        // Sanity: the matched raw slice must normalize to the same form as
+        // the needle under the same CJK-aware rules. Guards against
+        // adversarial input where the regex engine interpreted the pattern
+        // differently than `normalizeCjkSpacing` would.
+        if (normalizeCjkSpacing(actualRawSlice) !== normalizedOld) return null;
 
         // Build expandedNew. For insert ops, mirror `rewriteInsertReplacementForTrim`:
         // when `input.newString` is the already-merged `oldString + injected`

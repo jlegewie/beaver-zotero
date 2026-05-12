@@ -10,7 +10,7 @@
  * module.
  */
 
-import { normalizeWS } from './noteHtmlEntities';
+import { normalizeCjkSpacing, normalizeCjkSpacingMapped, normalizeWS } from './noteHtmlEntities';
 
 // =============================================================================
 // Candidate snippets
@@ -115,7 +115,23 @@ export function findCandidateSnippets(
     // Tier 1: whitespace-relaxed exact match. Expand the snippet window so the
     // full match is always visible even for long old_strings — truncating
     // inside the match would yield a snippet with `…` markers the agent
-    // cannot paste verbatim.
+    // cannot paste verbatim. Try the CJK-aware normalizer first so a needle
+    // that differs only by Pangu spacing at CJK ↔ non-CJK prose boundaries
+    // still surfaces the matching note span; fall back to the plain
+    // ws-normalizer so non-CJK content (the bulk of the corpus) gets the
+    // same snippet shape as before.
+    const cjkNormSearch = normalizeCjkSpacing(oldString);
+    const cjkNormHtmlMapped = normalizeCjkSpacingMapped(simplified);
+    const cjkIdx = cjkNormSearch ? cjkNormHtmlMapped.text.indexOf(cjkNormSearch) : -1;
+    if (cjkIdx !== -1) {
+        const matchEndNorm = cjkIdx + cjkNormSearch.length;
+        const origStart = cjkNormHtmlMapped.indexMap[cjkIdx] ?? 0;
+        const origEnd = cjkNormHtmlMapped.indexMap[matchEndNorm] ?? simplified.length;
+        const pivot = Math.floor((origStart + origEnd) / 2);
+        const window = Math.max(maxSnippetLength, (origEnd - origStart) + 100);
+        const { snippet, truncated } = centerTruncate(simplified, pivot, window);
+        return [{ snippet, truncated, via: 'whitespace_relaxed', score: 1 }];
+    }
     const normHtml = normalizeWS(simplified);
     const idx = normHtml.indexOf(normSearch);
     if (idx !== -1) {
