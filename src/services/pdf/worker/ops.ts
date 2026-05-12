@@ -387,6 +387,7 @@ export function runExtractFromIndices(
     // `analysisWindow=0` default).
     let preWalkedTargets: Map<number, RawPageData> | undefined;
     let preWalkedDetailedTargets: Map<number, RawPageDataDetailed> | undefined;
+    let preWalkedDetailedMsByTarget: Map<number, number> | undefined;
     let preWalkMs = 0;
     if (engine === "structured") {
         if (!fontApi) {
@@ -396,9 +397,15 @@ export function runExtractFromIndices(
         }
         const tPreWalk = performance.now();
         preWalkedDetailedTargets = new Map<number, RawPageDataDetailed>();
+        preWalkedDetailedMsByTarget = new Map<number, number>();
         preWalkedTargets = new Map<number, RawPageData>();
         for (const i of targetIndices) {
+            const tTargetPreWalk = performance.now();
             const detailed = extractRawPageDetailedFromDoc(doc, i, false, fontApi);
+            preWalkedDetailedMsByTarget.set(
+                i,
+                performance.now() - tTargetPreWalk,
+            );
             preWalkedDetailedTargets.set(i, detailed);
             // `RawPageDataDetailed` is structurally a `RawPageData`
             // (readonly arrays make blocks/lines covariant). Reusing
@@ -499,6 +506,7 @@ export function runExtractFromIndices(
         for (const i of targetIndices) {
             const tPage = performance.now();
             const rawPage = analysisPageByIndex.get(i)!;
+            const preWalkedDetailedMs = preWalkedDetailedMsByTarget!.get(i) ?? 0;
             const { sentenceResult, filteredResult, phaseTimings } =
                 extractSentencesForPage({
                     doc,
@@ -514,6 +522,7 @@ export function runExtractFromIndices(
                     // `buildAnalysisFromDoc` so we don't pay a second
                     // walk per target page.
                     preWalkedDetailed: preWalkedDetailedTargets!.get(i),
+                    preWalkedDetailedMs,
                 });
             logColumnDetection(rawPage.pageIndex, filteredResult.columnResult);
             pages.push({
@@ -542,7 +551,7 @@ export function runExtractFromIndices(
                 sentences: sentenceResult.sentences,
                 degradation: sentenceResult.degradation,
             } as ProcessedPage);
-            perPageMs.push(performance.now() - tPage);
+            perPageMs.push(preWalkedDetailedMs + (performance.now() - tPage));
             perPagePhases.push(phaseTimings);
         }
     } else {
@@ -1063,4 +1072,3 @@ export async function opExtractSentenceBBoxesDebug(
         releaseDoc(doc);
     }
 }
-

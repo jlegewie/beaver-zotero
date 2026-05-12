@@ -112,6 +112,12 @@ export function extractSentencesForPage(args: {
      */
     preWalkedDetailed?: RawPageDataDetailed;
     /**
+     * Time spent creating `preWalkedDetailed` before this call. When the
+     * caller pre-walks target pages outside the per-page loop, this keeps
+     * page-level phase timings attributed to the page that paid the walk.
+     */
+    preWalkedDetailedMs?: number;
+    /**
      * Font accessors for the WASM detailed walker. Required when
      * `preWalkedDetailed` is omitted — otherwise lines come out with
      * empty fonts and downstream heading detection silently degrades.
@@ -126,7 +132,11 @@ export function extractSentencesForPage(args: {
     const detailed =
         args.preWalkedDetailed ??
         extractRawPageDetailedFromDoc(args.doc, args.pageIndex, false, args.fontApi);
-    const detailedWalkMs = performance.now() - tDetailed;
+    const measuredDetailedWalkMs = performance.now() - tDetailed;
+    const detailedWalkMs =
+        args.preWalkedDetailed !== undefined
+            ? (args.preWalkedDetailedMs ?? 0)
+            : measuredDetailedWalkMs;
 
     const tFontBridge = performance.now();
     const pagesForFilter = pagesForFilterWithBridgedFonts(
