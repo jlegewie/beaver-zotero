@@ -862,12 +862,16 @@ export class MarginFilter {
                     const values = oneCandidatePerPage.map((p) => p.value);
                     if (!isIncreasingSequence(values)) continue;
 
-                    const matchedPageIndices = new Set(
-                        oneCandidatePerPage.map((p) => p.el.pageIndex),
-                    );
+                    // Only the proven sequence entries (one per page,
+                    // the lowest value in this y-bucket) are recorded
+                    // for removal. Iterating `bucketElements` here
+                    // would mark every page-number-like line in the
+                    // 10pt y-bucket on each matched page, including
+                    // unrelated table / list / body numerics, and
+                    // `filterPageWithSmartRemoval` would then drop
+                    // them by exact bbox.
                     const seenTexts = new Set<string>();
-                    for (const { el } of bucketElements) {
-                        if (!matchedPageIndices.has(el.pageIndex)) continue;
+                    for (const { el } of oneCandidatePerPage) {
                         const normalized = normalizeText(el.text);
 
                         if (!seenTexts.has(normalized)) {
