@@ -30,19 +30,79 @@ import {
 } from "./extractionOverlay";
 
 /**
- * Convert MuPDF Rect (top-left origin, x/y/w/h) to Zotero rect format
- * (bottom-left origin, [x1, y1, x2, y2]).
+ * Convert a MuPDF Rect (top-left origin, x/y/w/h, in MuPDF's getBounds
+ * frame — which equals PDF.js's display orientation since MuPDF applies
+ * `/Rotate` to its bounds and walked text) to a Zotero annotation rect
+ * (bottom-left origin, `[x1, y1, x2, y2]`, in **unrotated PDF coord
+ * space** — what PDF.js's annotation system expects).
+ *
+ * For non-rotated pages MuPDF frame == unrotated PDF coord, and the
+ * function only flips y. For `/Rotate 90/180/270` pages the function
+ * also remaps from MuPDF's display frame back to the unrotated PDF
+ * coord that PDF.js uses for `position.rects` — without this remap,
+ * PDF.js applies its own rotation transform on top of MuPDF's already-
+ * rotated output and the highlight lands rotated 90° from the text.
+ *
+ * `pdfWidth` / `pdfHeight` are the **unrotated** PDF page dims (PDF.js
+ * `_pageInfo.view`). For 90/270 these differ from the MuPDF frame dims
+ * (which are swapped because of the rotation).
+ *
+ * Geometry derivation (PDF /Rotate is CW degrees needed for upright
+ * display, top-left↔bottom-right diagonal of each rotated rect mapped
+ * via the four-corner rotation matrices):
+ *
+ *   /Rotate 0:   PDF (Px, Py_BL) = (Mx + vx, pdfHeight - My - h)
+ *   /Rotate 90:  PDF (Px, Py_BL) = (My,                  Mx)
+ *                                  swapped: PDF rect spans My..My+h in x,
+ *                                  Mx..Mx+w in y
+ *   /Rotate 180: PDF (Px, Py_BL) = (pdfWidth - Mx - w,   pdfHeight - My - h)
+ *                                  rect dims unchanged, mirrored both axes
+ *   /Rotate 270: PDF (Px, Py_BL) = (pdfHeight - My - h,  pdfWidth - Mx - w)
+ *                                  swapped + mirrored
+ *
+ * `viewBoxLL` is added back to the PDF coord after the rotation so
+ * pages with non-zero CropBox offsets still align.
  */
 function rectToZoteroFormat(
     rect: Rect,
-    pageHeight: number,
+    pdfWidth: number,
+    pdfHeight: number,
+    rotation: number,
     viewBoxLL: [number, number] = [0, 0],
 ): number[] {
     const [vx, vy] = viewBoxLL;
-    const x1 = rect.x + vx;
-    const x2 = rect.x + rect.w + vx;
-    const y1 = pageHeight - (rect.y + rect.h) + vy;
-    const y2 = pageHeight - rect.y + vy;
+    const norm = ((rotation % 360) + 360) % 360;
+    let x1: number;
+    let y1: number;
+    let x2: number;
+    let y2: number;
+    switch (norm) {
+        case 90:
+            x1 = rect.y + vx;
+            x2 = rect.y + rect.h + vx;
+            y1 = rect.x + vy;
+            y2 = rect.x + rect.w + vy;
+            break;
+        case 180:
+            x1 = pdfWidth - (rect.x + rect.w) + vx;
+            x2 = pdfWidth - rect.x + vx;
+            y1 = pdfHeight - (rect.y + rect.h) + vy;
+            y2 = pdfHeight - rect.y + vy;
+            break;
+        case 270:
+            x1 = pdfHeight - (rect.y + rect.h) + vx;
+            x2 = pdfHeight - rect.y + vx;
+            y1 = pdfWidth - (rect.x + rect.w) + vy;
+            y2 = pdfWidth - rect.x + vy;
+            break;
+        case 0:
+        default:
+            x1 = rect.x + vx;
+            x2 = rect.x + rect.w + vx;
+            y1 = pdfHeight - (rect.y + rect.h) + vy;
+            y2 = pdfHeight - rect.y + vy;
+            break;
+    }
     return [x1, y1, x2, y2];
 }
 
@@ -88,16 +148,24 @@ export async function resolveActiveReaderContext(): Promise<
  * and push them into the reader. Sentences get one annotation per group
  * (multiple rects per annotation), so multi-line sentences render as one
  * coherent highlight; everything else is one annotation per rect.
+ *
+ * `pdfWidth` / `pdfHeight` / `rotation` come from PDF.js's
+ * `_pageInfo.view` / `.rotate` (resolved upstream via
+ * `getPageViewportInfo`). They drive the MuPDF-frame → unrotated PDF
+ * coord transform for `/Rotate 90/180/270` pages — see
+ * `rectToZoteroFormat` for the geometry derivation.
  */
 async function pushOverlayToReader(
     overlay: OverlayResult,
     reader: ZoteroReader,
     viewBoxLL: [number, number],
+    pdfWidth: number,
+    pdfHeight: number,
+    rotation: number,
 ): Promise<ZoteroItemReference[]> {
     if (overlay.rects.length === 0) return [];
 
     const libraryId = (reader as any)._item.libraryID;
-    const pageHeight = overlay.pageHeight;
     const pageIndex = overlay.pageIndex;
 
     // Group rects by their `group` index so multi-rect sentences become a
@@ -116,7 +184,7 @@ async function pushOverlayToReader(
     for (const [groupIdx, groupRects] of groups.entries()) {
         const head = groupRects[0];
         const zoteroRects = groupRects.map((r) =>
-            rectToZoteroFormat(r.rect, pageHeight, viewBoxLL),
+            rectToZoteroFormat(r.rect, pdfWidth, pdfHeight, rotation, viewBoxLL),
         );
         // Sort index uses the topmost rect so the annotations sidebar
         // roughly matches reading order.
@@ -248,8 +316,15 @@ export async function visualizeCurrentPageColumns(): Promise<{
             };
         }
 
-        const { viewBox } = await getPageViewportInfo(reader, pageIndex);
-        const refs = await pushOverlayToReader(overlay, reader, [viewBox[0], viewBox[1]]);
+        const { viewBox, width, height, rotation } = await getPageViewportInfo(reader, pageIndex);
+        const refs = await pushOverlayToReader(
+            overlay,
+            reader,
+            [viewBox[0], viewBox[1]],
+            width,
+            height,
+            rotation,
+        );
         BeaverTemporaryAnnotations.addToTracking(refs);
 
         const message = `Page ${pageIndex + 1}: ${overlay.groupCount} column(s) detected`;
@@ -291,8 +366,15 @@ export async function visualizeCurrentPageLines(): Promise<{
             };
         }
 
-        const { viewBox } = await getPageViewportInfo(reader, pageIndex);
-        const refs = await pushOverlayToReader(overlay, reader, [viewBox[0], viewBox[1]]);
+        const { viewBox, width, height, rotation } = await getPageViewportInfo(reader, pageIndex);
+        const refs = await pushOverlayToReader(
+            overlay,
+            reader,
+            [viewBox[0], viewBox[1]],
+            width,
+            height,
+            rotation,
+        );
         BeaverTemporaryAnnotations.addToTracking(refs);
 
         const lineCount = Number(overlay.stats.lines ?? 0);
@@ -342,8 +424,15 @@ export async function visualizeCurrentPageParagraphs(): Promise<{
             };
         }
 
-        const { viewBox } = await getPageViewportInfo(reader, pageIndex);
-        const refs = await pushOverlayToReader(overlay, reader, [viewBox[0], viewBox[1]]);
+        const { viewBox, width, height, rotation } = await getPageViewportInfo(reader, pageIndex);
+        const refs = await pushOverlayToReader(
+            overlay,
+            reader,
+            [viewBox[0], viewBox[1]],
+            width,
+            height,
+            rotation,
+        );
         BeaverTemporaryAnnotations.addToTracking(refs);
 
         const paragraphs = Number(overlay.stats.paragraphs ?? 0);
@@ -393,11 +482,15 @@ export async function visualizeCurrentPageSentences(): Promise<{
             };
         }
 
-        const { viewBox } = await getPageViewportInfo(reader, pageIndex);
-        const refs = await pushOverlayToReader(overlay, reader, [
-            viewBox[0],
-            viewBox[1],
-        ]);
+        const { viewBox, width, height, rotation } = await getPageViewportInfo(reader, pageIndex);
+        const refs = await pushOverlayToReader(
+            overlay,
+            reader,
+            [viewBox[0], viewBox[1]],
+            width,
+            height,
+            rotation,
+        );
         BeaverTemporaryAnnotations.addToTracking(refs);
 
         const sentences = Number(overlay.stats.sentences ?? 0);
