@@ -88,7 +88,7 @@ import {
     resolvePageRangeOrThrow,
     searchPageInDoc,
 } from "./docHelpers";
-import type { DocumentLike } from "./mupdfApi";
+import type { DocumentLike, FontApi } from "./mupdfApi";
 
 export interface OpReply<T = unknown> {
     result: T;
@@ -125,6 +125,7 @@ export async function opGetMetadata(
 export async function opExtractRawPageDetailed(
     args: { pdfData: Uint8Array | ArrayBuffer; pageIndex: number; includeImages?: boolean },
 ): Promise<OpReply<RawPageDataDetailed>> {
+    const api = await ensureApi();
     const doc = await acquireDoc(args.pdfData);
     try {
         const pageCount = doc.countPages();
@@ -138,7 +139,12 @@ export async function opExtractRawPageDetailed(
                 `Page index ${args.pageIndex} out of range (0..${pageCount - 1})`,
             );
         }
-        const result = extractRawPageDetailedFromDoc(doc, args.pageIndex, !!args.includeImages);
+        const result = extractRawPageDetailedFromDoc(
+            doc,
+            args.pageIndex,
+            !!args.includeImages,
+            api.Font,
+        );
         return { result };
     } finally {
         releaseDoc(doc);
@@ -201,6 +207,13 @@ export async function opRenderPages(
  * Caller resolves `analysisIndices` (typically via `resolveAnalysisPages`)
  * and supplies the document's total `pageCount` (so
  * `getEffectiveRepeatThreshold` can apply the short-doc relaxation).
+ *
+ * `preWalked` lets the structured branch reuse target-page detailed
+ * walks (which carry every field a JSON walk produces — line bbox,
+ * font, page dims — with the WASM font helpers wired up). Indices in
+ * the map are NOT re-walked; everything else gets a JSON walk as
+ * before. This is what eliminates the redundant per-target JSON walk
+ * for structured mode when `analysisWindow=0`.
  */
 function buildAnalysisFromDoc(
     doc: DocumentLike,
@@ -208,6 +221,7 @@ function buildAnalysisFromDoc(
     requestedRepeatThreshold: number | undefined,
     analysisIndices: number[],
     pageCount: number,
+    preWalked?: Map<number, RawPageData>,
 ): {
     analysisPages: RawPageData[];
     analysisPageByIndex: Map<number, RawPageData>;
@@ -218,8 +232,8 @@ function buildAnalysisFromDoc(
     analysisMs: number;
 } {
     const tWalkStart = performance.now();
-    const analysisPages: RawPageData[] = analysisIndices.map((i) =>
-        extractRawPageFromDoc(doc, i),
+    const analysisPages: RawPageData[] = analysisIndices.map(
+        (i) => preWalked?.get(i) ?? extractRawPageFromDoc(doc, i),
     );
     const analysisPageByIndex = new Map<number, RawPageData>(
         analysisPages.map((p) => [p.pageIndex, p]),
@@ -354,8 +368,46 @@ export function runExtractFromIndices(
     engine: "block" | "paragraph" | "structured",
     paragraphSettings?: ParagraphDetectionSettings,
     splitter?: SentenceSplitter,
+    fontApi?: FontApi,
 ): ExtractionResult {
     const tStart = performance.now();
+
+    // Structured mode pre-walks every target in detailed mode FIRST so
+    // the analysis-window step can reuse those walks instead of
+    // duplicating them with a JSON walk. Markdown engines don't need
+    // per-char data so they skip this and go straight to the JSON walk
+    // inside `buildAnalysisFromDoc`.
+    //
+    // The detailed walk carries every field a JSON walk produces (line
+    // bbox, font family/weight/style/size — the WASM `_wasm_font_*`
+    // helpers populate the line font directly, so no separate
+    // `RawFontBridge` pass is needed for the target page). Once both
+    // walks become substitutable, target pages incur exactly one walk
+    // even when they also live in the analysis window (the
+    // `analysisWindow=0` default).
+    let preWalkedTargets: Map<number, RawPageData> | undefined;
+    let preWalkedDetailedTargets: Map<number, RawPageDataDetailed> | undefined;
+    let preWalkMs = 0;
+    if (engine === "structured") {
+        if (!fontApi) {
+            throw new Error(
+                "runExtractFromIndices: engine='structured' requires a `fontApi` argument so the detailed walker can populate line fonts",
+            );
+        }
+        const tPreWalk = performance.now();
+        preWalkedDetailedTargets = new Map<number, RawPageDataDetailed>();
+        preWalkedTargets = new Map<number, RawPageData>();
+        for (const i of targetIndices) {
+            const detailed = extractRawPageDetailedFromDoc(doc, i, false, fontApi);
+            preWalkedDetailedTargets.set(i, detailed);
+            // `RawPageDataDetailed` is structurally a `RawPageData`
+            // (readonly arrays make blocks/lines covariant). Reusing
+            // the same object keeps `pagesForFilterWithBridgedFonts`
+            // a no-op for the target page later on.
+            preWalkedTargets.set(i, detailed as unknown as RawPageData);
+        }
+        preWalkMs = performance.now() - tPreWalk;
+    }
 
     // Walk the analysis union once; targets are guaranteed to be in it
     // (resolveAnalysisPages always includes them), so the output loop
@@ -368,7 +420,7 @@ export function runExtractFromIndices(
         styleProfile,
         marginAnalysis,
         marginRemoval,
-        walkMs,
+        walkMs: jsonWalkMs,
         analysisMs,
     } = buildAnalysisFromDoc(
         doc,
@@ -376,7 +428,13 @@ export function runExtractFromIndices(
         requestedRepeatThreshold,
         analysisIndices,
         pageCount,
+        preWalkedTargets,
     );
+    // Fold the structured prewalk into the same `walkMs` counter the
+    // markdown engines use. Profilers and the `timings` envelope see a
+    // single "walk" total, regardless of whether the work was done as
+    // a detailed pre-walk or a JSON walk inside `buildAnalysisFromDoc`.
+    const walkMs = jsonWalkMs + preWalkMs;
 
     const pages: ProcessedPage[] = [];
     const perPageMs: number[] = [];
@@ -452,6 +510,10 @@ export function runExtractFromIndices(
                     styleProfile,
                     margins: opts.margins,
                     marginZone: opts.marginZone,
+                    // Reuse the detailed walk done before
+                    // `buildAnalysisFromDoc` so we don't pay a second
+                    // walk per target page.
+                    preWalkedDetailed: preWalkedDetailedTargets!.get(i),
                 });
             logColumnDetection(rawPage.pageIndex, filteredResult.columnResult);
             pages.push({
@@ -666,6 +728,10 @@ export async function opExtract(
                   args.structured?.splitterConfig ?? { type: "sentencex" },
               )
             : undefined;
+        // Structured mode needs the WASM `Font` helpers to populate
+        // line fonts during the detailed walk (the JSON walk used to
+        // cover this — we now skip it for target pages).
+        const fontApi = isStructured ? (await ensureApi()).Font : undefined;
 
         const result = runExtractFromIndices(
             doc,
@@ -678,6 +744,7 @@ export async function opExtract(
             engine,
             args.paragraphSettings,
             splitter,
+            fontApi,
         );
         // `runExtractFromIndices` measures the phases it owns; `docOpenMs`
         // and the op-level `totalMs` (which includes the OCR check) are

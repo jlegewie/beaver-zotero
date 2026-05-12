@@ -65,7 +65,8 @@ import type {
     StyleProfile,
 } from "../types";
 import { extractRawPageDetailedFromDoc, extractRawPageFromDoc } from "./docHelpers";
-import type { DocumentLike } from "./mupdfApi";
+import type { DocumentLike, FontApi } from "./mupdfApi";
+import { ensureApi } from "./wasmInit";
 import { resolveSplitter } from "./splitterResolver";
 
 /**
@@ -83,7 +84,8 @@ export function extractSentencesForPage(args: {
     doc: DocumentLike;
     pageIndex: number;
     /**
-     * JSON-walked analysis pages (must include the target page).
+     * Analysis pages covering the target page (may be the detailed
+     * page itself when the caller pre-walked it — see `preWalkedDetailed`).
      * Shared across loop iterations in the multi-page caller.
      */
     analysisPages: RawPageData[];
@@ -101,17 +103,29 @@ export function extractSentencesForPage(args: {
     /** Caller-supplied extraction margins. Match the markdown branch. */
     margins: MarginSettings;
     marginZone: MarginSettings;
+    /**
+     * Optional pre-walked detailed page for `pageIndex`. Lets the
+     * multi-page structured caller walk the target once (in
+     * `runExtractFromIndices`) and reuse it both as the analysis-window
+     * entry AND the input to the sentence mapper, eliminating the
+     * redundant per-target JSON walk.
+     */
+    preWalkedDetailed?: RawPageDataDetailed;
+    /**
+     * Font accessors for the WASM detailed walker. Required when
+     * `preWalkedDetailed` is omitted — otherwise lines come out with
+     * empty fonts and downstream heading detection silently degrades.
+     */
+    fontApi?: FontApi;
 }): {
     sentenceResult: PageSentenceBBoxResult;
     filteredResult: FilteredParagraphResult;
     phaseTimings: StructuredPagePhaseTimings;
 } {
     const tDetailed = performance.now();
-    const detailed = extractRawPageDetailedFromDoc(
-        args.doc,
-        args.pageIndex,
-        false,
-    );
+    const detailed =
+        args.preWalkedDetailed ??
+        extractRawPageDetailedFromDoc(args.doc, args.pageIndex, false, args.fontApi);
     const detailedWalkMs = performance.now() - tDetailed;
 
     const tFontBridge = performance.now();
@@ -239,9 +253,11 @@ export async function runSentenceExtractionFromDoc(
         splitterConfig ?? { type: "sentencex" },
     );
 
+    const { Font: fontApi } = await ensureApi();
+
     // Detailed target page (per-character quads + bbox identity for the
     // mapper). Walked once and substituted into the analysis window.
-    const detailed = extractRawPageDetailedFromDoc(doc, pageIndex, false);
+    const detailed = extractRawPageDetailedFromDoc(doc, pageIndex, false, fontApi);
 
     // Analysis window for cross-page smart margin removal + style profile.
     const analysisPageIndices = resolveAnalysisPages({

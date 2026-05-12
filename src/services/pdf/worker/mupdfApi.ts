@@ -56,6 +56,9 @@ export interface LibMuPdf {
     _wasm_stext_char_get_quad(ptr: number): number;
     _wasm_stext_char_get_argb(ptr: number): number;
     _wasm_stext_char_get_next(ptr: number): number;
+    _wasm_font_get_name(ptr: number): number;
+    _wasm_font_is_bold(ptr: number): number;
+    _wasm_font_is_italic(ptr: number): number;
     _wasm_search_page(page: number, needle: number, marks: number, hits: number, max: number): number;
     _wasm_new_pixmap_from_page(page: number, matrix: number, cs: number, alpha: number): number;
     _wasm_new_pixmap_from_page_contents(page: number, matrix: number, cs: number, alpha: number): number;
@@ -158,10 +161,23 @@ export interface ColorSpacePalette {
     DeviceCMYK: ColorSpaceLike;
 }
 
+/**
+ * Direct accessors over a font pointer produced by the structured-text
+ * walker. The walker passes `fontPtr` (a wasm pointer) to its `onChar`
+ * callback; consumers that want family/weight/style without parsing the
+ * full JSON serializer use these wrappers.
+ */
+export interface FontApi {
+    getName(fontPtr: number): string;
+    isBold(fontPtr: number): boolean;
+    isItalic(fontPtr: number): boolean;
+}
+
 export interface MuPDFApi {
     Document: DocumentStaticApi;
     Matrix: MatrixApi;
     ColorSpace: ColorSpacePalette;
+    Font: FontApi;
 }
 
 /**
@@ -549,9 +565,27 @@ export function makeDocumentApi(libmupdf: LibMuPdf): MuPDFApi {
         }
     }
 
+    const Font: FontApi = {
+        getName(fontPtr: number): string {
+            if (!fontPtr) return "";
+            const namePtr = libmupdf._wasm_font_get_name(fontPtr);
+            if (!namePtr) return "";
+            return fromString(namePtr);
+        },
+        isBold(fontPtr: number): boolean {
+            if (!fontPtr) return false;
+            return libmupdf._wasm_font_is_bold(fontPtr) !== 0;
+        },
+        isItalic(fontPtr: number): boolean {
+            if (!fontPtr) return false;
+            return libmupdf._wasm_font_is_italic(fontPtr) !== 0;
+        },
+    };
+
     return {
         Document: { openDocument: Document.openDocument.bind(Document) },
         Matrix,
         ColorSpace,
+        Font,
     };
 }
