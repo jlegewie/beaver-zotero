@@ -1056,8 +1056,17 @@ export async function handleTestPdfExtractTraceHttpRequest(request: any) {
     const targetPageRemovals =
         smartRemoval.removalsByPage.get(pageIndex) ?? new Set<string>();
     const targetPageOffMarginPageNumbers =
-        smartRemoval.offMarginPageNumberRemovals.get(pageIndex)
-        ?? new Set<string>();
+        smartRemoval.offMarginPageNumberRemovals.get(pageIndex) ?? [];
+    // Floating-point bbox match for the trace's off-margin verdict.
+    // Mirrors the production-side tolerance in MarginFilter so the
+    // trace reflects what filterPageWithSmartRemoval actually drops.
+    const BBOX_EQ_TOL_PT = 1.5;
+    const bboxApproxEq = (a: { x: number; y: number; w: number; h: number },
+                         b: { x: number; y: number; w: number; h: number }): boolean =>
+        Math.abs(a.x - b.x) <= BBOX_EQ_TOL_PT
+        && Math.abs(a.y - b.y) <= BBOX_EQ_TOL_PT
+        && Math.abs(a.w - b.w) <= BBOX_EQ_TOL_PT
+        && Math.abs(a.h - b.h) <= BBOX_EQ_TOL_PT;
     // Body styles drive the simple-margin spare — keeping `keptBySimple`
     // honest with the production pipeline (`MarginFilter
     // .filterPageWithSmartRemoval` now spares body-styled lines from the
@@ -1124,12 +1133,16 @@ export async function handleTestPdfExtractTraceHttpRequest(request: any) {
                 || StyleAnalyzer.looksLikeBodyContent(line, traceBodyStyles);
             // Smart-removal verdict: in-zone removals follow the
             // existing rule; off-margin page-number removals bypass the
-            // zone gate so the trace reflects production behavior
-            // (production drops them regardless of margin zone).
+            // zone gate but match the EXACT bbox the detector
+            // identified (production-side rule), so a body line that
+            // happens to share the page-number text on the same page
+            // is not falsely marked as removed.
             const inZoneRemoval = inSmartZone && targetPageRemovals.has(normalized)
                 ? reasonByText.get(normalized) ?? 'repeat'
                 : null;
-            const offMarginRemoval = targetPageOffMarginPageNumbers.has(normalized)
+            const offMarginRemoval = targetPageOffMarginPageNumbers.some(
+                (entry) => entry.text === normalized && bboxApproxEq(entry.bbox, line.bbox),
+            )
                 ? ('page_number' as const)
                 : null;
             const smartReason = inZoneRemoval ?? offMarginRemoval;

@@ -183,6 +183,15 @@ export function detectFilteredParagraphs(
         marginZone,
         marginRemoval,
         styleProfile.bodyStyles,
+        // Forward the rotation so the off-margin page-number bbox
+        // check can transform stored (raw frame) bboxes into the
+        // current working frame; without this, the bbox-match path
+        // misses page-number drops on rotated pages.
+        {
+            rotation: pageRotation,
+            sourceWidth: rotated.sourceWidth,
+            sourceHeight: rotated.sourceHeight,
+        },
     );
 
     const columnResult = detectColumns(filteredPage, {

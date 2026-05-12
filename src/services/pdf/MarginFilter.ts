@@ -14,12 +14,14 @@ import type {
     MarginPosition,
     MarginElement,
     MarginAnalysis,
+    OffMarginPageNumberLine,
     RemovalCandidate,
     MarginRemovalResult,
     TextStyle,
 } from "./types";
 import { pdfLog } from "./logging";
 import { StyleAnalyzer } from "./StyleAnalyzer";
+import { rotateBBox, type RotationAngle } from "./PageRotationNormalizer";
 
 // ============================================================================
 // Page Number Detection — multilingual prefixes, anchored parser
@@ -311,6 +313,29 @@ function normalizeText(text: string): string {
     return text.trim().toLowerCase();
 }
 
+/**
+ * Floating-point bbox equality used by the off-margin page-number drop
+ * to match a detected line back to its bbox at filter time. 1.5pt
+ * absorbs the JSON-walker / detailed-walker drift: the structured
+ * extract path runs cross-page margin analysis on JSON-walk pages
+ * (int-truncated bboxes) but the per-page filter sees the detailed
+ * walk's float bboxes for the target page, so the same physical line
+ * has up to ~1pt of per-coordinate drift between the two frames.
+ * Mirrors `RawFontBridge.Y_TOLERANCE_PT` (which absorbs the same
+ * drift). Line spacing in body text is typically 9–12pt — well
+ * outside 1.5pt — so the only bboxes that match are the same physical
+ * line the analysis identified.
+ */
+const BBOX_EQ_TOL_PT = 1.5;
+function bboxesApproxEqual(a: RawBBox, b: RawBBox): boolean {
+    return (
+        Math.abs(a.x - b.x) <= BBOX_EQ_TOL_PT
+        && Math.abs(a.y - b.y) <= BBOX_EQ_TOL_PT
+        && Math.abs(a.w - b.w) <= BBOX_EQ_TOL_PT
+        && Math.abs(a.h - b.h) <= BBOX_EQ_TOL_PT
+    );
+}
+
 // ============================================================================
 // Effective repeat-threshold helper
 // ============================================================================
@@ -559,7 +584,7 @@ export class MarginFilter {
         const candidates: RemovalCandidate[] = [];
         const textsToRemove = new Set<string>();
         const removalsByPage = new Map<number, Set<string>>();
-        const offMarginPageNumberRemovals = new Map<number, Set<string>>();
+        const offMarginPageNumberRemovals = new Map<number, OffMarginPageNumberLine[]>();
 
         // Process each margin position
         for (const [position, elements] of analysis.elements) {
@@ -858,10 +883,19 @@ export class MarginFilter {
 
                         textsToRemove.add(normalized);
 
-                        if (!offMarginPageNumberRemovals.has(el.pageIndex)) {
-                            offMarginPageNumberRemovals.set(el.pageIndex, new Set());
+                        // Track the exact bbox of each matched line so
+                        // `filterPageWithSmartRemoval` drops only that
+                        // specific line — text-only matching would also
+                        // remove body / table / list lines on the same
+                        // page that happen to share the page number
+                        // (e.g. a standalone numbered item "12" on a
+                        // page whose page number is also "12").
+                        let entries = offMarginPageNumberRemovals.get(el.pageIndex);
+                        if (!entries) {
+                            entries = [];
+                            offMarginPageNumberRemovals.set(el.pageIndex, entries);
                         }
-                        offMarginPageNumberRemovals.get(el.pageIndex)!.add(normalized);
+                        entries.push({ text: normalized, bbox: el.bbox });
                     }
 
                     if (process.env.NODE_ENV === "development") {
@@ -886,17 +920,44 @@ export class MarginFilter {
      * `bodyStyles` (optional) spares the simple-margin drop for lines whose
      * font matches a document body style, so tight-margin layouts
      * keep body text packed near the page edge.
+     *
+     * `pageFrame` (optional) carries the per-target-page rotation the
+     * pipeline applied before calling this filter. Off-margin
+     * page-number bboxes are stored in the analysis (raw) frame; when
+     * the target page was rotated, the stored bbox must be transformed
+     * into the current working frame before the bbox-equality check —
+     * otherwise the detected page-number line on a rotated page (e.g.
+     * a full-page rotated figure) won't match and the page number
+     * leaks back into output. Default `{ rotation: 0 }` leaves the
+     * bbox untouched (identity transform).
      */
     static filterPageWithSmartRemoval(
         page: RawPageData,
         margins: MarginSettings,
         marginZone: MarginSettings,
         removalResult: MarginRemovalResult,
-        bodyStyles?: TextStyle[]
+        bodyStyles?: TextStyle[],
+        pageFrame?: { rotation: RotationAngle; sourceWidth: number; sourceHeight: number },
     ): RawPageData {
         const pageRemovals = removalResult.removalsByPage.get(page.pageIndex);
         const offMarginPageNumbers =
             removalResult.offMarginPageNumberRemovals.get(page.pageIndex);
+        // Transform stored bboxes from the analysis (raw) frame to the
+        // current working frame ONCE per call. Identity transform when
+        // rotation is 0 or no frame is supplied.
+        const offMarginEntriesInFrame =
+            offMarginPageNumbers && offMarginPageNumbers.length > 0
+                && pageFrame && pageFrame.rotation !== 0
+                ? offMarginPageNumbers.map((e) => ({
+                    text: e.text,
+                    bbox: rotateBBox(
+                        e.bbox,
+                        pageFrame.rotation,
+                        pageFrame.sourceWidth,
+                        pageFrame.sourceHeight,
+                    ),
+                }))
+                : offMarginPageNumbers;
 
         const filteredBlocks = page.blocks.map(block => {
             if (block.type !== "text" || !block.lines) {
@@ -933,15 +994,23 @@ export class MarginFilter {
                     }
                 }
 
-                // Off-margin page-number drops bypass the zone gate.
-                // These texts were identified by a cross-page monotone
-                // sequence at a tight y cluster, which is already a
-                // strong enough signal — the zone gate is what missed
-                // them upstream.
-                if (offMarginPageNumbers && offMarginPageNumbers.size > 0) {
+                // Off-margin page-number drops bypass the zone gate
+                // but keep a line-level location check: a line is
+                // dropped only when **both** its normalized text AND
+                // its bbox (within a small floating-point tolerance)
+                // match an entry tracked by the cross-page monotone
+                // detector. Without the bbox check, a body / table /
+                // list line that happens to share the page number's
+                // text would also be dropped.
+                if (offMarginEntriesInFrame && offMarginEntriesInFrame.length > 0) {
                     const normalized = normalizeText(line.text || "");
-                    if (offMarginPageNumbers.has(normalized)) {
-                        return false;
+                    for (const entry of offMarginEntriesInFrame) {
+                        if (
+                            entry.text === normalized
+                            && bboxesApproxEqual(entry.bbox, line.bbox)
+                        ) {
+                            return false;
+                        }
                     }
                 }
 

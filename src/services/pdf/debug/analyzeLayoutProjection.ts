@@ -29,7 +29,13 @@ export interface AnalyzeLayoutWire {
         margin_removal: {
             candidates: LayoutAnalysisResult["analysis"]["marginRemoval"]["candidates"];
             removalsByPage: Record<string, string[]>;
-            offMarginPageNumberRemovals: Record<string, string[]>;
+            offMarginPageNumberRemovals: Record<
+                string,
+                Array<{
+                    text: string;
+                    bbox: { x: number; y: number; w: number; h: number };
+                }>
+            >;
             textsToRemove: string[];
         };
     };
@@ -51,9 +57,15 @@ export function projectAnalyzeLayout(
     for (const [pageIdx, texts] of result.analysis.marginRemoval.removalsByPage) {
         removalsByPage[String(pageIdx)] = Array.from(texts);
     }
-    const offMarginPageNumberRemovals: Record<string, string[]> = {};
-    for (const [pageIdx, texts] of result.analysis.marginRemoval.offMarginPageNumberRemovals) {
-        offMarginPageNumberRemovals[String(pageIdx)] = Array.from(texts);
+    const offMarginPageNumberRemovals: Record<
+        string,
+        Array<{ text: string; bbox: { x: number; y: number; w: number; h: number } }>
+    > = {};
+    for (const [pageIdx, entries] of result.analysis.marginRemoval.offMarginPageNumberRemovals) {
+        offMarginPageNumberRemovals[String(pageIdx)] = entries.map((e) => ({
+            text: e.text,
+            bbox: { x: e.bbox.x, y: e.bbox.y, w: e.bbox.w, h: e.bbox.h },
+        }));
     }
     const textsToRemove = Array.from(result.analysis.marginRemoval.textsToRemove);
 

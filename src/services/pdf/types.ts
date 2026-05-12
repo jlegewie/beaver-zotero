@@ -381,16 +381,32 @@ export interface MarginRemovalResult {
     /** Map of pageIndex -> set of texts to remove on that page */
     removalsByPage: Map<number, Set<string>>;
     /**
-     * Off-margin page-number removals, keyed by pageIndex. The per-page
-     * smart-removal filter drops these matches **regardless of margin
-     * zone position** — the cross-page monotone sequence + tight y
-     * cluster used to identify them is a strong enough signal that the
-     * margin-zone gate is not needed. Empty when no off-margin page
-     * sequence was detected. Kept separate from `removalsByPage` so the
-     * standard in-zone path (which protects matching body text outside
-     * the zone) stays untouched.
+     * Off-margin page-number removals, keyed by pageIndex. Each entry
+     * is the exact `{ text, bbox }` of a line the cross-page monotone
+     * sequence detector matched at a tight y cluster. The per-page
+     * smart-removal filter drops a line only when **both** its
+     * normalized text AND its bbox (within a small floating-point
+     * tolerance) match an entry here — this prevents a body / table /
+     * list line that happens to share the page number's text (e.g. a
+     * standalone numbered list item "12" on a page whose page number
+     * is also "12") from being dropped. The zone gate is bypassed,
+     * but the line-level location check stays. Empty when no
+     * off-margin page sequence was detected. Kept separate from
+     * `removalsByPage` so the standard in-zone path stays untouched.
      */
-    offMarginPageNumberRemovals: Map<number, Set<string>>;
+    offMarginPageNumberRemovals: Map<number, OffMarginPageNumberLine[]>;
+}
+
+/**
+ * A line matched by off-margin page-number sequence detection. Carries
+ * the exact bbox so `filterPageWithSmartRemoval` can drop only that
+ * specific line, not other same-text lines elsewhere on the page.
+ */
+export interface OffMarginPageNumberLine {
+    /** Normalized (trim + lowercase) text — same shape `textsToRemove` uses. */
+    text: string;
+    /** Exact bbox of the detected line in the analysis frame. */
+    bbox: RawBBox;
 }
 
 // ============================================================================

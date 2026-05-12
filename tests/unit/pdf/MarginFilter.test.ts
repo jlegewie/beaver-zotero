@@ -716,8 +716,13 @@ describe("off-margin page-number sequence — natural-footer layout", () => {
 
         // Off-margin removals populated per-page (so the per-page
         // filter can drop them without consulting the margin zone).
-        expect(out.offMarginPageNumberRemovals.get(0)?.has("1199")).toBe(true);
-        expect(out.offMarginPageNumberRemovals.get(4)?.has("1203")).toBe(true);
+        // Each entry carries both the normalized text AND the exact
+        // bbox so the filter's location check has the data it needs.
+        const p0Entries = out.offMarginPageNumberRemovals.get(0) ?? [];
+        const p4Entries = out.offMarginPageNumberRemovals.get(4) ?? [];
+        expect(p0Entries.some((e) => e.text === "1199")).toBe(true);
+        expect(p0Entries[0]).toMatchObject({ text: "1199", bbox: { y: 620 } });
+        expect(p4Entries.some((e) => e.text === "1203")).toBe(true);
 
         // textsToRemove tracks them for debug visibility too.
         expect(out.textsToRemove.has("1199")).toBe(true);
@@ -795,7 +800,8 @@ describe("off-margin page-number sequence — natural-footer layout", () => {
         // Sequence pass picks them up and writes the per-page removal map.
         const removal = MarginFilter.identifyElementsToRemove(analysis, 3, true);
         for (let p = 0; p < 4; p++) {
-            expect(removal.offMarginPageNumberRemovals.get(p)?.has(String(1199 + p)))
+            const entries = removal.offMarginPageNumberRemovals.get(p) ?? [];
+            expect(entries.some((e) => e.text === String(1199 + p)))
                 .toBe(true);
         }
     });
@@ -821,7 +827,10 @@ describe("off-margin page-number sequence — natural-footer layout", () => {
             ],
             textsToRemove: new Set(["1228"]),
             removalsByPage: new Map(),
-            offMarginPageNumberRemovals: new Map([[0, new Set(["1228"])]]),
+            offMarginPageNumberRemovals: new Map([[
+                0,
+                [{ text: "1228", bbox: pageNumberLine.bbox }],
+            ]]),
         };
 
         const filtered = MarginFilter.filterPageWithSmartRemoval(
@@ -835,6 +844,188 @@ describe("off-margin page-number sequence — natural-footer layout", () => {
             .map((L) => L.text);
         expect(remainingTexts).toContain("body content");
         expect(remainingTexts).not.toContain("1228");
+    });
+
+    it("does NOT drop a body line that happens to share the page-number text (different bbox)", () => {
+        // Regression for the bbox-keyed off-margin drop: a page whose
+        // detected page number is "12" (footer at y=620) ALSO contains
+        // a body line "12" at y=300 — e.g. a standalone numbered list
+        // item. The detector matched only the footer line; the filter
+        // must keep the body line because its bbox doesn't match.
+        const footerPageNumber = makeStyledLine("12", 100, 620, 14, "T", 10);
+        const bodyListItem = makeStyledLine("12", 60, 300, 14, "T", 10);
+        const otherBody = makeStyledLine("normal paragraph", 60, 350, 200, "T", 10);
+        const page = makePageWithLines([bodyListItem, otherBody, footerPageNumber]);
+        const margins = { left: 25, top: 40, right: 25, bottom: 40 };
+        const zone = { left: 60, top: 80, right: 60, bottom: 80 };
+
+        const removal: MarginRemovalResult = {
+            candidates: [],
+            textsToRemove: new Set(["12"]),
+            removalsByPage: new Map(),
+            // Detector only matched the footer bbox.
+            offMarginPageNumberRemovals: new Map([[
+                0,
+                [{ text: "12", bbox: footerPageNumber.bbox }],
+            ]]),
+        };
+
+        const filtered = MarginFilter.filterPageWithSmartRemoval(
+            page,
+            margins,
+            zone,
+            removal,
+        );
+        const remainingLines = filtered.blocks
+            .flatMap((b) => (b.type === "text" ? b.lines ?? [] : []))
+            .map((L) => ({ text: L.text, y: L.bbox.y }));
+        // Body list-item "12" at y=300 stays, body paragraph stays.
+        expect(remainingLines).toEqual(expect.arrayContaining([
+            { text: "12", y: 300 },
+            { text: "normal paragraph", y: 350 },
+        ]));
+        // Footer "12" at y=620 is the only "12" dropped.
+        expect(remainingLines).not.toContainEqual({ text: "12", y: 620 });
+    });
+
+    it("rotates the stored bbox into the working frame before bbox match", () => {
+        // Page with rotation=90 (e.g. landscape figure body). The
+        // off-margin detector stored the page-number bbox in the raw
+        // (pre-rotation) frame. At filter time the page lines are in
+        // the rotated working frame, so the stored bbox must be
+        // rotation-transformed before comparison — otherwise rotated
+        // pages never get the page-number drop.
+        //
+        // Raw frame: page 600x400, footer page number "12" at
+        //   (536, 210, 14, 10). The codebase rotation convention for
+        //   rotation=90 is `(x, y) → (y, sourceWidth - x)` — i.e. 90°
+        //   CCW — so the upright (working) bbox lands at
+        //   (210, 50, 10, 14). The filter receives the rotated page +
+        //   the rotation parameters; it must transform the stored
+        //   bbox to find the rotated line.
+        const sourceWidth = 600;
+        const sourceHeight = 400;
+        const rawFooterBbox = { x: 536, y: 210, w: 14, h: 10 };
+        const rotatedFooterBbox = { x: 210, y: 50, w: 10, h: 14 };
+        const footerLine: RawLine = {
+            wmode: 0,
+            bbox: rotatedFooterBbox,
+            font: { name: "T", family: "T", weight: "normal", style: "normal", size: 10 },
+            x: rotatedFooterBbox.x,
+            y: rotatedFooterBbox.y,
+            text: "12",
+        };
+        const block: RawBlock = {
+            type: "text",
+            bbox: { x: 0, y: 0, w: 400, h: 600 },
+            lines: [footerLine],
+        };
+        const rotatedPage: RawPageData = {
+            pageIndex: 0,
+            pageNumber: 1,
+            width: 400, // swapped
+            height: 600, // swapped
+            blocks: [block],
+        };
+
+        const margins = { left: 25, top: 40, right: 25, bottom: 40 };
+        const zone = { left: 60, top: 80, right: 60, bottom: 80 };
+        const removal: MarginRemovalResult = {
+            candidates: [],
+            textsToRemove: new Set(["12"]),
+            removalsByPage: new Map(),
+            offMarginPageNumberRemovals: new Map([[
+                0,
+                [{ text: "12", bbox: rawFooterBbox }],
+            ]]),
+        };
+
+        // Without rotation context, no drop (bbox doesn't match).
+        const noFrame = MarginFilter.filterPageWithSmartRemoval(
+            rotatedPage, margins, zone, removal,
+        );
+        expect(
+            noFrame.blocks.flatMap((b) => (b.type === "text" ? b.lines ?? [] : []))
+                .map((L) => L.text),
+        ).toContain("12");
+
+        // With rotation context, the filter rotates the stored bbox
+        // and matches → drops "12".
+        const withFrame = MarginFilter.filterPageWithSmartRemoval(
+            rotatedPage,
+            margins,
+            zone,
+            removal,
+            undefined,
+            { rotation: 90, sourceWidth, sourceHeight },
+        );
+        const survivingLines = withFrame.blocks
+            .flatMap((b) => (b.type === "text" ? b.lines ?? [] : []));
+        expect(survivingLines.map((L) => L.text)).not.toContain("12");
+    });
+
+    it("absorbs JSON-walker / detailed-walker bbox drift when matching off-margin entries", () => {
+        // The bbox tolerance must absorb the drift between the two
+        // MuPDF walks: cross-page margin analysis runs on the
+        // JSON-walked pages (int-truncated bboxes — e.g. (367, 619, 20, 10))
+        // while the structured target page is replaced with detailed-
+        // walk float bboxes (e.g. (367.71, 619.84, 20.0, 10.93)).
+        // Without the tolerance the stored bbox would never match the
+        // filter-time bbox and the off-margin drop would no-op.
+        const footerLine = makeStyledLine("12", 367.71, 619.84, 20, "T", 10);
+        // Detailed walker reports h~10.93 (vs makeStyledLine's h=9
+        // default). Adjust to a realistic value.
+        footerLine.bbox.h = 10.93;
+        const page = makePageWithLines([footerLine]);
+        const margins = { left: 25, top: 40, right: 25, bottom: 40 };
+        const zone = { left: 60, top: 80, right: 60, bottom: 80 };
+
+        // Stored bbox as JSON-walker would emit (Math.floor of each).
+        const jsonBbox = { x: 367, y: 619, w: 20, h: 10 };
+        const removal: MarginRemovalResult = {
+            candidates: [],
+            textsToRemove: new Set(["12"]),
+            removalsByPage: new Map(),
+            offMarginPageNumberRemovals: new Map([[
+                0,
+                [{ text: "12", bbox: jsonBbox }],
+            ]]),
+        };
+
+        const filtered = MarginFilter.filterPageWithSmartRemoval(
+            page, margins, zone, removal,
+        );
+        const remaining = filtered.blocks
+            .flatMap((b) => (b.type === "text" ? b.lines ?? [] : []))
+            .map((L) => L.text);
+        expect(remaining).not.toContain("12");
+    });
+
+    it("rejects bbox drift well beyond walker drift (3+ pt off)", () => {
+        // Sanity gate: drift larger than typical walker noise (3pt)
+        // should NOT match. This is the safety property that protects
+        // unrelated body-text lines from off-margin drops.
+        const bodyLine = makeStyledLine("12", 100, 620, 14, "T", 10);
+        const page = makePageWithLines([bodyLine]);
+        const margins = { left: 25, top: 40, right: 25, bottom: 40 };
+        const zone = { left: 60, top: 80, right: 60, bottom: 80 };
+        const farBbox = { x: 100, y: 620 + 3.5, w: 14, h: 9 };
+        const removal: MarginRemovalResult = {
+            candidates: [],
+            textsToRemove: new Set(["12"]),
+            removalsByPage: new Map(),
+            offMarginPageNumberRemovals: new Map([[
+                0,
+                [{ text: "12", bbox: farBbox }],
+            ]]),
+        };
+        const filtered = MarginFilter.filterPageWithSmartRemoval(
+            page, margins, zone, removal,
+        );
+        const remaining = filtered.blocks
+            .flatMap((b) => (b.type === "text" ? b.lines ?? [] : []))
+            .map((L) => L.text);
+        expect(remaining).toContain("12");
     });
 });
 

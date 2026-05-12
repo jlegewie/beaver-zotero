@@ -466,7 +466,15 @@ export function buildMarginsOverlayFromAnalysis(
     let keptInZoneCount = 0;
     const pageRemovals = removal.removalsByPage.get(pageIndex) ?? new Set();
     const offMarginPageNumbers =
-        removal.offMarginPageNumberRemovals.get(pageIndex) ?? new Set();
+        removal.offMarginPageNumberRemovals.get(pageIndex) ?? [];
+    // Same floating-point tolerance the production filter uses.
+    const BBOX_EQ_TOL_PT = 1.5;
+    const bboxApproxEq = (a: { x: number; y: number; w: number; h: number },
+                          b: { x: number; y: number; w: number; h: number }): boolean =>
+        Math.abs(a.x - b.x) <= BBOX_EQ_TOL_PT
+        && Math.abs(a.y - b.y) <= BBOX_EQ_TOL_PT
+        && Math.abs(a.w - b.w) <= BBOX_EQ_TOL_PT
+        && Math.abs(a.h - b.h) <= BBOX_EQ_TOL_PT;
 
     const reasonByText = new Map<string, "page_number" | "repeat">();
     for (const c of removal.candidates) {
@@ -488,7 +496,10 @@ export function buildMarginsOverlayFromAnalysis(
             );
             const normalized = trimmed.toLowerCase();
             const isOffMarginPageNumber = !zonePosition
-                && offMarginPageNumbers.has(normalized);
+                && offMarginPageNumbers.some(
+                    (entry) => entry.text === normalized
+                        && bboxApproxEq(entry.bbox, line.bbox),
+                );
             if (!zonePosition && !isOffMarginPageNumber) continue;
 
             const reason = reasonByText.get(normalized);
