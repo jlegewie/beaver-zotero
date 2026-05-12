@@ -297,12 +297,17 @@ async function executeCreateItemAction(
         // Checkpoint: abort before starting item creation
         checkAborted(ctx, 'create_item:before_apply');
 
-        // Create the item using the existing utility function
+        // Create the item using the existing utility function.
+        // Forward action/run/thread IDs so the background PDF fetch task can
+        // emit `attachment_resolved` back to the right thread on completion.
         const result: CreateItemResultData = await ta.track('apply_ms', () =>
             applyCreateItemData(proposedData, {
                 libraryId: library_id,
                 skipUrlTranslation: true,
                 timing: ta,
+                actionId: request.action_id,
+                runId: request.run_id,
+                threadId: request.thread_id,
             })
         );
 

@@ -1069,6 +1069,12 @@ export interface WSAgentActionExecuteRequest extends WSBaseEvent {
     action_data: Record<string, any>;
     /** Timeout in seconds for the frontend to complete execution (default: 25 seconds) */
     timeout_seconds?: number;
+    /** Agent action ID */
+    action_id?: string;
+    /** Run ID */
+    run_id?: string;
+    /** Thread ID */
+    thread_id?: string;
 }
 
 /** Response to agent action execution request */
