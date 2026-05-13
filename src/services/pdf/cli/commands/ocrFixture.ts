@@ -20,10 +20,12 @@ import type { CliDeps } from "../runCliTypes";
 import { emitFailure, emitSuccess, parsePositiveFloat } from "./_sharedHelpers";
 import { loadJsonFile } from "../options";
 import {
+    PRIVATE_FIXTURE_DIR_ENV,
     PUBLIC_FIXTURE_ROOT_REL,
     ensureSharedPdf,
     ensureSourcePdfLink,
     readSharedPdf,
+    resolvePrivateFixtureRoot,
     sharedPdfPath,
 } from "../fixture/fixtureFile";
 import {
@@ -54,7 +56,18 @@ const DEFAULT_ISSUE_RATIO_TOL = 0.02;
 const DEFAULT_TEXT_LENGTH_TOL = 5;
 
 function resolveDefaultRoot(): string {
+    // When $BEAVER_EXTRACT_FIXTURES_DIR is set, that's the user's working
+    // corpus — default to it. Otherwise fall back to the in-tree public
+    // corpus for safety.
+    const envRoot = process.env[PRIVATE_FIXTURE_DIR_ENV]?.trim();
+    if (envRoot && envRoot.length > 0) {
+        return resolvePrivateFixtureRoot(process.cwd());
+    }
     return resolvePath(process.cwd(), PUBLIC_FIXTURE_ROOT_REL);
+}
+
+function defaultRootHelp(): string {
+    return `corpus root (default: $${PRIVATE_FIXTURE_DIR_ENV} if set, else ${PUBLIC_FIXTURE_ROOT_REL})`;
 }
 
 // ---------------------------------------------------------------------------
@@ -103,7 +116,7 @@ function buildCaptureCommand(deps: CliDeps): Command {
         )
         .option(
             "--root <dir>",
-            `corpus root (default: ${PUBLIC_FIXTURE_ROOT_REL})`,
+            defaultRootHelp(),
         )
         .option(
             "--update",
@@ -257,7 +270,7 @@ function buildEvaluateCommand(deps: CliDeps): Command {
         .argument("<id>", "fixture id (folder name)")
         .option(
             "--root <dir>",
-            `corpus root (default: ${PUBLIC_FIXTURE_ROOT_REL})`,
+            defaultRootHelp(),
         )
         .option(
             "--issue-ratio-tolerance <n>",
@@ -365,7 +378,7 @@ function buildUpdateCommand(deps: CliDeps): Command {
         .argument("<id>", "fixture id (folder name)")
         .option(
             "--root <dir>",
-            `corpus root (default: ${PUBLIC_FIXTURE_ROOT_REL})`,
+            defaultRootHelp(),
         )
         .option("--notes <text>", "replace the stored notes field")
         .option("--clear-notes", "remove the stored notes field")
@@ -447,7 +460,7 @@ function buildListCommand(deps: CliDeps): Command {
     cmd.description("List OCR fixture ids under a corpus root.")
         .option(
             "--root <dir>",
-            `corpus root (default: ${PUBLIC_FIXTURE_ROOT_REL})`,
+            defaultRootHelp(),
         )
         .option("--json", "emit a structured JSON envelope")
         .option("--pretty", "pretty-print JSON output (only with --json)")

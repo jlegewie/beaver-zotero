@@ -221,9 +221,16 @@ ms fields so you can chart timing vs. page complexity offline.
 
 ## Configuration
 
-| Env var                    | Default                              | Purpose                              |
-| -------------------------- | ------------------------------------ | ------------------------------------ |
-| `BEAVER_EXTRACT_WASM_DIR`  | `<repo>/addon/content/lib`           | Override WASM file directory.        |
+| Env var                           | Default                              | Purpose                                                                                                                  |
+| --------------------------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| `BEAVER_EXTRACT_WASM_DIR`         | `<repo>/addon/content/lib`           | Override WASM file directory.                                                                                            |
+| `BEAVER_EXTRACT_FIXTURES_DIR`     | `tests/fixtures/pdfs/extract` (legacy) | Absolute path to the private fixtures checkout (`beaver-extract-fixtures`). When set, `fixture`/`ocr-fixture` default `--root` to it, and the smoke tier + bench script load fixtures from there. |
+
+Both the CLI (`src/services/pdf/cli/main.ts`) and the smoke vitest config
+preload `.env` via `dotenv/config`, so setting `BEAVER_EXTRACT_FIXTURES_DIR`
+(or `BEAVER_EXTRACT_WASM_DIR`) in the repo's `.env` is enough — no shell
+export needed. The in-process CLI test seam (`runCli`) skips this so tests
+drive env explicitly.
 
 ### Logging
 
@@ -249,12 +256,24 @@ and trace lines stay out of pipe-friendly output.
 Regression fixtures for the structured-mode extract pipeline live in two
 parallel corpus roots:
 
-- `tests/fixtures/pdfs/extract-public/` — committed, redistributable.
-  Required for CI; missing or invalid fixtures fail the smoke tier.
-- `tests/fixtures/pdfs/extract/` — gitignored, larger private/local corpus.
+- `tests/fixtures/pdfs/extract-public/` (inside `beaver-zotero`) — committed,
+  redistributable. Required for CI; missing or invalid fixtures fail the
+  smoke tier.
+- The private corpus, hosted in the separate `beaver-extract-fixtures`
+  repo. Point at your local checkout by exporting
+  `BEAVER_EXTRACT_FIXTURES_DIR=/absolute/path/to/beaver-extract-fixtures`.
+  When unset, the CLI falls back to the legacy in-tree path
+  `tests/fixtures/pdfs/extract/`.
 
-The default `--root` for every `fixture` subcommand is the public corpus.
-Pass `--root tests/fixtures/pdfs/extract` to target the private one.
+`--root` resolution per command invocation:
+
+- Explicit `--root <dir>` always wins.
+- When `BEAVER_EXTRACT_FIXTURES_DIR` is set, the default `--root` is the
+  private corpus — so `fixture capture`/`update` writes there with no
+  extra flags. Pass `--root tests/fixtures/pdfs/extract-public` to target
+  the public corpus.
+- When the env var is unset, the default `--root` is the public corpus
+  for safety.
 
 ### Subcommands
 
@@ -309,7 +328,8 @@ the same corpus roots and share `_shared/<sha>.pdf`; they're
 distinguished by file name (`fixture.json` vs `ocr.json`).
 
 ```bash
-# Capture (default --root is the public corpus).
+# Capture (default --root follows $BEAVER_EXTRACT_FIXTURES_DIR if set,
+# otherwise falls back to the public corpus).
 npm run beaver-extract -- ocr-fixture capture paper.pdf --id paperKey
 
 # Capture a false-positive case with a human-readable note.

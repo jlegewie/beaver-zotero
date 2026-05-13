@@ -3,7 +3,9 @@
  *
  * Two corpus roots:
  *   - `extract-public/` — committed, redistributable. Required for CI.
- *   - `extract/`        — gitignored, private. Best-effort.
+ *   - private corpus    — resolved from `$BEAVER_EXTRACT_FIXTURES_DIR`
+ *                         (falls back to the legacy in-tree
+ *                         `tests/fixtures/pdfs/extract/`). Best-effort.
  *
  * Schema validation runs at load time so a malformed fixture fails fast
  * with a path-prefixed error rather than a deep-compare crash inside the
@@ -13,8 +15,8 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import {
-    PRIVATE_FIXTURE_ROOT_REL,
     PUBLIC_FIXTURE_ROOT_REL,
+    resolvePrivateFixtureRoot,
     sharedPdfPath,
 } from "../../src/services/pdf/cli/fixture/fixtureFile";
 import {
@@ -29,7 +31,7 @@ export function publicRoot(): string {
 }
 
 export function privateRoot(): string {
-    return resolve(REPO_ROOT, PRIVATE_FIXTURE_ROOT_REL);
+    return resolvePrivateFixtureRoot(REPO_ROOT);
 }
 
 export type FixtureScope = "public" | "private";

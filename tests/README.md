@@ -249,7 +249,7 @@ Integration tests exercise full pipelines. Same prerequisites as live tests plus
 
 ### BeaverExtract regression fixtures
 
-`tests/smoke/extractFixtures.smoke.test.ts` runs every fixture under `tests/fixtures/pdfs/extract-public/` (committed) and `tests/fixtures/pdfs/extract/` (gitignored, larger private corpus) through the structured-mode extract pipeline and diffs against the captured `expected` snapshot.
+`tests/smoke/extractFixtures.smoke.test.ts` runs every fixture under `tests/fixtures/pdfs/extract-public/` (committed) plus the private corpus pointed at by `$BEAVER_EXTRACT_FIXTURES_DIR` (the separate `beaver-extract-fixtures` repo; falls back to the legacy in-tree `tests/fixtures/pdfs/extract/` when the env var is unset). Each fixture re-runs the structured-mode extract pipeline and diffs against the captured `expected` snapshot.
 
 Capture, evaluate, and rebaseline via the `beaver-extract` CLI:
 

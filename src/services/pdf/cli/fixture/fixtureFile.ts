@@ -25,15 +25,38 @@ import {
     writeFileSync,
     writeFileSync as writeFileSyncPlain,
 } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 import { pdfSha256 } from "../io";
 import { validateFixture, type CapturedFixture } from "./fixtureSchema";
 
 /** Path to the canonical public corpus root, relative to the repo root. */
 export const PUBLIC_FIXTURE_ROOT_REL = "tests/fixtures/pdfs/extract-public" as const;
-/** Path to the canonical (gitignored) private corpus root. */
+/**
+ * Legacy in-tree path for the private (gitignored) corpus. New checkouts
+ * point at an external repo via `BEAVER_EXTRACT_FIXTURES_DIR`; this path is
+ * the fallback used when the env var is unset, for back-compat with
+ * setups that still keep fixtures under the repo.
+ */
 export const PRIVATE_FIXTURE_ROOT_REL = "tests/fixtures/pdfs/extract" as const;
+/** Name of the env var that points at the private fixtures checkout. */
+export const PRIVATE_FIXTURE_DIR_ENV = "BEAVER_EXTRACT_FIXTURES_DIR" as const;
+
+/**
+ * Resolve the private fixtures root. Order:
+ *   1. `$BEAVER_EXTRACT_FIXTURES_DIR` (absolute, or relative to `baseDir`).
+ *   2. `<baseDir>/tests/fixtures/pdfs/extract` (legacy in-tree path).
+ *
+ * `baseDir` is `process.cwd()` for CLI callers and the repo root for test
+ * loaders. The result is always absolute.
+ */
+export function resolvePrivateFixtureRoot(baseDir: string): string {
+    const env = process.env[PRIVATE_FIXTURE_DIR_ENV]?.trim();
+    if (env && env.length > 0) {
+        return isAbsolute(env) ? env : resolve(baseDir, env);
+    }
+    return resolve(baseDir, PRIVATE_FIXTURE_ROOT_REL);
+}
 
 export interface FixtureLocation {
     root: string;

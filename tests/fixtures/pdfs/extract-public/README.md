@@ -2,8 +2,10 @@
 
 Small, redistributable PDFs and their captured `ExtractionSnapshot` outputs.
 This corpus runs in CI; missing or invalid fixtures here fail the smoke tier.
-The companion gitignored corpus at `tests/fixtures/pdfs/extract/` carries
-larger / private fixtures.
+The companion private corpus lives in the separate `beaver-extract-fixtures`
+repo and is loaded via `$BEAVER_EXTRACT_FIXTURES_DIR` (the CLI and smoke
+tier fall back to the legacy in-tree `tests/fixtures/pdfs/extract/` when
+the env var is unset).
 
 Every PDF and its captured text snapshot in this directory must be
 redistributable. Snapshots embed extracted text from the PDF, so the text
