@@ -26,6 +26,7 @@ import {
 import { buildPageAnalysisContext } from "./PageAnalysisContext";
 import {
     detectDominantTextOrientation,
+    rotateBBox,
     rotateRawPage,
     type RotationAngle,
 } from "./PageRotationNormalizer";
@@ -229,12 +230,26 @@ export function detectFilteredParagraphs(
     );
     const marginFilterMs = performance.now() - tMarginFilter;
 
+    // Frame rule: `ctx.fillBoundaries` come from the page content
+    // stream in raw MuPDF coordinates, but `filteredPage` (and its
+    // text bboxes) are in the upright working frame. Apply the same
+    // rotation to the fill rects so `ColumnDetector`'s zone guard
+    // compares text and fill rects in the same coordinate frame. On
+    // unrotated pages this is a no-op (rotateBBox short-circuits when
+    // `rotation === 0`).
+    const fillBoundaries =
+        ctx.fillBoundaries && ctx.fillBoundaries.length > 0
+            ? ctx.fillBoundaries.map((b) =>
+                  rotateBBox(b, pageRotation, rotated.sourceWidth, rotated.sourceHeight),
+              )
+            : ctx.fillBoundaries;
+
     const tColumnDetect = performance.now();
     const columnResult = detectColumns(filteredPage, {
         headerMargin: margins.top,
         footerMargin: margins.bottom,
         bodyStyles: styleProfile.bodyStyles,
-        fillBoundaries: ctx.fillBoundaries,
+        fillBoundaries,
     });
     const columnDetectMs = performance.now() - tColumnDetect;
 

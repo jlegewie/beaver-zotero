@@ -236,7 +236,7 @@ function invertPoint(
     }
 }
 
-function rotateBBox(
+export function rotateBBox(
     bbox: RawBBox,
     rotation: RotationAngle,
     sourceWidth: number,
