@@ -161,9 +161,19 @@ export interface FillRect {
     /** Alpha (0-1) */
     alpha: number;
     /**
-     * Whether the path consists of one `moveto` + three `lineto` + optional
-     * `closepath` (no curves, no extra sub-paths). Catches the typical
-     * filled-rectangle shape used for asides / background boxes.
+     * Whether the path renders as an axis-aligned rectangle in PAGE
+     * space. Two conditions, both required: the path consists of one
+     * `moveto` + three `lineto` + optional `closepath` (no curves,
+     * no extra sub-paths), AND the four corner coordinates — after
+     * the path's CTM is applied — collapse to exactly two distinct
+     * x-values and two distinct y-values within FP tolerance.
+     *
+     * The second condition is what keeps `filterToContainerRects`
+     * from accepting diamonds, trapezoids, parallelograms, and
+     * 45°-rotated rectangles as zone containers — all of those share
+     * the M-L-L-L-Z shape but their corners do not line up on two
+     * axes, so their axis-aligned bounding box overestimates the
+     * fill's true visual footprint.
      */
     isAxisAlignedRect: boolean;
 }
@@ -484,10 +494,22 @@ function installCallbacks(libmupdf: LibMuPdf): void {
             }
             const colorspaceType = csPtr ? libmupdf._wasm_colorspace_get_type(csPtr) : 0;
 
-            // Axis-aligned rect detection: M-L-L-L(-Z) with no curves,
-            // and the lateral corners form a rectangle aligned with the
-            // CTM's basis vectors. Most filled aside boxes match.
-            const isAxisAlignedRect =
+            // Axis-aligned rect detection. The shape gate
+            // (M-L-L-L(-Z), no curves) is necessary but not
+            // sufficient — diamonds, trapezoids, and rotated
+            // rectangles all match the same segment sequence. We also
+            // need the four CTM-transformed corner points to form an
+            // axis-aligned rectangle in page space: exactly two
+            // distinct x-values and two distinct y-values (within FP
+            // tolerance). This is a single test that catches BOTH
+            // failure modes:
+            //   - non-rect polygons in path-local space (the corners
+            //     have 3+ distinct x-values or y-values),
+            //   - genuine path-local rects with rotating CTMs (the
+            //     transformed corners form a diamond in page space).
+            // Either case would inject a misleading "container" rect
+            // into ColumnDetector's fillBoundaries.
+            const shapeOk =
                 segs.length >= 4 &&
                 segs.length <= 5 &&
                 segs[0][0] === "M" &&
@@ -495,6 +517,33 @@ function installCallbacks(libmupdf: LibMuPdf): void {
                 segs[2][0] === "L" &&
                 segs[3][0] === "L" &&
                 (segs.length === 4 || segs[4][0] === "Z");
+            let isAxisAlignedRect = false;
+            if (shapeOk) {
+                // Read the 4 path-local corner coordinates and
+                // transform each through the CTM. We use the path's
+                // actual corners (not the bbox extremes used above)
+                // because a polygon's bbox-derived corners would
+                // always look axis-aligned in page space.
+                // Each non-Z seg here is exactly [code, x, y] (no
+                // curves — shapeOk excludes them).
+                const corners: Array<[number, number]> = [];
+                for (let si = 0; si < 4; si++) {
+                    const seg = segs[si];
+                    const sx = seg[1] as number;
+                    const sy = seg[2] as number;
+                    corners.push([a * sx + cc * sy + e, b * sx + d * sy + f]);
+                }
+                // Cluster into distinct x and y values with a small
+                // tolerance for FP noise from the CTM multiplication.
+                const TOL = 0.25;
+                const distinctX: number[] = [];
+                const distinctY: number[] = [];
+                for (const [x, y] of corners) {
+                    if (!distinctX.some((u) => Math.abs(u - x) <= TOL)) distinctX.push(x);
+                    if (!distinctY.some((v) => Math.abs(v - y) <= TOL)) distinctY.push(y);
+                }
+                isAxisAlignedRect = distinctX.length === 2 && distinctY.length === 2;
+            }
 
             c.fills.push({
                 bbox: [px0, py0, px1, py1],
