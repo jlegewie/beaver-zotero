@@ -853,10 +853,10 @@ export async function handleTestPdfRenderOverlayHttpRequest(request: any) {
  *     page_index: number,
  *     settings?: ExtractionSettings,     // top-level (matches analyze-layout / render-overlay).
  *                                        // Honored: margins, marginZone, repeatThreshold,
- *                                        // detectPageSequences. Ignored: checkTextLayer,
- *                                        // minTextPerPage (those gate the document at extract()
- *                                        // entry, before any single-page trace runs — silently
- *                                        // ignored here, not an error).
+ *                                        // detectPageSequences, graphicsLayerMode. Ignored:
+ *                                        // checkTextLayer, minTextPerPage (those gate the
+ *                                        // document at extract() entry, before any single-page
+ *                                        // trace runs — silently ignored here, not an error).
  *     options?: {
  *       splitter?: SentenceSplitterConfig,   // serializable config:
  *                                            //   { type: "sentencex", language? } | { type: "simple" }
@@ -954,7 +954,7 @@ export async function handleTestPdfExtractTraceHttpRequest(request: any) {
     const analysisWindow =
         opts.analysisWindow != null ? Number(opts.analysisWindow) : undefined;
 
-    // ExtractionSettings — only the four layout-related fields are forwarded.
+    // ExtractionSettings — only page-local extraction fields are forwarded.
     // checkTextLayer / minTextPerPage gate the document at extract() entry
     // and don't apply to a single-page trace; silently ignored.
     const settings =
@@ -964,6 +964,7 @@ export async function handleTestPdfExtractTraceHttpRequest(request: any) {
                   marginZone?: unknown;
                   repeatThreshold?: number;
                   detectPageSequences?: boolean;
+                  graphicsLayerMode?: 'auto' | 'on' | 'off';
               })
             : undefined;
     const customMargins = (settings?.margins ?? undefined) as
@@ -989,6 +990,7 @@ export async function handleTestPdfExtractTraceHttpRequest(request: any) {
                 marginZone: customMarginZone,
                 repeatThreshold: settings?.repeatThreshold,
                 detectPageSequences: settings?.detectPageSequences,
+                graphicsLayerMode: settings?.graphicsLayerMode,
             },
         );
         result = out.result;
