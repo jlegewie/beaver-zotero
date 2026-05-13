@@ -57,6 +57,7 @@ import type {
     SentenceBBoxTraceResult,
 } from "../sentenceTypes";
 import type {
+    GraphicsLayerMode,
     MarginRemovalResult,
     MarginSettings,
     RawPageData,
@@ -64,7 +65,13 @@ import type {
     StructuredPagePhaseTimings,
     StyleProfile,
 } from "../types";
-import { extractRawPageDetailedFromDoc, extractRawPageFromDoc } from "./docHelpers";
+import { shouldProbeGraphicsLayer } from "../types";
+import {
+    extractFilledRectsFromDoc,
+    extractRawPageDetailedFromDoc,
+    extractRawPageFromDoc,
+    filterToContainerRects,
+} from "./docHelpers";
 import type { DocumentLike, FontApi } from "./mupdfApi";
 import { ensureApi } from "./wasmInit";
 import { resolveSplitter } from "./splitterResolver";
@@ -103,6 +110,15 @@ export function extractSentencesForPage(args: {
     /** Caller-supplied extraction margins. Match the markdown branch. */
     margins: MarginSettings;
     marginZone: MarginSettings;
+    /**
+     * Whether to probe the PDF graphics layer for tinted display
+     * containers (`fill_path` events) on this page. See
+     * `GraphicsLayerMode` — `"off"` skips the per-page WASM→JS
+     * device walk entirely, restoring v0.20 per-page performance for
+     * callers that don't need fill-zone column detection.
+     * Default `"auto"` (matches `"on"` today).
+     */
+    graphicsLayerMode?: GraphicsLayerMode;
     /**
      * Optional pre-walked detailed page for `pageIndex`. Lets the
      * multi-page structured caller walk the target once (in
@@ -146,6 +162,21 @@ export function extractSentencesForPage(args: {
     );
     const fontBridgeMs = performance.now() - tFontBridge;
 
+    // Collect background-fill rectangles via the JS device (PDF content-
+    // stream walk). These mark tinted sidebars / callouts / "facts"
+    // boxes — `ColumnDetector` uses them as hard zone boundaries.
+    // Gated by `graphicsLayerMode`: `"off"` skips the WASM→JS device
+    // walk entirely, restoring v0.20 per-page performance. `"on"`
+    // and `"auto"` (and undefined for legacy callers) probe — see
+    // `shouldProbeGraphicsLayer` for the per-mode decision.
+    const fillBoundaries = shouldProbeGraphicsLayer(args.graphicsLayerMode)
+        ? filterToContainerRects(
+              extractFilledRectsFromDoc(args.doc, args.pageIndex),
+              detailed.width,
+              detailed.height,
+          )
+        : undefined;
+
     const tFiltered = performance.now();
     const filteredResult = detectFilteredParagraphs({
         pages: pagesForFilter,
@@ -155,6 +186,7 @@ export function extractSentencesForPage(args: {
         margins: args.margins,
         marginZone: args.marginZone,
         paragraphSettings: args.paragraphSettings,
+        fillBoundaries,
     });
     const filteredParagraphsMs = performance.now() - tFiltered;
 
@@ -233,6 +265,14 @@ interface BaseArgs {
      * Forwarded to `buildPageAnalysisContext`; defaults to `true` there.
      */
     detectPageSequences?: boolean;
+    /**
+     * Graphics-layer probe mode. See `GraphicsLayerMode`. `"off"`
+     * skips the per-page WASM→JS device walk; `"on"` and `"auto"`
+     * (default behavior, including undefined) probe. The debug
+     * single-page paths honour the same setting as production so
+     * trace output matches the corresponding `extract` call.
+     */
+    graphicsLayerMode?: GraphicsLayerMode;
 }
 
 export async function runSentenceExtractionFromDoc(
@@ -255,8 +295,10 @@ export async function runSentenceExtractionFromDoc(
         marginZone,
         repeatThreshold,
         detectPageSequences,
+        graphicsLayerMode,
         trace: wantTrace,
     } = args;
+    const probeGraphics = shouldProbeGraphicsLayer(graphicsLayerMode);
 
     // Resolve the splitter once per request (not per paragraph).
     const splitter: SentenceSplitter = await resolveSplitter(
@@ -300,6 +342,13 @@ export async function runSentenceExtractionFromDoc(
             repeatThreshold,
             detectPageSequences,
         });
+        const fillBoundaries = probeGraphics
+            ? filterToContainerRects(
+                  extractFilledRectsFromDoc(doc, pageIndex),
+                  detailed.width,
+                  detailed.height,
+              )
+            : undefined;
         const filtered = detectFilteredParagraphs({
             pages: pagesForFilter,
             pageIndex,
@@ -308,6 +357,7 @@ export async function runSentenceExtractionFromDoc(
             margins,
             marginZone,
             paragraphSettings,
+            fillBoundaries,
         });
         const result = extractPageSentenceBBoxes(detailed, {
             paragraphSettings,
@@ -334,6 +384,13 @@ export async function runSentenceExtractionFromDoc(
             repeatThreshold,
             detectPageSequences,
         });
+    const traceFillBoundaries = probeGraphics
+        ? filterToContainerRects(
+              extractFilledRectsFromDoc(doc, pageIndex),
+              detailed.width,
+              detailed.height,
+          )
+        : undefined;
     const filteredResult = detectFilteredParagraphs({
         pages: pagesForFilter,
         pageIndex,
@@ -342,6 +399,7 @@ export async function runSentenceExtractionFromDoc(
         margins,
         marginZone,
         paragraphSettings,
+        fillBoundaries: traceFillBoundaries,
     });
     const result = extractPageSentenceBBoxes(detailed, {
         paragraphSettings,

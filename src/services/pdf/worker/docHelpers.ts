@@ -21,6 +21,7 @@ import type {
 import type { RawPageProvider } from "../DocumentAnalyzer";
 import type {
     DocumentLike,
+    FillRect,
     FontApi,
     MuPDFApi,
     QuadTuple,
@@ -249,6 +250,155 @@ export function extractRawPageFromDoc(
     } finally {
         page.destroy();
     }
+}
+
+/**
+ * Run the page's content stream through a JS device and collect every
+ * filled drawing primitive. Returned bboxes are in PDF page coordinates
+ * (top-left origin, matching `RawBBox`).
+ *
+ * Used by column detection to find background-shaded display elements
+ * (tinted asides, callouts, "facts" boxes). Page load + device run +
+ * destroy happens in this single helper so callers don't need to
+ * manage the Page lifecycle.
+ *
+ * **Budget.** `maxFills` forwards to `Page.collectFilledRects`. Pages
+ * that emit more fill_path events than the budget are figures /
+ * illustrations / glyph-as-path renders, not pages with real display
+ * containers. The collector aborts mid-stream and the helper returns
+ * an empty array. Default 15 (see `DEFAULT_MAX_FILL_RECTS`). The
+ * abort path keeps chart-heavy pages cheap: subsequent device
+ * callbacks short-circuit to no-ops, so a page with 10k fill_path
+ * events pays only the wasm→JS bridge cost for those events, not the
+ * per-event path walk + bbox math.
+ *
+ * **Failure mode.** Any error from `loadPage` / `collectFilledRects` /
+ * `destroy` is caught and logged at info level; the helper returns an
+ * empty array. Fill-rect collection is purely advisory — the
+ * downstream `ColumnDetector` treats an empty list as "no zones, run
+ * legacy behavior". A corrupt PDF, an unusual encoder, or a test mock
+ * without the JS-device wiring therefore degrades gracefully to the
+ * pre-fill-rect column logic instead of failing the whole extract.
+ */
+export function extractFilledRectsFromDoc(
+    doc: DocumentLike,
+    pageIndex: number,
+    maxFills?: number,
+): FillRect[] {
+    let page;
+    try {
+        page = doc.loadPage(pageIndex);
+    } catch (err) {
+        postLog(
+            "info",
+            `extractFilledRectsFromDoc: loadPage ${pageIndex} failed: ${String(err)}`,
+        );
+        return [];
+    }
+    try {
+        return page.collectFilledRects(maxFills);
+    } catch (err) {
+        postLog(
+            "info",
+            `extractFilledRectsFromDoc: collectFilledRects ${pageIndex} failed: ${String(err)}`,
+        );
+        return [];
+    } finally {
+        try {
+            page.destroy();
+        } catch (_) {
+            // best-effort cleanup
+        }
+    }
+}
+
+/**
+ * Filter raw `FillRect` events down to bboxes suitable for use as
+ * column-detection boundaries.
+ *
+ * Goal: keep fills that look like a "container" for a group of text
+ * lines (tinted aside box, callout, sidebar) and drop everything else
+ * (page background, hairline rules, tiny graphics, glyph paths). The
+ * column detector treats each kept rect as a zone — text inside it must
+ * not merge with text outside.
+ *
+ * Filters (applied in order):
+ *   1. Drop fills with alpha ≤ 0 (invisible).
+ *   2. Drop fills whose bbox area is < `MIN_FILL_AREA` pt²
+ *      (default 30×30 = 900pt²) — skips icons, page-number underlines,
+ *      paragraph rules.
+ *   3. Drop fills that cover ≥ `MAX_PAGE_COVERAGE` of the page area
+ *      (default 90 %) — these are page backgrounds, not display
+ *      elements.
+ *   4. Drop fills that are pure white / near-white. Colorspace-aware:
+ *      - Gray (csType 1) / RGB (2, 3): max-component ≥ `WHITE_THRESHOLD`
+ *        (i.e., all components close to 1) is white.
+ *      - CMYK (4): all components ≤ `INK_THRESHOLD` is white.
+ *      - Separation (7) / DeviceN (8): all components ≤ `INK_THRESHOLD`
+ *        is no-ink (white). Separation with `color=[1]` is full
+ *        saturation of a typically-tinted plate, so this fires "kept".
+ *      - Unknown colorspaces: kept by default (let downstream decide).
+ *   5. Path shape — `isAxisAlignedRect` only. Curved or multi-subpath
+ *      filled shapes are typically logos / illustrations, not aside
+ *      boxes; the column detector wouldn't know what to do with their
+ *      bboxes anyway.
+ */
+export function filterToContainerRects(
+    fills: FillRect[],
+    pageWidth: number,
+    pageHeight: number,
+): RawBBox[] {
+    const MIN_FILL_AREA = 900; // 30pt × 30pt
+    const MAX_PAGE_COVERAGE = 0.9;
+    const WHITE_THRESHOLD = 0.97;
+    const INK_THRESHOLD = 0.03;
+
+    const pageArea = pageWidth * pageHeight;
+    const out: RawBBox[] = [];
+
+    for (const f of fills) {
+        if (f.alpha <= 0) continue;
+        if (!f.isAxisAlignedRect) continue;
+
+        const [x0, y0, x1, y1] = f.bbox;
+        const w = x1 - x0;
+        const h = y1 - y0;
+        if (w <= 0 || h <= 0) continue;
+        const area = w * h;
+        if (area < MIN_FILL_AREA) continue;
+        if (pageArea > 0 && area >= MAX_PAGE_COVERAGE * pageArea) continue;
+
+        // White / no-ink detection across colorspaces. Conservative —
+        // when in doubt, keep.
+        let isWhite = false;
+        switch (f.colorspaceType) {
+            case 1: // Gray
+            case 2: // RGB
+            case 3: // BGR
+                isWhite =
+                    f.color.length > 0 &&
+                    f.color.every((c) => c >= WHITE_THRESHOLD);
+                break;
+            case 4: // CMYK
+                isWhite =
+                    f.color.length > 0 &&
+                    f.color.every((c) => c <= INK_THRESHOLD);
+                break;
+            case 7: // Separation
+            case 8: // DeviceN
+                isWhite =
+                    f.color.length > 0 &&
+                    f.color.every((c) => c <= INK_THRESHOLD);
+                break;
+            default:
+                isWhite = false;
+        }
+        if (isWhite) continue;
+
+        out.push({ x: x0, y: y0, w, h });
+    }
+
+    return out;
 }
 
 /**

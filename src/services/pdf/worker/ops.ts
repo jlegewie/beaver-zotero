@@ -59,6 +59,7 @@ import {
     DEFAULT_MARGIN_ZONE,
     DEFAULT_PDF_SEARCH_OPTIONS,
     DEFAULT_SEARCH_SCORING_OPTIONS,
+    shouldProbeGraphicsLayer,
 } from "../types";
 import type {
     SentenceBBoxTraceResult,
@@ -79,8 +80,10 @@ import {
     DEFAULT_PAGE_IMAGE_OPTIONS,
     collectDocumentInfo,
     collectPageLabels,
+    extractFilledRectsFromDoc,
     extractRawPageDetailedFromDoc,
     extractRawPageFromDoc,
+    filterToContainerRects,
     rawPageProviderFromDoc,
     renderOnePage,
     resolveExplicitPageIndicesOrThrow,
@@ -456,9 +459,23 @@ export function runExtractFromIndices(
         // paragraphs separated by `\n\n`). `detectFilteredParagraphs` accepts
         // the precomputed `marginRemoval` and `styleProfile` so it skips
         // re-running cross-page analysis.
+        const probeGraphics = shouldProbeGraphicsLayer(opts.graphicsLayerMode);
         for (const i of targetIndices) {
             const tPage = performance.now();
             const rawPage = analysisPageByIndex.get(i)!;
+            // Gate the device walk on `graphicsLayerMode`. Skipping it
+            // when off avoids the WASM→JS bridge cost per drawing
+            // primitive (dominated by `fill_text` events on
+            // text-dense pages) — restores v0.20 paragraph-engine
+            // per-page performance for callers that don't need
+            // tinted-display-container detection.
+            const fillBoundaries = probeGraphics
+                ? filterToContainerRects(
+                      extractFilledRectsFromDoc(doc, rawPage.pageIndex),
+                      rawPage.width,
+                      rawPage.height,
+                  )
+                : undefined;
             const filtered = detectFilteredParagraphs({
                 pages: analysisPages,
                 pageIndex: rawPage.pageIndex,
@@ -467,6 +484,7 @@ export function runExtractFromIndices(
                 margins: opts.margins,
                 marginZone: opts.marginZone,
                 paragraphSettings,
+                fillBoundaries,
             });
             logColumnDetection(rawPage.pageIndex, filtered.columnResult);
             pages.push({
@@ -518,6 +536,7 @@ export function runExtractFromIndices(
                     styleProfile,
                     margins: opts.margins,
                     marginZone: opts.marginZone,
+                    graphicsLayerMode: opts.graphicsLayerMode,
                     // Reuse the detailed walk done before
                     // `buildAnalysisFromDoc` so we don't pay a second
                     // walk per target page.
@@ -1065,6 +1084,7 @@ export async function opExtractSentenceBBoxesDebug(
             marginZone: opts?.marginZone,
             repeatThreshold: opts?.repeatThreshold,
             detectPageSequences: opts?.detectPageSequences,
+            graphicsLayerMode: opts?.graphicsLayerMode,
             trace: true,
         });
         return { result: traceResult };

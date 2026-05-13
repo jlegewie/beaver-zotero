@@ -45,6 +45,26 @@ export const DEFAULT_MARGIN_ZONE: MarginSettings = {
     bottom: 80,
 };
 
+/**
+ * Controls whether column detection probes the PDF graphics layer
+ * (filled background rectangles for tinted asides / callouts) on each
+ * target page to refine column boundaries and reading order.
+ *
+ * - `"off"` — never probe. Cheapest. Matches pre-feature column
+ *   detection behavior. Pages with shaded display containers
+ *   (DDS69CQI pp. 33 / 36) revert to the legacy mixed-reading-order
+ *   output. Pick this on perf-sensitive extracts of corpora whose
+ *   layouts don't use background-color cues (most academic papers).
+ * - `"on"` — always probe. Pays a per-page cost on every target page
+ *   (the WASM→JS device walk fires one callback per drawing
+ *   primitive, dominated by `fill_text` events on text-dense pages).
+ *   Pick this on documents you know rely on graphical layout cues.
+ * - `"auto"` (default) — currently equivalent to `"on"`. Reserved
+ *   for a future smart-gate that decides per-page from a cheap
+ *   pixmap probe; until then, `"auto"` and `"on"` behave the same.
+ */
+export type GraphicsLayerMode = "off" | "on" | "auto";
+
 /** Options for text extraction. Page selection lives on the args object of the calling op (e.g. `extract(args.pageIndices | args.pageRange)`), not here. */
 export interface ExtractionSettings {
     /** Whether to check for text layer before processing */
@@ -59,6 +79,14 @@ export interface ExtractionSettings {
     repeatThreshold?: number;
     /** Whether to detect and remove page number sequences */
     detectPageSequences?: boolean;
+    /**
+     * Graphics-layer probe mode for column detection (see
+     * `GraphicsLayerMode`). Default `"auto"`. Set `"off"` to opt out
+     * of fill-rect detection entirely — useful when the per-page
+     * device-walk cost outweighs the benefit on a corpus that doesn't
+     * use tinted display containers.
+     */
+    graphicsLayerMode?: GraphicsLayerMode;
 }
 
 /** Default extraction settings */
@@ -69,7 +97,26 @@ export const DEFAULT_EXTRACTION_SETTINGS: Required<ExtractionSettings> = {
     marginZone: DEFAULT_MARGIN_ZONE,
     repeatThreshold: 3,
     detectPageSequences: true,
+    graphicsLayerMode: "off",
+    // graphicsLayerMode: "auto",
 };
+
+/**
+ * Resolve a `GraphicsLayerMode` to a boolean "probe the graphics
+ * layer for this page" decision. `"off"` returns false; `"on"`
+ * returns true; `"auto"` currently matches `"on"` (to preserve the
+ * column-detection improvements from the feature) but is reserved
+ * for a future smart-gate. Callers should consult this helper at
+ * every site that would otherwise invoke
+ * `extractFilledRectsFromDoc` — see worker/sentenceExtraction.ts
+ * and worker/ops.ts.
+ */
+export function shouldProbeGraphicsLayer(
+    mode: GraphicsLayerMode | undefined,
+): boolean {
+    if (mode === "off") return false;
+    return true;
+}
 
 // ============================================================================
 // Raw MuPDF Data Structures (from WASM JSON output)
