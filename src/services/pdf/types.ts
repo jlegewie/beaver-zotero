@@ -97,7 +97,8 @@ export const DEFAULT_EXTRACTION_SETTINGS: Required<ExtractionSettings> = {
     marginZone: DEFAULT_MARGIN_ZONE,
     repeatThreshold: 3,
     detectPageSequences: true,
-    graphicsLayerMode: "auto",
+    graphicsLayerMode: "off",
+    // graphicsLayerMode: "auto",
 };
 
 /**
