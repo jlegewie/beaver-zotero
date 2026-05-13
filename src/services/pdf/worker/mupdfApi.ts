@@ -85,6 +85,7 @@ export interface LibMuPdf {
     _wasm_new_js_device(): number;
     _wasm_run_page_contents(page: number, device: number, ctm: number, cookie: number): void;
     _wasm_walk_path(path: number): void;
+    _wasm_close_device(device: number): void;
     _wasm_drop_device(device: number): void;
     _wasm_colorspace_get_type(ptr: number): number;
     _wasm_colorspace_get_n(ptr: number): number;
@@ -889,6 +890,13 @@ export function makeDocumentApi(libmupdf: LibMuPdf): MuPDFApi {
             try {
                 libmupdf._wasm_run_page_contents(this.pointer, device, ctmPtr, 0);
             } finally {
+                // MuPDF emits "dropping unclosed device" to stderr if
+                // `close_device` is skipped before `drop_device`. The
+                // close callback flushes any buffered state in the
+                // device's vtable (no-op for our JS device — see the
+                // `close_device` stub in `installCallbacks`) and
+                // matches the lifecycle MuPDF expects.
+                libmupdf._wasm_close_device(device);
                 libmupdf._wasm_drop_device(device);
                 _activeFillCollector = null;
             }
