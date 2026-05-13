@@ -496,19 +496,21 @@ function installCallbacks(libmupdf: LibMuPdf): void {
 
             // Axis-aligned rect detection. The shape gate
             // (M-L-L-L(-Z), no curves) is necessary but not
-            // sufficient — diamonds, trapezoids, and rotated
-            // rectangles all match the same segment sequence. We also
-            // need the four CTM-transformed corner points to form an
-            // axis-aligned rectangle in page space: exactly two
-            // distinct x-values and two distinct y-values (within FP
-            // tolerance). This is a single test that catches BOTH
-            // failure modes:
-            //   - non-rect polygons in path-local space (the corners
-            //     have 3+ distinct x-values or y-values),
-            //   - genuine path-local rects with rotating CTMs (the
-            //     transformed corners form a diamond in page space).
-            // Either case would inject a misleading "container" rect
-            // into ColumnDetector's fillBoundaries.
+            // sufficient — diamonds, trapezoids, rotated rectangles,
+            // and triangles closed by a redundant lineto-to-start
+            // all match the same segment sequence. We also need the
+            // four CTM-transformed corner points to form a true
+            // rectangle in page space:
+            //   - exactly two distinct x-values and two distinct
+            //     y-values across the four corners (within FP
+            //     tolerance), AND
+            //   - all four corners are pairwise distinct (no two
+            //     coincide). This is what rejects the triangle case
+            //     `M(0,0) L(100,0) L(100,100) L(0,0)` where corner 0
+            //     and corner 3 coincide — distinct-x/y counts alone
+            //     can't tell that pattern apart from a real rect.
+            // Either failure mode would inject a misleading
+            // "container" rect into ColumnDetector's fillBoundaries.
             const shapeOk =
                 segs.length >= 4 &&
                 segs.length <= 5 &&
@@ -542,7 +544,24 @@ function installCallbacks(libmupdf: LibMuPdf): void {
                     if (!distinctX.some((u) => Math.abs(u - x) <= TOL)) distinctX.push(x);
                     if (!distinctY.some((v) => Math.abs(v - y) <= TOL)) distinctY.push(y);
                 }
-                isAxisAlignedRect = distinctX.length === 2 && distinctY.length === 2;
+                // Pairwise-distinct corners: a real rectangle visits
+                // each of its four corners exactly once.
+                let allCornersDistinct = true;
+                for (let i = 0; i < 4 && allCornersDistinct; i++) {
+                    for (let j = i + 1; j < 4; j++) {
+                        if (
+                            Math.abs(corners[i][0] - corners[j][0]) <= TOL &&
+                            Math.abs(corners[i][1] - corners[j][1]) <= TOL
+                        ) {
+                            allCornersDistinct = false;
+                            break;
+                        }
+                    }
+                }
+                isAxisAlignedRect =
+                    distinctX.length === 2 &&
+                    distinctY.length === 2 &&
+                    allCornersDistinct;
             }
 
             c.fills.push({
