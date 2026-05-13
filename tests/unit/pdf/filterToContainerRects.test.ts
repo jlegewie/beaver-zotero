@@ -10,9 +10,17 @@
  * inject spurious zone boundaries and split body text into too many
  * columns; missing a real aside fill leaves the merge guard inactive.
  */
-import { describe, it, expect } from 'vitest';
-import { filterToContainerRects } from '../../../src/services/pdf/worker/docHelpers';
-import type { FillRect } from '../../../src/services/pdf/worker/mupdfApi';
+import { describe, it, expect, vi } from 'vitest';
+import {
+    extractFilledRectsFromDoc,
+    filterToContainerRects,
+} from '../../../src/services/pdf/worker/docHelpers';
+import {
+    DEFAULT_MAX_FILL_RECTS,
+    type DocumentLike,
+    type FillRect,
+    type PageLike,
+} from '../../../src/services/pdf/worker/mupdfApi';
 
 function fill(overrides: Partial<FillRect>): FillRect {
     return {
@@ -139,5 +147,64 @@ describe('filterToContainerRects', () => {
         const b = fill({ bbox: [300, 50, 500, 200], color: [0.85] });
         const out = filterToContainerRects([a, b], PAGE_W, PAGE_H);
         expect(out).toHaveLength(2);
+    });
+});
+
+describe('extractFilledRectsFromDoc — fill-budget plumbing', () => {
+    // Verifies that `maxFills` reaches `Page.collectFilledRects` without
+    // mutation, and that the default budget is taken from the API
+    // module (one source of truth). The actual abort behavior lives
+    // inside the WASM-backed Page implementation and is covered by the
+    // live-PDF smoke run in the worktree's CLI test (page 0 of
+    // DDS69CQI emits 1223 fill_path events; default budget → 0
+    // returned, loose budget → 1223 returned).
+
+    function makeDoc(
+        captured: { lastArg?: number },
+        fills: FillRect[] = [],
+    ): DocumentLike {
+        const page: PageLike = {
+            pointer: 1,
+            getBounds: () => [0, 0, 612, 792],
+            getLabel: () => undefined,
+            toStructuredText: vi.fn(),
+            toPixmap: vi.fn(),
+            search: vi.fn(),
+            collectFilledRects: (maxFills?: number) => {
+                captured.lastArg = maxFills;
+                return fills;
+            },
+            destroy: () => {},
+        };
+        return {
+            pointer: 1,
+            needsPassword: () => false,
+            countPages: () => 1,
+            getMetadata: () => undefined,
+            loadPage: () => page,
+            destroy: () => {},
+        };
+    }
+
+    it('forwards an explicit maxFills argument to Page.collectFilledRects', () => {
+        const captured: { lastArg?: number } = {};
+        const doc = makeDoc(captured);
+        extractFilledRectsFromDoc(doc, 0, 25);
+        expect(captured.lastArg).toBe(25);
+    });
+
+    it('passes undefined when maxFills is omitted (Page picks DEFAULT_MAX_FILL_RECTS)', () => {
+        const captured: { lastArg?: number } = {};
+        const doc = makeDoc(captured);
+        extractFilledRectsFromDoc(doc, 0);
+        expect(captured.lastArg).toBeUndefined();
+    });
+
+    it('default budget is set to a generous content-page ceiling', () => {
+        // Sanity: changing this constant changes user-visible
+        // behavior on chart-heavy pages. The test pins the value so a
+        // refactor that swaps default to e.g. 1 is caught.
+        expect(DEFAULT_MAX_FILL_RECTS).toBeGreaterThanOrEqual(10);
+        expect(DEFAULT_MAX_FILL_RECTS).toBeLessThanOrEqual(200);
     });
 });

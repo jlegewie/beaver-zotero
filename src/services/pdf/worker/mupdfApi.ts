@@ -185,8 +185,20 @@ export interface PageLike {
      * Returned bboxes are in PDF page coordinates with the y-axis flipped
      * to match `RawBBox` (origin top-left, y grows downward). Empty array
      * if the page has no filled paths.
+     *
+     * **Budget.** `maxFills` caps how many fill_path events we'll
+     * actually process before bailing out. When a page exceeds the
+     * budget (vector figures, glyph-as-path text, infographic
+     * illustrations — DDS69CQI page 0 emits 1223 fill_path events),
+     * the collector aborts: subsequent device callbacks short-circuit
+     * to no-ops (no path walk, no bbox math) and the method returns an
+     * empty array. The intent is correctness ("we can't reliably tell
+     * a tinted aside box from one of a thousand chart primitives") as
+     * much as it is performance — a chart-heavy page has no display
+     * containers worth surfacing. Default 15 is a generous ceiling for
+     * real content pages with sidebars/callouts (typical is 1–5).
      */
-    collectFilledRects(): FillRect[];
+    collectFilledRects(maxFills?: number): FillRect[];
     destroy(): void;
 }
 
@@ -296,6 +308,19 @@ interface DeviceCallbacks {
 }
 
 /**
+ * Default ceiling on the number of fill_path events `collectFilledRects`
+ * will process before aborting. Above this, the page is treated as a
+ * figure / vector illustration / glyph-as-path render — none of those
+ * carry meaningful display containers, and walking thousands of paths
+ * would cost milliseconds per page for no gain.
+ *
+ * 15 is a generous upper bound for typical "content page with
+ * sidebars/callouts" — real layouts emit 1–5 fill_path events for
+ * background-tinted display boxes.
+ */
+export const DEFAULT_MAX_FILL_RECTS = 15;
+
+/**
  * Internal collector state — populated by the device's `fill_path`
  * callback during `Page.collectFilledRects()`. Single-threaded worker,
  * so a module-level singleton is safe.
@@ -307,6 +332,19 @@ interface FillRectCollectorState {
     pageHeight: number;
     /** Per-fill_path path-walker scratch buffer. */
     path: Array<["M" | "L", number, number] | ["C", number, number, number, number, number, number] | ["Z"]>;
+    /**
+     * Total count of fill_path events seen on this page, including
+     * events past the budget. Drives the abort decision.
+     */
+    seen: number;
+    /** Hard ceiling on `seen` — see `DEFAULT_MAX_FILL_RECTS`. */
+    maxFills: number;
+    /**
+     * Once true, the callback no longer walks paths / reads colors /
+     * appends to `fills`. The return path of `collectFilledRects`
+     * checks this flag and discards `fills` entirely (empty result).
+     */
+    aborted: boolean;
 }
 let _activeFillCollector: FillRectCollectorState | null = null;
 
@@ -356,6 +394,17 @@ function installCallbacks(libmupdf: LibMuPdf): void {
         fill_path: (_dev, pathPtr, _evenOdd, ctmPtr, csPtr, csN, colorPtr, alpha) => {
             const c = _activeFillCollector;
             if (!c) return;
+            // Hot-path early-exit. Once aborted, every subsequent
+            // fill_path event short-circuits before any work
+            // (no path walk, no bbox math, no allocations) — keeps
+            // chart-heavy pages from billing the per-page extract
+            // for a thousand JS callbacks worth of grouping work.
+            if (c.aborted) return;
+            c.seen += 1;
+            if (c.seen > c.maxFills) {
+                c.aborted = true;
+                return;
+            }
             // Walk the path *now* — pathPtr / ctmPtr live in scratch
             // buffers that MuPDF reuses across subsequent device calls,
             // so all reads must happen inside this callback.
@@ -738,7 +787,7 @@ export function makeDocumentApi(libmupdf: LibMuPdf): MuPDFApi {
                 maxHits,
             );
         }
-        collectFilledRects(): FillRect[] {
+        collectFilledRects(maxFills: number = DEFAULT_MAX_FILL_RECTS): FillRect[] {
             // Single-collector reentrancy guard. The worker is
             // single-threaded so concurrent calls aren't expected, but
             // surfacing this as an error beats silently mixing two
@@ -755,7 +804,14 @@ export function makeDocumentApi(libmupdf: LibMuPdf): MuPDFApi {
             const ctmTuple: MatrixTuple = [1, 0, 0, 1, 0, 0];
             const ctmPtr = MATRIX(ctmTuple);
 
-            const state: FillRectCollectorState = { fills: [], pageHeight, path: [] };
+            const state: FillRectCollectorState = {
+                fills: [],
+                pageHeight,
+                path: [],
+                seen: 0,
+                maxFills,
+                aborted: false,
+            };
             _activeFillCollector = state;
             const device = libmupdf._wasm_new_js_device();
             try {
@@ -764,6 +820,13 @@ export function makeDocumentApi(libmupdf: LibMuPdf): MuPDFApi {
                 libmupdf._wasm_drop_device(device);
                 _activeFillCollector = null;
             }
+            // Hard abort: a page that emitted more than `maxFills`
+            // fill_path events is treated as a figure / vector
+            // illustration with no semantically-meaningful display
+            // containers. Discard everything we *did* collect — those
+            // first N fills are almost always sub-shapes of the same
+            // illustration, not real aside boxes.
+            if (state.aborted) return [];
             return state.fills;
         }
         destroy() {

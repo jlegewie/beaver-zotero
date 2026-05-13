@@ -262,6 +262,16 @@ export function extractRawPageFromDoc(
  * destroy happens in this single helper so callers don't need to
  * manage the Page lifecycle.
  *
+ * **Budget.** `maxFills` forwards to `Page.collectFilledRects`. Pages
+ * that emit more fill_path events than the budget are figures /
+ * illustrations / glyph-as-path renders, not pages with real display
+ * containers. The collector aborts mid-stream and the helper returns
+ * an empty array. Default 15 (see `DEFAULT_MAX_FILL_RECTS`). The
+ * abort path keeps chart-heavy pages cheap: subsequent device
+ * callbacks short-circuit to no-ops, so a page with 10k fill_path
+ * events pays only the wasm→JS bridge cost for those events, not the
+ * per-event path walk + bbox math.
+ *
  * **Failure mode.** Any error from `loadPage` / `collectFilledRects` /
  * `destroy` is caught and logged at info level; the helper returns an
  * empty array. Fill-rect collection is purely advisory — the
@@ -273,6 +283,7 @@ export function extractRawPageFromDoc(
 export function extractFilledRectsFromDoc(
     doc: DocumentLike,
     pageIndex: number,
+    maxFills?: number,
 ): FillRect[] {
     let page;
     try {
@@ -285,7 +296,7 @@ export function extractFilledRectsFromDoc(
         return [];
     }
     try {
-        return page.collectFilledRects();
+        return page.collectFilledRects(maxFills);
     } catch (err) {
         postLog(
             "info",
