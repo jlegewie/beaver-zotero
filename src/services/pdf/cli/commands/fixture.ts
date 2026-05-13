@@ -7,8 +7,10 @@
  *   evaluate <id>       read-only — diff captured against fresh
  *   update <id>         rebaseline preserving captured config (mutating)
  *
- * All three share `--root` (default `tests/fixtures/pdfs/extract-public`)
- * so a single corpus root selects the storage directory.
+ * All three share `--root`, which selects the storage directory. When
+ * `$BEAVER_EXTRACT_FIXTURES_DIR` is set the default points at it; otherwise
+ * the default is the in-tree public corpus
+ * (`tests/fixtures/pdfs/extract-public`).
  */
 import { Command } from "commander";
 
@@ -30,6 +32,7 @@ import {
     diffFingerprints,
 } from "../fixture/fingerprints";
 import {
+    PRIVATE_FIXTURE_DIR_ENV,
     PUBLIC_FIXTURE_ROOT_REL,
     ensureSharedPdf,
     ensureSourcePdfLink,
@@ -37,6 +40,7 @@ import {
     listFixtureIds,
     readFixture,
     readSharedPdf,
+    resolvePrivateFixtureRoot,
     semanticallyEqual,
     sharedPdfPath,
     writeFixtureFile,
@@ -68,9 +72,19 @@ const DEFAULT_BBOX_TOL_PT = 0.5;
 const PREVIEW_RENDER_SCALE = 1.5;
 
 function resolveDefaultRoot(): string {
-    // Resolve against process.cwd() so a dev's relative invocations work,
-    // but keep the literal path stable for the CLI's --help text.
+    // When $BEAVER_EXTRACT_FIXTURES_DIR is set, that's the user's working
+    // corpus (typically a checkout of beaver-extract-fixtures) — default to
+    // it so capture/update/list target the right place without --root.
+    // Otherwise fall back to the in-tree public corpus.
+    const envRoot = process.env[PRIVATE_FIXTURE_DIR_ENV]?.trim();
+    if (envRoot && envRoot.length > 0) {
+        return resolvePrivateFixtureRoot(process.cwd());
+    }
     return resolvePath(process.cwd(), PUBLIC_FIXTURE_ROOT_REL);
+}
+
+function defaultRootHelp(): string {
+    return `corpus root (default: $${PRIVATE_FIXTURE_DIR_ENV} if set, else ${PUBLIC_FIXTURE_ROOT_REL})`;
 }
 
 // ---------------------------------------------------------------------------
@@ -101,7 +115,7 @@ function buildCaptureCommand(deps: CliDeps): Command {
         .requiredOption("--pages <list>", "comma-separated page indices (e.g. '0,3,4')")
         .option(
             "--root <dir>",
-            `corpus root (default: ${PUBLIC_FIXTURE_ROOT_REL})`,
+            defaultRootHelp(),
         )
         .option(
             "--analysis-scope <scope>",
@@ -328,7 +342,7 @@ function buildEvaluateCommand(deps: CliDeps): Command {
         .argument("<id>", "fixture id (folder name)")
         .option(
             "--root <dir>",
-            `corpus root (default: ${PUBLIC_FIXTURE_ROOT_REL})`,
+            defaultRootHelp(),
         )
         .option("--bbox-tolerance <pt>", "override stored tolerance")
         .option("--verbose", "surface git-SHA fingerprint mismatches")
@@ -403,7 +417,7 @@ function buildUpdateCommand(deps: CliDeps): Command {
         .argument("<id>", "fixture id (folder name)")
         .option(
             "--root <dir>",
-            `corpus root (default: ${PUBLIC_FIXTURE_ROOT_REL})`,
+            defaultRootHelp(),
         )
         .option(
             "--preview",
@@ -486,7 +500,7 @@ function buildListCommand(deps: CliDeps): Command {
     cmd.description("List fixture ids under a corpus root.")
         .option(
             "--root <dir>",
-            `corpus root (default: ${PUBLIC_FIXTURE_ROOT_REL})`,
+            defaultRootHelp(),
         )
         .option("--json", "emit a structured JSON envelope")
         .option("--pretty", "pretty-print JSON output (only with --json)")
