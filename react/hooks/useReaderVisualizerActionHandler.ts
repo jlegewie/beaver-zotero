@@ -68,8 +68,6 @@ export function useReaderVisualizerActionHandler() {
     }, []);
 }
 
-const PRIVATE_ROOT = 'tests/fixtures/pdfs/extract';
-
 /**
  * Build a `beaver-extract fixture capture --update …` command (page-scoped,
  * id `paperKey__pN`) targeting the current reader page and copy it to the
@@ -94,7 +92,6 @@ async function copyExtractFixtureCommand(): Promise<{ ok: boolean; message: stri
         shellQuote(filePath),
         `--id ${extractId}`,
         `--pages ${pageIndex}`,
-        `--root ${PRIVATE_ROOT}`,
         '--preview',
     ];
     if (language) parts.push(`--language ${shellQuote(language)}`);
@@ -115,12 +112,12 @@ async function copyOcrFixtureCommand(): Promise<{ ok: boolean; message: string }
     if ('error' in ctx) return { ok: false, message: ctx.error };
     const { item, filePath } = ctx;
 
+    // --root is intentionally omitted; see copyExtractFixtureCommand above.
     const parts = [
         'npm run beaver-extract --',
         'ocr-fixture capture',
         shellQuote(filePath),
         `--id ${item.key}`,
-        `--root ${PRIVATE_ROOT}`,
         '--update',
     ];
     const command = parts.join(' ');
