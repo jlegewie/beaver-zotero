@@ -361,6 +361,25 @@ function mergeBridgeElementsOnce(
                 const above = sorted[neighborAbove];
                 const below = sorted[neighborBelow];
 
+                // Fill-zone guard. The bridge merger fuses three blocks
+                // (above + bridge + below) into one column rect; that
+                // operation crosses display-element boundaries when the
+                // three don't share the same zone.
+                if (opts.fillBoundaries.length > 0) {
+                    const aboveZone = fillZoneFor(above, opts.fillBoundaries);
+                    const bridgeZone = fillZoneFor(block, opts.fillBoundaries);
+                    const belowZone = fillZoneFor(below, opts.fillBoundaries);
+                    if (aboveZone !== bridgeZone || bridgeZone !== belowZone) {
+                        if (debug) {
+                            pdfLog(
+                                `  zones differ (above=${aboveZone}, bridge=${bridgeZone}, below=${belowZone}) — skipping bridge`,
+                                3,
+                            );
+                        }
+                        continue;
+                    }
+                }
+
                 // Check if bridge has significant x-overlap with both neighbors
                 const overlapWithAbove = hasSignificantXOverlap(block, above, 0.5);
                 const overlapWithBelow = hasSignificantXOverlap(block, below, 0.5);
@@ -1186,6 +1205,19 @@ function joinAndSort(
     const flagsOf = (r: Rect): BridgeFlags =>
         bridgeFlags?.get(r) ?? { headingAtTop: false, headingAtBottom: false };
 
+    // Fill-zone guard. Symmetric with the Phase-2 mergeBlocks check —
+    // never fuse two rects whose innermost containing fill rect
+    // differs. Without this, Phase 3/4.5's same-edge / relaxed merges
+    // can re-cross the boundary that Phase 2 was careful to preserve.
+    const useFillZones = opts.fillBoundaries.length > 0;
+    const crossesFillZone = (a: Rect, b: Rect): boolean => {
+        if (!useFillZones) return false;
+        return (
+            fillZoneFor(a, opts.fillBoundaries) !==
+            fillZoneFor(b, opts.fillBoundaries)
+        );
+    };
+
     /**
      * Should we block a merge between `upper` (lower y) and `lower`
      * (greater y) because of a bridge-absorbed heading at the boundary
@@ -1227,6 +1259,8 @@ function joinAndSort(
 
         for (let j = 0; j < joined.length; j++) {
             const existingBlock = joined[j];
+
+            if (crossesFillZone(block, existingBlock)) continue;
 
             // Check if blocks have similar left and right edges
             const sameLeftEdge = Math.abs(block.x - existingBlock.x) <= opts.edgeTolerance;
@@ -1286,6 +1320,8 @@ function joinAndSort(
             for (let j = i + 1; j < joined.length; j++) {
                 const block1 = joined[i];
                 const block2 = joined[j];
+
+                if (crossesFillZone(block1, block2)) continue;
 
                 // Strict same-edge merge (always enabled).
                 const sameLeftEdge = Math.abs(block1.x - block2.x) <= opts.edgeTolerance;

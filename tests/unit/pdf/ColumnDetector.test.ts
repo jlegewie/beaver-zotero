@@ -431,6 +431,37 @@ describe('detectColumns fillBoundaries zone guard (Phase 2)', () => {
         expect(result.columns.length).toBe(1);
     });
 
+    it('keeps a short heading INSIDE a fill from bridging to body OUTSIDE the fill (DDS69CQI p8 shape)', () => {
+        // Concretely: a body paragraph sits above a tinted "About this
+        // report"-style box. The box's first line ("About this
+        // report" heading, h≈12) is short, and Phase 4's bridge
+        // merger has same-right-edge + small-gap to both the body
+        // above and the box-content paragraph below. Without a fill-
+        // zone guard in Phase 4 the bridge merges body + heading +
+        // box-paragraph into one column rect, undoing Phase 2's zone
+        // split.
+        const bodyAbove:    Rect = { x: 147, y: 343, w: 195, h: 56 };  // outside fill
+        const insideHeading:Rect = { x: 147, y: 428, w: 101, h: 12 };  // short, INSIDE fill
+        const insideBody:   Rect = { x: 159, y: 447, w: 184, h: 109 }; // INSIDE fill
+        // Fill rect wraps the heading + insideBody (typical aside
+        // padding extends a few pt past the text bbox).
+        const fillRect = { x: 144, y: 419, w: 418, h: 252 };
+        const result = detectColumns(
+            makeColumnPage([bodyAbove, insideHeading, insideBody]),
+            { fillBoundaries: [fillRect] },
+        );
+        // No single rect should span from bodyAbove through to insideBody.
+        for (const c of result.columns) {
+            const spans = c.y <= bodyAbove.y && c.y + c.h >= insideBody.y + insideBody.h;
+            expect(spans).toBe(false);
+        }
+        // bodyAbove (outside) must be its own column rect, not absorbed
+        // into the inside-fill column flow.
+        const aboveCol = result.columns.find((c) => c.y === bodyAbove.y);
+        expect(aboveCol).toBeTruthy();
+        expect(aboveCol!.y + aboveCol!.h).toBeLessThan(insideHeading.y);
+    });
+
     it('picks the innermost fill when zones nest (smallest containing rect wins)', () => {
         // Nested-aside layout: outer card with an inner highlight box.
         // A text block inside the inner box should be in the inner zone,
