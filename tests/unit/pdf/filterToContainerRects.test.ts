@@ -19,6 +19,7 @@ import {
     DEFAULT_MAX_FILL_RECTS,
     type DocumentLike,
     type FillRect,
+    isAxisAlignedRectanglePath,
     type PageLike,
 } from '../../../src/services/pdf/worker/mupdfApi';
 
@@ -32,6 +33,58 @@ function fill(overrides: Partial<FillRect>): FillRect {
         ...overrides,
     };
 }
+
+describe('isAxisAlignedRectanglePath', () => {
+    const identity = [1, 0, 0, 1, 0, 0] as const;
+
+    it('accepts a four-corner axis-aligned rectangle path', () => {
+        const out = isAxisAlignedRectanglePath([
+            ['M', 0, 0],
+            ['L', 100, 0],
+            ['L', 100, 50],
+            ['L', 0, 50],
+            ['Z'],
+        ], identity);
+
+        expect(out).toBe(true);
+    });
+
+    it('rejects a closed triangle that repeats the start point', () => {
+        const out = isAxisAlignedRectanglePath([
+            ['M', 0, 0],
+            ['L', 100, 0],
+            ['L', 100, 100],
+            ['L', 0, 0],
+            ['Z'],
+        ], identity);
+
+        expect(out).toBe(false);
+    });
+
+    it('rejects four bbox corners visited in diagonal order', () => {
+        const out = isAxisAlignedRectanglePath([
+            ['M', 0, 0],
+            ['L', 100, 100],
+            ['L', 100, 0],
+            ['L', 0, 100],
+            ['Z'],
+        ], identity);
+
+        expect(out).toBe(false);
+    });
+
+    it('rejects a rectangle rotated off the page axes by the CTM', () => {
+        const out = isAxisAlignedRectanglePath([
+            ['M', 0, 0],
+            ['L', 100, 0],
+            ['L', 100, 50],
+            ['L', 0, 50],
+            ['Z'],
+        ], [0.7071, 0.7071, -0.7071, 0.7071, 0, 0]);
+
+        expect(out).toBe(false);
+    });
+});
 
 describe('filterToContainerRects', () => {
     const PAGE_W = 612;

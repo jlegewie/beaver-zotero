@@ -164,9 +164,10 @@ export interface FillRect {
      * Whether the path renders as an axis-aligned rectangle in PAGE
      * space. Two conditions, both required: the path consists of one
      * `moveto` + three `lineto` + optional `closepath` (no curves,
-     * no extra sub-paths), AND the four corner coordinates — after
-     * the path's CTM is applied — collapse to exactly two distinct
-     * x-values and two distinct y-values within FP tolerance.
+     * no extra sub-paths), AND the four corner coordinates after CTM
+     * transformation form a rectangle topology: exactly two distinct
+     * x-values, exactly two distinct y-values, four unique vertices,
+     * and every path edge horizontal or vertical within FP tolerance.
      *
      * The second condition is what keeps `filterToContainerRects`
      * from accepting diamonds, trapezoids, parallelograms, and
@@ -358,6 +359,77 @@ interface FillRectCollectorState {
 }
 let _activeFillCollector: FillRectCollectorState | null = null;
 
+type PathSegment = FillRectCollectorState["path"][number];
+
+function sameCoord(a: number, b: number, tolerance: number): boolean {
+    return Math.abs(a - b) <= tolerance;
+}
+
+function pointEquals(
+    a: readonly [number, number],
+    b: readonly [number, number],
+    tolerance: number,
+): boolean {
+    return sameCoord(a[0], b[0], tolerance) && sameCoord(a[1], b[1], tolerance);
+}
+
+function addDistinct(values: number[], value: number, tolerance: number): void {
+    if (!values.some((u) => sameCoord(u, value, tolerance))) values.push(value);
+}
+
+/**
+ * True only when the path's first four vertices form a closed
+ * axis-aligned rectangle after CTM transformation.
+ */
+export function isAxisAlignedRectanglePath(
+    segs: ReadonlyArray<PathSegment>,
+    ctm: readonly [number, number, number, number, number, number],
+    tolerance = 0.25,
+): boolean {
+    const shapeOk =
+        segs.length >= 4 &&
+        segs.length <= 5 &&
+        segs[0][0] === "M" &&
+        segs[1][0] === "L" &&
+        segs[2][0] === "L" &&
+        segs[3][0] === "L" &&
+        (segs.length === 4 || segs[4][0] === "Z");
+    if (!shapeOk) return false;
+
+    const [a, b, cc, d, e, f] = ctm;
+    const corners: Array<[number, number]> = [];
+    for (let si = 0; si < 4; si++) {
+        const seg = segs[si] as ["M" | "L", number, number];
+        const sx = seg[1];
+        const sy = seg[2];
+        corners.push([a * sx + cc * sy + e, b * sx + d * sy + f]);
+    }
+
+    const distinctX: number[] = [];
+    const distinctY: number[] = [];
+    for (const [x, y] of corners) {
+        addDistinct(distinctX, x, tolerance);
+        addDistinct(distinctY, y, tolerance);
+    }
+    if (distinctX.length !== 2 || distinctY.length !== 2) return false;
+
+    for (let i = 0; i < 4; i++) {
+        for (let j = i + 1; j < 4; j++) {
+            if (pointEquals(corners[i], corners[j], tolerance)) return false;
+        }
+    }
+
+    for (let i = 0; i < 4; i++) {
+        const current = corners[i];
+        const next = corners[(i + 1) % 4];
+        const sameX = sameCoord(current[0], next[0], tolerance);
+        const sameY = sameCoord(current[1], next[1], tolerance);
+        if (sameX === sameY) return false;
+    }
+
+    return true;
+}
+
 /**
  * Install the global JS-device and path-walker callback dispatchers.
  *
@@ -494,75 +566,7 @@ function installCallbacks(libmupdf: LibMuPdf): void {
             }
             const colorspaceType = csPtr ? libmupdf._wasm_colorspace_get_type(csPtr) : 0;
 
-            // Axis-aligned rect detection. The shape gate
-            // (M-L-L-L(-Z), no curves) is necessary but not
-            // sufficient — diamonds, trapezoids, rotated rectangles,
-            // and triangles closed by a redundant lineto-to-start
-            // all match the same segment sequence. We also need the
-            // four CTM-transformed corner points to form a true
-            // rectangle in page space:
-            //   - exactly two distinct x-values and two distinct
-            //     y-values across the four corners (within FP
-            //     tolerance), AND
-            //   - all four corners are pairwise distinct (no two
-            //     coincide). This is what rejects the triangle case
-            //     `M(0,0) L(100,0) L(100,100) L(0,0)` where corner 0
-            //     and corner 3 coincide — distinct-x/y counts alone
-            //     can't tell that pattern apart from a real rect.
-            // Either failure mode would inject a misleading
-            // "container" rect into ColumnDetector's fillBoundaries.
-            const shapeOk =
-                segs.length >= 4 &&
-                segs.length <= 5 &&
-                segs[0][0] === "M" &&
-                segs[1][0] === "L" &&
-                segs[2][0] === "L" &&
-                segs[3][0] === "L" &&
-                (segs.length === 4 || segs[4][0] === "Z");
-            let isAxisAlignedRect = false;
-            if (shapeOk) {
-                // Read the 4 path-local corner coordinates and
-                // transform each through the CTM. We use the path's
-                // actual corners (not the bbox extremes used above)
-                // because a polygon's bbox-derived corners would
-                // always look axis-aligned in page space.
-                // Each non-Z seg here is exactly [code, x, y] (no
-                // curves — shapeOk excludes them).
-                const corners: Array<[number, number]> = [];
-                for (let si = 0; si < 4; si++) {
-                    const seg = segs[si];
-                    const sx = seg[1] as number;
-                    const sy = seg[2] as number;
-                    corners.push([a * sx + cc * sy + e, b * sx + d * sy + f]);
-                }
-                // Cluster into distinct x and y values with a small
-                // tolerance for FP noise from the CTM multiplication.
-                const TOL = 0.25;
-                const distinctX: number[] = [];
-                const distinctY: number[] = [];
-                for (const [x, y] of corners) {
-                    if (!distinctX.some((u) => Math.abs(u - x) <= TOL)) distinctX.push(x);
-                    if (!distinctY.some((v) => Math.abs(v - y) <= TOL)) distinctY.push(y);
-                }
-                // Pairwise-distinct corners: a real rectangle visits
-                // each of its four corners exactly once.
-                let allCornersDistinct = true;
-                for (let i = 0; i < 4 && allCornersDistinct; i++) {
-                    for (let j = i + 1; j < 4; j++) {
-                        if (
-                            Math.abs(corners[i][0] - corners[j][0]) <= TOL &&
-                            Math.abs(corners[i][1] - corners[j][1]) <= TOL
-                        ) {
-                            allCornersDistinct = false;
-                            break;
-                        }
-                    }
-                }
-                isAxisAlignedRect =
-                    distinctX.length === 2 &&
-                    distinctY.length === 2 &&
-                    allCornersDistinct;
-            }
+            const isAxisAlignedRect = isAxisAlignedRectanglePath(segs, [a, b, cc, d, e, f]);
 
             c.fills.push({
                 bbox: [px0, py0, px1, py1],
