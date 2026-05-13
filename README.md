@@ -118,6 +118,8 @@ If this requirement motivates you to try a different provider, I suggest adding 
 
 The Zotero plugin is open source under the [AGPL‑3.0 License](LICENSE). The backend, server, and file‑processing code are not open source.
 
+The plugin bundles a custom WebAssembly build of [MuPDF](https://mupdf.com) (in `addon/content/lib/`) for PDF text and image extraction. The build is produced from a small fork of upstream MuPDF at <https://github.com/jlegewie/mupdf>, which adds a single 5-line patch so text extraction works on older Acrobat Distiller PDFs. See [`addon/content/lib/mupdf-README.md`](addon/content/lib/mupdf-README.md) for details and a link to the patch.
+
 ### Does Beaver support other model providers?
 
 Beaver includes an advanced setting to define custom models. These models are untested and not all features are be supported. You can learn more [here](https://www.beaverapp.ai/docs/custom-models)
