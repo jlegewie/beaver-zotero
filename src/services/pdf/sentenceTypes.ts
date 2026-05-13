@@ -20,6 +20,7 @@
 
 import type { ParagraphDetectionSettings } from "./ParagraphDetector";
 import type {
+    GraphicsLayerMode,
     MarginAnalysis,
     MarginRemovalResult,
     MarginSettings,
@@ -65,6 +66,13 @@ export interface WorkerSentenceBBoxDebugOptions {
     marginZone?: MarginSettings;
     repeatThreshold?: number;
     detectPageSequences?: boolean;
+    /**
+     * Graphics-layer probe mode for the per-page column detector
+     * (see `GraphicsLayerMode`). Mirrors `ExtractionSettings.graphicsLayerMode`
+     * so trace output reflects what the corresponding production
+     * `extract` call would see.
+     */
+    graphicsLayerMode?: GraphicsLayerMode;
 }
 
 /**
