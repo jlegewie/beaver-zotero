@@ -259,11 +259,22 @@ function renderHumanReport(
 export function buildProfileCommand(deps: CliDeps): Command {
     const cmd = new Command("profile");
     cmd.description(
-        "Run structured extraction and print a per-phase timing breakdown. " +
-            "Intended for measuring extract bottlenecks and tracking " +
-            "improvements over time.",
+        "Run an extraction and print a per-phase timing breakdown. " +
+            "Defaults to structured mode (with per-phase detail); " +
+            "supports markdown mode via --mode markdown --engine <block|paragraph> " +
+            "for cross-engine comparisons (top-level timings only — markdown " +
+            "engines don't emit per-page phase splits).",
     )
         .argument("<pdf>", "path to the PDF file")
+        .option(
+            "--mode <mode>",
+            "extraction mode: 'structured' | 'markdown'",
+            "structured",
+        )
+        .option(
+            "--engine <engine>",
+            "markdown engine when --mode markdown: 'block' | 'paragraph'",
+        )
         .option("--pages <list>", "comma-separated page indices (e.g. '0,1,4')")
         .option("--page-range <range>", "page range '<start>:<end>' (end inclusive)")
         .option("--analysis-window <n>", "analysis window size around target pages")
@@ -286,11 +297,22 @@ export function buildProfileCommand(deps: CliDeps): Command {
             try {
                 bytes = await deps.loadPdf(pdfPath);
 
+                const mode = opts.mode === "markdown" ? "markdown" : "structured";
                 const input: ExtractInput = {
                     pdfData: bytes,
-                    mode: "structured",
+                    mode,
                 };
-                effective.mode = "structured";
+                effective.mode = mode;
+                if (mode === "markdown") {
+                    const engine =
+                        opts.engine === "paragraph" ? "paragraph" : "block";
+                    input.markdown = { engine };
+                    effective.engine = engine;
+                } else if (opts.engine) {
+                    throw new Error(
+                        `--engine is only valid with --mode markdown (got --engine ${opts.engine})`,
+                    );
+                }
                 if (opts.pages) {
                     input.pageIndices = parsePagesList(opts.pages);
                     effective.pageIndices = input.pageIndices;
