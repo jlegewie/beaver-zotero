@@ -79,8 +79,10 @@ import {
     DEFAULT_PAGE_IMAGE_OPTIONS,
     collectDocumentInfo,
     collectPageLabels,
+    extractFilledRectsFromDoc,
     extractRawPageDetailedFromDoc,
     extractRawPageFromDoc,
+    filterToContainerRects,
     rawPageProviderFromDoc,
     renderOnePage,
     resolveExplicitPageIndicesOrThrow,
@@ -459,6 +461,12 @@ export function runExtractFromIndices(
         for (const i of targetIndices) {
             const tPage = performance.now();
             const rawPage = analysisPageByIndex.get(i)!;
+            const fillRects = extractFilledRectsFromDoc(doc, rawPage.pageIndex);
+            const fillBoundaries = filterToContainerRects(
+                fillRects,
+                rawPage.width,
+                rawPage.height,
+            );
             const filtered = detectFilteredParagraphs({
                 pages: analysisPages,
                 pageIndex: rawPage.pageIndex,
@@ -467,6 +475,7 @@ export function runExtractFromIndices(
                 margins: opts.margins,
                 marginZone: opts.marginZone,
                 paragraphSettings,
+                fillBoundaries,
             });
             logColumnDetection(rawPage.pageIndex, filtered.columnResult);
             pages.push({

@@ -75,6 +75,19 @@ export interface LibMuPdf {
     _wasm_device_rgb(): number;
     _wasm_device_bgr(): number;
     _wasm_device_cmyk(): number;
+    // ----- JS device + path-walker plumbing (used by collectFilledRects) -----
+    // `_wasm_new_js_device()` creates a fz_device whose callbacks dispatch
+    // into `globalThis.$libmupdf_device` (set by `installDeviceCallbacks`).
+    // `_wasm_run_page_contents(page, dev, ctm, cookie)` runs the page's
+    // content stream through the device, firing one JS callback per
+    // drawing primitive. `_wasm_walk_path(path)` walks a path emitted by
+    // a fill_path / stroke_path callback into `globalThis.$libmupdf_path_walk`.
+    _wasm_new_js_device(): number;
+    _wasm_run_page_contents(page: number, device: number, ctm: number, cookie: number): void;
+    _wasm_walk_path(path: number): void;
+    _wasm_drop_device(device: number): void;
+    _wasm_colorspace_get_type(ptr: number): number;
+    _wasm_colorspace_get_n(ptr: number): number;
     [key: string]: unknown;
 }
 
@@ -123,6 +136,38 @@ export interface StructuredTextLike {
     destroy(): void;
 }
 
+/**
+ * A filled drawing primitive captured by `Page.collectFilledRects()`.
+ *
+ * Page-content streams emit one `fill_path` call per filled vector
+ * primitive (rectangles, polygons, curves, glyph paths…). Each entry here
+ * is one such call, with the path's bbox already transformed into PDF
+ * page coordinates (origin top-left to match the rest of the extractor;
+ * MuPDF's native space is y-up bottom-left).
+ *
+ * `colorspaceType` mirrors `fz_colorspace_type` (1 Gray, 2 RGB, 3 BGR,
+ * 4 CMYK, 5 Lab, 6 Indexed, 7 Separation, 8 DeviceN, …). For tinted-aside
+ * detection on real PDFs the value 7 (Separation) shows up often — a
+ * "1.0" component is full ink saturation of a separation plate and
+ * appears visibly tinted, so the detector should NOT treat it as white.
+ */
+export interface FillRect {
+    /** Page-space axis-aligned bbox `[x0, y0, x1, y1]` (top-left origin). */
+    bbox: RectTuple;
+    /** Color components, length == colorspace.n */
+    color: number[];
+    /** `fz_colorspace_type` integer; 0 if no colorspace was reported */
+    colorspaceType: number;
+    /** Alpha (0-1) */
+    alpha: number;
+    /**
+     * Whether the path consists of one `moveto` + three `lineto` + optional
+     * `closepath` (no curves, no extra sub-paths). Catches the typical
+     * filled-rectangle shape used for asides / background boxes.
+     */
+    isAxisAlignedRect: boolean;
+}
+
 export interface PageLike {
     pointer: number;
     getBounds(box?: "MediaBox" | "CropBox" | "BleedBox" | "TrimBox" | "ArtBox"): RectTuple;
@@ -130,6 +175,18 @@ export interface PageLike {
     toStructuredText(options?: string): StructuredTextLike;
     toPixmap(matrix: MatrixTuple, colorspace: ColorSpaceLike, alpha?: boolean, showExtras?: boolean): PixmapLike;
     search(needle: string, maxHits?: number): QuadTuple[][];
+    /**
+     * Run the page's content stream through a JS device and collect every
+     * `fill_path` event with its bbox in page coordinates. Used by column
+     * detection to discover background-shaded display elements (tinted
+     * sidebars / "facts" boxes / callouts) — text inside such a fill
+     * should not merge with text outside it.
+     *
+     * Returned bboxes are in PDF page coordinates with the y-axis flipped
+     * to match `RawBBox` (origin top-left, y grows downward). Empty array
+     * if the page has no filled paths.
+     */
+    collectFilledRects(): FillRect[];
     destroy(): void;
 }
 
@@ -181,11 +238,256 @@ export interface MuPDFApi {
 }
 
 /**
+ * Path-walker callback table. The WASM bridge calls these for every
+ * segment of a `_wasm_walk_path` invocation. The active collector is
+ * keyed by module-level state — one path walk in flight at a time.
+ */
+interface PathWalkerCallbacks {
+    moveto?(arg: number, x: number, y: number): void;
+    lineto?(arg: number, x: number, y: number): void;
+    curveto?(arg: number, x1: number, y1: number, x2: number, y2: number, x3: number, y3: number): void;
+    closepath?(arg: number): void;
+}
+
+/**
+ * Device callback table — fz_device's vtable, dispatched into JS by the
+ * WASM bridge. We only set the callbacks we use; the rest must still
+ * exist as no-ops because the WASM bridge will dereference them
+ * unconditionally during page run.
+ *
+ * Layouts mirror the wasm bundle's EM_JS bindings (see
+ * `addon/content/lib/mupdf-wasm.mjs`). The first arg `_` is the device
+ * user data pointer (unused — we key off the active collector instead).
+ */
+interface DeviceCallbacks {
+    close_device(devRef: number): void;
+    drop_device(devRef: number): void;
+    fill_path(
+        devRef: number,
+        pathPtr: number,
+        evenOdd: number,
+        ctmPtr: number,
+        csPtr: number,
+        csN: number,
+        colorPtr: number,
+        alpha: number,
+    ): void;
+    stroke_path(...args: number[]): void;
+    clip_path(...args: number[]): void;
+    clip_stroke_path(...args: number[]): void;
+    fill_text(...args: number[]): void;
+    stroke_text(...args: number[]): void;
+    clip_text(...args: number[]): void;
+    clip_stroke_text(...args: number[]): void;
+    ignore_text(...args: number[]): void;
+    fill_shade(...args: number[]): void;
+    fill_image(...args: number[]): void;
+    fill_image_mask(...args: number[]): void;
+    clip_image_mask(...args: number[]): void;
+    pop_clip(...args: number[]): void;
+    begin_mask(...args: number[]): void;
+    end_mask(...args: number[]): void;
+    begin_group(...args: number[]): void;
+    end_group(...args: number[]): void;
+    begin_tile(...args: number[]): number;
+    end_tile(...args: number[]): void;
+    begin_layer(...args: number[]): void;
+    end_layer(...args: number[]): void;
+}
+
+/**
+ * Internal collector state — populated by the device's `fill_path`
+ * callback during `Page.collectFilledRects()`. Single-threaded worker,
+ * so a module-level singleton is safe.
+ */
+interface FillRectCollectorState {
+    /** Output accumulator, populated as fill_path events fire. */
+    fills: FillRect[];
+    /** Page height in points — used to flip MuPDF's y-up bbox to top-left. */
+    pageHeight: number;
+    /** Per-fill_path path-walker scratch buffer. */
+    path: Array<["M" | "L", number, number] | ["C", number, number, number, number, number, number] | ["Z"]>;
+}
+let _activeFillCollector: FillRectCollectorState | null = null;
+
+/**
+ * Install the global JS-device and path-walker callback dispatchers.
+ *
+ * The WASM bundle's EM_JS bindings dereference
+ * `globalThis.$libmupdf_device` and `globalThis.$libmupdf_path_walk` on
+ * every device call — both must exist before the first `_wasm_new_js_device()`
+ * / `_wasm_walk_path()` invocation, or wasm crashes with "X is not a function".
+ *
+ * The dispatchers route to `_activeFillCollector` when one is set
+ * (during `collectFilledRects`); otherwise they no-op. This keeps the
+ * dispatchers permanently installed without leaking state between calls.
+ */
+function installCallbacks(libmupdf: LibMuPdf): void {
+    const g = globalThis as unknown as {
+        $libmupdf_device?: DeviceCallbacks;
+        $libmupdf_path_walk?: PathWalkerCallbacks;
+    };
+
+    if (g.$libmupdf_path_walk && g.$libmupdf_device) return; // idempotent
+
+    g.$libmupdf_path_walk = {
+        moveto: (_a, x, y) => {
+            const c = _activeFillCollector;
+            if (c) c.path.push(["M", x, y]);
+        },
+        lineto: (_a, x, y) => {
+            const c = _activeFillCollector;
+            if (c) c.path.push(["L", x, y]);
+        },
+        curveto: (_a, x1, y1, x2, y2, x3, y3) => {
+            const c = _activeFillCollector;
+            if (c) c.path.push(["C", x1, y1, x2, y2, x3, y3]);
+        },
+        closepath: (_a) => {
+            const c = _activeFillCollector;
+            if (c) c.path.push(["Z"]);
+        },
+    };
+
+    const noop = () => {};
+    g.$libmupdf_device = {
+        close_device: noop,
+        drop_device: noop,
+        fill_path: (_dev, pathPtr, _evenOdd, ctmPtr, csPtr, csN, colorPtr, alpha) => {
+            const c = _activeFillCollector;
+            if (!c) return;
+            // Walk the path *now* — pathPtr / ctmPtr live in scratch
+            // buffers that MuPDF reuses across subsequent device calls,
+            // so all reads must happen inside this callback.
+            c.path = [];
+            libmupdf._wasm_walk_path(pathPtr);
+            const segs = c.path;
+            if (segs.length === 0) return;
+
+            // Local-space bbox (MuPDF user space, y-up bottom-left).
+            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+            for (const seg of segs) {
+                if (seg[0] === "Z") continue;
+                // M / L / C — every non-Z segment has (xN, yN) pairs.
+                for (let i = 1; i < seg.length; i += 2) {
+                    const x = seg[i] as number;
+                    const y = seg[i + 1] as number;
+                    if (x < minX) minX = x;
+                    if (y < minY) minY = y;
+                    if (x > maxX) maxX = x;
+                    if (y > maxY) maxY = y;
+                }
+            }
+            if (!isFinite(minX) || !isFinite(maxX) || !isFinite(minY) || !isFinite(maxY)) return;
+
+            // Read ctm inline (HEAPF32 view, 6 floats: a b c d e f).
+            const cm = ctmPtr >> 2;
+            const a = libmupdf.HEAPF32[cm + 0];
+            const b = libmupdf.HEAPF32[cm + 1];
+            const cc = libmupdf.HEAPF32[cm + 2];
+            const d = libmupdf.HEAPF32[cm + 3];
+            const e = libmupdf.HEAPF32[cm + 4];
+            const f = libmupdf.HEAPF32[cm + 5];
+
+            // Transform the four bbox corners through the ctm and take
+            // the axis-aligned envelope — handles rotated / mirrored
+            // matrices (page 36's `[1,0,0,-1,0,792]` PDF y-flip; rare
+            // rotated CTMs on annotated PDFs).
+            const tx = (x: number, y: number): [number, number] => [a * x + cc * y + e, b * x + d * y + f];
+            const c1 = tx(minX, minY);
+            const c2 = tx(maxX, minY);
+            const c3 = tx(minX, maxY);
+            const c4 = tx(maxX, maxY);
+            const px0 = Math.min(c1[0], c2[0], c3[0], c4[0]);
+            const py0Mupdf = Math.min(c1[1], c2[1], c3[1], c4[1]);
+            const px1 = Math.max(c1[0], c2[0], c3[0], c4[0]);
+            const py1Mupdf = Math.max(c1[1], c2[1], c3[1], c4[1]);
+
+            // The CTM may include the page's y-axis flip (e.g. p36's
+            // `0,-1,…,792`), in which case `py*` are already in
+            // top-left-origin space. If the CTM keeps MuPDF's native y-up
+            // orientation (e.g. p33's `0,0,0,0,…` degenerate matrix —
+            // rare encoder quirks), we still need to convert via page
+            // height. Heuristic: when the transformed bbox's top sits
+            // *below* the page bottom (pyMin > pageH) we're in y-up
+            // space and need to flip. Otherwise pass through.
+            let py0: number;
+            let py1: number;
+            if (py0Mupdf < 0 || py1Mupdf > c.pageHeight) {
+                // Degenerate / unexpected CTM — fall back to interpreting
+                // local-space coords as user space and flipping via page
+                // height. This matches the typical PDF authoring
+                // convention (y-up, origin bottom-left).
+                py0 = c.pageHeight - maxY;
+                py1 = c.pageHeight - minY;
+            } else {
+                py0 = py0Mupdf;
+                py1 = py1Mupdf;
+            }
+
+            // Read color (csN floats) and colorspace type. csPtr may be 0
+            // for "no colorspace" — typical for clipping-only paths,
+            // though those route through clip_* callbacks, not fill_path.
+            const color: number[] = [];
+            if (colorPtr && csN > 0) {
+                const cp = colorPtr >> 2;
+                for (let i = 0; i < csN; i++) color.push(libmupdf.HEAPF32[cp + i]);
+            }
+            const colorspaceType = csPtr ? libmupdf._wasm_colorspace_get_type(csPtr) : 0;
+
+            // Axis-aligned rect detection: M-L-L-L(-Z) with no curves,
+            // and the lateral corners form a rectangle aligned with the
+            // CTM's basis vectors. Most filled aside boxes match.
+            const isAxisAlignedRect =
+                segs.length >= 4 &&
+                segs.length <= 5 &&
+                segs[0][0] === "M" &&
+                segs[1][0] === "L" &&
+                segs[2][0] === "L" &&
+                segs[3][0] === "L" &&
+                (segs.length === 4 || segs[4][0] === "Z");
+
+            c.fills.push({
+                bbox: [px0, py0, px1, py1],
+                color,
+                colorspaceType,
+                alpha,
+                isAxisAlignedRect,
+            });
+        },
+        stroke_path: noop,
+        clip_path: noop,
+        clip_stroke_path: noop,
+        fill_text: noop,
+        stroke_text: noop,
+        clip_text: noop,
+        clip_stroke_text: noop,
+        ignore_text: noop,
+        fill_shade: noop,
+        fill_image: noop,
+        fill_image_mask: noop,
+        clip_image_mask: noop,
+        pop_clip: noop,
+        begin_mask: noop,
+        end_mask: noop,
+        begin_group: noop,
+        end_group: noop,
+        // Return 0 — "render the tile, MuPDF will cache it". Anything
+        // else asks for per-instance rendering, which we don't need.
+        begin_tile: () => 0,
+        end_tile: noop,
+        begin_layer: noop,
+        end_layer: noop,
+    };
+}
+
+/**
  * Build the API wrappers around a libmupdf module. Allocates real WASM
  * heap (scratch UTF8/Matrix slots, ColorSpace pointers) — call once per
  * worker lifetime via `ensureApi()`.
  */
 export function makeDocumentApi(libmupdf: LibMuPdf): MuPDFApi {
+    installCallbacks(libmupdf);
     const Malloc = (size: number) => libmupdf._wasm_malloc(size);
     const Free = (ptr: number) => libmupdf._wasm_free(ptr);
 
@@ -435,6 +737,34 @@ export function makeDocumentApi(libmupdf: LibMuPdf): MuPDFApi {
                 needle,
                 maxHits,
             );
+        }
+        collectFilledRects(): FillRect[] {
+            // Single-collector reentrancy guard. The worker is
+            // single-threaded so concurrent calls aren't expected, but
+            // surfacing this as an error beats silently mixing two
+            // pages' fill streams.
+            if (_activeFillCollector) {
+                throw new Error("collectFilledRects: another collection is already in progress");
+            }
+            const bounds = this.getBounds();
+            const pageHeight = bounds[3] - bounds[1];
+            // Identity CTM — we want the path coords MuPDF emits (each
+            // fill_path callback gets the path's own CTM at draw time;
+            // the matrix we pass to `run_page_contents` only adds an
+            // OUTER transform on top of that and would skew our bboxes).
+            const ctmTuple: MatrixTuple = [1, 0, 0, 1, 0, 0];
+            const ctmPtr = MATRIX(ctmTuple);
+
+            const state: FillRectCollectorState = { fills: [], pageHeight, path: [] };
+            _activeFillCollector = state;
+            const device = libmupdf._wasm_new_js_device();
+            try {
+                libmupdf._wasm_run_page_contents(this.pointer, device, ctmPtr, 0);
+            } finally {
+                libmupdf._wasm_drop_device(device);
+                _activeFillCollector = null;
+            }
+            return state.fills;
         }
         destroy() {
             if (this.pointer) {

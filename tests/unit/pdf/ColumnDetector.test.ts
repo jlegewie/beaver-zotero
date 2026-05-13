@@ -370,6 +370,159 @@ describe('detectColumns tail/head/paragraph merge for ragged-right text', () => 
     });
 });
 
+describe('detectColumns fillBoundaries zone guard (Phase 2)', () => {
+    // `fillBoundaries` carries the bboxes of tinted display containers
+    // (sidebar boxes, callouts, "facts" boxes) discovered by walking
+    // the PDF content stream's fill_path events. Each rect defines a
+    // zone — a text block inside the rect cannot merge in Phase 2 with
+    // a text block outside it, even when they share an x-range.
+    //
+    // The motivating layout is DDS69CQI page 33: a grey-tinted aside
+    // sits at the same x-range as the body column underneath it, with
+    // no intervening text block. Phase 2's `canMergeBlocks` would
+    // otherwise fuse them and the box content would interleave with
+    // body text in the final reading order.
+
+    it('keeps an aside-box block separate from same-x body block below when a fill zone marks the box', () => {
+        // Two same-shape blocks in the right column with a 41pt vertical
+        // gap. Without the fill rect they'd fuse via canMergeBlocks (same
+        // widths, no intervening block); with the fill rect bounding the
+        // upper block they stay distinct.
+        const asideBox: Rect = { x: 273, y: 97,  w: 198, h: 145 };  // inside fill
+        const body:     Rect = { x: 273, y: 283, w: 198, h: 200 };  // outside fill
+        // Fill rect encloses the aside box (with a few-pt padding around
+        // the text — typical for tinted backgrounds whose padding
+        // extends past the text bbox).
+        const fillRect = { x: 270, y: 90, w: 204, h: 160 };
+        const result = detectColumns(makeColumnPage([asideBox, body]), {
+            fillBoundaries: [fillRect],
+        });
+        expect(result.columns.length).toBe(2);
+        for (const c of result.columns) {
+            const spansBoth = c.y <= asideBox.y && c.y + c.h >= body.y + body.h;
+            expect(spansBoth).toBe(false);
+        }
+    });
+
+    it('still fuses two inside-the-same-fill blocks (e.g. paragraphs inside one aside)', () => {
+        // Both blocks sit inside the same fill rect → same zone → eligible
+        // to merge. Locks in that the zone guard is symmetric (it doesn't
+        // unconditionally reject merges inside a fill).
+        const para1: Rect = { x: 80, y: 100, w: 200, h: 80 };
+        const para2: Rect = { x: 80, y: 190, w: 200, h: 80 }; // 10pt gap
+        const fillRect = { x: 70, y: 90, w: 220, h: 200 };
+        const result = detectColumns(makeColumnPage([para1, para2]), {
+            fillBoundaries: [fillRect],
+        });
+        expect(result.columns.length).toBe(1);
+        expect(result.columns[0].y).toBe(100);
+        expect(result.columns[0].y + result.columns[0].h).toBe(270);
+    });
+
+    it('still fuses two outside-all-fills blocks (regression guard for plain layouts)', () => {
+        // Empty `fillBoundaries` ≡ "no zones" ≡ behavior identical to
+        // the un-gated detector. Verifies the guard is a no-op when no
+        // fill rects exist.
+        const para1: Rect = { x: 80, y: 100, w: 200, h: 80 };
+        const para2: Rect = { x: 80, y: 190, w: 200, h: 80 };
+        const result = detectColumns(makeColumnPage([para1, para2]), {
+            fillBoundaries: [],
+        });
+        expect(result.columns.length).toBe(1);
+    });
+
+    it('picks the innermost fill when zones nest (smallest containing rect wins)', () => {
+        // Nested-aside layout: outer card with an inner highlight box.
+        // A text block inside the inner box should be in the inner zone,
+        // not the outer one — otherwise it might merge with an outer-
+        // zone neighbor that shouldn't be in its scope.
+        const innerBox: Rect = { x: 80, y: 100, w: 100, h: 30 };  // inside inner fill
+        const outerOnly: Rect = { x: 80, y: 200, w: 100, h: 30 }; // inside outer only
+        const innerFill = { x: 70, y: 90, w: 120, h: 50 };
+        const outerFill = { x: 60, y: 60, w: 200, h: 200 };
+        const result = detectColumns(
+            makeColumnPage([innerBox, outerOnly]),
+            { fillBoundaries: [outerFill, innerFill] },
+        );
+        // Different zones (innerFill vs outerFill) → no merge despite
+        // matching shape.
+        expect(result.columns.length).toBe(2);
+    });
+
+    it('does not require fillBoundaries (option is optional)', () => {
+        // Default behavior when option is omitted matches the legacy
+        // detector — the guard only activates when explicit rects are
+        // provided.
+        const para1: Rect = { x: 80, y: 100, w: 200, h: 80 };
+        const para2: Rect = { x: 80, y: 190, w: 200, h: 80 };
+        const result = detectColumns(makeColumnPage([para1, para2]));
+        expect(result.columns.length).toBe(1);
+    });
+});
+
+describe('detectColumns zone-aware reading order (Phase 5)', () => {
+    // When a fill zone exists, the reading-order sort treats it as a
+    // single virtual block in the outer xy-cut. The motivating shape is
+    // DDS69CQI p36: top body text wraps left→right across the page,
+    // then a tinted "box" below it splits into two columns. Without
+    // zone awareness, xy-cut takes the inner-box gutter first and reads
+    // top-L → box-L → top-R → box-R. With zone awareness the outer cut
+    // sees the box as a unit and reads top-L → top-R → box-L → box-R.
+
+    it('reads top-body L→R before a tinted box that splits into 2 inner columns', () => {
+        // Page geometry (approximating the p36 shape):
+        //   topL  | topR     y=70..140    (above box)
+        //   ╔════════════════╗
+        //   ║ boxL  |  boxR  ║  y=200..600 (inside fill zone)
+        //   ╚════════════════╝
+        const topL: Rect  = { x: 100, y: 70,  w: 200, h: 70 };
+        const topR: Rect  = { x: 320, y: 70,  w: 200, h: 70 };
+        const boxL: Rect  = { x: 120, y: 200, w: 180, h: 400 };
+        const boxR: Rect  = { x: 320, y: 200, w: 180, h: 400 };
+        // Fill rect wraps the box's two columns.
+        const fillRect = { x: 110, y: 190, w: 400, h: 420 };
+        const result = detectColumns(
+            makeColumnPage([boxR, topR, boxL, topL]),
+            { fillBoundaries: [fillRect] },
+        );
+        const xs = result.columns.map(c => c.x);
+        // Expected sequence: topL, topR, boxL, boxR.
+        expect(xs).toEqual([100, 320, 120, 320]);
+    });
+
+    it('reading-order baseline without zones still flows column-major (regression guard)', () => {
+        // Same x-positions but use widths that *don't* trigger Phase 2's
+        // containment-merge (ratios < 0.8). This isolates the Phase-5
+        // reading-order behavior: legacy xy-cut takes the inner V-gutter
+        // first → column-major flow (top-L → box-L → top-R → box-R).
+        const topL: Rect  = { x: 100, y: 70,  w: 80,  h: 70 };  // narrow
+        const topR: Rect  = { x: 320, y: 70,  w: 80,  h: 70 };
+        const boxL: Rect  = { x: 100, y: 200, w: 180, h: 400 }; // wide
+        const boxR: Rect  = { x: 320, y: 200, w: 180, h: 400 };
+        const result = detectColumns(makeColumnPage([boxR, topR, boxL, topL]));
+        const xs = result.columns.map(c => c.x);
+        expect(xs).toEqual([100, 100, 320, 320]);
+        // Column-major: y=70 (topL) → y=200 (boxL) → y=70 (topR) → y=200 (boxR).
+        const ys = result.columns.map(c => c.y);
+        expect(ys).toEqual([70, 200, 70, 200]);
+    });
+
+    it('keeps the zone\'s own multi-column gutter for inside-zone ordering', () => {
+        // Only the box's content (no outside blocks). The zone is the
+        // only "world" — the inner V-cut should still apply so the
+        // left box-column is read before the right.
+        const boxL: Rect  = { x: 120, y: 200, w: 180, h: 400 };
+        const boxR: Rect  = { x: 320, y: 200, w: 180, h: 400 };
+        const fillRect = { x: 110, y: 190, w: 400, h: 420 };
+        const result = detectColumns(
+            makeColumnPage([boxR, boxL]),
+            { fillBoundaries: [fillRect] },
+        );
+        const xs = result.columns.map(c => c.x);
+        expect(xs).toEqual([120, 320]);
+    });
+});
+
 describe('detectColumns clipping respects custom header/footerMargin', () => {
     // Production callers (FilteredParagraphPipeline, worker/ops.ts) thread
     // their margins.{top,bottom} into ColumnDetectionOptions so the column

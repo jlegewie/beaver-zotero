@@ -73,6 +73,15 @@ export interface FilteredParagraphContext {
     detectPageSequences?: boolean;
     /** Forwarded to `detectParagraphs`. */
     paragraphSettings?: ParagraphDetectionSettings;
+    /**
+     * Bounding boxes of background-shaded display elements on the target
+     * page (see `ColumnDetectionOptions.fillBoundaries`). When supplied,
+     * `ColumnDetector` refuses to fuse text blocks across fill-zone
+     * boundaries. Optional — caller is responsible for collecting +
+     * filtering via `extractFilledRectsFromDoc` + `filterToContainerRects`
+     * upstream. Empty / absent = no behavior change.
+     */
+    fillBoundaries?: ReadonlyArray<{ x: number; y: number; w: number; h: number }>;
 }
 
 /**
@@ -225,6 +234,7 @@ export function detectFilteredParagraphs(
         headerMargin: margins.top,
         footerMargin: margins.bottom,
         bodyStyles: styleProfile.bodyStyles,
+        fillBoundaries: ctx.fillBoundaries,
     });
     const columnDetectMs = performance.now() - tColumnDetect;
 

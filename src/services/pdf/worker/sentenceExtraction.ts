@@ -64,7 +64,12 @@ import type {
     StructuredPagePhaseTimings,
     StyleProfile,
 } from "../types";
-import { extractRawPageDetailedFromDoc, extractRawPageFromDoc } from "./docHelpers";
+import {
+    extractFilledRectsFromDoc,
+    extractRawPageDetailedFromDoc,
+    extractRawPageFromDoc,
+    filterToContainerRects,
+} from "./docHelpers";
 import type { DocumentLike, FontApi } from "./mupdfApi";
 import { ensureApi } from "./wasmInit";
 import { resolveSplitter } from "./splitterResolver";
@@ -146,6 +151,20 @@ export function extractSentencesForPage(args: {
     );
     const fontBridgeMs = performance.now() - tFontBridge;
 
+    // Collect background-fill rectangles via the JS device (PDF content-
+    // stream walk). These mark tinted sidebars / callouts / "facts"
+    // boxes — `ColumnDetector` uses them as hard zone boundaries.
+    // Cheap on pages without colored containers (zero fills → empty
+    // boundaries array → no-op in `mergeBlocks`). The detailed page
+    // we already loaded covers width/height, so we don't pay an extra
+    // page-load for the filter.
+    const fillRects = extractFilledRectsFromDoc(args.doc, args.pageIndex);
+    const fillBoundaries = filterToContainerRects(
+        fillRects,
+        detailed.width,
+        detailed.height,
+    );
+
     const tFiltered = performance.now();
     const filteredResult = detectFilteredParagraphs({
         pages: pagesForFilter,
@@ -155,6 +174,7 @@ export function extractSentencesForPage(args: {
         margins: args.margins,
         marginZone: args.marginZone,
         paragraphSettings: args.paragraphSettings,
+        fillBoundaries,
     });
     const filteredParagraphsMs = performance.now() - tFiltered;
 
@@ -300,6 +320,12 @@ export async function runSentenceExtractionFromDoc(
             repeatThreshold,
             detectPageSequences,
         });
+        const fillRects = extractFilledRectsFromDoc(doc, pageIndex);
+        const fillBoundaries = filterToContainerRects(
+            fillRects,
+            detailed.width,
+            detailed.height,
+        );
         const filtered = detectFilteredParagraphs({
             pages: pagesForFilter,
             pageIndex,
@@ -308,6 +334,7 @@ export async function runSentenceExtractionFromDoc(
             margins,
             marginZone,
             paragraphSettings,
+            fillBoundaries,
         });
         const result = extractPageSentenceBBoxes(detailed, {
             paragraphSettings,
@@ -334,6 +361,12 @@ export async function runSentenceExtractionFromDoc(
             repeatThreshold,
             detectPageSequences,
         });
+    const traceFillRects = extractFilledRectsFromDoc(doc, pageIndex);
+    const traceFillBoundaries = filterToContainerRects(
+        traceFillRects,
+        detailed.width,
+        detailed.height,
+    );
     const filteredResult = detectFilteredParagraphs({
         pages: pagesForFilter,
         pageIndex,
@@ -342,6 +375,7 @@ export async function runSentenceExtractionFromDoc(
         margins,
         marginZone,
         paragraphSettings,
+        fillBoundaries: traceFillBoundaries,
     });
     const result = extractPageSentenceBBoxes(detailed, {
         paragraphSettings,

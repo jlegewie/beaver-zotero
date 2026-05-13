@@ -51,6 +51,15 @@ export interface ColumnDetectionOptions {
      * layouts with body text within ~20-30pt of the page edge.
      */
     bodyStyles?: TextStyle[];
+    /**
+     * Bounding boxes of background-shaded display elements (tinted aside
+     * boxes, sidebars, callouts) discovered by `collectFilledRects` +
+     * `filterToContainerRects`. Each rect is treated as a zone — Phase 2
+     * never fuses two text blocks if one is inside this rect and the
+     * other is outside. Optional; when empty or absent, background shading
+     * is ignored.
+     */
+    fillBoundaries?: ReadonlyArray<{ x: number; y: number; w: number; h: number }>;
     /** Enable debug logging for column detection */
     debug?: boolean;
 }
@@ -63,6 +72,7 @@ const DEFAULT_OPTIONS: Required<ColumnDetectionOptions> = {
     maxBridgeHeight: 50,
     bridgeVerticalGap: 30,
     bodyStyles: [],
+    fillBoundaries: [],
     debug: false,
 };
 
@@ -540,7 +550,15 @@ export function detectColumns(
     page: RawPageData,
     options: ColumnDetectionOptions = {}
 ): ColumnDetectionResult {
-    const opts = { ...DEFAULT_OPTIONS, ...options };
+    const opts: Required<ColumnDetectionOptions> = {
+        ...DEFAULT_OPTIONS,
+        ...options,
+    };
+    // Callers (e.g. FilteredParagraphPipeline) may forward an undefined
+    // `fillBoundaries` prop verbatim, which would clobber the default
+    // empty array. Re-apply the default after the spread so the no-zone
+    // code path stays the default behavior.
+    if (!opts.fillBoundaries) opts.fillBoundaries = [];
 
     // Check if page is broken
     const isBroken = pageIsBroken(page);
@@ -602,8 +620,19 @@ export function detectColumns(
         }
     }
 
-    // Phase 5: Final reading order sort
-    const sortedColumns = sortForReadingOrder(rejoined, opts);
+    // Phase 5: Final reading order sort. When fill-zone boundaries are
+    // supplied, route through a zone-aware sort that treats each fill
+    // zone as a single virtual block in the outer ordering and only
+    // recurses inside it for the inner ordering. This prevents a clean
+    // vertical gutter that exists ONLY because of the colored aside
+    // box from splitting the surrounding body text in half during
+    // reading-order traversal (DDS69CQI p36: top-body wraps L→R *above*
+    // the big box; xyCut otherwise reads top-L → box-left → page-number
+    // → top-R → box-right because of the gutter inside the box).
+    const sortedColumns =
+        opts.fillBoundaries.length > 0
+            ? sortForReadingOrderWithZones(rejoined, opts)
+            : sortForReadingOrder(rejoined, opts);
 
     return {
         columns: sortedColumns,
@@ -792,8 +821,59 @@ function canMergeBlocks(
 }
 
 /**
+ * Tolerance (pt) when deciding whether a text-block rect is "inside" a
+ * fill-boundary rect. Text bboxes routinely overshoot the visible fill
+ * by a small amount (text descenders extend below the colored band, or
+ * the fill is sized slightly tighter than its content). Without slop a
+ * single overshooting pixel would put the block on the "wrong side" of
+ * the boundary.
+ */
+const FILL_CONTAINMENT_SLOP = 3;
+
+/**
+ * Identifier for the fill-zone a text block sits inside. Used as an
+ * equality key in `mergeBlocks` — two blocks can only fuse when their
+ * zone IDs match (both outside all fills, or both inside the same fill
+ * rect).
+ *
+ * `null` ≡ "outside every fill boundary". Multiple fill rects are
+ * resolved by the SMALLEST containing fill (innermost wins), so a
+ * nested-callout layout produces deterministic zones.
+ */
+function fillZoneFor(
+    rect: Rect,
+    fillBoundaries: ReadonlyArray<{ x: number; y: number; w: number; h: number }>,
+): number | null {
+    let bestIdx: number | null = null;
+    let bestArea = Infinity;
+    for (let i = 0; i < fillBoundaries.length; i++) {
+        const f = fillBoundaries[i];
+        const inside =
+            rect.x >= f.x - FILL_CONTAINMENT_SLOP &&
+            rect.y >= f.y - FILL_CONTAINMENT_SLOP &&
+            rect.x + rect.w <= f.x + f.w + FILL_CONTAINMENT_SLOP &&
+            rect.y + rect.h <= f.y + f.h + FILL_CONTAINMENT_SLOP;
+        if (!inside) continue;
+        const area = f.w * f.h;
+        if (area < bestArea) {
+            bestArea = area;
+            bestIdx = i;
+        }
+    }
+    return bestIdx;
+}
+
+/**
  * Phase 2: Merge adjacent blocks into columns.
  * Uses stricter criteria to prevent full-width blocks from merging with columns.
+ *
+ * Fill-zone guard (when `opts.fillBoundaries` is non-empty): every text
+ * block is tagged with the index of the innermost fill rect that
+ * contains it (or `null` for "outside all fills"). A merge is rejected
+ * if the candidate's zone disagrees with the existing merged rect's
+ * zone — text inside a tinted aside box never fuses with body text
+ * outside it. The default-empty `fillBoundaries` array means PDFs
+ * without colored containers are unaffected.
  */
 function mergeBlocks(
     blocks: Rect[],
@@ -801,15 +881,35 @@ function mergeBlocks(
 ): Rect[] {
     if (blocks.length === 0) return [];
 
+    // Pre-compute the fill zone for each input block + a parallel array
+    // for the growing merged set. Each merged rect inherits the zone of
+    // the first block that seeded it; subsequent merges only join
+    // blocks with the same zone (no re-derivation from the unioned
+    // bbox — a union of two inside-fill blocks would unwittingly start
+    // to span the fill itself and could mis-classify).
+    const useZones = opts.fillBoundaries.length > 0;
+    const blockZones = useZones
+        ? blocks.map((b) => fillZoneFor(b, opts.fillBoundaries))
+        : null;
+
     const mergedBlocks: Rect[] = [{ ...blocks[0] }];
+    const mergedZones: (number | null)[] | null = useZones
+        ? [blockZones![0]]
+        : null;
 
     for (let i = 1; i < blocks.length; i++) {
         const block = blocks[i];
+        const blockZone = blockZones ? blockZones[i] : null;
         let merged = false;
 
         // Try to merge with existing merged blocks
         for (let j = 0; j < mergedBlocks.length; j++) {
             const existingBlock = mergedBlocks[j];
+
+            // Fill-zone guard — see comment on `mergeBlocks`.
+            if (mergedZones && mergedZones[j] !== blockZone) {
+                continue;
+            }
 
             // Check if blocks can be merged (similar edges or contained)
             if (!canMergeBlocks(block, existingBlock, opts.edgeTolerance)) {
@@ -833,6 +933,7 @@ function mergeBlocks(
 
         if (!merged) {
             mergedBlocks.push({ ...block });
+            if (mergedZones) mergedZones.push(blockZone);
         }
     }
 
@@ -1294,6 +1395,89 @@ function xyCut(blocks: Rect[]): Rect[] {
     }
 
     return [...blocks].sort((a, b) => a.y - b.y || a.x - b.x);
+}
+
+/**
+ * Zone-aware reading-order sort. Each fill zone (background-shaded
+ * display element) is treated as ONE virtual block in the outer xy-cut
+ * traversal; the cut therefore never slices a zone in half just because
+ * the colored container has a clean inner column gutter. Inside each
+ * zone we run xy-cut on its members, so the zone's own multi-column
+ * layout still flows correctly.
+ */
+function sortForReadingOrderWithZones(
+    blocks: Rect[],
+    opts: Required<ColumnDetectionOptions>,
+): Rect[] {
+    if (blocks.length <= 1) return blocks.slice();
+    if (opts.fillBoundaries.length === 0) return xyCut(blocks);
+
+    // Group each block by its innermost fill zone (or "outside" =
+    // index -1). Same zone-id semantics as Phase 2's mergeBlocks guard,
+    // so a block can't end up on the wrong side of a zone boundary in
+    // one phase but the right side in the other.
+    const zoneIdOf = new Map<Rect, number | null>();
+    for (const b of blocks) {
+        zoneIdOf.set(b, fillZoneFor(b, opts.fillBoundaries));
+    }
+    const zoneToMembers = new Map<number, Rect[]>();
+    const outsideMembers: Rect[] = [];
+    for (const b of blocks) {
+        const z = zoneIdOf.get(b)!;
+        if (z === null) {
+            outsideMembers.push(b);
+        } else {
+            const arr = zoneToMembers.get(z);
+            if (arr) arr.push(b);
+            else zoneToMembers.set(z, [b]);
+        }
+    }
+
+    // Build virtual super-rects: one per non-empty zone, plus every
+    // outside block as a single-member virtual. The zone's super-rect
+    // is the union of its members (not the raw fill bbox) so the outer
+    // xy-cut only sees the *text-occupied* footprint — the fill might
+    // extend beyond its content, which would otherwise pull spurious
+    // overlaps with neighboring outside blocks.
+    interface VirtualEntry { rect: Rect; members: Rect[] }
+    const virtuals: VirtualEntry[] = [];
+    for (const block of outsideMembers) {
+        virtuals.push({ rect: block, members: [block] });
+    }
+    for (const [, members] of zoneToMembers) {
+        if (members.length === 0) continue;
+        let unioned: Rect | null = null;
+        for (const m of members) unioned = unionRect(unioned, m);
+        if (unioned) virtuals.push({ rect: unioned, members });
+    }
+
+    if (virtuals.length <= 1) {
+        const only = virtuals[0];
+        if (!only) return [];
+        return only.members.length === 1 ? only.members.slice() : xyCut(only.members);
+    }
+
+    // Outer xy-cut on the super-rects, then expand each virtual back to
+    // its members (recursively xy-cut for multi-member zones).
+    const virtualRects = virtuals.map((v) => v.rect);
+    const lookup = new Map<Rect, VirtualEntry>();
+    for (const v of virtuals) lookup.set(v.rect, v);
+    const outerOrder = xyCut(virtualRects);
+    const result: Rect[] = [];
+    for (const v of outerOrder) {
+        const entry = lookup.get(v);
+        if (!entry) continue;
+        if (entry.members.length === 1) {
+            result.push(entry.members[0]);
+        } else {
+            // Inside-zone reading order — plain xy-cut. The zone's own
+            // multi-column gutter is now legitimate to slice on (no
+            // outside content can cross it because we're already
+            // committed to this zone's bbox).
+            result.push(...xyCut(entry.members));
+        }
+    }
+    return result;
 }
 
 function findCleanCut(
