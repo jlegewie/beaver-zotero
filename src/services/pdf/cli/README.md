@@ -38,9 +38,17 @@ npm run beaver-extract -- info "$SMOKE"
 # Structured extract for pages 0 and 1, pretty-printed JSON
 npm run beaver-extract -- extract "$SMOKE" --pages 0,1 --json --pretty
 
+# Same extract with graphics-layer fill/stroke probing enabled
+npm run beaver-extract -- extract "$SMOKE" --pages 0,1 \
+    --graphics-layer-mode on --json --pretty
+
 # Render page 0 with sentence overlays + JSON sidecar
 npm run beaver-extract -- overlay "$SMOKE" --page 0 --level sentences \
     --out /tmp/overlay.png --sidecar-json
+
+# Render a columns overlay using graphics-layer layout dividers
+npm run beaver-extract -- overlay "$SMOKE" --page 0 --level columns \
+    --graphics-layer-mode on --out /tmp/overlay-graphics.png
 
 # Document-wide style + margin analysis
 npm run beaver-extract -- analyze-layout "$SMOKE" --pages 0 --json
@@ -134,6 +142,7 @@ Flags:
 | ---- | ------- |
 | `--pages <list>` / `--page-range <s>:<e>` | Narrow the target pages. Same parsers as `extract`. |
 | `--analysis-window <n>` | Forwarded to the analysis-context prefix. |
+| `--graphics-layer-mode <off\|auto\|on>` | Override `ExtractionSettings.graphicsLayerMode` for the run. Default is `off`; use `on` to include fill/stroke graphics boundaries in column detection. |
 | `--repeat <N>` | Re-run the same extract N times. Run 1 is reported as **cold**; runs 2..N are averaged as **warm-cache**. The doc cache and the splitter are warm after the first run, so warm averages reflect the steady-state hot path. |
 | `--language <lang>` | Splitter language code (forwarded to `sentencex`). |
 | `--settings <path>` / `--paragraph-settings <path>` | JSON-file overrides. |
@@ -220,6 +229,19 @@ ms fields so you can chart timing vs. page complexity offline.
   speculatively.
 
 ## Configuration
+
+### Graphics Layer Mode
+
+`extract`, `overlay`, `profile`, and `fixture capture` accept:
+
+```bash
+--graphics-layer-mode off|auto|on
+```
+
+This is a CLI shortcut for `settings.graphicsLayerMode` and overrides the
+value from `--settings` when both are supplied. `off` is the default. Use
+`on` when you want column detection and sentence/item overlays to account
+for graphics-layer fills and thin stroked divider lines.
 
 | Env var                           | Default                              | Purpose                                                                                                                  |
 | --------------------------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |

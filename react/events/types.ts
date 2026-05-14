@@ -34,6 +34,9 @@ export interface BeaverEvents {
             | 'lines'
             | 'items'
             | 'sentences'
+            | 'columns-graphics'
+            | 'items-graphics'
+            | 'sentences-graphics'
             | 'clear'
             | 'copy-extract-fixture-command'
             | 'copy-ocr-fixture-command';

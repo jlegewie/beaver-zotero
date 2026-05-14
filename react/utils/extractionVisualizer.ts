@@ -15,7 +15,10 @@ import {
     PDFExtractor,
     bboxToReaderFrame,
 } from "../../src/services/pdf";
-import type { ProcessedPage } from "../../src/services/pdf";
+import type {
+    ExtractionSettings,
+    ProcessedPage,
+} from "../../src/services/pdf";
 import { getItemLanguage } from "../../src/utils/zoteroUtils";
 import { getCurrentReaderAndWaitForView } from "./readerUtils";
 import { getPageViewportInfo } from "./pdfUtils";
@@ -238,6 +241,7 @@ async function loadStructuredPage(
     filePath: string,
     pageIndex: number,
     item: Zotero.Item,
+    settings?: ExtractionSettings,
 ): Promise<ProcessedPage> {
     const pdfData = await IOUtils.read(filePath);
     let language: string | undefined;
@@ -252,6 +256,7 @@ async function loadStructuredPage(
         pageIndices: [pageIndex],
         analysisWindow: Number.POSITIVE_INFINITY,
         structured: { language },
+        settings,
     });
     const page = result.pages[0];
     if (!page) {
@@ -265,7 +270,17 @@ async function loadStructuredPage(
 /**
  * Visualize column detection results for the current page in the reader.
  */
-export async function visualizeCurrentPageColumns(): Promise<{
+interface VisualizerOptions {
+    graphicsLayerMode?: ExtractionSettings["graphicsLayerMode"];
+}
+
+function visualizerSettings(options?: VisualizerOptions): ExtractionSettings | undefined {
+    return options?.graphicsLayerMode
+        ? { graphicsLayerMode: options.graphicsLayerMode }
+        : undefined;
+}
+
+export async function visualizeCurrentPageColumns(options?: VisualizerOptions): Promise<{
     success: boolean;
     message: string;
     columns?: number;
@@ -277,7 +292,12 @@ export async function visualizeCurrentPageColumns(): Promise<{
         const { reader, item, filePath, pageIndex } = ctx;
 
         logger(`[Visualizer] Loading PDF and extracting page ${pageIndex + 1}...`);
-        const page = await loadStructuredPage(filePath, pageIndex, item);
+        const page = await loadStructuredPage(
+            filePath,
+            pageIndex,
+            item,
+            visualizerSettings(options),
+        );
 
         const overlay = buildColumnOverlayFromPage(page);
         if (overlay.rects.length === 0) {
@@ -313,7 +333,7 @@ export async function visualizeCurrentPageColumns(): Promise<{
 /**
  * Visualize line detection results for the current page in the reader.
  */
-export async function visualizeCurrentPageLines(): Promise<{
+export async function visualizeCurrentPageLines(options?: VisualizerOptions): Promise<{
     success: boolean;
     message: string;
     lines?: number;
@@ -326,7 +346,12 @@ export async function visualizeCurrentPageLines(): Promise<{
         const { reader, item, filePath, pageIndex } = ctx;
 
         logger(`[Visualizer] Loading PDF and detecting lines on page ${pageIndex + 1}...`);
-        const page = await loadStructuredPage(filePath, pageIndex, item);
+        const page = await loadStructuredPage(
+            filePath,
+            pageIndex,
+            item,
+            visualizerSettings(options),
+        );
 
         const overlay = buildLineOverlayFromPage(page);
         if (overlay.rects.length === 0) {
@@ -371,7 +396,7 @@ export async function visualizeCurrentPageLines(): Promise<{
 /**
  * Visualize all detected document items for the current page in the reader.
  */
-export async function visualizeCurrentPageItems(): Promise<{
+export async function visualizeCurrentPageItems(options?: VisualizerOptions): Promise<{
     success: boolean;
     message: string;
     items?: number;
@@ -385,7 +410,12 @@ export async function visualizeCurrentPageItems(): Promise<{
         const { reader, item, filePath, pageIndex } = ctx;
 
         logger(`[Visualizer] Loading PDF for item detection on page ${pageIndex + 1}...`);
-        const page = await loadStructuredPage(filePath, pageIndex, item);
+        const page = await loadStructuredPage(
+            filePath,
+            pageIndex,
+            item,
+            visualizerSettings(options),
+        );
 
         const overlay = buildItemOverlayFromPage(page);
         if (overlay.rects.length === 0) {
@@ -430,7 +460,7 @@ export async function visualizeCurrentPageItems(): Promise<{
  * sentences stay coherent. Adjacent sentences alternate pink/yellow;
  * degraded fallbacks render in gray.
  */
-export async function visualizeCurrentPageSentences(): Promise<{
+export async function visualizeCurrentPageSentences(options?: VisualizerOptions): Promise<{
     success: boolean;
     message: string;
     sentences?: number;
@@ -446,7 +476,12 @@ export async function visualizeCurrentPageSentences(): Promise<{
         const { reader, item, filePath, pageIndex } = ctx;
 
         logger(`[Visualizer] Loading PDF and mapping sentences on page ${pageIndex + 1}...`);
-        const page = await loadStructuredPage(filePath, pageIndex, item);
+        const page = await loadStructuredPage(
+            filePath,
+            pageIndex,
+            item,
+            visualizerSettings(options),
+        );
 
         const overlay = buildSentenceOverlayFromPage(page);
         if (overlay.rects.length === 0) {

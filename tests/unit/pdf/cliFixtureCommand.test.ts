@@ -189,6 +189,33 @@ describe('fixture capture', () => {
         expect(existsSync(join(tmpRoot, '_shared', `${FAKE_PDF_SHA}.pdf`))).toBe(true);
     });
 
+    it('stores --graphics-layer-mode in captured fixture settings', async () => {
+        const { deps } = makeDeps();
+        const code = await runCli(
+            [
+                'fixture',
+                'capture',
+                'fake.pdf',
+                '--root',
+                tmpRoot,
+                '--id',
+                'graphics__p0',
+                '--pages',
+                '0',
+                '--graphics-layer-mode',
+                'on',
+                '--json',
+            ],
+            deps,
+        );
+        expect(code).toBe(0);
+
+        const fix = JSON.parse(readFileSync(join(tmpRoot, 'graphics__p0', 'fixture.json'), 'utf8')) as {
+            config: { settings: { graphicsLayerMode?: string } };
+        };
+        expect(fix.config.settings.graphicsLayerMode).toBe('on');
+    });
+
     it('refuses to overwrite an existing fixture without --update', async () => {
         const { deps } = makeDeps();
         const args = (extra: string[] = []) => [
