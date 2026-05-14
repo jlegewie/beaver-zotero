@@ -19,6 +19,7 @@ import {
     hasReferenceTail,
     isReferenceParagraph,
     mergedRangesValid,
+    mergeLowercaseEllipsisContinuations,
     mergeDecimalNumberSplits,
     mergeLabelSentences,
     mergeOrphanClosers,
@@ -1799,7 +1800,7 @@ describe("mergeDecimalNumberSplits", () => {
 });
 
 describe("mergeOrphanClosers", () => {
-    it("merges a lone ']' onto a period-terminated previous range (the 57WFL3D9 p9 case)", () => {
+    it("merges a lone ']' onto a period-terminated previous range", () => {
         const text =
             "effect of .3 corresponds to a 35% increase in the probability of being stopped.]";
         const ranges = rangesFromChunks(text, [
@@ -1846,16 +1847,40 @@ describe("mergeOrphanClosers", () => {
         expect(slice(text, merged)).toEqual(["彼は驚いて見た。」"]);
     });
 
-    it("does NOT merge when the previous range is not sentence-final", () => {
+    it("merges punctuation-only fragments even when the previous range is not sentence-final", () => {
         const text = "an unfinished phrase ]";
         const ranges = rangesFromChunks(text, [
             "an unfinished phrase",
             "]",
         ]);
         const merged = mergeOrphanClosers(ranges, text);
+        expect(slice(text, merged)).toEqual(["an unfinished phrase ]"]);
+    });
+
+    it("merges a citation tail split into closing punctuation", () => {
+        const text = "prior studies (see for example Ref. [9]).";
+        const ranges = rangesFromChunks(text, [
+            "prior studies (see for example Ref. [9]",
+            ").",
+        ]);
+        const merged = mergeOrphanClosers(ranges, text);
         expect(slice(text, merged)).toEqual([
-            "an unfinished phrase",
-            "]",
+            "prior studies (see for example Ref. [9]).",
+        ]);
+    });
+
+    it("collapses spaced ellipsis punctuation fragments onto the previous range", () => {
+        const text = "a clear risk . . . it continues";
+        const ranges = rangesFromChunks(text, [
+            "a clear risk .",
+            ".",
+            ".",
+            "it continues",
+        ]);
+        const merged = mergeOrphanClosers(ranges, text);
+        expect(slice(text, merged)).toEqual([
+            "a clear risk . . .",
+            "it continues",
         ]);
     });
 
@@ -1908,6 +1933,47 @@ describe("mergeOrphanClosers", () => {
         const out = applyPostProcessing(ranges, text);
         expect(slice(text, out)).toEqual([
             "effect of .3 corresponds to a multiplicative effect of exp(.3) = 1.35, or a 35% increase in the probability of being stopped.]",
+        ]);
+    });
+});
+
+describe("mergeLowercaseEllipsisContinuations", () => {
+    it("merges a lowercase continuation after a spaced ellipsis", () => {
+        const text = "a clear risk . . . it is not a simple issue";
+        const ranges = rangesFromChunks(text, [
+            "a clear risk . . .",
+            "it is not a simple issue",
+        ]);
+        const merged = mergeLowercaseEllipsisContinuations(ranges, text);
+        expect(slice(text, merged)).toEqual([
+            "a clear risk . . . it is not a simple issue",
+        ]);
+    });
+
+    it("keeps an uppercase continuation after a spaced ellipsis split", () => {
+        const text = "support resources . . . The greater business issue follows.";
+        const ranges = rangesFromChunks(text, [
+            "support resources . . .",
+            "The greater business issue follows.",
+        ]);
+        const merged = mergeLowercaseEllipsisContinuations(ranges, text);
+        expect(slice(text, merged)).toEqual([
+            "support resources . . .",
+            "The greater business issue follows.",
+        ]);
+    });
+
+    it("integrates punctuation collapse and lowercase ellipsis continuation", () => {
+        const text = "a clear risk . . . it is not a simple issue";
+        const ranges = rangesFromChunks(text, [
+            "a clear risk .",
+            ".",
+            ".",
+            "it is not a simple issue",
+        ]);
+        const out = applyPostProcessing(ranges, text);
+        expect(slice(text, out)).toEqual([
+            "a clear risk . . . it is not a simple issue",
         ]);
     });
 });

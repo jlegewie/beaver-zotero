@@ -500,7 +500,7 @@ export function buildMarginsOverlayFromAnalysis(
     let keptInZoneCount = 0;
     const pageRemovals = removal.removalsByPage.get(pageIndex) ?? new Set();
 
-    const reasonByText = new Map<string, "page_number" | "repeat">();
+    const reasonByText = new Map<string, "page_number" | "repeat" | "identifier">();
     for (const c of removal.candidates) {
         if (c.pageIndices.includes(pageIndex)) {
             reasonByText.set(c.text, c.reason);
@@ -530,7 +530,7 @@ export function buildMarginsOverlayFromAnalysis(
                 color = OVERLAY_COLORS.marginCandidatePageNumber;
                 label = `PN`;
                 pageNumberCount++;
-            } else if (reason === "repeat" || willBeRemoved) {
+            } else if (reason === "repeat" || reason === "identifier" || willBeRemoved) {
                 color = OVERLAY_COLORS.marginCandidateRepeat;
                 label = `R`;
                 repeatCount++;

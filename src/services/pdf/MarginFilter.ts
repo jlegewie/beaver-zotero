@@ -311,6 +311,23 @@ function normalizeText(text: string): string {
     return text.trim().toLowerCase();
 }
 
+const STANDALONE_URL_RE =
+    /^(?:(?:https?:\/\/|www\.)\S+|\S+\.(?:edu|gov|org|com|net|io|ac|uk)(?:\/\S*)?)$/iu;
+const STANDALONE_DOI_RE =
+    /^(?:doi:\s*|https?:\/\/(?:dx\.)?doi\.org\/)?10\.\d{4,9}\/\S+$/iu;
+const STANDALONE_ARXIV_RE =
+    /^arxiv:\s*\d{4}\.\d{4,5}(?:v\d+)?(?:\s+\[[^\]]+\])?(?:\s+\d{1,2}\s+\p{L}{3}\s+\d{4})?$/iu;
+
+function isStandaloneExternalIdentifier(text: string): boolean {
+    const cleaned = text.trim();
+    if (!cleaned) return false;
+    return (
+        STANDALONE_URL_RE.test(cleaned) ||
+        STANDALONE_DOI_RE.test(cleaned) ||
+        STANDALONE_ARXIV_RE.test(cleaned)
+    );
+}
+
 // ============================================================================
 // Effective repeat-threshold helper
 // ============================================================================
@@ -606,6 +623,50 @@ export class MarginFilter {
                         removalsByPage.get(p)!.add(variant);
                     }
                 }
+            }
+
+            // Single-page margin links / repository identifiers are usually
+            // publisher chrome, preprint side labels, or footer link-outs.
+            // Unlike running heads, they often appear only once, so the
+            // repeat threshold cannot catch them. Keep this anchored to
+            // standalone identifiers; prose lines that merely contain a URL
+            // or email remain eligible for extraction.
+            const identifierBuckets = new Map<string, {
+                originalText: string;
+                pageIndices: Set<number>;
+            }>();
+            for (const el of elements) {
+                const normalized = normalizeText(el.text);
+                if (textsToRemove.has(normalized)) continue;
+                if (!isStandaloneExternalIdentifier(el.text)) continue;
+
+                let bucket = identifierBuckets.get(normalized);
+                if (!bucket) {
+                    bucket = {
+                        originalText: el.text,
+                        pageIndices: new Set(),
+                    };
+                    identifierBuckets.set(normalized, bucket);
+                }
+                bucket.pageIndices.add(el.pageIndex);
+
+                textsToRemove.add(normalized);
+                if (!removalsByPage.has(el.pageIndex)) {
+                    removalsByPage.set(el.pageIndex, new Set());
+                }
+                removalsByPage.get(el.pageIndex)!.add(normalized);
+            }
+
+            for (const [text, bucket] of identifierBuckets) {
+                candidates.push({
+                    text,
+                    originalText: bucket.originalText,
+                    pageIndices: Array.from(bucket.pageIndices).sort(
+                        (a, b) => a - b,
+                    ),
+                    reason: "identifier",
+                    position,
+                });
             }
 
             // Detect page number sequences

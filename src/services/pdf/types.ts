@@ -628,7 +628,7 @@ export interface RemovalCandidate {
     /** Page indices where this text appears */
     pageIndices: number[];
     /** Reason for removal */
-    reason: "repeat" | "page_number";
+    reason: "repeat" | "page_number" | "identifier";
     /** Which margin zone */
     position: MarginPosition;
 }

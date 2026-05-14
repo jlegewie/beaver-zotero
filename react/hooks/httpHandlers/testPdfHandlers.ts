@@ -1054,7 +1054,7 @@ export async function handleTestPdfExtractTraceHttpRequest(request: any) {
     // Stage 1: smart-removal analysis (cross-page) — read from trace.
     // ------------------------------------------------------------------
     const smartRemoval = trace.marginRemoval;
-    const reasonByText = new Map<string, 'page_number' | 'repeat'>();
+    const reasonByText = new Map<string, 'page_number' | 'repeat' | 'identifier'>();
     for (const c of smartRemoval.candidates) {
         reasonByText.set(c.text, c.reason);
     }
@@ -1081,7 +1081,7 @@ export async function handleTestPdfExtractTraceHttpRequest(request: any) {
         marginFilter: {
             keptBySimple: boolean;
             inSmartZone: boolean;
-            smartRemoval: 'page_number' | 'repeat' | null;
+            smartRemoval: 'page_number' | 'repeat' | 'identifier' | null;
             finalKept: boolean;
         };
         role: 'heading' | 'body' | 'caption' | 'footnote';

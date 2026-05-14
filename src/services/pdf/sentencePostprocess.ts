@@ -17,8 +17,6 @@
  */
 
 import {
-    hasSentenceFinalTerminator,
-    SENTENCE_FINAL_CLOSERS,
     type SentenceRange,
 } from "./SentenceMapper";
 
@@ -1104,39 +1102,40 @@ export const mergeDecimalNumberSplits: PostProcessStep = (ranges, text) => {
 };
 
 // ---------------------------------------------------------------------------
-// Step: merge orphan closer-only fragments back onto the previous sentence
+// Step: merge orphan punctuation fragments back onto the previous sentence
 // ---------------------------------------------------------------------------
 
 /**
  * sentencex emits a `.` (or `!`/`?`) as a sentence terminator even when the
  * next non-space character is a closing bracket / paren / quote, so paragraph
  * text that ends with `…stopped.]`, `…done.)`, `…said."`, `…見た。」` gets
- * shredded into a normal sentence followed by a single-character closer-only
- * fragment. Downstream that fragment becomes a 3-pt-wide one-glyph "sentence"
- * in the visualizer / citations / search results.
+ * shredded into a normal sentence followed by a punctuation-only fragment.
+ * Spaced ellipses (`. . .`) create the same shape: one lexical range followed
+ * by one or more standalone `.` ranges. Downstream those fragments become
+ * 3-pt-wide one-glyph "sentences" in the visualizer / citations / search
+ * results.
  *
- * Merge any closer-only range onto the previous range, but only when the
- * previous range was already sentence-final (terminator + optional closer
- * stack). Both guards are required:
+ * Merge any punctuation-only range onto the previous range. The guard is
+ * intentionally about lexical content, not the exact punctuation mark: a
+ * range containing only `).`, `]`, `.`, or `...` cannot stand alone as a
+ * useful sentence.
  *
- *   1. Range trimmed text is non-empty AND every character is in
- *      `SENTENCE_FINAL_CLOSERS` (so multi-closer tails like `])` collapse too).
- *   2. The previous range passes `hasSentenceFinalTerminator`, i.e. ends in
- *      `.`/`!`/`?`/`…`/Myanmar `။`/etc. through any existing closer stack.
- *
- * Without guard 2 we would silently absorb stray closers after non-final
- * fragments — a broader change than the production bug. With both guards the
- * rule only fires on the `<sentence-terminator><closer>` shape that sentencex
- * over-splits.
+ * A punctuation-only first range is left alone because there is no lexical
+ * sentence to attach it to.
  */
-function isOnlyClosers(text: string): boolean {
+function trimBounds(text: string): { start: number; end: number } {
     let start = 0;
     let end = text.length;
     while (start < end && /\s/.test(text[start])) start++;
     while (end > start && /\s/.test(text[end - 1])) end--;
+    return { start, end };
+}
+
+function isOnlySentencePunctuation(text: string): boolean {
+    const { start, end } = trimBounds(text);
     if (end <= start) return false;
     for (let i = start; i < end; i++) {
-        if (!SENTENCE_FINAL_CLOSERS.has(text[i])) return false;
+        if (!/\p{P}/u.test(text[i])) return false;
     }
     return true;
 }
@@ -1148,8 +1147,7 @@ export const mergeOrphanClosers: PostProcessStep = (ranges, text) => {
         const prev = out.length > 0 ? out[out.length - 1] : null;
         if (
             prev &&
-            isOnlyClosers(text.slice(r.start, r.end)) &&
-            hasSentenceFinalTerminator(text.slice(prev.start, prev.end))
+            isOnlySentencePunctuation(text.slice(r.start, r.end))
         ) {
             out[out.length - 1] = { start: prev.start, end: r.end };
             continue;
@@ -1157,6 +1155,52 @@ export const mergeOrphanClosers: PostProcessStep = (ranges, text) => {
         out.push(r);
     }
     return out;
+};
+
+// ---------------------------------------------------------------------------
+// Step: merge lowercase continuations after spaced ellipses
+// ---------------------------------------------------------------------------
+
+/**
+ * PDF text often represents an ellipsis as three spaced full stops (`. . .`).
+ * After punctuation-only fragments are absorbed, keep a lowercase-starting
+ * continuation with the ellipsis range. Uppercase continuations remain split
+ * because the ellipsis is commonly sentence-final before a new sentence.
+ */
+function endsWithSpacedEllipsis(text: string): boolean {
+    return /(?:^|\s)\.\s+\.\s+\.\s*$/u.test(text);
+}
+
+function startsWithLowercaseLetter(text: string): boolean {
+    const { start, end } = trimBounds(text);
+    if (end <= start) return false;
+    return /\p{Ll}/u.test(text[start]);
+}
+
+export const mergeLowercaseEllipsisContinuations: PostProcessStep = (
+    ranges,
+    text,
+) => {
+    if (ranges.length < 2) return ranges as SentenceRange[];
+    const merged: SentenceRange[] = [];
+    let pending: SentenceRange | null = null;
+    for (const r of ranges) {
+        if (pending) {
+            const left = text.slice(pending.start, pending.end);
+            const right = text.slice(r.start, r.end);
+            if (
+                endsWithSpacedEllipsis(left) &&
+                startsWithLowercaseLetter(right)
+            ) {
+                pending = { start: pending.start, end: r.end };
+                continue;
+            }
+            merged.push(pending);
+        }
+        pending = r;
+    }
+    if (pending) merged.push(pending);
+    return merged;
 };
 
 // ---------------------------------------------------------------------------
@@ -1170,4 +1214,5 @@ const POST_PROCESS_STEPS: ReadonlyArray<PostProcessStep> = [
     mergeDecimalNumberSplits,
     mergeReferenceListSentences,
     mergeOrphanClosers,
+    mergeLowercaseEllipsisContinuations,
 ];

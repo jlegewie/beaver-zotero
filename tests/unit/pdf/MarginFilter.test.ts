@@ -235,6 +235,59 @@ describe("multilingual same-template repeats (templated branch)", () => {
     });
 });
 
+describe("standalone external identifiers in margin zones", () => {
+    it("removes a singleton URL from a margin zone", () => {
+        const out = MarginFilter.identifyElementsToRemove(
+            oneTextPerPage(["www.rsc.org/advances"], "bottom"),
+            3,
+            true,
+        );
+
+        expect(out.candidates).toContainEqual({
+            text: "www.rsc.org/advances",
+            originalText: "www.rsc.org/advances",
+            pageIndices: [0],
+            reason: "identifier",
+            position: "bottom",
+        });
+        expect(
+            out.removalsByPage.get(0)?.has("www.rsc.org/advances"),
+        ).toBe(true);
+    });
+
+    it("removes a singleton arXiv side identifier from a margin zone", () => {
+        const text = "arXiv:1706.05678v1  [stat.AP]  18 Jun 2017";
+        const out = MarginFilter.identifyElementsToRemove(
+            oneTextPerPage([text], "left"),
+            3,
+            true,
+        );
+
+        expect(out.candidates).toContainEqual({
+            text: text.toLowerCase(),
+            originalText: text,
+            pageIndices: [0],
+            reason: "identifier",
+            position: "left",
+        });
+        expect(out.removalsByPage.get(0)?.has(text.toLowerCase())).toBe(true);
+    });
+
+    it("does not remove prose that merely contains a URL or email", () => {
+        const out = MarginFilter.identifyElementsToRemove(
+            oneTextPerPage([
+                "All data and analysis code are available at https://openpolicing.stanford.edu.",
+                "Correspondence may be addressed to Sharad Goel at scgoel@stanford.edu.",
+            ], "bottom"),
+            3,
+            true,
+        );
+
+        expect(out.candidates.some((c) => c.reason === "identifier")).toBe(false);
+        expect(out.textsToRemove.size).toBe(0);
+    });
+});
+
 describe("non-ASCII digit normalization", () => {
     it("Arabic-Indic digits in 'X of Y' form parse correctly", () => {
         // ١=1 ٢=2 ٣=3 ٤=4 ٥=5 (Arabic-Indic). Page indicator "K of ١٣".
