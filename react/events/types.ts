@@ -33,7 +33,6 @@ export interface BeaverEvents {
             | 'columns'
             | 'lines'
             | 'items'
-            | 'paragraphs'
             | 'sentences'
             | 'clear'
             | 'copy-extract-fixture-command'

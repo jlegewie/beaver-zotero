@@ -14,7 +14,6 @@ export {
     buildItemOverlayFromPage,
     buildLineOverlayFromPage,
     buildMarginsOverlayFromAnalysis,
-    buildParagraphOverlayFromPage,
     buildSentenceOverlayFromPage,
     buildSentenceOverlayFromResult,
 } from "../../src/services/pdf/debug/overlayBuilders";

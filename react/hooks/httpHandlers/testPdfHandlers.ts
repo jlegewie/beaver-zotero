@@ -10,7 +10,6 @@ import {
     buildColumnOverlayFromPage,
     buildItemOverlayFromPage,
     buildLineOverlayFromPage,
-    buildParagraphOverlayFromPage,
     buildSentenceOverlayFromPage,
     buildMarginsOverlayFromAnalysis,
 } from '../../utils/extractionOverlay';
@@ -618,7 +617,7 @@ export async function handleTestPdfSentenceBBoxesHttpRequest(request: any) {
  * Request body:
  *   { library_id, zotero_key | raw_bytes_base64,
  *     page_index: number,
- *     level: "columns" | "lines" | "items" | "paragraphs" | "sentences" | "margins",
+ *     level: "columns" | "lines" | "items" | "sentences" | "margins",
  *     dpi?: number,                       // default 144
  *     language?: string,                  // sentences only; falls back to item lang
  *     analysis_page_window?: number,      // ±N pages around page_index for
@@ -679,7 +678,6 @@ export async function handleTestPdfRenderOverlayHttpRequest(request: any) {
         level !== 'columns' &&
         level !== 'lines' &&
         level !== 'items' &&
-        level !== 'paragraphs' &&
         level !== 'sentences' &&
         level !== 'margins'
     ) {
@@ -688,7 +686,7 @@ export async function handleTestPdfRenderOverlayHttpRequest(request: any) {
             error: {
                 name: 'Error',
                 message:
-                    'level must be one of: columns | lines | items | paragraphs | sentences | margins',
+                    'level must be one of: columns | lines | items | sentences | margins',
             },
         };
     }
@@ -743,7 +741,7 @@ export async function handleTestPdfRenderOverlayHttpRequest(request: any) {
             });
             overlay = buildMarginsOverlayFromAnalysis(out, pageIndex);
         } else {
-            // sentences / columns / lines / items / paragraphs: one worker
+            // sentences / columns / lines / items: one worker
             // round-trip via the production structured-mode extract.
             // Same op production uses — what we paint here matches
             // what `extract({ mode: "structured" })` produces for
@@ -777,9 +775,8 @@ export async function handleTestPdfRenderOverlayHttpRequest(request: any) {
                 case 'items':
                     overlay = buildItemOverlayFromPage(page);
                     break;
-                default: // 'paragraphs'
-                    overlay = buildParagraphOverlayFromPage(page);
-                    break;
+                default:
+                    throw new Error(`Unhandled overlay level: ${level}`);
             }
         }
     } catch (e) {

@@ -112,7 +112,6 @@ function dispatchVisualizerAction(
         | 'columns'
         | 'lines'
         | 'items'
-        | 'paragraphs'
         | 'sentences'
         | 'clear'
         | 'copy-extract-fixture-command'
@@ -222,7 +221,6 @@ function openBeaverMenu(reader: any, anchorButton: HTMLElement): void {
             { label: 'Visualize Columns', action: 'columns' },
             { label: 'Visualize Lines', action: 'lines' },
             { label: 'Visualize Items', action: 'items' },
-            { label: 'Visualize Paragraphs', action: 'paragraphs' },
             { label: 'Visualize Sentences', action: 'sentences' },
             { label: 'Clear Visualization', action: 'clear' },
             { label: 'Copy Extract Fixture Command', action: 'copy-extract-fixture-command' },

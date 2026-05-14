@@ -11,7 +11,6 @@ import {
     buildColumnOverlayFromPage,
     buildItemOverlayFromPage,
     buildLineOverlayFromPage,
-    buildParagraphOverlayFromPage,
     buildSentenceOverlayFromPage,
     OVERLAY_COLORS,
 } from '../../../src/services/pdf/debug/overlayBuilders';
@@ -214,39 +213,6 @@ describe('debug/overlayBuilders', () => {
             expect(out.stats.pictures).toBe(1);
         });
 
-        it('paragraph overlay includes text items only', () => {
-            const page: ProcessedPage = {
-                ...basePage(),
-                items: [
-                    {
-                        kind: "section_header",
-                        id: "p0:i0",
-                        pageIndex: 0,
-                        index: 0,
-                        bbox: bbox(50, 50, 200, 30),
-                        columnIndex: 0,
-                        text: "Title",
-                        lines: [{ bbox: bbox(50, 50, 200, 30), text: "Title" }],
-                        level: 1,
-                    },
-                    {
-                        kind: "text",
-                        id: "p0:i1",
-                        pageIndex: 0,
-                        index: 1,
-                        bbox: bbox(50, 100, 500, 50),
-                        columnIndex: 0,
-                        text: "Body",
-                        lines: [{ bbox: bbox(50, 100, 500, 50), text: "Body" }],
-                        sentences: [],
-                    },
-                ],
-            };
-            const out = buildParagraphOverlayFromPage(page);
-            expect(out.level).toBe("paragraphs");
-            expect(out.rects).toHaveLength(1);
-            expect(out.rects[0].label).toBe("P2");
-        });
     });
 
     describe('buildSentenceOverlayFromPage', () => {

@@ -13,7 +13,6 @@ import {
     visualizeCurrentPageColumns,
     visualizeCurrentPageItems,
     visualizeCurrentPageLines,
-    visualizeCurrentPageParagraphs,
     visualizeCurrentPageSentences,
     clearVisualizationAnnotations,
     extractCurrentPageContent
@@ -259,17 +258,6 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
     const handleVisualizeItems = async () => {
         console.log("[PDF Visualizer] Visualizing items on current page...");
         const result = await visualizeCurrentPageItems();
-        if (result.success) {
-            console.log(`[PDF Visualizer] ${result.message}`);
-        } else {
-            console.warn(`[PDF Visualizer] ${result.message}`);
-        }
-    };
-
-    // Visualize detected paragraphs on current page
-    const handleVisualizeParagraphs = async () => {
-        console.log("[PDF Visualizer] Visualizing paragraphs on current page...");
-        const result = await visualizeCurrentPageParagraphs();
         if (result.success) {
             console.log(`[PDF Visualizer] ${result.message}`);
         } else {
@@ -791,12 +779,6 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
         {
             label: "Visualize Items",
             onClick: handleVisualizeItems,
-            icon: PdfIcon,
-            disabled: false,
-        },
-        {
-            label: "Visualize Paragraphs",
-            onClick: handleVisualizeParagraphs,
             icon: PdfIcon,
             disabled: false,
         },

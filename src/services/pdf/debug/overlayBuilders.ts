@@ -2,7 +2,7 @@
  * Extraction Overlay — shared bbox source-of-truth.
  *
  * Computes per-level bounding-box overlays (columns / lines / items /
- * paragraphs / sentences / margins) for a single PDF page, returning plain rect data
+ * sentences / margins) for a single PDF page, returning plain rect data
  * in MuPDF top-left point coordinates. No DOM, no Zotero reader, no
  * annotations.
  *
@@ -16,7 +16,7 @@
  *      `node/overlayPng.ts` (sharp + SVG composite) for the CLI overlay
  *      command.
  *
- * Filter alignment: columns / lines / items / paragraphs / sentences all route
+ * Filter alignment: columns / lines / items / sentences all route
  * through `detectFilteredParagraphs`, so every overlay reflects what the
  * production sentence pipeline sees (cross-page smart margin removal,
  * document-wide style profile). `margins` deliberately skips that filter
@@ -42,7 +42,6 @@ export type OverlayLevel =
     | "columns"
     | "lines"
     | "items"
-    | "paragraphs"
     | "sentences"
     | "margins";
 
@@ -149,7 +148,7 @@ export interface OverlayResult {
     pageWidth: number;
     /** Page height in MuPDF points. */
     pageHeight: number;
-    /** Number of logical groups (columns, lines, items, paragraphs, or sentences). */
+    /** Number of logical groups (columns, lines, items, or sentences). */
     groupCount: number;
     /** Flat list of rects, ordered by group then by reading order. */
     rects: OverlayRect[];
@@ -368,9 +367,7 @@ export function buildItemOverlayFromPage(
         };
     });
     return {
-        level: kindFilter && kindFilter.length === 1 && kindFilter[0] === "text"
-            ? "paragraphs"
-            : "items",
+        level: "items",
         pageIndex: page.index,
         pageWidth: page.width,
         pageHeight: page.height,
@@ -388,12 +385,6 @@ export function buildItemOverlayFromPage(
             pictures: kindCounts.picture ?? 0,
         },
     };
-}
-
-export function buildParagraphOverlayFromPage(
-    page: ProcessedPage,
-): OverlayResult {
-    return buildItemOverlayFromPage(page, ["text"]);
 }
 
 /**

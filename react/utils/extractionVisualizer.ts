@@ -2,7 +2,7 @@
  * Extraction Visualizer
  *
  * Creates temporary Zotero annotations to visualize PDF extraction results
- * (columns / lines / items / paragraphs / sentences) on the live reader. Useful
+ * (columns / lines / items / sentences) on the live reader. Useful
  * for dev-time inspection of the detection pipeline.
  *
  * Bbox computation is delegated to `extractionOverlay.ts` so the
@@ -25,7 +25,6 @@ import {
     buildColumnOverlayFromPage,
     buildItemOverlayFromPage,
     buildLineOverlayFromPage,
-    buildParagraphOverlayFromPage,
     buildSentenceOverlayFromPage,
     OverlayResult,
 } from "./extractionOverlay";
@@ -143,7 +142,7 @@ async function pushOverlayToReader(
     const pageIndex = overlay.pageIndex;
 
     // Group rects by their `group` index so multi-rect sentences become a
-    // single annotation. Single-rect levels (columns/lines/items/paragraphs)
+    // single annotation. Single-rect levels (columns/lines/items)
     // collapse to one entry per group naturally.
     const groups = new Map<number, typeof overlay.rects>();
     for (const r of overlay.rects) {
@@ -223,7 +222,7 @@ async function pushOverlayToReader(
 /**
  * Run the structured-mode extract for a single page and return the
  * `ProcessedPage`. Single worker round-trip that drives every visualizer
- * level (columns / lines / items / paragraphs / sentences) — the pure
+ * level (columns / lines / items / sentences) — the pure
  * `*FromPage` builders in `extractionOverlay.ts` then turn the result
  * into rects.
  *
@@ -421,58 +420,6 @@ export async function visualizeCurrentPageItems(): Promise<{
         const errorMessage = error instanceof Error ? error.message : String(error);
         logger(`[Visualizer] Error: ${errorMessage}`);
         return { success: false, message: `Item visualization failed: ${errorMessage}` };
-    }
-}
-
-/**
- * Visualize paragraph detection results for the current page in the reader.
- */
-export async function visualizeCurrentPageParagraphs(): Promise<{
-    success: boolean;
-    message: string;
-    paragraphs?: number;
-    headers?: number;
-    pageIndex?: number;
-}> {
-    try {
-        const ctx = await resolveActiveReaderContext();
-        if ("error" in ctx) return { success: false, message: ctx.error };
-        const { reader, item, filePath, pageIndex } = ctx;
-
-        logger(`[Visualizer] Loading PDF for paragraph detection on page ${pageIndex + 1}...`);
-        const page = await loadStructuredPage(filePath, pageIndex, item);
-
-        const overlay = buildParagraphOverlayFromPage(page);
-        if (overlay.rects.length === 0) {
-            return {
-                success: true,
-                message: `No paragraphs detected on page ${pageIndex + 1}`,
-                paragraphs: 0,
-                headers: 0,
-                pageIndex,
-            };
-        }
-
-        const { viewBox, width, height, rotation } = await getPageViewportInfo(reader, pageIndex);
-        const refs = await pushOverlayToReader(
-            overlay,
-            reader,
-            [viewBox[0], viewBox[1]],
-            width,
-            height,
-            rotation,
-        );
-        BeaverTemporaryAnnotations.addToTracking(refs);
-
-        const paragraphs = Number(overlay.stats.paragraphs ?? 0);
-        const headers = Number(overlay.stats.headers ?? 0);
-        const message = `Page ${pageIndex + 1}: ${paragraphs} paragraphs, ${headers} headers`;
-        logger(`[Visualizer] ${message}`);
-        return { success: true, message, paragraphs, headers, pageIndex };
-    } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        logger(`[Visualizer] Error: ${errorMessage}`);
-        return { success: false, message: `Paragraph visualization failed: ${errorMessage}` };
     }
 }
 

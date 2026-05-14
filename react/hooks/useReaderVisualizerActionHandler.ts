@@ -12,7 +12,6 @@ import {
     visualizeCurrentPageColumns,
     visualizeCurrentPageItems,
     visualizeCurrentPageLines,
-    visualizeCurrentPageParagraphs,
     visualizeCurrentPageSentences,
     clearVisualizationAnnotations,
     resolveActiveReaderContext,
@@ -40,11 +39,6 @@ export function useReaderVisualizerActionHandler() {
                 case 'items': {
                     const r = await visualizeCurrentPageItems();
                     logger(`[ReaderVisualizer] items: ${r.message}`);
-                    return;
-                }
-                case 'paragraphs': {
-                    const r = await visualizeCurrentPageParagraphs();
-                    logger(`[ReaderVisualizer] paragraphs: ${r.message}`);
                     return;
                 }
                 case 'sentences': {

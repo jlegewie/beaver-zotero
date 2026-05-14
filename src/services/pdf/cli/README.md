@@ -75,7 +75,7 @@ npm run beaver-extract -- overlay --help
 | `fixture`        | Manage extraction-regression fixtures (see below).     |
 | `ocr-fixture`    | Manage OCR-detection regression fixtures (see below).  |
 
-Overlay levels: `columns | lines | items | paragraphs | sentences | margins`.
+Overlay levels: `columns | lines | items | sentences | margins`.
 
 ## Output
 

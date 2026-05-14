@@ -596,9 +596,8 @@ visible only in dev builds) exposes the PDF debug actions:
 5. **Visualize Columns**: Blue overlays showing detected columns
 6. **Visualize Lines**: Orange overlays for each detected line
 7. **Visualize Items**: One box per `DocItem`, with stable colors for all item kinds
-8. **Visualize Paragraphs**: Green overlays for text items only, useful when tuning paragraph grouping
-9. **Visualize Sentences**: Lowest available text units: sentence boxes for split prose, item boxes for headers and other unsplit kinds
-10. **Clear Visualization**: Remove all temporary overlay annotations
+8. **Visualize Sentences**: Lowest available text units: sentence boxes for split prose, item boxes for headers and other unsplit kinds
+9. **Clear Visualization**: Remove all temporary overlay annotations
 
 For non-UI debugging, the dev-only HTTP endpoints under `/beaver/test/*`
 (see `react/hooks/useHttpEndpoints.ts` and
@@ -1092,7 +1091,8 @@ const paragraphResult = detectParagraphs(lineResult, bodyStyles);
 import {
   visualizeCurrentPageColumns,
   visualizeCurrentPageLines,
-  visualizeCurrentPageParagraphs,
+  visualizeCurrentPageItems,
+  visualizeCurrentPageSentences,
   clearVisualizationAnnotations,
 } from "react/utils/extractionVisualizer";
 

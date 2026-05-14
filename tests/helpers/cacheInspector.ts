@@ -362,7 +362,6 @@ export async function pdfRenderOverlay(
             | 'columns'
             | 'lines'
             | 'items'
-            | 'paragraphs'
             | 'sentences'
             | 'margins';
         dpi?: number;
