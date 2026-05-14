@@ -484,7 +484,7 @@ function isIconBulletLine(line: PageLine): boolean {
  * 1-3 digits avoids matching 4-digit years at the start of a line.
  */
 const NUMERIC_LEADER_RE =
-    /^\s*(?:[(\[]\d{1,3}[)\]]\s+|\d{1,3}[.)]\s+|\d{1,3}\s{2,}\p{Lu})/u;
+    /^\s*(?:[([]\d{1,3}[)\]]\s+|\d{1,3}[.)]\s+|\d{1,3}\s{2,}\p{Lu})/u;
 
 /**
  * Lettered leader for hanging-indent list items. Deliberately narrow to keep
@@ -501,7 +501,7 @@ const NUMERIC_LEADER_RE =
  * Whitespace required after the marker.
  */
 const LETTERED_LEADER_RE =
-    /^\s*(?:[(\[][a-zA-Z][)\]]\s+|[a-z][.)]\s+|(?:i{1,3}|iv|v|vi{0,3}|ix|x)[.)]\s+)/u;
+    /^\s*(?:[([][a-zA-Z][)\]]\s+|[a-z][.)]\s+|(?:i{1,3}|iv|v|vi{0,3}|ix|x)[.)]\s+)/u;
 
 /**
  * Footnote / reference symbol marker — the traditional non-numeric footnote
