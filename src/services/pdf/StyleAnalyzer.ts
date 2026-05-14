@@ -212,6 +212,51 @@ export class StyleAnalyzer {
     }
 
     /**
+     * Heading-like predicate used by the margin filter to spare a real
+     * article / chapter title from cross-page smart-removal when the
+     * same text appears as a small-font running header elsewhere.
+     *
+     * Two gates combined:
+     *  - **Size**: `size > body × 1.5`. Stricter than the descriptive
+     *    `> body × 1.2` cutoff in {@link classifyRole} on purpose: a
+     *    bold/italic running header that's only ~1.2× body is also
+     *    technically "heading-styled" but is still marginalia. Real
+     *    article and chapter titles are typically 1.5× – 2.5× body,
+     *    well above this cutoff.
+     *  - **Substance**: ≥ 3 word tokens AND ≥ 8 alphanumeric chars.
+     *    Stricter than the ≥ 2-token check in {@link looksLikeBodyContent}
+     *    because the spare needs to distinguish real article / chapter
+     *    titles (typically multi-word) from 2-word journal-category
+     *    labels that are also heading-sized but are still marginalia
+     *    ("Research Article", "Review Article", "Original Research",
+     *    "Brief Report"). The 3-token cutoff is empirical: a brief
+     *    survey of journal chrome across STEM and humanities title
+     *    pages found these labels are nearly always 1–2 words while
+     *    real article titles run 4+ words. Trade-off accepted: a
+     *    1–2-word real title (rare in academic writing) is not spared.
+     *
+     * Returns `false` when no body style is supplied or when the body
+     * size is non-positive, so callers can pass the field unconditionally.
+     */
+    static isHeadingLine(
+        line: RawLine,
+        primaryBodyStyle: TextStyle | undefined
+    ): boolean {
+        if (!primaryBodyStyle) return false;
+        const bodySize = primaryBodyStyle.size;
+        if (!Number.isFinite(bodySize) || bodySize <= 0) return false;
+        const size = extractStyle(line).size;
+        if (size <= bodySize * 1.5) return false;
+        const text = (line.text || "").trim();
+        const alnumMatches = text.match(/[\p{L}\p{N}]/gu);
+        if (!alnumMatches || alnumMatches.length < 8) return false;
+        const tokens = text
+            .split(/\s+/)
+            .filter((t) => /[\p{L}\p{N}]/u.test(t));
+        return tokens.length >= 3;
+    }
+
+    /**
      * Predicate used by the margin filter / column detector to decide
      * whether a line should be spared from the simple-margin drop on the
      * basis of "this looks like body content packed near the page edge".

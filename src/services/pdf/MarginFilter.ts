@@ -799,15 +799,31 @@ export class MarginFilter {
      * `bodyStyles` (optional) spares the simple-margin drop for lines whose
      * font matches a document body style, so tight-margin layouts
      * keep body text packed near the page edge.
+     *
+     * `primaryBodyStyle` (optional) spares the smart-removal drop for
+     * heading-sized lines (font size > primary body size × 1.2). Running
+     * headers are body-sized or smaller by convention, so a candidate-text
+     * match on a heading-sized line is almost always the document's actual
+     * title or section heading sharing text with a small-font running
+     * header elsewhere — keep it.
      */
     static filterPageWithSmartRemoval(
         page: RawPageData,
         margins: MarginSettings,
         marginZone: MarginSettings,
         removalResult: MarginRemovalResult,
-        bodyStyles?: TextStyle[]
+        bodyStyles?: TextStyle[],
+        primaryBodyStyle?: TextStyle
     ): RawPageData {
         const pageRemovals = removalResult.removalsByPage.get(page.pageIndex);
+        // Per-text reason lookup so the heading-spare can apply only to
+        // `repeat` removals — page-number sequences and identifier matches
+        // are structural classifications that must NOT be overridden by
+        // font size (a large page-number stamp is still a page number).
+        const reasonByText = new Map<string, RemovalCandidate["reason"]>();
+        for (const c of removalResult.candidates) {
+            if (!reasonByText.has(c.text)) reasonByText.set(c.text, c.reason);
+        }
 
         const filteredBlocks = page.blocks.map(block => {
             if (block.type !== "text" || !block.lines) {
@@ -827,7 +843,16 @@ export class MarginFilter {
                 }
 
                 // Check if line is in margin zone and matches removal candidate.
-                // Smart-removal still applies to body-styled lines.
+                // Smart-removal still applies to body-styled lines, but a
+                // heading-sized line whose text matches a `repeat` candidate
+                // is spared: a line whose font already meets the heading-
+                // size threshold cannot be a running header/footer on this
+                // page regardless of textual identity with a small-font
+                // running header elsewhere. This protects article titles
+                // and section headings whose text happens to recur as a
+                // running header on subsequent pages. The spare is gated to
+                // `repeat` reasons so page-number sequences and identifier
+                // matches (URLs, DOIs in margins) remain force-removed.
                 if (pageRemovals && pageRemovals.size > 0) {
                     const position = getMarginPosition(
                         line.bbox,
@@ -839,6 +864,16 @@ export class MarginFilter {
                     if (position) {
                         const normalized = normalizeText(line.text || "");
                         if (pageRemovals.has(normalized)) {
+                            const reason = reasonByText.get(normalized);
+                            if (
+                                reason === "repeat"
+                                && StyleAnalyzer.isHeadingLine(
+                                    line,
+                                    primaryBodyStyle,
+                                )
+                            ) {
+                                return true;
+                            }
                             return false;
                         }
                     }

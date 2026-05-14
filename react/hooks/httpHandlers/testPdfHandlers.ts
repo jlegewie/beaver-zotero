@@ -1066,6 +1066,13 @@ export async function handleTestPdfExtractTraceHttpRequest(request: any) {
     // simple-margin drop). Sourced from the trace's filtered result so the
     // trace shares the production-side style profile.
     const traceBodyStyles = trace.filteredResult.styleProfile.bodyStyles;
+    // Primary body style drives the heading-spare in smart-removal — a
+    // line whose font size meets the heading threshold is never treated as
+    // a marginal repeat (running headers are body-sized or smaller). The
+    // trace reports both: `smartRemoval` records the candidate match, and
+    // `finalKept` flips to true when the heading-spare overrides the drop.
+    const tracePrimaryBodyStyle =
+        trace.filteredResult.styleProfile.primaryBodyStyle;
 
     // ------------------------------------------------------------------
     // Stage 2: enumerate raw lines on the target page with stable IDs and
@@ -1129,7 +1136,15 @@ export async function handleTestPdfExtractTraceHttpRequest(request: any) {
                     ? reasonByText.get(normalized) ?? 'repeat'
                     : null
                 : null;
-            const finalKept = keptBySimple && smartReason === null;
+            // Heading-spare only neutralises `repeat`-reason removals —
+            // page-number and identifier matches are structural and stay
+            // force-removed regardless of font size. Mirrors the gate in
+            // `MarginFilter.filterPageWithSmartRemoval`.
+            const sparedAsHeading =
+                smartReason === "repeat"
+                && StyleAnalyzer.isHeadingLine(line, tracePrimaryBodyStyle);
+            const finalKept =
+                keptBySimple && (smartReason === null || sparedAsHeading);
 
             const entry: RawLineEntry = {
                 id,

@@ -241,6 +241,7 @@ export function detectFilteredParagraphs(
         marginZone,
         marginRemoval,
         styleProfile.bodyStyles,
+        styleProfile.primaryBodyStyle,
     );
     const marginFilterMs = performance.now() - tMarginFilter;
     const uprightMarginItems = collectMarginItemsFromFilteredPage(

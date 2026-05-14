@@ -1044,6 +1044,385 @@ describe("filterPageWithSmartRemoval — body-style spare", () => {
     });
 });
 
+// ---------------------------------------------------------------------------
+// Heading-size spare — smart-removal must not drop a heading-sized line
+// just because the same text appears as a small-font running header on
+// other pages. Mirrors the article-title vs running-head case (DK paper):
+// title rendered at 17pt on p0 and as a 7-9pt running head on later pages
+// share a normalized text key, so the cross-page repeat candidate covers
+// both — but only the body-sized copies on later pages are real marginalia.
+// ---------------------------------------------------------------------------
+
+describe("filterPageWithSmartRemoval — heading-size spare", () => {
+    const PRIMARY_BODY: TextStyle = {
+        size: 9,
+        font: "MinionPro-Regular",
+        bold: false,
+        italic: false,
+    };
+
+    // Helper to build a synthetic page where one heading-shaped line sits
+    // in the upper smart zone (below the simple margin, above the zone
+    // edge), so the smart-removal text-match path is the only thing that
+    // could drop it.
+    function pageWithTopLine(line: RawLine): RawPageData {
+        return makePageWithLines([line]);
+    }
+
+    const margins = { left: 25, top: 40, right: 25, bottom: 40 };
+    const zone = { left: 60, top: 80, right: 60, bottom: 80 };
+
+    function removalFor(text: string): MarginRemovalResult {
+        const normalized = text.toLowerCase();
+        return {
+            candidates: [
+                {
+                    text: normalized,
+                    originalText: text,
+                    reason: "repeat",
+                    position: "top",
+                    pageIndices: [0, 2, 4, 6, 8],
+                },
+            ],
+            textsToRemove: new Set([normalized]),
+            removalsByPage: new Map([[0, new Set([normalized])]]),
+        };
+    }
+
+    it("spares a heading-sized line whose text matches a smart-removal candidate", () => {
+        // Title-sized 17pt vs 9pt body → ratio 1.89× → heading.
+        const titleLine = makeStyledLine(
+            "Administrative Records Mask Racially Biased Policing",
+            48,
+            60,
+            385,
+            "AdvOT-Heading.B",
+            17,
+        );
+        const page = pageWithTopLine(titleLine);
+        const removal = removalFor(
+            "Administrative Records Mask Racially Biased Policing",
+        );
+
+        // Without primaryBodyStyle the smart-removal still drops the line —
+        // this is the pre-fix regression baseline.
+        const dropped = MarginFilter.filterPageWithSmartRemoval(
+            page,
+            margins,
+            zone,
+            removal,
+        );
+        expect(dropped.blocks).toHaveLength(0);
+
+        // With primaryBodyStyle supplied, the heading-size spare keeps it.
+        const kept = MarginFilter.filterPageWithSmartRemoval(
+            page,
+            margins,
+            zone,
+            removal,
+            undefined,
+            PRIMARY_BODY,
+        );
+        expect(kept.blocks).toHaveLength(1);
+        expect(kept.blocks[0].lines).toHaveLength(1);
+        expect(kept.blocks[0].lines![0].text).toBe(
+            "Administrative Records Mask Racially Biased Policing",
+        );
+    });
+
+    it("still drops a body-sized running header whose text matches the same candidate", () => {
+        // Same text but rendered at 9pt body size → not a heading → drop.
+        const runningHead = makeStyledLine(
+            "Administrative Records Mask Racially Biased Policing",
+            48,
+            30,
+            350,
+            "MinionPro-Regular",
+            9,
+        );
+        const page = pageWithTopLine(runningHead);
+        const removal = removalFor(
+            "Administrative Records Mask Racially Biased Policing",
+        );
+
+        const filtered = MarginFilter.filterPageWithSmartRemoval(
+            page,
+            margins,
+            zone,
+            removal,
+            undefined,
+            PRIMARY_BODY,
+        );
+        expect(filtered.blocks).toHaveLength(0);
+    });
+
+    it("does not spare a marginally-larger running header (≤ 1.5× body)", () => {
+        // Bold-italic running heads in books often render at body × ~1.2:
+        // technically "heading-styled" by `classifyRole`, but in practice
+        // running marginalia. The spare's stricter 1.5× cutoff keeps
+        // these from leaking into extraction. 11pt vs 9pt body → 1.22×.
+        const runningHead = makeStyledLine(
+            "Chapter 1: What We Know About Police Use of Force",
+            70,
+            44,
+            330,
+            "Times-BoldItalic",
+            11,
+        );
+        const page = pageWithTopLine(runningHead);
+        const removal = removalFor(
+            "Chapter 1: What We Know About Police Use of Force",
+        );
+
+        const filtered = MarginFilter.filterPageWithSmartRemoval(
+            page,
+            margins,
+            zone,
+            removal,
+            undefined,
+            PRIMARY_BODY,
+        );
+        expect(filtered.blocks).toHaveLength(0);
+    });
+
+    it("does not protect non-heading marginalia like watermarks or page-number stripes", () => {
+        // Body-sized stripe in the left margin zone — same physics as a
+        // "Downloaded from cambridge.org" vertical watermark. Smart-removal
+        // already covers this; the heading spare must not interfere.
+        const stripe: RawLine = {
+            wmode: 0,
+            bbox: bboxFromXYWH(7, 522, 8, 260, "top-left"),
+            font: {
+                name: "MinionPro-Regular",
+                family: "MinionPro-Regular",
+                weight: "normal",
+                style: "normal",
+                size: 7,
+            },
+            x: 7,
+            y: 522,
+            text: "Downloaded from cambridge.org",
+        };
+        const page = makePageWithLines([stripe]);
+        const removal: MarginRemovalResult = {
+            candidates: [
+                {
+                    text: "downloaded from cambridge.org",
+                    originalText: "Downloaded from cambridge.org",
+                    reason: "repeat",
+                    position: "left",
+                    pageIndices: [0, 1, 2, 3, 4],
+                },
+            ],
+            textsToRemove: new Set(["downloaded from cambridge.org"]),
+            removalsByPage: new Map([
+                [0, new Set(["downloaded from cambridge.org"])],
+            ]),
+        };
+
+        const filtered = MarginFilter.filterPageWithSmartRemoval(
+            page,
+            margins,
+            zone,
+            removal,
+            undefined,
+            PRIMARY_BODY,
+        );
+        expect(filtered.blocks).toHaveLength(0);
+    });
+
+    it("does not spare 2-word journal-category chrome at heading size (e.g. `RESEARCH ARTICLE`)", () => {
+        // Science / Nature / journal layouts often print a category
+        // label ("RESEARCH ARTICLE", "REVIEW", "PERSPECTIVE",
+        // "ORIGINAL RESEARCH") at the top of every page in a font
+        // bigger than body. The label clears the size gate but is
+        // still page chrome — keep it out of extraction. The ≥ 3-token
+        // substance gate handles the common 1–2-word forms.
+        const journalLabel = makeStyledLine(
+            "RESEARCH ARTICLE",
+            41,
+            53,
+            120,
+            "AdvOT-Heading.B",
+            13, // 13pt vs 8pt body → 1.625× → passes size gate
+        );
+        const page = pageWithTopLine(journalLabel);
+        const removal: MarginRemovalResult = {
+            candidates: [
+                {
+                    text: "research article",
+                    originalText: "RESEARCH ARTICLE",
+                    reason: "repeat",
+                    position: "top",
+                    pageIndices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+                },
+            ],
+            textsToRemove: new Set(["research article"]),
+            removalsByPage: new Map([[0, new Set(["research article"])]]),
+        };
+
+        const filtered = MarginFilter.filterPageWithSmartRemoval(
+            page,
+            margins,
+            zone,
+            removal,
+            undefined,
+            { size: 8, font: "AdvTT-Body", bold: false, italic: false },
+        );
+        expect(filtered.blocks).toHaveLength(0);
+    });
+
+    it("does not spare short large-font chrome (e.g. publisher volume marker `1 3`) even at heading size", () => {
+        // Publishers sometimes stamp a 2–3 char volume/issue marker
+        // ("1 3", "13", "Vol. 4") in a font that's larger than body but
+        // is clearly not a real heading. Smart-removal sees the same
+        // text repeat on every page → `repeat` candidate. The spare's
+        // substance gate (≥ 2 word tokens AND ≥ 8 alnum chars) keeps
+        // these out of extracted text.
+        const volMarker = makeStyledLine(
+            "1 3",
+            52,
+            736,
+            41,
+            "Springnew-Regular",
+            15, // 15pt vs 10pt body → 1.5× → would pass size gate alone
+        );
+        const page = makePageWithLines([volMarker]);
+        const removal: MarginRemovalResult = {
+            candidates: [
+                {
+                    text: "1 3",
+                    originalText: "1 3",
+                    reason: "repeat",
+                    position: "bottom",
+                    pageIndices: [0, 1, 2, 3, 4],
+                },
+            ],
+            textsToRemove: new Set(["1 3"]),
+            removalsByPage: new Map([[0, new Set(["1 3"])]]),
+        };
+
+        const filtered = MarginFilter.filterPageWithSmartRemoval(
+            page,
+            margins,
+            zone,
+            removal,
+            undefined,
+            { size: 10, font: "STIX-Regular", bold: false, italic: false },
+        );
+        expect(filtered.blocks).toHaveLength(0);
+    });
+
+    it("still drops a heading-sized line when the matching candidate is a page_number (structural classifier wins)", () => {
+        // Some publishers stamp the running page number in a slightly
+        // larger font than body. The heading-spare must NOT bypass the
+        // page-number sequence classifier — page numbers are reliably
+        // identified by their increasing sequence, regardless of size.
+        const bigPageNumber = makeStyledLine(
+            "13",
+            300,
+            760,
+            16,
+            "AdvOT-Heading.B",
+            14, // 14pt vs 9pt body → 1.55× → would trigger the heading-spare
+        );
+        const page = makePageWithLines([bigPageNumber]);
+        const removal: MarginRemovalResult = {
+            candidates: [
+                {
+                    text: "13",
+                    originalText: "13",
+                    reason: "page_number",
+                    position: "bottom",
+                    pageIndices: [12],
+                },
+            ],
+            textsToRemove: new Set(["13"]),
+            removalsByPage: new Map([[0, new Set(["13"])]]),
+        };
+
+        const filtered = MarginFilter.filterPageWithSmartRemoval(
+            page,
+            margins,
+            zone,
+            removal,
+            undefined,
+            PRIMARY_BODY,
+        );
+        expect(filtered.blocks).toHaveLength(0);
+    });
+
+    it("still drops a heading-sized line when the matching candidate is an identifier", () => {
+        // Symmetric guard for the identifier branch — DOIs / URLs in
+        // margins are removed regardless of font size.
+        const bigDoi = makeStyledLine(
+            "doi:10.1017/S0003055420000039",
+            300,
+            30,
+            220,
+            "AdvOT-Heading.B",
+            13,
+        );
+        const page = makePageWithLines([bigDoi]);
+        const removal: MarginRemovalResult = {
+            candidates: [
+                {
+                    text: "doi:10.1017/s0003055420000039",
+                    originalText: "doi:10.1017/S0003055420000039",
+                    reason: "identifier",
+                    position: "top",
+                    pageIndices: [0],
+                },
+            ],
+            textsToRemove: new Set(["doi:10.1017/s0003055420000039"]),
+            removalsByPage: new Map([
+                [0, new Set(["doi:10.1017/s0003055420000039"])],
+            ]),
+        };
+
+        const filtered = MarginFilter.filterPageWithSmartRemoval(
+            page,
+            margins,
+            zone,
+            removal,
+            undefined,
+            PRIMARY_BODY,
+        );
+        expect(filtered.blocks).toHaveLength(0);
+    });
+
+    it("falls back to drop when primaryBodyStyle is undefined or has non-positive size", () => {
+        const titleLine = makeStyledLine(
+            "Repeating Title",
+            48,
+            60,
+            120,
+            "AdvOT-Heading.B",
+            17,
+        );
+        const page = pageWithTopLine(titleLine);
+        const removal = removalFor("Repeating Title");
+
+        const noStyle = MarginFilter.filterPageWithSmartRemoval(
+            page,
+            margins,
+            zone,
+            removal,
+        );
+        expect(noStyle.blocks).toHaveLength(0);
+
+        const badSize = MarginFilter.filterPageWithSmartRemoval(
+            page,
+            margins,
+            zone,
+            removal,
+            undefined,
+            { size: 0, font: "x", bold: false, italic: false },
+        );
+        expect(badSize.blocks).toHaveLength(0);
+    });
+});
+
 describe("filterPageByMargins — body-style spare", () => {
     it("spares a body-styled line in the simple-margin band", () => {
         const bodyLine = makeStyledLine(

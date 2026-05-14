@@ -640,6 +640,7 @@ export function runExtractFromIndices(
                 opts.marginZone,
                 marginRemoval,
                 styleProfile.bodyStyles,
+                styleProfile.primaryBodyStyle,
             );
             const marginItems = collectMarginItemsFromFilteredPage(
                 rawPage,
