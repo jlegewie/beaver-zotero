@@ -20,7 +20,12 @@ import {
     emitSuccess,
     parsePositiveFloat,
 } from "./_sharedHelpers";
-import { loadJsonFile, parseAnalysisWindow, parsePagesList } from "../options";
+import {
+    applyGraphicsLayerMode,
+    loadJsonFile,
+    parseAnalysisWindow,
+    parsePagesList,
+} from "../options";
 import {
     DEFAULT_ANALYSIS_SCOPE,
     resolveAnalysisWindow,
@@ -125,6 +130,7 @@ function buildCaptureCommand(deps: CliDeps): Command {
         .option("--language <lang>", "splitter language code (e.g. 'en')")
         .option("--splitter <type>", "splitter type: sentencex (default) | simple")
         .option("--settings <path>", "path to JSON file with ExtractionSettings")
+        .option("--graphics-layer-mode <mode>", "graphics layer probe mode: off | auto | on")
         .option(
             "--paragraph-settings <path>",
             "path to JSON file with ParagraphDetectionSettings",
@@ -279,6 +285,7 @@ interface CaptureOpts {
     language?: string;
     splitter?: string;
     settings?: string;
+    graphicsLayerMode?: string;
     paragraphSettings?: string;
     bboxTolerance?: string;
     update?: boolean;
@@ -298,9 +305,12 @@ async function buildConfigFromCaptureOpts(opts: CaptureOpts): Promise<FixtureCon
                 : undefined,
     });
     const splitterConfig = buildSplitterConfig(opts.splitter, opts.language);
-    const settings = opts.settings
+    const loadedSettings = opts.settings
         ? await loadJsonFile<ExtractionSettings>(opts.settings)
         : ({} as ExtractionSettings);
+    const settings =
+        applyGraphicsLayerMode(loadedSettings, opts.graphicsLayerMode) ??
+        ({} as ExtractionSettings);
     const paragraphSettings = opts.paragraphSettings
         ? await loadJsonFile<ParagraphDetectionSettings>(opts.paragraphSettings)
         : ({} as ParagraphDetectionSettings);
@@ -610,4 +620,3 @@ function emitFingerprintWarnings(
         );
     }
 }
-

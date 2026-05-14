@@ -13,6 +13,7 @@ import {
     stringifyEnvelope,
 } from "../envelope";
 import {
+    applyGraphicsLayerMode,
     loadJsonFile,
     parseAnalysisWindow,
     parsePageRange,
@@ -30,6 +31,7 @@ export function buildExtractCommand(deps: CliDeps): Command {
         .option("--analysis-window <n>", "analysis window size around target pages")
         .option("--language <lang>", "splitter language code (e.g. 'en')")
         .option("--settings <path>", "path to JSON file with ExtractionSettings")
+        .option("--graphics-layer-mode <mode>", "graphics layer probe mode: off | auto | on")
         .option("--paragraph-settings <path>", "path to JSON file with ParagraphDetectionSettings")
         .option("--json", "emit a structured JSON envelope")
         .option("--pretty", "pretty-print JSON output (only with --json)")
@@ -67,6 +69,12 @@ export function buildExtractCommand(deps: CliDeps): Command {
                 }
                 if (opts.settings) {
                     input.settings = await loadJsonFile(opts.settings);
+                }
+                input.settings = applyGraphicsLayerMode(
+                    input.settings,
+                    opts.graphicsLayerMode,
+                );
+                if (input.settings) {
                     effective.settings = input.settings;
                 }
                 if (opts.paragraphSettings) {

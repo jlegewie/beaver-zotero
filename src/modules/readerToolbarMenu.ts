@@ -113,6 +113,9 @@ function dispatchVisualizerAction(
         | 'lines'
         | 'items'
         | 'sentences'
+        | 'columns-graphics'
+        | 'items-graphics'
+        | 'sentences-graphics'
         | 'clear'
         | 'copy-extract-fixture-command'
         | 'copy-ocr-fixture-command',
@@ -139,6 +142,20 @@ function openBeaverMenu(reader: any, anchorButton: HTMLElement): void {
     const xulDoc = win.document;
     const popup = xulDoc.createXULElement('menupopup');
     popupset.appendChild(popup);
+    const appendSeparator = () => {
+        popup.appendChild(xulDoc.createXULElement('menuseparator'));
+    };
+    const appendVisualizerItem = (
+        label: string,
+        action: Parameters<typeof dispatchVisualizerAction>[0],
+    ) => {
+        const menuitem = xulDoc.createXULElement('menuitem');
+        menuitem.setAttribute('label', label);
+        menuitem.addEventListener('command', () => {
+            dispatchVisualizerAction(action);
+        });
+        popup.appendChild(menuitem);
+    };
 
     // Auto-cleanup
     popup.addEventListener('popuphidden', () => popup.remove());
@@ -169,7 +186,7 @@ function openBeaverMenu(reader: any, anchorButton: HTMLElement): void {
         const actions = getMergedActions().filter(a => a.targetType === 'attachment');
 
         if (actions.length > 0) {
-            popup.appendChild(xulDoc.createXULElement('menuseparator'));
+            appendSeparator();
 
             // Disabled header
             const header = xulDoc.createXULElement('menuitem');
@@ -200,7 +217,7 @@ function openBeaverMenu(reader: any, anchorButton: HTMLElement): void {
     }
 
     // ---- Add custom action… ----
-    popup.appendChild(xulDoc.createXULElement('menuseparator'));
+    appendSeparator();
 
     const addItem = xulDoc.createXULElement('menuitem');
     addItem.setAttribute('label', 'Add custom action\u2026');
@@ -212,29 +229,23 @@ function openBeaverMenu(reader: any, anchorButton: HTMLElement): void {
     // ---- Dev-only: extraction visualizer controls (PDF only) ----
     // Dropped from production builds at compile time.
     if (process.env.NODE_ENV === 'development' && isPdf) {
-        popup.appendChild(xulDoc.createXULElement('menuseparator'));
+        appendSeparator();
+        appendVisualizerItem('Visualize Columns', 'columns');
+        appendVisualizerItem('Visualize Lines', 'lines');
+        appendVisualizerItem('Visualize Items', 'items');
+        appendVisualizerItem('Visualize Sentences', 'sentences');
 
-        const visualizerItems: Array<{
-            label: string;
-            action: Parameters<typeof dispatchVisualizerAction>[0];
-        }> = [
-            { label: 'Visualize Columns', action: 'columns' },
-            { label: 'Visualize Lines', action: 'lines' },
-            { label: 'Visualize Items', action: 'items' },
-            { label: 'Visualize Sentences', action: 'sentences' },
-            { label: 'Clear Visualization', action: 'clear' },
-            { label: 'Copy Extract Fixture Command', action: 'copy-extract-fixture-command' },
-            { label: 'Copy OCR Fixture Command', action: 'copy-ocr-fixture-command' },
-        ];
+        appendSeparator();
+        appendVisualizerItem('Visualize Columns (graphics)', 'columns-graphics');
+        appendVisualizerItem('Visualize Items (graphics)', 'items-graphics');
+        appendVisualizerItem('Visualize Sentences (graphics)', 'sentences-graphics');
 
-        for (const { label, action } of visualizerItems) {
-            const menuitem = xulDoc.createXULElement('menuitem');
-            menuitem.setAttribute('label', label);
-            menuitem.addEventListener('command', () => {
-                dispatchVisualizerAction(action);
-            });
-            popup.appendChild(menuitem);
-        }
+        appendSeparator();
+        appendVisualizerItem('Clear Visualization', 'clear');
+
+        appendSeparator();
+        appendVisualizerItem('Copy Extract Fixture Command', 'copy-extract-fixture-command');
+        appendVisualizerItem('Copy OCR Fixture Command', 'copy-ocr-fixture-command');
     }
 
     // ---- Position & open ----

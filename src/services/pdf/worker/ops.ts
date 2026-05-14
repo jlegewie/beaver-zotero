@@ -88,9 +88,10 @@ import {
     DEFAULT_PAGE_IMAGE_OPTIONS,
     collectDocumentInfo,
     collectPageLabels,
-    extractFilledRectsFromDoc,
+    extractGraphicsFromDoc,
     extractRawPageDetailedFromDoc,
     extractRawPageFromDoc,
+    filterToDividerLines,
     filterToContainerRects,
     rawPageProviderFromDoc,
     renderOnePage,
@@ -518,12 +519,14 @@ export function runExtractFromIndices(
             // text-dense pages) — restores v0.20 paragraph-engine
             // per-page performance for callers that don't need
             // tinted-display-container detection.
-            const fillBoundaries = probeGraphics
-                ? filterToContainerRects(
-                      extractFilledRectsFromDoc(doc, rawPage.pageIndex),
-                      rawPage.width,
-                      rawPage.height,
-                  )
+            const graphics = probeGraphics
+                ? extractGraphicsFromDoc(doc, rawPage.pageIndex)
+                : undefined;
+            const fillBoundaries = graphics
+                ? filterToContainerRects(graphics.fills, rawPage.width, rawPage.height)
+                : undefined;
+            const dividerLines = graphics
+                ? filterToDividerLines(graphics.strokes, rawPage.width, rawPage.height)
                 : undefined;
             const filtered = detectFilteredParagraphs({
                 pages: analysisPages,
@@ -534,6 +537,7 @@ export function runExtractFromIndices(
                 marginZone: opts.marginZone,
                 paragraphSettings,
                 fillBoundaries,
+                dividerLines,
             });
             logColumnDetection(rawPage.pageIndex, filtered.columnResult);
             pages.push({

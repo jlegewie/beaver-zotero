@@ -144,6 +144,34 @@ describe('runCli — extract command', () => {
         });
     });
 
+    it('passes --graphics-layer-mode through as ExtractionSettings', async () => {
+        const { deps, api } = makeDeps();
+        api.extractPdf.mockResolvedValue({
+            pages: [{ index: 0 }],
+            analysis: {},
+            fullText: '',
+            metadata: {},
+        });
+
+        const code = await runCli(
+            [
+                'extract',
+                'fake.pdf',
+                '--pages',
+                '0',
+                '--graphics-layer-mode',
+                'on',
+                '--json',
+            ],
+            deps,
+        );
+
+        expect(code).toBe(0);
+        expect(api.extractPdf.mock.calls[0][0]).toMatchObject({
+            settings: { graphicsLayerMode: 'on' },
+        });
+    });
+
     it('rejects --pages with a non-integer value via a structured error', async () => {
         const { deps, stderr } = makeDeps();
         const code = await runCli(

@@ -8,6 +8,10 @@
  * silently extracting page 0.
  */
 import { readFile } from "node:fs/promises";
+import type {
+    ExtractionSettings,
+    GraphicsLayerMode,
+} from "../types";
 
 export function parsePagesList(value: string): number[] {
     const parts = value.split(",").map((s) => s.trim()).filter(Boolean);
@@ -92,4 +96,22 @@ export async function loadJsonFile<T = unknown>(path: string): Promise<T> {
         const msg = e instanceof Error ? e.message : String(e);
         throw new Error(`failed to parse JSON in ${path}: ${msg}`);
     }
+}
+
+export function parseGraphicsLayerMode(value: string): GraphicsLayerMode {
+    if (value === "off" || value === "auto" || value === "on") return value;
+    throw new Error(
+        `--graphics-layer-mode must be one of off | auto | on, got "${value}"`,
+    );
+}
+
+export function applyGraphicsLayerMode(
+    settings: ExtractionSettings | undefined,
+    mode: string | undefined,
+): ExtractionSettings | undefined {
+    if (mode == null) return settings;
+    return {
+        ...(settings ?? {}),
+        graphicsLayerMode: parseGraphicsLayerMode(mode),
+    };
 }

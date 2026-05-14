@@ -31,6 +31,11 @@ export function useReaderVisualizerActionHandler() {
                     logger(`[ReaderVisualizer] columns: ${r.message}`);
                     return;
                 }
+                case 'columns-graphics': {
+                    const r = await visualizeCurrentPageColumns({ graphicsLayerMode: 'on' });
+                    logger(`[ReaderVisualizer] columns-graphics: ${r.message}`);
+                    return;
+                }
                 case 'lines': {
                     const r = await visualizeCurrentPageLines();
                     logger(`[ReaderVisualizer] lines: ${r.message}`);
@@ -41,9 +46,19 @@ export function useReaderVisualizerActionHandler() {
                     logger(`[ReaderVisualizer] items: ${r.message}`);
                     return;
                 }
+                case 'items-graphics': {
+                    const r = await visualizeCurrentPageItems({ graphicsLayerMode: 'on' });
+                    logger(`[ReaderVisualizer] items-graphics: ${r.message}`);
+                    return;
+                }
                 case 'sentences': {
                     const r = await visualizeCurrentPageSentences();
                     logger(`[ReaderVisualizer] sentences: ${r.message}`);
+                    return;
+                }
+                case 'sentences-graphics': {
+                    const r = await visualizeCurrentPageSentences({ graphicsLayerMode: 'on' });
+                    logger(`[ReaderVisualizer] sentences-graphics: ${r.message}`);
                     return;
                 }
                 case 'clear': {

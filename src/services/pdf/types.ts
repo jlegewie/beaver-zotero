@@ -73,7 +73,7 @@ export interface ExtractionSettings {
     detectPageSequences?: boolean;
     /**
      * Graphics-layer probe mode for column detection (see
-     * `GraphicsLayerMode`). Default `"auto"`. Set `"off"` to opt out
+     * `GraphicsLayerMode`). Default `"off"`. Set `"on"` or `"auto"` to opt in
      * of fill-rect detection entirely — useful when the per-page
      * device-walk cost outweighs the benefit on a corpus that doesn't
      * use tinted display containers.
@@ -89,23 +89,22 @@ export const DEFAULT_EXTRACTION_SETTINGS: Required<ExtractionSettings> = {
     marginZone: DEFAULT_MARGIN_ZONE,
     repeatThreshold: 3,
     detectPageSequences: true,
-    graphicsLayerMode: "auto",
+    graphicsLayerMode: "off",
 };
 
 /**
  * Resolve a `GraphicsLayerMode` to a boolean "probe the graphics
- * layer for this page" decision. `"off"` returns false; `"on"`
- * returns true; `"auto"` currently matches `"on"` (to preserve the
- * column-detection improvements from the feature) but is reserved
+ * layer for this page" decision. `"off"` and `undefined` return false;
+ * `"on"` returns true; `"auto"` currently matches `"on"` but is reserved
  * for a future smart-gate. Callers should consult this helper at
  * every site that would otherwise invoke
- * `extractFilledRectsFromDoc` — see worker/sentenceExtraction.ts
+ * `extractGraphicsFromDoc` — see worker/sentenceExtraction.ts
  * and worker/ops.ts.
  */
 export function shouldProbeGraphicsLayer(
     mode: GraphicsLayerMode | undefined,
 ): boolean {
-    if (mode === "off") return false;
+    if (mode === undefined || mode === "off") return false;
     return true;
 }
 

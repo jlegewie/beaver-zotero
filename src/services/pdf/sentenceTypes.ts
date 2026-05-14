@@ -92,6 +92,14 @@ export interface SentenceTrace {
     pagesForFilter: RawPageData[];
     marginAnalysis: MarginAnalysis;
     marginRemoval: MarginRemovalResult;
+    fillBoundaries: ReadonlyArray<{ x: number; y: number; w: number; h: number }>;
+    dividerLines: ReadonlyArray<{
+        orientation: "horizontal" | "vertical";
+        position: number;
+        start: number;
+        end: number;
+        thickness: number;
+    }>;
     filteredResult: FilteredParagraphResult;
 }
 

@@ -61,6 +61,19 @@ export interface ColumnDetectionOptions {
      * is ignored.
      */
     fillBoundaries?: ReadonlyArray<{ x: number; y: number; w: number; h: number }>;
+    /**
+     * Thin page-space rules discovered from stroke_path events. These are
+     * treated as hard layout dividers: merge phases do not fuse blocks across
+     * them, and reading-order xy-cut prefers a divider-backed cut when it
+     * cleanly partitions a bundle.
+     */
+    dividerLines?: ReadonlyArray<{
+        orientation: "horizontal" | "vertical";
+        position: number;
+        start: number;
+        end: number;
+        thickness: number;
+    }>;
     /** Enable debug logging for column detection */
     debug?: boolean;
 }
@@ -74,6 +87,7 @@ const DEFAULT_OPTIONS: Required<ColumnDetectionOptions> = {
     bridgeVerticalGap: 30,
     bodyStyles: [],
     fillBoundaries: [],
+    dividerLines: [],
     debug: false,
 };
 
@@ -579,6 +593,7 @@ export function detectColumns(
     // empty array. Re-apply the default after the spread so the no-zone
     // code path stays the default behavior.
     if (!opts.fillBoundaries) opts.fillBoundaries = [];
+    if (!opts.dividerLines) opts.dividerLines = [];
 
     // Check if page is broken
     const isBroken = pageIsBroken(page);
@@ -650,7 +665,7 @@ export function detectColumns(
     // the big box; xyCut otherwise reads top-L → box-left → page-number
     // → top-R → box-right because of the gutter inside the box).
     const sortedColumns =
-        opts.fillBoundaries.length > 0
+        opts.fillBoundaries.length > 0 || opts.dividerLines.length > 0
             ? sortForReadingOrderWithZones(rejoined, opts)
             : sortForReadingOrder(rejoined, opts);
 
@@ -849,6 +864,7 @@ function canMergeBlocks(
  * the boundary.
  */
 const FILL_CONTAINMENT_SLOP = 3;
+const DIVIDER_SLOP = 2;
 
 /**
  * Identifier for the fill-zone a text block sits inside. Used as an
@@ -881,6 +897,54 @@ function fillZoneFor(
         }
     }
     return bestIdx;
+}
+
+function rangesOverlap(
+    aStart: number,
+    aEnd: number,
+    bStart: number,
+    bEnd: number,
+): boolean {
+    return Math.max(aStart, bStart) <= Math.min(aEnd, bEnd);
+}
+
+function crossesDivider(
+    a: Rect,
+    b: Rect,
+    dividers: Required<ColumnDetectionOptions>["dividerLines"],
+    slop = DIVIDER_SLOP,
+): boolean {
+    if (dividers.length === 0) return false;
+
+    for (const divider of dividers) {
+        if (divider.orientation === "horizontal") {
+            const lo = Math.min(a.y + a.h, b.y + b.h) - slop;
+            const hi = Math.max(a.y, b.y) + slop;
+            if (!(divider.position > lo && divider.position < hi)) continue;
+            const dStart = divider.start - slop;
+            const dEnd = divider.end + slop;
+            if (
+                rangesOverlap(dStart, dEnd, a.x, a.x + a.w) &&
+                rangesOverlap(dStart, dEnd, b.x, b.x + b.w)
+            ) {
+                return true;
+            }
+        } else {
+            const lo = Math.min(a.x + a.w, b.x + b.w) - slop;
+            const hi = Math.max(a.x, b.x) + slop;
+            if (!(divider.position > lo && divider.position < hi)) continue;
+            const dStart = divider.start - slop;
+            const dEnd = divider.end + slop;
+            if (
+                rangesOverlap(dStart, dEnd, a.y, a.y + a.h) &&
+                rangesOverlap(dStart, dEnd, b.y, b.y + b.h)
+            ) {
+                return true;
+            }
+        }
+    }
+
+    return false;
 }
 
 /**
@@ -928,6 +992,9 @@ function mergeBlocks(
 
             // Fill-zone guard — see comment on `mergeBlocks`.
             if (mergedZones && mergedZones[j] !== blockZone) {
+                continue;
+            }
+            if (crossesDivider(block, existingBlock, opts.dividerLines)) {
                 continue;
             }
 
@@ -1218,6 +1285,8 @@ function joinAndSort(
             fillZoneFor(b, opts.fillBoundaries)
         );
     };
+    const crossesLayoutDivider = (a: Rect, b: Rect): boolean =>
+        crossesDivider(a, b, opts.dividerLines);
 
     /**
      * Should we block a merge between `upper` (lower y) and `lower`
@@ -1262,6 +1331,7 @@ function joinAndSort(
             const existingBlock = joined[j];
 
             if (crossesFillZone(block, existingBlock)) continue;
+            if (crossesLayoutDivider(block, existingBlock)) continue;
 
             // Check if blocks have similar left and right edges
             const sameLeftEdge = Math.abs(block.x - existingBlock.x) <= opts.edgeTolerance;
@@ -1323,6 +1393,7 @@ function joinAndSort(
                 const block2 = joined[j];
 
                 if (crossesFillZone(block1, block2)) continue;
+                if (crossesLayoutDivider(block1, block2)) continue;
 
                 // Strict same-edge merge (always enabled).
                 const sameLeftEdge = Math.abs(block1.x - block2.x) <= opts.edgeTolerance;
@@ -1412,26 +1483,153 @@ const MIN_H_CUT_GAP = 8;
  */
 function sortForReadingOrder(
     blocks: Rect[],
-    _opts: Required<ColumnDetectionOptions>
+    opts: Required<ColumnDetectionOptions>
 ): Rect[] {
     if (blocks.length <= 1) return blocks.slice();
-    return xyCut(blocks);
+    return xyCut(blocks, opts);
 }
 
-function xyCut(blocks: Rect[]): Rect[] {
+function xyCut(blocks: Rect[], opts?: Required<ColumnDetectionOptions>): Rect[] {
     if (blocks.length <= 1) return blocks.slice();
+
+    if (opts && opts.dividerLines.length > 0) {
+        const dividerCut = findDividerCut(blocks, opts);
+        if (dividerCut) {
+            return [
+                ...xyCut(dividerCut.first, opts),
+                ...xyCut(dividerCut.second, opts),
+            ];
+        }
+    }
 
     const vCut = findCleanCut(blocks, "x", MIN_V_CUT_GAP);
     if (vCut) {
-        return [...xyCut(vCut.first), ...xyCut(vCut.second)];
+        return [...xyCut(vCut.first, opts), ...xyCut(vCut.second, opts)];
     }
 
     const hCut = findCleanCut(blocks, "y", MIN_H_CUT_GAP);
     if (hCut) {
-        return [...xyCut(hCut.first), ...xyCut(hCut.second)];
+        return [...xyCut(hCut.first, opts), ...xyCut(hCut.second, opts)];
     }
 
     return [...blocks].sort((a, b) => a.y - b.y || a.x - b.x);
+}
+
+function findDividerCut(
+    blocks: Rect[],
+    opts: Required<ColumnDetectionOptions>,
+): { axis: "x" | "y"; position: number; first: Rect[]; second: Rect[] } | null {
+    if (blocks.length <= 1 || opts.dividerLines.length === 0) return null;
+
+    const bundle = blocks.reduce<Rect | null>((acc, block) => unionRect(acc, block), null);
+    if (!bundle) return null;
+    const minX = bundle.x;
+    const maxX = bundle.x + bundle.w;
+    const minY = bundle.y;
+    const maxY = bundle.y + bundle.h;
+
+    type Candidate = {
+        axis: "x" | "y";
+        position: number;
+        coverage: number;
+        first: Rect[];
+        second: Rect[];
+    };
+    const candidates: Candidate[] = [];
+
+    for (const divider of opts.dividerLines) {
+        if (divider.orientation === "horizontal") {
+            if (
+                divider.position <= minY + DIVIDER_SLOP ||
+                divider.position >= maxY - DIVIDER_SLOP
+            ) {
+                continue;
+            }
+            const crossExtent = maxX - minX;
+            if (crossExtent <= 0) continue;
+            const covered =
+                Math.min(maxX, divider.end) - Math.max(minX, divider.start);
+            const coverage = Math.max(0, covered) / crossExtent;
+            if (coverage < 0.8) continue;
+            const first: Rect[] = [];
+            const second: Rect[] = [];
+            let straddles = false;
+            for (const block of blocks) {
+                if (block.y + block.h <= divider.position + DIVIDER_SLOP) {
+                    first.push(block);
+                } else if (block.y >= divider.position - DIVIDER_SLOP) {
+                    second.push(block);
+                } else {
+                    straddles = true;
+                    break;
+                }
+            }
+            if (!straddles && first.length > 0 && second.length > 0) {
+                candidates.push({
+                    axis: "y",
+                    position: divider.position,
+                    coverage,
+                    first,
+                    second,
+                });
+            }
+        } else {
+            if (
+                divider.position <= minX + DIVIDER_SLOP ||
+                divider.position >= maxX - DIVIDER_SLOP
+            ) {
+                continue;
+            }
+            const crossExtent = maxY - minY;
+            if (crossExtent <= 0) continue;
+            const covered =
+                Math.min(maxY, divider.end) - Math.max(minY, divider.start);
+            const coverage = Math.max(0, covered) / crossExtent;
+            if (coverage < 0.8) continue;
+            const first: Rect[] = [];
+            const second: Rect[] = [];
+            let straddles = false;
+            for (const block of blocks) {
+                if (block.x + block.w <= divider.position + DIVIDER_SLOP) {
+                    first.push(block);
+                } else if (block.x >= divider.position - DIVIDER_SLOP) {
+                    second.push(block);
+                } else {
+                    straddles = true;
+                    break;
+                }
+            }
+            if (!straddles && first.length > 0 && second.length > 0) {
+                candidates.push({
+                    axis: "x",
+                    position: divider.position,
+                    coverage,
+                    first,
+                    second,
+                });
+            }
+        }
+    }
+
+    if (candidates.length === 0) return null;
+    const midFor = (candidate: Candidate) =>
+        candidate.axis === "y" ? (minY + maxY) / 2 : (minX + maxX) / 2;
+    candidates.sort((a, b) => {
+        const coverageDelta = b.coverage - a.coverage;
+        if (Math.abs(coverageDelta) > 1e-9) return coverageDelta;
+        const aMid = Math.abs(a.position - midFor(a));
+        const bMid = Math.abs(b.position - midFor(b));
+        if (Math.abs(aMid - bMid) > 1e-9) return aMid - bMid;
+        return a.position - b.position;
+    });
+
+    const best = candidates[0];
+    return {
+        axis: best.axis,
+        position: best.position,
+        first: best.first,
+        second: best.second,
+    };
 }
 
 /**
@@ -1447,7 +1645,7 @@ function sortForReadingOrderWithZones(
     opts: Required<ColumnDetectionOptions>,
 ): Rect[] {
     if (blocks.length <= 1) return blocks.slice();
-    if (opts.fillBoundaries.length === 0) return xyCut(blocks);
+    if (opts.fillBoundaries.length === 0) return xyCut(blocks, opts);
 
     // Group each block by its innermost fill zone (or "outside" =
     // index -1). Same zone-id semantics as Phase 2's mergeBlocks guard,
@@ -1491,7 +1689,7 @@ function sortForReadingOrderWithZones(
     if (virtuals.length <= 1) {
         const only = virtuals[0];
         if (!only) return [];
-        return only.members.length === 1 ? only.members.slice() : xyCut(only.members);
+        return only.members.length === 1 ? only.members.slice() : xyCut(only.members, opts);
     }
 
     // Outer xy-cut on the super-rects, then expand each virtual back to
@@ -1499,7 +1697,7 @@ function sortForReadingOrderWithZones(
     const virtualRects = virtuals.map((v) => v.rect);
     const lookup = new Map<Rect, VirtualEntry>();
     for (const v of virtuals) lookup.set(v.rect, v);
-    const outerOrder = xyCut(virtualRects);
+    const outerOrder = xyCut(virtualRects, opts);
     const result: Rect[] = [];
     for (const v of outerOrder) {
         const entry = lookup.get(v);
@@ -1511,7 +1709,7 @@ function sortForReadingOrderWithZones(
             // multi-column gutter is now legitimate to slice on (no
             // outside content can cross it because we're already
             // committed to this zone's bbox).
-            result.push(...xyCut(entry.members));
+            result.push(...xyCut(entry.members, opts));
         }
     }
     return result;

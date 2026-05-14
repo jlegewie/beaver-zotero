@@ -20,6 +20,7 @@ import {
     stringifyEnvelope,
 } from "../envelope";
 import {
+    applyGraphicsLayerMode,
     loadJsonFile,
     parseAnalysisWindow,
     parsePageInt,
@@ -83,6 +84,7 @@ export function buildOverlayCommand(deps: CliDeps): Command {
         .option("--analysis-window <n>", "analysis window size around target page")
         .option("--language <lang>", "splitter language code (e.g. 'en')")
         .option("--settings <path>", "path to JSON file with ExtractionSettings")
+        .option("--graphics-layer-mode <mode>", "graphics layer probe mode: off | auto | on")
         .option("--paragraph-settings <path>", "path to JSON file with ParagraphDetectionSettings")
         .option("--sidecar-json", "write a companion JSON sidecar with rect data + stats", false)
         .option("--json", "emit a structured JSON envelope on stdout")
@@ -141,6 +143,14 @@ export function buildOverlayCommand(deps: CliDeps): Command {
                     }
                     if (opts.settings) {
                         input.settings = await loadJsonFile(String(opts.settings));
+                    }
+                    input.settings = applyGraphicsLayerMode(
+                        input.settings,
+                        typeof opts.graphicsLayerMode === "string"
+                            ? opts.graphicsLayerMode
+                            : undefined,
+                    );
+                    if (input.settings) {
                         effective.settings = input.settings;
                     }
                     const layout = await deps.api.analyzeLayout(input);
@@ -166,6 +176,14 @@ export function buildOverlayCommand(deps: CliDeps): Command {
                     }
                     if (opts.settings) {
                         input.settings = await loadJsonFile(String(opts.settings));
+                    }
+                    input.settings = applyGraphicsLayerMode(
+                        input.settings,
+                        typeof opts.graphicsLayerMode === "string"
+                            ? opts.graphicsLayerMode
+                            : undefined,
+                    );
+                    if (input.settings) {
                         effective.settings = input.settings;
                     }
                     if (opts.paragraphSettings) {

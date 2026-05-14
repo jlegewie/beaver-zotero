@@ -116,6 +116,28 @@ describe('detectColumns reading order', () => {
         expect(result.columns[2].y).toBeLessThan(result.columns[3].y);
     });
 
+    it('4b. horizontal divider biases fragmented two-column order to top row before bottom row', () => {
+        const tl: Rect = { x: 100, y: 100, w: 100, h: 100 };
+        const bl: Rect = { x: 100, y: 230, w: 180, h: 100 };
+        const tr: Rect = { x: 300, y: 100, w: 100, h: 100 };
+        const br: Rect = { x: 300, y: 230, w: 180, h: 100 };
+        const result = detectColumns(makeColumnPage([tr, bl, br, tl]), {
+            dividerLines: [{
+                orientation: 'horizontal',
+                position: 215,
+                start: 90,
+                end: 500,
+                thickness: 1,
+            }],
+        });
+        expect(result.columns.map((c) => [c.x, c.y])).toEqual([
+            [100, 100],
+            [300, 100],
+            [100, 230],
+            [300, 230],
+        ]);
+    });
+
     it('5. 3-col body under wide title: title then L, M, R', () => {
         const title: Rect = { x: 100, y: 80, w: 500, h: 40 };
         const l: Rect = { x: 100, y: 150, w: 150, h: 400 };
@@ -495,6 +517,24 @@ describe('detectColumns fillBoundaries zone guard (Phase 2)', () => {
         const para2: Rect = { x: 80, y: 190, w: 200, h: 80 };
         const result = detectColumns(makeColumnPage([para1, para2]));
         expect(result.columns.length).toBe(1);
+    });
+});
+
+describe('detectColumns dividerLines merge guard', () => {
+    it('keeps vertically adjacent same-column blocks separate across a horizontal rule', () => {
+        const para1: Rect = { x: 80, y: 100, w: 200, h: 80 };
+        const para2: Rect = { x: 80, y: 190, w: 200, h: 80 };
+        const result = detectColumns(makeColumnPage([para1, para2]), {
+            dividerLines: [{
+                orientation: 'horizontal',
+                position: 185,
+                start: 60,
+                end: 320,
+                thickness: 1,
+            }],
+        });
+        expect(result.columns.length).toBe(2);
+        expect(result.columns.map((c) => c.y)).toEqual([100, 190]);
     });
 });
 
