@@ -525,7 +525,7 @@ const SYMBOL_LEADER_RE = /^\s*[*†‡§¶#]\s+\S/u;
  * Control characters (`\p{Cc}`) are replaced with a single space before
  * matching. PDF extraction occasionally emits non-printing codepoints (e.g.
  * BELL `\x07`) between a footnote marker and its body text — observed on
- * WZVA5ZF2 page 10 footnote 6 as `"6  \x07David Silver…"`. The
+ * WZVA5ZF2 page 10 footnote 6 as `"6 \x07David Silver…"`. The
  * normalization keeps the bare-numeric branch matching despite that noise
  * without loosening the regex itself.
  */
