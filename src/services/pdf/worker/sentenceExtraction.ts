@@ -46,6 +46,7 @@ import type { PageSentenceResult } from "../ParagraphSentenceMapper";
 import { resolveAnalysisPages } from "../AnalysisWindow";
 import {
     detectFilteredParagraphs,
+    reindexMarginItems,
     type FilteredParagraphResult,
 } from "../FilteredParagraphPipeline";
 import { pagesForFilterWithBridgedFonts } from "../RawFontBridge";
@@ -201,6 +202,13 @@ export function extractSentencesForPage(args: {
             sourceHeight: filteredResult.sourceHeight,
         },
     });
+    sentenceResult.items = [
+        ...sentenceResult.items,
+        ...reindexMarginItems(
+            filteredResult.marginItems,
+            sentenceResult.items.length,
+        ),
+    ];
     const sentenceMapMs = performance.now() - tSentence;
 
     const { charCount, lineCount } = countDetailedPageSizes(detailed);

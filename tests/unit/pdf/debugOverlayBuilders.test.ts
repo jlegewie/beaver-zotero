@@ -174,25 +174,35 @@ describe('debug/overlayBuilders', () => {
                         lines: [{ bbox: bbox(50, 250, 300, 20), text: "E = mc^2" }],
                     },
                     {
-                        kind: "table",
+                        kind: "margin",
                         id: "p0:i6",
                         pageIndex: 0,
                         index: 6,
-                        bbox: bbox(50, 280, 300, 40),
+                        bbox: bbox(50, 280, 300, 20),
+                        columnIndex: 0,
+                        text: "Running head",
+                        lines: [{ bbox: bbox(50, 280, 300, 20), text: "Running head" }],
+                    },
+                    {
+                        kind: "table",
+                        id: "p0:i7",
+                        pageIndex: 0,
+                        index: 7,
+                        bbox: bbox(50, 310, 300, 40),
                         columnIndex: 0,
                     },
                     {
                         kind: "picture",
-                        id: "p0:i7",
+                        id: "p0:i8",
                         pageIndex: 0,
-                        index: 7,
-                        bbox: bbox(50, 330, 300, 80),
+                        index: 8,
+                        bbox: bbox(50, 360, 300, 80),
                         columnIndex: 0,
                     },
                 ],
             };
             const out = buildItemOverlayFromPage(page);
-            expect(out.rects).toHaveLength(8);
+            expect(out.rects).toHaveLength(9);
             expect(out.rects[0].color).toBe(OVERLAY_COLORS.itemSectionHeader);
             expect(out.rects[0].label).toBe('H1');
             expect(out.rects[1].color).toBe(OVERLAY_COLORS.itemText);
@@ -201,13 +211,15 @@ describe('debug/overlayBuilders', () => {
             expect(out.rects[3]).toMatchObject({ color: OVERLAY_COLORS.itemCaption, label: "C4" });
             expect(out.rects[4]).toMatchObject({ color: OVERLAY_COLORS.itemList, label: "L5" });
             expect(out.rects[5]).toMatchObject({ color: OVERLAY_COLORS.itemFormula, label: "M6" });
-            expect(out.rects[6]).toMatchObject({ color: OVERLAY_COLORS.itemTable, label: "T7" });
-            expect(out.rects[7]).toMatchObject({ color: OVERLAY_COLORS.itemPicture, label: "I8" });
+            expect(out.rects[6]).toMatchObject({ color: OVERLAY_COLORS.itemMargin, label: "G7" });
+            expect(out.rects[7]).toMatchObject({ color: OVERLAY_COLORS.itemTable, label: "T8" });
+            expect(out.rects[8]).toMatchObject({ color: OVERLAY_COLORS.itemPicture, label: "I9" });
             expect(out.stats.headers).toBe(1);
             expect(out.stats.paragraphs).toBe(1);
             expect(out.stats.footnotes).toBe(1);
             expect(out.stats.captions).toBe(1);
             expect(out.stats.listItems).toBe(1);
+            expect(out.stats.marginItems).toBe(1);
             expect(out.stats.formulas).toBe(1);
             expect(out.stats.tables).toBe(1);
             expect(out.stats.pictures).toBe(1);

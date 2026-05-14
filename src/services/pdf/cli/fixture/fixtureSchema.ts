@@ -220,6 +220,7 @@ function validateItem(value: unknown, source: string): SnapshotItem {
         "footnote",
         "caption",
         "list_item",
+        "margin",
         "formula",
         "table",
         "picture",

@@ -189,7 +189,7 @@ RawPageData; // { pageIndex, width, height, blocks[] }
 
 ```typescript
 ItemLine; // { text, bbox, fontSize? }
-DocItem; // text, section_header, footnote, caption, list_item, formula, table, picture
+DocItem; // text, section_header, footnote, caption, list_item, margin, formula, table, picture
 SentenceItem; // { parentId, index, text, bboxes, fragments?, joinWithNext? }
 ProcessedPage; // { index, content, columns, items, sentences?, degradation? }
 ```

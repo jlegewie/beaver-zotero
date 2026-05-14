@@ -25,7 +25,11 @@ import { buildPageAnalysisContext } from "../PageAnalysisContext";
 import { resolveAnalysisPages } from "../AnalysisWindow";
 import { detectColumns, logColumnDetection } from "../ColumnDetector";
 import type { PageLine } from "../LineDetector";
-import { detectFilteredParagraphs } from "../FilteredParagraphPipeline";
+import {
+    collectMarginItemsFromFilteredPage,
+    detectFilteredParagraphs,
+    reindexMarginItems,
+} from "../FilteredParagraphPipeline";
 import {
     inverseRotateBBox,
     type RotationAngle,
@@ -551,12 +555,18 @@ export function runExtractFromIndices(
                         filtered.sourceHeight,
                     ),
                 ),
-                items: docItemsFromParagraphResult(
-                    filtered.paragraphResult,
-                    filtered.pageRotation,
-                    filtered.sourceWidth,
-                    filtered.sourceHeight,
-                ),
+                items: [
+                    ...docItemsFromParagraphResult(
+                        filtered.paragraphResult,
+                        filtered.pageRotation,
+                        filtered.sourceWidth,
+                        filtered.sourceHeight,
+                    ),
+                    ...reindexMarginItems(
+                        filtered.marginItems,
+                        filtered.paragraphResult.items.length,
+                    ),
+                ],
             } as ProcessedPage);
             perPageMs.push(performance.now() - tPage);
         }
@@ -631,6 +641,10 @@ export function runExtractFromIndices(
                 marginRemoval,
                 styleProfile.bodyStyles,
             );
+            const marginItems = collectMarginItemsFromFilteredPage(
+                rawPage,
+                filteredPage,
+            );
             const columnResult = detectColumns(filteredPage, {
                 headerMargin: opts.margins.top,
                 footerMargin: opts.margins.bottom,
@@ -638,9 +652,16 @@ export function runExtractFromIndices(
             });
             logColumnDetection(rawPage.pageIndex, columnResult);
 
-            pages.push(
-                pageExtractor.extractPageWithColumns(filteredPage, columnResult, true),
+            const page = pageExtractor.extractPageWithColumns(
+                filteredPage,
+                columnResult,
+                true,
             );
+            page.items = [
+                ...page.items,
+                ...reindexMarginItems(marginItems, page.items.length),
+            ];
+            pages.push(page);
             perPageMs.push(performance.now() - tPage);
         }
     }

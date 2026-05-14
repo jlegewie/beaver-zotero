@@ -89,7 +89,7 @@ export const DEFAULT_EXTRACTION_SETTINGS: Required<ExtractionSettings> = {
     marginZone: DEFAULT_MARGIN_ZONE,
     repeatThreshold: 3,
     detectPageSequences: true,
-    graphicsLayerMode: "off",
+    graphicsLayerMode: "auto",
 };
 
 /**
@@ -492,6 +492,10 @@ export interface ListItemItem extends TextBearingItem {
     sentences?: SentenceItem[];
 }
 
+export interface MarginItem extends TextBearingItem {
+    kind: "margin";
+}
+
 export interface FormulaItem extends TextBearingItem {
     kind: "formula";
 }
@@ -510,6 +514,7 @@ export type DocItem =
     | FootnoteItem
     | CaptionItem
     | ListItemItem
+    | MarginItem
     | FormulaItem
     | TableItem
     | PictureItem;

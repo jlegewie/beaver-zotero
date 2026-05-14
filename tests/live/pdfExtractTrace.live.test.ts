@@ -92,7 +92,8 @@ describe('pdf-extract-trace ↔ pdf-sentence-bboxes parity', () => {
             // Item count: trace still exposes the legacy `paragraphs` key
             // for cross-stage line links, while production returns `items`.
             const tracePCount = (traceRes.paragraphs ?? []).length;
-            const prodPCount = (prodRes.result.items as unknown[]).length;
+            const prodPCount = (prodRes.result.items as Array<{ kind: string }>)
+                .filter((item) => item.kind !== "margin").length;
             expect(tracePCount).toBe(prodPCount);
         });
 

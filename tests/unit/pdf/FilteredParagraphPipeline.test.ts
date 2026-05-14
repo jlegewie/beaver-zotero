@@ -140,6 +140,15 @@ describe("detectFilteredParagraphs", () => {
                 .join(" ");
             expect(allLineTexts).not.toContain("Watermark");
             expect(allLineTexts).toContain("Paragraph filler");
+            expect(out.marginItems).toHaveLength(1);
+            expect(out.marginItems[0]).toMatchObject({
+                kind: "margin",
+                text: "Watermark",
+                pageIndex: 0,
+                index: 0,
+                columnIndex: 0,
+            });
+            expect(out.marginItems[0].lines).toHaveLength(1);
         });
     });
 
@@ -179,6 +188,8 @@ describe("detectFilteredParagraphs", () => {
             });
             const allText = out.lineResult.allLines.map((l) => l.text).join(" ");
             expect(allText).not.toContain("Repeating Journal Header");
+            expect(out.marginItems.some((item) => item.text === "Repeating Journal Header"))
+                .toBe(true);
             expect(out.marginRemoval.candidates.some((c) => c.reason === "repeat"))
                 .toBe(true);
         });
@@ -385,6 +396,8 @@ describe("detectFilteredParagraphs", () => {
             const out = detectFilteredParagraphs({ pages, pageIndex: 0 });
             expect(out.paragraphResult.items).toEqual([]);
             expect(out.paragraphResult.itemLines).toEqual([]);
+            expect(out.marginItems).toHaveLength(1);
+            expect(out.marginItems[0].kind).toBe("margin");
         });
     });
 
