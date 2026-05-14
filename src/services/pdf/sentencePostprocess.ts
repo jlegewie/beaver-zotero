@@ -740,6 +740,39 @@ const REF_TAIL_B6_RE = /\bpmid:\s*\d{4,}/iu;
 // with `<Word.> <Word.> <NN> <NN>` — it ends with words.
 const REF_TAIL_B7_RE =
     /(?:\p{Lu}\p{L}*\.\s+){2,}\d{1,3}\s+\d{1,7}(?:\s*[–-]\s*\d{1,5})?\.?\s*$/u;
+// B8: journal-style `Journal Abbrev Year;Volume(Issue):Pages` tail,
+// anchored to the paragraph end. This covers biomedical reference formats
+// like `Nat Commun 2015;6:10004` and `Blood Cells 1994;20(2-3):364–9`
+// where the year precedes a semicolon-separated volume. The capitalized
+// journal-token prefix plus end anchor keep it from treating arbitrary
+// prose numbers as publication metadata.
+const REF_TAIL_B8_TOKEN_RE_SRC =
+    `(?:\\p{Lu}{2,}|\\p{Lu}[\\p{L}&.'\\-]*\\p{Ll}[\\p{L}&.'\\-]*)`;
+const REF_TAIL_B8_RE = new RegExp(
+    `\\b(?:${REF_TAIL_B8_TOKEN_RE_SRC}\\s+){1,8}` +
+        `(?:19|20)\\d{2};\\d{1,5}` +
+        `(?:\\s*\\(\\d{1,4}(?:\\s*[-–]\\s*\\d{1,4})?\\))?` +
+        `\\s*:\\s*\\d{1,7}(?:\\s*[-–]\\s*\\d{1,7})?\\.?\\s*$`,
+    "u",
+);
+// B9: news/magazine-style source + parenthesized full publication date,
+// e.g. `CNN (2024 April 5)`, anchored to the paragraph end. Kept separate
+// from continuation evidence because this shape is useful inside entries
+// that already start like references, but too broad to validate a
+// startless wrapped paragraph on its own.
+const REF_TAIL_B9_MONTH_RE_SRC =
+    `(?:January|February|March|April|May|June|July|August|September` +
+    `|October|November|December` +
+    `|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sept|Sep|Oct|Nov|Dec)`;
+const REF_TAIL_B9_SOURCE_TOKEN_RE_SRC =
+    `(?:\\p{Lu}{2,}|\\p{Lu}[\\p{L}&.'\\-]*\\p{Ll}[\\p{L}&.'\\-]*)`;
+const REF_TAIL_B9_RE = new RegExp(
+    `\\b(?:${REF_TAIL_B9_SOURCE_TOKEN_RE_SRC}\\s+){0,5}` +
+        `${REF_TAIL_B9_SOURCE_TOKEN_RE_SRC}\\s+` +
+        `\\((?:19|20)\\d{2}\\s+${REF_TAIL_B9_MONTH_RE_SRC}\\s+\\d{1,2}\\)` +
+        `\\.?\\s*$`,
+    "u",
+);
 
 // Body-position chained-abbrev + Vol + Page-Range pattern (NOT end-anchored).
 // Used as the bibliographic-evidence guard for the multi-numbered branch
@@ -798,6 +831,11 @@ export function hasContinuationTailEvidence(text: string): boolean {
     return REF_CONTINUATION_EVIDENCE_RE.test(text);
 }
 
+function hasReferenceContinuationTailEvidence(text: string): boolean {
+    return hasContinuationTailEvidence(text) ||
+        REF_TAIL_B8_RE.test(text.trimEnd());
+}
+
 /**
  * Count A1-style numbered markers that are **not** at the start of the
  * trimmed paragraph. Used by both the continuation classifier in
@@ -838,9 +876,9 @@ export function hasReferenceStart(text: string): boolean {
 
 /**
  * Decide whether a paragraph carries strong bibliographic-tail evidence.
- * Pattern B — at least one of B1..B7 must match. B5 is restricted to the
+ * Pattern B — at least one of B1..B9 must match. B5 is restricted to the
  * trailing window so a "Press" mention earlier in normal prose doesn't
- * count. B7 is anchored to the very end of the trimmed text.
+ * count. B7/B8/B9 are anchored to the very end of the trimmed text.
  *
  * @internal Exported for unit testing.
  */
@@ -854,6 +892,8 @@ export function hasReferenceTail(text: string): boolean {
     const tail = text.slice(tailStart);
     if (REF_TAIL_B5_RE.test(tail)) return true;
     if (REF_TAIL_B7_RE.test(text.trimEnd())) return true;
+    if (REF_TAIL_B8_RE.test(text.trimEnd())) return true;
+    if (REF_TAIL_B9_RE.test(text.trimEnd())) return true;
     return false;
 }
 
@@ -885,12 +925,19 @@ export function hasReferenceTail(text: string): boolean {
  *     reference marker (it begins with the trailing portion of the
  *     previous reference that wrapped from the previous column / page),
  *     contains at least one internal numbered marker, AND carries
- *     strong DOI/PMID evidence anywhere. The DOI/PMID-only threshold
- *     is stricter than `hasReferenceTail`'s B because a generic
- *     `https?://` URL appears in methods / data-availability prose far
- *     too easily to qualify. The same threshold gates `mergedRangesValid`
- *     in `allowContinuationFirst` mode, so the classifier and validator
- *     stay in sync.
+ *     strong continuation evidence anywhere.
+ *
+ *  4. **Single wrapped continuation tail** — paragraph does NOT start
+ *     with a reference marker, starts lowercase, and ends in the narrow
+ *     B8 journal-publication tail. This handles one-entry column wraps
+ *     such as a lowercase title continuation followed by `Clin Chem
+ *     1998;44(1):61–7` without admitting generic source/date tails.
+ *
+ * The continuation evidence threshold is stricter than `hasReferenceTail`:
+ * generic URLs and source/date tails are too common in prose to validate
+ * startless paragraphs on their own. The same threshold gates
+ * `mergedRangesValid` in `allowContinuationFirst` mode, so the classifier
+ * and validator stay in sync.
  *
  * @internal Exported for unit testing.
  */
@@ -915,11 +962,20 @@ export function isReferenceParagraph(text: string): boolean {
         return true;
     }
 
-    // Path 3: continuation paragraph with strong DOI/PMID evidence.
+    // Path 3: continuation paragraph with strong DOI/PMID or B8 evidence.
     if (
         !hasStart &&
         internalNumbered >= 1 &&
-        hasContinuationTailEvidence(trimmed)
+        hasReferenceContinuationTailEvidence(trimmed)
+    ) {
+        return true;
+    }
+
+    // Path 4: single wrapped continuation ending in journal metadata.
+    if (
+        !hasStart &&
+        /^\p{Ll}/u.test(trimmed) &&
+        REF_TAIL_B8_RE.test(trimmed)
     ) {
         return true;
     }
@@ -987,7 +1043,7 @@ export function findReferenceBoundaries(text: string): number[] {
     const isContinuationStyle =
         !hasReferenceStart(text) &&
         countInternalNumberedMarkers(text) >= 1 &&
-        hasContinuationTailEvidence(text);
+        hasReferenceContinuationTailEvidence(text);
 
     if (numberedAtStart || isContinuationStyle) {
         // Numbered-style reference lists: use **only** the numbered
@@ -1043,9 +1099,9 @@ function trimmedEndBeforeBoundary(text: string, boundary: number): number {
  * only — for column-wrap continuation paragraphs, the first emitted
  * range is the trailing portion of the previous reference and won't
  * carry a reference-start. In that mode the first range must instead
- * carry strong DOI/PMID continuation evidence (a generic `https://…` URL
- * is intentionally not enough) so arbitrary prose cannot pass as a
- * "reference tail."
+ * carry strong continuation evidence (a DOI, PMID, or B8 journal tail; a
+ * generic `https://…` URL or source/date tail is intentionally not enough)
+ * so arbitrary prose cannot pass as a "reference tail."
  *
  * If any check fails, the merge step falls back to the original
  * splitter ranges. This is defense-in-depth: the boundary regex
@@ -1065,7 +1121,7 @@ export function mergedRangesValid(
         if (i > 0 && r.start < newRanges[i - 1].end) return false;
         const segment = text.slice(r.start, r.end);
         if (i === 0 && options?.allowContinuationFirst) {
-            if (!hasContinuationTailEvidence(segment)) return false;
+            if (!hasReferenceContinuationTailEvidence(segment)) return false;
             continue;
         }
         if (!hasReferenceStart(segment)) return false;

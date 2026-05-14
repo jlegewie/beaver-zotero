@@ -1107,6 +1107,33 @@ describe("mergeReferenceListSentences", () => {
         expect(out).toHaveLength(1);
         expect(slice(text, out)).toEqual([text.trim()]);
     });
+
+    it("collapses a numbered reference ending in journal year-volume metadata", () => {
+        const text =
+            "[48] Mian SA, Rouault-Pierre K, Smith AE, et al. SF3B1 mutant " +
+            "MDS-initiating cells may arise from the haematopoietic stem " +
+            "cell compartment. Nat Commun 2015;6:10004.";
+        const input = rangesFromChunks(text, [
+            "[48] Mian SA, Rouault-Pierre K, Smith AE, et al.",
+            "SF3B1 mutant MDS-initiating cells may arise from the haematopoietic stem cell compartment.",
+            "Nat Commun 2015;6:10004.",
+        ]);
+        const out = mergeReferenceListSentences(input, text);
+        expect(slice(text, out)).toEqual([text.trim()]);
+    });
+
+    it("collapses a reference ending in news source-date metadata", () => {
+        const text =
+            "Smith, J. (2024). Market reactions after the announcement. " +
+            "Forbes Magazine (2024 May 2)";
+        const input = rangesFromChunks(text, [
+            "Smith, J. (2024).",
+            "Market reactions after the announcement.",
+            "Forbes Magazine (2024 May 2)",
+        ]);
+        const out = mergeReferenceListSentences(input, text);
+        expect(slice(text, out)).toEqual([text.trim()]);
+    });
 });
 
 describe("mergedRangesValid (sanity invariant for the fallback path)", () => {
@@ -1339,6 +1366,37 @@ describe("hasReferenceTail B7 (old-style journal-abbrev tail)", () => {
     });
 });
 
+describe("hasReferenceTail B8 (journal year-semicolon-volume tail)", () => {
+    it("fires on biomedical journal publication metadata", () => {
+        expect(hasReferenceTail("Clin Chem 1998;44(1):61–7.")).toBe(true);
+        expect(hasReferenceTail("Nat Commun 2015;6:10004.")).toBe(true);
+        expect(hasReferenceTail("Nature 2014;506(7488):328–33.")).toBe(true);
+        expect(hasReferenceTail("Nature 2014;506(7487):240–4.")).toBe(true);
+        expect(hasReferenceTail("Blood Cells 1994;20(2-3):364–9.")).toBe(true);
+    });
+
+    it("does NOT fire on prose with a semicolon and colon but no journal token", () => {
+        const text =
+            "The summary for 2015;6:10004 was recorded in the audit log.";
+        expect(hasReferenceTail(text)).toBe(false);
+    });
+});
+
+describe("hasReferenceTail B9 (source plus parenthesized publication date)", () => {
+    it("fires on news and magazine source-date metadata", () => {
+        expect(hasReferenceTail("CNN (2024 April 5)")).toBe(true);
+        expect(hasReferenceTail("Forbes Magazine (2024 May 2)")).toBe(true);
+        expect(hasReferenceTail("ABC News (2024 March 27)")).toBe(true);
+        expect(hasReferenceTail("Fortune (2024 May 19)")).toBe(true);
+    });
+
+    it("does NOT fire on a parenthesized year-month without a source name", () => {
+        expect(
+            hasReferenceTail("The update was published (2024 May 2)"),
+        ).toBe(false);
+    });
+});
+
 describe("countInternalNumberedMarkers", () => {
     it("counts internal markers but excludes the start-of-text marker", () => {
         const text = "[1] Foo. [2] Bar. [3] Baz.";
@@ -1560,6 +1618,13 @@ describe("isReferenceParagraph — continuation path", () => {
         expect(isReferenceParagraph(text)).toBe(true);
     });
 
+    it("accepts a lowercase wrapped reference ending in journal metadata", () => {
+        const text =
+            "of assays involving DNA methylation and transcript polymorphisms. " +
+            "Clin Chem 1998;44(1):61–7.";
+        expect(isReferenceParagraph(text)).toBe(true);
+    });
+
     it("does NOT accept a continuation candidate with only a generic URL", () => {
         // No DOI / PMID anywhere → continuation evidence threshold not met.
         const text =
@@ -1703,6 +1768,18 @@ describe("mergeReferenceListSentences — multi-numbered + continuation", () => 
         ]);
         const out = mergeReferenceListSentences(input, text);
         expect(out).toBe(input);
+    });
+
+    it("collapses a lowercase wrapped reference ending in journal metadata", () => {
+        const text =
+            "of assays involving DNA methylation and transcript polymorphisms. " +
+            "Clin Chem 1998;44(1):61–7.";
+        const input = rangesFromChunks(text, [
+            "of assays involving DNA methylation and transcript polymorphisms.",
+            "Clin Chem 1998;44(1):61–7.",
+        ]);
+        const out = mergeReferenceListSentences(input, text);
+        expect(slice(text, out)).toEqual([text.trim()]);
     });
 });
 
