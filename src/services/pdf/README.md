@@ -595,9 +595,9 @@ visible only in dev builds) exposes the PDF debug actions:
 4. **Test OCR Detection**: `PDFExtractor.analyzeOCRNeeds` against the selected attachment
 5. **Visualize Columns**: Blue overlays showing detected columns
 6. **Visualize Lines**: Orange overlays for each detected line
-7. **Visualize Items**: Green (text items) and purple (headers)
-8. **Visualize Paragraphs**: Green overlays for text items only
-9. **Visualize Sentences**: Per-sentence overlays from the sentence pipeline
+7. **Visualize Items**: One box per `DocItem`, with stable colors for all item kinds
+8. **Visualize Paragraphs**: Green overlays for text items only, useful when tuning paragraph grouping
+9. **Visualize Sentences**: Lowest available text units: sentence boxes for split prose, item boxes for headers and other unsplit kinds
 10. **Clear Visualization**: Remove all temporary overlay annotations
 
 For non-UI debugging, the dev-only HTTP endpoints under `/beaver/test/*`

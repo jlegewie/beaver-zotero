@@ -51,6 +51,16 @@ export type OverlayLevel =
 export const OVERLAY_COLORS = {
     column: "#00bbff",
     line: "#ff9500",
+    itemText: "#34c759",
+    itemSectionHeader: "#af52de",
+    itemFootnote: "#5ac8fa",
+    itemCaption: "#ff9500",
+    itemList: "#30d158",
+    itemFormula: "#ff9f0a",
+    itemTable: "#007aff",
+    itemPicture: "#bf5af2",
+    // Back-compat aliases for callers/tests that still talk in terms of
+    // paragraph/header overlays.
     paragraph: "#34c759",
     header: "#af52de",
     // Adjacent sentences alternate between these so they're easy to tell
@@ -67,6 +77,33 @@ export const OVERLAY_COLORS = {
     marginCandidateRepeat: "#af52de",
     marginKeptInZone: "#ffcc00",
 } as const;
+
+const ITEM_KIND_STYLE: Record<DocItem["kind"], { color: string; prefix: string }> = {
+    text: { color: OVERLAY_COLORS.itemText, prefix: "P" },
+    section_header: { color: OVERLAY_COLORS.itemSectionHeader, prefix: "H" },
+    footnote: { color: OVERLAY_COLORS.itemFootnote, prefix: "F" },
+    caption: { color: OVERLAY_COLORS.itemCaption, prefix: "C" },
+    list_item: { color: OVERLAY_COLORS.itemList, prefix: "L" },
+    formula: { color: OVERLAY_COLORS.itemFormula, prefix: "M" },
+    table: { color: OVERLAY_COLORS.itemTable, prefix: "T" },
+    picture: { color: OVERLAY_COLORS.itemPicture, prefix: "I" },
+};
+
+function itemStyle(item: DocItem): { color: string; prefix: string } {
+    return ITEM_KIND_STYLE[item.kind];
+}
+
+function itemText(item: DocItem): string {
+    return "text" in item ? item.text : item.kind;
+}
+
+function itemSentences(item: DocItem): SentenceItem[] {
+    return "sentences" in item ? item.sentences ?? [] : [];
+}
+
+function itemHasDrawableSentence(item: DocItem): boolean {
+    return itemSentences(item).some((sentence) => sentence.bboxes.length > 0);
+}
 
 /**
  * One rectangle to draw on top of a rendered page.
@@ -148,56 +185,90 @@ export function buildSentenceOverlayFromResult(
     );
 
     const rects: OverlayRect[] = [];
+    let groupIdx = 0;
     let bodyIdx = 0;
-    result.sentences.forEach((sentence, sentenceIdx) => {
-        if (sentence.bboxes.length === 0) return;
-        const isDegraded = degradedItemIds.has(sentence.parentId);
+    let sentenceLabelIdx = 0;
+    const sentenceByParent = new Map<string, SentenceItem[]>();
+    for (const sentence of result.sentences) {
+        const list = sentenceByParent.get(sentence.parentId);
+        if (list) list.push(sentence);
+        else sentenceByParent.set(sentence.parentId, [sentence]);
+    }
 
-        let color: string;
-        let label: string;
-        if (isDegraded) {
-            color = OVERLAY_COLORS.sentenceDegraded;
-            label = `S${sentenceIdx + 1}`;
-        } else {
-            color = OVERLAY_COLORS.sentence[bodyIdx % OVERLAY_COLORS.sentence.length];
-            label = `S${sentenceIdx + 1}`;
-            bodyIdx++;
+    for (const item of result.items) {
+        const itemSentences = sentenceByParent.get(item.id) ?? [];
+        if (itemSentences.some((sentence) => sentence.bboxes.length > 0)) {
+            for (const sentence of itemSentences) {
+                if (sentence.bboxes.length === 0) continue;
+                const isDegraded = degradedItemIds.has(sentence.parentId);
+
+                let color: string;
+                let label: string;
+                if (isDegraded) {
+                    color = OVERLAY_COLORS.sentenceDegraded;
+                    label = `S${sentenceLabelIdx + 1}`;
+                } else {
+                    color = OVERLAY_COLORS.sentence[bodyIdx % OVERLAY_COLORS.sentence.length];
+                    label = `S${sentenceLabelIdx + 1}`;
+                    bodyIdx++;
+                }
+                sentenceLabelIdx++;
+                // Surface the continuation hint visually so heuristic mistakes are
+                // obvious in the overlay PNG. Omitted means false on SentenceItem.
+                if (sentence.joinWithNext) {
+                    label = `${label}↪`;
+                }
+
+                const joinTail = sentence.joinWithNext ? " ↪" : "";
+                const annotationText =
+                    `page ${result.pageIndex + 1}, item ${sentence.parentId}, s${sentence.index + 1}${joinTail}\n` +
+                    sentence.text;
+
+                sentence.bboxes.forEach((bb, fragIdx) => {
+                    rects.push({
+                        rect: bb,
+                        color,
+                        // Only the first fragment carries the label so the overlay
+                        // isn't visually noisy on multi-line sentences.
+                        label: fragIdx === 0 ? label : undefined,
+                        annotationText: fragIdx === 0 ? annotationText : undefined,
+                        group: groupIdx,
+                        degraded: isDegraded,
+                    });
+                });
+                groupIdx++;
+            }
+            continue;
         }
-        // Surface the continuation hint visually so heuristic mistakes are
-        // obvious in the overlay PNG. Omitted means false on SentenceItem.
-        if (sentence.joinWithNext) {
-            label = `${label}↪`;
-        }
 
-        const joinTail = sentence.joinWithNext ? " ↪" : "";
-        const annotationText =
-            `page ${result.pageIndex + 1}, item ${sentence.parentId}, s${sentence.index + 1}${joinTail}\n` +
-            sentence.text;
-
-        sentence.bboxes.forEach((bb, fragIdx) => {
-            rects.push({
-                rect: bb,
-                color,
-                // Only the first fragment carries the label so the overlay
-                // isn't visually noisy on multi-line sentences/headings.
-                label: fragIdx === 0 ? label : undefined,
-                annotationText: fragIdx === 0 ? annotationText : undefined,
-                group: sentenceIdx,
-                degraded: isDegraded,
-            });
+        // Lowest-level overlay fallback: items that don't expose sentence
+        // geometry (headers today; reserved unsplit kinds in future) still
+        // need to be visible in the sentence view.
+        const style = itemStyle(item);
+        const label = `${style.prefix}${item.index + 1}`;
+        rects.push({
+            rect: item.bbox,
+            color: style.color,
+            label,
+            annotationText:
+                `page ${result.pageIndex + 1}, item ${item.id}, ${item.kind}\n` +
+                itemText(item),
+            group: groupIdx,
         });
-    });
+        groupIdx++;
+    }
 
     return {
         level: "sentences",
         pageIndex: result.pageIndex,
         pageWidth: result.width,
         pageHeight: result.height,
-        groupCount: result.sentences.length,
+        groupCount: groupIdx,
         rects,
         stats: {
             sentences: result.sentences.length,
             headings: result.items.filter((item) => item.kind === "section_header").length,
+            fallbackItems: result.items.filter((item) => !itemHasDrawableSentence(item)).length,
             paragraphs: result.items.filter((item) => item.kind === "text").length,
             degradation: result.degradation?.count ?? 0,
             analysisPagesScanned,
@@ -282,15 +353,17 @@ export function buildItemOverlayFromPage(
         ? page.items.filter((item) => allowed.has(item.kind))
         : page.items;
     let headerCount = 0;
-    let bodyCount = 0;
+    let textCount = 0;
+    const kindCounts: Partial<Record<DocItem["kind"], number>> = {};
     const rects: OverlayRect[] = items.map((item, i) => {
-        const isHeader = item.kind === "section_header";
-        if (isHeader) headerCount++;
-        else bodyCount++;
+        const style = itemStyle(item);
+        kindCounts[item.kind] = (kindCounts[item.kind] ?? 0) + 1;
+        if (item.kind === "section_header") headerCount++;
+        if (item.kind === "text") textCount++;
         return {
             rect: item.bbox,
-            color: isHeader ? OVERLAY_COLORS.header : OVERLAY_COLORS.paragraph,
-            label: `${isHeader ? "H" : "P"}${item.index + 1}`,
+            color: style.color,
+            label: `${style.prefix}${item.index + 1}`,
             group: i,
         };
     });
@@ -304,8 +377,15 @@ export function buildItemOverlayFromPage(
         groupCount: rects.length,
         rects,
         stats: {
-            paragraphs: bodyCount,
+            paragraphs: textCount,
             headers: headerCount,
+            textItems: textCount,
+            footnotes: kindCounts.footnote ?? 0,
+            captions: kindCounts.caption ?? 0,
+            listItems: kindCounts.list_item ?? 0,
+            formulas: kindCounts.formula ?? 0,
+            tables: kindCounts.table ?? 0,
+            pictures: kindCounts.picture ?? 0,
         },
     };
 }

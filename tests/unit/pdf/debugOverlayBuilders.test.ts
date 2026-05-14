@@ -105,7 +105,7 @@ describe('debug/overlayBuilders', () => {
     });
 
     describe('buildItemOverlayFromPage', () => {
-        it('uses the header color for section headers', () => {
+        it('uses kind-specific colors for every supported item kind', () => {
             const page: ProcessedPage = {
                 ...basePage(),
                 items: [
@@ -131,16 +131,87 @@ describe('debug/overlayBuilders', () => {
                         lines: [{ bbox: bbox(50, 100, 500, 50), text: "Body" }],
                         sentences: [],
                     },
+                    {
+                        kind: "footnote",
+                        id: "p0:i2",
+                        pageIndex: 0,
+                        index: 2,
+                        bbox: bbox(50, 160, 300, 20),
+                        columnIndex: 0,
+                        text: "Footnote",
+                        lines: [{ bbox: bbox(50, 160, 300, 20), text: "Footnote" }],
+                        sentences: [],
+                    },
+                    {
+                        kind: "caption",
+                        id: "p0:i3",
+                        pageIndex: 0,
+                        index: 3,
+                        bbox: bbox(50, 190, 300, 20),
+                        columnIndex: 0,
+                        text: "Caption",
+                        lines: [{ bbox: bbox(50, 190, 300, 20), text: "Caption" }],
+                        sentences: [],
+                    },
+                    {
+                        kind: "list_item",
+                        id: "p0:i4",
+                        pageIndex: 0,
+                        index: 4,
+                        bbox: bbox(50, 220, 300, 20),
+                        columnIndex: 0,
+                        text: "List item",
+                        lines: [{ bbox: bbox(50, 220, 300, 20), text: "List item" }],
+                        sentences: [],
+                    },
+                    {
+                        kind: "formula",
+                        id: "p0:i5",
+                        pageIndex: 0,
+                        index: 5,
+                        bbox: bbox(50, 250, 300, 20),
+                        columnIndex: 0,
+                        text: "E = mc^2",
+                        lines: [{ bbox: bbox(50, 250, 300, 20), text: "E = mc^2" }],
+                    },
+                    {
+                        kind: "table",
+                        id: "p0:i6",
+                        pageIndex: 0,
+                        index: 6,
+                        bbox: bbox(50, 280, 300, 40),
+                        columnIndex: 0,
+                    },
+                    {
+                        kind: "picture",
+                        id: "p0:i7",
+                        pageIndex: 0,
+                        index: 7,
+                        bbox: bbox(50, 330, 300, 80),
+                        columnIndex: 0,
+                    },
                 ],
             };
             const out = buildItemOverlayFromPage(page);
-            expect(out.rects).toHaveLength(2);
-            expect(out.rects[0].color).toBe(OVERLAY_COLORS.header);
+            expect(out.rects).toHaveLength(8);
+            expect(out.rects[0].color).toBe(OVERLAY_COLORS.itemSectionHeader);
             expect(out.rects[0].label).toBe('H1');
-            expect(out.rects[1].color).toBe(OVERLAY_COLORS.paragraph);
+            expect(out.rects[1].color).toBe(OVERLAY_COLORS.itemText);
             expect(out.rects[1].label).toBe('P2');
+            expect(out.rects[2]).toMatchObject({ color: OVERLAY_COLORS.itemFootnote, label: "F3" });
+            expect(out.rects[3]).toMatchObject({ color: OVERLAY_COLORS.itemCaption, label: "C4" });
+            expect(out.rects[4]).toMatchObject({ color: OVERLAY_COLORS.itemList, label: "L5" });
+            expect(out.rects[5]).toMatchObject({ color: OVERLAY_COLORS.itemFormula, label: "M6" });
+            expect(out.rects[6]).toMatchObject({ color: OVERLAY_COLORS.itemTable, label: "T7" });
+            expect(out.rects[7]).toMatchObject({ color: OVERLAY_COLORS.itemPicture, label: "I8" });
             expect(out.stats.headers).toBe(1);
             expect(out.stats.paragraphs).toBe(1);
+            expect(out.stats.footnotes).toBe(1);
+            expect(out.stats.captions).toBe(1);
+            expect(out.stats.listItems).toBe(1);
+            expect(out.stats.formulas).toBe(1);
+            expect(out.stats.tables).toBe(1);
+            expect(out.stats.pictures).toBe(1);
         });
 
         it('paragraph overlay includes text items only', () => {
@@ -219,7 +290,7 @@ describe('debug/overlayBuilders', () => {
             expect(out.stats.sentences).toBe(2);
         });
 
-        it('keeps section headers out of the sentence overlay', () => {
+        it('shows section headers directly in the sentence overlay', () => {
             const page: ProcessedPage = {
                 ...basePage(),
                 items: [
@@ -238,8 +309,73 @@ describe('debug/overlayBuilders', () => {
                 sentences: [],
             };
             const out = buildSentenceOverlayFromPage(page);
-            expect(out.rects).toHaveLength(0);
+            expect(out.rects).toHaveLength(1);
+            expect(out.rects[0]).toMatchObject({
+                rect: bbox(0, 0, 100, 20),
+                color: OVERLAY_COLORS.itemSectionHeader,
+                label: "H1",
+                group: 0,
+            });
             expect(out.stats.headings).toBe(1);
+            expect(out.stats.fallbackItems).toBe(1);
+        });
+
+        it('interleaves item fallbacks with sentence bboxes in reading order', () => {
+            const page: ProcessedPage = {
+                ...basePage(),
+                items: [
+                    {
+                        kind: "section_header",
+                        id: "p0:i0",
+                        pageIndex: 0,
+                        index: 0,
+                        bbox: bbox(0, 0, 100, 20),
+                        columnIndex: 0,
+                        text: "Title",
+                        lines: [{ bbox: bbox(0, 0, 100, 20), text: "Title" }],
+                        level: 1,
+                    },
+                    {
+                        kind: "text",
+                        id: "p0:i1",
+                        pageIndex: 0,
+                        index: 1,
+                        bbox: bbox(0, 40, 110, 12),
+                        columnIndex: 0,
+                        text: "A.",
+                        lines: [{ bbox: bbox(0, 40, 110, 12), text: "A." }],
+                        sentences: [
+                            {
+                                parentId: "p0:i1",
+                                index: 0,
+                                text: "A.",
+                                bboxes: [bbox(0, 40, 50, 12)],
+                            },
+                        ],
+                    },
+                    {
+                        kind: "formula",
+                        id: "p0:i2",
+                        pageIndex: 0,
+                        index: 2,
+                        bbox: bbox(0, 80, 100, 20),
+                        columnIndex: 0,
+                        text: "E = mc^2",
+                        lines: [{ bbox: bbox(0, 80, 100, 20), text: "E = mc^2" }],
+                    },
+                ],
+                sentences: [
+                    {
+                        parentId: "p0:i1",
+                        index: 0,
+                        text: "A.",
+                        bboxes: [bbox(0, 40, 50, 12)],
+                    },
+                ],
+            };
+            const out = buildSentenceOverlayFromPage(page);
+            expect(out.rects.map((rect) => rect.label)).toEqual(["H1", "S1", "M3"]);
+            expect(out.rects.map((rect) => rect.group)).toEqual([0, 1, 2]);
         });
     });
 });

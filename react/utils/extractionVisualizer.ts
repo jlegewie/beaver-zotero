@@ -488,6 +488,7 @@ export async function visualizeCurrentPageSentences(): Promise<{
     message: string;
     sentences?: number;
     headings?: number;
+    fallbackItems?: number;
     paragraphs?: number;
     degradation?: number;
     pageIndex?: number;
@@ -524,17 +525,22 @@ export async function visualizeCurrentPageSentences(): Promise<{
 
         const sentences = Number(overlay.stats.sentences ?? 0);
         const headings = Number(overlay.stats.headings ?? 0);
+        const fallbackItems = Number(overlay.stats.fallbackItems ?? 0);
         const paragraphs = Number(overlay.stats.paragraphs ?? 0);
         const degradation = Number(overlay.stats.degradation ?? 0);
         const tail = degradation > 0 ? ` (degradation: ${degradation})` : "";
-        const headingTail = headings > 0 ? ` (${headings} heading${headings === 1 ? "" : "s"})` : "";
-        const message = `Page ${pageIndex + 1}: ${sentences} sentences${headingTail} in ${paragraphs} paragraphs${tail}`;
+        const fallbackTail =
+            fallbackItems > 0
+                ? `, ${fallbackItems} unsplit item${fallbackItems === 1 ? "" : "s"} shown directly`
+                : "";
+        const message = `Page ${pageIndex + 1}: ${sentences} sentences${fallbackTail} in ${paragraphs} paragraphs${tail}`;
         logger(`[Visualizer] ${message}`);
         return {
             success: true,
             message,
             sentences,
             headings,
+            fallbackItems,
             paragraphs,
             degradation,
             pageIndex,
