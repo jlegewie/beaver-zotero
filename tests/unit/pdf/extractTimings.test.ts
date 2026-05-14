@@ -15,12 +15,12 @@ import {
     type RawBlock,
     type RawLine,
     type RawPageData,
-} from "../../../src/services/pdf/types";
+} from "../../../src/beaver-extract/types";
 
-vi.mock("../../../src/services/pdf/worker/docHelpers", async () => {
+vi.mock("../../../src/beaver-extract/worker/docHelpers", async () => {
     const actual = await vi.importActual<
-        typeof import("../../../src/services/pdf/worker/docHelpers")
-    >("../../../src/services/pdf/worker/docHelpers");
+        typeof import("../../../src/beaver-extract/worker/docHelpers")
+    >("../../../src/beaver-extract/worker/docHelpers");
     return {
         ...actual,
         extractRawPageFromDoc: (_doc: unknown, pageIndex: number) =>
@@ -28,8 +28,8 @@ vi.mock("../../../src/services/pdf/worker/docHelpers", async () => {
     };
 });
 
-import { runExtractFromIndices } from "../../../src/services/pdf/worker/ops";
-import type { DocumentLike } from "../../../src/services/pdf/worker/mupdfApi";
+import { runExtractFromIndices } from "../../../src/beaver-extract/worker/ops";
+import type { DocumentLike } from "../../../src/beaver-extract/worker/mupdfApi";
 
 const PAGE_W = 612;
 const PAGE_H = 792;

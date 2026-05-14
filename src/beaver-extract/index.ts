@@ -1,7 +1,7 @@
 /**
- * PDF Extraction Service
+ * BeaverExtract
  *
- * High-level facade over the MuPDF worker. Every `PDFExtractor` method
+ * High-level facade over the MuPDF worker. Every `BeaverExtractor` method
  * delegates to `getMuPDFWorkerClient()` so the heavy WASM work runs off the
  * Zotero UI thread
  */
@@ -131,7 +131,7 @@ export type {
 } from "./sentenceTypes";
 
 /**
- * PDFExtractor - High-level API for extracting text from PDFs.
+ * BeaverExtractor - High-level API for extracting text from PDFs.
  *
  * Every method delegates to the shared MuPDF worker (see
  * `getMuPDFWorkerClient()`) so the heavy WASM work runs off the Zotero UI
@@ -139,14 +139,14 @@ export type {
  *
  * Usage:
  * ```typescript
- * const extractor = new PDFExtractor();
+ * const extractor = new BeaverExtractor();
  * const result = await extractor.extract(pdfData, {
  *   pageRange: { startIndex: 0, endIndex: 2 },
  * });
  * console.log(result.fullText);
  * ```
  */
-export class PDFExtractor {
+export class BeaverExtractor {
     /**
      * Strict, fused extract for handlers that have deferred range validation
      * to the worker. Returns an `ExtractionResult` with `analysis.pageCount`
@@ -210,7 +210,7 @@ export class PDFExtractor {
         const isStructured = args.mode === "structured";
         if (isStructured && explicitEngine) {
             throw new Error(
-                "PDFExtractor.extract: markdown.engine is not applicable " +
+                "BeaverExtractor.extract: markdown.engine is not applicable " +
                 "when mode='structured'",
             );
         }
@@ -260,7 +260,7 @@ export class PDFExtractor {
      *
      * @example
      * ```typescript
-     * const analysis = await new PDFExtractor().analyzeLayout(pdfData, {
+     * const analysis = await new BeaverExtractor().analyzeLayout(pdfData, {
      *   pageIndices: [3],
      * });
      * console.log(analysis.analysis.styleProfile.primaryBodyStyle);
@@ -377,7 +377,7 @@ export class PDFExtractor {
      *
      * @example
      * ```typescript
-     * const extractor = new PDFExtractor();
+     * const extractor = new BeaverExtractor();
      * const result = await extractor.search(pdfData, "machine learning");
      * console.log(`Found ${result.totalMatches} matches in ${result.pagesWithMatches} pages`);
      *

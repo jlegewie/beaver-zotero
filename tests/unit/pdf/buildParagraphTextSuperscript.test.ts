@@ -17,8 +17,8 @@ import { describe, it, expect } from "vitest";
 import {
     buildParagraphText,
     extractPageSentences,
-} from "../../../src/services/pdf/ParagraphSentenceMapper";
-import { simpleRegexSentenceSplit } from "../../../src/services/pdf/SentenceMapper";
+} from "../../../src/beaver-extract/ParagraphSentenceMapper";
+import { simpleRegexSentenceSplit } from "../../../src/beaver-extract/SentenceMapper";
 import {
     bboxFromXYWH,
     bboxHeight,
@@ -27,7 +27,7 @@ import {
     type RawChar,
     type RawLineDetailed,
     type RawPageDataDetailed,
-} from "../../../src/services/pdf/types";
+} from "../../../src/beaver-extract/types";
 
 function makeLine(text: string, yTop: number, xStart = 50): RawLineDetailed {
     const chars: RawChar[] = [];

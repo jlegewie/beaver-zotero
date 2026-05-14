@@ -10,7 +10,7 @@ import { uiManager } from "../react/ui/UIManager";
 import { getPref, setPref } from "./utils/prefs";
 import { addPendingVersionNotification } from "./utils/versionNotificationPrefs";
 import { getAllVersionUpdateMessageVersions } from "../react/constants/versionUpdateMessages";
-import { disposeMuPDFWorker } from "./services/pdf";
+import { disposeMuPDFWorker } from "./beaver-extract";
 import { configurePDFForBeaver } from "./utils/configurePDFForBeaver";
 import { registerBeaverProtocolHandler, unregisterBeaverProtocolHandler } from "./services/protocolHandler";
 import { cancelAllActiveTasks } from "./utils/backgroundTasks";

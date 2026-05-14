@@ -11,15 +11,15 @@
  *   - Clears stale `true` from prior calls so the helper is idempotent.
  */
 import { describe, it, expect } from "vitest";
-import { annotateColumnContinuations } from "../../../src/services/pdf/ParagraphSentenceMapper";
-import { simpleRegexSentenceSplit } from "../../../src/services/pdf/SentenceMapper";
+import { annotateColumnContinuations } from "../../../src/beaver-extract/ParagraphSentenceMapper";
+import { simpleRegexSentenceSplit } from "../../../src/beaver-extract/SentenceMapper";
 import {
     bboxFromXYWH,
     type BoundingBox,
     type SectionHeaderItem,
     type SentenceItem,
     type TextItem,
-} from "../../../src/services/pdf/types";
+} from "../../../src/beaver-extract/types";
 
 // ---------------------------------------------------------------------------
 // Fixture helpers

@@ -1083,7 +1083,7 @@ export interface PDFPageSearchResult {
  *
  * Page-count gating (`maxPageCount`) is NOT here — it's a pre-flight gate, not
  * a search option. Pass it as the sibling `args.maxPageCount` parameter on
- * `PDFExtractor.search` / `MuPDFWorkerClient.search`.
+ * `BeaverExtractor.search` / `MuPDFWorkerClient.search`.
  */
 export interface PDFSearchOptions {
     /** Maximum hits per page (default: 100) */
@@ -1269,7 +1269,7 @@ export interface PageImageResult {
 // ============================================================================
 
 /**
- * Document-level PDF metadata returned by `PDFExtractor.getMetadata`.
+ * Document-level PDF metadata returned by `BeaverExtractor.getMetadata`.
  *
  * Cheap to collect: pulls the info dictionary and PDF format string via
  * `doc.getMetadata(...)` (string lookups in the trailer/info dict). Page

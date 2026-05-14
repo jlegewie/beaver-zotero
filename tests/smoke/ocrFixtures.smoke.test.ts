@@ -16,8 +16,8 @@ import {
     formatOcrDiffs,
     mergeEffectiveOptions,
     projectOcrSnapshot,
-} from "../../src/services/pdf/debug/ocrSnapshot";
-import { analyzeOCRNeeds } from "../../src/services/pdf/node/api";
+} from "../../src/beaver-extract/debug/ocrSnapshot";
+import { analyzeOCRNeeds } from "../../src/beaver-extract/node/api";
 import {
     loadOcrFixtures,
     privateRoot,

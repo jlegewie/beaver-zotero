@@ -19,8 +19,8 @@ import type {
     BoundingBox,
     PageSentenceResult,
     SentenceTrace,
-} from '../../../src/services/pdf';
-import { projectAnalyzeLayout } from '../../../src/services/pdf/debug/analyzeLayoutProjection';
+} from '../../../src/beaver-extract';
+import { projectAnalyzeLayout } from '../../../src/beaver-extract/debug/analyzeLayoutProjection';
 
 
 // =============================================================================
@@ -100,7 +100,7 @@ function uint8ToBase64ForTest(bytes: Uint8Array): string {
 }
 
 /**
- * Helper that wraps a PDFExtractor call and serializes ExtractionError
+ * Helper that wraps a BeaverExtractor call and serializes ExtractionError
  * (including the `details` payload) into the structured wire shape used by
  * live parity tests.
  */
@@ -109,7 +109,7 @@ async function runPdfExtractorCall<T>(
     fn: (pdfData: Uint8Array) => Promise<T>,
     onSuccess: (result: T) => any,
 ): Promise<any> {
-    const { ExtractionError } = await import('../../../src/services/pdf');
+    const { ExtractionError } = await import('../../../src/beaver-extract');
     const loaded = await loadPdfBytesForTestEndpoint(request);
     if (!loaded.ok) return loaded;
     try {
@@ -163,8 +163,8 @@ async function runPdfExtractorCall<T>(
  *   resolution.
  */
 export async function handleTestPdfPageCountHttpRequest(request: any) {
-    const { PDFExtractor, ExtractionError } = await import(
-        '../../../src/services/pdf'
+    const { BeaverExtractor, ExtractionError } = await import(
+        '../../../src/beaver-extract'
     );
 
     let pdfData: Uint8Array;
@@ -217,7 +217,7 @@ export async function handleTestPdfPageCountHttpRequest(request: any) {
     }
 
     try {
-        const count = await new PDFExtractor().getPageCount(pdfData);
+        const count = await new BeaverExtractor().getPageCount(pdfData);
         return { ok: true, count };
     } catch (e: any) {
         if (e instanceof ExtractionError) {
@@ -235,15 +235,15 @@ export async function handleTestPdfPageCountHttpRequest(request: any) {
 }
 
 /**
- * Dev-only PDF metadata endpoint. Routes through `PDFExtractor`, which
+ * Dev-only PDF metadata endpoint. Routes through `BeaverExtractor`, which
  * delegates to the MuPDF worker. Returns page count, page labels, and
  * cheap info-dict fields (title, author, format, etc.).
  *
  * @deprecated Prefer `npm run beaver-extract -- info <pdf>`.
  */
 export async function handleTestPdfPageLabelsHttpRequest(request: any) {
-    const { PDFExtractor, ExtractionError } = await import(
-        '../../../src/services/pdf'
+    const { BeaverExtractor, ExtractionError } = await import(
+        '../../../src/beaver-extract'
     );
 
     const loaded = await loadPdfBytesForTestEndpoint(request);
@@ -251,7 +251,7 @@ export async function handleTestPdfPageLabelsHttpRequest(request: any) {
     const { pdfData } = loaded;
 
     try {
-        const metadata = await new PDFExtractor().getMetadata(pdfData);
+        const metadata = await new BeaverExtractor().getMetadata(pdfData);
         return { ok: true, ...metadata };
     } catch (e: any) {
         if (e instanceof ExtractionError) {
@@ -270,7 +270,7 @@ export async function handleTestPdfPageLabelsHttpRequest(request: any) {
 
 /**
  * Dev-only PDF render endpoint. Routes through
- * `PDFExtractor.renderPages` and discards the metadata — the legacy
+ * `BeaverExtractor.renderPages` and discards the metadata — the legacy
  * `{ ok, pages }` response shape is preserved for live-test parity.
  * Image bytes are base64-encoded for JSON transport; live tests decode
  * for parity.
@@ -279,8 +279,8 @@ export async function handleTestPdfPageLabelsHttpRequest(request: any) {
  *   The CLI writes PNGs to disk and avoids the base64 round-trip.
  */
 export async function handleTestPdfRenderPagesHttpRequest(request: any) {
-    const { PDFExtractor, ExtractionError } = await import(
-        '../../../src/services/pdf'
+    const { BeaverExtractor, ExtractionError } = await import(
+        '../../../src/beaver-extract'
     );
 
     const loaded = await loadPdfBytesForTestEndpoint(request);
@@ -293,7 +293,7 @@ export async function handleTestPdfRenderPagesHttpRequest(request: any) {
     const options = request?.options || {};
 
     try {
-        const result = await new PDFExtractor().renderPages(
+        const result = await new BeaverExtractor().renderPages(
             pdfData,
             { pageIndices, options },
         );
@@ -325,14 +325,14 @@ export async function handleTestPdfRenderPagesHttpRequest(request: any) {
 
 /**
  * Dev-only fused render-pages endpoint exercising
- * `PDFExtractor.renderPages`. Returns metadata alongside rendered pages
+ * `BeaverExtractor.renderPages`. Returns metadata alongside rendered pages
  * so live tests can verify the fused-op shape end-to-end.
  *
  * @deprecated Prefer `npm run beaver-extract -- render <pdf> --pages <list> --out <dir> --json`.
  */
 export async function handleTestPdfRenderPagesWithMetaHttpRequest(request: any) {
-    const { PDFExtractor, ExtractionError } = await import(
-        '../../../src/services/pdf'
+    const { BeaverExtractor, ExtractionError } = await import(
+        '../../../src/beaver-extract'
     );
 
     const loaded = await loadPdfBytesForTestEndpoint(request);
@@ -348,7 +348,7 @@ export async function handleTestPdfRenderPagesWithMetaHttpRequest(request: any) 
     const options = request?.options || {};
 
     try {
-        const result = await new PDFExtractor().renderPages(pdfData, {
+        const result = await new BeaverExtractor().renderPages(pdfData, {
             pageIndices,
             pageRange,
             options,
@@ -396,9 +396,9 @@ export async function handleTestPdfRenderPagesWithMetaHttpRequest(request: any) 
  * @deprecated Prefer `npm run beaver-extract -- raw-detailed <pdf> --page <n> --json`.
  */
 export async function handleTestPdfExtractRawDetailedHttpRequest(request: any) {
-    const { ExtractionError } = await import('../../../src/services/pdf');
+    const { ExtractionError } = await import('../../../src/beaver-extract');
     const { getMuPDFWorkerClient } = await import(
-        '../../../src/services/pdf/MuPDFWorkerClient'
+        '../../../src/beaver-extract/MuPDFWorkerClient'
     );
 
     const loaded = await loadPdfBytesForTestEndpoint(request);
@@ -446,7 +446,7 @@ export async function handleTestPdfExtractRawDetailedHttpRequest(request: any) {
  *   The CLI defaults to `--mode structured`, matching production extraction.
  */
 export async function handleTestPdfExtractHttpRequest(request: any) {
-    const { PDFExtractor } = await import('../../../src/services/pdf');
+    const { BeaverExtractor } = await import('../../../src/beaver-extract');
     const settings = { ...(request?.settings || {}) };
     const pageIndices: number[] | undefined = Array.isArray(settings.pages) && settings.pages.length > 0
         ? settings.pages
@@ -454,7 +454,7 @@ export async function handleTestPdfExtractHttpRequest(request: any) {
     delete settings.pages;
     return runPdfExtractorCall(
         request,
-        (pdfData) => new PDFExtractor().extract(pdfData, { settings, pageIndices }),
+        (pdfData) => new BeaverExtractor().extract(pdfData, { settings, pageIndices }),
         (result) => ({ ok: true, result }),
     );
 }
@@ -462,7 +462,7 @@ export async function handleTestPdfExtractHttpRequest(request: any) {
 /**
  * Dev-only paragraph-engine extract endpoint.
  *
- * Routes through `PDFExtractor.extract` with `markdown: { engine: "paragraph" }`,
+ * Routes through `BeaverExtractor.extract` with `markdown: { engine: "paragraph" }`,
  * exercising the line + paragraph detection path. `settings.pages` is
  * translated into the worker-side `pageIndices` arg for parity with the
  * existing extract endpoints. Engine attribution is on `result.metadata.engine`
@@ -471,7 +471,7 @@ export async function handleTestPdfExtractHttpRequest(request: any) {
  * @deprecated Prefer `npm run beaver-extract -- extract <pdf> --mode markdown --pages <list> --json`.
  */
 export async function handleTestPdfExtractParagraphHttpRequest(request: any) {
-    const { PDFExtractor } = await import('../../../src/services/pdf');
+    const { BeaverExtractor } = await import('../../../src/beaver-extract');
     const settings = { ...(request?.settings || {}) };
     const pageIndices: number[] | undefined = Array.isArray(settings.pages) && settings.pages.length > 0
         ? settings.pages
@@ -479,7 +479,7 @@ export async function handleTestPdfExtractParagraphHttpRequest(request: any) {
     delete settings.pages;
     return runPdfExtractorCall(
         request,
-        (pdfData) => new PDFExtractor().extract(pdfData, {
+        (pdfData) => new BeaverExtractor().extract(pdfData, {
             markdown: { engine: 'paragraph' },
             settings,
             pageIndices,
@@ -496,33 +496,33 @@ export async function handleTestPdfExtractParagraphHttpRequest(request: any) {
  * return `!needsOCR` rather than maintaining a redundant facade method.
  */
 export async function handleTestPdfHasTextLayerHttpRequest(request: any) {
-    const { PDFExtractor } = await import('../../../src/services/pdf');
+    const { BeaverExtractor } = await import('../../../src/beaver-extract');
     return runPdfExtractorCall(
         request,
-        (pdfData) => new PDFExtractor().analyzeOCRNeeds(pdfData),
+        (pdfData) => new BeaverExtractor().analyzeOCRNeeds(pdfData),
         (result) => ({ ok: true, hasTextLayer: !result.needsOCR }),
     );
 }
 
 /** Dev-only `analyzeOCRNeeds` parity endpoint. */
 export async function handleTestPdfAnalyzeOcrHttpRequest(request: any) {
-    const { PDFExtractor } = await import('../../../src/services/pdf');
+    const { BeaverExtractor } = await import('../../../src/beaver-extract');
     const options = request?.options || {};
     return runPdfExtractorCall(
         request,
-        (pdfData) => new PDFExtractor().analyzeOCRNeeds(pdfData, options),
+        (pdfData) => new BeaverExtractor().analyzeOCRNeeds(pdfData, options),
         (result) => ({ ok: true, result }),
     );
 }
 
 /** Dev-only scored-search parity endpoint. */
 export async function handleTestPdfSearchScoredHttpRequest(request: any) {
-    const { PDFExtractor } = await import('../../../src/services/pdf');
+    const { BeaverExtractor } = await import('../../../src/beaver-extract');
     const query = String(request?.query ?? '');
     const options = request?.options || {};
     return runPdfExtractorCall(
         request,
-        (pdfData) => new PDFExtractor().search(pdfData, query, options),
+        (pdfData) => new BeaverExtractor().search(pdfData, query, options),
         (result) => ({ ok: true, result }),
     );
 }
@@ -530,7 +530,7 @@ export async function handleTestPdfSearchScoredHttpRequest(request: any) {
 /**
  * Dev-only sentence-bboxes parity endpoint.
  *
- * Routes through `PDFExtractor.extract({ mode: "structured", pageIndices:
+ * Routes through `BeaverExtractor.extract({ mode: "structured", pageIndices:
  * [n] })` → MuPDF worker op (single round-trip; analysis-window load, font
  * bridging, filtered paragraph detection, splitter resolution, and
  * sentence mapping all run worker-side). The wire response is shaped as
@@ -557,13 +557,13 @@ export async function handleTestPdfSearchScoredHttpRequest(request: any) {
  * structured `ExtractionError` envelope on failure.
  */
 export async function handleTestPdfSentenceBBoxesHttpRequest(request: any) {
-    const { PDFExtractor } = await import('../../../src/services/pdf');
+    const { BeaverExtractor } = await import('../../../src/beaver-extract');
     const pageIndex = Number(request?.page_index);
     const options = request?.options || {};
     return runPdfExtractorCall(
         request,
         (pdfData) =>
-            new PDFExtractor().extract(pdfData, {
+            new BeaverExtractor().extract(pdfData, {
                 mode: 'structured',
                 pageIndices: [pageIndex],
                 paragraphSettings: options.paragraphSettings,
@@ -637,13 +637,13 @@ export async function handleTestPdfSentenceBBoxesHttpRequest(request: any) {
  *
  * Level dispatch notes:
  *   - `sentences`, `columns`, `lines`, `items`, `paragraphs` route through
- *     `PDFExtractor.extract({ mode: "structured", pageIndices: [n] })`
+ *     `BeaverExtractor.extract({ mode: "structured", pageIndices: [n] })`
  *     and project the resulting `ProcessedPage` into rects via the pure
  *     `build{Sentence,Column,Line,Item,Paragraph}OverlayFromPage` builders in
  *     `extractionOverlay.ts`. This is the same worker op production
  *     uses, so what the overlay paints is byte-identical to what an
  *     extraction call for the same page produces.
- *   - `margins` routes through `PDFExtractor.analyzeLayout` (which runs
+ *   - `margins` routes through `BeaverExtractor.analyzeLayout` (which runs
  *     the same shared analysis prefix structured extract runs) and
  *     surfaces `marginAnalysis` / `marginRemoval` for the requested
  *     page. Accepts an optional `settings` field so the overlay can be
@@ -657,10 +657,10 @@ export async function handleTestPdfSentenceBBoxesHttpRequest(request: any) {
 export async function handleTestPdfRenderOverlayHttpRequest(request: any) {
     const {
         getMuPDFWorkerClient,
-        PDFExtractor,
+        BeaverExtractor,
         ExtractionError,
         ExtractionErrorCode,
-    } = await import('../../../src/services/pdf');
+    } = await import('../../../src/beaver-extract');
 
     const loaded = await loadPdfBytesForTestEndpoint(request);
     if (!loaded.ok) return loaded;
@@ -734,7 +734,7 @@ export async function handleTestPdfRenderOverlayHttpRequest(request: any) {
                 request?.settings && typeof request.settings === 'object'
                     ? request.settings
                     : undefined;
-            const out = await new PDFExtractor().analyzeLayout(pdfData, {
+            const out = await new BeaverExtractor().analyzeLayout(pdfData, {
                 pageIndices: [pageIndex],
                 analysisWindow,
                 settings,
@@ -746,7 +746,7 @@ export async function handleTestPdfRenderOverlayHttpRequest(request: any) {
             // Same op production uses — what we paint here matches
             // what `extract({ mode: "structured" })` produces for
             // the same page byte-for-byte.
-            const result = await new PDFExtractor().extract(pdfData, {
+            const result = await new BeaverExtractor().extract(pdfData, {
                 mode: 'structured',
                 pageIndices: [pageIndex],
                 structured: { language },
@@ -904,7 +904,7 @@ export async function handleTestPdfExtractTraceHttpRequest(request: any) {
         DEFAULT_MARGIN_ZONE,
         ExtractionError,
         getMuPDFWorkerClient,
-    } = await import('../../../src/services/pdf');
+    } = await import('../../../src/beaver-extract');
 
     const loaded = await loadPdfBytesForTestEndpoint(request);
     if (!loaded.ok) return loaded;
@@ -1015,7 +1015,7 @@ export async function handleTestPdfExtractTraceHttpRequest(request: any) {
             // for the same case — surface the legacy wire shape so existing
             // live tests / HTTP clients keep working.
             const { ExtractionErrorCode } = await import(
-                '../../../src/services/pdf'
+                '../../../src/beaver-extract'
             );
             if (e.code === ExtractionErrorCode.PAGE_OUT_OF_RANGE) {
                 return {
@@ -1453,7 +1453,7 @@ export async function handleTestPdfExtractTraceHttpRequest(request: any) {
 /**
  * Dev-only document-wide style + margin analysis endpoint.
  *
- * Routes through `PDFExtractor.analyzeLayout` which runs the EXACT
+ * Routes through `BeaverExtractor.analyzeLayout` which runs the EXACT
  * shared analysis prefix `extract({ mode: "structured" })` runs (page
  * count, page labels, optional OCR check, JSON walk over the analysis
  * window, `buildPageAnalysisContext`). Output is byte-identical to the
@@ -1500,8 +1500,8 @@ export async function handleTestPdfExtractTraceHttpRequest(request: any) {
  *     metadata: { extractedAt, version, settings, timings } }
  */
 export async function handleTestPdfAnalyzeLayoutHttpRequest(request: any) {
-    const { PDFExtractor, ExtractionError, ExtractionErrorCode } = await import(
-        '../../../src/services/pdf'
+    const { BeaverExtractor, ExtractionError, ExtractionErrorCode } = await import(
+        '../../../src/beaver-extract'
     );
 
     const loaded = await loadPdfBytesForTestEndpoint(request);
@@ -1542,7 +1542,7 @@ export async function handleTestPdfAnalyzeLayoutHttpRequest(request: any) {
             : undefined;
 
     try {
-        const result = await new PDFExtractor().analyzeLayout(pdfData, {
+        const result = await new BeaverExtractor().analyzeLayout(pdfData, {
             settings,
             pageIndices,
             pageRange,

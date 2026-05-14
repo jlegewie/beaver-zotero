@@ -5,7 +5,7 @@ import {
     rotateRawPage,
     rotateRawPageDetailed,
     type RotationAngle,
-} from "../../../src/services/pdf/PageRotationNormalizer";
+} from "../../../src/beaver-extract/PageRotationNormalizer";
 import {
     bboxFromXYWH,
     bboxHeight,
@@ -16,7 +16,7 @@ import {
     type RawLineDetailed,
     type RawPageData,
     type RawPageDataDetailed,
-} from "../../../src/services/pdf/types";
+} from "../../../src/beaver-extract/types";
 
 function bbox(x: number, y: number, w: number, h: number): BoundingBox {
     return bboxFromXYWH(x, y, w, h, "top-left");

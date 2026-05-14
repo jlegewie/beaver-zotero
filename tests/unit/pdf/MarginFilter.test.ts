@@ -10,7 +10,7 @@ import { describe, it, expect, test } from "vitest";
 import {
     MarginFilter,
     getEffectiveRepeatThreshold,
-} from "../../../src/services/pdf/MarginFilter";
+} from "../../../src/beaver-extract/MarginFilter";
 import {
     bboxFromXYWH,
     type MarginAnalysis,
@@ -21,7 +21,7 @@ import {
     type RawLine,
     type RawPageData,
     type TextStyle,
-} from "../../../src/services/pdf/types";
+} from "../../../src/beaver-extract/types";
 
 // ---------------------------------------------------------------------------
 // Helpers

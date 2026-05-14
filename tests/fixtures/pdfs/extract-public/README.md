@@ -48,4 +48,4 @@ The same corpus also hosts OCR-detection regression fixtures
 (`ocr.json`), managed by `beaver-extract ocr-fixture …`. OCR fixtures
 are keyed by paperKey alone (no `__pN` suffix) because the detector is
 document-wide, and they share `_shared/<sha>.pdf` with extract fixtures.
-See `src/services/pdf/cli/README.md` for the command surface.
+See `src/beaver-extract/cli/README.md` for the command surface.

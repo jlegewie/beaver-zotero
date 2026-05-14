@@ -15,7 +15,7 @@ let maxInflight = 0;
 const sleep = (ms: number) =>
     new Promise<void>((res) => setTimeout(res, ms));
 
-vi.mock('../../../src/services/pdf/worker/ops', () => {
+vi.mock('../../../src/beaver-extract/worker/ops', () => {
     async function tracked<T>(value: T): Promise<{ result: T }> {
         inflight++;
         maxInflight = Math.max(maxInflight, inflight);
@@ -51,7 +51,7 @@ vi.mock('../../../src/services/pdf/worker/ops', () => {
 });
 
 // Keep `ensureExtractionRuntime` from trying to load WASM in unit tests.
-vi.mock('../../../src/services/pdf/node/bootstrap', () => ({
+vi.mock('../../../src/beaver-extract/node/bootstrap', () => ({
     ensureExtractionRuntime: vi.fn(async () => undefined),
     ensureMuPDFNode: vi.fn(async () => undefined),
     ensureSentencexNode: vi.fn(async () => undefined),
@@ -69,7 +69,7 @@ afterEach(() => {
 describe('node/api.ts serialization', () => {
     it('Promise.all of two ops never lets them overlap (queue is FIFO)', async () => {
         const { getPageCount, getMetadata } = await import(
-            '../../../src/services/pdf/node/api'
+            '../../../src/beaver-extract/node/api'
         );
         const bytes = new Uint8Array([0x25, 0x50, 0x44, 0x46]);
         const [count, meta] = await Promise.all([
@@ -85,7 +85,7 @@ describe('node/api.ts serialization', () => {
 
     it('three concurrent ops still run one at a time', async () => {
         const { getPageCount, getMetadata, extractPdf } = await import(
-            '../../../src/services/pdf/node/api'
+            '../../../src/beaver-extract/node/api'
         );
         const bytes = new Uint8Array([0x25, 0x50, 0x44, 0x46]);
         await Promise.all([

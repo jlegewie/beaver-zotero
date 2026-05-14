@@ -78,7 +78,7 @@ type WorkerReply = WorkerSuccessReply | WorkerFailureReply | WorkerLogMessage;
 
 /**
  * Snapshot of the worker-side document cache. Mirrors the `CacheStats` type
- * declared inside `src/services/pdf/worker/docCache.ts` so the wire shape
+ * declared inside `src/beaver-extract/worker/docCache.ts` so the wire shape
  * stays explicit on both sides.
  */
 export interface MuPDFWorkerCacheStats {
@@ -307,7 +307,7 @@ export class MuPDFWorkerClient {
      * Get the page count of a PDF.
      *
      * Posts by copy (no transfer list) — current callers reuse `pdfData`
-     * across multiple `PDFExtractor` calls, so transferring would detach the
+     * across multiple `BeaverExtractor` calls, so transferring would detach the
      * caller's buffer.
      */
     async getPageCount(pdfData: Uint8Array | ArrayBuffer): Promise<number> {

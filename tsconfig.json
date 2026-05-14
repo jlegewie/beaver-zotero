@@ -22,7 +22,7 @@
   "exclude": [
     "build",
     "addon",
-    "src/services/pdf/node",
-    "src/services/pdf/cli"
+    "src/beaver-extract/node",
+    "src/beaver-extract/cli"
   ]
 }

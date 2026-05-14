@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const renderBytesByPage = new Map<number, Uint8Array>();
 
-vi.mock('../../../src/services/pdf', () => {
+vi.mock('../../../src/beaver-extract', () => {
     class MockPDFExtractor {
         async getPageCount(): Promise<number> {
             return renderBytesByPage.size;
@@ -44,7 +44,7 @@ vi.mock('../../../src/services/pdf', () => {
     }
 
     return {
-        PDFExtractor: MockPDFExtractor,
+        BeaverExtractor: MockPDFExtractor,
         ExtractionError: MockExtractionError,
         ExtractionErrorCode: {
             ENCRYPTED: 'encrypted',

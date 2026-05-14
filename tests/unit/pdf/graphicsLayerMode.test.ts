@@ -14,7 +14,7 @@ import { describe, it, expect } from "vitest";
 import {
     DEFAULT_EXTRACTION_SETTINGS,
     shouldProbeGraphicsLayer,
-} from "../../../src/services/pdf/types";
+} from "../../../src/beaver-extract/types";
 
 describe("shouldProbeGraphicsLayer", () => {
     it("returns false for 'off' — opts out of the device walk", () => {

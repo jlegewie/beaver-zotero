@@ -55,20 +55,20 @@ export default tseslint.config(
         },
     },
     // The MuPDF worker bundle is a separate execution context: no DOM, no
-    // window, no Zotero. It must not import the PDF index barrel (re-exports
-    // PDFExtractor, MuPDFService, the logger — none of which are
+    // window, no Zotero. It must not import the BeaverExtract index barrel (re-exports
+    // BeaverExtractor, MuPDFService, the logger — none of which are
     // worker-safe) or any Beaver app utilities. Worker-safe internals
     // (analyzers, types, mappers) are still allowed via direct subpath
     // imports like `../types`, `../StyleAnalyzer`.
     //
     // Path math reminder — relative specifiers from a file at
-    // `src/services/pdf/worker/<file>.ts`:
-    //   ../X            → src/services/pdf/X      (PDF package internals — OK)
-    //   ../../X         → src/services/X          (sibling of pdf — none today)
-    //   ../../../X      → src/X                   (Beaver app dirs)
-    //   ../../../../X   → repo-root/X             (e.g. `react/`)
+    // `src/beaver-extract/worker/<file>.ts`:
+    //   ../X            → src/beaver-extract/X    (package internals — OK)
+    //   ../../X         → src/X                   (Beaver app dirs)
+    //   ../../../X      → repo-root/X             (e.g. `react/`)
+    //   ../../../../X   → one level above repo root
     {
-        files: ["src/services/pdf/worker/**/*.ts"],
+        files: ["src/beaver-extract/worker/**/*.ts"],
         rules: {
             "no-restricted-imports": [
                 "error",
@@ -88,29 +88,21 @@ export default tseslint.config(
                     patterns: [
                         {
                             // src/utils/* — Beaver app utilities (logger, prefs, …).
-                            group: ["../../../utils/*"],
+                            group: ["../../utils/*"],
                             message:
                                 "Worker code must not import Beaver app utilities (src/utils).",
                         },
                         {
-                            // Anything reachable via `../..` leaves the PDF
-                            // package — sibling Beaver services like
-                            // `../../database`, `../../agentService`, …
-                            // PDF-package internals are still allowed via
-                            // `./X` and `../X`. The longer-form
-                            // `../../../services/*` is a redundant catch
-                            // for the same target, kept for clarity.
-                            group: [
-                                "../../*",
-                                "../../**",
-                                "../../../services/*",
-                            ],
+                            // Anything reachable via `../..` leaves the
+                            // package. Package internals are still allowed
+                            // via `./X` and `../X`.
+                            group: ["../../*", "../../**"],
                             message:
-                                "Worker code must not leave src/services/pdf. Use `./X` or `../X` for PDF-package internals only.",
+                                "Worker code must not leave src/beaver-extract. Use `./X` or `../X` for PDF-package internals only.",
                         },
                         {
                             // react/* — webpack-only bundle (DOM/Zotero APIs).
-                            group: ["../../../../react/*"],
+                            group: ["../../../react/*"],
                             message:
                                 "Worker code must not import the webpack-only React bundle.",
                         },

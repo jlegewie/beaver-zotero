@@ -10,8 +10,8 @@
  * `/beaver/test/pdf-*` endpoints
  * ------------------------------
  * The pure PDF extraction endpoints (page count, render, extract,
- * analyze-layout, render-overlay, sentence bboxes, etc.) have CLI
- * equivalents — see `docs-zotero/beaver-extract-cli.md` for the mapping.
+ * analyze-layout, render-overlay, sentence bboxes, etc.) have BeaverExtract
+ * CLI equivalents — see `docs-zotero/beaver-extract-cli.md` for the mapping.
  * Prefer the CLI for new debugging work; it skips the Zotero round-trip
  * and runs the same extraction code in Node. Endpoints that exercise
  * Zotero state (cache, notes, editor, item resolution, worker lifecycle)

@@ -10,13 +10,13 @@ import {
     diffOcrSnapshots,
     mergeEffectiveOptions,
     projectOcrSnapshot,
-} from "../../../src/services/pdf/debug/ocrSnapshot";
-import { DEFAULT_OCR_DETECTION_OPTIONS } from "../../../src/services/pdf/types";
+} from "../../../src/beaver-extract/debug/ocrSnapshot";
+import { DEFAULT_OCR_DETECTION_OPTIONS } from "../../../src/beaver-extract/types";
 import type {
     OCRDetectionResult,
     OCRIssueReason,
-} from "../../../src/services/pdf/types";
-import type { CapturedOcrFixture } from "../../../src/services/pdf/cli/fixture/ocrFixtureSchema";
+} from "../../../src/beaver-extract/types";
+import type { CapturedOcrFixture } from "../../../src/beaver-extract/cli/fixture/ocrFixtureSchema";
 
 const ALL_REASONS_ZERO = (): Record<OCRIssueReason, number> => ({
     no_text_blocks: 0,

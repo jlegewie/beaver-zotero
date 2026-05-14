@@ -1082,7 +1082,7 @@ export function canSetField(item: Zotero.Item, field: string): boolean {
  *
  * The returned value is the raw, unnormalized field text — callers that
  * need an ISO 639-1 code should pass it through
- * `normalizeLanguageCode` from `src/services/pdf/SentencexSplitter.ts`.
+ * `normalizeLanguageCode` from `src/beaver-extract/SentencexSplitter.ts`.
  */
 export async function getItemLanguage(
     libraryID: number,

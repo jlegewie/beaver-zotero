@@ -14,14 +14,14 @@ import {
     type RawBlock,
     type RawLine,
     type RawPageData,
-} from "../../../src/services/pdf/types";
+} from "../../../src/beaver-extract/types";
 
 // Mock the doc-helpers walker BEFORE importing the module under test so the
 // import sees the mocked binding. We hand-build RawPageData per page index.
-vi.mock("../../../src/services/pdf/worker/docHelpers", async () => {
+vi.mock("../../../src/beaver-extract/worker/docHelpers", async () => {
     const actual = await vi.importActual<
-        typeof import("../../../src/services/pdf/worker/docHelpers")
-    >("../../../src/services/pdf/worker/docHelpers");
+        typeof import("../../../src/beaver-extract/worker/docHelpers")
+    >("../../../src/beaver-extract/worker/docHelpers");
     return {
         ...actual,
         extractRawPageFromDoc: (_doc: unknown, pageIndex: number) =>
@@ -29,8 +29,8 @@ vi.mock("../../../src/services/pdf/worker/docHelpers", async () => {
     };
 });
 
-import { runExtractFromIndices } from "../../../src/services/pdf/worker/ops";
-import type { DocumentLike } from "../../../src/services/pdf/worker/mupdfApi";
+import { runExtractFromIndices } from "../../../src/beaver-extract/worker/ops";
+import type { DocumentLike } from "../../../src/beaver-extract/worker/mupdfApi";
 
 // ---------------------------------------------------------------------------
 // Synthetic page builder
@@ -214,14 +214,14 @@ describe("runExtractFromIndices: paragraph engine", () => {
     });
 });
 
-describe("PDFExtractor.extract: argument guards", () => {
+describe("BeaverExtractor.extract: argument guards", () => {
     it("rejects mode='structured' with markdown.engine set", async () => {
-        const { PDFExtractor } = await import(
-            "../../../src/services/pdf/index"
+        const { BeaverExtractor } = await import(
+            "../../../src/beaver-extract/index"
         );
         const fakeData = new Uint8Array([0]);
         await expect(
-            new PDFExtractor().extract(fakeData, {
+            new BeaverExtractor().extract(fakeData, {
                 mode: "structured",
                 markdown: { engine: "paragraph" },
             }),

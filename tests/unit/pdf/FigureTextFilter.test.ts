@@ -11,14 +11,14 @@
  */
 
 import { describe, it, expect } from "vitest";
-import type { Rect } from "../../../src/services/pdf/ColumnDetector";
-import { detectFigureTextColumns } from "../../../src/services/pdf/FigureTextFilter";
+import type { Rect } from "../../../src/beaver-extract/ColumnDetector";
+import { detectFigureTextColumns } from "../../../src/beaver-extract/FigureTextFilter";
 import {
     bboxFromXYWH,
     type RawBlock,
     type RawLine,
     type RawPageData,
-} from "../../../src/services/pdf/types";
+} from "../../../src/beaver-extract/types";
 
 const PAGE_W = 612;
 const PAGE_H = 792;

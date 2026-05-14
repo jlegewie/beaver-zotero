@@ -12,13 +12,13 @@
 
 import { logger } from "../../src/utils/logger";
 import {
-    PDFExtractor,
+    BeaverExtractor,
     bboxToReaderFrame,
-} from "../../src/services/pdf";
+} from "../../src/beaver-extract";
 import type {
     ExtractionSettings,
     ProcessedPage,
-} from "../../src/services/pdf";
+} from "../../src/beaver-extract";
 import { getItemLanguage } from "../../src/utils/zoteroUtils";
 import { getCurrentReaderAndWaitForView } from "./readerUtils";
 import { getPageViewportInfo } from "./pdfUtils";
@@ -67,7 +67,7 @@ import {
  * pages with non-zero CropBox offsets still align.
  */
 function rectToZoteroFormat(
-    rect: import("../../src/services/pdf").BoundingBox,
+    rect: import("../../src/beaver-extract").BoundingBox,
     pdfWidth: number,
     pdfHeight: number,
     rotation: number,
@@ -229,7 +229,7 @@ async function pushOverlayToReader(
  * `*FromPage` builders in `extractionOverlay.ts` then turn the result
  * into rects.
  *
- * Routes through `PDFExtractor.extract({ mode: "structured" })` so what
+ * Routes through `BeaverExtractor.extract({ mode: "structured" })` so what
  * the visualizer paints is byte-identical to what production extraction
  * produces for the same page.
  *
@@ -251,7 +251,7 @@ async function loadStructuredPage(
     } catch {
         // Best effort.
     }
-    const result = await new PDFExtractor().extract(pdfData, {
+    const result = await new BeaverExtractor().extract(pdfData, {
         mode: "structured",
         pageIndices: [pageIndex],
         analysisWindow: Number.POSITIVE_INFINITY,
@@ -584,7 +584,7 @@ export async function extractCurrentPageContent(): Promise<PageExtractionResult>
         logger(`[Extractor] Loading PDF and extracting page ${pageIndex + 1}...`);
         const pdfData = await IOUtils.read(filePath);
 
-        const result = await new PDFExtractor().extract(pdfData, {
+        const result = await new BeaverExtractor().extract(pdfData, {
             pageIndices: [pageIndex],
         });
         const processedPage = result.pages[0];

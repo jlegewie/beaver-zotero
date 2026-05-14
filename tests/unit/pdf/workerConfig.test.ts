@@ -16,7 +16,7 @@ import {
     getWorkerUrls,
     isWorkerConfigured,
     setWorkerUrls,
-} from '../../../src/services/pdf/worker/config';
+} from '../../../src/beaver-extract/worker/config';
 
 describe('worker/config', () => {
     it('throws on getWorkerUrls before configure', () => {

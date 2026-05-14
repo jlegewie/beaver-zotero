@@ -19,11 +19,11 @@ import { configurePDFForTests } from '../../helpers/configurePDFForTests';
 import {
     getMuPDFWorkerClient,
     disposeMuPDFWorker,
-} from '../../../src/services/pdf/MuPDFWorkerClient';
+} from '../../../src/beaver-extract/MuPDFWorkerClient';
 import {
     ExtractionError,
     ExtractionErrorCode,
-} from '../../../src/services/pdf/types';
+} from '../../../src/beaver-extract/types';
 
 // ---------------------------------------------------------------------------
 // MockWorker — captures postMessage calls + lets the test queue up replies.

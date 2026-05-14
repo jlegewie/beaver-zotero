@@ -9,7 +9,7 @@
 import { vi } from 'vitest';
 
 // ---------------------------------------------------------------------------
-// Worker-scope `self` — code inside src/services/pdf/worker/ references
+// Worker-scope `self` — code inside src/beaver-extract/worker/ references
 // `self` at module-load time (e.g. workerScope.ts). Tests run in node, where
 // `self` is undefined; alias it to globalThis so worker-only modules can be
 // imported without ReferenceError. Runtime calls into the worker still need

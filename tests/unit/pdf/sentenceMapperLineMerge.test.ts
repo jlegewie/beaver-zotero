@@ -18,13 +18,13 @@ import {
     sentenceToBoxes,
     type PageText,
     type SentenceRange,
-} from "../../../src/services/pdf/SentenceMapper";
+} from "../../../src/beaver-extract/SentenceMapper";
 import type {
     QuadPoint,
     RawChar,
     RawLineDetailed,
-} from "../../../src/services/pdf/types";
-import { bboxFromXYWH, bboxHeight, bboxWidth } from "../../../src/services/pdf/types";
+} from "../../../src/beaver-extract/types";
+import { bboxFromXYWH, bboxHeight, bboxWidth } from "../../../src/beaver-extract/types";
 
 function makeLine(
     text: string,

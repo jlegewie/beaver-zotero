@@ -28,8 +28,8 @@ import {
     splitOnEnumeratedListAfterColon,
     splitNumberedListSentenceBoundaries,
     splitTrailingNumericSubsectionLabel,
-} from "../../../src/services/pdf/sentencePostprocess";
-import type { SentenceRange } from "../../../src/services/pdf/SentenceMapper";
+} from "../../../src/beaver-extract/sentencePostprocess";
+import type { SentenceRange } from "../../../src/beaver-extract/SentenceMapper";
 
 /**
  * Build `SentenceRange[]` by walking pre-split chunks from left to

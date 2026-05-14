@@ -18,7 +18,7 @@ import {
     WSPageSearchResult,
     WSSearchHit,
 } from '../agentProtocol';
-import { PDFExtractor, ExtractionError, ExtractionErrorCode } from '../pdf';
+import { BeaverExtractor, ExtractionError, ExtractionErrorCode } from '../../beaver-extract';
 import { makeRemoteFilePath } from '../attachmentFileCache';
 import {
     validateZoteroItemReference,
@@ -202,7 +202,7 @@ export async function handleZoteroAttachmentSearchRequest(
         // Cold-cache path goes from 2 doc-opens (getPageCount + search) → 1.
         // The cache fast-path above (lines 157-165) already covers the
         // `cachedMeta.page_count > maxPageCount` case before any worker call.
-        const extractor = new PDFExtractor();
+        const extractor = new BeaverExtractor();
         const maxPageCount = !skip_local_limits ? getPref('maxPageCount') : undefined;
         const searchResult = await extractor.search(
             pdfData,

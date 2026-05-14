@@ -1,5 +1,5 @@
 /**
- * Unit tests for the in-worker doc cache (`src/services/pdf/worker/docCache.ts`).
+ * Unit tests for the in-worker doc cache (`src/beaver-extract/worker/docCache.ts`).
  *
  * The real `openDocUncached` (and the worker FIFO `enqueue`) are mocked so
  * the cache logic can be tested without WASM. Each test resets the cache
@@ -7,7 +7,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('../../../src/services/pdf/worker/errors', () => ({
+vi.mock('../../../src/beaver-extract/worker/errors', () => ({
     postLog: vi.fn(),
     ERROR_CODES: {},
     workerError: vi.fn((code: string, message: string) => {
@@ -18,7 +18,7 @@ vi.mock('../../../src/services/pdf/worker/errors', () => ({
 }));
 
 const opQueueState: { tasks: Array<() => unknown | Promise<unknown>> } = { tasks: [] };
-vi.mock('../../../src/services/pdf/worker/opQueue', () => ({
+vi.mock('../../../src/beaver-extract/worker/opQueue', () => ({
     enqueue: vi.fn(<T>(work: () => T | Promise<T>): Promise<T> => {
         // Capture the task synchronously so tests can assert it was queued,
         // then run it on the microtask queue so the await semantics still
@@ -47,7 +47,7 @@ function makeFakeDoc() {
     };
 }
 
-vi.mock('../../../src/services/pdf/worker/docHelpers', () => ({
+vi.mock('../../../src/beaver-extract/worker/docHelpers', () => ({
     openDocUncached: vi.fn(async () => {
         openDocCallCount++;
         return makeFakeDoc();
@@ -62,7 +62,7 @@ import {
     getCacheStats,
     releaseDoc,
     sweepExpiredEntries,
-} from '../../../src/services/pdf/worker/docCache';
+} from '../../../src/beaver-extract/worker/docCache';
 
 // Provide a minimal `crypto.subtle.digest` for the test environment so the
 // cache's feature-detect succeeds. Node's webcrypto is exposed on

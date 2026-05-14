@@ -1,8 +1,8 @@
-# PDF Extraction Service - Technical Documentation
+# BeaverExtract
 
 ## Overview
 
-This service provides high-quality text extraction from PDFs using **MuPDF WASM** (compiled to JavaScript). It implements a sophisticated multi-stage pipeline that understands document structure, typography, and layout to produce clean, structured text suitable for indexing, RAG, and semantic search.
+BeaverExtract provides high-quality text extraction from PDFs using **MuPDF WASM** (compiled to JavaScript). It implements a sophisticated multi-stage pipeline that understands document structure, typography, and layout to produce clean, structured text suitable for indexing, RAG, and semantic search.
 
 **Key Capabilities:**
 
@@ -64,8 +64,8 @@ Phase 3: Page Processing (filtering, line detection, extraction)
 ## File Organization
 
 ```
-src/services/pdf/
-├── index.ts                       # Main API entry point (PDFExtractor facade + barrel re-exports)
+src/beaver-extract/
+├── index.ts                       # Main API entry point (BeaverExtractor facade + barrel re-exports)
 ├── types.ts                       # Shared TypeScript interfaces
 ├── config.ts                      # Cross-bundle config (worker URLs, log sink, client slot)
 ├── logging.ts                     # Cross-bundle log sink for analyzer modules
@@ -197,12 +197,12 @@ ProcessedPage; // { index, content, columns, items, sentences?, degradation? }
 #### Results
 
 ```typescript
-ExtractionResult; // Result of PDFExtractor.extract — markdown OR structured mode.
+ExtractionResult; // Result of BeaverExtractor.extract — markdown OR structured mode.
                   // Structured mode populates pages[i].items / sentences /
                   // degradation alongside the same content / columns fields.
                   // `degradation` is omitted on pages where no item fell
                   // back to a whole-item bbox.
-LayoutAnalysisResult; // Result of PDFExtractor.analyzeLayout — pre-extraction
+LayoutAnalysisResult; // Result of BeaverExtractor.analyzeLayout — pre-extraction
                       // analysis context (styleProfile + marginAnalysis +
                       // marginRemoval) plus the JSON-walked target pages. Same
                       // shared prefix structured extract runs, so the analysis
@@ -211,8 +211,8 @@ LayoutAnalysisResult; // Result of PDFExtractor.analyzeLayout — pre-extraction
 SentenceTraceResult; // Result of getMuPDFWorkerClient().extractSentenceDebug
                      // — single-page debug envelope { result, trace } used by
                      // fixture capture and the extract-trace endpoint.
-PDFSearchResult; // Result of PDFExtractor.search
-PageImageResult; // Per-page entry in PDFExtractor.renderPages result.pages
+PDFSearchResult; // Result of BeaverExtractor.search
+PageImageResult; // Per-page entry in BeaverExtractor.renderPages result.pages
 ```
 
 ### 3. Text Layer Detection
@@ -457,7 +457,7 @@ export async function visualizeCurrentPageSections(): Promise<{
     //    via the worker — same shared analysis context structured extract
     //    uses, so the visualizer matches what production sees.
     const pdfData = await IOUtils.read(filePath);
-    const layout = await new PDFExtractor().analyzeLayout(pdfData, {
+    const layout = await new BeaverExtractor().analyzeLayout(pdfData, {
         pageIndices: [currentPageIndex],
     });
     const rawPage = layout.pages[0];
@@ -495,7 +495,7 @@ export async function visualizeCurrentPageSections(): Promise<{
 
 ```typescript
 // ✅ Good: Single worker call surfaces the analysis context production uses
-const layout = await new PDFExtractor().analyzeLayout(pdfData);
+const layout = await new BeaverExtractor().analyzeLayout(pdfData);
 const { styleProfile, marginAnalysis, marginRemoval } = layout.analysis;
 
 // ❌ Bad: Multiple extractions / re-walking the doc per analyzer
@@ -589,10 +589,10 @@ console.groupEnd();
 The plugin's **Dev Tools menu** (`react/components/ui/buttons/DevToolsMenuButton.tsx`,
 visible only in dev builds) exposes the PDF debug actions:
 
-1. **Test PDF Extraction**: Extract the selected attachment via `PDFExtractor.extract`
+1. **Test PDF Extraction**: Extract the selected attachment via `BeaverExtractor.extract`
 2. **Extract Current Page**: Run extraction on the single page open in the reader
-3. **Test PDF Search**: `PDFExtractor.search` against the selected attachment
-4. **Test OCR Detection**: `PDFExtractor.analyzeOCRNeeds` against the selected attachment
+3. **Test PDF Search**: `BeaverExtractor.search` against the selected attachment
+4. **Test OCR Detection**: `BeaverExtractor.analyzeOCRNeeds` against the selected attachment
 5. **Visualize Columns**: Blue overlays showing detected columns
 6. **Visualize Lines**: Orange overlays for each detected line
 7. **Visualize Items**: One box per `DocItem`, with stable colors for all item kinds
@@ -657,7 +657,7 @@ reader.
 2. **Cache extraction results**:
 
    ```typescript
-   const cachedResult = await new PDFExtractor().extract(pdfData);
+   const cachedResult = await new BeaverExtractor().extract(pdfData);
    // Store in Map<itemID, ExtractionResult>
    ```
 
@@ -665,12 +665,12 @@ reader.
 
    ```typescript
    // Load first 10 pages immediately
-   const preview = await new PDFExtractor().extract(pdfData, {
+   const preview = await new BeaverExtractor().extract(pdfData, {
      pageIndices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
    });
    // Load rest in background — `pageRange` defers range resolution to the
    // worker so we don't need a separate getPageCount round-trip:
-   const rest = await new PDFExtractor().extract(pdfData, {
+   const rest = await new BeaverExtractor().extract(pdfData, {
      pageRange: { startIndex: 10 },
    });
    ```
@@ -682,9 +682,9 @@ reader.
 ### Main Extraction Methods
 
 ```typescript
-import { PDFExtractor } from "src/services/pdf";
+import { BeaverExtractor } from "src/beaver-extract";
 
-const extractor = new PDFExtractor();
+const extractor = new BeaverExtractor();
 
 // Whole document
 const result = await extractor.extract(pdfData);
@@ -743,7 +743,7 @@ for (const c of layout.analysis.marginRemoval.candidates) {
 // multi-page structured path — see worker/sentenceExtraction.ts for
 // the divergence rationale. For analysis-context parity, prefer
 // `analyzeLayout` above.
-import { getMuPDFWorkerClient } from "../../src/services/pdf";
+import { getMuPDFWorkerClient } from "../../src/beaver-extract";
 const debug = await getMuPDFWorkerClient().extractSentenceDebug(
   pdfData,
   0,
@@ -756,7 +756,7 @@ const debug = await getMuPDFWorkerClient().extractSentenceDebug(
 Render PDF pages to PNG or JPEG images with configurable resolution.
 
 ```typescript
-const extractor = new PDFExtractor();
+const extractor = new BeaverExtractor();
 
 // Render first page at 300 DPI as PNG (single-page render uses pageIndices: [n])
 const single = await extractor.renderPages(pdfData, {
@@ -838,7 +838,7 @@ if (!filePath) {
 }
 
 const pdfData = await IOUtils.read(filePath);
-const extractor = new PDFExtractor();
+const extractor = new BeaverExtractor();
 
 // ✅ Good: Specific phrase
 await extractor.search(pdfData, "random forest classifier");
@@ -865,7 +865,7 @@ if (!filePath) {
 }
 
 const pdfData = await IOUtils.read(filePath);
-const extractor = new PDFExtractor();
+const extractor = new BeaverExtractor();
 
 // Search for pages containing BOTH terms
 const result1 = await extractor.search(pdfData, "machine learning");
@@ -880,7 +880,7 @@ const pagesWithBoth = result1.pages.filter((p1) =>
 #### Basic Usage
 
 ```typescript
-import { PDFExtractor } from "src/services/pdf";
+import { BeaverExtractor } from "src/beaver-extract";
 
 // Simple search
 const filePath = await attachment.getFilePathAsync();
@@ -889,7 +889,7 @@ if (!filePath) {
 }
 
 const pdfData = await IOUtils.read(filePath);
-const extractor = new PDFExtractor();
+const extractor = new BeaverExtractor();
 const result = await extractor.search(pdfData, "machine learning");
 
 if (result) {
@@ -907,9 +907,9 @@ if (result) {
 #### Manual Usage with Raw PDF Data
 
 ```typescript
-import { PDFExtractor } from "src/services/pdf";
+import { BeaverExtractor } from "src/beaver-extract";
 
-const extractor = new PDFExtractor();
+const extractor = new BeaverExtractor();
 const result = await extractor.search(pdfData, "neural network");
 
 // Access ranked pages
@@ -1073,15 +1073,15 @@ const result = await extractor.search(pdfData, "query", {
 
 ```typescript
 // Column detection
-import { detectColumns } from "src/services/pdf";
+import { detectColumns } from "src/beaver-extract";
 const columnResult = detectColumns(rawPage);
 
 // Line detection
-import { detectLinesOnPage } from "src/services/pdf";
+import { detectLinesOnPage } from "src/beaver-extract";
 const lineResult = detectLinesOnPage(rawPage, columns);
 
 // Paragraph detection
-import { detectParagraphs } from "src/services/pdf";
+import { detectParagraphs } from "src/beaver-extract";
 const paragraphResult = detectParagraphs(lineResult, bodyStyles);
 ```
 

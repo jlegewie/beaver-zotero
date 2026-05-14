@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import * as pdf from "../../../src/services/pdf";
+import * as pdf from "../../../src/beaver-extract";
 import type {
     BoundingBox,
     CaptionItem,
@@ -28,7 +28,7 @@ import type {
     TextBearingItem,
     TextItem,
     WorkerSentenceDebugOptions,
-} from "../../../src/services/pdf";
+} from "../../../src/beaver-extract";
 
 type PublicTypeSmoke = [
     BoundingBox,
@@ -62,6 +62,7 @@ type PublicTypeSmoke = [
 describe("pdf barrel exports", () => {
     it("exposes the intended runtime API surface", () => {
         const expected = [
+            "BeaverExtractor",
             "DEFAULT_EXTRACTION_SETTINGS",
             "DEFAULT_MARGINS",
             "DEFAULT_MARGIN_ZONE",
@@ -75,7 +76,6 @@ describe("pdf barrel exports", () => {
             "ExtractionErrorCode",
             "MarginFilter",
             "MuPDFWorkerClient",
-            "PDFExtractor",
             "PageExtractor",
             "SearchScorer",
             "StyleAnalyzer",

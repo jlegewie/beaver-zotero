@@ -23,11 +23,11 @@ import {
     extractPageSentences,
     buildDetailedLineLookup,
     buildPageSentenceFeasibilityReport,
-} from '../src/services/pdf/ParagraphSentenceMapper';
-import { extractPageWideSentences } from '../src/services/pdf/SentenceMapper';
-import { detectColumns } from '../src/services/pdf/ColumnDetector';
-import { detectLinesOnPage } from '../src/services/pdf/LineDetector';
-import { detectParagraphs } from '../src/services/pdf/ParagraphDetector';
+} from '../src/beaver-extract/ParagraphSentenceMapper';
+import { extractPageWideSentences } from '../src/beaver-extract/SentenceMapper';
+import { detectColumns } from '../src/beaver-extract/ColumnDetector';
+import { detectLinesOnPage } from '../src/beaver-extract/LineDetector';
+import { detectParagraphs } from '../src/beaver-extract/ParagraphDetector';
 import {
     bboxFromXYWH,
     bboxHeight,
@@ -37,7 +37,7 @@ import {
     type RawBlockDetailed,
     type RawPageDataDetailed,
     type QuadPoint,
-} from '../src/services/pdf/types';
+} from '../src/beaver-extract/types';
 
 // ---------------------------------------------------------------------------
 // Synthetic page builder (same grid as sentenceMapper.unit.test.ts)

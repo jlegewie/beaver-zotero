@@ -7,8 +7,8 @@ import ToolsIcon from '../../icons/ToolsIcon';
 import {
     ExtractionError,
     ExtractionErrorCode,
-    PDFExtractor,
-} from '../../../../src/services/pdf';
+    BeaverExtractor,
+} from '../../../../src/beaver-extract';
 import {
     visualizeCurrentPageColumns,
     visualizeCurrentPageItems,
@@ -165,7 +165,7 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
                 return;
             }
             const pdfData = await IOUtils.read(path);
-            const result = await new PDFExtractor().extract(pdfData, {
+            const result = await new BeaverExtractor().extract(pdfData, {
                 mode: "structured",
             });
 
@@ -469,7 +469,7 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
                 return;
             }
             const pdfData = await IOUtils.read(path);
-            const result = await new PDFExtractor().extract(pdfData, {
+            const result = await new BeaverExtractor().extract(pdfData, {
                 mode: "structured",
                 pageIndices: [currentPageIndex],
                 settings: { checkTextLayer: false },
@@ -560,7 +560,7 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
             }
 
             const pdfData = await IOUtils.read(path);
-            const extractor = new PDFExtractor();
+            const extractor = new BeaverExtractor();
             
             console.time("[OCR Detection Test] Analysis time");
             const result = await extractor.analyzeOCRNeeds(pdfData);
@@ -658,7 +658,7 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
                 return;
             }
             const pdfData = await IOUtils.read(path);
-            const result = await new PDFExtractor().search(pdfData, query);
+            const result = await new BeaverExtractor().search(pdfData, query);
 
             // Log summary
             console.log("\n" + "=".repeat(60));

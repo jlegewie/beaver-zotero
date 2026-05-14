@@ -2,7 +2,7 @@
  * MuPDF WASM module worker entry point.
  *
  * IMPORTANT: do NOT import from `../index` (the barrel). It re-exports
- * `MuPDFWorkerClient` (and the `PDFExtractor` facade that wraps it), which
+ * `MuPDFWorkerClient` (and the `BeaverExtractor` facade that wraps it), which
  * is the *main-thread* worker proxy: it calls `new Worker(...)` against
  * URLs supplied by `getConfig()` and would try to spawn a worker from
  * inside this worker. Worker code imports analyzers and types directly:

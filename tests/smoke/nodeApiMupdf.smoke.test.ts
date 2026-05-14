@@ -14,7 +14,7 @@ import {
     extractPdf,
     getMetadata,
     getPageCount,
-} from '../../src/services/pdf/node/api';
+} from '../../src/beaver-extract/node/api';
 import { SMOKE_PDF, smokePdfExists } from './_helpers';
 
 describe.runIf(smokePdfExists())('Node API (smoke)', () => {

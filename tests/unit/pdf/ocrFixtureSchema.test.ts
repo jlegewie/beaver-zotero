@@ -10,7 +10,7 @@ import {
     OCR_FIXTURE_SCHEMA_VERSION,
     OcrFixtureValidationError,
     validateOcrFixture,
-} from "../../../src/services/pdf/cli/fixture/ocrFixtureSchema";
+} from "../../../src/beaver-extract/cli/fixture/ocrFixtureSchema";
 
 function wellFormed(): Record<string, unknown> {
     return {

@@ -12,7 +12,7 @@
  *   2. `react/hooks/useHttpEndpoints.ts` (`/beaver/test/pdf-render-overlay`)
  *      — passes them to `canvasOverlay.ts` to draw on a rendered page PNG
  *      for headless agent debugging.
- *   3. `src/services/pdf/cli/commands/overlay.ts` — passes them to
+ *   3. `src/beaver-extract/cli/commands/overlay.ts` — passes them to
  *      `node/overlayPng.ts` (sharp + SVG composite) for the CLI overlay
  *      command.
  *
@@ -22,7 +22,7 @@
  * document-wide style profile). `margins` deliberately skips that filter
  * — its purpose is to expose the pre-removal classification.
  *
- * Imports use direct module paths (not the `src/services/pdf/index.ts`
+ * Imports use direct module paths (not the `src/beaver-extract/index.ts`
  * barrel) so this module can be safely consumed from the CLI without
  * pulling `MuPDFWorkerClient` into Node code.
  */

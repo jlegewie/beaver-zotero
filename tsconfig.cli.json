@@ -9,10 +9,10 @@
     "noEmit": true
   },
   "include": [
-    "src/services/pdf/node",
-    "src/services/pdf/cli",
-    "src/services/pdf/worker",
-    "src/services/pdf/debug",
+    "src/beaver-extract/node",
+    "src/beaver-extract/cli",
+    "src/beaver-extract/worker",
+    "src/beaver-extract/debug",
     "tests/unit/pdf/cliEnvelope.test.ts",
     "tests/unit/pdf/cliFixtureCommand.test.ts",
     "tests/unit/pdf/debugOverlayBuilders.test.ts",

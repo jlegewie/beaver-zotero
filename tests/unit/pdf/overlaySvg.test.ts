@@ -9,9 +9,9 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { buildOverlaySvg } from '../../../src/services/pdf/debug/overlaySvg';
-import type { OverlayRect } from '../../../src/services/pdf/debug/overlayBuilders';
-import { bboxFromXYWH } from '../../../src/services/pdf/types';
+import { buildOverlaySvg } from '../../../src/beaver-extract/debug/overlaySvg';
+import type { OverlayRect } from '../../../src/beaver-extract/debug/overlayBuilders';
+import { bboxFromXYWH } from '../../../src/beaver-extract/types';
 
 describe('buildOverlaySvg', () => {
     it('emits a self-contained SVG with the requested image dimensions', () => {

@@ -12,7 +12,7 @@ import { join } from "node:path";
 import {
     validateOcrFixture,
     type CapturedOcrFixture,
-} from "../../src/services/pdf/cli/fixture/ocrFixtureSchema";
+} from "../../src/beaver-extract/cli/fixture/ocrFixtureSchema";
 import {
     privateRoot,
     publicRoot,

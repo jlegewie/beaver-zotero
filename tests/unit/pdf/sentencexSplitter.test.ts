@@ -28,7 +28,7 @@ import {
     sentencexBoundariesToCharRanges,
     normalizeLanguageCode,
     type SentencexBoundary,
-} from '../../../src/services/pdf/SentencexSplitter';
+} from '../../../src/beaver-extract/SentencexSplitter';
 
 // ---------------------------------------------------------------------------
 // buildByteOffsetTable

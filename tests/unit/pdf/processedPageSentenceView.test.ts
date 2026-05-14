@@ -6,13 +6,13 @@ import {
     type ProcessedPage,
     type RawLineDetailed,
     type RawPageDataDetailed,
-} from "../../../src/services/pdf";
-import { bboxFromXYWH } from "../../../src/services/pdf/types";
-import type { PageLine } from "../../../src/services/pdf/LineDetector";
+} from "../../../src/beaver-extract";
+import { bboxFromXYWH } from "../../../src/beaver-extract/types";
+import type { PageLine } from "../../../src/beaver-extract/LineDetector";
 import type {
     ContentItem,
     PageParagraphResult,
-} from "../../../src/services/pdf/ParagraphDetector";
+} from "../../../src/beaver-extract/ParagraphDetector";
 
 const PAGE_W = 612;
 const PAGE_H = 792;

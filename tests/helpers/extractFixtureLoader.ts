@@ -18,11 +18,11 @@ import {
     PUBLIC_FIXTURE_ROOT_REL,
     resolvePrivateFixtureRoot,
     sharedPdfPath,
-} from "../../src/services/pdf/cli/fixture/fixtureFile";
+} from "../../src/beaver-extract/cli/fixture/fixtureFile";
 import {
     validateFixture,
     type CapturedFixture,
-} from "../../src/services/pdf/cli/fixture/fixtureSchema";
+} from "../../src/beaver-extract/cli/fixture/fixtureSchema";
 
 const REPO_ROOT = resolve(__dirname, "..", "..");
 

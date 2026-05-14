@@ -7,7 +7,7 @@
  * closing punctuation, and ignore terminators buried mid-string.
  */
 import { describe, it, expect } from "vitest";
-import { hasSentenceFinalTerminator } from "../../../src/services/pdf/SentenceMapper";
+import { hasSentenceFinalTerminator } from "../../../src/beaver-extract/SentenceMapper";
 
 describe("hasSentenceFinalTerminator", () => {
     it("returns true for ASCII period, exclamation, question", () => {

@@ -9,15 +9,15 @@
  * `columns: Rect[]`.
  */
 import { describe, it, expect } from 'vitest';
-import { detectColumns } from '../../../src/services/pdf/ColumnDetector';
-import type { Rect } from '../../../src/services/pdf/ColumnDetector';
+import { detectColumns } from '../../../src/beaver-extract/ColumnDetector';
+import type { Rect } from '../../../src/beaver-extract/ColumnDetector';
 import {
     bboxFromXYWH,
     type RawBlock,
     type RawLine,
     type RawPageData,
     type TextStyle,
-} from '../../../src/services/pdf/types';
+} from '../../../src/beaver-extract/types';
 
 // ---------------------------------------------------------------------------
 // Helpers

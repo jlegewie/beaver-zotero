@@ -21,7 +21,7 @@ import {
     makeDocumentApi,
     type LibMuPdf,
     type StructuredTextWalker,
-} from "../../../src/services/pdf/worker/mupdfApi";
+} from "../../../src/beaver-extract/worker/mupdfApi";
 
 const BLOCK_PTR = 100;
 const LINE_PTR = 200;

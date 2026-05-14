@@ -17,9 +17,9 @@ import {
     diffExtractionSnapshots,
     formatDiffs,
     projectExtractionSnapshot,
-} from "../../src/services/pdf/debug/extractionSnapshot";
-import { extractPdf } from "../../src/services/pdf/node/api";
-import { resolveAnalysisWindow } from "../../src/services/pdf/cli/fixture/analysisScope";
+} from "../../src/beaver-extract/debug/extractionSnapshot";
+import { extractPdf } from "../../src/beaver-extract/node/api";
+import { resolveAnalysisWindow } from "../../src/beaver-extract/cli/fixture/analysisScope";
 import {
     loadExtractFixtures,
     privateRoot,

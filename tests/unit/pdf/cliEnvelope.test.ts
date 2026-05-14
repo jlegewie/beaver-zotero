@@ -12,9 +12,9 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { Writable } from 'node:stream';
 
-import { buildProgram, runCli } from '../../../src/services/pdf/node/runCli';
-import type { CliDeps } from '../../../src/services/pdf/cli/runCliTypes';
-import type * as NodeApi from '../../../src/services/pdf/node/api';
+import { buildProgram, runCli } from '../../../src/beaver-extract/node/runCli';
+import type { CliDeps } from '../../../src/beaver-extract/cli/runCliTypes';
+import type * as NodeApi from '../../../src/beaver-extract/node/api';
 
 class StringSink extends Writable {
     chunks: string[] = [];

@@ -41,7 +41,7 @@
         "build-react:staging": "BUILD_ENV=staging webpack --config webpack.config.js --mode=production",
         "watch-react": "webpack --config webpack.config.js --watch",
         "pack:xpi": "node scripts/pack-xpi.mjs",
-        "beaver-extract": "tsx src/services/pdf/cli/main.ts",
+        "beaver-extract": "tsx src/beaver-extract/cli/main.ts",
         "typecheck:cli": "tsc -p tsconfig.cli.json --noEmit",
         "test:cli-smoke": "vitest run --config vitest.smoke.config.ts"
     },

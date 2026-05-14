@@ -4,7 +4,7 @@
  * Sole owner of the Zotero / Firefox glue (`chrome://` URLs,
  * `ChromeUtils.importESModule`, the `Zotero.__beaverMuPDFWorkerClient`
  * singleton slot, the Beaver logger). The package itself
- * (`src/services/pdf/`) has no Zotero awareness; it just consumes the
+ * (`src/beaver-extract/`) has no Zotero awareness; it just consumes the
  * config installed here.
  *
  * Called once per bundle:
@@ -15,7 +15,7 @@
  *  - webpack (`react/`): from `react/index.tsx` at module-init time.
  */
 
-import { configurePDF } from "../services/pdf/config";
+import { configurePDF } from "../beaver-extract/config";
 import { logger } from "./logger";
 
 /**

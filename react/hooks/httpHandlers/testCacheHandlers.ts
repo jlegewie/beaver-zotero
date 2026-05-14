@@ -88,7 +88,7 @@ export async function handleTestCacheDeleteContentHttpRequest(request: any) {
  */
 export async function handleTestWorkerStatsHttpRequest(request: any) {
     const { getMuPDFWorkerClient } = await import(
-        '../../../src/services/pdf/MuPDFWorkerClient'
+        '../../../src/beaver-extract/MuPDFWorkerClient'
     );
     const client = getMuPDFWorkerClient();
     if (request?.reset === true) {
@@ -108,7 +108,7 @@ export async function handleTestWorkerStatsHttpRequest(request: any) {
  */
 export async function handleTestWorkerMarkStaleHttpRequest(request: any) {
     const { getMuPDFWorkerClient } = await import(
-        '../../../src/services/pdf/MuPDFWorkerClient'
+        '../../../src/beaver-extract/MuPDFWorkerClient'
     );
     const reason = typeof request?.reason === 'string' ? request.reason : 'test';
     const client = getMuPDFWorkerClient();
@@ -126,7 +126,7 @@ export async function handleTestWorkerMarkStaleHttpRequest(request: any) {
  */
 export async function handleTestWorkerCacheClearHttpRequest(request: any) {
     const { getMuPDFWorkerClient } = await import(
-        '../../../src/services/pdf/MuPDFWorkerClient'
+        '../../../src/beaver-extract/MuPDFWorkerClient'
     );
     const client = getMuPDFWorkerClient();
     const resetCounters = request?.resetCounters !== false;

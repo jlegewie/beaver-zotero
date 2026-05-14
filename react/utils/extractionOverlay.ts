@@ -1,9 +1,9 @@
 /**
  * Re-export shim for the shared overlay builders.
  *
- * The implementation moved to `src/services/pdf/debug/overlayBuilders.ts`
+ * The implementation moved to `src/beaver-extract/debug/overlayBuilders.ts`
  * so the CLI can import the same builders without dragging in
- * `MuPDFWorkerClient` (which the `src/services/pdf/index.ts` barrel
+ * `MuPDFWorkerClient` (which the `src/beaver-extract/index.ts` barrel
  * re-exports). This file stays in place only for back-compat with the
  * React-side consumers (`extractionVisualizer.ts`, the
  * `pdf-render-overlay` HTTP handler).
@@ -16,10 +16,10 @@ export {
     buildMarginsOverlayFromAnalysis,
     buildSentenceOverlayFromPage,
     buildSentenceOverlayFromResult,
-} from "../../src/services/pdf/debug/overlayBuilders";
+} from "../../src/beaver-extract/debug/overlayBuilders";
 
 export type {
     OverlayLevel,
     OverlayRect,
     OverlayResult,
-} from "../../src/services/pdf/debug/overlayBuilders";
+} from "../../src/beaver-extract/debug/overlayBuilders";

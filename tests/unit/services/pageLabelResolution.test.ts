@@ -4,7 +4,7 @@
  * Covers the pure `resolvePageValue` exhaustively (numeric + string inputs,
  * label-aware + strict modes, error paths), plus light coverage of
  * `ensurePageLabelsForResolution` (the cache + eager-load path with mocked
- * PDFExtractor + IOUtils).
+ * BeaverExtractor + IOUtils).
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
@@ -52,7 +52,7 @@ function makeCachedMeta(
     };
 }
 
-/** Minimal mock PDFExtractor — only `getMetadata` is exercised here. */
+/** Minimal mock BeaverExtractor — only `getMetadata` is exercised here. */
 function makeMockExtractor(result: { pageCount: number; pageLabels: Record<number, string> } | Error) {
     return {
         getMetadata: vi.fn().mockImplementation(async () => {

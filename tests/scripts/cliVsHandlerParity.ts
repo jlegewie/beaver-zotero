@@ -43,7 +43,7 @@ import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "..", "..");
-const CLI_MAIN = resolve(REPO_ROOT, "src/services/pdf/cli/main.ts");
+const CLI_MAIN = resolve(REPO_ROOT, "src/beaver-extract/cli/main.ts");
 const TSX_BIN = resolve(REPO_ROOT, "node_modules/.bin/tsx");
 const DEFAULT_FIXTURE = resolve(
     REPO_ROOT,
@@ -1070,7 +1070,7 @@ function pickCases(filter: Set<string> | undefined): ParityCase[] {
 
 function buildReport(results: CaseResult[], port: number): string {
     const out: string[] = [];
-    out.push("# beaver-extract CLI ↔ HTTP parity report");
+    out.push("# BeaverExtract CLI ↔ HTTP parity report");
     out.push("");
     out.push(`- Generated: ${new Date().toISOString()}`);
     out.push(`- Port: ${port}`);

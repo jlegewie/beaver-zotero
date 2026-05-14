@@ -87,7 +87,7 @@ describe('MuPDF worker smoke — PR #1 ops', () => {
 // ---------------------------------------------------------------------------
 // PR #2 — worker primitives
 //
-// These endpoints call worker primitives directly (no PDFExtractor /
+// These endpoints call worker primitives directly (no BeaverExtractor /
 // SearchScorer). They prove the WS-driven worker path runs end-to-end
 // against real PDFs.
 // ---------------------------------------------------------------------------

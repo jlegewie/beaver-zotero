@@ -7,7 +7,7 @@ import { planFeaturesAtom, searchableLibraryIdsAtom } from '../../react/atoms/pr
 import { selectedModelAtom } from '../../react/atoms/models';
 import { isAttachmentOnServer } from '../utils/webAPI';
 import { getPref } from '../utils/prefs';
-import { PDFExtractor, ExtractionError, ExtractionErrorCode } from './pdf';
+import { BeaverExtractor, ExtractionError, ExtractionErrorCode } from '../beaver-extract';
 import { safeFileExists } from '../utils/zoteroUtils';
 import { isRemoteAccessAvailable } from './agentDataProvider/utils';
 
@@ -393,7 +393,7 @@ class ItemValidationManager {
         // 6. Analyze PDF (page count, encryption, OCR needs)
         try {
             const pdfData = await IOUtils.read(filePath);
-            const extractor = new PDFExtractor();
+            const extractor = new BeaverExtractor();
 
             // Get page count (also validates PDF and detects encryption)
             let pageCount: number;

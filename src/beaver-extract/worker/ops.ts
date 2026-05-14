@@ -9,7 +9,7 @@
  * directly from cached ops.
  *
  * IMPORTANT: do NOT import from `../index` (the barrel). It re-exports
- * `MuPDFWorkerClient` (and the `PDFExtractor` facade that wraps it), the
+ * `MuPDFWorkerClient` (and the `BeaverExtractor` facade that wraps it), the
  * main-thread worker proxy that spawns workers via `getConfig()` URLs —
  * pulling it in here would try to spawn another worker from inside this
  * one. Import analyzers and types directly:

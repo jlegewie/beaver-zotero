@@ -8,7 +8,7 @@ import { getPref } from '../../utils/prefs';
 import { isAttachmentOnServer, isAttachmentAvailableRemotely, getAttachmentDataInMemory, DownloadOptions } from '../../utils/webAPI';
 import { addPopupMessageAtom } from '../../../react/utils/popupMessageUtils';
 import { wasItemAddedBeforeLastSync } from '../../../react/utils/sourceUtils';
-import { PDFExtractor, ExtractionError, ExtractionErrorCode } from '../pdf';
+import { BeaverExtractor, ExtractionError, ExtractionErrorCode } from '../../beaver-extract';
 import { EXTRACTION_VERSION, isRemoteFilePath, makeRemoteFilePath } from '../attachmentFileCache';
 import type { AttachmentFileCacheRecord } from '../attachmentFileCache';
 import { DeferredToolPreference } from '../agentProtocol';
@@ -391,12 +391,12 @@ function fileStatusFromCache(record: AttachmentFileCacheRecord, isPrimary: boole
  * Extract page labels from PDF data using MuPDF.
  * Returns the label mapping (empty {} if no custom labels or on error).
  *
- * Routes through `PDFExtractor.getMetadata`, which delegates to the
+ * Routes through `BeaverExtractor.getMetadata`, which delegates to the
  * MuPDF worker.
  */
 async function extractPageLabelsFromData(pdfData: Uint8Array): Promise<Record<number, string>> {
     try {
-        const { pageLabels } = await new PDFExtractor().getMetadata(pdfData);
+        const { pageLabels } = await new BeaverExtractor().getMetadata(pdfData);
         return pageLabels;
     } catch {
         return {};
@@ -650,7 +650,7 @@ export async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary
                 status_reason: 'Failed to download file from remote storage',
             };
         }
-        const extractor = new PDFExtractor();
+        const extractor = new BeaverExtractor();
 
         // Get page count - this also validates the PDF and detects encryption
         let pageCount: number;

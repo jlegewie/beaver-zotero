@@ -1,4 +1,4 @@
-# beaver-extract CLI
+# BeaverExtract CLI
 
 Local Node-based CLI for the BeaverExtract PDF pipeline. Runs the same
 extraction code as the Zotero plugin's worker, in-process under Node —
@@ -248,7 +248,7 @@ for graphics-layer fills and thin stroked divider lines.
 | `BEAVER_EXTRACT_WASM_DIR`         | `<repo>/addon/content/lib`           | Override WASM file directory.                                                                                            |
 | `BEAVER_EXTRACT_FIXTURES_DIR`     | `tests/fixtures/pdfs/extract` (legacy) | Absolute path to the private fixtures checkout (`beaver-extract-fixtures`). When set, `fixture`/`ocr-fixture` default `--root` to it, and the smoke tier + bench script load fixtures from there. |
 
-Both the CLI (`src/services/pdf/cli/main.ts`) and the smoke vitest config
+Both the CLI (`src/beaver-extract/cli/main.ts`) and the smoke vitest config
 preload `.env` via `dotenv/config`, so setting `BEAVER_EXTRACT_FIXTURES_DIR`
 (or `BEAVER_EXTRACT_WASM_DIR`) in the repo's `.env` is enough — no shell
 export needed. The in-process CLI test seam (`runCli`) skips this so tests
@@ -391,7 +391,7 @@ native deps.
 ## Architecture
 
 ```
-src/services/pdf/
+src/beaver-extract/
 ├── cli/                # commander + per-command files (this dir)
 │   ├── main.ts                  # 5-line wrapper around runCli
 │   ├── envelope.ts              # success/error JSON envelope builders
@@ -432,7 +432,7 @@ src/services/pdf/
 └── worker/             # MuPDF worker ops, reused as-is from Node
 ```
 
-The CLI never imports from `src/services/pdf/index.ts` (the main
+The CLI never imports from `src/beaver-extract/index.ts` (the main
 barrel). That barrel re-exports `MuPDFWorkerClient`, which would try to
 spawn a Web Worker. Imports go directly to `worker/ops.ts` and the
 `debug/` helpers.

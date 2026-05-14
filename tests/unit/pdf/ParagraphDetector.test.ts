@@ -16,13 +16,13 @@ import { describe, it, expect } from 'vitest';
 import {
     looksLikeFragmentedCJKBody,
     detectParagraphs,
-} from '../../../src/services/pdf/ParagraphDetector';
+} from '../../../src/beaver-extract/ParagraphDetector';
 import type {
     PageLine,
     DetectedSpan,
     PageLineResult,
-} from '../../../src/services/pdf/LineDetector';
-import type { TextStyle } from '../../../src/services/pdf/types';
+} from '../../../src/beaver-extract/LineDetector';
+import type { TextStyle } from '../../../src/beaver-extract/types';
 
 // ---------------------------------------------------------------------------
 // Factories

@@ -1,5 +1,5 @@
 /**
- * Unit tests for `PDFExtractor.extract({ mode: "structured" })` — the
+ * Unit tests for `BeaverExtractor.extract({ mode: "structured" })` — the
  * production sentence-level extraction path.
  *
  * The key regression check: the facade dispatches exactly one `extract`
@@ -17,8 +17,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { configurePDFForTests } from '../../helpers/configurePDFForTests';
 
-import { disposeMuPDFWorker } from '../../../src/services/pdf/MuPDFWorkerClient';
-import { PDFExtractor } from '../../../src/services/pdf';
+import { disposeMuPDFWorker } from '../../../src/beaver-extract/MuPDFWorkerClient';
+import { BeaverExtractor } from '../../../src/beaver-extract';
 
 class MockWorker {
     static instances: MockWorker[] = [];
@@ -100,7 +100,7 @@ const FAKE_EXTRACTION_RESULT = {
     },
 };
 
-describe('PDFExtractor.extract({ mode: "structured" }) — single worker round-trip', () => {
+describe('BeaverExtractor.extract({ mode: "structured" }) — single worker round-trip', () => {
     beforeEach(() => {
         MockWorker.instances.length = 0;
         setupZoteroMainWindowWithMockWorker();
@@ -112,7 +112,7 @@ describe('PDFExtractor.extract({ mode: "structured" }) — single worker round-t
     });
 
     it('dispatches exactly one extract op (no fan-out)', async () => {
-        const promise = new PDFExtractor().extract(new Uint8Array([1, 2, 3]), {
+        const promise = new BeaverExtractor().extract(new Uint8Array([1, 2, 3]), {
             mode: 'structured',
             pageIndices: [0],
         });
@@ -140,7 +140,7 @@ describe('PDFExtractor.extract({ mode: "structured" }) — single worker round-t
     });
 
     it('defaults splitter to { type: "sentencex", language: undefined } when none provided', async () => {
-        const promise = new PDFExtractor().extract(new Uint8Array([1]), {
+        const promise = new BeaverExtractor().extract(new Uint8Array([1]), {
             mode: 'structured',
             pageIndices: [0],
         });
@@ -156,7 +156,7 @@ describe('PDFExtractor.extract({ mode: "structured" }) — single worker round-t
     });
 
     it('uses structured.language to seed sentencex when splitter is omitted', async () => {
-        const promise = new PDFExtractor().extract(new Uint8Array([1]), {
+        const promise = new BeaverExtractor().extract(new Uint8Array([1]), {
             mode: 'structured',
             pageIndices: [0],
             structured: { language: 'fr' },
@@ -173,7 +173,7 @@ describe('PDFExtractor.extract({ mode: "structured" }) — single worker round-t
     });
 
     it('forwards { type: "simple" } verbatim', async () => {
-        const promise = new PDFExtractor().extract(new Uint8Array([1]), {
+        const promise = new BeaverExtractor().extract(new Uint8Array([1]), {
             mode: 'structured',
             pageIndices: [0],
             structured: { splitter: { type: 'simple' } },
@@ -189,7 +189,7 @@ describe('PDFExtractor.extract({ mode: "structured" }) — single worker round-t
     });
 
     it('forwards an explicit sentencex language verbatim', async () => {
-        const promise = new PDFExtractor().extract(new Uint8Array([1]), {
+        const promise = new BeaverExtractor().extract(new Uint8Array([1]), {
             mode: 'structured',
             pageIndices: [0],
             structured: {
@@ -208,7 +208,7 @@ describe('PDFExtractor.extract({ mode: "structured" }) — single worker round-t
     });
 
     it('honors splitter precedence: explicit structured.splitter wins over structured.language', async () => {
-        const promise = new PDFExtractor().extract(new Uint8Array([1]), {
+        const promise = new BeaverExtractor().extract(new Uint8Array([1]), {
             mode: 'structured',
             pageIndices: [0],
             structured: {
@@ -228,7 +228,7 @@ describe('PDFExtractor.extract({ mode: "structured" }) — single worker round-t
     });
 
     it('forwards paragraphSettings and analysisWindow on the wire', async () => {
-        const promise = new PDFExtractor().extract(new Uint8Array([1]), {
+        const promise = new BeaverExtractor().extract(new Uint8Array([1]), {
             mode: 'structured',
             pageIndices: [7],
             paragraphSettings: { headingFontSizeBoost: 1.2 } as any,
@@ -248,7 +248,7 @@ describe('PDFExtractor.extract({ mode: "structured" }) — single worker round-t
     });
 
     it('does NOT carry a `structured` field on the wire when mode is markdown', async () => {
-        const promise = new PDFExtractor().extract(new Uint8Array([1]), {
+        const promise = new BeaverExtractor().extract(new Uint8Array([1]), {
             mode: 'markdown',
             pageIndices: [0],
         });
@@ -261,7 +261,7 @@ describe('PDFExtractor.extract({ mode: "structured" }) — single worker round-t
     });
 
     it('returns the ExtractionResult shape with structured fields populated', async () => {
-        const promise = new PDFExtractor().extract(new Uint8Array([1]), {
+        const promise = new BeaverExtractor().extract(new Uint8Array([1]), {
             mode: 'structured',
             pageIndices: [0],
         });

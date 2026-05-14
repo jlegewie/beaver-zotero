@@ -6,7 +6,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 
-// utils.ts pulls in heavy dependencies (PDFExtractor, supabase, react/store,
+// utils.ts pulls in heavy dependencies (BeaverExtractor, supabase, react/store,
 // etc.) via transitive imports. Mock the ones that would otherwise fail to
 // load in node — only `preflightCachedPdfMeta` itself is exercised, so all
 // these deps are unused at runtime.

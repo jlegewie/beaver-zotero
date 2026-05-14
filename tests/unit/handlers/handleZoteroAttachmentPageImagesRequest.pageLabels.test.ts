@@ -8,7 +8,7 @@ const mockState = {
     cannedPageLabels: { 0: 'i', 1: '1', 2: '2' } as Record<number, string>,
 };
 
-vi.mock('../../../src/services/pdf', () => {
+vi.mock('../../../src/beaver-extract', () => {
     class MockPDFExtractor {
         async getPageCount(): Promise<number> {
             return mockState.cannedPageCount;
@@ -59,7 +59,7 @@ vi.mock('../../../src/services/pdf', () => {
     }
 
     return {
-        PDFExtractor: MockPDFExtractor,
+        BeaverExtractor: MockPDFExtractor,
         ExtractionError: MockExtractionError,
         ExtractionErrorCode: {
             ENCRYPTED: 'encrypted',

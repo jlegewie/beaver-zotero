@@ -13,9 +13,9 @@ import {
     buildLineOverlayFromPage,
     buildSentenceOverlayFromPage,
     OVERLAY_COLORS,
-} from '../../../src/services/pdf/debug/overlayBuilders';
-import { bboxFromXYWH } from '../../../src/services/pdf/types';
-import type { ProcessedPage } from '../../../src/services/pdf/types';
+} from '../../../src/beaver-extract/debug/overlayBuilders';
+import { bboxFromXYWH } from '../../../src/beaver-extract/types';
+import type { ProcessedPage } from '../../../src/beaver-extract/types';
 
 const bbox = (x: number, y: number, w: number, h: number) =>
     bboxFromXYWH(x, y, w, h, "top-left");

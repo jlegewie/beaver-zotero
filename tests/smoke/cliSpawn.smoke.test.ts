@@ -2,7 +2,7 @@
  * Reality check for the spawned-binary path.
  *
  * The unit tier exercises `runCli(argv, deps)` in-process; this is the
- * one test that actually `spawn`s `tsx src/services/pdf/cli/main.ts ...`
+ * one test that actually `spawn`s `tsx src/beaver-extract/cli/main.ts ...`
  * to verify argv handling, exit codes, and stdout JSON parses end-to-end.
  *
  * If this passes but the in-process tests don't, the seam between
@@ -17,7 +17,7 @@ import { SMOKE_PDF, smokePdfExists } from './_helpers';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, '..', '..');
-const mainTs = resolve(repoRoot, 'src/services/pdf/cli/main.ts');
+const mainTs = resolve(repoRoot, 'src/beaver-extract/cli/main.ts');
 // Use the locally-installed tsx binary directly. `npx tsx` works but adds
 // 5-10s of dependency-resolution overhead on the first run, which breaks
 // realistic smoke timeouts on CI.

@@ -17,7 +17,7 @@ import {
     AttachmentPagesErrorCode,
     WSPageContent,
 } from '../agentProtocol';
-import { PDFExtractor, ExtractionError, ExtractionErrorCode } from '../pdf';
+import { BeaverExtractor, ExtractionError, ExtractionErrorCode } from '../../beaver-extract';
 import { makeRemoteFilePath } from '../attachmentFileCache';
 import type { CachedPageContent } from '../attachmentFileCache';
 import {
@@ -178,7 +178,7 @@ export async function handleZoteroAttachmentPagesRequest(
 
         // 5. Resolve page labels and (only if needed) page count up-front.
         let pdfData: Uint8Array | null = null;
-        const extractor = new PDFExtractor();
+        const extractor = new BeaverExtractor();
         let pageLabels: Record<number, string> | null = null;
 
         // 5a. Load page labels for label-aware resolution. `ensurePageLabelsForResolution`

@@ -10,8 +10,9 @@
 import { describe, expect, it } from 'vitest';
 import sharp from 'sharp';
 
-import { drawBBoxOverlayPNGNode } from '../../src/services/pdf/node/overlayPng';
-import type { OverlayRect } from '../../src/services/pdf/debug/overlayBuilders';
+import { drawBBoxOverlayPNGNode } from '../../src/beaver-extract/node/overlayPng';
+import type { OverlayRect } from '../../src/beaver-extract/debug/overlayBuilders';
+import { bboxFromXYWH } from '../../src/beaver-extract/types';
 
 async function makeBlankPng(width: number, height: number): Promise<Uint8Array> {
     const buf = await sharp({
@@ -32,13 +33,13 @@ describe('drawBBoxOverlayPNGNode (smoke)', () => {
         const png = await makeBlankPng(200, 100);
         const rects: OverlayRect[] = [
             {
-                rect: { x: 10, y: 10, w: 50, h: 20 },
+                rect: bboxFromXYWH(10, 10, 50, 20, 'top-left'),
                 color: '#ff2d55',
                 label: 'A',
                 group: 0,
             },
             {
-                rect: { x: 80, y: 40, w: 60, h: 30 },
+                rect: bboxFromXYWH(80, 40, 60, 30, 'top-left'),
                 color: '#00bbff',
                 label: 'B',
                 group: 1,

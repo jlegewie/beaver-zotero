@@ -3,7 +3,7 @@
  * sentence/paragraph extraction stack.
  *
  * Worker-safe: imports only sibling PDF modules — never the
- * `src/services/pdf/index.ts` barrel (`worker/ops.ts:15` forbids the
+ * `src/beaver-extract/index.ts` barrel (`worker/ops.ts:15` forbids the
  * barrel inside the worker).
  */
 

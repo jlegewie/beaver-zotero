@@ -1,5 +1,5 @@
 /**
- * Error codes mirroring `ExtractionErrorCode` in `src/services/pdf/types.ts`.
+ * Error codes mirroring `ExtractionErrorCode` in `src/beaver-extract/types.ts`.
  *
  * The worker is bundled but kept narrow about what it imports from `src/`;
  * the canonical enum is owned by types.ts (which it imports). However, since

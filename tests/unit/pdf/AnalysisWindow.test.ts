@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { resolveAnalysisPages } from "../../../src/services/pdf/AnalysisWindow";
+import { resolveAnalysisPages } from "../../../src/beaver-extract/AnalysisWindow";
 
 describe("resolveAnalysisPages", () => {
     describe("N=0: targets only", () => {

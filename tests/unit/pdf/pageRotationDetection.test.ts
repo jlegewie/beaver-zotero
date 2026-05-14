@@ -4,14 +4,14 @@ import {
     aspectRatioRotation,
     detectDominantTextOrientation,
     dirToRotation,
-} from "../../../src/services/pdf/PageRotationNormalizer";
+} from "../../../src/beaver-extract/PageRotationNormalizer";
 import {
     DEFAULT_MARGIN_ZONE,
     bboxFromXYWH,
     type RawPageData,
     type RawLine,
     type RawBlock,
-} from "../../../src/services/pdf/types";
+} from "../../../src/beaver-extract/types";
 
 // ---------------------------------------------------------------------------
 // dirToRotation — oracle values from real MuPDF detailed walk on the

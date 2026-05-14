@@ -16,7 +16,7 @@ import {
     extractGraphicsFromDoc,
     filterToDividerLines,
     filterToContainerRects,
-} from '../../../src/services/pdf/worker/docHelpers';
+} from '../../../src/beaver-extract/worker/docHelpers';
 import {
     DEFAULT_MAX_FILL_RECTS,
     type DocumentLike,
@@ -26,7 +26,7 @@ import {
     isAxisAlignedLineSegment,
     lineSegmentToTopLeftFrame,
     type PageLike,
-} from '../../../src/services/pdf/worker/mupdfApi';
+} from '../../../src/beaver-extract/worker/mupdfApi';
 
 function fill(overrides: Partial<FillRect>): FillRect {
     return {

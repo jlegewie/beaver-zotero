@@ -6,7 +6,7 @@ const mockState = {
     extractCalls: [] as any[],
 };
 
-vi.mock('../../../src/services/pdf', () => {
+vi.mock('../../../src/beaver-extract', () => {
     class MockPDFExtractor {
         async getPageCount(): Promise<number> {
             return 3;
@@ -43,7 +43,7 @@ vi.mock('../../../src/services/pdf', () => {
     }
 
     return {
-        PDFExtractor: MockPDFExtractor,
+        BeaverExtractor: MockPDFExtractor,
         ExtractionError: MockExtractionError,
         ExtractionErrorCode: {
             ENCRYPTED: 'encrypted',
@@ -84,7 +84,7 @@ vi.mock('../../../src/services/agentDataProvider/utils', async () => {
 
 import { handleZoteroAttachmentPagesRequest } from '../../../src/services/agentDataProvider/handleZoteroAttachmentPagesRequest';
 import { resolveToPdfAttachment } from '../../../src/services/agentDataProvider/utils';
-import { ExtractionError, ExtractionErrorCode } from '../../../src/services/pdf';
+import { ExtractionError, ExtractionErrorCode } from '../../../src/beaver-extract';
 
 describe('handleZoteroAttachmentPagesRequest page label persistence', () => {
     const mockIOUtils = (globalThis as any).IOUtils as {

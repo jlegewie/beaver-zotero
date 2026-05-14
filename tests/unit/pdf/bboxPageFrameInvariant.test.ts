@@ -7,7 +7,7 @@ import {
 import type {
     SnapshotBBox,
     ExtractionPageSnapshot,
-} from "../../../src/services/pdf/debug/extractionSnapshot";
+} from "../../../src/beaver-extract/debug/extractionSnapshot";
 
 function expectTopLeftInPage(
     bbox: SnapshotBBox,

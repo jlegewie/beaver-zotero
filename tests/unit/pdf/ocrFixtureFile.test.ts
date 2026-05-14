@@ -22,9 +22,9 @@ import {
     readOcrFixture,
     semanticallyEqualOcr,
     writeOcrFixtureFile,
-} from "../../../src/services/pdf/cli/fixture/ocrFixtureFile";
-import { mergeEffectiveOptions } from "../../../src/services/pdf/debug/ocrSnapshot";
-import type { CapturedOcrFixture } from "../../../src/services/pdf/cli/fixture/ocrFixtureSchema";
+} from "../../../src/beaver-extract/cli/fixture/ocrFixtureFile";
+import { mergeEffectiveOptions } from "../../../src/beaver-extract/debug/ocrSnapshot";
+import type { CapturedOcrFixture } from "../../../src/beaver-extract/cli/fixture/ocrFixtureSchema";
 
 let tmpRoot = "";
 

@@ -5,9 +5,9 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { detectFilteredParagraphs } from "../../../src/services/pdf/FilteredParagraphPipeline";
-import { MarginFilter } from "../../../src/services/pdf/MarginFilter";
-import { StyleAnalyzer } from "../../../src/services/pdf/StyleAnalyzer";
+import { detectFilteredParagraphs } from "../../../src/beaver-extract/FilteredParagraphPipeline";
+import { MarginFilter } from "../../../src/beaver-extract/MarginFilter";
+import { StyleAnalyzer } from "../../../src/beaver-extract/StyleAnalyzer";
 import {
     DEFAULT_MARGINS,
     DEFAULT_MARGIN_ZONE,
@@ -15,7 +15,7 @@ import {
     type RawBlock,
     type RawLine,
     type RawPageData,
-} from "../../../src/services/pdf/types";
+} from "../../../src/beaver-extract/types";
 
 // ---------------------------------------------------------------------------
 // Synthetic page builders

@@ -13,7 +13,7 @@
  * work).
  */
 
-import { configurePDF, type PDFConfig } from "../../src/services/pdf/config";
+import { configurePDF, type PDFConfig } from "../../src/beaver-extract/config";
 
 interface ConfigureForTestsOptions {
     /**

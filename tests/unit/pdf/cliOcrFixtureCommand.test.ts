@@ -18,10 +18,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 
-import { runCli } from "../../../src/services/pdf/node/runCli";
-import type { CliDeps } from "../../../src/services/pdf/cli/runCliTypes";
-import type * as NodeApi from "../../../src/services/pdf/node/api";
-import type { OCRDetectionResult } from "../../../src/services/pdf/types";
+import { runCli } from "../../../src/beaver-extract/node/runCli";
+import type { CliDeps } from "../../../src/beaver-extract/cli/runCliTypes";
+import type * as NodeApi from "../../../src/beaver-extract/node/api";
+import type { OCRDetectionResult } from "../../../src/beaver-extract/types";
 
 // ---------------------------------------------------------------------------
 // Harness

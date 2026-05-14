@@ -37,7 +37,7 @@ vi.mock('../../src/ui/ui', () => ({
     },
 }));
 
-vi.mock('../../src/services/pdf', () => ({
+vi.mock('../../src/beaver-extract', () => ({
     disposeMuPDFWorker: mockDisposeMuPDFWorker,
 }));
 
