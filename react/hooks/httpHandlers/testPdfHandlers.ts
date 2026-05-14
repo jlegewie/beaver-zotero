@@ -8,16 +8,17 @@
 
 import {
     buildColumnOverlayFromPage,
+    buildItemOverlayFromPage,
     buildLineOverlayFromPage,
-    buildParagraphOverlayFromPage,
     buildSentenceOverlayFromPage,
     buildMarginsOverlayFromAnalysis,
 } from '../../utils/extractionOverlay';
 import type { OverlayResult } from '../../utils/extractionOverlay';
 import { drawBBoxOverlayPNG } from '../../utils/canvasOverlay';
 import type {
-    PageSentenceBBoxResult,
-    SentenceBBoxTrace,
+    BoundingBox,
+    PageSentenceResult,
+    SentenceTrace,
 } from '../../../src/services/pdf';
 import { projectAnalyzeLayout } from '../../../src/services/pdf/debug/analyzeLayoutProjection';
 
@@ -533,7 +534,7 @@ export async function handleTestPdfSearchScoredHttpRequest(request: any) {
  * [n] })` → MuPDF worker op (single round-trip; analysis-window load, font
  * bridging, filtered paragraph detection, splitter resolution, and
  * sentence mapping all run worker-side). The wire response is shaped as
- * `PageSentenceBBoxResult` — read fields off `pages[0]`.
+ * `PageSentenceResult` — read fields off `pages[0]`.
  *
  * @deprecated Prefer `npm run beaver-extract -- extract <pdf> --pages <n> --json`.
  *   Sentence bboxes live on `result.pages[0].sentences`.
@@ -552,7 +553,7 @@ export async function handleTestPdfSearchScoredHttpRequest(request: any) {
  *       analysisWindow?: number,
  *     } }
  *
- * Response: `{ ok: true, result: PageSentenceBBoxResult }` or the
+ * Response: `{ ok: true, result: PageSentenceResult }` or the
  * structured `ExtractionError` envelope on failure.
  */
 export async function handleTestPdfSentenceBBoxesHttpRequest(request: any) {
@@ -583,7 +584,7 @@ export async function handleTestPdfSentenceBBoxesHttpRequest(request: any) {
                     },
                 };
             }
-            // Reshape into PageSentenceBBoxResult so callers can
+            // Reshape into PageSentenceResult so callers can
             // consume the same shape the producer returns.
             return {
                 ok: true,
@@ -591,10 +592,10 @@ export async function handleTestPdfSentenceBBoxesHttpRequest(request: any) {
                     pageIndex: page.index,
                     width: page.width,
                     height: page.height,
-                    paragraphs: page.paragraphs ?? [],
+                    items: page.items,
                     sentences: page.sentences ?? [],
                     degradation: page.degradation,
-                },
+                } satisfies PageSentenceResult,
             };
         },
     );
@@ -616,7 +617,7 @@ export async function handleTestPdfSentenceBBoxesHttpRequest(request: any) {
  * Request body:
  *   { library_id, zotero_key | raw_bytes_base64,
  *     page_index: number,
- *     level: "columns" | "lines" | "paragraphs" | "sentences" | "margins",
+ *     level: "columns" | "lines" | "items" | "sentences" | "margins",
  *     dpi?: number,                       // default 144
  *     language?: string,                  // sentences only; falls back to item lang
  *     analysis_page_window?: number,      // ±N pages around page_index for
@@ -635,10 +636,10 @@ export async function handleTestPdfSentenceBBoxesHttpRequest(request: any) {
  *                                         // call.
  *
  * Level dispatch notes:
- *   - `sentences`, `columns`, `lines`, `paragraphs` route through
+ *   - `sentences`, `columns`, `lines`, `items`, `paragraphs` route through
  *     `PDFExtractor.extract({ mode: "structured", pageIndices: [n] })`
  *     and project the resulting `ProcessedPage` into rects via the pure
- *     `build{Sentence,Column,Line,Paragraph}OverlayFromPage` builders in
+ *     `build{Sentence,Column,Line,Item,Paragraph}OverlayFromPage` builders in
  *     `extractionOverlay.ts`. This is the same worker op production
  *     uses, so what the overlay paints is byte-identical to what an
  *     extraction call for the same page produces.
@@ -676,7 +677,7 @@ export async function handleTestPdfRenderOverlayHttpRequest(request: any) {
     if (
         level !== 'columns' &&
         level !== 'lines' &&
-        level !== 'paragraphs' &&
+        level !== 'items' &&
         level !== 'sentences' &&
         level !== 'margins'
     ) {
@@ -685,7 +686,7 @@ export async function handleTestPdfRenderOverlayHttpRequest(request: any) {
             error: {
                 name: 'Error',
                 message:
-                    'level must be one of: columns | lines | paragraphs | sentences | margins',
+                    'level must be one of: columns | lines | items | sentences | margins',
             },
         };
     }
@@ -740,7 +741,7 @@ export async function handleTestPdfRenderOverlayHttpRequest(request: any) {
             });
             overlay = buildMarginsOverlayFromAnalysis(out, pageIndex);
         } else {
-            // sentences / columns / lines / paragraphs: one worker
+            // sentences / columns / lines / items: one worker
             // round-trip via the production structured-mode extract.
             // Same op production uses — what we paint here matches
             // what `extract({ mode: "structured" })` produces for
@@ -771,9 +772,11 @@ export async function handleTestPdfRenderOverlayHttpRequest(request: any) {
                 case 'lines':
                     overlay = buildLineOverlayFromPage(page);
                     break;
-                default: // 'paragraphs'
-                    overlay = buildParagraphOverlayFromPage(page);
+                case 'items':
+                    overlay = buildItemOverlayFromPage(page);
                     break;
+                default:
+                    throw new Error(`Unhandled overlay level: ${level}`);
             }
         }
     } catch (e) {
@@ -872,7 +875,7 @@ export async function handleTestPdfRenderOverlayHttpRequest(request: any) {
  *     },
  *     include_chars?: boolean,           // include per-char quads on raw_lines
  *     mode?: "full" | "triage" }         // "full" (default) returns raw_lines, columns,
- *                                        //   paragraphs, sentences, etc. in full detail.
+ *                                        //   items, sentences, etc. in full detail.
  *                                        // "triage" omits text bodies / chars / topStyles
  *                                        //   and keeps only triage facts (counts, candidates,
  *                                        //   finalKept=false lines, lines_dropped_by_columns,
@@ -886,8 +889,8 @@ export async function handleTestPdfRenderOverlayHttpRequest(request: any) {
  *     style_profile: { primaryBodyStyle, bodyStyles, topStyles },
  *     columns: [{ idx, rect, lineIds }],
  *     lines_dropped_by_columns: [...],
- *     paragraphs: [{ id, type, columnIdx, lineIds, text, bbox, role }],
- *     sentences: [{ idx, text, paragraphId, bboxes, degraded }],
+ *     paragraphs: [{ id, type, columnIdx, lineIds, text, bbox, role }], // legacy key for items
+ *     sentences: [{ idx, text, parentId, bboxes, degraded }],
  *     sentence_stats }
  *
  * Triage mode echoes `mode: "triage"` on the response (replacing the legacy
@@ -976,10 +979,10 @@ export async function handleTestPdfExtractTraceHttpRequest(request: any) {
     const marginsToUse = customMargins ?? DEFAULT_MARGINS;
     const marginZoneToUse = customMarginZone ?? DEFAULT_MARGIN_ZONE;
 
-    let result: PageSentenceBBoxResult;
-    let trace: SentenceBBoxTrace;
+    let result: PageSentenceResult;
+    let trace: SentenceTrace;
     try {
-        const out = await getMuPDFWorkerClient().extractSentenceBBoxesDebug(
+        const out = await getMuPDFWorkerClient().extractSentenceDebug(
             pdfData,
             pageIndex,
             {
@@ -1067,12 +1070,12 @@ export async function handleTestPdfExtractTraceHttpRequest(request: any) {
     // ------------------------------------------------------------------
     // Stage 2: enumerate raw lines on the target page with stable IDs and
     // margin-filter classification. This is the spine that everything
-    // else hangs off — paragraphs reference these IDs.
+    // else hangs off — item records reference these IDs.
     // ------------------------------------------------------------------
     type RawLineEntry = {
         id: string;
         text: string;
-        bbox: { x: number; y: number; w: number; h: number };
+        bbox: BoundingBox;
         font: { name: string; family: string; size: number; weight: string; style: string };
         marginPosition: 'top' | 'bottom' | 'left' | 'right' | null;
         marginFilter: {
@@ -1083,12 +1086,12 @@ export async function handleTestPdfExtractTraceHttpRequest(request: any) {
         };
         role: 'heading' | 'body' | 'caption' | 'footnote';
         finalParagraphId: string | null;
-        chars?: Array<{ c: string; bbox: { x: number; y: number; w: number; h: number } }>;
+        chars?: Array<{ c: string; bbox: BoundingBox }>;
     };
 
     const rawLineEntries: RawLineEntry[] = [];
-    // Map raw RawBBox object → entry index, for cross-stage linking via
-    // bbox object identity. The line detector preserves the same RawBBox
+    // Map raw BoundingBox object → entry index, for cross-stage linking via
+    // bbox object identity. The line detector preserves the same BoundingBox
     // reference (see ColumnDetector.extractFilteredBlocks → DetectedSpan
     // construction), so this is safe within a single pipeline run.
     const bboxToEntryIdx = new Map<object, number>();
@@ -1131,7 +1134,7 @@ export async function handleTestPdfExtractTraceHttpRequest(request: any) {
             const entry: RawLineEntry = {
                 id,
                 text: line.text,
-                bbox: { x: line.bbox.x, y: line.bbox.y, w: line.bbox.w, h: line.bbox.h },
+                bbox: line.bbox,
                 font: {
                     name: line.font.name,
                     family: line.font.family,
@@ -1229,8 +1232,7 @@ export async function handleTestPdfExtractTraceHttpRequest(request: any) {
                 t: item.bbox.t,
                 r: item.bbox.r,
                 b: item.bbox.b,
-                width: item.bbox.width,
-                height: item.bbox.height,
+                origin: item.bbox.origin,
             },
         };
     });
@@ -1242,48 +1244,32 @@ export async function handleTestPdfExtractTraceHttpRequest(request: any) {
     const sentenceResult = result;
     const detailed = trace.detailed;
 
-    // Mark which paragraphs degraded so we can flag fallback sentences.
-    const degradedItemIndices = new Set(
-        (sentenceResult.degradation?.notes ?? []).map((n) => n.itemIndex),
+    // Mark which items degraded so we can flag fallback sentences.
+    const degradedItemIds = new Set(
+        (sentenceResult.degradation?.notes ?? []).map((n) => n.itemId),
     );
     const sentencesOut: Array<{
         idx: number;
         text: string;
-        paragraphId: string | null;
-        paragraphIndex: number;
+        parentId: string;
         sentenceIndex: number;
         joinWithNext?: boolean;
-        bboxes: Array<{ x: number; y: number; w: number; h: number }>;
+        bboxes: BoundingBox[];
         degraded: boolean;
     }> = [];
-    let flatSentenceIdx = 0;
-    sentenceResult.paragraphs.forEach((pws, paragraphArrayIdx) => {
-        const isDegradedItem = degradedItemIndices.has(paragraphArrayIdx);
-        for (const sentence of pws.sentences) {
-            const isFallback =
-                isDegradedItem &&
-                pws.sentences.length === 1 &&
-                pws.sentences[0].text === pws.item.text;
-            const entry: typeof sentencesOut[number] = {
-                idx: flatSentenceIdx++,
-                text: sentence.text,
-                paragraphId: pws.item.id ?? null,
-                paragraphIndex: sentence.paragraphIndex,
-                sentenceIndex: sentence.sentenceIndex,
-                bboxes: sentence.bboxes.map((b) => ({
-                    x: b.x,
-                    y: b.y,
-                    w: b.w,
-                    h: b.h,
-                })),
-                degraded: isFallback,
-            };
-            // Only emit when truthy. Omitted ≡ false.
-            if (sentence.joinWithNext) {
-                entry.joinWithNext = true;
-            }
-            sentencesOut.push(entry);
+    sentenceResult.sentences.forEach((sentence, idx) => {
+        const entry: typeof sentencesOut[number] = {
+            idx,
+            text: sentence.text,
+            parentId: sentence.parentId,
+            sentenceIndex: sentence.index,
+            bboxes: sentence.bboxes,
+            degraded: degradedItemIds.has(sentence.parentId),
+        };
+        if (sentence.joinWithNext) {
+            entry.joinWithNext = true;
         }
+        sentencesOut.push(entry);
     });
 
     // ------------------------------------------------------------------
@@ -1292,8 +1278,8 @@ export async function handleTestPdfExtractTraceHttpRequest(request: any) {
     // ------------------------------------------------------------------
     if (includeChars) {
         const detailedByBboxKey = new Map<string, typeof detailed.blocks[0]['lines'] extends (infer L)[] | undefined ? L : never>();
-        const keyOf = (b: { x: number; y: number; w: number; h: number }) =>
-            `${b.x.toFixed(3)}|${b.y.toFixed(3)}|${b.w.toFixed(3)}|${b.h.toFixed(3)}`;
+        const keyOf = (b: BoundingBox) =>
+            `${b.l.toFixed(3)}|${b.t.toFixed(3)}|${b.r.toFixed(3)}|${b.b.toFixed(3)}|${b.origin}`;
         for (const block of detailed.blocks) {
             if (block.type !== 'text' || !block.lines) continue;
             for (const line of block.lines) {
@@ -1305,7 +1291,7 @@ export async function handleTestPdfExtractTraceHttpRequest(request: any) {
             if (detailedLine && detailedLine.chars) {
                 entry.chars = detailedLine.chars.map((ch) => ({
                     c: ch.c,
-                    bbox: { x: ch.bbox.x, y: ch.bbox.y, w: ch.bbox.w, h: ch.bbox.h },
+                    bbox: ch.bbox,
                 }));
             }
         }
@@ -1373,7 +1359,7 @@ export async function handleTestPdfExtractTraceHttpRequest(request: any) {
             lines_dropped_by_columns: linesDroppedByColumns,
             sentence_stats: {
                 sentences: sentenceResult.sentences.length,
-                paragraphs: sentenceResult.paragraphs.length,
+                items: sentenceResult.items.length,
                 degradation: {
                     count: sentenceResult.degradation?.count ?? 0,
                     notes: sentenceResult.degradation?.notes ?? [],
@@ -1432,7 +1418,7 @@ export async function handleTestPdfExtractTraceHttpRequest(request: any) {
         sentences: sentencesOut,
         sentence_stats: {
             sentences: sentenceResult.sentences.length,
-            paragraphs: sentenceResult.paragraphs.length,
+            items: sentenceResult.items.length,
             degradation: {
                 count: sentenceResult.degradation?.count ?? 0,
                 notes: sentenceResult.degradation?.notes ?? [],

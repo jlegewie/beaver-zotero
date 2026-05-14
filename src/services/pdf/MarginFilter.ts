@@ -7,9 +7,9 @@
  */
 
 import type {
+    BoundingBox,
     RawPageData,
     RawLine,
-    RawBBox,
     MarginSettings,
     MarginPosition,
     MarginElement,
@@ -256,16 +256,16 @@ function isIncreasingSequence(numbers: number[]): boolean {
  * Check if a bounding box is ENTIRELY within a specific margin zone.
  */
 function isEntirelyInMarginZone(
-    bbox: RawBBox,
+    bbox: BoundingBox,
     pageWidth: number,
     pageHeight: number,
     margins: MarginSettings,
     position?: MarginPosition
 ): boolean {
-    const x0 = bbox.x;
-    const y0 = bbox.y;
-    const x1 = bbox.x + bbox.w;
-    const y1 = bbox.y + bbox.h;
+    const x0 = bbox.l;
+    const y0 = bbox.t;
+    const x1 = bbox.r;
+    const y1 = bbox.b;
 
     const inTop = y1 <= margins.top;
     const inBottom = y0 >= pageHeight - margins.bottom;
@@ -288,15 +288,15 @@ function isEntirelyInMarginZone(
  * Determine which margin zone an element is ENTIRELY within.
  */
 function getMarginPosition(
-    bbox: RawBBox,
+    bbox: BoundingBox,
     pageWidth: number,
     pageHeight: number,
     margins: MarginSettings
 ): MarginPosition | null {
-    const y0 = bbox.y;
-    const y1 = bbox.y + bbox.h;
-    const x0 = bbox.x;
-    const x1 = bbox.x + bbox.w;
+    const y0 = bbox.t;
+    const y1 = bbox.b;
+    const x0 = bbox.l;
+    const x1 = bbox.r;
 
     if (y1 <= margins.top) return "top";
     if (y0 >= pageHeight - margins.bottom) return "bottom";
@@ -415,7 +415,7 @@ export class MarginFilter {
      * filter uses, exposed without forcing callers to instantiate a Line.
      */
     static getMarginPosition(
-        bbox: RawBBox,
+        bbox: BoundingBox,
         pageWidth: number,
         pageHeight: number,
         margins: MarginSettings

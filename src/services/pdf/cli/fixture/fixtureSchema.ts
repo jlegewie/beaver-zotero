@@ -5,14 +5,15 @@
  * offending field so the loader can surface "config.analysisScope is
  * invalid" rather than a deep-compare crash buried in the test runner.
  *
- * Schema is intentionally unversioned (per plan): when the extraction
- * return type changes, the projection in `extractionSnapshot.ts` is
- * updated and a `--update` sweep regenerates every fixture.
+ * Bump `FIXTURE_SCHEMA_VERSION` whenever the snapshot projection changes
+ * incompatibly. The loader rejects stale fixtures so regeneration failures
+ * surface immediately instead of comparing mixed wire shapes.
  */
 import type {
     ExtractionPageSnapshot,
     ExtractionSnapshot,
     SnapshotBBox,
+    SnapshotItem,
     SnapshotSentence,
 } from "../../debug/extractionSnapshot";
 import type { ExtractionSettings } from "../../types";
@@ -21,7 +22,7 @@ import type { SentenceSplitterConfig } from "../../sentenceTypes";
 import { parseAnalysisScope, type AnalysisScope } from "./analysisScope";
 import type { Fingerprints } from "./fingerprints";
 
-export const FIXTURE_SCHEMA_VERSION = 1 as const;
+export const FIXTURE_SCHEMA_VERSION = 2 as const;
 
 export interface FixtureConfig {
     pageIndices: number[];
@@ -177,11 +178,11 @@ function validateSnapshot(value: unknown, source: string): ExtractionSnapshot {
     return {
         perPage,
         totals: {
-            paragraphCount: expectInt(totals.paragraphCount, `${source}.totals.paragraphCount`),
+            itemCount: expectInt(totals.itemCount, `${source}.totals.itemCount`),
             sentenceCount: expectInt(totals.sentenceCount, `${source}.totals.sentenceCount`),
-            degradedParagraphs: expectInt(
-                totals.degradedParagraphs,
-                `${source}.totals.degradedParagraphs`,
+            degradedItems: expectInt(
+                totals.degradedItems,
+                `${source}.totals.degradedItems`,
             ),
         },
     };
@@ -189,6 +190,10 @@ function validateSnapshot(value: unknown, source: string): ExtractionSnapshot {
 
 function validatePage(value: unknown, source: string): ExtractionPageSnapshot {
     const v = expectObject(value, source);
+    const itemsRaw = expectArray(v.items, `${source}.items`);
+    const items = itemsRaw.map((item, i) =>
+        validateItem(item, `${source}.items[${i}]`),
+    );
     const sentencesRaw = expectArray(v.sentences, `${source}.sentences`);
     const sentences = sentencesRaw.map((s, i) =>
         validateSentence(s, `${source}.sentences[${i}]`),
@@ -198,28 +203,54 @@ function validatePage(value: unknown, source: string): ExtractionPageSnapshot {
         pageWidth: expectFiniteNumber(v.pageWidth, `${source}.pageWidth`),
         pageHeight: expectFiniteNumber(v.pageHeight, `${source}.pageHeight`),
         content: expectString(v.content, `${source}.content`),
-        paragraphCount: expectInt(v.paragraphCount, `${source}.paragraphCount`),
+        itemCount: expectInt(v.itemCount, `${source}.itemCount`),
         sentenceCount: expectInt(v.sentenceCount, `${source}.sentenceCount`),
-        degradedParagraphs: expectInt(v.degradedParagraphs, `${source}.degradedParagraphs`),
+        degradedItems: expectInt(v.degradedItems, `${source}.degradedItems`),
+        items,
         sentences,
     };
 }
 
-function validateSentence(value: unknown, source: string): SnapshotSentence {
+function validateItem(value: unknown, source: string): SnapshotItem {
     const v = expectObject(value, source);
-    const kindRaw = expectString(v.kind, `${source}.kind`);
-    if (kindRaw !== "text" && kindRaw !== "heading") {
+    const kind = expectString(v.kind, `${source}.kind`) as SnapshotItem["kind"];
+    const allowedKinds = new Set([
+        "text",
+        "section_header",
+        "footnote",
+        "caption",
+        "list_item",
+        "margin",
+        "formula",
+        "table",
+        "picture",
+    ]);
+    if (!allowedKinds.has(kind)) {
         throw new FixtureValidationError(
-            `${source}.kind: expected "text" | "heading", got "${kindRaw}"`,
+            `${source}.kind: unexpected item kind "${kind}"`,
         );
     }
+    const out: SnapshotItem = {
+        id: expectString(v.id, `${source}.id`),
+        kind,
+        index: expectInt(v.index, `${source}.index`),
+        columnIndex: expectInt(v.columnIndex, `${source}.columnIndex`),
+        bbox: validateBBox(v.bbox, `${source}.bbox`),
+    };
+    if (v.text !== undefined) {
+        out.text = expectString(v.text, `${source}.text`);
+    }
+    return out;
+}
+
+function validateSentence(value: unknown, source: string): SnapshotSentence {
+    const v = expectObject(value, source);
     const bboxesRaw = expectArray(v.bboxes, `${source}.bboxes`);
     const bboxes = bboxesRaw.map((b, i) => validateBBox(b, `${source}.bboxes[${i}]`));
     const out: SnapshotSentence = {
         index: expectInt(v.index, `${source}.index`),
-        paragraphIndex: expectInt(v.paragraphIndex, `${source}.paragraphIndex`),
+        parentId: expectString(v.parentId, `${source}.parentId`),
         sentenceIndex: expectInt(v.sentenceIndex, `${source}.sentenceIndex`),
-        kind: kindRaw,
         text: expectString(v.text, `${source}.text`),
         bboxes,
     };
@@ -234,11 +265,18 @@ function validateSentence(value: unknown, source: string): SnapshotSentence {
 
 function validateBBox(value: unknown, source: string): SnapshotBBox {
     const v = expectObject(value, source);
+    const origin = expectString(v.origin, `${source}.origin`);
+    if (origin !== "top-left" && origin !== "bottom-left") {
+        throw new FixtureValidationError(
+            `${source}.origin: expected "top-left" | "bottom-left", got "${origin}"`,
+        );
+    }
     return {
-        x: expectFiniteNumber(v.x, `${source}.x`),
-        y: expectFiniteNumber(v.y, `${source}.y`),
-        w: expectFiniteNumber(v.w, `${source}.w`),
-        h: expectFiniteNumber(v.h, `${source}.h`),
+        l: expectFiniteNumber(v.l, `${source}.l`),
+        t: expectFiniteNumber(v.t, `${source}.t`),
+        r: expectFiniteNumber(v.r, `${source}.r`),
+        b: expectFiniteNumber(v.b, `${source}.b`),
+        origin,
     };
 }
 

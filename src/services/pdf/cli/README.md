@@ -75,7 +75,7 @@ npm run beaver-extract -- overlay --help
 | `fixture`        | Manage extraction-regression fixtures (see below).     |
 | `ocr-fixture`    | Manage OCR-detection regression fixtures (see below).  |
 
-Overlay levels: `columns | lines | paragraphs | sentences | margins`.
+Overlay levels: `columns | lines | items | sentences | margins`.
 
 ## Output
 
@@ -202,7 +202,7 @@ JSON envelope shape (`--json`):
 ```
 
 The raw `perPagePhases[]` entries on each run carry `charCount`,
-`lineCount`, `paragraphCount`, and `degradationCount` alongside the
+`lineCount`, `itemCount`, and `degradationCount` alongside the
 ms fields so you can chart timing vs. page complexity offline.
 
 ### Stable methodology for tracking improvements

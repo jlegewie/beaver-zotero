@@ -77,7 +77,7 @@ describe('pdf-extract-trace ↔ pdf-sentence-bboxes parity', () => {
             const traceSentences = traceRes.sentences ?? [];
             const prodSentences = prodRes.result.sentences as Array<{
                 text: string;
-                bboxes: Array<{ x: number; y: number; w: number; h: number }>;
+                bboxes: Array<{ l: number; t: number; r: number; b: number; origin: string }>;
             }>;
 
             // Sentence count must match — both call the same helper.
@@ -89,11 +89,11 @@ describe('pdf-extract-trace ↔ pdf-sentence-bboxes parity', () => {
                 expect(traceSentences[i].bboxes).toEqual(prodSentences[i].bboxes);
             }
 
-            // Paragraph count: trace flattens to `{ id, lineIds, … }` while
-            // production returns `ParagraphWithSentences[]` — different
-            // shapes, same count.
+            // Item count: trace still exposes the legacy `paragraphs` key
+            // for cross-stage line links, while production returns `items`.
             const tracePCount = (traceRes.paragraphs ?? []).length;
-            const prodPCount = (prodRes.result.paragraphs as unknown[]).length;
+            const prodPCount = (prodRes.result.items as Array<{ kind: string }>)
+                .filter((item) => item.kind !== "margin").length;
             expect(tracePCount).toBe(prodPCount);
         });
 

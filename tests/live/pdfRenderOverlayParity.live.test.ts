@@ -30,7 +30,7 @@ import { SMALL_PDF, NORMAL_PDF } from '../helpers/fixtures';
 
 interface ProdSentence {
     text: string;
-    bboxes: Array<{ x: number; y: number; w: number; h: number }>;
+    bboxes: Array<{ l: number; t: number; r: number; b: number; origin: string }>;
 }
 
 let available = false;
@@ -67,27 +67,26 @@ describe('pdf-render-overlay (sentences) ↔ pdf-sentence-bboxes parity', () => 
                 else groups.set(r.group, [r]);
             }
 
-            // Production emits one entry per sentence; the overlay omits
-            // sentences whose `bboxes.length === 0` (see
-            // `buildSentenceOverlayFromResult`). Every prod sentence with
-            // at least one bbox must be present.
+            // Production emits one entry per sentence. The overlay also
+            // includes fallback item boxes for headers/reserved unsplit
+            // kinds, so filter to groups whose first rect has an S label.
             const prodWithBboxes = prodSentences.filter((s) => s.bboxes.length > 0);
-            expect(groups.size).toBe(prodWithBboxes.length);
+            const sentenceGroups = new Map(
+                Array.from(groups.entries()).filter(([, groupRects]) =>
+                    groupRects[0]?.label?.startsWith("S"),
+                ),
+            );
+            expect(sentenceGroups.size).toBe(prodWithBboxes.length);
 
             // Walk groups in ascending order — that's the order the
             // overlay endpoint assigns (`group: sentenceIdx`), matching
             // the flat `prodRes.result.sentences` order.
-            const sortedGroupIndices = Array.from(groups.keys()).sort(
+            const sortedGroupIndices = Array.from(sentenceGroups.keys()).sort(
                 (a, b) => a - b,
             );
             sortedGroupIndices.forEach((groupIdx, i) => {
-                const overlayFrags = groups.get(groupIdx)!.map((r) => r.rect);
-                const prodFrags = prodWithBboxes[i].bboxes.map((b) => ({
-                    x: b.x,
-                    y: b.y,
-                    w: b.w,
-                    h: b.h,
-                }));
+                const overlayFrags = sentenceGroups.get(groupIdx)!.map((r) => r.rect);
+                const prodFrags = prodWithBboxes[i].bboxes;
                 expect(overlayFrags).toEqual(prodFrags);
             });
 

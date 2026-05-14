@@ -29,6 +29,7 @@ import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 
 import { runCli } from '../../../src/services/pdf/node/runCli';
+import { FIXTURE_SCHEMA_VERSION } from '../../../src/services/pdf/cli/fixture/fixtureSchema';
 import type { CliDeps } from '../../../src/services/pdf/cli/runCliTypes';
 import type * as NodeApi from '../../../src/services/pdf/node/api';
 
@@ -63,20 +64,28 @@ function pageWithSentences(): unknown {
         width: 595,
         height: 842,
         content: 'Hello.',
-        sentences: [
+        columns: [],
+        items: [
             {
+                kind: 'text',
+                id: 'p0:i0',
                 pageIndex: 0,
-                paragraphIndex: 0,
-                sentenceIndex: 0,
+                index: 0,
+                bbox: { l: 10, t: 10, r: 90, b: 22, origin: 'top-left' },
+                columnIndex: 0,
                 text: 'Hello.',
-                bboxes: [{ x: 10, y: 10, w: 80, h: 12 }],
+                lines: [
+                    { text: 'Hello.', bbox: { l: 10, t: 10, r: 90, b: 22, origin: 'top-left' } },
+                ],
+                sentences: [],
             },
         ],
-        paragraphs: [
+        sentences: [
             {
-                item: { type: 'paragraph', idx: 0, text: 'Hello.' },
-                paragraphText: 'Hello.',
-                sentences: [],
+                parentId: 'p0:i0',
+                index: 0,
+                text: 'Hello.',
+                bboxes: [{ l: 10, t: 10, r: 90, b: 22, origin: 'top-left' }],
             },
         ],
     };
@@ -97,7 +106,12 @@ function makeDeps(api: Partial<DepFakes['api']> = {}): DepFakes {
         analyzeLayout: vi.fn(),
         renderPages: vi.fn(),
         extractRawPageDetailed: vi.fn(),
-        analyzeOCRNeeds: vi.fn(),
+        analyzeOCRNeeds: vi.fn().mockResolvedValue({
+            needsOCR: false,
+            primaryReason: "text_layer",
+            pageAnalyses: [],
+            issueBreakdown: {},
+        }),
         ...api,
     };
     const deps: CliDeps = {
@@ -163,7 +177,7 @@ describe('fixture capture', () => {
         expect(code, `stdout=${stdout.text()}`).toBe(0);
 
         const fix = readFixtureJson('synth__p0');
-        expect(fix.schema).toBe(1);
+        expect(fix.schema).toBe(FIXTURE_SCHEMA_VERSION);
         expect(fix.id).toBe('synth__p0');
         expect(fix.pdfSha256).toBe(FAKE_PDF_SHA);
         expect(fix.config.pageIndices).toEqual([0]);
@@ -610,7 +624,7 @@ describe('fixture loader validation', () => {
 
 function buildSyntheticFixture(sha: string): Record<string, unknown> {
     return {
-        schema: 1,
+        schema: FIXTURE_SCHEMA_VERSION,
         id: 'synthetic',
         capturedAt: '2026-01-01T00:00:00.000Z',
         updatedAt: '2026-01-01T00:00:00.000Z',
@@ -632,7 +646,7 @@ function buildSyntheticFixture(sha: string): Record<string, unknown> {
         tolerance: { bboxAbsPt: 0.5 },
         expected: {
             perPage: [],
-            totals: { paragraphCount: 0, sentenceCount: 0, degradedParagraphs: 0 },
+            totals: { itemCount: 0, sentenceCount: 0, degradedItems: 0 },
         },
     };
 }

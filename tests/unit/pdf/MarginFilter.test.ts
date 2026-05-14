@@ -11,15 +11,16 @@ import {
     MarginFilter,
     getEffectiveRepeatThreshold,
 } from "../../../src/services/pdf/MarginFilter";
-import type {
-    MarginAnalysis,
-    MarginElement,
-    MarginPosition,
-    MarginRemovalResult,
-    RawBlock,
-    RawLine,
-    RawPageData,
-    TextStyle,
+import {
+    bboxFromXYWH,
+    type MarginAnalysis,
+    type MarginElement,
+    type MarginPosition,
+    type MarginRemovalResult,
+    type RawBlock,
+    type RawLine,
+    type RawPageData,
+    type TextStyle,
 } from "../../../src/services/pdf/types";
 
 // ---------------------------------------------------------------------------
@@ -33,7 +34,7 @@ const PAGE_H = 792;
 function makeLine(text: string, x: number, y: number): RawLine {
     return {
         wmode: 0,
-        bbox: { x, y, w: Math.max(1, text.length * 6), h: 10 },
+        bbox: bboxFromXYWH(x, y, Math.max(1, text.length * 6), 10, "top-left"),
         font: {
             name: "T",
             family: "T",
@@ -769,7 +770,7 @@ function makeStyledLine(
 ): RawLine {
     return {
         wmode: 0,
-        bbox: { x, y, w, h: 9 },
+        bbox: bboxFromXYWH(x, y, w, 9, "top-left"),
         font: {
             name: fontName,
             family: fontName,
@@ -786,12 +787,13 @@ function makeStyledLine(
 function makePageWithLines(lines: RawLine[]): RawPageData {
     const block: RawBlock = {
         type: "text",
-        bbox: {
-            x: Math.min(...lines.map((L) => L.bbox.x)),
-            y: Math.min(...lines.map((L) => L.bbox.y)),
-            w: 400,
-            h: PAGE_H,
-        },
+        bbox: bboxFromXYWH(
+            Math.min(...lines.map((L) => L.bbox.l)),
+            Math.min(...lines.map((L) => L.bbox.t)),
+            400,
+            PAGE_H,
+            "top-left",
+        ),
         lines,
     };
     return {

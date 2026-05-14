@@ -53,8 +53,6 @@ beforeAll(async () => {
 });
 
 const SMALL_PDF_PAGE_COUNT = 2;
-const NORMAL_PDF_PAGE_COUNT = 15;
-
 describe('MuPDF worker smoke — PR #1 ops', () => {
     beforeEach((ctx) => {
         skipIfNoZotero(ctx, available);
@@ -275,9 +273,9 @@ describe('MuPDF worker smoke — orchestration ops', () => {
             expect(res.ok).toBe(true);
 
             const result = res.result;
-            expect(Array.isArray(result.paragraphs)).toBe(true);
+            expect(Array.isArray(result.items)).toBe(true);
             expect(Array.isArray(result.sentences)).toBe(true);
-            // `degradation` is optional — omitted when no paragraphs degraded.
+            // `degradation` is optional — omitted when no items degraded.
             if (result.degradation !== undefined) {
                 expect(typeof result.degradation.count).toBe('number');
                 expect(Array.isArray(result.degradation.notes)).toBe(true);

@@ -10,8 +10,8 @@
 import { useEventSubscription } from './useEventSubscription';
 import {
     visualizeCurrentPageColumns,
+    visualizeCurrentPageItems,
     visualizeCurrentPageLines,
-    visualizeCurrentPageParagraphs,
     visualizeCurrentPageSentences,
     clearVisualizationAnnotations,
     resolveActiveReaderContext,
@@ -36,9 +36,9 @@ export function useReaderVisualizerActionHandler() {
                     logger(`[ReaderVisualizer] lines: ${r.message}`);
                     return;
                 }
-                case 'paragraphs': {
-                    const r = await visualizeCurrentPageParagraphs();
-                    logger(`[ReaderVisualizer] paragraphs: ${r.message}`);
+                case 'items': {
+                    const r = await visualizeCurrentPageItems();
+                    logger(`[ReaderVisualizer] items: ${r.message}`);
                     return;
                 }
                 case 'sentences': {

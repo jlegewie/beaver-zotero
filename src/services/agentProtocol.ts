@@ -634,8 +634,8 @@ export interface WSZoteroAttachmentSearchRequest extends WSBaseEvent {
 
 /** A single search hit within a page */
 export interface WSSearchHit {
-    /** Hit bounding box in MuPDF format {x, y, w, h} */
-    bbox: { x: number; y: number; w: number; h: number };
+    /** Hit bounding box in source MuPDF top-left page coordinates. */
+    bbox: { l: number; t: number; r: number; b: number; origin: "top-left" | "bottom-left" };
     /** Text role: heading, body, caption, footnote, unknown */
     role: string;
     /** Role weight applied to this hit */

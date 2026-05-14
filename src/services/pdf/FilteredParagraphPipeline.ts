@@ -18,14 +18,20 @@ import {
 import {
     DEFAULT_MARGINS,
     DEFAULT_MARGIN_ZONE,
+    bboxFromXYWH,
+    bboxHeight,
+    bboxWidth,
+    type MarginItem,
     type MarginRemovalResult,
     type MarginSettings,
     type RawPageData,
+    type RawLine,
     type StyleProfile,
 } from "./types";
 import { buildPageAnalysisContext } from "./PageAnalysisContext";
 import {
     detectDominantTextOrientation,
+    inverseRotateBBox,
     rotateBBox,
     rotateRawPage,
     type RotationAngle,
@@ -110,7 +116,7 @@ export interface FilteredParagraphTimings {
 export interface FilteredParagraphResult {
     /**
      * Paragraph detection result with `itemLines` populated, ready to
-     * pass to `extractPageSentenceBBoxes` as
+     * pass to `extractPageSentences` as
      * `precomputed: { paragraphResult }`.
      */
     paragraphResult: PageParagraphResult;
@@ -124,6 +130,14 @@ export interface FilteredParagraphResult {
     columnResult: ColumnDetectionResult;
     /** Line detection on the filtered page. */
     lineResult: PageLineResult;
+    /**
+     * Text lines removed by simple/smart margin filtering, represented as
+     * first-class document items. These are intentionally not fed into
+     * paragraph detection, markdown content, or sentence splitting; callers
+     * append them to `ProcessedPage.items` so consumers can inspect or filter
+     * marginalia explicitly.
+     */
+    marginItems: MarginItem[];
     /**
      * Rotation applied to the target page before column / paragraph
      * detection (0 = no rotation; pipeline ran in MuPDF frame).
@@ -229,6 +243,31 @@ export function detectFilteredParagraphs(
         styleProfile.bodyStyles,
     );
     const marginFilterMs = performance.now() - tMarginFilter;
+    const uprightMarginItems = collectMarginItemsFromFilteredPage(
+        targetPage,
+        filteredPage,
+    );
+    const marginItems =
+        pageRotation === 0
+            ? uprightMarginItems
+            : uprightMarginItems.map((item) => ({
+                  ...item,
+                  bbox: inverseRotateBBox(
+                      item.bbox,
+                      pageRotation,
+                      rotated.sourceWidth,
+                      rotated.sourceHeight,
+                  ),
+                  lines: item.lines.map((line) => ({
+                      ...line,
+                      bbox: inverseRotateBBox(
+                          line.bbox,
+                          pageRotation,
+                          rotated.sourceWidth,
+                          rotated.sourceHeight,
+                      ),
+                  })),
+              }));
 
     // Frame rule: `ctx.fillBoundaries` come from the page content
     // stream in raw MuPDF coordinates, but `filteredPage` (and its
@@ -240,7 +279,20 @@ export function detectFilteredParagraphs(
     const fillBoundaries =
         ctx.fillBoundaries && ctx.fillBoundaries.length > 0
             ? ctx.fillBoundaries.map((b) =>
-                  rotateBBox(b, pageRotation, rotated.sourceWidth, rotated.sourceHeight),
+                  {
+                      const rotatedBox = rotateBBox(
+                          bboxFromXYWH(b.x, b.y, b.w, b.h, "top-left"),
+                          pageRotation,
+                          rotated.sourceWidth,
+                          rotated.sourceHeight,
+                      );
+                      return {
+                          x: rotatedBox.l,
+                          y: rotatedBox.t,
+                          w: bboxWidth(rotatedBox),
+                          h: bboxHeight(rotatedBox),
+                      };
+                  },
               )
             : ctx.fillBoundaries;
 
@@ -293,6 +345,7 @@ export function detectFilteredParagraphs(
         styleProfile,
         columnResult,
         lineResult,
+        marginItems,
         pageRotation,
         sourceWidth: rotated.sourceWidth,
         sourceHeight: rotated.sourceHeight,
@@ -305,6 +358,58 @@ export function detectFilteredParagraphs(
             paragraphDetectMs,
         },
     };
+}
+
+export function collectMarginItemsFromFilteredPage(
+    originalPage: RawPageData,
+    filteredPage: RawPageData,
+): MarginItem[] {
+    const keptLines = new Set<RawLine>();
+    for (const block of filteredPage.blocks) {
+        if (block.type !== "text" || !block.lines) continue;
+        for (const line of block.lines) keptLines.add(line);
+    }
+
+    const items: MarginItem[] = [];
+    for (const block of originalPage.blocks) {
+        if (block.type !== "text" || !block.lines) continue;
+        for (const line of block.lines) {
+            const text = (line.text ?? "").trim();
+            if (!text || keptLines.has(line)) continue;
+            const index = items.length;
+            items.push({
+                kind: "margin",
+                id: `p${originalPage.pageIndex}:i${index}`,
+                pageIndex: originalPage.pageIndex,
+                index,
+                bbox: line.bbox,
+                columnIndex: 0,
+                text: line.text,
+                lines: [
+                    {
+                        text: line.text,
+                        bbox: line.bbox,
+                        fontSize: line.font?.size,
+                    },
+                ],
+            });
+        }
+    }
+    return items;
+}
+
+export function reindexMarginItems(
+    marginItems: readonly MarginItem[],
+    startIndex: number,
+): MarginItem[] {
+    return marginItems.map((item, offset) => {
+        const index = startIndex + offset;
+        return {
+            ...item,
+            id: `p${item.pageIndex}:i${index}`,
+            index,
+        };
+    });
 }
 
 function emptyParagraphResult(page: RawPageData): PageParagraphResult {

@@ -705,7 +705,7 @@ const CASE_EXTRACT_PARAGRAPH: ParityCase = {
 // -----------------------------------------------------------------------------
 
 interface PageWithSentences {
-    paragraphs?: unknown;
+    items?: unknown;
     sentences?: unknown;
     degradation?: unknown;
     width?: number;
@@ -730,7 +730,7 @@ const CASE_SENTENCE_BBOXES: ParityCase = {
             pageIndex: number;
             width: number;
             height: number;
-            paragraphs: unknown;
+            items: unknown;
             sentences: unknown;
             degradation: unknown;
         };
@@ -759,7 +759,7 @@ const CASE_SENTENCE_BBOXES: ParityCase = {
                 pageIndex: cliPage.index,
                 width: cliPage.width,
                 height: cliPage.height,
-                paragraphs: cliPage.paragraphs ?? [],
+                items: cliPage.items ?? [],
                 sentences: cliPage.sentences ?? [],
                 degradation: cliPage.degradation,
             },

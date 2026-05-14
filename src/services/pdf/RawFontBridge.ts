@@ -15,7 +15,7 @@
  *
  * The bridge is a pure data transformation — no MuPDF / worker
  * dependencies — so both the main-thread `SentenceExtractionPipeline`
- * and the worker-side `opExtractSentenceBBoxes` can use it.
+ * and the worker-side sentence extraction path can use it.
  */
 
 import type { RawLine, RawPageData, RawPageDataDetailed } from "./types";
@@ -67,9 +67,9 @@ export function bridgeDetailedPageFonts(
         if (block.type !== "text" || !block.lines) continue;
         for (const line of block.lines) {
             jsonLines.push({
-                y: line.bbox.y,
-                x: line.bbox.x,
-                r: line.bbox.x + line.bbox.w,
+                y: line.bbox.t,
+                x: line.bbox.l,
+                r: line.bbox.r,
                 line,
             });
         }
@@ -80,9 +80,9 @@ export function bridgeDetailedPageFonts(
     for (const block of detailed.blocks) {
         if (block.type !== "text" || !block.lines) continue;
         for (const line of block.lines) {
-            const dy = line.bbox.y;
-            const dx = line.bbox.x;
-            const dr = line.bbox.x + line.bbox.w;
+            const dy = line.bbox.t;
+            const dx = line.bbox.l;
+            const dr = line.bbox.r;
 
             let best: JsonLineEntry | null = null;
             let bestOverlap = -1;

@@ -11,6 +11,7 @@ import { StyleAnalyzer } from "../../../src/services/pdf/StyleAnalyzer";
 import {
     DEFAULT_MARGINS,
     DEFAULT_MARGIN_ZONE,
+    bboxFromXYWH,
     type RawBlock,
     type RawLine,
     type RawPageData,
@@ -34,7 +35,7 @@ function makeLine(
 ): RawLine {
     return {
         wmode: 0,
-        bbox: { x: xStart, y: yTop, w: text.length * 6, h: size },
+        bbox: bboxFromXYWH(xStart, yTop, text.length * 6, size, "top-left"),
         font: {
             name: fontName,
             family: fontName,
@@ -49,16 +50,13 @@ function makeLine(
 }
 
 function makePage(pageIndex: number, lines: RawLine[]): RawPageData {
+    const left = lines.length ? Math.min(...lines.map((l) => l.bbox.l)) : 0;
+    const top = lines.length ? Math.min(...lines.map((l) => l.bbox.t)) : 0;
     const blocks: RawBlock[] = lines.length
         ? [
               {
                   type: "text",
-                  bbox: {
-                      x: Math.min(...lines.map((l) => l.bbox.x)),
-                      y: Math.min(...lines.map((l) => l.bbox.y)),
-                      w: PAGE_W,
-                      h: PAGE_H,
-                  },
+                  bbox: bboxFromXYWH(left, top, PAGE_W, PAGE_H, "top-left"),
                   lines,
               },
           ]
@@ -113,7 +111,7 @@ describe("detectFilteredParagraphs", () => {
             const watermarkX = PAGE_W - DEFAULT_MARGINS.right; // 587
             const watermark: RawLine = {
                 wmode: 0,
-                bbox: { x: watermarkX, y: 200, w: 5, h: 300 },
+                bbox: bboxFromXYWH(watermarkX, 200, 5, 300, "top-left"),
                 font: {
                     name: "WM",
                     family: "WM",
@@ -142,6 +140,15 @@ describe("detectFilteredParagraphs", () => {
                 .join(" ");
             expect(allLineTexts).not.toContain("Watermark");
             expect(allLineTexts).toContain("Paragraph filler");
+            expect(out.marginItems).toHaveLength(1);
+            expect(out.marginItems[0]).toMatchObject({
+                kind: "margin",
+                text: "Watermark",
+                pageIndex: 0,
+                index: 0,
+                columnIndex: 0,
+            });
+            expect(out.marginItems[0].lines).toHaveLength(1);
         });
     });
 
@@ -158,7 +165,7 @@ describe("detectFilteredParagraphs", () => {
                 makePage(idx, [
                     {
                         wmode: 0,
-                        bbox: { x: 80, y: 50, w: 200, h: 8 },
+                        bbox: bboxFromXYWH(80, 50, 200, 8, "top-left"),
                         font: {
                             name: "H",
                             family: "H",
@@ -181,6 +188,8 @@ describe("detectFilteredParagraphs", () => {
             });
             const allText = out.lineResult.allLines.map((l) => l.text).join(" ");
             expect(allText).not.toContain("Repeating Journal Header");
+            expect(out.marginItems.some((item) => item.text === "Repeating Journal Header"))
+                .toBe(true);
             expect(out.marginRemoval.candidates.some((c) => c.reason === "repeat"))
                 .toBe(true);
         });
@@ -192,7 +201,7 @@ describe("detectFilteredParagraphs", () => {
                 makePage(idx, [
                     {
                         wmode: 0,
-                        bbox: { x: 80, y: 50, w: 30, h: 8 },
+                        bbox: bboxFromXYWH(80, 50, 30, 8, "top-left"),
                         font: {
                             name: "PN",
                             family: "PN",
@@ -227,7 +236,7 @@ describe("detectFilteredParagraphs", () => {
                 makePage(idx, [
                     {
                         wmode: 0,
-                        bbox: { x: 80, y: 50, w: 60, h: 8 },
+                        bbox: bboxFromXYWH(80, 50, 60, 8, "top-left"),
                         font: {
                             name: "PN",
                             family: "PN",
@@ -262,7 +271,7 @@ describe("detectFilteredParagraphs", () => {
                 makePage(idx, [
                     {
                         wmode: 0,
-                        bbox: { x: 80, y: 50, w: 60, h: 8 },
+                        bbox: bboxFromXYWH(80, 50, 60, 8, "top-left"),
                         font: {
                             name: "H",
                             family: "H",
@@ -296,7 +305,7 @@ describe("detectFilteredParagraphs", () => {
                 makePage(idx, [
                     {
                         wmode: 0,
-                        bbox: { x: 80, y: 50, w: 80, h: 8 },
+                        bbox: bboxFromXYWH(80, 50, 80, 8, "top-left"),
                         font: {
                             name: "H",
                             family: "H",
@@ -328,7 +337,7 @@ describe("detectFilteredParagraphs", () => {
                 makePage(idx, [
                     {
                         wmode: 0,
-                        bbox: { x: 80, y: 50, w: 60, h: 8 },
+                        bbox: bboxFromXYWH(80, 50, 60, 8, "top-left"),
                         font: {
                             name: "H",
                             family: "H",
@@ -370,7 +379,7 @@ describe("detectFilteredParagraphs", () => {
                 makePage(0, [
                     {
                         wmode: 0,
-                        bbox: { x: 5, y: 5, w: 10, h: 5 },
+                        bbox: bboxFromXYWH(5, 5, 10, 5, "top-left"),
                         font: {
                             name: "X",
                             family: "X",
@@ -387,6 +396,8 @@ describe("detectFilteredParagraphs", () => {
             const out = detectFilteredParagraphs({ pages, pageIndex: 0 });
             expect(out.paragraphResult.items).toEqual([]);
             expect(out.paragraphResult.itemLines).toEqual([]);
+            expect(out.marginItems).toHaveLength(1);
+            expect(out.marginItems[0].kind).toBe("margin");
         });
     });
 
@@ -478,7 +489,7 @@ describe("detectFilteredParagraphs", () => {
             // rotateBBox semantics.
             const yUpLine = (text: string, x: number, y: number): RawLine => ({
                 wmode: 0,
-                bbox: { x, y, w: 12, h: text.length * 7 },
+                bbox: bboxFromXYWH(x, y, 12, text.length * 7, "top-left"),
                 font: {
                     name: "Body",
                     family: "Body",

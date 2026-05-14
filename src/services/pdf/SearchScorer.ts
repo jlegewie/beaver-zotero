@@ -16,7 +16,7 @@
 import type {
     RawPageData,
     RawLine,
-    RawBBox,
+    BoundingBox,
     PDFPageSearchResult,
     PDFSearchHit,
     ScoredSearchHit,
@@ -37,17 +37,17 @@ import { pdfLog } from "./logging";
  * Check if two bounding boxes overlap.
  * Uses a tolerance to handle slight coordinate mismatches.
  */
-function bboxOverlaps(a: RawBBox, b: RawBBox, tolerance: number = 2): boolean {
-    const aRight = a.x + a.w;
-    const aBottom = a.y + a.h;
-    const bRight = b.x + b.w;
-    const bBottom = b.y + b.h;
+function bboxOverlaps(a: BoundingBox, b: BoundingBox, tolerance: number = 2): boolean {
+    const aRight = a.r;
+    const aBottom = a.b;
+    const bRight = b.r;
+    const bBottom = b.b;
 
     return !(
-        aRight < b.x - tolerance ||
-        a.x > bRight + tolerance ||
-        aBottom < b.y - tolerance ||
-        a.y > bBottom + tolerance
+        aRight < b.l - tolerance ||
+        a.l > bRight + tolerance ||
+        aBottom < b.t - tolerance ||
+        a.t > bBottom + tolerance
     );
 }
 

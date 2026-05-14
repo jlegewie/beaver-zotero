@@ -18,7 +18,8 @@
  *   8. Merge overlapping lines (handles drop caps, subscripts, etc.)
  */
 
-import type { RawPageData, RawBlock, RawLine, RawBBox } from "./types";
+import type { BoundingBox, RawPageData, RawBlock, RawLine } from "./types";
+import { bboxHeight, bboxWidth, mergeBoxes } from "./types";
 import type { Rect } from "./ColumnDetector";
 import { pdfLog } from "./logging";
 
@@ -27,33 +28,15 @@ import { pdfLog } from "./logging";
 // ============================================================================
 
 /**
- * Bounding box in l/t/r/b format (more convenient for overlap calculations)
- */
-export interface LineBBox {
-    /** Left edge */
-    l: number;
-    /** Top edge */
-    t: number;
-    /** Right edge */
-    r: number;
-    /** Bottom edge */
-    b: number;
-    /** Width */
-    width: number;
-    /** Height */
-    height: number;
-}
-
-/**
  * A span of text with consistent styling
  */
 export interface DetectedSpan {
     /** Text content */
     text: string;
-    /** Original bbox in x/y/w/h format */
-    bbox: RawBBox;
-    /** Converted bbox in l/t/r/b format */
-    lineBBox: LineBBox;
+    /** Original source MuPDF-frame bbox */
+    bbox: BoundingBox;
+    /** Bbox used for line grouping */
+    lineBBox: BoundingBox;
     /** Font size */
     size?: number;
     /** Font name */
@@ -71,9 +54,9 @@ export interface PageLine {
     /** All spans in this line (sorted left to right) */
     spans: DetectedSpan[];
     /** Individual span bboxes */
-    bboxes: LineBBox[];
+    bboxes: BoundingBox[];
     /** Merged line bbox (union of all spans) */
-    bbox: LineBBox;
+    bbox: BoundingBox;
     /** Concatenated text content */
     text: string;
     /** Median font size of spans */
@@ -133,32 +116,6 @@ const DEFAULT_OPTIONS: Required<LineDetectionOptions> = {
 // ============================================================================
 
 /**
- * Convert RawBBox to LineBBox format
- */
-function toLineBBox(bbox: RawBBox): LineBBox {
-    return {
-        l: bbox.x,
-        t: bbox.y,
-        r: bbox.x + bbox.w,
-        b: bbox.y + bbox.h,
-        width: bbox.w,
-        height: bbox.h,
-    };
-}
-
-/**
- * Convert LineBBox to Rect format (for compatibility)
- */
-export function lineBBoxToRect(bbox: LineBBox): Rect {
-    return {
-        x: bbox.l,
-        y: bbox.t,
-        w: bbox.width,
-        h: bbox.height,
-    };
-}
-
-/**
  * Check if a point is inside a rectangle
  */
 function isPointInRect(
@@ -176,18 +133,18 @@ function isPointInRect(
 /**
  * Calculate overlap ratio between a bbox and a column
  */
-function calculateColumnOverlap(bbox: RawBBox, column: Rect): number {
-    const xOverlapStart = Math.max(bbox.x, column.x);
-    const xOverlapEnd = Math.min(bbox.x + bbox.w, column.x + column.w);
-    const yOverlapStart = Math.max(bbox.y, column.y);
-    const yOverlapEnd = Math.min(bbox.y + bbox.h, column.y + column.h);
+function calculateColumnOverlap(bbox: BoundingBox, column: Rect): number {
+    const xOverlapStart = Math.max(bbox.l, column.x);
+    const xOverlapEnd = Math.min(bbox.r, column.x + column.w);
+    const yOverlapStart = Math.max(bbox.t, column.y);
+    const yOverlapEnd = Math.min(bbox.b, column.y + column.h);
 
     if (xOverlapEnd <= xOverlapStart || yOverlapEnd <= yOverlapStart) {
         return 0;
     }
 
     const overlapArea = (xOverlapEnd - xOverlapStart) * (yOverlapEnd - yOverlapStart);
-    const bboxArea = bbox.w * bbox.h;
+    const bboxArea = bboxWidth(bbox) * bboxHeight(bbox);
 
     return bboxArea > 0 ? overlapArea / bboxArea : 0;
 }
@@ -202,29 +159,6 @@ function median(values: number[]): number {
     return sorted.length % 2 === 0
         ? (sorted[mid - 1] + sorted[mid]) / 2
         : sorted[mid];
-}
-
-/**
- * Merge multiple bounding boxes into one
- */
-function mergeBoundingBoxes(bboxes: LineBBox[]): LineBBox {
-    if (bboxes.length === 0) {
-        return { l: 0, t: 0, r: 0, b: 0, width: 0, height: 0 };
-    }
-
-    const l = Math.min(...bboxes.map(b => b.l));
-    const t = Math.min(...bboxes.map(b => b.t));
-    const r = Math.max(...bboxes.map(b => b.r));
-    const b = Math.max(...bboxes.map(b => b.b));
-
-    return {
-        l,
-        t,
-        r,
-        b,
-        width: r - l,
-        height: b - t,
-    };
 }
 
 /**
@@ -263,7 +197,7 @@ function extractSpansInColumn(
             spans.push({
                 text,
                 bbox: line.bbox,
-                lineBBox: toLineBBox(line.bbox),
+                lineBBox: line.bbox,
                 size: line.font?.size,
                 fontName: line.font?.name,
                 fontWeight: line.font?.weight,
@@ -442,7 +376,7 @@ function convertToPageLines(refinedLines: DetectedSpan[][]): PageLine[] {
         const bboxes = sortedSpans.map(s => s.lineBBox);
 
         // Merge into single bbox
-        const mergedBbox = mergeBoundingBoxes(bboxes);
+        const mergedBbox = mergeBoxes(bboxes);
 
         // Concatenate text
         const text = sortedSpans.map(s => s.text).join(" ");
@@ -502,8 +436,8 @@ function mergeOverlappingLines(
                 const verticalOverlap = Math.max(0, overlapBottom - overlapTop);
 
                 const minHeight = Math.min(
-                    currentLine.bbox.height,
-                    otherLine.bbox.height
+                    bboxHeight(currentLine.bbox),
+                    bboxHeight(otherLine.bbox)
                 );
                 const overlapProportion =
                     minHeight > 0 ? verticalOverlap / minHeight : 0;
@@ -515,8 +449,8 @@ function mergeOverlappingLines(
                 // "line", scrambling reading order. Sub/superscripts and
                 // inline math stay below this ratio and continue to merge.
                 const maxHeight = Math.max(
-                    currentLine.bbox.height,
-                    otherLine.bbox.height
+                    bboxHeight(currentLine.bbox),
+                    bboxHeight(otherLine.bbox)
                 );
                 const heightRatio =
                     minHeight > 0 ? maxHeight / minHeight : Infinity;
@@ -526,7 +460,7 @@ function mergeOverlappingLines(
                     currentLine.spans = [...currentLine.spans, ...otherLine.spans];
                     currentLine.spans.sort((a, b) => a.lineBBox.l - b.lineBBox.l);
                     currentLine.bboxes = currentLine.spans.map(s => s.lineBBox);
-                    currentLine.bbox = mergeBoundingBoxes(currentLine.bboxes);
+                    currentLine.bbox = mergeBoxes(currentLine.bboxes);
                     currentLine.text = currentLine.spans.map(s => s.text).join(" ");
 
                     // Recalculate font size
@@ -657,7 +591,7 @@ export function logLineDetection(result: PageLineResult): void {
                     : line.text;
             pdfLog(
                 `      Line ${i + 1}: "${textPreview}" ` +
-                    `(y=${line.bbox.t.toFixed(0)}, h=${line.bbox.height.toFixed(1)})`,
+                    `(y=${line.bbox.t.toFixed(0)}, h=${bboxHeight(line.bbox).toFixed(1)})`,
                 3,
             );
         }
@@ -667,4 +601,3 @@ export function logLineDetection(result: PageLineResult): void {
         }
     }
 }
-

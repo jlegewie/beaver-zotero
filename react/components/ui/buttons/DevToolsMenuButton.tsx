@@ -11,8 +11,8 @@ import {
 } from '../../../../src/services/pdf';
 import {
     visualizeCurrentPageColumns,
+    visualizeCurrentPageItems,
     visualizeCurrentPageLines,
-    visualizeCurrentPageParagraphs,
     visualizeCurrentPageSentences,
     clearVisualizationAnnotations,
     extractCurrentPageContent
@@ -175,8 +175,9 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
             // Log structured results for all pages
             console.group("[PDF Test] Pages");
             for (const page of result.pages) {
-                const lineCount = page.lines?.length || 0;
-                const columnCount = page.columns?.length || 0;
+                const lines = page.items.flatMap((item) => ("lines" in item ? item.lines : []));
+                const lineCount = lines.length;
+                const columnCount = page.columns.length;
                 
                 console.group(`Page ${page.index + 1}${page.label ? ` (${page.label})` : ''}`);
                 console.log(`  Dimensions: ${page.width.toFixed(0)} × ${page.height.toFixed(0)} pt`);
@@ -184,17 +185,17 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
                 console.log(`  Lines: ${lineCount}`);
                 console.log(`  Text length: ${page.content.length} chars`);
                 
-                if (page.lines && page.lines.length > 0) {
+                if (lines.length > 0) {
                     console.group("Lines");
-                    for (let i = 0; i < Math.min(page.lines.length, 10); i++) {
-                        const line = page.lines[i];
+                    for (let i = 0; i < Math.min(lines.length, 10); i++) {
+                        const line = lines[i];
                         const preview = line.text.length > 80 
                             ? line.text.slice(0, 80) + "..." 
                             : line.text;
-                        console.log(`    [${i + 1}] Col ${line.columnIndex + 1}: "${preview}"`);
+                        console.log(`    [${i + 1}]: "${preview}"`);
                     }
-                    if (page.lines.length > 10) {
-                        console.log(`    ... ${page.lines.length - 10} more lines`);
+                    if (lines.length > 10) {
+                        console.log(`    ... ${lines.length - 10} more lines`);
                     }
                     console.groupEnd();
                 }
@@ -253,10 +254,10 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
         }
     };
 
-    // Visualize detected paragraphs on current page
-    const handleVisualizeParagraphs = async () => {
-        console.log("[PDF Visualizer] Visualizing paragraphs on current page...");
-        const result = await visualizeCurrentPageParagraphs();
+    // Visualize detected document items on current page
+    const handleVisualizeItems = async () => {
+        console.log("[PDF Visualizer] Visualizing items on current page...");
+        const result = await visualizeCurrentPageItems();
         if (result.success) {
             console.log(`[PDF Visualizer] ${result.message}`);
         } else {
@@ -272,7 +273,7 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
             console.log(`[PDF Visualizer] ${result.message}`);
             if (result.degradation) {
                 console.warn(
-                    `[PDF Visualizer] Degradation: ${result.degradation} paragraphs fell back to whole-paragraph bboxes (shown in gray)`,
+                    `[PDF Visualizer] Degradation: ${result.degradation} items fell back to whole-item bboxes (shown in gray)`,
                 );
             }
         } else {
@@ -480,8 +481,9 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
             }
             
             const page = result.pages[0];
-            const lineCount = page.lines?.length || 0;
-            const columnCount = page.columns?.length || 0;
+            const lines = page.items.flatMap((item) => ("lines" in item ? item.lines : []));
+            const lineCount = lines.length;
+            const columnCount = page.columns.length;
             
             console.log(`[PDF Extractor] ✓ Page ${page.index + 1}${page.label ? ` (${page.label})` : ''} extracted`);
             console.group(`Page ${page.index + 1} Details`);
@@ -490,7 +492,7 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
             console.log(`  Lines: ${lineCount}`);
             console.log(`  Text length: ${page.content.length} chars`);
             
-            if (page.columns && page.columns.length > 0) {
+            if (page.columns.length > 0) {
                 console.group("Columns");
                 page.columns.forEach((col, i) => {
                     const width = col.r - col.l;
@@ -500,14 +502,14 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
                 console.groupEnd();
             }
             
-            if (page.lines && page.lines.length > 0) {
+            if (lines.length > 0) {
                 console.group("Lines");
-                page.lines.forEach((line, i) => {
+                lines.forEach((line, i) => {
                     const preview = line.text.length > 100 
                         ? line.text.slice(0, 100) + "..." 
                         : line.text;
                     const fontSize = line.fontSize ? `${line.fontSize.toFixed(1)}pt` : "?";
-                    console.log(`  [${i + 1}] Col ${line.columnIndex + 1}, ${fontSize}: "${preview}"`);
+                    console.log(`  [${i + 1}] ${fontSize}: "${preview}"`);
                 });
                 console.groupEnd();
             }
@@ -775,8 +777,8 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
             disabled: false,
         },
         {
-            label: "Visualize Paragraphs",
-            onClick: handleVisualizeParagraphs,
+            label: "Visualize Items",
+            onClick: handleVisualizeItems,
             icon: PdfIcon,
             disabled: false,
         },
@@ -832,4 +834,3 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
 };
 
 export default DevToolsMenuButton;
-

@@ -28,11 +28,19 @@
  */
 
 import type {
-    RawBBox,
+    BoundingBox,
+    DegradationNote,
+    DegradationSummary,
+    DocItem,
+    ItemLine,
     RawLineDetailed,
     RawPageDataDetailed,
+    SectionHeaderItem,
+    SentenceItem,
+    TextBearingItem,
+    TextItem,
 } from "./types";
-import type { SentenceBBox } from "./types";
+import { bboxHeight, mergeBoxes } from "./types";
 import type { PageLine } from "./LineDetector";
 import type {
     ContentItem,
@@ -51,8 +59,7 @@ import {
     type SentenceSplitter,
 } from "./SentenceMapper";
 import {
-    inverseRotateLineBBox,
-    inverseRotateRawBBox,
+    inverseRotateBBox,
     rotateRawPageDetailed,
     type RotationAngle,
 } from "./PageRotationNormalizer";
@@ -88,81 +95,13 @@ export interface ParagraphText {
     lines: RawLineDetailed[];
 }
 
-/**
- * Result of mapping a single `ContentItem` (paragraph or header) to the
- * sentences it contains with per-sentence line-fragment bboxes.
- */
-export interface ParagraphWithSentences {
-    item: ContentItem;
-    paragraphText: ParagraphText;
-    sentences: SentenceBBox[];
-}
-
-/**
- * Why a paragraph failed the precise mapping path and fell back to a
- * whole-paragraph bbox.
- */
-export type DegradationReason =
-    /** `ContentItem` had no PageLine group or none of its spans matched the detailed lookup. */
-    | "unmapped"
-    /** `buildParagraphText` threw — text/chars lockstep violated (ligatures, astral-plane chars, etc.). */
-    | "invariant_violation"
-    /** The splitter produced no sentences inside this paragraph. Unusual but possible. */
-    | "empty_split";
-
-/** A single note about a degraded paragraph, for surfacing to callers/logs. */
-export interface DegradationNote {
-    /** Index into `paragraphResult.items` for the offending paragraph. */
-    itemIndex: number;
-    /** Human-readable type from the underlying `ContentItem`. */
-    itemType: "paragraph" | "header";
-    /** What failed. */
-    reason: DegradationReason;
-    /** Error message when `reason === "invariant_violation"`. */
-    message?: string;
-}
-
-/**
- * Summary of paragraphs on a page that fell back from precise sentence-level
- * mapping to a single whole-paragraph bbox. The producer omits the field
- * entirely when no paragraphs degraded — callers should use
- * `result.degradation?.count ?? 0` and `result.degradation?.notes ?? []`.
- *
- * The per-reason classification (`unmapped` / `invariant_violation` /
- * `empty_split`) lives on each `DegradationNote.reason`. `count` reflects
- * the total across all reasons; `notes` is bounded by
- * `MAX_DEGRADATION_NOTES` so per-reason histograms over `notes` may
- * undercount on pathological pages — `count` is always exact.
- */
-export interface DegradationSummary {
-    /** Total paragraphs that fell back to a whole-paragraph bbox. */
-    count: number;
-    /** Per-paragraph diagnostic notes (capped at `MAX_DEGRADATION_NOTES`). */
-    notes: DegradationNote[];
-}
-
 /** Result of running the full paragraph-scoped sentence pipeline on a page. */
-export interface PageSentenceBBoxResult {
+export interface PageSentenceResult {
     pageIndex: number;
     width: number;
     height: number;
-    /** Detected paragraphs with their sentences. */
-    paragraphs: ParagraphWithSentences[];
-    /**
-     * Flattened `SentenceBBox[]` across all paragraphs, in reading order.
-     * Convenient for callers that don't care which paragraph a sentence
-     * came from. Degraded paragraphs contribute a single whole-paragraph
-     * fallback bbox to this list.
-     */
-    sentences: SentenceBBox[];
-    /**
-     * Paragraphs that fell back from precise sentence-level mapping to a
-     * single whole-paragraph bbox (bbox-lookup miss, text/chars invariant
-     * violation, or empty splitter result — distinguished by
-     * `notes[i].reason`). Omitted when no paragraphs degraded; callers
-     * should read it as `result.degradation?.count ?? 0` /
-     * `result.degradation?.notes ?? []`.
-     */
+    items: DocItem[];
+    sentences: SentenceItem[];
     degradation?: DegradationSummary;
 }
 
@@ -182,8 +121,8 @@ const MAX_DEGRADATION_NOTES = 50;
  * float-equality misses; the rounding granularity (3 decimals) is far below
  * any real bbox-distinct-enough-to-matter threshold.
  */
-function bboxKey(b: RawBBox): string {
-    return `${b.x.toFixed(3)}|${b.y.toFixed(3)}|${b.w.toFixed(3)}|${b.h.toFixed(3)}`;
+function bboxKey(b: BoundingBox): string {
+    return `${b.l.toFixed(3)}|${b.t.toFixed(3)}|${b.r.toFixed(3)}|${b.b.toFixed(3)}|${b.origin}`;
 }
 
 export function buildDetailedLineLookup(
@@ -268,7 +207,8 @@ const SUPERSCRIPT_HEIGHT_RATIO = 0.85;
 function lineMedianCharHeight(line: RawLineDetailed): number {
     const heights: number[] = [];
     for (const c of line.chars) {
-        if (c.bbox.h > 0) heights.push(c.bbox.h);
+        const height = bboxHeight(c.bbox);
+        if (height > 0) heights.push(height);
     }
     if (heights.length === 0) return 0;
     heights.sort((a, b) => a - b);
@@ -316,8 +256,8 @@ export function buildParagraphText(
             const ch = line.chars[ci];
             const isSmall =
                 superscriptThreshold > 0 &&
-                ch.bbox.h > 0 &&
-                ch.bbox.h < superscriptThreshold;
+                bboxHeight(ch.bbox) > 0 &&
+                bboxHeight(ch.bbox) < superscriptThreshold;
             const isFootnoteMarker =
                 isSmall && FOOTNOTE_MARKER_CHARS.has(ch.c);
             if (
@@ -369,75 +309,60 @@ export function tryBuildParagraphText(
     }
 }
 
-/**
- * Build a degraded fallback `SentenceBBox` for a `ContentItem` whose
- * precise char-level mapping failed (unmapped or invariant violation).
- *
- * Produces one whole-paragraph rectangle using the `ContentItem.bbox`
- * (already merged across all lines by the paragraph detector) and the
- * `ContentItem.text` as the sentence text. Callers can tell this apart
- * from a precise result by looking at `PageSentenceBBoxResult.degradation`
- * (count + per-paragraph notes).
- */
-function fallbackSentenceFromItem(
+function itemLinesFromDetailed(
+    lines: RawLineDetailed[],
+    fallbackText: string,
+    fallbackBBox: BoundingBox,
+): ItemLine[] {
+    if (lines.length === 0) {
+        return [{ text: fallbackText, bbox: fallbackBBox }];
+    }
+    return lines.map((line) => ({
+        text: line.text,
+        bbox: line.bbox,
+        fontSize: line.font?.size,
+    }));
+}
+
+function itemFromContentItem(
     item: ContentItem,
     pageIndex: number,
-    paragraphIndex: number,
-): SentenceBBox {
-    const bbox: RawBBox = {
-        x: item.bbox.l,
-        y: item.bbox.t,
-        w: item.bbox.width,
-        h: item.bbox.height,
-    };
-    const sentence: SentenceBBox = {
+    index: number,
+    lines: ItemLine[],
+): TextItem | SectionHeaderItem {
+    const base: Omit<TextBearingItem, "kind"> = {
+        id: `p${pageIndex}:i${index}`,
         pageIndex,
-        paragraphIndex,
-        sentenceIndex: 0,
+        index,
+        bbox: item.bbox,
+        columnIndex: item.columnIndex,
         text: item.text,
-        bboxes: [bbox],
+        lines: lines.length > 0 ? lines : [{ text: item.text, bbox: item.bbox }],
+    };
+    if (item.type === "header") {
+        return { ...base, kind: "section_header", level: 1 };
+    }
+    return { ...base, kind: "text" };
+}
+
+function fallbackSentenceFromItem(item: TextItem): SentenceItem {
+    return {
+        parentId: item.id,
+        index: 0,
+        text: item.text,
+        bboxes: [item.bbox],
         fragments: [
             {
                 lineIndex: 0,
                 text: item.text,
-                bbox,
+                bbox: item.bbox,
             },
         ],
     };
-    if (item.type === "header") sentence.kind = "heading";
-    return sentence;
 }
 
 /**
- * Build a single `SentenceBBox` for a heading paragraph, using one fragment
- * per detailed line so multi-line headings keep precise per-line geometry.
- *
- * Headings are intentionally never run through the sentence splitter — one
- * heading paragraph always produces exactly one sentence.
- */
-function headingSentenceFromParagraph(
-    paragraphText: ParagraphText,
-    pageIndex: number,
-    paragraphIndex: number,
-): SentenceBBox {
-    const fragments = paragraphText.lines.map((line, lineIndex) => ({
-        lineIndex,
-        text: line.text,
-        bbox: line.bbox,
-    }));
-    return {
-        pageIndex,
-        paragraphIndex,
-        sentenceIndex: 0,
-        text: fragments.map((f) => f.text).join(" "),
-        bboxes: fragments.map((f) => f.bbox),
-        fragments,
-        kind: "heading",
-    };
-}
-
-/**
- * Resolve sentence ranges within a `ParagraphText` to `SentenceBBox[]`.
+ * Resolve sentence ranges within a `ParagraphText` to `SentenceItem[]`.
  *
  * Uses the same `sentenceToBoxes` core that `SentenceMapper` uses page-wide,
  * but with a paragraph-local line array so the `lineIndex` values refer to
@@ -445,10 +370,9 @@ function headingSentenceFromParagraph(
  */
 function resolveSentencesInParagraph(
     paragraphText: ParagraphText,
-    pageIndex: number,
-    paragraphIndex: number,
+    parentId: string,
     splitter: SentenceSplitter,
-): SentenceBBox[] {
+): SentenceItem[] {
     // Reuse the page-wide sentenceToBoxes by repackaging as a PageText view
     // of the paragraph. The line array is identical; the source indices are
     // already paragraph-local.
@@ -460,18 +384,62 @@ function resolveSentencesInParagraph(
     const ranges: SentenceRange[] = splitter(paragraphText.text, {
         source: paragraphText.source,
     });
-    const out: SentenceBBox[] = [];
+    const out: SentenceItem[] = [];
     for (const range of ranges) {
         const s = sentenceToBoxes(
             pageTextView,
             range,
-            pageIndex,
-            paragraphIndex,
+            0,
             out.length,
         );
-        if (s) out.push(s);
+        if (!s) continue;
+        out.push({
+            parentId,
+            index: out.length,
+            text: s.text,
+            bboxes: s.bboxes,
+            fragments: s.fragments,
+        });
     }
     return out;
+}
+
+function itemSupportsSentences(item: DocItem): item is TextItem {
+    return item.kind === "text";
+}
+
+function inverseRotateItem(
+    item: DocItem,
+    pageRotation: RotationAngle,
+    sourceWidth: number,
+    sourceHeight: number,
+): void {
+    item.bbox = inverseRotateBBox(item.bbox, pageRotation, sourceWidth, sourceHeight);
+    if ("lines" in item) {
+        for (const line of item.lines) {
+            line.bbox = inverseRotateBBox(line.bbox, pageRotation, sourceWidth, sourceHeight);
+        }
+    }
+    if (itemSupportsSentences(item) && item.sentences) {
+        for (const sentence of item.sentences) {
+            for (let i = 0; i < sentence.bboxes.length; i++) {
+                sentence.bboxes[i] = inverseRotateBBox(
+                    sentence.bboxes[i],
+                    pageRotation,
+                    sourceWidth,
+                    sourceHeight,
+                );
+            }
+            for (const fragment of sentence.fragments ?? []) {
+                fragment.bbox = inverseRotateBBox(
+                    fragment.bbox,
+                    pageRotation,
+                    sourceWidth,
+                    sourceHeight,
+                );
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -479,9 +447,9 @@ function resolveSentencesInParagraph(
 // ---------------------------------------------------------------------------
 
 /**
- * Options for `extractPageSentenceBBoxes`.
+ * Options for `extractPageSentences`.
  */
-export interface PageSentenceBBoxOptions {
+export interface PageSentenceOptions {
     /**
      * Splitter callback. Defaults to `simpleRegexSentenceSplit` at this
      * layer. Worker callers resolve a sentencex-backed splitter from a
@@ -541,13 +509,13 @@ export interface PageSentenceBBoxOptions {
  * detection, then produce paragraph-scoped sentence bboxes.
  *
  * This is the paragraph-scoped counterpart to
- * `SentenceMapper.extractSentenceBBoxes`. Either may be used; they do not
+ * `SentenceMapper.extractPageWideSentences`. Either may be used; they do not
  * interfere with one another.
  */
-export function extractPageSentenceBBoxes(
+export function extractPageSentences(
     detailedPageInput: RawPageDataDetailed,
-    options: PageSentenceBBoxOptions = {},
-): PageSentenceBBoxResult {
+    options: PageSentenceOptions = {},
+): PageSentenceResult {
     const splitter = options.splitter ?? simpleRegexSentenceSplit;
 
     // Rotation handshake. When the caller pre-rotated their raw page
@@ -595,14 +563,14 @@ export function extractPageSentenceBBoxes(
     const itemLines = paragraphResult.itemLines!;
     const detailedLookup = buildDetailedLineLookup(detailedPage);
 
-    const paragraphs: ParagraphWithSentences[] = [];
-    const flatSentences: SentenceBBox[] = [];
+    const items: DocItem[] = [];
+    const flatSentences: SentenceItem[] = [];
     let degradedCount = 0;
     const degradationNotes: DegradationNote[] = [];
     // Uncapped — `degradationNotes` itself is bounded by MAX_DEGRADATION_NOTES,
     // but the column-continuation pass needs to skip every degraded paragraph,
     // not just the first 50.
-    const degradedItems = new Set<number>();
+    const degradedItems = new Set<string>();
     const addNote = (note: DegradationNote) => {
         if (degradationNotes.length < MAX_DEGRADATION_NOTES) {
             degradationNotes.push(note);
@@ -618,23 +586,24 @@ export function extractPageSentenceBBoxes(
         );
 
         // Degradation path 1: paragraph could not be mapped back to any
-        // detailed line. We still want a usable SentenceBBox for the
+        // detailed line. We still want a usable SentenceItem for the
         // caller, so we emit a fallback covering the whole paragraph.
         if (detailedLines.length === 0) {
-            degradedCount++;
-            degradedItems.add(i);
-            addNote({ itemIndex: i, itemType: item.type, reason: "unmapped" });
-            const fallback = fallbackSentenceFromItem(item, detailedPage.pageIndex, i);
-            paragraphs.push({
+            const docItem = itemFromContentItem(
                 item,
-                paragraphText: {
-                    text: item.text,
-                    source: [],
-                    lines: [],
-                },
-                sentences: [fallback],
-            });
-            flatSentences.push(fallback);
+                detailedPage.pageIndex,
+                i,
+                [{ text: item.text, bbox: item.bbox }],
+            );
+            degradedCount++;
+            degradedItems.add(docItem.id);
+            addNote({ itemId: docItem.id, itemKind: docItem.kind, reason: "unmapped" });
+            if (docItem.kind === "text") {
+                const fallback = fallbackSentenceFromItem(docItem);
+                docItem.sentences = [fallback];
+                flatSentences.push(fallback);
+            }
+            items.push(docItem);
             continue;
         }
 
@@ -643,48 +612,48 @@ export function extractPageSentenceBBoxes(
         // crash the whole page.
         const built = tryBuildParagraphText(detailedLines);
         if (!built.ok) {
+            const docItem = itemFromContentItem(
+                item,
+                detailedPage.pageIndex,
+                i,
+                [{ text: item.text, bbox: item.bbox }],
+            );
             degradedCount++;
-            degradedItems.add(i);
+            degradedItems.add(docItem.id);
             addNote({
-                itemIndex: i,
-                itemType: item.type,
+                itemId: docItem.id,
+                itemKind: docItem.kind,
                 reason: "invariant_violation",
                 message: built.error,
             });
-            const fallback = fallbackSentenceFromItem(item, detailedPage.pageIndex, i);
-            paragraphs.push({
-                item,
-                paragraphText: {
-                    text: item.text,
-                    source: [],
-                    lines: detailedLines,
-                },
-                sentences: [fallback],
-            });
-            flatSentences.push(fallback);
+            if (docItem.kind === "text") {
+                const fallback = fallbackSentenceFromItem(docItem);
+                docItem.sentences = [fallback];
+                flatSentences.push(fallback);
+            }
+            items.push(docItem);
             continue;
         }
 
         const paragraphText = built.paragraphText;
+        const docItem = itemFromContentItem(
+            item,
+            detailedPage.pageIndex,
+            i,
+            itemLinesFromDetailed(detailedLines, item.text, item.bbox),
+        );
 
-        // Heading path: never split a heading. One heading paragraph always
-        // produces exactly one sentence, tagged kind: "heading".
-        if (item.type === "header") {
-            const heading = headingSentenceFromParagraph(
-                paragraphText,
-                detailedPage.pageIndex,
-                i,
-            );
-            paragraphs.push({ item, paragraphText, sentences: [heading] });
-            flatSentences.push(heading);
+        // Heading path: never split headings, and exclude them from the
+        // flattened sentence view.
+        if (docItem.kind === "section_header") {
+            items.push(docItem);
             continue;
         }
 
         // Happy path (body paragraph).
         const sentences = resolveSentencesInParagraph(
             paragraphText,
-            detailedPage.pageIndex,
-            i,
+            docItem.id,
             splitter,
         );
 
@@ -693,66 +662,37 @@ export function extractPageSentenceBBoxes(
         // addressable, but mark it degraded so the caller can tell.
         if (sentences.length === 0 && paragraphText.text.trim().length > 0) {
             degradedCount++;
-            degradedItems.add(i);
-            addNote({ itemIndex: i, itemType: item.type, reason: "empty_split" });
-            const fallback = fallbackSentenceFromItem(item, detailedPage.pageIndex, i);
-            paragraphs.push({ item, paragraphText, sentences: [fallback] });
+            degradedItems.add(docItem.id);
+            addNote({ itemId: docItem.id, itemKind: docItem.kind, reason: "empty_split" });
+            const fallback = fallbackSentenceFromItem(docItem);
+            docItem.sentences = [fallback];
             flatSentences.push(fallback);
+            items.push(docItem);
             continue;
         }
 
-        paragraphs.push({ item, paragraphText, sentences });
+        docItem.sentences = sentences;
         flatSentences.push(...sentences);
+        items.push(docItem);
     }
 
-    // Mutates `joinWithNext` on last sentences of paragraphs whose successor
-    // is the start of a sentence that crosses a column boundary. `paragraphs`
-    // and `flatSentences` share SentenceBBox object identity, so the flag is
+    // Mutates `joinWithNext` on last sentences of text items whose successor
+    // is the start of a sentence that crosses a column boundary. `items`
+    // and `flatSentences` share SentenceItem object identity, so the flag is
     // visible through both.
     //
     // Runs BEFORE the inverse-rotation step so the LTR geometric gate
     // in `nextStartsStrictlyRightOfPrev` (and similar geometric
     // heuristics) operates on upright bboxes — that's the frame those
     // gates were tuned for.
-    annotateColumnContinuations(paragraphs, splitter, degradedItems);
+    annotateColumnContinuations(items, splitter, degradedItems);
 
     // Inverse-rotate every emitted bbox back to MuPDF frame so
-    // downstream consumers (annotation rendering via
-    // `applyRotationToBoundingBox`, search scoring, etc.) see the
-    // same coord system regardless of whether the pipeline normalized
-    // internally. `paragraphs` and `flatSentences` share SentenceBBox
-    // identity — mutate once and both views update.
+    // downstream consumers see the same coord system regardless of whether
+    // the pipeline normalized internally.
     if (pageRotation !== 0) {
-        for (const p of paragraphs) {
-            // ContentItem.bbox first: fallbackSentenceFromItem would
-            // re-derive bboxes from it (already executed), but the
-            // outward-facing `item.bbox` itself must also be MuPDF-frame.
-            p.item.bbox = inverseRotateLineBBox(
-                p.item.bbox,
-                pageRotation,
-                sourceWidth,
-                sourceHeight,
-            );
-            for (const s of p.sentences) {
-                for (let i = 0; i < s.bboxes.length; i++) {
-                    s.bboxes[i] = inverseRotateRawBBox(
-                        s.bboxes[i],
-                        pageRotation,
-                        sourceWidth,
-                        sourceHeight,
-                    );
-                }
-                if (s.fragments) {
-                    for (const frag of s.fragments) {
-                        frag.bbox = inverseRotateRawBBox(
-                            frag.bbox,
-                            pageRotation,
-                            sourceWidth,
-                            sourceHeight,
-                        );
-                    }
-                }
-            }
+        for (const item of items) {
+            inverseRotateItem(item, pageRotation, sourceWidth, sourceHeight);
         }
     }
 
@@ -763,7 +703,7 @@ export function extractPageSentenceBBoxes(
         // pre-normalization page geometry.
         width: sourceWidth,
         height: sourceHeight,
-        paragraphs,
+        items,
         sentences: flatSentences,
         degradation:
             degradedCount > 0
@@ -773,7 +713,7 @@ export function extractPageSentenceBBoxes(
 }
 
 // ---------------------------------------------------------------------------
-// Column-continuation annotator (sets SentenceBBox.joinWithNext)
+// Column-continuation annotator (sets SentenceItem.joinWithNext)
 // ---------------------------------------------------------------------------
 
 function startsWithLowercase(text: string): boolean {
@@ -823,18 +763,17 @@ function hasUnclosedParen(text: string): boolean {
  * detection.
  */
 function nextStartsStrictlyRightOfPrev(
-    prev: SentenceBBox,
-    next: SentenceBBox,
+    prev: SentenceItem,
+    next: SentenceItem,
 ): boolean {
     if (prev.bboxes.length === 0 || next.bboxes.length === 0) return false;
     let prevMaxRight = -Infinity;
     for (const b of prev.bboxes) {
-        const right = b.x + b.w;
-        if (right > prevMaxRight) prevMaxRight = right;
+        if (b.r > prevMaxRight) prevMaxRight = b.r;
     }
     let nextMinLeft = Infinity;
     for (const b of next.bboxes) {
-        if (b.x < nextMinLeft) nextMinLeft = b.x;
+        if (b.l < nextMinLeft) nextMinLeft = b.l;
     }
     return nextMinLeft >= prevMaxRight;
 }
@@ -844,8 +783,8 @@ function nextStartsStrictlyRightOfPrev(
  * columns should be joined. Pure heuristic — no I/O.
  */
 function shouldJoinAcrossColumns(
-    prev: SentenceBBox,
-    next: SentenceBBox,
+    prev: SentenceItem,
+    next: SentenceItem,
     splitter: SentenceSplitter,
 ): boolean {
     const lastText = prev.text;
@@ -890,34 +829,36 @@ function shouldJoinAcrossColumns(
 }
 
 /**
- * Set `SentenceBBox.joinWithNext = true` on the last sentence of each
- * paragraph whose successor (in reading order) begins a sentence that
- * **continues** the previous one across a column boundary.
+ * Set `SentenceItem.joinWithNext = true` on the last sentence of each text
+ * item whose successor (in reading order) begins a sentence that continues
+ * the previous one across a column boundary.
  *
  * Conservative: requires strictly consecutive columns (`col` → `col + 1`),
- * both sides body paragraphs, last sentence non-terminated, first sentence
+ * both sides text items, last sentence non-terminated, first sentence
  * lowercase-starting, and the splitter must agree the combined text is one
  * sentence. Only sets the flag — never writes `false` (omitted ≡ false per
- * `SentenceBBox.joinWithNext` contract). Stale `true` values from prior calls
+ * `SentenceItem.joinWithNext` contract). Stale `true` values from prior calls
  * on the same array are cleared at evaluation time so the helper is
  * idempotent under repeated invocation.
  *
- * Mutates `paragraphs[i].sentences[last].joinWithNext` in place. Because the
- * caller's `flatSentences` array shares SentenceBBox object identity with
- * `paragraphs[i].sentences`, the flag is observable through both.
+ * Mutates `items[i].sentences[last].joinWithNext` in place. Because the
+ * caller's flat view shares SentenceItem object identity with
+ * `items[i].sentences`, the flag is observable through both.
  *
- * @internal Public surface is `extractPageSentenceBBoxes`; this helper is
+ * @internal Public surface is `extractPageSentences`; this helper is
  * exported for direct unit testing.
  */
 export function annotateColumnContinuations(
-    paragraphs: ParagraphWithSentences[],
+    items: DocItem[],
     splitter: SentenceSplitter,
-    degradedItems: ReadonlySet<number>,
+    degradedItems: ReadonlySet<string>,
 ): void {
-    for (let i = 0; i < paragraphs.length - 1; i++) {
-        const cur = paragraphs[i];
-        const next = paragraphs[i + 1];
-        const lastSentence = cur.sentences[cur.sentences.length - 1];
+    for (let i = 0; i < items.length - 1; i++) {
+        const cur = items[i];
+        const next = items[i + 1];
+        const curSentences = itemSupportsSentences(cur) ? cur.sentences ?? [] : [];
+        const nextSentences = itemSupportsSentences(next) ? next.sentences ?? [] : [];
+        const lastSentence = curSentences[curSentences.length - 1];
 
         // Always clear any stale flag before re-evaluating; only set on
         // success below. Prevents leftover `true` from a prior call on a
@@ -925,15 +866,13 @@ export function annotateColumnContinuations(
         if (lastSentence) delete lastSentence.joinWithNext;
 
         if (!lastSentence) continue;
-        if (cur.item.type !== "paragraph" || next.item.type !== "paragraph") {
+        if (cur.kind !== "text" || next.kind !== "text") {
             continue;
         }
-        if (next.item.columnIndex !== cur.item.columnIndex + 1) continue;
-        if (degradedItems.has(i) || degradedItems.has(i + 1)) continue;
-        if (lastSentence.kind === "heading") continue;
-        const firstSentence = next.sentences[0];
+        if (next.columnIndex !== cur.columnIndex + 1) continue;
+        if (degradedItems.has(cur.id) || degradedItems.has(next.id)) continue;
+        const firstSentence = nextSentences[0];
         if (!firstSentence) continue;
-        if (firstSentence.kind === "heading") continue;
 
         if (shouldJoinAcrossColumns(lastSentence, firstSentence, splitter)) {
             lastSentence.joinWithNext = true;
@@ -945,56 +884,44 @@ export function annotateColumnContinuations(
 // Feasibility report — mirrors SentenceMapper.buildFeasibilityReport
 // ---------------------------------------------------------------------------
 
-export interface ParagraphFeasibilityReport {
+export interface PageSentenceFeasibilityReport {
     pageIndex: number;
-    totalParagraphs: number;
-    totalHeaders: number;
-    mappedParagraphs: number;
+    itemCount: number;
+    itemsByKind: Partial<Record<DocItem["kind"], number>>;
     /**
-     * Degradation summary copied from `extractPageSentenceBBoxes`. Omitted
-     * when no paragraphs degraded.
+     * Degradation summary copied from `extractPageSentences`. Omitted
+     * when no items degraded.
      */
     degradation?: DegradationSummary;
     totalSentences: number;
     multiFragmentSentences: number;
     invariantHolds: boolean;
     allBBoxesInPage: boolean;
-    /** First N paragraphs with their sentence summaries, for inspection. */
-    paragraphs: Array<{
+    /** First N items with their sentence summaries, for inspection. */
+    items: Array<{
         index: number;
-        itemType: "paragraph" | "header";
+        itemKind: DocItem["kind"];
         numLines: number;
-        paragraphText: string;
+        text: string;
         numSentences: number;
         sentences: Array<{
             text: string;
             numBBoxes: number;
-            unionBBox: RawBBox;
+            unionBBox: BoundingBox;
         }>;
     }>;
 }
 
-function unionBBoxes(bboxes: RawBBox[]): RawBBox {
-    if (bboxes.length === 0) return { x: 0, y: 0, w: 0, h: 0 };
-    let minX = Infinity;
-    let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
-    for (const b of bboxes) {
-        if (b.x < minX) minX = b.x;
-        if (b.y < minY) minY = b.y;
-        if (b.x + b.w > maxX) maxX = b.x + b.w;
-        if (b.y + b.h > maxY) maxY = b.y + b.h;
-    }
-    return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+function unionBBoxes(bboxes: BoundingBox[]): BoundingBox {
+    return mergeBoxes(bboxes);
 }
 
-export function buildParagraphFeasibilityReport(
+export function buildPageSentenceFeasibilityReport(
     detailedPage: RawPageDataDetailed,
-    options: PageSentenceBBoxOptions = {},
+    options: PageSentenceOptions = {},
     maxParagraphs = 10,
     maxSentencesPerParagraph = 5,
-): ParagraphFeasibilityReport {
+): PageSentenceFeasibilityReport {
     let invariantHolds = true;
     try {
         // Proactively validate text/chars lockstep — buildParagraphText will
@@ -1013,7 +940,7 @@ export function buildParagraphFeasibilityReport(
         invariantHolds = false;
     }
 
-    const result = extractPageSentenceBBoxes(detailedPage, options);
+    const result = extractPageSentences(detailedPage, options);
 
     let multi = 0;
     let allBBoxesInPage = true;
@@ -1022,10 +949,10 @@ export function buildParagraphFeasibilityReport(
         if (s.bboxes.length > 1) multi++;
         for (const b of s.bboxes) {
             if (
-                b.x < -tolerance ||
-                b.y < -tolerance ||
-                b.x + b.w > detailedPage.width + tolerance ||
-                b.y + b.h > detailedPage.height + tolerance
+                b.l < -tolerance ||
+                b.t < -tolerance ||
+                b.r > detailedPage.width + tolerance ||
+                b.b > detailedPage.height + tolerance
             ) {
                 allBBoxesInPage = false;
                 break;
@@ -1034,35 +961,39 @@ export function buildParagraphFeasibilityReport(
         if (!allBBoxesInPage) break;
     }
 
-    const totalHeaders = result.paragraphs.filter((p) => p.item.type === "header").length;
-    const totalParagraphs = result.paragraphs.length - totalHeaders;
+    const itemsByKind: Partial<Record<DocItem["kind"], number>> = {};
+    for (const item of result.items) {
+        itemsByKind[item.kind] = (itemsByKind[item.kind] ?? 0) + 1;
+    }
 
-    const previews = result.paragraphs.slice(0, maxParagraphs).map((p, idx) => ({
-        index: idx,
-        itemType: p.item.type,
-        numLines: p.paragraphText.lines.length,
-        paragraphText:
-            p.paragraphText.text.length > 120
-                ? p.paragraphText.text.slice(0, 120) + "…"
-                : p.paragraphText.text,
-        numSentences: p.sentences.length,
-        sentences: p.sentences.slice(0, maxSentencesPerParagraph).map((s) => ({
-            text: s.text.length > 80 ? s.text.slice(0, 80) + "…" : s.text,
-            numBBoxes: s.bboxes.length,
-            unionBBox: unionBBoxes(s.bboxes),
-        })),
-    }));
+    const previews = result.items.slice(0, maxParagraphs).map((item, idx) => {
+        const sentences = itemSupportsSentences(item) ? item.sentences ?? [] : [];
+        return {
+            index: idx,
+            itemKind: item.kind,
+            numLines: "lines" in item ? item.lines.length : 0,
+            text:
+                "text" in item && item.text.length > 120
+                    ? item.text.slice(0, 120) + "…"
+                    : "text" in item ? item.text : "",
+            numSentences: sentences.length,
+            sentences: sentences.slice(0, maxSentencesPerParagraph).map((s) => ({
+                text: s.text.length > 80 ? s.text.slice(0, 80) + "…" : s.text,
+                numBBoxes: s.bboxes.length,
+                unionBBox: unionBBoxes(s.bboxes),
+            })),
+        };
+    });
 
     return {
         pageIndex: detailedPage.pageIndex,
-        totalParagraphs,
-        totalHeaders,
-        mappedParagraphs: result.paragraphs.length,
+        itemCount: result.items.length,
+        itemsByKind,
         degradation: result.degradation,
         totalSentences: result.sentences.length,
         multiFragmentSentences: multi,
         invariantHolds,
         allBBoxesInPage,
-        paragraphs: previews,
+        items: previews,
     };
 }

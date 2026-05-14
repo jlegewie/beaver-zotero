@@ -4,7 +4,7 @@
  *
  * The key regression check: the facade dispatches exactly one `extract`
  * worker op — NOT a fan-out of `getPageCount` /
- * `extractRawPageDetailed` / `extractSentenceBBoxesDebug` calls. Also
+ * `extractRawPageDetailed` / `extractSentenceDebug` calls. Also
  * verifies that the public `structured.splitter` / `structured.language`
  * args are translated to a serializable `splitterConfig` on the wire,
  * including the "explicit splitter wins over language" precedence rule.
@@ -74,8 +74,7 @@ const FAKE_EXTRACTION_RESULT = {
             height: 792,
             content: '## Title\n\nA sentence.',
             columns: [],
-            lines: [],
-            paragraphs: [],
+            items: [],
             sentences: [],
         },
     ],
@@ -88,7 +87,7 @@ const FAKE_EXTRACTION_RESULT = {
     fullText: '## Title\n\nA sentence.',
     metadata: {
         extractedAt: new Date().toISOString(),
-        version: '2.2.0',
+        version: '3.0.0',
         settings: {},
         engine: 'structured',
         timings: {
@@ -137,7 +136,7 @@ describe('PDFExtractor.extract({ mode: "structured" }) — single worker round-t
         );
         expect(ops).not.toContain('getPageCount');
         expect(ops).not.toContain('extractRawPageDetailed');
-        expect(ops).not.toContain('extractSentenceBBoxesDebug');
+        expect(ops).not.toContain('extractSentenceDebug');
     });
 
     it('defaults splitter to { type: "sentencex", language: undefined } when none provided', async () => {
@@ -271,8 +270,9 @@ describe('PDFExtractor.extract({ mode: "structured" }) — single worker round-t
         const result = await promise;
 
         expect(result.metadata.engine).toBe('structured');
-        expect(result.metadata.version).toBe('2.2.0');
+        expect(result.metadata.version).toBe('3.0.0');
+        expect(result.pages[0]).toHaveProperty('items');
         expect(result.pages[0]).toHaveProperty('sentences');
-        expect(result.pages[0]).toHaveProperty('paragraphs');
+        expect(result.pages[0]).not.toHaveProperty('paragraphs');
     });
 });

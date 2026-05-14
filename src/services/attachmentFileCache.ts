@@ -26,6 +26,8 @@ import { logger } from '../utils/logger';
  *         with line + paragraph detection, headers as `## ...`,
  *         paragraph-aware breaks).
  */
+// Attachment text cache stores rendered page text only; structural extraction
+// metadata (items/sentences/bboxes) is not cached here.
 export const EXTRACTION_VERSION = '3';
 
 /** Maximum entries in the in-memory metadata cache. */

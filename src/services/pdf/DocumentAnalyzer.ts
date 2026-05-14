@@ -9,15 +9,16 @@
  */
 
 import type {
+    BoundingBox,
     RawPageData,
     RawBlock,
-    RawBBox,
     OCRDetectionOptions,
     OCRDetectionResult,
     PageOCRAnalysis,
     OCRIssueReason,
 } from "./types";
 import { DEFAULT_OCR_DETECTION_OPTIONS, bboxToTuple } from "./types";
+import { bboxHeight, bboxWidth } from "./types";
 
 /**
  * Minimal interface that DocumentAnalyzer needs — implemented by a
@@ -149,7 +150,7 @@ function calculateIntersectionArea(
  * - Excessive overlapping between text lines
  */
 function validateBoundingBoxes(
-    lineBBoxes: RawBBox[],
+    lineBBoxes: BoundingBox[],
     pageWidth: number,
     pageHeight: number,
     opts: Required<OCRDetectionOptions>
@@ -241,7 +242,7 @@ function checkImageCoverage(
 
     for (const block of imageBlocks) {
         if (block.type === "image" && block.bbox) {
-            const imageArea = block.bbox.w * block.bbox.h;
+            const imageArea = bboxWidth(block.bbox) * bboxHeight(block.bbox);
             const coverageRatio = imageArea / pageArea;
 
             if (coverageRatio >= opts.imageCoverageThreshold) {
@@ -299,7 +300,7 @@ function analyzePage(
 
     // Collect all text and line bounding boxes
     let pageText = "";
-    const lineBBoxes: RawBBox[] = [];
+    const lineBBoxes: BoundingBox[] = [];
 
     for (const block of textBlocks) {
         if (block.lines) {

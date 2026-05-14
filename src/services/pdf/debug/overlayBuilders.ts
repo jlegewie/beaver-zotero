@@ -1,7 +1,7 @@
 /**
  * Extraction Overlay — shared bbox source-of-truth.
  *
- * Computes per-level bounding-box overlays (columns / lines / paragraphs /
+ * Computes per-level bounding-box overlays (columns / lines / items /
  * sentences / margins) for a single PDF page, returning plain rect data
  * in MuPDF top-left point coordinates. No DOM, no Zotero reader, no
  * annotations.
@@ -16,7 +16,7 @@
  *      `node/overlayPng.ts` (sharp + SVG composite) for the CLI overlay
  *      command.
  *
- * Filter alignment: columns / lines / paragraphs / sentences all route
+ * Filter alignment: columns / lines / items / sentences all route
  * through `detectFilteredParagraphs`, so every overlay reflects what the
  * production sentence pipeline sees (cross-page smart margin removal,
  * document-wide style profile). `margins` deliberately skips that filter
@@ -26,22 +26,22 @@
  * barrel) so this module can be safely consumed from the CLI without
  * pulling `MuPDFWorkerClient` into Node code.
  */
-import { lineBBoxToRect } from "../LineDetector";
 import { MarginFilter } from "../MarginFilter";
-import { DEFAULT_MARGINS, DEFAULT_MARGIN_ZONE } from "../types";
-import type { Rect } from "../ColumnDetector";
-import type { SentenceBBox } from "../types";
+import { bboxFromXYWH, DEFAULT_MARGINS, DEFAULT_MARGIN_ZONE } from "../types";
 import type {
+    BoundingBox,
+    DocItem,
     LayoutAnalysisResult,
     MarginPosition,
     ProcessedPage,
+    SentenceItem,
 } from "../types";
-import type { PageSentenceBBoxResult } from "../ParagraphSentenceMapper";
+import type { PageSentenceResult } from "../ParagraphSentenceMapper";
 
 export type OverlayLevel =
     | "columns"
     | "lines"
-    | "paragraphs"
+    | "items"
     | "sentences"
     | "margins";
 
@@ -50,6 +50,17 @@ export type OverlayLevel =
 export const OVERLAY_COLORS = {
     column: "#00bbff",
     line: "#ff9500",
+    itemText: "#34c759",
+    itemSectionHeader: "#af52de",
+    itemFootnote: "#5ac8fa",
+    itemCaption: "#ff9500",
+    itemList: "#30d158",
+    itemMargin: "#d1d1d6",
+    itemFormula: "#ff9f0a",
+    itemTable: "#007aff",
+    itemPicture: "#bf5af2",
+    // Back-compat aliases for callers/tests that still talk in terms of
+    // paragraph/header overlays.
     paragraph: "#34c759",
     header: "#af52de",
     // Adjacent sentences alternate between these so they're easy to tell
@@ -67,6 +78,34 @@ export const OVERLAY_COLORS = {
     marginKeptInZone: "#ffcc00",
 } as const;
 
+const ITEM_KIND_STYLE: Record<DocItem["kind"], { color: string; prefix: string }> = {
+    text: { color: OVERLAY_COLORS.itemText, prefix: "P" },
+    section_header: { color: OVERLAY_COLORS.itemSectionHeader, prefix: "H" },
+    footnote: { color: OVERLAY_COLORS.itemFootnote, prefix: "F" },
+    caption: { color: OVERLAY_COLORS.itemCaption, prefix: "C" },
+    list_item: { color: OVERLAY_COLORS.itemList, prefix: "L" },
+    margin: { color: OVERLAY_COLORS.itemMargin, prefix: "G" },
+    formula: { color: OVERLAY_COLORS.itemFormula, prefix: "M" },
+    table: { color: OVERLAY_COLORS.itemTable, prefix: "T" },
+    picture: { color: OVERLAY_COLORS.itemPicture, prefix: "I" },
+};
+
+function itemStyle(item: DocItem): { color: string; prefix: string } {
+    return ITEM_KIND_STYLE[item.kind];
+}
+
+function itemText(item: DocItem): string {
+    return "text" in item ? item.text : item.kind;
+}
+
+function itemSentences(item: DocItem): SentenceItem[] {
+    return "sentences" in item ? item.sentences ?? [] : [];
+}
+
+function itemHasDrawableSentence(item: DocItem): boolean {
+    return itemSentences(item).some((sentence) => sentence.bboxes.length > 0);
+}
+
 /**
  * One rectangle to draw on top of a rendered page.
  *
@@ -76,7 +115,7 @@ export const OVERLAY_COLORS = {
  */
 export interface OverlayRect {
     /** Bbox in MuPDF top-left point coordinates. */
-    rect: Rect;
+    rect: BoundingBox;
     /** Hex fill color. */
     color: string;
     /** Optional short label drawn near the rect (group label only). */
@@ -111,7 +150,7 @@ export interface OverlayResult {
     pageWidth: number;
     /** Page height in MuPDF points. */
     pageHeight: number;
-    /** Number of logical groups (columns, lines, paragraphs, or sentences). */
+    /** Number of logical groups (columns, lines, items, or sentences). */
     groupCount: number;
     /** Flat list of rects, ordered by group then by reading order. */
     rects: OverlayRect[];
@@ -127,7 +166,7 @@ export interface OverlayResult {
 // ---------------------------------------------------------------------------
 
 /**
- * Build a sentence overlay from a `PageSentenceBBoxResult`.
+ * Build a sentence overlay from a `PageSentenceResult`.
  *
  * Shared rect-construction loop used by the `ProcessedPage`-based
  * visualizer wrapper above and by fixture capture (which still needs
@@ -139,113 +178,103 @@ export interface OverlayResult {
  * (the production-mode visualizer wrapper) omit it.
  */
 export function buildSentenceOverlayFromResult(
-    result: PageSentenceBBoxResult,
+    result: PageSentenceResult,
     analysisPagesScanned?: number,
 ): OverlayResult {
-    const degradedItemIndices = new Set(
-        (result.degradation?.notes ?? []).map((n) => n.itemIndex),
-    );
-    const degradedSentenceIndices = computeDegradedSentenceIndices(
-        result.paragraphs,
-        degradedItemIndices,
+    const degradedItemIds = new Set(
+        (result.degradation?.notes ?? []).map((n) => n.itemId),
     );
 
     const rects: OverlayRect[] = [];
-    let headingCount = 0;
+    let groupIdx = 0;
     let bodyIdx = 0;
-    result.sentences.forEach((sentence, sentenceIdx) => {
-        if (sentence.bboxes.length === 0) return;
-        const isDegraded = degradedSentenceIndices.has(sentenceIdx);
-        const isHeading = sentence.kind === "heading";
+    let sentenceLabelIdx = 0;
+    const sentenceByParent = new Map<string, SentenceItem[]>();
+    for (const sentence of result.sentences) {
+        const list = sentenceByParent.get(sentence.parentId);
+        if (list) list.push(sentence);
+        else sentenceByParent.set(sentence.parentId, [sentence]);
+    }
 
-        // Priority: degraded (gray) > heading (purple) > body (alternating).
-        // Body sentences alternate using their own counter so a heading
-        // sandwiched between two body sentences does not break the
-        // pink/yellow alternation.
-        let color: string;
-        let label: string;
-        if (isDegraded) {
-            color = OVERLAY_COLORS.sentenceDegraded;
-            label = `S${sentenceIdx + 1}`;
-        } else if (isHeading) {
-            headingCount++;
-            color = OVERLAY_COLORS.header;
-            label = `H${headingCount}`;
-        } else {
-            color = OVERLAY_COLORS.sentence[bodyIdx % OVERLAY_COLORS.sentence.length];
-            label = `S${sentenceIdx + 1}`;
-            bodyIdx++;
+    for (const item of result.items) {
+        const itemSentences = sentenceByParent.get(item.id) ?? [];
+        if (itemSentences.some((sentence) => sentence.bboxes.length > 0)) {
+            for (const sentence of itemSentences) {
+                if (sentence.bboxes.length === 0) continue;
+                const isDegraded = degradedItemIds.has(sentence.parentId);
+
+                let color: string;
+                let label: string;
+                if (isDegraded) {
+                    color = OVERLAY_COLORS.sentenceDegraded;
+                    label = `S${sentenceLabelIdx + 1}`;
+                } else {
+                    color = OVERLAY_COLORS.sentence[bodyIdx % OVERLAY_COLORS.sentence.length];
+                    label = `S${sentenceLabelIdx + 1}`;
+                    bodyIdx++;
+                }
+                sentenceLabelIdx++;
+                // Surface the continuation hint visually so heuristic mistakes are
+                // obvious in the overlay PNG. Omitted means false on SentenceItem.
+                if (sentence.joinWithNext) {
+                    label = `${label}↪`;
+                }
+
+                const joinTail = sentence.joinWithNext ? " ↪" : "";
+                const annotationText =
+                    `page ${result.pageIndex + 1}, item ${sentence.parentId}, s${sentence.index + 1}${joinTail}\n` +
+                    sentence.text;
+
+                sentence.bboxes.forEach((bb, fragIdx) => {
+                    rects.push({
+                        rect: bb,
+                        color,
+                        // Only the first fragment carries the label so the overlay
+                        // isn't visually noisy on multi-line sentences.
+                        label: fragIdx === 0 ? label : undefined,
+                        annotationText: fragIdx === 0 ? annotationText : undefined,
+                        group: groupIdx,
+                        degraded: isDegraded,
+                    });
+                });
+                groupIdx++;
+            }
+            continue;
         }
-        // Surface the continuation hint visually so heuristic mistakes are
-        // obvious in the overlay PNG. Omitted ≡ false on SentenceBBox.
-        if (sentence.joinWithNext) {
-            label = `${label}↪`;
-        }
 
-        const joinTail = sentence.joinWithNext ? " ↪" : "";
-        const annotationText =
-            `page ${result.pageIndex + 1}, para ${sentence.paragraphIndex + 1}, s${sentence.sentenceIndex + 1}${joinTail}\n` +
-            sentence.text;
-
-        sentence.bboxes.forEach((bb, fragIdx) => {
-            rects.push({
-                rect: { x: bb.x, y: bb.y, w: bb.w, h: bb.h },
-                color,
-                // Only the first fragment carries the label so the overlay
-                // isn't visually noisy on multi-line sentences/headings.
-                label: fragIdx === 0 ? label : undefined,
-                annotationText: fragIdx === 0 ? annotationText : undefined,
-                group: sentenceIdx,
-                degraded: isDegraded,
-            });
+        // Lowest-level overlay fallback: items that don't expose sentence
+        // geometry (headers today; reserved unsplit kinds in future) still
+        // need to be visible in the sentence view.
+        const style = itemStyle(item);
+        const label = `${style.prefix}${item.index + 1}`;
+        rects.push({
+            rect: item.bbox,
+            color: style.color,
+            label,
+            annotationText:
+                `page ${result.pageIndex + 1}, item ${item.id}, ${item.kind}\n` +
+                itemText(item),
+            group: groupIdx,
         });
-    });
+        groupIdx++;
+    }
 
     return {
         level: "sentences",
         pageIndex: result.pageIndex,
         pageWidth: result.width,
         pageHeight: result.height,
-        groupCount: result.sentences.length,
+        groupCount: groupIdx,
         rects,
         stats: {
             sentences: result.sentences.length,
-            headings: headingCount,
-            paragraphs: result.paragraphs.length,
+            headings: result.items.filter((item) => item.kind === "section_header").length,
+            fallbackItems: result.items.filter((item) => !itemHasDrawableSentence(item)).length,
+            paragraphs: result.items.filter((item) => item.kind === "text").length,
             degradation: result.degradation?.count ?? 0,
             analysisPagesScanned,
         },
     };
-}
-
-/**
- * Find which sentences in the flat list are degradation fallbacks.
- *
- * The fallback path emits exactly one sentence per degraded paragraph,
- * whose text equals the paragraph's whole text. We walk paragraphs in
- * lockstep with their sentences and tag the first sentence of any
- * paragraph that matches that pattern. This mirrors the heuristic in
- * `extractionVisualizer.ts` — a more direct mapping would require the
- * mapper to expose a per-sentence "isFallback" flag.
- */
-function computeDegradedSentenceIndices(
-    paragraphs: Array<{ item: { text: string }; sentences: SentenceBBox[] }>,
-    degradedItemIndices: Set<number>,
-): Set<number> {
-    const out = new Set<number>();
-    if (degradedItemIndices.size === 0) return out;
-    let flatIdx = 0;
-    for (const [paragraphIdx, pws] of paragraphs.entries()) {
-        if (
-            degradedItemIndices.has(paragraphIdx) &&
-            pws.sentences.length === 1 &&
-            pws.sentences[0].text === pws.item.text
-        ) {
-            out.add(flatIdx);
-        }
-        flatIdx += pws.sentences.length;
-    }
-    return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -262,13 +291,13 @@ function computeDegradedSentenceIndices(
 
 /**
  * Column overlay from a structured-mode `ProcessedPage`. Reads
- * `page.columns` (`ColumnBBox[]`, `{l,t,r,b}`) and converts to the
- * `Rect` shape (`{x,y,w,h}`) the overlay uses.
+ * `page.columns` (`BoundingBox[]`, `{l,t,r,b,origin}`) and emits them in
+ * the same top-left page frame used by production extraction.
  */
 export function buildColumnOverlayFromPage(page: ProcessedPage): OverlayResult {
-    const columns = page.columns ?? [];
+    const columns = page.columns;
     const rects: OverlayRect[] = columns.map((col, i) => ({
-        rect: { x: col.l, y: col.t, w: col.r - col.l, h: col.b - col.t },
+        rect: col,
         color: OVERLAY_COLORS.column,
         label: `C${i + 1}`,
         group: i,
@@ -287,19 +316,18 @@ export function buildColumnOverlayFromPage(page: ProcessedPage): OverlayResult {
 }
 
 /**
- * Line overlay from a structured-mode `ProcessedPage`. Reads `page.lines`
- * (flat `ExtractedLine[]` already in reading order; column grouping
- * survives via `columnIndex`).
+ * Line overlay from a structured-mode `ProcessedPage`. Lines are flattened
+ * from `page.items[].lines` in item reading order.
  */
 export function buildLineOverlayFromPage(page: ProcessedPage): OverlayResult {
-    const lines = page.lines ?? [];
+    const lines = page.items.flatMap((item) => ("lines" in item ? item.lines : []));
     const rects: OverlayRect[] = lines.map((line, i) => ({
-        rect: lineBBoxToRect(line.bbox),
+        rect: line.bbox,
         color: OVERLAY_COLORS.line,
         label: `L${i + 1}`,
         group: i,
     }));
-    const distinctColumns = new Set(lines.map((l) => l.columnIndex)).size;
+    const distinctColumns = new Set(page.items.map((item) => item.columnIndex)).size;
     return {
         level: "lines",
         pageIndex: page.index,
@@ -315,43 +343,49 @@ export function buildLineOverlayFromPage(page: ProcessedPage): OverlayResult {
 }
 
 /**
- * Paragraph overlay from a structured-mode `ProcessedPage`. Reads
- * `page.paragraphs[i].item` (the `ContentItem` carrying `type` /
- * `bbox` / `idx`).
+ * Item overlay from a structured-mode `ProcessedPage`.
  */
-export function buildParagraphOverlayFromPage(
+export function buildItemOverlayFromPage(
     page: ProcessedPage,
+    kindFilter?: DocItem["kind"][],
 ): OverlayResult {
-    const paragraphs = page.paragraphs ?? [];
+    const allowed = kindFilter ? new Set(kindFilter) : null;
+    const items = allowed
+        ? page.items.filter((item) => allowed.has(item.kind))
+        : page.items;
     let headerCount = 0;
-    let bodyCount = 0;
-    const rects: OverlayRect[] = paragraphs.map((pws, i) => {
-        const item = pws.item;
-        const isHeader = item.type === "header";
-        if (isHeader) headerCount++;
-        else bodyCount++;
+    let textCount = 0;
+    const kindCounts: Partial<Record<DocItem["kind"], number>> = {};
+    const rects: OverlayRect[] = items.map((item, i) => {
+        const style = itemStyle(item);
+        kindCounts[item.kind] = (kindCounts[item.kind] ?? 0) + 1;
+        if (item.kind === "section_header") headerCount++;
+        if (item.kind === "text") textCount++;
         return {
-            rect: {
-                x: item.bbox.l,
-                y: item.bbox.t,
-                w: item.bbox.width,
-                h: item.bbox.height,
-            },
-            color: isHeader ? OVERLAY_COLORS.header : OVERLAY_COLORS.paragraph,
-            label: `${isHeader ? "H" : "P"}${item.idx + 1}`,
+            rect: item.bbox,
+            color: style.color,
+            label: `${style.prefix}${item.index + 1}`,
             group: i,
         };
     });
     return {
-        level: "paragraphs",
+        level: "items",
         pageIndex: page.index,
         pageWidth: page.width,
         pageHeight: page.height,
         groupCount: rects.length,
         rects,
         stats: {
-            paragraphs: bodyCount,
+            paragraphs: textCount,
             headers: headerCount,
+            textItems: textCount,
+            footnotes: kindCounts.footnote ?? 0,
+            captions: kindCounts.caption ?? 0,
+            listItems: kindCounts.list_item ?? 0,
+            marginItems: kindCounts.margin ?? 0,
+            formulas: kindCounts.formula ?? 0,
+            tables: kindCounts.table ?? 0,
+            pictures: kindCounts.picture ?? 0,
         },
     };
 }
@@ -361,11 +395,11 @@ export function buildParagraphOverlayFromPage(
  * over `buildSentenceOverlayFromResult`.
  */
 export function buildSentenceOverlayFromPage(page: ProcessedPage): OverlayResult {
-    const projected: PageSentenceBBoxResult = {
+    const projected: PageSentenceResult = {
         pageIndex: page.index,
         width: page.width,
         height: page.height,
-        paragraphs: page.paragraphs ?? [],
+        items: page.items,
         sentences: page.sentences ?? [],
         degradation: page.degradation,
     };
@@ -412,32 +446,34 @@ export function buildMarginsOverlayFromAnalysis(
     // Margin zones — drawn first so lines render on top.
     const buildZoneRects = (
         m: typeof DEFAULT_MARGIN_ZONE,
-    ): Array<{ pos: MarginPosition; rect: Rect }> => [
+    ): Array<{ pos: MarginPosition; rect: BoundingBox }> => [
         {
             pos: "top",
-            rect: { x: 0, y: 0, w: targetPage.width, h: m.top },
+            rect: bboxFromXYWH(0, 0, targetPage.width, m.top, "top-left"),
         },
         {
             pos: "bottom",
-            rect: {
-                x: 0,
-                y: targetPage.height - m.bottom,
-                w: targetPage.width,
-                h: m.bottom,
-            },
+            rect: bboxFromXYWH(
+                0,
+                targetPage.height - m.bottom,
+                targetPage.width,
+                m.bottom,
+                "top-left",
+            ),
         },
         {
             pos: "left",
-            rect: { x: 0, y: 0, w: m.left, h: targetPage.height },
+            rect: bboxFromXYWH(0, 0, m.left, targetPage.height, "top-left"),
         },
         {
             pos: "right",
-            rect: {
-                x: targetPage.width - m.right,
-                y: 0,
-                w: m.right,
-                h: targetPage.height,
-            },
+            rect: bboxFromXYWH(
+                targetPage.width - m.right,
+                0,
+                m.right,
+                targetPage.height,
+                "top-left",
+            ),
         },
     ];
     for (const z of buildZoneRects(marginZone)) {
@@ -505,12 +541,7 @@ export function buildMarginsOverlayFromAnalysis(
             }
 
             rects.push({
-                rect: {
-                    x: line.bbox.x,
-                    y: line.bbox.y,
-                    w: line.bbox.w,
-                    h: line.bbox.h,
-                },
+                rect: line.bbox,
                 color,
                 label,
                 group: groupIdx++,

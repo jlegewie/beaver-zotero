@@ -131,7 +131,7 @@ react/utils/
 | **PageExtractor**            | Orchestration                                   | All above                              | `ProcessedPage`                 |
 | **SearchScorer**             | Search scoring                                  | `RawPageData[]`, hits                  | `ScoredPageSearchResult[]`      |
 | **FilteredParagraphPipeline**| Margin → column → line → paragraph fused        | `RawPageData`, detailed page, settings | `FilteredParagraphResult`       |
-| **ParagraphSentenceMapper**  | Paragraph + splitter → sentence bboxes          | filtered paragraphs, splitter          | `PageSentenceBBoxResult`        |
+| **ParagraphSentenceMapper**  | Item + splitter → sentence bboxes               | filtered items, splitter               | `PageSentenceResult`            |
 
 ---
 
@@ -147,7 +147,7 @@ react/utils/
 (0,0) ────────► X
   │
   │  [Text Block]
-  │     x, y, w, h
+  │     l, t, r, b
   ▼
   Y
 ```
@@ -166,11 +166,11 @@ react/utils/
 **Conversion formulas** (see `extractionVisualizer.ts`):
 
 ```typescript
-// MuPDF {x, y, w, h} → Zotero [x1, y1, x2, y2]
-x1 = rect.x;
-x2 = rect.x + rect.w;
-y1 = pageHeight - (rect.y + rect.h); // Bottom in Zotero coords
-y2 = pageHeight - rect.y; // Top in Zotero coords
+// MuPDF top-left BoundingBox → Zotero [x1, y1, x2, y2]
+x1 = bbox.l;
+x2 = bbox.r;
+y1 = pageHeight - bbox.b; // Bottom in Zotero coords
+y2 = pageHeight - bbox.t; // Top in Zotero coords
 ```
 
 ### 2. Data Types
@@ -178,7 +178,7 @@ y2 = pageHeight - rect.y; // Top in Zotero coords
 #### Raw Data (from MuPDF)
 
 ```typescript
-RawBBox; // { x, y, w, h } - top-left origin
+BoundingBox; // { l, t, r, b, origin } - top-left or bottom-left origin
 RawFont; // { name, family, weight, style, size }
 RawLine; // { wmode, bbox, font, x, y, text }
 RawBlock; // { type, bbox, lines[] }
@@ -188,28 +188,29 @@ RawPageData; // { pageIndex, width, height, blocks[] }
 #### Processed Data
 
 ```typescript
-LineBBox; // { l, t, r, b, width, height } - easier for comparisons
-ExtractedLine; // { text, bbox, fontSize, columnIndex }
-ProcessedPage; // { index, content, lines[], columns[] }
+ItemLine; // { text, bbox, fontSize? }
+DocItem; // text, section_header, footnote, caption, list_item, margin, formula, table, picture
+SentenceItem; // { parentId, index, text, bboxes, fragments?, joinWithNext? }
+ProcessedPage; // { index, content, columns, items, sentences?, degradation? }
 ```
 
 #### Results
 
 ```typescript
 ExtractionResult; // Result of PDFExtractor.extract — markdown OR structured mode.
-                  // Structured mode populates pages[i].sentences / paragraphs /
-                  // degradation alongside the same content / columns / lines
-                  // fields. `degradation` is omitted on pages where no
-                  // paragraph fell back to a whole-paragraph bbox.
+                  // Structured mode populates pages[i].items / sentences /
+                  // degradation alongside the same content / columns fields.
+                  // `degradation` is omitted on pages where no item fell
+                  // back to a whole-item bbox.
 LayoutAnalysisResult; // Result of PDFExtractor.analyzeLayout — pre-extraction
                       // analysis context (styleProfile + marginAnalysis +
                       // marginRemoval) plus the JSON-walked target pages. Same
                       // shared prefix structured extract runs, so the analysis
                       // context is byte-identical for the same settings /
                       // pageIndices / analysisWindow.
-SentenceBBoxTraceResult; // Result of getMuPDFWorkerClient().extractSentenceBBoxesDebug
-                         // — single-page debug envelope { result, trace } used by
-                         // fixture capture and the extract-trace endpoint.
+SentenceTraceResult; // Result of getMuPDFWorkerClient().extractSentenceDebug
+                     // — single-page debug envelope { result, trace } used by
+                     // fixture capture and the extract-trace endpoint.
 PDFSearchResult; // Result of PDFExtractor.search
 PageImageResult; // Per-page entry in PDFExtractor.renderPages result.pages
 ```
@@ -594,8 +595,8 @@ visible only in dev builds) exposes the PDF debug actions:
 4. **Test OCR Detection**: `PDFExtractor.analyzeOCRNeeds` against the selected attachment
 5. **Visualize Columns**: Blue overlays showing detected columns
 6. **Visualize Lines**: Orange overlays for each detected line
-7. **Visualize Paragraphs**: Green (paragraphs) and purple (headers)
-8. **Visualize Sentences**: Per-sentence overlays from the sentence-bbox pipeline
+7. **Visualize Items**: One box per `DocItem`, with stable colors for all item kinds
+8. **Visualize Sentences**: Lowest available text units: sentence boxes for split prose, item boxes for headers and other unsplit kinds
 9. **Clear Visualization**: Remove all temporary overlay annotations
 
 For non-UI debugging, the dev-only HTTP endpoints under `/beaver/test/*`
@@ -705,8 +706,8 @@ const ocrNeeds = await extractor.analyzeOCRNeeds(pdfData);
 
 // Sentence-level extraction — production multi-page entry point.
 // Returns the same `ExtractionResult` shape; structured-mode page data
-// lives on `pages[i].sentences` / `paragraphs` / `columns` / `lines`
-// alongside paragraph-engine `content`. Per-page detailed walk is the
+// lives on `pages[i].items` / `sentences` / `columns` alongside
+// paragraph-engine `content`. Per-page detailed walk is the
 // dominant cost — budget accordingly for large ranges.
 const structured = await extractor.extract(pdfData, {
   mode: "structured",
@@ -743,7 +744,7 @@ for (const c of layout.analysis.marginRemoval.candidates) {
 // the divergence rationale. For analysis-context parity, prefer
 // `analyzeLayout` above.
 import { getMuPDFWorkerClient } from "../../src/services/pdf";
-const debug = await getMuPDFWorkerClient().extractSentenceBBoxesDebug(
+const debug = await getMuPDFWorkerClient().extractSentenceDebug(
   pdfData,
   0,
   { splitterConfig: { type: "sentencex", language: "en" } },
@@ -1039,7 +1040,7 @@ interface ScoredPageSearchResult {
 ```typescript
 interface ScoredSearchHit {
   quads: QuadPoint[]; // Hit coordinates (for highlighting)
-  bbox: RawBBox; // Bounding box of hit
+  bbox: BoundingBox; // Bounding box of hit
   role: TextRole; // "heading" | "body" | "caption" | "footnote" | "unknown"
   weight: number; // Role weight applied
   matchedText?: string; // Text context of the match
@@ -1090,7 +1091,8 @@ const paragraphResult = detectParagraphs(lineResult, bodyStyles);
 import {
   visualizeCurrentPageColumns,
   visualizeCurrentPageLines,
-  visualizeCurrentPageParagraphs,
+  visualizeCurrentPageItems,
+  visualizeCurrentPageSentences,
   clearVisualizationAnnotations,
 } from "react/utils/extractionVisualizer";
 

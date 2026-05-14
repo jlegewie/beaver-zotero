@@ -24,19 +24,24 @@ import { PageExtractor } from "../PageExtractor";
 import { buildPageAnalysisContext } from "../PageAnalysisContext";
 import { resolveAnalysisPages } from "../AnalysisWindow";
 import { detectColumns, logColumnDetection } from "../ColumnDetector";
-import type { PageLineResult } from "../LineDetector";
-import { detectFilteredParagraphs } from "../FilteredParagraphPipeline";
+import type { PageLine } from "../LineDetector";
 import {
-    inverseRotateLineBBox,
-    inverseRotateRawBBox,
+    collectMarginItemsFromFilteredPage,
+    detectFilteredParagraphs,
+    reindexMarginItems,
+} from "../FilteredParagraphPipeline";
+import {
+    inverseRotateBBox,
     type RotationAngle,
 } from "../PageRotationNormalizer";
 import { SearchScorer } from "../SearchScorer";
 import type {
     DocumentAnalysis,
+    BoundingBox,
+    DocItem,
     ExtractionResult,
     ExtractionSettings,
-    ExtractedLine,
+    ItemLine,
     LayoutAnalysisResult,
     MarginAnalysis,
     MarginRemovalResult,
@@ -60,10 +65,13 @@ import {
     DEFAULT_PDF_SEARCH_OPTIONS,
     DEFAULT_SEARCH_SCORING_OPTIONS,
     shouldProbeGraphicsLayer,
+    bboxFromXYWH,
+    bboxHeight,
+    bboxWidth,
 } from "../types";
 import type {
-    SentenceBBoxTraceResult,
-    WorkerSentenceBBoxDebugOptions,
+    SentenceTraceResult,
+    WorkerSentenceDebugOptions,
 } from "../sentenceTypes";
 import { ERROR_CODES, workerError } from "./errors";
 import { acquireDoc, releaseDoc } from "./docCache";
@@ -266,41 +274,88 @@ function buildAnalysisFromDoc(
     };
 }
 
-/**
- * Project a `PageLineResult` into the flat `ExtractedLine[]` shape that
- * lives on `ProcessedPage.lines`. Used by the structured-engine branch.
- *
- * When `pageRotation` is non-zero, the line bboxes (currently in the
- * upright working frame) are inverse-rotated back to MuPDF coords so
- * `ProcessedPage.lines[].bbox` stays in the same frame as
- * `ProcessedPage.width`/`height` and the annotation layer.
- */
-function flattenColumnLines(
-    lineResult: PageLineResult,
-    pageRotation: RotationAngle = 0,
-    sourceWidth = lineResult.width,
-    sourceHeight = lineResult.height,
-): ExtractedLine[] {
-    const out: ExtractedLine[] = [];
-    for (const colResult of lineResult.columnResults) {
-        for (const line of colResult.lines) {
-            out.push({
+function inverseMaybe<T extends { bbox: BoundingBox }>(
+    value: T,
+    pageRotation: RotationAngle,
+    sourceWidth: number,
+    sourceHeight: number,
+): T {
+    return pageRotation === 0
+        ? value
+        : {
+              ...value,
+              bbox: inverseRotateBBox(
+                  value.bbox,
+                  pageRotation,
+                  sourceWidth,
+                  sourceHeight,
+              ),
+          };
+}
+
+function itemLinesFromPageLines(
+    lines: PageLine[],
+    fallbackText: string,
+    fallbackBBox: BoundingBox,
+    pageRotation: RotationAngle,
+    sourceWidth: number,
+    sourceHeight: number,
+): ItemLine[] {
+    const mapped = lines.map((line) =>
+        inverseMaybe(
+            {
                 text: line.text,
-                bbox:
-                    pageRotation === 0
-                        ? line.bbox
-                        : inverseRotateLineBBox(
-                              line.bbox,
-                              pageRotation,
-                              sourceWidth,
-                              sourceHeight,
-                          ),
+                bbox: line.bbox,
                 fontSize: line.fontSize,
-                columnIndex: colResult.columnIndex,
-            });
+            },
+            pageRotation,
+            sourceWidth,
+            sourceHeight,
+        ),
+    );
+    if (mapped.length > 0) return mapped;
+    return [
+        inverseMaybe(
+            { text: fallbackText, bbox: fallbackBBox },
+            pageRotation,
+            sourceWidth,
+            sourceHeight,
+        ),
+    ];
+}
+
+function docItemsFromParagraphResult(
+    paragraphResult: import("../ParagraphDetector").PageParagraphResult,
+    pageRotation: RotationAngle,
+    sourceWidth: number,
+    sourceHeight: number,
+): DocItem[] {
+    return paragraphResult.items.map((item, index) => {
+        const bbox = pageRotation === 0
+            ? item.bbox
+            : inverseRotateBBox(item.bbox, pageRotation, sourceWidth, sourceHeight);
+        const lines = itemLinesFromPageLines(
+            paragraphResult.itemLines?.[index] ?? [],
+            item.text,
+            item.bbox,
+            pageRotation,
+            sourceWidth,
+            sourceHeight,
+        );
+        const base = {
+            id: `p${paragraphResult.pageIndex}:i${index}`,
+            pageIndex: paragraphResult.pageIndex,
+            index,
+            bbox,
+            columnIndex: item.columnIndex,
+            text: item.text,
+            lines,
+        };
+        if (item.type === "header") {
+            return { ...base, kind: "section_header" as const, level: 1 };
         }
-    }
-    return out;
+        return { ...base, kind: "text" as const };
+    });
 }
 
 /**
@@ -313,17 +368,11 @@ function projectColumnRect(
     pageRotation: RotationAngle,
     sourceWidth: number,
     sourceHeight: number,
-): { l: number; t: number; r: number; b: number } {
-    const bb =
-        pageRotation === 0
-            ? { x: col.x, y: col.y, w: col.w, h: col.h }
-            : inverseRotateRawBBox(
-                  { x: col.x, y: col.y, w: col.w, h: col.h },
-                  pageRotation,
-                  sourceWidth,
-                  sourceHeight,
-              );
-    return { l: bb.x, t: bb.y, r: bb.x + bb.w, b: bb.y + bb.h };
+): BoundingBox {
+    const box = bboxFromXYWH(col.x, col.y, col.w, col.h, "top-left");
+    return pageRotation === 0
+        ? box
+        : inverseRotateBBox(box, pageRotation, sourceWidth, sourceHeight);
 }
 
 /**
@@ -333,8 +382,8 @@ function projectColumnRect(
  *     `paragraphResult.pageContent` (`## ` headers, `\n\n` separators).
  *   - `"block"` → column detection + PageExtractor (block-based).
  *   - `"structured"` → `extractSentencesForPage` (per-page detailed walk
- *     + sentence mapping). Populates `paragraphs`, `sentences`,
- *     `columns`, `lines`, plus paragraph-engine `content`.
+ *     + sentence mapping). Populates `items`, `sentences`, `columns`,
+ *     plus paragraph-engine `content`.
  *     Requires `splitter` (resolved by the caller). Per-page detailed
  *     walk is the dominant cost — multi-page structured extracts pay
  *     N× this per the `targetIndices` length.
@@ -506,6 +555,18 @@ export function runExtractFromIndices(
                         filtered.sourceHeight,
                     ),
                 ),
+                items: [
+                    ...docItemsFromParagraphResult(
+                        filtered.paragraphResult,
+                        filtered.pageRotation,
+                        filtered.sourceWidth,
+                        filtered.sourceHeight,
+                    ),
+                    ...reindexMarginItems(
+                        filtered.marginItems,
+                        filtered.paragraphResult.items.length,
+                    ),
+                ],
             } as ProcessedPage);
             perPageMs.push(performance.now() - tPage);
         }
@@ -560,13 +621,7 @@ export function runExtractFromIndices(
                         filteredResult.sourceHeight,
                     ),
                 ),
-                lines: flattenColumnLines(
-                    filteredResult.lineResult,
-                    filteredResult.pageRotation,
-                    filteredResult.sourceWidth,
-                    filteredResult.sourceHeight,
-                ),
-                paragraphs: sentenceResult.paragraphs,
+                items: sentenceResult.items,
                 sentences: sentenceResult.sentences,
                 degradation: sentenceResult.degradation,
             } as ProcessedPage);
@@ -586,6 +641,10 @@ export function runExtractFromIndices(
                 marginRemoval,
                 styleProfile.bodyStyles,
             );
+            const marginItems = collectMarginItemsFromFilteredPage(
+                rawPage,
+                filteredPage,
+            );
             const columnResult = detectColumns(filteredPage, {
                 headerMargin: opts.margins.top,
                 footerMargin: opts.margins.bottom,
@@ -593,9 +652,16 @@ export function runExtractFromIndices(
             });
             logColumnDetection(rawPage.pageIndex, columnResult);
 
-            pages.push(
-                pageExtractor.extractPageWithColumns(filteredPage, columnResult, true),
+            const page = pageExtractor.extractPageWithColumns(
+                filteredPage,
+                columnResult,
+                true,
             );
+            page.items = [
+                ...page.items,
+                ...reindexMarginItems(marginItems, page.items.length),
+            ];
+            pages.push(page);
             perPageMs.push(performance.now() - tPage);
         }
     }
@@ -619,7 +685,7 @@ export function runExtractFromIndices(
         pageLabels: Object.keys(pageLabels).length > 0 ? pageLabels : undefined,
         metadata: {
             extractedAt: new Date().toISOString(),
-            version: "2.2.0",
+            version: "3.0.0",
             settings: finalSettings,
             engine: recordedEngine,
             // `docOpenMs` is unknown to this helper (the doc is already open
@@ -658,7 +724,7 @@ export function runExtractFromIndices(
  *   - `"markdown"` (default) returns per-page text via the markdown
  *     engines below.
  *   - `"structured"` returns the same `ExtractionResult` shape with
- *     `pages[i].sentences` / `paragraphs` / `columns` / `lines`
+ *     `pages[i].sentences` / `items` / `columns`
  *     populated alongside paragraph-engine `content`. Per-page detailed
  *     walk is the dominant cost — multi-page structured extracts pay
  *     N× this per the requested page count.
@@ -898,7 +964,7 @@ export async function opAnalyzeLayout(
                 // Mirrors the version `runExtractFromIndices` writes so
                 // analyze + extract advance together when the analysis
                 // context build changes.
-                version: "2.2.0",
+                version: "3.0.0",
                 settings: opts,
                 timings: {
                     docOpenMs,
@@ -1052,13 +1118,13 @@ export async function opSearch(
  * (analysis-window indices, raw doc, detailed page, font-bridged
  * `pagesForFilter`, margin analysis/removal, filtered-paragraph result).
  */
-export async function opExtractSentenceBBoxesDebug(
+export async function opExtractSentenceDebug(
     args: {
         pdfData: Uint8Array | ArrayBuffer;
         pageIndex: number;
-        options?: WorkerSentenceBBoxDebugOptions;
+        options?: WorkerSentenceDebugOptions;
     },
-): Promise<OpReply<SentenceBBoxTraceResult>> {
+): Promise<OpReply<SentenceTraceResult>> {
     const doc = await acquireDoc(args.pdfData);
     try {
         const pageCount = doc.countPages();

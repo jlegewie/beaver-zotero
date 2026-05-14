@@ -5,7 +5,8 @@
  * sorted in natural reading order.
  */
 
-import type { RawPageData, RawBlock, RawLine, RawBBox, TextStyle } from "./types";
+import type { BoundingBox, RawPageData, RawBlock, RawLine, TextStyle } from "./types";
+import { bboxHeight, bboxWidth } from "./types";
 import { pdfLog } from "./logging";
 import { StyleAnalyzer } from "./StyleAnalyzer";
 
@@ -164,9 +165,9 @@ function rectsEqual(r1: Rect, r2: Rect, tolerance: number = 0.01): boolean {
     );
 }
 
-/** Convert RawBBox to Rect */
-function bboxToRect(bbox: RawBBox): Rect {
-    return { x: bbox.x, y: bbox.y, w: bbox.w, h: bbox.h };
+/** Convert a public BoundingBox to the detector's internal Rect shape. */
+function bboxToRect(bbox: BoundingBox): Rect {
+    return { x: bbox.l, y: bbox.t, w: bboxWidth(bbox), h: bboxHeight(bbox) };
 }
 
 /** Check if font is a symbol font */

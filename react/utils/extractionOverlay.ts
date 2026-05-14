@@ -11,9 +11,9 @@
 export {
     OVERLAY_COLORS,
     buildColumnOverlayFromPage,
+    buildItemOverlayFromPage,
     buildLineOverlayFromPage,
     buildMarginsOverlayFromAnalysis,
-    buildParagraphOverlayFromPage,
     buildSentenceOverlayFromPage,
     buildSentenceOverlayFromResult,
 } from "../../src/services/pdf/debug/overlayBuilders";

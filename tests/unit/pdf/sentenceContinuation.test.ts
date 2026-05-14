@@ -1,57 +1,37 @@
 /**
  * Unit tests for `annotateColumnContinuations` in `ParagraphSentenceMapper.ts`.
  *
- * Hermetic — synthetic `ParagraphWithSentences` arrays, no MuPDF, no Zotero.
+ * Hermetic — synthetic `DocItem` arrays, no MuPDF, no Zotero.
  *
  * Verifies the conservative cheap-gate + splitter-validation heuristic:
  *   - Sets `joinWithNext = true` only when adjacent body paragraphs in
  *     consecutive columns appear to share one sentence (last text not
  *     terminated, first text starts lowercase, splitter agrees).
- *   - Never writes explicit `false` (omitted ≡ false per SentenceBBox contract).
+ *   - Never writes explicit `false` (omitted ≡ false per SentenceItem contract).
  *   - Clears stale `true` from prior calls so the helper is idempotent.
  */
 import { describe, it, expect } from "vitest";
-import {
-    annotateColumnContinuations,
-    type ParagraphWithSentences,
-} from "../../../src/services/pdf/ParagraphSentenceMapper";
+import { annotateColumnContinuations } from "../../../src/services/pdf/ParagraphSentenceMapper";
 import { simpleRegexSentenceSplit } from "../../../src/services/pdf/SentenceMapper";
-import type { ContentItem } from "../../../src/services/pdf/ParagraphDetector";
-import type { SentenceBBox } from "../../../src/services/pdf/types";
+import {
+    bboxFromXYWH,
+    type BoundingBox,
+    type SectionHeaderItem,
+    type SentenceItem,
+    type TextItem,
+} from "../../../src/services/pdf/types";
 
 // ---------------------------------------------------------------------------
 // Fixture helpers
 // ---------------------------------------------------------------------------
 
-function makeItem(
-    overrides: Partial<ContentItem> & {
-        idx: number;
-        columnIndex: number;
-        type?: "paragraph" | "header";
-    },
-): ContentItem {
-    return {
-        type: overrides.type ?? "paragraph",
-        idx: overrides.idx,
-        docIdx: overrides.idx,
-        start: 0,
-        end: 0,
-        text: "",
-        id: `item-${overrides.idx}`,
-        bbox: { l: 0, t: 0, r: 0, b: 0, width: 0, height: 0 },
-        columnIndex: overrides.columnIndex,
-        ...overrides,
-    };
-}
-
 function makeSentence(
     text: string,
-    overrides: Partial<SentenceBBox> = {},
-): SentenceBBox {
+    overrides: Partial<SentenceItem> = {},
+): SentenceItem {
     return {
-        pageIndex: 0,
-        paragraphIndex: 0,
-        sentenceIndex: 0,
+        parentId: "",
+        index: 0,
         text,
         bboxes: [],
         ...overrides,
@@ -64,32 +44,50 @@ function makeSentence(
  * geometric gate in `shouldJoinAcrossColumns` checks: column N+1 starts
  * strictly to the right of column N's right edge.
  */
-function defaultBBoxForColumn(columnIndex: number) {
+function defaultBBoxForColumn(columnIndex: number): BoundingBox {
     const x = 50 + columnIndex * 300;
-    return { x, y: 0, w: 250, h: 12 };
+    return bboxFromXYWH(x, 0, 250, 12, "top-left");
 }
 
 function makeParagraph(
     columnIndex: number,
-    sentences: SentenceBBox[],
+    sentences: SentenceItem[],
     opts: { type?: "paragraph" | "header"; idx?: number } = {},
-): ParagraphWithSentences {
+): TextItem | SectionHeaderItem {
+    const index = opts.idx ?? columnIndex;
+    const id = `p0:i${index}`;
     // Auto-fill bboxes so tests don't have to specify geometry unless they're
     // exercising the geometric gate. Mutates in place so the caller's
     // sentence references still point at the same objects after the test
     // helper runs the producer.
-    for (const s of sentences) {
+    for (let i = 0; i < sentences.length; i++) {
+        const s = sentences[i];
+        s.parentId = id;
+        s.index = i;
         if (s.bboxes.length === 0) {
             s.bboxes = [defaultBBoxForColumn(columnIndex)];
         }
     }
+    const itemBBox = sentences[0]?.bboxes[0] ?? defaultBBoxForColumn(columnIndex);
+    const base = {
+        id,
+        pageIndex: 0,
+        index,
+        bbox: itemBBox,
+        columnIndex,
+        text: sentences.map((s) => s.text).join(" "),
+        lines: [{ text: sentences.map((s) => s.text).join(" "), bbox: itemBBox }],
+    };
+    if (opts.type === "header") {
+        return {
+            ...base,
+            kind: "section_header",
+            level: 1,
+        };
+    }
     return {
-        item: makeItem({
-            idx: opts.idx ?? columnIndex,
-            columnIndex,
-            type: opts.type ?? "paragraph",
-        }),
-        paragraphText: { text: "", source: [], lines: [] },
+        ...base,
+        kind: "text",
         sentences,
     };
 }
@@ -249,17 +247,17 @@ describe("annotateColumnContinuations", () => {
         const left = makeParagraph(0, [
             makeSentence(
                 "[Colour figure can be viewed at wileyonlinelibrary.com]",
-                { bboxes: [{ x: 50, y: 0, w: 700, h: 12 }] },
+                { bboxes: [bboxFromXYWH(50, 0, 700, 12, "top-left")] },
             ),
         ]);
         const right = makeParagraph(0, [
             makeSentence(
                 "population in 2001 and 2011 with the quintiles of each variable",
-                { bboxes: [{ x: 50, y: 100, w: 250, h: 12 }] },
+                { bboxes: [bboxFromXYWH(50, 100, 250, 12, "top-left")] },
             ),
         ], { idx: 1 });
         // Force a column-step transition (helper's other gates require it).
-        right.item.columnIndex = 1;
+        right.columnIndex = 1;
         annotateColumnContinuations(
             [left, right],
             simpleRegexSentenceSplit,
@@ -273,15 +271,15 @@ describe("annotateColumnContinuations", () => {
         // overlap (even a single point shy) blocks the join.
         const left = makeParagraph(0, [
             makeSentence("ending without terminator", {
-                bboxes: [{ x: 50, y: 0, w: 250, h: 12 }],
+                bboxes: [bboxFromXYWH(50, 0, 250, 12, "top-left")],
             }),
         ]);
         const right = makeParagraph(0, [
             makeSentence("continuation that would join", {
-                bboxes: [{ x: 299, y: 100, w: 250, h: 12 }],
+                bboxes: [bboxFromXYWH(299, 100, 250, 12, "top-left")],
             }),
         ], { idx: 1 });
-        right.item.columnIndex = 1;
+        right.columnIndex = 1;
         annotateColumnContinuations(
             [left, right],
             simpleRegexSentenceSplit,
@@ -297,17 +295,17 @@ describe("annotateColumnContinuations", () => {
         const left = makeParagraph(0, [
             makeSentence("multi-line ending without terminator", {
                 bboxes: [
-                    { x: 50, y: 0, w: 700, h: 12 }, // wide fragment 0
-                    { x: 50, y: 12, w: 100, h: 12 }, // narrow fragment 1
+                    bboxFromXYWH(50, 0, 700, 12, "top-left"), // wide fragment 0
+                    bboxFromXYWH(50, 12, 100, 12, "top-left"), // narrow fragment 1
                 ],
             }),
         ]);
         const right = makeParagraph(0, [
             makeSentence("continuation that would join", {
-                bboxes: [{ x: 350, y: 100, w: 250, h: 12 }],
+                bboxes: [bboxFromXYWH(350, 100, 250, 12, "top-left")],
             }),
         ], { idx: 1 });
-        right.item.columnIndex = 1;
+        right.columnIndex = 1;
         annotateColumnContinuations(
             [left, right],
             simpleRegexSentenceSplit,
@@ -422,7 +420,7 @@ describe("annotateColumnContinuations", () => {
     it("does nothing if either side is a header", () => {
         const left = makeParagraph(
             0,
-            [makeSentence("HEADING TEXT", { kind: "heading" })],
+            [makeSentence("HEADING TEXT")],
             { type: "header" },
         );
         const right = makeParagraph(1, [
@@ -433,12 +431,12 @@ describe("annotateColumnContinuations", () => {
             simpleRegexSentenceSplit,
             new Set(),
         );
-        expect(left.sentences[0].joinWithNext).toBeUndefined();
+        expect("sentences" in left).toBe(false);
 
         const a = makeParagraph(0, [makeSentence("ending without terminator")]);
         const b = makeParagraph(
             1,
-            [makeSentence("HEADING", { kind: "heading" })],
+            [makeSentence("HEADING")],
             { type: "header" },
         );
         annotateColumnContinuations(
@@ -486,7 +484,7 @@ describe("annotateColumnContinuations", () => {
         annotateColumnContinuations(
             [left, right],
             simpleRegexSentenceSplit,
-            new Set([0]),
+            new Set([left.id]),
         );
         expect(left.sentences[0].joinWithNext).toBeUndefined();
 
@@ -500,7 +498,7 @@ describe("annotateColumnContinuations", () => {
         annotateColumnContinuations(
             [left2, right2],
             simpleRegexSentenceSplit,
-            new Set([1]),
+            new Set([right2.id]),
         );
         expect(left2.sentences[0].joinWithNext).toBeUndefined();
     });

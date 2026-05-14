@@ -11,6 +11,7 @@ import { describe, expect, it } from 'vitest';
 
 import { buildOverlaySvg } from '../../../src/services/pdf/debug/overlaySvg';
 import type { OverlayRect } from '../../../src/services/pdf/debug/overlayBuilders';
+import { bboxFromXYWH } from '../../../src/services/pdf/types';
 
 describe('buildOverlaySvg', () => {
     it('emits a self-contained SVG with the requested image dimensions', () => {
@@ -30,7 +31,7 @@ describe('buildOverlaySvg', () => {
 
     it('scales rect coordinates by image/page ratio', () => {
         const rect: OverlayRect = {
-            rect: { x: 10, y: 20, w: 30, h: 40 },
+            rect: bboxFromXYWH(10, 20, 30, 40, "top-left"),
             color: '#ff2d55',
             group: 0,
         };
@@ -52,7 +53,7 @@ describe('buildOverlaySvg', () => {
 
     it('emits a label background rect plus the text element', () => {
         const rect: OverlayRect = {
-            rect: { x: 100, y: 100, w: 50, h: 30 },
+            rect: bboxFromXYWH(100, 100, 50, 30, "top-left"),
             color: '#34c759',
             label: 'P1',
             group: 0,
@@ -79,7 +80,7 @@ describe('buildOverlaySvg', () => {
             pageHeight: 100,
             rects: [
                 {
-                    rect: { x: 0, y: 0, w: 10, h: 10 },
+                    rect: bboxFromXYWH(0, 0, 10, 10, "top-left"),
                     color: '#000000',
                     label: '<S&1>',
                     group: 0,
@@ -98,7 +99,7 @@ describe('buildOverlaySvg', () => {
             pageHeight: 100,
             rects: [
                 {
-                    rect: { x: 0, y: 0, w: 10, h: 10 },
+                    rect: bboxFromXYWH(0, 0, 10, 10, "top-left"),
                     color: 'not-a-hex',
                     group: 0,
                 },

@@ -54,11 +54,11 @@ function parseFixtureRef(
     };
 }
 
-// Normal 15-page PDF
+// Normal 18-page PDF
 export const NORMAL_PDF: AttachmentFixture = {
     library_id: 1,
     zotero_key: '2YWA8DTZ',
-    description: 'Normal 15-page PDF',
+    description: 'Normal 18-page PDF',
 };
 
 // Small 2-page PDF
@@ -82,11 +82,11 @@ export const NO_TEXT_PDF: AttachmentFixture = {
     description: 'No text layer (scanned)',
 };
 
-// Large 316-page PDF
+// Large 373-page PDF
 export const LARGE_PDF: AttachmentFixture = {
     library_id: 1,
     zotero_key: 'D4WGZFFX',
-    description: '316-page PDF',
+    description: '373-page PDF',
 };
 
 // Missing local file (attachment exists but file is not available locally)
