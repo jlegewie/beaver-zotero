@@ -25,29 +25,17 @@ describe("shouldProbeGraphicsLayer", () => {
         expect(shouldProbeGraphicsLayer("on")).toBe(true);
     });
 
-    it("returns true for 'auto' — preserves v0.20 feature behavior until smart-gate ships", () => {
-        // `"auto"` is the default. Today it must behave like `"on"`
-        // so the fill-rect feature still helps the documents that
-        // need it (DDS69CQI). A future smart-gate will differentiate
-        // the two — this test pins the current "always probe"
-        // semantics so the change is intentional, not accidental.
+    it("returns true for 'auto' — explicit smart-gate opt-in", () => {
         expect(shouldProbeGraphicsLayer("auto")).toBe(true);
     });
 
-    it("returns true for undefined — legacy callers default to probing", () => {
-        // Worker-internal helpers may receive an undefined mode when
-        // the caller predates the field. They get the same behavior
-        // as the documented default `"auto"`.
-        expect(shouldProbeGraphicsLayer(undefined)).toBe(true);
+    it("returns false for undefined — omitted settings use the off default", () => {
+        expect(shouldProbeGraphicsLayer(undefined)).toBe(false);
     });
 });
 
 describe("ExtractionSettings.graphicsLayerMode default", () => {
-    it("default is 'auto'", () => {
-        // Pins the default value users see when they pass no
-        // settings. Changing this is a public-behavior change — the
-        // test exists so any future refactor that flips the default
-        // is intentional rather than incidental.
-        expect(DEFAULT_EXTRACTION_SETTINGS.graphicsLayerMode).toBe("auto");
+    it("default is 'off'", () => {
+        expect(DEFAULT_EXTRACTION_SETTINGS.graphicsLayerMode).toBe("off");
     });
 });

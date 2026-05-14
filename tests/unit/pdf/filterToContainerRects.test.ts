@@ -13,13 +13,18 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
     extractFilledRectsFromDoc,
+    extractGraphicsFromDoc,
+    filterToDividerLines,
     filterToContainerRects,
 } from '../../../src/services/pdf/worker/docHelpers';
 import {
     DEFAULT_MAX_FILL_RECTS,
     type DocumentLike,
+    type DividerLine,
     type FillRect,
     isAxisAlignedRectanglePath,
+    isAxisAlignedLineSegment,
+    lineSegmentToTopLeftFrame,
     type PageLike,
 } from '../../../src/services/pdf/worker/mupdfApi';
 
@@ -30,6 +35,19 @@ function fill(overrides: Partial<FillRect>): FillRect {
         colorspaceType: 1, // Gray
         alpha: 1,
         isAxisAlignedRect: true,
+        ...overrides,
+    };
+}
+
+function stroke(overrides: Partial<DividerLine>): DividerLine {
+    return {
+        a: [0, 100],
+        b: [612, 100],
+        thickness: 1,
+        orientation: 'horizontal',
+        color: [0],
+        colorspaceType: 1,
+        alpha: 1,
         ...overrides,
     };
 }
@@ -83,6 +101,54 @@ describe('isAxisAlignedRectanglePath', () => {
         ], [0.7071, 0.7071, -0.7071, 0.7071, 0, 0]);
 
         expect(out).toBe(false);
+    });
+});
+
+describe('isAxisAlignedLineSegment', () => {
+    const identity = [1, 0, 0, 1, 0, 0] as const;
+
+    it('accepts a horizontal move-line path after CTM transform', () => {
+        const out = isAxisAlignedLineSegment([
+            ['M', 10, 20],
+            ['L', 200, 20],
+        ], identity);
+        expect(out).toEqual({
+            orientation: 'horizontal',
+            a: [10, 20],
+            b: [200, 20],
+        });
+    });
+
+    it('accepts a vertical move-line path after CTM transform', () => {
+        const out = isAxisAlignedLineSegment([
+            ['M', 10, 20],
+            ['L', 10, 200],
+        ], identity);
+        expect(out?.orientation).toBe('vertical');
+    });
+
+    it('rejects skew line segments', () => {
+        const out = isAxisAlignedLineSegment([
+            ['M', 10, 20],
+            ['L', 200, 30],
+        ], identity);
+        expect(out).toBeNull();
+    });
+});
+
+describe('lineSegmentToTopLeftFrame', () => {
+    it('flips MuPDF y-up stroke endpoints into the extractor top-left frame', () => {
+        const out = lineSegmentToTopLeftFrame({
+            orientation: 'horizontal',
+            a: [20, 692],
+            b: [590, 692],
+        }, 792);
+
+        expect(out).toEqual({
+            orientation: 'horizontal',
+            a: [20, 100],
+            b: [590, 100],
+        });
     });
 });
 
@@ -203,6 +269,53 @@ describe('filterToContainerRects', () => {
     });
 });
 
+describe('filterToDividerLines', () => {
+    const PAGE_W = 612;
+    const PAGE_H = 792;
+
+    it('keeps a thin horizontal rule spanning at least half the page', () => {
+        const out = filterToDividerLines([stroke({ a: [20, 300], b: [590, 300] })], PAGE_W, PAGE_H);
+        expect(out).toEqual([
+            {
+                orientation: 'horizontal',
+                position: 300,
+                start: 20,
+                end: 590,
+                thickness: 1,
+            },
+        ]);
+    });
+
+    it('keeps a thin vertical rule spanning at least half the page', () => {
+        const out = filterToDividerLines([
+            stroke({
+                a: [300, 100],
+                b: [300, 700],
+                orientation: 'vertical',
+            }),
+        ], PAGE_W, PAGE_H);
+        expect(out).toEqual([
+            {
+                orientation: 'vertical',
+                position: 300,
+                start: 100,
+                end: 700,
+                thickness: 1,
+            },
+        ]);
+    });
+
+    it('drops short, thick, invisible, and near-white strokes', () => {
+        const out = filterToDividerLines([
+            stroke({ a: [20, 300], b: [200, 300] }),
+            stroke({ thickness: 3 }),
+            stroke({ alpha: 0 }),
+            stroke({ color: [1] }),
+        ], PAGE_W, PAGE_H);
+        expect(out).toHaveLength(0);
+    });
+});
+
 describe('extractFilledRectsFromDoc — fill-budget plumbing', () => {
     // Verifies that `maxFills` reaches `Page.collectFilledRects` without
     // mutation, and that the default budget is taken from the API
@@ -226,6 +339,10 @@ describe('extractFilledRectsFromDoc — fill-budget plumbing', () => {
             collectFilledRects: (maxFills?: number) => {
                 captured.lastArg = maxFills;
                 return fills;
+            },
+            collectGraphics: (opts) => {
+                captured.lastArg = opts?.maxFills;
+                return { fills, strokes: [] };
             },
             destroy: () => {},
         };
@@ -259,5 +376,44 @@ describe('extractFilledRectsFromDoc — fill-budget plumbing', () => {
         // refactor that swaps default to e.g. 1 is caught.
         expect(DEFAULT_MAX_FILL_RECTS).toBeGreaterThanOrEqual(10);
         expect(DEFAULT_MAX_FILL_RECTS).toBeLessThanOrEqual(200);
+    });
+});
+
+describe('extractGraphicsFromDoc', () => {
+    it('loads the page once and collects fills and strokes in one device walk', () => {
+        const captured: { loadCount: number; opts?: unknown } = { loadCount: 0 };
+        const fills = [fill({})];
+        const strokes = [stroke({})];
+        const page: PageLike = {
+            pointer: 1,
+            getBounds: () => [0, 0, 612, 792],
+            getLabel: () => undefined,
+            toStructuredText: vi.fn(),
+            toPixmap: vi.fn(),
+            search: vi.fn(),
+            collectFilledRects: vi.fn(),
+            collectGraphics: (opts) => {
+                captured.opts = opts;
+                return { fills, strokes };
+            },
+            destroy: () => {},
+        };
+        const doc: DocumentLike = {
+            pointer: 1,
+            needsPassword: () => false,
+            countPages: () => 1,
+            getMetadata: () => undefined,
+            loadPage: () => {
+                captured.loadCount += 1;
+                return page;
+            },
+            destroy: () => {},
+        };
+
+        const out = extractGraphicsFromDoc(doc, 0, { maxFills: 5, maxStrokes: 6 });
+
+        expect(captured.loadCount).toBe(1);
+        expect(captured.opts).toEqual({ maxFills: 5, maxStrokes: 6 });
+        expect(out).toEqual({ fills, strokes });
     });
 });

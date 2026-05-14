@@ -543,6 +543,43 @@ describe("detectFilteredParagraphs", () => {
             // on unrotated pages without exception.
             expect(out.paragraphResult).toBeDefined();
         });
+
+        it("does not throw when text orientation is 90° and divider lines are supplied", () => {
+            const yUpLine = (text: string, x: number, y: number): RawLine => ({
+                wmode: 0,
+                bbox: bboxFromXYWH(x, y, 12, text.length * 7, "top-left"),
+                font: {
+                    name: "Body",
+                    family: "Body",
+                    weight: "normal",
+                    style: "normal",
+                    size: BODY_SIZE,
+                },
+                x,
+                y,
+                text,
+                rotation: 90,
+            });
+            const longText =
+                "This is body text content used to clear the weighted-character threshold";
+            const lines: RawLine[] = [];
+            for (let i = 0; i < 5; i++) {
+                lines.push(yUpLine(longText, 80 + i * 20, 120));
+            }
+            const out = detectFilteredParagraphs({
+                pages: [makePage(0, lines)],
+                pageIndex: 0,
+                dividerLines: [{
+                    orientation: "horizontal",
+                    position: 250,
+                    start: 40,
+                    end: 560,
+                    thickness: 1,
+                }],
+            });
+            expect(out.pageRotation).toBe(90);
+            expect(out.paragraphResult).toBeDefined();
+        });
     });
 
 });

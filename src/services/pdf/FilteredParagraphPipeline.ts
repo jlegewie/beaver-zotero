@@ -84,11 +84,19 @@ export interface FilteredParagraphContext {
      * Bounding boxes of background-shaded display elements on the target
      * page (see `ColumnDetectionOptions.fillBoundaries`). When supplied,
      * `ColumnDetector` refuses to fuse text blocks across fill-zone
-     * boundaries. Optional — caller is responsible for collecting +
-     * filtering via `extractFilledRectsFromDoc` + `filterToContainerRects`
+     * boundaries. Optional — caller is responsible for collecting via
+     * `extractGraphicsFromDoc` and filtering with `filterToContainerRects`
      * upstream. Empty / absent = no behavior change.
      */
     fillBoundaries?: ReadonlyArray<{ x: number; y: number; w: number; h: number }>;
+    /** Thin stroked layout dividers on the target page, in raw MuPDF frame. */
+    dividerLines?: ReadonlyArray<{
+        orientation: "horizontal" | "vertical";
+        position: number;
+        start: number;
+        end: number;
+        thickness: number;
+    }>;
 }
 
 /**
@@ -296,6 +304,51 @@ export function detectFilteredParagraphs(
                   },
               )
             : ctx.fillBoundaries;
+    const dividerLines =
+        ctx.dividerLines && ctx.dividerLines.length > 0
+            ? ctx.dividerLines.map((d) => {
+                  const raw =
+                      d.orientation === "horizontal"
+                          ? bboxFromXYWH(
+                                d.start,
+                                d.position,
+                                d.end - d.start,
+                                0,
+                                "top-left",
+                            )
+                          : bboxFromXYWH(
+                                d.position,
+                                d.start,
+                                0,
+                                d.end - d.start,
+                                "top-left",
+                            );
+                  const rotatedBox = rotateBBox(
+                      raw,
+                      pageRotation,
+                      rotated.sourceWidth,
+                      rotated.sourceHeight,
+                  );
+                  const w = bboxWidth(rotatedBox);
+                  const h = bboxHeight(rotatedBox);
+                  if (w >= h) {
+                      return {
+                          orientation: "horizontal" as const,
+                          position: (rotatedBox.t + rotatedBox.b) / 2,
+                          start: Math.min(rotatedBox.l, rotatedBox.r),
+                          end: Math.max(rotatedBox.l, rotatedBox.r),
+                          thickness: d.thickness,
+                      };
+                  }
+                  return {
+                      orientation: "vertical" as const,
+                      position: (rotatedBox.l + rotatedBox.r) / 2,
+                      start: Math.min(rotatedBox.t, rotatedBox.b),
+                      end: Math.max(rotatedBox.t, rotatedBox.b),
+                      thickness: d.thickness,
+                  };
+              })
+            : ctx.dividerLines;
 
     const tColumnDetect = performance.now();
     const columnResult = detectColumns(filteredPage, {
@@ -303,6 +356,7 @@ export function detectFilteredParagraphs(
         footerMargin: margins.bottom,
         bodyStyles: styleProfile.bodyStyles,
         fillBoundaries,
+        dividerLines,
     });
     const columnDetectMs = performance.now() - tColumnDetect;
 

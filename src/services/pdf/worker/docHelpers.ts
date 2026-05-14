@@ -21,9 +21,12 @@ import type {
 import { bboxFromXYWH } from "../types";
 import type { RawPageProvider } from "../DocumentAnalyzer";
 import type {
+    CollectGraphicsOptions,
+    DividerLine,
     DocumentLike,
     FillRect,
     FontApi,
+    GraphicsLayerPrimitives,
     MuPDFApi,
     QuadTuple,
     RectTuple,
@@ -274,62 +277,96 @@ export function extractRawPageFromDoc(
 }
 
 /**
- * Run the page's content stream through a JS device and collect every
- * filled drawing primitive. Returned bboxes are in PDF page coordinates
- * (top-left origin).
+ * Run the page's content stream through a JS device and collect graphics
+ * primitives used by layout detection. Fill bboxes and stroked divider
+ * endpoints are returned in PDF page coordinates (top-left origin).
  *
  * Used by column detection to find background-shaded display elements
  * (tinted asides, callouts, "facts" boxes). Page load + device run +
  * destroy happens in this single helper so callers don't need to
  * manage the Page lifecycle.
  *
- * **Budget.** `maxFills` forwards to `Page.collectFilledRects`. Pages
- * that emit more fill_path events than the budget are figures /
- * illustrations / glyph-as-path renders, not pages with real display
- * containers. The collector aborts mid-stream and the helper returns
- * an empty array. Default 15 (see `DEFAULT_MAX_FILL_RECTS`). The
- * abort path keeps chart-heavy pages cheap: subsequent device
- * callbacks short-circuit to no-ops, so a page with 10k fill_path
- * events pays only the wasm→JS bridge cost for those events, not the
- * per-event path walk + bbox math.
+ * **Budget.** `maxFills` and `maxStrokes` forward to `Page.collectGraphics`.
+ * Each primitive kind aborts independently when its budget is exceeded,
+ * returning an empty array for that kind while still preserving the other
+ * side's results.
  *
- * **Failure mode.** Any error from `loadPage` / `collectFilledRects` /
- * `destroy` is caught and logged at info level; the helper returns an
- * empty array. Fill-rect collection is purely advisory — the
- * downstream `ColumnDetector` treats an empty list as "no zones, run
- * legacy behavior". A corrupt PDF, an unusual encoder, or a test mock
- * without the JS-device wiring therefore degrades gracefully to the
- * pre-fill-rect column logic instead of failing the whole extract.
+ * **Failure mode.** Any error from `loadPage` / `collectGraphics` /
+ * `destroy` is caught and logged at info level; the helper returns empty
+ * arrays. Graphics collection is purely advisory — the downstream
+ * `ColumnDetector` treats empty lists as "no graphics boundaries, run
+ * legacy behavior".
  */
-export function extractFilledRectsFromDoc(
+export function extractGraphicsFromDoc(
     doc: DocumentLike,
     pageIndex: number,
-    maxFills?: number,
-): FillRect[] {
+    opts?: CollectGraphicsOptions,
+): GraphicsLayerPrimitives {
     let page;
     try {
         page = doc.loadPage(pageIndex);
     } catch (err) {
         postLog(
             "info",
-            `extractFilledRectsFromDoc: loadPage ${pageIndex} failed: ${String(err)}`,
+            `extractGraphicsFromDoc: loadPage ${pageIndex} failed: ${String(err)}`,
         );
-        return [];
+        return { fills: [], strokes: [] };
     }
     try {
-        return page.collectFilledRects(maxFills);
+        if (typeof page.collectGraphics === "function") {
+            return page.collectGraphics(opts);
+        }
+        return {
+            fills: page.collectFilledRects(opts?.maxFills),
+            strokes: [],
+        };
     } catch (err) {
         postLog(
             "info",
-            `extractFilledRectsFromDoc: collectFilledRects ${pageIndex} failed: ${String(err)}`,
+            `extractGraphicsFromDoc: collectGraphics ${pageIndex} failed: ${String(err)}`,
         );
-        return [];
+        return { fills: [], strokes: [] };
     } finally {
         try {
             page.destroy();
         } catch (_) {
             // best-effort cleanup
         }
+    }
+}
+
+export function extractFilledRectsFromDoc(
+    doc: DocumentLike,
+    pageIndex: number,
+    maxFills?: number,
+): FillRect[] {
+    return extractGraphicsFromDoc(doc, pageIndex, { maxFills, maxStrokes: 0 }).fills;
+}
+
+export function extractStrokedLinesFromDoc(
+    doc: DocumentLike,
+    pageIndex: number,
+    maxStrokes?: number,
+): DividerLine[] {
+    return extractGraphicsFromDoc(doc, pageIndex, { maxFills: 0, maxStrokes }).strokes;
+}
+
+const WHITE_THRESHOLD = 0.97;
+const INK_THRESHOLD = 0.03;
+
+export function isNearWhiteOrNoInk(color: number[], colorspaceType: number): boolean {
+    switch (colorspaceType) {
+        case 1: // Gray
+        case 2: // RGB
+        case 3: // BGR
+            return color.length > 0 && color.every((c) => c >= WHITE_THRESHOLD);
+        case 4: // CMYK
+            return color.length > 0 && color.every((c) => c <= INK_THRESHOLD);
+        case 7: // Separation
+        case 8: // DeviceN
+            return color.length > 0 && color.every((c) => c <= INK_THRESHOLD);
+        default:
+            return false;
     }
 }
 
@@ -371,8 +408,6 @@ export function filterToContainerRects(
 ): Array<{ x: number; y: number; w: number; h: number }> {
     const MIN_FILL_AREA = 900; // 30pt × 30pt
     const MAX_PAGE_COVERAGE = 0.9;
-    const WHITE_THRESHOLD = 0.97;
-    const INK_THRESHOLD = 0.03;
 
     const pageArea = pageWidth * pageHeight;
     const out: Array<{ x: number; y: number; w: number; h: number }> = [];
@@ -389,34 +424,65 @@ export function filterToContainerRects(
         if (area < MIN_FILL_AREA) continue;
         if (pageArea > 0 && area >= MAX_PAGE_COVERAGE * pageArea) continue;
 
-        // White / no-ink detection across colorspaces. Conservative —
-        // when in doubt, keep.
-        let isWhite = false;
-        switch (f.colorspaceType) {
-            case 1: // Gray
-            case 2: // RGB
-            case 3: // BGR
-                isWhite =
-                    f.color.length > 0 &&
-                    f.color.every((c) => c >= WHITE_THRESHOLD);
-                break;
-            case 4: // CMYK
-                isWhite =
-                    f.color.length > 0 &&
-                    f.color.every((c) => c <= INK_THRESHOLD);
-                break;
-            case 7: // Separation
-            case 8: // DeviceN
-                isWhite =
-                    f.color.length > 0 &&
-                    f.color.every((c) => c <= INK_THRESHOLD);
-                break;
-            default:
-                isWhite = false;
-        }
-        if (isWhite) continue;
+        if (isNearWhiteOrNoInk(f.color, f.colorspaceType)) continue;
 
         out.push({ x: x0, y: y0, w, h });
+    }
+
+    return out;
+}
+
+export function filterToDividerLines(
+    strokes: DividerLine[],
+    pageWidth: number,
+    pageHeight: number,
+): Array<{
+    orientation: "horizontal" | "vertical";
+    position: number;
+    start: number;
+    end: number;
+    thickness: number;
+}> {
+    const MAX_THICKNESS = 2;
+    const MIN_SPAN_RATIO = 0.5;
+    const out: Array<{
+        orientation: "horizontal" | "vertical";
+        position: number;
+        start: number;
+        end: number;
+        thickness: number;
+    }> = [];
+
+    for (const stroke of strokes) {
+        if (stroke.alpha <= 0) continue;
+        if (stroke.thickness <= 0 || stroke.thickness > MAX_THICKNESS) continue;
+        if (isNearWhiteOrNoInk(stroke.color, stroke.colorspaceType)) continue;
+
+        if (stroke.orientation === "horizontal") {
+            const y = (stroke.a[1] + stroke.b[1]) / 2;
+            const start = Math.min(stroke.a[0], stroke.b[0]);
+            const end = Math.max(stroke.a[0], stroke.b[0]);
+            if (end - start < MIN_SPAN_RATIO * pageWidth) continue;
+            out.push({
+                orientation: "horizontal",
+                position: y,
+                start,
+                end,
+                thickness: stroke.thickness,
+            });
+        } else {
+            const x = (stroke.a[0] + stroke.b[0]) / 2;
+            const start = Math.min(stroke.a[1], stroke.b[1]);
+            const end = Math.max(stroke.a[1], stroke.b[1]);
+            if (end - start < MIN_SPAN_RATIO * pageHeight) continue;
+            out.push({
+                orientation: "vertical",
+                position: x,
+                start,
+                end,
+                thickness: stroke.thickness,
+            });
+        }
     }
 
     return out;

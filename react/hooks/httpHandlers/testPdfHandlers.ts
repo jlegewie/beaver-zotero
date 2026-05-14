@@ -1370,6 +1370,10 @@ export async function handleTestPdfExtractTraceHttpRequest(request: any) {
                 isBroken: columnResult.isBroken,
                 columnCount: columnResult.columnCount,
             },
+            graphics_layer: {
+                fillBoundaries: trace.fillBoundaries,
+                dividerLines: trace.dividerLines,
+            },
             raw_lines_final_dropped: finalDropped,
             lines_dropped_by_columns: linesDroppedByColumns,
             sentence_stats: {
@@ -1427,6 +1431,10 @@ export async function handleTestPdfExtractTraceHttpRequest(request: any) {
         column_detection: {
             isBroken: columnResult.isBroken,
             columnCount: columnResult.columnCount,
+        },
+        graphics_layer: {
+            fillBoundaries: trace.fillBoundaries,
+            dividerLines: trace.dividerLines,
         },
         lines_dropped_by_columns: linesDroppedByColumns,
         paragraphs: paragraphsOut,

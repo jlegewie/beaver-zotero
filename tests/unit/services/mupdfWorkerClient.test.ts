@@ -744,6 +744,8 @@ describe('MuPDFWorkerClient', () => {
                         textsToRemove: new Set(),
                         removalsByPage: new Map(),
                     },
+                    fillBoundaries: [],
+                    dividerLines: [],
                     filteredResult: {},
                 },
             };

@@ -89,6 +89,7 @@ export interface LibMuPdf {
     _wasm_drop_device(device: number): void;
     _wasm_colorspace_get_type(ptr: number): number;
     _wasm_colorspace_get_n(ptr: number): number;
+    _wasm_stroke_state_get_linewidth?(ptr: number): number;
     [key: string]: unknown;
 }
 
@@ -180,6 +181,29 @@ export interface FillRect {
     isAxisAlignedRect: boolean;
 }
 
+export interface DividerLine {
+    /** Endpoints in page-space (top-left origin) after CTM transform. */
+    a: [number, number];
+    b: [number, number];
+    /** Stroke width in page-space points, perpendicular to the segment. */
+    thickness: number;
+    /** Axis classification derived at probe time. */
+    orientation: "horizontal" | "vertical";
+    color: number[];
+    colorspaceType: number;
+    alpha: number;
+}
+
+export interface GraphicsLayerPrimitives {
+    fills: FillRect[];
+    strokes: DividerLine[];
+}
+
+export interface CollectGraphicsOptions {
+    maxFills?: number;
+    maxStrokes?: number;
+}
+
 export interface PageLike {
     pointer: number;
     getBounds(box?: "MediaBox" | "CropBox" | "BleedBox" | "TrimBox" | "ArtBox"): RectTuple;
@@ -211,6 +235,7 @@ export interface PageLike {
      * real content pages with sidebars/callouts (typical is 1–5).
      */
     collectFilledRects(maxFills?: number): FillRect[];
+    collectGraphics(opts?: CollectGraphicsOptions): GraphicsLayerPrimitives;
     destroy(): void;
 }
 
@@ -296,7 +321,16 @@ interface DeviceCallbacks {
         colorPtr: number,
         alpha: number,
     ): void;
-    stroke_path(...args: number[]): void;
+    stroke_path(
+        devRef: number,
+        pathPtr: number,
+        strokeStatePtr: number,
+        ctmPtr: number,
+        csPtr: number,
+        csN: number,
+        colorPtr: number,
+        alpha: number,
+    ): void;
     clip_path(...args: number[]): void;
     clip_stroke_path(...args: number[]): void;
     fill_text(...args: number[]): void;
@@ -331,36 +365,43 @@ interface DeviceCallbacks {
  * background-tinted display boxes.
  */
 export const DEFAULT_MAX_FILL_RECTS = 15;
+export const DEFAULT_MAX_STROKE_LINES = 50;
 
 /**
  * Internal collector state — populated by the device's `fill_path`
  * callback during `Page.collectFilledRects()`. Single-threaded worker,
  * so a module-level singleton is safe.
  */
-interface FillRectCollectorState {
+interface GraphicsCollectorState {
     /** Output accumulator, populated as fill_path events fire. */
     fills: FillRect[];
+    /** Output accumulator, populated as stroke_path events fire. */
+    strokes: DividerLine[];
     /** Page height in points — used to flip MuPDF's y-up bbox to top-left. */
     pageHeight: number;
-    /** Per-fill_path path-walker scratch buffer. */
+    /** Per-path callback scratch buffer. */
     path: Array<["M" | "L", number, number] | ["C", number, number, number, number, number, number] | ["Z"]>;
     /**
      * Total count of fill_path events seen on this page, including
      * events past the budget. Drives the abort decision.
      */
-    seen: number;
-    /** Hard ceiling on `seen` — see `DEFAULT_MAX_FILL_RECTS`. */
+    fillsSeen: number;
+    strokesSeen: number;
+    /** Hard ceiling on `fillsSeen` — see `DEFAULT_MAX_FILL_RECTS`. */
     maxFills: number;
+    /** Hard ceiling on `strokesSeen` — see `DEFAULT_MAX_STROKE_LINES`. */
+    maxStrokes: number;
     /**
      * Once true, the callback no longer walks paths / reads colors /
      * appends to `fills`. The return path of `collectFilledRects`
      * checks this flag and discards `fills` entirely (empty result).
      */
-    aborted: boolean;
+    fillsAborted: boolean;
+    strokesAborted: boolean;
 }
-let _activeFillCollector: FillRectCollectorState | null = null;
+let _activeGraphicsCollector: GraphicsCollectorState | null = null;
 
-type PathSegment = FillRectCollectorState["path"][number];
+type PathSegment = GraphicsCollectorState["path"][number];
 
 function sameCoord(a: number, b: number, tolerance: number): boolean {
     return Math.abs(a - b) <= tolerance;
@@ -431,6 +472,110 @@ export function isAxisAlignedRectanglePath(
     return true;
 }
 
+export function isAxisAlignedLineSegment(
+    segs: ReadonlyArray<PathSegment>,
+    ctm: readonly [number, number, number, number, number, number],
+    tolerance = 0.25,
+): { orientation: "horizontal" | "vertical"; a: [number, number]; b: [number, number] } | null {
+    if (
+        segs.length !== 2 ||
+        segs[0][0] !== "M" ||
+        segs[1][0] !== "L"
+    ) {
+        return null;
+    }
+    const [aa, bb, cc, dd, ee, ff] = ctm;
+    const start = segs[0] as ["M", number, number];
+    const end = segs[1] as ["L", number, number];
+    const a: [number, number] = [
+        aa * start[1] + cc * start[2] + ee,
+        bb * start[1] + dd * start[2] + ff,
+    ];
+    const b: [number, number] = [
+        aa * end[1] + cc * end[2] + ee,
+        bb * end[1] + dd * end[2] + ff,
+    ];
+    if (pointEquals(a, b, tolerance)) return null;
+    if (sameCoord(a[1], b[1], tolerance)) {
+        return { orientation: "horizontal", a, b };
+    }
+    if (sameCoord(a[0], b[0], tolerance)) {
+        return { orientation: "vertical", a, b };
+    }
+    return null;
+}
+
+function readColor(
+    libmupdf: LibMuPdf,
+    csPtr: number,
+    csN: number,
+    colorPtr: number,
+): { color: number[]; colorspaceType: number } {
+    const color: number[] = [];
+    if (colorPtr && csN > 0) {
+        const cp = colorPtr >> 2;
+        for (let i = 0; i < csN; i++) color.push(libmupdf.HEAPF32[cp + i]);
+    }
+    const colorspaceType = csPtr ? libmupdf._wasm_colorspace_get_type(csPtr) : 0;
+    return { color, colorspaceType };
+}
+
+function readCtm(
+    libmupdf: LibMuPdf,
+    ctmPtr: number,
+): [number, number, number, number, number, number] {
+    const cm = ctmPtr >> 2;
+    return [
+        libmupdf.HEAPF32[cm + 0],
+        libmupdf.HEAPF32[cm + 1],
+        libmupdf.HEAPF32[cm + 2],
+        libmupdf.HEAPF32[cm + 3],
+        libmupdf.HEAPF32[cm + 4],
+        libmupdf.HEAPF32[cm + 5],
+    ];
+}
+
+function transformPoint(
+    ctm: readonly [number, number, number, number, number, number],
+    x: number,
+    y: number,
+): [number, number] {
+    const [a, b, c, d, e, f] = ctm;
+    return [a * x + c * y + e, b * x + d * y + f];
+}
+
+function pathSpaceStrokeThickness(
+    segs: ReadonlyArray<PathSegment>,
+    ctm: readonly [number, number, number, number, number, number],
+    lineWidth: number,
+): number {
+    if (lineWidth <= 0 || segs.length < 2 || segs[0][0] !== "M" || segs[1][0] !== "L") {
+        return Math.max(0, lineWidth);
+    }
+    const start = segs[0] as ["M", number, number];
+    const end = segs[1] as ["L", number, number];
+    const dx = end[1] - start[1];
+    const dy = end[2] - start[2];
+    const len = Math.hypot(dx, dy);
+    if (len <= 0) return Math.max(0, lineWidth);
+    const px = (-dy / len) * lineWidth;
+    const py = (dx / len) * lineWidth;
+    const p0 = transformPoint(ctm, start[1], start[2]);
+    const p1 = transformPoint(ctm, start[1] + px, start[2] + py);
+    return Math.hypot(p1[0] - p0[0], p1[1] - p0[1]);
+}
+
+export function lineSegmentToTopLeftFrame(
+    line: { orientation: "horizontal" | "vertical"; a: [number, number]; b: [number, number] },
+    pageHeight: number,
+): { orientation: "horizontal" | "vertical"; a: [number, number]; b: [number, number] } {
+    return {
+        orientation: line.orientation,
+        a: [line.a[0], pageHeight - line.a[1]],
+        b: [line.b[0], pageHeight - line.b[1]],
+    };
+}
+
 /**
  * Install the global JS-device and path-walker callback dispatchers.
  *
@@ -439,8 +584,8 @@ export function isAxisAlignedRectanglePath(
  * every device call — both must exist before the first `_wasm_new_js_device()`
  * / `_wasm_walk_path()` invocation, or wasm crashes with "X is not a function".
  *
- * The dispatchers route to `_activeFillCollector` when one is set
- * (during `collectFilledRects`); otherwise they no-op. This keeps the
+ * The dispatchers route to `_activeGraphicsCollector` when one is set
+ * (during `collectGraphics`); otherwise they no-op. This keeps the
  * dispatchers permanently installed without leaking state between calls.
  */
 function installCallbacks(libmupdf: LibMuPdf): void {
@@ -453,19 +598,19 @@ function installCallbacks(libmupdf: LibMuPdf): void {
 
     g.$libmupdf_path_walk = {
         moveto: (_a, x, y) => {
-            const c = _activeFillCollector;
+            const c = _activeGraphicsCollector;
             if (c) c.path.push(["M", x, y]);
         },
         lineto: (_a, x, y) => {
-            const c = _activeFillCollector;
+            const c = _activeGraphicsCollector;
             if (c) c.path.push(["L", x, y]);
         },
         curveto: (_a, x1, y1, x2, y2, x3, y3) => {
-            const c = _activeFillCollector;
+            const c = _activeGraphicsCollector;
             if (c) c.path.push(["C", x1, y1, x2, y2, x3, y3]);
         },
         closepath: (_a) => {
-            const c = _activeFillCollector;
+            const c = _activeGraphicsCollector;
             if (c) c.path.push(["Z"]);
         },
     };
@@ -475,17 +620,17 @@ function installCallbacks(libmupdf: LibMuPdf): void {
         close_device: noop,
         drop_device: noop,
         fill_path: (_dev, pathPtr, _evenOdd, ctmPtr, csPtr, csN, colorPtr, alpha) => {
-            const c = _activeFillCollector;
+            const c = _activeGraphicsCollector;
             if (!c) return;
             // Hot-path early-exit. Once aborted, every subsequent
             // fill_path event short-circuits before any work
             // (no path walk, no bbox math, no allocations) — keeps
             // chart-heavy pages from billing the per-page extract
             // for a thousand JS callbacks worth of grouping work.
-            if (c.aborted) return;
-            c.seen += 1;
-            if (c.seen > c.maxFills) {
-                c.aborted = true;
+            if (c.fillsAborted) return;
+            c.fillsSeen += 1;
+            if (c.fillsSeen > c.maxFills) {
+                c.fillsAborted = true;
                 return;
             }
             // Walk the path *now* — pathPtr / ctmPtr live in scratch
@@ -513,13 +658,7 @@ function installCallbacks(libmupdf: LibMuPdf): void {
             if (!isFinite(minX) || !isFinite(maxX) || !isFinite(minY) || !isFinite(maxY)) return;
 
             // Read ctm inline (HEAPF32 view, 6 floats: a b c d e f).
-            const cm = ctmPtr >> 2;
-            const a = libmupdf.HEAPF32[cm + 0];
-            const b = libmupdf.HEAPF32[cm + 1];
-            const cc = libmupdf.HEAPF32[cm + 2];
-            const d = libmupdf.HEAPF32[cm + 3];
-            const e = libmupdf.HEAPF32[cm + 4];
-            const f = libmupdf.HEAPF32[cm + 5];
+            const [a, b, cc, d, e, f] = readCtm(libmupdf, ctmPtr);
 
             // Transform the four bbox corners through the ctm and take
             // the axis-aligned envelope — handles rotated / mirrored
@@ -560,12 +699,7 @@ function installCallbacks(libmupdf: LibMuPdf): void {
             // Read color (csN floats) and colorspace type. csPtr may be 0
             // for "no colorspace" — typical for clipping-only paths,
             // though those route through clip_* callbacks, not fill_path.
-            const color: number[] = [];
-            if (colorPtr && csN > 0) {
-                const cp = colorPtr >> 2;
-                for (let i = 0; i < csN; i++) color.push(libmupdf.HEAPF32[cp + i]);
-            }
-            const colorspaceType = csPtr ? libmupdf._wasm_colorspace_get_type(csPtr) : 0;
+            const { color, colorspaceType } = readColor(libmupdf, csPtr, csN, colorPtr);
 
             const isAxisAlignedRect = isAxisAlignedRectanglePath(segs, [a, b, cc, d, e, f]);
 
@@ -577,7 +711,41 @@ function installCallbacks(libmupdf: LibMuPdf): void {
                 isAxisAlignedRect,
             });
         },
-        stroke_path: noop,
+        stroke_path: (_dev, pathPtr, strokeStatePtr, ctmPtr, csPtr, csN, colorPtr, alpha) => {
+            const c = _activeGraphicsCollector;
+            if (!c) return;
+            if (c.strokesAborted) return;
+            c.strokesSeen += 1;
+            if (c.strokesSeen > c.maxStrokes) {
+                c.strokesAborted = true;
+                return;
+            }
+
+            c.path = [];
+            libmupdf._wasm_walk_path(pathPtr);
+            const segs = c.path;
+            const ctm = readCtm(libmupdf, ctmPtr);
+            const line = isAxisAlignedLineSegment(segs, ctm);
+            if (!line) return;
+            const topLeftLine = lineSegmentToTopLeftFrame(line, c.pageHeight);
+
+            const rawLineWidth =
+                typeof libmupdf._wasm_stroke_state_get_linewidth === "function"
+                    ? libmupdf._wasm_stroke_state_get_linewidth(strokeStatePtr)
+                    : 0;
+            const thickness = pathSpaceStrokeThickness(segs, ctm, rawLineWidth);
+            const { color, colorspaceType } = readColor(libmupdf, csPtr, csN, colorPtr);
+
+            c.strokes.push({
+                a: topLeftLine.a,
+                b: topLeftLine.b,
+                thickness,
+                orientation: topLeftLine.orientation,
+                color,
+                colorspaceType,
+                alpha,
+            });
+        },
         clip_path: noop,
         clip_stroke_path: noop,
         fill_text: noop,
@@ -861,12 +1029,15 @@ export function makeDocumentApi(libmupdf: LibMuPdf): MuPDFApi {
             );
         }
         collectFilledRects(maxFills: number = DEFAULT_MAX_FILL_RECTS): FillRect[] {
+            return this.collectGraphics({ maxFills, maxStrokes: 0 }).fills;
+        }
+        collectGraphics(opts: CollectGraphicsOptions = {}): GraphicsLayerPrimitives {
             // Single-collector reentrancy guard. The worker is
             // single-threaded so concurrent calls aren't expected, but
             // surfacing this as an error beats silently mixing two
-            // pages' fill streams.
-            if (_activeFillCollector) {
-                throw new Error("collectFilledRects: another collection is already in progress");
+            // pages' graphics streams.
+            if (_activeGraphicsCollector) {
+                throw new Error("collectGraphics: another collection is already in progress");
             }
             const bounds = this.getBounds();
             const pageHeight = bounds[3] - bounds[1];
@@ -877,15 +1048,19 @@ export function makeDocumentApi(libmupdf: LibMuPdf): MuPDFApi {
             const ctmTuple: MatrixTuple = [1, 0, 0, 1, 0, 0];
             const ctmPtr = MATRIX(ctmTuple);
 
-            const state: FillRectCollectorState = {
+            const state: GraphicsCollectorState = {
                 fills: [],
+                strokes: [],
                 pageHeight,
                 path: [],
-                seen: 0,
-                maxFills,
-                aborted: false,
+                fillsSeen: 0,
+                strokesSeen: 0,
+                maxFills: opts.maxFills ?? DEFAULT_MAX_FILL_RECTS,
+                maxStrokes: opts.maxStrokes ?? DEFAULT_MAX_STROKE_LINES,
+                fillsAborted: false,
+                strokesAborted: false,
             };
-            _activeFillCollector = state;
+            _activeGraphicsCollector = state;
             const device = libmupdf._wasm_new_js_device();
             try {
                 libmupdf._wasm_run_page_contents(this.pointer, device, ctmPtr, 0);
@@ -898,7 +1073,7 @@ export function makeDocumentApi(libmupdf: LibMuPdf): MuPDFApi {
                 // matches the lifecycle MuPDF expects.
                 libmupdf._wasm_close_device(device);
                 libmupdf._wasm_drop_device(device);
-                _activeFillCollector = null;
+                _activeGraphicsCollector = null;
             }
             // Hard abort: a page that emitted more than `maxFills`
             // fill_path events is treated as a figure / vector
@@ -906,8 +1081,10 @@ export function makeDocumentApi(libmupdf: LibMuPdf): MuPDFApi {
             // containers. Discard everything we *did* collect — those
             // first N fills are almost always sub-shapes of the same
             // illustration, not real aside boxes.
-            if (state.aborted) return [];
-            return state.fills;
+            return {
+                fills: state.fillsAborted ? [] : state.fills,
+                strokes: state.strokesAborted ? [] : state.strokes,
+            };
         }
         destroy() {
             if (this.pointer) {
