@@ -2,7 +2,7 @@
  * Extraction Visualizer
  *
  * Creates temporary Zotero annotations to visualize PDF extraction results
- * (columns / lines / paragraphs / sentences) on the live reader. Useful
+ * (columns / lines / items / paragraphs / sentences) on the live reader. Useful
  * for dev-time inspection of the detection pipeline.
  *
  * Bbox computation is delegated to `extractionOverlay.ts` so the
@@ -13,7 +13,7 @@
 import { logger } from "../../src/utils/logger";
 import {
     PDFExtractor,
-    Rect,
+    bboxToReaderFrame,
 } from "../../src/services/pdf";
 import type { ProcessedPage } from "../../src/services/pdf";
 import { getItemLanguage } from "../../src/utils/zoteroUtils";
@@ -23,6 +23,7 @@ import { BeaverTemporaryAnnotations, ZoteroReader } from "./annotationUtils";
 import { ZoteroItemReference } from "../types/zotero";
 import {
     buildColumnOverlayFromPage,
+    buildItemOverlayFromPage,
     buildLineOverlayFromPage,
     buildParagraphOverlayFromPage,
     buildSentenceOverlayFromPage,
@@ -64,46 +65,19 @@ import {
  * pages with non-zero CropBox offsets still align.
  */
 function rectToZoteroFormat(
-    rect: Rect,
+    rect: import("../../src/services/pdf").BoundingBox,
     pdfWidth: number,
     pdfHeight: number,
     rotation: number,
     viewBoxLL: [number, number] = [0, 0],
 ): number[] {
-    const [vx, vy] = viewBoxLL;
-    const norm = ((rotation % 360) + 360) % 360;
-    let x1: number;
-    let y1: number;
-    let x2: number;
-    let y2: number;
-    switch (norm) {
-        case 90:
-            x1 = rect.y + vx;
-            x2 = rect.y + rect.h + vx;
-            y1 = rect.x + vy;
-            y2 = rect.x + rect.w + vy;
-            break;
-        case 180:
-            x1 = pdfWidth - (rect.x + rect.w) + vx;
-            x2 = pdfWidth - rect.x + vx;
-            y1 = pdfHeight - (rect.y + rect.h) + vy;
-            y2 = pdfHeight - rect.y + vy;
-            break;
-        case 270:
-            x1 = pdfHeight - (rect.y + rect.h) + vx;
-            x2 = pdfHeight - rect.y + vx;
-            y1 = pdfWidth - (rect.x + rect.w) + vy;
-            y2 = pdfWidth - rect.x + vy;
-            break;
-        case 0:
-        default:
-            x1 = rect.x + vx;
-            x2 = rect.x + rect.w + vx;
-            y1 = pdfHeight - (rect.y + rect.h) + vy;
-            y2 = pdfHeight - rect.y + vy;
-            break;
-    }
-    return [x1, y1, x2, y2];
+    const readerBox = bboxToReaderFrame(rect, {
+        pageWidth: pdfWidth,
+        pageHeight: pdfHeight,
+        pageRotation: (((rotation % 360) + 360) % 360) as 0 | 90 | 180 | 270,
+        viewBoxLL: { x: viewBoxLL[0], y: viewBoxLL[1] },
+    });
+    return [readerBox.l, readerBox.b, readerBox.r, readerBox.t];
 }
 
 /**
@@ -169,7 +143,7 @@ async function pushOverlayToReader(
     const pageIndex = overlay.pageIndex;
 
     // Group rects by their `group` index so multi-rect sentences become a
-    // single annotation. Single-rect levels (columns/lines/paragraphs)
+    // single annotation. Single-rect levels (columns/lines/items/paragraphs)
     // collapse to one entry per group naturally.
     const groups = new Map<number, typeof overlay.rects>();
     for (const r of overlay.rects) {
@@ -249,7 +223,7 @@ async function pushOverlayToReader(
 /**
  * Run the structured-mode extract for a single page and return the
  * `ProcessedPage`. Single worker round-trip that drives every visualizer
- * level (columns / lines / paragraphs / sentences) — the pure
+ * level (columns / lines / items / paragraphs / sentences) — the pure
  * `*FromPage` builders in `extractionOverlay.ts` then turn the result
  * into rects.
  *
@@ -392,6 +366,61 @@ export async function visualizeCurrentPageLines(): Promise<{
         const errorMessage = error instanceof Error ? error.message : String(error);
         logger(`[Visualizer] Error: ${errorMessage}`);
         return { success: false, message: `Line visualization failed: ${errorMessage}` };
+    }
+}
+
+/**
+ * Visualize all detected document items for the current page in the reader.
+ */
+export async function visualizeCurrentPageItems(): Promise<{
+    success: boolean;
+    message: string;
+    items?: number;
+    paragraphs?: number;
+    headers?: number;
+    pageIndex?: number;
+}> {
+    try {
+        const ctx = await resolveActiveReaderContext();
+        if ("error" in ctx) return { success: false, message: ctx.error };
+        const { reader, item, filePath, pageIndex } = ctx;
+
+        logger(`[Visualizer] Loading PDF for item detection on page ${pageIndex + 1}...`);
+        const page = await loadStructuredPage(filePath, pageIndex, item);
+
+        const overlay = buildItemOverlayFromPage(page);
+        if (overlay.rects.length === 0) {
+            return {
+                success: true,
+                message: `No items detected on page ${pageIndex + 1}`,
+                items: 0,
+                paragraphs: 0,
+                headers: 0,
+                pageIndex,
+            };
+        }
+
+        const { viewBox, width, height, rotation } = await getPageViewportInfo(reader, pageIndex);
+        const refs = await pushOverlayToReader(
+            overlay,
+            reader,
+            [viewBox[0], viewBox[1]],
+            width,
+            height,
+            rotation,
+        );
+        BeaverTemporaryAnnotations.addToTracking(refs);
+
+        const items = overlay.groupCount;
+        const paragraphs = Number(overlay.stats.paragraphs ?? 0);
+        const headers = Number(overlay.stats.headers ?? 0);
+        const message = `Page ${pageIndex + 1}: ${items} items (${paragraphs} text, ${headers} headers)`;
+        logger(`[Visualizer] ${message}`);
+        return { success: true, message, items, paragraphs, headers, pageIndex };
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        logger(`[Visualizer] Error: ${errorMessage}`);
+        return { success: false, message: `Item visualization failed: ${errorMessage}` };
     }
 }
 

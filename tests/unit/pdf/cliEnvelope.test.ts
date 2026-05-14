@@ -191,7 +191,7 @@ describe('runCli — profile command', () => {
                             sentenceMapMs: 0,
                             charCount: 100,
                             lineCount: 1,
-                            paragraphCount: 1,
+                            itemCount: 1,
                             degradationCount: 0,
                         },
                     ],
@@ -255,20 +255,28 @@ describe('runCli — overlay command', () => {
                     width: 500,
                     height: 750,
                     content: '',
-                    sentences: [
+                    columns: [],
+                    items: [
                         {
+                            kind: 'text',
+                            id: 'p0:i0',
                             pageIndex: 0,
-                            paragraphIndex: 0,
-                            sentenceIndex: 0,
+                            index: 0,
+                            bbox: { l: 10, t: 10, r: 90, b: 22, origin: 'top-left' },
+                            columnIndex: 0,
                             text: 'Hello.',
-                            bboxes: [{ x: 10, y: 10, w: 80, h: 12 }],
+                            lines: [
+                                { text: 'Hello.', bbox: { l: 10, t: 10, r: 90, b: 22, origin: 'top-left' } },
+                            ],
+                            sentences: [],
                         },
                     ],
-                    paragraphs: [
+                    sentences: [
                         {
-                            item: { type: 'paragraph', idx: 0, text: 'Hello.' },
-                            paragraphText: 'Hello.',
-                            sentences: [],
+                            parentId: 'p0:i0',
+                            index: 0,
+                            text: 'Hello.',
+                            bboxes: [{ l: 10, t: 10, r: 90, b: 22, origin: 'top-left' }],
                         },
                     ],
                 },

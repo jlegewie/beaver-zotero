@@ -21,11 +21,11 @@
  */
 
 import type {
-    RawBBox,
+    BoundingBox,
     RawLineDetailed,
     RawPageDataDetailed,
-    SentenceBBox,
 } from "./types";
+import { bboxHeight, bboxWidth, mergeBoxes } from "./types";
 
 // ---------------------------------------------------------------------------
 // Sentence splitter contract
@@ -192,6 +192,14 @@ export interface PageText {
     lines: RawLineDetailed[];
 }
 
+export interface PageWideSentence {
+    pageIndex: number;
+    sentenceIndex: number;
+    text: string;
+    bboxes: BoundingBox[];
+    fragments?: Array<{ lineIndex: number; text: string; bbox: BoundingBox }>;
+}
+
 /**
  * Flatten a detailed page's text blocks into a single line array in document
  * order, build the concatenated text, and emit the source map.
@@ -255,20 +263,9 @@ export function flattenPageText(page: RawPageDataDetailed): PageText {
 // Sentence → bboxes
 // ---------------------------------------------------------------------------
 
-/** Compute the axis-aligned union of a set of RawBBoxes. */
-function unionBBoxes(bboxes: RawBBox[]): RawBBox {
-    if (bboxes.length === 0) return { x: 0, y: 0, w: 0, h: 0 };
-    let minX = Infinity;
-    let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
-    for (const b of bboxes) {
-        if (b.x < minX) minX = b.x;
-        if (b.y < minY) minY = b.y;
-        if (b.x + b.w > maxX) maxX = b.x + b.w;
-        if (b.y + b.h > maxY) maxY = b.y + b.h;
-    }
-    return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+/** Compute the axis-aligned union of a set of BoundingBoxes. */
+function unionBBoxes(bboxes: BoundingBox[]): BoundingBox {
+    return mergeBoxes(bboxes);
 }
 
 /**
@@ -319,40 +316,25 @@ const SAME_LINE_MAX_GAP_RATIO = 3.0;
  * consecutively.
  */
 function mergeSameLineFragments(
-    fragments: NonNullable<SentenceBBox["fragments"]>,
-): NonNullable<SentenceBBox["fragments"]> {
+    fragments: NonNullable<PageWideSentence["fragments"]>,
+): NonNullable<PageWideSentence["fragments"]> {
     if (fragments.length < 2) return fragments;
-    const out: NonNullable<SentenceBBox["fragments"]> = [];
+    const out: NonNullable<PageWideSentence["fragments"]> = [];
     for (const frag of fragments) {
         const last = out.length > 0 ? out[out.length - 1] : null;
         const sameLine =
             !!last &&
-            Math.abs(last.bbox.y - frag.bbox.y) <= SAME_LINE_Y_TOL_PT &&
-            Math.abs(last.bbox.h - frag.bbox.h) <= SAME_LINE_H_TOL_PT;
+            Math.abs(last.bbox.t - frag.bbox.t) <= SAME_LINE_Y_TOL_PT &&
+            Math.abs(bboxHeight(last.bbox) - bboxHeight(frag.bbox)) <= SAME_LINE_H_TOL_PT;
         if (last && sameLine) {
-            const lastRight = last.bbox.x + last.bbox.w;
-            const gap = frag.bbox.x - lastRight;
+            const lastRight = last.bbox.r;
+            const gap = frag.bbox.l - lastRight;
             // Allow a tiny negative slop for sub-pt overlaps (kerning,
             // rounding); reject real backwards jumps and oversized gaps.
-            const refHeight = Math.max(last.bbox.h, frag.bbox.h, 1);
+            const refHeight = Math.max(bboxHeight(last.bbox), bboxHeight(frag.bbox), 1);
             const maxGap = refHeight * SAME_LINE_MAX_GAP_RATIO;
             if (gap >= -SAME_LINE_Y_TOL_PT && gap <= maxGap) {
-                const minX = Math.min(last.bbox.x, frag.bbox.x);
-                const maxX = Math.max(
-                    last.bbox.x + last.bbox.w,
-                    frag.bbox.x + frag.bbox.w,
-                );
-                const minY = Math.min(last.bbox.y, frag.bbox.y);
-                const maxY = Math.max(
-                    last.bbox.y + last.bbox.h,
-                    frag.bbox.y + frag.bbox.h,
-                );
-                last.bbox = {
-                    x: minX,
-                    y: minY,
-                    w: maxX - minX,
-                    h: maxY - minY,
-                };
+                last.bbox = mergeBoxes([last.bbox, frag.bbox]);
                 last.text = last.text + " " + frag.text;
                 continue;
             }
@@ -375,9 +357,8 @@ export function sentenceToBoxes(
     pageText: PageText,
     range: SentenceRange,
     pageIndex: number,
-    paragraphIndex: number,
     sentenceIndex: number,
-): SentenceBBox | null {
+): PageWideSentence | null {
     const { source, lines } = pageText;
     const clampedStart = Math.max(0, range.start);
     const clampedEnd = Math.min(source.length, range.end);
@@ -411,7 +392,7 @@ export function sentenceToBoxes(
 
     if (runs.length === 0) return null;
 
-    const rawFragments: NonNullable<SentenceBBox["fragments"]> = [];
+    const rawFragments: NonNullable<PageWideSentence["fragments"]> = [];
 
     for (const run of runs) {
         const line = lines[run.lineIndex];
@@ -430,7 +411,6 @@ export function sentenceToBoxes(
     const text = fragments.map((f) => f.text).join(" ");
     return {
         pageIndex,
-        paragraphIndex,
         sentenceIndex,
         text,
         bboxes,
@@ -443,28 +423,27 @@ export function sentenceToBoxes(
 // ---------------------------------------------------------------------------
 
 /**
- * Produce `SentenceBBox[]` for a detailed page.
+ * Produce page-wide debug sentences for a detailed page.
  *
  * @param page     - Output of `MuPDFWorkerClient.extractRawPageDetailed`.
  * @param splitter - Sentence splitter callback. Defaults to
  *                   `simpleRegexSentenceSplit` for feasibility testing.
  */
-export function extractSentenceBBoxes(
+export function extractPageWideSentences(
     page: RawPageDataDetailed,
     splitter: SentenceSplitter = simpleRegexSentenceSplit,
-): SentenceBBox[] {
+): PageWideSentence[] {
     // Page-wide path treats the whole page as a single virtual paragraph,
     // since paragraph detection is intentionally out of scope here. Callers
     // that need true paragraph addressing should use ParagraphSentenceMapper.
     const pageText = flattenPageText(page);
     const ranges = splitter(pageText.text);
-    const result: SentenceBBox[] = [];
+    const result: PageWideSentence[] = [];
     for (const range of ranges) {
         const sentence = sentenceToBoxes(
             pageText,
             range,
             page.pageIndex,
-            0,
             result.length,
         );
         if (sentence) result.push(sentence);
@@ -498,7 +477,7 @@ export interface FeasibilityReport {
         index: number;
         text: string;
         numBBoxes: number;
-        unionBBox: RawBBox;
+        unionBBox: BoundingBox;
     }>;
     /**
      * True if every sentence bbox lies fully within the page CropBox
@@ -527,13 +506,12 @@ export function buildFeasibilityReport(
     }
 
     const ranges = splitter(pageText.text);
-    const sentencesFull: SentenceBBox[] = [];
+    const sentencesFull: PageWideSentence[] = [];
     for (const r of ranges) {
         const s = sentenceToBoxes(
             pageText,
             r,
             page.pageIndex,
-            0,
             sentencesFull.length,
         );
         if (s) sentencesFull.push(s);
@@ -548,10 +526,10 @@ export function buildFeasibilityReport(
     for (const s of sentencesFull) {
         for (const b of s.bboxes) {
             if (
-                b.x < -tolerance ||
-                b.y < -tolerance ||
-                b.x + b.w > pageW + tolerance ||
-                b.y + b.h > pageH + tolerance
+                b.l < -tolerance ||
+                b.t < -tolerance ||
+                b.r > pageW + tolerance ||
+                b.b > pageH + tolerance
             ) {
                 allBBoxesInPage = false;
                 break;

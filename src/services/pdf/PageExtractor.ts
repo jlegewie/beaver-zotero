@@ -14,17 +14,15 @@ import type {
     RawPageData,
     RawBlock,
     RawLine,
-    RawBBox,
     ProcessedPage,
-    ProcessedBlock,
-    ProcessedLine,
+    BoundingBox,
+    DocItem,
+    ItemLine,
     StyleProfile,
     TextStyle,
     MarginSettings,
-    ColumnBBox,
 } from "./types";
-import { styleToKey } from "./types";
-import { StyleAnalyzer } from "./StyleAnalyzer";
+import { bboxFromXYWH, bboxHeight, bboxWidth } from "./types";
 import { MarginFilter } from "./MarginFilter";
 import type { Rect, ColumnDetectionResult } from "./ColumnDetector";
 import { pdfLog } from "./logging";
@@ -37,12 +35,12 @@ import { pdfLog } from "./logging";
  * Calculate the overlap ratio between a block and a column.
  * Returns the fraction of the block's area that falls within the column.
  */
-function calculateOverlapRatio(blockBBox: RawBBox, column: Rect): number {
+function calculateOverlapRatio(blockBBox: BoundingBox, column: Rect): number {
     // Calculate intersection
-    const xOverlapStart = Math.max(blockBBox.x, column.x);
-    const xOverlapEnd = Math.min(blockBBox.x + blockBBox.w, column.x + column.w);
-    const yOverlapStart = Math.max(blockBBox.y, column.y);
-    const yOverlapEnd = Math.min(blockBBox.y + blockBBox.h, column.y + column.h);
+    const xOverlapStart = Math.max(blockBBox.l, column.x);
+    const xOverlapEnd = Math.min(blockBBox.r, column.x + column.w);
+    const yOverlapStart = Math.max(blockBBox.t, column.y);
+    const yOverlapEnd = Math.min(blockBBox.b, column.y + column.h);
 
     // No overlap if any dimension is negative
     if (xOverlapEnd <= xOverlapStart || yOverlapEnd <= yOverlapStart) {
@@ -50,7 +48,7 @@ function calculateOverlapRatio(blockBBox: RawBBox, column: Rect): number {
     }
 
     const overlapArea = (xOverlapEnd - xOverlapStart) * (yOverlapEnd - yOverlapStart);
-    const blockArea = blockBBox.w * blockBBox.h;
+    const blockArea = bboxWidth(blockBBox) * bboxHeight(blockBBox);
 
     return blockArea > 0 ? overlapArea / blockArea : 0;
 }
@@ -61,23 +59,11 @@ function calculateOverlapRatio(blockBBox: RawBBox, column: Rect): number {
  * Default 0.5 (50%) is a good balance between precision and tolerance.
  */
 function blockBelongsToColumn(
-    blockBBox: RawBBox,
+    blockBBox: BoundingBox,
     column: Rect,
     minOverlap: number = 0.5
 ): boolean {
     return calculateOverlapRatio(blockBBox, column) >= minOverlap;
-}
-
-/**
- * Convert Rect to ColumnBBox format.
- */
-function rectToColumnBBox(rect: Rect): ColumnBBox {
-    return {
-        l: rect.x,
-        t: rect.y,
-        r: rect.x + rect.w,
-        b: rect.y + rect.h,
-    };
 }
 
 /**
@@ -101,6 +87,22 @@ export interface PageExtractorOptions {
     styleProfile?: StyleProfile;
     /** Margin settings for filtering */
     margins?: MarginSettings;
+}
+
+interface ProcessedLine {
+    text: string;
+    bbox: BoundingBox;
+    style: TextStyle;
+}
+
+interface ProcessedBlock {
+    type: "text" | "image";
+    bbox: BoundingBox;
+    lines: ProcessedLine[];
+    text: string;
+    columnIndex: number;
+    /** Stylistic role detected by the block engine. Reserved DocItem kinds are not emitted from this heuristic. */
+    role?: "heading" | "body" | "caption" | "footnote";
 }
 
 /**
@@ -149,8 +151,9 @@ export class PageExtractor {
             )
             : rawPage;
 
-        const blocks = this.processBlocks(pageToProcess.blocks);
+        const blocks = this.processBlocks(pageToProcess.blocks, 0);
         const content = this.buildContent(blocks);
+        const items = this.blocksToItems(blocks, rawPage.pageIndex);
 
         return {
             index: rawPage.pageIndex,
@@ -158,6 +161,8 @@ export class PageExtractor {
             width: rawPage.width,
             height: rawPage.height,
             content,
+            columns: [],
+            items,
         };
     }
 
@@ -188,7 +193,8 @@ export class PageExtractor {
         const orderedBlocks: ProcessedBlock[] = [];
 
         // Process each column in reading order
-        for (const column of columns) {
+        for (let columnIndex = 0; columnIndex < columns.length; columnIndex++) {
+            const column = columns[columnIndex];
             // Find blocks that belong to this column (by center point)
             const blocksInColumn = allBlocks
                 .map((block, idx) => ({ block, idx }))
@@ -198,12 +204,12 @@ export class PageExtractor {
                 });
 
             // Sort blocks within column by y-position (top to bottom)
-            blocksInColumn.sort((a, b) => a.block.bbox.y - b.block.bbox.y);
+            blocksInColumn.sort((a, b) => a.block.bbox.t - b.block.bbox.t);
 
             // Process each block
             for (const { block, idx } of blocksInColumn) {
                 assignedBlocks.add(idx);
-                const processedBlock = this.processBlock(block);
+                const processedBlock = this.processBlock(block, columnIndex);
                 if (processedBlock.text.trim()) {
                     orderedBlocks.push(processedBlock);
                 }
@@ -226,9 +232,12 @@ export class PageExtractor {
         const content = this.buildContent(orderedBlocks);
 
         // Convert columns to output format
-        const columnBBoxes: ColumnBBox[] | undefined = includeColumns
-            ? columns.map(rectToColumnBBox)
-            : undefined;
+        const columnBBoxes: BoundingBox[] = includeColumns
+            ? columns.map((rect) =>
+                bboxFromXYWH(rect.x, rect.y, rect.w, rect.h, "top-left"),
+            )
+            : [];
+        const items = this.blocksToItems(orderedBlocks, rawPage.pageIndex);
 
         return {
             index: rawPage.pageIndex,
@@ -237,19 +246,20 @@ export class PageExtractor {
             height: rawPage.height,
             content,
             columns: columnBBoxes,
+            items,
         };
     }
 
     /**
      * Process raw blocks into structured blocks.
      */
-    private processBlocks(rawBlocks: readonly RawBlock[]): ProcessedBlock[] {
+    private processBlocks(rawBlocks: readonly RawBlock[], columnIndex: number): ProcessedBlock[] {
         const processed: ProcessedBlock[] = [];
 
         for (const block of rawBlocks) {
             if (block.type !== "text" || !block.lines) continue;
 
-            const processedBlock = this.processBlock(block);
+            const processedBlock = this.processBlock(block, columnIndex);
             if (processedBlock.text.trim()) {
                 processed.push(processedBlock);
             }
@@ -261,7 +271,7 @@ export class PageExtractor {
     /**
      * Process a single block.
      */
-    private processBlock(block: RawBlock): ProcessedBlock {
+    private processBlock(block: RawBlock, columnIndex: number): ProcessedBlock {
         const lines: ProcessedLine[] = [];
         let blockText = "";
 
@@ -285,6 +295,7 @@ export class PageExtractor {
             bbox: block.bbox,
             lines,
             text: blockText.trim(),
+            columnIndex,
             role,
         };
     }
@@ -318,6 +329,32 @@ export class PageExtractor {
      */
     private buildContent(blocks: ProcessedBlock[]): string {
         return blocks.map(b => b.text).join("\n\n");
+    }
+
+    private blocksToItems(blocks: ProcessedBlock[], pageIndex: number): DocItem[] {
+        return blocks.map((block, index) => {
+            const lines: ItemLine[] = block.lines.map((line) => ({
+                text: line.text,
+                bbox: line.bbox,
+                fontSize: line.style.size,
+            }));
+            const textLines = lines.length > 0
+                ? lines
+                : [{ text: block.text, bbox: block.bbox }];
+            const base = {
+                id: `p${pageIndex}:i${index}`,
+                pageIndex,
+                index,
+                bbox: block.bbox,
+                columnIndex: block.columnIndex,
+                text: block.text,
+                lines: textLines,
+            };
+            if (block.role === "heading") {
+                return { ...base, kind: "section_header" as const, level: 1 };
+            }
+            return { ...base, kind: "text" as const };
+        });
     }
 
     /**

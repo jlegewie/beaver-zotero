@@ -111,6 +111,7 @@ function dispatchVisualizerAction(
     action:
         | 'columns'
         | 'lines'
+        | 'items'
         | 'paragraphs'
         | 'sentences'
         | 'clear'
@@ -220,6 +221,7 @@ function openBeaverMenu(reader: any, anchorButton: HTMLElement): void {
         }> = [
             { label: 'Visualize Columns', action: 'columns' },
             { label: 'Visualize Lines', action: 'lines' },
+            { label: 'Visualize Items', action: 'items' },
             { label: 'Visualize Paragraphs', action: 'paragraphs' },
             { label: 'Visualize Sentences', action: 'sentences' },
             { label: 'Clear Visualization', action: 'clear' },

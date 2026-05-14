@@ -3,15 +3,7 @@
  *
  * Core type definitions for the PDF text extraction pipeline.
  *
- * NOTE: `ProcessedPage` references `ParagraphWithSentences` and
- * `DegradationNote` from `./ParagraphSentenceMapper`. These are pulled in via
- * `import type` so the imports erase at runtime — no real cycle.
  */
-
-import type {
-    DegradationSummary,
-    ParagraphWithSentences,
-} from "./ParagraphSentenceMapper";
 
 // ============================================================================
 // Settings & Options
@@ -98,7 +90,6 @@ export const DEFAULT_EXTRACTION_SETTINGS: Required<ExtractionSettings> = {
     repeatThreshold: 3,
     detectPageSequences: true,
     graphicsLayerMode: "off",
-    // graphicsLayerMode: "auto",
 };
 
 /**
@@ -122,20 +113,189 @@ export function shouldProbeGraphicsLayer(
 // Raw MuPDF Data Structures (from WASM JSON output)
 // ============================================================================
 
+export type CoordOrigin = "top-left" | "bottom-left";
+
 /**
- * Bounding box from MuPDF structured text JSON.
- * Format: { x, y, w, h } where x,y is top-left corner
+ * Axis-aligned page-space rectangle.
+ *
+ * `t` and `b` are semantic top/bottom edges. With top-left origin,
+ * y increases downward and `t <= b`; with bottom-left origin, y
+ * increases upward and `t >= b`. Public extraction/layout results emit
+ * source MuPDF page coordinates with `origin: "top-left"`.
  */
-export interface RawBBox {
-    x: number;
-    y: number;
-    w: number;
-    h: number;
+export interface BoundingBox {
+    l: number;
+    t: number;
+    r: number;
+    b: number;
+    origin: CoordOrigin;
 }
 
-/** Convert RawBBox to tuple format [x0, y0, x1, y1] */
-export function bboxToTuple(bbox: RawBBox): [number, number, number, number] {
-    return [bbox.x, bbox.y, bbox.x + bbox.w, bbox.y + bbox.h];
+export function bboxWidth(bbox: BoundingBox): number {
+    return bbox.r - bbox.l;
+}
+
+export function bboxHeight(bbox: BoundingBox): number {
+    return Math.abs(bbox.t - bbox.b);
+}
+
+export function mergeBoxes(boxes: BoundingBox[]): BoundingBox {
+    if (boxes.length === 0) {
+        return { l: 0, t: 0, r: 0, b: 0, origin: "top-left" };
+    }
+    const origin = boxes[0].origin;
+    for (const box of boxes) {
+        if (box.origin !== origin) {
+            throw new Error("mergeBoxes requires all boxes to use the same origin");
+        }
+    }
+    const l = Math.min(...boxes.map((b) => b.l));
+    const r = Math.max(...boxes.map((b) => b.r));
+    if (origin === "top-left") {
+        return {
+            l,
+            t: Math.min(...boxes.map((b) => b.t)),
+            r,
+            b: Math.max(...boxes.map((b) => b.b)),
+            origin,
+        };
+    }
+    return {
+        l,
+        t: Math.max(...boxes.map((b) => b.t)),
+        r,
+        b: Math.min(...boxes.map((b) => b.b)),
+        origin,
+    };
+}
+
+export function flipOrigin(bbox: BoundingBox, pageHeight: number): BoundingBox {
+    return {
+        l: bbox.l,
+        t: pageHeight - bbox.t,
+        r: bbox.r,
+        b: pageHeight - bbox.b,
+        origin: bbox.origin === "top-left" ? "bottom-left" : "top-left",
+    };
+}
+
+export function bboxFromXYWH(
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    origin: CoordOrigin,
+): BoundingBox {
+    return {
+        l: x,
+        t: y,
+        r: x + w,
+        b: origin === "top-left" ? y + h : y - h,
+        origin,
+    };
+}
+
+export function bboxToTuple(bbox: BoundingBox): [number, number, number, number] {
+    return [bbox.l, bbox.t, bbox.r, bbox.b];
+}
+
+export interface ReaderFrameContext {
+    pageHeight: number;
+    pageWidth: number;
+    pageRotation: 0 | 90 | 180 | 270;
+    cropBoxOffset?: { x: number; y: number };
+    viewBoxLL?: { x: number; y: number };
+}
+
+function normalizeRotation(rotation: number): 0 | 90 | 180 | 270 {
+    const normalized = ((rotation % 360) + 360) % 360;
+    if (normalized === 90 || normalized === 180 || normalized === 270) {
+        return normalized;
+    }
+    return 0;
+}
+
+/**
+ * Convert a public source-MuPDF/top-left bbox to Zotero reader annotation
+ * coordinates. The returned bottom-left bbox keeps semantic edges:
+ * `t` is the visual top edge and `b` the visual bottom edge.
+ */
+export function bboxToReaderFrame(
+    bbox: BoundingBox,
+    ctx: ReaderFrameContext,
+): BoundingBox {
+    if (bbox.origin !== "top-left") {
+        throw new Error("bboxToReaderFrame expects a top-left source bbox");
+    }
+    const dx = (ctx.cropBoxOffset?.x ?? 0) + (ctx.viewBoxLL?.x ?? 0);
+    const dy = (ctx.cropBoxOffset?.y ?? 0) + (ctx.viewBoxLL?.y ?? 0);
+    const rotation = normalizeRotation(ctx.pageRotation);
+    let l: number;
+    let r: number;
+    let bottom: number;
+    let top: number;
+    switch (rotation) {
+        case 90:
+            l = bbox.t + dx;
+            r = bbox.b + dx;
+            bottom = bbox.l + dy;
+            top = bbox.r + dy;
+            break;
+        case 180:
+            l = ctx.pageWidth - bbox.r + dx;
+            r = ctx.pageWidth - bbox.l + dx;
+            bottom = ctx.pageHeight - bbox.b + dy;
+            top = ctx.pageHeight - bbox.t + dy;
+            break;
+        case 270:
+            l = ctx.pageHeight - bbox.b + dx;
+            r = ctx.pageHeight - bbox.t + dx;
+            bottom = ctx.pageWidth - bbox.r + dy;
+            top = ctx.pageWidth - bbox.l + dy;
+            break;
+        case 0:
+        default:
+            l = bbox.l + dx;
+            r = bbox.r + dx;
+            bottom = ctx.pageHeight - bbox.b + dy;
+            top = ctx.pageHeight - bbox.t + dy;
+            break;
+    }
+    return { l, t: top, r, b: bottom, origin: "bottom-left" };
+}
+
+function pointToReaderFrame(
+    x: number,
+    y: number,
+    ctx: ReaderFrameContext,
+): [number, number] {
+    const dx = (ctx.cropBoxOffset?.x ?? 0) + (ctx.viewBoxLL?.x ?? 0);
+    const dy = (ctx.cropBoxOffset?.y ?? 0) + (ctx.viewBoxLL?.y ?? 0);
+    switch (normalizeRotation(ctx.pageRotation)) {
+        case 90:
+            return [y + dx, x + dy];
+        case 180:
+            return [ctx.pageWidth - x + dx, ctx.pageHeight - y + dy];
+        case 270:
+            return [ctx.pageHeight - y + dx, ctx.pageWidth - x + dy];
+        case 0:
+        default:
+            return [x + dx, ctx.pageHeight - y + dy];
+    }
+}
+
+export function quadsToReaderFrame(
+    quads: QuadPoint[],
+    ctx: ReaderFrameContext,
+): QuadPoint[] {
+    return quads.map((quad) => {
+        const out: number[] = [];
+        for (let i = 0; i < quad.length; i += 2) {
+            const [x, y] = pointToReaderFrame(quad[i], quad[i + 1], ctx);
+            out.push(x, y);
+        }
+        return out as QuadPoint;
+    });
 }
 
 /**
@@ -157,7 +317,7 @@ export interface RawLine {
     /** Writing mode: 0 = horizontal, 1 = vertical */
     wmode: number;
     /** Bounding box */
-    bbox: RawBBox;
+    bbox: BoundingBox;
     /** Font information */
     font: RawFont;
     /** Baseline X coordinate */
@@ -191,7 +351,7 @@ export interface RawBlock {
     /** Block type: "text" or "image" */
     type: "text" | "image";
     /** Bounding box */
-    bbox: RawBBox;
+    bbox: BoundingBox;
     /**
      * Lines (only for text blocks). `readonly` so detailed subtypes
      * (`RawBlockDetailed`) are covariantly assignable to `RawBlock` —
@@ -240,7 +400,7 @@ export interface RawChar {
     /** 8-float quadrilateral: [ulx,uly,urx,ury,llx,lly,lrx,lry] */
     quad: QuadPoint;
     /** Axis-aligned bbox computed from the quad (convenience) */
-    bbox: RawBBox;
+    bbox: BoundingBox;
 }
 
 /** A line enriched with per-character quads. */
@@ -262,49 +422,113 @@ export interface RawPageDataDetailed extends Omit<RawPageData, "blocks"> {
     blocks: RawBlockDetailed[];
 }
 
-/**
- * A sentence resolved to one bbox per line-fragment it occupies.
- * Multi-line sentences produce multiple bboxes; short sentences produce one.
- *
- * Addressing model: `(pageIndex, paragraphIndex, sentenceIndex)` is a stable
- * page-local identifier. Both indices are page-local and reset per page.
- * `sentenceIndex` is paragraph-local (resets at each paragraph boundary), so
- * `(paragraphIndex, sentenceIndex)` lexicographically equals reading order
- * within a page. Indices are deterministic for the same input but may drift
- * across code changes — citations should persist self-contained data
- * (text + bboxes), not these indices.
- */
-export interface SentenceBBox {
-    pageIndex: number;
-    /** Index into the producing page's `paragraphs[]`. For cross-paragraph merges, the first paragraph the sentence starts in. */
-    paragraphIndex: number;
-    /** Position within the paragraph's sentence list (0-based). For merges, the index in the first paragraph. */
-    sentenceIndex: number;
+export interface ItemLine {
     text: string;
-    /** One bbox per contiguous line-fragment */
-    bboxes: RawBBox[];
-    /** Optional per-fragment detail (line index, per-line text, per-line bbox) */
+    bbox: BoundingBox;
+    fontSize?: number;
+}
+
+export interface DocItemBase {
+    /** Stable page-local reading-order id. Kind is intentionally excluded. */
+    id: string;
+    pageIndex: number;
+    /** Page-local reading-order position. */
+    index: number;
+    /** Merged item bbox in public source MuPDF coordinates. */
+    bbox: BoundingBox;
+    /** 0-based reading-order column index. Fallback/full-width items use 0. */
+    columnIndex: number;
+}
+
+export interface TextBearingItem extends DocItemBase {
+    text: string;
+    /** One entry per visual line. Degraded items carry one synthetic full-item line. */
+    lines: ItemLine[];
+}
+
+export interface SentenceItem {
+    /** Parent `DocItem.id`. */
+    parentId: string;
+    /** 0-based position within the parent item. */
+    index: number;
+    text: string;
+    /** One bbox per contiguous line-fragment. */
+    bboxes: BoundingBox[];
+    /** Optional per-fragment detail (line index, per-line text, per-line bbox). */
     fragments?: Array<{
         lineIndex: number;
         text: string;
-        bbox: RawBBox;
+        bbox: BoundingBox;
     }>;
     /**
-     * Source paragraph kind. Absent ≡ "text". "heading" sentences come from
-     * paragraphs the detector classified as headers; they are never split,
-     * so one heading paragraph always produces exactly one SentenceBBox.
-     */
-    kind?: "text" | "heading";
-    /**
      * Hint that this sentence is continued by the *next* sentence in reading
-     * order — typically across a column or page break (no terminal
-     * punctuation here, lowercase / continuation start on the next sentence,
-     * both sides body text). The producer never merges; downstream consumers
-     * decide whether to join. For runs that span N > 2 fragments, every
-     * non-final fragment carries the flag. **Omitted ≡ false** — never
-     * encoded explicitly as `false`.
+     * order. Omitted means false.
      */
     joinWithNext?: boolean;
+}
+
+export interface TextItem extends TextBearingItem {
+    kind: "text";
+    sentences?: SentenceItem[];
+}
+
+export interface SectionHeaderItem extends TextBearingItem {
+    kind: "section_header";
+    level: number;
+}
+
+export interface FootnoteItem extends TextBearingItem {
+    kind: "footnote";
+    sentences?: SentenceItem[];
+}
+
+export interface CaptionItem extends TextBearingItem {
+    kind: "caption";
+    sentences?: SentenceItem[];
+}
+
+export interface ListItemItem extends TextBearingItem {
+    kind: "list_item";
+    sentences?: SentenceItem[];
+}
+
+export interface FormulaItem extends TextBearingItem {
+    kind: "formula";
+}
+
+export interface TableItem extends DocItemBase {
+    kind: "table";
+}
+
+export interface PictureItem extends DocItemBase {
+    kind: "picture";
+}
+
+export type DocItem =
+    | TextItem
+    | SectionHeaderItem
+    | FootnoteItem
+    | CaptionItem
+    | ListItemItem
+    | FormulaItem
+    | TableItem
+    | PictureItem;
+
+export type DegradationReason =
+    | "unmapped"
+    | "invariant_violation"
+    | "empty_split";
+
+export interface DegradationNote {
+    itemId: string;
+    itemKind: DocItem["kind"];
+    reason: DegradationReason;
+    message?: string;
+}
+
+export interface DegradationSummary {
+    count: number;
+    notes: DegradationNote[];
 }
 
 /**
@@ -371,7 +595,7 @@ export interface MarginElement {
     /** Which margin zone it's in */
     position: MarginPosition;
     /** Bounding box */
-    bbox: RawBBox;
+    bbox: BoundingBox;
     /** Page index where this appears */
     pageIndex: number;
     /** Full line data for context */
@@ -420,63 +644,6 @@ export interface MarginRemovalResult {
 // Processed Data Structures
 // ============================================================================
 
-/** A processed text line with style information */
-export interface ProcessedLine {
-    text: string;
-    bbox: RawBBox;
-    style: TextStyle;
-}
-
-/** A processed text block */
-export interface ProcessedBlock {
-    type: "text" | "image";
-    bbox: RawBBox;
-    lines: ProcessedLine[];
-    text: string;
-    /** Semantic role detected by style analysis */
-    role?: "heading" | "body" | "caption" | "footnote";
-}
-
-/** Column bounding box (for output) */
-export interface ColumnBBox {
-    /** Left edge */
-    l: number;
-    /** Top edge */
-    t: number;
-    /** Right edge */
-    r: number;
-    /** Bottom edge */
-    b: number;
-}
-
-/** Line bounding box (same format as ColumnBBox) */
-export interface LineBBox {
-    /** Left edge */
-    l: number;
-    /** Top edge */
-    t: number;
-    /** Right edge */
-    r: number;
-    /** Bottom edge */
-    b: number;
-    /** Width */
-    width: number;
-    /** Height */
-    height: number;
-}
-
-/** A single line of text with metadata */
-export interface ExtractedLine {
-    /** Text content */
-    text: string;
-    /** Bounding box */
-    bbox: LineBBox;
-    /** Font size (median of spans) */
-    fontSize?: number;
-    /** Column index (0-based) */
-    columnIndex: number;
-}
-
 /** A fully processed page */
 export interface ProcessedPage {
     /** 0-based page index */
@@ -488,37 +655,13 @@ export interface ProcessedPage {
     height: number;
     /** Plain text content (in reading order) */
     content: string;
-    /** Detected columns (in reading order) */
-    columns?: ColumnBBox[];
-    /** Detected lines (populated by `mode: "structured"`) */
-    lines?: ExtractedLine[];
-
-    // ------------------------------------------------------------------
-    // Structured-mode-only fields. Populated when the producing
-    // `extract` call ran with `mode: "structured"`. Always-on in that
-    // mode (no opt-in flag); markdown-mode results leave them
-    // undefined.
-    // ------------------------------------------------------------------
-
-    /**
-     * Paragraphs with their sentences. Same `ParagraphWithSentences[]`
-     * shape returned by the single-page sentence mapper. Each entry
-     * carries the underlying `ContentItem`, the paragraph text +
-     * source-map, and the sentence list.
-     */
-    paragraphs?: ParagraphWithSentences[];
-    /**
-     * Flattened `SentenceBBox[]` across all paragraphs in reading order.
-     * Convenient for callers that don't care which paragraph a
-     * sentence came from.
-     */
-    sentences?: SentenceBBox[];
-    /**
-     * Paragraphs that fell back from precise sentence-level mapping to a
-     * single whole-paragraph bbox (bbox-lookup miss, text/chars invariant
-     * violation, or empty splitter result — distinguished by
-     * `notes[i].reason`). Omitted when no paragraphs degraded.
-     */
+    /** Detected columns in reading order. Empty when no columns are detected. */
+    columns: BoundingBox[];
+    /** Page items in reading order. Present in every extraction mode. */
+    items: DocItem[];
+    /** Structured-mode flattened view over splitter-eligible item sentences. */
+    sentences?: SentenceItem[];
+    /** Structured-mode fallback diagnostics. Omitted when no items degraded. */
     degradation?: DegradationSummary;
 }
 
@@ -533,7 +676,7 @@ export interface RepeatedElement {
     /** Approximate Y position (top or bottom of page) */
     position: "header" | "footer";
     /** Bounding box pattern */
-    bbox: RawBBox;
+    bbox: BoundingBox;
     /** Pages where this element appears */
     pageIndices: number[];
 }
@@ -560,8 +703,8 @@ export interface DocumentAnalysis {
  * Lets a profiler attribute the per-page cost to the WASM detailed walk,
  * the font bridge, the filtered-paragraph pipeline (column/line/paragraph
  * detection), and the sentence mapper. `charCount` / `lineCount` /
- * `paragraphCount` are emitted in the same struct so bottleneck ms can
- * be normalized per 1k chars / per line / per paragraph without a
+ * `itemCount` are emitted in the same struct so bottleneck ms can
+ * be normalized per 1k chars / per line / per item without a
  * second pass over the result.
  *
  * Only populated by the structured branch of `runExtractFromIndices`.
@@ -596,14 +739,14 @@ export interface StructuredPagePhaseTimings {
     lineDetectMs: number;
     /** `detectParagraphs` inside the pipeline. */
     paragraphDetectMs: number;
-    /** `extractPageSentenceBBoxes` — paragraph → sentence bbox mapping. */
+    /** `extractPageSentences` — item-scoped sentence mapping. */
     sentenceMapMs: number;
     /** Total character count on the target page (post-detailed-walk). */
     charCount: number;
     /** Total line count on the target page (post-detailed-walk). */
     lineCount: number;
-    /** Paragraph count emitted by the filtered-paragraph pipeline. */
-    paragraphCount: number;
+    /** Document item count emitted by the structured pipeline. */
+    itemCount: number;
     /** Degradation count from the sentence mapper (0 on the happy path). */
     degradationCount: number;
 }
@@ -897,6 +1040,9 @@ export class ExtractionError extends Error {
  * A QuadPoint defines a quadrilateral region on a page.
  * Format: [ulx, uly, urx, ury, llx, lly, lrx, lry]
  * - ul = upper-left, ur = upper-right, ll = lower-left, lr = lower-right
+ *
+ * Quad coordinates use the public source MuPDF page frame: top-left origin,
+ * y increasing downward, same page dimensions as the containing result.
  */
 export type QuadPoint = [number, number, number, number, number, number, number, number];
 
@@ -908,7 +1054,7 @@ export interface PDFSearchHit {
     /** QuadPoints defining the hit region(s) - one quad per character in match */
     quads: QuadPoint[];
     /** Bounding box enclosing all quads (for convenience) */
-    bbox: RawBBox;
+    bbox: BoundingBox;
 }
 
 /**

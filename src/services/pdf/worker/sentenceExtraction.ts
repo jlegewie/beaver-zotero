@@ -41,8 +41,8 @@
  * validation. These helpers trust their inputs.
  */
 
-import { extractPageSentenceBBoxes } from "../ParagraphSentenceMapper";
-import type { PageSentenceBBoxResult } from "../ParagraphSentenceMapper";
+import { extractPageSentences } from "../ParagraphSentenceMapper";
+import type { PageSentenceResult } from "../ParagraphSentenceMapper";
 import { resolveAnalysisPages } from "../AnalysisWindow";
 import {
     detectFilteredParagraphs,
@@ -54,7 +54,7 @@ import type { SentenceSplitter } from "../SentenceMapper";
 import type { ParagraphDetectionSettings } from "../ParagraphDetector";
 import type {
     SentenceSplitterConfig,
-    SentenceBBoxTraceResult,
+    SentenceTraceResult,
 } from "../sentenceTypes";
 import type {
     GraphicsLayerMode,
@@ -140,7 +140,7 @@ export function extractSentencesForPage(args: {
      */
     fontApi?: FontApi;
 }): {
-    sentenceResult: PageSentenceBBoxResult;
+    sentenceResult: PageSentenceResult;
     filteredResult: FilteredParagraphResult;
     phaseTimings: StructuredPagePhaseTimings;
 } {
@@ -191,7 +191,7 @@ export function extractSentencesForPage(args: {
     const filteredParagraphsMs = performance.now() - tFiltered;
 
     const tSentence = performance.now();
-    const sentenceResult = extractPageSentenceBBoxes(detailed, {
+    const sentenceResult = extractPageSentences(detailed, {
         paragraphSettings: args.paragraphSettings,
         splitter: args.splitter,
         precomputed: {
@@ -216,7 +216,7 @@ export function extractSentencesForPage(args: {
         sentenceMapMs,
         charCount,
         lineCount,
-        paragraphCount: filteredResult.paragraphResult.paragraphCount ?? 0,
+        itemCount: sentenceResult.items.length,
         degradationCount: sentenceResult.degradation?.count ?? 0,
     };
 
@@ -277,13 +277,13 @@ interface BaseArgs {
 
 export async function runSentenceExtractionFromDoc(
     args: BaseArgs & { trace?: false },
-): Promise<{ result: PageSentenceBBoxResult }>;
+): Promise<{ result: PageSentenceResult }>;
 export async function runSentenceExtractionFromDoc(
     args: BaseArgs & { trace: true },
-): Promise<SentenceBBoxTraceResult>;
+): Promise<SentenceTraceResult>;
 export async function runSentenceExtractionFromDoc(
     args: BaseArgs & { trace?: boolean },
-): Promise<{ result: PageSentenceBBoxResult } | SentenceBBoxTraceResult> {
+): Promise<{ result: PageSentenceResult } | SentenceTraceResult> {
     const {
         doc,
         pageIndex,
@@ -359,7 +359,7 @@ export async function runSentenceExtractionFromDoc(
             paragraphSettings,
             fillBoundaries,
         });
-        const result = extractPageSentenceBBoxes(detailed, {
+        const result = extractPageSentences(detailed, {
             paragraphSettings,
             splitter,
             precomputed: {
@@ -401,7 +401,7 @@ export async function runSentenceExtractionFromDoc(
         paragraphSettings,
         fillBoundaries: traceFillBoundaries,
     });
-    const result = extractPageSentenceBBoxes(detailed, {
+    const result = extractPageSentences(detailed, {
         paragraphSettings,
         splitter,
         precomputed: {

@@ -10,6 +10,7 @@
 import { useEventSubscription } from './useEventSubscription';
 import {
     visualizeCurrentPageColumns,
+    visualizeCurrentPageItems,
     visualizeCurrentPageLines,
     visualizeCurrentPageParagraphs,
     visualizeCurrentPageSentences,
@@ -34,6 +35,11 @@ export function useReaderVisualizerActionHandler() {
                 case 'lines': {
                     const r = await visualizeCurrentPageLines();
                     logger(`[ReaderVisualizer] lines: ${r.message}`);
+                    return;
+                }
+                case 'items': {
+                    const r = await visualizeCurrentPageItems();
+                    logger(`[ReaderVisualizer] items: ${r.message}`);
                     return;
                 }
                 case 'paragraphs': {

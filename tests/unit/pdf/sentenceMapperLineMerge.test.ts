@@ -24,6 +24,7 @@ import type {
     RawChar,
     RawLineDetailed,
 } from "../../../src/services/pdf/types";
+import { bboxFromXYWH, bboxHeight, bboxWidth } from "../../../src/services/pdf/types";
 
 function makeLine(
     text: string,
@@ -44,12 +45,12 @@ function makeLine(
         chars.push({
             c: text[i],
             quad,
-            bbox: { x, y: yTop, w: charW, h: charH },
+            bbox: bboxFromXYWH(x, yTop, charW, charH, "top-left"),
         });
     }
     return {
         wmode: 0,
-        bbox: { x: xStart, y: yTop, w: text.length * charW, h: charH },
+        bbox: bboxFromXYWH(xStart, yTop, text.length * charW, charH, "top-left"),
         font: { name: "Body", family: "Body", weight: "normal", style: "normal", size: 12 },
         x: xStart,
         y: yTop,
@@ -100,10 +101,10 @@ describe("sentenceToBoxes — same-line fragment merge", () => {
         expect(sentence!.bboxes).toHaveLength(1);
         const b = sentence!.bboxes[0];
         // Spans the union of both fragments + the gap they sit in.
-        expect(b.x).toBeCloseTo(50);
-        expect(b.x + b.w).toBeCloseTo(150 + 10 * "mechanism.".length);
-        expect(b.y).toBeCloseTo(100);
-        expect(b.h).toBeCloseTo(12);
+        expect(b.l).toBeCloseTo(50);
+        expect(b.r).toBeCloseTo(150 + 10 * "mechanism.".length);
+        expect(b.t).toBeCloseTo(100);
+        expect(bboxHeight(b)).toBeCloseTo(12);
     });
 
     it("does NOT merge two same-y fragments separated by a large gap (column gutter / table cell)", () => {
@@ -119,9 +120,9 @@ describe("sentenceToBoxes — same-line fragment merge", () => {
         expect(sentence).not.toBeNull();
         // Per-fragment precision preserved: two distinct rectangles.
         expect(sentence!.bboxes).toHaveLength(2);
-        expect(sentence!.bboxes[0].x).toBeCloseTo(50);
-        expect(sentence!.bboxes[0].w).toBeCloseTo(50);
-        expect(sentence!.bboxes[1].x).toBeCloseTo(50 + 50 + 200);
+        expect(sentence!.bboxes[0].l).toBeCloseTo(50);
+        expect(bboxWidth(sentence!.bboxes[0])).toBeCloseTo(50);
+        expect(sentence!.bboxes[1].l).toBeCloseTo(50 + 50 + 200);
     });
 
     it("does NOT merge fragments with different y (different visual lines)", () => {
@@ -132,8 +133,8 @@ describe("sentenceToBoxes — same-line fragment merge", () => {
         const sentence = sentenceToBoxes(pt, fullRange(pt), 0, 0, 0);
         expect(sentence).not.toBeNull();
         expect(sentence!.bboxes).toHaveLength(2);
-        expect(sentence!.bboxes[0].y).toBeCloseTo(100);
-        expect(sentence!.bboxes[1].y).toBeCloseTo(120);
+        expect(sentence!.bboxes[0].t).toBeCloseTo(100);
+        expect(sentence!.bboxes[1].t).toBeCloseTo(120);
     });
 
     it("does NOT merge fragments with different heights (subscript / superscript)", () => {
@@ -145,8 +146,8 @@ describe("sentenceToBoxes — same-line fragment merge", () => {
         const sentence = sentenceToBoxes(pt, fullRange(pt), 0, 0, 0);
         expect(sentence).not.toBeNull();
         expect(sentence!.bboxes).toHaveLength(2);
-        expect(sentence!.bboxes[0].h).toBeCloseTo(12);
-        expect(sentence!.bboxes[1].h).toBeCloseTo(7);
+        expect(bboxHeight(sentence!.bboxes[0])).toBeCloseTo(12);
+        expect(bboxHeight(sentence!.bboxes[1])).toBeCloseTo(7);
     });
 
     it("does NOT merge backwards (next fragment starts left of previous fragment's right edge)", () => {

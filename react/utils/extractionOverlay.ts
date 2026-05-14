@@ -11,6 +11,7 @@
 export {
     OVERLAY_COLORS,
     buildColumnOverlayFromPage,
+    buildItemOverlayFromPage,
     buildLineOverlayFromPage,
     buildMarginsOverlayFromAnalysis,
     buildParagraphOverlayFromPage,

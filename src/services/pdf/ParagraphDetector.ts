@@ -15,8 +15,9 @@
  *   5. Build output with text content and bounding boxes
  */
 
-import type { PageLine, LineBBox, PageLineResult, ColumnLineResult } from "./LineDetector";
-import type { TextStyle, StyleProfile } from "./types";
+import type { PageLine, PageLineResult, ColumnLineResult } from "./LineDetector";
+import type { BoundingBox, TextStyle, StyleProfile } from "./types";
+import { bboxHeight, mergeBoxes } from "./types";
 import type { Rect } from "./ColumnDetector";
 import { pdfLog } from "./logging";
 
@@ -112,7 +113,7 @@ export interface ContentItem {
     /** Unique ID for the item */
     id: string;
     /** Bounding box for the item */
-    bbox: LineBBox;
+    bbox: BoundingBox;
     /** Column index this item belongs to */
     columnIndex: number;
 }
@@ -204,29 +205,6 @@ function modeLeftEdge(values: number[], binPx: number): number {
     // Return median of values in that bin
     const inBin = values.filter(v => Math.round(v / binPx) === modeKey);
     return inBin.length > 0 ? median(inBin) : modeKey * binPx;
-}
-
-/**
- * Merge multiple bounding boxes into one
- */
-function mergeBoundingBoxes(bboxes: LineBBox[]): LineBBox {
-    if (bboxes.length === 0) {
-        return { l: 0, t: 0, r: 0, b: 0, width: 0, height: 0 };
-    }
-
-    const l = Math.min(...bboxes.map(b => b.l));
-    const t = Math.min(...bboxes.map(b => b.t));
-    const r = Math.max(...bboxes.map(b => b.r));
-    const b = Math.max(...bboxes.map(b => b.b));
-
-    return {
-        l,
-        t,
-        r,
-        b,
-        width: r - l,
-        height: b - t,
-    };
 }
 
 /**
@@ -734,7 +712,7 @@ function calculatePageThresholds(
 
     // 1a. Median line height
     const heights = allLines
-        .map(line => line.bbox.height)
+        .map(line => bboxHeight(line.bbox))
         .filter(h => h > 0);
     const medianHeight = heights.length > 0 ? median(heights) : 12.0;
     const binPx = Math.max(2.0, 0.15 * medianHeight);
@@ -1211,7 +1189,7 @@ function startNewItem(
                     currStyle.bold === prevDominant.bold &&
                     currStyle.italic === prevDominant.italic;
                 const lineHeightsMatch =
-                    Math.abs(line.bbox.height - prevLine.bbox.height) < 1.0;
+                    Math.abs(bboxHeight(line.bbox) - bboxHeight(prevLine.bbox)) < 1.0;
                 const markerSizeDiscrepancy =
                     prevLine.spans.length === 1 &&
                     lineHeightsMatch &&
@@ -1245,7 +1223,7 @@ function startNewItem(
     let fontSizeBreak = false;
     if (line.fontSize && prevLine.fontSize) {
         const fontSizeDiff = Math.abs(line.fontSize - prevLine.fontSize);
-        const lineHeightDiff = Math.abs(line.bbox.height - prevLine.bbox.height);
+        const lineHeightDiff = Math.abs(bboxHeight(line.bbox) - bboxHeight(prevLine.bbox));
         fontSizeBreak =
             fontSizeDiff > settings.fontSizeTolerance &&
             lineHeightDiff > settings.fontSizeTolerance;
@@ -1257,7 +1235,7 @@ function startNewItem(
     // breaks in that case are geometric artefacts of the wraparound, not real
     // paragraph boundaries — suppress them so the paragraph stays whole.
     const prevExtendsBelow =
-        prevLine.bbox.b > line.bbox.b + line.bbox.height;
+        prevLine.bbox.b > line.bbox.b + bboxHeight(line.bbox);
     if (prevExtendsBelow) {
         indentBreak = false;
         earlyEndBreak = false;
@@ -1364,7 +1342,7 @@ function processCurrentLinesAsItem(
 
     // e. Create bounding box
     const allBboxes = currentLines.map(l => l.bbox);
-    const mergedBbox = mergeBoundingBoxes(allBboxes);
+    const mergedBbox = mergeBoxes(allBboxes);
 
     // f. Create item
     const idx = isHeader ? headerIndex : paragraphIndex;
@@ -1379,7 +1357,7 @@ function processCurrentLinesAsItem(
         start: itemStart,
         end: itemEnd,
         text: itemText,
-        id: `${isHeader ? "header" : "para"}_p${pageIndex}_${idx}`,
+        id: "",
         bbox: mergedBbox,
         columnIndex,
     };
@@ -1585,6 +1563,10 @@ export function detectParagraphs(
         prevDocLine = colResult.lines[colResult.lines.length - 1];
     }
 
+    allItems.forEach((item, index) => {
+        item.id = `p${lineResult.pageIndex}:i${index}`;
+    });
+
     const baseResult: PageParagraphResult = {
         pageIndex: lineResult.pageIndex,
         width: lineResult.width,
@@ -1632,4 +1614,3 @@ export function logParagraphDetection(result: PageParagraphResult): void {
         pdfLog(`    ... and ${result.items.length - previewCount} more items`, 3);
     }
 }
-

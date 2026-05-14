@@ -13,16 +13,22 @@
 import { describe, it, expect } from "vitest";
 import type { Rect } from "../../../src/services/pdf/ColumnDetector";
 import { detectFigureTextColumns } from "../../../src/services/pdf/FigureTextFilter";
-import type { RawBlock, RawLine, RawPageData } from "../../../src/services/pdf/types";
+import {
+    bboxFromXYWH,
+    type RawBlock,
+    type RawLine,
+    type RawPageData,
+} from "../../../src/services/pdf/types";
 
 const PAGE_W = 612;
 const PAGE_H = 792;
 const CONTENT_W = PAGE_W - 50; // mirrors DEFAULT_MARGINS.left + .right
 
 function line(text: string, bbox: { x: number; y: number; w: number; h: number }): RawLine {
+    const lineBBox = bboxFromXYWH(bbox.x, bbox.y, bbox.w, bbox.h, "top-left");
     return {
         wmode: 0,
-        bbox,
+        bbox: lineBBox,
         font: { name: "Body", family: "Body", weight: "normal", style: "normal", size: 10 },
         x: bbox.x,
         y: bbox.y,
@@ -35,7 +41,7 @@ function page(lines: RawLine[]): RawPageData {
         ? [
               {
                   type: "text",
-                  bbox: { x: 0, y: 0, w: PAGE_W, h: PAGE_H },
+                  bbox: bboxFromXYWH(0, 0, PAGE_W, PAGE_H, "top-left"),
                   lines,
               },
           ]
@@ -51,10 +57,10 @@ function page(lines: RawLine[]): RawPageData {
 
 /** Build a column rect that snugly encloses the supplied lines. */
 function colFromLines(ls: RawLine[]): Rect {
-    const x0 = Math.min(...ls.map((l) => l.bbox.x));
-    const y0 = Math.min(...ls.map((l) => l.bbox.y));
-    const x1 = Math.max(...ls.map((l) => l.bbox.x + l.bbox.w));
-    const y1 = Math.max(...ls.map((l) => l.bbox.y + l.bbox.h));
+    const x0 = Math.min(...ls.map((l) => l.bbox.l));
+    const y0 = Math.min(...ls.map((l) => l.bbox.t));
+    const x1 = Math.max(...ls.map((l) => l.bbox.r));
+    const y1 = Math.max(...ls.map((l) => l.bbox.b));
     return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
 }
 

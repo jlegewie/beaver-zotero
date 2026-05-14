@@ -7,10 +7,9 @@
  *
  *   1. `buildParagraphText` preserves text/chars lockstep inside one
  *      paragraph and builds a correct source map.
- *   2. `extractPageSentenceBBoxes` wires the real detectors
+ *   2. `extractPageSentences` wires the real detectors
  *      (`detectColumns`, `detectLinesOnPage`, `detectParagraphs`) up to
- *      the sentence mapper and produces one `ParagraphWithSentences` per
- *      detected paragraph.
+ *      the sentence mapper and produces one `DocItem` per detected item.
  *   3. Splitting is scoped: a sentence that does not terminate at a
  *      paragraph break does not bleed across the break.
  *   4. The page-wide `SentenceMapper` and the paragraph-scoped mapper
@@ -21,20 +20,23 @@ import { describe, it, expect } from 'vitest';
 import {
     buildParagraphText,
     tryBuildParagraphText,
-    extractPageSentenceBBoxes,
+    extractPageSentences,
     buildDetailedLineLookup,
-    buildParagraphFeasibilityReport,
+    buildPageSentenceFeasibilityReport,
 } from '../src/services/pdf/ParagraphSentenceMapper';
-import { extractSentenceBBoxes } from '../src/services/pdf/SentenceMapper';
+import { extractPageWideSentences } from '../src/services/pdf/SentenceMapper';
 import { detectColumns } from '../src/services/pdf/ColumnDetector';
 import { detectLinesOnPage } from '../src/services/pdf/LineDetector';
 import { detectParagraphs } from '../src/services/pdf/ParagraphDetector';
-import type {
-    RawChar,
-    RawLineDetailed,
-    RawBlockDetailed,
-    RawPageDataDetailed,
-    QuadPoint,
+import {
+    bboxFromXYWH,
+    bboxHeight,
+    bboxWidth,
+    type RawChar,
+    type RawLineDetailed,
+    type RawBlockDetailed,
+    type RawPageDataDetailed,
+    type QuadPoint,
 } from '../src/services/pdf/types';
 
 // ---------------------------------------------------------------------------
@@ -55,12 +57,12 @@ function makeLine(text: string, yTop: number, xStart = 50): RawLineDetailed {
         chars.push({
             c: text[i],
             quad,
-            bbox: { x, y: yTop, w: 10, h: charH },
+            bbox: bboxFromXYWH(x, yTop, 10, charH, "top-left"),
         });
     }
     return {
         wmode: 0,
-        bbox: { x: xStart, y: yTop, w: text.length * 10, h: charH },
+        bbox: bboxFromXYWH(xStart, yTop, text.length * 10, charH, "top-left"),
         font: { name: 'Body', family: 'Body', weight: 'normal', style: 'normal', size: 12 },
         x: xStart,
         y: yTop,
@@ -77,10 +79,10 @@ function makeMultiBlockPage(blocks: RawLineDetailed[][]): RawPageDataDetailed {
         if (lines.length === 0) continue;
         let bminX = Infinity, bminY = Infinity, bmaxX = -Infinity, bmaxY = -Infinity;
         for (const l of lines) {
-            if (l.bbox.x < bminX) bminX = l.bbox.x;
-            if (l.bbox.y < bminY) bminY = l.bbox.y;
-            if (l.bbox.x + l.bbox.w > bmaxX) bmaxX = l.bbox.x + l.bbox.w;
-            if (l.bbox.y + l.bbox.h > bmaxY) bmaxY = l.bbox.y + l.bbox.h;
+            if (l.bbox.l < bminX) bminX = l.bbox.l;
+            if (l.bbox.t < bminY) bminY = l.bbox.t;
+            if (l.bbox.r > bmaxX) bmaxX = l.bbox.r;
+            if (l.bbox.b > bmaxY) bmaxY = l.bbox.b;
         }
         if (bminX < minX) minX = bminX;
         if (bminY < minY) minY = bminY;
@@ -88,7 +90,7 @@ function makeMultiBlockPage(blocks: RawLineDetailed[][]): RawPageDataDetailed {
         if (bmaxY > maxY) maxY = bmaxY;
         rawBlocks.push({
             type: 'text',
-            bbox: { x: bminX, y: bminY, w: bmaxX - bminX, h: bmaxY - bminY },
+            bbox: bboxFromXYWH(bminX, bminY, bmaxX - bminX, bmaxY - bminY, "top-left"),
             lines,
         });
     }
@@ -162,7 +164,7 @@ describe('buildDetailedLineLookup', () => {
         for (const block of page.blocks) {
             if (block.type !== 'text' || !block.lines) continue;
             for (const line of block.lines) {
-                const key = `${line.bbox.x.toFixed(3)}|${line.bbox.y.toFixed(3)}|${line.bbox.w.toFixed(3)}|${line.bbox.h.toFixed(3)}`;
+                const key = `${line.bbox.l.toFixed(3)}|${line.bbox.t.toFixed(3)}|${line.bbox.r.toFixed(3)}|${line.bbox.b.toFixed(3)}|${line.bbox.origin}`;
                 expect(lookup.get(key)).toBe(line);
             }
         }
@@ -170,10 +172,10 @@ describe('buildDetailedLineLookup', () => {
 });
 
 // ---------------------------------------------------------------------------
-// extractPageSentenceBBoxes — full pipeline
+// extractPageSentences — full pipeline
 // ---------------------------------------------------------------------------
 
-describe('extractPageSentenceBBoxes', () => {
+describe('extractPageSentences', () => {
     it('runs the full column + line + paragraph pipeline on a one-paragraph page', () => {
         const page = makeMultiBlockPage([
             [
@@ -181,10 +183,10 @@ describe('extractPageSentenceBBoxes', () => {
                 makeLine('This is sentence two.', 115),
             ],
         ]);
-        const result = extractPageSentenceBBoxes(page);
+        const result = extractPageSentences(page);
         expect(result.pageIndex).toBe(0);
         expect(result.degradation).toBeUndefined();
-        expect(result.paragraphs.length).toBeGreaterThanOrEqual(1);
+        expect(result.items.length).toBeGreaterThanOrEqual(1);
         const totalSentences = result.sentences.length;
         expect(totalSentences).toBeGreaterThanOrEqual(2);
         // Every sentence must have at least one bbox.
@@ -203,16 +205,17 @@ describe('extractPageSentenceBBoxes', () => {
             [makeLine('First paragraph ends here.', 100)],
             [makeLine('Second paragraph trailing', 200)],
         ]);
-        const result = extractPageSentenceBBoxes(page);
+        const result = extractPageSentences(page);
         // Expect at least two paragraphs — one per block.
-        expect(result.paragraphs.length).toBeGreaterThanOrEqual(2);
+        const textItems = result.items.filter((item) => item.kind === "text");
+        expect(textItems.length).toBeGreaterThanOrEqual(2);
         // First paragraph's only sentence should be the period-terminated one.
-        const firstPara = result.paragraphs[0];
+        const firstPara = textItems[0];
         expect(firstPara.sentences.length).toBe(1);
         expect(firstPara.sentences[0].text.trim()).toMatch(/ends here\.$/);
         // Second paragraph's sentence (no terminator) still gets produced
         // but covers only its own text — not the first paragraph's text.
-        const secondPara = result.paragraphs[1];
+        const secondPara = textItems[1];
         expect(secondPara.sentences.length).toBe(1);
         expect(secondPara.sentences[0].text).not.toContain('First paragraph');
     });
@@ -234,7 +237,7 @@ describe('extractPageSentenceBBoxes', () => {
             { paragraph: 0, header: 0 },
             { trackItemLines: true },
         );
-        const result = extractPageSentenceBBoxes(page, {
+        const result = extractPageSentences(page, {
             precomputed: { paragraphResult: paraResult },
         });
         expect(result.degradation).toBeUndefined();
@@ -247,7 +250,7 @@ describe('extractPageSentenceBBoxes', () => {
         const lines = detectLinesOnPage(page, cols.columns);
         const paraResult = detectParagraphs(lines, null, {}); // no trackItemLines
         expect(() =>
-            extractPageSentenceBBoxes(page, {
+            extractPageSentences(page, {
                 precomputed: { paragraphResult: paraResult },
             }),
         ).toThrow(/trackItemLines/);
@@ -262,10 +265,10 @@ describe('extractPageSentenceBBoxes', () => {
         lineB.chars = lineB.chars.slice(0, -1); // invariant violated
         const page = makeMultiBlockPage([[lineA, lineB]]);
 
-        const result = extractPageSentenceBBoxes(page);
+        const result = extractPageSentences(page);
 
         // Pipeline did not throw.
-        expect(result.paragraphs.length).toBeGreaterThanOrEqual(1);
+        expect(result.items.length).toBeGreaterThanOrEqual(1);
         expect(result.sentences.length).toBeGreaterThanOrEqual(1);
         // Degradation is counted and reported.
         expect(result.degradation?.count ?? 0).toBeGreaterThanOrEqual(1);
@@ -294,10 +297,13 @@ describe('extractPageSentenceBBoxes', () => {
             for (const pageLine of colResult.lines) {
                 for (const span of pageLine.spans) {
                     span.bbox = {
-                        x: span.bbox.x + 99999,
-                        y: span.bbox.y + 99999,
-                        w: span.bbox.w,
-                        h: span.bbox.h,
+                        ...bboxFromXYWH(
+                            span.bbox.l + 99999,
+                            span.bbox.t + 99999,
+                            bboxWidth(span.bbox),
+                            bboxHeight(span.bbox),
+                            span.bbox.origin,
+                        ),
                     };
                 }
             }
@@ -310,7 +316,7 @@ describe('extractPageSentenceBBoxes', () => {
             { trackItemLines: true },
         );
 
-        const result = extractPageSentenceBBoxes(page, {
+        const result = extractPageSentences(page, {
             precomputed: { paragraphResult: paraResult },
         });
 
@@ -321,10 +327,10 @@ describe('extractPageSentenceBBoxes', () => {
         expect(
             (result.degradation?.notes ?? []).some((n) => n.reason === 'unmapped'),
         ).toBe(true);
-        // Every paragraph in the output has at least one sentence — even
+        // Every text item in the output has at least one sentence — even
         // the degraded ones, because fallbacks are emitted.
-        for (const p of result.paragraphs) {
-            expect(p.sentences.length).toBeGreaterThanOrEqual(1);
+        for (const item of result.items.filter((item) => item.kind === "text")) {
+            expect(item.sentences.length).toBeGreaterThanOrEqual(1);
         }
     });
 
@@ -342,15 +348,15 @@ describe('extractPageSentenceBBoxes', () => {
             blocks.push([line]);
         }
         const page = makeMultiBlockPage(blocks);
-        const result = extractPageSentenceBBoxes(page);
+        const result = extractPageSentences(page);
 
         // All broken lines become degraded paragraphs, but the notes
         // array is capped.
         expect(result.degradation?.count ?? 0).toBeGreaterThanOrEqual(NUM);
         expect(result.degradation?.notes.length ?? 0).toBeLessThanOrEqual(50);
-        // Every paragraph still has a fallback sentence.
-        for (const p of result.paragraphs) {
-            expect(p.sentences.length).toBe(1);
+        // Every text item still has a fallback sentence.
+        for (const item of result.items.filter((item) => item.kind === "text")) {
+            expect(item.sentences.length).toBe(1);
         }
     });
 });
@@ -359,7 +365,7 @@ describe('extractPageSentenceBBoxes', () => {
 // buildParagraphFeasibilityReport
 // ---------------------------------------------------------------------------
 
-describe('buildParagraphFeasibilityReport', () => {
+describe('buildPageSentenceFeasibilityReport', () => {
     it('summarizes a multi-paragraph page', () => {
         const page = makeMultiBlockPage([
             [
@@ -368,11 +374,12 @@ describe('buildParagraphFeasibilityReport', () => {
             ],
             [makeLine('Second paragraph only sentence.', 160)],
         ]);
-        const report = buildParagraphFeasibilityReport(page);
+        const report = buildPageSentenceFeasibilityReport(page);
         expect(report.invariantHolds).toBe(true);
         expect(report.allBBoxesInPage).toBe(true);
         expect(report.degradation).toBeUndefined();
-        expect(report.mappedParagraphs).toBeGreaterThanOrEqual(2);
+        expect(report.itemCount).toBeGreaterThanOrEqual(2);
+        expect(report.itemsByKind.text).toBeGreaterThanOrEqual(2);
         expect(report.totalSentences).toBeGreaterThanOrEqual(3);
     });
 });
@@ -391,8 +398,8 @@ describe('page-wide vs paragraph-scoped coexistence', () => {
                 makeLine('How are you?', 115),
             ],
         ]);
-        const pageWide = extractSentenceBBoxes(page);
-        const paragraphScoped = extractPageSentenceBBoxes(page);
+        const pageWide = extractPageWideSentences(page);
+        const paragraphScoped = extractPageSentences(page);
         expect(paragraphScoped.sentences.length).toBe(pageWide.length);
         expect(paragraphScoped.sentences.map((s) => s.text.trim())).toEqual(
             pageWide.map((s) => s.text.trim()),

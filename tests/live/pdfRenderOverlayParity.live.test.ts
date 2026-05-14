@@ -30,7 +30,7 @@ import { SMALL_PDF, NORMAL_PDF } from '../helpers/fixtures';
 
 interface ProdSentence {
     text: string;
-    bboxes: Array<{ x: number; y: number; w: number; h: number }>;
+    bboxes: Array<{ l: number; t: number; r: number; b: number; origin: string }>;
 }
 
 let available = false;
@@ -82,12 +82,7 @@ describe('pdf-render-overlay (sentences) ↔ pdf-sentence-bboxes parity', () => 
             );
             sortedGroupIndices.forEach((groupIdx, i) => {
                 const overlayFrags = groups.get(groupIdx)!.map((r) => r.rect);
-                const prodFrags = prodWithBboxes[i].bboxes.map((b) => ({
-                    x: b.x,
-                    y: b.y,
-                    w: b.w,
-                    h: b.h,
-                }));
+                const prodFrags = prodWithBboxes[i].bboxes;
                 expect(overlayFrags).toEqual(prodFrags);
             });
 

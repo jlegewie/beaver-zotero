@@ -251,6 +251,8 @@ Integration tests exercise full pipelines. Same prerequisites as live tests plus
 
 `tests/smoke/extractFixtures.smoke.test.ts` runs every fixture under `tests/fixtures/pdfs/extract-public/` (committed) plus the private corpus pointed at by `$BEAVER_EXTRACT_FIXTURES_DIR` (the separate `beaver-extract-fixtures` repo; falls back to the legacy in-tree `tests/fixtures/pdfs/extract/` when the env var is unset). Each fixture re-runs the structured-mode extract pipeline and diffs against the captured `expected` snapshot.
 
+Current extraction fixtures use snapshot schema `2`, which records `items` (`DocItem` projection), flattened `sentences` (`SentenceItem` projection), `BoundingBox` objects with `origin`, and `degradedItems`. Older paragraph/sentence-bbox fixture files are intentionally rejected at load time; regenerate them with the CLI before evaluating.
+
 Capture, evaluate, and rebaseline via the `beaver-extract` CLI:
 
 ```bash

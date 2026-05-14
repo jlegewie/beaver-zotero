@@ -7,6 +7,7 @@ import {
 } from "../../../src/services/pdf/PageRotationNormalizer";
 import {
     DEFAULT_MARGIN_ZONE,
+    bboxFromXYWH,
     type RawPageData,
     type RawLine,
     type RawBlock,
@@ -64,22 +65,22 @@ describe("dirToRotation (oracle values from real PDFs)", () => {
 describe("aspectRatioRotation (fallback when dir is unavailable)", () => {
     it("flags tall-narrow bboxes as rotated 90", () => {
         // h >= 2*w  →  vertical strip
-        expect(aspectRatioRotation({ x: 0, y: 0, w: 10, h: 200 })).toBe(90);
-        expect(aspectRatioRotation({ x: 0, y: 0, w: 10, h: 20 })).toBe(90);
+        expect(aspectRatioRotation(bboxFromXYWH(0, 0, 10, 200, "top-left"))).toBe(90);
+        expect(aspectRatioRotation(bboxFromXYWH(0, 0, 10, 20, "top-left"))).toBe(90);
     });
 
     it("returns 0 for normal wide-short body lines", () => {
-        expect(aspectRatioRotation({ x: 0, y: 0, w: 200, h: 12 })).toBe(0);
+        expect(aspectRatioRotation(bboxFromXYWH(0, 0, 200, 12, "top-left"))).toBe(0);
     });
 
     it("returns 0 for ambiguous (near-square) bboxes", () => {
-        expect(aspectRatioRotation({ x: 0, y: 0, w: 12, h: 12 })).toBe(0);
-        expect(aspectRatioRotation({ x: 0, y: 0, w: 10, h: 19 })).toBe(0);
+        expect(aspectRatioRotation(bboxFromXYWH(0, 0, 12, 12, "top-left"))).toBe(0);
+        expect(aspectRatioRotation(bboxFromXYWH(0, 0, 10, 19, "top-left"))).toBe(0);
     });
 
     it("returns 0 for degenerate bboxes (zero w or h)", () => {
-        expect(aspectRatioRotation({ x: 0, y: 0, w: 0, h: 100 })).toBe(0);
-        expect(aspectRatioRotation({ x: 0, y: 0, w: 100, h: 0 })).toBe(0);
+        expect(aspectRatioRotation(bboxFromXYWH(0, 0, 0, 100, "top-left"))).toBe(0);
+        expect(aspectRatioRotation(bboxFromXYWH(0, 0, 100, 0, "top-left"))).toBe(0);
     });
 });
 
@@ -97,7 +98,7 @@ function line(opts: {
 }): RawLine {
     return {
         wmode: 0,
-        bbox: { x: opts.x, y: opts.y, w: opts.w, h: opts.h },
+        bbox: bboxFromXYWH(opts.x, opts.y, opts.w, opts.h, "top-left"),
         font: { name: "T", family: "T", weight: "normal", style: "normal", size: 10 },
         x: opts.x,
         y: opts.y,
@@ -109,7 +110,7 @@ function line(opts: {
 function page(width: number, height: number, lines: RawLine[]): RawPageData {
     const block: RawBlock = {
         type: "text",
-        bbox: { x: 0, y: 0, w: width, h: height },
+        bbox: bboxFromXYWH(0, 0, width, height, "top-left"),
         lines,
     };
     return {

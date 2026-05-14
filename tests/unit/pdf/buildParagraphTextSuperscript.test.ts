@@ -16,15 +16,17 @@
 import { describe, it, expect } from "vitest";
 import {
     buildParagraphText,
-    extractPageSentenceBBoxes,
+    extractPageSentences,
 } from "../../../src/services/pdf/ParagraphSentenceMapper";
 import { simpleRegexSentenceSplit } from "../../../src/services/pdf/SentenceMapper";
-import type {
-    QuadPoint,
-    RawBlockDetailed,
-    RawChar,
-    RawLineDetailed,
-    RawPageDataDetailed,
+import {
+    bboxFromXYWH,
+    bboxHeight,
+    type QuadPoint,
+    type RawBlockDetailed,
+    type RawChar,
+    type RawLineDetailed,
+    type RawPageDataDetailed,
 } from "../../../src/services/pdf/types";
 
 function makeLine(text: string, yTop: number, xStart = 50): RawLineDetailed {
@@ -41,12 +43,12 @@ function makeLine(text: string, yTop: number, xStart = 50): RawLineDetailed {
         chars.push({
             c: text[i],
             quad,
-            bbox: { x, y: yTop, w: 10, h: charH },
+            bbox: bboxFromXYWH(x, yTop, 10, charH, "top-left"),
         });
     }
     return {
         wmode: 0,
-        bbox: { x: xStart, y: yTop, w: text.length * 10, h: charH },
+        bbox: bboxFromXYWH(xStart, yTop, text.length * 10, charH, "top-left"),
         font: { name: "Body", family: "Body", weight: "normal", style: "normal", size: 12 },
         x: xStart,
         y: yTop,
@@ -58,21 +60,27 @@ function makeLine(text: string, yTop: number, xStart = 50): RawLineDetailed {
 function shrinkChars(line: RawLineDetailed, indices: number[], ratio = 0.65) {
     for (const idx of indices) {
         const ch = line.chars[idx];
-        ch.bbox = { ...ch.bbox, h: ch.bbox.h * ratio };
+        ch.bbox = bboxFromXYWH(
+            ch.bbox.l,
+            ch.bbox.t,
+            ch.bbox.r - ch.bbox.l,
+            bboxHeight(ch.bbox) * ratio,
+            ch.bbox.origin,
+        );
     }
 }
 
 function makePage(lines: RawLineDetailed[]): RawPageDataDetailed {
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const l of lines) {
-        if (l.bbox.x < minX) minX = l.bbox.x;
-        if (l.bbox.y < minY) minY = l.bbox.y;
-        if (l.bbox.x + l.bbox.w > maxX) maxX = l.bbox.x + l.bbox.w;
-        if (l.bbox.y + l.bbox.h > maxY) maxY = l.bbox.y + l.bbox.h;
+        if (l.bbox.l < minX) minX = l.bbox.l;
+        if (l.bbox.t < minY) minY = l.bbox.t;
+        if (l.bbox.r > maxX) maxX = l.bbox.r;
+        if (l.bbox.b > maxY) maxY = l.bbox.b;
     }
     const block: RawBlockDetailed = {
         type: "text",
-        bbox: { x: minX, y: minY, w: maxX - minX, h: maxY - minY },
+        bbox: bboxFromXYWH(minX, minY, maxX - minX, maxY - minY, "top-left"),
         lines,
     };
     return {
@@ -279,7 +287,7 @@ describe("buildParagraphText whitespace-tolerant precondition", () => {
     });
 });
 
-describe("end-to-end: cross-line marker is absent from final SentenceBBox", () => {
+describe("end-to-end: cross-line marker is absent from final SentenceItem", () => {
     it("splits at the line break and excludes the marker chars from sentence text + bboxes", () => {
         // Synthetic single-paragraph page. Two lines with a small vertical
         // gap so the paragraph detector groups them. Line N ends with a
@@ -290,10 +298,10 @@ describe("end-to-end: cross-line marker is absent from final SentenceBBox", () =
         const lineB = makeLine("11 The factor score", 113, xStart);
         shrinkChars(lineB, [0, 1]);
         // 'T' is at lineB.chars[3] (after "11 "). Capture its expected x.
-        const expectedTx = lineB.chars[3].bbox.x;
+        const expectedTx = lineB.chars[3].bbox.l;
         const page = makePage([lineA, lineB]);
 
-        const result = extractPageSentenceBBoxes(page, {
+        const result = extractPageSentences(page, {
             splitter: simpleRegexSentenceSplit,
         });
 
@@ -323,6 +331,6 @@ describe("end-to-end: cross-line marker is absent from final SentenceBBox", () =
         // The second sentence's first fragment bbox should start at the
         // 'T' x-coordinate, not at the smaller '1' x-coordinate. This
         // pins the bbox-exclusion claim via the synthetic geometry.
-        expect(second!.fragments![0].bbox.x).toBeCloseTo(expectedTx, 5);
+        expect(second!.fragments![0].bbox.l).toBeCloseTo(expectedTx, 5);
     });
 });

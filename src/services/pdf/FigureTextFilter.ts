@@ -24,6 +24,7 @@
  */
 import type { Rect } from "./ColumnDetector";
 import type { RawLine, RawPageData } from "./types";
+import { bboxHeight, bboxWidth } from "./types";
 
 export interface FigureTextDetectionOptions {
     /** Minimum tiny columns lacking body content needed for figure-heavy mode. */
@@ -177,8 +178,9 @@ function describeColumn(
 
     let rotatedLineCount = 0;
     for (const l of lines) {
-        if (l.bbox.w <= 0) continue;
-        const ratio = l.bbox.h / l.bbox.w;
+        const width = bboxWidth(l.bbox);
+        if (width <= 0) continue;
+        const ratio = bboxHeight(l.bbox) / width;
         if (ratio >= o.rotatedAspectRatio && countAlnum(l.text) >= o.rotatedMinAlnumChars) {
             rotatedLineCount++;
         }
@@ -331,8 +333,8 @@ function collectLinesInColumn(col: Rect, page: RawPageData): RawLine[] {
     for (const block of page.blocks) {
         if (block.type !== "text" || !block.lines) continue;
         for (const line of block.lines) {
-            const cx = line.bbox.x + line.bbox.w / 2;
-            const cy = line.bbox.y + line.bbox.h / 2;
+            const cx = line.bbox.l + bboxWidth(line.bbox) / 2;
+            const cy = line.bbox.t + bboxHeight(line.bbox) / 2;
             if (
                 cx >= colLeft - SLACK &&
                 cx <= colRight + SLACK &&

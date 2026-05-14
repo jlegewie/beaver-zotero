@@ -180,7 +180,7 @@ const ENDPOINT_PATHS = [
     '/beaver/test/pdf-analyze-ocr',
     '/beaver/test/pdf-search-scored',
     '/beaver/test/pdf-sentence-bboxes',
-    // Bbox-overlay debugging (sentences/lines/paragraphs/columns/margins)
+    // Bbox-overlay debugging (sentences/items/lines/paragraphs/columns/margins)
     '/beaver/test/pdf-render-overlay',
     // Per-page extract trace (every stage, JSON-only)
     '/beaver/test/pdf-extract-trace',
@@ -747,14 +747,14 @@ function registerEndpoints(): boolean {
         Zotero.Server.Endpoints['/beaver/test/pdf-sentence-bboxes'] =
             createEndpoint(handleTestPdfSentenceBBoxesHttpRequest);
 
-        // Bbox overlay endpoint — paints columns/lines/paragraphs/sentences/
+        // Bbox overlay endpoint — paints columns/lines/items/paragraphs/sentences/
         // margins on a rendered page PNG for headless agent debugging.
         Zotero.Server.Endpoints['/beaver/test/pdf-render-overlay'] =
             createEndpoint(handleTestPdfRenderOverlayHttpRequest);
 
         // Per-page extract trace — emits every stage of the extraction
         // pipeline as JSON with cross-stage IDs, so an agent can trace
-        // one piece of text from raw line through paragraphs to sentences.
+        // one piece of text from raw line through items to sentences.
         Zotero.Server.Endpoints['/beaver/test/pdf-extract-trace'] =
             createEndpoint(handleTestPdfExtractTraceHttpRequest);
 

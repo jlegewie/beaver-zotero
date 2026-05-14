@@ -70,10 +70,10 @@ export function buildOverlaySvg(opts: OverlaySvgOptions): string {
     const labelFragments: string[] = [];
 
     for (const r of rects) {
-        const x = r.rect.x * sx;
-        const y = r.rect.y * sy;
-        const w = r.rect.w * sx;
-        const h = r.rect.h * sy;
+        const x = r.rect.l * sx;
+        const y = r.rect.t * sy;
+        const w = (r.rect.r - r.rect.l) * sx;
+        const h = (r.rect.b - r.rect.t) * sy;
         const fill = hexToRgba(r.color, 0.18);
         fillStrokeFragments.push(
             `<rect x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${w.toFixed(2)}" height="${h.toFixed(2)}" fill="${fill}" stroke="${r.color}" stroke-width="1" />`,
@@ -82,8 +82,8 @@ export function buildOverlaySvg(opts: OverlaySvgOptions): string {
 
     for (const r of rects) {
         if (!r.label) continue;
-        const x = r.rect.x * sx;
-        const y = r.rect.y * sy;
+        const x = r.rect.l * sx;
+        const y = r.rect.t * sy;
         const labelText = escapeXml(r.label);
         const labelW = labelText.length * glyphWidth + padX * 2;
         const labelH = fontSize + padY * 2;

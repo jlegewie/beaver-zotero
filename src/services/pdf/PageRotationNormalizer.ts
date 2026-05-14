@@ -23,8 +23,8 @@
  * `DocumentAnalyzer`, `SearchScorer`, trace endpoints, `analyzeLayout`)
  * stay in MuPDF frame.
  *
- * Coordinate convention (MuPDF stext): bbox is `{x, y, w, h}` with
- * top-left origin and y increasing downward.
+ * Coordinate convention (MuPDF stext): public bboxes are `BoundingBox`
+ * objects with top-left origin and y increasing downward.
  *
  * Per-line `rotation` mapping (observed values from
  * `stext.walk → beginLine(dir)` on real /Rotate-90 and side-caption
@@ -37,8 +37,8 @@
  */
 
 import type {
+    BoundingBox,
     MarginSettings,
-    RawBBox,
     RawBlock,
     RawChar,
     RawLine,
@@ -47,6 +47,7 @@ import type {
     RawPageDataDetailed,
     QuadPoint,
 } from "./types";
+import { bboxHeight, bboxWidth } from "./types";
 
 export type RotationAngle = 0 | 90 | 180 | 270;
 
@@ -75,9 +76,11 @@ export function dirToRotation(dx: number, dy: number): RotationAngle {
  * reading-order sign should consult `dir`-derived rotations from the
  * parallel walk instead.
  */
-export function aspectRatioRotation(bbox: RawBBox): RotationAngle {
-    if (bbox.w <= 0 || bbox.h <= 0) return 0;
-    if (bbox.h >= 2 * bbox.w) return 90;
+export function aspectRatioRotation(bbox: BoundingBox): RotationAngle {
+    const width = bboxWidth(bbox);
+    const height = bboxHeight(bbox);
+    if (width <= 0 || height <= 0) return 0;
+    if (height >= 2 * width) return 90;
     return 0;
 }
 
@@ -132,8 +135,8 @@ export function detectDominantTextOrientation(
     for (const block of page.blocks) {
         if (block.type !== "text") continue;
         for (const line of block.lines ?? []) {
-            const cx = line.bbox.x + line.bbox.w / 2;
-            const cy = line.bbox.y + line.bbox.h / 2;
+            const cx = line.bbox.l + bboxWidth(line.bbox) / 2;
+            const cy = line.bbox.t + bboxHeight(line.bbox) / 2;
             // Skip lines whose center is in the marginZone — they're
             // usually page numbers, running headers, JSTOR-style
             // watermarks, etc., not body content. Center-based test
@@ -196,7 +199,7 @@ export function detectDominantTextOrientation(
 //   R=270: (u, v) → (v, H_src - u)
 //
 // Bbox transforms preserve axis-alignment by mapping the two diagonal
-// corners then re-deriving {x, y, w, h}.
+// corners then re-deriving semantic top-left edges.
 
 function rotatePoint(
     x: number,
@@ -237,16 +240,16 @@ function invertPoint(
 }
 
 export function rotateBBox(
-    bbox: RawBBox,
+    bbox: BoundingBox,
     rotation: RotationAngle,
     sourceWidth: number,
     sourceHeight: number,
-): RawBBox {
-    if (rotation === 0) return { x: bbox.x, y: bbox.y, w: bbox.w, h: bbox.h };
-    const [x0, y0] = rotatePoint(bbox.x, bbox.y, rotation, sourceWidth, sourceHeight);
+): BoundingBox {
+    if (rotation === 0) return { ...bbox };
+    const [x0, y0] = rotatePoint(bbox.l, bbox.t, rotation, sourceWidth, sourceHeight);
     const [x1, y1] = rotatePoint(
-        bbox.x + bbox.w,
-        bbox.y + bbox.h,
+        bbox.r,
+        bbox.b,
         rotation,
         sourceWidth,
         sourceHeight,
@@ -255,7 +258,7 @@ export function rotateBBox(
     const minY = Math.min(y0, y1);
     const maxX = Math.max(x0, x1);
     const maxY = Math.max(y0, y1);
-    return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+    return { l: minX, t: minY, r: maxX, b: maxY, origin: bbox.origin };
 }
 
 function rotateQuad(
@@ -281,22 +284,22 @@ function rotateQuad(
 }
 
 /**
- * `RawBBox` inverse — upright working frame → source MuPDF frame.
+ * BoundingBox inverse — upright working frame → source MuPDF frame.
  * Used at every emit site (sentence/paragraph/column/line bboxes) so
  * downstream consumers see MuPDF coordinates regardless of whether the
  * pipeline normalized internally.
  */
-export function inverseRotateRawBBox(
-    bbox: RawBBox,
+export function inverseRotateBBox(
+    bbox: BoundingBox,
     rotation: RotationAngle,
     sourceWidth: number,
     sourceHeight: number,
-): RawBBox {
-    if (rotation === 0) return { x: bbox.x, y: bbox.y, w: bbox.w, h: bbox.h };
-    const [x0, y0] = invertPoint(bbox.x, bbox.y, rotation, sourceWidth, sourceHeight);
+): BoundingBox {
+    if (rotation === 0) return { ...bbox };
+    const [x0, y0] = invertPoint(bbox.l, bbox.t, rotation, sourceWidth, sourceHeight);
     const [x1, y1] = invertPoint(
-        bbox.x + bbox.w,
-        bbox.y + bbox.h,
+        bbox.r,
+        bbox.b,
         rotation,
         sourceWidth,
         sourceHeight,
@@ -305,30 +308,7 @@ export function inverseRotateRawBBox(
     const minY = Math.min(y0, y1);
     const maxX = Math.max(x0, x1);
     const maxY = Math.max(y0, y1);
-    return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
-}
-
-/**
- * `LineBBox`-shape inverse (used by `ParagraphSentenceMapper` for the
- * `ContentItem.bbox` and `PageLine` bboxes that drive fallback sentence
- * bbox derivation).
- */
-export function inverseRotateLineBBox<
-    T extends { l: number; t: number; r: number; b: number; width: number; height: number },
->(
-    bbox: T,
-    rotation: RotationAngle,
-    sourceWidth: number,
-    sourceHeight: number,
-): T {
-    if (rotation === 0) return { ...bbox };
-    const [u0, v0] = invertPoint(bbox.l, bbox.t, rotation, sourceWidth, sourceHeight);
-    const [u1, v1] = invertPoint(bbox.r, bbox.b, rotation, sourceWidth, sourceHeight);
-    const l = Math.min(u0, u1);
-    const t = Math.min(v0, v1);
-    const r = Math.max(u0, u1);
-    const b = Math.max(v0, v1);
-    return { ...bbox, l, t, r, b, width: r - l, height: b - t };
+    return { l: minX, t: minY, r: maxX, b: maxY, origin: bbox.origin };
 }
 
 export interface RotatedPage<T extends RawPageData> {

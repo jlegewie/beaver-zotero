@@ -2,8 +2,8 @@
  * `beaver-extract overlay <pdf>` — render one PDF page with extraction
  * overlays composited on top.
  *
- * Levels: `columns | lines | paragraphs | sentences | margins`. The
- * first four come from a structured-mode `extractPdf({ pageIndices: [n] })`;
+ * Levels: `columns | lines | items | paragraphs | sentences | margins`. The
+ * page-content levels come from a structured-mode `extractPdf({ pageIndices: [n] })`;
  * `margins` comes from `analyzeLayout` so the candidates / removal
  * decisions match what production extract sees pre-filter.
  *
@@ -26,6 +26,7 @@ import {
 } from "../options";
 import {
     buildColumnOverlayFromPage,
+    buildItemOverlayFromPage,
     buildLineOverlayFromPage,
     buildMarginsOverlayFromAnalysis,
     buildParagraphOverlayFromPage,
@@ -41,6 +42,7 @@ import type { ExtractionResult, ProcessedPage } from "../../types";
 const VALID_LEVELS: ReadonlyArray<OverlayLevel> = [
     "columns",
     "lines",
+    "items",
     "paragraphs",
     "sentences",
     "margins",
@@ -182,6 +184,9 @@ export function buildOverlayCommand(deps: CliDeps): Command {
                             break;
                         case "lines":
                             overlay = buildLineOverlayFromPage(ppage);
+                            break;
+                        case "items":
+                            overlay = buildItemOverlayFromPage(ppage);
                             break;
                         case "paragraphs":
                             overlay = buildParagraphOverlayFromPage(ppage);

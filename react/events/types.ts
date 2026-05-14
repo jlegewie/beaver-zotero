@@ -32,6 +32,7 @@ export interface BeaverEvents {
         action:
             | 'columns'
             | 'lines'
+            | 'items'
             | 'paragraphs'
             | 'sentences'
             | 'clear'

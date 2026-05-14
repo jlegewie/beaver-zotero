@@ -1,5 +1,5 @@
 /**
- * Unit tests for the sentence-bbox prototype.
+ * Unit tests for the page-wide sentence mapper.
  *
  * These tests run the pure logic of `SentenceMapper.ts` against synthetic
  * `RawPageDataDetailed` fixtures (with made-up quads) — no MuPDF WASM
@@ -13,15 +13,16 @@ import {
     simpleRegexSentenceSplit,
     flattenPageText,
     sentenceToBoxes,
-    extractSentenceBBoxes,
+    extractPageWideSentences,
     buildFeasibilityReport,
 } from '../src/services/pdf/SentenceMapper';
-import type {
-    RawBBox,
-    RawChar,
-    RawLineDetailed,
-    RawPageDataDetailed,
-    QuadPoint,
+import {
+    bboxFromXYWH,
+    bboxWidth,
+    type RawChar,
+    type RawLineDetailed,
+    type RawPageDataDetailed,
+    type QuadPoint,
 } from '../src/services/pdf/types';
 
 // ---------------------------------------------------------------------------
@@ -47,15 +48,10 @@ function makeLine(text: string, yTop: number, xStart = 50): RawLineDetailed {
         chars.push({
             c: text[i],
             quad,
-            bbox: { x, y: lineY, w: 10, h: charH },
+            bbox: bboxFromXYWH(x, lineY, 10, charH, "top-left"),
         });
     }
-    const bbox: RawBBox = {
-        x: xStart,
-        y: lineY,
-        w: text.length * 10,
-        h: charH,
-    };
+    const bbox = bboxFromXYWH(xStart, lineY, text.length * 10, charH, "top-left");
     return {
         wmode: 0,
         bbox,
@@ -72,10 +68,10 @@ function makePage(lines: RawLineDetailed[]): RawPageDataDetailed {
     // everything; pad a bit for safety.
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const l of lines) {
-        if (l.bbox.x < minX) minX = l.bbox.x;
-        if (l.bbox.y < minY) minY = l.bbox.y;
-        if (l.bbox.x + l.bbox.w > maxX) maxX = l.bbox.x + l.bbox.w;
-        if (l.bbox.y + l.bbox.h > maxY) maxY = l.bbox.y + l.bbox.h;
+        if (l.bbox.l < minX) minX = l.bbox.l;
+        if (l.bbox.t < minY) minY = l.bbox.t;
+        if (l.bbox.r > maxX) maxX = l.bbox.r;
+        if (l.bbox.b > maxY) maxY = l.bbox.b;
     }
     return {
         pageIndex: 0,
@@ -85,7 +81,7 @@ function makePage(lines: RawLineDetailed[]): RawPageDataDetailed {
         blocks: [
             {
                 type: 'text',
-                bbox: { x: minX, y: minY, w: maxX - minX, h: maxY - minY },
+                bbox: bboxFromXYWH(minX, minY, maxX - minX, maxY - minY, "top-left"),
                 lines,
             },
         ],
@@ -167,18 +163,18 @@ describe('flattenPageText', () => {
 });
 
 // ---------------------------------------------------------------------------
-// sentenceToBoxes / extractSentenceBBoxes
+// sentenceToBoxes / extractPageWideSentences
 // ---------------------------------------------------------------------------
 
 describe('sentenceToBoxes', () => {
     it('resolves a single-line sentence to one bbox', () => {
         const page = makePage([makeLine('Hello world.', 100)]);
-        const sentences = extractSentenceBBoxes(page);
+        const sentences = extractPageWideSentences(page);
         expect(sentences).toHaveLength(1);
         const s = sentences[0];
         expect(s.text).toBe('Hello world.');
         expect(s.bboxes).toHaveLength(1);
-        expect(s.bboxes[0]).toEqual({ x: 50, y: 100, w: 120, h: 12 });
+        expect(s.bboxes[0]).toEqual(bboxFromXYWH(50, 100, 120, 12, "top-left"));
     });
 
     it('resolves a multi-line sentence to one bbox per line-fragment', () => {
@@ -188,7 +184,7 @@ describe('sentenceToBoxes', () => {
             makeLine('This sentence spans', 100),
             makeLine('two distinct lines.', 120),
         ]);
-        const sentences = extractSentenceBBoxes(page);
+        const sentences = extractPageWideSentences(page);
         expect(sentences).toHaveLength(1);
         const s = sentences[0];
         expect(s.bboxes).toHaveLength(2);
@@ -196,8 +192,8 @@ describe('sentenceToBoxes', () => {
         expect(s.fragments![0].text).toBe('This sentence spans');
         expect(s.fragments![1].text).toBe('two distinct lines.');
         // Each fragment bbox should be at the respective baseline
-        expect(s.bboxes[0].y).toBe(100);
-        expect(s.bboxes[1].y).toBe(120);
+        expect(s.bboxes[0].t).toBe(100);
+        expect(s.bboxes[1].t).toBe(120);
     });
 
     it('produces short-last-line bboxes, not full-width rectangles', () => {
@@ -207,28 +203,28 @@ describe('sentenceToBoxes', () => {
             makeLine('This is a long first line that wraps', 100),
             makeLine('here.', 120),
         ]);
-        const sentences = extractSentenceBBoxes(page);
+        const sentences = extractPageWideSentences(page);
         expect(sentences).toHaveLength(1);
         const lastFrag = sentences[0].fragments![1];
         expect(lastFrag.text).toBe('here.');
         // 5 chars × 10 wide = 50
-        expect(lastFrag.bbox.w).toBe(50);
-        expect(lastFrag.bbox.x).toBe(50);
+        expect(bboxWidth(lastFrag.bbox)).toBe(50);
+        expect(lastFrag.bbox.l).toBe(50);
     });
 
     it('splits a line into two fragments when a sentence ends mid-line', () => {
         // One physical line, two sentences — each should get its own tight
         // bbox covering only the characters belonging to that sentence.
         const page = makePage([makeLine('First. Second.', 100)]);
-        const sentences = extractSentenceBBoxes(page);
+        const sentences = extractPageWideSentences(page);
         expect(sentences).toHaveLength(2);
         expect(sentences[0].text).toBe('First.');
         expect(sentences[1].text).toBe('Second.');
         // First sentence = 6 chars wide
-        expect(sentences[0].bboxes[0].w).toBe(60);
+        expect(bboxWidth(sentences[0].bboxes[0])).toBe(60);
         // Second sentence = 7 chars wide ('Second.'), starts after 'First. '
-        expect(sentences[1].bboxes[0].w).toBe(70);
-        expect(sentences[1].bboxes[0].x).toBe(50 + 7 * 10);
+        expect(bboxWidth(sentences[1].bboxes[0])).toBe(70);
+        expect(sentences[1].bboxes[0].l).toBe(50 + 7 * 10);
     });
 });
 

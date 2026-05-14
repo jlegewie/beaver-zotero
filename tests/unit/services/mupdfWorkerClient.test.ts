@@ -715,22 +715,22 @@ describe('MuPDFWorkerClient', () => {
         });
     });
 
-    describe('extractSentenceBBoxesDebug', () => {
+    describe('extractSentenceDebug', () => {
         // Production sentence-level extraction goes through `extract({ mode:
         // "structured" })` (covered in `pdfExtractorSentenceBBoxes.test.ts`).
         // This op is debug-only — the worker always returns
-        // `SentenceBBoxTraceResult = { result, trace }`.
+        // `SentenceTraceResult = { result, trace }`.
 
-        it('round-trips a SentenceBBoxTraceResult', async () => {
+        it('round-trips a SentenceTraceResult', async () => {
             const client = getMuPDFWorkerClient();
-            const promise = client.extractSentenceBBoxesDebug(
+            const promise = client.extractSentenceDebug(
                 new Uint8Array([1]),
                 0,
             );
             const worker = MockWorker.instances[0];
             const traceReply = {
                 result: {
-                    paragraphs: [],
+                    items: [],
                     sentences: [],
                 },
                 trace: {
@@ -751,7 +751,7 @@ describe('MuPDFWorkerClient', () => {
             const out = await promise;
             const [message] = worker.opCall(0);
             expect(message).toMatchObject({
-                op: 'extractSentenceBBoxesDebug',
+                op: 'extractSentenceDebug',
                 args: { pageIndex: 0 },
             });
             // The promise resolves to the trace envelope shape.
@@ -762,7 +762,7 @@ describe('MuPDFWorkerClient', () => {
 
         it('forwards splitterConfig as a serializable object', async () => {
             const client = getMuPDFWorkerClient();
-            const promise = client.extractSentenceBBoxesDebug(
+            const promise = client.extractSentenceDebug(
                 new Uint8Array([1]),
                 3,
                 {
@@ -773,12 +773,12 @@ describe('MuPDFWorkerClient', () => {
             const worker = MockWorker.instances[0];
             worker.replyToLast({
                 ok: true,
-                result: { result: { paragraphs: [], sentences: [] }, trace: {} },
+                result: { result: { items: [], sentences: [] }, trace: {} },
             });
             await promise;
             const [message] = worker.opCall(0);
             expect(message).toMatchObject({
-                op: 'extractSentenceBBoxesDebug',
+                op: 'extractSentenceDebug',
                 args: {
                     pageIndex: 3,
                     options: {
@@ -795,7 +795,7 @@ describe('MuPDFWorkerClient', () => {
 
         it('forwards { type: "simple" } as splitterConfig', async () => {
             const client = getMuPDFWorkerClient();
-            const promise = client.extractSentenceBBoxesDebug(
+            const promise = client.extractSentenceDebug(
                 new Uint8Array([1]),
                 0,
                 { splitterConfig: { type: 'simple' } },
@@ -803,7 +803,7 @@ describe('MuPDFWorkerClient', () => {
             const worker = MockWorker.instances[0];
             worker.replyToLast({
                 ok: true,
-                result: { result: { paragraphs: [], sentences: [] }, trace: {} },
+                result: { result: { items: [], sentences: [] }, trace: {} },
             });
             await promise;
             const [message] = worker.opCall(0);

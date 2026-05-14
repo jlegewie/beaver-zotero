@@ -63,10 +63,8 @@ export {
     detectLinesInColumn,
     detectLinesOnPage,
     logLineDetection,
-    lineBBoxToRect,
 } from "./LineDetector";
 export type {
-    LineBBox,
     DetectedSpan,
     PageLine,
     ColumnLineResult,
@@ -78,41 +76,32 @@ export {
     logParagraphDetection,
 } from "./ParagraphDetector";
 export type {
-    ContentItem,
-    PageParagraphResult,
     ParagraphDetectionSettings,
-    ItemCounters,
 } from "./ParagraphDetector";
 export { SearchScorer } from "./SearchScorer";
 export {
     simpleRegexSentenceSplit,
-    flattenPageText,
-    sentenceToBoxes,
-    extractSentenceBBoxes,
-    buildFeasibilityReport,
 } from "./SentenceMapper";
 export type {
-    SentenceRange,
     SentenceSplitter,
-    PageText,
-    FeasibilityReport,
 } from "./SentenceMapper";
 export {
     buildDetailedLineLookup,
     buildParagraphText,
-    extractPageSentenceBBoxes,
-    buildParagraphFeasibilityReport,
+    extractPageSentences,
+    buildPageSentenceFeasibilityReport,
 } from "./ParagraphSentenceMapper";
 export type {
     ParagraphText,
-    ParagraphWithSentences,
-    PageSentenceBBoxResult,
-    PageSentenceBBoxOptions,
-    ParagraphFeasibilityReport,
+    PageSentenceResult,
+    PageSentenceOptions,
+    PageSentenceFeasibilityReport,
+} from "./ParagraphSentenceMapper";
+export type {
     DegradationSummary,
     DegradationNote,
     DegradationReason,
-} from "./ParagraphSentenceMapper";
+} from "./types";
 export {
     normalizeLanguageCode,
     buildByteOffsetTable,
@@ -136,9 +125,9 @@ export type {
 } from "./FilteredParagraphPipeline";
 export type {
     SentenceSplitterConfig,
-    WorkerSentenceBBoxDebugOptions,
-    SentenceBBoxTrace,
-    SentenceBBoxTraceResult,
+    WorkerSentenceDebugOptions,
+    SentenceTrace,
+    SentenceTraceResult,
 } from "./sentenceTypes";
 
 /**
@@ -176,7 +165,7 @@ export class PDFExtractor {
      *    (see `markdown.engine`).
      *  - `"structured"`: sentence-level extraction. Returns the same
      *    `ExtractionResult` shape with `pages[i].sentences` /
-     *    `paragraphs` / `columns` / `lines` populated alongside
+     *    `items` / `columns` populated alongside
      *    paragraph-engine `content`.
      *
      * `markdown.engine` selects the markdown engine when `mode === "markdown"`:
@@ -408,4 +397,3 @@ export class PDFExtractor {
         return getMuPDFWorkerClient().search(pdfData, query, options, { maxPageCount });
     }
 }
-

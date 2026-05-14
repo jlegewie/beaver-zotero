@@ -40,9 +40,9 @@ describe.runIf(smokePdfExists())('Node API (smoke)', () => {
         expect(result.pages[0].index).toBe(0);
         expect(result.pages[0].width).toBeGreaterThan(0);
         expect(result.pages[0].height).toBeGreaterThan(0);
-        // Structured mode populates sentences + paragraphs.
+        // Structured mode populates DocItems plus a flattened sentence view.
         expect(Array.isArray(result.pages[0].sentences)).toBe(true);
-        expect(Array.isArray(result.pages[0].paragraphs)).toBe(true);
+        expect(Array.isArray(result.pages[0].items)).toBe(true);
     });
 
     it('runs analyzeLayout on page 0 and reports at least one analysis page', async () => {

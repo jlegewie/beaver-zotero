@@ -7,7 +7,7 @@
  */
 
 import type {
-    RawBBox,
+    BoundingBox,
     RawBlock,
     RawLine,
     RawPageData,
@@ -18,6 +18,7 @@ import type {
     PageImageOptions,
     PageImageResult,
 } from "../types";
+import { bboxFromXYWH } from "../types";
 import type { RawPageProvider } from "../DocumentAnalyzer";
 import type {
     DocumentLike,
@@ -59,25 +60,25 @@ export const DEFAULT_PAGE_IMAGE_OPTIONS: RenderOptionsResolved = {
     jpegQuality: 85,
 };
 
-/** Convert a [x0, y0, x1, y1] tuple (from walk() bboxes) to RawBBox. */
-export function tupleToBBox(t: RectTuple): RawBBox {
-    return { x: t[0], y: t[1], w: t[2] - t[0], h: t[3] - t[1] };
+/** Convert a [x0, y0, x1, y1] tuple (from walk() bboxes) to a BoundingBox. */
+export function tupleToBBox(t: RectTuple): BoundingBox {
+    return { l: t[0], t: t[1], r: t[2], b: t[3], origin: "top-left" };
 }
 
-/** Compute an axis-aligned RawBBox from a QuadPoint's four corners. */
-export function bboxFromQuad(q: QuadTuple): RawBBox {
+/** Compute an axis-aligned BoundingBox from a QuadPoint's four corners. */
+export function bboxFromQuad(q: QuadTuple): BoundingBox {
     const xs = [q[0], q[2], q[4], q[6]];
     const ys = [q[1], q[3], q[5], q[7]];
     const minX = Math.min(...xs);
     const minY = Math.min(...ys);
     const maxX = Math.max(...xs);
     const maxY = Math.max(...ys);
-    return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+    return { l: minX, t: minY, r: maxX, b: maxY, origin: "top-left" };
 }
 
 /** Compute an axis-aligned bbox from an array of quads. */
-export function bboxFromQuads(quads: QuadTuple[]): RawBBox {
-    if (!quads.length) return { x: 0, y: 0, w: 0, h: 0 };
+export function bboxFromQuads(quads: QuadTuple[]): BoundingBox {
+    if (!quads.length) return { l: 0, t: 0, r: 0, b: 0, origin: "top-left" };
     let minX = Infinity;
     let minY = Infinity;
     let maxX = -Infinity;
@@ -89,7 +90,27 @@ export function bboxFromQuads(quads: QuadTuple[]): RawBBox {
         maxX = Math.max(maxX, ulx, urx, llx, lrx);
         maxY = Math.max(maxY, uly, ury, lly, lry);
     }
-    return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+    return { l: minX, t: minY, r: maxX, b: maxY, origin: "top-left" };
+}
+
+function jsonBBoxToBBox(bbox: { x: number; y: number; w: number; h: number }): BoundingBox {
+    return bboxFromXYWH(bbox.x, bbox.y, bbox.w, bbox.h, "top-left");
+}
+
+function normalizeStructuredTextBlocks(blocks: Array<RawBlock & { bbox: any }>): RawBlock[] {
+    return blocks.map((block) => {
+        const normalized: RawBlock = {
+            ...block,
+            bbox: jsonBBoxToBBox(block.bbox),
+        };
+        if (block.type === "text" && block.lines) {
+            normalized.lines = block.lines.map((line) => ({
+                ...line,
+                bbox: jsonBBoxToBBox(line.bbox as any),
+            }));
+        }
+        return normalized;
+    });
 }
 
 /**
@@ -195,7 +216,7 @@ export function extractRawPageFromDoc(
         const stext = page.toStructuredText(stextOptions);
         try {
             const json = JSON.parse(stext.asJSON());
-            const blocks = (json.blocks || []) as RawBlock[];
+            const blocks = normalizeStructuredTextBlocks(json.blocks || []);
 
             // Parallel walk just to capture per-line `dir` so the
             // JSON-pass lines can carry a sign-precise `rotation`
@@ -255,7 +276,7 @@ export function extractRawPageFromDoc(
 /**
  * Run the page's content stream through a JS device and collect every
  * filled drawing primitive. Returned bboxes are in PDF page coordinates
- * (top-left origin, matching `RawBBox`).
+ * (top-left origin).
  *
  * Used by column detection to find background-shaded display elements
  * (tinted asides, callouts, "facts" boxes). Page load + device run +
@@ -347,14 +368,14 @@ export function filterToContainerRects(
     fills: FillRect[],
     pageWidth: number,
     pageHeight: number,
-): RawBBox[] {
+): Array<{ x: number; y: number; w: number; h: number }> {
     const MIN_FILL_AREA = 900; // 30pt × 30pt
     const MAX_PAGE_COVERAGE = 0.9;
     const WHITE_THRESHOLD = 0.97;
     const INK_THRESHOLD = 0.03;
 
     const pageArea = pageWidth * pageHeight;
-    const out: RawBBox[] = [];
+    const out: Array<{ x: number; y: number; w: number; h: number }> = [];
 
     for (const f of fills) {
         if (f.alpha <= 0) continue;

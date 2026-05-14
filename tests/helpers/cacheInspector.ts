@@ -329,7 +329,7 @@ export async function pdfSentenceBBoxes(
  * exactly.
  */
 export interface PdfRenderOverlayRect {
-    rect: { x: number; y: number; w: number; h: number };
+    rect: { l: number; t: number; r: number; b: number; origin: string };
     color: string;
     label?: string;
     group: number;
@@ -361,6 +361,7 @@ export async function pdfRenderOverlay(
         level:
             | 'columns'
             | 'lines'
+            | 'items'
             | 'paragraphs'
             | 'sentences'
             | 'margins';

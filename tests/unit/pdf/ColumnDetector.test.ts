@@ -11,7 +11,13 @@
 import { describe, it, expect } from 'vitest';
 import { detectColumns } from '../../../src/services/pdf/ColumnDetector';
 import type { Rect } from '../../../src/services/pdf/ColumnDetector';
-import type { RawBlock, RawLine, RawPageData, TextStyle } from '../../../src/services/pdf/types';
+import {
+    bboxFromXYWH,
+    type RawBlock,
+    type RawLine,
+    type RawPageData,
+    type TextStyle,
+} from '../../../src/services/pdf/types';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -20,15 +26,16 @@ import type { RawBlock, RawLine, RawPageData, TextStyle } from '../../../src/ser
 // extractFilteredBlocks keeps a line if alnumCount >= 2, OR
 // (alnumCount >= 1 AND length >= 3). "body text" satisfies both.
 function makeTextBlock(rect: Rect, text = 'body text'): RawBlock {
+    const bbox = bboxFromXYWH(rect.x, rect.y, rect.w, rect.h, "top-left");
     const line: RawLine = {
         wmode: 0,
-        bbox: rect,
+        bbox,
         font: { name: 'Body', family: 'Body', weight: 'normal', style: 'normal', size: 10 },
         x: rect.x,
         y: rect.y,
         text,
     };
-    return { type: 'text', bbox: rect, lines: [line] };
+    return { type: 'text', bbox, lines: [line] };
 }
 
 // extractFilteredBlocks clips by headerMargin: 50 and footerMargin: 50,
@@ -609,9 +616,10 @@ function makeBlockWithFont(
     fontSize: number,
     text = 'body text',
 ): RawBlock {
+    const bbox = bboxFromXYWH(rect.x, rect.y, rect.w, rect.h, "top-left");
     const line: RawLine = {
         wmode: 0,
-        bbox: rect,
+        bbox,
         font: {
             name: fontName,
             family: fontName,
@@ -623,7 +631,7 @@ function makeBlockWithFont(
         y: rect.y,
         text,
     };
-    return { type: 'text', bbox: rect, lines: [line] };
+    return { type: 'text', bbox, lines: [line] };
 }
 
 const BODY_STYLE: TextStyle = {

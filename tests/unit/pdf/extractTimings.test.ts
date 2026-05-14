@@ -10,6 +10,7 @@
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
+    bboxFromXYWH,
     DEFAULT_EXTRACTION_SETTINGS,
     type RawBlock,
     type RawLine,
@@ -45,7 +46,7 @@ function makeLine(
 ): RawLine {
     return {
         wmode: 0,
-        bbox: { x: xStart, y: yTop, w: text.length * 6, h: size },
+        bbox: bboxFromXYWH(xStart, yTop, text.length * 6, size, "top-left"),
         font: { name: fontName, family: fontName, weight, style: "normal", size },
         x: xStart,
         y: yTop,
@@ -54,16 +55,13 @@ function makeLine(
 }
 
 function makePage(pageIndex: number, lines: RawLine[]): RawPageData {
+    const left = lines.length ? Math.min(...lines.map((l) => l.bbox.l)) : 0;
+    const top = lines.length ? Math.min(...lines.map((l) => l.bbox.t)) : 0;
     const blocks: RawBlock[] = lines.length
         ? [
               {
                   type: "text",
-                  bbox: {
-                      x: Math.min(...lines.map((l) => l.bbox.x)),
-                      y: Math.min(...lines.map((l) => l.bbox.y)),
-                      w: PAGE_W,
-                      h: PAGE_H,
-                  },
+                  bbox: bboxFromXYWH(left, top, PAGE_W, PAGE_H, "top-left"),
                   lines,
               },
           ]

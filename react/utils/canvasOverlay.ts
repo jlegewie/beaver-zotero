@@ -57,10 +57,10 @@ export async function drawBBoxOverlayPNG(
 
         ctx.lineWidth = 1;
         for (const r of rects) {
-            const x = r.rect.x * sx;
-            const y = r.rect.y * sy;
-            const w = r.rect.w * sx;
-            const h = r.rect.h * sy;
+            const x = r.rect.l * sx;
+            const y = r.rect.t * sy;
+            const w = (r.rect.r - r.rect.l) * sx;
+            const h = (r.rect.b - r.rect.t) * sy;
             ctx.fillStyle = hexToRgba(r.color, 0.18);
             ctx.fillRect(x, y, w, h);
             ctx.strokeStyle = r.color;
@@ -74,8 +74,8 @@ export async function drawBBoxOverlayPNG(
         ctx.textBaseline = "top";
         for (const r of rects) {
             if (!r.label) continue;
-            const x = r.rect.x * sx;
-            const y = r.rect.y * sy;
+            const x = r.rect.l * sx;
+            const y = r.rect.t * sy;
             drawLabel(ctx, r.label, x, y, fontSize, r.color);
         }
 

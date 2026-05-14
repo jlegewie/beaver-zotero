@@ -195,7 +195,7 @@ export interface PageLike {
      * should not merge with text outside it.
      *
      * Returned bboxes are in PDF page coordinates with the y-axis flipped
-     * to match `RawBBox` (origin top-left, y grows downward). Empty array
+     * to match `BoundingBox` (origin top-left, y grows downward). Empty array
      * if the page has no filled paths.
      *
      * **Budget.** `maxFills` caps how many fill_path events we'll

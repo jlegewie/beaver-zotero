@@ -18,6 +18,9 @@ import {
 import {
     DEFAULT_MARGINS,
     DEFAULT_MARGIN_ZONE,
+    bboxFromXYWH,
+    bboxHeight,
+    bboxWidth,
     type MarginRemovalResult,
     type MarginSettings,
     type RawPageData,
@@ -110,7 +113,7 @@ export interface FilteredParagraphTimings {
 export interface FilteredParagraphResult {
     /**
      * Paragraph detection result with `itemLines` populated, ready to
-     * pass to `extractPageSentenceBBoxes` as
+     * pass to `extractPageSentences` as
      * `precomputed: { paragraphResult }`.
      */
     paragraphResult: PageParagraphResult;
@@ -240,7 +243,20 @@ export function detectFilteredParagraphs(
     const fillBoundaries =
         ctx.fillBoundaries && ctx.fillBoundaries.length > 0
             ? ctx.fillBoundaries.map((b) =>
-                  rotateBBox(b, pageRotation, rotated.sourceWidth, rotated.sourceHeight),
+                  {
+                      const rotatedBox = rotateBBox(
+                          bboxFromXYWH(b.x, b.y, b.w, b.h, "top-left"),
+                          pageRotation,
+                          rotated.sourceWidth,
+                          rotated.sourceHeight,
+                      );
+                      return {
+                          x: rotatedBox.l,
+                          y: rotatedBox.t,
+                          w: bboxWidth(rotatedBox),
+                          h: bboxHeight(rotatedBox),
+                      };
+                  },
               )
             : ctx.fillBoundaries;
 

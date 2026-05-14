@@ -10,31 +10,38 @@
  * consume the same projection later.
  *
  * Snapshots cover only the fields that drive sentence-level regression: the
- * page geometry, the markdown `content`, paragraph + sentence counts, and
- * each `SentenceBBox` projected to the minimum stable subset (text + bboxes
+ * page geometry, the markdown `content`, item + sentence counts, and
+ * each `SentenceItem` projected to the minimum stable subset (text + bboxes
  * rounded to 3 decimals + classification flags).
  */
-import type { ExtractionResult, ProcessedPage, RawBBox, SentenceBBox } from "../types";
+import type { BoundingBox, DocItem, ExtractionResult, ProcessedPage, SentenceItem } from "../types";
 
 // ---------------------------------------------------------------------------
 // Snapshot shape
 // ---------------------------------------------------------------------------
 
 export interface SnapshotBBox {
-    x: number;
-    y: number;
-    w: number;
-    h: number;
+    l: number;
+    t: number;
+    r: number;
+    b: number;
+    origin: "top-left" | "bottom-left";
+}
+
+export interface SnapshotItem {
+    id: string;
+    kind: DocItem["kind"];
+    index: number;
+    columnIndex: number;
+    text?: string;
+    bbox: SnapshotBBox;
 }
 
 export interface SnapshotSentence {
     /** Position in the page-flat sentence list (mirrors `ExtractionPageSnapshot.sentences`). */
     index: number;
-    /** Source paragraph index on this page. */
-    paragraphIndex: number;
-    /** Position within the source paragraph (0-based). */
+    parentId: string;
     sentenceIndex: number;
-    kind: "text" | "heading";
     text: string;
     bboxes: SnapshotBBox[];
     /** Producer continuation hint. Omitted ≡ false; never serialized as false. */
@@ -47,10 +54,11 @@ export interface ExtractionPageSnapshot {
     pageHeight: number;
     /** Markdown content from the paragraph engine. Compared exactly. */
     content: string;
-    paragraphCount: number;
+    itemCount: number;
     sentenceCount: number;
-    /** Total degraded paragraphs on this page (from `ProcessedPage.degradation.count`). */
-    degradedParagraphs: number;
+    /** Total degraded items on this page (from `ProcessedPage.degradation.count`). */
+    degradedItems: number;
+    items: SnapshotItem[];
     sentences: SnapshotSentence[];
 }
 
@@ -58,9 +66,9 @@ export interface ExtractionSnapshot {
     perPage: ExtractionPageSnapshot[];
     /** Global totals across the captured pages. Coarse-grained signal only. */
     totals: {
-        paragraphCount: number;
+        itemCount: number;
         sentenceCount: number;
-        degradedParagraphs: number;
+        degradedItems: number;
     };
 }
 
@@ -82,35 +90,47 @@ export function projectExtractionSnapshot(
     const perPage = result.pages.map(projectPage);
     const totals = perPage.reduce(
         (acc, p) => ({
-            paragraphCount: acc.paragraphCount + p.paragraphCount,
+            itemCount: acc.itemCount + p.itemCount,
             sentenceCount: acc.sentenceCount + p.sentenceCount,
-            degradedParagraphs: acc.degradedParagraphs + p.degradedParagraphs,
+            degradedItems: acc.degradedItems + p.degradedItems,
         }),
-        { paragraphCount: 0, sentenceCount: 0, degradedParagraphs: 0 },
+        { itemCount: 0, sentenceCount: 0, degradedItems: 0 },
     );
     return { perPage, totals };
 }
 
 function projectPage(page: ProcessedPage): ExtractionPageSnapshot {
     const sentences = (page.sentences ?? []).map(projectSentence);
+    const items = page.items.map(projectItem);
     return {
         pageIndex: page.index,
         pageWidth: page.width,
         pageHeight: page.height,
         content: page.content,
-        paragraphCount: (page.paragraphs ?? []).length,
+        itemCount: items.length,
         sentenceCount: sentences.length,
-        degradedParagraphs: page.degradation?.count ?? 0,
+        degradedItems: page.degradation?.count ?? 0,
+        items,
         sentences,
     };
 }
 
-function projectSentence(s: SentenceBBox, idx: number): SnapshotSentence {
+function projectItem(item: DocItem): SnapshotItem {
+    return {
+        id: item.id,
+        kind: item.kind,
+        index: item.index,
+        columnIndex: item.columnIndex,
+        text: "text" in item ? item.text : undefined,
+        bbox: roundBBox(item.bbox),
+    };
+}
+
+function projectSentence(s: SentenceItem, idx: number): SnapshotSentence {
     const out: SnapshotSentence = {
         index: idx,
-        paragraphIndex: s.paragraphIndex,
-        sentenceIndex: s.sentenceIndex,
-        kind: s.kind ?? "text",
+        parentId: s.parentId,
+        sentenceIndex: s.index,
         text: s.text,
         bboxes: s.bboxes.map(roundBBox),
     };
@@ -118,12 +138,13 @@ function projectSentence(s: SentenceBBox, idx: number): SnapshotSentence {
     return out;
 }
 
-function roundBBox(b: RawBBox): SnapshotBBox {
+function roundBBox(b: BoundingBox): SnapshotBBox {
     return {
-        x: round3(b.x),
-        y: round3(b.y),
-        w: round3(b.w),
-        h: round3(b.h),
+        l: round3(b.l),
+        t: round3(b.t),
+        r: round3(b.r),
+        b: round3(b.b),
+        origin: b.origin,
     };
 }
 
@@ -168,9 +189,9 @@ export function diffExtractionSnapshots(
     diffPages(expected.perPage, actual.perPage, opts, diffs, cap);
     if (diffs.length >= cap) return diffs;
 
-    diffScalar("totals.paragraphCount", expected.totals.paragraphCount, actual.totals.paragraphCount, diffs);
+    diffScalar("totals.itemCount", expected.totals.itemCount, actual.totals.itemCount, diffs);
     diffScalar("totals.sentenceCount", expected.totals.sentenceCount, actual.totals.sentenceCount, diffs);
-    diffScalar("totals.degradedParagraphs", expected.totals.degradedParagraphs, actual.totals.degradedParagraphs, diffs);
+    diffScalar("totals.degradedItems", expected.totals.degradedItems, actual.totals.degradedItems, diffs);
 
     return diffs;
 }
@@ -219,11 +240,21 @@ function diffPage(
     diffScalar(`${base}.pageWidth`, e.pageWidth, a.pageWidth, diffs);
     diffScalar(`${base}.pageHeight`, e.pageHeight, a.pageHeight, diffs);
     diffScalar(`${base}.content`, e.content, a.content, diffs);
-    diffScalar(`${base}.paragraphCount`, e.paragraphCount, a.paragraphCount, diffs);
+    diffScalar(`${base}.itemCount`, e.itemCount, a.itemCount, diffs);
     diffScalar(`${base}.sentenceCount`, e.sentenceCount, a.sentenceCount, diffs);
-    diffScalar(`${base}.degradedParagraphs`, e.degradedParagraphs, a.degradedParagraphs, diffs);
+    diffScalar(`${base}.degradedItems`, e.degradedItems, a.degradedItems, diffs);
 
     if (diffs.length >= cap) return;
+    const maxItems = Math.max(e.items.length, a.items.length);
+    for (let i = 0; i < maxItems; i++) {
+        if (diffs.length >= cap) return;
+        diffScalar(`${base}.items[${i}].id`, e.items[i]?.id, a.items[i]?.id, diffs);
+        diffScalar(`${base}.items[${i}].kind`, e.items[i]?.kind, a.items[i]?.kind, diffs);
+        if (e.items[i] && a.items[i]) {
+            diffBBox(`${base}.items[${i}].bbox`, e.items[i].bbox, a.items[i].bbox, opts.bboxAbsPt, diffs);
+        }
+    }
+
     const max = Math.max(e.sentences.length, a.sentences.length);
     for (let i = 0; i < max; i++) {
         if (diffs.length >= cap) return;
@@ -248,9 +279,8 @@ function diffSentence(
     opts: DiffOptions,
     diffs: SnapshotDiff[],
 ): void {
-    diffScalar(`${base}.paragraphIndex`, e.paragraphIndex, a.paragraphIndex, diffs);
+    diffScalar(`${base}.parentId`, e.parentId, a.parentId, diffs);
     diffScalar(`${base}.sentenceIndex`, e.sentenceIndex, a.sentenceIndex, diffs);
-    diffScalar(`${base}.kind`, e.kind, a.kind, diffs);
     diffScalar(`${base}.text`, normalizeWhitespace(e.text), normalizeWhitespace(a.text), diffs);
     diffScalar(`${base}.joinWithNext`, e.joinWithNext === true, a.joinWithNext === true, diffs);
 
@@ -276,9 +306,12 @@ function diffBBox(
     diffs: SnapshotDiff[],
 ): void {
     const breaches: string[] = [];
-    for (const k of ["x", "y", "w", "h"] as const) {
+    for (const k of ["l", "t", "r", "b"] as const) {
         const delta = Math.abs(a[k] - e[k]);
         if (delta > tol) breaches.push(`Δ${k}=${delta.toFixed(3)}pt`);
+    }
+    if (e.origin !== a.origin) {
+        breaches.push(`origin ${e.origin} != ${a.origin}`);
     }
     if (breaches.length > 0) {
         diffs.push({
