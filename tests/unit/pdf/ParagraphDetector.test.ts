@@ -255,6 +255,7 @@ interface LeaderLineSpec {
     text: string;
     l: number;
     r?: number;
+    gapAfter?: number;
     size?: number;
     font?: string;
     bold?: boolean;
@@ -365,7 +366,7 @@ function makeColumnPageResult(specs: LeaderLineSpec[]): PageLineResult {
     const lines: PageLine[] = specs.map(s => {
         const line = makeMultiSpanLine(s, cursorTop);
         // Standard leading: line height + small inter-line gap.
-        cursorTop += line.bbox.height + 2;
+        cursorTop += line.bbox.height + (s.gapAfter ?? 2);
         return line;
     });
     const allLeft = Math.min(...lines.map(l => l.bbox.l));
@@ -590,9 +591,239 @@ describe('hanging-indent leader suppression', () => {
             expect(paragraphs[0]).toContain('Bullet item');
             expect(paragraphs[0]).toContain('continues with body');
         });
+
+        it('standard bullet in Helvetica', () => {
+            const result = makeColumnPageResult([
+                ...FILLERS,
+                {
+                    text: '• Bullet item in Helvetica that wraps',
+                    l: 0,
+                    size: 10,
+                    font: 'Helvetica',
+                },
+                {
+                    text: 'and continues in matching Helvetica style',
+                    l: 10,
+                    size: 10,
+                    font: 'Helvetica',
+                },
+            ]);
+            const paragraphs = paragraphTexts(result, [bodyStyle(10, 'Helvetica')]);
+            expect(paragraphs.length).toBe(1);
+            expect(paragraphs[0]).toContain('Bullet item in Helvetica');
+            expect(paragraphs[0]).toContain('matching Helvetica style');
+        });
+
+        it('standard filled-circle bullet in serif body font', () => {
+            const result = makeColumnPageResult([
+                ...FILLERS,
+                {
+                    text: '● Bullet item in serif text that wraps',
+                    l: 0,
+                    size: 10,
+                    font: 'Times-Roman',
+                },
+                {
+                    text: 'and continues in matching serif style',
+                    l: 10,
+                    size: 10,
+                    font: 'Times-Roman',
+                },
+            ]);
+            const paragraphs = paragraphTexts(result, [BODY]);
+            expect(paragraphs.length).toBe(1);
+            expect(paragraphs[0]).toContain('Bullet item in serif');
+            expect(paragraphs[0]).toContain('matching serif style');
+        });
+
+        it('Wingdings glyph-substituted bullet leader', () => {
+            const result = makeColumnPageResult([
+                ...FILLERS,
+                {
+                    text: 'Ø Bullet via Wingdings that wraps',
+                    l: 0,
+                    size: 10,
+                    font: 'AAAAAY+Wingdings-Regular',
+                },
+                {
+                    text: 'and continues in regular body text',
+                    l: 10,
+                    size: 10,
+                    font: 'Times-Roman',
+                },
+            ]);
+            const paragraphs = paragraphTexts(result, [BODY]);
+            expect(paragraphs.length).toBe(1);
+            expect(paragraphs[0]).toContain('Bullet via Wingdings');
+            expect(paragraphs[0]).toContain('regular body text');
+        });
+
+        it('AdvPi glyph-substituted bullet leader', () => {
+            const result = makeColumnPageResult([
+                ...FILLERS,
+                {
+                    text: '. Limiting up-front expenditure',
+                    l: 0,
+                    size: 10,
+                    font: 'FJBJNK+AdvPi1',
+                },
+                {
+                    text: 'spect minimising risk money and exposure',
+                    l: 10,
+                    size: 10,
+                    font: 'Times-Roman',
+                },
+            ]);
+            const paragraphs = paragraphTexts(result, [BODY]);
+            expect(paragraphs.length).toBe(1);
+            expect(paragraphs[0]).toContain('Limiting up-front expenditure');
+            expect(paragraphs[0]).toContain('minimising risk money');
+        });
+
+        it('same-indent continuation remains with a bullet item across a larger gap', () => {
+            const result = makeColumnPageResult([
+                ...FILLERS.slice(0, -1),
+                { ...FILLERS[FILLERS.length - 1], gapAfter: 8 },
+                {
+                    text: '● Bullet item with several wrapped lines',
+                    l: 0,
+                    r: 420,
+                },
+                {
+                    text: 'first continuation stays at the hanging indent',
+                    l: 10,
+                    gapAfter: 8,
+                },
+                {
+                    text: 'second continuation should remain attached',
+                    l: 10,
+                },
+            ]);
+            const paragraphs = paragraphTexts(result, [BODY]);
+            expect(paragraphs.length).toBe(2);
+            expect(paragraphs[1]).toContain('several wrapped lines');
+            expect(paragraphs[1]).toContain('second continuation');
+        });
+    });
+
+    describe('positives — successive leaders are not cross-merged', () => {
+        it('splits filled-circle bullet leaders after continuations', () => {
+            const result = makeColumnPageResult([
+                ...FILLERS,
+                { text: '● First bullet item that wraps', l: 0 },
+                { text: 'continuation of first bullet item', l: 10 },
+                { text: '● Second bullet item that wraps', l: 0 },
+                { text: 'continuation of second bullet item', l: 10 },
+            ]);
+            const paragraphs = paragraphTexts(result, [BODY]);
+            const first = paragraphs.find(p => p.includes('First bullet item'));
+            const second = paragraphs.find(p => p.includes('Second bullet item'));
+            expect(first).toBeDefined();
+            expect(second).toBeDefined();
+            expect(first).not.toBe(second);
+            expect(first).toContain('continuation of first');
+            expect(first).not.toContain('Second bullet item');
+            expect(second).toContain('continuation of second');
+        });
+
+        it('splits numbered list leaders after continuations', () => {
+            const result = makeColumnPageResult([
+                ...FILLERS,
+                { text: '1. First numbered item that wraps', l: 0 },
+                { text: 'continuation of first numbered item', l: 10 },
+                { text: '2. Second numbered item that wraps', l: 0 },
+                { text: 'continuation of second numbered item', l: 10 },
+            ]);
+            const paragraphs = paragraphTexts(result, [BODY]);
+            const first = paragraphs.find(p => p.includes('First numbered item'));
+            const second = paragraphs.find(p => p.includes('Second numbered item'));
+            expect(first).toBeDefined();
+            expect(second).toBeDefined();
+            expect(first).not.toBe(second);
+            expect(first).toContain('continuation of first');
+            expect(first).not.toContain('Second numbered item');
+            expect(second).toContain('continuation of second');
+        });
     });
 
     describe('negatives — split is preserved', () => {
+        it('quoted bullet marker in prose is not a leader continuation', () => {
+            const result = makeColumnPageResult([
+                ...FILLERS,
+                { text: '"• as a marker is conventional," she said.', l: 0 },
+                { text: 'A normally indented body line follows here', l: 10 },
+            ]);
+            const paragraphs = paragraphTexts(result, [BODY]);
+            expect(paragraphs.length).toBe(2);
+        });
+
+        it('standard bullet does not use body-style fallback without icon font', () => {
+            const result = makeColumnPageResult([
+                ...FILLERS,
+                {
+                    text: '• Bullet item in a non-body font',
+                    l: 0,
+                    size: 10,
+                    font: 'Helvetica',
+                },
+                {
+                    text: 'continuation set in another non-body font',
+                    l: 10,
+                    size: 10,
+                    font: 'NotABodyFont',
+                },
+            ]);
+            const paragraphs = paragraphTexts(result, [BODY]);
+            expect(paragraphs.length).toBe(2);
+        });
+
+        it('same-indent gap suppression is gated to leader-started items', () => {
+            const result = makeColumnPageResult([
+                ...FILLERS.slice(0, -1),
+                { ...FILLERS[FILLERS.length - 1], gapAfter: 8 },
+                {
+                    text: 'Indented block quotation starts without a terminator',
+                    l: 10,
+                    r: 420,
+                    gapAfter: 8,
+                },
+                {
+                    text: 'Another indented paragraph starts after a visual gap',
+                    l: 10,
+                },
+            ]);
+            const paragraphs = paragraphTexts(result, [BODY]);
+            const first = paragraphs.find(p =>
+                p.includes('block quotation starts')
+            );
+            const second = paragraphs.find(p =>
+                p.includes('Another indented paragraph')
+            );
+            expect(first).toBeDefined();
+            expect(second).toBeDefined();
+            expect(first).not.toBe(second);
+        });
+
+        it('MTSY equation lines do not merge through permissive icon handling', () => {
+            const result = makeColumnPageResult([
+                ...FILLERS,
+                { text: '+ x = y', l: 0, size: 10, font: 'MTSY7' },
+                { text: '+ z = w', l: 10, size: 10, font: 'MTSY7' },
+            ]);
+            const paragraphs = paragraphTexts(result, [BODY]);
+            expect(paragraphs.length).toBe(2);
+        });
+
+        it('Symbol equation lines do not merge through permissive icon handling', () => {
+            const result = makeColumnPageResult([
+                ...FILLERS,
+                { text: '+ α = β', l: 0, size: 10, font: 'AAAAAA+SymbolMT' },
+                { text: '+ γ = δ', l: 10, size: 10, font: 'AAAAAA+SymbolMT' },
+            ]);
+            const paragraphs = paragraphTexts(result, [BODY]);
+            expect(paragraphs.length).toBe(2);
+        });
+
         it('leader line ends with a sentence terminator', () => {
             const result = makeColumnPageResult([
                 ...FILLERS,

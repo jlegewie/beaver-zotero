@@ -195,7 +195,83 @@ export const mergeLabelSentences: PostProcessStep = (ranges, text) => {
 };
 
 // ---------------------------------------------------------------------------
-// Step 2: split enumerated lists introduced by a colon
+// Step 2: drop glyph-substituted marker-only bullet sentences
+// ---------------------------------------------------------------------------
+
+/**
+ * Some Pi/dingbat-font bullets extract as an ASCII full stop. Sentencex can
+ * split that marker into a standalone `"."` sentence before the real list
+ * item text. Drop only the leading marker-only range and let the following
+ * content sentence carry the citation target.
+ */
+export const dropLeadingGlyphBulletMarkerSentence: PostProcessStep = (
+    ranges,
+    text,
+) => {
+    if (ranges.length < 2) return ranges as SentenceRange[];
+    const first = text.slice(ranges[0].start, ranges[0].end).trim();
+    if (first !== ".") return ranges as SentenceRange[];
+    return ranges.slice(1) as SentenceRange[];
+};
+
+// ---------------------------------------------------------------------------
+// Step 3: split numbered-list ranges at ordinary sentence boundaries
+// ---------------------------------------------------------------------------
+
+const NUMBERED_LIST_LEADER_PREFIX_RE = /^\s*\d{1,3}[.)]\s+/u;
+const NUMBERED_LIST_LEADER_RE = /^\s*\d{1,3}[.)]\s+\p{Lu}/u;
+const SENTENCE_BOUNDARY_AFTER_LIST_LEADER_RE =
+    /[.!?]["'”’)]?\s+["'“‘(]?\p{Lu}/gu;
+
+function splitNumberedListRange(
+    range: SentenceRange,
+    text: string,
+): SentenceRange[] {
+    const segText = text.slice(range.start, range.end);
+    if (!NUMBERED_LIST_LEADER_RE.test(segText)) return [range];
+    const leader = NUMBERED_LIST_LEADER_PREFIX_RE.exec(segText);
+    const minSplitOffset = leader ? leader[0].length : 0;
+
+    const out: SentenceRange[] = [];
+    let cursor = 0;
+    const re = new RegExp(SENTENCE_BOUNDARY_AFTER_LIST_LEADER_RE.source, "gu");
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(segText)) !== null) {
+        const matched = m[0];
+        const endOffset = m.index + matched.search(/\s/u);
+        if (endOffset <= minSplitOffset) continue;
+        if (endOffset <= cursor) continue;
+        out.push({ start: range.start + cursor, end: range.start + endOffset });
+        cursor = endOffset;
+        while (cursor < segText.length && /\s/u.test(segText[cursor])) cursor++;
+    }
+    if (out.length === 0) return [range];
+    if (cursor < segText.length) {
+        out.push({ start: range.start + cursor, end: range.end });
+    }
+    return out;
+}
+
+/**
+ * Sentencex can keep an entire numbered-list item as one sentence when the
+ * item starts with `1.`. Split only ranges that begin with a numbered-list
+ * leader, and only at normal terminal punctuation followed by an uppercase
+ * sentence start. Reference-list cleanup runs later and can still collapse
+ * bibliographic entries.
+ */
+export const splitNumberedListSentenceBoundaries: PostProcessStep = (
+    ranges,
+    text,
+) => {
+    const out: SentenceRange[] = [];
+    for (const range of ranges) {
+        out.push(...splitNumberedListRange(range, text));
+    }
+    return out;
+};
+
+// ---------------------------------------------------------------------------
+// Step 4: split enumerated lists introduced by a colon
 // ---------------------------------------------------------------------------
 
 /**
@@ -647,7 +723,7 @@ const REF_TAIL_B2_RE = new RegExp(
 const REF_TAIL_B3_RE = /\b\d{1,4}\s*:\s*\d{1,4}\s*[-–]\s*\d{1,4}\b/u;
 const REF_TAIL_B4_RE = /\bpp?\.\s+\d{1,4}(?:\s*[-–]\s*\d{1,4})?\b/iu;
 const REF_TAIL_B5_RE =
-    /\b(?:Press|Publishers?|Publishing|Wiley|Springer|Elsevier|Routledge|Sage|Oxford|Cambridge|MIT|University Press|Working Paper|Technical Report|Retrieved\s+from)\b/iu;
+    /\b(?:Press|Publishers?|Publishing|Wiley|Springer|Elsevier|Routledge|Sage|Oxford|Cambridge|MIT|University Press|Working Paper|Technical Report|Retrieved\s+from)\b/u;
 // B6: PMID (PubMed ID). A strong reference-only signal — `pmid:` with a
 // numeric ID appears almost exclusively in biomedical reference lists.
 const REF_TAIL_B6_RE = /\bpmid:\s*\d{4,}/iu;
@@ -1210,6 +1286,8 @@ export const mergeLowercaseEllipsisContinuations: PostProcessStep = (
 const POST_PROCESS_STEPS: ReadonlyArray<PostProcessStep> = [
     splitTrailingNumericSubsectionLabel,
     mergeLabelSentences,
+    dropLeadingGlyphBulletMarkerSentence,
+    splitNumberedListSentenceBoundaries,
     splitOnEnumeratedListAfterColon,
     mergeDecimalNumberSplits,
     mergeReferenceListSentences,

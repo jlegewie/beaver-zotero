@@ -13,6 +13,7 @@ import { describe, it, expect } from "vitest";
 import {
     applyPostProcessing,
     countInternalNumberedMarkers,
+    dropLeadingGlyphBulletMarkerSentence,
     findReferenceBoundaries,
     hasContinuationTailEvidence,
     hasReferenceStart,
@@ -25,6 +26,7 @@ import {
     mergeOrphanClosers,
     mergeReferenceListSentences,
     splitOnEnumeratedListAfterColon,
+    splitNumberedListSentenceBoundaries,
     splitTrailingNumericSubsectionLabel,
 } from "../../../src/services/pdf/sentencePostprocess";
 import type { SentenceRange } from "../../../src/services/pdf/SentenceMapper";
@@ -244,6 +246,48 @@ describe("mergeLabelSentences", () => {
 
     it("returns an empty array for empty input", () => {
         expect(mergeLabelSentences([], "")).toEqual([]);
+    });
+});
+
+describe("dropLeadingGlyphBulletMarkerSentence", () => {
+    it("drops a leading marker-only period before bullet text", () => {
+        const text = ". Limiting up-front expenditure.";
+        const ranges = rangesFromChunks(text, [
+            ".",
+            "Limiting up-front expenditure.",
+        ]);
+        const out = dropLeadingGlyphBulletMarkerSentence(ranges, text);
+        expect(slice(text, out)).toEqual([
+            "Limiting up-front expenditure.",
+        ]);
+    });
+
+    it("does not drop non-leading punctuation-only ranges", () => {
+        const text = "First sentence. .";
+        const ranges = rangesFromChunks(text, ["First sentence.", "."]);
+        const out = dropLeadingGlyphBulletMarkerSentence(ranges, text);
+        expect(slice(text, out)).toEqual(["First sentence.", "."]);
+    });
+});
+
+describe("splitNumberedListSentenceBoundaries", () => {
+    it("splits a numbered-list item at an ordinary sentence boundary", () => {
+        const text =
+            "1. Open access has created incentives to increase the number of articles published. This trend towards quantity over quality risks reducing options.";
+        const ranges = [{ start: 0, end: text.length }];
+        const out = splitNumberedListSentenceBoundaries(ranges, text);
+        expect(slice(text, out)).toEqual([
+            "1. Open access has created incentives to increase the number of articles published.",
+            "This trend towards quantity over quality risks reducing options.",
+        ]);
+    });
+
+    it("does not split ordinary prose ranges", () => {
+        const text =
+            "Open access increased the number of articles published. This trend continued.";
+        const ranges = [{ start: 0, end: text.length }];
+        const out = splitNumberedListSentenceBoundaries(ranges, text);
+        expect(slice(text, out)).toEqual([text]);
     });
 });
 
@@ -771,6 +815,13 @@ describe("isReferenceParagraph (A∧B classifier)", () => {
             "Bourgois, Philippe. 2003. In Search of Respect. Cambridge: " +
             "Cambridge University Press.";
         expect(hasReferenceTail(reference)).toBe(true);
+    });
+
+    it("hasReferenceTail B5 does not fire on lowercase prose publishing mentions", () => {
+        const prose =
+            "1. Open access can affect publishing options for researchers.";
+        expect(hasReferenceTail(prose)).toBe(false);
+        expect(isReferenceParagraph(prose)).toBe(false);
     });
 });
 
