@@ -405,6 +405,8 @@ class ItemValidationManager {
                         return { isValid: false, reason: 'PDF is password-protected' };
                     } else if (error.code === ExtractionErrorCode.INVALID_PDF) {
                         return { isValid: false, reason: 'PDF file is invalid or corrupted' };
+                    } else if (error.code === ExtractionErrorCode.WASM_ERROR) {
+                        return { isValid: false, reason: 'PDF crashes the local PDF parser' };
                     }
                 }
                 throw error;
@@ -426,6 +428,10 @@ class ItemValidationManager {
             return { isValid: true };
 
         } catch (error: any) {
+            if (error instanceof ExtractionError && error.code === ExtractionErrorCode.WASM_ERROR) {
+                logger(`ItemValidationManager: PDF parser crashed while analyzing ${attachment.libraryID}-${attachment.key}: ${error.message}`, 2);
+                return { isValid: false, reason: 'PDF crashes the local PDF parser' };
+            }
             logger(`ItemValidationManager: Error analyzing PDF: ${error.message}`, 2);
             return { isValid: false, reason: 'Error analyzing PDF' };
         }

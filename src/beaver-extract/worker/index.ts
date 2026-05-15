@@ -25,7 +25,8 @@ import { enqueue } from "./opQueue";
 import { ensureApi } from "./wasmInit";
 import { isWorkerConfigured, setWorkerUrls, type WorkerUrls } from "./config";
 import { setPDFLogger } from "../logging";
-import { postLog } from "./errors";
+import { ERROR_CODES, postLog } from "./errors";
+import { isFatalWasmError } from "../wasmFatal";
 
 // Route analyzer-module logs through the existing `postLog` channel so the
 // main-thread `MuPDFWorkerClient` forwards them to the host-configured
@@ -174,6 +175,14 @@ workerSelf.onmessage = (event: MessageEvent) => {
             } else {
                 const message = e instanceof Error ? e.message : String(e);
                 error = { name: "Error", message };
+            }
+            if (isFatalWasmError(e)) {
+                error = {
+                    name: "ExtractionError",
+                    code: ERROR_CODES.WASM_ERROR,
+                    message:
+                        "This PDF crashed the MuPDF WASM parser and cannot be processed.",
+                };
             }
             workerSelf.postMessage({ id, ok: false, error });
         }

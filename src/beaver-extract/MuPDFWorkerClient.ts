@@ -34,6 +34,14 @@ import type { ParagraphDetectionSettings } from "./ParagraphDetector";
 interface PendingEntry {
     resolve: (value: any) => void;
     reject: (reason: any) => void;
+    fatalCandidate?: FatalOperationCandidate;
+}
+
+interface FatalOperationCandidate {
+    op: string;
+    bytes: Uint8Array;
+    argsSignature: string;
+    prefix: string;
 }
 
 /**
@@ -127,6 +135,12 @@ export class MuPDFWorkerClient {
     private retryCount = 0;
     private dispatchCounts: Record<string, number> = {};
     private lastSpawnTime: number | null = null;
+    private fatalOperationKeys = new Set<string>();
+    private fatalOperationEntries: Array<{ key: string; prefix: string }> = [];
+    private fatalOperationPrefixCounts = new Map<string, number>();
+    // Populated only after a fatal reply so healthy dispatch never walks a
+    // whole PDF on the UI thread before posting work to the worker.
+    private pdfDigestCache = new WeakMap<object, Map<string, string>>();
 
     /** The window that spawned the current worker. Used for stale detection. */
     get spawnedFromWindow(): Window | null {
@@ -218,7 +232,16 @@ export class MuPDFWorkerClient {
         if (reply.ok) {
             entry.resolve(reply.result);
         } else {
-            entry.reject(rehydrateError(reply.error));
+            const error = rehydrateError(reply.error);
+            if (isFatalWorkerError(reply.error)) {
+                if (entry.fatalCandidate) {
+                    this.rememberFatalOperation(
+                        this.computeFatalOperationKey(entry.fatalCandidate),
+                    );
+                }
+                this.markStale("fatal WASM error from worker");
+            }
+            entry.reject(error);
         }
     }
 
@@ -286,11 +309,22 @@ export class MuPDFWorkerClient {
     }
 
     private dispatch<T>(op: string, args: Record<string, unknown>): Promise<T> {
+        const fatalCandidate = getFatalOperationCandidate(op, args);
+        const fatalKey = fatalCandidate
+            ? this.getCachedFatalOperationKey(fatalCandidate)
+            : null;
+        if (fatalKey && this.fatalOperationKeys.has(fatalKey)) {
+            return Promise.reject(createKnownFatalWasmError());
+        }
         const worker = this.ensureWorker();
         const id = this.nextId++;
 
         return new Promise<T>((resolve, reject) => {
-            this.pending.set(id, { resolve, reject });
+            this.pending.set(id, {
+                resolve,
+                reject,
+                fatalCandidate: fatalCandidate ?? undefined,
+            });
             try {
                 worker.postMessage({ id, op, args });
             } catch (e) {
@@ -301,6 +335,24 @@ export class MuPDFWorkerClient {
                 reject(new StaleWorkerError("postMessage threw"));
             }
         });
+    }
+
+    private getCachedFatalOperationKey(
+        candidate: FatalOperationCandidate,
+    ): string | null {
+        let digest = getCachedPdfDigest(this.pdfDigestCache, candidate.bytes);
+        if (!digest && this.fatalOperationPrefixCounts.has(candidate.prefix)) {
+            digest = getOrComputePdfDigest(this.pdfDigestCache, candidate.bytes);
+        }
+        if (!digest) return null;
+        return makeFatalOperationKey(candidate, digest);
+    }
+
+    private computeFatalOperationKey(
+        candidate: FatalOperationCandidate,
+    ): string {
+        const digest = getOrComputePdfDigest(this.pdfDigestCache, candidate.bytes);
+        return makeFatalOperationKey(candidate, digest);
     }
 
     /**
@@ -709,6 +761,29 @@ export class MuPDFWorkerClient {
         });
     }
 
+    private rememberFatalOperation(key: string): void {
+        if (this.fatalOperationKeys.has(key)) return;
+        const prefix = getFatalOperationPrefixFromKey(key);
+        this.fatalOperationKeys.add(key);
+        this.fatalOperationEntries.push({ key, prefix });
+        this.fatalOperationPrefixCounts.set(
+            prefix,
+            (this.fatalOperationPrefixCounts.get(prefix) ?? 0) + 1,
+        );
+        if (this.fatalOperationEntries.length > 128) {
+            const oldest = this.fatalOperationEntries.shift();
+            if (oldest) {
+                this.fatalOperationKeys.delete(oldest.key);
+                const count = this.fatalOperationPrefixCounts.get(oldest.prefix) ?? 0;
+                if (count <= 1) {
+                    this.fatalOperationPrefixCounts.delete(oldest.prefix);
+                } else {
+                    this.fatalOperationPrefixCounts.set(oldest.prefix, count - 1);
+                }
+            }
+        }
+    }
+
     dispose(): void {
         // Set BEFORE markStale so that any rejection that races with this
         // call (or runs synchronously inside it) sees the disposed flag and
@@ -744,6 +819,129 @@ function rehydrateError(payload: WorkerErrorPayload | undefined): Error {
         );
     }
     return new Error(payload.message ?? "Unknown worker error");
+}
+
+function isFatalWorkerError(payload: WorkerErrorPayload | undefined): boolean {
+    return payload?.name === "ExtractionError"
+        && payload.code === ExtractionErrorCode.WASM_ERROR;
+}
+
+function createKnownFatalWasmError(): ExtractionError {
+    return new ExtractionError(
+        ExtractionErrorCode.WASM_ERROR,
+        "This PDF previously crashed the MuPDF WASM parser and cannot be processed.",
+    );
+}
+
+function getFatalOperationCandidate(
+    op: string,
+    args: Record<string, unknown>,
+): FatalOperationCandidate | null {
+    const bytes = getPdfBytes(args.pdfData);
+    if (!bytes) return null;
+    const argsSignature = stableStringifyWithoutPdfData(args);
+    return {
+        op,
+        bytes,
+        argsSignature,
+        prefix: makeFatalOperationPrefix(op, bytes.byteLength, argsSignature),
+    };
+}
+
+function makeFatalOperationPrefix(
+    op: string,
+    byteLength: number,
+    argsSignature: string,
+): string {
+    return `${op}:${byteLength}:${argsSignature}`;
+}
+
+function makeFatalOperationKey(
+    candidate: FatalOperationCandidate,
+    digest: string,
+): string {
+    return `${candidate.prefix}:${digest}`;
+}
+
+function getFatalOperationPrefixFromKey(key: string): string {
+    const idx = key.lastIndexOf(":");
+    return idx >= 0 ? key.slice(0, idx) : key;
+}
+
+function getPdfBytes(value: unknown): Uint8Array | null {
+    if (value instanceof Uint8Array) return value;
+    if (value instanceof ArrayBuffer) return new Uint8Array(value);
+    if (ArrayBuffer.isView(value)) {
+        return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+    }
+    return null;
+}
+
+function getCachedPdfDigest(
+    cache: WeakMap<object, Map<string, string>>,
+    bytes: Uint8Array,
+): string | null {
+    const bufferKey = bytes.buffer as object;
+    const viewKey = getPdfViewKey(bytes);
+    return cache.get(bufferKey)?.get(viewKey) ?? null;
+}
+
+function getOrComputePdfDigest(
+    cache: WeakMap<object, Map<string, string>>,
+    bytes: Uint8Array,
+): string {
+    const bufferKey = bytes.buffer as object;
+    const viewKey = getPdfViewKey(bytes);
+    let digests = cache.get(bufferKey);
+    if (!digests) {
+        digests = new Map();
+        cache.set(bufferKey, digests);
+    }
+    const cached = digests.get(viewKey);
+    if (cached) return cached;
+    const digest = hashBytes(bytes);
+    digests.set(viewKey, digest);
+    return digest;
+}
+
+function getPdfViewKey(bytes: Uint8Array): string {
+    return `${bytes.byteOffset}:${bytes.byteLength}`;
+}
+
+function hashBytes(bytes: Uint8Array): string {
+    let hash = 0x811c9dc5;
+    for (let i = 0; i < bytes.length; i++) {
+        hash = Math.imul(hash ^ bytes[i], 0x01000193) >>> 0;
+    }
+    const hex = hash.toString(16);
+    return "00000000".slice(hex.length) + hex;
+}
+
+function stableStringifyWithoutPdfData(args: Record<string, unknown>): string {
+    const filtered: Record<string, unknown> = {};
+    for (const key of Object.keys(args)) {
+        if (key !== "pdfData") {
+            filtered[key] = args[key];
+        }
+    }
+    return stableStringify(filtered);
+}
+
+function stableStringify(value: unknown): string {
+    if (value === null) return "null";
+    if (value === undefined) return "undefined";
+    if (typeof value !== "object") return JSON.stringify(value);
+    if (Array.isArray(value)) {
+        return `[${value.map((v) => stableStringify(v)).join(",")}]`;
+    }
+    if (ArrayBuffer.isView(value)) {
+        return `"${value.constructor.name}:${value.byteLength}"`;
+    }
+    const record = value as Record<string, unknown>;
+    const entries = Object.keys(record)
+        .sort()
+        .map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`);
+    return `{${entries.join(",")}}`;
 }
 
 /**

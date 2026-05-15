@@ -276,6 +276,88 @@ describe('MuPDFWorkerClient', () => {
         await expect(promise).resolves.toBe(9);
     });
 
+    it('retires a worker after a WASM_ERROR reply without retrying the crashing op', async () => {
+        const client = getMuPDFWorkerClient();
+
+        const firstGood = client.getPageCount(new Uint8Array([1]));
+        const first = MockWorker.instances[0];
+        first.replyToLast({ ok: true, result: { count: 1 } });
+        await expect(firstGood).resolves.toBe(1);
+
+        const badBytes = new Uint8Array([2]);
+        const bad = client.getPageCount(badBytes);
+        first.replyToLast({
+            ok: false,
+            error: {
+                name: 'ExtractionError',
+                code: ExtractionErrorCode.WASM_ERROR,
+                message: 'This PDF crashed the MuPDF WASM parser and cannot be processed.',
+            },
+        });
+        await expect(bad).rejects.toMatchObject({
+            name: 'ExtractionError',
+            code: ExtractionErrorCode.WASM_ERROR,
+        });
+        expect(first.terminate).toHaveBeenCalledOnce();
+        expect(MockWorker.instances).toHaveLength(1);
+
+        const repeatedBad = client.getPageCount(new Uint8Array([2]));
+        await expect(repeatedBad).rejects.toMatchObject({
+            name: 'ExtractionError',
+            code: ExtractionErrorCode.WASM_ERROR,
+        });
+        expect(MockWorker.instances).toHaveLength(1);
+
+        const secondGood = client.getPageCount(new Uint8Array([3]));
+        const second = MockWorker.instances[1];
+        expect(second).toBeDefined();
+        second.replyToLast({ ok: true, result: { count: 3 } });
+        await expect(secondGood).resolves.toBe(3);
+
+        const stats = client.getStats();
+        expect(stats.spawnCount).toBe(2);
+        expect(stats.retryCount).toBe(0);
+        expect(stats.dispatchCounts.getPageCount).toBe(4);
+    });
+
+    it('keys fatal suppression by operation arguments', async () => {
+        const client = getMuPDFWorkerClient();
+        const pdfData = new Uint8Array([1, 2, 3]);
+
+        const badPage = client.renderPages(pdfData, { pageIndices: [0] });
+        const first = MockWorker.instances[0];
+        first.replyToLast({
+            ok: false,
+            error: {
+                name: 'ExtractionError',
+                code: ExtractionErrorCode.WASM_ERROR,
+                message: 'This PDF crashed the MuPDF WASM parser and cannot be processed.',
+            },
+        });
+        await expect(badPage).rejects.toMatchObject({
+            code: ExtractionErrorCode.WASM_ERROR,
+        });
+        expect(first.terminate).toHaveBeenCalledOnce();
+
+        const differentPage = client.renderPages(pdfData, { pageIndices: [1] });
+        const second = MockWorker.instances[1];
+        expect(second).toBeDefined();
+        second.replyToLast({
+            ok: true,
+            result: { pageCount: 2, pageLabels: {}, pages: [] },
+        });
+        await expect(differentPage).resolves.toMatchObject({ pageCount: 2 });
+
+        const repeatedBadPage = client.renderPages(
+            new Uint8Array([1, 2, 3]),
+            { pageIndices: [0] },
+        );
+        await expect(repeatedBadPage).rejects.toMatchObject({
+            code: ExtractionErrorCode.WASM_ERROR,
+        });
+        expect(MockWorker.instances).toHaveLength(2);
+    });
+
     // -----------------------------------------------------------------------
     // PR #2 — broaden the worker surface
     // -----------------------------------------------------------------------
