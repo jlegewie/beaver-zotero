@@ -29,7 +29,7 @@ import {
     preflightCachedPdfMeta,
 } from './utils';
 import {
-    DEFAULT_PAGES_TIMEOUT_SECONDS,
+    DEFAULT_SEARCH_TIMEOUT_SECONDS,
     TimeoutError,
     createTimeoutController,
 } from './timeout';
@@ -77,7 +77,7 @@ export async function handleZoteroAttachmentSearchRequest(
         );
     }
 
-    const timeout = createTimeoutController(timeout_seconds, DEFAULT_PAGES_TIMEOUT_SECONDS);
+    const timeout = createTimeoutController(timeout_seconds, DEFAULT_SEARCH_TIMEOUT_SECONDS);
     const { signal, timeoutSeconds, throwIfTimedOut, dispose } = timeout;
 
     try {
