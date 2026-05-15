@@ -10,6 +10,7 @@ export {
     ensureExtractionRuntime,
     ensureMuPDFNode,
     ensureSentencexNode,
+    resetMuPDFNode,
 } from "./bootstrap";
 export { drawBBoxOverlayPNGNode } from "./overlayPng";
 export { buildProgram, runCli } from "./runCli";
