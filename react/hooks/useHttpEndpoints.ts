@@ -325,6 +325,7 @@ async function handleAttachmentPagesHttpRequest(request: any) {
         skip_local_limits: request.skip_local_limits,
         prefer_page_labels: request.prefer_page_labels,
         max_pages: request.max_pages,
+        timeout_seconds: request.timeout_seconds,
     };
 
     const response = await handleZoteroAttachmentPagesRequest(wsRequest);
@@ -350,6 +351,7 @@ async function handleAttachmentPageImagesHttpRequest(request: any) {
         jpeg_quality: request.jpeg_quality,
         skip_local_limits: request.skip_local_limits,
         prefer_page_labels: request.prefer_page_labels,
+        timeout_seconds: request.timeout_seconds,
     };
     
     const response = await handleZoteroAttachmentPageImagesRequest(wsRequest);
@@ -371,6 +373,7 @@ async function handleAttachmentSearchHttpRequest(request: any) {
         query: request.query,
         max_hits_per_page: request.max_hits_per_page,
         skip_local_limits: request.skip_local_limits,
+        timeout_seconds: request.timeout_seconds,
     };
     
     const response = await handleZoteroAttachmentSearchRequest(wsRequest);

@@ -79,6 +79,7 @@ describe("pdf barrel exports", () => {
             "PageExtractor",
             "SearchScorer",
             "StyleAnalyzer",
+            "WorkerAbortError",
             "bboxFromXYWH",
             "bboxHeight",
             "bboxToReaderFrame",
