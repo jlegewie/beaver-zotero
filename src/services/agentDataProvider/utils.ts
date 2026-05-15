@@ -676,6 +676,15 @@ export async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary
                         status: "unavailable",
                         status_code: FileStatusCode.PdfInvalid,
                     };
+                } else if (error.code === ExtractionErrorCode.WASM_ERROR) {
+                    return {
+                        is_primary: isPrimary,
+                        mime_type: contentType,
+                        page_count: null,
+                        status: "unavailable",
+                        status_code: FileStatusCode.PdfParserCrash,
+                        status_reason: "PDF crashes the local PDF parser",
+                    };
                 }
             }
             throw error;
@@ -709,6 +718,17 @@ export async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary
 
     } catch (error) {
         // Unexpected error during analysis
+        if (error instanceof ExtractionError && error.code === ExtractionErrorCode.WASM_ERROR) {
+            logger(`getAttachmentFileStatus: PDF parser crashed while analyzing ${attachment.libraryID}-${attachment.key}: ${error.message}`, 1);
+            return {
+                is_primary: isPrimary,
+                mime_type: contentType,
+                page_count: null,
+                status: "unavailable",
+                status_code: FileStatusCode.PdfParserCrash,
+                status_reason: "PDF crashes the local PDF parser",
+            };
+        }
         logger(`getAttachmentFileStatus: Error analyzing PDF: ${error}`, 1);
         return {
             is_primary: isPrimary,
