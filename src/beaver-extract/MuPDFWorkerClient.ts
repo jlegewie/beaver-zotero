@@ -41,6 +41,7 @@ interface FatalOperationCandidate {
     op: string;
     bytes: Uint8Array;
     argsSignature: string;
+    prefix: string;
 }
 
 /**
@@ -135,7 +136,8 @@ export class MuPDFWorkerClient {
     private dispatchCounts: Record<string, number> = {};
     private lastSpawnTime: number | null = null;
     private fatalOperationKeys = new Set<string>();
-    private fatalOperationKeyOrder: string[] = [];
+    private fatalOperationEntries: Array<{ key: string; prefix: string }> = [];
+    private fatalOperationPrefixCounts = new Map<string, number>();
     // Populated only after a fatal reply so healthy dispatch never walks a
     // whole PDF on the UI thread before posting work to the worker.
     private pdfDigestCache = new WeakMap<object, Map<string, string>>();
@@ -338,7 +340,10 @@ export class MuPDFWorkerClient {
     private getCachedFatalOperationKey(
         candidate: FatalOperationCandidate,
     ): string | null {
-        const digest = getCachedPdfDigest(this.pdfDigestCache, candidate.bytes);
+        let digest = getCachedPdfDigest(this.pdfDigestCache, candidate.bytes);
+        if (!digest && this.fatalOperationPrefixCounts.has(candidate.prefix)) {
+            digest = getOrComputePdfDigest(this.pdfDigestCache, candidate.bytes);
+        }
         if (!digest) return null;
         return makeFatalOperationKey(candidate, digest);
     }
@@ -758,12 +763,23 @@ export class MuPDFWorkerClient {
 
     private rememberFatalOperation(key: string): void {
         if (this.fatalOperationKeys.has(key)) return;
+        const prefix = getFatalOperationPrefixFromKey(key);
         this.fatalOperationKeys.add(key);
-        this.fatalOperationKeyOrder.push(key);
-        if (this.fatalOperationKeyOrder.length > 128) {
-            const oldest = this.fatalOperationKeyOrder.shift();
+        this.fatalOperationEntries.push({ key, prefix });
+        this.fatalOperationPrefixCounts.set(
+            prefix,
+            (this.fatalOperationPrefixCounts.get(prefix) ?? 0) + 1,
+        );
+        if (this.fatalOperationEntries.length > 128) {
+            const oldest = this.fatalOperationEntries.shift();
             if (oldest) {
-                this.fatalOperationKeys.delete(oldest);
+                this.fatalOperationKeys.delete(oldest.key);
+                const count = this.fatalOperationPrefixCounts.get(oldest.prefix) ?? 0;
+                if (count <= 1) {
+                    this.fatalOperationPrefixCounts.delete(oldest.prefix);
+                } else {
+                    this.fatalOperationPrefixCounts.set(oldest.prefix, count - 1);
+                }
             }
         }
     }
@@ -823,23 +839,33 @@ function getFatalOperationCandidate(
 ): FatalOperationCandidate | null {
     const bytes = getPdfBytes(args.pdfData);
     if (!bytes) return null;
+    const argsSignature = stableStringifyWithoutPdfData(args);
     return {
         op,
         bytes,
-        argsSignature: stableStringifyWithoutPdfData(args),
+        argsSignature,
+        prefix: makeFatalOperationPrefix(op, bytes.byteLength, argsSignature),
     };
+}
+
+function makeFatalOperationPrefix(
+    op: string,
+    byteLength: number,
+    argsSignature: string,
+): string {
+    return `${op}:${byteLength}:${argsSignature}`;
 }
 
 function makeFatalOperationKey(
     candidate: FatalOperationCandidate,
     digest: string,
 ): string {
-    return [
-        candidate.op,
-        candidate.bytes.byteLength,
-        digest,
-        candidate.argsSignature,
-    ].join(":");
+    return `${candidate.prefix}:${digest}`;
+}
+
+function getFatalOperationPrefixFromKey(key: string): string {
+    const idx = key.lastIndexOf(":");
+    return idx >= 0 ? key.slice(0, idx) : key;
 }
 
 function getPdfBytes(value: unknown): Uint8Array | null {

@@ -301,7 +301,7 @@ describe('MuPDFWorkerClient', () => {
         expect(first.terminate).toHaveBeenCalledOnce();
         expect(MockWorker.instances).toHaveLength(1);
 
-        const repeatedBad = client.getPageCount(badBytes);
+        const repeatedBad = client.getPageCount(new Uint8Array([2]));
         await expect(repeatedBad).rejects.toMatchObject({
             name: 'ExtractionError',
             code: ExtractionErrorCode.WASM_ERROR,
@@ -348,7 +348,10 @@ describe('MuPDFWorkerClient', () => {
         });
         await expect(differentPage).resolves.toMatchObject({ pageCount: 2 });
 
-        const repeatedBadPage = client.renderPages(pdfData, { pageIndices: [0] });
+        const repeatedBadPage = client.renderPages(
+            new Uint8Array([1, 2, 3]),
+            { pageIndices: [0] },
+        );
         await expect(repeatedBadPage).rejects.toMatchObject({
             code: ExtractionErrorCode.WASM_ERROR,
         });
