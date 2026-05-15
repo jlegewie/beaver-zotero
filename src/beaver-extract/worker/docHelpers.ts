@@ -39,11 +39,24 @@ import {
     type RotationAngle,
 } from "../PageRotationNormalizer";
 
-const STRUCTURED_TEXT_OPTIONS = "preserve-whitespace";
-const STRUCTURED_TEXT_OPTIONS_WITH_IMAGES = "preserve-whitespace,preserve-images";
-const STRUCTURED_TEXT_OPTIONS_DETAILED = "preserve-whitespace,preserve-ligatures";
+// `use-cid-for-unknown-unicode`: when MuPDF cannot resolve a glyph to a Unicode
+// codepoint it normally emits U+FFFD. Some born-digital PDFs (e.g. GNU
+// Ghostscript output) embed Type 1C font subsets whose builtin encoding maps
+// ordinary character codes to opaque glyph names with no ToUnicode CMap — the
+// whole text layer then extracts as U+FFFD and the document is wrongly rejected
+// as needing OCR. With this option MuPDF falls back to the character code,
+// which for these fonts is the correct Latin-1 codepoint, recovering the text.
+// The fallback only ever replaces characters that were already U+FFFD, so it
+// cannot corrupt correctly-decoded text; genuine symbol/math glyphs that stay
+// unmappable become a wrong-but-plausible character instead of U+FFFD (the same
+// best-effort behavior as Poppler and PyMuPDF).
+const STRUCTURED_TEXT_OPTIONS = "preserve-whitespace,use-cid-for-unknown-unicode";
+const STRUCTURED_TEXT_OPTIONS_WITH_IMAGES =
+    "preserve-whitespace,preserve-images,use-cid-for-unknown-unicode";
+const STRUCTURED_TEXT_OPTIONS_DETAILED =
+    "preserve-whitespace,preserve-ligatures,use-cid-for-unknown-unicode";
 const STRUCTURED_TEXT_OPTIONS_DETAILED_WITH_IMAGES =
-    "preserve-whitespace,preserve-ligatures,preserve-images";
+    "preserve-whitespace,preserve-ligatures,preserve-images,use-cid-for-unknown-unicode";
 
 export interface RenderOptionsResolved {
     scale: number;
