@@ -458,6 +458,7 @@ export interface WorkerStatsSnapshot {
     nextId: number;
     dispatchCounts: Record<string, number>;
     lastSpawnTime: number | null;
+    idleTimerArmed: boolean;
 }
 
 export interface WorkerStatsResponse {

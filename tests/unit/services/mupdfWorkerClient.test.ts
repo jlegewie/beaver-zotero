@@ -20,6 +20,8 @@ import {
     getMuPDFWorkerClient,
     disposeMuPDFWorker,
     WorkerAbortError,
+    __setIdleTimeoutForTest,
+    __resetIdleTimeoutForTest,
 } from '../../../src/beaver-extract/MuPDFWorkerClient';
 import {
     ExtractionError,
@@ -96,6 +98,7 @@ describe('MuPDFWorkerClient', () => {
 
     afterEach(async () => {
         await disposeMuPDFWorker();
+        __resetIdleTimeoutForTest();
         delete (globalThis as any).Zotero.__beaverMuPDFWorkerClient;
     });
 
@@ -151,6 +154,45 @@ describe('MuPDFWorkerClient', () => {
         expect(worker.posted).toHaveLength(1);
         const [, transfer] = worker.opCall(0);
         expect(transfer).toBeUndefined();
+    });
+
+    it('terminates the idle worker after the idle timeout', async () => {
+        vi.useFakeTimers();
+        try {
+            __setIdleTimeoutForTest(50);
+            const client = getMuPDFWorkerClient();
+
+            const firstOp = client.getPageCount(new Uint8Array([0]));
+            const first = MockWorker.instances[0];
+            first.replyToLast({ ok: true, result: { count: 1 } });
+
+            await expect(firstOp).resolves.toBe(1);
+            expect(client.getStats()).toMatchObject({
+                hasWorker: true,
+                disposed: false,
+                idleTimerArmed: true,
+            });
+
+            vi.advanceTimersByTime(50);
+
+            expect(first.terminate).toHaveBeenCalledOnce();
+            expect(client.getStats()).toMatchObject({
+                hasWorker: false,
+                disposed: false,
+                idleTimerArmed: false,
+            });
+
+            const secondOp = client.getPageCount(new Uint8Array([1]));
+            const second = MockWorker.instances[1];
+            expect(second).toBeDefined();
+            second.replyToLast({ ok: true, result: { count: 2 } });
+
+            await expect(secondOp).resolves.toBe(2);
+            expect(MockWorker.instances).toHaveLength(2);
+        } finally {
+            await disposeMuPDFWorker();
+            vi.useRealTimers();
+        }
     });
 
     it('rehydrates an ExtractionError from a structured failure reply', async () => {

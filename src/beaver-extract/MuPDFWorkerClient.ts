@@ -31,6 +31,19 @@ import type {
 } from "./sentenceTypes";
 import type { ParagraphDetectionSettings } from "./ParagraphDetector";
 
+const DEFAULT_IDLE_TIMEOUT_MS = 5 * 60 * 1000;
+let idleTimeoutMs = DEFAULT_IDLE_TIMEOUT_MS;
+
+/** Test-only: shorten the idle timeout so teardown can be asserted fast. */
+export function __setIdleTimeoutForTest(ms: number): void {
+    idleTimeoutMs = ms;
+}
+
+/** Test-only: restore the production idle timeout. */
+export function __resetIdleTimeoutForTest(): void {
+    idleTimeoutMs = DEFAULT_IDLE_TIMEOUT_MS;
+}
+
 interface PendingEntry {
     resolve: (value: any) => void;
     reject: (reason: any) => void;
@@ -149,6 +162,7 @@ export class MuPDFWorkerClient {
     private fatalOperationKeys = new Set<string>();
     private fatalOperationEntries: Array<{ key: string; prefix: string }> = [];
     private fatalOperationPrefixCounts = new Map<string, number>();
+    private idleTimerId: ReturnType<typeof setTimeout> | undefined;
     // Populated only after a fatal reply so healthy dispatch never walks a
     // whole PDF on the UI thread before posting work to the worker.
     private pdfDigestCache = new WeakMap<object, Map<string, string>>();
@@ -156,6 +170,25 @@ export class MuPDFWorkerClient {
     /** The window that spawned the current worker. Used for stale detection. */
     get spawnedFromWindow(): Window | null {
         return this.spawnedFromWindowInternal;
+    }
+
+    private clearIdleTimer(): void {
+        if (this.idleTimerId === undefined) return;
+        clearTimeout(this.idleTimerId);
+        this.idleTimerId = undefined;
+    }
+
+    private armIdleTimer(): void {
+        this.clearIdleTimer();
+        if (this.disposed || !this.worker || this.pending.size !== 0) return;
+
+        const id = setTimeout(() => {
+            this.idleTimerId = undefined;
+            if (this.disposed || !this.worker || this.pending.size !== 0) return;
+            this.markStale("idle timeout");
+        }, idleTimeoutMs);
+        (id as any)?.unref?.();
+        this.idleTimerId = id;
     }
 
     private ensureWorker(): Worker {
@@ -254,6 +287,8 @@ export class MuPDFWorkerClient {
             }
             entry.reject(error);
         }
+
+        this.armIdleTimer();
     }
 
     /**
@@ -261,6 +296,7 @@ export class MuPDFWorkerClient {
      * clear singleton state. Idempotent.
      */
     private markStale(reason: string): void {
+        this.clearIdleTimer();
         const w = this.worker;
         this.worker = null;
         this.spawnedFromWindowInternal = null;
@@ -388,6 +424,7 @@ export class MuPDFWorkerClient {
                 return;
             }
             try {
+                this.clearIdleTimer();
                 worker.postMessage({ id, op, args });
             } catch (e) {
                 this.pending.delete(id);
@@ -698,6 +735,7 @@ export class MuPDFWorkerClient {
         nextId: number;
         dispatchCounts: Record<string, number>;
         lastSpawnTime: number | null;
+        idleTimerArmed: boolean;
     } {
         return {
             hasWorker: this.worker !== null,
@@ -708,6 +746,7 @@ export class MuPDFWorkerClient {
             nextId: this.nextId,
             dispatchCounts: { ...this.dispatchCounts },
             lastSpawnTime: this.lastSpawnTime,
+            idleTimerArmed: this.idleTimerId !== undefined,
         };
     }
 
@@ -820,9 +859,11 @@ export class MuPDFWorkerClient {
         return new Promise<T>((resolve, reject) => {
             this.pending.set(id, { resolve, reject });
             try {
+                this.clearIdleTimer();
                 worker.postMessage({ id, op, args });
             } catch (e) {
                 this.pending.delete(id);
+                this.armIdleTimer();
                 reject(
                     new Error(
                         `postMessage threw: ${e instanceof Error ? e.message : String(e)}`,

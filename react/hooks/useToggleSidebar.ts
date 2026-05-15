@@ -9,7 +9,6 @@ import { currentMessageItemsAtom, updateMessageItemsFromZoteroSelectionAtom } fr
 import { searchableLibraryIdsAtom } from '../atoms/profile';
 import { logger } from '../../src/utils/logger';
 import { dismissDiffPreview } from '../utils/noteEditorDiffPreview';
-import { prewarmMuPDFWorker } from '../../src/beaver-extract';
 
 export function useToggleSidebar() {
     const setSidebarVisible = useSetAtom(isSidebarVisibleAtom);
@@ -18,13 +17,6 @@ export function useToggleSidebar() {
     const setCurrentMessageItems = useSetAtom(currentMessageItemsAtom);
     
     useEventSubscription('toggleChat', (detail) => {
-        // Pre-warm the MuPDF worker on every false → true transition
-        const currentlyOpenSnapshot = store.get(isSidebarVisibleAtom);
-        const willOpen = detail?.forceOpen ? true : !currentlyOpenSnapshot;
-        if (!currentlyOpenSnapshot && willOpen) {
-            prewarmMuPDFWorker();
-        }
-
         // Update atoms
         setSidebarVisible((prev) => {
             const currentlyOpen = prev;
@@ -68,4 +60,4 @@ export function useToggleSidebar() {
             return newIsVisible;
         });
     });
-} 
+}
