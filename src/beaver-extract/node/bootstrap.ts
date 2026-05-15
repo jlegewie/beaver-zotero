@@ -18,11 +18,13 @@ import { pathToFileURL } from "node:url";
 
 import { makeDocumentApi, type LibMuPdf } from "../worker/mupdfApi";
 import {
+    clearCachedMuPDF,
     getCachedApi,
     getCachedSentencex,
     setCachedApi,
     setCachedSentencex,
 } from "../worker/apiCache";
+import { clearAllCachedDocs } from "../worker/docCache";
 import type { SentencexModule } from "../worker/sentencexInit";
 import { setPDFLogger, type PDFLogLevel } from "../logging";
 import { defaultWasmDir } from "./paths";
@@ -191,4 +193,38 @@ export function ensureSentencexNode(): Promise<void> {
  */
 export async function ensureExtractionRuntime(): Promise<void> {
     await Promise.all([ensureMuPDFNode(), ensureSentencexNode()]);
+}
+
+/**
+ * Tear down the cached MuPDF WASM instance so the next op re-instantiates a
+ * fresh one. The only legitimate use is recovery from a fatal WASM trap
+ * (`RuntimeError: memory access out of bounds`, stack overflow, etc.) — after
+ * such a trap the `WebAssembly.Instance` is dead per spec and every
+ * subsequent op against the cached instance will repeat the failure.
+ *
+ * Order matters:
+ *   1. Drop the doc cache. Cached `DocumentLike` handles point into the dead
+ *      heap; their `destroy()` calls will throw against the trapped instance,
+ *      but `clearAllCachedDocs` already wraps each in try/catch so the dead
+ *      entries are simply abandoned to GC.
+ *   2. Null the cached `LibMuPdf` + `MuPDFApi` slots so `ensureApi()` falls
+ *      through to a fresh `wasmFactory()` call on its next invocation.
+ *   3. Null the in-flight `_mupdfPromise` so `ensureMuPDFNode()` re-runs.
+ *
+ * Sentencex is intentionally left alone — it's a separate WASM module that
+ * is not corrupted by a MuPDF trap.
+ *
+ * Memory note: the trapped `WebAssembly.Memory` (typically ~256 MB) is
+ * orphaned until V8 GCs the dead module instance. Callers that recover from
+ * many crashes in one process should consider forcing GC with
+ * `--expose-gc` + `global.gc()` between retries.
+ */
+export function resetMuPDFNode(): void {
+    try {
+        clearAllCachedDocs(false);
+    } catch {
+        // Dead WASM heap — nothing to free, fall through.
+    }
+    clearCachedMuPDF();
+    _mupdfPromise = null;
 }

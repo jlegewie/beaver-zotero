@@ -41,3 +41,18 @@ export function getCachedSentencex(): SentencexModule | null {
 export function setCachedSentencex(mod: SentencexModule): void {
     _sentencex = mod;
 }
+
+/**
+ * Drop the cached MuPDF handles so the next `ensureApi()` call re-instantiates
+ * the WASM module. Used by the Node bootstrap's `resetMuPDFNode()` to recover
+ * from a fatal WASM trap (e.g. `memory access out of bounds`) — after such a
+ * trap the WebAssembly.Instance is unusable per spec and the only path
+ * forward is a fresh factory call.
+ *
+ * Sentencex is intentionally left alone: it's a separate WASM module and is
+ * not corrupted by MuPDF traps.
+ */
+export function clearCachedMuPDF(): void {
+    _libmupdf = null;
+    _api = null;
+}
