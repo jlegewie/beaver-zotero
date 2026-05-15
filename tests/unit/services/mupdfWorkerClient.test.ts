@@ -284,7 +284,8 @@ describe('MuPDFWorkerClient', () => {
         first.replyToLast({ ok: true, result: { count: 1 } });
         await expect(firstGood).resolves.toBe(1);
 
-        const bad = client.getPageCount(new Uint8Array([2]));
+        const badBytes = new Uint8Array([2]);
+        const bad = client.getPageCount(badBytes);
         first.replyToLast({
             ok: false,
             error: {
@@ -300,7 +301,7 @@ describe('MuPDFWorkerClient', () => {
         expect(first.terminate).toHaveBeenCalledOnce();
         expect(MockWorker.instances).toHaveLength(1);
 
-        const repeatedBad = client.getPageCount(new Uint8Array([2]));
+        const repeatedBad = client.getPageCount(badBytes);
         await expect(repeatedBad).rejects.toMatchObject({
             name: 'ExtractionError',
             code: ExtractionErrorCode.WASM_ERROR,
@@ -317,6 +318,41 @@ describe('MuPDFWorkerClient', () => {
         expect(stats.spawnCount).toBe(2);
         expect(stats.retryCount).toBe(0);
         expect(stats.dispatchCounts.getPageCount).toBe(4);
+    });
+
+    it('keys fatal suppression by operation arguments', async () => {
+        const client = getMuPDFWorkerClient();
+        const pdfData = new Uint8Array([1, 2, 3]);
+
+        const badPage = client.renderPages(pdfData, { pageIndices: [0] });
+        const first = MockWorker.instances[0];
+        first.replyToLast({
+            ok: false,
+            error: {
+                name: 'ExtractionError',
+                code: ExtractionErrorCode.WASM_ERROR,
+                message: 'This PDF crashed the MuPDF WASM parser and cannot be processed.',
+            },
+        });
+        await expect(badPage).rejects.toMatchObject({
+            code: ExtractionErrorCode.WASM_ERROR,
+        });
+        expect(first.terminate).toHaveBeenCalledOnce();
+
+        const differentPage = client.renderPages(pdfData, { pageIndices: [1] });
+        const second = MockWorker.instances[1];
+        expect(second).toBeDefined();
+        second.replyToLast({
+            ok: true,
+            result: { pageCount: 2, pageLabels: {}, pages: [] },
+        });
+        await expect(differentPage).resolves.toMatchObject({ pageCount: 2 });
+
+        const repeatedBadPage = client.renderPages(pdfData, { pageIndices: [0] });
+        await expect(repeatedBadPage).rejects.toMatchObject({
+            code: ExtractionErrorCode.WASM_ERROR,
+        });
+        expect(MockWorker.instances).toHaveLength(2);
     });
 
     // -----------------------------------------------------------------------
