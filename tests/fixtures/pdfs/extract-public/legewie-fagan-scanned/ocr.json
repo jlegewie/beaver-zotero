@@ -1,0 +1,68 @@
+{
+  "schema": 1,
+  "id": "legewie-fagan-scanned",
+  "capturedAt": "2026-05-15T18:59:51.585Z",
+  "updatedAt": "2026-05-15T18:59:51.585Z",
+  "pdfSha256": "56f5ca419d881c56b3b8715779a9c4b1f7bd4f9b085dd20c6b8d0f1f27657a0f",
+  "pdfBytes": 102311,
+  "config": {
+    "options": {},
+    "effectiveOptions": {
+      "minTextPerPage": 100,
+      "sampleSize": 6,
+      "expandedSampleSize": 20,
+      "expandLowerThreshold": 0.1,
+      "expandUpperThreshold": 0.8,
+      "confirmationThreshold": 0.5,
+      "maxWhitespaceRatio": 0.7,
+      "maxNewlineRatio": 0.6,
+      "minAlphanumericRatio": 0.3,
+      "maxInvalidCharRatio": 0.3,
+      "minValidCharsToAccept": 1000,
+      "imageCoverageThreshold": 0.65,
+      "maxLineOverlapRatio": 0.1,
+      "boundaryMargin": 5,
+      "checkBoundingBoxes": false
+    }
+  },
+  "fingerprints": {
+    "extractorGitSha": "7c007983",
+    "extractorVersion": "0.19.3",
+    "mupdfWasmSha256": "9421cc3840344b0975ed9f9b518fd00f53f456f2b9fd1eb5c16b283d3e8c7223"
+  },
+  "tolerance": {
+    "issueRatioAbs": 0.02,
+    "textLengthAbs": 5
+  },
+  "expected": {
+    "needsOCR": true,
+    "primaryReason": "scanned_without_ocr",
+    "issueRatio": 1,
+    "issueBreakdown": {
+      "no_text_blocks": 1,
+      "insufficient_text": 0,
+      "high_whitespace_ratio": 0,
+      "high_newline_ratio": 0,
+      "low_alphanumeric_ratio": 0,
+      "invalid_characters": 0,
+      "large_image_coverage": 1,
+      "bbox_overflow": 0,
+      "excessive_line_overlap": 0
+    },
+    "sampledPages": 1,
+    "totalPages": 1,
+    "pageAnalyses": [
+      {
+        "pageIndex": 0,
+        "hasIssues": true,
+        "issues": [
+          "large_image_coverage",
+          "no_text_blocks"
+        ],
+        "textLength": 0,
+        "hasImages": true
+      }
+    ]
+  },
+  "notes": "Image-only (no text layer) raster of the author-owned legewie-fagan page; positive OCR verdict for CI coverage"
+}
