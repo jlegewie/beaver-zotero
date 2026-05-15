@@ -367,7 +367,7 @@ async function validateEditMetadataAction(
             type: 'agent_action_validate_response',
             request_id: request.request_id,
             valid: false,
-            error: `Editing Notes is not supported`,
+            error: `Editing Notes is not supported with this tool. Use the edit_note instead to change the content of a note or the title, which is the first line of the note.`,
             error_code: 'note_items_not_supported',
             preference: 'always_ask',
         };

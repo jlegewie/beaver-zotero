@@ -232,6 +232,8 @@ export interface WSZoteroAttachmentPagesRequest extends WSBaseEvent {
      * max_pages.
      */
     max_pages?: number;
+    /** Frontend-side extraction deadline in seconds. */
+    timeout_seconds?: number;
 }
 
 /** Request from backend to render attachment pages as images */
@@ -260,6 +262,8 @@ export interface WSZoteroAttachmentPageImagesRequest extends WSBaseEvent {
      * falling back to 1-based document index when no label matches.
      */
     prefer_page_labels?: boolean;
+    /** Frontend-side rendering deadline in seconds. */
+    timeout_seconds?: number;
 }
 
 /**
@@ -551,10 +555,12 @@ export type AttachmentPagesErrorCode =
     | 'encrypted'           // PDF is password-protected
     | 'no_text_layer'       // PDF needs OCR
     | 'invalid_pdf'         // Invalid/corrupted PDF
+    | 'pdf_parser_crash'    // PDF crashes the local PDF parser
     | 'too_many_pages'      // PDF exceeds page count limit
     | 'page_out_of_range'   // Requested pages are out of range
     | 'download_failed'     // Remote file download failed
     | 'invalid_page_value'  // Non-parseable string or unresolved label
+    | 'timeout'             // Extraction timed out
     | 'extraction_failed';  // General extraction failure
 
 /** Response to zotero attachment pages request */
@@ -583,10 +589,12 @@ export type AttachmentPageImagesErrorCode =
     | 'file_too_large'      // PDF file exceeds size limit
     | 'encrypted'           // PDF is password-protected
     | 'invalid_pdf'         // Invalid/corrupted PDF
+    | 'pdf_parser_crash'    // PDF crashes the local PDF parser
     | 'too_many_pages'      // PDF exceeds page count limit
     | 'page_out_of_range'   // Requested pages are out of range
     | 'download_failed'     // Remote file download failed
     | 'invalid_page_value'  // Non-parseable string or unresolved label
+    | 'timeout'             // Rendering timed out
     | 'render_failed';      // General rendering failure
 
 /** Response to zotero attachment page images request */
@@ -616,7 +624,8 @@ export type AttachmentSearchErrorCode =
     | 'invalid_pdf'         // Invalid/corrupted PDF
     | 'no_text_layer'       // PDF requires OCR — text search unavailable
     | 'too_many_pages'      // PDF exceeds page count limit
-    | 'download_failed'    // Remote file download failed
+    | 'download_failed'     // Remote file download failed
+    | 'timeout'             // Search timed out
     | 'search_failed';      // General search failure
 
 /** Request from backend to search text within an attachment */
@@ -630,12 +639,14 @@ export interface WSZoteroAttachmentSearchRequest extends WSBaseEvent {
     max_hits_per_page?: number;
     /** Skip local file size and page count limits. Default: false */
     skip_local_limits?: boolean;
+    /** Frontend-side search deadline in seconds. */
+    timeout_seconds?: number;
 }
 
 /** A single search hit within a page */
 export interface WSSearchHit {
-    /** Hit bounding box in MuPDF format {x, y, w, h} */
-    bbox: { x: number; y: number; w: number; h: number };
+    /** Hit bounding box in source MuPDF top-left page coordinates. */
+    bbox: { l: number; t: number; r: number; b: number; origin: "top-left" | "bottom-left" };
     /** Text role: heading, body, caption, footnote, unknown */
     role: string;
     /** Role weight applied to this hit */

@@ -1,6 +1,6 @@
 /**
  * Regression test: the bundled MuPDF worker must NOT include any non-worker-
- * safe symbols. Pulling the `src/services/pdf/index.ts` barrel would drag in
+ * safe symbols. Pulling the `src/beaver-extract/index.ts` barrel would drag in
  * `MuPDFService`, `MuPDFWorkerClient`, `getPref` (`Zotero.Prefs`), the
  * webpack-only `react/store`, etc. — any of which crashes the worker at boot
  * because `Zotero` / `window` / `Zotero.Prefs` don't exist in worker scope.
@@ -57,7 +57,7 @@ describe('mupdf-worker.js bundle', () => {
         return;
     }
 
-    it('does not pull in the src/services/pdf/index.ts barrel', () => {
+    it('does not pull in the src/beaver-extract/index.ts barrel', () => {
         const source = readFileSync(WORKER_BUNDLE, 'utf-8');
         for (const sym of FORBIDDEN_SYMBOLS) {
             expect(
@@ -73,9 +73,14 @@ describe('mupdf-worker.js bundle', () => {
         }
     });
 
-    it('preserves the chrome:// WASM factory URL (dynamic import survived bundling)', () => {
+    it('does not bundle any chrome:// Beaver URLs (worker is decoupled — URLs arrive via the configure message)', () => {
+        // After the PDF package decoupling, the worker no longer hardcodes
+        // any `chrome://beaver/...` URLs. They arrive at runtime via the
+        // configure message posted by `MuPDFWorkerClient.ensureWorker`
+        // (sourced from `src/utils/configurePDFForBeaver.ts`). If a URL
+        // shows up here, something in `worker/` is still referencing the
+        // old hardcoded constants instead of `getWorkerUrls()`.
         const source = readFileSync(WORKER_BUNDLE, 'utf-8');
-        expect(source).toContain('chrome://beaver/content/lib/mupdf-wasm.mjs');
-        expect(source).toContain('chrome://beaver/content/lib/mupdf-wasm.wasm');
+        expect(source).not.toContain('chrome://beaver/');
     });
 });

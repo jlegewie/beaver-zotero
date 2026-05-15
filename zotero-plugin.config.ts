@@ -60,13 +60,13 @@ export default defineConfig({
         outfile: `.scaffold/build/addon/content/scripts/${pkg.config.addonRef}.js`,
       },
       {
-        // Bundled MuPDF worker — see src/services/pdf/worker/index.ts.
+        // Bundled MuPDF worker — see src/beaver-extract/worker/index.ts.
         // Output is reachable from the main thread at
         // `chrome://beaver/content/scripts/mupdf-worker.js`. The WASM factory
         // at `chrome://beaver/content/lib/mupdf-wasm.mjs` is loaded at
         // runtime via dynamic import; `external: ["chrome://*"]` keeps any
         // chrome-URL imports from being resolved at bundle time.
-        entryPoints: ["src/services/pdf/worker/index.ts"],
+        entryPoints: ["src/beaver-extract/worker/index.ts"],
         define: {
           "process.env.NODE_ENV": `"${process.env.NODE_ENV ?? "production"}"`,
         },
@@ -93,6 +93,11 @@ export default defineConfig({
         }
       },
     },
+  },
+
+  server: {
+    // Allow multiple Zotero instances (one per git worktree) to run side-by-side.
+    startArgs: ["-no-remote"],
   },
 
   // If you need to see a more detailed log, uncomment the following line:

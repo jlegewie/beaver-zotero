@@ -154,24 +154,17 @@ export interface PdfRenderPagesWithMetaResponse {
 
 export interface PdfPageLabelsResponse {
     ok: boolean;
-    count?: number;
-    labels?: Record<number, string>;
-    error?: { name: string; code?: string; message: string };
-}
-
-export interface PdfExtractRawResponse {
-    ok: boolean;
-    result?: {
-        pageCount: number;
-        pages: Array<{
-            pageIndex: number;
-            pageNumber: number;
-            width: number;
-            height: number;
-            label?: string;
-            blocks: unknown[];
-        }>;
-    };
+    pageCount?: number;
+    pageLabels?: Record<number, string>;
+    format?: string;
+    title?: string;
+    author?: string;
+    subject?: string;
+    keywords?: string;
+    creator?: string;
+    producer?: string;
+    creationDate?: string;
+    modDate?: string;
     error?: { name: string; code?: string; message: string };
 }
 
@@ -185,22 +178,6 @@ export interface PdfExtractRawDetailedResponse {
         label?: string;
         blocks: unknown[];
     };
-    error?: { name: string; code?: string; message: string };
-}
-
-export interface PdfSearchResponse {
-    ok: boolean;
-    pages?: Array<{
-        pageIndex: number;
-        label?: string;
-        matchCount: number;
-        hits: Array<{
-            quads: number[][];
-            bbox: { x: number; y: number; w: number; h: number };
-        }>;
-        width: number;
-        height: number;
-    }>;
     error?: { name: string; code?: string; message: string };
 }
 
@@ -249,17 +226,6 @@ export async function pdfRenderPagesWithMeta(
     });
 }
 
-export async function pdfExtractRaw(
-    attachment: AttachmentFixture,
-    body: { page_indices?: number[] } = {},
-): Promise<PdfExtractRawResponse> {
-    return post<PdfExtractRawResponse>('/beaver/test/pdf-extract-raw', {
-        library_id: attachment.library_id,
-        zotero_key: attachment.zotero_key,
-        ...body,
-    });
-}
-
 export async function pdfExtractRawDetailed(
     attachment: AttachmentFixture,
     body: { page_index: number; include_images?: boolean },
@@ -272,21 +238,6 @@ export async function pdfExtractRawDetailed(
             ...body,
         },
     );
-}
-
-export async function pdfSearch(
-    attachment: AttachmentFixture,
-    body: {
-        query: string;
-        page_indices?: number[];
-        max_hits_per_page?: number;
-    },
-): Promise<PdfSearchResponse> {
-    return post<PdfSearchResponse>('/beaver/test/pdf-search', {
-        library_id: attachment.library_id,
-        zotero_key: attachment.zotero_key,
-        ...body,
-    });
 }
 
 export interface PdfErrorEnvelope {
@@ -317,11 +268,11 @@ export async function pdfExtract(
     });
 }
 
-export async function pdfExtractByLines(
+export async function pdfExtractParagraph(
     attachment: AttachmentFixture,
     body: { settings?: Record<string, unknown> } = {},
 ): Promise<PdfExtractResponse> {
-    return post<PdfExtractResponse>('/beaver/test/pdf-extract-by-lines', {
+    return post<PdfExtractResponse>('/beaver/test/pdf-extract-paragraph', {
         library_id: attachment.library_id,
         zotero_key: attachment.zotero_key,
         ...body,
@@ -371,26 +322,60 @@ export async function pdfSentenceBBoxes(
 }
 
 /**
- * Single-page render — exercises the dedicated `renderPageToImage` op.
- * The plural endpoint silently filters invalid indices, so this is the
- * only way to test PAGE_OUT_OF_RANGE parity.
+ * `/beaver/test/pdf-render-overlay` — renders a page and paints bbox
+ * overlays for the requested level. Sentence-level rects are produced by
+ * the same orchestration as `/beaver/test/pdf-sentence-bboxes`; the
+ * `pdfRenderOverlayParity.live.test.ts` test asserts the bboxes match
+ * exactly.
  */
-export interface PdfRenderPageResponse {
+export interface PdfRenderOverlayRect {
+    rect: { l: number; t: number; r: number; b: number; origin: string };
+    color: string;
+    label?: string;
+    group: number;
+    degraded?: boolean;
+    marginPosition?: 'top' | 'bottom' | 'left' | 'right' | null;
+}
+
+export interface PdfRenderOverlayResponse {
     ok: boolean;
-    result?: PdfRenderPagePayload;
+    level?: string;
+    page_index?: number;
+    page_width?: number;
+    page_height?: number;
+    image_width?: number;
+    image_height?: number;
+    dpi?: number;
+    group_count?: number;
+    stats?: Record<string, number | string | undefined>;
+    rects?: PdfRenderOverlayRect[];
+    image_base64?: string;
+    image_byte_length?: number;
     error?: PdfErrorEnvelope;
 }
 
-export async function pdfRenderPage(
+export async function pdfRenderOverlay(
     attachment: AttachmentFixture,
-    body: { page_index: number; options?: PdfPageImageOptions },
-): Promise<PdfRenderPageResponse> {
-    return post<PdfRenderPageResponse>('/beaver/test/pdf-render-page', {
+    body: {
+        page_index: number;
+        level:
+            | 'columns'
+            | 'lines'
+            | 'items'
+            | 'sentences'
+            | 'margins';
+        dpi?: number;
+        language?: string;
+        analysis_page_window?: number;
+    },
+): Promise<PdfRenderOverlayResponse> {
+    return post<PdfRenderOverlayResponse>('/beaver/test/pdf-render-overlay', {
         library_id: attachment.library_id,
         zotero_key: attachment.zotero_key,
         ...body,
     });
 }
+
 
 /** Decode a base64 image payload from `pdfRenderPages` for byte-level checks. */
 export function decodeRenderPayload(payload: PdfRenderPagePayload): Uint8Array {
@@ -445,85 +430,6 @@ export async function resolveItem(
     return post('/beaver/test/resolve-item', {
         library_id: libraryId,
         zotero_key: key,
-    });
-}
-
-// ---------------------------------------------------------------------------
-// Sentence bbox feasibility probe
-// ---------------------------------------------------------------------------
-
-export interface SentenceBBoxReportSentence {
-    index: number;
-    text: string;
-    numBBoxes: number;
-    unionBBox: { x: number; y: number; w: number; h: number };
-}
-
-export interface SentenceBBoxReport {
-    pageIndex: number;
-    totalChars: number;
-    totalLines: number;
-    totalSentences: number;
-    multiFragmentSentences: number;
-    pageTextLength: number;
-    invariantHolds: boolean;
-    allBBoxesInPage: boolean;
-    sentences: SentenceBBoxReportSentence[];
-}
-
-export interface ParagraphSentenceReportParagraph {
-    index: number;
-    itemType: 'paragraph' | 'header';
-    numLines: number;
-    paragraphText: string;
-    numSentences: number;
-    sentences: Array<{
-        text: string;
-        numBBoxes: number;
-        unionBBox: { x: number; y: number; w: number; h: number };
-    }>;
-}
-
-export interface ParagraphSentenceBBoxReport {
-    pageIndex: number;
-    totalParagraphs: number;
-    totalHeaders: number;
-    mappedParagraphs: number;
-    unmappedParagraphs: number;
-    totalSentences: number;
-    multiFragmentSentences: number;
-    invariantHolds: boolean;
-    allBBoxesInPage: boolean;
-    paragraphs: ParagraphSentenceReportParagraph[];
-}
-
-export interface SentenceBBoxResponse {
-    ok?: boolean;
-    error?: string;
-    page_count?: number;
-    page_width?: number;
-    page_height?: number;
-    num_blocks?: number;
-    timings_ms?: {
-        walk: number;
-        page_mapper: number;
-        paragraph_mapper: number;
-    };
-    report?: SentenceBBoxReport;
-    paragraph_report?: ParagraphSentenceBBoxReport;
-}
-
-export async function getSentenceBBoxReport(
-    libraryId: number,
-    key: string,
-    pageIndex = 0,
-    mode: 'page' | 'paragraph' | 'both' = 'both',
-): Promise<SentenceBBoxResponse> {
-    return post<SentenceBBoxResponse>('/beaver/test/sentence-bboxes', {
-        library_id: libraryId,
-        zotero_key: key,
-        page_index: pageIndex,
-        mode,
     });
 }
 

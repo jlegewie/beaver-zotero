@@ -9,6 +9,18 @@
 import { vi } from 'vitest';
 
 // ---------------------------------------------------------------------------
+// Worker-scope `self` — code inside src/beaver-extract/worker/ references
+// `self` at module-load time (e.g. workerScope.ts). Tests run in node, where
+// `self` is undefined; alias it to globalThis so worker-only modules can be
+// imported without ReferenceError. Runtime calls into the worker still need
+// to happen inside an actual worker, but the symbol resolution at import is
+// what matters here.
+// ---------------------------------------------------------------------------
+if (typeof (globalThis as any).self === 'undefined') {
+    (globalThis as any).self = globalThis;
+}
+
+// ---------------------------------------------------------------------------
 // IOUtils — Mozilla's async file I/O
 // ---------------------------------------------------------------------------
 const ioUtils = {

@@ -130,7 +130,7 @@ import { ZoteroItemReference, createZoteroItemReference } from '../types/zotero'
 import { markExternalReferenceImportedAtom } from './externalReferences';
 import type { CreateItemProposedData, CreateItemResultData } from '../types/agentActions/items';
 import { appendRunIfMissing, findResumeChainRoot, findRunForResume, hasOnlyThinkingParts, resolveErrorRunId, toRunError } from '../agents/runResumeHelpers';
-import { prewarmMuPDFWorker } from '../../src/services/pdf/prewarm';
+import { prewarmMuPDFWorker } from '../../src/beaver-extract';
 
 // =============================================================================
 // Helper Functions

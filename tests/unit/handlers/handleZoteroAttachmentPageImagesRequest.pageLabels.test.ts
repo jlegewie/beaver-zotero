@@ -8,20 +8,20 @@ const mockState = {
     cannedPageLabels: { 0: 'i', 1: '1', 2: '2' } as Record<number, string>,
 };
 
-vi.mock('../../../src/services/pdf', () => {
+vi.mock('../../../src/beaver-extract', () => {
     class MockPDFExtractor {
         async getPageCount(): Promise<number> {
             return mockState.cannedPageCount;
         }
 
-        async getPageCountAndLabels(): Promise<{ count: number; labels: Record<number, string> }> {
+        async getMetadata(): Promise<{ pageCount: number; pageLabels: Record<number, string> }> {
             return {
-                count: mockState.cannedPageCount,
-                labels: mockState.cannedPageLabels,
+                pageCount: mockState.cannedPageCount,
+                pageLabels: mockState.cannedPageLabels,
             };
         }
 
-        async renderPagesToImagesWithMeta(
+        async renderPages(
             _pdfData: Uint8Array | ArrayBuffer,
             args: any,
         ): Promise<{ pageCount: number; pageLabels: Record<number, string>; pages: any[] }> {
@@ -59,7 +59,7 @@ vi.mock('../../../src/services/pdf', () => {
     }
 
     return {
-        PDFExtractor: MockPDFExtractor,
+        BeaverExtractor: MockPDFExtractor,
         ExtractionError: MockExtractionError,
         ExtractionErrorCode: {
             ENCRYPTED: 'encrypted',
@@ -69,14 +69,33 @@ vi.mock('../../../src/services/pdf', () => {
     };
 });
 
-vi.mock('../../../src/services/agentDataProvider/utils', () => ({
-    resolveToPdfAttachment: vi.fn(),
-    validateZoteroItemReference: vi.fn(() => null),
-    backfillMetadataForError: vi.fn(),
-    loadPdfData: vi.fn(async () => new Uint8Array([1, 2, 3])),
-    checkRemotePdfSize: vi.fn(() => null),
-    isRemoteAccessAvailable: vi.fn(() => false),
+// Mock heavy transitive deps so we can `importActual` utils.ts and use the
+// real `preflightCachedPdfMeta` + `persistMetadataToCache` (the handler now
+// delegates to those — pure logic, exercising them is preferable to stubbing).
+vi.mock('../../../src/services/supabaseClient', () => ({
+    supabase: { auth: { getSession: vi.fn() } },
 }));
+vi.mock('../../../react/store', () => ({
+    store: { get: vi.fn(), set: vi.fn() },
+}));
+vi.mock('../../../react/atoms/profile', () => ({
+    searchableLibraryIdsAtom: { toString: () => 'searchableLibraryIdsAtom' },
+}));
+
+vi.mock('../../../src/services/agentDataProvider/utils', async () => {
+    const actual = await vi.importActual<typeof import('../../../src/services/agentDataProvider/utils')>(
+        '../../../src/services/agentDataProvider/utils',
+    );
+    return {
+        ...actual,
+        resolveToPdfAttachment: vi.fn(),
+        validateZoteroItemReference: vi.fn(() => null),
+        backfillMetadataForError: vi.fn(),
+        loadPdfData: vi.fn(async () => new Uint8Array([1, 2, 3])),
+        checkRemotePdfSize: vi.fn(() => null),
+        isRemoteAccessAvailable: vi.fn(() => false),
+    };
+});
 
 import { handleZoteroAttachmentPageImagesRequest } from '../../../src/services/agentDataProvider/handleZoteroAttachmentPageImagesRequest';
 import { resolveToPdfAttachment } from '../../../src/services/agentDataProvider/utils';

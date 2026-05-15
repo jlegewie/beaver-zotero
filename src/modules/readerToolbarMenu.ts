@@ -105,6 +105,30 @@ function injectIntoExistingReader(reader: any): void {
     }
 }
 
+// Dev-only: dispatch an extraction-visualizer action so the React layer
+// (which owns the visualizer code in the webpack bundle) can run it.
+function dispatchVisualizerAction(
+    action:
+        | 'columns'
+        | 'lines'
+        | 'items'
+        | 'sentences'
+        | 'columns-graphics'
+        | 'items-graphics'
+        | 'sentences-graphics'
+        | 'clear'
+        | 'copy-extract-fixture-command'
+        | 'copy-ocr-fixture-command',
+): void {
+    const win = Zotero.getMainWindow();
+    const eventBus = win?.__beaverEventBus;
+    if (!eventBus) return;
+
+    eventBus.dispatchEvent(new win.CustomEvent('readerVisualizerAction', {
+        detail: { action },
+    }));
+}
+
 // ---------------------------------------------------------------------------
 // Menu builder
 // ---------------------------------------------------------------------------
@@ -118,6 +142,20 @@ function openBeaverMenu(reader: any, anchorButton: HTMLElement): void {
     const xulDoc = win.document;
     const popup = xulDoc.createXULElement('menupopup');
     popupset.appendChild(popup);
+    const appendSeparator = () => {
+        popup.appendChild(xulDoc.createXULElement('menuseparator'));
+    };
+    const appendVisualizerItem = (
+        label: string,
+        action: Parameters<typeof dispatchVisualizerAction>[0],
+    ) => {
+        const menuitem = xulDoc.createXULElement('menuitem');
+        menuitem.setAttribute('label', label);
+        menuitem.addEventListener('command', () => {
+            dispatchVisualizerAction(action);
+        });
+        popup.appendChild(menuitem);
+    };
 
     // Auto-cleanup
     popup.addEventListener('popuphidden', () => popup.remove());
@@ -148,7 +186,7 @@ function openBeaverMenu(reader: any, anchorButton: HTMLElement): void {
         const actions = getMergedActions().filter(a => a.targetType === 'attachment');
 
         if (actions.length > 0) {
-            popup.appendChild(xulDoc.createXULElement('menuseparator'));
+            appendSeparator();
 
             // Disabled header
             const header = xulDoc.createXULElement('menuitem');
@@ -179,7 +217,7 @@ function openBeaverMenu(reader: any, anchorButton: HTMLElement): void {
     }
 
     // ---- Add custom action… ----
-    popup.appendChild(xulDoc.createXULElement('menuseparator'));
+    appendSeparator();
 
     const addItem = xulDoc.createXULElement('menuitem');
     addItem.setAttribute('label', 'Add custom action\u2026');
@@ -187,6 +225,28 @@ function openBeaverMenu(reader: any, anchorButton: HTMLElement): void {
         openPreferencesWindow('actions');
     });
     popup.appendChild(addItem);
+
+    // ---- Dev-only: extraction visualizer controls (PDF only) ----
+    // Dropped from production builds at compile time.
+    if (process.env.NODE_ENV === 'development' && isPdf) {
+        appendSeparator();
+        appendVisualizerItem('Visualize Columns', 'columns');
+        appendVisualizerItem('Visualize Lines', 'lines');
+        appendVisualizerItem('Visualize Items', 'items');
+        appendVisualizerItem('Visualize Sentences', 'sentences');
+
+        appendSeparator();
+        appendVisualizerItem('Visualize Columns (graphics)', 'columns-graphics');
+        appendVisualizerItem('Visualize Items (graphics)', 'items-graphics');
+        appendVisualizerItem('Visualize Sentences (graphics)', 'sentences-graphics');
+
+        appendSeparator();
+        appendVisualizerItem('Clear Visualization', 'clear');
+
+        appendSeparator();
+        appendVisualizerItem('Copy Extract Fixture Command', 'copy-extract-fixture-command');
+        appendVisualizerItem('Copy OCR Fixture Command', 'copy-ocr-fixture-command');
+    }
 
     // ---- Position & open ----
     const btnRect = anchorButton.getBoundingClientRect();

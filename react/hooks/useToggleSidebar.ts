@@ -9,7 +9,7 @@ import { currentMessageItemsAtom, updateMessageItemsFromZoteroSelectionAtom } fr
 import { searchableLibraryIdsAtom } from '../atoms/profile';
 import { logger } from '../../src/utils/logger';
 import { dismissDiffPreview } from '../utils/noteEditorDiffPreview';
-import { prewarmMuPDFWorker } from '../../src/services/pdf/prewarm';
+import { prewarmMuPDFWorker } from '../../src/beaver-extract';
 
 export function useToggleSidebar() {
     const setSidebarVisible = useSetAtom(isSidebarVisibleAtom);

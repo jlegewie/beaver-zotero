@@ -1,0 +1,585 @@
+/**
+ * Unit tests for FilteredParagraphPipeline.
+ *
+ * Hermetic — synthetic RawPageData, no MuPDF, no Zotero.
+ */
+
+import { describe, it, expect } from "vitest";
+import { detectFilteredParagraphs } from "../../../src/beaver-extract/FilteredParagraphPipeline";
+import { MarginFilter } from "../../../src/beaver-extract/MarginFilter";
+import { StyleAnalyzer } from "../../../src/beaver-extract/StyleAnalyzer";
+import {
+    DEFAULT_MARGINS,
+    DEFAULT_MARGIN_ZONE,
+    bboxFromXYWH,
+    type RawBlock,
+    type RawLine,
+    type RawPageData,
+} from "../../../src/beaver-extract/types";
+
+// ---------------------------------------------------------------------------
+// Synthetic page builders
+// ---------------------------------------------------------------------------
+
+const PAGE_W = 612;
+const PAGE_H = 792;
+const BODY_SIZE = 12;
+const HEADER_SIZE = 18;
+
+function makeLine(
+    text: string,
+    yTop: number,
+    xStart = 80,
+    size: number = BODY_SIZE,
+    fontName: string = "Body",
+): RawLine {
+    return {
+        wmode: 0,
+        bbox: bboxFromXYWH(xStart, yTop, text.length * 6, size, "top-left"),
+        font: {
+            name: fontName,
+            family: fontName,
+            weight: "normal",
+            style: "normal",
+            size,
+        },
+        x: xStart,
+        y: yTop,
+        text,
+    };
+}
+
+function makePage(pageIndex: number, lines: RawLine[]): RawPageData {
+    const left = lines.length ? Math.min(...lines.map((l) => l.bbox.l)) : 0;
+    const top = lines.length ? Math.min(...lines.map((l) => l.bbox.t)) : 0;
+    const blocks: RawBlock[] = lines.length
+        ? [
+              {
+                  type: "text",
+                  bbox: bboxFromXYWH(left, top, PAGE_W, PAGE_H, "top-left"),
+                  lines,
+              },
+          ]
+        : [];
+    return {
+        pageIndex,
+        pageNumber: pageIndex + 1,
+        width: PAGE_W,
+        height: PAGE_H,
+        blocks,
+    };
+}
+
+/** Build a body line at a content-area y position. */
+function bodyLine(text: string, yTop: number): RawLine {
+    return makeLine(text, yTop, 80, BODY_SIZE);
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+describe("detectFilteredParagraphs", () => {
+    describe("pageIndex resolution by document-page-index", () => {
+        it("picks the page whose pageIndex matches, not the array position", () => {
+            const pages = [
+                makePage(8, [bodyLine("Page eight body text here.", 200)]),
+                makePage(9, [bodyLine("Page nine body text here.", 200)]),
+                makePage(10, [bodyLine("Page ten body text here.", 200)]),
+            ];
+            const out = detectFilteredParagraphs({ pages, pageIndex: 9 });
+            expect(out.filteredPage.pageIndex).toBe(9);
+            expect(out.paragraphResult.items.length).toBeGreaterThan(0);
+            expect(out.paragraphResult.items[0].text).toContain("nine");
+        });
+
+        it("throws when pageIndex is not present in the supplied pages", () => {
+            const pages = [makePage(0, [bodyLine("Body", 200)])];
+            expect(() =>
+                detectFilteredParagraphs({ pages, pageIndex: 99 }),
+            ).toThrow(/page_index 99 not present/);
+        });
+    });
+
+    describe("simple-margin filtering", () => {
+        it("drops a line entirely inside the simple right-margin zone", () => {
+            // Place a watermark at x exactly on the right-margin boundary
+            // (page width 612, right margin 25 → boundary at 587, inclusive).
+            // The body-style spare is style-aware, so we give the page enough
+            // body text that the watermark style (different font and size)
+            // falls below the 15% body-threshold and is not mistaken for body.
+            const watermarkX = PAGE_W - DEFAULT_MARGINS.right; // 587
+            const watermark: RawLine = {
+                wmode: 0,
+                bbox: bboxFromXYWH(watermarkX, 200, 5, 300, "top-left"),
+                font: {
+                    name: "WM",
+                    family: "WM",
+                    weight: "normal",
+                    style: "normal",
+                    size: 6,
+                },
+                x: watermarkX,
+                y: 200,
+                text: "Watermark",
+            };
+            const bodyText =
+                "Paragraph filler text that is long enough to make body the dominant style in this synthetic page.";
+            const pages = [
+                makePage(0, [
+                    bodyLine(bodyText, 200),
+                    bodyLine(bodyText, 220),
+                    bodyLine(bodyText, 240),
+                    bodyLine(bodyText, 260),
+                    watermark,
+                ]),
+            ];
+            const out = detectFilteredParagraphs({ pages, pageIndex: 0 });
+            const allLineTexts = out.lineResult.allLines
+                .map((l) => l.text)
+                .join(" ");
+            expect(allLineTexts).not.toContain("Watermark");
+            expect(allLineTexts).toContain("Paragraph filler");
+            expect(out.marginItems).toHaveLength(1);
+            expect(out.marginItems[0]).toMatchObject({
+                kind: "margin",
+                text: "Watermark",
+                pageIndex: 0,
+                index: 0,
+                columnIndex: 0,
+            });
+            expect(out.marginItems[0].lines).toHaveLength(1);
+        });
+    });
+
+    describe("smart-removal: repeating header", () => {
+        it("removes a header that appears in the top zone of ≥3 pages", () => {
+            // Header text in the simple top margin zone — would normally
+            // be excluded by the simple filter alone. But to prove the
+            // *smart-removal* branch fires, we put it in the smart zone
+            // (top-band 80pt) but outside the simple zone (40pt). Place
+            // header line at y=50 → simple top boundary at y+h=62 ≤ 40
+            // is false (62>40), so simple filter keeps it. Smart zone
+            // boundary at y+h=62 ≤ 80 is true, so it's collected.
+            const buildPage = (idx: number): RawPageData =>
+                makePage(idx, [
+                    {
+                        wmode: 0,
+                        bbox: bboxFromXYWH(80, 50, 200, 8, "top-left"),
+                        font: {
+                            name: "H",
+                            family: "H",
+                            weight: "normal",
+                            style: "normal",
+                            size: 8,
+                        },
+                        x: 80,
+                        y: 50,
+                        text: "Repeating Journal Header",
+                    },
+                    bodyLine(`Body of page ${idx + 1} goes here.`, 200),
+                    bodyLine("Second line of body text.", 220),
+                ]);
+            const pages = [0, 1, 2, 3, 4].map(buildPage);
+            const out = detectFilteredParagraphs({
+                pages,
+                pageIndex: 2,
+                repeatThreshold: 3,
+            });
+            const allText = out.lineResult.allLines.map((l) => l.text).join(" ");
+            expect(allText).not.toContain("Repeating Journal Header");
+            expect(out.marginItems.some((item) => item.text === "Repeating Journal Header"))
+                .toBe(true);
+            expect(out.marginRemoval.candidates.some((c) => c.reason === "repeat"))
+                .toBe(true);
+        });
+    });
+
+    describe("smart-removal: page-number sequence", () => {
+        it("removes ascending page numbers in the same margin zone", () => {
+            const buildPage = (idx: number, num: number): RawPageData =>
+                makePage(idx, [
+                    {
+                        wmode: 0,
+                        bbox: bboxFromXYWH(80, 50, 30, 8, "top-left"),
+                        font: {
+                            name: "PN",
+                            family: "PN",
+                            weight: "normal",
+                            style: "normal",
+                            size: 8,
+                        },
+                        x: 80,
+                        y: 50,
+                        text: String(num),
+                    },
+                    bodyLine(`Body of page ${idx + 1}.`, 200),
+                    bodyLine("Filler line two.", 220),
+                ]);
+            const pages = [0, 1, 2, 3, 4].map((i) => buildPage(i, 100 + i));
+            const out = detectFilteredParagraphs({
+                pages,
+                pageIndex: 2,
+                repeatThreshold: 3,
+                detectPageSequences: true,
+            });
+            const allText = out.lineResult.allLines.map((l) => l.text).join(" ");
+            expect(allText).not.toContain("102");
+            expect(out.marginRemoval.candidates.some((c) => c.reason === "page_number"))
+                .toBe(true);
+        });
+    });
+
+    describe("smart-removal: 'K of 13' indicators (regression — original bug)", () => {
+        it("removes 'K of 13' page indicators across pages", () => {
+            const buildPage = (idx: number, k: number): RawPageData =>
+                makePage(idx, [
+                    {
+                        wmode: 0,
+                        bbox: bboxFromXYWH(80, 50, 60, 8, "top-left"),
+                        font: {
+                            name: "PN",
+                            family: "PN",
+                            weight: "normal",
+                            style: "normal",
+                            size: 8,
+                        },
+                        x: 80,
+                        y: 50,
+                        text: `${k} of 13`,
+                    },
+                    bodyLine(`Body of page ${idx + 1}.`, 200),
+                    bodyLine("Filler line two.", 220),
+                ]);
+            const pages = [0, 1, 2, 3, 4].map((i) => buildPage(i, i + 1));
+            const out = detectFilteredParagraphs({
+                pages,
+                pageIndex: 2,
+                repeatThreshold: 3,
+                detectPageSequences: true,
+            });
+            const allText = out.lineResult.allLines.map((l) => l.text).join(" ");
+            expect(allText).not.toContain("of 13");
+            expect(out.marginRemoval.candidates.some((c) => c.reason === "page_number"))
+                .toBe(true);
+        });
+    });
+
+    describe("smart-removal: multilingual prefix headers", () => {
+        it("removes 'Seite N' running headers across ≥3 pages", () => {
+            const buildPage = (idx: number, k: number): RawPageData =>
+                makePage(idx, [
+                    {
+                        wmode: 0,
+                        bbox: bboxFromXYWH(80, 50, 60, 8, "top-left"),
+                        font: {
+                            name: "H",
+                            family: "H",
+                            weight: "normal",
+                            style: "normal",
+                            size: 8,
+                        },
+                        x: 80,
+                        y: 50,
+                        text: `Seite ${k}`,
+                    },
+                    bodyLine(`Body of page ${idx + 1}.`, 200),
+                    bodyLine("Filler line two.", 220),
+                ]);
+            const pages = [0, 1, 2, 3, 4].map((i) => buildPage(i, i + 1));
+            const out = detectFilteredParagraphs({
+                pages,
+                pageIndex: 2,
+                repeatThreshold: 3,
+            });
+            const allText = out.lineResult.allLines.map((l) => l.text).join(" ");
+            expect(allText).not.toContain("Seite");
+            expect(out.marginRemoval.candidates.some((c) => c.reason === "repeat"))
+                .toBe(true);
+        });
+    });
+
+    describe("smart-removal: negative — must NOT over-remove", () => {
+        it("preserves 'Chapter N' lines in margin zone", () => {
+            const buildPage = (idx: number, k: number): RawPageData =>
+                makePage(idx, [
+                    {
+                        wmode: 0,
+                        bbox: bboxFromXYWH(80, 50, 80, 8, "top-left"),
+                        font: {
+                            name: "H",
+                            family: "H",
+                            weight: "normal",
+                            style: "normal",
+                            size: 8,
+                        },
+                        x: 80,
+                        y: 50,
+                        text: `Chapter ${k}`,
+                    },
+                    bodyLine(`Body of page ${idx + 1}.`, 200),
+                    bodyLine("Filler line two.", 220),
+                ]);
+            const pages = [0, 1, 2, 3, 4].map((i) => buildPage(i, i + 1));
+            const out = detectFilteredParagraphs({
+                pages,
+                pageIndex: 2,
+                repeatThreshold: 3,
+            });
+            // No repeat candidate should fire for the Chapter sequence.
+            expect(out.marginRemoval.candidates.some((c) => c.reason === "repeat"))
+                .toBe(false);
+        });
+
+        it("preserves hyphenated ISO codes like '2024-05' in margin zone", () => {
+            const codes = ["2024-05", "2025-06", "2026-07", "2027-08", "2028-09"];
+            const buildPage = (idx: number): RawPageData =>
+                makePage(idx, [
+                    {
+                        wmode: 0,
+                        bbox: bboxFromXYWH(80, 50, 60, 8, "top-left"),
+                        font: {
+                            name: "H",
+                            family: "H",
+                            weight: "normal",
+                            style: "normal",
+                            size: 8,
+                        },
+                        x: 80,
+                        y: 50,
+                        text: codes[idx],
+                    },
+                    bodyLine(`Body of page ${idx + 1}.`, 200),
+                    bodyLine("Filler line two.", 220),
+                ]);
+            const pages = [0, 1, 2, 3, 4].map(buildPage);
+            const out = detectFilteredParagraphs({
+                pages,
+                pageIndex: 2,
+                repeatThreshold: 3,
+                detectPageSequences: true,
+            });
+            // Hyphen excluded from bare-connector forms → no candidates at all.
+            expect(out.marginRemoval.candidates.length).toBe(0);
+        });
+    });
+
+    describe("empty / degenerate pages", () => {
+        it("returns a well-formed empty result when the page has no text blocks", () => {
+            const pages = [makePage(0, [])];
+            const out = detectFilteredParagraphs({ pages, pageIndex: 0 });
+            expect(out.paragraphResult.items).toEqual([]);
+            expect(out.paragraphResult.itemLines).toEqual([]);
+            expect(out.lineResult.allLines).toEqual([]);
+        });
+
+        it("returns a well-formed empty result when no columns are detected", () => {
+            // Single tiny line in the margin → after filtering, nothing left
+            const pages = [
+                makePage(0, [
+                    {
+                        wmode: 0,
+                        bbox: bboxFromXYWH(5, 5, 10, 5, "top-left"),
+                        font: {
+                            name: "X",
+                            family: "X",
+                            weight: "normal",
+                            style: "normal",
+                            size: 5,
+                        },
+                        x: 5,
+                        y: 5,
+                        text: "x",
+                    },
+                ]),
+            ];
+            const out = detectFilteredParagraphs({ pages, pageIndex: 0 });
+            expect(out.paragraphResult.items).toEqual([]);
+            expect(out.paragraphResult.itemLines).toEqual([]);
+            expect(out.marginItems).toHaveLength(1);
+            expect(out.marginItems[0].kind).toBe("margin");
+        });
+    });
+
+    describe("caller-supplied precomputed values", () => {
+        it("reuses caller-supplied marginRemoval without recomputing", () => {
+            const pages = [makePage(0, [bodyLine("Body text.", 200)])];
+
+            // Build a marginRemoval that flags "Body text." for removal
+            // (synthetic — wouldn't naturally arise from these pages).
+            // Confirm the helper uses it as-is by checking the candidate
+            // array on the output matches the synthetic input.
+            const synthetic = MarginFilter.identifyElementsToRemove(
+                MarginFilter.collectMarginElements(pages, DEFAULT_MARGIN_ZONE),
+                3,
+                true,
+            );
+            // Tag the synthetic with a unique candidate so we can verify
+            // identity reuse:
+            synthetic.candidates.push({
+                text: "synthetic-marker",
+                originalText: "synthetic-marker",
+                pageIndices: [0],
+                reason: "repeat",
+                position: "top",
+            });
+
+            const out = detectFilteredParagraphs({
+                pages,
+                pageIndex: 0,
+                marginRemoval: synthetic,
+            });
+            expect(out.marginRemoval).toBe(synthetic);
+            expect(
+                out.marginRemoval.candidates.some(
+                    (c) => c.text === "synthetic-marker",
+                ),
+            ).toBe(true);
+        });
+
+        it("reuses caller-supplied styleProfile without recomputing", () => {
+            const pages = [makePage(0, [bodyLine("Body text here.", 200)])];
+            const sp = new StyleAnalyzer().analyze(pages, 4, 0.15, 0);
+            const out = detectFilteredParagraphs({
+                pages,
+                pageIndex: 0,
+                styleProfile: sp,
+            });
+            expect(out.styleProfile).toBe(sp);
+        });
+    });
+
+    describe("paragraph-result invariants", () => {
+        it("populates itemLines aligned with items", () => {
+            const pages = [
+                makePage(0, [
+                    bodyLine("First paragraph first line.", 200),
+                    bodyLine("First paragraph second line.", 215),
+                ]),
+            ];
+            const out = detectFilteredParagraphs({ pages, pageIndex: 0 });
+            expect(out.paragraphResult.itemLines).toBeDefined();
+            expect(out.paragraphResult.itemLines!.length).toBe(
+                out.paragraphResult.items.length,
+            );
+        });
+    });
+
+    describe("fillBoundaries coordinate frame", () => {
+        // Regression guard: `ctx.fillBoundaries` come from the page
+        // content stream in raw MuPDF coordinates, but the pipeline
+        // rotates the target page into the upright working frame when
+        // the dominant text orientation is non-zero. The pipeline
+        // must transform fill rects with the SAME rotation before
+        // handing them to `detectColumns`, otherwise the column
+        // detector's zone guard compares text bboxes (rotated) against
+        // fill rects (unrotated) and the guard misfires.
+
+        it("does not throw when text orientation is 90° and fill rects are supplied", () => {
+            // Synthetic rotated page: every line's `rotation` says
+            // "writes downward" (90°), enough total characters to
+            // clear `detectDominantTextOrientation`'s minWeightedChars
+            // threshold. Verifies the pipeline transforms the
+            // fillBoundaries with `rotateBBox` before handing them to
+            // `detectColumns` — without that transform, the column
+            // detector compares rotated text bboxes to unrotated fill
+            // rects and either misses the zone protection or applies
+            // it to the wrong region. Behavioral coverage of the
+            // transform itself lives in PageRotationNormalizer's
+            // rotateBBox semantics.
+            const yUpLine = (text: string, x: number, y: number): RawLine => ({
+                wmode: 0,
+                bbox: bboxFromXYWH(x, y, 12, text.length * 7, "top-left"),
+                font: {
+                    name: "Body",
+                    family: "Body",
+                    weight: "normal",
+                    style: "normal",
+                    size: BODY_SIZE,
+                },
+                x,
+                y,
+                text,
+                rotation: 90,
+            });
+            // 300+ chars total → clears minWeightedChars=200.
+            const longText =
+                "This is body text content used to clear the weighted-character threshold";
+            const lines: RawLine[] = [];
+            for (let i = 0; i < 5; i++) {
+                lines.push(yUpLine(longText, 80 + i * 20, 120));
+            }
+            const pages = [makePage(0, lines)];
+            const fillUnrotated = { x: 80, y: 120, w: 120, h: 180 };
+            const out = detectFilteredParagraphs({
+                pages,
+                pageIndex: 0,
+                fillBoundaries: [fillUnrotated],
+            });
+            // Pipeline must rotate the page AND not throw on the fill
+            // rect path. Richer geometry assertions belong in the
+            // PageRotationNormalizer / ColumnDetector tests.
+            expect(out.pageRotation).toBe(90);
+            expect(out.sourceWidth).toBe(PAGE_W);
+            expect(out.sourceHeight).toBe(PAGE_H);
+        });
+
+        it("passes through unrotated fill rects when pageRotation is 0", () => {
+            // Plain horizontal page (no `rotation` on lines) → no
+            // normalization, fill rects pass through verbatim.
+            const pages = [
+                makePage(0, [
+                    bodyLine("Body line one.", 200),
+                    bodyLine("Body line two.", 215),
+                ]),
+            ];
+            const out = detectFilteredParagraphs({
+                pages,
+                pageIndex: 0,
+                fillBoundaries: [{ x: 50, y: 50, w: 100, h: 100 }],
+            });
+            expect(out.pageRotation).toBe(0);
+            // Just verifies the call path with fillBoundaries works
+            // on unrotated pages without exception.
+            expect(out.paragraphResult).toBeDefined();
+        });
+
+        it("does not throw when text orientation is 90° and divider lines are supplied", () => {
+            const yUpLine = (text: string, x: number, y: number): RawLine => ({
+                wmode: 0,
+                bbox: bboxFromXYWH(x, y, 12, text.length * 7, "top-left"),
+                font: {
+                    name: "Body",
+                    family: "Body",
+                    weight: "normal",
+                    style: "normal",
+                    size: BODY_SIZE,
+                },
+                x,
+                y,
+                text,
+                rotation: 90,
+            });
+            const longText =
+                "This is body text content used to clear the weighted-character threshold";
+            const lines: RawLine[] = [];
+            for (let i = 0; i < 5; i++) {
+                lines.push(yUpLine(longText, 80 + i * 20, 120));
+            }
+            const out = detectFilteredParagraphs({
+                pages: [makePage(0, lines)],
+                pageIndex: 0,
+                dividerLines: [{
+                    orientation: "horizontal",
+                    position: 250,
+                    start: 40,
+                    end: 560,
+                    thickness: 1,
+                }],
+            });
+            expect(out.pageRotation).toBe(90);
+            expect(out.paragraphResult).toBeDefined();
+        });
+    });
+
+});

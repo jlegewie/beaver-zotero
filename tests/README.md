@@ -247,6 +247,23 @@ Integration tests exercise full pipelines. Same prerequisites as live tests plus
 - Run: `npm run test:live` (or target just this file: `npx vitest run --config vitest.live.config.ts tests/live/editNote.live.test.ts`).
 - Each test seeds and deletes its own notes — no manual fixture setup required.
 
+### BeaverExtract regression fixtures
+
+`tests/smoke/extractFixtures.smoke.test.ts` runs every fixture under `tests/fixtures/pdfs/extract-public/` (committed) plus the private corpus pointed at by `$BEAVER_EXTRACT_FIXTURES_DIR` (the separate `beaver-extract-fixtures` repo; falls back to the legacy in-tree `tests/fixtures/pdfs/extract/` when the env var is unset). Each fixture re-runs the structured-mode extract pipeline and diffs against the captured `expected` snapshot.
+
+Current extraction fixtures use snapshot schema `2`, which records `items` (`DocItem` projection), flattened `sentences` (`SentenceItem` projection), `BoundingBox` objects with `origin`, and `degradedItems`. Older paragraph/sentence-bbox fixture files are intentionally rejected at load time; regenerate them with the CLI before evaluating.
+
+Capture, evaluate, and rebaseline via the `beaver-extract` CLI:
+
+```bash
+npm run beaver-extract -- fixture capture <pdf> --pages 0 --id <id>
+npm run beaver-extract -- fixture evaluate <id>
+npm run beaver-extract -- fixture update <id>
+npm run test:cli-smoke
+```
+
+The reader's dev menu has a "Copy Fixture Capture Command" item that builds the right `beaver-extract fixture capture --update` invocation for the active page and copies it to the clipboard.
+
 ## Conventions
 
 - **File placement**: One file per logical module/concern, in the appropriate subdirectory.

@@ -1,6 +1,7 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { Provider } from 'jotai';
+import { configurePDFForBeaver } from '../src/utils/configurePDFForBeaver';
 import LibrarySidebar from './components/LibrarySidebar';
 import { useZoteroSync } from './hooks/useZoteroSync';
 import { useEmbeddingIndex } from './hooks/useEmbeddingIndex';
@@ -23,8 +24,16 @@ import { useThreadProtocolHandler } from './hooks/useThreadProtocolHandler';
 import { useContextMenuActionHandler } from './hooks/useContextMenuActionHandler';
 import { useReaderSelectionActionHandler } from './hooks/useReaderSelectionActionHandler';
 import { useReaderAnnotationActionHandler } from './hooks/useReaderAnnotationActionHandler';
+import { useReaderVisualizerActionHandler } from './hooks/useReaderVisualizerActionHandler';
 import { useOnboardingPopups } from './hooks/useOnboardingPopups';
+import { BeaverTemporaryAnnotations } from './utils/annotationUtils';
 
+// Configure the PDF package (webpack bundle copy). The esbuild bundle
+// configures its own copy from `src/hooks.ts`. Both must run because each
+// bundle has its own module-scope config in `src/beaver-extract/config.ts`.
+// The cross-bundle `MuPDFWorkerClient` singleton is shared via
+// `Zotero.__beaverMuPDFWorkerClient` regardless.
+configurePDFForBeaver();
 
 /**
  * Component to initialize global hooks that should only run once.
@@ -76,6 +85,9 @@ const GlobalContextInitializer = () => {
 
     // Handle reader annotation context menu actions (Explain / Ask)
     useReaderAnnotationActionHandler();
+
+    // Handle dev-only extraction visualizer actions from the reader menu
+    useReaderVisualizerActionHandler();
 
     // Handle first-install and first-reader onboarding popups
     useOnboardingPopups();
@@ -221,4 +233,12 @@ export function unmountFromElement(domElement: HTMLElement) {
         return true;
     }
     return false;
+}
+
+/**
+ * Dev-only cleanup hook called by the esbuild bundle before React unmounts.
+ */
+export async function cleanupTemporaryAnnotations() {
+    if (process.env.NODE_ENV !== 'development') return;
+    await BeaverTemporaryAnnotations.cleanupAll();
 }

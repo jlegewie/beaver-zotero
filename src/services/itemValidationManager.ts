@@ -7,7 +7,7 @@ import { planFeaturesAtom, searchableLibraryIdsAtom } from '../../react/atoms/pr
 import { selectedModelAtom } from '../../react/atoms/models';
 import { isAttachmentOnServer } from '../utils/webAPI';
 import { getPref } from '../utils/prefs';
-import { PDFExtractor, ExtractionError, ExtractionErrorCode } from './pdf';
+import { BeaverExtractor, ExtractionError, ExtractionErrorCode } from '../beaver-extract';
 import { safeFileExists } from '../utils/zoteroUtils';
 import { isRemoteAccessAvailable } from './agentDataProvider/utils';
 
@@ -393,7 +393,7 @@ class ItemValidationManager {
         // 6. Analyze PDF (page count, encryption, OCR needs)
         try {
             const pdfData = await IOUtils.read(filePath);
-            const extractor = new PDFExtractor();
+            const extractor = new BeaverExtractor();
 
             // Get page count (also validates PDF and detects encryption)
             let pageCount: number;
@@ -405,6 +405,8 @@ class ItemValidationManager {
                         return { isValid: false, reason: 'PDF is password-protected' };
                     } else if (error.code === ExtractionErrorCode.INVALID_PDF) {
                         return { isValid: false, reason: 'PDF file is invalid or corrupted' };
+                    } else if (error.code === ExtractionErrorCode.WASM_ERROR) {
+                        return { isValid: false, reason: 'PDF crashes the local PDF parser' };
                     }
                 }
                 throw error;
@@ -426,6 +428,10 @@ class ItemValidationManager {
             return { isValid: true };
 
         } catch (error: any) {
+            if (error instanceof ExtractionError && error.code === ExtractionErrorCode.WASM_ERROR) {
+                logger(`ItemValidationManager: PDF parser crashed while analyzing ${attachment.libraryID}-${attachment.key}: ${error.message}`, 2);
+                return { isValid: false, reason: 'PDF crashes the local PDF parser' };
+            }
             logger(`ItemValidationManager: Error analyzing PDF: ${error.message}`, 2);
             return { isValid: false, reason: 'Error analyzing PDF' };
         }

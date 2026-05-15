@@ -29,16 +29,12 @@ import {
     pdfPageLabels,
     pdfRenderPages,
     pdfRenderPagesWithMeta,
-    pdfExtractRaw,
     pdfExtractRawDetailed,
-    pdfSearch,
     pdfExtract,
-    pdfExtractByLines,
     pdfHasTextLayer,
     pdfAnalyzeOcr,
     pdfSearchScored,
     pdfSentenceBBoxes,
-    pdfRenderPage,
     workerCacheClear,
     workerMarkStale,
     workerStats,
@@ -57,8 +53,6 @@ beforeAll(async () => {
 });
 
 const SMALL_PDF_PAGE_COUNT = 2;
-const NORMAL_PDF_PAGE_COUNT = 15;
-
 describe('MuPDF worker smoke — PR #1 ops', () => {
     beforeEach((ctx) => {
         skipIfNoZotero(ctx, available);
@@ -93,7 +87,7 @@ describe('MuPDF worker smoke — PR #1 ops', () => {
 // ---------------------------------------------------------------------------
 // PR #2 — worker primitives
 //
-// These endpoints call worker primitives directly (no PDFExtractor /
+// These endpoints call worker primitives directly (no BeaverExtractor /
 // SearchScorer). They prove the WS-driven worker path runs end-to-end
 // against real PDFs.
 // ---------------------------------------------------------------------------
@@ -103,33 +97,11 @@ describe('MuPDF worker smoke — PR #2 ops', () => {
         skipIfNoZotero(ctx, available);
     });
 
-    it('getPageCountAndLabels returns count + labels', async () => {
+    it('getMetadata returns pageCount + pageLabels', async () => {
         const res = await pdfPageLabels(SMALL_PDF);
         expect(res.ok).toBe(true);
-        expect(res.count).toBe(SMALL_PDF_PAGE_COUNT);
-        expect(res.labels).toBeDefined();
-    });
-
-    it('extractRawPages returns blocks for every page', async () => {
-        const res = await pdfExtractRaw(NORMAL_PDF);
-        expect(res.ok).toBe(true);
-        const doc = res.result!;
-        expect(doc.pageCount).toBe(NORMAL_PDF_PAGE_COUNT);
-        expect(doc.pages.length).toBe(NORMAL_PDF_PAGE_COUNT);
-        for (const page of doc.pages) {
-            expect(typeof page.pageIndex).toBe('number');
-            expect(page.width).toBeGreaterThan(0);
-            expect(page.height).toBeGreaterThan(0);
-            expect(Array.isArray(page.blocks)).toBe(true);
-        }
-    });
-
-    it('extractRawPages silently filters invalid indices', async () => {
-        const res = await pdfExtractRaw(SMALL_PDF, { page_indices: [0, 99999] });
-        expect(res.ok).toBe(true);
-        const pages = res.result!.pages;
-        expect(pages.length).toBe(1);
-        expect(pages[0].pageIndex).toBe(0);
+        expect(res.pageCount).toBe(SMALL_PDF_PAGE_COUNT);
+        expect(res.pageLabels).toBeDefined();
     });
 
     it('renderPagesToImages produces a non-empty image', async () => {
@@ -142,7 +114,7 @@ describe('MuPDF worker smoke — PR #2 ops', () => {
         expect(page.data_byte_length).toBeGreaterThan(0);
     });
 
-    it('renderPagesToImagesWithMeta returns { pageCount, pageLabels, pages } in one round-trip', async () => {
+    it('renderPages returns { pageCount, pageLabels, pages } in one round-trip', async () => {
         const res = await pdfRenderPagesWithMeta(SMALL_PDF, { page_indices: [0] });
         expect(res.ok).toBe(true);
         expect(res.pageCount).toBe(SMALL_PDF_PAGE_COUNT);
@@ -153,14 +125,14 @@ describe('MuPDF worker smoke — PR #2 ops', () => {
         expect(page.data_byte_length).toBeGreaterThan(0);
     });
 
-    it('renderPagesToImagesWithMeta enumerates all pages when no pageIndices/pageRange given', async () => {
+    it('renderPages enumerates all pages when no pageIndices/pageRange given', async () => {
         const res = await pdfRenderPagesWithMeta(SMALL_PDF);
         expect(res.ok).toBe(true);
         expect(res.pageCount).toBe(SMALL_PDF_PAGE_COUNT);
         expect(res.pages?.length).toBe(SMALL_PDF_PAGE_COUNT);
     });
 
-    it('renderPagesToImagesWithMeta resolves an open-ended pageRange against pageCount', async () => {
+    it('renderPages resolves an open-ended pageRange against pageCount', async () => {
         // startIndex=0, no endIndex → worker uses pageCount-1.
         const res = await pdfRenderPagesWithMeta(SMALL_PDF, {
             page_range: { startIndex: 0, maxPages: 10 },
@@ -170,7 +142,7 @@ describe('MuPDF worker smoke — PR #2 ops', () => {
         expect(res.pages?.length).toBe(SMALL_PDF_PAGE_COUNT);
     });
 
-    it('renderPagesToImagesWithMeta throws PAGE_OUT_OF_RANGE for all-invalid explicit indices and carries pageCount in the payload', async () => {
+    it('renderPages throws PAGE_OUT_OF_RANGE for all-invalid explicit indices and carries pageCount in the payload', async () => {
         const res = await pdfRenderPagesWithMeta(SMALL_PDF, { page_indices: [99999] });
         expect(res.ok).toBe(false);
         expect(res.error?.code).toBe('PAGE_OUT_OF_RANGE');
@@ -193,18 +165,6 @@ describe('MuPDF worker smoke — PR #2 ops', () => {
         expect(res.error?.code).toBe('PAGE_OUT_OF_RANGE');
     });
 
-    it('searchPages returns hits with quad coordinates', async () => {
-        const res = await pdfSearch(NORMAL_PDF, { query: 'the' });
-        expect(res.ok).toBe(true);
-        expect(Array.isArray(res.pages)).toBe(true);
-        // Most papers contain "the" — guard with a >= check to avoid flake.
-        expect(res.pages!.length).toBeGreaterThan(0);
-        for (const page of res.pages!) {
-            expect(typeof page.pageIndex).toBe('number');
-            expect(page.matchCount).toBeGreaterThan(0);
-            expect(page.hits.length).toBe(page.matchCount);
-        }
-    });
 });
 
 describe('MuPDF worker smoke — orchestration ops', () => {
@@ -214,8 +174,7 @@ describe('MuPDF worker smoke — orchestration ops', () => {
 
     describe('extract', () => {
         it('returns page-level extraction for a healthy PDF', async () => {
-            const settings = { styleSampleSize: 0 };
-            const res = await pdfExtract(SMALL_PDF, { settings });
+            const res = await pdfExtract(SMALL_PDF, {});
             expect(res.ok).toBe(true);
 
             const result = res.result;
@@ -245,21 +204,6 @@ describe('MuPDF worker smoke — orchestration ops', () => {
             expect(typeof ocr.primaryReason).toBe('string');
             expect(typeof res.error!.payload!.pageCount).toBe('number');
             expect(res.error!.payload!.pageLabels).toBeDefined();
-        });
-    });
-
-    describe('extractByLines', () => {
-        it('returns line-based extraction for a healthy PDF', async () => {
-            const settings = { styleSampleSize: 0, useLineDetection: true };
-            const res = await pdfExtractByLines(SMALL_PDF, { settings });
-            expect(res.ok).toBe(true);
-
-            const result = res.result;
-            expect(result.pages.length).toBe(SMALL_PDF_PAGE_COUNT);
-            expect(typeof result.fullText).toBe('string');
-            for (const page of result.pages) {
-                expect(Array.isArray(page.lines)).toBe(true);
-            }
         });
     });
 
@@ -323,16 +267,19 @@ describe('MuPDF worker smoke — orchestration ops', () => {
         });
     });
 
-    describe('extractSentenceBBoxes', () => {
+    describe('structured extract (sentence-level)', () => {
         it('returns sentences with bboxes for a healthy PDF page', async () => {
             const res = await pdfSentenceBBoxes(SMALL_PDF, { page_index: 0 });
             expect(res.ok).toBe(true);
 
             const result = res.result;
-            expect(Array.isArray(result.paragraphs)).toBe(true);
+            expect(Array.isArray(result.items)).toBe(true);
             expect(Array.isArray(result.sentences)).toBe(true);
-            expect(typeof result.unmappedParagraphs).toBe('number');
-            expect(typeof result.degradedParagraphs).toBe('number');
+            // `degradation` is optional — omitted when no items degraded.
+            if (result.degradation !== undefined) {
+                expect(typeof result.degradation.count).toBe('number');
+                expect(Array.isArray(result.degradation.notes)).toBe(true);
+            }
             for (const sentence of result.sentences) {
                 expect(typeof sentence.text).toBe('string');
                 expect(Array.isArray(sentence.bboxes)).toBe(true);
@@ -346,24 +293,6 @@ describe('MuPDF worker smoke — orchestration ops', () => {
         });
     });
 
-    describe('renderPageToImage', () => {
-        it('renders a single page', async () => {
-            const res = await pdfRenderPage(SMALL_PDF, { page_index: 0 });
-            expect(res.ok).toBe(true);
-
-            const result = res.result!;
-            expect(result.pageIndex).toBe(0);
-            expect(result.width).toBeGreaterThan(0);
-            expect(result.height).toBeGreaterThan(0);
-            expect(result.data_byte_length).toBeGreaterThan(0);
-        });
-
-        it('throws PAGE_OUT_OF_RANGE for an invalid index', async () => {
-            const res = await pdfRenderPage(SMALL_PDF, { page_index: 99999 });
-            expect(res.ok).toBe(false);
-            expect(res.error?.code).toBe('PAGE_OUT_OF_RANGE');
-        });
-    });
 });
 
 // ---------------------------------------------------------------------------
@@ -467,10 +396,10 @@ describe('MuPDF worker — doc cache', () => {
     });
 
     it('multi-call pattern on the same attachment hits cache on every reuse', async () => {
-        // The pages handler typically issues getPageCountAndLabels +
-        // getPageCount + (extract). Here we simulate the multi-call
-        // pattern with two cheap ops: page count and page labels. Both
-        // share the same pdfData, so the second one should be a cache hit.
+        // The pages handler typically issues getMetadata + getPageCount
+        // + (extract). Here we simulate the multi-call pattern with two
+        // cheap ops: page count and metadata. Both share the same
+        // pdfData, so the second one should be a cache hit.
         await workerStats({ reset: true });
         await workerCacheClear({ resetCounters: true });
 

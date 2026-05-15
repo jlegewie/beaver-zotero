@@ -312,6 +312,7 @@ export const FileStatusCode = {
     PdfEncrypted: 'pdf_encrypted',
     PdfInvalid: 'pdf_invalid',
     PdfNeedsOcr: 'pdf_needs_ocr',
+    PdfParserCrash: 'pdf_parser_crash',
     PdfAnalysisError: 'pdf_analysis_error',
     PdfUnreadable: 'pdf_unreadable',
 } as const;

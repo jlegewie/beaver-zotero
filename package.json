@@ -32,6 +32,7 @@
         "test:live": "vitest run --config vitest.live.config.ts",
         "test:integration": "vitest run --config vitest.integration.config.ts",
         "test:all": "npm test && npm run test:live && npm run test:integration",
+        "bench:pdf": "BEAVER_BENCH=1 vitest run --config vitest.live.config.ts tests/live/markdownEnginesBench.live.test.ts",
         "test:watch": "vitest",
         "update-deps": "npm update --save",
         "build-react": "webpack --config webpack.config.js",
@@ -39,7 +40,10 @@
         "build-react:prod": "webpack --config webpack.config.js --mode=production",
         "build-react:staging": "BUILD_ENV=staging webpack --config webpack.config.js --mode=production",
         "watch-react": "webpack --config webpack.config.js --watch",
-        "pack:xpi": "node scripts/pack-xpi.mjs"
+        "pack:xpi": "node scripts/pack-xpi.mjs",
+        "beaver-extract": "tsx src/beaver-extract/cli/main.ts",
+        "typecheck:cli": "tsc -p tsconfig.cli.json --noEmit",
+        "test:cli-smoke": "vitest run --config vitest.smoke.config.ts"
     },
     "dependencies": {
         "@babel/preset-typescript": "^7.26.0",
@@ -86,7 +90,10 @@
         "eslint": "^9.19.0",
         "eslint-scope": "^8.3.0",
         "jsdom": "^27.0.1",
+        "commander": "^12.1.0",
         "prettier": "^3.4.2",
+        "sharp": "^0.33.5",
+        "tsx": "^4.19.2",
         "typescript": "^5.7.3",
         "typescript-eslint": "^8.23.0",
         "vitest": "^3.2.4",

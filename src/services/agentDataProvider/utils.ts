@@ -8,7 +8,7 @@ import { getPref } from '../../utils/prefs';
 import { isAttachmentOnServer, isAttachmentAvailableRemotely, getAttachmentDataInMemory, DownloadOptions } from '../../utils/webAPI';
 import { addPopupMessageAtom } from '../../../react/utils/popupMessageUtils';
 import { wasItemAddedBeforeLastSync } from '../../../react/utils/sourceUtils';
-import { PDFExtractor, ExtractionError, ExtractionErrorCode } from '../pdf';
+import { BeaverExtractor, ExtractionError, ExtractionErrorCode } from '../../beaver-extract';
 import { EXTRACTION_VERSION, isRemoteFilePath, makeRemoteFilePath } from '../attachmentFileCache';
 import type { AttachmentFileCacheRecord } from '../attachmentFileCache';
 import { DeferredToolPreference } from '../agentProtocol';
@@ -391,24 +391,93 @@ function fileStatusFromCache(record: AttachmentFileCacheRecord, isPrimary: boole
  * Extract page labels from PDF data using MuPDF.
  * Returns the label mapping (empty {} if no custom labels or on error).
  *
- * Routes through `PDFExtractor.getPageCountAndLabels`, which delegates to
- * the MuPDF worker.
+ * Routes through `BeaverExtractor.getMetadata`, which delegates to the
+ * MuPDF worker.
  */
 async function extractPageLabelsFromData(pdfData: Uint8Array): Promise<Record<number, string>> {
     try {
-        const { labels } = await new PDFExtractor().getPageCountAndLabels(pdfData);
-        return labels;
+        const { pageLabels } = await new BeaverExtractor().getMetadata(pdfData);
+        return pageLabels;
     } catch {
         return {};
     }
 }
 
 /**
- * Persist metadata to the attachment file cache after extraction.
- * Awaited at call sites to ensure cache consistency before returning.
- * Errors are caught internally and logged — they never propagate.
+ * Pre-flight gate against `cachedMeta` — short-circuits the handler when the
+ * cached record carries an authoritative error state (encrypted / invalid /
+ * needs OCR) or violates the page-count cap. Pure function; returns a
+ * neutral failure descriptor that each handler maps onto its own response
+ * wording via its local `errorResponse(...)`.
+ *
+ * Caller controls per-request predicates:
+ * - `applyPageCountCap` — handlers gate this on shape-of-request (e.g., the
+ *   pages handler only fires the cap for "effectively unbounded" extracts).
+ * - `checkOcr` — image rendering does not gate on text layer; pages and
+ *   search do.
+ *
+ * Check ordering matches today's handler ordering: encrypted → invalid →
+ * needs_ocr → too_many_pages.
  */
-async function persistMetadataToCache(
+export type PreflightErrorCode = 'encrypted' | 'invalid_pdf' | 'no_text_layer' | 'too_many_pages';
+
+export interface PreflightFailure {
+    code: PreflightErrorCode;
+    pageCount: number | null;
+    /** Populated only when code === 'too_many_pages'. */
+    maxPageCount?: number;
+}
+
+export interface PreflightOptions {
+    /** If false, skip the OCR check (image rendering doesn't need a text layer). */
+    checkOcr: boolean;
+    /** If true and `page_count` is known, fire the page-count cap. Caller decides per-request. */
+    applyPageCountCap: boolean;
+    /** From `getPref('maxPageCount')`. Required when `applyPageCountCap` is true. */
+    maxPageCount: number;
+}
+
+export function preflightCachedPdfMeta(
+    cachedMeta: AttachmentFileCacheRecord | null,
+    opts: PreflightOptions,
+): PreflightFailure | null {
+    if (!cachedMeta) return null;
+
+    if (cachedMeta.is_encrypted) {
+        return { code: 'encrypted', pageCount: cachedMeta.page_count ?? null };
+    }
+    if (cachedMeta.is_invalid) {
+        return { code: 'invalid_pdf', pageCount: cachedMeta.page_count ?? null };
+    }
+    if (opts.checkOcr && cachedMeta.needs_ocr) {
+        return { code: 'no_text_layer', pageCount: cachedMeta.page_count ?? null };
+    }
+    if (opts.applyPageCountCap && cachedMeta.page_count != null && cachedMeta.page_count > opts.maxPageCount) {
+        return {
+            code: 'too_many_pages',
+            pageCount: cachedMeta.page_count,
+            maxPageCount: opts.maxPageCount,
+        };
+    }
+    return null;
+}
+
+/**
+ * Persist metadata to the attachment file cache after extraction.
+ * Best-effort: errors are caught internally and logged — they never
+ * propagate.
+ *
+ * Returns `true` when the metadata write succeeded, `false` when the
+ * write was skipped due to shutdown OR failed internally. Callers that
+ * chain a follow-up cache write (e.g., `setContentPages`) MUST gate on
+ * the boolean — a `false` result means metadata is not in a known-good
+ * state and downstream cache writes should be skipped.
+ *
+ * Shutdown handling: re-checks `Zotero.__beaverShuttingDown` between the
+ * `IOUtils.stat` await and `cache.setMetadata` to avoid racing the
+ * Zotero teardown after a yielded I/O.
+ */
+export async function persistMetadataToCache(
     attachment: Zotero.Item,
     filePath: string,
     contentType: string,
@@ -420,9 +489,14 @@ async function persistMetadataToCache(
         is_encrypted: boolean;
         is_invalid: boolean;
     }
-): Promise<void> {
+): Promise<boolean> {
     const cache = Zotero.Beaver?.attachmentFileCache;
-    if (!cache) return;
+    if (!cache) return false;
+
+    if (Zotero.__beaverShuttingDown) {
+        logger(`persistMetadataToCache: skipping write for ${attachment.libraryID}/${attachment.key} — shutdown signalled on entry`, 3);
+        return false;
+    }
 
     try {
         let file_mtime_ms = 0;
@@ -431,6 +505,12 @@ async function persistMetadataToCache(
             const stat = await IOUtils.stat(filePath);
             file_mtime_ms = stat.lastModified ?? 0;
             file_size_bytes = stat.size ?? 0;
+        }
+        // Re-check after the stat await — shutdown can race in during the
+        // I/O. Without this, an already-closing DB would receive the write.
+        if (Zotero.__beaverShuttingDown) {
+            logger(`persistMetadataToCache: skipping write for ${attachment.libraryID}/${attachment.key} — shutdown signalled during stat`, 3);
+            return false;
         }
         await cache.setMetadata({
             item_id: attachment.id,
@@ -448,8 +528,10 @@ async function persistMetadataToCache(
             is_invalid: fields.is_invalid,
             extraction_version: EXTRACTION_VERSION,
         });
+        return true;
     } catch (error) {
         logger(`persistMetadataToCache: ${error}`, 1);
+        return false;
     }
 }
 
@@ -568,7 +650,7 @@ export async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary
                 status_reason: 'Failed to download file from remote storage',
             };
         }
-        const extractor = new PDFExtractor();
+        const extractor = new BeaverExtractor();
 
         // Get page count - this also validates the PDF and detects encryption
         let pageCount: number;
@@ -593,6 +675,15 @@ export async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary
                         page_count: null,
                         status: "unavailable",
                         status_code: FileStatusCode.PdfInvalid,
+                    };
+                } else if (error.code === ExtractionErrorCode.WASM_ERROR) {
+                    return {
+                        is_primary: isPrimary,
+                        mime_type: contentType,
+                        page_count: null,
+                        status: "unavailable",
+                        status_code: FileStatusCode.PdfParserCrash,
+                        status_reason: "PDF crashes the local PDF parser",
                     };
                 }
             }
@@ -627,6 +718,17 @@ export async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary
 
     } catch (error) {
         // Unexpected error during analysis
+        if (error instanceof ExtractionError && error.code === ExtractionErrorCode.WASM_ERROR) {
+            logger(`getAttachmentFileStatus: PDF parser crashed while analyzing ${attachment.libraryID}-${attachment.key}: ${error.message}`, 1);
+            return {
+                is_primary: isPrimary,
+                mime_type: contentType,
+                page_count: null,
+                status: "unavailable",
+                status_code: FileStatusCode.PdfParserCrash,
+                status_reason: "PDF crashes the local PDF parser",
+            };
+        }
         logger(`getAttachmentFileStatus: Error analyzing PDF: ${error}`, 1);
         return {
             is_primary: isPrimary,

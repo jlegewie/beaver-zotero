@@ -28,7 +28,20 @@ export interface BeaverEvents {
         annotationIds: string[];
         readerItemID: number;
     };
-    focusInput: {};
+    readerVisualizerAction: {
+        action:
+            | 'columns'
+            | 'lines'
+            | 'items'
+            | 'sentences'
+            | 'columns-graphics'
+            | 'items-graphics'
+            | 'sentences-graphics'
+            | 'clear'
+            | 'copy-extract-fixture-command'
+            | 'copy-ocr-fixture-command';
+    };
+    focusInput: Record<string, never>;
 }
 
 export type BeaverEventName = keyof BeaverEvents;
