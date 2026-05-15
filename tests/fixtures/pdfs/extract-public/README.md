@@ -19,6 +19,7 @@ references one of these by `pdfSha256`.
 | File (sha256 prefix) | Source | License |
 |----------------------|--------|---------|
 | `d86a26bf17a0e191…`  | Single-page excerpt (page 231) from Legewie, Joscha and Jeffrey Fagan. "Aggressive Policing and the Educational Performance of Minority Youth." *American Sociological Review*, 84(2): 220–247. | Self-authored by repository owner; committed with author's permission. |
+| `56f5ca419d881c56…`  | Image-only (no text layer) raster of the `d86a26bf17a0e191…` page above — the same author-owned excerpt flattened to a single JPEG-compressed image. Drives the `legewie-fagan-scanned` OCR fixture (positive `needsOCR=true` verdict, so CI exercises the scanned-document path). | Self-authored by repository owner; committed with author's permission. |
 
 Add new committed PDFs only when their license clearly permits redistribution
 (CC0, public domain, author-owned). Anything else goes in the gitignored
