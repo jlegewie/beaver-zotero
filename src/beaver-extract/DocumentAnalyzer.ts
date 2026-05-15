@@ -352,6 +352,36 @@ function analyzePage(
     };
 }
 
+/**
+ * Pick `count` page indices spread evenly across the range
+ * `[startPage, startPage + availablePages)`.
+ *
+ * Sampling the whole document — rather than a contiguous block from the front —
+ * keeps the OCR detector from judging a long scanned book by its front matter
+ * alone. Front matter (bookplate, blanks, half-title, title page, copyright,
+ * table of contents) genuinely has little or no text even when the OCR'd body
+ * does not; sampling only those pages misclassifies the whole book as
+ * `scanned_without_ocr`.
+ *
+ * For documents short enough that `count >= availablePages` every available
+ * page is returned, so behavior is unchanged for small documents. The returned
+ * indices are strictly increasing with no duplicates (the step is always >= 1).
+ */
+function spreadPageIndices(
+    startPage: number,
+    availablePages: number,
+    count: number,
+): number[] {
+    const n = Math.min(count, availablePages);
+    if (n <= 0) return [];
+    const step = availablePages / n;
+    const indices: number[] = [];
+    for (let k = 0; k < n; k++) {
+        indices.push(startPage + Math.floor(k * step));
+    }
+    return indices;
+}
+
 // ============================================================================
 // Document Analyzer Class
 // ============================================================================
@@ -377,8 +407,16 @@ export class DocumentAnalyzer {
         const startPage = pageCount > 3 ? 1 : 0;
         const availablePages = pageCount - startPage;
 
-        // Determine initial sample size
-        const initialSampleSize = Math.min(availablePages, opts.sampleSize);
+        // Build the evenly-spread page grid for the largest sample we might
+        // take. The initial sample is a spread subset of this grid and the
+        // expansion fills in the remaining grid pages, so the total sample
+        // never exceeds `expandedSampleSize`.
+        const sampleGrid = spreadPageIndices(
+            startPage,
+            availablePages,
+            Math.min(availablePages, opts.expandedSampleSize),
+        );
+        const initialSampleSize = Math.min(sampleGrid.length, opts.sampleSize);
 
         // Analyze initial sample
         const pageAnalyses: PageOCRAnalysis[] = [];
@@ -394,8 +432,13 @@ export class DocumentAnalyzer {
             excessive_line_overlap: 0,
         };
 
-        for (let i = startPage; i < startPage + initialSampleSize; i++) {
-            const rawPage = this.mupdf.extractRawPage(i, { includeImages: true });
+        // The initial sample is a spread subset of the grid, so front matter
+        // cannot dominate the verdict and the expansion stays a strict superset.
+        const initialPages = spreadPageIndices(0, sampleGrid.length, initialSampleSize)
+            .map((pos) => sampleGrid[pos]);
+
+        for (const pageIndex of initialPages) {
+            const rawPage = this.mupdf.extractRawPage(pageIndex, { includeImages: true });
             const analysis = analyzePage(rawPage, opts);
             pageAnalyses.push(analysis);
 
@@ -406,7 +449,7 @@ export class DocumentAnalyzer {
 
         // Calculate initial issue ratio
         const issuesCount = pageAnalyses.filter((p) => p.hasIssues).length;
-        let issueRatio = initialSampleSize > 0 ? issuesCount / initialSampleSize : 0;
+        let issueRatio = pageAnalyses.length > 0 ? issuesCount / pageAnalyses.length : 0;
 
         // Expand sample if we're in the "uncertain zone"
         // - Below lower threshold (e.g., <10%): Clearly OK, no expansion needed
@@ -416,11 +459,14 @@ export class DocumentAnalyzer {
             issueRatio >= opts.expandLowerThreshold &&
             issueRatio < opts.expandUpperThreshold;
 
-        if (isInUncertainZone && availablePages > initialSampleSize) {
-            const expandedSampleSize = Math.min(availablePages, opts.expandedSampleSize);
+        if (isInUncertainZone && sampleGrid.length > initialPages.length) {
+            // Fill in the remaining grid pages not covered by the initial
+            // sample. The total then equals `expandedSampleSize` exactly.
+            const alreadySampled = new Set(initialPages);
 
-                for (let i = startPage + initialSampleSize; i < startPage + expandedSampleSize; i++) {
-                const rawPage = this.mupdf.extractRawPage(i, { includeImages: true });
+            for (const pageIndex of sampleGrid) {
+                if (alreadySampled.has(pageIndex)) continue;
+                const rawPage = this.mupdf.extractRawPage(pageIndex, { includeImages: true });
                 const analysis = analyzePage(rawPage, opts);
                 pageAnalyses.push(analysis);
 
@@ -433,6 +479,10 @@ export class DocumentAnalyzer {
             const totalIssues = pageAnalyses.filter((p) => p.hasIssues).length;
             issueRatio = pageAnalyses.length > 0 ? totalIssues / pageAnalyses.length : 0;
         }
+
+        // Keep the per-page analyses in document order for a deterministic
+        // result (the expanded sample is interleaved with the initial one).
+        pageAnalyses.sort((a, b) => a.pageIndex - b.pageIndex);
 
         // Determine if OCR is needed
         const needsOCR = issueRatio >= opts.confirmationThreshold;
