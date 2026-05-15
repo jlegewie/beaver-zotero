@@ -76,11 +76,31 @@ function analyzeTextQuality(
     // Check alphanumeric ratio (low ratio suggests garbled/symbol-heavy text).
     // Unicode-aware: \p{L} matches letters in any script (Latin, Cyrillic,
     // Greek, Arabic, CJK, etc.) and \p{N} matches any number character.
-    const alphanumMatches = strippedText.match(/[\p{L}\p{N}]/gu);
+    //
+    // Before taking the ratio, collapse runs of 4+ identical non-alphanumeric
+    // characters down to one. Long runs of a single punctuation mark are layout
+    // artifacts — table-of-contents / index dot leaders, underline rules — not
+    // linguistic content; counting every leader dot as a non-alphanumeric
+    // character sinks the ratio of perfectly readable pages well below the
+    // threshold. Genuinely garbled extraction interleaves many distinct
+    // codepoints (replacement characters, controls, per-glyph private-use
+    // codepoints) and never forms such runs, so this collapse does not weaken
+    // detection of unmapped-glyph pages.
+    const leaderCollapsed = strippedText.replace(/([^\p{L}\p{N}])\1{3,}/gu, "$1");
+    const alphanumMatches = leaderCollapsed.match(/[\p{L}\p{N}]/gu);
     const alphanumCount = alphanumMatches ? alphanumMatches.length : 0;
-    if (contentChars > 0) {
-        const alphanumRatio = alphanumCount / contentChars;
-        if (alphanumRatio < opts.minAlphanumericRatio) {
+    const ratioChars = leaderCollapsed.length;
+    if (ratioChars > 0) {
+        const alphanumRatio = alphanumCount / ratioChars;
+        // Flag only when BOTH hold: the ratio is below threshold AND the page
+        // lacks enough real alphanumeric content to stand on its own. The
+        // absolute-volume guard mirrors the invalid-character check below and
+        // keeps legitimate symbol-dense pages — dense mathematics, equation-
+        // heavy papers, formula appendices — out of the garbled bucket.
+        if (
+            alphanumRatio < opts.minAlphanumericRatio &&
+            alphanumCount < opts.minValidCharsToAccept
+        ) {
             issues.push("low_alphanumeric_ratio");
         }
     }

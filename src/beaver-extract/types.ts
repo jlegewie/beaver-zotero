@@ -927,7 +927,14 @@ export interface OCRDetectionOptions {
     minAlphanumericRatio?: number;
     /** Max ratio of invalid/replacement characters before flagging (default: 0.3 = 30%) */
     maxInvalidCharRatio?: number;
-    /** Minimum valid characters to accept a page despite invalid chars (default: 1000) */
+    /**
+     * Minimum count of real characters to accept a page despite text-quality
+     * issues (default: 1000). Used as a volume guard by two checks: the
+     * invalid-character check (valid = non-replacement chars) and the
+     * low-alphanumeric-ratio check (valid = alphanumeric chars). A page with
+     * this much real content is treated as substantive even when its ratio of
+     * symbols/punctuation is high.
+     */
     minValidCharsToAccept?: number;
 
     // Image coverage threshold
