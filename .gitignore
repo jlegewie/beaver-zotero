@@ -52,3 +52,4 @@ docs-zotero
 
 # BeaverExtract benchmarks
 /tests/live/.bench-results/
+/.bench-corpus/
