@@ -411,7 +411,7 @@ export async function handleZoteroAttachmentPageImagesRequest(
                 case ExtractionErrorCode.WASM_ERROR:
                     return errorResponse(
                         `The PDF file for ${errorKey} crashes the PDF parser and cannot be rendered`,
-                        'render_failed',
+                        'pdf_parser_crash',
                         totalPagesForError
                     );
                 default:

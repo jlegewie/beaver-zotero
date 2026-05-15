@@ -551,6 +551,7 @@ export type AttachmentPagesErrorCode =
     | 'encrypted'           // PDF is password-protected
     | 'no_text_layer'       // PDF needs OCR
     | 'invalid_pdf'         // Invalid/corrupted PDF
+    | 'pdf_parser_crash'    // PDF crashes the local PDF parser
     | 'too_many_pages'      // PDF exceeds page count limit
     | 'page_out_of_range'   // Requested pages are out of range
     | 'download_failed'     // Remote file download failed
@@ -583,6 +584,7 @@ export type AttachmentPageImagesErrorCode =
     | 'file_too_large'      // PDF file exceeds size limit
     | 'encrypted'           // PDF is password-protected
     | 'invalid_pdf'         // Invalid/corrupted PDF
+    | 'pdf_parser_crash'    // PDF crashes the local PDF parser
     | 'too_many_pages'      // PDF exceeds page count limit
     | 'page_out_of_range'   // Requested pages are out of range
     | 'download_failed'     // Remote file download failed
