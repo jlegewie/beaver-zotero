@@ -34,6 +34,7 @@ import type { ParagraphDetectionSettings } from "./ParagraphDetector";
 interface PendingEntry {
     resolve: (value: any) => void;
     reject: (reason: any) => void;
+    fatalKey?: string;
 }
 
 /**
@@ -127,6 +128,8 @@ export class MuPDFWorkerClient {
     private retryCount = 0;
     private dispatchCounts: Record<string, number> = {};
     private lastSpawnTime: number | null = null;
+    private fatalOperationKeys = new Set<string>();
+    private fatalOperationKeyOrder: string[] = [];
 
     /** The window that spawned the current worker. Used for stale detection. */
     get spawnedFromWindow(): Window | null {
@@ -218,7 +221,14 @@ export class MuPDFWorkerClient {
         if (reply.ok) {
             entry.resolve(reply.result);
         } else {
-            entry.reject(rehydrateError(reply.error));
+            const error = rehydrateError(reply.error);
+            if (isFatalWorkerError(reply.error)) {
+                if (entry.fatalKey) {
+                    this.rememberFatalOperation(entry.fatalKey);
+                }
+                this.markStale("fatal WASM error from worker");
+            }
+            entry.reject(error);
         }
     }
 
@@ -286,11 +296,19 @@ export class MuPDFWorkerClient {
     }
 
     private dispatch<T>(op: string, args: Record<string, unknown>): Promise<T> {
+        const fatalKey = getFatalOperationKey(op, args);
+        if (fatalKey && this.fatalOperationKeys.has(fatalKey)) {
+            return Promise.reject(createKnownFatalWasmError());
+        }
         const worker = this.ensureWorker();
         const id = this.nextId++;
 
         return new Promise<T>((resolve, reject) => {
-            this.pending.set(id, { resolve, reject });
+            this.pending.set(id, {
+                resolve,
+                reject,
+                fatalKey: fatalKey ?? undefined,
+            });
             try {
                 worker.postMessage({ id, op, args });
             } catch (e) {
@@ -709,6 +727,18 @@ export class MuPDFWorkerClient {
         });
     }
 
+    private rememberFatalOperation(key: string): void {
+        if (this.fatalOperationKeys.has(key)) return;
+        this.fatalOperationKeys.add(key);
+        this.fatalOperationKeyOrder.push(key);
+        if (this.fatalOperationKeyOrder.length > 128) {
+            const oldest = this.fatalOperationKeyOrder.shift();
+            if (oldest) {
+                this.fatalOperationKeys.delete(oldest);
+            }
+        }
+    }
+
     dispose(): void {
         // Set BEFORE markStale so that any rejection that races with this
         // call (or runs synchronously inside it) sees the disposed flag and
@@ -744,6 +774,45 @@ function rehydrateError(payload: WorkerErrorPayload | undefined): Error {
         );
     }
     return new Error(payload.message ?? "Unknown worker error");
+}
+
+function isFatalWorkerError(payload: WorkerErrorPayload | undefined): boolean {
+    return payload?.name === "ExtractionError"
+        && payload.code === ExtractionErrorCode.WASM_ERROR;
+}
+
+function createKnownFatalWasmError(): ExtractionError {
+    return new ExtractionError(
+        ExtractionErrorCode.WASM_ERROR,
+        "This PDF previously crashed the MuPDF WASM parser and cannot be processed.",
+    );
+}
+
+function getFatalOperationKey(
+    op: string,
+    args: Record<string, unknown>,
+): string | null {
+    const bytes = getPdfBytes(args.pdfData);
+    if (!bytes) return null;
+    return `${op}:${bytes.byteLength}:${hashBytes(bytes)}`;
+}
+
+function getPdfBytes(value: unknown): Uint8Array | null {
+    if (value instanceof Uint8Array) return value;
+    if (value instanceof ArrayBuffer) return new Uint8Array(value);
+    if (ArrayBuffer.isView(value)) {
+        return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+    }
+    return null;
+}
+
+function hashBytes(bytes: Uint8Array): string {
+    let hash = 0x811c9dc5;
+    for (let i = 0; i < bytes.length; i++) {
+        hash = Math.imul(hash ^ bytes[i], 0x01000193) >>> 0;
+    }
+    const hex = hash.toString(16);
+    return "00000000".slice(hex.length) + hex;
 }
 
 /**

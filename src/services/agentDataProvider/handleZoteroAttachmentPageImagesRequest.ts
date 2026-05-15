@@ -408,6 +408,12 @@ export async function handleZoteroAttachmentPageImagesRequest(
                     return errorResponse(`The PDF file for ${errorKey} is invalid or corrupted`, 'invalid_pdf');
                 case ExtractionErrorCode.PAGE_OUT_OF_RANGE:
                     return errorResponse(error.message, 'page_out_of_range', totalPagesForError);
+                case ExtractionErrorCode.WASM_ERROR:
+                    return errorResponse(
+                        `The PDF file for ${errorKey} crashes the PDF parser and cannot be rendered`,
+                        'render_failed',
+                        totalPagesForError
+                    );
                 default:
                     return errorResponse(
                         `Failed to render PDF pages for ${errorKey}: ${error.message}`,

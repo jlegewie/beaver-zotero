@@ -276,6 +276,49 @@ describe('MuPDFWorkerClient', () => {
         await expect(promise).resolves.toBe(9);
     });
 
+    it('retires a worker after a WASM_ERROR reply without retrying the crashing op', async () => {
+        const client = getMuPDFWorkerClient();
+
+        const firstGood = client.getPageCount(new Uint8Array([1]));
+        const first = MockWorker.instances[0];
+        first.replyToLast({ ok: true, result: { count: 1 } });
+        await expect(firstGood).resolves.toBe(1);
+
+        const bad = client.getPageCount(new Uint8Array([2]));
+        first.replyToLast({
+            ok: false,
+            error: {
+                name: 'ExtractionError',
+                code: ExtractionErrorCode.WASM_ERROR,
+                message: 'This PDF crashed the MuPDF WASM parser and cannot be processed.',
+            },
+        });
+        await expect(bad).rejects.toMatchObject({
+            name: 'ExtractionError',
+            code: ExtractionErrorCode.WASM_ERROR,
+        });
+        expect(first.terminate).toHaveBeenCalledOnce();
+        expect(MockWorker.instances).toHaveLength(1);
+
+        const repeatedBad = client.getPageCount(new Uint8Array([2]));
+        await expect(repeatedBad).rejects.toMatchObject({
+            name: 'ExtractionError',
+            code: ExtractionErrorCode.WASM_ERROR,
+        });
+        expect(MockWorker.instances).toHaveLength(1);
+
+        const secondGood = client.getPageCount(new Uint8Array([3]));
+        const second = MockWorker.instances[1];
+        expect(second).toBeDefined();
+        second.replyToLast({ ok: true, result: { count: 3 } });
+        await expect(secondGood).resolves.toBe(3);
+
+        const stats = client.getStats();
+        expect(stats.spawnCount).toBe(2);
+        expect(stats.retryCount).toBe(0);
+        expect(stats.dispatchCounts.getPageCount).toBe(4);
+    });
+
     // -----------------------------------------------------------------------
     // PR #2 — broaden the worker surface
     // -----------------------------------------------------------------------
