@@ -19,6 +19,7 @@ import { configurePDFForTests } from '../../helpers/configurePDFForTests';
 import {
     getMuPDFWorkerClient,
     disposeMuPDFWorker,
+    WorkerAbortError,
 } from '../../../src/beaver-extract/MuPDFWorkerClient';
 import {
     ExtractionError,
@@ -274,6 +275,29 @@ describe('MuPDFWorkerClient', () => {
         second.replyToLast({ ok: true, result: { count: 9 } });
 
         await expect(promise).resolves.toBe(9);
+    });
+
+    it('aborting a call rejects without retrying and the next call respawns', async () => {
+        const client = getMuPDFWorkerClient();
+        const controller = new AbortController();
+
+        const promise = client.getPageCount(new Uint8Array([0]), controller.signal);
+        const first = MockWorker.instances[0];
+        expect(first).toBeDefined();
+
+        controller.abort();
+
+        await expect(promise).rejects.toBeInstanceOf(WorkerAbortError);
+        expect(first.terminate).toHaveBeenCalledOnce();
+        expect(MockWorker.instances).toHaveLength(1);
+
+        const next = client.getPageCount(new Uint8Array([1]));
+        const second = MockWorker.instances[1];
+        expect(second).toBeDefined();
+        second.replyToLast({ ok: true, result: { count: 5 } });
+
+        await expect(next).resolves.toBe(5);
+        expect(client.getStats().retryCount).toBe(0);
     });
 
     it('retires a worker after a WASM_ERROR reply without retrying the crashing op', async () => {

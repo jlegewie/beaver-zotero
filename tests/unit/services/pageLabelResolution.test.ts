@@ -302,7 +302,7 @@ describe('ensurePageLabelsForResolution', () => {
         expect(result.pageCount).toBe(42);
         expect(result.pdfData).toBe(pdfBytes);
         expect(mockIOUtils.read).toHaveBeenCalledWith('/data/test.pdf');
-        expect(extractor.getMetadata).toHaveBeenCalledWith(pdfBytes);
+        expect(extractor.getMetadata).toHaveBeenCalledWith(pdfBytes, undefined);
     });
 
     it('does an eager load when cachedMeta has null page_labels (never checked)', async () => {

@@ -33,6 +33,7 @@ export type {
 } from "./config";
 export {
     MuPDFWorkerClient,
+    WorkerAbortError,
     getMuPDFWorkerClient,
     disposeMuPDFWorker,
 } from "./MuPDFWorkerClient";
@@ -204,7 +205,8 @@ export class BeaverExtractor {
              * around each target; `Infinity` covers the whole doc.
              */
             analysisWindow?: number;
-        } = {}
+        } = {},
+        signal?: AbortSignal,
     ): Promise<ExtractionResult> {
         const explicitEngine = args.markdown?.engine;
         const isStructured = args.mode === "structured";
@@ -235,7 +237,7 @@ export class BeaverExtractor {
             pageIndices: args.pageIndices,
             pageRange: args.pageRange,
             analysisWindow: args.analysisWindow,
-        });
+        }, signal);
     }
 
     /**
@@ -300,16 +302,20 @@ export class BeaverExtractor {
      */
     async analyzeOCRNeeds(
         pdfData: Uint8Array | ArrayBuffer,
-        args: OCRDetectionOptions = {}
+        args: OCRDetectionOptions = {},
+        signal?: AbortSignal,
     ): Promise<OCRDetectionResult> {
-        return getMuPDFWorkerClient().analyzeOCRNeeds(pdfData, args);
+        return getMuPDFWorkerClient().analyzeOCRNeeds(pdfData, args, signal);
     }
 
     /**
      * Get page count without full extraction.
      */
-    async getPageCount(pdfData: Uint8Array | ArrayBuffer): Promise<number> {
-        return getMuPDFWorkerClient().getPageCount(pdfData);
+    async getPageCount(
+        pdfData: Uint8Array | ArrayBuffer,
+        signal?: AbortSignal,
+    ): Promise<number> {
+        return getMuPDFWorkerClient().getPageCount(pdfData, signal);
     }
 
     /**
@@ -322,9 +328,10 @@ export class BeaverExtractor {
      * per-page label pass.
      */
     async getMetadata(
-        pdfData: Uint8Array | ArrayBuffer
+        pdfData: Uint8Array | ArrayBuffer,
+        signal?: AbortSignal,
     ): Promise<PDFMetadata> {
-        return getMuPDFWorkerClient().getMetadata(pdfData);
+        return getMuPDFWorkerClient().getMetadata(pdfData, signal);
     }
 
     /**
@@ -346,9 +353,10 @@ export class BeaverExtractor {
             pageIndices?: number[];
             pageRange?: { startIndex: number; endIndex?: number; maxPages?: number };
             options?: PageImageOptions;
-        } = {}
+        } = {},
+        signal?: AbortSignal,
     ): Promise<{ pageCount: number; pageLabels: Record<number, string>; pages: PageImageResult[] }> {
-        return getMuPDFWorkerClient().renderPages(pdfData, args);
+        return getMuPDFWorkerClient().renderPages(pdfData, args, signal);
     }
 
     /**
@@ -390,10 +398,11 @@ export class BeaverExtractor {
     async search(
         pdfData: Uint8Array | ArrayBuffer,
         query: string,
-        args: PDFSearchOptions & { maxPageCount?: number } = {}
+        args: PDFSearchOptions & { maxPageCount?: number } = {},
+        signal?: AbortSignal,
     ): Promise<PDFSearchResult> {
         const { maxPageCount, ...options } = args;
         // search + score within one worker round-trip.
-        return getMuPDFWorkerClient().search(pdfData, query, options, { maxPageCount });
+        return getMuPDFWorkerClient().search(pdfData, query, options, { maxPageCount }, signal);
     }
 }

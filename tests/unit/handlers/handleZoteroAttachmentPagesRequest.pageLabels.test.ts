@@ -42,9 +42,17 @@ vi.mock('../../../src/beaver-extract', () => {
         }
     }
 
+    class MockWorkerAbortError extends Error {
+        constructor(message = 'worker operation aborted by caller') {
+            super(message);
+            this.name = 'WorkerAbortError';
+        }
+    }
+
     return {
         BeaverExtractor: MockPDFExtractor,
         ExtractionError: MockExtractionError,
+        WorkerAbortError: MockWorkerAbortError,
         ExtractionErrorCode: {
             ENCRYPTED: 'encrypted',
             NO_TEXT_LAYER: 'no_text_layer',
@@ -84,7 +92,7 @@ vi.mock('../../../src/services/agentDataProvider/utils', async () => {
 
 import { handleZoteroAttachmentPagesRequest } from '../../../src/services/agentDataProvider/handleZoteroAttachmentPagesRequest';
 import { resolveToPdfAttachment } from '../../../src/services/agentDataProvider/utils';
-import { ExtractionError, ExtractionErrorCode } from '../../../src/beaver-extract';
+import { ExtractionError, ExtractionErrorCode, WorkerAbortError } from '../../../src/beaver-extract';
 
 describe('handleZoteroAttachmentPagesRequest page label persistence', () => {
     const mockIOUtils = (globalThis as any).IOUtils as {
@@ -236,6 +244,63 @@ describe('handleZoteroAttachmentPagesRequest page label persistence', () => {
         });
         // No endIndex set — open-ended; worker resolves it.
         expect(mockState.extractCalls[0].pageRange.endIndex).toBeUndefined();
+    });
+
+    it('returns timeout when the worker aborts extraction', async () => {
+        setupRequestScenario({ cachedPageCount: 3 });
+        mockState.extractImpl = async () => {
+            throw new WorkerAbortError();
+        };
+
+        const response = await handleZoteroAttachmentPagesRequest({
+            event: 'zotero_attachment_pages_request',
+            request_id: 'req-timeout',
+            attachment: { library_id: 1, zotero_key: 'ABCD1234' },
+            start_page: 1,
+            end_page: 1,
+            skip_local_limits: true,
+            timeout_seconds: 1,
+        });
+
+        expect(response).toMatchObject({
+            type: 'zotero_attachment_pages',
+            error_code: 'timeout',
+            total_pages: 3,
+            pages: [],
+        });
+    });
+
+    it('returns timeout instead of treating an expired content-cache lookup as a cache miss', async () => {
+        vi.useFakeTimers();
+        try {
+            const { cache } = setupRequestScenario({ cachedPageCount: 3 });
+            cache.getContentRange.mockImplementation(
+                () => new Promise((resolve) => setTimeout(() => resolve(null), 1000)),
+            );
+
+            const promise = handleZoteroAttachmentPagesRequest({
+                event: 'zotero_attachment_pages_request',
+                request_id: 'req-cache-timeout',
+                attachment: { library_id: 1, zotero_key: 'ABCD1234' },
+                start_page: 1,
+                end_page: 1,
+                skip_local_limits: true,
+                timeout_seconds: 0.5,
+            });
+
+            await vi.advanceTimersByTimeAsync(1000);
+            const response = await promise;
+
+            expect(response).toMatchObject({
+                type: 'zotero_attachment_pages',
+                error_code: 'timeout',
+                total_pages: 3,
+                pages: [],
+            });
+            expect(mockState.extractCalls).toHaveLength(0);
+        } finally {
+            vi.useRealTimers();
+        }
     });
 
     it('maps worker PAGE_OUT_OF_RANGE to page_out_of_range with total_pages from error.pageCount', async () => {

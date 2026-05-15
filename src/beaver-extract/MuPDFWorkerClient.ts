@@ -113,6 +113,17 @@ class StaleWorkerError extends Error {
     }
 }
 
+/**
+ * Sentinel rejection for caller-initiated cancellation. Unlike stale-worker
+ * failures, aborted operations are not retried by `call()`.
+ */
+export class WorkerAbortError extends Error {
+    constructor(message = "worker operation aborted by caller") {
+        super(message);
+        this.name = "WorkerAbortError";
+    }
+}
+
 export class MuPDFWorkerClient {
     private worker: Worker | null = null;
     private spawnedFromWindowInternal: Window | null = null;
@@ -286,29 +297,46 @@ export class MuPDFWorkerClient {
      * Send an RPC to the worker. Transparently retries once if the worker
      * went stale between dispatch and reply.
      */
-    async call<T>(op: string, args: Record<string, unknown> = {}): Promise<T> {
+    async call<T>(
+        op: string,
+        args: Record<string, unknown> = {},
+        opts: { signal?: AbortSignal } = {},
+    ): Promise<T> {
+        if (opts.signal?.aborted) {
+            throw new WorkerAbortError();
+        }
         this.dispatchCounts[op] = (this.dispatchCounts[op] ?? 0) + 1;
         getConfig().log(`[MuPDFWorkerClient] dispatch op=${op}`, 3);
         try {
-            return await this.dispatch<T>(op, args);
+            return await this.dispatch<T>(op, args, opts.signal);
         } catch (e) {
             // Only retry on stale-worker recovery, and only when the client is
             // still live. After dispose() the singleton slot has been cleared
             // and respawning would orphan the new worker from shutdown
             // cleanup — propagate the StaleWorkerError instead.
             if (e instanceof StaleWorkerError && !this.disposed) {
+                if (opts.signal?.aborted) {
+                    throw new WorkerAbortError();
+                }
                 this.retryCount++;
                 getConfig().log(
                     `[MuPDFWorkerClient] retry op=${op} after stale worker`,
                     2,
                 );
-                return await this.dispatch<T>(op, args);
+                return await this.dispatch<T>(op, args, opts.signal);
             }
             throw e;
         }
     }
 
-    private dispatch<T>(op: string, args: Record<string, unknown>): Promise<T> {
+    private dispatch<T>(
+        op: string,
+        args: Record<string, unknown>,
+        signal?: AbortSignal,
+    ): Promise<T> {
+        if (signal?.aborted) {
+            return Promise.reject(new WorkerAbortError());
+        }
         const fatalCandidate = getFatalOperationCandidate(op, args);
         const fatalKey = fatalCandidate
             ? this.getCachedFatalOperationKey(fatalCandidate)
@@ -320,11 +348,45 @@ export class MuPDFWorkerClient {
         const id = this.nextId++;
 
         return new Promise<T>((resolve, reject) => {
+            let settled = false;
+            let onAbort: (() => void) | null = null;
+            const cleanup = () => {
+                if (onAbort && signal) {
+                    signal.removeEventListener("abort", onAbort);
+                    onAbort = null;
+                }
+            };
+            const resolveWithCleanup = (value: T) => {
+                if (settled) return;
+                settled = true;
+                cleanup();
+                resolve(value);
+            };
+            const rejectWithCleanup = (reason: any) => {
+                if (settled) return;
+                settled = true;
+                cleanup();
+                reject(reason);
+            };
+            if (signal) {
+                onAbort = () => {
+                    if (!this.pending.has(id)) return;
+                    this.pending.delete(id);
+                    rejectWithCleanup(new WorkerAbortError());
+                    this.markStale("op aborted by caller");
+                };
+                signal.addEventListener("abort", onAbort, { once: true });
+            }
             this.pending.set(id, {
-                resolve,
-                reject,
+                resolve: resolveWithCleanup,
+                reject: rejectWithCleanup,
                 fatalCandidate: fatalCandidate ?? undefined,
             });
+            if (signal?.aborted) {
+                this.pending.delete(id);
+                rejectWithCleanup(new WorkerAbortError());
+                return;
+            }
             try {
                 worker.postMessage({ id, op, args });
             } catch (e) {
@@ -332,7 +394,7 @@ export class MuPDFWorkerClient {
                 this.markStale(
                     `postMessage threw: ${e instanceof Error ? e.message : String(e)}`,
                 );
-                reject(new StaleWorkerError("postMessage threw"));
+                rejectWithCleanup(new StaleWorkerError("postMessage threw"));
             }
         });
     }
@@ -362,12 +424,15 @@ export class MuPDFWorkerClient {
      * across multiple `BeaverExtractor` calls, so transferring would detach the
      * caller's buffer.
      */
-    async getPageCount(pdfData: Uint8Array | ArrayBuffer): Promise<number> {
+    async getPageCount(
+        pdfData: Uint8Array | ArrayBuffer,
+        signal?: AbortSignal,
+    ): Promise<number> {
         const bytes =
             pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
         const result = await this.call<{ count: number }>("getPageCount", {
             pdfData: bytes,
-        });
+        }, { signal });
         return result.count;
     }
 
@@ -380,10 +445,11 @@ export class MuPDFWorkerClient {
      */
     async getMetadata(
         pdfData: Uint8Array | ArrayBuffer,
+        signal?: AbortSignal,
     ): Promise<PDFMetadata> {
         const bytes =
             pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
-        return this.call<PDFMetadata>("getMetadata", { pdfData: bytes });
+        return this.call<PDFMetadata>("getMetadata", { pdfData: bytes }, { signal });
     }
 
     /**
@@ -423,6 +489,7 @@ export class MuPDFWorkerClient {
             pageRange?: { startIndex: number; endIndex?: number; maxPages?: number };
             options?: PageImageOptions;
         },
+        signal?: AbortSignal,
     ): Promise<{ pageCount: number; pageLabels: Record<number, string>; pages: PageImageResult[] }> {
         const bytes =
             pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
@@ -434,6 +501,7 @@ export class MuPDFWorkerClient {
                 pageRange: args?.pageRange,
                 options: args?.options,
             },
+            { signal },
         );
     }
 
@@ -471,6 +539,7 @@ export class MuPDFWorkerClient {
              */
             analysisWindow?: number;
         },
+        signal?: AbortSignal,
     ): Promise<ExtractionResult> {
         const bytes =
             pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
@@ -484,7 +553,7 @@ export class MuPDFWorkerClient {
             pageIndices: args?.pageIndices,
             pageRange: args?.pageRange,
             analysisWindow: args?.analysisWindow,
-        });
+        }, { signal });
     }
 
     /**
@@ -534,13 +603,14 @@ export class MuPDFWorkerClient {
     async analyzeOCRNeeds(
         pdfData: Uint8Array | ArrayBuffer,
         options?: OCRDetectionOptions,
+        signal?: AbortSignal,
     ): Promise<OCRDetectionResult> {
         const bytes =
             pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
         return this.call<OCRDetectionResult>("analyzeOCRNeeds", {
             pdfData: bytes,
             options,
-        });
+        }, { signal });
     }
 
     /**
@@ -556,6 +626,7 @@ export class MuPDFWorkerClient {
         query: string,
         options?: PDFSearchOptions,
         args?: { maxPageCount?: number },
+        signal?: AbortSignal,
     ): Promise<PDFSearchResult> {
         const bytes =
             pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
@@ -564,7 +635,7 @@ export class MuPDFWorkerClient {
             query,
             options,
             maxPageCount: args?.maxPageCount,
-        });
+        }, { signal });
     }
 
     /**

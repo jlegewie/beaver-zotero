@@ -17,7 +17,7 @@ import {
     AttachmentPagesErrorCode,
     WSPageContent,
 } from '../agentProtocol';
-import { BeaverExtractor, ExtractionError, ExtractionErrorCode } from '../../beaver-extract';
+import { BeaverExtractor, ExtractionError, ExtractionErrorCode, WorkerAbortError } from '../../beaver-extract';
 import { makeRemoteFilePath } from '../attachmentFileCache';
 import type { CachedPageContent } from '../attachmentFileCache';
 import {
@@ -31,6 +31,11 @@ import {
     persistMetadataToCache,
 } from './utils';
 import { ensurePageLabelsForResolution, resolvePageValue, InvalidPageValueError } from './pageLabelResolution';
+import {
+    DEFAULT_PAGES_TIMEOUT_SECONDS,
+    TimeoutError,
+    createTimeoutController,
+} from './timeout';
 
 
 /**
@@ -40,7 +45,7 @@ import { ensurePageLabelsForResolution, resolvePageValue, InvalidPageValueError 
 export async function handleZoteroAttachmentPagesRequest(
     request: WSZoteroAttachmentPagesRequest
 ): Promise<WSZoteroAttachmentPagesResponse> {
-    const { attachment, start_page, end_page, skip_local_limits, prefer_page_labels, max_pages, request_id } = request;
+    const { attachment, start_page, end_page, skip_local_limits, prefer_page_labels, max_pages, request_id, timeout_seconds } = request;
     const requestKey = `${attachment.library_id}-${attachment.zotero_key}`;
     let errorKey = requestKey;
 
@@ -74,14 +79,19 @@ export async function handleZoteroAttachmentPagesRequest(
         );
     }
 
+    const timeout = createTimeoutController(timeout_seconds, DEFAULT_PAGES_TIMEOUT_SECONDS);
+    const { signal, timeoutSeconds, throwIfTimedOut, dispose } = timeout;
+
     try {
         // 1. Get the attachment item from Zotero
         const zoteroItem = await Zotero.Items.getByLibraryAndKeyAsync(
             attachment.library_id,
             attachment.zotero_key
         );
+        throwIfTimedOut('zotero_item_lookup');
 
         if (!zoteroItem) {
+            throwIfTimedOut('not_found_response');
             return errorResponse(
                 `Attachment does not exist in user's library: ${requestKey}`,
                 'not_found'
@@ -90,10 +100,13 @@ export async function handleZoteroAttachmentPagesRequest(
 
         // Load all data for the item
         await zoteroItem.loadAllData();
+        throwIfTimedOut('zotero_item_load');
 
         // 2. Resolve to a PDF attachment (auto-resolves regular items with one PDF)
         const resolveResult = await resolveToPdfAttachment(zoteroItem, requestKey);
+        throwIfTimedOut('pdf_attachment_resolution');
         if (!resolveResult.resolved) {
+            throwIfTimedOut('pdf_attachment_resolution_response');
             return errorResponse(resolveResult.error, resolveResult.error_code);
         }
         const { item: pdfItem, key: pdfKey } = resolveResult;
@@ -102,6 +115,7 @@ export async function handleZoteroAttachmentPagesRequest(
 
         // 3. Get the file path — returns false if missing or nonexistent
         const rawFilePath = await pdfItem.getFilePathAsync();
+        throwIfTimedOut('file_path_lookup');
         const filePath = rawFilePath || null;  // normalize false → null
         const isRemoteOnly = !filePath && isRemoteAccessAvailable(pdfItem);
         const effectiveFilePath = filePath || (isRemoteOnly ? makeRemoteFilePath(pdfItem) : null);
@@ -109,6 +123,7 @@ export async function handleZoteroAttachmentPagesRequest(
 
         if (!effectiveFilePath) {
             const onServer = isAttachmentAvailableRemotely(pdfItem);
+            throwIfTimedOut('file_missing_response');
             return errorResponse(
                 onServer
                     ? `The PDF file for ${pdfKey} is not available locally and remote file access is disabled in settings.`
@@ -121,10 +136,12 @@ export async function handleZoteroAttachmentPagesRequest(
         if (!skip_local_limits && !isRemoteOnly) {
             const maxFileSizeMB = getPref('maxFileSizeMB');
             const fileSize = await Zotero.Attachments.getTotalFileSize(pdfItem);
+            throwIfTimedOut('file_size_check');
 
             if (fileSize) {
                 const fileSizeInMB = fileSize / 1024 / 1024;
                 if (fileSizeInMB > maxFileSizeMB) {
+                    throwIfTimedOut('file_too_large_response');
                     return errorResponse(
                         `The PDF file for ${pdfKey} has a file size of ${fileSizeInMB.toFixed(1)}MB, which exceeds the ${maxFileSizeMB}MB limit`,
                         'file_too_large'
@@ -139,6 +156,7 @@ export async function handleZoteroAttachmentPagesRequest(
             logger(`handleZoteroAttachmentPagesRequest: cache not available for ${requestKey}`, 1);
         }
         const cachedMeta = cache ? await cache.getMetadata(pdfItem.id, effectiveFilePath).catch(() => null) : null;
+        throwIfTimedOut('metadata_cache_lookup');
 
         // Fast-path: use cached metadata for known error states.
         //
@@ -159,16 +177,20 @@ export async function handleZoteroAttachmentPagesRequest(
         if (preflight) {
             switch (preflight.code) {
                 case 'encrypted':
+                    throwIfTimedOut('cached_encrypted_response');
                     return errorResponse(`The PDF file for ${pdfKey} is password-protected`, 'encrypted');
                 case 'invalid_pdf':
+                    throwIfTimedOut('cached_invalid_pdf_response');
                     return errorResponse(`The PDF file for ${pdfKey} is invalid or corrupted`, 'invalid_pdf');
                 case 'no_text_layer':
+                    throwIfTimedOut('cached_no_text_layer_response');
                     return errorResponse(
                         `The PDF file for ${pdfKey} requires OCR (no text layer)`,
                         'no_text_layer',
                         preflight.pageCount,
                     );
                 case 'too_many_pages':
+                    throwIfTimedOut('cached_too_many_pages_response');
                     return errorResponse(
                         `The PDF file for ${pdfKey} has ${preflight.pageCount} pages, which exceeds the ${preflight.maxPageCount}-page limit`,
                         'too_many_pages',
@@ -185,7 +207,8 @@ export async function handleZoteroAttachmentPagesRequest(
         // short-circuits on cache hits; only on cold cache does it open the PDF.
         // The bytes / pageCount it returns are reused below.
         if (prefer_page_labels && filePath) {
-            const labelResult = await ensurePageLabelsForResolution(filePath, cachedMeta, extractor);
+            const labelResult = await ensurePageLabelsForResolution(filePath, cachedMeta, extractor, signal);
+            throwIfTimedOut('page_label_resolution');
             pageLabels = labelResult.labels;
             if (labelResult.pageCount != null) {
                 totalPages = labelResult.pageCount;
@@ -213,9 +236,11 @@ export async function handleZoteroAttachmentPagesRequest(
             if (!pdfData) {
                 try {
                     pdfData = await loadPdfData(pdfItem, effectiveFilePath, isRemoteOnly);
+                    throwIfTimedOut('pdf_data_load_for_page_count');
                 } catch (error) {
                     if (!isRemoteOnly) throw error;
                     logger(`handleZoteroAttachmentPagesRequest: Remote download failed: ${error}`, 1);
+                    throwIfTimedOut('remote_download_failed_response');
                     return errorResponse(
                         `Failed to download PDF for ${pdfKey} from remote storage: ${error instanceof Error ? error.message : String(error)}`,
                         'download_failed'
@@ -224,6 +249,7 @@ export async function handleZoteroAttachmentPagesRequest(
                 if (isRemoteOnly) {
                     const exceeded = checkRemotePdfSize(pdfData, skip_local_limits);
                     if (exceeded) {
+                        throwIfTimedOut('remote_file_too_large_response');
                         return errorResponse(
                             `The PDF file for ${pdfKey} has a file size of ${exceeded.sizeMB.toFixed(1)}MB, which exceeds the ${exceeded.maxMB}MB limit`,
                             'file_too_large'
@@ -231,7 +257,8 @@ export async function handleZoteroAttachmentPagesRequest(
                     }
                 }
             }
-            totalPages = await extractor.getPageCount(pdfData);
+            totalPages = await extractor.getPageCount(pdfData, signal);
+            throwIfTimedOut('page_count_extraction');
         }
 
         // 6. Check page count limit when extracting the entire document.
@@ -239,6 +266,7 @@ export async function handleZoteroAttachmentPagesRequest(
         if (!skip_local_limits && effectivelyUnboundedExtract && totalPages != null) {
             const maxPageCount = getPref('maxPageCount');
             if (totalPages > maxPageCount) {
+                throwIfTimedOut('too_many_pages_response');
                 return errorResponse(
                     `The PDF file for ${pdfKey} has ${totalPages} pages, which exceeds the ${maxPageCount}-page limit`,
                     'too_many_pages'
@@ -266,6 +294,7 @@ export async function handleZoteroAttachmentPagesRequest(
                 : (totalPages != null ? totalPages : null);
         } catch (error) {
             if (error instanceof InvalidPageValueError) {
+                throwIfTimedOut('invalid_page_value_response');
                 return errorResponse(error.message, 'invalid_page_value', totalPages);
             }
             throw error;
@@ -297,6 +326,7 @@ export async function handleZoteroAttachmentPagesRequest(
                         pdfItem.libraryID, pdfItem.key,
                         effectiveFilePath, startIdx, endIdx
                     );
+                    throwIfTimedOut('content_cache_lookup');
                     if (cachedPages) {
                         logger(`handleZoteroAttachmentPagesRequest: Cache hit for ${requestKey} pages ${startPage}-${endPageForCache}`, 3);
                         const pages: WSPageContent[] = cachedPages.map((p) => ({
@@ -304,6 +334,7 @@ export async function handleZoteroAttachmentPagesRequest(
                             page_label: pageLabels?.[p.index] ?? p.label,
                             content: p.content,
                         }));
+                        throwIfTimedOut('content_cache_hit_response');
                         return {
                             type: 'zotero_attachment_pages',
                             request_id,
@@ -313,6 +344,9 @@ export async function handleZoteroAttachmentPagesRequest(
                         };
                     }
                 } catch (error) {
+                    if (signal.aborted || error instanceof WorkerAbortError || error instanceof TimeoutError) {
+                        throw error;
+                    }
                     logger(`handleZoteroAttachmentPagesRequest: content cache read error: ${error}`, 1);
                 }
             }
@@ -328,15 +362,17 @@ export async function handleZoteroAttachmentPagesRequest(
                 pdfData = await loadPdfData(pdfItem, effectiveFilePath, isRemoteOnly);
             } catch (error) {
                 if (!isRemoteOnly) throw error; // local I/O error — let outer handler deal with it
-                logger(`handleZoteroAttachmentPagesRequest: Remote download failed: ${error}`, 1);
-                return errorResponse(
-                    `Failed to download PDF for ${pdfKey} from remote storage: ${error instanceof Error ? error.message : String(error)}`,
-                    'download_failed'
-                );
+                    logger(`handleZoteroAttachmentPagesRequest: Remote download failed: ${error}`, 1);
+                    throwIfTimedOut('remote_download_failed_response');
+                    return errorResponse(
+                        `Failed to download PDF for ${pdfKey} from remote storage: ${error instanceof Error ? error.message : String(error)}`,
+                        'download_failed'
+                    );
             }
             if (isRemoteOnly) {
                 const exceeded = checkRemotePdfSize(pdfData, skip_local_limits);
                 if (exceeded) {
+                    throwIfTimedOut('remote_file_too_large_response');
                     return errorResponse(
                         `The PDF file for ${pdfKey} has a file size of ${exceeded.sizeMB.toFixed(1)}MB, which exceeds the ${exceeded.maxMB}MB limit`,
                         'file_too_large'
@@ -378,7 +414,8 @@ export async function handleZoteroAttachmentPagesRequest(
             + `pageRange=${JSON.stringify(extractArgs.pageRange ?? null)} (allPages=${extractingAllPages}, max_pages=${max_pages ?? 'none'})`,
             3,
         );
-        const result = await extractor.extract(pdfData, extractArgs);
+        const result = await extractor.extract(pdfData, extractArgs, signal);
+        throwIfTimedOut('pdf_extract');
 
         // The worker's extract always populates analysis.pageCount.
         const resolvedPageCount = result.analysis.pageCount;
@@ -428,6 +465,7 @@ export async function handleZoteroAttachmentPagesRequest(
                     is_invalid: false,
                 },
             );
+            throwIfTimedOut('metadata_cache_persist');
 
             if (metadataPersisted && !Zotero.__beaverShuttingDown) {
                 try {
@@ -445,6 +483,7 @@ export async function handleZoteroAttachmentPagesRequest(
                         resolvedPageCount,
                         contentPages,
                     );
+                    throwIfTimedOut('content_cache_persist');
                 } catch (error) {
                     logger(`handleZoteroAttachmentPagesRequest: content-page write error: ${error}`, 1);
                 }
@@ -453,6 +492,7 @@ export async function handleZoteroAttachmentPagesRequest(
             }
         }
 
+        throwIfTimedOut('success_response');
         return {
             type: 'zotero_attachment_pages',
             request_id,
@@ -462,6 +502,15 @@ export async function handleZoteroAttachmentPagesRequest(
         };
 
     } catch (error) {
+        if (signal.aborted || error instanceof WorkerAbortError || error instanceof TimeoutError) {
+            logger(`handleZoteroAttachmentPagesRequest: Timed out after ${timeoutSeconds}s`, 1);
+            return errorResponse(
+                `PDF extraction timed out after ${timeoutSeconds} seconds`,
+                'timeout',
+                totalPages,
+            );
+        }
+
         logger(`handleZoteroAttachmentPagesRequest: Extraction failed: ${error}`, 1);
 
         if (error instanceof ExtractionError) {
@@ -503,5 +552,7 @@ export async function handleZoteroAttachmentPagesRequest(
             `Failed to extract PDF content for ${errorKey}: ${error instanceof Error ? error.message : String(error)}`,
             'extraction_failed'
         );
+    } finally {
+        dispose();
     }
 }
