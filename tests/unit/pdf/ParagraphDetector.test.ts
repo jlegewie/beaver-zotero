@@ -1064,3 +1064,140 @@ describe('hanging-indent leader suppression', () => {
         });
     });
 });
+
+// ---------------------------------------------------------------------------
+// Header detection
+//
+// Two layout rules exercised here:
+//   - Heading-capitalization guard: a candidate promoted by a same-size
+//     font-difference rule (italic/bold/different-font, no size cue) must
+//     begin like a heading — capital, digit, or opening quote/bracket. A
+//     lowercase-leading line is body prose (MuPDF reports a whole line's
+//     font as that of its leading run, so a paragraph beginning with an
+//     italic word reads as "different font") or an equation fragment.
+//   - Numbered section headings test the numeric outline prefix against
+//     the joined item text, so a heading long enough to wrap across lines
+//     is recognised even though only its first line carries the number.
+// ---------------------------------------------------------------------------
+describe('header detection', () => {
+    // Filler body block whose last line carries the whitespace a section
+    // heading sits above — without a real gap the header rules (which
+    // require `gapCheckPasses`) never get a chance to fire in `startNewItem`.
+    const FILLERS_BEFORE_HEADING: LeaderLineSpec[] = FILLERS.map((f, i) =>
+        i === FILLERS.length - 1 ? { ...f, gapAfter: 14 } : f,
+    );
+
+    function items(specs: LeaderLineSpec[], bodyStyles: TextStyle[]) {
+        return detectParagraphs(makeColumnPageResult(specs), bodyStyles).items;
+    }
+
+    describe('heading-capitalization guard', () => {
+        it('does not promote an equation fragment in a math-italic font', () => {
+            // Body-size italic in a font distinct from body — matches the
+            // same-size-italic header rule — but the line is the numerator
+            // of a fraction, beginning with a lowercase variable name.
+            const all = items(
+                [
+                    ...FILLERS_BEFORE_HEADING,
+                    { text: 'n(unemp | soc, s, t)', l: 0, size: 10, italic: true, font: 'Math-Italic' },
+                ],
+                [BODY],
+            );
+            const eq = all.find(it => it.text.includes('n(unemp'));
+            expect(eq).toBeDefined();
+            expect(eq!.type).toBe('paragraph');
+            expect(eq!.text.startsWith('## ')).toBe(false);
+        });
+
+        it('does not promote a prose line that merely begins with an italic word', () => {
+            // A hyphenated italic term ("congruence prin-/ciple") continues
+            // onto this line, so MuPDF reports the whole line in the italic
+            // font. The line is mid-paragraph body prose, lowercase-leading.
+            const all = items(
+                [
+                    ...FILLERS_BEFORE_HEADING,
+                    {
+                        text: 'ciple. This principle which holds that the data space should be the',
+                        l: 0,
+                        size: 10,
+                        italic: true,
+                        font: 'Times-Italic',
+                    },
+                ],
+                [BODY],
+            );
+            const prose = all.find(it => it.text.includes('ciple. This principle'));
+            expect(prose).toBeDefined();
+            expect(prose!.type).toBe('paragraph');
+        });
+
+        it('still promotes a same-size italic heading that begins with a capital', () => {
+            // The guard must not demote a genuine font-difference heading:
+            // an italic subsection title set in a distinct font, capitalised.
+            const all = items(
+                [
+                    ...FILLERS_BEFORE_HEADING,
+                    { text: 'Materials and Methods', l: 0, size: 10, italic: true, font: 'Times-Italic' },
+                ],
+                [BODY],
+            );
+            const heading = all.find(it => it.text.includes('Materials and Methods'));
+            expect(heading).toBeDefined();
+            expect(heading!.type).toBe('header');
+        });
+
+        it('still promotes a bold heading whose wrapped continuation begins lowercase', () => {
+            // A genuine bold heading long enough to wrap: the first line is
+            // capitalised, the continuation begins with a lowercase word
+            // ("and ..."). The guard is item-level — it judges the joined
+            // item text, which starts with the capitalised first line — so
+            // both lines stay in one heading item rather than the
+            // continuation splitting off as body text.
+            const all = items(
+                [
+                    ...FILLERS_BEFORE_HEADING,
+                    { text: 'Exploring strain and stage distribution', l: 0, size: 10, bold: true, font: 'Heading-Bold' },
+                    { text: 'and relatedness between strains within donors', l: 0, size: 10, bold: true, font: 'Heading-Bold' },
+                ],
+                [BODY],
+            );
+            const heading = all.find(it => it.text.includes('Exploring strain'));
+            expect(heading).toBeDefined();
+            expect(heading!.type).toBe('header');
+            expect(heading!.text).toContain('and relatedness between strains');
+        });
+    });
+
+    describe('numbered section headings', () => {
+        it('promotes a single-line numbered heading in a distinct font', () => {
+            const all = items(
+                [
+                    ...FILLERS_BEFORE_HEADING,
+                    { text: '3. Formulation of strategic objectives', l: 0, size: 10, font: 'Heading-Sans' },
+                ],
+                [BODY],
+            );
+            const heading = all.find(it => it.text.includes('Formulation of strategic'));
+            expect(heading).toBeDefined();
+            expect(heading!.type).toBe('header');
+        });
+
+        it('promotes a numbered heading that wraps across two lines', () => {
+            // The numeric outline prefix ("3.3.") sits only on the first
+            // line; the wrapped continuation carries no heading cue of its
+            // own. Both lines share the heading font, so they form one item.
+            const all = items(
+                [
+                    ...FILLERS_BEFORE_HEADING,
+                    { text: '3.3. Key success factors for successful', l: 0, size: 10, font: 'Heading-Sans' },
+                    { text: 'project management', l: 0, size: 10, font: 'Heading-Sans' },
+                ],
+                [BODY],
+            );
+            const heading = all.find(it => it.text.includes('Key success factors'));
+            expect(heading).toBeDefined();
+            expect(heading!.type).toBe('header');
+            expect(heading!.text).toContain('project management');
+        });
+    });
+});

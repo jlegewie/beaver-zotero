@@ -946,6 +946,11 @@ function isHeaderStyle(
     const primaryBodyStyle = bodyStyles[0];
     let isPotentialHeader = false;
     const gapCheckPasses = precededByGap === null || precededByGap;
+    // True when the candidate carries an independent size cue (Rule 1).
+    // Used to exempt size-cued headings from the heading-capitalization
+    // guard below — a larger line is a heading regardless of its leading
+    // character.
+    const sizeIncreaseHeader = lineStyle.size > primaryBodyStyle.size;
 
     // Rule 1: Larger font size
     if (lineStyle.size > primaryBodyStyle.size) {
@@ -1022,12 +1027,20 @@ function isHeaderStyle(
     // outline prefix is what makes the rule safe: body lines that happen to
     // be in a different font (inline code, embedded glyphs) almost never
     // start with a "N." or "N.M" outline.
+    //
+    // Tested against `phraseText`, not the per-line `text`: a section
+    // heading long enough to wrap carries its numeric outline only on the
+    // first line ("3.3. Key success factors for successful\nproject
+    // management"). Per-line evaluation in `startNewItem` leaves
+    // `phraseTextOverride` null so the first line still triggers correctly;
+    // the multi-line item evaluator passes the joined text so every wrapped
+    // line of the same heading is recognised. Mirrors Rule 5.
     if (
         !isPotentialHeader &&
         gapCheckPasses &&
         Math.abs(lineStyle.size - primaryBodyStyle.size) < 0.5 &&
         lineStyle.font !== primaryBodyStyle.font &&
-        SECTION_PREFIX_RE.test(text)
+        SECTION_PREFIX_RE.test(phraseText)
     ) {
         isPotentialHeader = true;
     }
@@ -1035,6 +1048,40 @@ function isHeaderStyle(
     if (!isPotentialHeader) return false;
 
     // Apply disqualifying heuristics
+
+    // Heading-capitalization guard. Rules 2-6 promote a candidate on a
+    // same-or-smaller-size font difference alone — a signal that is
+    // unreliable in two recurring situations:
+    //   - MuPDF's JSON walk reports a single font per line, taken from the
+    //     line's leading run. A body paragraph line that merely begins with
+    //     an italic/bold word (e.g. the tail of a hyphenated italicised
+    //     term continued onto the next line) is reported entirely in that
+    //     emphasis font and reads as "different font, same size" vs. body.
+    //   - Inline equation fragments set in a math-italic font (variables,
+    //     function notation like "n(unemp | soc, s, t)") are a different
+    //     font at body size.
+    // Both produce a lowercase-leading line. Real section headings begin
+    // with a capital letter, a digit, or an opening quote/bracket — so a
+    // lowercase-leading candidate carrying no size cue is body prose or an
+    // equation, not a heading. Size-cued headings (Rule 1) keep their
+    // independent signal and are exempt.
+    //
+    // This is an item-level disqualifier: it runs only when an explicit
+    // `phraseTextOverride` is supplied, i.e. from the multi-line item
+    // evaluator, where `phraseText` is the joined item text and therefore
+    // begins with the item's FIRST line. The per-line boundary checks in
+    // `startNewItem` pass no override and are skipped — otherwise a genuine
+    // multi-line heading whose wrapped continuation starts with a lowercase
+    // word ("...stage distribution\nand relatedness between strains...")
+    // would have that continuation demoted, breaking the merge that keeps
+    // the heading intact.
+    if (
+        phraseTextOverride !== null &&
+        !sizeIncreaseHeader &&
+        /^["'“‘«(\[]?\p{Ll}/u.test(phraseText)
+    ) {
+        return false;
+    }
 
     // Author block on a paper's cover page commonly uses the same bold-encoded
     // subset font as section titles. Use the merged `phraseText` so multi-line
