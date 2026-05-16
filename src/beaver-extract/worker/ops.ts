@@ -114,10 +114,14 @@ export interface OpReply<T = unknown> {
 
 export async function opGetPageCount(args: { pdfData: Uint8Array | ArrayBuffer }): Promise<OpReply<{ count: number }>> {
     const doc = await acquireDoc(args.pdfData);
+    let docFailed = false;
     try {
         return { result: { count: doc.countPages() } };
+    } catch (e) {
+        docFailed = true;
+        throw e;
     } finally {
-        releaseDoc(doc);
+        releaseDoc(doc, docFailed);
     }
 }
 
@@ -125,13 +129,17 @@ export async function opGetMetadata(
     args: { pdfData: Uint8Array | ArrayBuffer },
 ): Promise<OpReply<PDFMetadata>> {
     const doc = await acquireDoc(args.pdfData);
+    let docFailed = false;
     try {
         const pageCount = doc.countPages();
         const pageLabels = collectPageLabels(doc);
         const info = collectDocumentInfo(doc);
         return { result: { pageCount, pageLabels, ...info } };
+    } catch (e) {
+        docFailed = true;
+        throw e;
     } finally {
-        releaseDoc(doc);
+        releaseDoc(doc, docFailed);
     }
 }
 
@@ -140,6 +148,7 @@ export async function opExtractRawPageDetailed(
 ): Promise<OpReply<RawPageDataDetailed>> {
     const api = await ensureApi();
     const doc = await acquireDoc(args.pdfData);
+    let docFailed = false;
     try {
         const pageCount = doc.countPages();
         if (
@@ -159,8 +168,11 @@ export async function opExtractRawPageDetailed(
             api.Font,
         );
         return { result };
+    } catch (e) {
+        docFailed = true;
+        throw e;
     } finally {
-        releaseDoc(doc);
+        releaseDoc(doc, docFailed);
     }
 }
 
@@ -182,6 +194,7 @@ export async function opRenderPages(
 ): Promise<OpReply<{ pageCount: number; pageLabels: Record<number, string>; pages: PageImageResult[] }>> {
     const api = await ensureApi();
     const doc = await acquireDoc(args.pdfData);
+    let docFailed = false;
     try {
         const opts = { ...DEFAULT_PAGE_IMAGE_OPTIONS, ...(args.options || {}) };
         const pageCount = doc.countPages();
@@ -200,8 +213,11 @@ export async function opRenderPages(
             result: { pageCount, pageLabels, pages: out },
             transfer,
         };
+    } catch (e) {
+        docFailed = true;
+        throw e;
     } finally {
-        releaseDoc(doc);
+        releaseDoc(doc, docFailed);
     }
 }
 
@@ -908,6 +924,7 @@ export async function opExtract(
     const tDocOpenStart = performance.now();
     const doc = await acquireDoc(args.pdfData);
     const docOpenMs = performance.now() - tDocOpenStart;
+    let docFailed = false;
     try {
         // Capture the caller-supplied threshold BEFORE the spread flattens
         // it to the default. `getEffectiveRepeatThreshold` uses this to
@@ -995,8 +1012,11 @@ export async function opExtract(
             result.metadata.timings.totalMs = performance.now() - tOpStart;
         }
         return { result };
+    } catch (e) {
+        docFailed = true;
+        throw e;
     } finally {
-        releaseDoc(doc);
+        releaseDoc(doc, docFailed);
     }
 }
 
@@ -1038,6 +1058,7 @@ export async function opAnalyzeLayout(
     const tDocOpenStart = performance.now();
     const doc = await acquireDoc(args.pdfData);
     const docOpenMs = performance.now() - tDocOpenStart;
+    let docFailed = false;
     try {
         // Same prefix as `opExtract`: capture caller-supplied threshold
         // before defaults flatten it; merge defaults; collect labels;
@@ -1122,8 +1143,11 @@ export async function opAnalyzeLayout(
             },
         };
         return { result };
+    } catch (e) {
+        docFailed = true;
+        throw e;
     } finally {
-        releaseDoc(doc);
+        releaseDoc(doc, docFailed);
     }
 }
 
@@ -1131,13 +1155,17 @@ export async function opAnalyzeOCRNeeds(
     args: { pdfData: Uint8Array | ArrayBuffer; options?: OCRDetectionOptions },
 ): Promise<OpReply<OCRDetectionResult>> {
     const doc = await acquireDoc(args.pdfData);
+    let docFailed = false;
     try {
         const provider = rawPageProviderFromDoc(doc);
         const analyzer = new DocumentAnalyzer(provider);
         const result = analyzer.getDetailedOCRAnalysis(args.options || {});
         return { result };
+    } catch (e) {
+        docFailed = true;
+        throw e;
     } finally {
-        releaseDoc(doc);
+        releaseDoc(doc, docFailed);
     }
 }
 
@@ -1154,6 +1182,7 @@ export async function opSearch(
     const scoringOpts = { ...DEFAULT_SEARCH_SCORING_OPTIONS, ...(opts.scoring || {}) };
 
     const doc = await acquireDoc(args.pdfData);
+    let docFailed = false;
     try {
         const totalPages = doc.countPages();
 
@@ -1261,8 +1290,11 @@ export async function opSearch(
                 },
             } as PDFSearchResult,
         };
+    } catch (e) {
+        docFailed = true;
+        throw e;
     } finally {
-        releaseDoc(doc);
+        releaseDoc(doc, docFailed);
     }
 }
 
@@ -1285,6 +1317,7 @@ export async function opExtractSentenceDebug(
     },
 ): Promise<OpReply<SentenceTraceResult>> {
     const doc = await acquireDoc(args.pdfData);
+    let docFailed = false;
     try {
         const pageCount = doc.countPages();
         if (
@@ -1313,7 +1346,10 @@ export async function opExtractSentenceDebug(
             trace: true,
         });
         return { result: traceResult };
+    } catch (e) {
+        docFailed = true;
+        throw e;
     } finally {
-        releaseDoc(doc);
+        releaseDoc(doc, docFailed);
     }
 }

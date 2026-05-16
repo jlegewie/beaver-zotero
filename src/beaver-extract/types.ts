@@ -1027,6 +1027,7 @@ export enum ExtractionErrorCode {
     INVALID_PDF = "INVALID_PDF",
     PAGE_OUT_OF_RANGE = "PAGE_OUT_OF_RANGE",
     WASM_ERROR = "WASM_ERROR",
+    HEAP_EXHAUSTION = "HEAP_EXHAUSTION",
 }
 
 /** Structured error for extraction failures */

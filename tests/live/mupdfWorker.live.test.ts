@@ -411,4 +411,18 @@ describe('MuPDF worker — doc cache', () => {
         expect(stats.cacheStats!.hits).toBe(1);
         expect(stats.cacheStats!.entries).toBe(1);
     });
+
+    it('discard-on-error prevents an out-of-range op from warming the cache', async () => {
+        await workerStats({ reset: true });
+        await workerCacheClear({ resetCounters: true });
+
+        const res = await pdfExtractRawDetailed(SMALL_PDF, { page_index: 9999 });
+        expect(res.ok).toBe(false);
+        expect(res.error?.code).toBe('PAGE_OUT_OF_RANGE');
+
+        const stats = await workerStats();
+        expect(stats.cacheStats).not.toBeNull();
+        expect(stats.cacheStats!.entries).toBe(0);
+        expect(stats.cacheStats!.discards).toBe(1);
+    });
 });

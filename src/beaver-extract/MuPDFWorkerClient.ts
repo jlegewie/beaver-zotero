@@ -108,6 +108,7 @@ export interface MuPDFWorkerCacheStats {
     hits: number;
     misses: number;
     evictions: number;
+    discards: number;
     ttlMs: number;
     maxEntries: number;
     maxBytes: number;
@@ -284,6 +285,8 @@ export class MuPDFWorkerClient {
                     );
                 }
                 this.markStale("fatal WASM error from worker");
+            } else if (isHeapExhaustionWorkerError(reply.error)) {
+                this.markStale("MuPDF WASM heap exhaustion from worker");
             }
             entry.reject(error);
         }
@@ -936,6 +939,11 @@ function rehydrateError(payload: WorkerErrorPayload | undefined): Error {
 function isFatalWorkerError(payload: WorkerErrorPayload | undefined): boolean {
     return payload?.name === "ExtractionError"
         && payload.code === ExtractionErrorCode.WASM_ERROR;
+}
+
+function isHeapExhaustionWorkerError(payload: WorkerErrorPayload | undefined): boolean {
+    return payload?.name === "ExtractionError"
+        && payload.code === ExtractionErrorCode.HEAP_EXHAUSTION;
 }
 
 function createKnownFatalWasmError(): ExtractionError {

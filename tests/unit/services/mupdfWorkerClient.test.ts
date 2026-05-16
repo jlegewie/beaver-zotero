@@ -386,6 +386,39 @@ describe('MuPDFWorkerClient', () => {
         expect(stats.dispatchCounts.getPageCount).toBe(4);
     });
 
+    it('retires a worker after HEAP_EXHAUSTION without memoizing the PDF as permanently fatal', async () => {
+        const client = getMuPDFWorkerClient();
+
+        const badBytes = new Uint8Array([2]);
+        const bad = client.getPageCount(badBytes);
+        const first = MockWorker.instances[0];
+        first.replyToLast({
+            ok: false,
+            error: {
+                name: 'ExtractionError',
+                code: ExtractionErrorCode.HEAP_EXHAUSTION,
+                message: 'MuPDF exhausted its WASM heap while processing this PDF.',
+            },
+        });
+        await expect(bad).rejects.toMatchObject({
+            name: 'ExtractionError',
+            code: ExtractionErrorCode.HEAP_EXHAUSTION,
+        });
+        expect(first.terminate).toHaveBeenCalledOnce();
+        expect(MockWorker.instances).toHaveLength(1);
+
+        const repeated = client.getPageCount(new Uint8Array([2]));
+        const second = MockWorker.instances[1];
+        expect(second).toBeDefined();
+        second.replyToLast({ ok: true, result: { count: 2 } });
+        await expect(repeated).resolves.toBe(2);
+
+        const stats = client.getStats();
+        expect(stats.spawnCount).toBe(2);
+        expect(stats.retryCount).toBe(0);
+        expect(stats.dispatchCounts.getPageCount).toBe(2);
+    });
+
     it('keys fatal suppression by operation arguments', async () => {
         const client = getMuPDFWorkerClient();
         const pdfData = new Uint8Array([1, 2, 3]);
@@ -776,6 +809,7 @@ describe('MuPDFWorkerClient', () => {
                 hits: 0,
                 misses: 0,
                 evictions: 0,
+                discards: 0,
                 ttlMs: 30_000,
                 maxEntries: 3,
                 maxBytes: 200 * 1024 * 1024,
@@ -811,6 +845,7 @@ describe('MuPDFWorkerClient', () => {
                     hits: 0,
                     misses: 0,
                     evictions: 0,
+                    discards: 0,
                     ttlMs: 30_000,
                     maxEntries: 3,
                     maxBytes: 200 * 1024 * 1024,
@@ -846,6 +881,7 @@ describe('MuPDFWorkerClient', () => {
                     hits: 5,
                     misses: 7,
                     evictions: 1,
+                    discards: 2,
                     ttlMs: 30_000,
                     maxEntries: 3,
                     maxBytes: 200 * 1024 * 1024,
