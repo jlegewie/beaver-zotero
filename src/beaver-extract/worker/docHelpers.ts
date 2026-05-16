@@ -32,6 +32,7 @@ import type {
     RectTuple,
 } from "./mupdfApi";
 import { ERROR_CODES, postLog, workerError } from "./errors";
+import { isRecoverablePageError } from "../wasmFatal";
 import { ensureApi } from "./wasmInit";
 import {
     aspectRatioRotation,
@@ -50,13 +51,24 @@ import {
 // cannot corrupt correctly-decoded text; genuine symbol/math glyphs that stay
 // unmappable become a wrong-but-plausible character instead of U+FFFD (the same
 // best-effort behavior as Poppler and PyMuPDF).
-const STRUCTURED_TEXT_OPTIONS = "preserve-whitespace,use-cid-for-unknown-unicode";
+//
+// `collect-styles`: enables MuPDF's structured-text style collection, which
+// also activates the `check_for_fake_bold` pass. That pass drops a character
+// when an identical one already exists within a fraction of the font size —
+// MuPDF's mechanism for collapsing text drawn multiple times in the same place
+// (fake-bold overprinting, and OCR text layers redrawn many times). Without it,
+// a PDF whose invisible OCR layer is stamped dozens of times per page extracts
+// with every glyph duplicated dozens of times, exploding memory until the WASM
+// module aborts (SIGABRT) or the V8 heap is exhausted. `mutool` enables this by
+// default; matching it keeps pathological OCR documents extractable.
+const STRUCTURED_TEXT_OPTIONS =
+    "preserve-whitespace,collect-styles,use-cid-for-unknown-unicode";
 const STRUCTURED_TEXT_OPTIONS_WITH_IMAGES =
-    "preserve-whitespace,preserve-images,use-cid-for-unknown-unicode";
+    "preserve-whitespace,preserve-images,collect-styles,use-cid-for-unknown-unicode";
 const STRUCTURED_TEXT_OPTIONS_DETAILED =
-    "preserve-whitespace,preserve-ligatures,use-cid-for-unknown-unicode";
+    "preserve-whitespace,preserve-ligatures,collect-styles,use-cid-for-unknown-unicode";
 const STRUCTURED_TEXT_OPTIONS_DETAILED_WITH_IMAGES =
-    "preserve-whitespace,preserve-ligatures,preserve-images,use-cid-for-unknown-unicode";
+    "preserve-whitespace,preserve-ligatures,preserve-images,collect-styles,use-cid-for-unknown-unicode";
 
 export interface RenderOptionsResolved {
     scale: number;
@@ -825,7 +837,21 @@ export function collectPageLabels(doc: DocumentLike): Record<number, string> {
     const count = doc.countPages();
     const labels: Record<number, string> = {};
     for (let i = 0; i < count; i++) {
-        const page = doc.loadPage(i);
+        let page;
+        try {
+            page = doc.loadPage(i);
+        } catch (err) {
+            // A malformed page tree can claim `count` pages yet fail to
+            // resolve some leaves. Skip the bad index and keep going so one
+            // unresolvable page does not abort label collection (and, via
+            // `opExtract`, the whole document).
+            if (!isRecoverablePageError(err)) throw err;
+            postLog(
+                "warn",
+                `[mupdf-worker] collectPageLabels: skipping unresolvable page ${i}: ${String(err)}`,
+            );
+            continue;
+        }
         try {
             const label = page.getLabel();
             if (label) labels[i] = label;

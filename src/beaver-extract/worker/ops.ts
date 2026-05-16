@@ -73,7 +73,8 @@ import type {
     SentenceTraceResult,
     WorkerSentenceDebugOptions,
 } from "../sentenceTypes";
-import { ERROR_CODES, workerError } from "./errors";
+import { ERROR_CODES, postLog, workerError } from "./errors";
+import { isRecoverablePageError } from "../wasmFatal";
 import { acquireDoc, releaseDoc } from "./docCache";
 import { ensureApi } from "./wasmInit";
 import {
@@ -244,9 +245,26 @@ function buildAnalysisFromDoc(
     analysisMs: number;
 } {
     const tWalkStart = performance.now();
-    const analysisPages: RawPageData[] = analysisIndices.map(
-        (i) => preWalked?.get(i) ?? extractRawPageFromDoc(doc, i),
-    );
+    const analysisPages: RawPageData[] = [];
+    for (const i of analysisIndices) {
+        const pre = preWalked?.get(i);
+        if (pre) {
+            analysisPages.push(pre);
+            continue;
+        }
+        try {
+            analysisPages.push(extractRawPageFromDoc(doc, i));
+        } catch (err) {
+            // A malformed page tree can fail to resolve individual leaves.
+            // Skip the bad page and keep going so one unresolvable page
+            // does not abort the whole extraction (mirrors `mutool`).
+            if (!isRecoverablePageError(err)) throw err;
+            postLog(
+                "warn",
+                `[mupdf-worker] buildAnalysisFromDoc: skipping unresolvable page ${i}: ${String(err)}`,
+            );
+        }
+    }
     const analysisPageByIndex = new Map<number, RawPageData>(
         analysisPages.map((p) => [p.pageIndex, p]),
     );
@@ -454,7 +472,21 @@ export function runExtractFromIndices(
         preWalkedTargets = new Map<number, RawPageData>();
         for (const i of targetIndices) {
             const tTargetPreWalk = performance.now();
-            const detailed = extractRawPageDetailedFromDoc(doc, i, false, fontApi);
+            let detailed: RawPageDataDetailed;
+            try {
+                detailed = extractRawPageDetailedFromDoc(doc, i, false, fontApi);
+            } catch (err) {
+                // Unresolvable page in a malformed page tree — skip it. The
+                // page is then absent from `preWalkedTargets`, so
+                // `buildAnalysisFromDoc` also skips it and it drops out of
+                // `effectiveTargetIndices` below.
+                if (!isRecoverablePageError(err)) throw err;
+                postLog(
+                    "warn",
+                    `[mupdf-worker] runExtractFromIndices: skipping unresolvable page ${i}: ${String(err)}`,
+                );
+                continue;
+            }
             preWalkedDetailedMsByTarget.set(
                 i,
                 performance.now() - tTargetPreWalk,
@@ -496,6 +528,21 @@ export function runExtractFromIndices(
     // a detailed pre-walk or a JSON walk inside `buildAnalysisFromDoc`.
     const walkMs = jsonWalkMs + preWalkMs;
 
+    // Drop any target page that failed to walk (unresolvable leaf in a
+    // malformed page tree). `buildAnalysisFromDoc` skips such pages, so they
+    // are absent from `analysisPageByIndex`; the per-engine output loops below
+    // rely on that lookup and would otherwise dereference `undefined`.
+    const effectiveTargetIndices = targetIndices.filter((i) =>
+        analysisPageByIndex.has(i),
+    );
+    if (effectiveTargetIndices.length === 0 && targetIndices.length > 0) {
+        throw workerError(
+            ERROR_CODES.PAGE_OUT_OF_RANGE,
+            `None of the ${targetIndices.length} requested page(s) could be resolved (malformed page tree)`,
+            { pageCount },
+        );
+    }
+
     const pages: ProcessedPage[] = [];
     const perPageMs: number[] = [];
     // Per-page phase breakdown — only populated by the structured branch.
@@ -510,7 +557,7 @@ export function runExtractFromIndices(
         // the precomputed `marginRemoval` and `styleProfile` so it skips
         // re-running cross-page analysis.
         const probeGraphics = shouldProbeGraphicsLayer(opts.graphicsLayerMode);
-        for (const i of targetIndices) {
+        for (const i of effectiveTargetIndices) {
             const tPage = performance.now();
             const rawPage = analysisPageByIndex.get(i)!;
             // Gate the device walk on `graphicsLayerMode`. Skipping it
@@ -586,7 +633,7 @@ export function runExtractFromIndices(
                 "runExtractFromIndices: engine='structured' requires a resolved `splitter` argument",
             );
         }
-        for (const i of targetIndices) {
+        for (const i of effectiveTargetIndices) {
             const tPage = performance.now();
             const rawPage = analysisPageByIndex.get(i)!;
             const preWalkedDetailedMs = preWalkedDetailedMsByTarget!.get(i) ?? 0;
@@ -635,7 +682,7 @@ export function runExtractFromIndices(
     } else {
         const pageExtractor = new PageExtractor({ styleProfile });
 
-        for (const i of targetIndices) {
+        for (const i of effectiveTargetIndices) {
             const tPage = performance.now();
             const rawPage = analysisPageByIndex.get(i)!;
             const filteredPage = MarginFilter.filterPageWithSmartRemoval(
@@ -947,11 +994,12 @@ export async function opAnalyzeLayout(
         );
 
         // Project analysis-window pages → target-page subset, in target
-        // order. `resolveAnalysisPages` guarantees every target index is
-        // present in the analysis union, so the lookups never miss.
-        const pages: RawPageData[] = targetIndices.map(
-            (i) => analysisPageByIndex.get(i)!,
-        );
+        // order. `resolveAnalysisPages` guarantees every target index is in
+        // the analysis union, but `buildAnalysisFromDoc` drops unresolvable
+        // pages (malformed page tree), so filter the misses out.
+        const pages: RawPageData[] = targetIndices
+            .map((i) => analysisPageByIndex.get(i))
+            .filter((p): p is RawPageData => p != null);
 
         const result: LayoutAnalysisResult = {
             pages,
@@ -1060,7 +1108,19 @@ export async function opSearch(
         // raw-page extraction in step 2 and the scoring pass in step 3.
         const pageResults: PDFPageSearchResult[] = [];
         for (const pageIndex of indices) {
-            const r = searchPageInDoc(doc, pageIndex, args.query, limit);
+            let r: PDFPageSearchResult;
+            try {
+                r = searchPageInDoc(doc, pageIndex, args.query, limit);
+            } catch (err) {
+                // Unresolvable page in a malformed page tree — skip it so
+                // search still covers the rest of the document.
+                if (!isRecoverablePageError(err)) throw err;
+                postLog(
+                    "warn",
+                    `[mupdf-worker] opSearch: skipping unresolvable page ${pageIndex}: ${String(err)}`,
+                );
+                continue;
+            }
             if (r.matchCount > 0) pageResults.push(r);
         }
 
