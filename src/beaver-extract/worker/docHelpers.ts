@@ -52,23 +52,21 @@ import {
 // unmappable become a wrong-but-plausible character instead of U+FFFD (the same
 // best-effort behavior as Poppler and PyMuPDF).
 //
-// `collect-styles`: enables MuPDF's structured-text style collection, which
-// also activates the `check_for_fake_bold` pass. That pass drops a character
-// when an identical one already exists within a fraction of the font size —
-// MuPDF's mechanism for collapsing text drawn multiple times in the same place
-// (fake-bold overprinting, and OCR text layers redrawn many times). Without it,
-// a PDF whose invisible OCR layer is stamped dozens of times per page extracts
-// with every glyph duplicated dozens of times, exploding memory until the WASM
-// module aborts (SIGABRT) or the V8 heap is exhausted. `mutool` enables this by
-// default; matching it keeps pathological OCR documents extractable.
-const STRUCTURED_TEXT_OPTIONS =
-    "preserve-whitespace,collect-styles,use-cid-for-unknown-unicode";
+// Duplicate-redraw collapsing: some PDFs — notably OCR tools that stamp the
+// invisible text layer many times per page — draw their whole text content
+// dozens of times at identical coordinates. MuPDF's `collect-styles` option
+// would collapse those (its `check_for_fake_bold` pass), but that pass scans
+// every prior glyph for every glyph — O(n^2) per page — making normal
+// documents ~7x slower to walk. `dedupOverlappingLines` (below) does the same
+// collapse as a cheap O(n) post-pass instead, so `collect-styles` is
+// intentionally NOT set here.
+const STRUCTURED_TEXT_OPTIONS = "preserve-whitespace,use-cid-for-unknown-unicode";
 const STRUCTURED_TEXT_OPTIONS_WITH_IMAGES =
-    "preserve-whitespace,preserve-images,collect-styles,use-cid-for-unknown-unicode";
+    "preserve-whitespace,preserve-images,use-cid-for-unknown-unicode";
 const STRUCTURED_TEXT_OPTIONS_DETAILED =
-    "preserve-whitespace,preserve-ligatures,collect-styles,use-cid-for-unknown-unicode";
+    "preserve-whitespace,preserve-ligatures,use-cid-for-unknown-unicode";
 const STRUCTURED_TEXT_OPTIONS_DETAILED_WITH_IMAGES =
-    "preserve-whitespace,preserve-ligatures,preserve-images,collect-styles,use-cid-for-unknown-unicode";
+    "preserve-whitespace,preserve-ligatures,preserve-images,use-cid-for-unknown-unicode";
 
 export interface RenderOptionsResolved {
     scale: number;
@@ -139,6 +137,51 @@ function normalizeStructuredTextBlocks(blocks: Array<RawBlock & { bbox: any }>):
         }
         return normalized;
     });
+}
+
+/**
+ * Collapse page elements that are exact positional duplicates of an earlier
+ * one on the same page: text lines with identical text at the same rounded
+ * origin, and image blocks with the same rounded bbox.
+ *
+ * Some PDFs — notably OCR tools that stamp the invisible text layer many times
+ * per page — draw their whole content dozens of times at identical
+ * coordinates. MuPDF's structured-text walk faithfully returns every copy,
+ * inflating the page 30-50x and exploding downstream memory and time. This is
+ * the cheap O(n) equivalent of MuPDF's `collect-styles` fake-bold dedup (see
+ * the `STRUCTURED_TEXT_OPTIONS` comment).
+ *
+ * Returns a new block list: duplicate lines are dropped and any block left
+ * with no lines is removed. Origins are rounded to the nearest point so float
+ * noise between redraws cannot defeat the match; distinct text lines on a page
+ * are always more than a point apart, so normal documents pass through with
+ * nothing removed.
+ */
+function dedupOverlappingLines(blocks: RawBlock[]): RawBlock[] {
+    const seen = new Set<string>();
+    const out: RawBlock[] = [];
+    for (const block of blocks) {
+        if (block.type === "text" && block.lines) {
+            const kept = (block.lines as RawLine[]).filter((line) => {
+                const key = `t:${Math.round(line.bbox.l)},${Math.round(line.bbox.t)}:${line.text}`;
+                if (seen.has(key)) return false;
+                seen.add(key);
+                return true;
+            });
+            if (kept.length === 0) continue;
+            block.lines = kept;
+            out.push(block);
+        } else if (block.type === "image") {
+            const b = block.bbox;
+            const key = `i:${Math.round(b.l)},${Math.round(b.t)},${Math.round(b.r)},${Math.round(b.b)}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            out.push(block);
+        } else {
+            out.push(block);
+        }
+    }
+    return out;
 }
 
 /**
@@ -291,7 +334,7 @@ export function extractRawPageFromDoc(
                 width,
                 height,
                 label,
-                blocks,
+                blocks: dedupOverlappingLines(blocks),
             };
         } finally {
             stext.destroy();
@@ -686,7 +729,7 @@ export function extractRawPageDetailedFromDoc(
             width,
             height,
             label,
-            blocks,
+            blocks: dedupOverlappingLines(blocks),
         } as RawPageDataDetailed;
     } finally {
         page.destroy();
