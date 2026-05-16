@@ -17,7 +17,7 @@
  *   import type { RawPageData, ExtractionResult } from "../types";
  */
 
-import { DocumentAnalyzer } from "../DocumentAnalyzer";
+import { DocumentAnalyzer, type RawPageProvider } from "../DocumentAnalyzer";
 import { StyleAnalyzer } from "../StyleAnalyzer";
 import { MarginFilter, getEffectiveRepeatThreshold } from "../MarginFilter";
 import { PageExtractor } from "../PageExtractor";
@@ -206,6 +206,68 @@ export async function opRenderPages(
 }
 
 /**
+ * Per-`opExtract` page-walk cache.
+ *
+ * The OCR gate (`DocumentAnalyzer`) samples a spread of pages across the
+ * document, and the extraction pipeline then walks every target/analysis
+ * page. For a whole-document extract every sampled page is also a
+ * pipeline page, so without sharing each such page's `toStructuredText`
+ * walk runs twice — once for the gate, once for extraction. The doubling
+ * is invisible on cheap pages but doubles the wall time of a page that is
+ * expensive to walk (heavy vector content, redraw-stamped text layers).
+ *
+ * This cache memoizes the walk so each page is walked at most once per
+ * `opExtract` call: the gate populates it, the pipeline reuses it.
+ *
+ * `includeImages` only takes effect on a cache MISS. It is the OCR gate,
+ * not the extraction pipeline, that needs image blocks (to measure
+ * scanned-page coverage). The gate always runs first, so the pages it
+ * samples are walked WITH images and the pipeline reuses them as-is —
+ * image blocks are inert for every downstream text consumer (line /
+ * column / paragraph / margin / sentence detection all filter to
+ * `type === "text"`). Pages the gate did not sample — and every page
+ * when `checkTextLayer` is off and the gate never runs — are walked by
+ * the pipeline WITHOUT images, exactly as before this cache existed.
+ *
+ *  - `getPlain`    — JSON-walk pages for the markdown engines and the
+ *                    markdown-mode gate.
+ *  - `getDetailed` — per-char detailed-walk pages for structured
+ *                    extraction and the structured-mode gate.
+ */
+class PageWalkCache {
+    private readonly plain = new Map<number, RawPageData>();
+    private readonly detailed = new Map<number, RawPageDataDetailed>();
+
+    constructor(
+        private readonly doc: DocumentLike,
+        private readonly fontApi?: FontApi,
+    ) {}
+
+    getPlain(pageIndex: number, includeImages: boolean): RawPageData {
+        let page = this.plain.get(pageIndex);
+        if (!page) {
+            page = extractRawPageFromDoc(this.doc, pageIndex, { includeImages });
+            this.plain.set(pageIndex, page);
+        }
+        return page;
+    }
+
+    getDetailed(pageIndex: number, includeImages: boolean): RawPageDataDetailed {
+        let page = this.detailed.get(pageIndex);
+        if (!page) {
+            page = extractRawPageDetailedFromDoc(
+                this.doc,
+                pageIndex,
+                includeImages,
+                this.fontApi,
+            );
+            this.detailed.set(pageIndex, page);
+        }
+        return page;
+    }
+}
+
+/**
  * Shared analysis-context prefix for `runExtractFromIndices` and
  * `opAnalyzeLayout`. Walks the analysis-window pages once and runs the
  * cross-page `buildPageAnalysisContext` (StyleAnalyzer + MarginFilter)
@@ -235,6 +297,7 @@ function buildAnalysisFromDoc(
     analysisIndices: number[],
     pageCount: number,
     preWalked?: Map<number, RawPageData>,
+    pageCache?: PageWalkCache,
 ): {
     analysisPages: RawPageData[];
     analysisPageByIndex: Map<number, RawPageData>;
@@ -253,7 +316,11 @@ function buildAnalysisFromDoc(
             continue;
         }
         try {
-            analysisPages.push(extractRawPageFromDoc(doc, i));
+            analysisPages.push(
+                pageCache
+                    ? pageCache.getPlain(i, false)
+                    : extractRawPageFromDoc(doc, i),
+            );
         } catch (err) {
             // A malformed page tree can fail to resolve individual leaves.
             // Skip the bad page and keep going so one unresolvable page
@@ -440,6 +507,7 @@ export function runExtractFromIndices(
     paragraphSettings?: ParagraphDetectionSettings,
     splitter?: SentenceSplitter,
     fontApi?: FontApi,
+    pageCache?: PageWalkCache,
 ): ExtractionResult {
     const tStart = performance.now();
 
@@ -474,7 +542,13 @@ export function runExtractFromIndices(
             const tTargetPreWalk = performance.now();
             let detailed: RawPageDataDetailed;
             try {
-                detailed = extractRawPageDetailedFromDoc(doc, i, false, fontApi);
+                // Reuse the OCR gate's walk of this page when the shared
+                // cache is present; otherwise walk it fresh. The pipeline
+                // never needs image blocks, so a page the gate did not
+                // already sample is walked without them.
+                detailed = pageCache
+                    ? pageCache.getDetailed(i, false)
+                    : extractRawPageDetailedFromDoc(doc, i, false, fontApi);
             } catch (err) {
                 // Unresolvable page in a malformed page tree — skip it. The
                 // page is then absent from `preWalkedTargets`, so
@@ -521,6 +595,7 @@ export function runExtractFromIndices(
         analysisIndices,
         pageCount,
         preWalkedTargets,
+        pageCache,
     );
     // Fold the structured prewalk into the same `walkMs` counter the
     // markdown engines use. Profilers and the `timings` envelope see a
@@ -841,13 +916,35 @@ export async function opExtract(
         // provided.
         const requestedRepeatThreshold = args.settings?.repeatThreshold;
         const opts = { ...DEFAULT_EXTRACTION_SETTINGS, ...(args.settings || {}) };
-        const provider = rawPageProviderFromDoc(doc);
-        const docAnalyzer = new DocumentAnalyzer(provider);
-        const pageCount = docAnalyzer.getPageCount();
+        const pageCount = doc.countPages();
         const pageLabels = collectPageLabels(doc);
 
+        // Structured mode needs the WASM `Font` helpers to populate line
+        // fonts during the detailed walk (the JSON walk used to cover this
+        // — we now skip it for target pages). Resolved up front so the OCR
+        // gate's page cache can produce detailed walks the pipeline reuses.
+        const fontApi = isStructured ? (await ensureApi()).Font : undefined;
+
+        // One walk per page for the whole op. The OCR gate samples a
+        // spread of pages and the pipeline walks them again; sharing the
+        // walk here keeps an expensive-to-walk page from being processed
+        // twice (gate + extraction).
+        const pageCache = new PageWalkCache(doc, fontApi);
+
         if (opts.checkTextLayer) {
-            const ocr = docAnalyzer.getDetailedOCRAnalysis({ minTextPerPage: opts.minTextPerPage });
+            // Run the gate over the SAME walk the pipeline will reuse —
+            // detailed for structured, JSON for markdown — so a sampled
+            // page is never re-walked by the extraction below.
+            const ocrProvider: RawPageProvider = {
+                getPageCount: () => pageCount,
+                extractRawPage: (i) =>
+                    isStructured
+                        ? (pageCache.getDetailed(i, true) as unknown as RawPageData)
+                        : pageCache.getPlain(i, true),
+            };
+            const ocr = new DocumentAnalyzer(ocrProvider).getDetailedOCRAnalysis({
+                minTextPerPage: opts.minTextPerPage,
+            });
             if (ocr.needsOCR) {
                 throw workerError(
                     ERROR_CODES.NO_TEXT_LAYER,
@@ -874,10 +971,6 @@ export async function opExtract(
                   args.structured?.splitterConfig ?? { type: "sentencex" },
               )
             : undefined;
-        // Structured mode needs the WASM `Font` helpers to populate
-        // line fonts during the detailed walk (the JSON walk used to
-        // cover this — we now skip it for target pages).
-        const fontApi = isStructured ? (await ensureApi()).Font : undefined;
 
         const result = runExtractFromIndices(
             doc,
@@ -891,6 +984,7 @@ export async function opExtract(
             args.paragraphSettings,
             splitter,
             fontApi,
+            pageCache,
         );
         // `runExtractFromIndices` measures the phases it owns; `docOpenMs`
         // and the op-level `totalMs` (which includes the OCR check) are
