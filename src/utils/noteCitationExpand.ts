@@ -566,6 +566,31 @@ export function expandToRawHtml(
         }
     );
 
+    // Expand self-linking anchor tokens (<link href="X"/>) back to raw anchors.
+    // Found in metadata → return the exact stored raw <a> (a verbatim slice of
+    // the note, so the matcher's exact strategy succeeds). Not found → a new
+    // URL the model wrote in new_string, so reconstruct the canonical anchor.
+    // The expanded anchors are shielded behind placeholders so the dollar-math
+    // passes below cannot corrupt a URL that contains `$...$`.
+    const rawLinkAnchors: string[] = [];
+    str = str.replace(
+        /<link\s+href="([^"]*)"\s*\/>/g,
+        (_match, tokenHref) => {
+            const decodedHref = unescapeAttr(tokenHref);
+            const stored = metadata.elements.get(`link:${decodedHref}`);
+            // For an unknown URL, re-encode the decoded href canonically so the
+            // reconstructed anchor matches what normalizeNoteHtml emits — a
+            // model-written bare `&` becomes `&amp;`, and a token that already
+            // carried `&amp;` is never double-escaped to `&amp;amp;`.
+            const escapedHref = escapeAttr(decodedHref);
+            const anchor = stored
+                ? stored.rawHtml
+                : `<a href="${escapedHref}" rel="noopener noreferrer nofollow">${escapedHref}</a>`;
+            const idx = rawLinkAnchors.push(anchor) - 1;
+            return `__BEAVER_RAW_LINK_${idx}__`;
+        }
+    );
+
     // Preserve math wrappers that already exist in the edited string. Empty
     // placeholders now survive simplification as raw HTML, and the model may
     // keep those wrappers when filling them in. Shield them before the dollar
@@ -618,6 +643,12 @@ export function expandToRawHtml(
     str = str.replace(
         /__BEAVER_RAW_MATH_(\d+)__/g,
         (match, idx) => preservedMathWrappers[Number(idx)] ?? match
+    );
+
+    // Restore shielded self-linking anchors (see the <link/> expansion above).
+    str = str.replace(
+        /__BEAVER_RAW_LINK_(\d+)__/g,
+        (match, idx) => rawLinkAnchors[Number(idx)] ?? match
     );
 
     return str;

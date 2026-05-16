@@ -208,4 +208,25 @@ describe('stripPartialSimplifiedElements — other element types', () => {
         expect(result).not.toBeNull();
         expect(result!.strippedOld).toBe('Before ');
     });
+
+    it('strips a leading partial <link/> tag fragment', () => {
+        const simplified = 'See <link href="https://example.com/p"/> after link';
+        const oldString = 'p"/> after link';
+        const pos = simplified.indexOf(oldString);
+
+        const result = stripPartialSimplifiedElements(oldString, 'p"/> new text', simplified, pos);
+        expect(result).not.toBeNull();
+        expect(result!.strippedOld).toBe(' after link');
+        expect(result!.strippedNew).toBe(' new text');
+    });
+
+    it('strips a trailing partial <link/> tag fragment', () => {
+        const simplified = 'Before <link href="https://example.com/p"/> after';
+        const oldString = 'Before <link href=';
+        const pos = simplified.indexOf(oldString);
+
+        const result = stripPartialSimplifiedElements(oldString, 'Before replacement', simplified, pos);
+        expect(result).not.toBeNull();
+        expect(result!.strippedOld).toBe('Before ');
+    });
 });
