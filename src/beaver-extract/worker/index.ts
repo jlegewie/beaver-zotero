@@ -186,6 +186,12 @@ workerSelf.onmessage = (event: MessageEvent) => {
             }
             if (isHeapExhaustionError(e)) {
                 clearAllCachedDocs(false);
+                error = {
+                    name: "ExtractionError",
+                    code: ERROR_CODES.HEAP_EXHAUSTION,
+                    message:
+                        "MuPDF exhausted its WASM heap while processing this PDF. The worker will be restarted before the next operation.",
+                };
             }
             workerSelf.postMessage({ id, ok: false, error });
         }

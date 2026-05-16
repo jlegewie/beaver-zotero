@@ -38,7 +38,7 @@ describe('isFatalWasmError', () => {
         expect(isFatalWasmError({ name: 'ExtractionError', code: 'NO_TEXT_LAYER' })).toBe(false);
     });
 
-    it('classifies RuntimeError-shaped heap exhaustion as non-fatal', () => {
+    it('keeps RuntimeError-shaped heap exhaustion out of permanent fatal classification', () => {
         const err = new RuntimeErrorLike('Aborted(OOM)');
         expect(isHeapExhaustionError(err)).toBe(true);
         expect(isFatalWasmError(err)).toBe(false);

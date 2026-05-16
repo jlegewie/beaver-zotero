@@ -1,7 +1,7 @@
 /**
- * MuPDF WASM traps leave the current WebAssembly instance unusable. Any caller
- * that sees one of these errors must discard the cached runtime before issuing
- * more PDF operations.
+ * MuPDF heap exhaustion can be recoverable for the PDF after the runtime is
+ * restarted. Keep it separate from `WASM_FATAL_PATTERNS` so callers can retire
+ * the current runtime without memoizing the file as permanently fatal.
  */
 const HEAP_EXHAUSTION_PATTERNS: RegExp[] = [
     /malloc\b[\s\S]*failed/i,
@@ -17,6 +17,10 @@ export function isHeapExhaustionError(err: unknown): boolean {
     return HEAP_EXHAUSTION_PATTERNS.some((re) => re.test(msg));
 }
 
+/**
+ * MuPDF WASM traps leave the current WebAssembly instance unusable and are
+ * treated as permanent failures for the current PDF operation.
+ */
 export const WASM_FATAL_PATTERNS: RegExp[] = [
     /memory access out of bounds/i,
     /RuntimeError/,
