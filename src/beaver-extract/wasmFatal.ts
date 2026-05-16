@@ -3,6 +3,20 @@
  * that sees one of these errors must discard the cached runtime before issuing
  * more PDF operations.
  */
+const HEAP_EXHAUSTION_PATTERNS: RegExp[] = [
+    /malloc\b[\s\S]*failed/i,
+    /realloc\b[\s\S]*failed/i,
+    /calloc\b[\s\S]*failed/i,
+    /out of memory/i,
+    /Cannot enlarge memory/i,
+    /Aborted\(OOM\)/i,
+];
+
+export function isHeapExhaustionError(err: unknown): boolean {
+    const msg = errorText(err);
+    return HEAP_EXHAUSTION_PATTERNS.some((re) => re.test(msg));
+}
+
 export const WASM_FATAL_PATTERNS: RegExp[] = [
     /memory access out of bounds/i,
     /RuntimeError/,
@@ -14,6 +28,7 @@ export const WASM_FATAL_PATTERNS: RegExp[] = [
 ];
 
 export function isFatalWasmError(err: unknown): boolean {
+    if (isHeapExhaustionError(err)) return false;
     const msg = errorText(err);
     return WASM_FATAL_PATTERNS.some((re) => re.test(msg));
 }
@@ -40,6 +55,7 @@ const PAGE_TREE_ERROR_PATTERN = /page tree/i;
  * leave the runtime unusable.
  */
 export function isRecoverablePageError(err: unknown): boolean {
+    if (isHeapExhaustionError(err)) return false;
     if (isFatalWasmError(err)) return false;
     return PAGE_TREE_ERROR_PATTERN.test(errorText(err));
 }

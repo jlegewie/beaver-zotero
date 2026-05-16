@@ -443,6 +443,7 @@ export interface WorkerCacheStats {
     hits: number;
     misses: number;
     evictions: number;
+    discards: number;
     ttlMs: number;
     maxEntries: number;
     maxBytes: number;
