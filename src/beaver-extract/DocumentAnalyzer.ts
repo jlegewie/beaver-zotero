@@ -19,6 +19,7 @@ import type {
 } from "./types";
 import { DEFAULT_OCR_DETECTION_OPTIONS, bboxToTuple } from "./types";
 import { bboxHeight, bboxWidth } from "./types";
+import { isRecoverablePageError } from "./wasmFatal";
 
 /**
  * Minimal interface that DocumentAnalyzer needs — implemented by a
@@ -413,6 +414,36 @@ export class DocumentAnalyzer {
     constructor(private mupdf: RawPageProvider) {}
 
     /**
+     * Sample one page for OCR analysis, pushing its `PageOCRAnalysis` onto
+     * `pageAnalyses` and folding its issues into `issueBreakdown`.
+     *
+     * Returns `false` (leaving both collections untouched) when the page is an
+     * unresolvable leaf of a malformed page tree — such pages are skipped so
+     * one bad leaf does not abort detection. Genuine extraction failures and
+     * WASM traps still propagate.
+     */
+    private tryAnalyzeOcrPage(
+        pageIndex: number,
+        opts: Required<OCRDetectionOptions>,
+        pageAnalyses: PageOCRAnalysis[],
+        issueBreakdown: Record<OCRIssueReason, number>,
+    ): boolean {
+        let rawPage: RawPageData;
+        try {
+            rawPage = this.mupdf.extractRawPage(pageIndex, { includeImages: true });
+        } catch (err) {
+            if (!isRecoverablePageError(err)) throw err;
+            return false;
+        }
+        const analysis = analyzePage(rawPage, opts);
+        pageAnalyses.push(analysis);
+        for (const issue of analysis.issues) {
+            issueBreakdown[issue]++;
+        }
+        return true;
+    }
+
+    /**
      * Perform detailed OCR detection analysis.
      * Samples pages and analyzes text quality, bounding boxes, and image coverage.
      *
@@ -457,14 +488,10 @@ export class DocumentAnalyzer {
         const initialPages = spreadPageIndices(0, sampleGrid.length, initialSampleSize)
             .map((pos) => sampleGrid[pos]);
 
+        // A malformed page tree can fail to resolve a sampled leaf;
+        // `tryAnalyzeOcrPage` drops those rather than aborting detection.
         for (const pageIndex of initialPages) {
-            const rawPage = this.mupdf.extractRawPage(pageIndex, { includeImages: true });
-            const analysis = analyzePage(rawPage, opts);
-            pageAnalyses.push(analysis);
-
-            for (const issue of analysis.issues) {
-                issueBreakdown[issue]++;
-            }
+            this.tryAnalyzeOcrPage(pageIndex, opts, pageAnalyses, issueBreakdown);
         }
 
         // Calculate initial issue ratio
@@ -486,18 +513,40 @@ export class DocumentAnalyzer {
 
             for (const pageIndex of sampleGrid) {
                 if (alreadySampled.has(pageIndex)) continue;
-                const rawPage = this.mupdf.extractRawPage(pageIndex, { includeImages: true });
-                const analysis = analyzePage(rawPage, opts);
-                pageAnalyses.push(analysis);
-
-                for (const issue of analysis.issues) {
-                    issueBreakdown[issue]++;
-                }
+                this.tryAnalyzeOcrPage(pageIndex, opts, pageAnalyses, issueBreakdown);
             }
 
             // Recalculate ratio with expanded sample
             const totalIssues = pageAnalyses.filter((p) => p.hasIssues).length;
             issueRatio = pageAnalyses.length > 0 ? totalIssues / pageAnalyses.length : 0;
+        }
+
+        // Fallback sweep: if page-tree corruption left the spread sample short
+        // of `initialSampleSize` resolvable pages, walk the remaining pages for
+        // any resolvable leaf. Without this, an all-skipped sample collapses
+        // `issueRatio` to 0 and a scanned/image-only document whose sampled
+        // leaves happen to be unresolvable would silently bypass the
+        // NO_TEXT_LAYER guard. Only runs for malformed documents — a normal
+        // sample already fills, so the loop body is never entered.
+        if (pageAnalyses.length < initialSampleSize) {
+            const sampled = new Set(pageAnalyses.map((p) => p.pageIndex));
+            for (let pageIndex = startPage; pageIndex < pageCount; pageIndex++) {
+                if (pageAnalyses.length >= initialSampleSize) break;
+                if (sampled.has(pageIndex)) continue;
+                this.tryAnalyzeOcrPage(pageIndex, opts, pageAnalyses, issueBreakdown);
+            }
+            const totalIssues = pageAnalyses.filter((p) => p.hasIssues).length;
+            issueRatio = pageAnalyses.length > 0 ? totalIssues / pageAnalyses.length : 0;
+        }
+
+        if (pageAnalyses.length === 0) {
+            // Not a single page of the document could be resolved — there is
+            // nothing to base an OCR verdict on, and extraction itself cannot
+            // proceed either. Surface the failure instead of defaulting
+            // `issueRatio` to 0 and reporting the text layer as acceptable.
+            throw new Error(
+                "OCR detection could not resolve any page of the document (malformed page tree)",
+            );
         }
 
         // Keep the per-page analyses in document order for a deterministic

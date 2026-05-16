@@ -18,6 +18,32 @@ export function isFatalWasmError(err: unknown): boolean {
     return WASM_FATAL_PATTERNS.some((re) => re.test(msg));
 }
 
+/**
+ * MuPDF page-tree resolution failures. A malformed page tree can report N
+ * pages via `countPages()` yet fail to resolve individual leaves; every such
+ * `loadPage` error carries the substring "page tree" (e.g. "cannot find page N
+ * in page tree", "non-page object in page tree", "malformed page tree", "cycle
+ * in page tree"). See `source/pdf/pdf-page.c` in the MuPDF source.
+ */
+const PAGE_TREE_ERROR_PATTERN = /page tree/i;
+
+/**
+ * True only for MuPDF page-tree resolution failures — the case where a page
+ * index cannot be resolved to a page object at all. Native `mutool` skips such
+ * pages and extracts the rest; this predicate lets page-iteration code do the
+ * same, isolating one unresolvable leaf instead of aborting the whole document.
+ *
+ * Deliberately narrow: a failure later in page processing (a corrupt content
+ * stream that breaks `toStructuredText`, a JSON parse error) is NOT recoverable
+ * here — silently dropping such a page would hide a real extraction failure, so
+ * those propagate and abort. WASM traps are likewise non-recoverable: they
+ * leave the runtime unusable.
+ */
+export function isRecoverablePageError(err: unknown): boolean {
+    if (isFatalWasmError(err)) return false;
+    return PAGE_TREE_ERROR_PATTERN.test(errorText(err));
+}
+
 function errorText(err: unknown): string {
     if (err instanceof Error) {
         return [err.name, err.message].filter(Boolean).join(": ");
