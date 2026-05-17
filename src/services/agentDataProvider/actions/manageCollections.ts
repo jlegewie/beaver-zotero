@@ -67,6 +67,37 @@ function formatSubcollectionList(subs: SubcollectionSummary[]): string {
 }
 
 
+/**
+ * When a collection lookup fails, check whether the key actually belongs to a
+ * library item so we can tell the agent it pointed a collection-only tool at
+ * the wrong object type. Returns a human-readable type label, or null if the
+ * key is not an item.
+ */
+async function classifyNonCollectionKey(
+    key: string,
+    libraryIdHint: number | undefined,
+): Promise<string | null> {
+    const libraryIds = libraryIdHint !== undefined
+        ? [libraryIdHint]
+        : Zotero.Libraries.getAll().map((lib: any) => lib.libraryID);
+    for (const libraryID of libraryIds) {
+        try {
+            const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryID, key);
+            if (item) {
+                if (typeof (item as any).isAnnotation === 'function' && (item as any).isAnnotation()) return 'annotation';
+                if (item.isAttachment()) return 'attachment';
+                if (item.isNote()) return 'note';
+                if (item.isRegularItem()) return 'regular library item';
+                return 'library item';
+            }
+        } catch {
+            // Ignore lookup failures and try the next library.
+        }
+    }
+    return null;
+}
+
+
 export async function validateManageCollectionsAction(
     request: WSAgentActionValidateRequest
 ): Promise<WSAgentActionValidateResponse> {
@@ -114,6 +145,25 @@ export async function validateManageCollectionsAction(
     const effectiveLibraryId = parsed.libraryId ?? hintLibraryId;
     const lookup = getCollectionByIdOrName(trimmedCollectionKey, effectiveLibraryId);
     if (!lookup) {
+        // The key matched no collection. Check whether it belongs to a library
+        // item so the agent gets a specific error instead of a bare
+        // "not found" — the recurring failure is the agent passing a note /
+        // item / attachment / annotation key to this collection-only tool.
+        const objectType = await classifyNonCollectionKey(parsed.key, effectiveLibraryId);
+        if (objectType) {
+            return {
+                type: 'agent_action_validate_response',
+                request_id: request.request_id,
+                valid: false,
+                error:
+                    `The key '${rawCollectionKey}' refers to a ${objectType}, not a collection. ` +
+                    `manage_collections operates only on collections (folders). It cannot rename, ` +
+                    `move, or delete library items, notes, attachments, or annotations. ` +
+                    `If the user asked to delete this object, tell them to do it manually in Zotero.`,
+                error_code: 'not_a_collection',
+                preference: 'always_ask',
+            };
+        }
         return {
             type: 'agent_action_validate_response',
             request_id: request.request_id,
