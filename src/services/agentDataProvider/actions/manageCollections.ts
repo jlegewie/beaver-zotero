@@ -77,11 +77,12 @@ async function classifyNonCollectionKey(
     key: string,
     libraryIdHint: number | undefined,
 ): Promise<string | null> {
-    const libraryIds = libraryIdHint !== undefined
-        ? [libraryIdHint]
-        : Zotero.Libraries.getAll().map((lib: any) => lib.libraryID);
-    for (const libraryID of libraryIds) {
-        try {
+    // Best-effort on an error path
+    try {
+        const libraryIds = libraryIdHint !== undefined
+            ? [libraryIdHint]
+            : (Zotero.Libraries.getAll() ?? []).map((lib: any) => lib.libraryID);
+        for (const libraryID of libraryIds) {
             const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryID, key);
             if (item) {
                 if (typeof (item as any).isAnnotation === 'function' && (item as any).isAnnotation()) return 'annotation';
@@ -90,9 +91,9 @@ async function classifyNonCollectionKey(
                 if (item.isRegularItem()) return 'regular library item';
                 return 'library item';
             }
-        } catch {
-            // Ignore lookup failures and try the next library.
         }
+    } catch {
+        // Fall through to null — caller emits 'collection_not_found'.
     }
     return null;
 }
