@@ -31,6 +31,7 @@ import {
     findCandidateSnippets,
     findInlineTagDriftMatch,
     findStructuralAnchorHint,
+    findWindowCandidates,
 } from './editNoteHints';
 import {
     captureValidatedEditTargetContext,
@@ -134,12 +135,23 @@ export type ZeroMatchHint =
     | { kind: 'structural'; tagName: string; context: string; message: string; candidates: CandidateSnippet[] }
     | { kind: 'generic'; message: string; candidates: CandidateSnippet[] };
 
+/** Render a candidate list as a numbered, fenced block for the model. */
+function renderCandidateLines(candidates: CandidateSnippet[]): string {
+    return candidates
+        .map((c, i) => {
+            const parts: string[] = [`score ${c.score.toFixed(2)}`, `via ${c.via}`];
+            if (c.truncated) parts.push('truncated');
+            return `  [${i + 1}] (${parts.join(', ')})\n\`\`\`\n${c.snippet}\n\`\`\``;
+        })
+        .join('\n');
+}
+
 /**
  * Build the most specific error hint available when `old_string` isn't found.
  * Priority: inline-tag drift → candidate snippets → structural anchor →
- * generic. Each variant carries `candidates` so callers can forward them to
- * the agent in a structured envelope (see `WSAgentActionValidateResponse
- * .error_candidates`).
+ * multi-line window region → generic. Each variant carries `candidates` so
+ * callers can forward them to the agent in a structured envelope (see
+ * `WSAgentActionValidateResponse.error_candidates`).
  */
 export function buildZeroMatchHint(
     simplified: string,
@@ -184,18 +196,15 @@ export function buildZeroMatchHint(
         const header =
             'The string to replace was not found in the note. '
             + 'Closest matches in the note:';
-        const body = candidates
-            .map((c, i) => {
-                const parts: string[] = [`score ${c.score.toFixed(2)}`, `via ${c.via}`];
-                if (c.truncated) parts.push('truncated');
-                return `  [${i + 1}] (${parts.join(', ')})\n\`\`\`\n${c.snippet}\n\`\`\``;
-            })
-            .join('\n');
         const footer =
             '\nCopy the exact text from one of the candidates above as your '
             + 'old_string, or rewrite old_string to match a span you can see '
             + 'in the note.';
-        return { kind: 'fuzzy', message: `${header}\n${body}${footer}`, candidates };
+        return {
+            kind: 'fuzzy',
+            message: `${header}\n${renderCandidateLines(candidates)}${footer}`,
+            candidates,
+        };
     }
 
     const structural = findStructuralAnchorHint(simplified, oldString);
@@ -225,6 +234,25 @@ export function buildZeroMatchHint(
         };
     }
 
+    // Last resort before a bare "not found": multi-line window scoring locates
+    // the region even when old_string is Markdown, mis-tagged, or spread
+    // across many lines that no per-line scorer could catch.
+    const windowCandidates = findWindowCandidates(simplified, oldString);
+    if (windowCandidates.length > 0) {
+        const header =
+            'The string to replace was not found in the note. These note '
+            + 'snippets are near the region your old_string seems to target, '
+            + 'but are NOT exact matches:';
+        const footer =
+            '\nDo not paste these verbatim. Call read_note around them to see '
+            + 'the exact current HTML, then copy a precise span as old_string.';
+        return {
+            kind: 'fuzzy',
+            message: `${header}\n${renderCandidateLines(windowCandidates)}${footer}`,
+            candidates: windowCandidates,
+        };
+    }
+
     return {
         kind: 'generic',
         message: 'The string to replace was not found in the note.',
@@ -247,23 +275,35 @@ export function buildExecutionZeroMatchHint(
     oldString: string
 ): ExecutionZeroMatchHint {
     const candidates = findCandidateSnippets(simplified, oldString);
-    if (candidates.length === 0) {
+    if (candidates.length > 0) {
+        const header =
+            'The string to replace was not found in the note. '
+            + 'Closest matches in the note:';
         return {
-            message: 'The string to replace was not found in the note.',
-            candidates: [],
+            message: `${header}\n${renderCandidateLines(candidates)}`,
+            candidates,
         };
     }
-    const header =
-        'The string to replace was not found in the note. '
-        + 'Closest matches in the note:';
-    const body = candidates
-        .map((c, i) => {
-            const parts: string[] = [`score ${c.score.toFixed(2)}`, `via ${c.via}`];
-            if (c.truncated) parts.push('truncated');
-            return `  [${i + 1}] (${parts.join(', ')})\n\`\`\`\n${c.snippet}\n\`\`\``;
-        })
-        .join('\n');
-    return { message: `${header}\n${body}`, candidates };
+    // Fall back to multi-line window scoring so a long or mis-formatted
+    // old_string still yields a region pointer instead of a bare "not found".
+    const windowCandidates = findWindowCandidates(simplified, oldString);
+    if (windowCandidates.length > 0) {
+        const header =
+            'The string to replace was not found in the note. These note '
+            + 'snippets are near the region your old_string seems to target, '
+            + 'but are NOT exact matches:';
+        const footer =
+            '\nCall read_note around them to see the exact current HTML, '
+            + 'then copy a precise span as old_string.';
+        return {
+            message: `${header}\n${renderCandidateLines(windowCandidates)}${footer}`,
+            candidates: windowCandidates,
+        };
+    }
+    return {
+        message: 'The string to replace was not found in the note.',
+        candidates: [],
+    };
 }
 
 // =============================================================================

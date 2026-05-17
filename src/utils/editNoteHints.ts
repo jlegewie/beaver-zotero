@@ -28,12 +28,16 @@ import { normalizeCjkSpacing, normalizeCjkSpacingMapped, normalizeWS } from './n
  *     `findInlineTagDriftMatch`.
  *   - `structural_anchor`  — attached by `buildZeroMatchHint` from
  *     `findStructuralAnchorHint`.
+ *   - `fuzzy_window`       — region located by multi-line window scoring when
+ *     no single line matched; region-level confidence only, the model should
+ *     read_note around it rather than paste blindly.
  */
 export type CandidateSource =
     | 'whitespace_relaxed'
     | 'word_overlap'
     | 'inline_tag_drift'
-    | 'structural_anchor';
+    | 'structural_anchor'
+    | 'fuzzy_window';
 
 export interface CandidateSnippet {
     /** Snippet to show the model. Already truncated — do not re-truncate. */
@@ -200,6 +204,129 @@ export function findCandidateSnippets(
         out.push({ snippet, truncated, via: 'word_overlap', score: entry.score });
     }
 
+    return out;
+}
+
+/** Minimum window word-overlap for a `fuzzy_window` candidate to be emitted.
+ *  Below this the region is too uncertain to point at — callers fall through
+ *  to a generic "call read_note" hint rather than emit a misleading anchor. */
+const WINDOW_MIN_SCORE = 0.35;
+
+/** Grow a window no further than this multiple of the old_string length;
+ *  beyond it the extra lines only dilute precision. */
+const WINDOW_MAX_LENGTH_FACTOR = 1.5;
+
+/**
+ * Tier-3 fallback for `findCandidateSnippets`: when no single note line
+ * carries enough of `old_string`'s words, score windows of consecutive lines.
+ *
+ * This catches cases the per-line scorer misses because the target text is
+ * spread across many lines — e.g. `old_string` is a Markdown table row whose
+ * cells the rendered note splits across many `<td>` lines, or a long
+ * multi-block span. A sliding line window grown to roughly `old_string`'s
+ * length localizes the region; the most word-dense individual lines from that
+ * region are then returned as short, pasteable `old_string` candidates.
+ *
+ * Confidence is region-level only — `score` is the window overlap, and the
+ * `fuzzy_window` source signals that the caller should steer the model toward
+ * `read_note` rather than a blind paste.
+ *
+ * Returns `[]` when `old_string` has fewer than 3 content words or no window
+ * clears `WINDOW_MIN_SCORE`.
+ */
+export function findWindowCandidates(
+    simplified: string,
+    oldString: string,
+    opts: FindCandidateSnippetsOptions = {},
+): CandidateSnippet[] {
+    const maxCandidates = opts.maxCandidates ?? DEFAULT_MAX_CANDIDATES;
+    const maxSnippetLength = opts.maxSnippetLength ?? DEFAULT_MAX_SNIPPET_LENGTH;
+
+    const normSearch = normalizeWS(oldString);
+    if (!normSearch) return [];
+    const searchWords = new Set(
+        normSearch.toLowerCase().split(/\s+/).filter(w => w.length > 2),
+    );
+    // Need a few distinct content words to localize a region reliably; short
+    // old_strings are already handled by the per-line scorer.
+    if (searchWords.size < 3) return [];
+
+    // Precompute, per line: the tag-ful trimmed line (for the returned
+    // snippet), its lowercased text-only word list (for scoring), and its
+    // length (for the window char budget).
+    const lineInfo = simplified.split('\n').map((line) => {
+        const trimmed = line.trim();
+        const textOnly = normalizeWS(trimmed.replace(/<[^>]+>/g, '')).toLowerCase();
+        return {
+            trimmed,
+            words: textOnly ? textOnly.split(/\s+/) : [],
+            len: line.length + 1,
+        };
+    });
+
+    const targetLen = Math.max(normSearch.length, 1);
+    const maxWindowLen = targetLen * WINDOW_MAX_LENGTH_FACTOR;
+
+    // Slide a window from each start line, growing it until its combined
+    // length covers the target; track the union of matched search words.
+    let best = { start: 0, end: 0, score: 0 };
+    for (let i = 0; i < lineInfo.length; i++) {
+        const matched = new Set<string>();
+        let charLen = 0;
+        for (let j = i; j < lineInfo.length; j++) {
+            for (const w of lineInfo[j].words) {
+                if (searchWords.has(w)) matched.add(w);
+            }
+            charLen += lineInfo[j].len;
+            const score = matched.size / searchWords.size;
+            if (score > best.score) best = { start: i, end: j, score };
+            if (charLen >= maxWindowLen) break;
+        }
+    }
+    if (best.score < WINDOW_MIN_SCORE) return [];
+
+    // Return the most word-dense individual lines from the winning region as
+    // short pasteable anchors. Skip pure-structure lines (no content words).
+    const regionLines: Array<{ score: number; line: string; pivot: number }> = [];
+    for (let k = best.start; k <= best.end; k++) {
+        const info = lineInfo[k];
+        if (info.words.length === 0) continue;
+        let matches = 0;
+        let firstWord: string | null = null;
+        for (const w of new Set(info.words)) {
+            if (!searchWords.has(w)) continue;
+            matches += 1;
+            if (firstWord === null) firstWord = w;
+        }
+        if (matches === 0) continue;
+        let pivot = 0;
+        if (firstWord) {
+            const p = info.trimmed.toLowerCase().indexOf(firstWord);
+            if (p !== -1) pivot = p;
+        }
+        regionLines.push({
+            score: matches / searchWords.size,
+            line: info.trimmed,
+            pivot,
+        });
+    }
+    regionLines.sort((a, b) => b.score - a.score);
+
+    const seen = new Set<string>();
+    const out: CandidateSnippet[] = [];
+    for (const entry of regionLines) {
+        if (out.length >= maxCandidates) break;
+        const { snippet, truncated } = centerTruncate(
+            entry.line,
+            entry.pivot,
+            maxSnippetLength,
+        );
+        if (seen.has(snippet)) continue;
+        seen.add(snippet);
+        // score is the region-level window overlap, shared by all lines so
+        // the model (and the backend regime classifier) treats them uniformly.
+        out.push({ snippet, truncated, via: 'fuzzy_window', score: best.score });
+    }
     return out;
 }
 

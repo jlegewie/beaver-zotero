@@ -1035,7 +1035,8 @@ export interface ErrorCandidate {
         | 'whitespace_relaxed'
         | 'word_overlap'
         | 'inline_tag_drift'
-        | 'structural_anchor';
+        | 'structural_anchor'
+        | 'fuzzy_window';
     score: number;
 }
 

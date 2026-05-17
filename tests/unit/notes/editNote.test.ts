@@ -151,6 +151,7 @@ vi.mock('../../../src/utils/editNoteHints', () => ({
     findCandidateSnippets: vi.fn(() => []),
     findStructuralAnchorHint: vi.fn(() => null),
     findInlineTagDriftMatch: vi.fn(() => null),
+    findWindowCandidates: vi.fn(() => []),
     centerTruncate: vi.fn((text: string) => ({ snippet: text, truncated: false })),
     DEFAULT_MAX_SNIPPET_LENGTH: 200,
 }));
