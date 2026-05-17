@@ -907,6 +907,15 @@ export interface LayoutAnalysisResult {
 export interface OCRDetectionOptions {
     /** Minimum text characters per page to consider valid (default: 100) */
     minTextPerPage?: number;
+    /**
+     * Document-level near-empty threshold (default: 24). When the mean
+     * extractable (non-whitespace) text across the sampled pages falls below
+     * this, the document is flagged as needing OCR regardless of the per-page
+     * issue ratio. Catches scanned documents that expose only a stray
+     * incidental text layer (running header, figure label, lone citation
+     * line) without a detectable large image.
+     */
+    minMeanTextPerPage?: number;
     /** Initial pages to sample for analysis (default: 6) */
     sampleSize?: number;
     /** Expanded sample size when uncertain (default: 20) */
@@ -997,6 +1006,7 @@ export interface OCRDetectionResult {
 /** Default OCR detection options */
 export const DEFAULT_OCR_DETECTION_OPTIONS: Required<OCRDetectionOptions> = {
     minTextPerPage: 100,
+    minMeanTextPerPage: 24,
     sampleSize: 6,
     expandedSampleSize: 20,
     expandLowerThreshold: 0.1,   // Expand if >10% issues (uncertain)

@@ -17,9 +17,16 @@ import type {
     PageOCRAnalysis,
     OCRIssueReason,
 } from "./types";
-import { DEFAULT_OCR_DETECTION_OPTIONS, bboxToTuple } from "./types";
+import { DEFAULT_OCR_DETECTION_OPTIONS, DEFAULT_MARGIN_ZONE, bboxToTuple } from "./types";
 import { bboxHeight, bboxWidth } from "./types";
 import { isRecoverablePageError } from "./wasmFatal";
+
+/**
+ * Minimum page count for the document-level near-empty guard to fire.
+ * Below this, a sparse document is more likely a legitimate cover /
+ * part-divider / short note than a scanned document missing its text layer.
+ */
+const NEAR_EMPTY_GUARD_MIN_PAGES = 3;
 
 /**
  * Minimal interface that DocumentAnalyzer needs — implemented by a
@@ -280,6 +287,40 @@ function checkImageCoverage(
 // ============================================================================
 
 /**
+ * Decide whether a line belongs to the page body rather than the margin.
+ *
+ * The body region is the page inset by `DEFAULT_MARGIN_ZONE`; a line counts
+ * as body text when its bounding box overlaps that region at all. Margin
+ * furniture — running headers/footers, page numbers, and especially
+ * publisher watermarks ("Downloaded from …") and browser print banners —
+ * sits entirely outside the body region and is excluded.
+ *
+ * This keeps the OCR text-density measurement honest: a scanned document
+ * whose only text layer is a repeated margin stamp would otherwise have
+ * that stamp counted as page text and slip past the gate. The check is
+ * free — the detector already walks every sampled page and holds each
+ * line's bbox.
+ *
+ * Lines without a bbox cannot be placed and are conservatively kept.
+ */
+function isBodyLine(
+    bbox: BoundingBox | undefined,
+    pageWidth: number,
+    pageHeight: number,
+): boolean {
+    if (!bbox) return true;
+    const bodyL = DEFAULT_MARGIN_ZONE.left;
+    const bodyT = DEFAULT_MARGIN_ZONE.top;
+    const bodyR = pageWidth - DEFAULT_MARGIN_ZONE.right;
+    const bodyB = pageHeight - DEFAULT_MARGIN_ZONE.bottom;
+    // Degenerate body region (tiny page / oversized margins): disable the
+    // filter rather than discard every line.
+    if (bodyR <= bodyL || bodyB <= bodyT) return true;
+    const [l, t, r, b] = bboxToTuple(bbox);
+    return !(r < bodyL || l > bodyR || b < bodyT || t > bodyB);
+}
+
+/**
  * Analyze a single page for OCR-related issues.
  *
  * Key design decisions:
@@ -287,6 +328,9 @@ function checkImageCoverage(
  *   A scanned document that was previously OCR'd will have both large images AND
  *   a valid text layer. We only flag large_image_coverage when combined with
  *   insufficient or missing text.
+ * - Text density is measured from body lines only — margin watermarks,
+ *   running headers/footers, and page numbers are excluded via `isBodyLine`
+ *   so they cannot mask a scanned page as text-bearing.
  * - Bounding box checks (overflow, overlap) are optional and disabled by default.
  *   They're useful for word-level positioning accuracy but not for page-level
  *   text extraction.
@@ -319,14 +363,20 @@ function analyzePage(
         };
     }
 
-    // Collect all text and line bounding boxes
+    // Collect body text and line bounding boxes. Margin lines (watermarks,
+    // running headers/footers, page numbers) are excluded from the text
+    // measurement but still contribute their bbox to `lineBBoxes`, which the
+    // optional overflow/overlap checks need to see in full.
     let pageText = "";
     const lineBBoxes: BoundingBox[] = [];
 
     for (const block of textBlocks) {
         if (block.lines) {
             for (const line of block.lines) {
-                if (line.text) {
+                if (
+                    line.text &&
+                    isBodyLine(line.bbox, rawPage.width, rawPage.height)
+                ) {
                     pageText += line.text + "\n";
                 }
                 if (line.bbox) {
@@ -445,7 +495,10 @@ export class DocumentAnalyzer {
 
     /**
      * Perform detailed OCR detection analysis.
-     * Samples pages and analyzes text quality, bounding boxes, and image coverage.
+     * Samples pages and analyzes text quality, bounding boxes, and image
+     * coverage. A document-level near-empty guard additionally flags
+     * documents whose mean sampled text falls below `minMeanTextPerPage`,
+     * even when no per-page issue fires.
      *
      * @param options - Detection options
      * @returns Detailed analysis result
@@ -553,12 +606,31 @@ export class DocumentAnalyzer {
         // result (the expanded sample is interleaved with the initial one).
         pageAnalyses.sort((a, b) => a.pageIndex - b.pageIndex);
 
+        // Document-level near-empty guard. `textLength` already excludes
+        // margin furniture (see `isBodyLine`), so the mean reflects body text
+        // only — a scanned document whose pages carry just a watermark or
+        // running header lands near zero here. Gated on a minimum page count:
+        // "text far below what the page count implies" is only meaningful when
+        // there are enough pages to imply substantial text. A 1-2 page PDF can
+        // legitimately be a cover, part-divider, or short note, so the guard
+        // does not fire on them (a genuinely scanned short document still has
+        // a large image and is caught by the per-page issue path instead).
+        const totalSampledText = pageAnalyses.reduce(
+            (sum, p) => sum + p.textLength,
+            0,
+        );
+        const meanTextPerPage = totalSampledText / pageAnalyses.length;
+        const documentNearEmpty =
+            pageCount >= NEAR_EMPTY_GUARD_MIN_PAGES &&
+            meanTextPerPage < opts.minMeanTextPerPage;
+
         // Determine if OCR is needed
-        const needsOCR = issueRatio >= opts.confirmationThreshold;
+        const needsOCR =
+            issueRatio >= opts.confirmationThreshold || documentNearEmpty;
 
         // Determine primary reason
         let primaryReason = "text_extraction_acceptable";
-        if (needsOCR) {
+        if (issueRatio >= opts.confirmationThreshold) {
             // Find the most common issue
             const sortedIssues = Object.entries(issueBreakdown)
                 .filter(([, count]) => count > 0)
@@ -599,6 +671,15 @@ export class DocumentAnalyzer {
             } else {
                 primaryReason = "quality_threshold_exceeded";
             }
+        } else if (documentNearEmpty) {
+            // The near-empty guard is the sole trigger — no per-page issue
+            // crossed the confirmation threshold. Derive the reason from
+            // whether the sampled pages carry images: image-backed pages with
+            // no usable text are un-OCR'd scans, otherwise the text layer is
+            // simply missing.
+            primaryReason = pageAnalyses.some((p) => p.hasImages)
+                ? "scanned_without_ocr"
+                : "missing_text_content";
         }
 
         return {
