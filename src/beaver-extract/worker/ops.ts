@@ -99,6 +99,7 @@ import {
     resolveExplicitPageIndicesOrThrow,
     resolvePageIndices,
     resolvePageRangeOrThrow,
+    resolveTruePageCount,
     searchPageInDoc,
 } from "./docHelpers";
 import type { DocumentLike, FontApi } from "./mupdfApi";
@@ -933,7 +934,12 @@ export async function opExtract(
         // provided.
         const requestedRepeatThreshold = args.settings?.repeatThreshold;
         const opts = { ...DEFAULT_EXTRACTION_SETTINGS, ...(args.settings || {}) };
-        const pageCount = doc.countPages();
+        // `resolveTruePageCount` (not `doc.countPages()`): a corrupt or
+        // truncated PDF can advertise more pages in `/Root/Pages/Count`
+        // than its page tree can resolve. Using the advertised count
+        // would drive the page walk past the last real page and abort
+        // the whole extraction with `invalid page number`.
+        const pageCount = resolveTruePageCount(doc);
         const pageLabels = collectPageLabels(doc);
 
         // Structured mode needs the WASM `Font` helpers to populate line

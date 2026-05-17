@@ -1030,6 +1030,37 @@ export function resolvePageRangeOrThrow(
 }
 
 /**
+ * Return the document's true, loadable page count.
+ *
+ * `doc.countPages()` reports `/Root/Pages/Count` verbatim. In a corrupt
+ * or truncated PDF that value can exceed the number of pages the page
+ * tree can actually resolve — MuPDF only reconciles `Count` with reality
+ * the first time it walks the page tree (it then rewrites `Count` to the
+ * number of pages actually found). Loading any page forces that walk, so
+ * a throwaway `loadPage(0)` makes the subsequent `countPages()` reflect
+ * the pages that can really be read.
+ *
+ * Without this, a document claiming 24 pages but holding 7 drives the
+ * extractor to `loadPage(7)`, which throws `invalid page number` and
+ * aborts the whole extraction instead of returning the 7 real pages.
+ */
+export function resolveTruePageCount(doc: DocumentLike): number {
+    try {
+        const page = doc.loadPage(0);
+        page.destroy();
+    } catch (err) {
+        // A page-tree resolution failure still ran the tree walk (and its
+        // Count correction), so countPages() below is valid even though page
+        // 0 itself is unloadable — swallow it. Any other failure (WASM trap,
+        // heap exhaustion) leaves the MuPDF runtime unusable; rethrow so the
+        // caller aborts and discards the document, matching how every other
+        // page-load site treats non-recoverable errors.
+        if (!isRecoverablePageError(err)) throw err;
+    }
+    return doc.countPages();
+}
+
+/**
  * Build a RawPageProvider over an open Document. Lets DocumentAnalyzer
  * run inside the worker against an already-open `doc` (no extra opens).
  */
