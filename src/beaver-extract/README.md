@@ -228,6 +228,19 @@ PageImageResult; // Per-page entry in BeaverExtractor.renderPages result.pages
 
 **Why strip whitespace?** Some PDFs have pages with only `\n\n\n...` which would pass a naive check.
 
+**Margin-text exclusion:** text density is measured from body lines only.
+Lines whose bounding box falls in the page margin zone — publisher watermarks
+("Downloaded from …"), browser print banners, running headers/footers, page
+numbers — are excluded. Otherwise a scanned page carrying only a repeated
+margin stamp would be counted as text-bearing and slip past the gate.
+
+**Document-level near-empty guard:** beyond the per-page check, a document
+(of at least 3 pages) is also routed to OCR when the mean body text across the
+sampled pages falls below `minMeanTextPerPage` (default: 24). This catches
+scanned documents that expose only a stray incidental text layer without a
+detectable large image. Documents of 1–2 pages are exempt — a short PDF can
+legitimately be a cover or part-divider.
+
 ### 4. Style Analysis
 
 **Character-frequency based detection** of body text:

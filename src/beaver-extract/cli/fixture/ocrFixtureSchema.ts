@@ -16,6 +16,7 @@ import type {
     OCRDetectionOptions,
     OCRIssueReason,
 } from "../../types";
+import { DEFAULT_OCR_DETECTION_OPTIONS } from "../../types";
 
 export const OCR_FIXTURE_SCHEMA_VERSION = 1 as const;
 
@@ -168,6 +169,13 @@ function validateEffectiveOptions(
 ): Required<OCRDetectionOptions> {
     return {
         minTextPerPage: expectInt(v.minTextPerPage, `${source}.minTextPerPage`),
+        // Backward-compatible: fixtures captured before `minMeanTextPerPage`
+        // existed omit it — fall back to the current default so older
+        // `ocr.json` files still validate.
+        minMeanTextPerPage:
+            v.minMeanTextPerPage === undefined
+                ? DEFAULT_OCR_DETECTION_OPTIONS.minMeanTextPerPage
+                : expectInt(v.minMeanTextPerPage, `${source}.minMeanTextPerPage`),
         sampleSize: expectInt(v.sampleSize, `${source}.sampleSize`),
         expandedSampleSize: expectInt(v.expandedSampleSize, `${source}.expandedSampleSize`),
         expandLowerThreshold: expectFiniteNumber(
