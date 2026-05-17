@@ -305,6 +305,8 @@ export async function handleZoteroAttachmentSearchRequest(
                     return errorResponse('PDF is password-protected', 'encrypted');
                 case ExtractionErrorCode.INVALID_PDF:
                     return errorResponse('PDF file is invalid or corrupted', 'invalid_pdf');
+                case ExtractionErrorCode.EMPTY_DOCUMENT:
+                    return errorResponse('PDF has no readable pages (it may be empty or corrupted)', 'empty_document');
                 case ExtractionErrorCode.NO_TEXT_LAYER:
                     // Note: dead branch: opSearch does not run
                     // OCR detection. Kept as cheap insurance against future

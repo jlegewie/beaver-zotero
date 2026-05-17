@@ -626,6 +626,7 @@ export type AttachmentSearchErrorCode =
     | 'file_too_large'      // PDF file exceeds size limit
     | 'encrypted'           // PDF is password-protected
     | 'invalid_pdf'         // Invalid/corrupted PDF
+    | 'empty_document'      // PDF opened but has no readable pages
     | 'no_text_layer'       // PDF requires OCR — text search unavailable
     | 'too_many_pages'      // PDF exceeds page count limit
     | 'download_failed'     // Remote file download failed
