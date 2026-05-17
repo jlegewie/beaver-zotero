@@ -1063,10 +1063,16 @@ export function resolveTruePageCount(doc: DocumentLike): number {
 /**
  * Build a RawPageProvider over an open Document. Lets DocumentAnalyzer
  * run inside the worker against an already-open `doc` (no extra opens).
+ *
+ * The page count is resolved once via `resolveTruePageCount` (not raw
+ * `doc.countPages()`): a corrupt or truncated PDF can advertise more
+ * pages in `/Root/Pages/Count` than its page tree can resolve, and
+ * `DocumentAnalyzer` samples page indices across that count.
  */
 export function rawPageProviderFromDoc(doc: DocumentLike): RawPageProvider {
+    const pageCount = resolveTruePageCount(doc);
     return {
-        getPageCount: () => doc.countPages(),
+        getPageCount: () => pageCount,
         extractRawPage: (i, opts) => extractRawPageFromDoc(doc, i, opts),
     };
 }
