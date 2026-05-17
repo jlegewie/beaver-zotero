@@ -351,7 +351,7 @@ export function applyOldStringEnrichment(
 // =============================================================================
 
 export interface PartialSimplifiedTag {
-    kind: 'citation' | 'annotation';
+    kind: 'citation' | 'annotation' | 'link';
     snippet: string;
 }
 
@@ -374,10 +374,10 @@ export function detectPartialSimplifiedTag(
     oldString: string,
 ): PartialSimplifiedTag | null {
     if (!oldString) return null;
-    const openerRe = /<(citation|annotation)(?=\s|>|\/|$)/g;
+    const openerRe = /<(citation|annotation|link)(?=\s|>|\/|$)/g;
     let m: RegExpExecArray | null;
     while ((m = openerRe.exec(oldString)) !== null) {
-        const kind = m[1] as 'citation' | 'annotation';
+        const kind = m[1] as 'citation' | 'annotation' | 'link';
         const start = m.index;
         let cursor = start + m[0].length;
         let closed = false;
@@ -387,7 +387,7 @@ export function detectPartialSimplifiedTag(
             // never terminated — the model truncated the tag.
             if (c === '<' || c === '\n') break;
             if (c === '/' && oldString[cursor + 1] === '>') {
-                closed = kind === 'citation';
+                closed = kind === 'citation' || kind === 'link';
                 cursor += 2;
                 break;
             }
@@ -420,6 +420,14 @@ export function detectPartialSimplifiedTag(
  * reading the generic zero-match hint.
  */
 export function buildPartialSimplifiedTagMessage(partial: PartialSimplifiedTag): string {
+    if (partial.kind === 'link') {
+        return (
+            '`<link/>` tags are atomic — the matcher cannot match a partial tag. '
+            + `Found a partial opener in old_string: \`${partial.snippet}\`.\n`
+            + 'A `<link/>` tag is a hyperlink. Copy the FULL `<link href="..."/>` '
+            + 'tag from `read_note` verbatim as old_string, not a prefix of it.'
+        );
+    }
     return (
         `${partial.kind === 'citation' ? 'Citation' : 'Annotation'} tags are atomic — `
         + `the matcher cannot match a partial tag. Found a partial opener in old_string: `

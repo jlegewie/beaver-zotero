@@ -12,7 +12,7 @@
 // =============================================================================
 
 /** Names of simplified-only elements (tags that don't exist in raw HTML). */
-const SIMPLIFIED_ELEMENT_NAMES = /^\/?(citation|annotation-image|annotation|image)\b/;
+const SIMPLIFIED_ELEMENT_NAMES = /^\/?(citation|annotation-image|annotation|image|link)\b/;
 
 export interface PartialElementStrip {
     /** old_string with partial element boundary fragments removed */

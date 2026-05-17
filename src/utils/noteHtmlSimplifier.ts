@@ -11,7 +11,7 @@
  */
 
 import { stripBeaverEditFooter, stripBeaverCreatedFooter } from './noteEditFooter';
-import { escapeAttr } from './noteHtmlEntities';
+import { escapeAttr, unescapeAttr } from './noteHtmlEntities';
 import { stripDataCitationItems, stripNoteWrapperDiv } from './noteWrapper';
 import { normalizeNoteHtml } from '../prosemirror/normalize';
 
@@ -32,7 +32,7 @@ export interface SimplificationMetadata {
 
 export interface StoredElement {
     rawHtml: string;
-    type: 'citation' | 'compound-citation' | 'annotation' | 'annotation-image' | 'image';
+    type: 'citation' | 'compound-citation' | 'annotation' | 'annotation-image' | 'image' | 'link';
     originalAttrs?: { item_id: string; page?: string };
     isCompound?: boolean;
     originalText?: string;
@@ -327,6 +327,50 @@ export function simplifyNoteHtml(rawHtml: string, libraryID: number): Simplifica
             }
         }
     );
+
+    // 5.5. Replace self-linking anchors with a compact <link href="X"/> token.
+    // Zotero auto-linkifies bare URLs typed into notes, producing
+    // <a href="X" rel="...">X</a> where the visible text equals the href. The
+    // verbose, URL-duplicating anchor is hard for the agent to copy verbatim
+    // into edit_note old_string; the token is short and stable.
+    // Annotation tokens are shielded first: a self-linking <a> could sit inside
+    // an annotation's inner text, and rewriting it there would desync the
+    // <annotation> tag from the stored originalText, breaking the equality
+    // check in expandToRawHtml. Citations/images are self-closing tokens and
+    // cannot contain a nested <a>.
+    {
+        const shieldedAnnotations: string[] = [];
+        simplified = simplified.replace(
+            /<annotation\s[^>]*>[\s\S]*?<\/annotation>/g,
+            (annMatch) => {
+                const idx = shieldedAnnotations.push(annMatch) - 1;
+                return `__BEAVER_LINK_SHIELD_${idx}__`;
+            }
+        );
+        simplified = simplified.replace(
+            /<a\s+href="([^"]*)"\s+rel="[^"]*">([^<]*)<\/a>/g,
+            (match, rawHref, rawText) => {
+                // Decode both sides so entity-encoded ampersands etc. compare
+                // equal. Only collapse genuine auto-linkified bare URLs: the
+                // visible text must equal the href and the scheme must be
+                // http(s) (exclude zotero://, mailto:, relative hrefs).
+                const decodedHref = unescapeAttr(rawHref);
+                const decodedText = unescapeAttr(rawText);
+                if (decodedHref !== decodedText) return match;
+                if (!/^https?:\/\//i.test(decodedHref)) return match;
+                metadata.elements.set(`link:${decodedHref}`, {
+                    rawHtml: match,
+                    type: 'link',
+                });
+                // rawHref is already valid attribute encoding — use verbatim.
+                return `<link href="${rawHref}"/>`;
+            }
+        );
+        simplified = simplified.replace(
+            /__BEAVER_LINK_SHIELD_(\d+)__/g,
+            (m, idx) => shieldedAnnotations[Number(idx)] ?? m
+        );
+    }
 
     // 6. Simplify math to dollar notation
     // Strip HTML wrappers from math elements, leaving dollar-delimited content.

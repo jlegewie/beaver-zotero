@@ -41,6 +41,7 @@ import {
     validateNewString,
     checkDuplicateCitations,
     enrichOldStringCitationRefs,
+    detectPartialSimplifiedTag,
 } from '../../../src/utils/editNoteValidation';
 import {
     findUniqueRawMatchPosition,
@@ -3138,5 +3139,147 @@ describe('simplifyNoteHtml with pre-normalization', () => {
         // Expand back
         const expanded = expandToRawHtml(simplified, metadata, 'old');
         expect(expanded).toContain('data-annotation=');
+    });
+});
+
+// =============================================================================
+// self-linking anchor collapse (<link/> token)
+// =============================================================================
+
+describe('self-linking anchor collapse', () => {
+    it('collapses a self-linking http anchor to a <link/> token', () => {
+        const url = 'https://example.com/page';
+        const html = wrap(`<p><a href="${url}">${url}</a></p>`);
+        const { simplified, metadata } = simplifyNoteHtml(html, 1);
+        expect(simplified).toContain(`<link href="${url}"/>`);
+        expect(simplified).not.toContain('<a ');
+        const stored = metadata.elements.get(`link:${url}`);
+        expect(stored).toBeDefined();
+        expect(stored?.type).toBe('link');
+    });
+
+    it('round-trips a self-linking anchor back to the exact raw HTML', () => {
+        const url = 'https://example.com/page';
+        const html = wrap(`<p><a href="${url}">${url}</a></p>`);
+        const { simplified, metadata } = simplifyNoteHtml(html, 1);
+        const stored = metadata.elements.get(`link:${url}`);
+        expect(stored).toBeDefined();
+        // The stored raw anchor is a verbatim slice of the matchable note HTML.
+        expect(normalizeNoteHtml(html)).toContain(stored!.rawHtml);
+        // Expanding the simplified note restores that exact raw anchor.
+        expect(expandToRawHtml(simplified, metadata, 'old')).toContain(stored!.rawHtml);
+    });
+
+    it('leaves a labeled (non-self-linking) anchor verbatim', () => {
+        const html = wrap('<p><a href="https://doi.org/10.1/x">Smith 2020</a></p>');
+        const { simplified, metadata } = simplifyNoteHtml(html, 1);
+        expect(simplified).not.toContain('<link ');
+        expect(simplified).toContain('<a href="https://doi.org/10.1/x"');
+        expect([...metadata.elements.keys()].some((k) => k.startsWith('link:'))).toBe(false);
+    });
+
+    it('does not collapse mailto: or relative self-links', () => {
+        const mailto = wrap('<p><a href="mailto:a@b.com">mailto:a@b.com</a></p>');
+        expect(simplifyNoteHtml(mailto, 1).simplified).not.toContain('<link ');
+        const relative = wrap('<p><a href="#section">#section</a></p>');
+        expect(simplifyNoteHtml(relative, 1).simplified).not.toContain('<link ');
+    });
+
+    it('keeps a single &amp; in the token for a URL with an ampersand', () => {
+        const html = wrap(
+            '<p><a href="https://example.com/?a=1&amp;b=2">https://example.com/?a=1&amp;b=2</a></p>'
+        );
+        const { simplified, metadata } = simplifyNoteHtml(html, 1);
+        expect(simplified).toContain('<link href="https://example.com/?a=1&amp;b=2"/>');
+        expect(simplified).not.toContain('&amp;amp;');
+        // Metadata is keyed by the decoded (bare-&) URL.
+        const stored = metadata.elements.get('link:https://example.com/?a=1&b=2');
+        expect(stored).toBeDefined();
+        expect(expandToRawHtml(simplified, metadata, 'old')).toContain(stored!.rawHtml);
+    });
+
+    it('does not corrupt a URL containing $...$ during expansion', () => {
+        const url = 'https://example.com/a$b$c';
+        const html = wrap(`<p><a href="${url}">${url}</a></p>`);
+        const { simplified, metadata } = simplifyNoteHtml(html, 1);
+        expect(simplified).toContain(`<link href="${url}"/>`);
+        const expanded = expandToRawHtml(simplified, metadata, 'old');
+        expect(expanded).not.toContain('class="math"');
+        expect(expanded).toContain(metadata.elements.get(`link:${url}`)!.rawHtml);
+    });
+
+    it('reconstructs a canonical anchor for an unknown <link/> in new_string', () => {
+        const metadata: SimplificationMetadata = { elements: new Map() };
+        const result = expandToRawHtml('<link href="https://new.com/p"/>', metadata, 'new');
+        expect(result).toBe(
+            '<a href="https://new.com/p" rel="noopener noreferrer nofollow">https://new.com/p</a>'
+        );
+    });
+
+    it('reconstructs a canonical single &amp; for an unknown <link/> URL', () => {
+        const metadata: SimplificationMetadata = { elements: new Map() };
+        // Model wrote a bare `&` in the token — expansion must emit canonical
+        // `&amp;` (and never double-escaped `&amp;amp;`).
+        const result = expandToRawHtml('<link href="https://new.com/?a=1&b=2"/>', metadata, 'new');
+        expect(result).toBe(
+            '<a href="https://new.com/?a=1&amp;b=2" rel="noopener noreferrer nofollow">'
+            + 'https://new.com/?a=1&amp;b=2</a>'
+        );
+        expect(result).not.toContain('&amp;amp;');
+        // A token that already carried `&amp;` converges on the same output.
+        const fromEncoded = expandToRawHtml(
+            '<link href="https://new.com/?a=1&amp;b=2"/>', metadata, 'new'
+        );
+        expect(fromEncoded).toBe(result);
+    });
+
+    it('does not throw for an unknown <link/> in old_string context', () => {
+        const metadata: SimplificationMetadata = { elements: new Map() };
+        expect(() => expandToRawHtml('<link href="https://x.com/q"/>', metadata, 'old')).not.toThrow();
+        expect(expandToRawHtml('<link href="https://x.com/q"/>', metadata, 'old')).toBe(
+            '<a href="https://x.com/q" rel="noopener noreferrer nofollow">https://x.com/q</a>'
+        );
+    });
+
+    it('collapses a self-link while leaving annotations intact (shielding round-trip)', () => {
+        const html = wrap(
+            `<p>${rawAnnotation('ANN1', 'highlighted text')}</p>`
+            + '<p><a href="https://example.com/p">https://example.com/p</a></p>'
+        );
+        const { simplified, metadata } = simplifyNoteHtml(html, 1);
+        expect(simplified).toContain('<link href="https://example.com/p"/>');
+        expect(simplified).toContain('<annotation id="a_ANN1"');
+        // The annotation token still expands — shield placeholders fully restored.
+        expect(() => expandToRawHtml(simplified, metadata, 'old')).not.toThrow();
+    });
+
+    it('does not collapse a self-link that carries a title attribute', () => {
+        const html = wrap('<p><a href="https://x.com/p" title="tip">https://x.com/p</a></p>');
+        const { simplified } = simplifyNoteHtml(html, 1);
+        expect(simplified).not.toContain('<link ');
+        expect(simplified).toContain('<a href="https://x.com/p"');
+    });
+
+    it('leaves a literal raw <a> in old_string untouched (backward compatible)', () => {
+        const url = 'https://example.com/p';
+        const html = wrap(`<p><a href="${url}">${url}</a></p>`);
+        const { metadata } = simplifyNoteHtml(html, 1);
+        const rawAnchor = metadata.elements.get(`link:${url}`)!.rawHtml;
+        // A verbose raw <a> (no <link/> token) passes through expansion unchanged
+        // and is a verbatim slice of the matchable note HTML — so the matcher's
+        // exact strategy still works if the model copies the legacy form.
+        expect(expandToRawHtml(rawAnchor, metadata, 'old')).toBe(rawAnchor);
+        expect(normalizeNoteHtml(html)).toContain(rawAnchor);
+    });
+});
+
+describe('detectPartialSimplifiedTag — <link>', () => {
+    it('flags a truncated <link href= opener', () => {
+        const result = detectPartialSimplifiedTag('see <link href="https://y.com');
+        expect(result?.kind).toBe('link');
+    });
+
+    it('returns null for a complete <link/> tag', () => {
+        expect(detectPartialSimplifiedTag('see <link href="https://y.com/p"/> ok')).toBeNull();
     });
 });
