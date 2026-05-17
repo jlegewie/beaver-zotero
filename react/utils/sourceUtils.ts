@@ -301,8 +301,14 @@ export async function getCurrentCollectionKeyForItem(
         if (!item) return undefined;
 
         // Collection membership lives on the top-level item; a child note
-        // inherits its placement from its parent.
-        const topLevelItem = item.isNote() && item.parentItem ? item.parentItem : item;
+        // inherits its placement from its parent. Load the parent async via
+        // its ID — the synchronous `parentItem` getter throws when the parent
+        // is not yet in Zotero's object cache.
+        let topLevelItem = item;
+        if (item.isNote() && item.parentItemID) {
+            const parent = await Zotero.Items.getAsync(item.parentItemID);
+            if (parent) topLevelItem = parent;
+        }
         await topLevelItem.loadDataType('collections');
         return topLevelItem.getCollections().includes(selectedCollection.id)
             ? selectedCollection.key
