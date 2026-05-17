@@ -186,9 +186,20 @@ function dedupOverlappingLines(blocks: RawBlock[]): RawBlock[] {
 
 /**
  * Open a PDF document and run the encryption check. Throws workerError
- * on encrypted / invalid input. Returns the open `doc` on success.
+ * on empty / encrypted / invalid input. Returns the open `doc` on success.
  */
 export async function openDocSafe(pdfData: Uint8Array | ArrayBuffer): Promise<DocumentLike> {
+    // Reject empty input before invoking the parser. A 0-byte file would
+    // otherwise surface as a generic `INVALID_PDF` parser error; classify it
+    // explicitly. `byteLength` covers both `Uint8Array` and `ArrayBuffer`.
+    if (!pdfData || pdfData.byteLength === 0) {
+        throw workerError(
+            ERROR_CODES.EMPTY_DOCUMENT,
+            "PDF file is empty (0 bytes)",
+            { pageCount: 0 },
+        );
+    }
+
     const { Document } = await ensureApi();
 
     let doc: DocumentLike;
@@ -916,6 +927,29 @@ export function resolvePageIndices(pageCount: number, pageIndices?: number[]): n
     return pageIndices && pageIndices.length
         ? pageIndices.filter((i) => i >= 0 && i < pageCount)
         : Array.from({ length: pageCount }, (_, i) => i);
+}
+
+/**
+ * Throw a classified error when an opened document resolves to no pages.
+ *
+ * A structurally broken PDF (e.g. an unrepairable xref) can still open
+ * successfully yet resolve to 0 pages. Without this guard the extraction
+ * ops fail with a raw, unclassified internal error (the OCR gate's plain
+ * `Error`, or `resolveAnalysisPages`'s `RangeError`). Call this right
+ * after the page count is resolved, before any per-page work.
+ *
+ * The `{ pageCount: 0 }` payload mirrors PAGE_OUT_OF_RANGE so the
+ * MuPDFWorkerClient rehydrator can populate `ExtractionError.pageCount`,
+ * which handlers surface as the response's `total_pages` field.
+ */
+export function assertDocumentHasPages(pageCount: number): void {
+    if (!Number.isInteger(pageCount) || pageCount <= 0) {
+        throw workerError(
+            ERROR_CODES.EMPTY_DOCUMENT,
+            "Document has no extractable pages — it may be empty or have a corrupt structure",
+            { pageCount: 0 },
+        );
+    }
 }
 
 /**

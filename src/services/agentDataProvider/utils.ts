@@ -685,9 +685,32 @@ export async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary
                         status_code: FileStatusCode.PdfParserCrash,
                         status_reason: "PDF crashes the local PDF parser",
                     };
+                } else if (error.code === ExtractionErrorCode.EMPTY_DOCUMENT) {
+                    // Empty / 0-byte file. Report as invalid without persisting
+                    // metadata — empty-document failures are deliberately not
+                    // cached (re-extraction is cheap).
+                    return {
+                        is_primary: isPrimary,
+                        mime_type: contentType,
+                        page_count: 0,
+                        status: "unavailable",
+                        status_code: FileStatusCode.PdfInvalid,
+                    };
                 }
             }
             throw error;
+        }
+
+        // A document that opened but resolves to zero pages is empty or
+        // structurally corrupt. Report as invalid without persisting metadata.
+        if (pageCount === 0) {
+            return {
+                is_primary: isPrimary,
+                mime_type: contentType,
+                page_count: 0,
+                status: "unavailable",
+                status_code: FileStatusCode.PdfInvalid,
+            };
         }
 
         // Analyze OCR needs and extract page labels in parallel

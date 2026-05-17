@@ -91,6 +91,7 @@ import {
     collectPageLabels,
     extractGraphicsFromDoc,
     extractRawPageDetailedFromDoc,
+    assertDocumentHasPages,
     extractRawPageFromDoc,
     filterToDividerLines,
     filterToContainerRects,
@@ -198,7 +199,17 @@ export async function opRenderPages(
     let docFailed = false;
     try {
         const opts = { ...DEFAULT_PAGE_IMAGE_OPTIONS, ...(args.options || {}) };
-        const pageCount = doc.countPages();
+        // `resolveTruePageCount` (not `doc.countPages()`): a corrupt PDF can
+        // advertise a positive `/Root/Pages/Count` whose page tree resolves
+        // to zero pages. Two `assertDocumentHasPages` guards, both required:
+        //  - before: a genuinely page-less document makes the `loadPage(0)`
+        //    probe throw a raw "invalid page number" error.
+        //  - after: `resolveTruePageCount` can correct an advertised count
+        //    down to 0, which would otherwise let `renderOnePage` throw a
+        //    raw "invalid page number" instead of a classified error.
+        assertDocumentHasPages(doc.countPages());
+        const pageCount = resolveTruePageCount(doc);
+        assertDocumentHasPages(pageCount);
         const pageLabels = collectPageLabels(doc);
         const indices = args.pageRange
             ? resolvePageRangeOrThrow(pageCount, args.pageRange)
@@ -939,7 +950,17 @@ export async function opExtract(
         // than its page tree can resolve. Using the advertised count
         // would drive the page walk past the last real page and abort
         // the whole extraction with `invalid page number`.
+        //
+        // Two `assertDocumentHasPages` guards, both required:
+        //  - before `resolveTruePageCount`: a genuinely page-less document
+        //    makes its `loadPage(0)` probe throw a raw "invalid page
+        //    number" error, which `resolveTruePageCount` rethrows.
+        //  - after: `resolveTruePageCount` itself can correct an advertised
+        //    count down to 0, which would otherwise reach the OCR gate /
+        //    `resolveAnalysisPages` and throw a raw unclassified error.
+        assertDocumentHasPages(doc.countPages());
         const pageCount = resolveTruePageCount(doc);
+        assertDocumentHasPages(pageCount);
         const pageLabels = collectPageLabels(doc);
 
         // Structured mode needs the WASM `Font` helpers to populate line
@@ -1071,9 +1092,16 @@ export async function opAnalyzeLayout(
         // optional OCR gate.
         const requestedRepeatThreshold = args.settings?.repeatThreshold;
         const opts = { ...DEFAULT_EXTRACTION_SETTINGS, ...(args.settings || {}) };
+        // Classify a 0-page document before `rawPageProviderFromDoc`, whose
+        // `resolveTruePageCount` probe would otherwise throw a raw
+        // "invalid page number" error for a page-less document. The second
+        // check covers `resolveTruePageCount` correcting an advertised
+        // count down to 0.
+        assertDocumentHasPages(doc.countPages());
         const provider = rawPageProviderFromDoc(doc);
         const docAnalyzer = new DocumentAnalyzer(provider);
         const pageCount = docAnalyzer.getPageCount();
+        assertDocumentHasPages(pageCount);
         const pageLabels = collectPageLabels(doc);
 
         if (opts.checkTextLayer) {
@@ -1163,7 +1191,13 @@ export async function opAnalyzeOCRNeeds(
     const doc = await acquireDoc(args.pdfData);
     let docFailed = false;
     try {
+        // Classify a 0-page document up front — `getDetailedOCRAnalysis`
+        // would otherwise throw a raw, unclassified `Error`. The second
+        // check covers `resolveTruePageCount` (inside `rawPageProviderFromDoc`)
+        // correcting an advertised count down to 0.
+        assertDocumentHasPages(doc.countPages());
         const provider = rawPageProviderFromDoc(doc);
+        assertDocumentHasPages(provider.getPageCount());
         const analyzer = new DocumentAnalyzer(provider);
         const result = analyzer.getDetailedOCRAnalysis(args.options || {});
         return { result };
@@ -1326,6 +1360,7 @@ export async function opExtractSentenceDebug(
     let docFailed = false;
     try {
         const pageCount = doc.countPages();
+        assertDocumentHasPages(pageCount);
         if (
             typeof args.pageIndex !== "number" ||
             args.pageIndex < 0 ||

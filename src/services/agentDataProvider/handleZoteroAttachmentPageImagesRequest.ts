@@ -264,6 +264,19 @@ export async function handleZoteroAttachmentPageImagesRequest(
             }
         }
 
+        // 6b. A document that opened but resolves to zero pages is empty or
+        // structurally corrupt. Classify it here — before page resolution —
+        // so a specific-page request does not fall through to the bounds
+        // pre-filter below and surface a misleading `page_out_of_range`.
+        if (totalPages === 0) {
+            throwIfTimedOut('empty_document_response');
+            return errorResponse(
+                `The PDF file for ${pdfKey} has no readable pages (it may be empty or corrupted)`,
+                'empty_document',
+                0,
+            );
+        }
+
         // 7. Resolve `pages` array (label or numeric strings) to numeric indices
         // on main thread. Same separation-of-concerns as the pages handler:
         // string parsing → `invalid_page_value`; range validation →
@@ -449,12 +462,24 @@ export async function handleZoteroAttachmentPageImagesRequest(
                     return errorResponse(`The PDF file for ${errorKey} is password-protected`, 'encrypted');
                 case ExtractionErrorCode.INVALID_PDF:
                     return errorResponse(`The PDF file for ${errorKey} is invalid or corrupted`, 'invalid_pdf');
+                case ExtractionErrorCode.EMPTY_DOCUMENT:
+                    return errorResponse(
+                        `The PDF file for ${errorKey} has no readable pages (it may be empty or corrupted)`,
+                        'empty_document',
+                        totalPagesForError
+                    );
                 case ExtractionErrorCode.PAGE_OUT_OF_RANGE:
                     return errorResponse(error.message, 'page_out_of_range', totalPagesForError);
                 case ExtractionErrorCode.WASM_ERROR:
                     return errorResponse(
                         `The PDF file for ${errorKey} crashes the PDF parser and cannot be rendered`,
                         'pdf_parser_crash',
+                        totalPagesForError
+                    );
+                case ExtractionErrorCode.HEAP_EXHAUSTION:
+                    return errorResponse(
+                        `The PDF file for ${errorKey} is too large or complex to process and exhausted the parser's memory`,
+                        'pdf_too_complex',
                         totalPagesForError
                     );
                 default:
