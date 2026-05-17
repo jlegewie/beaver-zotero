@@ -26,6 +26,7 @@ import {
 import IconButton from '../ui/IconButton';
 import Tooltip from '../ui/Tooltip';
 import { selectItemById } from '../../../src/utils/selectItem';
+import { revealSource, getCurrentCollectionKeyForItem } from '../../utils/sourceUtils';
 import { isLibraryEditable } from '../../../src/utils/zoteroUtils';
 import { saveStreamingNote } from '../../utils/noteActions';
 import {
@@ -71,12 +72,13 @@ const NoteAgentActionRow: React.FC<NoteAgentActionRowProps> = ({ action, runId, 
 
     // Reveal note in Zotero
     const handleReveal = useCallback(async () => {
-        if (action.result_data?.library_id && action.result_data?.zotero_key) {
-            const item = await Zotero.Items.getByLibraryAndKeyAsync(
-                action.result_data.library_id, action.result_data.zotero_key
-            );
-            if (item) await selectItemById(item.id);
-        }
+        const libraryId = action.result_data?.library_id;
+        const zoteroKey = action.result_data?.zotero_key;
+        if (!libraryId || !zoteroKey) return;
+        // Reveal within the current collection when the note belongs to it,
+        // instead of switching to the library root.
+        const collectionKey = await getCurrentCollectionKeyForItem(libraryId, zoteroKey);
+        revealSource({ library_id: libraryId, zotero_key: zoteroKey }, collectionKey);
     }, [action.result_data]);
 
     // Undo: delete note from Zotero + revert action status

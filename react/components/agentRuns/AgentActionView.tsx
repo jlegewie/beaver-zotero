@@ -54,7 +54,7 @@ import {
     GlobalSearchIcon,
     FileDiffIcon,
 } from '../icons/icons';
-import { revealSource, openNoteByKey } from '../../utils/sourceUtils';
+import { revealSource, openNoteByKey, getCurrentCollectionKeyForItem } from '../../utils/sourceUtils';
 import Button from '../ui/Button';
 import IconButton from '../ui/IconButton';
 import Tooltip from '../ui/Tooltip';
@@ -484,6 +484,16 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         }
     }, [isUndoError, handleUndo, handleApplyPending]);
 
+    const handleRevealNote = useCallback(async () => {
+        const libraryId = action?.result_data?.library_id;
+        const zoteroKey = action?.result_data?.zotero_key;
+        if (!libraryId || !zoteroKey) return;
+        // Reveal within the current collection when the note belongs to it,
+        // instead of switching to the library root.
+        const collectionKey = await getCurrentCollectionKeyForItem(libraryId, zoteroKey);
+        revealSource({ library_id: libraryId, zotero_key: zoteroKey }, collectionKey);
+    }, [action]);
+
     const toggleExpanded = () => setExpanded({ key: expansionKey, expanded: !isExpanded });
     const previewData = buildPreviewData(toolName, pendingApproval, action);
 
@@ -695,10 +705,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                         {toolName === 'create_note' && action?.status === 'applied' && action?.result_data?.library_id && action?.result_data?.zotero_key && (
                             <Button
                                 variant="outline"
-                                onClick={() => revealSource({
-                                    library_id: action.result_data!.library_id,
-                                    zotero_key: action.result_data!.zotero_key,
-                                })}
+                                onClick={handleRevealNote}
                                 disabled={isProcessing}
                             >
                                 Reveal

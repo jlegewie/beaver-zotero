@@ -280,6 +280,39 @@ export function revealSource(source: ZoteroItemReference | SourceAttachment | Ci
     }
 }
 
+/**
+ * Resolve the key of the currently selected collection when the given item
+ * (or its top-level parent, for child notes) is a member of that collection.
+ *
+ * Pass the result to `revealSource` so the item is revealed within the
+ * current collection instead of switching to the library root. Returns
+ * undefined when there is no selected collection or the item does not belong
+ * to it — callers then fall back to the default library-root behavior.
+ */
+export async function getCurrentCollectionKeyForItem(
+    libraryId: number,
+    zoteroKey: string,
+): Promise<string | undefined> {
+    try {
+        const selectedCollection = Zotero.getActiveZoteroPane()?.getSelectedCollection?.();
+        if (!selectedCollection || selectedCollection.libraryID !== libraryId) return undefined;
+
+        const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryId, zoteroKey);
+        if (!item) return undefined;
+
+        // Collection membership lives on the top-level item; a child note
+        // inherits its placement from its parent.
+        const topLevelItem = item.isNote() && item.parentItem ? item.parentItem : item;
+        await topLevelItem.loadDataType('collections');
+        return topLevelItem.getCollections().includes(selectedCollection.id)
+            ? selectedCollection.key
+            : undefined;
+    } catch (error) {
+        logger(`getCurrentCollectionKeyForItem: ${error}`, 1);
+        return undefined;
+    }
+}
+
 export async function openSource(source: SourceAttachment | CitationData) {
     const item = getZoteroItem(source);
     if (!item) return;
