@@ -162,7 +162,6 @@ export const ToolResultView: React.FC<ToolResultViewProps> = ({ toolcall, result
                 <ListCollectionsResultView
                     collections={data.collections}
                     totalCount={data.totalCount}
-                    libraryId={data.libraryId}
                 />
             );
         }

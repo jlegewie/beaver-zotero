@@ -6,7 +6,6 @@ import { selectCollection } from '../../../src/utils/selectItem';
 interface ListCollectionsResultViewProps {
     collections: CollectionReference[];
     totalCount: number;
-    libraryId?: number | null;
 }
 
 /**
@@ -16,7 +15,6 @@ interface ListCollectionsResultViewProps {
 export const ListCollectionsResultView: React.FC<ListCollectionsResultViewProps> = ({
     collections,
     totalCount,
-    libraryId
 }) => {
     const [hoveredKey, setHoveredKey] = useState<string | null>(null);
 
@@ -28,12 +26,12 @@ export const ListCollectionsResultView: React.FC<ListCollectionsResultViewProps>
         );
     }
 
-    const handleCollectionClick = (collectionKey: string) => {
-        if (libraryId == null) return;
-        
-        const collection = Zotero.Collections.getByLibraryAndKey(libraryId, collectionKey);
-        if (collection) {
-            selectCollection(collection);
+    // Each CollectionReference carries its own resolved library scope, so reveal
+    // uses the per-collection library_id (not a single result-level library).
+    const handleCollectionClick = (collection: CollectionReference) => {
+        const found = Zotero.Collections.getByLibraryAndKey(collection.library_id, collection.zotero_key);
+        if (found) {
+            selectCollection(found);
         }
     };
 
@@ -42,18 +40,17 @@ export const ListCollectionsResultView: React.FC<ListCollectionsResultViewProps>
             {collections.map((collection) => {
                 const compositeKey = collectionReferenceKey(collection);
                 const isHovered = hoveredKey === compositeKey;
-                const isClickable = libraryId != null;
 
                 return (
                     <div
                         key={compositeKey}
-                        className={`display-flex flex-row gap-1 items-start min-w-0 px-15 py-15 last:border-0 transition-colors duration-150 ${
-                            isClickable ? 'cursor-pointer' : ''
-                        } ${isHovered ? 'bg-quinary' : ''}`}
-                        onClick={() => handleCollectionClick(collection.zotero_key)}
+                        className={`display-flex flex-row gap-1 items-start min-w-0 px-15 py-15 last:border-0 transition-colors duration-150 cursor-pointer ${
+                            isHovered ? 'bg-quinary' : ''
+                        }`}
+                        onClick={() => handleCollectionClick(collection)}
                         onMouseEnter={() => setHoveredKey(compositeKey)}
                         onMouseLeave={() => setHoveredKey(null)}
-                        title={isClickable ? 'Click to reveal in Zotero' : undefined}
+                        title="Click to reveal in Zotero"
                     >
                         <span className="scale-75" style={{ marginTop: '-2px' }}>
                             <CSSIcon name="collection" className="icon-16" />
