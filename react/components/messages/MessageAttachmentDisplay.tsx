@@ -10,6 +10,7 @@ import { CollectionButton } from '../library/CollectionButton';
 import { TagButton } from '../library/TagButton';
 import { MessageItemButton } from '../input/MessageItemButton';
 import { MessageCollectionButton } from '../input/MessageCollectionButton';
+import { collectionReferenceKey } from '../../types/zotero';
 import { usePreviewHover } from '../../hooks/usePreviewHover';
 import { activePreviewAtom } from '../../atoms/ui';
 
@@ -103,7 +104,7 @@ const MessageAttachmentDisplay = ({
 
             {/* Current message collections */}
             {currentMessageCollections.map(col => (
-                <MessageCollectionButton key={col.key} collection={col} />
+                <MessageCollectionButton key={collectionReferenceKey(col)} collection={col} />
             ))}
 
             {/* Current reader attachment */}

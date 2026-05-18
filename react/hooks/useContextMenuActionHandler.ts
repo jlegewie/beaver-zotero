@@ -8,6 +8,7 @@ import { useSetAtom, useAtomValue } from 'jotai';
 import { userAtom } from '../atoms/auth';
 import { newThreadAtom } from '../atoms/threads';
 import { currentMessageItemsAtom, currentMessageCollectionsAtom } from '../atoms/messageComposition';
+import { collectionToReference } from '../types/zotero';
 import { sendResolvedActionAtom, markActionUsedAtom, stageActionInInputAtom } from '../atoms/actions';
 import { eventManager } from '../events/eventManager';
 import { useEventSubscription } from './useEventSubscription';
@@ -59,12 +60,7 @@ export function useContextMenuActionHandler() {
                 if (targetType === 'collection' && collectionId) {
                     const col = Zotero.Collections.get(collectionId);
                     if (col) {
-                        setCurrentMessageCollections([{
-                            key: col.key,
-                            name: col.name,
-                            libraryID: col.libraryID,
-                            parentKey: col.parentKey || null,
-                        }]);
+                        setCurrentMessageCollections([collectionToReference(col)]);
                     }
                 }
 
