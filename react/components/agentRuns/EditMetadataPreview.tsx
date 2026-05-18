@@ -1,5 +1,6 @@
 import React from 'react';
 import type { MetadataEdit, AppliedMetadataEdit, CreatorJSON } from '../../types/agentActions/base';
+import { resolveFieldForItemType } from '../../../src/utils/zoteroUtils';
 
 type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error' | 'awaiting';
 
@@ -16,6 +17,14 @@ interface EditMetadataPreviewProps {
     oldCreators?: CreatorJSON[] | null;
     /** New creators (proposed or applied) */
     newCreators?: CreatorJSON[] | null;
+    /**
+     * Item type ID of the edited item. Used to display the field that will
+     * actually change: the agent may supply a label belonging to the wrong
+     * item type (e.g. `bookTitle` on a journalArticle), which the edit handler
+     * remaps via the shared base field to the type's equivalent
+     * (`publicationTitle`). When omitted, the agent-supplied label is shown.
+     */
+    itemTypeID?: number;
 }
 
 /**
@@ -30,6 +39,7 @@ export const EditMetadataPreview: React.FC<EditMetadataPreviewProps> = ({
     status = 'pending',
     oldCreators,
     newCreators,
+    itemTypeID,
 }) => {
     const isApplied = status === 'applied';
     const isRejectedOrUndone = status === 'rejected' || status === 'undone';
@@ -44,6 +54,13 @@ export const EditMetadataPreview: React.FC<EditMetadataPreviewProps> = ({
                     const currentValue = currentValues[edit.field];
                     const appliedEdit = appliedEdits?.find(ae => ae.field === edit.field);
                     const displayValue = appliedEdit?.applied_value ?? edit.new_value;
+                    // Show the field that will actually change. The edit handler
+                    // remaps a wrong-type label to the type's equivalent field;
+                    // mirror that here so the preview matches the real outcome.
+                    // currentValues/appliedEdits stay keyed by edit.field.
+                    const displayField = itemTypeID != null
+                        ? (resolveFieldForItemType(itemTypeID, edit.field) ?? edit.field)
+                        : edit.field;
 
                     return (
                         <div
@@ -51,7 +68,7 @@ export const EditMetadataPreview: React.FC<EditMetadataPreviewProps> = ({
                             className="flex flex-col gap-1"
                         >
                             <div className="text-sm font-color-primary font-medium px-3 py-1">
-                                {formatFieldName(edit.field)}
+                                {formatFieldName(displayField)}
                             </div>
                             <div className="diff-container">
                                 {/* Old value - deletion style (show crossed out for applied, normal for others) */}

@@ -1074,6 +1074,74 @@ export function canSetField(item: Zotero.Item, field: string): boolean {
 }
 
 /**
+ * Find the base field ID for a field, independent of item type.
+ *
+ * `Zotero.ItemFields.getBaseIDFromTypeAndField()` is type-scoped — it only
+ * resolves a label that is already valid for the supplied item type. To find
+ * the base field for a label that may belong to a different type, probe every
+ * item type until one owns the label. Returns false for fields that are not
+ * base-mapped (e.g. ISBN, DOI).
+ */
+function findBaseFieldID(fieldID: number): number | false {
+    // A base field is its own base.
+    if (Zotero.ItemFields.isBaseField(fieldID)) {
+        return fieldID;
+    }
+    // Fields that are never base-mapped have no base field — skip the scan.
+    if (!Zotero.ItemFields.getBaseMappedFields().includes(fieldID)) {
+        return false;
+    }
+    for (const itemType of Zotero.ItemTypes.getAll()) {
+        try {
+            const baseID = Zotero.ItemFields.getBaseIDFromTypeAndField(itemType.id, fieldID);
+            if (baseID) return baseID;
+        } catch {
+            // Field is invalid for this type — keep probing.
+        }
+    }
+    return false;
+}
+
+/**
+ * Resolve a field name to the variant valid for a specific item type, using
+ * Zotero's base-field mappings.
+ *
+ * Zotero exposes several display labels over one shared base field — e.g.
+ * `bookTitle`, `websiteTitle`, and `proceedingsTitle` all map to the base
+ * field `publicationTitle`. An agent may supply a label belonging to the
+ * wrong item type (e.g. `bookTitle` on a `journalArticle`); this resolves
+ * such a label to the equivalent field for the target type.
+ *
+ * Returns:
+ *   - `field` unchanged when it is already valid for the item type
+ *   - the type-specific equivalent when `field` shares a base field that the
+ *     type also exposes (e.g. `bookTitle` -> `publicationTitle`)
+ *   - `null` when there is no equivalent for this type — a genuine mismatch
+ *     (e.g. `pages` on `webpage`, or `publicationTitle` on `document`)
+ */
+export function resolveFieldForItemType(itemTypeID: number, field: string): string | null {
+    const fieldID = Zotero.ItemFields.getID(field);
+    if (!fieldID) return null;
+
+    // Already valid for this type — no remap needed.
+    if (Zotero.ItemFields.isValidForType(fieldID, itemTypeID)) {
+        return field;
+    }
+
+    // Discover the base field shared by the supplied label.
+    const baseID = findBaseFieldID(fieldID);
+    if (!baseID) return null;
+
+    // Resolve the base field to this type's equivalent.
+    const equivID = Zotero.ItemFields.getFieldIDFromTypeAndBase(itemTypeID, baseID);
+    if (!equivID || !Zotero.ItemFields.isValidForType(equivID, itemTypeID)) {
+        return null;
+    }
+
+    return Zotero.ItemFields.getName(equivID);
+}
+
+/**
  * Get the `language` field for a Zotero item by library ID + key.
  *
  * Falls back to the parent item if the target is not a regular item

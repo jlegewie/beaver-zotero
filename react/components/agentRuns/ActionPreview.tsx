@@ -52,6 +52,18 @@ export const ActionPreview: React.FC<{
             ?? previewData.actionData.creators
             ?? null;
 
+        // Resolve the edited item's type so the preview can display the field
+        // that will actually change (the edit handler remaps wrong-type labels
+        // to the type's equivalent field). Falls back to the agent-supplied
+        // label when the item is not loaded.
+        let itemTypeID: number | undefined;
+        const libraryId = previewData.actionData.library_id;
+        const zoteroKey = previewData.actionData.zotero_key;
+        if (typeof libraryId === 'number' && zoteroKey) {
+            const item = Zotero.Items.getByLibraryAndKey(libraryId, zoteroKey);
+            if (item) itemTypeID = item.itemTypeID;
+        }
+
         return (
             <EditMetadataPreview
                 edits={edits}
@@ -60,6 +72,7 @@ export const ActionPreview: React.FC<{
                 status={status}
                 oldCreators={oldCreators}
                 newCreators={newCreators}
+                itemTypeID={itemTypeID}
             />
         );
     }
