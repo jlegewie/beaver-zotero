@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { CollectionReference } from '../../types/zotero';
+import { CollectionReference, collectionReferenceKey } from '../../types/zotero';
 import { CSSIcon } from '../icons/icons';
 import { selectCollection } from '../../../src/utils/selectItem';
 
@@ -40,17 +40,18 @@ export const ListCollectionsResultView: React.FC<ListCollectionsResultViewProps>
     return (
         <div className="display-flex flex-col">
             {collections.map((collection) => {
-                const isHovered = hoveredKey === collection.zotero_key;
+                const compositeKey = collectionReferenceKey(collection);
+                const isHovered = hoveredKey === compositeKey;
                 const isClickable = libraryId != null;
 
                 return (
                     <div
-                        key={collection.zotero_key}
+                        key={compositeKey}
                         className={`display-flex flex-row gap-1 items-start min-w-0 px-15 py-15 last:border-0 transition-colors duration-150 ${
                             isClickable ? 'cursor-pointer' : ''
                         } ${isHovered ? 'bg-quinary' : ''}`}
                         onClick={() => handleCollectionClick(collection.zotero_key)}
-                        onMouseEnter={() => setHoveredKey(collection.zotero_key)}
+                        onMouseEnter={() => setHoveredKey(compositeKey)}
                         onMouseLeave={() => setHoveredKey(null)}
                         title={isClickable ? 'Click to reveal in Zotero' : undefined}
                     >

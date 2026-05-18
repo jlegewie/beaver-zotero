@@ -77,6 +77,15 @@ export function collectionToReference(collection: Zotero.Collection): Collection
 }
 
 /**
+ * Stable composite key for a collection reference. Zotero collection keys are
+ * only unique within a library, so React list keys and dedup comparisons must
+ * combine the library ID with the key.
+ */
+export function collectionReferenceKey(ref: CollectionReference): string {
+    return `${ref.library_id}-${ref.zotero_key}`;
+}
+
+/**
  * ZoteroItemBase is a base interface for a Zotero item.
  */
 export interface ZoteroItemBase extends ZoteroItemReference {
