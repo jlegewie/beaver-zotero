@@ -967,6 +967,7 @@ export type OCRIssueReason =
     | "high_newline_ratio"
     | "low_alphanumeric_ratio"
     | "invalid_characters"
+    | "fragmented_text_lines"
     | "large_image_coverage"
     | "bbox_overflow"
     | "excessive_line_overlap";

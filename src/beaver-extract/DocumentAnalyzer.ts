@@ -29,6 +29,20 @@ import { isRecoverablePageError } from "./wasmFatal";
 const NEAR_EMPTY_GUARD_MIN_PAGES = 3;
 
 /**
+ * Minimum number of text lines on a page before the fragmented-text check
+ * (see `analyzePage`) applies. Keeps a sparse page — a few stray marks — from
+ * being judged on a tiny, unrepresentative sample.
+ */
+const FRAGMENTED_TEXT_MIN_LINES = 50;
+
+/**
+ * Maximum mean characters-per-line for a page to count as fragmented. A font
+ * MuPDF cannot group into words emits one structured-text line per glyph
+ * (mean ~1); genuine text lines carry whole words and run far longer.
+ */
+const FRAGMENTED_TEXT_MAX_MEAN_LEN = 1.5;
+
+/**
  * Minimal interface that DocumentAnalyzer needs — implemented by a
  * worker-side adapter that wraps an open `Document`. Decouples the analyzer
  * from the MuPDF lifecycle so the same code can be reused outside the
@@ -369,15 +383,21 @@ function analyzePage(
     // optional overflow/overlap checks need to see in full.
     let pageText = "";
     const lineBBoxes: BoundingBox[] = [];
+    // Count every text-bearing line (body and margin) and its characters so a
+    // degenerate line structure can be detected — see the fragmented-text
+    // check below.
+    let textLineCount = 0;
+    let textLineChars = 0;
 
     for (const block of textBlocks) {
         if (block.lines) {
             for (const line of block.lines) {
-                if (
-                    line.text &&
-                    isBodyLine(line.bbox, rawPage.width, rawPage.height)
-                ) {
-                    pageText += line.text + "\n";
+                if (line.text) {
+                    textLineCount++;
+                    textLineChars += line.text.length;
+                    if (isBodyLine(line.bbox, rawPage.width, rawPage.height)) {
+                        pageText += line.text + "\n";
+                    }
                 }
                 if (line.bbox) {
                     lineBBoxes.push(line.bbox);
@@ -388,7 +408,22 @@ function analyzePage(
 
     const textLength = pageText.replace(/\s+/g, "").length;
 
-    // Check 2: Insufficient text combined with large image
+    // Check 2: Fragmented text lines. A font MuPDF cannot group into words —
+    // e.g. a Type 3 font with broken metrics and a custom encoding — yields a
+    // structured-text layer where every glyph becomes its own one-character
+    // line. The substituted characters can be ordinary letters, so the
+    // text-quality checks pass and the per-page text length looks healthy,
+    // yet the text never assembles into words and the document must still be
+    // routed to OCR. A page with many text lines averaging ~1 character each
+    // is unambiguously broken.
+    if (
+        textLineCount >= FRAGMENTED_TEXT_MIN_LINES &&
+        textLineChars / textLineCount <= FRAGMENTED_TEXT_MAX_MEAN_LEN
+    ) {
+        issues.push("fragmented_text_lines");
+    }
+
+    // Check 3: Insufficient text combined with large image
     // This catches scanned pages that weren't OCR'd properly
     // Note: A page with large images but sufficient good text is likely already OCR'd
     if (textLength < opts.minTextPerPage && hasLargeImage) {
@@ -396,13 +431,13 @@ function analyzePage(
         issues.push("large_image_coverage");
     }
 
-    // Check 3: Text quality analysis (applies regardless of images)
+    // Check 4: Text quality analysis (applies regardless of images)
     if (textLength > 0) {
         const textQualityIssues = analyzeTextQuality(pageText, opts);
         issues.push(...textQualityIssues);
     }
 
-    // Check 4: Bounding box validation (optional - for word-level accuracy)
+    // Check 5: Bounding box validation (optional - for word-level accuracy)
     // Disabled by default since most users need page-level text extraction
     if (opts.checkBoundingBoxes && lineBBoxes.length > 0) {
         const bboxIssues = validateBoundingBoxes(
@@ -531,6 +566,7 @@ export class DocumentAnalyzer {
             high_newline_ratio: 0,
             low_alphanumeric_ratio: 0,
             invalid_characters: 0,
+            fragmented_text_lines: 0,
             large_image_coverage: 0,
             bbox_overflow: 0,
             excessive_line_overlap: 0,
@@ -660,6 +696,7 @@ export class DocumentAnalyzer {
                         case "high_newline_ratio":
                         case "low_alphanumeric_ratio":
                         case "invalid_characters":
+                        case "fragmented_text_lines":
                             primaryReason = "poor_text_quality";
                             break;
                         case "bbox_overflow":

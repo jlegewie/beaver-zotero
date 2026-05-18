@@ -66,6 +66,7 @@ function normalizeBreakdown(
         high_newline_ratio: raw.high_newline_ratio ?? 0,
         low_alphanumeric_ratio: raw.low_alphanumeric_ratio ?? 0,
         invalid_characters: raw.invalid_characters ?? 0,
+        fragmented_text_lines: raw.fragmented_text_lines ?? 0,
         large_image_coverage: raw.large_image_coverage ?? 0,
         bbox_overflow: raw.bbox_overflow ?? 0,
         excessive_line_overlap: raw.excessive_line_overlap ?? 0,

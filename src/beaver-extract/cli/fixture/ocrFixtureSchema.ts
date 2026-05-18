@@ -39,10 +39,21 @@ const OCR_ISSUE_REASONS: readonly OCRIssueReason[] = [
     "high_newline_ratio",
     "low_alphanumeric_ratio",
     "invalid_characters",
+    "fragmented_text_lines",
     "large_image_coverage",
     "bbox_overflow",
     "excessive_line_overlap",
 ];
+
+/**
+ * Issue reasons introduced after the first fixtures were captured. These — and
+ * only these — may be absent from an older `ocr.json`; a missing count is read
+ * as 0. Every other reason stays required so a corrupt or hand-edited fixture
+ * that drops a field still fails validation fast.
+ */
+const OPTIONAL_OCR_ISSUE_REASONS: ReadonlySet<OCRIssueReason> = new Set([
+    "fragmented_text_lines",
+]);
 
 export interface SnapshotPageOcr {
     pageIndex: number;
@@ -296,6 +307,13 @@ function validateIssueBreakdown(
     const v = expectObject(value, source);
     const out = {} as Record<OCRIssueReason, number>;
     for (const reason of OCR_ISSUE_REASONS) {
+        if (v[reason] === undefined && OPTIONAL_OCR_ISSUE_REASONS.has(reason)) {
+            // A reason added after this fixture was captured — absent counts
+            // as 0. All originally-required reasons still go through
+            // `expectInt`, so a fixture that drops one fails validation.
+            out[reason] = 0;
+            continue;
+        }
         out[reason] = expectInt(v[reason], `${source}.${reason}`);
     }
     return out;
