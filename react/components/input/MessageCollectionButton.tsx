@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { useSetAtom, useAtomValue } from 'jotai';
 import { CSSIcon } from '../icons/icons';
-import { currentMessageCollectionsAtom, CollectionReference } from '../../atoms/messageComposition';
+import { currentMessageCollectionsAtom } from '../../atoms/messageComposition';
+import { CollectionReference } from '../../types/zotero';
 import { truncateText } from '../../utils/stringUtils';
 import { selectCollection } from '../../../src/utils/selectItem';
 
@@ -26,14 +27,14 @@ export const MessageCollectionButton: React.FC<MessageCollectionButtonProps> = (
 
     const handleRemove = (e: React.MouseEvent<HTMLSpanElement>) => {
         e.stopPropagation();
-        setCollections(collections.filter(c => c.key !== collection.key || c.libraryID !== collection.libraryID));
+        setCollections(collections.filter(c => c.zotero_key !== collection.zotero_key || c.library_id !== collection.library_id));
     };
 
     const handleButtonClick = (e: React.MouseEvent<HTMLButtonElement>) => {
         e.stopPropagation();
         if (!disabled) {
             try {
-                const col = Zotero.Collections.getByLibraryAndKey(collection.libraryID, collection.key);
+                const col = Zotero.Collections.getByLibraryAndKey(collection.library_id, collection.zotero_key);
                 if (col) selectCollection(col);
             } catch { /* ignore */ }
         }

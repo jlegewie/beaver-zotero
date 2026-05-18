@@ -55,6 +55,28 @@ export function createZoteroItemReference(id: string): ZoteroItemReference | nul
 }
 
 /**
+ * CollectionReference is a reference to a Zotero collection.
+ *
+ * Canonical collection type used across message composition, prompt-variable
+ * resolution, and tool-result display. Build one from a live Zotero collection
+ * with `collectionToReference()`.
+ */
+export interface CollectionReference extends ZoteroItemReference {
+    name: string;
+    parent_key: string | null;
+}
+
+/** Build a CollectionReference from a live Zotero collection. */
+export function collectionToReference(collection: Zotero.Collection): CollectionReference {
+    return {
+        library_id: collection.libraryID,
+        zotero_key: collection.key,
+        name: collection.name,
+        parent_key: collection.parentKey || null,
+    };
+}
+
+/**
  * ZoteroItemBase is a base interface for a Zotero item.
  */
 export interface ZoteroItemBase extends ZoteroItemReference {
@@ -124,13 +146,6 @@ export interface AttachmentSummary {
     status: AttachmentReadability;
     status_code?: FileStatusCodeValue | null;
     status_reason?: string | null;
-}
-
-/** Lightweight collection reference with name */
-export interface CollectionSummary {
-    library_id: number;
-    zotero_key: string;
-    name: string;
 }
 
 /** Lightweight item data for search results. Omits formatted_citation, item_json, hashes, sync fields. */

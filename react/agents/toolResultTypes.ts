@@ -7,7 +7,7 @@
  */
 
 import { ExternalReference } from "../types/externalReferences";
-import { ZoteroItemReference } from "../types/zotero";
+import { ZoteroItemReference, CollectionReference } from "../types/zotero";
 import { ToolReturnPart } from "./types";
 
 // ============================================================================
@@ -1134,10 +1134,11 @@ const GET_METADATA_TOOL_NAMES: readonly string[] = [
 // ============================================================================
 
 /**
- * Collection reference for UI display.
- * Matches CollectionReference from backend.
+ * Collection reference as sent by the backend in list_collections summaries.
+ * The backend omits library scope here; `extractListCollectionsData` normalizes
+ * it into the canonical `CollectionReference` using the surrounding library_id.
  */
-export interface CollectionReference {
+export interface BackendCollectionRef {
     collection_key: string;
     name: string;
 }
@@ -1189,7 +1190,7 @@ export interface ListCollectionsResultSummary {
     has_more: boolean;
     library_id?: number | null;
     library_name?: string | null;
-    collections: CollectionReference[];
+    collections: BackendCollectionRef[];
 }
 
 /**
@@ -1642,7 +1643,8 @@ export function extractListItemsData(
 
 /**
  * Normalized list collections view data.
- * Uses CollectionReference (collection_key, name) which is available in both content and summary.
+ * Collections are canonical `CollectionReference`, normalized from the backend
+ * wire shape (content's `CollectionInfo` or summary's `BackendCollectionRef`).
  */
 export interface ListCollectionsViewData {
     collections: CollectionReference[];
@@ -1653,7 +1655,12 @@ export interface ListCollectionsViewData {
 
 /**
  * Extract list collections data from content or metadata.summary.
- * Uses metadata.summary (which contains CollectionReference[]) for dehydrated results.
+ *
+ * Normalizes backend collection refs into canonical `CollectionReference`,
+ * filling `library_id` from the result container (list_collections is always
+ * library-scoped). Empty collection arrays are preserved so the view can render
+ * its "No collections found" state. Returns null when the library scope is
+ * absent — a defensive case that should not occur for list_collections.
  */
 export function extractListCollectionsData(
     content: unknown,
@@ -1662,13 +1669,15 @@ export function extractListCollectionsData(
     // Try content first (non-dehydrated)
     if (content && typeof content === 'object') {
         const obj = content as ListCollectionsResultContent;
-        if (Array.isArray(obj.collections) && obj.collections.length > 0) {
-            // Convert CollectionInfo to CollectionReference (keep key and name)
+        if (Array.isArray(obj.collections)) {
+            const libId = obj.library_id;
+            if (libId == null) return null;
             const collections: CollectionReference[] = obj.collections.map(coll => ({
-                collection_key: coll.collection_key,
+                library_id: libId,
+                zotero_key: coll.collection_key,
                 name: coll.name,
+                parent_key: coll.parent_key ?? null,
             }));
-            
             return {
                 collections,
                 totalCount: obj.total_count,
@@ -1677,15 +1686,19 @@ export function extractListCollectionsData(
             };
         }
     }
-    
+
     // Fall back to metadata.summary (dehydrated)
     if (metadata?.summary && typeof metadata.summary === 'object') {
         const summary = metadata.summary as ListCollectionsResultSummary;
         if (Array.isArray(summary.collections)) {
-            return { 
+            const libId = summary.library_id;
+            if (libId == null) return null;
+            return {
                 collections: summary.collections.map(coll => ({
-                    collection_key: coll.collection_key,
+                    library_id: libId,
+                    zotero_key: coll.collection_key,
                     name: coll.name,
+                    parent_key: null,
                 })),
                 totalCount: summary.total_count,
                 libraryId: summary.library_id,
@@ -1693,7 +1706,7 @@ export function extractListCollectionsData(
             };
         }
     }
-    
+
     return null;
 }
 

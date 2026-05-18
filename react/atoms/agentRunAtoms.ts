@@ -1606,10 +1606,10 @@ export const sendWSMessageAtom = atom(
         for (const col of messageCollections) {
             attachments.push({
                 type: 'collection',
-                library_id: col.libraryID,
-                zotero_key: col.key,
+                library_id: col.library_id,
+                zotero_key: col.zotero_key,
                 name: col.name,
-                parent_key: col.parentKey,
+                parent_key: col.parent_key,
             });
         }
 

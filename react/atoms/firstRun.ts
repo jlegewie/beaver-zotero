@@ -12,8 +12,8 @@ import {
 import {
     currentMessageItemsAtom,
     currentMessageCollectionsAtom,
-    CollectionReference,
 } from './messageComposition';
+import { CollectionReference, collectionToReference } from '../types/zotero';
 import { sendWSMessageAtom } from './agentRunAtoms';
 import { newThreadAtom } from './threads';
 import { profileWithPlanAtom, isDeviceAuthorizedAtom, isDatabaseSyncSupportedAtom } from './profile';
@@ -258,12 +258,7 @@ async function hydrateAttachments(
         if (a.type === 'collection') {
             const c = await Zotero.Collections.getByLibraryAndKeyAsync(a.library_id, a.zotero_key);
             if (c) {
-                collections.push({
-                    key: c.key,
-                    name: c.name,
-                    libraryID: c.libraryID,
-                    parentKey: (c as any).parentKey || null,
-                });
+                collections.push(collectionToReference(c));
             }
         } else {
             const item = await Zotero.Items.getByLibraryAndKeyAsync(a.library_id, a.zotero_key);

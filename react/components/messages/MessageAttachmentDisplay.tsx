@@ -103,7 +103,7 @@ const MessageAttachmentDisplay = ({
 
             {/* Current message collections */}
             {currentMessageCollections.map(col => (
-                <MessageCollectionButton key={col.key} collection={col} />
+                <MessageCollectionButton key={col.zotero_key} collection={col} />
             ))}
 
             {/* Current reader attachment */}

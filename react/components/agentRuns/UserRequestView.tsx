@@ -279,7 +279,7 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
 
                         {/* Collection attachments */}
                         {collectionAttachments.map((col) => (
-                            <MessageCollectionButton key={col.zotero_key} collection={{ key: col.zotero_key, name: col.name, libraryID: col.library_id, parentKey: col.parent_key }} canEdit={false} />
+                            <MessageCollectionButton key={col.zotero_key} collection={col} canEdit={false} />
                         ))}
 
                         {/* Attachments */}
@@ -367,7 +367,7 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
 
                             {/* Collection attachments (read-only in edit mode) */}
                             {collectionAttachments.map((col) => (
-                                <MessageCollectionButton key={col.zotero_key} collection={{ key: col.zotero_key, name: col.name, libraryID: col.library_id, parentKey: col.parent_key }} canEdit={false} />
+                                <MessageCollectionButton key={col.zotero_key} collection={col} canEdit={false} />
                             ))}
 
                             {/* Attachments (read-only in edit mode) */}

@@ -27,6 +27,7 @@ import { store } from '../store';
 import { currentReaderAttachmentAtom } from '../atoms/messageComposition';
 import { selectedZoteroItemsAtom, currentNoteItemAtom } from '../atoms/zoteroContext';
 import { ActionTargetType } from '../types/actions';
+import { CollectionReference, collectionToReference } from '../types/zotero';
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -53,14 +54,6 @@ export const PROMPT_VARIABLES: { name: string; description: string }[] = [
     { name: 'current_collection', description: 'Currently selected collection' },
 ];
 
-/** Collection context resolved from targetType */
-export interface CollectionContext {
-    key: string;
-    name: string;
-    libraryID: number;
-    parentKey: string | null;
-}
-
 /** Result of resolving prompt variables */
 export interface PromptResolution {
     /** The prompt text with placeholders replaced (item placeholders removed) */
@@ -68,7 +61,7 @@ export interface PromptResolution {
     /** Zotero items to add as message attachments */
     items: Zotero.Item[];
     /** Collection context when targetType is 'collection' */
-    collection: CollectionContext | null;
+    collection: CollectionReference | null;
     /** Item variable names that were present but resolved to zero items */
     emptyItemVariables: string[];
 }
@@ -125,7 +118,7 @@ export async function resolvePromptVariables(
     });
 
     // Auto-attach context based on targetType (dedup items with variable-resolved ones)
-    let collection: CollectionContext | null = null;
+    let collection: CollectionReference | null = null;
     if (targetType) {
         const context = resolveTargetTypeContext(targetType);
         if (context.items.length > 0) {
@@ -157,7 +150,7 @@ export async function resolvePromptVariables(
 
 interface TargetTypeContext {
     items: Zotero.Item[];
-    collection: CollectionContext | null;
+    collection: CollectionReference | null;
 }
 
 function isActionableItem(item: Zotero.Item): boolean {
@@ -192,12 +185,7 @@ function resolveTargetTypeContext(targetType: ActionTargetType): TargetTypeConte
         case 'collection': {
             const zp = Zotero.getActiveZoteroPane?.();
             const col = zp?.getSelectedCollection?.();
-            const collection = col ? {
-                key: col.key,
-                name: col.name,
-                libraryID: col.libraryID,
-                parentKey: col.parentKey || null,
-            } : null;
+            const collection = col ? collectionToReference(col) : null;
             return { items: [], collection };
         }
         case 'note': {
