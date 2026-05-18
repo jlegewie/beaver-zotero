@@ -660,13 +660,30 @@ export class DocumentAnalyzer {
             pageCount >= NEAR_EMPTY_GUARD_MIN_PAGES &&
             meanTextPerPage < opts.minMeanTextPerPage;
 
-        // Determine if OCR is needed
-        const needsOCR =
-            issueRatio >= opts.confirmationThreshold || documentNearEmpty;
+        // Document-level sufficient-text rescue
+        const cleanPages = pageAnalyses.filter((p) => !p.hasIssues);
+        const cleanMeanText =
+            cleanPages.length > 0
+                ? cleanPages.reduce((sum, p) => sum + p.textLength, 0) /
+                  cleanPages.length
+                : 0;
+        const documentHasUsableText =
+            cleanPages.length >= pageAnalyses.length / 2 &&
+            cleanMeanText >= opts.minTextPerPage;
 
-        // Determine primary reason
+        // Determine if OCR is needed. The near-empty guard always forces a
+        // verdict; the per-page issue ratio is overridden by the
+        // sufficient-text rescue above.
+        const needsOCR =
+            documentNearEmpty ||
+            (issueRatio >= opts.confirmationThreshold &&
+                !documentHasUsableText);
+
+        // Determine primary reason. Gated on `needsOCR` so a document rescued
+        // by the sufficient-text guard reports `text_extraction_acceptable`
+        // rather than a stale per-page issue reason.
         let primaryReason = "text_extraction_acceptable";
-        if (issueRatio >= opts.confirmationThreshold) {
+        if (needsOCR && issueRatio >= opts.confirmationThreshold) {
             // Find the most common issue
             const sortedIssues = Object.entries(issueBreakdown)
                 .filter(([, count]) => count > 0)
@@ -708,7 +725,7 @@ export class DocumentAnalyzer {
             } else {
                 primaryReason = "quality_threshold_exceeded";
             }
-        } else if (documentNearEmpty) {
+        } else if (needsOCR && documentNearEmpty) {
             // The near-empty guard is the sole trigger — no per-page issue
             // crossed the confirmation threshold. Derive the reason from
             // whether the sampled pages carry images: image-backed pages with
