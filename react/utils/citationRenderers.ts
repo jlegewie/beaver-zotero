@@ -14,6 +14,9 @@ import { ExternalReference } from '../types/externalReferences';
 import { formatExternalCitation } from '../atoms/externalReferences';
 import {
     baseCitationKey,
+    externalCompatKey,
+    getRequestedRef,
+    getResolvedRef,
     getPageLocator,
     normalizeCitationTag,
     parseRawCitationAttributes,
@@ -35,6 +38,20 @@ function parseAttributes(attrString: string) {
         return fullMatch;
     });
     return attrs;
+}
+
+function getEarliestExistingMarker(markerMap: Record<string, string>, keys: string[]): string | undefined {
+    const markers = keys
+        .map((key) => markerMap[key])
+        .filter((marker): marker is string => !!marker);
+    if (markers.length === 0) return undefined;
+
+    const numericMarkers = markers
+        .map((marker) => parseInt(marker, 10))
+        .filter((marker) => Number.isFinite(marker));
+    if (numericMarkers.length === 0) return markers[0];
+
+    return Math.min(...numericMarkers).toString();
 }
 
 /**
@@ -205,6 +222,7 @@ export function renderToHTML(
     const pattern = new RegExp(CITATION_TAG_PATTERN);
     
     let match;
+    const aliasGroups: string[][] = [];
     while ((match = pattern.exec(content)) !== null) {
         const attributesStr = match[1] || '';
         const normalized = normalizeCitationTag(parseRawCitationAttributes(attributesStr));
@@ -213,6 +231,24 @@ export function renderToHTML(
         if (citationKey && !markerMap[citationKey]) {
             markerCount++;
             markerMap[citationKey] = markerCount.toString();
+        }
+    }
+
+    if (contextData?.citationDataMap) {
+        for (const citation of Object.values(contextData.citationDataMap)) {
+            const keys: string[] = [];
+            for (const ref of [getRequestedRef(citation), getResolvedRef(citation)]) {
+                if (!ref) continue;
+                keys.push(baseCitationKey(ref));
+                if (ref.kind === 'external') keys.push(externalCompatKey(ref.external_id));
+            }
+            const uniqueKeys = [...new Set(keys.filter(Boolean))];
+            if (uniqueKeys.length > 1) aliasGroups.push(uniqueKeys);
+        }
+        for (const keys of aliasGroups) {
+            const existing = getEarliestExistingMarker(markerMap, keys);
+            if (!existing) continue;
+            for (const key of keys) markerMap[key] = existing;
         }
     }
 

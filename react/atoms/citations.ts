@@ -36,6 +36,28 @@ import { isFirstRunOrigin } from '../agents/types';
  */
 export const citationKeyToMarkerAtom = atom<Record<string, string>>({});
 
+function getNextCitationMarker(current: Record<string, string>): string {
+    const maxMarker = Object.values(current).reduce((max, marker) => {
+        const parsed = parseInt(marker, 10);
+        return Number.isFinite(parsed) && parsed > max ? parsed : max;
+    }, 0);
+    return (maxMarker + 1).toString();
+}
+
+function getEarliestExistingMarker(current: Record<string, string>, keys: string[]): string | undefined {
+    const markers = keys
+        .map((key) => current[key])
+        .filter((marker): marker is string => !!marker);
+    if (markers.length === 0) return undefined;
+
+    const numericMarkers = markers
+        .map((marker) => parseInt(marker, 10))
+        .filter((marker) => Number.isFinite(marker));
+    if (numericMarkers.length === 0) return markers[0];
+
+    return Math.min(...numericMarkers).toString();
+}
+
 /**
  * Get or assign a numeric marker for a citation key.
  * Returns the existing marker if already assigned, otherwise assigns the next number.
@@ -47,8 +69,7 @@ export const getOrAssignCitationMarkerAtom = atom(
         if (current[citationKey]) {
             return current[citationKey];
         }
-        // Assign next number based on how many unique citations we've seen
-        const nextMarker = (Object.keys(current).length + 1).toString();
+        const nextMarker = getNextCitationMarker(current);
         set(citationKeyToMarkerAtom, { ...current, [citationKey]: nextMarker });
         return nextMarker;
     }
@@ -61,6 +82,27 @@ export const getOrAssignCitationMarkerAtom = atom(
 export const getCitationMarkerAtom = atom(
     (get) => (citationKey: string): string | undefined => {
         return get(citationKeyToMarkerAtom)[citationKey];
+    }
+);
+
+/**
+ * Ensure a group of citation base keys all resolve to the same marker.
+ */
+export const aliasCitationMarkerKeysAtom = atom(
+    null,
+    (get, set, keys: string[]): string | null => {
+        const uniqueKeys = [...new Set(keys.filter(Boolean))];
+        if (uniqueKeys.length === 0) return null;
+
+        const current = get(citationKeyToMarkerAtom);
+        const existingMarker = getEarliestExistingMarker(current, uniqueKeys);
+        const marker = existingMarker || getNextCitationMarker(current);
+        const next = { ...current };
+        for (const key of uniqueKeys) {
+            next[key] = marker;
+        }
+        set(citationKeyToMarkerAtom, next);
+        return marker;
     }
 );
 
@@ -155,6 +197,16 @@ function addCitationKeys(keys: Set<string>, citation: CitationMetadata) {
             keys.add(externalCompatKey(ref.external_id, ref.loc));
         }
     }
+}
+
+function getCitationMarkerBaseKeys(citation: CitationMetadata): string[] {
+    const keys: string[] = [];
+    for (const ref of [getRequestedRef(citation), getResolvedRef(citation)]) {
+        if (!ref) continue;
+        keys.push(baseCitationKey(ref));
+        if (ref.kind === 'external') keys.push(externalCompatKey(ref.external_id));
+    }
+    return [...new Set(keys.filter(Boolean))];
 }
 
 /**
@@ -277,8 +329,8 @@ export const updateCitationDataAtom = atom(
 
             // Get or assign numeric citation using the shared thread-scoped atom.
             // This ensures markers assigned during streaming are preserved.
-            set(getOrAssignCitationMarkerAtom, citationKey);
-            const numericCitation = get(citationKeyToMarkerAtom)[citationKey] || null;
+            const markerKeys = getCitationMarkerBaseKeys(citation);
+            const numericCitation = set(aliasCitationMarkerKeysAtom, markerKeys) || null;
 
             // Use existing extended metadata if available
             if (prevCitation) {

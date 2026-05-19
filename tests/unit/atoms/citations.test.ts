@@ -12,8 +12,12 @@ vi.mock('../../../src/utils/zoteroUtils', () => ({
     getZoteroUserIdentifier: vi.fn(() => ({ userID: undefined, localUserKey: 'test' })),
 }));
 import {
+    citationKeyToMarkerAtom,
+    citationMetadataAtom,
     citationDataByCitationKeyAtom,
     citationDataMapAtom,
+    getOrAssignCitationMarkerAtom,
+    updateCitationDataAtom,
 } from '../../../react/atoms/citations';
 import type { CitationData } from '../../../react/types/citations';
 
@@ -99,5 +103,68 @@ describe('citationDataByCitationKeyAtom', () => {
         store.set(citationDataMapAtom, { c1: data });
 
         expect(store.get(citationDataByCitationKeyAtom)['invalid:bad']).toBe(data);
+    });
+});
+
+describe('updateCitationDataAtom', () => {
+    it('aliases requested and resolved marker keys when bases differ', async () => {
+        const store = createStore();
+        store.set(citationKeyToMarkerAtom, { 'zotero:1-ATTACH': '1' });
+        store.set(citationMetadataAtom, [citation({
+            citation_id: 'c1',
+            invalid: true,
+            library_id: 1,
+            zotero_key: 'PARENT',
+            raw_tag: '<citation att_id="1-ATTACH"/>',
+        })]);
+
+        await store.set(updateCitationDataAtom);
+
+        const markers = store.get(citationKeyToMarkerAtom);
+        expect(markers['zotero:1-ATTACH']).toBe('1');
+        expect(markers['zotero:1-PARENT']).toBe('1');
+    });
+
+    it('allocates the next marker from existing marker values, not alias key count', async () => {
+        const store = createStore();
+        store.set(citationKeyToMarkerAtom, { 'zotero:1-ATTACH': '1' });
+        store.set(citationMetadataAtom, [citation({
+            citation_id: 'c1',
+            invalid: true,
+            library_id: 1,
+            zotero_key: 'PARENT',
+            raw_tag: '<citation att_id="1-ATTACH"/>',
+        })]);
+
+        await store.set(updateCitationDataAtom);
+
+        expect(store.set(getOrAssignCitationMarkerAtom, 'zotero:1-NEXT')).toBe('2');
+        expect(store.get(citationKeyToMarkerAtom)).toMatchObject({
+            'zotero:1-ATTACH': '1',
+            'zotero:1-PARENT': '1',
+            'zotero:1-NEXT': '2',
+        });
+    });
+
+    it('preserves the earliest existing marker when alias keys already have markers', async () => {
+        const store = createStore();
+        store.set(citationKeyToMarkerAtom, {
+            'zotero:1-PARENT': '1',
+            'zotero:1-ATTACH': '2',
+        });
+        store.set(citationMetadataAtom, [citation({
+            citation_id: 'c1',
+            invalid: true,
+            library_id: 1,
+            zotero_key: 'PARENT',
+            raw_tag: '<citation att_id="1-ATTACH"/>',
+        })]);
+
+        await store.set(updateCitationDataAtom);
+
+        expect(store.get(citationKeyToMarkerAtom)).toMatchObject({
+            'zotero:1-PARENT': '1',
+            'zotero:1-ATTACH': '1',
+        });
     });
 });

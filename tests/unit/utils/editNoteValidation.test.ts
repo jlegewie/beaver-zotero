@@ -165,6 +165,26 @@ describe('enrichOldStringCitationRefs (att_id)', () => {
         );
     });
 
+    it('rewrites unified id attachment citations to the parent item ref', () => {
+        installZoteroItems(new Map([
+            ['1-ATTKEY000', {
+                libraryID: 1,
+                parentKey: 'PARENT1234',
+                isAttachment: () => true,
+            }],
+        ]));
+        const metadata = buildMetadata([
+            { ref: 'c_PARENT_0', itemId: '1-PARENT1234', page: '3' },
+        ]);
+        const result = enrichOldStringCitationRefs(
+            '<p><citation id="1-ATTKEY000" loc="p3"/></p>',
+            metadata,
+        );
+        expect(result).toBe(
+            '<p><citation item_id="1-PARENT1234" page="3" ref="c_PARENT_0"/></p>',
+        );
+    });
+
     it('preserves page attribute in the rewritten citation', () => {
         installZoteroItems(new Map([
             ['1-ATTKEY000', {
