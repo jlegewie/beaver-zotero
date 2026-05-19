@@ -782,10 +782,14 @@ export function lookupCitationItemFromAttachment(attId: string): { itemData: any
  */
 export function recoverSimplifiedCitationLabel(tag: string): string | null {
     const openTag = tag.match(/^<citation\b([^>]*)/i);
-    const normalized = openTag ? normalizeCitationTag(parseRawCitationAttributes(openTag[1] || '')) : null;
+    const rawAttrs = openTag ? parseRawCitationAttributes(openTag[1] || '') : {};
+    const normalized = openTag ? normalizeCitationTag(rawAttrs) : null;
     if (normalized?.ok && normalized.ref.kind === 'zotero') {
         const id = `${normalized.ref.library_id}-${normalized.ref.zotero_key}`;
-        const ci = lookupCitationItem(id) || lookupCitationItemFromAttachment(id);
+        const isAttachmentIdentity = rawAttrs.att_id != null || rawAttrs.attachment_id != null;
+        const ci = isAttachmentIdentity
+            ? lookupCitationItemFromAttachment(id)
+            : lookupCitationItem(id) || lookupCitationItemFromAttachment(id);
         return ci ? formatCitationText([ci]) : null;
     }
     // Single citation: item_id="1-KEY"
