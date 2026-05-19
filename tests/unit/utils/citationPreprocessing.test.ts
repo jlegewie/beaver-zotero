@@ -28,6 +28,23 @@ describe('preprocessCitations', () => {
             expect(result).toContain('data-zotero-key="DEF"');
         });
 
+        it('unwraps adjacent same-item citations sharing one pair of backticks', () => {
+            const input = '`<citation att_id="3-ABC" page="5"/><citation att_id="3-ABC" page="12"/>`';
+            const result = preprocessCitations(input);
+            expect(result).not.toContain('`');
+            expect(result).toContain('data-zotero-key="ABC"');
+            expect(result).toContain('data-loc-value="5"');
+            expect(result).toContain('data-loc-value="12"');
+        });
+
+        it('unwraps adjacent citations with whitespace inside one pair of backticks', () => {
+            const input = '`<citation att_id="3-ABC" page="5"/> <citation att_id="3-DEF" page="12"/>`';
+            const result = preprocessCitations(input);
+            expect(result).not.toContain('`');
+            expect(result).toContain('data-zotero-key="ABC"');
+            expect(result).toContain('data-zotero-key="DEF"');
+        });
+
         it('does not affect citations without backticks', () => {
             const input = 'text <citation item_id="1-ABC"></citation> more';
             const result = preprocessCitations(input);

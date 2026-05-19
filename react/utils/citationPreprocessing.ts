@@ -147,8 +147,12 @@ export function preprocessCitationMatch(
 /**
  * Unwrap backtick-wrapped citation tags (common LLM mistake).
  * Matches: `<citation att_id="...">` → <citation att_id="...">
+ *
+ * Also handles multiple adjacent citation tags sharing one pair of backticks
+ * (e.g. consecutive citations of the same item):
+ * `<citation .../><citation .../>` → <citation .../><citation .../>
  */
-const UNWRAP_BACKTICK_PATTERN = /`(<citation[^>]*>)`/g;
+const UNWRAP_BACKTICK_PATTERN = /`(<citation[^>]*>(?:\s*<citation[^>]*>)*)`/g;
 
 /**
  * Regex pattern for matching citation tags in all formats:
