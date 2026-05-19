@@ -5,7 +5,7 @@ import { getPref, setPref } from '../../../src/utils/prefs';
 import { UserIcon, LogoutIcon, SyncIcon, TickIcon, DatabaseIcon, Spinner, RepeatIcon, SettingsIcon, Icon, SearchIcon, LockIcon, KeyIcon, ZapIcon, ToolsIcon, DollarCircleIcon } from '../icons/icons';
 import Button from "../ui/Button";
 import { useSetAtom } from 'jotai';
-import { profileWithPlanAtom, syncedLibraryIdsAtom, syncWithZoteroAtom, profileBalanceAtom, isDatabaseSyncSupportedAtom } from "../../atoms/profile";
+import { profileWithPlanAtom, syncedLibraryIdsAtom, syncWithZoteroAtom, profileBalanceAtom, isDatabaseSyncSupportedAtom, creditPlanAtom, hasCreditPlanAtom } from "../../atoms/profile";
 import { activePreferencePageTabAtom, PreferencePageTab } from "../../atoms/ui";
 import { logger } from "../../../src/utils/logger";
 import { isDiffPreviewSupported } from "../../utils/noteEditorDiffPreview";
@@ -24,7 +24,7 @@ import { connectionStatusAtom, fileStatusAtom } from "../../atoms/files";
 import { fetchFileStatusResult } from "../../hooks/useFileStatus";
 import ActionsPreferenceSection from "./ActionsPreferenceSection";
 import CustomInstructionsSection from "./CustomInstructionsSection";
-import BillingSection from "./BillingSection";
+import BillingSection, { formatPlanName } from "./BillingSection";
 import ApiKeysSection from "./ApiKeysSection";
 import AdvancedSection from "./AdvancedSection";
 import PermissionsSection from "./PermissionsSection";
@@ -51,6 +51,8 @@ const PreferencePage: React.FC = () => {
     const diffPreviewSupported = isDiffPreviewSupported();
     const [consentToShare, setConsentToShare] = useState(() => profileWithPlan?.consent_to_share || false);
     const [emailNotifications, setEmailNotifications] = useState(() => profileWithPlan?.email_notifications || false);
+    const creditPlan = useAtomValue(creditPlanAtom);
+    const hasCreditPlan = useAtomValue(hasCreditPlanAtom);
     const syncWithZotero = useAtomValue(syncWithZoteroAtom);
     const [localSyncToggle, setLocalSyncToggle] = useState(syncWithZotero);
     const profileBalance = useAtomValue(profileBalanceAtom);
@@ -476,7 +478,7 @@ const PreferencePage: React.FC = () => {
                             <SettingsGroup>
                                 <SettingsRow
                                     title="Manage Account"
-                                    description={<>Signed in as {user.email} ({profileWithPlan?.plan.display_name || 'Unknown'} plan)</>}
+                                    description={<>Signed in as {user.email} ({hasCreditPlan ? `${formatPlanName(creditPlan.plan ?? undefined)} plan` : 'No active plan'})</>}
                                     control={
                                         <Button
                                             variant="outline"
