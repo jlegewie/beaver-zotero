@@ -420,6 +420,25 @@ describe('validateEditNoteAction — success', () => {
         expect(response.valid).toBe(true);
         expect(response.preference).toBe('always_allow');
     });
+
+    it('validates append with match_count 1 and no old content', async () => {
+        const response = await handleAgentActionValidateRequest(makeValidateRequest({
+            action_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                old_string: '',
+                new_string: '<p>Appended content</p>',
+                operation: 'append',
+            },
+        }));
+
+        expect(response.valid).toBe(true);
+        expect(response.current_value).toEqual({
+            note_title: 'My Note',
+            total_lines: 1,
+            match_count: 1,
+        });
+    });
 });
 
 
@@ -486,9 +505,40 @@ describe('validateEditNoteAction — failures', () => {
         expect(response.error_code).toBe('no_changes');
     });
 
+    it('no_changes for append with empty new_string', async () => {
+        const response = await handleAgentActionValidateRequest(makeValidateRequest({
+            action_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                old_string: '',
+                new_string: '   ',
+                operation: 'append',
+            },
+        }));
+
+        expect(response.valid).toBe(false);
+        expect(response.error_code).toBe('no_changes');
+    });
+
     it('invalid_new_string', async () => {
         vi.mocked(validateNewString).mockReturnValueOnce('Cannot create annotations');
         const response = await handleAgentActionValidateRequest(makeValidateRequest());
+        expect(response.valid).toBe(false);
+        expect(response.error_code).toBe('invalid_new_string');
+    });
+
+    it('invalid_new_string for append', async () => {
+        vi.mocked(validateNewString).mockReturnValueOnce('Cannot create annotations');
+        const response = await handleAgentActionValidateRequest(makeValidateRequest({
+            action_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                old_string: '',
+                new_string: '<annotation id="bad"/>',
+                operation: 'append',
+            },
+        }));
+
         expect(response.valid).toBe(false);
         expect(response.error_code).toBe('invalid_new_string');
     });
@@ -663,6 +713,31 @@ describe('executeEditNoteAction — success', () => {
     it('invalidates cache on success', async () => {
         await handleAgentActionExecuteRequest(makeExecuteRequest());
         expect(invalidateSimplificationCache).toHaveBeenCalledWith('1-NOTE0001');
+    });
+
+    it('append inserts at the end of the body and returns full undo HTML', async () => {
+        const item = makeMockItem({
+            getNote: vi.fn(() => '<div data-schema-version="9"><p>Existing</p></div>'),
+        });
+        (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(item);
+
+        const response = await handleAgentActionExecuteRequest(makeExecuteRequest({
+            action_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                old_string: '',
+                new_string: '<p>Appended</p>',
+                operation: 'append',
+            },
+        }));
+
+        expect(response.success).toBe(true);
+        const savedHtml = item.setNote.mock.calls[0][0];
+        expect(savedHtml).toContain('<p>Existing</p><p>Appended</p>');
+        expect(savedHtml.indexOf('<p>Appended</p>')).toBeLessThan(savedHtml.indexOf('Edited by Beaver'));
+        expect(response.result_data!.undo_old_html).toBe('');
+        expect(response.result_data!.undo_new_html).toBe('<p>Appended</p>');
+        expect(response.result_data!.undo_full_html).toBeUndefined();
     });
 });
 

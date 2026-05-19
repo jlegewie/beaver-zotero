@@ -92,7 +92,7 @@ export function updateDiffPreviewForNote(libraryId: number, zoteroKey: string): 
         if (paLib == null || !paKey || makeNoteKey(paLib, paKey) !== noteKey) continue;
         const oldStr = pa.actionData?.old_string ?? '';
         const op = pa.actionData?.operation ?? 'str_replace';
-        if (oldStr || op === 'rewrite') {
+        if (oldStr || op === 'rewrite' || op === 'append') {
             edits.push({
                 oldString: oldStr,
                 newString: pa.actionData?.new_string ?? '',

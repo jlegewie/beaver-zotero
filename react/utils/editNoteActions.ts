@@ -9,6 +9,7 @@ import { logger } from '../../src/utils/logger';
 import {
     getOrSimplify,
     invalidateSimplificationCache,
+    normalizeNoteHtml,
 } from '../../src/utils/noteHtmlSimplifier';
 import {
     checkDuplicateCitations,
@@ -50,7 +51,7 @@ import {
 import { clearNoteEditorSelection } from './sourceUtils';
 import { store } from '../store';
 import { currentThreadIdAtom } from '../atoms/threads';
-import { addOrUpdateEditFooter } from '../../src/utils/noteEditFooter';
+import { addOrUpdateEditFooter, parseEditFooter } from '../../src/utils/noteEditFooter';
 import { assertNoPreviewMarkers } from '../../src/utils/notePreviewGuard';
 import {
     externalReferenceMappingAtom,
@@ -263,6 +264,85 @@ export async function executeEditNoteAction(
             warnings,
             undo_full_html: strippedHtml,
         };
+    }
+
+    // ── append mode: add new_string to the end of the note body ──
+    if (operation === 'append') {
+        let expandedNew: string;
+        try {
+            expandedNew = expandToRawHtml(new_string, metadata, 'new', externalRefContext);
+        } catch (e: any) {
+            throw new Error(e.message || String(e));
+        }
+
+        const normalizedOldHtml = normalizeNoteHtml(oldHtml);
+        const existingCitationCache = extractDataCitationItems(normalizedOldHtml);
+        const strippedHtml = stripDataCitationItems(normalizedOldHtml);
+
+        const footer = parseEditFooter(strippedHtml);
+        const lastDiv = strippedHtml.lastIndexOf('</div>');
+        const insertAt = footer ? footer.startIndex : (lastDiv !== -1 ? lastDiv : strippedHtml.length);
+        let undoBeforeContext = strippedHtml.substring(Math.max(0, insertAt - UNDO_CONTEXT_LENGTH), insertAt);
+        let undoAfterContext = strippedHtml.substring(insertAt, insertAt + UNDO_CONTEXT_LENGTH);
+        let newHtml = strippedHtml.slice(0, insertAt) + expandedNew + strippedHtml.slice(insertAt);
+
+        const threadId = store.get(currentThreadIdAtom);
+        if (threadId) {
+            newHtml = addOrUpdateEditFooter(newHtml, threadId);
+        }
+
+        newHtml = rebuildDataCitationItems(newHtml, existingCitationCache);
+
+        const hadSchemaVersion = hasSchemaVersionWrapper(strippedHtml);
+        if (hadSchemaVersion && !hasSchemaVersionWrapper(newHtml)) {
+            throw new Error('The note wrapper <div data-schema-version="..."> must not be removed.');
+        }
+
+        const postEditStripped = stripDataCitationItems(newHtml);
+        undoBeforeContext = postEditStripped.substring(
+            Math.max(0, insertAt - UNDO_CONTEXT_LENGTH),
+            insertAt,
+        );
+        undoAfterContext = postEditStripped.substring(
+            insertAt + expandedNew.length,
+            insertAt + expandedNew.length + UNDO_CONTEXT_LENGTH,
+        );
+
+        try {
+            assertNoPreviewMarkers(newHtml, 'editNoteActions:append:apply');
+            item.setNote(newHtml);
+            await item.saveTx();
+            logger(`executeEditNoteAction: Saved append edit to ${noteId}`, 1);
+        } catch (error) {
+            try {
+                assertNoPreviewMarkers(oldHtml, 'editNoteActions:append:rollback');
+                item.setNote(oldHtml);
+            } catch (_) { /* best-effort */ }
+            throw new Error(`Failed to save note: ${error}`);
+        }
+
+        await waitForNoteSaveStabilization(item, newHtml);
+        clearNoteEditorSelection(library_id, zotero_key);
+        invalidateSimplificationCache(noteId);
+
+        const duplicateWarning = checkDuplicateCitations(new_string, metadata);
+        const warnings = duplicateWarning ? [duplicateWarning] : undefined;
+
+        const result: EditNoteResultData = {
+            library_id,
+            zotero_key,
+            occurrences_replaced: 1,
+            warnings,
+            undo_old_html: '',
+            undo_new_html: expandedNew,
+            undo_before_context: undoBeforeContext,
+            undo_after_context: undoAfterContext,
+        };
+
+        const savedStrippedHtml = stripDataCitationItems(newHtml);
+        await waitForPMNormalization(item, savedStrippedHtml, result, strippedHtml);
+
+        return result;
     }
 
     // ── String replacement mode (default) ──
@@ -526,7 +606,7 @@ export async function undoEditNoteAction(
 
     // ── String replacement undo ──
 
-    if (!old_string) {
+    if (!old_string && operation !== 'append') {
         throw new Error('No undo data available: proposed_data.old_string is required');
     }
 
@@ -555,13 +635,13 @@ export async function undoEditNoteAction(
     let expandedOld = storedUndoOldHtml;
     let expandedNew = storedUndoNewHtml;
 
-    if (!expandedOld || (!isDeletion && expandedNew === undefined)) {
+    if (expandedOld === undefined || (!isDeletion && expandedNew === undefined)) {
         const { metadata } = getOrSimplify(noteId, currentHtml, library_id);
         const externalRefContext = getExternalRefContext();
 
         try {
-            if (!expandedOld) {
-                expandedOld = expandToRawHtml(old_string, metadata, 'old');
+            if (expandedOld === undefined) {
+                expandedOld = expandToRawHtml(old_string ?? '', metadata, 'old');
             }
             if (!isDeletion && expandedNew === undefined) {
                 expandedNew = expandToRawHtml(new_string, metadata, 'new', externalRefContext);

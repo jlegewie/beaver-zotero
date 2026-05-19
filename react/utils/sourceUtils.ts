@@ -12,6 +12,8 @@ import { userIdAtom } from '../atoms/auth';
 import { isAttachmentOnServer } from '../../src/utils/webAPI';
 import { safeFileExists } from '../../src/utils/zoteroUtils';
 import { getNoteContentPreviewText } from './noteText';
+import type { EditNoteOperation } from '../types/agentActions/editNote';
+import { parseEditFooter } from '../../src/utils/noteEditFooter';
 
 // Constants
 export const MAX_NOTE_TITLE_LENGTH = 20;
@@ -420,6 +422,7 @@ export async function openNoteAndSearchEdit(
     undoAfterContext?: string,
     targetBeforeContext?: string,
     targetAfterContext?: string,
+    operation?: EditNoteOperation,
 ): Promise<void> {
     logger(`openNoteAndSearchEdit: called with libraryId=${libraryId}, zoteroKey=${zoteroKey}, isApplied=${isApplied}`, 1);
     logger(`openNoteAndSearchEdit: oldString (${oldString.length} chars): "${oldString.substring(0, 200)}"`, 1);
@@ -463,7 +466,9 @@ export async function openNoteAndSearchEdit(
     const diffTarget = isApplied ? 'addition' : 'deletion';
     const fallbackHtml = isApplied ? newString : oldString;
 
-    const result = extractHighlightedDiffText(oldString, newString, diffTarget);
+    const result = operation === 'append' && !isApplied
+        ? null
+        : extractHighlightedDiffText(oldString, newString, diffTarget);
     if (result) {
         searchText = result.searchText;
         selectText = result.selectText;
@@ -472,7 +477,10 @@ export async function openNoteAndSearchEdit(
         logger(`openNoteAndSearchEdit: extractHighlightedDiffText(${diffTarget}): searchText="${searchText.substring(0, 80)}", selectText="${selectText.substring(0, 80)}", selectOffsetInSearch=${selectOffsetInSearch}${endSearchText ? `, endSearchText="${endSearchText.substring(0, 80)}"` : ''}`, 1);
     } else {
         // Fall back when there's no char-level diff highlight.
-        if (diffTarget === 'deletion') {
+        if (operation === 'append' && !isApplied) {
+            searchText = await extractAppendAnchorSearchText(itemId);
+            logger(`openNoteAndSearchEdit: using append anchor search "${searchText?.substring(0, 80)}"`, 1);
+        } else if (diffTarget === 'deletion') {
             // For pending pure insertions, search for the END of the old text
             // so we scroll to the insertion point.
             searchText = extractSearchTermEnd(fallbackHtml) || extractSearchTerm(fallbackHtml);
@@ -503,7 +511,7 @@ export async function openNoteAndSearchEdit(
     // anchor for the editor search. The editor matcher operates on flattened
     // plain text, so we convert the raw-note context to nearby text here
     // instead of passing raw HTML into selectAndScrollInNoteEditor.
-    if (!endSearchText) {
+    if (!endSearchText && !(operation === 'append' && !isApplied)) {
         contextualSearches = extractTargetContextSearches(
             targetBeforeContext,
             isApplied ? newString : oldString,
@@ -757,6 +765,27 @@ function extractSearchTermEnd(html: string): string | null {
     }
     term = stripEllipsis(term);
     return term || null;
+}
+
+/**
+ * Derive a plain-text search anchor near the note append point.
+ */
+async function extractAppendAnchorSearchText(itemId: number): Promise<string | null> {
+    const item = await Zotero.Items.getAsync(itemId);
+    if (!item) return null;
+    await item.loadDataType('note');
+
+    const html = item.getNote();
+    const footer = parseEditFooter(html);
+    const beforeFooter = footer ? html.slice(0, footer.startIndex) : html;
+    const lastDiv = beforeFooter.lastIndexOf('</div>');
+    const bodyHtml = lastDiv !== -1 ? beforeFooter.slice(0, lastDiv) : beforeFooter;
+    const spacedHtml = bodyHtml.replace(/<\/(p|div|li|h[1-6])>\s*</gi, '</$1> <');
+    const plainText = stripHtmlTags(spacedHtml).replace(/\s+/g, ' ').trim();
+    if (!plainText) return null;
+
+    const anchor = plainText.length > 80 ? plainText.slice(-80) : plainText;
+    return anchor.length >= 10 ? anchor : null;
 }
 
 /**

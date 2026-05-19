@@ -37,6 +37,7 @@ import {
     encodeTextEntities,
     ENTITY_FORMS,
 } from '../../src/utils/noteHtmlEntities';
+import { parseEditFooter } from '../../src/utils/noteEditFooter';
 import { store } from '../store';
 import {
     externalReferenceMappingAtom,
@@ -334,7 +335,7 @@ export async function showDiffPreview(
         for (const edit of edits) {
             const op = edit.operation ?? 'str_replace';
             try {
-                if (op === 'rewrite') {
+                if (op === 'rewrite' || op === 'append') {
                     const expandedNew = edit.newString ? expandToRawHtml(edit.newString, metadata, 'new', externalRefContext) : '';
                     expandedEdits.push({ expandedOld: '', expandedNew, operation: op });
                 } else {
@@ -857,7 +858,7 @@ function logExpandedOldMismatch(
     );
 }
 
-function constructMultiDiffHtml(
+export function constructMultiDiffHtml(
     fullHtml: string,
     edits: Array<{ expandedOld: string; expandedNew: string; operation: EditNoteOperation }>,
 ): string | null {
@@ -885,6 +886,17 @@ function constructMultiDiffHtml(
     }
 
     const ops: Array<{ pos: number; oldLen: number; replacement: string }> = [];
+
+    const appendEdits = edits.filter(e => e.operation === 'append' && e.expandedNew);
+    if (appendEdits.length > 0) {
+        const footer = parseEditFooter(stripped);
+        const lastDiv = stripped.lastIndexOf('</div>');
+        const pos = footer ? footer.startIndex : (lastDiv !== -1 ? lastDiv : stripped.length);
+        const replacement = appendEdits
+            .map(e => wrapTextNodesWithStyle(e.expandedNew, ADD_STYLE))
+            .join('');
+        ops.push({ pos, oldLen: 0, replacement });
+    }
 
     for (const origEdit of edits) {
         if (!origEdit.expandedOld) continue;
