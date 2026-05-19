@@ -45,6 +45,20 @@ describe('preprocessCitations', () => {
             expect(result).toContain('data-zotero-key="DEF"');
         });
 
+        it('unwraps backtick-wrapped full-pair citation tag', () => {
+            const result = preprocessCitations('text `<citation item_id="1-ABC"></citation>` more');
+            expect(result).not.toContain('`');
+            expect(result).toContain('data-zotero-key="ABC"');
+        });
+
+        it('unwraps adjacent full-pair citations sharing one pair of backticks', () => {
+            const input = '`<citation att_id="3-ABC"></citation><citation att_id="3-ABC"></citation>`';
+            const result = preprocessCitations(input);
+            expect(result).not.toContain('`');
+            expect(result).toContain('data-zotero-key="ABC"');
+            expect(result).toContain('data-consecutive="true"');
+        });
+
         it('does not affect citations without backticks', () => {
             const input = 'text <citation item_id="1-ABC"></citation> more';
             const result = preprocessCitations(input);
