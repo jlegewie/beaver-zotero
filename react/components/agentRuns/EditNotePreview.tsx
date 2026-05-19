@@ -765,6 +765,7 @@ export function lookupCitationItemFromAttachment(attId: string): { itemData: any
         const key = attId.substring(dashIdx + 1);
         const attachment = Zotero.Items.getByLibraryAndKey(libraryID, key);
         if (!attachment) return null;
+        if (typeof attachment.isAttachment !== 'function' || !attachment.isAttachment()) return null;
         // Resolve to parent item for citation formatting
         const parentID = attachment.parentItemID;
         const item = parentID ? Zotero.Items.get(parentID) : attachment;
@@ -786,9 +787,9 @@ export function recoverSimplifiedCitationLabel(tag: string): string | null {
     const normalized = openTag ? normalizeCitationTag(rawAttrs) : null;
     if (normalized?.ok && normalized.ref.kind === 'zotero') {
         const id = `${normalized.ref.library_id}-${normalized.ref.zotero_key}`;
-        const isAttachmentIdentity = rawAttrs.att_id != null || rawAttrs.attachment_id != null;
+        const isAttachmentIdentity = rawAttrs.id != null || rawAttrs.att_id != null || rawAttrs.attachment_id != null;
         const ci = isAttachmentIdentity
-            ? lookupCitationItemFromAttachment(id)
+            ? lookupCitationItemFromAttachment(id) || lookupCitationItem(id)
             : lookupCitationItem(id) || lookupCitationItemFromAttachment(id);
         return ci ? formatCitationText([ci]) : null;
     }

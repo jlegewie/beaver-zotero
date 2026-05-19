@@ -18,8 +18,8 @@ beforeEach(() => {
         Items: {
             getByLibraryAndKey: vi.fn((libraryID: number, key: string) => {
                 if (libraryID !== 1) return false;
-                if (key === 'ATTACH') return { kind: 'attachment', parentItemID: 10 };
-                if (key === 'PARENT') return { kind: 'parent-direct' };
+                if (key === 'ATTACH') return { kind: 'attachment', parentItemID: 10, isAttachment: () => true };
+                if (key === 'PARENT') return { kind: 'parent-direct', isAttachment: () => false };
                 return false;
             }),
             get: vi.fn((itemID: number) => itemID === 10 ? { kind: 'parent' } : false),
@@ -69,5 +69,9 @@ describe('recoverSimplifiedCitationLabel', () => {
 
     it('keeps item_id citation labels on the direct item', () => {
         expect(recoverSimplifiedCitationLabel('<citation item_id="1-PARENT"/>')).toBe('(parent-direct)');
+    });
+
+    it('resolves unified id attachment citation labels through the parent item', () => {
+        expect(recoverSimplifiedCitationLabel('<citation id="1-ATTACH"/>')).toBe('(parent)');
     });
 });
