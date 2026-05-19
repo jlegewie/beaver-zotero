@@ -132,8 +132,7 @@ export function preprocessCitationMatch(
 
     const baseAttrs = attrParts.filter((part): part is string => !!part).join(' ');
     
-    let html: string;
-    html = baseAttrs ? `<citation ${baseAttrs}></citation>` : '<citation></citation>';
+    const html = baseAttrs ? `<citation ${baseAttrs}></citation>` : '<citation></citation>';
     
     return {
         attrs: rawAttrs,
