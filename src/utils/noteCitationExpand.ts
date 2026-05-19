@@ -23,10 +23,33 @@ import {
 import type { SimplificationMetadata } from './noteHtmlSimplifier';
 import type { ExternalReference } from '../../react/types/externalReferences';
 import type { ZoteroItemReference } from '../../react/types/zotero';
+import {
+    getPageLocator,
+    normalizeCitationTag,
+    parseRawCitationAttributes,
+} from '../../react/utils/citationGrammar';
 
 // =============================================================================
 // Page Label Resolution
 // =============================================================================
+
+/**
+ * Find the best PDF attachment for a regular item.
+ * Prefers PDF attachments and falls back to the first attachment.
+ */
+function getBestPDFAttachment(item: any): any {
+    try {
+        const attachmentIDs = item.getAttachments();
+        if (!attachmentIDs || attachmentIDs.length === 0) return null;
+        for (const attID of attachmentIDs) {
+            const att = Zotero.Items.get(attID);
+            if (att && att.attachmentContentType === 'application/pdf') return att;
+        }
+        return Zotero.Items.get(attachmentIDs[0]) || null;
+    } catch {
+        return null;
+    }
+}
 
 /**
  * Translate a page number string (1-based, as humans see it) to its display label.
@@ -59,24 +82,6 @@ export function translatePageNumberToLabel(itemId: number, pageStr: string): str
 }
 
 /**
- * Find the best PDF attachment for a regular item.
- * Prefers PDF attachments; falls back to the first attachment.
- */
-function getBestPDFAttachment(item: any): any {
-    try {
-        const attachmentIDs = item.getAttachments();
-        if (!attachmentIDs || attachmentIDs.length === 0) return null;
-        for (const attID of attachmentIDs) {
-            const att = Zotero.Items.get(attID);
-            if (att && att.attachmentContentType === 'application/pdf') return att;
-        }
-        return Zotero.Items.get(attachmentIDs[0]) || null;
-    } catch {
-        return null;
-    }
-}
-
-/**
  * Pre-load page labels into the in-memory cache for citations in a string
  * that have page attributes. Must be called (and awaited) before expandToRawHtml()
  * so that synchronous translatePageNumberToLabel lookups succeed.
@@ -91,38 +96,13 @@ export async function preloadPageLabelsForNewCitations(str: string): Promise<voi
 
     while ((match = regex.exec(str)) !== null) {
         const attrStr = match[1];
-        const pageAttr = extractAttr(attrStr, 'page');
-        if (!pageAttr) continue;
-
-        const attIdStr = extractAttr(attrStr, 'att_id') || extractAttr(attrStr, 'attachment_id');
-        const itemIdStr = extractAttr(attrStr, 'item_id');
+        const normalized = normalizeCitationTag(parseRawCitationAttributes(attrStr));
+        if (!normalized.ok || normalized.ref.kind !== 'zotero' || !getPageLocator(normalized.ref)) continue;
 
         let attachmentItem: any = null;
-
-        if (attIdStr) {
-            const dashIdx = attIdStr.indexOf('-');
-            if (dashIdx > 0) {
-                const libId = parseInt(attIdStr.substring(0, dashIdx), 10);
-                const key = attIdStr.substring(dashIdx + 1);
-                if (libId && key) {
-                    const item = Zotero.Items.getByLibraryAndKey(libId, key);
-                    if (item && item.isAttachment()) {
-                        attachmentItem = item;
-                    }
-                }
-            }
-        } else if (itemIdStr) {
-            const dashIdx = itemIdStr.indexOf('-');
-            if (dashIdx > 0) {
-                const libId = parseInt(itemIdStr.substring(0, dashIdx), 10);
-                const key = itemIdStr.substring(dashIdx + 1);
-                if (libId && key) {
-                    const item = Zotero.Items.getByLibraryAndKey(libId, key);
-                    if (item && typeof item !== 'boolean') {
-                        attachmentItem = item.isAttachment() ? item : getBestPDFAttachment(item);
-                    }
-                }
-            }
+        const item = Zotero.Items.getByLibraryAndKey(normalized.ref.library_id, normalized.ref.zotero_key);
+        if (item && typeof item !== 'boolean') {
+            attachmentItem = item.isAttachment() ? item : getBestPDFAttachment(item);
         }
 
         if (!attachmentItem || seen.has(attachmentItem.id)) continue;
@@ -211,11 +191,12 @@ export function extractAttr(attrStr: string, name: string): string | undefined {
 
 /** Parse simplified citation attributes into a structured object */
 function parseSimplifiedCitationAttrs(attrStr: string): { item_id: string; page?: string } {
-    const item_id = extractAttr(attrStr, 'item_id');
-    if (!item_id) {
+    const normalized = normalizeCitationTag(parseRawCitationAttributes(attrStr));
+    if (!normalized.ok || normalized.ref.kind !== 'zotero') {
         throw new Error('Citation must have an item_id attribute.');
     }
-    const page = extractAttr(attrStr, 'page');
+    const item_id = `${normalized.ref.library_id}-${normalized.ref.zotero_key}`;
+    const page = getPageLocator(normalized.ref);
     return { item_id, page: page || undefined };
 }
 
@@ -405,8 +386,8 @@ export function expandToRawHtml(
         /<citation\s+([^/]*?)\s*\/>/g,
         (match, attrStr) => {
             const ref = extractAttr(attrStr, 'ref');
-            const itemId = extractAttr(attrStr, 'item_id');
-            const attId = extractAttr(attrStr, 'att_id');
+            const itemId = extractAttr(attrStr, 'item_id') || extractAttr(attrStr, 'id');
+            const attId = extractAttr(attrStr, 'att_id') || extractAttr(attrStr, 'attachment_id');
             const items = extractAttr(attrStr, 'items');
             const externalId = extractAttr(attrStr, 'external_id');
 
@@ -477,18 +458,24 @@ export function expandToRawHtml(
                 );
             }
             // New citations from the model always use 1-based page numbers → translate
+            const normalizedCitation = normalizeCitationTag(parseRawCitationAttributes(attrStr));
             if (itemId) {
                 const attrs = parseSimplifiedCitationAttrs(attrStr);
                 return buildCitationFromSimplifiedAttrs(attrs, true);
             }
             if (attId) {
-                return buildCitationFromAttId(attId, extractAttr(attrStr, 'page'), true);
+                const page = normalizedCitation.ok ? getPageLocator(normalizedCitation.ref) : extractAttr(attrStr, 'page');
+                return buildCitationFromAttId(attId, page, true);
+            }
+            if (normalizedCitation.ok && normalizedCitation.ref.kind === 'zotero') {
+                const attrs = parseSimplifiedCitationAttrs(attrStr);
+                return buildCitationFromSimplifiedAttrs(attrs, true);
             }
             // external_id: chat-side external work ID (e.g. OpenAlex W-id). Two-tier
             // fallback so the model's research effort isn't lost when it tries to
             // cite an external source in a Zotero note.
             if (externalId) {
-                const page = extractAttr(attrStr, 'page');
+                const page = normalizedCitation.ok ? getPageLocator(normalizedCitation.ref) : extractAttr(attrStr, 'page');
 
                 // Tier 1: auto-resolve to Zotero item if the external work is in
                 // the library. Best outcome — produces a real Zotero citation.

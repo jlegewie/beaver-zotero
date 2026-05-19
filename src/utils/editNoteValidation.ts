@@ -19,6 +19,11 @@ import {
     normalizePageLocator,
     translatePageNumberToLabel,
 } from './noteCitationExpand';
+import {
+    getPageLocator,
+    normalizeCitationTag,
+    parseRawCitationAttributes,
+} from '../../react/utils/citationGrammar';
 
 // =============================================================================
 // New-string validation
@@ -94,19 +99,13 @@ export function checkNewCitationItemsExist(
         if (ref && metadata.elements.has(ref)) continue;
 
         // New citation (no ref) or unknown ref — validate the item exists
-        const itemId = extractAttr(attrStr, 'item_id');
-        const attId = extractAttr(attrStr, 'att_id');
-        const id = itemId || attId;
-        if (!id) continue; // will fail later in expansion with a proper error
+        const normalized = normalizeCitationTag(parseRawCitationAttributes(attrStr));
+        if (!normalized.ok || normalized.ref.kind !== 'zotero') continue; // will fail later in expansion with a proper error
 
-        const dashIdx = id.indexOf('-');
-        if (dashIdx === -1) continue; // will fail later in expansion
-
-        const libId = parseInt(id.substring(0, dashIdx), 10);
-        const key = id.substring(dashIdx + 1);
-        const item = Zotero.Items.getByLibraryAndKey(libId, key);
+        const id = `${normalized.ref.library_id}-${normalized.ref.zotero_key}`;
+        const item = Zotero.Items.getByLibraryAndKey(normalized.ref.library_id, normalized.ref.zotero_key);
         if (!item) {
-            const label = itemId ? 'item_id' : 'att_id';
+            const label = extractAttr(attrStr, 'id') ? 'id' : extractAttr(attrStr, 'item_id') ? 'item_id' : 'att_id';
             return `Citation references a Zotero item that does not exist: ${label}="${id}". Verify the item ID is correct.`;
         }
     }
@@ -126,12 +125,14 @@ export function checkDuplicateCitations(
     metadata: SimplificationMetadata
 ): string | null {
     // Find new citations (item_id without ref) in new_string
-    const newCitationRegex = /<citation\s+(?![^/]*\bref=)[^>]*item_id="([^"]*)"[^/]*\/>/g;
+    const newCitationRegex = /<citation\s+(?![^/]*\bref=)([^>]*?)\/>/g;
     let match;
     const warnings: string[] = [];
 
     while ((match = newCitationRegex.exec(newString)) !== null) {
-        const newItemId = match[1];
+        const normalized = normalizeCitationTag(parseRawCitationAttributes(match[1]));
+        if (!normalized.ok || normalized.ref.kind !== 'zotero') continue;
+        const newItemId = `${normalized.ref.library_id}-${normalized.ref.zotero_key}`;
         // Check if any existing citation references the same item
         for (const [existingId, stored] of metadata.elements) {
             if (stored.type === 'citation' && stored.originalAttrs?.item_id === newItemId) {
@@ -259,9 +260,10 @@ export function enrichOldStringCitationRefs(
         // Skip if it already has a ref — enrichment not needed
         if (extractAttr(attrStr, 'ref') !== undefined) continue;
 
-        const page = extractAttr(attrStr, 'page') || undefined;
+        const normalized = normalizeCitationTag(parseRawCitationAttributes(attrStr));
+        const page = normalized.ok ? getPageLocator(normalized.ref) : extractAttr(attrStr, 'page') || undefined;
 
-        const itemId = extractAttr(attrStr, 'item_id');
+        const itemId = extractAttr(attrStr, 'item_id') || extractAttr(attrStr, 'id');
         if (itemId) {
             const candidateRef = findUniqueCitationRef(metadata, itemId, page);
             if (candidateRef === null) continue;
@@ -279,7 +281,7 @@ export function enrichOldStringCitationRefs(
             continue;
         }
 
-        const attId = extractAttr(attrStr, 'att_id');
+        const attId = extractAttr(attrStr, 'att_id') || extractAttr(attrStr, 'attachment_id');
         if (attId) {
             const resolved = resolveAttIdToParent(attId);
             if (!resolved) continue;

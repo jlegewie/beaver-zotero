@@ -1,4 +1,13 @@
 import { ZoteroItemReference } from "./zotero";
+import {
+    baseCitationKey,
+    getRequestedRef,
+    getResolvedRef,
+    normalizeCitationTag,
+    parseRawCitationAttributes,
+    parseZoteroId,
+    requestedCitationKey,
+} from "../utils/citationGrammar";
 
 
 export enum CoordOrigin {
@@ -208,9 +217,11 @@ export function parseItemReference(ref: string | undefined): { libraryID: number
  * All attribute names are normalized (e.g., attachment_id → att_id).
  */
 export interface NormalizedCitationAttrs {
+    id?: string;           // Format: "libraryID-itemKey"
     item_id?: string;      // Format: "libraryID-itemKey"
     att_id?: string;       // Format: "libraryID-itemKey"
     external_id?: string;  // External source ID
+    loc?: string;          // Unified locator token (e.g., "p10", "s0-s8")
     sid?: string;          // Sentence ID (e.g., "s0-s8")
     page?: string;         // Page number(s) - e.g., "10" or "10-12"
 }
@@ -227,26 +238,21 @@ export interface NormalizedCitationAttrs {
  */
 export function parseCitationAttributes(attributesStr: string): NormalizedCitationAttrs {
     const attrs: NormalizedCitationAttrs = {};
-    const attrRegex = /(\w+)=(?:"([^"]*)"|'([^']*)')/g;
-    let match: RegExpExecArray | null;
-    
-    while ((match = attrRegex.exec(attributesStr)) !== null) {
-        let name = match[1];
-        const value = match[2] ?? match[3];
-        
-        // Normalize attribute names
-        if (name === 'attachment_id') {
-            name = 'att_id';
-        }
-        
-        // Only keep recognized citation attributes
-        if (name === 'item_id') attrs.item_id = value;
+    const rawAttrs = parseRawCitationAttributes(attributesStr);
+
+    for (const [name, value] of Object.entries(rawAttrs)) {
+        if (name === 'id') attrs.id = value;
+        else if (name === 'item_id') attrs.item_id = value;
         else if (name === 'att_id') attrs.att_id = value;
+        else if (name === 'attachment_id') {
+            attrs.att_id = value;
+        }
         else if (name === 'external_id') attrs.external_id = value;
+        else if (name === 'loc') attrs.loc = value;
         else if (name === 'sid') attrs.sid = value;
         else if (name === 'page') attrs.page = value;
     }
-    
+
     return attrs;
 }
 
@@ -259,27 +265,8 @@ export function parseCitationAttributes(attributesStr: string): NormalizedCitati
  * @returns Full citation key or empty string if no valid identifier
  */
 export function computeCitationKeyFromAttrs(attrs: NormalizedCitationAttrs): string {
-    // att_id takes priority (attachment reference)
-    const zoteroRef = parseItemReference(attrs.att_id) || parseItemReference(attrs.item_id);
-    
-    if (zoteroRef) {
-        return getFullCitationKey({
-            library_id: zoteroRef.libraryID,
-            zotero_key: zoteroRef.itemKey,
-            sid: attrs.sid,
-            page: attrs.page
-        });
-    }
-    
-    if (attrs.external_id) {
-        return getFullCitationKey({ 
-            external_source_id: attrs.external_id,
-            sid: attrs.sid,
-            page: attrs.page
-        });
-    }
-    
-    return '';
+    const normalized = normalizeCitationTag(attrs as Record<string, string>);
+    return normalized.ok ? requestedCitationKey(normalized.ref) : (normalized.requestedKey || '');
 }
 
 /**
@@ -290,20 +277,8 @@ export function computeCitationKeyFromAttrs(attrs: NormalizedCitationAttrs): str
  * @returns Base citation key or empty string if no valid identifier
  */
 export function computeBaseCitationKeyFromAttrs(attrs: NormalizedCitationAttrs): string {
-    const zoteroRef = parseItemReference(attrs.att_id) || parseItemReference(attrs.item_id);
-    
-    if (zoteroRef) {
-        return getCitationKey({
-            library_id: zoteroRef.libraryID,
-            zotero_key: zoteroRef.itemKey
-        });
-    }
-    
-    if (attrs.external_id) {
-        return getCitationKey({ external_source_id: attrs.external_id });
-    }
-    
-    return '';
+    const normalized = normalizeCitationTag(attrs as Record<string, string>);
+    return normalized.ok ? baseCitationKey(normalized.ref) : (normalized.requestedKey || '');
 }
 
 /**
@@ -311,8 +286,11 @@ export function computeBaseCitationKeyFromAttrs(attrs: NormalizedCitationAttrs):
  * Uses the primary identifier (att_id > item_id > external_id).
  */
 export function getCitationIdentityKey(attrs: NormalizedCitationAttrs): string {
-    return attrs.att_id || attrs.item_id || attrs.external_id || '';
+    const normalized = normalizeCitationTag(attrs as Record<string, string>);
+    return normalized.ok ? baseCitationKey(normalized.ref) : (normalized.requestedKey || '');
 }
+
+export { getRequestedRef, getResolvedRef };
 
 export interface CitationData extends CitationMetadata {
     type: "item" | "attachment" | "note" | "annotation" | "external";

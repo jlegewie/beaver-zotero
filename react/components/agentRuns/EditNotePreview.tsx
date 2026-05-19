@@ -3,6 +3,7 @@ import { diffWords, diffLines, diffChars } from 'diff';
 import { getOrSimplify } from '../../../src/utils/noteHtmlSimplifier';
 import { getLatestNoteHtml } from '../../../src/utils/noteEditorIO';
 import type { EditNoteOperation } from '../../types/agentActions/editNote';
+import { getPageLocator, normalizeCitationTag, parseRawCitationAttributes } from '../../utils/citationGrammar';
 
 type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error' | 'awaiting';
 
@@ -780,6 +781,13 @@ export function lookupCitationItemFromAttachment(attId: string): { itemData: any
  * items for compound citations).
  */
 export function recoverSimplifiedCitationLabel(tag: string): string | null {
+    const openTag = tag.match(/^<citation\b([^>]*)/i);
+    const normalized = openTag ? normalizeCitationTag(parseRawCitationAttributes(openTag[1] || '')) : null;
+    if (normalized?.ok && normalized.ref.kind === 'zotero') {
+        const id = `${normalized.ref.library_id}-${normalized.ref.zotero_key}`;
+        const ci = lookupCitationItem(id) || lookupCitationItemFromAttachment(id);
+        return ci ? formatCitationText([ci]) : null;
+    }
     // Single citation: item_id="1-KEY"
     const itemIdMatch = tag.match(/\bitem_id="([^"]*)"/);
     if (itemIdMatch) {
@@ -833,9 +841,13 @@ export function recoverRawCitationLabel(encodedCitation: string): string | null 
  * to the label text so page changes are visible in the diff preview.
  */
 function appendCitationPage(tag: string, label: string): string {
+    const openTag = tag.match(/^<citation\b([^>]*)/i);
+    const normalized = openTag ? normalizeCitationTag(parseRawCitationAttributes(openTag[1] || '')) : null;
+    const pageFromRef = normalized?.ok ? getPageLocator(normalized.ref) : undefined;
     const pageMatch = tag.match(/\bpage="([^"]*)"/);
-    if (!pageMatch || !pageMatch[1]) return label;
-    const page = pageMatch[1].replace(/&quot;/g, '"').replace(/&amp;/g, '&');
+    const rawPage = pageFromRef || pageMatch?.[1];
+    if (!rawPage) return label;
+    const page = rawPage.replace(/&quot;/g, '"').replace(/&amp;/g, '&');
     // Insert before closing paren if label ends with ')'
     if (label.endsWith(')')) {
         return label.slice(0, -1) + ', p. ' + page + ')';
