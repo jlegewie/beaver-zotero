@@ -66,8 +66,8 @@ const UpgradeConsentPage: React.FC = () => {
     const getHeaderMessage = () => {
         return (
             <div className="display-flex flex-col gap-3 py-2 mt-2">
-                <div>
-                    You're upgrading to Pro. Here's what's new:
+                <div className="text-lg">
+                    Your account was updated to Beaver Beta. Here's what's new:
                 </div>
                 <div className="display-flex flex-col gap-4 ml-1 mt-2">
                     <div className="display-flex flex-row gap-2 items-start">
@@ -106,15 +106,15 @@ const UpgradeConsentPage: React.FC = () => {
 
                 {/* Main content */}
                 <div className="display-flex flex-1"/>
-                <div className="display-flex flex-col gap-4 flex-1">
+                <div className="display-flex flex-col gap-4">
                     {/* Data sync notice */}
                     <div className="display-flex flex-col gap-3 p-4 rounded-lg bg-senary mt-4">
                         <div className="display-flex flex-row gap-3 items-start">
                             <Icon icon={LockIcon} className="mt-020 scale-11" />
                             <div className="display-flex flex-col gap-2">
-                                <div className="font-semibold">Beta/Pro Plan Privacy Notice</div>
+                                <div className="font-semibold">Beta Plan Privacy Notice</div>
                                 <div className="font-color-secondary">
-                                    Beaver Beta/Pro syncs your Zotero library and uploads PDFs for cloud-based indexing and search.
+                                    Beaver Beta syncs your Zotero library and uploads PDFs for cloud-based indexing and search.
                                     By continuing, you confirm you're authorized to upload these files.
                                 </div>
                             </div>
@@ -122,7 +122,7 @@ const UpgradeConsentPage: React.FC = () => {
                     </div>
 
                     {/* Spacer */}
-                    <div className="flex-1" />
+                    {/* <div className="flex-1" /> */}
 
                     {/* Consent toggle */}
                     <div className="display-flex flex-col gap-4">
