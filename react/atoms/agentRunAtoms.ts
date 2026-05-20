@@ -1032,7 +1032,7 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                 set(addPopupMessageAtom, {
                     type: 'info',
                     title: 'Indexing your library',
-                    text: 'We are processing your library to enable Pro features. You can use standard features in the meantime.',
+                    text: 'We are processing your library to enable Beta features. You can use standard features in the meantime.',
                     expire: true,
                     duration: 10000
                 });
