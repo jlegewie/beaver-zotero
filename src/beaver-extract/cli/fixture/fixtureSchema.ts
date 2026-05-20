@@ -22,7 +22,7 @@ import type { SentenceSplitterConfig } from "../../sentenceTypes";
 import { parseAnalysisScope, type AnalysisScope } from "./analysisScope";
 import type { Fingerprints } from "./fingerprints";
 
-export const FIXTURE_SCHEMA_VERSION = 3 as const;
+export const FIXTURE_SCHEMA_VERSION = 4 as const;
 
 export interface FixtureConfig {
     pageIndices: number[];
@@ -234,7 +234,6 @@ function validateItem(value: unknown, source: string): SnapshotItem {
         id: expectString(v.id, `${source}.id`),
         kind,
         index: expectInt(v.index, `${source}.index`),
-        columnIndex: expectInt(v.columnIndex, `${source}.columnIndex`),
         bbox: validateBBox(v.bbox, `${source}.bbox`),
     };
     if (v.text !== undefined) {

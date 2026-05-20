@@ -10,9 +10,9 @@
  * consume the same projection later.
  *
  * Snapshots cover only the fields that drive sentence-level regression: the
- * page geometry, the markdown `content`, item + sentence counts, and
- * each `SentenceItem` projected to the minimum stable subset (text + bboxes
- * rounded to 3 decimals + classification flags).
+ * page geometry, concatenated text-bearing item content, item + sentence
+ * counts, and each `SentenceItem` projected to the minimum stable subset
+ * (text + bboxes rounded to 3 decimals + classification flags).
  */
 import type { BoundingBox, DocItem, InternalExtractionResult, InternalProcessedPage, SentenceItem } from "../types";
 import type { DocumentItem, Rect, Sentence, StructuredExtractResult, StructuredPage } from "../schema";
@@ -33,7 +33,6 @@ export interface SnapshotItem {
     id: string;
     kind: DocItem["kind"];
     index: number;
-    columnIndex: number;
     text?: string;
     bbox: SnapshotBBox;
 }
@@ -53,7 +52,7 @@ export interface ExtractionPageSnapshot {
     pageIndex: number;
     pageWidth: number;
     pageHeight: number;
-    /** Markdown content from the paragraph engine. Compared after whitespace normalization. */
+    /** Concatenated text-bearing item content. Compared after whitespace normalization. */
     content: string;
     itemCount: number;
     sentenceCount: number;
@@ -78,9 +77,10 @@ export interface ExtractionSnapshot {
 // ---------------------------------------------------------------------------
 
 /**
- * Project an `InternalExtractionResult` to the snapshot wire shape. Idempotent and
- * pure — bbox coords are rounded to 3 decimals to keep diffs stable across
- * insignificant float jitter.
+ * Project an extraction result to the snapshot wire shape. Idempotent and pure
+ * — bbox coords are rounded to 3 decimals to keep diffs stable across
+ * insignificant float jitter. Structured results use the canonical item stream
+ * and expose `content` as a plain text concatenation of non-margin items.
  *
  * Only includes pages that the structured-mode op actually emitted; pages
  * outside `config.pageIndices` are not in `result.pages` to begin with.
@@ -115,11 +115,11 @@ function projectStructuredPageSnapshot(
     const sentences = page.items.flatMap((item) =>
         "sentences" in item
             ? (item.sentences ?? []).map((sentence, index) =>
-                projectStructuredSentence(page, item, sentence, index),
+                projectStructuredSentence(item, sentence, index),
               )
             : [],
     );
-    const items = page.items.map((item) => projectStructuredItem(page, item));
+    const items = page.items.map(projectStructuredItem);
     const content = page.items
         .map((item) => ("text" in item && item.kind !== "margin" ? item.text : ""))
         .filter(Boolean)
@@ -137,19 +137,17 @@ function projectStructuredPageSnapshot(
     };
 }
 
-function projectStructuredItem(page: StructuredPage, item: DocumentItem): SnapshotItem {
+function projectStructuredItem(item: DocumentItem): SnapshotItem {
     return {
         id: item.id,
         kind: item.kind as DocItem["kind"],
         index: item.order,
-        columnIndex: 0,
         text: "text" in item ? item.text : undefined,
         bbox: rectToSnapshotBBox(item.bbox),
     };
 }
 
 function projectStructuredSentence(
-    page: StructuredPage,
     item: DocumentItem,
     sentence: Sentence,
     index: number,
@@ -196,7 +194,6 @@ function projectItem(item: DocItem): SnapshotItem {
         id: item.id,
         kind: item.kind,
         index: item.index,
-        columnIndex: item.columnIndex,
         text: "text" in item ? item.text : undefined,
         bbox: roundBBox(item.bbox),
     };

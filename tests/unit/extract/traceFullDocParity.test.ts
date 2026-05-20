@@ -1,12 +1,72 @@
 import { describe, expect, it } from "vitest";
+import { join } from "node:path";
 
 import { projectTracePage } from "../../../src/beaver-extract/debug/traceProjection";
+import { readFixture, readSharedPdf } from "../../../src/beaver-extract/cli/fixture/fixtureFile";
+import {
+    extractPdf,
+    structuredExtractWithDebug,
+} from "../../../src/beaver-extract/node/api";
 import type {
     ExtractionDebug,
     StructuredExtractResult,
 } from "../../../src/beaver-extract/schema";
 
 describe("structured trace projection", () => {
+    it("matches a full structured extract page through the Node worker path", async () => {
+        const fixtureRoot = join(process.cwd(), "tests/fixtures/pdfs/extract-public");
+        const fixture = readFixture(fixtureRoot, "legewie-fagan__p0");
+        const pdfData = readSharedPdf(fixtureRoot, fixture.pdfSha256);
+        const pageIndex = fixture.config.pageIndices[0];
+
+        const structured = await extractPdf({
+            pdfData,
+            mode: "structured",
+            structured: { splitterConfig: fixture.config.splitterConfig },
+            settings: fixture.config.settings,
+            paragraphSettings: fixture.config.paragraphSettings,
+        });
+        expect(structured.mode).toBe("structured");
+        if (structured.mode !== "structured") throw new Error("expected structured result");
+
+        const trace = await structuredExtractWithDebug({
+            pdfData,
+            mode: "structured",
+            capturePages: [pageIndex],
+            debugMode: "full",
+            structured: { splitterConfig: fixture.config.splitterConfig },
+            settings: fixture.config.settings,
+            paragraphSettings: fixture.config.paragraphSettings,
+        });
+
+        const structuredPage = structured.document.pages.find(
+            (page) => page.index === pageIndex,
+        );
+        const tracePage = trace.result.document.pages.find(
+            (page) => page.index === pageIndex,
+        );
+        expect(tracePage).toEqual(structuredPage);
+
+        const debugPage = trace.debug.pages?.[String(pageIndex)];
+        expect(debugPage?.items).toEqual(structuredPage?.items);
+        expect(
+            debugPage?.sentences?.map((sentence) => {
+                const { id, order, text, bboxes, joinWithNext } = sentence;
+                return {
+                    id,
+                    order,
+                    text,
+                    bboxes,
+                    ...(joinWithNext ? { joinWithNext } : {}),
+                };
+            }),
+        ).toEqual(
+            structuredPage?.items.flatMap((item) =>
+                "sentences" in item ? (item.sentences ?? []) : [],
+            ),
+        );
+    });
+
     it("surfaces full debug fields for a captured page", () => {
         const result: StructuredExtractResult = {
             mode: "structured",

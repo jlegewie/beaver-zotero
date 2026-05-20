@@ -58,6 +58,7 @@ import type {
     RawPageDataDetailed,
     StructuredPagePhaseTimings,
     StyleProfile,
+    DegradationSummary,
 } from "../types";
 import {
     DEFAULT_EXTRACTION_SETTINGS,
@@ -905,6 +906,17 @@ function degradationSummary(result: InternalExtractionResult):
     return totalCount > 0 ? { totalCount, pageCount } : undefined;
 }
 
+function degradationByPage(
+    result: InternalExtractionResult,
+): Record<string, DegradationSummary> | undefined {
+    const byPage: Record<string, DegradationSummary> = {};
+    for (const page of result.pages) {
+        if (!page.degradation || page.degradation.count <= 0) continue;
+        byPage[String(page.index)] = page.degradation;
+    }
+    return Object.keys(byPage).length > 0 ? byPage : undefined;
+}
+
 function toMarkdownExtractResult(
     result: InternalExtractionResult,
 ): MarkdownExtractResult {
@@ -941,6 +953,16 @@ function toStructuredExtractResult(
     );
     assignDocumentIds(pages);
     const degradation = degradationSummary(result);
+    const pageDegradation = degradationByPage(result);
+    const mergedDebug: ExtractionDebug | undefined = pageDegradation
+        ? {
+            ...(debug ?? {}),
+            degradation: {
+                ...pageDegradation,
+                ...(debug?.degradation ?? {}),
+            },
+        }
+        : debug;
     return {
         mode: "structured",
         schemaVersion: SCHEMA_VERSION,
@@ -959,7 +981,7 @@ function toStructuredExtractResult(
             pages,
             citationIndex: buildCitationIndex(pages),
         },
-        ...(debug ? { debug } : {}),
+        ...(mergedDebug ? { debug: mergedDebug } : {}),
     };
 }
 
