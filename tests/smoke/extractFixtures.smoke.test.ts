@@ -3,8 +3,8 @@
  *
  * Iterates every fixture under `tests/fixtures/pdfs/extract-public/` (and
  * `extract/` when the private corpus is present), re-runs structured-mode
- * extraction with the captured config, projects, and diffs against
- * `expected`. Failures throw the formatted diff block from
+ * extraction with the captured config and diffs canonical structured and
+ * markdown pages against `expected`. Failures throw the formatted diff block from
  * `formatDiffs(...)` so an agent can pinpoint the offending field.
  *
  * Lives in the smoke tier (`vitest.smoke.config.ts` / `npm run
@@ -14,10 +14,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
-    diffExtractionSnapshots,
+    diffMarkdownPages,
+    diffStructuredPages,
     formatDiffs,
-    projectExtractionSnapshot,
-} from "../../src/beaver-extract/debug/extractionSnapshot";
+    type SnapshotDiff,
+} from "../../src/beaver-extract/cli/fixture/pageDiff";
 import { extractPdf } from "../../src/beaver-extract/node/api";
 import { resolveAnalysisWindow } from "../../src/beaver-extract/cli/fixture/analysisScope";
 import {
@@ -50,17 +51,39 @@ describe("BeaverExtract fixtures (smoke)", () => {
             if (result.mode !== "structured") {
                 throw new Error("expected structured result");
             }
-            const actual = projectExtractionSnapshot(
-                result,
-                f.fixture.config.pageIndices,
-            );
-            const diffs = diffExtractionSnapshots(f.fixture.expected, actual, {
-                bboxAbsPt: f.fixture.tolerance.bboxAbsPt,
+            const selected = new Set(f.fixture.config.pageIndices);
+            const structuredPages = result.document.pages
+                .filter((p) => selected.has(p.index))
+                .sort((a, b) => a.index - b.index);
+            const markdown = await extractPdf({
+                pdfData: pdfBytes,
+                mode: "markdown",
+                analysisWindow: resolveAnalysisWindow(f.fixture.config.analysisScope),
+                pageIndices: f.fixture.config.pageIndices,
+                settings: f.fixture.config.settings,
+                paragraphSettings: f.fixture.config.paragraphSettings,
             });
+            if (markdown.mode !== "markdown") {
+                throw new Error("expected markdown result");
+            }
+            const markdownPages = markdown.document.pages
+                .filter((p) => selected.has(p.index))
+                .sort((a, b) => a.index - b.index);
+            const diffs: SnapshotDiff[] = [
+                ...diffStructuredPages(
+                    f.fixture.expected.structured.pages,
+                    structuredPages,
+                    { bboxAbsPt: f.fixture.tolerance.bboxAbsPt },
+                ).map((d) => ({ ...d, path: `structured.${d.path}` })),
+                ...diffMarkdownPages(
+                    f.fixture.expected.markdown.pages,
+                    markdownPages,
+                    {},
+                ).map((d) => ({ ...d, path: `markdown.${d.path}` })),
+            ];
             if (diffs.length > 0) {
                 throw new Error(formatDiffs(`[${f.scope}] ${f.id}`, diffs));
             }
-            const selected = new Set(f.fixture.config.pageIndices);
             for (const page of result.document.pages.filter((p) => selected.has(p.index))) {
                 for (const item of page.items) {
                     expect(result.document.citationIndex[item.id]).toMatchObject({
