@@ -161,21 +161,23 @@ export function getCitationKey(params: CitationKeyParams): string {
  * Parameters for generating a full citation key (includes location info).
  */
 export interface FullCitationKeyParams extends CitationKeyParams {
-    sid?: string;   // Sentence ID (e.g., "s0-s8")
+    loc?: string;   // Unified Beaver Extract locator (e.g., "s343" or "p12")
+    sid?: string;   // Sentence ID (e.g., "s343")
     page?: string;  // Page number (e.g., "3")
 }
 
 /**
- * Generate a full citation key including location info (sid, page).
+ * Generate a full citation key including location info.
  * 
  * Used for matching in-text citations to their specific metadata.
  * Different locations within the same item get different full keys.
  * 
  * Key format:
  * - Base key only: "zotero:1-ABC123"
- * - With sid: "zotero:1-ABC123:sid=s0-s8"
+ * - With loc: "zotero:1-ABC123:s343"
+ * - With sid: "zotero:1-ABC123:s343"
  * - With page: "zotero:1-ABC123:page=3"
- * - With both: "zotero:1-ABC123:sid=s0-s8:page=3"
+ * - With sid and page: "zotero:1-ABC123:s343:page=3"
  * 
  * @param params Full citation key parameters
  * @returns Full citation key string
@@ -185,7 +187,8 @@ export function getFullCitationKey(params: FullCitationKeyParams): string {
     if (!baseKey) return '';
     
     const parts: string[] = [baseKey];
-    if (params.sid) parts.push(`sid=${params.sid}`);
+    if (params.loc) parts.push(params.loc);
+    else if (params.sid) parts.push(params.sid);
     if (params.page) parts.push(`page=${params.page}`);
     
     return parts.join(':');
@@ -221,8 +224,8 @@ export interface NormalizedCitationAttrs {
     item_id?: string;      // Format: "libraryID-itemKey"
     att_id?: string;       // Format: "libraryID-itemKey"
     external_id?: string;  // External source ID
-    loc?: string;          // Unified locator token (e.g., "p10", "s0-s8")
-    sid?: string;          // Sentence ID (e.g., "s0-s8")
+    loc?: string;          // Unified locator token (e.g., "page10", "s343", "p12")
+    sid?: string;          // Sentence ID (e.g., "s343")
     page?: string;         // Page number(s) - e.g., "10" or "10-12"
 }
 
@@ -231,7 +234,7 @@ export interface NormalizedCitationAttrs {
  * 
  * Normalizations:
  * - attachment_id → att_id
- * - Only keeps recognized attributes (item_id, att_id, external_id, sid, page)
+ * - Only keeps recognized attributes (id, item_id, att_id, external_id, loc, sid, page)
  * 
  * @param attributesStr Raw attribute string from citation tag
  * @returns Normalized attributes object
@@ -258,7 +261,7 @@ export function parseCitationAttributes(attributesStr: string): NormalizedCitati
 
 /**
  * Compute a full citation key from normalized citation attributes.
- * Includes sid and page for unique identification of citation instances.
+ * Includes loc/sid/page for unique identification of citation instances.
  * Priority: att_id > item_id > external_id
  * 
  * @param attrs Normalized citation attributes
@@ -271,7 +274,7 @@ export function computeCitationKeyFromAttrs(attrs: NormalizedCitationAttrs): str
 
 /**
  * Compute a base (item-only) citation key from normalized citation attributes.
- * Does NOT include sid/page - used for marker assignment.
+ * Does NOT include loc/sid/page - used for marker assignment.
  * 
  * @param attrs Normalized citation attributes
  * @returns Base citation key or empty string if no valid identifier

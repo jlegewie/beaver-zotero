@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseCitationAttributes } from '../../../react/types/citations';
+import { computeCitationKeyFromAttrs, getFullCitationKey, parseCitationAttributes } from '../../../react/types/citations';
 
 describe('parseCitationAttributes', () => {
     describe('double-quoted attributes', () => {
@@ -20,12 +20,14 @@ describe('parseCitationAttributes', () => {
 
         it('parses all recognized attributes together', () => {
             const result = parseCitationAttributes(
-                'item_id="1-ABC" att_id="1-XYZ" external_id="ext:1" sid="s1" page="5"'
+                'id="1-ID" item_id="1-ABC" att_id="1-XYZ" external_id="ext:1" loc="p12" sid="s1" page="5"'
             );
             expect(result).toEqual({
+                id: '1-ID',
                 item_id: '1-ABC',
                 att_id: '1-XYZ',
                 external_id: 'ext:1',
+                loc: 'p12',
                 sid: 's1',
                 page: '5',
             });
@@ -104,6 +106,29 @@ describe('parseCitationAttributes', () => {
         it('handles extra whitespace between attributes', () => {
             const result = parseCitationAttributes('  item_id="1-ABC"   page="5"  ');
             expect(result).toEqual({ item_id: '1-ABC', page: '5' });
+        });
+    });
+
+    describe('citation keys', () => {
+        it('uses loc for Beaver Extract record ids', () => {
+            expect(computeCitationKeyFromAttrs({
+                item_id: '1-ABC',
+                loc: 'p12',
+            })).toBe('zotero:1-ABC:p12');
+        });
+
+        it('builds compatibility full keys from loc or sid', () => {
+            expect(getFullCitationKey({
+                library_id: 1,
+                zotero_key: 'ABC',
+                loc: 's343',
+            })).toBe('zotero:1-ABC:s343');
+            expect(getFullCitationKey({
+                library_id: 1,
+                zotero_key: 'ABC',
+                sid: 's343',
+                page: '4',
+            })).toBe('zotero:1-ABC:s343:page=4');
         });
     });
 });
