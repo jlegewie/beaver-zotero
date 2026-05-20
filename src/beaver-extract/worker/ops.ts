@@ -917,6 +917,20 @@ function degradationByPage(
     return Object.keys(byPage).length > 0 ? byPage : undefined;
 }
 
+function translateDegradationItemIds(
+    degradation: DegradationSummary | undefined,
+    itemIdByInternalId: Map<string, string>,
+): DegradationSummary | undefined {
+    if (!degradation) return undefined;
+    return {
+        ...degradation,
+        notes: degradation.notes.map((note) => ({
+            ...note,
+            itemId: itemIdByInternalId.get(note.itemId) ?? note.itemId,
+        })),
+    };
+}
+
 function toMarkdownExtractResult(
     result: InternalExtractionResult,
 ): MarkdownExtractResult {
@@ -1000,6 +1014,16 @@ function buildDebugProjection(
         const structuredPage = structured.document.pages.find(
             (candidate) => candidate.index === page.index,
         );
+        const itemIdByInternalId = new Map(
+            (structuredPage?.items ?? []).map((item) => [
+                `p${page.index}:i${item.order}`,
+                item.id,
+            ]),
+        );
+        const pageDegradation = translateDegradationItemIds(
+            page.degradation,
+            itemIdByInternalId,
+        );
         const internalSentencesByParent = new Map(
             (page.sentences ?? []).map((sentence) => [
                 `${sentence.parentId}:${sentence.index}`,
@@ -1079,10 +1103,10 @@ function buildDebugProjection(
                         })),
                 }
                 : {}),
-            ...(page.degradation ? { degradation: page.degradation } : {}),
+            ...(pageDegradation ? { degradation: pageDegradation } : {}),
         };
-        if (page.degradation) {
-            degradation[String(page.index)] = page.degradation;
+        if (pageDegradation) {
+            degradation[String(page.index)] = pageDegradation;
         }
     }
     return {

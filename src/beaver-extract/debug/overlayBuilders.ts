@@ -100,6 +100,16 @@ function itemText(item: DocItem): string {
     return "text" in item ? item.text : item.kind;
 }
 
+type DebugItem = NonNullable<PageDebugData["items"]>[number];
+
+function debugItemStyle(item: DebugItem): { color: string; prefix: string } {
+    return ITEM_KIND_STYLE[item.kind as DocItem["kind"]];
+}
+
+function debugItemText(item: DebugItem): string {
+    return "text" in item ? item.text : item.kind;
+}
+
 function itemSentences(item: DocItem): SentenceItem[] {
     return "sentences" in item ? item.sentences ?? [] : [];
 }
@@ -490,15 +500,32 @@ export function buildSentenceOverlayFromDebugPage(page: PageDebugData): OverlayR
     const rects: OverlayRect[] = [];
     let groupIdx = 0;
     let bodyIdx = 0;
+    let sentenceLabelIdx = 0;
+    const sentencesByItem = new Map<string, NonNullable<PageDebugData["sentences"]>>();
     for (const sentence of page.sentences ?? []) {
-        if (sentence.bboxes.length === 0) continue;
+        const list = sentencesByItem.get(sentence.itemId);
+        if (list) list.push(sentence);
+        else sentencesByItem.set(sentence.itemId, [sentence]);
+    }
+
+    const drawSentence = (
+        sentence: NonNullable<PageDebugData["sentences"]>[number],
+    ): void => {
+        if (sentence.bboxes.length === 0) return;
         const isDegraded = degradedItemIds.has(sentence.itemId);
-        const color = isDegraded
-            ? OVERLAY_COLORS.sentenceDegraded
-            : OVERLAY_COLORS.sentence[bodyIdx++ % OVERLAY_COLORS.sentence.length];
-        const label = `S${groupIdx + 1}${sentence.joinWithNext ? "↪" : ""}`;
+        let color: string;
+        if (isDegraded) {
+            color = OVERLAY_COLORS.sentenceDegraded;
+        } else {
+            color = OVERLAY_COLORS.sentence[bodyIdx % OVERLAY_COLORS.sentence.length];
+            bodyIdx++;
+        }
+        let label = `S${sentenceLabelIdx + 1}`;
+        sentenceLabelIdx++;
+        if (sentence.joinWithNext) label = `${label}↪`;
+        const joinTail = sentence.joinWithNext ? " ↪" : "";
         const annotationText =
-            `page ${page.pageIndex + 1}, item ${sentence.itemId}, s${sentence.order + 1}\n` +
+            `page ${page.pageIndex + 1}, item ${sentence.itemId}, s${sentence.order + 1}${joinTail}\n` +
             sentence.text;
         sentence.bboxes.forEach((rect, fragIdx) => {
             rects.push({
@@ -511,6 +538,34 @@ export function buildSentenceOverlayFromDebugPage(page: PageDebugData): OverlayR
             });
         });
         groupIdx++;
+    };
+
+    if ((page.items?.length ?? 0) > 0) {
+        for (const item of page.items ?? []) {
+            const itemSentences = sentencesByItem.get(item.id) ?? [];
+            if (itemSentences.some((sentence) => sentence.bboxes.length > 0)) {
+                for (const sentence of itemSentences) {
+                    drawSentence(sentence);
+                }
+                continue;
+            }
+
+            const style = debugItemStyle(item);
+            rects.push({
+                rect: rectToBBox(item.bbox),
+                color: style.color,
+                label: `${style.prefix}${item.order + 1}`,
+                annotationText:
+                    `page ${page.pageIndex + 1}, item ${item.id}, ${item.kind}\n` +
+                    debugItemText(item),
+                group: groupIdx,
+            });
+            groupIdx++;
+        }
+    } else {
+        for (const sentence of page.sentences ?? []) {
+            drawSentence(sentence);
+        }
     }
     return {
         level: "sentences",
@@ -521,6 +576,11 @@ export function buildSentenceOverlayFromDebugPage(page: PageDebugData): OverlayR
         rects,
         stats: {
             sentences: page.sentences?.length ?? 0,
+            headings: page.items?.filter((item) => item.kind === "section_header").length ?? 0,
+            fallbackItems: page.items?.filter((item) => {
+                const itemSentences = sentencesByItem.get(item.id) ?? [];
+                return !itemSentences.some((sentence) => sentence.bboxes.length > 0);
+            }).length ?? 0,
             paragraphs: page.items?.filter((item) => item.kind === "text").length ?? 0,
             degradation: page.degradation?.count ?? 0,
         },
