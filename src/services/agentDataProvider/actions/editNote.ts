@@ -51,7 +51,7 @@ import {
     externalReferenceMappingAtom,
     externalReferenceItemMappingAtom,
 } from '../../../../react/atoms/externalReferences';
-import { addOrUpdateEditFooter, parseEditFooter } from '../../../utils/noteEditFooter';
+import { addOrUpdateEditFooter, getBeaverFooterAppendPoint } from '../../../utils/noteEditFooter';
 import { assertNoPreviewMarkers } from '../../../utils/notePreviewGuard';
 import {
     WSAgentActionValidateRequest,
@@ -813,13 +813,10 @@ async function executeEditNoteAction(
             };
         }
 
-        const normalizedOldHtml = normalizeNoteHtml(oldHtml);
-        const existingCitationCache = extractDataCitationItems(normalizedOldHtml);
-        const strippedHtml = stripDataCitationItems(normalizedOldHtml);
+        const existingCitationCache = extractDataCitationItems(oldHtml);
+        const strippedHtml = stripDataCitationItems(oldHtml);
 
-        const footer = parseEditFooter(strippedHtml);
-        const lastDiv = strippedHtml.lastIndexOf('</div>');
-        const insertAt = footer ? footer.startIndex : (lastDiv !== -1 ? lastDiv : strippedHtml.length);
+        const insertAt = getBeaverFooterAppendPoint(strippedHtml);
         let undoBeforeContext = strippedHtml.substring(Math.max(0, insertAt - 200), insertAt);
         let undoAfterContext = strippedHtml.substring(insertAt, insertAt + 200);
         let newHtml = strippedHtml.slice(0, insertAt) + expandedNew + strippedHtml.slice(insertAt);

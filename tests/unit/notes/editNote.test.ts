@@ -739,6 +739,40 @@ describe('executeEditNoteAction — success', () => {
         expect(response.result_data!.undo_new_html).toBe('<p>Appended</p>');
         expect(response.result_data!.undo_full_html).toBeUndefined();
     });
+
+    it('append inserts before Created by Beaver footer without breaking its link', async () => {
+        vi.mocked(store.get).mockImplementation((atom: any) => {
+            if (typeof atom === 'symbol' && atom.description === 'autoApproveNoteKeysAtom') {
+                return new Set<string>();
+            }
+            if (typeof atom === 'symbol' && atom.description === 'currentThreadIdAtom') {
+                return null;
+            }
+            return [1, 2];
+        });
+        const createdFooter =
+            '<p><span style="color: #aaa;"><strong>Created by Beaver</strong> \u00b7 <a href="zotero://beaver/thread/t0/run/r0">Open Message</a></span></p>';
+        const item = makeMockItem({
+            getNote: vi.fn(() => `<div data-schema-version="9"><p>Existing</p>${createdFooter}</div>`),
+        });
+        (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(item);
+
+        const response = await handleAgentActionExecuteRequest(makeExecuteRequest({
+            action_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                old_string: '',
+                new_string: '<p>Appended</p>',
+                operation: 'append',
+            },
+        }));
+
+        expect(response.success).toBe(true);
+        const savedHtml = item.setNote.mock.calls[0][0];
+        expect(savedHtml.indexOf('<p>Appended</p>')).toBeLessThan(savedHtml.indexOf('Created by Beaver'));
+        expect(savedHtml).toContain('href="zotero://beaver/thread/t0/run/r0"');
+        expect(savedHtml).toContain('Open Message</a>');
+    });
 });
 
 

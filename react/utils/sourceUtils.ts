@@ -13,7 +13,7 @@ import { isAttachmentOnServer } from '../../src/utils/webAPI';
 import { safeFileExists } from '../../src/utils/zoteroUtils';
 import { getNoteContentPreviewText } from './noteText';
 import type { EditNoteOperation } from '../types/agentActions/editNote';
-import { parseEditFooter } from '../../src/utils/noteEditFooter';
+import { getBeaverFooterAppendPoint } from '../../src/utils/noteEditFooter';
 
 // Constants
 export const MAX_NOTE_TITLE_LENGTH = 20;
@@ -776,10 +776,8 @@ async function extractAppendAnchorSearchText(itemId: number): Promise<string | n
     await item.loadDataType('note');
 
     const html = item.getNote();
-    const footer = parseEditFooter(html);
-    const beforeFooter = footer ? html.slice(0, footer.startIndex) : html;
-    const lastDiv = beforeFooter.lastIndexOf('</div>');
-    const bodyHtml = lastDiv !== -1 ? beforeFooter.slice(0, lastDiv) : beforeFooter;
+    const appendPoint = getBeaverFooterAppendPoint(html);
+    const bodyHtml = html.slice(0, appendPoint);
     const spacedHtml = bodyHtml.replace(/<\/(p|div|li|h[1-6])>\s*</gi, '</$1> <');
     const plainText = stripHtmlTags(spacedHtml).replace(/\s+/g, ' ').trim();
     if (!plainText) return null;

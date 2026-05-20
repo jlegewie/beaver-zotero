@@ -63,6 +63,12 @@ export interface ParsedEditFooter {
     endIndex: number;
 }
 
+export interface ParsedCreatedFooter {
+    footerHtml: string;
+    startIndex: number;
+    endIndex: number;
+}
+
 /**
  * Parse an existing "Edited by Beaver" footer from note HTML.
  * Returns the footer details and linked thread IDs, or null if not found.
@@ -88,6 +94,47 @@ export function parseEditFooter(html: string): ParsedEditFooter | null {
     }
 
     return { footerHtml, threadIds, startIndex, endIndex };
+}
+
+/**
+ * Parse an existing "Created by Beaver" footer from note HTML.
+ * Returns the final structurally recognized footer, or null if not found.
+ */
+export function parseCreatedFooter(html: string): ParsedCreatedFooter | null {
+    const paragraphRegex = new RegExp(CREATED_FOOTER_PARAGRAPH_REGEX.source, 'g');
+    let footerHtml = '';
+    let footerStart = -1;
+    let paragraphMatch;
+
+    while ((paragraphMatch = paragraphRegex.exec(html)) !== null) {
+        if (isBeaverCreatedFooterParagraph(paragraphMatch[0])) {
+            footerHtml = paragraphMatch[0];
+            footerStart = paragraphMatch.index;
+        }
+    }
+
+    if (footerStart === -1) return null;
+
+    return {
+        footerHtml,
+        startIndex: footerStart,
+        endIndex: footerStart + footerHtml.length,
+    };
+}
+
+/**
+ * Return the insertion point for visible note-body appends.
+ * Beaver footers are metadata, so appended content belongs above them.
+ */
+export function getBeaverFooterAppendPoint(html: string): number {
+    const starts = [
+        parseCreatedFooter(html)?.startIndex,
+        parseEditFooter(html)?.startIndex,
+    ].filter((idx): idx is number => idx !== undefined);
+    if (starts.length > 0) return Math.min(...starts);
+
+    const closingDivIdx = html.lastIndexOf('</div>');
+    return closingDivIdx !== -1 ? closingDivIdx : html.length;
 }
 
 /**
@@ -181,23 +228,10 @@ export function stripBeaverEditFooter(html: string): string {
  * Used by the simplifier so the agent can't see or edit the footer.
  */
 export function stripBeaverCreatedFooter(html: string): string {
-    const paragraphRegex = new RegExp(CREATED_FOOTER_PARAGRAPH_REGEX.source, 'g');
-    let footerHtml = '';
-    let footerStart = -1;
-    let paragraphMatch;
-
-    while ((paragraphMatch = paragraphRegex.exec(html)) !== null) {
-        if (isBeaverCreatedFooterParagraph(paragraphMatch[0])) {
-            // Prefer the final matching footer so incidental earlier content
-            // never wins over the real Beaver footer near the end of the note.
-            footerHtml = paragraphMatch[0];
-            footerStart = paragraphMatch.index;
-        }
-    }
-
-    if (footerStart === -1) {
+    const footer = parseCreatedFooter(html);
+    if (!footer) {
         return html;
     }
 
-    return html.slice(0, footerStart) + html.slice(footerStart + footerHtml.length);
+    return html.slice(0, footer.startIndex) + html.slice(footer.endIndex);
 }

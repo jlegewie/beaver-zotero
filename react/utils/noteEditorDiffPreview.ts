@@ -37,7 +37,7 @@ import {
     encodeTextEntities,
     ENTITY_FORMS,
 } from '../../src/utils/noteHtmlEntities';
-import { parseEditFooter } from '../../src/utils/noteEditFooter';
+import { getBeaverFooterAppendPoint } from '../../src/utils/noteEditFooter';
 import { store } from '../store';
 import {
     externalReferenceMappingAtom,
@@ -889,9 +889,7 @@ export function constructMultiDiffHtml(
 
     const appendEdits = edits.filter(e => e.operation === 'append' && e.expandedNew);
     if (appendEdits.length > 0) {
-        const footer = parseEditFooter(stripped);
-        const lastDiv = stripped.lastIndexOf('</div>');
-        const pos = footer ? footer.startIndex : (lastDiv !== -1 ? lastDiv : stripped.length);
+        const pos = getBeaverFooterAppendPoint(stripped);
         const replacement = appendEdits
             .map(e => wrapTextNodesWithStyle(e.expandedNew, ADD_STYLE))
             .join('');

@@ -9,7 +9,6 @@ import { logger } from '../../src/utils/logger';
 import {
     getOrSimplify,
     invalidateSimplificationCache,
-    normalizeNoteHtml,
 } from '../../src/utils/noteHtmlSimplifier';
 import {
     checkDuplicateCitations,
@@ -51,7 +50,7 @@ import {
 import { clearNoteEditorSelection } from './sourceUtils';
 import { store } from '../store';
 import { currentThreadIdAtom } from '../atoms/threads';
-import { addOrUpdateEditFooter, parseEditFooter } from '../../src/utils/noteEditFooter';
+import { addOrUpdateEditFooter, getBeaverFooterAppendPoint } from '../../src/utils/noteEditFooter';
 import { assertNoPreviewMarkers } from '../../src/utils/notePreviewGuard';
 import {
     externalReferenceMappingAtom,
@@ -275,13 +274,10 @@ export async function executeEditNoteAction(
             throw new Error(e.message || String(e));
         }
 
-        const normalizedOldHtml = normalizeNoteHtml(oldHtml);
-        const existingCitationCache = extractDataCitationItems(normalizedOldHtml);
-        const strippedHtml = stripDataCitationItems(normalizedOldHtml);
+        const existingCitationCache = extractDataCitationItems(oldHtml);
+        const strippedHtml = stripDataCitationItems(oldHtml);
 
-        const footer = parseEditFooter(strippedHtml);
-        const lastDiv = strippedHtml.lastIndexOf('</div>');
-        const insertAt = footer ? footer.startIndex : (lastDiv !== -1 ? lastDiv : strippedHtml.length);
+        const insertAt = getBeaverFooterAppendPoint(strippedHtml);
         let undoBeforeContext = strippedHtml.substring(Math.max(0, insertAt - UNDO_CONTEXT_LENGTH), insertAt);
         let undoAfterContext = strippedHtml.substring(insertAt, insertAt + UNDO_CONTEXT_LENGTH);
         let newHtml = strippedHtml.slice(0, insertAt) + expandedNew + strippedHtml.slice(insertAt);
