@@ -175,6 +175,30 @@ describe('preloadPageLabelsForContent', () => {
         expect(mockGetAttachmentFileStatus).not.toHaveBeenCalled();
     });
 
+    it('preloads parent-item citations against the selected PDF attachment', async () => {
+        const parent = {
+            ...makeParentItem(50, 'PARENT01'),
+            isRegularItem: () => true,
+            getAttachments: vi.fn(() => [77]),
+        };
+        const attachment = makeItem(77, 'ATTACH01');
+        const cache = {
+            getMetadata: vi.fn().mockResolvedValue(null),
+        };
+
+        (globalThis as any).Zotero.Items = {
+            getByLibraryAndKey: vi.fn(() => parent),
+            get: vi.fn((itemID: number) => itemID === 77 ? attachment : false),
+        };
+        (globalThis as any).Zotero.Beaver = { attachmentFileCache: cache };
+
+        await preloadPageLabelsForContent('<citation id="1-PARENT01" loc="p3" />');
+
+        expect(cache.getMetadata).toHaveBeenCalledWith(77, '/storage/ATTACH01/test.pdf');
+        expect(mockGetAttachmentFileStatus).toHaveBeenCalledWith(attachment, false);
+        expect(parent.getFilePathAsync).not.toHaveBeenCalled();
+    });
+
     it('deduplicates by item ID', async () => {
         const item = makeItem(45, 'MNOP3456');
         const cache = {
@@ -307,5 +331,32 @@ describe('preloadPageLabelsForCitations', () => {
 
         expect(mockGetAttachmentFileStatus).toHaveBeenCalledWith(item, false);
         expect(loaded).toBe(true);
+    });
+
+    it('preloads parent-item citation metadata against the selected PDF attachment', async () => {
+        const parent = {
+            ...makeParentItem(54, 'PARENT03'),
+            isRegularItem: () => true,
+            getAttachments: vi.fn(() => [78]),
+        };
+        const attachment = makeItem(78, 'ATTACH02');
+        const cache = {
+            getMetadata: vi.fn().mockResolvedValue(null),
+        };
+
+        (globalThis as any).Zotero.Items = {
+            getByLibraryAndKey: vi.fn(() => parent),
+            get: vi.fn((itemID: number) => itemID === 78 ? attachment : false),
+        };
+        (globalThis as any).Zotero.Beaver = { attachmentFileCache: cache };
+
+        const loaded = await preloadPageLabelsForCitations([
+            { library_id: 1, zotero_key: 'PARENT03', pages: [3], parts: [] },
+        ]);
+
+        expect(loaded).toBe(true);
+        expect(cache.getMetadata).toHaveBeenCalledWith(78, '/storage/ATTACH02/test.pdf');
+        expect(mockGetAttachmentFileStatus).toHaveBeenCalledWith(attachment, false);
+        expect(parent.getFilePathAsync).not.toHaveBeenCalled();
     });
 });

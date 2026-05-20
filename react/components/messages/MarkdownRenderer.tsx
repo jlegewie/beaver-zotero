@@ -13,21 +13,29 @@ import {
     createPreprocessState 
 } from '../../utils/citationPreprocessing';
 
-// Create a custom schema that extends GitHub's defaults but allows citation tags
-// Supported citation formats:
-//   <citation item_id="..."/>           - parent item reference
-//   <citation att_id="..."/>            - attachment reference  
-//   <citation att_id="..." sid="..."/>  - attachment with sentence ID
-//   <citation att_id="..." page="..."/> - attachment with page reference
-//   <citation external_id="..."/>       - external reference
+const citationDataAttributes = [
+    'data-library-id', 'dataLibraryId',
+    'data-zotero-key', 'dataZoteroKey',
+    'data-external-id', 'dataExternalId',
+    'data-external-source', 'dataExternalSource',
+    'data-loc', 'dataLoc',
+    'data-loc-kind', 'dataLocKind',
+    'data-loc-value', 'dataLocValue',
+    'data-requested-citation-key', 'dataRequestedCitationKey',
+    'data-resolved-citation-key', 'dataResolvedCitationKey',
+    'data-consecutive', 'dataConsecutive',
+    'data-adjacent', 'dataAdjacent',
+    'data-invalid-reason', 'dataInvalidReason',
+    'data-raw-identity', 'dataRawIdentity',
+    'data-identity-attr', 'dataIdentityAttr',
+];
+
+// Create a custom schema that extends GitHub's defaults but allows normalized citation tags.
 const customSchema = deepmerge(defaultSchema, {
     tagNames: [...(defaultSchema.tagNames || []), 'citation'],
     attributes: {
         ...defaultSchema.attributes,
-        // Note: We allow extra attributes that get passed through but ignored
-        // attachment_id is normalized to att_id during preprocessing
-        // citation_key is used for metadata lookup (replaces raw_tag)
-        citation: ['item_id', 'att_id', 'attachment_id', 'sid', 'page', 'external_id', 'consecutive', 'adjacent', 'citation_key']
+        citation: citationDataAttributes
     },
     protocols: {
         ...defaultSchema.protocols,

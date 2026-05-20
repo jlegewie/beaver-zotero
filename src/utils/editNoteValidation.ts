@@ -19,6 +19,11 @@ import {
     normalizePageLocator,
     translatePageNumberToLabel,
 } from './noteCitationExpand';
+import {
+    getPageLocator,
+    normalizeCitationTag,
+    parseRawCitationAttributes,
+} from '../../react/utils/citationGrammar';
 
 // =============================================================================
 // New-string validation
@@ -94,19 +99,13 @@ export function checkNewCitationItemsExist(
         if (ref && metadata.elements.has(ref)) continue;
 
         // New citation (no ref) or unknown ref — validate the item exists
-        const itemId = extractAttr(attrStr, 'item_id');
-        const attId = extractAttr(attrStr, 'att_id');
-        const id = itemId || attId;
-        if (!id) continue; // will fail later in expansion with a proper error
+        const normalized = normalizeCitationTag(parseRawCitationAttributes(attrStr));
+        if (!normalized.ok || normalized.ref.kind !== 'zotero') continue; // will fail later in expansion with a proper error
 
-        const dashIdx = id.indexOf('-');
-        if (dashIdx === -1) continue; // will fail later in expansion
-
-        const libId = parseInt(id.substring(0, dashIdx), 10);
-        const key = id.substring(dashIdx + 1);
-        const item = Zotero.Items.getByLibraryAndKey(libId, key);
+        const id = `${normalized.ref.library_id}-${normalized.ref.zotero_key}`;
+        const item = Zotero.Items.getByLibraryAndKey(normalized.ref.library_id, normalized.ref.zotero_key);
         if (!item) {
-            const label = itemId ? 'item_id' : 'att_id';
+            const label = extractAttr(attrStr, 'id') ? 'id' : extractAttr(attrStr, 'item_id') ? 'item_id' : 'att_id';
             return `Citation references a Zotero item that does not exist: ${label}="${id}". Verify the item ID is correct.`;
         }
     }
@@ -126,12 +125,14 @@ export function checkDuplicateCitations(
     metadata: SimplificationMetadata
 ): string | null {
     // Find new citations (item_id without ref) in new_string
-    const newCitationRegex = /<citation\s+(?![^/]*\bref=)[^>]*item_id="([^"]*)"[^/]*\/>/g;
+    const newCitationRegex = /<citation\s+(?![^/]*\bref=)([^>]*?)\/>/g;
     let match;
     const warnings: string[] = [];
 
     while ((match = newCitationRegex.exec(newString)) !== null) {
-        const newItemId = match[1];
+        const normalized = normalizeCitationTag(parseRawCitationAttributes(match[1]));
+        if (!normalized.ok || normalized.ref.kind !== 'zotero') continue;
+        const newItemId = `${normalized.ref.library_id}-${normalized.ref.zotero_key}`;
         // Check if any existing citation references the same item
         for (const [existingId, stored] of metadata.elements) {
             if (stored.type === 'citation' && stored.originalAttrs?.item_id === newItemId) {
@@ -227,6 +228,53 @@ function translateAttIdPageLocator(
     return normalized;
 }
 
+function resolveUnifiedIdForOldString(id: string): { itemId?: string; attId?: string } {
+    const dashIdx = id.indexOf('-');
+    if (dashIdx <= 0) return { itemId: id };
+    const libId = parseInt(id.substring(0, dashIdx), 10);
+    const key = id.substring(dashIdx + 1);
+    if (!libId || !key) return { itemId: id };
+    const item = Zotero.Items.getByLibraryAndKey(libId, key);
+    if (item && typeof item !== 'boolean' && item.isAttachment?.()) {
+        return { attId: id };
+    }
+    return { itemId: id };
+}
+
+function addParentCitationRefReplacement(
+    replacements: { start: number; end: number; replacement: string }[],
+    metadata: SimplificationMetadata,
+    match: RegExpExecArray,
+    attrStr: string,
+    attId: string,
+    page: string | undefined,
+): boolean {
+    const resolved = resolveAttIdToParent(attId);
+    if (!resolved) return false;
+    const { parentItemId, attachmentItem } = resolved;
+
+    // Attachment citations are stored as parent-item citations after expansion,
+    // so compare both translated and raw page locators before giving up.
+    const translatedPage = translateAttIdPageLocator(attachmentItem, page);
+    let matchedPage = translatedPage;
+    let candidateRef = findUniqueCitationRef(metadata, parentItemId, translatedPage);
+    if (candidateRef === null && translatedPage !== page) {
+        candidateRef = findUniqueCitationRef(metadata, parentItemId, page);
+        if (candidateRef !== null) matchedPage = page;
+    }
+    if (candidateRef === null) return false;
+
+    const finalPageAttr = matchedPage !== undefined
+        ? ` page="${matchedPage}"`
+        : '';
+    replacements.push({
+        start: match.index,
+        end: match.index + match[0].length,
+        replacement: `<citation item_id="${parentItemId}"${finalPageAttr} ref="${candidateRef}"/>`,
+    });
+    return true;
+}
+
 /**
  * Enrich no-ref citations in `old_string` with the `ref` attribute from the
  * metadata map.
@@ -259,9 +307,14 @@ export function enrichOldStringCitationRefs(
         // Skip if it already has a ref — enrichment not needed
         if (extractAttr(attrStr, 'ref') !== undefined) continue;
 
-        const page = extractAttr(attrStr, 'page') || undefined;
+        const normalized = normalizeCitationTag(parseRawCitationAttributes(attrStr));
+        const page = normalized.ok ? getPageLocator(normalized.ref) : extractAttr(attrStr, 'page') || undefined;
 
-        const itemId = extractAttr(attrStr, 'item_id');
+        const explicitItemId = extractAttr(attrStr, 'item_id');
+        const unifiedId = extractAttr(attrStr, 'id');
+        const resolvedUnifiedId = unifiedId ? resolveUnifiedIdForOldString(unifiedId) : {};
+        const itemId = explicitItemId || resolvedUnifiedId.itemId;
+        const unifiedAttId = resolvedUnifiedId.attId;
         if (itemId) {
             const candidateRef = findUniqueCitationRef(metadata, itemId, page);
             if (candidateRef === null) continue;
@@ -279,45 +332,9 @@ export function enrichOldStringCitationRefs(
             continue;
         }
 
-        const attId = extractAttr(attrStr, 'att_id');
+        const attId = extractAttr(attrStr, 'att_id') || extractAttr(attrStr, 'attachment_id') || unifiedAttId;
         if (attId) {
-            const resolved = resolveAttIdToParent(attId);
-            if (!resolved) continue;
-            const { parentItemId, attachmentItem } = resolved;
-
-            // `buildCitationFromAttId` translates the 1-based page number
-            // through the attachment's page-label map at insert time, so the
-            // stored `originalAttrs.page` is the display label (e.g., "iii").
-            // When the model re-uses its own prior att_id form — with the
-            // raw number it originally wrote — the unadjusted comparison
-            // misses the stored citation. Try both the translated and the
-            // raw form before giving up, since the label cache may be empty
-            // on a fresh session and we don't want the enrichment to be all-
-            // or-nothing in that case.
-            const translatedPage = translateAttIdPageLocator(attachmentItem, page);
-            let matchedPage = translatedPage;
-            let candidateRef = findUniqueCitationRef(metadata, parentItemId, translatedPage);
-            if (candidateRef === null && translatedPage !== page) {
-                candidateRef = findUniqueCitationRef(metadata, parentItemId, page);
-                if (candidateRef !== null) matchedPage = page;
-            }
-            if (candidateRef === null) continue;
-
-            // Drop `att_id` and write the parent `item_id` + `ref`. Use the
-            // page variant that actually matched in metadata so the downstream
-            // `attrsChanged` check in expandToRawHtml treats the enriched tag
-            // as identical to the stored citation — which returns stored.rawHtml
-            // verbatim and guarantees the expanded old_string is a literal slice
-            // of the note. Writing the translated form here when only the raw
-            // form matched would fabricate a citation with the wrong locator.
-            const finalPageAttr = matchedPage !== undefined
-                ? ` page="${matchedPage}"`
-                : '';
-            replacements.push({
-                start: m.index,
-                end: m.index + m[0].length,
-                replacement: `<citation item_id="${parentItemId}"${finalPageAttr} ref="${candidateRef}"/>`,
-            });
+            addParentCitationRefReplacement(replacements, metadata, m, attrStr, attId, page);
             continue;
         }
     }

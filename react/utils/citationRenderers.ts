@@ -6,15 +6,24 @@ import MarkdownRenderer from '../components/messages/MarkdownRenderer';
 import { Citation } from '../../src/services/CitationService';
 import { citationDataMapAtom, citationKeyToMarkerAtom } from '../atoms/citations';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../atoms/externalReferences';
-import { CitationData, parseCitationAttributes, computeBaseCitationKeyFromAttrs } from '../types/citations';
+import { CitationData } from '../types/citations';
 import { CITATION_TAG_PATTERN } from '../utils/citationPreprocessing';
 import { ZoteroItemReference } from '../types/zotero';
 import { logger } from '../../src/utils/logger';
 import { ExternalReference } from '../types/externalReferences';
 import { formatExternalCitation } from '../atoms/externalReferences';
+import {
+    baseCitationKey,
+    externalCompatKey,
+    getRequestedRef,
+    getResolvedRef,
+    getPageLocator,
+    normalizeCitationTag,
+    parseRawCitationAttributes,
+} from './citationGrammar';
 
 // Regex for citation syntax - matches self-closing (/>) and non-self-closing (>) with or without closing tag
-const citationRegex = /<citation\s+([^>]+?)\s*(\/>|>(?:.*?<\/citation>)?)/g;
+const citationRegex = /<citation(?:\s+([^>]*?))?\s*(\/>|>(?:.*?<\/citation>)?)/g;
 const attributeRegex = /(\w+)\s*=\s*"([^"]*)"/g;
 
 /**
@@ -31,38 +40,18 @@ function parseAttributes(attrString: string) {
     return attrs;
 }
 
-/**
- * Extracts libraryID and itemKey from an id attribute value.
- * Format: "libraryID-itemKey" (may have 'user-content-' prefix from sanitization)
- * @param id - The raw id string from the citation attribute
- * @returns An object with libraryID and itemKey
- */
-function parseItemReference(id: string): { libraryID: number; itemKey: string } {
-    const cleanedId = id.replace('user-content-', '');
-    const dashIndex = cleanedId.indexOf('-');
-    if (dashIndex > 0) {
-        const libraryIDString = cleanedId.substring(0, dashIndex);
-        const itemKey = cleanedId.substring(dashIndex + 1);
-        return { libraryID: parseInt(libraryIDString, 10) || 1, itemKey };
-    }
-    // Fallback for malformed reference
-    return { libraryID: 1, itemKey: cleanedId };
-}
+function getEarliestExistingMarker(markerMap: Record<string, string>, keys: string[]): string | undefined {
+    const markers = keys
+        .map((key) => markerMap[key])
+        .filter((marker): marker is string => !!marker);
+    if (markers.length === 0) return undefined;
 
-/**
- * Get the Zotero item reference from citation attributes.
- * Priority: att_id > item_id (attachment_id is normalized to att_id)
- */
-function getItemReferenceFromAttrs(attrs: Record<string, string>): { libraryID: number; itemKey: string } | null {
-    // Normalize attachment_id to att_id
-    const attId = attrs.att_id || attrs.attachment_id;
-    if (attId) {
-        return parseItemReference(attId);
-    }
-    if (attrs.item_id) {
-        return parseItemReference(attrs.item_id);
-    }
-    return null;
+    const numericMarkers = markers
+        .map((marker) => parseInt(marker, 10))
+        .filter((marker) => Number.isFinite(marker));
+    if (numericMarkers.length === 0) return markers[0];
+
+    return Math.min(...numericMarkers).toString();
 }
 
 /**
@@ -106,21 +95,25 @@ export function renderToMarkdown(
     text = preprocessNoteContent(text);
 
     // Format references
-    const formattedContent = text.replace(citationRegex, (match: string, attrString: string): string => {
-        // Parse the attributes
-        const attrs = parseAttributes(attrString);
-        
-        // Get item reference from attributes (att_id, item_id, or external_id)
-        let itemRef = getItemReferenceFromAttrs(attrs);
-        const isExternalReference = !!attrs.external_id && !itemRef;
-        const isExternalReferenceMappedToZoteroItem = isExternalReference && !!externalItemMapping[attrs.external_id];
+    const formattedContent = text.replace(citationRegex, (match: string, attrString: string = ''): string => {
+        const attrs = parseRawCitationAttributes(attrString);
+        const normalized = normalizeCitationTag(attrs);
+        if (!normalized.ok) {
+            logger(`renderToMarkdown: Citation tag missing valid reference: ${match}`);
+            return '';
+        }
+
+        let ref = normalized.ref;
+        const externalId = ref.kind === 'external' ? ref.external_id : undefined;
+        const isExternalReference = ref.kind === 'external';
+        const isExternalReferenceMappedToZoteroItem = !!externalId && !!externalItemMapping[externalId];
 
         // 1. External reference (not mapped to Zotero) ---------------------------------------------------
         if (isExternalReference && !isExternalReferenceMappedToZoteroItem) {
             // Look up external reference data
-            const externalRef = externalReferenceMapping[attrs.external_id];
+            const externalRef = externalReferenceMapping[externalId!];
             if (!externalRef) {
-                logger(`renderToMarkdown: No external reference found for external_id: ${attrs.external_id}`);
+                logger(`renderToMarkdown: No external reference found for external_id: ${externalId}`);
                 return '';
             }
             externalReferences.push(externalRef);
@@ -131,22 +124,21 @@ export function renderToMarkdown(
 
         // 2. External reference mapped to Zotero item ---------------------------------------------------
         if (isExternalReferenceMappedToZoteroItem) {
-            const mappedZoteroItem = externalItemMapping[attrs.external_id];
+            const mappedZoteroItem = externalItemMapping[externalId!];
             if (!mappedZoteroItem) {
-                logger(`renderToMarkdown: No Zotero item found for external_id: ${attrs.external_id}`);
+                logger(`renderToMarkdown: No Zotero item found for external_id: ${externalId}`);
                 return '';
             }
-            // Use the mapped Zotero item
-            itemRef = { libraryID: mappedZoteroItem.library_id, itemKey: mappedZoteroItem.zotero_key };
+            ref = { kind: 'zotero', library_id: mappedZoteroItem.library_id, zotero_key: mappedZoteroItem.zotero_key, loc: ref.loc };
         }
 
         // 3. Zotero item ---------------------------------------------------
-        if (!itemRef) {
+        if (ref.kind !== 'zotero') {
             logger(`renderToMarkdown: Citation tag missing item reference: ${match}`);
             return '';
         }
         
-        const { libraryID, itemKey } = itemRef;
+        const { library_id: libraryID, zotero_key: itemKey } = ref;
 
         // Get the Zotero item
         try {
@@ -167,8 +159,8 @@ export function renderToMarkdown(
             let citation = '';
             if (itemToCite.isRegularItem()) {
                 const citationObject: Citation = {id: itemToCite.id};
-                if (attrs.page || attrs.pages) {
-                    const rawPage = (attrs.page || attrs.pages)!;
+                const rawPage = getPageLocator(ref);
+                if (rawPage) {
                     citationObject.locator = rawPage;
                     citationObject.label = 'p.';
                 }
@@ -230,15 +222,33 @@ export function renderToHTML(
     const pattern = new RegExp(CITATION_TAG_PATTERN);
     
     let match;
+    const aliasGroups: string[][] = [];
     while ((match = pattern.exec(content)) !== null) {
-        const attributesStr = match[1];
-        const attrs = parseCitationAttributes(attributesStr);
-        // Use base key (without sid/page) so all citations to the same item share a marker
-        const citationKey = computeBaseCitationKeyFromAttrs(attrs);
+        const attributesStr = match[1] || '';
+        const normalized = normalizeCitationTag(parseRawCitationAttributes(attributesStr));
+        const citationKey = normalized.ok ? baseCitationKey(normalized.ref) : '';
         
         if (citationKey && !markerMap[citationKey]) {
             markerCount++;
             markerMap[citationKey] = markerCount.toString();
+        }
+    }
+
+    if (contextData?.citationDataMap) {
+        for (const citation of Object.values(contextData.citationDataMap)) {
+            const keys: string[] = [];
+            for (const ref of [getRequestedRef(citation), getResolvedRef(citation)]) {
+                if (!ref) continue;
+                keys.push(baseCitationKey(ref));
+                if (ref.kind === 'external') keys.push(externalCompatKey(ref.external_id));
+            }
+            const uniqueKeys = [...new Set(keys.filter(Boolean))];
+            if (uniqueKeys.length > 1) aliasGroups.push(uniqueKeys);
+        }
+        for (const keys of aliasGroups) {
+            const existing = getEarliestExistingMarker(markerMap, keys);
+            if (!existing) continue;
+            for (const key of keys) markerMap[key] = existing;
         }
     }
 
