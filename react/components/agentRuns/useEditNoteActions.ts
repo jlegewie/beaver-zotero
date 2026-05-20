@@ -11,6 +11,7 @@ import {
     rejectAgentActionAtom,
     setAgentActionsToErrorAtom,
     undoAgentActionAtom,
+    threadAgentActionsAtom,
 } from '../../agents/agentActions';
 import {
     approvalResponseIntentsAtom,
@@ -31,6 +32,7 @@ import {
 import { diffPreviewNoteKeyAtom, isDiffPreviewLive } from '../../utils/diffPreviewCoordinator';
 import { logger } from '../../../src/utils/logger';
 import { store } from '../../store';
+import { currentThreadIdAtom } from '../../atoms/threads';
 import { PreviewData, STATUS_CONFIGS, buildPreviewData } from './agentActionViewHelpers';
 import {
     EditNoteDisplayStatus,
@@ -337,7 +339,10 @@ export function useEditNoteActions({
         setClickedButton('undo');
         try {
             await dismissActiveEditNotePreview();
-            await undoEditNoteAction(action);
+            await undoEditNoteAction(action, {
+                threadId: store.get(currentThreadIdAtom),
+                threadActions: store.get(threadAgentActionsAtom),
+            });
             undoAgentAction(action.id);
             logger(`useEditNoteActions: Undone edit_note action ${action.id}`, 1);
         } catch (error: any) {

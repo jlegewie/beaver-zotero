@@ -224,6 +224,26 @@ export function stripBeaverEditFooter(html: string): string {
 }
 
 /**
+ * Remove one thread from the "Edited by Beaver" footer, preserving any other
+ * thread links. Removes the footer entirely when no thread links remain.
+ */
+export function removeThreadFromEditFooter(html: string, threadId: string): string {
+    const existingIds = collectAllThreadIds(html);
+    if (!existingIds.includes(threadId)) return html;
+
+    const cleaned = stripBeaverEditFooter(html);
+    const remainingThreadIds = existingIds.filter(id => id !== threadId);
+    if (remainingThreadIds.length === 0) return cleaned;
+
+    const newFooter = buildEditFooterHtml(remainingThreadIds);
+    const closingDivIdx = cleaned.lastIndexOf('</div>');
+    if (closingDivIdx !== -1) {
+        return cleaned.substring(0, closingDivIdx) + newFooter + cleaned.substring(closingDivIdx);
+    }
+    return cleaned + newFooter;
+}
+
+/**
  * Strip the "Created by Beaver" footer from HTML.
  * Used by the simplifier so the agent can't see or edit the footer.
  */

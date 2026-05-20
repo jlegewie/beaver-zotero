@@ -79,8 +79,10 @@ import {
     stripNoteWrapperDiv,
     rebuildDataCitationItems,
 } from '../../../src/utils/noteWrapper';
+import { buildEditFooterHtml } from '../../../src/utils/noteEditFooter';
 import { getLatestNoteHtml } from '../../../src/utils/noteEditorIO';
 import { createCitationHTML } from '../../../src/utils/zoteroUtils';
+import { store } from '../../../react/store';
 
 // =============================================================================
 // Helpers
@@ -334,6 +336,7 @@ const FIXTURE_C = wrap(
 
 beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(store.get).mockReturnValue(null);
 
     // Reset Zotero globals for expansion / rebuild
     (globalThis as any).Zotero = {
@@ -1130,7 +1133,10 @@ describe('executeEditNoteAction + undoEditNoteAction', () => {
             },
         });
 
-        await undoEditNoteAction(action);
+        await undoEditNoteAction(action, {
+            threadId: 'thread-1',
+            threadActions: [action],
+        });
 
         // Should reverse the replacement: Goodbye → Hello
         const savedHtml = item.setNote.mock.calls[0][0];
@@ -1202,7 +1208,10 @@ describe('executeEditNoteAction + undoEditNoteAction', () => {
             },
         });
 
-        await undoEditNoteAction(action);
+        await undoEditNoteAction(action, {
+            threadId: 'thread-1',
+            threadActions: [action],
+        });
 
         const savedHtml = item.setNote.mock.calls[0][0];
         expect(savedHtml).toContain('Hello world');
@@ -1382,6 +1391,87 @@ describe('executeEditNoteAction + undoEditNoteAction', () => {
         expect(restoredHtml).not.toContain('Appended body');
         expect(restoredHtml).toContain('Created by Beaver');
         expect(restoredHtml).toContain('href="zotero://beaver/thread/thread-1/run/run-1"');
+    });
+
+    it('undo removes the current thread from the edit footer when no applied edits remain for that thread', async () => {
+        const noteHtml = wrap(`<p>Goodbye world</p>${buildEditFooterHtml(['thread-1'])}`);
+        const item = makeMockItem(noteHtml);
+        (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(item);
+        (globalThis as any).Zotero.Notes._editorInstances = [];
+
+        const action = makeAction({
+            id: 'action-1',
+            status: 'applied',
+            result_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                occurrences_replaced: 1,
+                undo_old_html: 'Hello',
+                undo_new_html: 'Goodbye',
+            },
+        });
+        vi.mocked(store.get).mockImplementation((atom: any) => {
+            if (typeof atom === 'symbol' && atom.description === 'currentThreadIdAtom') {
+                return 'thread-1';
+            }
+            return [action];
+        });
+
+        const { undoEditNoteAction } = await importEditNoteActions();
+        await undoEditNoteAction(action, {
+            threadId: 'thread-1',
+            threadActions: [action],
+        });
+
+        const restoredHtml = item.setNote.mock.calls[0][0];
+        expect(restoredHtml).toContain('Hello world');
+        expect(restoredHtml).not.toContain('Edited by Beaver');
+    });
+
+    it('undo keeps the current thread in the edit footer when another applied edit remains', async () => {
+        const noteHtml = wrap(`<p>Goodbye world</p>${buildEditFooterHtml(['thread-1'])}`);
+        const item = makeMockItem(noteHtml);
+        (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(item);
+        (globalThis as any).Zotero.Notes._editorInstances = [];
+
+        const action = makeAction({
+            id: 'action-1',
+            status: 'applied',
+            result_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                occurrences_replaced: 1,
+                undo_old_html: 'Hello',
+                undo_new_html: 'Goodbye',
+            },
+        });
+        const remainingAction = makeAction({
+            id: 'action-2',
+            status: 'applied',
+            proposed_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                old_string: 'Other',
+                new_string: 'Another',
+            },
+        });
+        vi.mocked(store.get).mockImplementation((atom: any) => {
+            if (typeof atom === 'symbol' && atom.description === 'currentThreadIdAtom') {
+                return 'thread-1';
+            }
+            return [action, remainingAction];
+        });
+
+        const { undoEditNoteAction } = await importEditNoteActions();
+        await undoEditNoteAction(action, {
+            threadId: 'thread-1',
+            threadActions: [action, remainingAction],
+        });
+
+        const restoredHtml = item.setNote.mock.calls[0][0];
+        expect(restoredHtml).toContain('Hello world');
+        expect(restoredHtml).toContain('Edited by Beaver');
+        expect(restoredHtml).toContain('zotero://beaver/thread/thread-1');
     });
 
     it('execute rolls back in-memory on save failure', async () => {

@@ -11,8 +11,10 @@ import {
     rejectAgentActionAtom,
     setAgentActionsToErrorAtom,
     undoAgentActionAtom,
+    threadAgentActionsAtom,
 } from '../../agents/agentActions';
 import { isWSChatPendingAtom, sendApprovalResponseAtom } from '../../atoms/agentRunAtoms';
+import { currentThreadIdAtom } from '../../atoms/threads';
 import {
     agentActionItemTitlesAtom,
     setAgentActionItemTitleAtom,
@@ -93,6 +95,8 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
     const setAgentActionsToError = useSetAtom(setAgentActionsToErrorAtom);
     const undoAgentAction = useSetAtom(undoAgentActionAtom);
     const addAutoApproveNoteKey = useSetAtom(addAutoApproveNoteKeyAtom);
+    const threadActions = useAtomValue(threadAgentActionsAtom);
+    const currentThreadId = useAtomValue(currentThreadIdAtom);
 
     const partStates = useMemo(() => {
         return parts.map((part) => {
@@ -441,10 +445,15 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
         const newFailures: Record<string, string> = {};
         try {
             await dismissActiveEditNotePreview();
+            const undoneActionIds = new Set<string>();
 
             for (const action of [...appliedActions].reverse()) {
                 try {
-                    await undoEditNoteAction(action);
+                    await undoEditNoteAction(action, {
+                        threadId: currentThreadId,
+                        threadActions: threadActions.filter((threadAction) => !undoneActionIds.has(threadAction.id)),
+                    });
+                    undoneActionIds.add(action.id);
                     undoAgentAction(action.id);
                     logger(`EditNoteGroupView: Undone edit_note action ${action.id}`, 1);
                 } catch (error: any) {
@@ -473,6 +482,8 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
         setExpanded,
         expansionKey,
         noteKeyLabel,
+        currentThreadId,
+        threadActions,
     ]);
 
     const handleRetryAll = useCallback(async () => {

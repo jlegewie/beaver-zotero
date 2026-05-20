@@ -3,7 +3,7 @@
  * These functions are used by AgentActionView for post-run action handling.
  */
 
-import { AgentAction } from '../agents/agentActions';
+import type { AgentAction } from '../agents/agentActions';
 import type { EditNoteResultData, EditNoteOperation } from '../types/agentActions/editNote';
 import { logger } from '../../src/utils/logger';
 import {
@@ -50,7 +50,11 @@ import {
 import { clearNoteEditorSelection } from './sourceUtils';
 import { store } from '../store';
 import { currentThreadIdAtom } from '../atoms/threads';
-import { addOrUpdateEditFooter, getBeaverFooterAppendPoint } from '../../src/utils/noteEditFooter';
+import {
+    addOrUpdateEditFooter,
+    getBeaverFooterAppendPoint,
+    removeThreadFromEditFooter,
+} from '../../src/utils/noteEditFooter';
 import { assertNoPreviewMarkers } from '../../src/utils/notePreviewGuard';
 import {
     externalReferenceMappingAtom,
@@ -133,6 +137,39 @@ function isAlreadyUndone(
 }
 
 const UNDO_CONTEXT_LENGTH = 200;
+
+interface UndoEditNoteOptions {
+    threadId?: string | null;
+    threadActions?: AgentAction[];
+}
+
+/**
+ * Return true when another applied edit_note action from this thread still
+ * contributes to the edited-note footer for the same note.
+ */
+function hasRemainingAppliedEditForThread(action: AgentAction, threadActions: AgentAction[]): boolean {
+    const proposed = action.proposed_data as { library_id?: number; zotero_key?: string };
+
+    return threadActions.some(other => {
+        if (other.id === action.id) return false;
+        if (other.action_type !== 'edit_note' || other.status !== 'applied') return false;
+        const otherProposed = other.proposed_data as { library_id?: number; zotero_key?: string };
+        return otherProposed.library_id === proposed.library_id
+            && otherProposed.zotero_key === proposed.zotero_key;
+    });
+}
+
+/**
+ * Remove this thread from the edit footer when undoing its final remaining
+ * applied edit_note action for the note.
+ */
+function updateEditFooterAfterUndo(html: string, action: AgentAction, options?: UndoEditNoteOptions): string {
+    const threadId = options?.threadId ?? store.get(currentThreadIdAtom);
+    if (!threadId) return html;
+    const threadActions = options?.threadActions ?? [];
+    if (hasRemainingAppliedEditForThread(action, threadActions)) return html;
+    return removeThreadFromEditFooter(html, threadId);
+}
 
 /**
  * Execute an edit_note agent action by applying string replacement on the note.
@@ -563,7 +600,8 @@ export async function executeEditNoteAction(
  * @param action The agent action to undo (must have proposed_data with old_string/new_string)
  */
 export async function undoEditNoteAction(
-    action: AgentAction
+    action: AgentAction,
+    options?: UndoEditNoteOptions,
 ): Promise<void> {
     const { library_id, zotero_key, old_string, new_string, operation: rawOp } = action.proposed_data as {
         library_id: number;
@@ -823,9 +861,11 @@ export async function undoEditNoteAction(
         }
     }
 
+    restoredHtml = updateEditFooterAfterUndo(restoredHtml!, action, options);
+
     // Rebuild data-citation-items, preserving the pre-undo itemData so
     // citations to foreign/unresolved URIs don't lose their labels.
-    restoredHtml = rebuildDataCitationItems(restoredHtml!, existingCitationCache);
+    restoredHtml = rebuildDataCitationItems(restoredHtml, existingCitationCache);
 
     // Save
     try {

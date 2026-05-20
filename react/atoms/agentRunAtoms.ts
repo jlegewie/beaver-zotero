@@ -579,7 +579,10 @@ async function startAutoRetryRun(
  *
  * Per-action failures are logged and do not stop the loop.
  */
-async function undoAppliedActionsInReverse(actions: AgentAction[]): Promise<void> {
+async function undoAppliedActionsInReverse(
+    actions: AgentAction[],
+    options?: { threadId?: string | null; threadActions?: AgentAction[] },
+): Promise<void> {
     // Filter applied actions, keeping their original array position as the
     // tiebreaker for chronological ordering.
     const indexed = actions
@@ -600,6 +603,8 @@ async function undoAppliedActionsInReverse(actions: AgentAction[]): Promise<void
         return b.index - a.index;
     });
 
+    const undoneActionIds = new Set<string>();
+
     for (const { action } of indexed) {
         try {
             if (isAnnotationAgentAction(action) || isZoteroNoteAgentAction(action)) {
@@ -612,7 +617,13 @@ async function undoAppliedActionsInReverse(actions: AgentAction[]): Promise<void
                 // false = preserve fields the user manually modified after apply
                 await undoEditMetadataAction(action, false);
             } else if (isEditNoteAgentAction(action)) {
-                await undoEditNoteAction(action);
+                const undoOptions = options
+                    ? {
+                        ...options,
+                        threadActions: options.threadActions?.filter((threadAction) => !undoneActionIds.has(threadAction.id)),
+                    }
+                    : undefined;
+                await undoEditNoteAction(action, undoOptions);
             } else if (isCreateItemAgentAction(action)) {
                 await undoCreateItemAction(action);
             } else if (isCreateCollectionAgentAction(action)) {
@@ -626,6 +637,7 @@ async function undoAppliedActionsInReverse(actions: AgentAction[]): Promise<void
             } else if (isCreateNoteAgentAction(action)) {
                 await undoCreateNoteAction(action);
             }
+            undoneActionIds.add(action.id);
         } catch (error) {
             logger(`undoAppliedActionsInReverse: Failed to undo action ${action.id} (${action.action_type}): ${error}`, 1);
         }
@@ -2022,7 +2034,10 @@ export const regenerateFromRunAtom = atom(
                     // create_collection undo cascades to descendants, so any
                     // later manage_collections moves into it must be undone
                     // first. See undoAppliedActionsInReverse for details.
-                    await undoAppliedActionsInReverse(actionsInRemovedRuns);
+                    await undoAppliedActionsInReverse(actionsInRemovedRuns, {
+                        threadId,
+                        threadActions: allAgentActions,
+                    });
                 }
             }
 
@@ -2203,7 +2218,10 @@ export const regenerateWithEditedPromptAtom = atom(
                     // Single reverse-chronological pass — see
                     // undoAppliedActionsInReverse for why cross-type ordering
                     // matters (e.g. create_collection cascades on erase).
-                    await undoAppliedActionsInReverse(actionsInRemovedRuns);
+                    await undoAppliedActionsInReverse(actionsInRemovedRuns, {
+                        threadId,
+                        threadActions: allAgentActions,
+                    });
                 }
             }
 

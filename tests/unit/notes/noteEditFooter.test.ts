@@ -4,6 +4,7 @@ import {
     buildEditFooterHtml,
     addOrUpdateEditFooter,
     getBeaverFooterAppendPoint,
+    removeThreadFromEditFooter,
     stripBeaverEditFooter,
     stripBeaverCreatedFooter,
 } from '../../../src/utils/noteEditFooter';
@@ -307,6 +308,40 @@ describe('stripBeaverEditFooter', () => {
         );
         const result = stripBeaverEditFooter(html);
         expect(result).toBe(html);
+    });
+});
+
+describe('removeThreadFromEditFooter', () => {
+    it('removes the footer when the last thread is removed', () => {
+        const html = wrap('<p>Content</p>' + buildEditFooterHtml(['t1']));
+        const result = removeThreadFromEditFooter(html, 't1');
+
+        expect(result).toContain('<p>Content</p>');
+        expect(result).not.toContain('Edited by Beaver');
+    });
+
+    it('preserves other thread links when one thread is removed', () => {
+        const html = wrap('<p>Content</p>' + buildEditFooterHtml(['t1', 't2']));
+        const result = removeThreadFromEditFooter(html, 't1');
+
+        expect(result).toContain('Edited by Beaver');
+        expect(result).not.toContain('zotero://beaver/thread/t1');
+        expect(result).toContain('zotero://beaver/thread/t2');
+    });
+
+    it('removes the thread from duplicate footers and rebuilds one footer', () => {
+        const html = wrap(
+            '<p>Content</p>'
+            + buildEditFooterHtml(['t1', 't2'])
+            + '<p>More content</p>'
+            + buildEditFooterHtml(['t1', 't3'])
+        );
+        const result = removeThreadFromEditFooter(html, 't1');
+
+        expect(result).not.toContain('zotero://beaver/thread/t1');
+        expect(result).toContain('zotero://beaver/thread/t2');
+        expect(result).toContain('zotero://beaver/thread/t3');
+        expect((result.match(/Edited by Beaver/g) ?? []).length).toBe(1);
     });
 });
 
