@@ -11,7 +11,7 @@
  * test:cli-smoke`) because real MuPDF + sentencex extraction is slower
  * than the default unit run.
  */
-import { describe, it } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import {
     diffExtractionSnapshots,
@@ -59,6 +59,27 @@ describe("BeaverExtract fixtures (smoke)", () => {
             });
             if (diffs.length > 0) {
                 throw new Error(formatDiffs(`[${f.scope}] ${f.id}`, diffs));
+            }
+            const selected = new Set(f.fixture.config.pageIndices);
+            for (const page of result.document.pages.filter((p) => selected.has(p.index))) {
+                for (const item of page.items) {
+                    expect(result.document.citationIndex[item.id]).toMatchObject({
+                        id: item.id,
+                        kind: "item",
+                        pageIndex: page.index,
+                        itemId: item.id,
+                    });
+                    if (!("sentences" in item) || !item.sentences) continue;
+                    for (const sentence of item.sentences) {
+                        expect(result.document.citationIndex[sentence.id]).toMatchObject({
+                            id: sentence.id,
+                            kind: "sentence",
+                            pageIndex: page.index,
+                            itemId: item.id,
+                            sentenceId: sentence.id,
+                        });
+                    }
+                }
             }
         });
     }

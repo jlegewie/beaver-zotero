@@ -9,19 +9,6 @@ export const SCHEMA_VERSION = "4";
 export type Rect = [number, number, number, number];
 export type BBoxOrigin = "top-left";
 
-export const ID_PREFIXES = {
-    sentence: "s",
-    text: "p",
-    section_header: "heading",
-    list_item: "list",
-    caption: "caption",
-    footnote: "footnote",
-    formula: "eq",
-    table: "table",
-    picture: "fig",
-    margin: "margin",
-} as const satisfies Record<DocumentItemKind | "sentence", string>;
-
 export interface ExtractResultBase {
     schemaVersion: string;
     createdAt?: string;
@@ -100,12 +87,25 @@ export type DocumentItemKind =
     | "picture"
     | "margin";
 
+export const ID_PREFIXES = {
+    sentence: "s",
+    text: "p",
+    section_header: "heading",
+    list_item: "list",
+    caption: "caption",
+    footnote: "footnote",
+    formula: "eq",
+    table: "table",
+    picture: "fig",
+    margin: "margin",
+} as const satisfies Record<DocumentItemKind | "sentence", string>;
+
 export interface DocumentItemBase {
     id: string;
     kind: DocumentItemKind;
     pageIndex: number;
     order: number;
-    bboxes: Rect[];
+    bbox: Rect;
 }
 
 export interface TextBearingItem extends DocumentItemBase {
@@ -166,13 +166,15 @@ export type DocumentItem =
 
 export interface Sentence {
     id: string;
-    itemId: string;
-    pageIndex: number;
     order: number;
     text: string;
     bboxes: Rect[];
-    fragments?: DebugSentenceFragment[];
     joinWithNext?: boolean;
+}
+
+export interface DebugSentence extends Sentence {
+    itemId: string;
+    fragments?: DebugSentenceFragment[];
 }
 
 export type CitationKind = "item" | "sentence";
@@ -207,7 +209,7 @@ export interface PageDebugData {
     columns?: Rect[];
     lines?: DebugLine[];
     items?: DocumentItem[];
-    sentences?: Sentence[];
+    sentences?: DebugSentence[];
     sentenceFragments?: DebugSentenceFragment[];
     droppedLineIds?: string[];
     marginCandidates?: unknown[];

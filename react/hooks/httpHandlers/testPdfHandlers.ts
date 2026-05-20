@@ -7,19 +7,16 @@
  */
 
 import {
-    buildColumnOverlayFromPage,
-    buildItemOverlayFromPage,
-    buildLineOverlayFromPage,
-    buildSentenceOverlayFromPage,
+    buildColumnOverlayFromDebugPage,
+    buildItemOverlayFromDebugPage,
+    buildLineOverlayFromDebugPage,
+    buildSentenceOverlayFromDebugPage,
     buildMarginsOverlayFromAnalysis,
 } from '../../utils/extractionOverlay';
 import type { OverlayResult } from '../../utils/extractionOverlay';
 import { drawBBoxOverlayPNG } from '../../utils/canvasOverlay';
 import type {
     BoundingBox,
-    InternalProcessedPage,
-    PageSentenceResult,
-    SentenceTrace,
 } from '../../../src/beaver-extract';
 import { projectAnalyzeLayout } from '../../../src/beaver-extract/debug/analyzeLayoutProjection';
 import { projectTracePage } from '../../../src/beaver-extract/debug/traceProjection';
@@ -28,32 +25,6 @@ import { projectTracePage } from '../../../src/beaver-extract/debug/traceProject
 // =============================================================================
 // Shared helpers
 // =============================================================================
-
-function internalPageFromSentenceTrace(
-    result: PageSentenceResult,
-    trace: SentenceTrace,
-): InternalProcessedPage {
-    const sourcePage = trace.pagesForFilter.find(
-        (page) => page.pageIndex === result.pageIndex,
-    );
-    return {
-        index: result.pageIndex,
-        label: sourcePage?.label,
-        width: result.width,
-        height: result.height,
-        content: trace.filteredResult.paragraphResult.pageContent,
-        columns: trace.filteredResult.columnResult.columns.map((column) => ({
-            l: column.x,
-            t: column.y,
-            r: column.x + column.w,
-            b: column.y + column.h,
-            origin: 'top-left',
-        })),
-        items: result.items,
-        sentences: result.sentences,
-        degradation: result.degradation,
-    };
-}
 
 /**
  * Resolve a request body to PDF bytes — accepts either an attachment ref
@@ -558,14 +529,11 @@ export async function handleTestPdfSearchScoredHttpRequest(request: any) {
 /**
  * Dev-only sentence-bboxes parity endpoint.
  *
- * Routes through `BeaverExtractor.extract({ mode: "structured", pageIndices:
- * [n] })` → MuPDF worker op (single round-trip; analysis-window load, font
- * bridging, filtered paragraph detection, splitter resolution, and
- * sentence mapping all run worker-side). The wire response is shaped as
- * `PageSentenceResult` — read fields off `pages[0]`.
+ * Routes through the full-document structured trace op and projects the
+ * requested page from its debug payload. This keeps sentence bboxes aligned
+ * with production structured extraction.
  *
- * @deprecated Prefer `npm run beaver-extract -- extract <pdf> --pages <n> --json`.
- *   Sentence bboxes live on `result.pages[0].sentences`.
+ * @deprecated Prefer `npm run beaver-extract -- trace <pdf> --page <n> --json`.
  *
  * Request body:
  *   { library_id, zotero_key | raw_bytes_base64,
@@ -581,7 +549,7 @@ export async function handleTestPdfSearchScoredHttpRequest(request: any) {
  *       analysisWindow?: number,
  *     } }
  *
- * Response: `{ ok: true, result: PageSentenceResult }` or the
+ * Response: `{ ok: true, result: { pageIndex, width, height, items, sentences } }` or the
  * structured `ExtractionError` envelope on failure.
  */
 export async function handleTestPdfSentenceBBoxesHttpRequest(request: any) {
@@ -591,32 +559,32 @@ export async function handleTestPdfSentenceBBoxesHttpRequest(request: any) {
     return runPdfExtractorCall(
         request,
         (pdfData) =>
-            getMuPDFWorkerClient().extractSentenceDebug(pdfData, pageIndex, {
-                splitterConfig: options.splitter ?? (
-                    options.language
-                        ? { type: 'sentencex', language: options.language }
-                        : undefined
-                ),
+            getMuPDFWorkerClient().structuredExtractWithDebug(pdfData, {
+                capturePages: [pageIndex],
+                debugMode: 'full',
+                structured: {
+                    splitterConfig: options.splitter ?? (
+                        options.language
+                            ? { type: 'sentencex', language: options.language }
+                            : undefined
+                    ),
+                },
                 paragraphSettings: options.paragraphSettings,
                 analysisWindow: options.analysisWindow,
             }),
         (extraction) => {
-            const page = internalPageFromSentenceTrace(
-                extraction.result,
-                extraction.trace,
-            );
-            // Reshape into PageSentenceResult so callers can
-            // consume the same shape the producer returns.
+            const page = extraction.debug.pages?.[String(pageIndex)];
+            if (!page) throw new Error(`page ${pageIndex} missing from trace`);
             return {
                 ok: true,
                 result: {
-                    pageIndex: page.index,
+                    pageIndex: page.pageIndex,
                     width: page.width,
                     height: page.height,
-                    items: page.items,
+                    items: page.items ?? [],
                     sentences: page.sentences ?? [],
                     degradation: page.degradation,
-                } satisfies PageSentenceResult,
+                },
             };
         },
     );
@@ -658,12 +626,8 @@ export async function handleTestPdfSentenceBBoxesHttpRequest(request: any) {
  *
  * Level dispatch notes:
  *   - `sentences`, `columns`, `lines`, `items`, `paragraphs` route through
- *     `BeaverExtractor.extract({ mode: "structured", pageIndices: [n] })`
- *     and project the resulting `InternalProcessedPage` into rects via the pure
- *     `build{Sentence,Column,Line,Item,Paragraph}OverlayFromPage` builders in
- *     `extractionOverlay.ts`. This is the same worker op production
- *     uses, so what the overlay paints is byte-identical to what an
- *     extraction call for the same page produces.
+ *     the full-document structured trace op and project the requested page
+ *     into rects via the pure debug-page overlay builders.
  *   - `margins` routes through `BeaverExtractor.analyzeLayout` (which runs
  *     the same shared analysis prefix structured extract runs) and
  *     surfaces `marginAnalysis` / `marginRemoval` for the requested
@@ -767,28 +731,30 @@ export async function handleTestPdfRenderOverlayHttpRequest(request: any) {
             // Same op production uses — what we paint here matches
             // what `extract({ mode: "structured" })` produces for
             // the same page byte-for-byte.
-            const traceOut = await client.extractSentenceDebug(pdfData, pageIndex, {
-                splitterConfig: language
-                    ? { type: 'sentencex', language }
-                    : undefined,
+            const traceOut = await client.structuredExtractWithDebug(pdfData, {
+                capturePages: [pageIndex],
+                debugMode: 'full',
+                structured: {
+                    splitterConfig: language
+                        ? { type: 'sentencex', language }
+                        : undefined,
+                },
                 analysisWindow,
             });
-            const page = internalPageFromSentenceTrace(
-                traceOut.result,
-                traceOut.trace,
-            );
+            const page = traceOut.debug.pages?.[String(pageIndex)];
+            if (!page) throw new Error(`page ${pageIndex} missing from trace`);
             switch (level) {
                 case 'sentences':
-                    overlay = buildSentenceOverlayFromPage(page);
+                    overlay = buildSentenceOverlayFromDebugPage(page);
                     break;
                 case 'columns':
-                    overlay = buildColumnOverlayFromPage(page);
+                    overlay = buildColumnOverlayFromDebugPage(page);
                     break;
                 case 'lines':
-                    overlay = buildLineOverlayFromPage(page);
+                    overlay = buildLineOverlayFromDebugPage(page);
                     break;
                 case 'items':
-                    overlay = buildItemOverlayFromPage(page);
+                    overlay = buildItemOverlayFromDebugPage(page);
                     break;
                 default:
                     throw new Error(`Unhandled overlay level: ${level}`);

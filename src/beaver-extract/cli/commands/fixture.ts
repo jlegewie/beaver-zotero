@@ -78,10 +78,7 @@ import { existsSync } from "node:fs";
 
 const DEFAULT_BBOX_TOL_PT = 0.5;
 
-function expectStructuredResult(
-    result: BeaverExtractResult | any,
-): StructuredExtractResult | any {
-    if (Array.isArray(result?.pages)) return result;
+function expectStructuredResult(result: BeaverExtractResult): StructuredExtractResult {
     if (result.mode !== "structured") {
         throw new Error("fixture extraction expected a structured result");
     }
@@ -639,10 +636,10 @@ function internalPageFromStructuredPage(page: StructuredPage): InternalProcessed
             pageIndex: item.pageIndex,
             index: item.order,
             bbox: {
-                l: item.bboxes[0]?.[0] ?? 0,
-                t: item.bboxes[0]?.[1] ?? 0,
-                r: item.bboxes[0]?.[2] ?? 0,
-                b: item.bboxes[0]?.[3] ?? 0,
+                l: item.bbox[0],
+                t: item.bbox[1],
+                r: item.bbox[2],
+                b: item.bbox[3],
                 origin: "top-left" as const,
             },
             columnIndex: 0,
@@ -653,7 +650,7 @@ function internalPageFromStructuredPage(page: StructuredPage): InternalProcessed
         sentences: page.items.flatMap((item) =>
             "sentences" in item
                 ? (item.sentences ?? []).map((sentence) => ({
-                    parentId: sentence.itemId,
+                    parentId: item.id,
                     index: sentence.order,
                     text: sentence.text,
                     bboxes: sentence.bboxes.map((bbox) => ({

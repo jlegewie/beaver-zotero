@@ -25,7 +25,6 @@ export function assignDocumentIds(pages: StructuredPage[]): void {
         for (const item of sortedItems(page)) {
             if (!("sentences" in item) || !item.sentences?.length) continue;
             for (const sentence of [...item.sentences].sort((a, b) => a.order - b.order)) {
-                sentence.itemId = item.id;
                 sentence.id = nextId(ID_PREFIXES.sentence);
             }
         }

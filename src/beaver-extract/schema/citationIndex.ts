@@ -75,6 +75,6 @@ export function resolveCitation(
         pageLabel: page.label,
         item,
         sentence,
-        bboxes: sentence?.bboxes ?? item.bboxes,
+        bboxes: sentence?.bboxes ?? [item.bbox],
     };
 }

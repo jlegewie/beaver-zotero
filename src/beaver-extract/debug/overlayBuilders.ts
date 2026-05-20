@@ -37,6 +37,8 @@ import type {
     SentenceItem,
 } from "../types";
 import type { PageSentenceResult } from "../ParagraphSentenceMapper";
+import type { PageDebugData } from "../schema";
+import { rectToBBox } from "../schema/bbox";
 
 export type OverlayLevel =
     | "columns"
@@ -404,6 +406,125 @@ export function buildSentenceOverlayFromPage(page: InternalProcessedPage): Overl
         degradation: page.degradation,
     };
     return buildSentenceOverlayFromResult(projected);
+}
+
+export function buildColumnOverlayFromDebugPage(page: PageDebugData): OverlayResult {
+    const rects: OverlayRect[] = (page.columns ?? []).map((rect, i) => ({
+        rect: rectToBBox(rect),
+        color: OVERLAY_COLORS.column,
+        label: `C${i + 1}`,
+        group: i,
+    }));
+    return {
+        level: "columns",
+        pageIndex: page.pageIndex,
+        pageWidth: page.width,
+        pageHeight: page.height,
+        groupCount: rects.length,
+        rects,
+        stats: { columns: rects.length },
+    };
+}
+
+export function buildLineOverlayFromDebugPage(page: PageDebugData): OverlayResult {
+    const rects: OverlayRect[] = (page.lines ?? []).map((line, i) => ({
+        rect: rectToBBox(line.bbox),
+        color: OVERLAY_COLORS.line,
+        label: `L${i + 1}`,
+        group: i,
+    }));
+    return {
+        level: "lines",
+        pageIndex: page.pageIndex,
+        pageWidth: page.width,
+        pageHeight: page.height,
+        groupCount: rects.length,
+        rects,
+        stats: {
+            lines: rects.length,
+            columns: page.counts.columns,
+        },
+    };
+}
+
+export function buildItemOverlayFromDebugPage(page: PageDebugData): OverlayResult {
+    const items = page.items ?? [];
+    const kindCounts: Partial<Record<DocItem["kind"], number>> = {};
+    const rects: OverlayRect[] = items.map((item, i) => {
+        const kind = item.kind as DocItem["kind"];
+        const style = ITEM_KIND_STYLE[kind];
+        kindCounts[kind] = (kindCounts[kind] ?? 0) + 1;
+        return {
+            rect: rectToBBox(item.bbox),
+            color: style.color,
+            label: `${style.prefix}${item.order + 1}`,
+            group: i,
+        };
+    });
+    return {
+        level: "items",
+        pageIndex: page.pageIndex,
+        pageWidth: page.width,
+        pageHeight: page.height,
+        groupCount: rects.length,
+        rects,
+        stats: {
+            paragraphs: kindCounts.text ?? 0,
+            headers: kindCounts.section_header ?? 0,
+            textItems: kindCounts.text ?? 0,
+            footnotes: kindCounts.footnote ?? 0,
+            captions: kindCounts.caption ?? 0,
+            listItems: kindCounts.list_item ?? 0,
+            marginItems: kindCounts.margin ?? 0,
+            formulas: kindCounts.formula ?? 0,
+            tables: kindCounts.table ?? 0,
+            pictures: kindCounts.picture ?? 0,
+        },
+    };
+}
+
+export function buildSentenceOverlayFromDebugPage(page: PageDebugData): OverlayResult {
+    const degradedItemIds = new Set(
+        (page.degradation?.notes ?? []).map((n) => n.itemId),
+    );
+    const rects: OverlayRect[] = [];
+    let groupIdx = 0;
+    let bodyIdx = 0;
+    for (const sentence of page.sentences ?? []) {
+        if (sentence.bboxes.length === 0) continue;
+        const isDegraded = degradedItemIds.has(sentence.itemId);
+        const color = isDegraded
+            ? OVERLAY_COLORS.sentenceDegraded
+            : OVERLAY_COLORS.sentence[bodyIdx++ % OVERLAY_COLORS.sentence.length];
+        const label = `S${groupIdx + 1}${sentence.joinWithNext ? "↪" : ""}`;
+        const annotationText =
+            `page ${page.pageIndex + 1}, item ${sentence.itemId}, s${sentence.order + 1}\n` +
+            sentence.text;
+        sentence.bboxes.forEach((rect, fragIdx) => {
+            rects.push({
+                rect: rectToBBox(rect),
+                color,
+                label: fragIdx === 0 ? label : undefined,
+                annotationText: fragIdx === 0 ? annotationText : undefined,
+                group: groupIdx,
+                degraded: isDegraded,
+            });
+        });
+        groupIdx++;
+    }
+    return {
+        level: "sentences",
+        pageIndex: page.pageIndex,
+        pageWidth: page.width,
+        pageHeight: page.height,
+        groupCount: groupIdx,
+        rects,
+        stats: {
+            sentences: page.sentences?.length ?? 0,
+            paragraphs: page.items?.filter((item) => item.kind === "text").length ?? 0,
+            degradation: page.degradation?.count ?? 0,
+        },
+    };
 }
 
 /**

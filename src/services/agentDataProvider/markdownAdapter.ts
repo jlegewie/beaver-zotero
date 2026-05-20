@@ -18,11 +18,11 @@ export function markdownDocumentToCachedPages(
 /** Convert canonical markdown pages to the agent page-content wire shape. */
 export function markdownDocumentToWSPageContent(
     doc: MarkdownDocument,
-    pageLabels?: Record<string, string>,
+    pageLabels?: Record<string | number, string>,
 ): WSPageContent[] {
     return doc.pages.map((page) => ({
         page_number: page.index + 1,
-        page_label: pageLabels?.[String(page.index)] ?? page.label,
+        page_label: pageLabels?.[page.index] ?? pageLabels?.[String(page.index)] ?? page.label,
         content: page.markdown,
     }));
 }

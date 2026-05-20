@@ -437,26 +437,6 @@ export async function handleZoteroAttachmentPagesRequest(
         let markdownDocument: MarkdownDocument;
         if (result.mode === 'markdown') {
             markdownDocument = result.document;
-        } else if (Array.isArray((result as any).pages)) {
-            const legacy = result as any;
-            markdownDocument = {
-                pageCount: legacy.analysis?.pageCount ?? legacy.pages.length,
-                pageLabels: legacy.pageLabels
-                    ? Object.fromEntries(
-                        Object.entries(legacy.pageLabels).map(([index, label]) => [
-                            String(index),
-                            String(label),
-                        ]),
-                      )
-                    : undefined,
-                pages: legacy.pages.map((page: any) => ({
-                    index: page.index,
-                    label: page.label,
-                    width: page.width,
-                    height: page.height,
-                    markdown: page.content ?? '',
-                })),
-            };
         } else {
             throw new Error('Expected markdown extraction result for attachment pages');
         }

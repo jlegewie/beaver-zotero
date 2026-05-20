@@ -58,7 +58,7 @@ interface DepFakes {
 const FAKE_PDF_BYTES = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x34]); // %PDF-1.4
 const FAKE_PDF_SHA = createHash('sha256').update(FAKE_PDF_BYTES).digest('hex');
 
-function pageWithSentences(): unknown {
+function pageWithSentences(): any {
     return {
         index: 0,
         width: 595,
@@ -91,18 +91,73 @@ function pageWithSentences(): unknown {
     };
 }
 
+function structuredResult(page = pageWithSentences()): unknown {
+    const item = page.items[0];
+    const sentence = page.sentences[0];
+    const text = page.content ?? item.text;
+    return {
+        mode: 'structured',
+        schemaVersion: '4',
+        document: {
+            pageCount: 1,
+            bboxOrigin: 'top-left',
+            bboxPrecision: 1,
+            pages: [
+                {
+                    index: page.index,
+                    width: page.width,
+                    height: page.height,
+                    items: [
+                        {
+                            id: item.id,
+                            kind: item.kind,
+                            pageIndex: item.pageIndex,
+                            order: item.index,
+                            bbox: [item.bbox.l, item.bbox.t, item.bbox.r, item.bbox.b],
+                            text,
+                            sentences: [
+                                {
+                                    id: 's1',
+                                    order: sentence.index,
+                                    text: sentence.text,
+                                    bboxes: sentence.bboxes.map((bbox: any) => [
+                                        bbox.l,
+                                        bbox.t,
+                                        bbox.r,
+                                        bbox.b,
+                                    ]),
+                                },
+                            ],
+                        },
+                    ],
+                },
+            ],
+            citationIndex: {
+                [item.id]: {
+                    id: item.id,
+                    kind: 'item',
+                    pageIndex: page.index,
+                    itemId: item.id,
+                },
+                s1: {
+                    id: 's1',
+                    kind: 'sentence',
+                    pageIndex: page.index,
+                    itemId: item.id,
+                    sentenceId: 's1',
+                },
+            },
+        },
+    };
+}
+
 function makeDeps(api: Partial<DepFakes['api']> = {}): DepFakes {
     const stdout = new StringSink();
     const stderr = new StringSink();
     const fakeApi = {
         getPageCount: vi.fn(),
         getMetadata: vi.fn(),
-        extractPdf: vi.fn().mockResolvedValue({
-            pages: [pageWithSentences()],
-            analysis: {},
-            fullText: 'Hello.',
-            metadata: {},
-        }),
+        extractPdf: vi.fn().mockResolvedValue(structuredResult()),
         analyzeLayout: vi.fn(),
         renderPages: vi.fn(),
         extractRawPageDetailed: vi.fn(),
@@ -297,12 +352,7 @@ describe('fixture capture', () => {
         mutated.content = 'Mutated content.';
 
         const { deps: updateDeps, stdout } = makeDeps({
-            extractPdf: vi.fn().mockResolvedValue({
-                pages: [mutated],
-                analysis: {},
-                fullText: 'Mutated content.',
-                metadata: {},
-            }),
+            extractPdf: vi.fn().mockResolvedValue(structuredResult(mutated)),
         });
         const code = await runCli([...baseArgs, '--update'], updateDeps);
         expect(code).toBe(0);
@@ -497,12 +547,7 @@ describe('fixture update', () => {
         mutated.content = 'Different content.';
 
         const { deps } = makeDeps({
-            extractPdf: vi.fn().mockResolvedValue({
-                pages: [mutated],
-                analysis: {},
-                fullText: 'Different content.',
-                metadata: {},
-            }),
+            extractPdf: vi.fn().mockResolvedValue(structuredResult(mutated)),
         });
 
         const code = await runCli(
@@ -594,12 +639,7 @@ describe('fixture evaluate', () => {
         mutated.sentences = sentences;
 
         const { deps: evalDeps, stdout } = makeDeps({
-            extractPdf: vi.fn().mockResolvedValue({
-                pages: [mutated],
-                analysis: {},
-                fullText: '',
-                metadata: {},
-            }),
+            extractPdf: vi.fn().mockResolvedValue(structuredResult(mutated)),
         });
 
         const code = await runCli(

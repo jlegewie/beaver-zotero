@@ -76,6 +76,7 @@ import {
     projectStructuredPage,
     type BeaverExtractResult,
     type ExtractionDebug,
+    type DebugSentence,
     type MarkdownExtractResult,
     type StructuredExtractResult,
     type StructuredExtractWithDebugResult,
@@ -977,8 +978,33 @@ function buildDebugProjection(
         const structuredPage = structured.document.pages.find(
             (candidate) => candidate.index === page.index,
         );
-        const sentences = structuredPage?.items.flatMap((item) =>
-            "sentences" in item ? (item.sentences ?? []) : [],
+        const internalSentencesByParent = new Map(
+            (page.sentences ?? []).map((sentence) => [
+                `${sentence.parentId}:${sentence.index}`,
+                sentence,
+            ]),
+        );
+        const sentences: DebugSentence[] = structuredPage?.items.flatMap((item) =>
+            "sentences" in item
+                ? (item.sentences ?? []).map((sentence) => {
+                    const internalSentence = internalSentencesByParent.get(
+                        `p${page.index}:i${item.order}:${sentence.order}`,
+                    );
+                    return {
+                        ...sentence,
+                        itemId: item.id,
+                        ...(internalSentence?.fragments?.length
+                            ? {
+                                fragments: internalSentence.fragments.map((fragment) => ({
+                                    lineIndex: fragment.lineIndex,
+                                    text: fragment.text,
+                                    bbox: bboxToRect(fragment.bbox, precision),
+                                })),
+                            }
+                            : {}),
+                    };
+                })
+                : [],
         ) ?? [];
         pages[String(page.index)] = {
             pageIndex: page.index,
@@ -996,6 +1022,18 @@ function buildDebugProjection(
             columns: page.columns.map((bbox) => bboxToRect(bbox, precision)),
             items: structuredPage?.items,
             sentences,
+            marginCandidates: internal.analysis.marginAnalysis.elements
+                ? Array.from(internal.analysis.marginAnalysis.elements.entries())
+                    .flatMap(([position, elements]) =>
+                        elements
+                            .filter((element) => element.pageIndex === page.index)
+                            .map((element) => ({
+                                text: element.text,
+                                position,
+                                bbox: bboxToRect(element.bbox, precision),
+                            })),
+                    )
+                : undefined,
             ...(full
                 ? {
                     lines: page.items.flatMap((item) =>
@@ -1008,9 +1046,15 @@ function buildDebugProjection(
                             }))
                             : [],
                     ),
-                    sentenceFragments: sentences.flatMap(
-                        (sentence) => sentence.fragments ?? [],
-                    ),
+                    sentenceFragments: sentences.flatMap((sentence) => sentence.fragments ?? []),
+                    styleProfile: serializeStyleProfile(internal.analysis.styleProfile),
+                    marginDecisions: page.items
+                        .filter((item) => item.kind === "margin")
+                        .map((item) => ({
+                            id: item.id,
+                            text: "text" in item ? item.text : undefined,
+                            bbox: bboxToRect(item.bbox, precision),
+                        })),
                 }
                 : {}),
             ...(page.degradation ? { degradation: page.degradation } : {}),
@@ -1022,6 +1066,17 @@ function buildDebugProjection(
     return {
         pages,
         ...(Object.keys(degradation).length > 0 ? { degradation } : {}),
+    };
+}
+
+function serializeStyleProfile(styleProfile: StyleProfile): unknown {
+    return {
+        primaryBodyStyle: styleProfile.primaryBodyStyle,
+        bodyStyles: styleProfile.bodyStyles,
+        topStyles: Array.from(styleProfile.styleCounts.values())
+            .sort((a, b) => b.count - a.count)
+            .slice(0, 20)
+            .map(({ count, style }) => ({ count, style })),
     };
 }
 
@@ -1237,44 +1292,82 @@ export async function opStructuredExtractWithDebug(
         debugMode?: "triage" | "full";
     },
 ): Promise<OpReply<StructuredExtractWithDebugResult>> {
-    const extractReply = await opExtract({
-        pdfData: args.pdfData,
-        mode: "structured",
-        structured: args.structured,
-        settings: args.settings,
-        paragraphSettings: args.paragraphSettings,
-        analysisWindow: args.analysisWindow,
-    });
-    const result = extractReply.result as StructuredExtractResult;
-    const capture = new Set(args.capturePages);
-    const pages: NonNullable<ExtractionDebug["pages"]> = {};
-    const degradation: NonNullable<ExtractionDebug["degradation"]> = {};
-    for (const page of result.document.pages) {
-        if (!capture.has(page.index)) continue;
-        const sentences = page.items.flatMap((item) =>
-            "sentences" in item ? (item.sentences ?? []) : [],
+    const tOpStart = performance.now();
+    const tDocOpenStart = performance.now();
+    const doc = await acquireDoc(args.pdfData);
+    const docOpenMs = performance.now() - tDocOpenStart;
+    let docFailed = false;
+    try {
+        const requestedRepeatThreshold = args.settings?.repeatThreshold;
+        const opts = { ...DEFAULT_EXTRACTION_SETTINGS, ...(args.settings || {}) };
+        assertDocumentHasPages(doc.countPages());
+        const pageCount = resolveTruePageCount(doc);
+        assertDocumentHasPages(pageCount);
+        const pageLabels = collectPageLabels(doc);
+        const fontApi = (await ensureApi()).Font;
+        const pageCache = new PageWalkCache(doc, fontApi);
+
+        if (opts.checkTextLayer) {
+            const ocrProvider: RawPageProvider = {
+                getPageCount: () => pageCount,
+                extractRawPage: (i) =>
+                    pageCache.getDetailed(i, true) as unknown as RawPageData,
+            };
+            const ocr = new DocumentAnalyzer(ocrProvider).getDetailedOCRAnalysis({
+                minTextPerPage: opts.minTextPerPage,
+            });
+            if (ocr.needsOCR) {
+                throw workerError(
+                    ERROR_CODES.NO_TEXT_LAYER,
+                    `Document may require OCR: ${ocr.primaryReason} (${Math.round(ocr.issueRatio * 100)}% of sampled pages have issues)`,
+                    { ocrAnalysis: ocr, pageLabels, pageCount },
+                );
+            }
+        }
+
+        const targetIndices = Array.from({ length: pageCount }, (_, index) => index);
+        const analysisIndices = resolveAnalysisPages({
+            targetPageIndices: targetIndices,
+            totalPageCount: pageCount,
+            analysisWindow: args.analysisWindow,
+        });
+        const splitter = await resolveSplitter(
+            args.structured?.splitterConfig ?? { type: "sentencex" },
         );
-        const pageDegradation = result.debug?.degradation?.[String(page.index)];
-        pages[String(page.index)] = {
-            pageIndex: page.index,
-            pageLabel: page.label,
-            width: page.width,
-            height: page.height,
-            counts: {
-                items: page.items.length,
-                sentences: sentences.length,
-            },
-            items: page.items,
-            sentences,
-            ...(pageDegradation ? { degradation: pageDegradation } : {}),
-        };
-        if (pageDegradation) degradation[String(page.index)] = pageDegradation;
+        const internal = runExtractFromIndices(
+            doc,
+            opts as any,
+            requestedRepeatThreshold,
+            targetIndices,
+            analysisIndices,
+            pageCount,
+            pageLabels,
+            "structured",
+            args.paragraphSettings,
+            splitter,
+            fontApi,
+            pageCache,
+        );
+        if (internal.metadata.timings) {
+            internal.metadata.timings.docOpenMs = docOpenMs;
+            internal.metadata.timings.totalMs = performance.now() - tOpStart;
+        }
+        const bboxPrecision = args.structured?.bboxPrecision ?? 1;
+        const result = toStructuredExtractResult(internal, bboxPrecision);
+        const debug = buildDebugProjection(
+            internal,
+            result,
+            args.capturePages,
+            bboxPrecision,
+            args.debugMode === "full",
+        );
+        return { result: { result, debug } };
+    } catch (e) {
+        docFailed = true;
+        throw e;
+    } finally {
+        releaseDoc(doc, docFailed);
     }
-    const debug: ExtractionDebug = {
-        pages,
-        ...(Object.keys(degradation).length > 0 ? { degradation } : {}),
-    };
-    return { result: { result, debug } };
 }
 
 /**

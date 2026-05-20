@@ -7,6 +7,9 @@ import {
     resolveCitation,
 } from "../../../src/beaver-extract/schema/citationIndex";
 import { projectStructuredPage } from "../../../src/beaver-extract/schema/canonicalProjection";
+import { BeaverExtractor, ExtractionError, ExtractionErrorCode } from "../../../src/beaver-extract";
+import { extractPdf } from "../../../src/beaver-extract/node/api";
+import { opExtract } from "../../../src/beaver-extract/worker/ops";
 import {
     SCHEMA_VERSION,
     type StructuredPage,
@@ -45,7 +48,7 @@ describe("canonical extraction schema helpers", () => {
                         order: 0,
                         text: "Intro",
                         level: 1,
-                        bboxes: [[0, 0, 10, 10]],
+                        bbox: [0, 0, 10, 10],
                     },
                     {
                         id: "old2",
@@ -53,12 +56,10 @@ describe("canonical extraction schema helpers", () => {
                         pageIndex: 0,
                         order: 1,
                         text: "A sentence.",
-                        bboxes: [[0, 10, 80, 20]],
+                        bbox: [0, 10, 80, 20],
                         sentences: [
                             {
                                 id: "tmp",
-                                itemId: "old2",
-                                pageIndex: 0,
                                 order: 0,
                                 text: "A sentence.",
                                 bboxes: [[0, 10, 80, 20]],
@@ -126,5 +127,35 @@ describe("canonical extraction schema helpers", () => {
         const textItem = page.items[0];
         expect("sentences" in textItem ? textItem.sentences?.[0].text : "").toBe("Text.");
         expect(SCHEMA_VERSION).toBe("4");
+    });
+
+    it("rejects page selection for structured extraction at public layers", async () => {
+        const bytes = new Uint8Array();
+        await expect(
+            new BeaverExtractor().extract(bytes, {
+                mode: "structured",
+                pageIndices: [0],
+            }),
+        ).rejects.toMatchObject({
+            code: ExtractionErrorCode.STRUCTURED_PAGE_SELECTION_REJECTED,
+        } satisfies Partial<ExtractionError>);
+        await expect(
+            extractPdf({
+                pdfData: bytes,
+                mode: "structured",
+                pageRange: { startIndex: 0, maxPages: 1 },
+            }),
+        ).rejects.toMatchObject({
+            code: ExtractionErrorCode.STRUCTURED_PAGE_SELECTION_REJECTED,
+        } satisfies Partial<ExtractionError>);
+        await expect(
+            opExtract({
+                pdfData: bytes,
+                mode: "structured",
+                pageIndices: [0],
+            }),
+        ).rejects.toMatchObject({
+            code: ExtractionErrorCode.STRUCTURED_PAGE_SELECTION_REJECTED,
+        });
     });
 });

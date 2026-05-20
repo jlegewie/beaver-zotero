@@ -18,20 +18,18 @@ import {
 } from "../../src/beaver-extract";
 import type {
     ExtractionSettings,
-    InternalProcessedPage,
-    PageSentenceResult,
-    SentenceTrace,
 } from "../../src/beaver-extract";
+import type { PageDebugData } from "../../src/beaver-extract/schema";
 import { getItemLanguage } from "../../src/utils/zoteroUtils";
 import { getCurrentReaderAndWaitForView } from "./readerUtils";
 import { getPageViewportInfo } from "./pdfUtils";
 import { BeaverTemporaryAnnotations, ZoteroReader } from "./annotationUtils";
 import { ZoteroItemReference } from "../types/zotero";
 import {
-    buildColumnOverlayFromPage,
-    buildItemOverlayFromPage,
-    buildLineOverlayFromPage,
-    buildSentenceOverlayFromPage,
+    buildColumnOverlayFromDebugPage,
+    buildItemOverlayFromDebugPage,
+    buildLineOverlayFromDebugPage,
+    buildSentenceOverlayFromDebugPage,
     OverlayResult,
 } from "./extractionOverlay";
 
@@ -245,7 +243,7 @@ async function loadStructuredPage(
     pageIndex: number,
     item: Zotero.Item,
     settings?: ExtractionSettings,
-): Promise<InternalProcessedPage> {
+): Promise<PageDebugData> {
     const pdfData = await IOUtils.read(filePath);
     let language: string | undefined;
     try {
@@ -254,16 +252,18 @@ async function loadStructuredPage(
     } catch {
         // Best effort.
     }
-    const result = await getMuPDFWorkerClient().extractSentenceDebug(pdfData, pageIndex, {
-        splitterConfig: language ? { type: "sentencex", language } : undefined,
+    const result = await getMuPDFWorkerClient().structuredExtractWithDebug(pdfData, {
+        capturePages: [pageIndex],
+        debugMode: "full",
+        structured: {
+            splitterConfig: language ? { type: "sentencex", language } : undefined,
+        },
         analysisWindow: Number.POSITIVE_INFINITY,
-        margins: settings?.margins,
-        marginZone: settings?.marginZone,
-        repeatThreshold: settings?.repeatThreshold,
-        detectPageSequences: settings?.detectPageSequences,
-        graphicsLayerMode: settings?.graphicsLayerMode,
+        settings,
     });
-    return internalPageFromSentenceTrace(result.result, result.trace);
+    const page = result.debug.pages?.[String(pageIndex)];
+    if (!page) throw new Error(`page ${pageIndex} missing from trace`);
+    return page;
 }
 
 /**
@@ -277,32 +277,6 @@ function visualizerSettings(options?: VisualizerOptions): ExtractionSettings | u
     return options?.graphicsLayerMode
         ? { graphicsLayerMode: options.graphicsLayerMode }
         : undefined;
-}
-
-function internalPageFromSentenceTrace(
-    result: PageSentenceResult,
-    trace: SentenceTrace,
-): InternalProcessedPage {
-    const sourcePage = trace.pagesForFilter.find(
-        (page) => page.pageIndex === result.pageIndex,
-    );
-    return {
-        index: result.pageIndex,
-        label: sourcePage?.label,
-        width: result.width,
-        height: result.height,
-        content: trace.filteredResult.paragraphResult.pageContent,
-        columns: trace.filteredResult.columnResult.columns.map((column) => ({
-            l: column.x,
-            t: column.y,
-            r: column.x + column.w,
-            b: column.y + column.h,
-            origin: "top-left",
-        })),
-        items: result.items,
-        sentences: result.sentences,
-        degradation: result.degradation,
-    };
 }
 
 export async function visualizeCurrentPageColumns(options?: VisualizerOptions): Promise<{
@@ -324,7 +298,7 @@ export async function visualizeCurrentPageColumns(options?: VisualizerOptions): 
             visualizerSettings(options),
         );
 
-        const overlay = buildColumnOverlayFromPage(page);
+        const overlay = buildColumnOverlayFromDebugPage(page);
         if (overlay.rects.length === 0) {
             return {
                 success: true,
@@ -378,7 +352,7 @@ export async function visualizeCurrentPageLines(options?: VisualizerOptions): Pr
             visualizerSettings(options),
         );
 
-        const overlay = buildLineOverlayFromPage(page);
+        const overlay = buildLineOverlayFromDebugPage(page);
         if (overlay.rects.length === 0) {
             return {
                 success: true,
@@ -442,7 +416,7 @@ export async function visualizeCurrentPageItems(options?: VisualizerOptions): Pr
             visualizerSettings(options),
         );
 
-        const overlay = buildItemOverlayFromPage(page);
+        const overlay = buildItemOverlayFromDebugPage(page);
         if (overlay.rects.length === 0) {
             return {
                 success: true,
@@ -508,7 +482,7 @@ export async function visualizeCurrentPageSentences(options?: VisualizerOptions)
             visualizerSettings(options),
         );
 
-        const overlay = buildSentenceOverlayFromPage(page);
+        const overlay = buildSentenceOverlayFromDebugPage(page);
         if (overlay.rects.length === 0) {
             return {
                 success: true,

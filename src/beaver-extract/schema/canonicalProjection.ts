@@ -1,11 +1,6 @@
 import type { DocItem, SentenceItem } from "../types";
 import { bboxToRect } from "./bbox";
-import type {
-    DebugSentenceFragment,
-    DocumentItem,
-    Sentence,
-    StructuredPage,
-} from "./schema";
+import type { DocumentItem, Sentence, StructuredPage } from "./schema";
 
 interface InternalPageForProjection {
     index: number;
@@ -16,36 +11,16 @@ interface InternalPageForProjection {
     sentences?: SentenceItem[];
 }
 
-function sentenceFragments(
-    sentence: SentenceItem,
-    precision: number,
-): DebugSentenceFragment[] | undefined {
-    if (!sentence.fragments?.length) return undefined;
-    return sentence.fragments.map((fragment) => ({
-        lineIndex: fragment.lineIndex,
-        text: fragment.text,
-        bbox: bboxToRect(fragment.bbox, precision),
-    }));
-}
-
 function projectSentence(
     sentence: SentenceItem,
-    pageIndex: number,
     order: number,
     precision: number,
 ): Sentence {
     return {
-        id: sentence.parentId
-            ? `${sentence.parentId}:s${sentence.index + 1}`
-            : `s${order + 1}`,
-        itemId: sentence.parentId,
-        pageIndex,
+        id: "",
         order,
         text: sentence.text,
         bboxes: sentence.bboxes.map((bbox) => bboxToRect(bbox, precision)),
-        ...(sentenceFragments(sentence, precision)
-            ? { fragments: sentenceFragments(sentence, precision) }
-            : {}),
         ...(sentence.joinWithNext ? { joinWithNext: true } : {}),
     };
 }
@@ -55,7 +30,7 @@ function projectBase(item: DocItem, precision: number) {
         id: item.id,
         pageIndex: item.pageIndex,
         order: item.index,
-        bboxes: [bboxToRect(item.bbox, precision)],
+        bbox: bboxToRect(item.bbox, precision),
     };
 }
 
@@ -76,7 +51,7 @@ function attachSentences(
     const sourceSentences = sentencesByParent.get(internalItem.id) ?? [];
     if (sourceSentences.length === 0) return publicItem;
     const sentences = sourceSentences.map((sentence, index) =>
-        projectSentence(sentence, internalItem.pageIndex, index, precision),
+        projectSentence(sentence, index, precision),
     );
     return { ...publicItem, sentences } as DocumentItem;
 }

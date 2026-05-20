@@ -93,7 +93,7 @@ export function projectExtractionSnapshot(
     const perPage = "document" in result
         ? result.document.pages
             .filter((page) => !selected || selected.has(page.index))
-            .map(projectStructuredPageSnapshot)
+            .map((page) => projectStructuredPageSnapshot(page, result.debug))
         : result.pages
             .filter((page) => !selected || selected.has(page.index))
             .map(projectPage);
@@ -108,7 +108,10 @@ export function projectExtractionSnapshot(
     return { perPage, totals };
 }
 
-function projectStructuredPageSnapshot(page: StructuredPage): ExtractionPageSnapshot {
+function projectStructuredPageSnapshot(
+    page: StructuredPage,
+    debug?: StructuredExtractResult["debug"],
+): ExtractionPageSnapshot {
     const sentences = page.items.flatMap((item) =>
         "sentences" in item
             ? (item.sentences ?? []).map((sentence, index) =>
@@ -128,24 +131,20 @@ function projectStructuredPageSnapshot(page: StructuredPage): ExtractionPageSnap
         content,
         itemCount: items.length,
         sentenceCount: sentences.length,
-        degradedItems: 0,
+        degradedItems: debug?.degradation?.[String(page.index)]?.count ?? 0,
         items,
         sentences,
     };
 }
 
-function legacyFixtureItemId(page: StructuredPage, item: DocumentItem): string {
-    return `p${page.index}:i${item.order}`;
-}
-
 function projectStructuredItem(page: StructuredPage, item: DocumentItem): SnapshotItem {
     return {
-        id: legacyFixtureItemId(page, item),
+        id: item.id,
         kind: item.kind as DocItem["kind"],
         index: item.order,
         columnIndex: 0,
         text: "text" in item ? item.text : undefined,
-        bbox: rectToSnapshotBBox(item.bboxes[0] ?? [0, 0, 0, 0]),
+        bbox: rectToSnapshotBBox(item.bbox),
     };
 }
 
@@ -157,7 +156,7 @@ function projectStructuredSentence(
 ): SnapshotSentence {
     const out: SnapshotSentence = {
         index,
-        parentId: legacyFixtureItemId(page, item),
+        parentId: item.id,
         sentenceIndex: sentence.order,
         text: sentence.text,
         bboxes: sentence.bboxes.map(rectToSnapshotBBox),

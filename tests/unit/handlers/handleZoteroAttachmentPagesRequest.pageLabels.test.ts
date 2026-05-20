@@ -6,6 +6,18 @@ const mockState = {
     extractCalls: [] as any[],
 };
 
+function markdownResult(pageLabels: Record<string, string> | undefined = undefined) {
+    return {
+        mode: 'markdown',
+        schemaVersion: '4',
+        document: {
+            pageCount: 3,
+            pageLabels,
+            pages: [{ index: 0, label: '1', markdown: 'page-1', width: 100, height: 200 }],
+        },
+    };
+}
+
 vi.mock('../../../src/beaver-extract', () => {
     class MockPDFExtractor {
         async getPageCount(): Promise<number> {
@@ -19,13 +31,7 @@ vi.mock('../../../src/beaver-extract', () => {
             if (mockState.extractImpl) {
                 return mockState.extractImpl(args);
             }
-            return {
-                pages: [{ index: 0, label: '1', content: 'page-1', width: 100, height: 200 }],
-                analysis: { pageCount: 3, hasTextLayer: true, styleProfile: {}, marginAnalysis: {} },
-                fullText: 'page-1',
-                pageLabels: undefined,
-                metadata: { extractedAt: 'now', version: '2.0.0', settings: {} },
-            };
+            return markdownResult();
         }
     }
 
@@ -430,13 +436,7 @@ describe('handleZoteroAttachmentPagesRequest page label persistence', () => {
         mockState.extractImpl = async () => {
             // Simulate shutdown firing between extract resolution and the cache write.
             (globalThis as any).Zotero.__beaverShuttingDown = true;
-            return {
-                pages: [{ index: 0, label: '1', content: 'page-1', width: 100, height: 200 }],
-                analysis: { pageCount: 3, hasTextLayer: true, styleProfile: {}, marginAnalysis: {} },
-                fullText: 'page-1',
-                pageLabels: {},
-                metadata: { extractedAt: 'now', version: '2.0.0', settings: {} },
-            };
+            return markdownResult({});
         };
 
         const response = await handleZoteroAttachmentPagesRequest({

@@ -22,7 +22,7 @@ import type { SentenceSplitterConfig } from "../../sentenceTypes";
 import { parseAnalysisScope, type AnalysisScope } from "./analysisScope";
 import type { Fingerprints } from "./fingerprints";
 
-export const FIXTURE_SCHEMA_VERSION = 2 as const;
+export const FIXTURE_SCHEMA_VERSION = 3 as const;
 
 export interface FixtureConfig {
     pageIndices: number[];
