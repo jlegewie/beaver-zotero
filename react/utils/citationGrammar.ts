@@ -1,6 +1,18 @@
 import type { ZoteroItemReference } from '../types/zotero';
 
-export type LocatorKind = 'page' | 'sentence' | 'figure' | 'equation' | 'table' | 'unknown';
+export type LocatorKind =
+    | 'page'
+    | 'sentence'
+    | 'paragraph'
+    | 'heading'
+    | 'list'
+    | 'caption'
+    | 'footnote'
+    | 'figure'
+    | 'equation'
+    | 'table'
+    | 'margin'
+    | 'unknown';
 
 export interface Locator {
     kind: LocatorKind;
@@ -45,13 +57,20 @@ type CitationMetadataLike = {
 
 const CLOBBER_PREFIX = 'user-content-';
 
-const LOC_PREFIXES: Array<{ prefix: string; kind: LocatorKind }> = [
+const LOC_PREFIXES: Array<{ prefix: string; kind: LocatorKind; numericOnly?: boolean }> = [
+    { prefix: 'paragraph', kind: 'paragraph', numericOnly: true },
+    { prefix: 'heading', kind: 'heading', numericOnly: true },
+    { prefix: 'caption', kind: 'caption', numericOnly: true },
+    { prefix: 'footnote', kind: 'footnote', numericOnly: true },
+    { prefix: 'margin', kind: 'margin', numericOnly: true },
+    { prefix: 'table', kind: 'table', numericOnly: true },
     { prefix: 'page', kind: 'page' },
-    { prefix: 'fig', kind: 'figure' },
-    { prefix: 'tab', kind: 'table' },
-    { prefix: 'eq', kind: 'equation' },
-    { prefix: 'p', kind: 'page' },
-    { prefix: 's', kind: 'sentence' },
+    { prefix: 'list', kind: 'list', numericOnly: true },
+    { prefix: 'fig', kind: 'figure', numericOnly: true },
+    { prefix: 'tab', kind: 'table', numericOnly: true },
+    { prefix: 'eq', kind: 'equation', numericOnly: true },
+    { prefix: 'p', kind: 'paragraph', numericOnly: true },
+    { prefix: 's', kind: 'sentence', numericOnly: true },
 ];
 
 function stripClobberPrefix(value: string): string {
@@ -61,14 +80,16 @@ function stripClobberPrefix(value: string): string {
 function locPrefixFor(raw: string): { prefix: string; kind: LocatorKind; value: string } | null {
     for (const entry of LOC_PREFIXES) {
         if (raw.startsWith(entry.prefix) && raw.length > entry.prefix.length) {
-            return { ...entry, value: raw.slice(entry.prefix.length) };
+            const value = raw.slice(entry.prefix.length);
+            if (entry.numericOnly && !/^\d+(?:-.+)?$/.test(value)) continue;
+            return { prefix: entry.prefix, kind: entry.kind, value };
         }
     }
     return null;
 }
 
 /**
- * Parse a compact locator token such as "p10", "s0-s8", or "fig2".
+ * Parse compact page locators and Beaver Extract record ids.
  */
 export function parseLoc(token: string | undefined): Locator | undefined {
     if (token == null) return undefined;
