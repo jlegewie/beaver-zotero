@@ -29,7 +29,7 @@ export function parsePagesList(value: string): number[] {
         out.push(n);
     }
     if (out.length === 0) throw new Error("--pages must list at least one index");
-    return out.sort((a, b) => a - b);
+    return out;
 }
 
 export function parsePageInt(value: string): number {

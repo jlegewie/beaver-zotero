@@ -308,7 +308,7 @@ interface CaptureOpts {
 }
 
 async function buildConfigFromCaptureOpts(opts: CaptureOpts): Promise<FixtureConfig> {
-    const pageIndices = parsePagesList(opts.pages);
+    const pageIndices = parsePagesList(opts.pages).sort((a, b) => a - b);
     const scope = scopeFromCliFlags({
         analysisScopeFlag: opts.analysisScope,
         analysisWindowFlag:
