@@ -63,16 +63,30 @@ import {
 import { buildSentenceOverlayFromPage } from "../../debug/overlayBuilders";
 import type { ExtractInput } from "../../node/api";
 import type {
-    ExtractionResult,
     ExtractionSettings,
-    ProcessedPage,
+    InternalProcessedPage,
 } from "../../types";
+import type {
+    BeaverExtractResult,
+    StructuredExtractResult,
+    StructuredPage,
+} from "../../schema";
 import type { ParagraphDetectionSettings } from "../../ParagraphDetector";
 import type { SentenceSplitterConfig } from "../../sentenceTypes";
 import { join, resolve as resolvePath } from "node:path";
 import { existsSync } from "node:fs";
 
 const DEFAULT_BBOX_TOL_PT = 0.5;
+
+function expectStructuredResult(
+    result: BeaverExtractResult | any,
+): StructuredExtractResult | any {
+    if (Array.isArray(result?.pages)) return result;
+    if (result.mode !== "structured") {
+        throw new Error("fixture extraction expected a structured result");
+    }
+    return result;
+}
 /** Render scale for preview PNGs. */
 const PREVIEW_RENDER_SCALE = 1.5;
 
@@ -192,7 +206,10 @@ function buildCaptureCommand(deps: CliDeps): Command {
                 }
 
                 const result = await deps.api.extractPdf(buildExtractInput(bytes, config));
-                const expected = projectExtractionSnapshot(result);
+                const expected = projectExtractionSnapshot(
+                    expectStructuredResult(result),
+                    config.pageIndices,
+                );
                 const fingerprints = captureFingerprints();
                 const tolerance = {
                     bboxAbsPt:
@@ -248,7 +265,7 @@ function buildCaptureCommand(deps: CliDeps): Command {
                           deps,
                           bytes,
                           loc.folder,
-                          result,
+                          expectStructuredResult(result),
                           config.pageIndices,
                       )
                     : [];
@@ -374,7 +391,10 @@ function buildEvaluateCommand(deps: CliDeps): Command {
                 const result = await deps.api.extractPdf(
                     buildExtractInput(pdfBytes, fixture.config),
                 );
-                const actual = projectExtractionSnapshot(result);
+                const actual = projectExtractionSnapshot(
+                    expectStructuredResult(result),
+                    fixture.config.pageIndices,
+                );
                 const diffs = diffExtractionSnapshots(fixture.expected, actual, {
                     bboxAbsPt: tol,
                 });
@@ -447,7 +467,10 @@ function buildUpdateCommand(deps: CliDeps): Command {
                 const result = await deps.api.extractPdf(
                     buildExtractInput(pdfBytes, previous.config),
                 );
-                const expected = projectExtractionSnapshot(result);
+                const expected = projectExtractionSnapshot(
+                    expectStructuredResult(result),
+                    previous.config.pageIndices,
+                );
                 const fingerprints = captureFingerprints();
 
                 const now = new Date().toISOString();
@@ -470,7 +493,7 @@ function buildUpdateCommand(deps: CliDeps): Command {
                           deps,
                           pdfBytes,
                           loc.folder,
-                          result,
+                          expectStructuredResult(result),
                           previous.config.pageIndices,
                       )
                     : [];
@@ -555,7 +578,7 @@ async function renderPreviewsForFixture(
     deps: CliDeps,
     pdfBytes: Uint8Array,
     fixtureFolder: string,
-    result: ExtractionResult,
+    result: StructuredExtractResult | any,
     pageIndices: number[],
 ): Promise<string[]> {
     const rendered = await deps.api.renderPages({
@@ -566,10 +589,13 @@ async function renderPreviewsForFixture(
     const paths: string[] = [];
     for (const pageIndex of pageIndices) {
         const renderedPage = rendered.pages.find((p) => p.pageIndex === pageIndex);
-        const ppage: ProcessedPage | undefined = result.pages.find(
-            (p) => p.index === pageIndex,
-        );
-        if (!renderedPage || !ppage) continue;
+        const page = "document" in result
+            ? result.document.pages.find((p: StructuredPage) => p.index === pageIndex)
+            : result.pages.find((p: InternalProcessedPage) => p.index === pageIndex);
+        if (!renderedPage || !page) continue;
+        const ppage = "document" in result
+            ? internalPageFromStructuredPage(page)
+            : page;
         const overlay = buildSentenceOverlayFromPage(ppage);
         const composited = await deps.drawOverlay(
             renderedPage.data,
@@ -590,11 +616,57 @@ function buildExtractInput(pdfBytes: Uint8Array, config: FixtureConfig): Extract
     return {
         pdfData: pdfBytes,
         mode: "structured",
-        pageIndices: config.pageIndices,
         analysisWindow: resolveAnalysisWindow(config.analysisScope),
         settings: config.settings,
         paragraphSettings: config.paragraphSettings,
         structured: { splitterConfig: config.splitterConfig },
+    };
+}
+
+function internalPageFromStructuredPage(page: StructuredPage): InternalProcessedPage {
+    return {
+        index: page.index,
+        label: page.label,
+        width: page.width,
+        height: page.height,
+        content: page.items
+            .map((item) => ("text" in item ? item.text : ""))
+            .filter(Boolean)
+            .join("\n\n"),
+        columns: [],
+        items: page.items.map((item) => ({
+            id: item.id,
+            pageIndex: item.pageIndex,
+            index: item.order,
+            bbox: {
+                l: item.bboxes[0]?.[0] ?? 0,
+                t: item.bboxes[0]?.[1] ?? 0,
+                r: item.bboxes[0]?.[2] ?? 0,
+                b: item.bboxes[0]?.[3] ?? 0,
+                origin: "top-left" as const,
+            },
+            columnIndex: 0,
+            kind: item.kind,
+            ...("text" in item ? { text: item.text, lines: [] } : {}),
+            ...("level" in item ? { level: item.level } : {}),
+        })) as InternalProcessedPage["items"],
+        sentences: page.items.flatMap((item) =>
+            "sentences" in item
+                ? (item.sentences ?? []).map((sentence) => ({
+                    parentId: sentence.itemId,
+                    index: sentence.order,
+                    text: sentence.text,
+                    bboxes: sentence.bboxes.map((bbox) => ({
+                        l: bbox[0],
+                        t: bbox[1],
+                        r: bbox[2],
+                        b: bbox[3],
+                        origin: "top-left" as const,
+                    })),
+                    joinWithNext: sentence.joinWithNext,
+                }))
+                : [],
+        ),
     };
 }
 

@@ -14,10 +14,13 @@ import { logger } from "../../src/utils/logger";
 import {
     BeaverExtractor,
     bboxToReaderFrame,
+    getMuPDFWorkerClient,
 } from "../../src/beaver-extract";
 import type {
     ExtractionSettings,
-    ProcessedPage,
+    InternalProcessedPage,
+    PageSentenceResult,
+    SentenceTrace,
 } from "../../src/beaver-extract";
 import { getItemLanguage } from "../../src/utils/zoteroUtils";
 import { getCurrentReaderAndWaitForView } from "./readerUtils";
@@ -224,7 +227,7 @@ async function pushOverlayToReader(
 
 /**
  * Run the structured-mode extract for a single page and return the
- * `ProcessedPage`. Single worker round-trip that drives every visualizer
+ * `InternalProcessedPage`. Single worker round-trip that drives every visualizer
  * level (columns / lines / items / sentences) — the pure
  * `*FromPage` builders in `extractionOverlay.ts` then turn the result
  * into rects.
@@ -242,7 +245,7 @@ async function loadStructuredPage(
     pageIndex: number,
     item: Zotero.Item,
     settings?: ExtractionSettings,
-): Promise<ProcessedPage> {
+): Promise<InternalProcessedPage> {
     const pdfData = await IOUtils.read(filePath);
     let language: string | undefined;
     try {
@@ -251,20 +254,16 @@ async function loadStructuredPage(
     } catch {
         // Best effort.
     }
-    const result = await new BeaverExtractor().extract(pdfData, {
-        mode: "structured",
-        pageIndices: [pageIndex],
+    const result = await getMuPDFWorkerClient().extractSentenceDebug(pdfData, pageIndex, {
+        splitterConfig: language ? { type: "sentencex", language } : undefined,
         analysisWindow: Number.POSITIVE_INFINITY,
-        structured: { language },
-        settings,
+        margins: settings?.margins,
+        marginZone: settings?.marginZone,
+        repeatThreshold: settings?.repeatThreshold,
+        detectPageSequences: settings?.detectPageSequences,
+        graphicsLayerMode: settings?.graphicsLayerMode,
     });
-    const page = result.pages[0];
-    if (!page) {
-        throw new Error(
-            `Structured extract returned no page for index ${pageIndex}`,
-        );
-    }
-    return page;
+    return internalPageFromSentenceTrace(result.result, result.trace);
 }
 
 /**
@@ -278,6 +277,32 @@ function visualizerSettings(options?: VisualizerOptions): ExtractionSettings | u
     return options?.graphicsLayerMode
         ? { graphicsLayerMode: options.graphicsLayerMode }
         : undefined;
+}
+
+function internalPageFromSentenceTrace(
+    result: PageSentenceResult,
+    trace: SentenceTrace,
+): InternalProcessedPage {
+    const sourcePage = trace.pagesForFilter.find(
+        (page) => page.pageIndex === result.pageIndex,
+    );
+    return {
+        index: result.pageIndex,
+        label: sourcePage?.label,
+        width: result.width,
+        height: result.height,
+        content: trace.filteredResult.paragraphResult.pageContent,
+        columns: trace.filteredResult.columnResult.columns.map((column) => ({
+            l: column.x,
+            t: column.y,
+            r: column.x + column.w,
+            b: column.y + column.h,
+            origin: "top-left",
+        })),
+        items: result.items,
+        sentences: result.sentences,
+        degradation: result.degradation,
+    };
 }
 
 export async function visualizeCurrentPageColumns(options?: VisualizerOptions): Promise<{
@@ -585,9 +610,16 @@ export async function extractCurrentPageContent(): Promise<PageExtractionResult>
         const pdfData = await IOUtils.read(filePath);
 
         const result = await new BeaverExtractor().extract(pdfData, {
+            mode: "markdown",
             pageIndices: [pageIndex],
         });
-        const processedPage = result.pages[0];
+        if (result.mode !== "markdown") {
+            return {
+                success: false,
+                message: "Markdown extraction did not return markdown output",
+            };
+        }
+        const processedPage = result.document.pages[0];
         if (!processedPage) {
             return {
                 success: false,
@@ -595,20 +627,18 @@ export async function extractCurrentPageContent(): Promise<PageExtractionResult>
             };
         }
 
-        const columns = processedPage.columns ?? [];
-        logger(`[Extractor] Found ${columns.length} column(s)`);
         logger(
-            `[Extractor] Page ${pageIndex + 1} content extracted (${processedPage.content.length} chars)`,
+            `[Extractor] Page ${pageIndex + 1} content extracted (${processedPage.markdown.length} chars)`,
         );
 
         return {
             success: true,
-            message: `Extracted ${processedPage.content.length} characters from page ${pageIndex + 1}`,
+            message: `Extracted ${processedPage.markdown.length} characters from page ${pageIndex + 1}`,
             pageIndex,
             pageNumber: pageIndex + 1,
-            content: processedPage.content,
-            columnCount: columns.length,
-            columns,
+            content: processedPage.markdown,
+            columnCount: 0,
+            columns: [],
         };
     } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);

@@ -128,7 +128,7 @@ react/utils/
 | **ColumnDetector**           | Layout detection                                | `RawPageData`                          | `ColumnDetectionResult`         |
 | **LineDetector**             | Line extraction                                 | `RawPageData`, columns                 | `PageLineResult`                |
 | **ParagraphDetector**        | Semantic grouping                               | `PageLineResult`                       | `PageParagraphResult`           |
-| **PageExtractor**            | Orchestration                                   | All above                              | `ProcessedPage`                 |
+| **PageExtractor**            | Orchestration                                   | All above                              | `InternalProcessedPage`                 |
 | **SearchScorer**             | Search scoring                                  | `RawPageData[]`, hits                  | `ScoredPageSearchResult[]`      |
 | **FilteredParagraphPipeline**| Margin → column → line → paragraph fused        | `RawPageData`, detailed page, settings | `FilteredParagraphResult`       |
 | **ParagraphSentenceMapper**  | Item + splitter → sentence bboxes               | filtered items, splitter               | `PageSentenceResult`            |
@@ -191,13 +191,13 @@ RawPageData; // { pageIndex, width, height, blocks[] }
 ItemLine; // { text, bbox, fontSize? }
 DocItem; // text, section_header, footnote, caption, list_item, margin, formula, table, picture
 SentenceItem; // { parentId, index, text, bboxes, fragments?, joinWithNext? }
-ProcessedPage; // { index, content, columns, items, sentences?, degradation? }
+InternalProcessedPage; // { index, content, columns, items, sentences?, degradation? }
 ```
 
 #### Results
 
 ```typescript
-ExtractionResult; // Result of BeaverExtractor.extract — markdown OR structured mode.
+InternalExtractionResult; // Result of BeaverExtractor.extract — markdown OR structured mode.
                   // Structured mode populates pages[i].items / sentences /
                   // degradation alongside the same content / columns fields.
                   // `degradation` is omitted on pages where no item fell
@@ -389,7 +389,7 @@ export function detectSections(
 2. **Add types to `types.ts`**:
 
 ```typescript
-export interface ProcessedPage {
+export interface InternalProcessedPage {
   // ... existing fields
   sections?: Section[]; // Add optional field
 }
@@ -671,7 +671,7 @@ reader.
 
    ```typescript
    const cachedResult = await new BeaverExtractor().extract(pdfData);
-   // Store in Map<itemID, ExtractionResult>
+   // Store in Map<itemID, InternalExtractionResult>
    ```
 
 3. **Use page ranges for progressive loading**:
@@ -718,7 +718,7 @@ const pageCount = await extractor.getPageCount(pdfData);
 const ocrNeeds = await extractor.analyzeOCRNeeds(pdfData);
 
 // Sentence-level extraction — production multi-page entry point.
-// Returns the same `ExtractionResult` shape; structured-mode page data
+// Returns the same `InternalExtractionResult` shape; structured-mode page data
 // lives on `pages[i].items` / `sentences` / `columns` alongside
 // paragraph-engine `content`. Per-page detailed walk is the
 // dominant cost — budget accordingly for large ranges.

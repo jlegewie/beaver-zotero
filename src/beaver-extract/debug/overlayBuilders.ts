@@ -33,7 +33,7 @@ import type {
     DocItem,
     LayoutAnalysisResult,
     MarginPosition,
-    ProcessedPage,
+    InternalProcessedPage,
     SentenceItem,
 } from "../types";
 import type { PageSentenceResult } from "../ParagraphSentenceMapper";
@@ -168,7 +168,7 @@ export interface OverlayResult {
 /**
  * Build a sentence overlay from a `PageSentenceResult`.
  *
- * Shared rect-construction loop used by the `ProcessedPage`-based
+ * Shared rect-construction loop used by the `InternalProcessedPage`-based
  * visualizer wrapper above and by fixture capture (which still needs
  * the trace-flavored result for splitter recording).
  *
@@ -278,7 +278,7 @@ export function buildSentenceOverlayFromResult(
 }
 
 // ---------------------------------------------------------------------------
-// Pure builders — consume `ProcessedPage` from a structured-mode extract
+// Pure builders — consume `InternalProcessedPage` from a structured-mode extract
 // (`extract({ mode: "structured", pageIndices: [n] })`). What the visualizer
 // paints is byte-identical to what production produces for that page.
 //
@@ -290,11 +290,11 @@ export function buildSentenceOverlayFromResult(
 // ---------------------------------------------------------------------------
 
 /**
- * Column overlay from a structured-mode `ProcessedPage`. Reads
+ * Column overlay from a structured-mode `InternalProcessedPage`. Reads
  * `page.columns` (`BoundingBox[]`, `{l,t,r,b,origin}`) and emits them in
  * the same top-left page frame used by production extraction.
  */
-export function buildColumnOverlayFromPage(page: ProcessedPage): OverlayResult {
+export function buildColumnOverlayFromPage(page: InternalProcessedPage): OverlayResult {
     const columns = page.columns;
     const rects: OverlayRect[] = columns.map((col, i) => ({
         rect: col,
@@ -316,10 +316,10 @@ export function buildColumnOverlayFromPage(page: ProcessedPage): OverlayResult {
 }
 
 /**
- * Line overlay from a structured-mode `ProcessedPage`. Lines are flattened
+ * Line overlay from a structured-mode `InternalProcessedPage`. Lines are flattened
  * from `page.items[].lines` in item reading order.
  */
-export function buildLineOverlayFromPage(page: ProcessedPage): OverlayResult {
+export function buildLineOverlayFromPage(page: InternalProcessedPage): OverlayResult {
     const lines = page.items.flatMap((item) => ("lines" in item ? item.lines : []));
     const rects: OverlayRect[] = lines.map((line, i) => ({
         rect: line.bbox,
@@ -343,10 +343,10 @@ export function buildLineOverlayFromPage(page: ProcessedPage): OverlayResult {
 }
 
 /**
- * Item overlay from a structured-mode `ProcessedPage`.
+ * Item overlay from a structured-mode `InternalProcessedPage`.
  */
 export function buildItemOverlayFromPage(
-    page: ProcessedPage,
+    page: InternalProcessedPage,
     kindFilter?: DocItem["kind"][],
 ): OverlayResult {
     const allowed = kindFilter ? new Set(kindFilter) : null;
@@ -391,10 +391,10 @@ export function buildItemOverlayFromPage(
 }
 
 /**
- * Sentence overlay from a structured-mode `ProcessedPage`. Thin wrapper
+ * Sentence overlay from a structured-mode `InternalProcessedPage`. Thin wrapper
  * over `buildSentenceOverlayFromResult`.
  */
-export function buildSentenceOverlayFromPage(page: ProcessedPage): OverlayResult {
+export function buildSentenceOverlayFromPage(page: InternalProcessedPage): OverlayResult {
     const projected: PageSentenceResult = {
         pageIndex: page.index,
         width: page.width,

@@ -14,7 +14,7 @@
  * pulling it in here would try to spawn another worker from inside this
  * one. Import analyzers and types directly:
  *   import { StyleAnalyzer } from "../StyleAnalyzer";
- *   import type { RawPageData, ExtractionResult } from "../types";
+ *   import type { RawPageData, InternalExtractionResult } from "../types";
  */
 
 import { DocumentAnalyzer, type RawPageProvider } from "../DocumentAnalyzer";
@@ -39,7 +39,7 @@ import type {
     DocumentAnalysis,
     BoundingBox,
     DocItem,
-    ExtractionResult,
+    InternalExtractionResult,
     ExtractionSettings,
     ItemLine,
     LayoutAnalysisResult,
@@ -53,7 +53,7 @@ import type {
     PDFPageSearchResult,
     PDFSearchOptions,
     PDFSearchResult,
-    ProcessedPage,
+    InternalProcessedPage,
     RawPageData,
     RawPageDataDetailed,
     StructuredPagePhaseTimings,
@@ -69,6 +69,18 @@ import {
     bboxHeight,
     bboxWidth,
 } from "../types";
+import {
+    SCHEMA_VERSION,
+    assignDocumentIds,
+    buildCitationIndex,
+    projectStructuredPage,
+    type BeaverExtractResult,
+    type ExtractionDebug,
+    type MarkdownExtractResult,
+    type StructuredExtractResult,
+    type StructuredExtractWithDebugResult,
+} from "../schema";
+import { bboxToRect } from "../schema/bbox";
 import type {
     SentenceTraceResult,
     WorkerSentenceDebugOptions,
@@ -475,7 +487,7 @@ function docItemsFromParagraphResult(
 /**
  * Inverse-rotate a column rect (`{x, y, w, h}` in upright frame) back
  * to MuPDF coords and project into the `{l, t, r, b}` shape stored on
- * `ProcessedPage.columns`.
+ * `InternalProcessedPage.columns`.
  */
 function projectColumnRect(
     col: { x: number; y: number; w: number; h: number },
@@ -505,7 +517,7 @@ function projectColumnRect(
  * The combination `engine === "structured"` && `markdown.engine` is
  * rejected upstream by `opExtract`. All other steps (raw extraction,
  * style + margin analysis, fullText assembly, analysis build) are
- * identical, and the result shape is the same `ExtractionResult` for
+ * identical, and the result shape is the same `InternalExtractionResult` for
  * every branch — `version` and `engine` come from this single metadata
  * builder.
  *
@@ -536,7 +548,7 @@ export function runExtractFromIndices(
     splitter?: SentenceSplitter,
     fontApi?: FontApi,
     pageCache?: PageWalkCache,
-): ExtractionResult {
+): InternalExtractionResult {
     const tStart = performance.now();
 
     // Structured mode pre-walks every target in detailed mode FIRST so
@@ -578,11 +590,12 @@ export function runExtractFromIndices(
                     ? pageCache.getDetailed(i, false)
                     : extractRawPageDetailedFromDoc(doc, i, false, fontApi);
             } catch (err) {
-                // Unresolvable page in a malformed page tree — skip it. The
-                // page is then absent from `preWalkedTargets`, so
-                // `buildAnalysisFromDoc` also skips it and it drops out of
-                // `effectiveTargetIndices` below.
-                if (!isRecoverablePageError(err)) throw err;
+                if (engine === "structured" || !isRecoverablePageError(err)) {
+                    throw err;
+                }
+                // Markdown extraction can still skip an unresolvable leaf in
+                // a malformed page tree. Structured extraction is
+                // full-document canonical output and must fail instead.
                 postLog(
                     "warn",
                     `[mupdf-worker] runExtractFromIndices: skipping unresolvable page ${i}: ${String(err)}`,
@@ -646,7 +659,7 @@ export function runExtractFromIndices(
         );
     }
 
-    const pages: ProcessedPage[] = [];
+    const pages: InternalProcessedPage[] = [];
     const perPageMs: number[] = [];
     // Per-page phase breakdown — only populated by the structured branch.
     // Stays undefined on the final result for markdown engines so the
@@ -721,7 +734,7 @@ export function runExtractFromIndices(
                         filtered.paragraphResult.items.length,
                     ),
                 ],
-            } as ProcessedPage);
+            } as InternalProcessedPage);
             perPageMs.push(performance.now() - tPage);
         }
     } else if (engine === "structured") {
@@ -778,7 +791,7 @@ export function runExtractFromIndices(
                 items: sentenceResult.items,
                 sentences: sentenceResult.sentences,
                 degradation: sentenceResult.degradation,
-            } as ProcessedPage);
+            } as InternalProcessedPage);
             perPageMs.push(preWalkedDetailedMs + (performance.now() - tPage));
             perPagePhases.push(phaseTimings);
         }
@@ -833,14 +846,14 @@ export function runExtractFromIndices(
     const recordedEngine: "block" | "paragraph" | "structured" = engine;
 
     const totalMs = performance.now() - tStart;
-    const baseResult: ExtractionResult = {
+    const baseResult: InternalExtractionResult = {
         pages,
         analysis,
         fullText,
         pageLabels: Object.keys(pageLabels).length > 0 ? pageLabels : undefined,
         metadata: {
             extractedAt: new Date().toISOString(),
-            version: "3.0.0",
+            version: SCHEMA_VERSION,
             settings: finalSettings,
             engine: recordedEngine,
             // `docOpenMs` is unknown to this helper (the doc is already open
@@ -867,6 +880,151 @@ export function runExtractFromIndices(
     return baseResult;
 }
 
+function pageLabelsToStringKeys(
+    pageLabels?: Record<number, string>,
+): Record<string, string> | undefined {
+    if (!pageLabels || Object.keys(pageLabels).length === 0) return undefined;
+    return Object.fromEntries(
+        Object.entries(pageLabels).map(([index, label]) => [String(index), label]),
+    );
+}
+
+function degradationSummary(result: InternalExtractionResult):
+    | { totalCount: number; pageCount: number }
+    | undefined {
+    let totalCount = 0;
+    let pageCount = 0;
+    for (const page of result.pages) {
+        const count = page.degradation?.count ?? 0;
+        if (count > 0) {
+            totalCount += count;
+            pageCount += 1;
+        }
+    }
+    return totalCount > 0 ? { totalCount, pageCount } : undefined;
+}
+
+function toMarkdownExtractResult(
+    result: InternalExtractionResult,
+): MarkdownExtractResult {
+    return {
+        mode: "markdown",
+        schemaVersion: SCHEMA_VERSION,
+        createdAt: result.metadata.extractedAt,
+        diagnostics: {
+            settings: result.metadata.settings,
+            engine: result.metadata.engine ?? "paragraph",
+            timings: result.metadata.timings,
+        },
+        document: {
+            pageCount: result.analysis.pageCount,
+            pageLabels: pageLabelsToStringKeys(result.pageLabels),
+            pages: result.pages.map((page) => ({
+                index: page.index,
+                label: page.label,
+                width: page.width,
+                height: page.height,
+                markdown: page.content,
+            })),
+        },
+    };
+}
+
+function toStructuredExtractResult(
+    result: InternalExtractionResult,
+    bboxPrecision: number,
+    debug?: ExtractionDebug,
+): StructuredExtractResult {
+    const pages = result.pages.map((page) =>
+        projectStructuredPage(page, bboxPrecision),
+    );
+    assignDocumentIds(pages);
+    const degradation = degradationSummary(result);
+    return {
+        mode: "structured",
+        schemaVersion: SCHEMA_VERSION,
+        createdAt: result.metadata.extractedAt,
+        diagnostics: {
+            settings: result.metadata.settings,
+            engine: "structured",
+            timings: result.metadata.timings,
+            ...(degradation ? { degradation } : {}),
+        },
+        document: {
+            pageCount: result.analysis.pageCount,
+            pageLabels: pageLabelsToStringKeys(result.pageLabels),
+            bboxOrigin: "top-left",
+            bboxPrecision,
+            pages,
+            citationIndex: buildCitationIndex(pages),
+        },
+        ...(debug ? { debug } : {}),
+    };
+}
+
+function buildDebugProjection(
+    internal: InternalExtractionResult,
+    structured: StructuredExtractResult,
+    capturePages: number[],
+    precision: number,
+    full = false,
+): ExtractionDebug {
+    const capture = new Set(capturePages);
+    const pages: NonNullable<ExtractionDebug["pages"]> = {};
+    const degradation: NonNullable<ExtractionDebug["degradation"]> = {};
+    for (const page of internal.pages) {
+        if (!capture.has(page.index)) continue;
+        const structuredPage = structured.document.pages.find(
+            (candidate) => candidate.index === page.index,
+        );
+        const sentences = structuredPage?.items.flatMap((item) =>
+            "sentences" in item ? (item.sentences ?? []) : [],
+        ) ?? [];
+        pages[String(page.index)] = {
+            pageIndex: page.index,
+            pageLabel: page.label,
+            width: page.width,
+            height: page.height,
+            counts: {
+                items: structuredPage?.items.length ?? page.items.length,
+                sentences: sentences.length,
+                columns: page.columns.length,
+                lines: page.items.reduce((sum, item) => (
+                    "lines" in item ? sum + item.lines.length : sum
+                ), 0),
+            },
+            columns: page.columns.map((bbox) => bboxToRect(bbox, precision)),
+            items: structuredPage?.items,
+            sentences,
+            ...(full
+                ? {
+                    lines: page.items.flatMap((item) =>
+                        "lines" in item
+                            ? item.lines.map((line, offset) => ({
+                                id: `${item.id}:l${offset}`,
+                                text: line.text,
+                                bbox: bboxToRect(line.bbox, precision),
+                                columnIndex: item.columnIndex,
+                            }))
+                            : [],
+                    ),
+                    sentenceFragments: sentences.flatMap(
+                        (sentence) => sentence.fragments ?? [],
+                    ),
+                }
+                : {}),
+            ...(page.degradation ? { degradation: page.degradation } : {}),
+        };
+        if (page.degradation) {
+            degradation[String(page.index)] = page.degradation;
+        }
+    }
+    return {
+        pages,
+        ...(Object.keys(degradation).length > 0 ? { degradation } : {}),
+    };
+}
+
 /**
  * Strict, fused extract op for the agent handlers.
  *
@@ -878,7 +1036,7 @@ export function runExtractFromIndices(
  * `mode` selects the output product:
  *   - `"markdown"` (default) returns per-page text via the markdown
  *     engines below.
- *   - `"structured"` returns the same `ExtractionResult` shape with
+ *   - `"structured"` returns the same `InternalExtractionResult` shape with
  *     `pages[i].sentences` / `items` / `columns`
  *     populated alongside paragraph-engine `content`. Per-page detailed
  *     walk is the dominant cost — multi-page structured extracts pay
@@ -886,7 +1044,7 @@ export function runExtractFromIndices(
  *
  * `markdown.engine` selects the markdown engine when `mode === "markdown"`:
  *   - `"paragraph"` (default): line + paragraph detection via
- *     `detectFilteredParagraphs`. `ProcessedPage.content` is
+ *     `detectFilteredParagraphs`. `InternalProcessedPage.content` is
  *     `paragraphResult.pageContent` (markdown-shaped with `## ` headers
  *     and `\n\n` paragraph separators).
  *   - `"block"`: block-based PageExtractor.
@@ -905,14 +1063,17 @@ export async function opExtract(
         pdfData: Uint8Array | ArrayBuffer;
         mode?: "markdown" | "structured";
         markdown?: { engine?: "block" | "paragraph" };
-        structured?: { splitterConfig?: SentenceSplitterConfig };
+        structured?: {
+            splitterConfig?: SentenceSplitterConfig;
+            bboxPrecision?: number;
+        };
         settings?: ExtractionSettings;
         paragraphSettings?: ParagraphDetectionSettings;
         pageIndices?: number[];
         pageRange?: { startIndex: number; endIndex?: number; maxPages?: number };
         analysisWindow?: number;
     },
-): Promise<OpReply<ExtractionResult>> {
+): Promise<OpReply<BeaverExtractResult>> {
     // Defense in depth: the facade enforces this too, but the worker is
     // reachable directly via the worker-client RPC and any future caller
     // (e.g. tests) shouldn't be able to slip past the contract.
@@ -922,6 +1083,12 @@ export async function opExtract(
     if (isStructured && explicitEngine) {
         throw new Error(
             "opExtract: markdown.engine is not applicable when mode='structured'",
+        );
+    }
+    if (isStructured && ((args.pageIndices?.length ?? 0) > 0 || args.pageRange)) {
+        throw workerError(
+            ERROR_CODES.STRUCTURED_PAGE_SELECTION_REJECTED,
+            "Structured extraction is full-document only; pageIndices and pageRange are only supported for markdown extraction.",
         );
     }
 
@@ -998,7 +1165,9 @@ export async function opExtract(
             }
         }
 
-        const targetIndices = args.pageRange
+        const targetIndices = isStructured
+            ? Array.from({ length: pageCount }, (_, index) => index)
+            : args.pageRange
             ? resolvePageRangeOrThrow(pageCount, args.pageRange)
             : resolveExplicitPageIndicesOrThrow(pageCount, args.pageIndices);
 
@@ -1016,7 +1185,7 @@ export async function opExtract(
               )
             : undefined;
 
-        const result = runExtractFromIndices(
+        const internal = runExtractFromIndices(
             doc,
             opts as any,
             requestedRepeatThreshold,
@@ -1034,10 +1203,16 @@ export async function opExtract(
         // and the op-level `totalMs` (which includes the OCR check) are
         // known only here. Mutate the timings record we just got back —
         // it's a fresh object built inside the helper, so this is safe.
-        if (result.metadata.timings) {
-            result.metadata.timings.docOpenMs = docOpenMs;
-            result.metadata.timings.totalMs = performance.now() - tOpStart;
+        if (internal.metadata.timings) {
+            internal.metadata.timings.docOpenMs = docOpenMs;
+            internal.metadata.timings.totalMs = performance.now() - tOpStart;
         }
+        const result = isStructured
+            ? toStructuredExtractResult(
+                internal,
+                args.structured?.bboxPrecision ?? 1,
+              )
+            : toMarkdownExtractResult(internal);
         return { result };
     } catch (e) {
         docFailed = true;
@@ -1045,6 +1220,61 @@ export async function opExtract(
     } finally {
         releaseDoc(doc, docFailed);
     }
+}
+
+export async function opStructuredExtractWithDebug(
+    args: {
+        pdfData: Uint8Array | ArrayBuffer;
+        mode?: "structured";
+        structured?: {
+            splitterConfig?: SentenceSplitterConfig;
+            bboxPrecision?: number;
+        };
+        settings?: ExtractionSettings;
+        paragraphSettings?: ParagraphDetectionSettings;
+        analysisWindow?: number;
+        capturePages: number[];
+        debugMode?: "triage" | "full";
+    },
+): Promise<OpReply<StructuredExtractWithDebugResult>> {
+    const extractReply = await opExtract({
+        pdfData: args.pdfData,
+        mode: "structured",
+        structured: args.structured,
+        settings: args.settings,
+        paragraphSettings: args.paragraphSettings,
+        analysisWindow: args.analysisWindow,
+    });
+    const result = extractReply.result as StructuredExtractResult;
+    const capture = new Set(args.capturePages);
+    const pages: NonNullable<ExtractionDebug["pages"]> = {};
+    const degradation: NonNullable<ExtractionDebug["degradation"]> = {};
+    for (const page of result.document.pages) {
+        if (!capture.has(page.index)) continue;
+        const sentences = page.items.flatMap((item) =>
+            "sentences" in item ? (item.sentences ?? []) : [],
+        );
+        const pageDegradation = result.debug?.degradation?.[String(page.index)];
+        pages[String(page.index)] = {
+            pageIndex: page.index,
+            pageLabel: page.label,
+            width: page.width,
+            height: page.height,
+            counts: {
+                items: page.items.length,
+                sentences: sentences.length,
+            },
+            items: page.items,
+            sentences,
+            ...(pageDegradation ? { degradation: pageDegradation } : {}),
+        };
+        if (pageDegradation) degradation[String(page.index)] = pageDegradation;
+    }
+    const debug: ExtractionDebug = {
+        pages,
+        ...(Object.keys(degradation).length > 0 ? { degradation } : {}),
+    };
+    return { result: { result, debug } };
 }
 
 /**
@@ -1166,7 +1396,7 @@ export async function opAnalyzeLayout(
                 // Mirrors the version `runExtractFromIndices` writes so
                 // analyze + extract advance together when the analysis
                 // context build changes.
-                version: "3.0.0",
+                version: SCHEMA_VERSION,
                 settings: opts,
                 timings: {
                     docOpenMs,
@@ -1342,7 +1572,7 @@ export async function opSearch(
  * Single-page sentence-level bbox extraction with intermediates surfaced.
  * Debug-only — production sentence-level extraction goes through
  * `opExtract` with `mode: "structured"` (multi-page, returns
- * `ExtractionResult` with `pages[i].sentences`).
+ * `InternalExtractionResult` with `pages[i].sentences`).
  *
  * Powers the dev visualizer / extract-trace endpoints: returns the
  * production sentence result PLUS the pipeline intermediates

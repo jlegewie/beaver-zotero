@@ -37,7 +37,8 @@ import type {
     OverlayResult,
 } from "../../debug/overlayBuilders";
 import type { ExtractInput, AnalyzeLayoutInput } from "../../node/api";
-import type { ExtractionResult, ProcessedPage } from "../../types";
+import type { BeaverExtractResult, StructuredPage } from "../../schema";
+import type { InternalProcessedPage } from "../../types";
 
 const VALID_LEVELS: ReadonlyArray<OverlayLevel> = [
     "columns",
@@ -56,17 +57,80 @@ function parseLevel(value: string): OverlayLevel {
     );
 }
 
-function findPage(
-    extract: ExtractionResult,
-    pageIndex: number,
-): ProcessedPage {
-    const page = extract.pages.find((p) => p.index === pageIndex);
-    if (!page) {
-        throw new Error(
-            `overlay: page ${pageIndex} missing from extract.pages`,
+function findPage(extract: BeaverExtractResult, pageIndex: number): InternalProcessedPage {
+    if (Array.isArray((extract as any).pages)) {
+        const page = (extract as any).pages.find(
+            (p: InternalProcessedPage) => p.index === pageIndex,
         );
+        if (!page) {
+            throw new Error(`overlay: page ${pageIndex} missing from extract.pages`);
+        }
+        return page;
     }
-    return page;
+    if (extract.mode === "markdown") {
+        const page = extract.document.pages.find((p) => p.index === pageIndex);
+        if (!page) {
+            throw new Error(`overlay: page ${pageIndex} missing from extract.pages`);
+        }
+        return {
+            index: page.index,
+            label: page.label,
+            width: page.width,
+            height: page.height,
+            content: page.markdown,
+            columns: [],
+            items: [],
+        };
+    }
+    const page = extract.document.pages.find((p) => p.index === pageIndex);
+    if (!page) {
+        throw new Error(`overlay: page ${pageIndex} missing from extract.pages`);
+    }
+    const structuredPage = page as StructuredPage;
+    return {
+        index: structuredPage.index,
+        label: structuredPage.label,
+        width: structuredPage.width,
+        height: structuredPage.height,
+        content: structuredPage.items
+            .map((item) => ("text" in item ? item.text : ""))
+            .filter(Boolean)
+            .join("\n\n"),
+        columns: [],
+        items: structuredPage.items.map((item) => ({
+            id: item.id,
+            pageIndex: item.pageIndex,
+            index: item.order,
+            bbox: {
+                l: item.bboxes[0]?.[0] ?? 0,
+                t: item.bboxes[0]?.[1] ?? 0,
+                r: item.bboxes[0]?.[2] ?? 0,
+                b: item.bboxes[0]?.[3] ?? 0,
+                origin: "top-left",
+            },
+            columnIndex: 0,
+            kind: item.kind,
+            ...("text" in item ? { text: item.text, lines: [] } : {}),
+            ...("level" in item ? { level: item.level } : {}),
+        })) as InternalProcessedPage["items"],
+        sentences: structuredPage.items.flatMap((item) =>
+            "sentences" in item
+                ? (item.sentences ?? []).map((sentence) => ({
+                    parentId: sentence.itemId,
+                    index: sentence.order,
+                    text: sentence.text,
+                    bboxes: sentence.bboxes.map((bbox) => ({
+                        l: bbox[0],
+                        t: bbox[1],
+                        r: bbox[2],
+                        b: bbox[3],
+                        origin: "top-left" as const,
+                    })),
+                    joinWithNext: sentence.joinWithNext,
+                }))
+                : [],
+        ),
+    };
 }
 
 export function buildOverlayCommand(deps: CliDeps): Command {
@@ -159,7 +223,6 @@ export function buildOverlayCommand(deps: CliDeps): Command {
                     const input: ExtractInput = {
                         pdfData: bytes,
                         mode: "structured",
-                        pageIndices: [pageIndex],
                     };
                     if (opts.analysisWindow != null) {
                         input.analysisWindow = parseAnalysisWindow(String(opts.analysisWindow));

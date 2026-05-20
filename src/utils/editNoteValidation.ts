@@ -308,7 +308,11 @@ export function enrichOldStringCitationRefs(
         if (extractAttr(attrStr, 'ref') !== undefined) continue;
 
         const normalized = normalizeCitationTag(parseRawCitationAttributes(attrStr));
-        const page = normalized.ok ? getPageLocator(normalized.ref) : extractAttr(attrStr, 'page') || undefined;
+        const rawLoc = extractAttr(attrStr, 'loc');
+        const page = normalized.ok
+            ? (getPageLocator(normalized.ref) ??
+                (rawLoc && /^p\d+$/.test(rawLoc) ? rawLoc.slice(1) : undefined))
+            : extractAttr(attrStr, 'page') || undefined;
 
         const explicitItemId = extractAttr(attrStr, 'item_id');
         const unifiedId = extractAttr(attrStr, 'id');

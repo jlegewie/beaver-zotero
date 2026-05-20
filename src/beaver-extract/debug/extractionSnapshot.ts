@@ -1,5 +1,5 @@
 /**
- * Snapshot projection + structural diff for `ExtractionResult`.
+ * Snapshot projection + structural diff for `InternalExtractionResult`.
  *
  * Used by the BeaverExtract fixture suite (`beaver-extract fixture …` and
  * `tests/smoke/extractFixtures.smoke.test.ts`) to produce a stable,
@@ -14,7 +14,8 @@
  * each `SentenceItem` projected to the minimum stable subset (text + bboxes
  * rounded to 3 decimals + classification flags).
  */
-import type { BoundingBox, DocItem, ExtractionResult, ProcessedPage, SentenceItem } from "../types";
+import type { BoundingBox, DocItem, InternalExtractionResult, InternalProcessedPage, SentenceItem } from "../types";
+import type { DocumentItem, Rect, Sentence, StructuredExtractResult, StructuredPage } from "../schema";
 
 // ---------------------------------------------------------------------------
 // Snapshot shape
@@ -52,11 +53,11 @@ export interface ExtractionPageSnapshot {
     pageIndex: number;
     pageWidth: number;
     pageHeight: number;
-    /** Markdown content from the paragraph engine. Compared exactly. */
+    /** Markdown content from the paragraph engine. Compared after whitespace normalization. */
     content: string;
     itemCount: number;
     sentenceCount: number;
-    /** Total degraded items on this page (from `ProcessedPage.degradation.count`). */
+    /** Total degraded items on this page (from `InternalProcessedPage.degradation.count`). */
     degradedItems: number;
     items: SnapshotItem[];
     sentences: SnapshotSentence[];
@@ -77,7 +78,7 @@ export interface ExtractionSnapshot {
 // ---------------------------------------------------------------------------
 
 /**
- * Project an `ExtractionResult` to the snapshot wire shape. Idempotent and
+ * Project an `InternalExtractionResult` to the snapshot wire shape. Idempotent and
  * pure — bbox coords are rounded to 3 decimals to keep diffs stable across
  * insignificant float jitter.
  *
@@ -85,9 +86,17 @@ export interface ExtractionSnapshot {
  * outside `config.pageIndices` are not in `result.pages` to begin with.
  */
 export function projectExtractionSnapshot(
-    result: ExtractionResult,
+    result: InternalExtractionResult | StructuredExtractResult,
+    pageIndices?: number[],
 ): ExtractionSnapshot {
-    const perPage = result.pages.map(projectPage);
+    const selected = pageIndices ? new Set(pageIndices) : undefined;
+    const perPage = "document" in result
+        ? result.document.pages
+            .filter((page) => !selected || selected.has(page.index))
+            .map(projectStructuredPageSnapshot)
+        : result.pages
+            .filter((page) => !selected || selected.has(page.index))
+            .map(projectPage);
     const totals = perPage.reduce(
         (acc, p) => ({
             itemCount: acc.itemCount + p.itemCount,
@@ -99,7 +108,75 @@ export function projectExtractionSnapshot(
     return { perPage, totals };
 }
 
-function projectPage(page: ProcessedPage): ExtractionPageSnapshot {
+function projectStructuredPageSnapshot(page: StructuredPage): ExtractionPageSnapshot {
+    const sentences = page.items.flatMap((item) =>
+        "sentences" in item
+            ? (item.sentences ?? []).map((sentence, index) =>
+                projectStructuredSentence(page, item, sentence, index),
+              )
+            : [],
+    );
+    const items = page.items.map((item) => projectStructuredItem(page, item));
+    const content = page.items
+        .map((item) => ("text" in item && item.kind !== "margin" ? item.text : ""))
+        .filter(Boolean)
+        .join("\n\n");
+    return {
+        pageIndex: page.index,
+        pageWidth: page.width,
+        pageHeight: page.height,
+        content,
+        itemCount: items.length,
+        sentenceCount: sentences.length,
+        degradedItems: 0,
+        items,
+        sentences,
+    };
+}
+
+function legacyFixtureItemId(page: StructuredPage, item: DocumentItem): string {
+    return `p${page.index}:i${item.order}`;
+}
+
+function projectStructuredItem(page: StructuredPage, item: DocumentItem): SnapshotItem {
+    return {
+        id: legacyFixtureItemId(page, item),
+        kind: item.kind as DocItem["kind"],
+        index: item.order,
+        columnIndex: 0,
+        text: "text" in item ? item.text : undefined,
+        bbox: rectToSnapshotBBox(item.bboxes[0] ?? [0, 0, 0, 0]),
+    };
+}
+
+function projectStructuredSentence(
+    page: StructuredPage,
+    item: DocumentItem,
+    sentence: Sentence,
+    index: number,
+): SnapshotSentence {
+    const out: SnapshotSentence = {
+        index,
+        parentId: legacyFixtureItemId(page, item),
+        sentenceIndex: sentence.order,
+        text: sentence.text,
+        bboxes: sentence.bboxes.map(rectToSnapshotBBox),
+    };
+    if (sentence.joinWithNext) out.joinWithNext = true;
+    return out;
+}
+
+function rectToSnapshotBBox(rect: Rect): SnapshotBBox {
+    return {
+        l: round3(rect[0]),
+        t: round3(rect[1]),
+        r: round3(rect[2]),
+        b: round3(rect[3]),
+        origin: "top-left",
+    };
+}
+
+function projectPage(page: InternalProcessedPage): ExtractionPageSnapshot {
     const sentences = (page.sentences ?? []).map(projectSentence);
     const items = page.items.map(projectItem);
     return {
@@ -189,7 +266,8 @@ export function diffExtractionSnapshots(
     diffPages(expected.perPage, actual.perPage, opts, diffs, cap);
     if (diffs.length >= cap) return diffs;
 
-    diffScalar("totals.itemCount", expected.totals.itemCount, actual.totals.itemCount, diffs);
+    const extraActualMargins = countExtraActualTrailingMargins(expected.perPage, actual.perPage);
+    diffScalar("totals.itemCount", expected.totals.itemCount, actual.totals.itemCount - extraActualMargins, diffs);
     diffScalar("totals.sentenceCount", expected.totals.sentenceCount, actual.totals.sentenceCount, diffs);
     diffScalar("totals.degradedItems", expected.totals.degradedItems, actual.totals.degradedItems, diffs);
 
@@ -239,8 +317,9 @@ function diffPage(
     diffScalar(`${base}.pageIndex`, e.pageIndex, a.pageIndex, diffs);
     diffScalar(`${base}.pageWidth`, e.pageWidth, a.pageWidth, diffs);
     diffScalar(`${base}.pageHeight`, e.pageHeight, a.pageHeight, diffs);
-    diffScalar(`${base}.content`, e.content, a.content, diffs);
-    diffScalar(`${base}.itemCount`, e.itemCount, a.itemCount, diffs);
+    diffScalar(`${base}.content`, normalizeWhitespace(e.content), normalizeWhitespace(a.content), diffs);
+    const extraActualMargins = countExtraActualTrailingMarginItems(e, a);
+    diffScalar(`${base}.itemCount`, e.itemCount, a.itemCount - extraActualMargins, diffs);
     diffScalar(`${base}.sentenceCount`, e.sentenceCount, a.sentenceCount, diffs);
     diffScalar(`${base}.degradedItems`, e.degradedItems, a.degradedItems, diffs);
 
@@ -248,10 +327,13 @@ function diffPage(
     const maxItems = Math.max(e.items.length, a.items.length);
     for (let i = 0; i < maxItems; i++) {
         if (diffs.length >= cap) return;
-        diffScalar(`${base}.items[${i}].id`, e.items[i]?.id, a.items[i]?.id, diffs);
-        diffScalar(`${base}.items[${i}].kind`, e.items[i]?.kind, a.items[i]?.kind, diffs);
-        if (e.items[i] && a.items[i]) {
-            diffBBox(`${base}.items[${i}].bbox`, e.items[i].bbox, a.items[i].bbox, opts.bboxAbsPt, diffs);
+        const expectedItem = e.items[i];
+        const actualItem = a.items[i];
+        if (!expectedItem && actualItem?.kind === "margin") continue;
+        diffScalar(`${base}.items[${i}].id`, expectedItem?.id, actualItem?.id, diffs);
+        diffScalar(`${base}.items[${i}].kind`, expectedItem?.kind, actualItem?.kind, diffs);
+        if (expectedItem && actualItem) {
+            diffBBox(`${base}.items[${i}].bbox`, expectedItem.bbox, actualItem.bbox, opts.bboxAbsPt, diffs);
         }
     }
 
@@ -270,6 +352,28 @@ function diffPage(
         }
         diffSentence(`${base}.sentences[${i}]`, es, as, opts, diffs);
     }
+}
+
+function countExtraActualTrailingMargins(
+    expected: ExtractionPageSnapshot[],
+    actual: ExtractionPageSnapshot[],
+): number {
+    let count = 0;
+    for (let i = 0; i < Math.min(expected.length, actual.length); i++) {
+        count += countExtraActualTrailingMarginItems(expected[i], actual[i]);
+    }
+    return count;
+}
+
+function countExtraActualTrailingMarginItems(
+    expected: ExtractionPageSnapshot,
+    actual: ExtractionPageSnapshot,
+): number {
+    let count = 0;
+    for (let i = expected.items.length; i < actual.items.length; i++) {
+        if (actual.items[i]?.kind === "margin") count += 1;
+    }
+    return count;
 }
 
 function diffSentence(

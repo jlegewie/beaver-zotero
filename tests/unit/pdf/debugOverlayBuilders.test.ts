@@ -1,7 +1,7 @@
 /**
  * Pure rect-builder tests. Verifies the moved overlay builders match
  * the original `react/utils/extractionOverlay.ts` contract using
- * synthetic `ProcessedPage` data.
+ * synthetic `InternalProcessedPage` data.
  *
  * No PDF / WASM / sharp.
  */
@@ -15,12 +15,12 @@ import {
     OVERLAY_COLORS,
 } from '../../../src/beaver-extract/debug/overlayBuilders';
 import { bboxFromXYWH } from '../../../src/beaver-extract/types';
-import type { ProcessedPage } from '../../../src/beaver-extract/types';
+import type { InternalProcessedPage } from '../../../src/beaver-extract/types';
 
 const bbox = (x: number, y: number, w: number, h: number) =>
     bboxFromXYWH(x, y, w, h, "top-left");
 
-function basePage(): ProcessedPage {
+function basePage(): InternalProcessedPage {
     return {
         index: 0,
         width: 600,
@@ -34,7 +34,7 @@ function basePage(): ProcessedPage {
 describe('debug/overlayBuilders', () => {
     describe('buildColumnOverlayFromPage', () => {
         it('emits one rect per column with C{n} labels', () => {
-            const page: ProcessedPage = {
+            const page: InternalProcessedPage = {
                 ...basePage(),
                 columns: [
                     bbox(50, 50, 240, 700),
@@ -63,7 +63,7 @@ describe('debug/overlayBuilders', () => {
 
     describe('buildLineOverlayFromPage', () => {
         it('emits one rect per line and counts distinct columns', () => {
-            const page: ProcessedPage = {
+            const page: InternalProcessedPage = {
                 ...basePage(),
                 items: [
                     {
@@ -105,7 +105,7 @@ describe('debug/overlayBuilders', () => {
 
     describe('buildItemOverlayFromPage', () => {
         it('uses kind-specific colors for every supported item kind', () => {
-            const page: ProcessedPage = {
+            const page: InternalProcessedPage = {
                 ...basePage(),
                 items: [
                     {
@@ -229,7 +229,7 @@ describe('debug/overlayBuilders', () => {
 
     describe('buildSentenceOverlayFromPage', () => {
         it('alternates body sentence colors and labels them sequentially', () => {
-            const page: ProcessedPage = {
+            const page: InternalProcessedPage = {
                 ...basePage(),
                 items: [
                     {
@@ -269,7 +269,7 @@ describe('debug/overlayBuilders', () => {
         });
 
         it('shows section headers directly in the sentence overlay', () => {
-            const page: ProcessedPage = {
+            const page: InternalProcessedPage = {
                 ...basePage(),
                 items: [
                     {
@@ -299,7 +299,7 @@ describe('debug/overlayBuilders', () => {
         });
 
         it('interleaves item fallbacks with sentence bboxes in reading order', () => {
-            const page: ProcessedPage = {
+            const page: InternalProcessedPage = {
                 ...basePage(),
                 items: [
                     {

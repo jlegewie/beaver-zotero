@@ -42,13 +42,18 @@ describe("BeaverExtract fixtures (smoke)", () => {
             const result = await extractPdf({
                 pdfData: pdfBytes,
                 mode: "structured",
-                pageIndices: f.fixture.config.pageIndices,
                 analysisWindow: resolveAnalysisWindow(f.fixture.config.analysisScope),
                 settings: f.fixture.config.settings,
                 paragraphSettings: f.fixture.config.paragraphSettings,
                 structured: { splitterConfig: f.fixture.config.splitterConfig },
             });
-            const actual = projectExtractionSnapshot(result);
+            if (result.mode !== "structured") {
+                throw new Error("expected structured result");
+            }
+            const actual = projectExtractionSnapshot(
+                result,
+                f.fixture.config.pageIndices,
+            );
             const diffs = diffExtractionSnapshots(f.fixture.expected, actual, {
                 bboxAbsPt: f.fixture.tolerance.bboxAbsPt,
             });

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
     extractPageSentences,
     simpleRegexSentenceSplit,
-    type ProcessedPage,
+    type InternalProcessedPage,
     type RawLineDetailed,
     type RawPageDataDetailed,
 } from "../../../src/beaver-extract";
@@ -140,7 +140,7 @@ describe("processed page sentence view", () => {
             splitter: simpleRegexSentenceSplit,
             precomputed: { paragraphResult },
         });
-        const page: ProcessedPage = {
+        const page: InternalProcessedPage = {
             index: result.pageIndex,
             width: result.width,
             height: result.height,
@@ -167,7 +167,7 @@ describe("processed page sentence view", () => {
         page.sentences![0].joinWithNext = true;
         expect(textItem.sentences![0].joinWithNext).toBe(true);
 
-        const serialized = JSON.parse(JSON.stringify(page)) as ProcessedPage;
+        const serialized = JSON.parse(JSON.stringify(page)) as InternalProcessedPage;
         for (const sentence of serialized.sentences ?? []) {
             const parent = serialized.items.find((item) => item.id === sentence.parentId);
             expect(parent?.kind).toBe("text");

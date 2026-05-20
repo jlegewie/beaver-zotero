@@ -29,6 +29,7 @@ import { buildOverlayCommand } from "../cli/commands/overlay";
 import { buildProfileCommand } from "../cli/commands/profile";
 import { buildRawDetailedCommand } from "../cli/commands/rawDetailed";
 import { buildRenderCommand } from "../cli/commands/render";
+import { buildTraceCommand } from "../cli/commands/trace";
 
 const LOG_LEVEL_CHOICES: ReadonlyArray<CliLogLevel> = [
     "error",
@@ -83,6 +84,7 @@ export function buildProgram(deps: CliDeps): Command {
         .addCommand(buildOverlayCommand(deps))
         .addCommand(buildAnalyzeLayoutCommand(deps))
         .addCommand(buildProfileCommand(deps))
+        .addCommand(buildTraceCommand(deps))
         .addCommand(buildRawDetailedCommand(deps))
         .addCommand(buildRenderCommand(deps))
         .addCommand(buildFixtureCommand(deps))

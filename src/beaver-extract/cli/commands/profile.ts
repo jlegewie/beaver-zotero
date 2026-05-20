@@ -27,10 +27,10 @@ import { Command } from "commander";
 import type { CliDeps } from "../runCliTypes";
 import type { ExtractInput } from "../../node/api";
 import type {
-    ExtractionResult,
     ExtractionTimings,
     StructuredPagePhaseTimings,
 } from "../../types";
+import type { BeaverExtractResult } from "../../schema";
 import {
     buildErrorEnvelope,
     buildSuccessEnvelope,
@@ -361,7 +361,7 @@ export function buildProfileCommand(deps: CliDeps): Command {
                 effective.repeat = repeat;
 
                 const runs: ProfileRun[] = [];
-                let lastResult: ExtractionResult | undefined;
+                let lastResult: BeaverExtractResult | undefined;
                 for (let i = 0; i < repeat; i++) {
                     const startedAt = performance.now();
                     const result = await deps.api.extractPdf(input);
@@ -371,8 +371,10 @@ export function buildProfileCommand(deps: CliDeps): Command {
                         runIndex: i,
                         cold: i === 0,
                         cliWallMs,
-                        timings: result.metadata.timings,
-                        pageCount: result.pages.length,
+                        timings: result.diagnostics?.timings ?? (result as any).metadata?.timings,
+                        pageCount: "document" in result
+                            ? result.document.pages.length
+                            : ((result as any).pages?.length ?? 0),
                     });
                 }
 
@@ -401,7 +403,12 @@ export function buildProfileCommand(deps: CliDeps): Command {
                     // Keep `lastResult` alive for GC visibility only —
                     // some PDFs are large and we want the structured-clone
                     // pressure to be representative of the actual run.
-                    if (lastResult && lastResult.pages.length === 0) {
+                    if (
+                        lastResult &&
+                        ("document" in lastResult
+                            ? lastResult.document.pages.length
+                            : ((lastResult as any).pages?.length ?? 0)) === 0
+                    ) {
                         deps.stdout.write("warning: no pages extracted\n");
                     }
                 }

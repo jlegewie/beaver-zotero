@@ -68,7 +68,7 @@ describe('mupdf-worker.js bundle', () => {
                     'MuPDFService / Zotero.Prefs. Worker files must import ' +
                     'analyzers and types directly:\n' +
                     '  import { StyleAnalyzer } from "../StyleAnalyzer";\n' +
-                    '  import type { ExtractionResult } from "../types";\n',
+                    '  import type { InternalExtractionResult } from "../types";\n',
             ).toBe(false);
         }
     });
