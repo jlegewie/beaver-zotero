@@ -15,6 +15,7 @@ import { atom, createStore } from 'jotai';
 const {
     capturedHandlers,
     mockDismissDiffPreview,
+    mockShowDiffPreview,
     storeRef,
     testPendingApprovalsAtom,
 } = vi.hoisted(() => {
@@ -31,6 +32,7 @@ const {
             previewNoteKey: null as { libraryId: number; zoteroKey: string } | null,
         },
         mockDismissDiffPreview: vi.fn(),
+        mockShowDiffPreview: vi.fn().mockResolvedValue(true),
         storeRef: { current: null as any },
         // Will be set after atom() is available
         testPendingApprovalsAtom: { ref: null as any },
@@ -42,7 +44,7 @@ const {
 // ---------------------------------------------------------------------------
 
 vi.mock('../../../react/utils/noteEditorDiffPreview', () => ({
-    showDiffPreview: vi.fn().mockResolvedValue(true),
+    showDiffPreview: (...args: any[]) => mockShowDiffPreview(...args),
     dismissDiffPreview: (...args: any[]) => mockDismissDiffPreview(...args),
     isDiffPreviewActive: vi.fn().mockReturnValue(false),
     isDiffPreviewSupported: vi.fn().mockReturnValue(true),
@@ -91,6 +93,7 @@ vi.mock('../../../react/atoms/agentRunAtoms', () => ({
 // ---------------------------------------------------------------------------
 
 import { diffPreviewNoteKeyAtom } from '../../../react/utils/diffPreviewCoordinator';
+import { updateDiffPreviewForNote } from '../../../react/utils/diffPreviewCoordinator';
 
 // Now create the real atom and assign it
 const pendingApprovalsAtom = atom<Map<string, any>>(new Map());
@@ -105,6 +108,9 @@ function makePendingApproval(overrides: {
     actionType?: string;
     library_id?: number;
     zotero_key?: string;
+    old_string?: string;
+    new_string?: string;
+    operation?: string;
 }) {
     return {
         actionId: overrides.actionId,
@@ -113,8 +119,9 @@ function makePendingApproval(overrides: {
         actionData: {
             library_id: overrides.library_id ?? 1,
             zotero_key: overrides.zotero_key ?? 'AAAA1111',
-            old_string: 'old',
-            new_string: 'new',
+            old_string: overrides.old_string ?? 'old',
+            new_string: overrides.new_string ?? 'new',
+            operation: overrides.operation,
         },
     };
 }
@@ -142,6 +149,22 @@ describe('diffPreviewCoordinator — handleBannerAction', () => {
         storeRef.current = createStore();
         capturedHandlers.previewNoteKey = null;
         approvalResponses.length = 0;
+    });
+
+    it('includes pending append approvals in automatic diff preview edits', async () => {
+        seedApprovals(makePendingApproval({
+            actionId: 'append-1',
+            old_string: '',
+            new_string: '<p>Appended</p>',
+            operation: 'append',
+        }));
+
+        updateDiffPreviewForNote(1, 'AAAA1111');
+        await Promise.resolve();
+
+        expect(mockShowDiffPreview).toHaveBeenCalledWith(1, 'AAAA1111', [
+            { oldString: '', newString: '<p>Appended</p>', operation: 'append' },
+        ]);
     });
 
     it('registers a banner action handler on module load', () => {

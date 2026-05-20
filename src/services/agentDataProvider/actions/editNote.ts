@@ -51,7 +51,7 @@ import {
     externalReferenceMappingAtom,
     externalReferenceItemMappingAtom,
 } from '../../../../react/atoms/externalReferences';
-import { addOrUpdateEditFooter } from '../../../utils/noteEditFooter';
+import { addOrUpdateEditFooter, getBeaverFooterAppendPoint } from '../../../utils/noteEditFooter';
 import { assertNoPreviewMarkers } from '../../../utils/notePreviewGuard';
 import {
     WSAgentActionValidateRequest,
@@ -427,6 +427,39 @@ async function validateEditNoteAction(
         };
     }
 
+    // ── append mode: validate new_string only, no old_string matching ──
+    if (operation === 'append') {
+        if (!new_string || new_string.trim() === '') {
+            return {
+                type: 'agent_action_validate_response',
+                request_id: request.request_id,
+                valid: false,
+                error: 'new_string must not be empty.',
+                error_code: 'no_changes',
+                preference: 'always_ask',
+            };
+        }
+
+        const pre = precheckNewString(request.request_id, new_string, metadata, externalRefContext);
+        if (!pre.ok) return pre.response;
+
+        const noteTitle = item.getNoteTitle() || '(untitled)';
+        const totalLines = simplified.split('\n').length;
+        const preference = getEditNotePreference(library_id, zotero_key);
+
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: true,
+            current_value: {
+                note_title: noteTitle,
+                total_lines: totalLines,
+                match_count: 1,
+            },
+            preference,
+        };
+    }
+
     // ── String replacement mode (default) ──
 
     // 9. Require an actual change.
@@ -761,6 +794,110 @@ async function executeEditNoteAction(
                 occurrences_replaced: 1,
                 warnings,
                 undo_full_html: strippedHtml,
+            },
+        };
+    }
+
+    // ── append mode: add new_string to the end of the note body ──
+    if (operation === 'append') {
+        let expandedNew: string;
+        try {
+            expandedNew = expandToRawHtml(new_string, metadata, 'new', externalRefContext);
+        } catch (e: any) {
+            return {
+                type: 'agent_action_execute_response',
+                request_id: request.request_id,
+                success: false,
+                error: e.message || String(e),
+                error_code: 'expansion_failed',
+            };
+        }
+
+        const existingCitationCache = extractDataCitationItems(oldHtml);
+        const strippedHtml = stripDataCitationItems(oldHtml);
+
+        const insertAt = getBeaverFooterAppendPoint(strippedHtml);
+        let undoBeforeContext = strippedHtml.substring(Math.max(0, insertAt - 200), insertAt);
+        let undoAfterContext = strippedHtml.substring(insertAt, insertAt + 200);
+        let newHtml = strippedHtml.slice(0, insertAt) + expandedNew + strippedHtml.slice(insertAt);
+
+        const threadId = store.get(currentThreadIdAtom);
+        if (threadId) {
+            newHtml = addOrUpdateEditFooter(newHtml, threadId);
+        }
+
+        newHtml = rebuildDataCitationItems(newHtml, existingCitationCache);
+
+        const hadSchemaVersion = hasSchemaVersionWrapper(strippedHtml);
+        if (hadSchemaVersion && !hasSchemaVersionWrapper(newHtml)) {
+            return {
+                type: 'agent_action_execute_response',
+                request_id: request.request_id,
+                success: false,
+                error: 'The note wrapper <div data-schema-version="..."> must not be removed.',
+                error_code: 'wrapper_removed',
+            };
+        }
+
+        const postEditStripped = stripDataCitationItems(newHtml);
+        undoBeforeContext = postEditStripped.substring(
+            Math.max(0, insertAt - 200),
+            insertAt,
+        );
+        undoAfterContext = postEditStripped.substring(
+            insertAt + expandedNew.length,
+            insertAt + expandedNew.length + 200,
+        );
+
+        checkAborted(ctx, 'edit_note:before_save');
+
+        try {
+            assertNoPreviewMarkers(newHtml, 'editNote:append:apply');
+            item.setNote(newHtml);
+            await item.saveTx();
+            logger(`executeEditNoteAction: Saved append edit to ${noteId}`, 1);
+        } catch (error) {
+            try {
+                assertNoPreviewMarkers(oldHtml, 'editNote:append:rollback');
+                item.setNote(oldHtml);
+            } catch (_) { /* best-effort */ }
+            if (error instanceof TimeoutError) throw error;
+            return {
+                type: 'agent_action_execute_response',
+                request_id: request.request_id,
+                success: false,
+                error: `Failed to save note: ${error}`,
+                error_code: 'save_failed',
+            };
+        }
+
+        await waitForNoteSaveStabilization(item, newHtml);
+        clearNoteEditorSelection(library_id, zotero_key);
+        invalidateSimplificationCache(noteId);
+
+        const duplicateWarning = checkDuplicateCitations(new_string, metadata);
+        const warnings = duplicateWarning ? [duplicateWarning] : undefined;
+        const undoData = {
+            undo_new_html: expandedNew,
+            undo_before_context: undoBeforeContext,
+            undo_after_context: undoAfterContext,
+        };
+        const savedStrippedHtml = stripDataCitationItems(newHtml);
+        await waitForPMNormalization(item, savedStrippedHtml, undoData, strippedHtml);
+
+        return {
+            type: 'agent_action_execute_response',
+            request_id: request.request_id,
+            success: true,
+            result_data: {
+                library_id,
+                zotero_key,
+                occurrences_replaced: 1,
+                warnings,
+                undo_old_html: '',
+                undo_new_html: undoData.undo_new_html,
+                undo_before_context: undoData.undo_before_context,
+                undo_after_context: undoData.undo_after_context,
             },
         };
     }

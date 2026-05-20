@@ -3,6 +3,7 @@ import {
     parseEditFooter,
     buildEditFooterHtml,
     addOrUpdateEditFooter,
+    getBeaverFooterAppendPoint,
     stripBeaverEditFooter,
     stripBeaverCreatedFooter,
 } from '../../../src/utils/noteEditFooter';
@@ -440,5 +441,24 @@ describe('stripBeaverCreatedFooter', () => {
         const result = stripBeaverCreatedFooter(html);
         expect(result).not.toContain('Created by Beaver');
         expect(result).toContain('Edited by Beaver');
+    });
+});
+
+describe('getBeaverFooterAppendPoint', () => {
+    it('returns the start of a created footer', () => {
+        const createdFooter =
+            '<p><span style="color: #aaa;"><strong>Created by Beaver</strong> \u00b7 <a href="zotero://beaver/thread/t0/run/r0">Open Message</a></span></p>';
+        const html = wrap('<p>Content</p>' + createdFooter);
+
+        expect(getBeaverFooterAppendPoint(html)).toBe(html.indexOf(createdFooter));
+    });
+
+    it('returns the earliest Beaver footer when created and edited footers coexist', () => {
+        const createdFooter =
+            '<p><span style="color: #aaa;"><strong>Created by Beaver</strong> \u00b7 <a href="zotero://beaver/thread/t0/run/r0">Open Message</a></span></p>';
+        const editFooter = buildEditFooterHtml(['t1']);
+        const html = wrap('<p>Content</p>' + createdFooter + editFooter);
+
+        expect(getBeaverFooterAppendPoint(html)).toBe(html.indexOf(createdFooter));
     });
 });
