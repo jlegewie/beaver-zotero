@@ -17,13 +17,16 @@ import {
     type PageImageResult,
     type PDFMetadata,
     type ExtractionSettings,
-    type ExtractionResult,
     type LayoutAnalysisResult,
     type OCRDetectionOptions,
     type OCRDetectionResult,
     type PDFSearchOptions,
     type PDFSearchResult,
 } from "./types";
+import type {
+    BeaverExtractResult,
+    StructuredExtractWithDebugResult,
+} from "./schema";
 import type {
     SentenceTraceResult,
     SentenceSplitterConfig,
@@ -747,8 +750,8 @@ export class MuPDFWorkerClient {
      * in the error payload (rehydrated by `rehydrateError`).
      *
      * `mode === "structured"` enables sentence-level extraction. The result
-     * is the same `ExtractionResult` shape; per-page sentence /
-     * paragraph / column / line data lives on `ProcessedPage`. Pass the
+     * is the same `InternalExtractionResult` shape; per-page sentence /
+     * paragraph / column / line data lives on `InternalProcessedPage`. Pass the
      * splitter as a serializable `structured.splitterConfig` (the
      * facade does the `splitter`/`language` translation before crossing
      * the worker boundary).
@@ -758,7 +761,10 @@ export class MuPDFWorkerClient {
         args?: {
             mode?: "markdown" | "structured";
             markdown?: { engine?: "block" | "paragraph" };
-            structured?: { splitterConfig?: SentenceSplitterConfig };
+            structured?: {
+                splitterConfig?: SentenceSplitterConfig;
+                bboxPrecision?: number;
+            };
             settings?: ExtractionSettings;
             paragraphSettings?: ParagraphDetectionSettings;
             pageIndices?: number[];
@@ -772,10 +778,10 @@ export class MuPDFWorkerClient {
             analysisWindow?: number;
         },
         signal?: AbortSignal,
-    ): Promise<ExtractionResult> {
+    ): Promise<BeaverExtractResult> {
         const bytes =
             pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
-        return this.call<ExtractionResult>("extract", {
+        return this.call<BeaverExtractResult>("extract", {
             pdfData: bytes,
             mode: args?.mode,
             markdown: args?.markdown,
@@ -786,6 +792,39 @@ export class MuPDFWorkerClient {
             pageRange: args?.pageRange,
             analysisWindow: args?.analysisWindow,
         }, { signal });
+    }
+
+    async structuredExtractWithDebug(
+        pdfData: Uint8Array | ArrayBuffer,
+        args: {
+            structured?: {
+                splitterConfig?: SentenceSplitterConfig;
+                bboxPrecision?: number;
+            };
+            settings?: ExtractionSettings;
+            paragraphSettings?: ParagraphDetectionSettings;
+            analysisWindow?: number;
+            capturePages: number[];
+            debugMode?: "triage" | "full";
+        },
+        signal?: AbortSignal,
+    ): Promise<StructuredExtractWithDebugResult> {
+        const bytes =
+            pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
+        return this.call<StructuredExtractWithDebugResult>(
+            "structuredExtractWithDebug",
+            {
+                pdfData: bytes,
+                mode: "structured",
+                structured: args.structured,
+                settings: args.settings,
+                paragraphSettings: args.paragraphSettings,
+                analysisWindow: args.analysisWindow,
+                capturePages: args.capturePages,
+                debugMode: args.debugMode,
+            },
+            { signal },
+        );
     }
 
     /**
@@ -874,7 +913,7 @@ export class MuPDFWorkerClient {
      * Single-page sentence-bbox extraction with pipeline intermediates.
      * Debug-only — production sentence-level extraction goes through
      * `extract({ mode: "structured" })` which returns the same
-     * `ExtractionResult` shape with `pages[i].sentences` populated.
+     * `InternalExtractionResult` shape with `pages[i].sentences` populated.
      *
      * Powers the dev visualizer / fixture capture / extract-trace
      * endpoints. Returns `SentenceTraceResult = { result, trace }`

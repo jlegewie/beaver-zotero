@@ -8,7 +8,7 @@
  *
  * Returns `marginAnalysis` alongside `marginRemoval` because the
  * extract result envelope publishes it as
- * `ExtractionResult.analysis.marginAnalysis`. Returning both keeps the
+ * `InternalExtractionResult.analysis.marginAnalysis`. Returning both keeps the
  * contract intact without forcing the extract op to recompute the
  * collection pass.
  *
@@ -50,11 +50,11 @@ export interface PageAnalysisContextInput {
 }
 
 export interface PageAnalysisContext {
-    /** Document-wide style profile (echoed to ExtractionResult.analysis). */
+    /** Document-wide style profile (echoed to InternalExtractionResult.analysis). */
     styleProfile: StyleProfile;
     /**
      * Margin zone elements collected per position. Echoed to
-     * `ExtractionResult.analysis.marginAnalysis`.
+     * `InternalExtractionResult.analysis.marginAnalysis`.
      */
     marginAnalysis: MarginAnalysis;
     /**

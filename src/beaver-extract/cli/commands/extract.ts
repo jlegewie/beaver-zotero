@@ -20,6 +20,10 @@ import {
     parsePagesList,
 } from "../options";
 import type { ExtractInput } from "../../node/api";
+import {
+    validateMarkdownExtractResult,
+    validateStructuredExtractResult,
+} from "../../schema";
 
 export function buildExtractCommand(deps: CliDeps): Command {
     const cmd = new Command("extract");
@@ -30,6 +34,7 @@ export function buildExtractCommand(deps: CliDeps): Command {
         .option("--page-range <range>", "page range '<start>:<end>' (end inclusive)")
         .option("--analysis-window <n>", "analysis window size around target pages")
         .option("--language <lang>", "splitter language code (e.g. 'en')")
+        .option("--bbox-precision <n>", "structured bbox decimal precision", "1")
         .option("--settings <path>", "path to JSON file with ExtractionSettings")
         .option("--graphics-layer-mode <mode>", "graphics layer probe mode: off | auto | on")
         .option("--paragraph-settings <path>", "path to JSON file with ParagraphDetectionSettings")
@@ -67,6 +72,14 @@ export function buildExtractCommand(deps: CliDeps): Command {
                     };
                     effective.splitter = input.structured.splitterConfig;
                 }
+                if (input.mode === "structured") {
+                    const bboxPrecision = Number(opts.bboxPrecision ?? 1);
+                    input.structured = {
+                        ...(input.structured ?? {}),
+                        bboxPrecision,
+                    };
+                    effective.bboxPrecision = bboxPrecision;
+                }
                 if (opts.settings) {
                     input.settings = await loadJsonFile(opts.settings);
                 }
@@ -83,6 +96,11 @@ export function buildExtractCommand(deps: CliDeps): Command {
                 }
 
                 const result = await deps.api.extractPdf(input);
+                if (result.mode === "structured") {
+                    validateStructuredExtractResult(result);
+                } else if (result.mode === "markdown") {
+                    validateMarkdownExtractResult(result);
+                }
 
                 if (opts.json) {
                     deps.stdout.write(
@@ -92,8 +110,11 @@ export function buildExtractCommand(deps: CliDeps): Command {
                         ) + "\n",
                     );
                 } else {
+                    const pageCount = "document" in result
+                        ? result.document.pages.length
+                        : ((result as any).pages?.length ?? 0);
                     deps.stdout.write(
-                        `extracted ${result.pages.length} page(s); ` +
+                        `extracted ${pageCount} page(s); ` +
                             `mode=${input.mode ?? "structured"}\n`,
                     );
                 }

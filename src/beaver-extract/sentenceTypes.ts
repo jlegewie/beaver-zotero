@@ -13,7 +13,7 @@
  *   - `SentenceSplitterConfig` — serializable, crosses the worker boundary.
  *   - `WorkerSentenceDebugOptions` — debug-only worker op input. The
  *     production sentence path lives on `extract({ mode: "structured" })`
- *     (see `types.ts` for `ProcessedPage` sentence fields); this options
+ *     (see `types.ts` for `InternalProcessedPage` sentence fields); this options
  *     type is for the dev-only `extractSentenceDebug` op that
  *     surfaces single-page intermediates.
  */

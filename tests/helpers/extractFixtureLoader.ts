@@ -20,6 +20,7 @@ import {
     sharedPdfPath,
 } from "../../src/beaver-extract/cli/fixture/fixtureFile";
 import {
+    FixtureValidationError,
     validateFixture,
     type CapturedFixture,
 } from "../../src/beaver-extract/cli/fixture/fixtureSchema";
@@ -84,7 +85,19 @@ export function loadExtractFixtures(
             const msg = e instanceof Error ? e.message : String(e);
             throw new Error(`failed to parse JSON in ${fixtureJson}: ${msg}`);
         }
-        const fixture = validateFixture(parsed, fixtureJson);
+        let fixture: CapturedFixture;
+        try {
+            fixture = validateFixture(parsed, fixtureJson);
+        } catch (e) {
+            if (
+                opts.skipIfMissing &&
+                e instanceof FixtureValidationError &&
+                /schema: expected/.test(e.message)
+            ) {
+                continue;
+            }
+            throw e;
+        }
         fixtures.push({ root, scope, id: name, path: fixtureJson, fixture });
     }
     fixtures.sort((a, b) => a.id.localeCompare(b.id));

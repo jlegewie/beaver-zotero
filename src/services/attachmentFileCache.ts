@@ -28,7 +28,7 @@ import { logger } from '../utils/logger';
  */
 // Attachment text cache stores rendered page text only; structural extraction
 // metadata (items/sentences/bboxes) is not cached here.
-export const EXTRACTION_VERSION = '3';
+export const EXTRACTION_VERSION = '4';
 
 /** Maximum entries in the in-memory metadata cache. */
 const MEMORY_CACHE_MAX = 500;

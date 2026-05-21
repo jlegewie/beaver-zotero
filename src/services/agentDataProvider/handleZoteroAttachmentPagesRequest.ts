@@ -36,6 +36,11 @@ import {
     TimeoutError,
     createTimeoutController,
 } from './timeout';
+import {
+    markdownDocumentToCachedPages,
+    markdownDocumentToWSPageContent,
+} from './markdownAdapter';
+import type { MarkdownDocument } from '../../beaver-extract/schema';
 
 
 /**
@@ -399,10 +404,11 @@ export async function handleZoteroAttachmentPagesRequest(
         //   - bounded both ends                     → pageRange { startIndex, endIndex, maxPages }
         //   - open-ended (start set, end omitted)   → pageRange { startIndex, maxPages } (worker resolves endIndex)
         const extractArgs: {
+            mode: 'markdown';
             settings?: { checkTextLayer: true };
             pageIndices?: number[];
             pageRange?: { startIndex: number; endIndex?: number; maxPages?: number };
-        } = { settings: { checkTextLayer: true } };
+        } = { mode: 'markdown', settings: { checkTextLayer: true } };
         if (!extractingAllPages) {
             const range: { startIndex: number; endIndex?: number; maxPages?: number } = {
                 startIndex: startPage - 1,
@@ -428,24 +434,42 @@ export async function handleZoteroAttachmentPagesRequest(
         );
         const result = await extractor.extract(pdfData, extractArgs, signal);
         throwIfTimedOut('pdf_extract');
+        let markdownDocument: MarkdownDocument;
+        if (result.mode === 'markdown') {
+            markdownDocument = result.document;
+        } else {
+            throw new Error('Expected markdown extraction result for attachment pages');
+        }
 
-        // The worker's extract always populates analysis.pageCount.
-        const resolvedPageCount = result.analysis.pageCount;
+        // The worker's extract always populates document.pageCount.
+        const resolvedPageCount = markdownDocument.pageCount;
         totalPages = resolvedPageCount;
 
         // Refresh pageLabels from the extraction result if we hadn't loaded
         // them earlier. Ensures response `page_label` is populated even when
         // `prefer_page_labels=false` and the cache was cold.
-        if (!pageLabels && result.pageLabels && Object.keys(result.pageLabels).length > 0) {
-            pageLabels = result.pageLabels;
+        if (!pageLabels && markdownDocument.pageLabels && Object.keys(markdownDocument.pageLabels).length > 0) {
+            pageLabels = Object.fromEntries(
+                Object.entries(markdownDocument.pageLabels).map(([index, label]) => [
+                    Number(index),
+                    label,
+                ]),
+            );
         }
 
         // 10. Build response (convert back to 1-indexed page numbers)
-        const pages: WSPageContent[] = result.pages.map((page) => ({
-            page_number: page.index + 1,
-            page_label: pageLabels?.[page.index] ?? page.label,
-            content: page.content,
-        }));
+        const stringPageLabels = pageLabels
+            ? Object.fromEntries(
+                Object.entries(pageLabels).map(([index, label]) => [
+                    String(index),
+                    label,
+                ]),
+              )
+            : undefined;
+        const pages: WSPageContent[] = markdownDocumentToWSPageContent(
+            markdownDocument,
+            stringPageLabels,
+        );
 
         // 10b. Write-through: persist metadata and content cache.
         // This handler produces document-level properties (page_labels) that
@@ -461,8 +485,13 @@ export async function handleZoteroAttachmentPagesRequest(
             // - null => not checked yet (lightweight metadata path)
             // - {} => checked, no custom labels found
             // - populated object => checked, custom labels found
-            const persistedPageLabels = result.pageLabels && Object.keys(result.pageLabels).length > 0
-                ? result.pageLabels
+            const persistedPageLabels = markdownDocument.pageLabels && Object.keys(markdownDocument.pageLabels).length > 0
+                ? Object.fromEntries(
+                    Object.entries(markdownDocument.pageLabels).map(([index, label]) => [
+                        Number(index),
+                        label,
+                    ]),
+                  )
                 : {};
             const metadataPersisted = await persistMetadataToCache(
                 pdfItem,
@@ -481,13 +510,8 @@ export async function handleZoteroAttachmentPagesRequest(
 
             if (metadataPersisted && !Zotero.__beaverShuttingDown) {
                 try {
-                    const contentPages: CachedPageContent[] = result.pages.map((p) => ({
-                        index: p.index,
-                        label: p.label,
-                        content: p.content,
-                        width: p.width,
-                        height: p.height,
-                    }));
+                    const contentPages: CachedPageContent[] =
+                        markdownDocumentToCachedPages(markdownDocument);
                     await cache.setContentPages(
                         pdfItem.libraryID,
                         pdfItem.key,

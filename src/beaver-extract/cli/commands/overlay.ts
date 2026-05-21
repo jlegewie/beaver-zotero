@@ -3,9 +3,9 @@
  * overlays composited on top.
  *
  * Levels: `columns | lines | items | sentences | margins`. The
- * page-content levels come from a structured-mode `extractPdf({ pageIndices: [n] })`;
- * `margins` comes from `analyzeLayout` so the candidates / removal
- * decisions match what production extract sees pre-filter.
+ * page-content levels come from `structuredExtractWithDebug`; `margins`
+ * comes from `analyzeLayout` so the candidates / removal decisions match
+ * what production extract sees pre-filter.
  *
  * Always writes a PNG file to `--out`. With `--sidecar-json`, writes a
  * companion `<out>.json` with rect data + page dims + stats + effective
@@ -26,18 +26,17 @@ import {
     parsePageInt,
 } from "../options";
 import {
-    buildColumnOverlayFromPage,
-    buildItemOverlayFromPage,
-    buildLineOverlayFromPage,
+    buildColumnOverlayFromDebugPage,
+    buildItemOverlayFromDebugPage,
+    buildLineOverlayFromDebugPage,
     buildMarginsOverlayFromAnalysis,
-    buildSentenceOverlayFromPage,
+    buildSentenceOverlayFromDebugPage,
 } from "../../debug/overlayBuilders";
 import type {
     OverlayLevel,
     OverlayResult,
 } from "../../debug/overlayBuilders";
-import type { ExtractInput, AnalyzeLayoutInput } from "../../node/api";
-import type { ExtractionResult, ProcessedPage } from "../../types";
+import type { AnalyzeLayoutInput, StructuredTraceInput } from "../../node/api";
 
 const VALID_LEVELS: ReadonlyArray<OverlayLevel> = [
     "columns",
@@ -54,19 +53,6 @@ function parseLevel(value: string): OverlayLevel {
     throw new Error(
         `--level must be one of ${VALID_LEVELS.join(" | ")}, got "${value}"`,
     );
-}
-
-function findPage(
-    extract: ExtractionResult,
-    pageIndex: number,
-): ProcessedPage {
-    const page = extract.pages.find((p) => p.index === pageIndex);
-    if (!page) {
-        throw new Error(
-            `overlay: page ${pageIndex} missing from extract.pages`,
-        );
-    }
-    return page;
 }
 
 export function buildOverlayCommand(deps: CliDeps): Command {
@@ -129,8 +115,9 @@ export function buildOverlayCommand(deps: CliDeps): Command {
                 }
 
                 // Build the overlay rects for the requested level. `margins`
-                // routes through analyzeLayout; everything else goes through
-                // a single structured-mode extract for the target page.
+                // routes through analyzeLayout; everything else uses the
+                // structured debug projection so internal geometry such as
+                // columns and lines is available.
                 let overlay: OverlayResult;
                 if (level === "margins") {
                     const input: AnalyzeLayoutInput = {
@@ -156,10 +143,11 @@ export function buildOverlayCommand(deps: CliDeps): Command {
                     const layout = await deps.api.analyzeLayout(input);
                     overlay = buildMarginsOverlayFromAnalysis(layout, pageIndex);
                 } else {
-                    const input: ExtractInput = {
+                    const input: StructuredTraceInput = {
                         pdfData: bytes,
                         mode: "structured",
-                        pageIndices: [pageIndex],
+                        capturePages: [pageIndex],
+                        debugMode: "full",
                     };
                     if (opts.analysisWindow != null) {
                         input.analysisWindow = parseAnalysisWindow(String(opts.analysisWindow));
@@ -192,20 +180,23 @@ export function buildOverlayCommand(deps: CliDeps): Command {
                         );
                         effective.paragraphSettings = input.paragraphSettings;
                     }
-                    const extract = await deps.api.extractPdf(input);
-                    const ppage = findPage(extract, pageIndex);
+                    const extract = await deps.api.structuredExtractWithDebug(input);
+                    const debugPage = extract.debug.pages?.[String(pageIndex)];
+                    if (!debugPage) {
+                        throw new Error(`overlay: page ${pageIndex} missing from debug.pages`);
+                    }
                     switch (level) {
                         case "columns":
-                            overlay = buildColumnOverlayFromPage(ppage);
+                            overlay = buildColumnOverlayFromDebugPage(debugPage);
                             break;
                         case "lines":
-                            overlay = buildLineOverlayFromPage(ppage);
+                            overlay = buildLineOverlayFromDebugPage(debugPage);
                             break;
                         case "items":
-                            overlay = buildItemOverlayFromPage(ppage);
+                            overlay = buildItemOverlayFromDebugPage(debugPage);
                             break;
                         case "sentences":
-                            overlay = buildSentenceOverlayFromPage(ppage);
+                            overlay = buildSentenceOverlayFromDebugPage(debugPage);
                             break;
                     }
                 }

@@ -5,22 +5,21 @@ import {
     publicRoot,
 } from "../../helpers/extractFixtureLoader";
 import type {
-    SnapshotBBox,
-    ExtractionPageSnapshot,
-} from "../../../src/beaver-extract/debug/extractionSnapshot";
+    Rect,
+    StructuredPage,
+} from "../../../src/beaver-extract/schema/schema";
 
 function expectTopLeftInPage(
-    bbox: SnapshotBBox,
-    page: ExtractionPageSnapshot,
+    bbox: Rect,
+    page: StructuredPage,
     tolerance: number,
 ): void {
-    expect(bbox.origin).toBe("top-left");
-    expect(bbox.l).toBeLessThanOrEqual(bbox.r + tolerance);
-    expect(bbox.t).toBeLessThanOrEqual(bbox.b + tolerance);
-    expect(bbox.l).toBeGreaterThanOrEqual(-tolerance);
-    expect(bbox.t).toBeGreaterThanOrEqual(-tolerance);
-    expect(bbox.r).toBeLessThanOrEqual(page.pageWidth + tolerance);
-    expect(bbox.b).toBeLessThanOrEqual(page.pageHeight + tolerance);
+    expect(bbox[0]).toBeLessThanOrEqual(bbox[2] + tolerance);
+    expect(bbox[1]).toBeLessThanOrEqual(bbox[3] + tolerance);
+    expect(bbox[0]).toBeGreaterThanOrEqual(-tolerance);
+    expect(bbox[1]).toBeGreaterThanOrEqual(-tolerance);
+    expect(bbox[2]).toBeLessThanOrEqual(page.width + tolerance);
+    expect(bbox[3]).toBeLessThanOrEqual(page.height + tolerance);
 }
 
 describe("bbox page-frame invariant", () => {
@@ -30,13 +29,14 @@ describe("bbox page-frame invariant", () => {
 
         for (const { fixture } of fixtures) {
             const tolerance = fixture.tolerance.bboxAbsPt;
-            for (const page of fixture.expected.perPage) {
+            for (const page of fixture.expected.structured.pages) {
                 for (const item of page.items) {
                     expectTopLeftInPage(item.bbox, page, tolerance);
-                }
-                for (const sentence of page.sentences) {
-                    for (const bbox of sentence.bboxes) {
-                        expectTopLeftInPage(bbox, page, tolerance);
+                    if (!("sentences" in item) || !item.sentences) continue;
+                    for (const sentence of item.sentences) {
+                        for (const bbox of sentence.bboxes) {
+                            expectTopLeftInPage(bbox, page, tolerance);
+                        }
                     }
                 }
             }

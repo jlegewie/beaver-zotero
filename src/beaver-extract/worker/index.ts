@@ -7,7 +7,7 @@
  * URLs supplied by `getConfig()` and would try to spawn a worker from
  * inside this worker. Worker code imports analyzers and types directly:
  *   import { StyleAnalyzer } from "../StyleAnalyzer";
- *   import type { RawPageData, ExtractionResult } from "../types";
+ *   import type { RawPageData, InternalExtractionResult } from "../types";
  *
  * Built as a separate worker bundle by the host's build system.
  *
@@ -53,6 +53,7 @@ import {
     opGetPageCount,
     opRenderPages,
     opSearch,
+    opStructuredExtractWithDebug,
     type OpReply,
 } from "./ops";
 import { requireWorkerSelf } from "./workerScope";
@@ -96,6 +97,10 @@ async function dispatch(op: string, args: Record<string, unknown> | undefined): 
         // orchestration ops
         case "extract":
             return await opExtract(a as Parameters<typeof opExtract>[0]);
+        case "structuredExtractWithDebug":
+            return await opStructuredExtractWithDebug(
+                a as Parameters<typeof opStructuredExtractWithDebug>[0],
+            );
         case "analyzeOCRNeeds":
             return await opAnalyzeOCRNeeds(a as Parameters<typeof opAnalyzeOCRNeeds>[0]);
         case "search":

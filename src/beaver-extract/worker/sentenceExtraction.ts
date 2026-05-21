@@ -84,7 +84,7 @@ import { resolveSplitter } from "./splitterResolver";
  * and builds the analysis context once and reuses them across pages.
  *
  * Returns both the sentence result and the `FilteredParagraphResult`
- * so the multi-page caller can populate `ProcessedPage.content` /
+ * so the multi-page caller can populate `InternalProcessedPage.content` /
  * `columns` / `lines` from the same call (the paragraph-engine
  * markdown text is already produced inside the filter step as
  * `paragraphResult.pageContent`).

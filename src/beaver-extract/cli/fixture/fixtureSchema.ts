@@ -1,28 +1,29 @@
 /**
  * Runtime validators for the fixture file format.
  *
- * Targeted error messages — every failure cites the JSON path of the
- * offending field so the loader can surface "config.analysisScope is
- * invalid" rather than a deep-compare crash buried in the test runner.
+ * Targeted error messages cite the JSON path of the offending field so the
+ * loader can surface "config.analysisScope is invalid" rather than a
+ * deep-compare crash buried in the test runner.
  *
- * Bump `FIXTURE_SCHEMA_VERSION` whenever the snapshot projection changes
+ * Bump `FIXTURE_SCHEMA_VERSION` whenever the fixture wire shape changes
  * incompatibly. The loader rejects stale fixtures so regeneration failures
  * surface immediately instead of comparing mixed wire shapes.
  */
 import type {
-    ExtractionPageSnapshot,
-    ExtractionSnapshot,
-    SnapshotBBox,
-    SnapshotItem,
-    SnapshotSentence,
-} from "../../debug/extractionSnapshot";
+    DocumentItem,
+    DocumentItemKind,
+    MarkdownPage,
+    Rect,
+    Sentence,
+    StructuredPage,
+} from "../../schema";
 import type { ExtractionSettings } from "../../types";
 import type { ParagraphDetectionSettings } from "../../ParagraphDetector";
 import type { SentenceSplitterConfig } from "../../sentenceTypes";
 import { parseAnalysisScope, type AnalysisScope } from "./analysisScope";
 import type { Fingerprints } from "./fingerprints";
 
-export const FIXTURE_SCHEMA_VERSION = 2 as const;
+export const FIXTURE_SCHEMA_VERSION = 5 as const;
 
 export interface FixtureConfig {
     pageIndices: number[];
@@ -30,6 +31,11 @@ export interface FixtureConfig {
     splitterConfig: SentenceSplitterConfig;
     settings: ExtractionSettings;
     paragraphSettings: ParagraphDetectionSettings;
+}
+
+export interface ExpectedExtraction {
+    structured: { pages: StructuredPage[] };
+    markdown: { pages: MarkdownPage[] };
 }
 
 export interface CapturedFixture {
@@ -42,7 +48,7 @@ export interface CapturedFixture {
     config: FixtureConfig;
     fingerprints: Fingerprints;
     tolerance: { bboxAbsPt: number };
-    expected: ExtractionSnapshot;
+    expected: ExpectedExtraction;
 }
 
 export class FixtureValidationError extends Error {
@@ -81,7 +87,7 @@ export function validateFixture(value: unknown, source = "fixture"): CapturedFix
         `${source}.fingerprints`,
     );
     const tolerance = validateTolerance(v.tolerance, `${source}.tolerance`);
-    const expected = validateSnapshot(v.expected, `${source}.expected`);
+    const expected = validateExpected(v.expected, config, `${source}.expected`);
 
     return {
         schema: FIXTURE_SCHEMA_VERSION,
@@ -97,7 +103,7 @@ export function validateFixture(value: unknown, source = "fixture"): CapturedFix
     };
 }
 
-function validateConfig(value: unknown, source: string): FixtureConfig {
+export function validateConfig(value: unknown, source: string): FixtureConfig {
     const v = expectObject(value, source);
     const pageIndices = expectIntArray(v.pageIndices, `${source}.pageIndices`);
     if (pageIndices.length === 0) {
@@ -157,7 +163,7 @@ function validateFingerprints(value: unknown, source: string): Fingerprints {
     };
 }
 
-function validateTolerance(value: unknown, source: string): { bboxAbsPt: number } {
+export function validateTolerance(value: unknown, source: string): { bboxAbsPt: number } {
     const v = expectObject(value, source);
     const bboxAbsPt = v.bboxAbsPt;
     if (typeof bboxAbsPt !== "number" || !Number.isFinite(bboxAbsPt) || bboxAbsPt < 0) {
@@ -168,94 +174,190 @@ function validateTolerance(value: unknown, source: string): { bboxAbsPt: number 
     return { bboxAbsPt };
 }
 
-function validateSnapshot(value: unknown, source: string): ExtractionSnapshot {
+function validateExpected(
+    value: unknown,
+    config: FixtureConfig,
+    source: string,
+): ExpectedExtraction {
     const v = expectObject(value, source);
-    const perPageRaw = expectArray(v.perPage, `${source}.perPage`);
-    const perPage: ExtractionPageSnapshot[] = perPageRaw.map((p, i) =>
-        validatePage(p, `${source}.perPage[${i}]`),
+    const structured = expectObject(v.structured, `${source}.structured`);
+    const markdown = expectObject(v.markdown, `${source}.markdown`);
+    const structuredPages = expectArray(
+        structured.pages,
+        `${source}.structured.pages`,
+    ).map((p, i) => validateStructuredPage(p, `${source}.structured.pages[${i}]`));
+    const markdownPages = expectArray(
+        markdown.pages,
+        `${source}.markdown.pages`,
+    ).map((p, i) => validateMarkdownPage(p, `${source}.markdown.pages[${i}]`));
+
+    validatePageIndexSet(
+        structuredPages,
+        config,
+        `${source}.structured.pages`,
     );
-    const totals = expectObject(v.totals, `${source}.totals`);
+    validatePageIndexSet(markdownPages, config, `${source}.markdown.pages`);
+
     return {
-        perPage,
-        totals: {
-            itemCount: expectInt(totals.itemCount, `${source}.totals.itemCount`),
-            sentenceCount: expectInt(totals.sentenceCount, `${source}.totals.sentenceCount`),
-            degradedItems: expectInt(
-                totals.degradedItems,
-                `${source}.totals.degradedItems`,
-            ),
-        },
+        structured: { pages: structuredPages },
+        markdown: { pages: markdownPages },
     };
 }
 
-function validatePage(value: unknown, source: string): ExtractionPageSnapshot {
+function validatePageIndexSet(
+    pages: Array<{ index: number }>,
+    config: FixtureConfig,
+    source: string,
+): void {
+    const actual = pages.map((p) => p.index);
+    const expected = [...config.pageIndices].sort((a, b) => a - b);
+    if (
+        actual.length !== expected.length ||
+        actual.some((index, i) => index !== expected[i])
+    ) {
+        throw new FixtureValidationError(
+            `${source}: page indices [${actual.join(", ")}] do not match config.pageIndices [${expected.join(", ")}]`,
+        );
+    }
+}
+
+function validateStructuredPage(value: unknown, source: string): StructuredPage {
     const v = expectObject(value, source);
-    const itemsRaw = expectArray(v.items, `${source}.items`);
-    const items = itemsRaw.map((item, i) =>
-        validateItem(item, `${source}.items[${i}]`),
+    const items = expectArray(v.items, `${source}.items`).map((item, i) =>
+        validateDocumentItem(item, `${source}.items[${i}]`),
     );
-    const sentencesRaw = expectArray(v.sentences, `${source}.sentences`);
-    const sentences = sentencesRaw.map((s, i) =>
-        validateSentence(s, `${source}.sentences[${i}]`),
-    );
-    return {
-        pageIndex: expectInt(v.pageIndex, `${source}.pageIndex`),
-        pageWidth: expectFiniteNumber(v.pageWidth, `${source}.pageWidth`),
-        pageHeight: expectFiniteNumber(v.pageHeight, `${source}.pageHeight`),
-        content: expectString(v.content, `${source}.content`),
-        itemCount: expectInt(v.itemCount, `${source}.itemCount`),
-        sentenceCount: expectInt(v.sentenceCount, `${source}.sentenceCount`),
-        degradedItems: expectInt(v.degradedItems, `${source}.degradedItems`),
+    const out: StructuredPage = {
+        index: expectInt(v.index, `${source}.index`),
+        width: expectFiniteNumber(v.width, `${source}.width`),
+        height: expectFiniteNumber(v.height, `${source}.height`),
         items,
-        sentences,
     };
+    if (v.label !== undefined) out.label = expectString(v.label, `${source}.label`);
+    return out;
 }
 
-function validateItem(value: unknown, source: string): SnapshotItem {
+function validateMarkdownPage(value: unknown, source: string): MarkdownPage {
     const v = expectObject(value, source);
-    const kind = expectString(v.kind, `${source}.kind`) as SnapshotItem["kind"];
-    const allowedKinds = new Set([
-        "text",
-        "section_header",
-        "footnote",
-        "caption",
-        "list_item",
-        "margin",
-        "formula",
-        "table",
-        "picture",
-    ]);
+    const out: MarkdownPage = {
+        index: expectInt(v.index, `${source}.index`),
+        width: expectFiniteNumber(v.width, `${source}.width`),
+        height: expectFiniteNumber(v.height, `${source}.height`),
+        markdown: expectString(v.markdown, `${source}.markdown`),
+    };
+    if (v.label !== undefined) out.label = expectString(v.label, `${source}.label`);
+    return out;
+}
+
+const allowedKinds = new Set<DocumentItemKind>([
+    "text",
+    "section_header",
+    "list_item",
+    "caption",
+    "footnote",
+    "formula",
+    "table",
+    "picture",
+    "margin",
+]);
+
+const textBearingKinds = new Set<DocumentItemKind>([
+    "text",
+    "section_header",
+    "list_item",
+    "caption",
+    "footnote",
+    "formula",
+    "margin",
+]);
+
+const sentenceBearingKinds = new Set<DocumentItemKind>([
+    "text",
+    "list_item",
+    "caption",
+    "footnote",
+]);
+
+function validateDocumentItem(value: unknown, source: string): DocumentItem {
+    const v = expectObject(value, source);
+    const kind = expectString(v.kind, `${source}.kind`) as DocumentItemKind;
     if (!allowedKinds.has(kind)) {
         throw new FixtureValidationError(
             `${source}.kind: unexpected item kind "${kind}"`,
         );
     }
-    const out: SnapshotItem = {
+    const base = {
         id: expectString(v.id, `${source}.id`),
-        kind,
-        index: expectInt(v.index, `${source}.index`),
-        columnIndex: expectInt(v.columnIndex, `${source}.columnIndex`),
-        bbox: validateBBox(v.bbox, `${source}.bbox`),
+        pageIndex: expectInt(v.pageIndex, `${source}.pageIndex`),
+        order: expectInt(v.order, `${source}.order`),
+        bbox: validateRect(v.bbox, `${source}.bbox`),
     };
-    if (v.text !== undefined) {
-        out.text = expectString(v.text, `${source}.text`);
+
+    if (textBearingKinds.has(kind)) {
+        if (v.text === undefined) {
+            throw new FixtureValidationError(`${source}.text: expected string`);
+        }
+    } else if (v.text !== undefined) {
+        throw new FixtureValidationError(`${source}.text: forbidden for ${kind}`);
     }
-    return out;
+
+    if (sentenceBearingKinds.has(kind)) {
+        const sentences = v.sentences === undefined
+            ? undefined
+            : expectArray(v.sentences, `${source}.sentences`).map((s, i) =>
+                validateSentence(s, `${source}.sentences[${i}]`),
+              );
+        return {
+            ...base,
+            kind,
+            text: expectString(v.text, `${source}.text`),
+            ...(sentences === undefined ? {} : { sentences }),
+        } as DocumentItem;
+    }
+
+    if (v.sentences !== undefined) {
+        throw new FixtureValidationError(`${source}.sentences: forbidden for ${kind}`);
+    }
+
+    if (kind === "section_header") {
+        if (v.level === undefined) {
+            throw new FixtureValidationError(`${source}.level: expected finite number`);
+        }
+        return {
+            ...base,
+            kind,
+            text: expectString(v.text, `${source}.text`),
+            level: expectFiniteNumber(v.level, `${source}.level`),
+        };
+    }
+
+    if (v.level !== undefined) {
+        throw new FixtureValidationError(`${source}.level: forbidden for ${kind}`);
+    }
+
+    if (textBearingKinds.has(kind)) {
+        return {
+            ...base,
+            kind,
+            text: expectString(v.text, `${source}.text`),
+        } as DocumentItem;
+    }
+
+    return { ...base, kind } as DocumentItem;
 }
 
-function validateSentence(value: unknown, source: string): SnapshotSentence {
+function validateSentence(value: unknown, source: string): Sentence {
     const v = expectObject(value, source);
-    const bboxesRaw = expectArray(v.bboxes, `${source}.bboxes`);
-    const bboxes = bboxesRaw.map((b, i) => validateBBox(b, `${source}.bboxes[${i}]`));
-    const out: SnapshotSentence = {
-        index: expectInt(v.index, `${source}.index`),
-        parentId: expectString(v.parentId, `${source}.parentId`),
-        sentenceIndex: expectInt(v.sentenceIndex, `${source}.sentenceIndex`),
+    const bboxes = expectArray(v.bboxes, `${source}.bboxes`).map((b, i) =>
+        validateRect(b, `${source}.bboxes[${i}]`),
+    );
+    const out: Sentence = {
+        id: expectString(v.id, `${source}.id`),
+        order: expectInt(v.order, `${source}.order`),
         text: expectString(v.text, `${source}.text`),
         bboxes,
     };
     if (v.joinWithNext === true) out.joinWithNext = true;
-    else if (v.joinWithNext != null && v.joinWithNext !== false) {
+    else if (v.joinWithNext !== undefined) {
         throw new FixtureValidationError(
             `${source}.joinWithNext: expected omitted or true, got ${JSON.stringify(v.joinWithNext)}`,
         );
@@ -263,21 +365,17 @@ function validateSentence(value: unknown, source: string): SnapshotSentence {
     return out;
 }
 
-function validateBBox(value: unknown, source: string): SnapshotBBox {
-    const v = expectObject(value, source);
-    const origin = expectString(v.origin, `${source}.origin`);
-    if (origin !== "top-left" && origin !== "bottom-left") {
-        throw new FixtureValidationError(
-            `${source}.origin: expected "top-left" | "bottom-left", got "${origin}"`,
-        );
+function validateRect(value: unknown, source: string): Rect {
+    const arr = expectArray(value, source);
+    if (arr.length !== 4) {
+        throw new FixtureValidationError(`${source}: expected Rect tuple length 4`);
     }
-    return {
-        l: expectFiniteNumber(v.l, `${source}.l`),
-        t: expectFiniteNumber(v.t, `${source}.t`),
-        r: expectFiniteNumber(v.r, `${source}.r`),
-        b: expectFiniteNumber(v.b, `${source}.b`),
-        origin,
-    };
+    return [
+        expectFiniteNumber(arr[0], `${source}[0]`),
+        expectFiniteNumber(arr[1], `${source}[1]`),
+        expectFiniteNumber(arr[2], `${source}[2]`),
+        expectFiniteNumber(arr[3], `${source}[3]`),
+    ];
 }
 
 // ---------------------------------------------------------------------------

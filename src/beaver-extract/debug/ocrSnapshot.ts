@@ -6,8 +6,7 @@
  * shape and to compare a captured `expected` snapshot against the live
  * detector output.
  *
- * Browser-safe — no `fs` or other Node-only imports. Mirrors the style of
- * `extractionSnapshot.ts`.
+ * Browser-safe — no `fs` or other Node-only imports.
  */
 import { DEFAULT_OCR_DETECTION_OPTIONS } from "../types";
 import type {

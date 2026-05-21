@@ -98,7 +98,6 @@ describe('BeaverExtractor.extract({ mode: "structured" }) — single worker roun
     it('dispatches exactly one extract op (no fan-out)', async () => {
         const promise = new BeaverExtractor().extract(new Uint8Array([1, 2, 3]), {
             mode: 'structured',
-            pageIndices: [0],
         });
         const worker = MockWorker.instances[0];
         expect(worker).toBeDefined();
@@ -111,7 +110,7 @@ describe('BeaverExtractor.extract({ mode: "structured" }) — single worker roun
         const [message] = worker.opCall(0);
         expect(message).toMatchObject({
             op: 'extract',
-            args: { mode: 'structured', pageIndices: [0] },
+            args: { mode: 'structured' },
         });
 
         // None of the legacy main-thread fan-out ops appear on the wire.
@@ -126,7 +125,6 @@ describe('BeaverExtractor.extract({ mode: "structured" }) — single worker roun
     it('defaults splitter to { type: "sentencex", language: undefined } when none provided', async () => {
         const promise = new BeaverExtractor().extract(new Uint8Array([1]), {
             mode: 'structured',
-            pageIndices: [0],
         });
         const worker = MockWorker.instances[0];
         worker.replyToLast({ ok: true, result: FAKE_STRUCTURED_RESULT });
@@ -142,7 +140,6 @@ describe('BeaverExtractor.extract({ mode: "structured" }) — single worker roun
     it('uses structured.language to seed sentencex when splitter is omitted', async () => {
         const promise = new BeaverExtractor().extract(new Uint8Array([1]), {
             mode: 'structured',
-            pageIndices: [0],
             structured: { language: 'fr' },
         });
         const worker = MockWorker.instances[0];
@@ -159,7 +156,6 @@ describe('BeaverExtractor.extract({ mode: "structured" }) — single worker roun
     it('forwards { type: "simple" } verbatim', async () => {
         const promise = new BeaverExtractor().extract(new Uint8Array([1]), {
             mode: 'structured',
-            pageIndices: [0],
             structured: { splitter: { type: 'simple' } },
         });
         const worker = MockWorker.instances[0];
@@ -175,7 +171,6 @@ describe('BeaverExtractor.extract({ mode: "structured" }) — single worker roun
     it('forwards an explicit sentencex language verbatim', async () => {
         const promise = new BeaverExtractor().extract(new Uint8Array([1]), {
             mode: 'structured',
-            pageIndices: [0],
             structured: {
                 splitter: { type: 'sentencex', language: 'de' },
             },
@@ -194,7 +189,6 @@ describe('BeaverExtractor.extract({ mode: "structured" }) — single worker roun
     it('honors splitter precedence: explicit structured.splitter wins over structured.language', async () => {
         const promise = new BeaverExtractor().extract(new Uint8Array([1]), {
             mode: 'structured',
-            pageIndices: [0],
             structured: {
                 splitter: { type: 'sentencex', language: 'de' },
                 language: 'en',
@@ -214,7 +208,6 @@ describe('BeaverExtractor.extract({ mode: "structured" }) — single worker roun
     it('forwards paragraphSettings and analysisWindow on the wire', async () => {
         const promise = new BeaverExtractor().extract(new Uint8Array([1]), {
             mode: 'structured',
-            pageIndices: [7],
             paragraphSettings: { headingFontSizeBoost: 1.2 } as any,
             analysisWindow: 5,
         });
@@ -225,7 +218,6 @@ describe('BeaverExtractor.extract({ mode: "structured" }) — single worker roun
         const [message] = worker.opCall(0);
         expect(message.args).toMatchObject({
             mode: 'structured',
-            pageIndices: [7],
             paragraphSettings: { headingFontSizeBoost: 1.2 },
             analysisWindow: 5,
         });
@@ -234,7 +226,6 @@ describe('BeaverExtractor.extract({ mode: "structured" }) — single worker roun
     it('does NOT carry a `structured` field on the wire when mode is markdown', async () => {
         const promise = new BeaverExtractor().extract(new Uint8Array([1]), {
             mode: 'markdown',
-            pageIndices: [0],
         });
         const worker = MockWorker.instances[0];
         worker.replyToLast({ ok: true, result: FAKE_STRUCTURED_RESULT });
@@ -247,7 +238,6 @@ describe('BeaverExtractor.extract({ mode: "structured" }) — single worker roun
     it('returns the StructuredExtractResult shape with document items populated', async () => {
         const promise = new BeaverExtractor().extract(new Uint8Array([1]), {
             mode: 'structured',
-            pageIndices: [0],
         });
         const worker = MockWorker.instances[0];
         worker.replyToLast({ ok: true, result: FAKE_STRUCTURED_RESULT });

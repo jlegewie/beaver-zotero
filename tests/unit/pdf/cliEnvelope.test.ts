@@ -44,6 +44,7 @@ function makeDeps(api: Partial<DepFakes['api']> = {}): DepFakes {
         analyzeLayout: vi.fn(),
         renderPages: vi.fn(),
         extractRawPageDetailed: vi.fn(),
+        structuredExtractWithDebug: vi.fn(),
         analyzeOCRNeeds: vi.fn(),
         ...api,
     };
@@ -259,7 +260,7 @@ describe('runCli — profile command', () => {
 });
 
 describe('runCli — overlay command', () => {
-    it('runs structured extract → builder → drawOverlay → writePngFile (and sidecar)', async () => {
+    it('runs structured debug extract → builder → drawOverlay → writePngFile (and sidecar)', async () => {
         const { deps, api } = makeDeps();
         api.renderPages.mockResolvedValue({
             pageCount: 1,
@@ -276,42 +277,55 @@ describe('runCli — overlay command', () => {
                 },
             ],
         });
-        api.extractPdf.mockResolvedValue({
-            pages: [
-                {
-                    index: 0,
-                    width: 500,
-                    height: 750,
-                    content: '',
-                    columns: [],
-                    items: [
-                        {
-                            kind: 'text',
-                            id: 'p0:i0',
-                            pageIndex: 0,
-                            index: 0,
-                            bbox: { l: 10, t: 10, r: 90, b: 22, origin: 'top-left' },
-                            columnIndex: 0,
-                            text: 'Hello.',
-                            lines: [
-                                { text: 'Hello.', bbox: { l: 10, t: 10, r: 90, b: 22, origin: 'top-left' } },
-                            ],
-                            sentences: [],
-                        },
-                    ],
-                    sentences: [
-                        {
-                            parentId: 'p0:i0',
-                            index: 0,
-                            text: 'Hello.',
-                            bboxes: [{ l: 10, t: 10, r: 90, b: 22, origin: 'top-left' }],
-                        },
-                    ],
+        api.structuredExtractWithDebug.mockResolvedValue({
+            result: {
+                mode: 'structured',
+                schemaVersion: '4',
+                document: {
+                    pageCount: 1,
+                    bboxOrigin: 'top-left',
+                    bboxPrecision: 1,
+                    pages: [],
+                    citationIndex: {},
                 },
-            ],
-            analysis: {},
-            fullText: '',
-            metadata: {},
+            },
+            debug: {
+                pages: {
+                    '0': {
+                        pageIndex: 0,
+                        width: 500,
+                        height: 750,
+                        counts: { items: 1, sentences: 1, columns: 1, lines: 1 },
+                        items: [
+                            {
+                                id: 'p1',
+                                kind: 'text',
+                                pageIndex: 0,
+                                order: 0,
+                                bbox: [10, 10, 90, 22],
+                                text: 'Hello.',
+                                sentences: [
+                                    {
+                                        id: 's1',
+                                        order: 0,
+                                        text: 'Hello.',
+                                        bboxes: [[10, 10, 90, 22]],
+                                    },
+                                ],
+                            },
+                        ],
+                        sentences: [
+                            {
+                                id: 's1',
+                                itemId: 'p1',
+                                order: 0,
+                                text: 'Hello.',
+                                bboxes: [[10, 10, 90, 22]],
+                            },
+                        ],
+                    },
+                },
+            },
         });
 
         const code = await runCli(
@@ -330,6 +344,13 @@ describe('runCli — overlay command', () => {
             deps,
         );
         expect(code).toBe(0);
+        expect(api.structuredExtractWithDebug).toHaveBeenCalledWith(
+            expect.objectContaining({
+                mode: 'structured',
+                capturePages: [0],
+                debugMode: 'full',
+            }),
+        );
         expect(deps.drawOverlay).toHaveBeenCalledTimes(1);
         expect(deps.writePngFile).toHaveBeenCalledWith(
             '/tmp/out.png',
