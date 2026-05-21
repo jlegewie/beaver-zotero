@@ -11,9 +11,16 @@
  *
  * Built as a separate worker bundle by the host's build system.
  *
- * Configuration: the main-thread client posts a `configure` message as the
- * first frame after spawning this worker (see `MuPDFWorkerClient.ensureWorker`).
- * Op messages received before configure throw via `getWorkerUrls()`.
+ * Configure handshake: an eager `configure` frame posted right after spawn
+ * can be lost during module-worker startup, so this worker does not rely on
+ * it alone. Once its `onmessage` handler is installed, the worker posts a
+ * `ready` message; the main-thread client (`MuPDFWorkerClient`) responds with
+ * a `configure` frame, and the worker acks it with `configured` after
+ * `setWorkerUrls`. The client holds all ops until that `configured` ack, so
+ * `getWorkerUrls()` is always populated by the time an op runs. The
+ * `isWorkerConfigured()` guard below stays as a last-resort safety net — a
+ * pre-configure op there yields a structured failure the client retries on a
+ * fresh worker.
  */
 
 import {
@@ -132,6 +139,7 @@ workerSelf.onmessage = (event: MessageEvent) => {
         const cfg = data as IncomingConfigureMessage;
         if (cfg.urls && typeof cfg.urls === "object") {
             setWorkerUrls(cfg.urls);
+            workerSelf.postMessage({ kind: "configured" });
         }
         return;
     }
@@ -197,3 +205,5 @@ workerSelf.onmessage = (event: MessageEvent) => {
         }
     });
 };
+
+workerSelf.postMessage({ kind: "ready" });
