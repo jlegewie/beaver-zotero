@@ -11,6 +11,12 @@
 
 import { BeaverDB, AttachmentFileCacheRecord } from './database';
 import { logger } from '../utils/logger';
+import {
+    REMOTE_PATH_PREFIX,
+    makeRemoteFilePath,
+    isRemoteFilePath,
+    type FileSignature,
+} from './documentFileIdentity';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -33,37 +39,13 @@ export const EXTRACTION_VERSION = '4';
 /** Maximum entries in the in-memory metadata cache. */
 const MEMORY_CACHE_MAX = 500;
 
-/** Prefix for synthetic file paths representing remote-only files. */
-export const REMOTE_PATH_PREFIX = 'remote:';
-
-/** Build a synthetic file path for a remote-only attachment.
- *  Prefers the synced hash — the path changes when the server file changes,
- *  naturally invalidating the cache. Falls back to libraryID-key plus the
- *  Zotero API item version for on-demand attachments whose hash isn't
- *  populated until the first real download; the version bumps when the
- *  server updates the item (including storage metadata), so the cache is
- *  still invalidated when the remote file changes. */
-export function makeRemoteFilePath(item: Zotero.Item): string {
-    const hash = item.attachmentSyncedHash;
-    const id = hash
-        ? `h:${hash}`
-        : `k:${item.libraryID}-${item.key}-v${item.version || 0}`;
-    return `${REMOTE_PATH_PREFIX}${id}`;
-}
-
-/** Check if a file path represents a remote-only attachment. */
-export function isRemoteFilePath(filePath: string): boolean {
-    return filePath.startsWith(REMOTE_PATH_PREFIX);
-}
+export { REMOTE_PATH_PREFIX, makeRemoteFilePath, isRemoteFilePath };
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-export interface FileSignature {
-    mtime_ms: number;
-    size_bytes: number;
-}
+export type { FileSignature };
 
 export interface CachedPageContent {
     index: number;
