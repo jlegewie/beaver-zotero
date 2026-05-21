@@ -109,6 +109,15 @@ export interface DocumentItemBase {
 }
 
 export interface TextBearingItem extends DocumentItemBase {
+    /**
+     * Exact paragraph reconstruction in reading order. For sentence-bearing
+     * kinds (`text` / `caption` / `footnote` / `list_item`) this overlaps with
+     * `sentences[].text` but is NOT byte-equal to `sentences.map(s => s.text).join(' ')`:
+     * the splitter only emits ranges over the sentence-bearing characters, so
+     * inter-sentence whitespace and inter-line filler (footnote runs, etc.)
+     * live on `text` only. Use `text` for the canonical paragraph string and
+     * `sentences[].text` for citation-aligned spans.
+     */
     text: string;
 }
 
