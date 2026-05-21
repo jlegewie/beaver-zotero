@@ -27,6 +27,7 @@ import {
     handleZoteroDataRequest,
     handleExternalReferenceCheckRequest,
     handleZoteroAttachmentPagesRequest,
+    handleZoteroDocumentRequest,
     handleZoteroAttachmentPageImagesRequest,
     handleZoteroAttachmentSearchRequest,
     handleItemSearchByMetadataRequest,
@@ -86,6 +87,7 @@ import type {
     WSZoteroDataRequest,
     WSExternalReferenceCheckRequest,
     WSZoteroAttachmentPagesRequest,
+    WSZoteroDocumentRequest,
     WSZoteroAttachmentPageImagesRequest,
     WSZoteroAttachmentSearchRequest,
     WSItemSearchByMetadataRequest,
@@ -130,6 +132,7 @@ const ENDPOINT_PATHS = [
     '/beaver/search/metadata',
     '/beaver/search/topic',
     '/beaver/attachment/pages',
+    '/beaver/attachment/document',
     '/beaver/attachment/page-images',
     '/beaver/attachment/search',
     // Library management tools
@@ -333,6 +336,29 @@ async function handleAttachmentPagesHttpRequest(request: any) {
     return {
         attachment: response.attachment,
         pages: response.pages,
+        total_pages: response.total_pages,
+        error: response.error,
+        error_code: response.error_code,
+    };
+}
+
+async function handleAttachmentDocumentHttpRequest(request: any) {
+    const wsRequest: WSZoteroDocumentRequest = {
+        event: 'zotero_document_request',
+        request_id: generateRequestId(),
+        attachment: request.attachment,
+        mode: request.mode ?? 'structured',
+        max_pages: request.max_pages,
+        max_file_size_mb: request.max_file_size_mb,
+        timeout_seconds: request.timeout_seconds,
+    };
+
+    const response = await handleZoteroDocumentRequest(wsRequest);
+
+    return {
+        resolved_attachment: response.resolved_attachment,
+        content_type: response.content_type,
+        result: response.result,
         total_pages: response.total_pages,
         error: response.error,
         error_code: response.error_code,
@@ -618,6 +644,9 @@ function registerEndpoints(): boolean {
     
     Zotero.Server.Endpoints['/beaver/attachment/pages'] = 
         createEndpoint(handleAttachmentPagesHttpRequest);
+
+    Zotero.Server.Endpoints['/beaver/attachment/document'] =
+        createEndpoint(handleAttachmentDocumentHttpRequest);
     
     Zotero.Server.Endpoints['/beaver/attachment/page-images'] = 
         createEndpoint(handleAttachmentPageImagesHttpRequest);

@@ -6,6 +6,7 @@ import { ReaderState, NoteState } from '../../react/types/attachments/apiTypes';
 import { BeaverAgentPrompt } from '../../react/agents/types';
 import { CustomChatModel } from '../../react/types/settings';
 import { AttachmentData, ItemData } from '../../react/types/zotero';
+import type { BeaverExtractResult } from '../beaver-extract/schema/schema';
 
 // =============================================================================
 // WebSocket Event Types (matching backend ws_events.py)
@@ -232,6 +233,21 @@ export interface WSZoteroAttachmentPagesRequest extends WSBaseEvent {
      * max_pages.
      */
     max_pages?: number;
+    /** Frontend-side extraction deadline in seconds. */
+    timeout_seconds?: number;
+}
+
+/** Request from backend to fetch a whole-document Beaver Extract result */
+export interface WSZoteroDocumentRequest extends WSBaseEvent {
+    event: 'zotero_document_request';
+    request_id: string;
+    /** May be a parent item; frontend resolves it to a PDF attachment. */
+    attachment: ZoteroItemReference;
+    mode: BeaverExtractResult['mode'];
+    /** Reject threshold for total document page count; not a page clamp. */
+    max_pages?: number | null;
+    /** Backend-requested file size cap; frontend also applies its hard cap. */
+    max_file_size_mb?: number | null;
     /** Frontend-side extraction deadline in seconds. */
     timeout_seconds?: number;
 }
@@ -565,6 +581,11 @@ export type AttachmentPagesErrorCode =
     | 'timeout'             // Extraction timed out
     | 'extraction_failed';  // General extraction failure
 
+export type ZoteroDocumentErrorCode =
+    | AttachmentPagesErrorCode
+    | 'schema_version_mismatch'
+    | 'mode_mismatch';
+
 /** Response to zotero attachment pages request */
 export interface WSZoteroAttachmentPagesResponse {
     type: 'zotero_attachment_pages';
@@ -578,6 +599,19 @@ export interface WSZoteroAttachmentPagesResponse {
     error?: string | null;
     /** Error code for programmatic handling */
     error_code?: AttachmentPagesErrorCode | null;
+}
+
+/** Response to whole-document extraction request */
+export interface WSZoteroDocumentResponse {
+    type: 'zotero_document';
+    request_id: string;
+    resolved_attachment?: ZoteroItemReference | null;
+    content_type?: string | null;
+    result?: BeaverExtractResult | null;
+    /** Page count on error responses when available. */
+    total_pages?: number | null;
+    error?: string | null;
+    error_code?: ZoteroDocumentErrorCode | null;
 }
 
 /** Error codes for attachment page image rendering failures */
@@ -1153,6 +1187,7 @@ export type WSEvent =
     | WSAgentActionsEvent
     | WSMissingZoteroDataEvent
     | WSZoteroAttachmentPagesRequest
+    | WSZoteroDocumentRequest
     | WSZoteroAttachmentPageImagesRequest
     | WSZoteroAttachmentSearchRequest
     | WSExternalReferenceCheckRequest
