@@ -14,21 +14,22 @@ import { logger } from "../../src/utils/logger";
 import {
     BeaverExtractor,
     bboxToReaderFrame,
+    getMuPDFWorkerClient,
 } from "../../src/beaver-extract";
 import type {
     ExtractionSettings,
-    ProcessedPage,
 } from "../../src/beaver-extract";
+import type { PageDebugData } from "../../src/beaver-extract/schema";
 import { getItemLanguage } from "../../src/utils/zoteroUtils";
 import { getCurrentReaderAndWaitForView } from "./readerUtils";
 import { getPageViewportInfo } from "./pdfUtils";
 import { BeaverTemporaryAnnotations, ZoteroReader } from "./annotationUtils";
 import { ZoteroItemReference } from "../types/zotero";
 import {
-    buildColumnOverlayFromPage,
-    buildItemOverlayFromPage,
-    buildLineOverlayFromPage,
-    buildSentenceOverlayFromPage,
+    buildColumnOverlayFromDebugPage,
+    buildItemOverlayFromDebugPage,
+    buildLineOverlayFromDebugPage,
+    buildSentenceOverlayFromDebugPage,
     OverlayResult,
 } from "./extractionOverlay";
 
@@ -224,7 +225,7 @@ async function pushOverlayToReader(
 
 /**
  * Run the structured-mode extract for a single page and return the
- * `ProcessedPage`. Single worker round-trip that drives every visualizer
+ * `InternalProcessedPage`. Single worker round-trip that drives every visualizer
  * level (columns / lines / items / sentences) — the pure
  * `*FromPage` builders in `extractionOverlay.ts` then turn the result
  * into rects.
@@ -242,7 +243,7 @@ async function loadStructuredPage(
     pageIndex: number,
     item: Zotero.Item,
     settings?: ExtractionSettings,
-): Promise<ProcessedPage> {
+): Promise<PageDebugData> {
     const pdfData = await IOUtils.read(filePath);
     let language: string | undefined;
     try {
@@ -251,19 +252,17 @@ async function loadStructuredPage(
     } catch {
         // Best effort.
     }
-    const result = await new BeaverExtractor().extract(pdfData, {
-        mode: "structured",
-        pageIndices: [pageIndex],
+    const result = await getMuPDFWorkerClient().structuredExtractWithDebug(pdfData, {
+        capturePages: [pageIndex],
+        debugMode: "full",
+        structured: {
+            splitterConfig: language ? { type: "sentencex", language } : undefined,
+        },
         analysisWindow: Number.POSITIVE_INFINITY,
-        structured: { language },
         settings,
     });
-    const page = result.pages[0];
-    if (!page) {
-        throw new Error(
-            `Structured extract returned no page for index ${pageIndex}`,
-        );
-    }
+    const page = result.debug.pages?.[String(pageIndex)];
+    if (!page) throw new Error(`page ${pageIndex} missing from trace`);
     return page;
 }
 
@@ -299,7 +298,7 @@ export async function visualizeCurrentPageColumns(options?: VisualizerOptions): 
             visualizerSettings(options),
         );
 
-        const overlay = buildColumnOverlayFromPage(page);
+        const overlay = buildColumnOverlayFromDebugPage(page);
         if (overlay.rects.length === 0) {
             return {
                 success: true,
@@ -353,7 +352,7 @@ export async function visualizeCurrentPageLines(options?: VisualizerOptions): Pr
             visualizerSettings(options),
         );
 
-        const overlay = buildLineOverlayFromPage(page);
+        const overlay = buildLineOverlayFromDebugPage(page);
         if (overlay.rects.length === 0) {
             return {
                 success: true,
@@ -417,7 +416,7 @@ export async function visualizeCurrentPageItems(options?: VisualizerOptions): Pr
             visualizerSettings(options),
         );
 
-        const overlay = buildItemOverlayFromPage(page);
+        const overlay = buildItemOverlayFromDebugPage(page);
         if (overlay.rects.length === 0) {
             return {
                 success: true,
@@ -483,7 +482,7 @@ export async function visualizeCurrentPageSentences(options?: VisualizerOptions)
             visualizerSettings(options),
         );
 
-        const overlay = buildSentenceOverlayFromPage(page);
+        const overlay = buildSentenceOverlayFromDebugPage(page);
         if (overlay.rects.length === 0) {
             return {
                 success: true,
@@ -585,9 +584,16 @@ export async function extractCurrentPageContent(): Promise<PageExtractionResult>
         const pdfData = await IOUtils.read(filePath);
 
         const result = await new BeaverExtractor().extract(pdfData, {
+            mode: "markdown",
             pageIndices: [pageIndex],
         });
-        const processedPage = result.pages[0];
+        if (result.mode !== "markdown") {
+            return {
+                success: false,
+                message: "Markdown extraction did not return markdown output",
+            };
+        }
+        const processedPage = result.document.pages[0];
         if (!processedPage) {
             return {
                 success: false,
@@ -595,20 +601,18 @@ export async function extractCurrentPageContent(): Promise<PageExtractionResult>
             };
         }
 
-        const columns = processedPage.columns ?? [];
-        logger(`[Extractor] Found ${columns.length} column(s)`);
         logger(
-            `[Extractor] Page ${pageIndex + 1} content extracted (${processedPage.content.length} chars)`,
+            `[Extractor] Page ${pageIndex + 1} content extracted (${processedPage.markdown.length} chars)`,
         );
 
         return {
             success: true,
-            message: `Extracted ${processedPage.content.length} characters from page ${pageIndex + 1}`,
+            message: `Extracted ${processedPage.markdown.length} characters from page ${pageIndex + 1}`,
             pageIndex,
             pageNumber: pageIndex + 1,
-            content: processedPage.content,
-            columnCount: columns.length,
-            columns,
+            content: processedPage.markdown,
+            columnCount: 0,
+            columns: [],
         };
     } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);

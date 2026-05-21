@@ -2,7 +2,7 @@
  * Runtime validators for the OCR fixture file format (`ocr.json`).
  *
  * Mirrors the structure of `fixtureSchema.ts` (used by extract fixtures)
- * but targets `OCRDetectionResult` rather than `ExtractionResult`. Every
+ * but targets `OCRDetectionResult` rather than `InternalExtractionResult`. Every
  * failure reports the JSON path of the offending field so a malformed
  * fixture surfaces a precise error rather than a deep-compare crash.
  *

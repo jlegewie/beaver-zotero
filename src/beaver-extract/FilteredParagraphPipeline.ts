@@ -142,7 +142,7 @@ export interface FilteredParagraphResult {
      * Text lines removed by simple/smart margin filtering, represented as
      * first-class document items. These are intentionally not fed into
      * paragraph detection, markdown content, or sentence splitting; callers
-     * append them to `ProcessedPage.items` so consumers can inspect or filter
+     * append them to `InternalProcessedPage.items` so consumers can inspect or filter
      * marginalia explicitly.
      */
     marginItems: MarginItem[];

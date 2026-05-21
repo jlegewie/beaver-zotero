@@ -8,8 +8,9 @@
 
 import { getMuPDFWorkerClient } from "./MuPDFWorkerClient";
 import {
+    ExtractionError,
+    ExtractionErrorCode,
     ExtractionSettings,
-    ExtractionResult,
     LayoutAnalysisResult,
     OCRDetectionOptions,
     OCRDetectionResult,
@@ -19,6 +20,7 @@ import {
     PDFSearchOptions,
     PDFSearchResult,
 } from "./types";
+import type { BeaverExtractResult } from "./schema";
 import type { ParagraphDetectionSettings } from "./ParagraphDetector";
 import type { SentenceSplitterConfig } from "./sentenceTypes";
 
@@ -150,7 +152,7 @@ export type {
 export class BeaverExtractor {
     /**
      * Strict, fused extract for handlers that have deferred range validation
-     * to the worker. Returns an `ExtractionResult` with `analysis.pageCount`
+     * to the worker. Returns an `InternalExtractionResult` with `analysis.pageCount`
      * and `pageLabels` populated.
      *
      * Args:
@@ -165,7 +167,7 @@ export class BeaverExtractor {
      *  - `"markdown"` (default): per-page text via the markdown engines
      *    (see `markdown.engine`).
      *  - `"structured"`: sentence-level extraction. Returns the same
-     *    `ExtractionResult` shape with `pages[i].sentences` /
+     *    `InternalExtractionResult` shape with `pages[i].sentences` /
      *    `items` / `columns` populated alongside
      *    paragraph-engine `content`.
      *
@@ -193,6 +195,7 @@ export class BeaverExtractor {
             structured?: {
                 splitter?: SentenceSplitterConfig;
                 language?: string;
+                bboxPrecision?: number;
             };
             settings?: ExtractionSettings;
             paragraphSettings?: ParagraphDetectionSettings;
@@ -207,7 +210,7 @@ export class BeaverExtractor {
             analysisWindow?: number;
         } = {},
         signal?: AbortSignal,
-    ): Promise<ExtractionResult> {
+    ): Promise<BeaverExtractResult> {
         const explicitEngine = args.markdown?.engine;
         const isStructured = args.mode === "structured";
         if (isStructured && explicitEngine) {
@@ -216,15 +219,24 @@ export class BeaverExtractor {
                 "when mode='structured'",
             );
         }
+        if (isStructured && ((args.pageIndices?.length ?? 0) > 0 || args.pageRange)) {
+            throw new ExtractionError(
+                ExtractionErrorCode.STRUCTURED_PAGE_SELECTION_REJECTED,
+                "Structured extraction is full-document only; pageIndices and pageRange are only supported for markdown extraction.",
+            );
+        }
 
         // Translate the user-friendly `structured.splitter`/`language`
         // into a serializable `splitterConfig` before crossing the worker
         // boundary. Worker-client speaks `splitterConfig` only.
-        let workerStructured: { splitterConfig?: SentenceSplitterConfig } | undefined;
+        let workerStructured:
+            | { splitterConfig?: SentenceSplitterConfig; bboxPrecision?: number }
+            | undefined;
         if (isStructured) {
-            const { splitter, language } = args.structured ?? {};
+            const { splitter, language, bboxPrecision } = args.structured ?? {};
             workerStructured = {
                 splitterConfig: splitter ?? { type: "sentencex", language },
+                bboxPrecision,
             };
         }
 

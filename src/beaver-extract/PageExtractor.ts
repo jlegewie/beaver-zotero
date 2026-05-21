@@ -14,7 +14,7 @@ import type {
     RawPageData,
     RawBlock,
     RawLine,
-    ProcessedPage,
+    InternalProcessedPage,
     BoundingBox,
     DocItem,
     ItemLine,
@@ -141,7 +141,7 @@ export class PageExtractor {
      * Process a raw page into structured output (without column detection).
      * Use extractPageWithColumns for column-aware extraction.
      */
-    extractPage(rawPage: RawPageData): ProcessedPage {
+    extractPage(rawPage: RawPageData): InternalProcessedPage {
         // Apply margin filtering if configured
         const pageToProcess = this.margins
             ? MarginFilter.filterPageByMargins(
@@ -177,7 +177,7 @@ export class PageExtractor {
         rawPage: RawPageData,
         columnResult: ColumnDetectionResult,
         includeColumns: boolean = true
-    ): ProcessedPage {
+    ): InternalProcessedPage {
         const columns = columnResult.columns;
         
         // If no columns detected, fall back to regular extraction

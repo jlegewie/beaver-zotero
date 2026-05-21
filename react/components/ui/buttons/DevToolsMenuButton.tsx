@@ -170,32 +170,43 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
             });
 
             console.log("[PDF Test] ✓ Extraction complete!");
-            console.log(`[PDF Test] Document: ${result.analysis.pageCount} pages, ${result.fullText.length} chars total`);
+            if (result.mode !== "structured") {
+                console.log("[PDF Test] Expected structured extraction result");
+                return;
+            }
+            const totalTextLength = result.document.pages.reduce(
+                (sum, page) =>
+                    sum + page.items.reduce(
+                        (itemSum, item) => itemSum + ("text" in item ? item.text.length : 0),
+                        0,
+                    ),
+                0,
+            );
+            console.log(`[PDF Test] Document: ${result.document.pageCount} pages, ${totalTextLength} chars total`);
             
             // Log structured results for all pages
             console.group("[PDF Test] Pages");
-            for (const page of result.pages) {
-                const lines = page.items.flatMap((item) => ("lines" in item ? item.lines : []));
-                const lineCount = lines.length;
-                const columnCount = page.columns.length;
+            for (const page of result.document.pages) {
+                const sentences = page.items.flatMap((item) => ("sentences" in item ? item.sentences ?? [] : []));
+                const textLength = page.items.reduce(
+                    (sum, item) => sum + ("text" in item ? item.text.length : 0),
+                    0,
+                );
                 
                 console.group(`Page ${page.index + 1}${page.label ? ` (${page.label})` : ''}`);
                 console.log(`  Dimensions: ${page.width.toFixed(0)} × ${page.height.toFixed(0)} pt`);
-                console.log(`  Columns: ${columnCount}`);
-                console.log(`  Lines: ${lineCount}`);
-                console.log(`  Text length: ${page.content.length} chars`);
+                console.log(`  Items: ${page.items.length}`);
+                console.log(`  Sentences: ${sentences.length}`);
+                console.log(`  Text length: ${textLength} chars`);
                 
-                if (lines.length > 0) {
-                    console.group("Lines");
-                    for (let i = 0; i < Math.min(lines.length, 10); i++) {
-                        const line = lines[i];
-                        const preview = line.text.length > 80 
-                            ? line.text.slice(0, 80) + "..." 
-                            : line.text;
-                        console.log(`    [${i + 1}]: "${preview}"`);
+                if (sentences.length > 0) {
+                    console.group("Sentences");
+                    for (let i = 0; i < Math.min(sentences.length, 10); i++) {
+                        const sentence = sentences[i];
+                        console.log(`  [${i + 1}] "${sentence.text}"`);
                     }
-                    if (lines.length > 10) {
-                        console.log(`    ... ${lines.length - 10} more lines`);
+                    if (sentences.length > 10) {
+                        console.log(`    ... ${sentences.length - 10} more sentences`);
                     }
                     console.groupEnd();
                 }
@@ -471,45 +482,39 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
             const pdfData = await IOUtils.read(path);
             const result = await new BeaverExtractor().extract(pdfData, {
                 mode: "structured",
-                pageIndices: [currentPageIndex],
                 settings: { checkTextLayer: false },
             });
 
-            if (result.pages.length === 0) {
+            if (result.mode !== "structured") {
                 console.warn("[PDF Extractor] Extraction failed");
                 return;
             }
             
-            const page = result.pages[0];
-            const lines = page.items.flatMap((item) => ("lines" in item ? item.lines : []));
-            const lineCount = lines.length;
-            const columnCount = page.columns.length;
+            const page = result.document.pages.find((p) => p.index === currentPageIndex);
+            if (!page) {
+                console.warn("[PDF Extractor] Current page missing from structured result");
+                return;
+            }
+            const sentences = page.items.flatMap((item) => ("sentences" in item ? item.sentences ?? [] : []));
+            const textLength = page.items.reduce(
+                (sum, item) => sum + ("text" in item ? item.text.length : 0),
+                0,
+            );
             
             console.log(`[PDF Extractor] ✓ Page ${page.index + 1}${page.label ? ` (${page.label})` : ''} extracted`);
             console.group(`Page ${page.index + 1} Details`);
             console.log(`  Dimensions: ${page.width.toFixed(0)} × ${page.height.toFixed(0)} pt`);
-            console.log(`  Columns: ${columnCount}`);
-            console.log(`  Lines: ${lineCount}`);
-            console.log(`  Text length: ${page.content.length} chars`);
+            console.log(`  Items: ${page.items.length}`);
+            console.log(`  Sentences: ${sentences.length}`);
+            console.log(`  Text length: ${textLength} chars`);
             
-            if (page.columns.length > 0) {
-                console.group("Columns");
-                page.columns.forEach((col, i) => {
-                    const width = col.r - col.l;
-                    const height = col.b - col.t;
-                    console.log(`  [${i + 1}] Position: (${col.l.toFixed(0)}, ${col.t.toFixed(0)}), Size: ${width.toFixed(0)} × ${height.toFixed(0)} pt`);
-                });
-                console.groupEnd();
-            }
-            
-            if (lines.length > 0) {
-                console.group("Lines");
-                lines.forEach((line, i) => {
-                    const preview = line.text.length > 100 
-                        ? line.text.slice(0, 100) + "..." 
-                        : line.text;
-                    const fontSize = line.fontSize ? `${line.fontSize.toFixed(1)}pt` : "?";
-                    console.log(`  [${i + 1}] ${fontSize}: "${preview}"`);
+            if (sentences.length > 0) {
+                console.group("Sentences");
+                sentences.forEach((sentence, i) => {
+                    const preview = sentence.text.length > 100
+                        ? sentence.text.slice(0, 100) + "..."
+                        : sentence.text;
+                    console.log(`  [${i + 1}]: "${preview}"`);
                 });
                 console.groupEnd();
             }

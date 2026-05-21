@@ -649,7 +649,7 @@ export interface MarginRemovalResult {
 // ============================================================================
 
 /** A fully processed page */
-export interface ProcessedPage {
+export interface InternalProcessedPage {
     /** 0-based page index */
     index: number;
     /** Page label (e.g., "iv", "220") if available */
@@ -718,7 +718,7 @@ export interface StructuredPagePhaseTimings {
     /**
      * Document-page index this entry describes. Pairs positionally with
      * the same-index entry of `ExtractionTimings.perPageMs` and
-     * `ExtractionResult.pages[]`.
+     * `InternalExtractionResult.pages[]`.
      */
     pageIndex: number;
     /**
@@ -760,7 +760,7 @@ export interface StructuredPagePhaseTimings {
  * milliseconds (`performance.now()` deltas measured inside the worker).
  *
  * Recorded for both markdown engines so cross-engine comparisons stay
- * apples-to-apples. Optional on `ExtractionResult.metadata` so older
+ * apples-to-apples. Optional on `InternalExtractionResult.metadata` so older
  * callers and tests that don't need timings don't have to populate them.
  */
 export interface ExtractionTimings {
@@ -792,9 +792,9 @@ export interface ExtractionTimings {
 }
 
 /** The complete extraction result */
-export interface ExtractionResult {
+export interface InternalExtractionResult {
     /** Processed pages */
-    pages: ProcessedPage[];
+    pages: InternalProcessedPage[];
     /** Document-level analysis */
     analysis: DocumentAnalysis;
     /** Combined plain text from all pages */
@@ -816,7 +816,7 @@ export interface ExtractionResult {
         engine?: "block" | "paragraph" | "structured";
         /**
          * Per-phase worker timings. Optional — populated by `opExtract` /
-         * `runExtractFromIndices`; absent on direct ExtractionResult literals
+         * `runExtractFromIndices`; absent on direct InternalExtractionResult literals
          * built in tests or fixtures.
          */
         timings?: ExtractionTimings;
@@ -845,7 +845,7 @@ export interface LayoutAnalysisTimings {
 }
 
 /**
- * Result of a single `analyzeLayout` call. Mirrors `ExtractionResult`'s
+ * Result of a single `analyzeLayout` call. Mirrors `InternalExtractionResult`'s
  * field naming where applicable.
  *
  * Output is byte-identical to the analysis context built by
@@ -869,7 +869,7 @@ export interface LayoutAnalysisResult {
     /** Page count of the source document. */
     pageCount: number;
     /**
-     * Full-document page labels. Same shape as `ExtractionResult.pageLabels`
+     * Full-document page labels. Same shape as `InternalExtractionResult.pageLabels`
      * — collected via `collectPageLabels(doc)` over all pages so the field
      * is symmetric with extract.
      */
@@ -1038,6 +1038,7 @@ export enum ExtractionErrorCode {
     INVALID_PDF = "INVALID_PDF",
     EMPTY_DOCUMENT = "EMPTY_DOCUMENT",
     PAGE_OUT_OF_RANGE = "PAGE_OUT_OF_RANGE",
+    STRUCTURED_PAGE_SELECTION_REJECTED = "STRUCTURED_PAGE_SELECTION_REJECTED",
     WASM_ERROR = "WASM_ERROR",
     HEAP_EXHAUSTION = "HEAP_EXHAUSTION",
 }

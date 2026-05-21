@@ -152,7 +152,7 @@ describe("runExtractFromIndices: paragraph engine", () => {
         expect(page.lines).toBeUndefined();
     });
 
-    it("preserves the same ExtractionResult shape as the block engine", () => {
+    it("preserves the same InternalExtractionResult shape as the block engine", () => {
         const doc = makeDocStub();
         const opts = { ...DEFAULT_EXTRACTION_SETTINGS };
 

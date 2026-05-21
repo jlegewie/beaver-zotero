@@ -53,24 +53,33 @@ import {
 import {
     FIXTURE_SCHEMA_VERSION,
     type CapturedFixture,
+    type ExpectedExtraction,
+    FixtureValidationError,
     type FixtureConfig,
+    validateConfig,
+    validateFixture,
+    validateTolerance,
 } from "../fixture/fixtureSchema";
 import {
-    diffExtractionSnapshots,
+    diffMarkdownPages,
+    diffStructuredPages,
     formatDiffs,
-    projectExtractionSnapshot,
-} from "../../debug/extractionSnapshot";
+    type SnapshotDiff,
+} from "../fixture/pageDiff";
 import { buildSentenceOverlayFromPage } from "../../debug/overlayBuilders";
 import type { ExtractInput } from "../../node/api";
 import type {
-    ExtractionResult,
     ExtractionSettings,
-    ProcessedPage,
+    InternalProcessedPage,
 } from "../../types";
+import type {
+    StructuredExtractResult,
+    StructuredPage,
+} from "../../schema";
 import type { ParagraphDetectionSettings } from "../../ParagraphDetector";
 import type { SentenceSplitterConfig } from "../../sentenceTypes";
 import { join, resolve as resolvePath } from "node:path";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 
 const DEFAULT_BBOX_TOL_PT = 0.5;
 /** Render scale for preview PNGs. */
@@ -102,6 +111,7 @@ export function buildFixtureCommand(deps: CliDeps): Command {
     cmd.addCommand(buildCaptureCommand(deps));
     cmd.addCommand(buildEvaluateCommand(deps));
     cmd.addCommand(buildUpdateCommand(deps));
+    cmd.addCommand(buildMigrateCommand(deps));
     cmd.addCommand(buildListCommand(deps));
     return cmd;
 }
@@ -191,8 +201,8 @@ function buildCaptureCommand(deps: CliDeps): Command {
                     }
                 }
 
-                const result = await deps.api.extractPdf(buildExtractInput(bytes, config));
-                const expected = projectExtractionSnapshot(result);
+                const captured = await captureExpected(deps, bytes, config);
+                const expected = captured.expected;
                 const fingerprints = captureFingerprints();
                 const tolerance = {
                     bboxAbsPt:
@@ -218,6 +228,7 @@ function buildCaptureCommand(deps: CliDeps): Command {
                         tolerance,
                         expected,
                     };
+                    validateFixture(candidate, `${loc.fixtureJson}#`);
                     if (semanticallyEqual(previous, candidate)) {
                         // True no-op — snapshot, config, and fingerprints all match.
                         fixture = previous;
@@ -239,6 +250,7 @@ function buildCaptureCommand(deps: CliDeps): Command {
                         tolerance,
                         expected,
                     };
+                    validateFixture(fixture, `${loc.fixtureJson}#`);
                     writeFixtureFile(loc, fixture);
                     wrote = true;
                 }
@@ -248,7 +260,7 @@ function buildCaptureCommand(deps: CliDeps): Command {
                           deps,
                           bytes,
                           loc.folder,
-                          result,
+                          captured.structured,
                           config.pageIndices,
                       )
                     : [];
@@ -262,8 +274,8 @@ function buildCaptureCommand(deps: CliDeps): Command {
                     fixtureJson: loc.fixtureJson,
                     sharedPdf: sharedPdfPath(root, sha),
                     sourcePdfLink,
-                    pageCount: expected.perPage.length,
-                    sentenceCount: expected.totals.sentenceCount,
+                    pageCount: expected.structured.pages.length,
+                    sentenceCount: countStructuredSentences(expected.structured.pages),
                     wrote,
                     previews: previewPaths,
                     capturedAt: fixture.capturedAt,
@@ -296,7 +308,7 @@ interface CaptureOpts {
 }
 
 async function buildConfigFromCaptureOpts(opts: CaptureOpts): Promise<FixtureConfig> {
-    const pageIndices = parsePagesList(opts.pages);
+    const pageIndices = parsePagesList(opts.pages).sort((a, b) => a - b);
     const scope = scopeFromCliFlags({
         analysisScopeFlag: opts.analysisScope,
         analysisWindowFlag:
@@ -371,13 +383,24 @@ function buildEvaluateCommand(deps: CliDeps): Command {
                         ? parsePositiveFloat("--bbox-tolerance", opts.bboxTolerance)
                         : fixture.tolerance.bboxAbsPt;
 
-                const result = await deps.api.extractPdf(
-                    buildExtractInput(pdfBytes, fixture.config),
+                const actual = await captureExpected(deps, pdfBytes, fixture.config);
+                const structuredDiffs = prefixDiffs(
+                    "structured.",
+                    diffStructuredPages(
+                        fixture.expected.structured.pages,
+                        actual.expected.structured.pages,
+                        { bboxAbsPt: tol },
+                    ),
                 );
-                const actual = projectExtractionSnapshot(result);
-                const diffs = diffExtractionSnapshots(fixture.expected, actual, {
-                    bboxAbsPt: tol,
-                });
+                const markdownDiffs = prefixDiffs(
+                    "markdown.",
+                    diffMarkdownPages(
+                        fixture.expected.markdown.pages,
+                        actual.expected.markdown.pages,
+                        {},
+                    ),
+                );
+                const diffs = [...structuredDiffs, ...markdownDiffs];
 
                 const fpDiff = diffFingerprints(fixture.fingerprints, captureFingerprints());
                 emitFingerprintWarnings(deps, id, fpDiff, !!opts.verbose);
@@ -444,10 +467,8 @@ function buildUpdateCommand(deps: CliDeps): Command {
             try {
                 const previous = readFixture(root, id);
                 const pdfBytes = readSharedPdf(root, previous.pdfSha256);
-                const result = await deps.api.extractPdf(
-                    buildExtractInput(pdfBytes, previous.config),
-                );
-                const expected = projectExtractionSnapshot(result);
+                const captured = await captureExpected(deps, pdfBytes, previous.config);
+                const expected = captured.expected;
                 const fingerprints = captureFingerprints();
 
                 const now = new Date().toISOString();
@@ -459,6 +480,7 @@ function buildUpdateCommand(deps: CliDeps): Command {
                     updatedAt: now,
                 };
                 const loc = fixtureLocation(root, id);
+                validateFixture(candidate, `${loc.fixtureJson}#`);
                 let wrote = false;
                 if (!semanticallyEqual(previous, candidate)) {
                     writeFixtureFile(loc, candidate);
@@ -470,7 +492,7 @@ function buildUpdateCommand(deps: CliDeps): Command {
                           deps,
                           pdfBytes,
                           loc.folder,
-                          result,
+                          captured.structured,
                           previous.config.pageIndices,
                       )
                     : [];
@@ -497,6 +519,120 @@ function buildUpdateCommand(deps: CliDeps): Command {
 interface UpdateOpts {
     root?: string;
     preview?: boolean;
+    json?: boolean;
+    pretty?: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// fixture migrate <id>
+// ---------------------------------------------------------------------------
+
+function buildMigrateCommand(deps: CliDeps): Command {
+    const cmd = new Command("migrate");
+    cmd.description("Re-extract a legacy fixture into the current fixture schema.")
+        .argument("<id>", "fixture id (folder name)")
+        .option(
+            "--root <dir>",
+            defaultRootHelp(),
+        )
+        .option("--json", "emit a structured JSON envelope")
+        .option("--pretty", "pretty-print JSON output (only with --json)")
+        .action(async (id: string, opts: MigrateOpts) => {
+            const root = opts.root
+                ? resolvePath(process.cwd(), opts.root)
+                : resolveDefaultRoot();
+            const loc = fixtureLocation(root, id);
+            const effective: Record<string, unknown> = { id, root };
+            try {
+                const parsed = parseRawFixtureFile(loc.fixtureJson);
+                const raw = expectRawObject(parsed, `${loc.fixtureJson}#`);
+                const fromSchema = typeof raw.schema === "number" ? raw.schema : null;
+                const parsedId = expectRawString(raw.id, `${loc.fixtureJson}#.id`);
+                if (parsedId !== id) {
+                    throw new Error(
+                        `${loc.fixtureJson}#.id: expected "${id}", got "${parsedId}"`,
+                    );
+                }
+                const pdfSha256 = expectRawString(
+                    raw.pdfSha256,
+                    `${loc.fixtureJson}#.pdfSha256`,
+                );
+                if (!/^[0-9a-f]{64}$/.test(pdfSha256)) {
+                    throw new FixtureValidationError(
+                        `${loc.fixtureJson}#.pdfSha256: not a 64-char lowercase hex string`,
+                    );
+                }
+                const capturedAt = expectRawString(
+                    raw.capturedAt,
+                    `${loc.fixtureJson}#.capturedAt`,
+                );
+                const config = validateConfig(raw.config, `${loc.fixtureJson}#.config`);
+                const tolerance = readLegacyTolerance(raw.tolerance, loc.fixtureJson);
+                const pdfBytes = readSharedPdf(root, pdfSha256);
+                const captured = await captureExpected(deps, pdfBytes, config);
+                const fingerprints = captureFingerprints();
+                const now = new Date().toISOString();
+                const candidate: CapturedFixture = {
+                    schema: FIXTURE_SCHEMA_VERSION,
+                    id,
+                    capturedAt,
+                    updatedAt: now,
+                    pdfSha256,
+                    pdfBytes: pdfBytes.byteLength,
+                    config,
+                    fingerprints,
+                    tolerance,
+                    expected: captured.expected,
+                };
+                validateFixture(candidate, `${loc.fixtureJson}#`);
+
+                let wrote = false;
+                if (fromSchema === FIXTURE_SCHEMA_VERSION) {
+                    const previous = validateFixture(parsed, `${loc.fixtureJson}#`);
+                    if (!semanticallyEqual(previous, candidate)) {
+                        writeFixtureFile(loc, candidate);
+                        wrote = true;
+                    }
+                } else {
+                    writeFixtureFile(loc, candidate);
+                    wrote = true;
+                }
+
+                const sourcePdfLink = ensureSourcePdfLink(loc, pdfSha256, (msg) =>
+                    deps.stderr.write(`[${id}] warning: ${msg}\n`),
+                );
+                const result = {
+                    id,
+                    root,
+                    fromSchema,
+                    toSchema: FIXTURE_SCHEMA_VERSION,
+                    wrote,
+                    sourcePdfLink,
+                    capturedAt,
+                    updatedAt: wrote ? candidate.updatedAt : raw.updatedAt,
+                };
+                if (opts.json) {
+                    deps.stdout.write(
+                        JSON.stringify(
+                            { ok: true, input: { fixtureId: id, root }, result },
+                            null,
+                            opts.pretty ? 2 : 0,
+                        ) + "\n",
+                    );
+                } else {
+                    deps.stdout.write(
+                        `${id}: migrated schema ${fromSchema ?? "unknown"} -> ${FIXTURE_SCHEMA_VERSION}${wrote ? "" : " (no changes)"}\n`,
+                    );
+                }
+            } catch (e) {
+                emitFailure(deps, opts, id, undefined, effective, e);
+            }
+        });
+    return cmd;
+}
+
+interface MigrateOpts {
+    root?: string;
     json?: boolean;
     pretty?: boolean;
 }
@@ -542,6 +678,59 @@ function buildListCommand(deps: CliDeps): Command {
 // Helpers
 // ---------------------------------------------------------------------------
 
+async function captureExpected(
+    deps: CliDeps,
+    pdfBytes: Uint8Array,
+    config: FixtureConfig,
+): Promise<{ expected: ExpectedExtraction; structured: StructuredExtractResult }> {
+    const structured = await deps.api.extractPdf(buildStructuredExtractInput(pdfBytes, config));
+    if (structured.mode !== "structured") {
+        throw new Error("fixture extraction expected a structured result");
+    }
+    const structuredPages = selectPages(
+        structured.document.pages,
+        config.pageIndices,
+    );
+
+    const markdown = await deps.api.extractPdf(buildMarkdownExtractInput(pdfBytes, config));
+    if (markdown.mode !== "markdown") {
+        throw new Error("fixture extraction expected a markdown result");
+    }
+    const markdownPages = selectPages(markdown.document.pages, config.pageIndices);
+
+    return {
+        expected: {
+            structured: { pages: structuredPages },
+            markdown: { pages: markdownPages },
+        },
+        structured,
+    };
+}
+
+function selectPages<T extends { index: number }>(pages: T[], pageIndices: number[]): T[] {
+    const selected = new Set(pageIndices);
+    return pages
+        .filter((page) => selected.has(page.index))
+        .sort((a, b) => a.index - b.index);
+}
+
+function countStructuredSentences(pages: StructuredPage[]): number {
+    return pages.reduce(
+        (total, page) =>
+            total +
+            page.items.reduce(
+                (pageTotal, item) =>
+                    pageTotal + ("sentences" in item ? item.sentences?.length ?? 0 : 0),
+                0,
+            ),
+        0,
+    );
+}
+
+function prefixDiffs(prefix: string, diffs: SnapshotDiff[]): SnapshotDiff[] {
+    return diffs.map((diff) => ({ ...diff, path: `${prefix}${diff.path}` }));
+}
+
 /**
  * Render one preview-p<n>.png per captured page, with the sentence-level
  * overlay composited on top.
@@ -555,7 +744,7 @@ async function renderPreviewsForFixture(
     deps: CliDeps,
     pdfBytes: Uint8Array,
     fixtureFolder: string,
-    result: ExtractionResult,
+    result: StructuredExtractResult | any,
     pageIndices: number[],
 ): Promise<string[]> {
     const rendered = await deps.api.renderPages({
@@ -566,10 +755,13 @@ async function renderPreviewsForFixture(
     const paths: string[] = [];
     for (const pageIndex of pageIndices) {
         const renderedPage = rendered.pages.find((p) => p.pageIndex === pageIndex);
-        const ppage: ProcessedPage | undefined = result.pages.find(
-            (p) => p.index === pageIndex,
-        );
-        if (!renderedPage || !ppage) continue;
+        const page = "document" in result
+            ? result.document.pages.find((p: StructuredPage) => p.index === pageIndex)
+            : result.pages.find((p: InternalProcessedPage) => p.index === pageIndex);
+        if (!renderedPage || !page) continue;
+        const ppage = "document" in result
+            ? internalPageFromStructuredPage(page)
+            : page;
         const overlay = buildSentenceOverlayFromPage(ppage);
         const composited = await deps.drawOverlay(
             renderedPage.data,
@@ -586,16 +778,112 @@ async function renderPreviewsForFixture(
     return paths;
 }
 
-function buildExtractInput(pdfBytes: Uint8Array, config: FixtureConfig): ExtractInput {
+function buildStructuredExtractInput(pdfBytes: Uint8Array, config: FixtureConfig): ExtractInput {
     return {
         pdfData: pdfBytes,
         mode: "structured",
-        pageIndices: config.pageIndices,
         analysisWindow: resolveAnalysisWindow(config.analysisScope),
         settings: config.settings,
         paragraphSettings: config.paragraphSettings,
         structured: { splitterConfig: config.splitterConfig },
     };
+}
+
+function buildMarkdownExtractInput(pdfBytes: Uint8Array, config: FixtureConfig): ExtractInput {
+    return {
+        pdfData: pdfBytes,
+        mode: "markdown",
+        analysisWindow: resolveAnalysisWindow(config.analysisScope),
+        pageIndices: config.pageIndices,
+        settings: config.settings,
+        paragraphSettings: config.paragraphSettings,
+    };
+}
+
+function internalPageFromStructuredPage(page: StructuredPage): InternalProcessedPage {
+    return {
+        index: page.index,
+        label: page.label,
+        width: page.width,
+        height: page.height,
+        content: page.items
+            .map((item) => ("text" in item ? item.text : ""))
+            .filter(Boolean)
+            .join("\n\n"),
+        columns: [],
+        items: page.items.map((item) => ({
+            id: item.id,
+            pageIndex: item.pageIndex,
+            index: item.order,
+            bbox: {
+                l: item.bbox[0],
+                t: item.bbox[1],
+                r: item.bbox[2],
+                b: item.bbox[3],
+                origin: "top-left" as const,
+            },
+            columnIndex: 0,
+            kind: item.kind,
+            ...("text" in item ? { text: item.text, lines: [] } : {}),
+            ...("level" in item ? { level: item.level } : {}),
+        })) as InternalProcessedPage["items"],
+        sentences: page.items.flatMap((item) =>
+            "sentences" in item
+                ? (item.sentences ?? []).map((sentence) => ({
+                    parentId: item.id,
+                    index: sentence.order,
+                    text: sentence.text,
+                    bboxes: sentence.bboxes.map((bbox) => ({
+                        l: bbox[0],
+                        t: bbox[1],
+                        r: bbox[2],
+                        b: bbox[3],
+                        origin: "top-left" as const,
+                    })),
+                    joinWithNext: sentence.joinWithNext,
+                }))
+                : [],
+        ),
+    };
+}
+
+function parseRawFixtureFile(path: string): unknown {
+    if (!existsSync(path)) {
+        throw new Error(`fixture not found: ${path}`);
+    }
+    const raw = readFileSync(path, "utf8");
+    try {
+        return JSON.parse(raw) as unknown;
+    } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        throw new Error(`failed to parse JSON in ${path}: ${msg}`);
+    }
+}
+
+function expectRawObject(value: unknown, source: string): Record<string, unknown> {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+        throw new FixtureValidationError(`${source}: expected object`);
+    }
+    return value as Record<string, unknown>;
+}
+
+function expectRawString(value: unknown, source: string): string {
+    if (typeof value !== "string") {
+        throw new FixtureValidationError(`${source}: expected string`);
+    }
+    return value;
+}
+
+function readLegacyTolerance(
+    value: unknown,
+    fixtureJson: string,
+): { bboxAbsPt: number } {
+    if (value === undefined) return { bboxAbsPt: DEFAULT_BBOX_TOL_PT };
+    try {
+        return validateTolerance(value, `${fixtureJson}#.tolerance`);
+    } catch {
+        return { bboxAbsPt: DEFAULT_BBOX_TOL_PT };
+    }
 }
 
 function emitFingerprintWarnings(

@@ -25,19 +25,25 @@ import {
     opGetMetadata,
     opGetPageCount,
     opRenderPages,
+    opStructuredExtractWithDebug,
 } from "../worker/ops";
 import { enqueue } from "../worker/opQueue";
-import type {
-    ExtractionResult,
-    ExtractionSettings,
-    LayoutAnalysisResult,
-    OCRDetectionOptions,
-    OCRDetectionResult,
-    PageImageOptions,
-    PageImageResult,
-    PDFMetadata,
-    RawPageDataDetailed,
+import {
+    ExtractionError,
+    ExtractionErrorCode,
+    type ExtractionSettings,
+    type LayoutAnalysisResult,
+    type OCRDetectionOptions,
+    type OCRDetectionResult,
+    type PageImageOptions,
+    type PageImageResult,
+    type PDFMetadata,
+    type RawPageDataDetailed,
 } from "../types";
+import type {
+    BeaverExtractResult,
+    StructuredExtractWithDebugResult,
+} from "../schema";
 import type { ParagraphDetectionSettings } from "../ParagraphDetector";
 import type { SentenceSplitterConfig } from "../sentenceTypes";
 
@@ -53,7 +59,7 @@ export interface ExtractInput {
     pdfData: PdfBytes;
     mode?: "markdown" | "structured";
     markdown?: { engine?: "block" | "paragraph" };
-    structured?: { splitterConfig?: SentenceSplitterConfig };
+    structured?: { splitterConfig?: SentenceSplitterConfig; bboxPrecision?: number };
     settings?: ExtractionSettings;
     paragraphSettings?: ParagraphDetectionSettings;
     pageIndices?: number[];
@@ -67,6 +73,12 @@ export interface AnalyzeLayoutInput {
     pageIndices?: number[];
     pageRange?: PageRange;
     analysisWindow?: number;
+}
+
+export interface StructuredTraceInput extends ExtractInput {
+    mode: "structured";
+    capturePages: number[];
+    debugMode?: "triage" | "full";
 }
 
 export interface RenderPagesInput {
@@ -96,9 +108,26 @@ export async function getMetadata(pdfData: PdfBytes): Promise<PDFMetadata> {
     return reply.result;
 }
 
-export async function extractPdf(input: ExtractInput): Promise<ExtractionResult> {
+export async function extractPdf(input: ExtractInput): Promise<BeaverExtractResult> {
+    if (
+        input.mode === "structured" &&
+        ((input.pageIndices?.length ?? 0) > 0 || input.pageRange)
+    ) {
+        throw new ExtractionError(
+            ExtractionErrorCode.STRUCTURED_PAGE_SELECTION_REJECTED,
+            "Structured extraction is full-document only; pageIndices and pageRange are only supported for markdown extraction.",
+        );
+    }
     await ensureExtractionRuntime();
     const reply = await enqueue(() => opExtract(input));
+    return reply.result;
+}
+
+export async function structuredExtractWithDebug(
+    input: StructuredTraceInput,
+): Promise<StructuredExtractWithDebugResult> {
+    await ensureExtractionRuntime();
+    const reply = await enqueue(() => opStructuredExtractWithDebug(input));
     return reply.result;
 }
 

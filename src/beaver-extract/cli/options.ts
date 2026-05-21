@@ -16,11 +16,16 @@ import type {
 export function parsePagesList(value: string): number[] {
     const parts = value.split(",").map((s) => s.trim()).filter(Boolean);
     const out: number[] = [];
+    const seen = new Set<number>();
     for (const p of parts) {
         const n = Number(p);
         if (!Number.isInteger(n) || n < 0) {
             throw new Error(`--pages: invalid page index "${p}"`);
         }
+        if (seen.has(n)) {
+            throw new Error(`--pages: duplicate page index "${n}"`);
+        }
+        seen.add(n);
         out.push(n);
     }
     if (out.length === 0) throw new Error("--pages must list at least one index");
