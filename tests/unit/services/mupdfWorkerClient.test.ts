@@ -15,6 +15,10 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { configurePDFForTests } from '../../helpers/configurePDFForTests';
+import {
+    MockWorker,
+    setupZoteroMainWindowWithMockWorker,
+} from '../../helpers/mockWorker';
 
 import {
     getMuPDFWorkerClient,
@@ -28,71 +32,10 @@ import {
     ExtractionErrorCode,
 } from '../../../src/beaver-extract/types';
 
-// ---------------------------------------------------------------------------
-// MockWorker — captures postMessage calls + lets the test queue up replies.
-// The configure handshake (first message after spawn) is recorded
-// separately on `configureMessages` and excluded from `posted` so existing
-// op-focused assertions don't have to skip an off-by-one.
-// ---------------------------------------------------------------------------
-class MockWorker {
-    static instances: MockWorker[] = [];
-    onmessage: ((event: { data: any }) => void) | null = null;
-    onerror: ((event: any) => void) | null = null;
-    onmessageerror: ((event: any) => void) | null = null;
-    posted: Array<{ message: any; transfer: Transferable[] | undefined }> = [];
-    configureMessages: any[] = [];
-    postMessage = vi.fn((message: any, transfer?: Transferable[]) => {
-        if (message?.kind === 'configure') {
-            this.configureMessages.push(message);
-            return;
-        }
-        this.posted.push({ message, transfer });
-    });
-    terminate = vi.fn();
-
-    constructor(public url: string, public options: any) {
-        MockWorker.instances.push(this);
-    }
-
-    /** Helper: deliver a reply to the most recently posted op message. */
-    replyToLast(reply: any): void {
-        const last = this.posted[this.posted.length - 1];
-        const id = (last?.message as { id: number } | undefined)?.id;
-        this.onmessage?.({ data: { id, ...reply } });
-    }
-
-    /** Returns the [message, transfer] tuple for the Nth op message. */
-    opCall(
-        n: number,
-    ): [any, Transferable[] | undefined] {
-        const e = this.posted[n];
-        return [e?.message, e?.transfer];
-    }
-}
-
-function setupZoteroMainWindowWithMockWorker() {
-    const win: any = {
-        Worker: MockWorker,
-    };
-    (globalThis as any).Zotero = (globalThis as any).Zotero ?? {};
-    // The package no longer reads Zotero.getMainWindow directly — it goes
-    // through getConfig().getWorkerHost. The configure-for-tests helper
-    // wires both `getWorkerHost` and the singleton slot to this Zotero
-    // global so existing assertions (`Zotero.__beaverMuPDFWorkerClient`)
-    // continue to inspect the same storage.
-    (globalThis as any).Zotero.getMainWindow = vi.fn(() => win);
-    (globalThis as any).Zotero.__beaverMuPDFWorkerClient = undefined;
-    configurePDFForTests({
-        slotHost: (globalThis as any).Zotero,
-        slotKey: '__beaverMuPDFWorkerClient',
-        getWorkerHost: () => win,
-    });
-    return win;
-}
-
 describe('MuPDFWorkerClient', () => {
     beforeEach(() => {
         MockWorker.instances.length = 0;
+        MockWorker.dropNextConfigureAck = false;
         setupZoteroMainWindowWithMockWorker();
     });
 
@@ -135,6 +78,84 @@ describe('MuPDFWorkerClient', () => {
 
         worker.replyToLast({ ok: true, result: { count: 1 } });
         await promise;
+    });
+
+    it('waits for a configured acknowledgement before posting ops', async () => {
+        MockWorker.dropNextConfigureAck = true;
+        const client = getMuPDFWorkerClient();
+        const promise = client.getPageCount(new Uint8Array([0]));
+        const worker = MockWorker.instances[0];
+
+        expect(worker.configureMessages).toHaveLength(1);
+        expect(worker.posted).toHaveLength(0);
+
+        worker.sendReady();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(worker.configureMessages).toHaveLength(2);
+        expect(worker.posted[0].message).toMatchObject({ op: 'getPageCount' });
+
+        worker.replyToLast({ ok: true, result: { count: 2 } });
+        await expect(promise).resolves.toBe(2);
+    });
+
+    it('aborting while waiting for startup terminates the worker without posting an op', async () => {
+        MockWorker.dropNextConfigureAck = true;
+        const client = getMuPDFWorkerClient();
+        const controller = new AbortController();
+        const promise = client.getPageCount(new Uint8Array([0]), controller.signal);
+        const worker = MockWorker.instances[0];
+
+        expect(worker.configureMessages).toHaveLength(1);
+        expect(worker.posted).toHaveLength(0);
+
+        controller.abort();
+
+        await expect(promise).rejects.toBeInstanceOf(WorkerAbortError);
+        expect(worker.terminate).toHaveBeenCalledOnce();
+        expect(worker.posted).toHaveLength(0);
+        expect(client.getStats()).toMatchObject({
+            hasWorker: false,
+            retryCount: 0,
+            idleTimerArmed: false,
+        });
+
+        worker.sendReady();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(worker.posted).toHaveLength(0);
+    });
+
+    it('terminates the worker and retries when the configure handshake times out', async () => {
+        vi.useFakeTimers();
+        try {
+            // First worker never acks the configure handshake.
+            MockWorker.dropNextConfigureAck = true;
+            const client = getMuPDFWorkerClient();
+            const promise = client.getPageCount(new Uint8Array([0]));
+            const first = MockWorker.instances[0];
+
+            expect(first.configureMessages).toHaveLength(1);
+            expect(first.posted).toHaveLength(0);
+
+            // Advance past the 15s startup timeout without a `configured` ack.
+            await vi.advanceTimersByTimeAsync(15000);
+
+            expect(first.terminate).toHaveBeenCalledOnce();
+            expect(first.posted).toHaveLength(0);
+
+            // call() retries once on the stale worker — a fresh worker
+            // spawns, acks the handshake, and the op goes through.
+            const second = MockWorker.instances[1];
+            expect(second).toBeDefined();
+            expect(second.posted[0].message).toMatchObject({ op: 'getPageCount' });
+            second.replyToLast({ ok: true, result: { count: 7 } });
+
+            await expect(promise).resolves.toBe(7);
+            expect(client.getStats().retryCount).toBe(1);
+        } finally {
+            await disposeMuPDFWorker();
+            vi.useRealTimers();
+        }
     });
 
     it('passes the PDF bytes to the worker WITHOUT a transfer list', async () => {
@@ -317,6 +338,31 @@ describe('MuPDFWorkerClient', () => {
         second.replyToLast({ ok: true, result: { count: 9 } });
 
         await expect(promise).resolves.toBe(9);
+    });
+
+    it('retries once when a worker reports an op before configure', async () => {
+        const client = getMuPDFWorkerClient();
+        const promise = client.getPageCount(new Uint8Array([0]));
+        const first = MockWorker.instances[0];
+
+        first.replyToLast({
+            ok: false,
+            error: {
+                name: 'Error',
+                message: 'MuPDF worker received op before configure message',
+            },
+        });
+
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(first.terminate).toHaveBeenCalledOnce();
+        const second = MockWorker.instances[1];
+        expect(second).toBeDefined();
+        expect(second.configureMessages).toHaveLength(1);
+        second.replyToLast({ ok: true, result: { count: 4 } });
+
+        await expect(promise).resolves.toBe(4);
+        expect(client.getStats().retryCount).toBe(1);
     });
 
     it('aborting a call rejects without retrying and the next call respawns', async () => {

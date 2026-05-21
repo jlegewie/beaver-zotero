@@ -14,88 +14,72 @@
  * client method was called.
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { configurePDFForTests } from '../../helpers/configurePDFForTests';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import {
+    MockWorker,
+    setupZoteroMainWindowWithMockWorker,
+} from '../../helpers/mockWorker';
 
 import { disposeMuPDFWorker } from '../../../src/beaver-extract/MuPDFWorkerClient';
 import { BeaverExtractor } from '../../../src/beaver-extract';
+import {
+    SCHEMA_VERSION,
+    type StructuredExtractResult,
+} from '../../../src/beaver-extract/schema';
 
-class MockWorker {
-    static instances: MockWorker[] = [];
-    onmessage: ((event: { data: any }) => void) | null = null;
-    onerror: ((event: any) => void) | null = null;
-    onmessageerror: ((event: any) => void) | null = null;
-    posted: Array<{ message: any; transfer: Transferable[] | undefined }> = [];
-    configureMessages: any[] = [];
-    postMessage = vi.fn((message: any, transfer?: Transferable[]) => {
-        if (message?.kind === 'configure') {
-            this.configureMessages.push(message);
-            return;
-        }
-        this.posted.push({ message, transfer });
-    });
-    terminate = vi.fn();
-
-    constructor(public url: string, public options: any) {
-        MockWorker.instances.push(this);
-    }
-
-    /** Helper: deliver a reply to the most recently posted op message. */
-    replyToLast(reply: any): void {
-        const last = this.posted[this.posted.length - 1];
-        const id = (last?.message as { id: number } | undefined)?.id;
-        this.onmessage?.({ data: { id, ...reply } });
-    }
-
-    opCall(n: number): [any, Transferable[] | undefined] {
-        const e = this.posted[n];
-        return [e?.message, e?.transfer];
-    }
-}
-
-function setupZoteroMainWindowWithMockWorker() {
-    const win: any = { Worker: MockWorker };
-    (globalThis as any).Zotero = (globalThis as any).Zotero ?? {};
-    (globalThis as any).Zotero.getMainWindow = vi.fn(() => win);
-    (globalThis as any).Zotero.__beaverMuPDFWorkerClient = undefined;
-    configurePDFForTests({
-        slotHost: (globalThis as any).Zotero,
-        slotKey: '__beaverMuPDFWorkerClient',
-        getWorkerHost: () => win,
-    });
-}
-
-const FAKE_EXTRACTION_RESULT = {
-    pages: [
-        {
-            index: 0,
-            label: undefined,
-            width: 612,
-            height: 792,
-            content: '## Title\n\nA sentence.',
-            columns: [],
-            items: [],
-            sentences: [],
-        },
-    ],
-    analysis: {
-        pageCount: 1,
-        hasTextLayer: true,
-        styleProfile: {} as any,
-        marginAnalysis: {} as any,
-    },
-    fullText: '## Title\n\nA sentence.',
-    metadata: {
-        extractedAt: new Date().toISOString(),
-        version: '3.0.0',
-        settings: {},
+const FAKE_STRUCTURED_RESULT: StructuredExtractResult = {
+    mode: 'structured',
+    schemaVersion: SCHEMA_VERSION,
+    createdAt: new Date().toISOString(),
+    diagnostics: {
         engine: 'structured',
+        settings: {},
         timings: {
             totalMs: 0,
             docOpenMs: 0,
             walkMs: 0,
             analysisMs: 0,
             perPageMs: [0],
+        },
+    },
+    document: {
+        pageCount: 1,
+        bboxOrigin: 'top-left',
+        bboxPrecision: 1,
+        pages: [
+            {
+                index: 0,
+                width: 612,
+                height: 792,
+                items: [
+                    {
+                        id: 'p1',
+                        kind: 'text',
+                        pageIndex: 0,
+                        order: 0,
+                        bbox: [0, 0, 100, 10],
+                        text: 'A sentence.',
+                        sentences: [
+                            {
+                                id: 's1',
+                                order: 0,
+                                text: 'A sentence.',
+                                bboxes: [[0, 0, 100, 10]],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+        citationIndex: {
+            p1: { id: 'p1', kind: 'item', pageIndex: 0, itemId: 'p1' },
+            s1: {
+                id: 's1',
+                kind: 'sentence',
+                pageIndex: 0,
+                itemId: 'p1',
+                sentenceId: 's1',
+            },
         },
     },
 };
@@ -117,7 +101,7 @@ describe('BeaverExtractor.extract({ mode: "structured" }) — single worker roun
         });
         const worker = MockWorker.instances[0];
         expect(worker).toBeDefined();
-        worker.replyToLast({ ok: true, result: FAKE_EXTRACTION_RESULT });
+        worker.replyToLast({ ok: true, result: FAKE_STRUCTURED_RESULT });
         await promise;
 
         // Exactly one posted op message (configure handshake is excluded
@@ -143,7 +127,7 @@ describe('BeaverExtractor.extract({ mode: "structured" }) — single worker roun
             mode: 'structured',
         });
         const worker = MockWorker.instances[0];
-        worker.replyToLast({ ok: true, result: FAKE_EXTRACTION_RESULT });
+        worker.replyToLast({ ok: true, result: FAKE_STRUCTURED_RESULT });
         await promise;
 
         const [message] = worker.opCall(0);
@@ -159,7 +143,7 @@ describe('BeaverExtractor.extract({ mode: "structured" }) — single worker roun
             structured: { language: 'fr' },
         });
         const worker = MockWorker.instances[0];
-        worker.replyToLast({ ok: true, result: FAKE_EXTRACTION_RESULT });
+        worker.replyToLast({ ok: true, result: FAKE_STRUCTURED_RESULT });
         await promise;
 
         const [message] = worker.opCall(0);
@@ -175,7 +159,7 @@ describe('BeaverExtractor.extract({ mode: "structured" }) — single worker roun
             structured: { splitter: { type: 'simple' } },
         });
         const worker = MockWorker.instances[0];
-        worker.replyToLast({ ok: true, result: FAKE_EXTRACTION_RESULT });
+        worker.replyToLast({ ok: true, result: FAKE_STRUCTURED_RESULT });
         await promise;
 
         const [message] = worker.opCall(0);
@@ -192,7 +176,7 @@ describe('BeaverExtractor.extract({ mode: "structured" }) — single worker roun
             },
         });
         const worker = MockWorker.instances[0];
-        worker.replyToLast({ ok: true, result: FAKE_EXTRACTION_RESULT });
+        worker.replyToLast({ ok: true, result: FAKE_STRUCTURED_RESULT });
         await promise;
 
         const [message] = worker.opCall(0);
@@ -211,7 +195,7 @@ describe('BeaverExtractor.extract({ mode: "structured" }) — single worker roun
             },
         });
         const worker = MockWorker.instances[0];
-        worker.replyToLast({ ok: true, result: FAKE_EXTRACTION_RESULT });
+        worker.replyToLast({ ok: true, result: FAKE_STRUCTURED_RESULT });
         await promise;
 
         const [message] = worker.opCall(0);
@@ -228,7 +212,7 @@ describe('BeaverExtractor.extract({ mode: "structured" }) — single worker roun
             analysisWindow: 5,
         });
         const worker = MockWorker.instances[0];
-        worker.replyToLast({ ok: true, result: FAKE_EXTRACTION_RESULT });
+        worker.replyToLast({ ok: true, result: FAKE_STRUCTURED_RESULT });
         await promise;
 
         const [message] = worker.opCall(0);
@@ -244,25 +228,31 @@ describe('BeaverExtractor.extract({ mode: "structured" }) — single worker roun
             mode: 'markdown',
         });
         const worker = MockWorker.instances[0];
-        worker.replyToLast({ ok: true, result: FAKE_EXTRACTION_RESULT });
+        worker.replyToLast({ ok: true, result: FAKE_STRUCTURED_RESULT });
         await promise;
 
         const [message] = worker.opCall(0);
         expect(message.args.structured).toBeUndefined();
     });
 
-    it('returns the InternalExtractionResult shape with structured fields populated', async () => {
+    it('returns the StructuredExtractResult shape with document items populated', async () => {
         const promise = new BeaverExtractor().extract(new Uint8Array([1]), {
             mode: 'structured',
         });
         const worker = MockWorker.instances[0];
-        worker.replyToLast({ ok: true, result: FAKE_EXTRACTION_RESULT });
+        worker.replyToLast({ ok: true, result: FAKE_STRUCTURED_RESULT });
         const result = await promise;
 
-        expect(result.metadata.engine).toBe('structured');
-        expect(result.metadata.version).toBe('3.0.0');
-        expect(result.pages[0]).toHaveProperty('items');
-        expect(result.pages[0]).toHaveProperty('sentences');
-        expect(result.pages[0]).not.toHaveProperty('paragraphs');
+        expect(result.mode).toBe('structured');
+        if (result.mode !== 'structured') return;
+        expect(result.diagnostics?.engine).toBe('structured');
+        expect(result.schemaVersion).toBe(SCHEMA_VERSION);
+        expect(result.document.pages[0].items).toHaveLength(1);
+        expect(result.document.pages[0].items[0]).toMatchObject({
+            kind: 'text',
+            sentences: expect.arrayContaining([
+                expect.objectContaining({ text: 'A sentence.' }),
+            ]),
+        });
     });
 });
