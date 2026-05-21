@@ -247,9 +247,10 @@ export async function loadPdfData(
 export function checkRemotePdfSize(
     data: Uint8Array,
     skipLimits?: boolean,
+    maxFileSizeMB?: number,
 ): { sizeMB: number; maxMB: number } | null {
     if (skipLimits) return null;
-    const maxMB = getPref('maxFileSizeMB');
+    const maxMB = maxFileSizeMB ?? getPref('maxFileSizeMB');
     const sizeMB = data.length / 1024 / 1024;
     return sizeMB > maxMB ? { sizeMB, maxMB } : null;
 }

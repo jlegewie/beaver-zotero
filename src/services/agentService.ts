@@ -17,6 +17,7 @@ import {
     handleZoteroDataRequest,
     handleExternalReferenceCheckRequest,
     handleZoteroAttachmentPagesRequest,
+    handleZoteroDocumentRequest,
     handleZoteroAttachmentPageImagesRequest,
     handleZoteroAttachmentSearchRequest,
     handleItemSearchByMetadataRequest,
@@ -443,6 +444,22 @@ export class AgentService {
                                 request_id: event.request_id,
                                 attachment: event.attachment,
                                 pages: [],
+                                total_pages: null,
+                                error: String(err),
+                                error_code: 'extraction_failed',
+                            });
+                        });
+                    break;
+
+                case 'zotero_document_request':
+                    logger("AgentService: Received zotero_document_request", event, 1);
+                    handleZoteroDocumentRequest(event)
+                        .then(res => this.send(res))
+                        .catch(err => {
+                            logger(`AgentService: zotero_document_request failed: ${err}`, 1);
+                            this.send({
+                                type: 'zotero_document',
+                                request_id: event.request_id,
                                 total_pages: null,
                                 error: String(err),
                                 error_code: 'extraction_failed',
