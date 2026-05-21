@@ -11,6 +11,7 @@ import { wasItemAddedBeforeLastSync } from '../../../react/utils/sourceUtils';
 import { BeaverExtractor, ExtractionError, ExtractionErrorCode } from '../../beaver-extract';
 import { EXTRACTION_VERSION, isRemoteFilePath, makeRemoteFilePath } from '../attachmentFileCache';
 import type { AttachmentFileCacheRecord } from '../attachmentFileCache';
+import type { DocumentPreflightMetadata } from '../documentCache';
 import { DeferredToolPreference } from '../agentProtocol';
 import { deferredToolPreferencesAtom } from '../../../react/atoms/deferredToolPreferences';
 import { isSupportedItem } from '../../utils/sync';
@@ -439,24 +440,37 @@ export interface PreflightOptions {
 }
 
 export function preflightCachedPdfMeta(
-    cachedMeta: AttachmentFileCacheRecord | null,
+    cachedMeta: AttachmentFileCacheRecord | DocumentPreflightMetadata | null,
     opts: PreflightOptions,
 ): PreflightFailure | null {
     if (!cachedMeta) return null;
 
-    if (cachedMeta.is_encrypted) {
-        return { code: 'encrypted', pageCount: cachedMeta.page_count ?? null };
+    const pageCount = 'page_count' in cachedMeta
+        ? cachedMeta.page_count ?? null
+        : cachedMeta.pageCount ?? null;
+    const isEncrypted = 'is_encrypted' in cachedMeta
+        ? cachedMeta.is_encrypted
+        : cachedMeta.isEncrypted;
+    const isInvalid = 'is_invalid' in cachedMeta
+        ? cachedMeta.is_invalid
+        : cachedMeta.isInvalid;
+    const needsOcr = 'needs_ocr' in cachedMeta
+        ? cachedMeta.needs_ocr
+        : cachedMeta.needsOcr;
+
+    if (isEncrypted) {
+        return { code: 'encrypted', pageCount };
     }
-    if (cachedMeta.is_invalid) {
-        return { code: 'invalid_pdf', pageCount: cachedMeta.page_count ?? null };
+    if (isInvalid) {
+        return { code: 'invalid_pdf', pageCount };
     }
-    if (opts.checkOcr && cachedMeta.needs_ocr) {
-        return { code: 'no_text_layer', pageCount: cachedMeta.page_count ?? null };
+    if (opts.checkOcr && needsOcr) {
+        return { code: 'no_text_layer', pageCount };
     }
-    if (opts.applyPageCountCap && cachedMeta.page_count != null && cachedMeta.page_count > opts.maxPageCount) {
+    if (opts.applyPageCountCap && pageCount != null && pageCount > opts.maxPageCount) {
         return {
             code: 'too_many_pages',
-            pageCount: cachedMeta.page_count,
+            pageCount,
             maxPageCount: opts.maxPageCount,
         };
     }
