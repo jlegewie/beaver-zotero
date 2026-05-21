@@ -209,6 +209,10 @@ export class AgentService {
 
                 this.ws.onopen = () => {
                     logger('AgentService: Connection established, sending auth message', 1);
+                    logger(
+                        `AgentService: WebSocket negotiated extensions="${wsInstance.extensions || '(none)'}" protocol="${wsInstance.protocol || '(none)'}"`,
+                        1,
+                    );
                     // Small delay to ensure server has completed accept() before we send
                     // This prevents a race condition where messages sent immediately in onopen
                     // may be dropped if the server hasn't finished accepting the connection
