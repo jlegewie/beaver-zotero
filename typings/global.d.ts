@@ -57,6 +57,7 @@ declare namespace Zotero {
         };
 
         const attachmentFileCache: import("../src/services/attachmentFileCache").AttachmentFileCache | undefined;
+        const documentCache: import("../src/services/documentCache").DocumentCache | undefined;
 
         const db: {
             /**

@@ -6,6 +6,7 @@ import eventBus from "../react/eventBus";
 import { CitationService } from "./services/CitationService";
 import { BeaverDB } from "./services/database";
 import { AttachmentFileCache } from "./services/attachmentFileCache";
+import { DocumentCache } from "./services/documentCache";
 import { uiManager } from "../react/ui/UIManager";
 import { getPref, setPref } from "./utils/prefs";
 import { addPendingVersionNotification } from "./utils/versionNotificationPrefs";
@@ -244,6 +245,13 @@ async function onStartup() {
         await attachmentFileCache.runStartupGC();
         addon.attachmentFileCache = attachmentFileCache;
         ztoolkit.log("AttachmentFileCache initialized successfully");
+
+        // -------- Initialize Document Cache --------
+        const documentCache = new DocumentCache(beaverDB);
+        await documentCache.init();
+        await documentCache.runStartupGC();
+        addon.documentCache = documentCache;
+        ztoolkit.log("DocumentCache initialized successfully");
 
         // -------- Initialize Citation Service with caching --------
         const citationService = new CitationService(ztoolkit);
