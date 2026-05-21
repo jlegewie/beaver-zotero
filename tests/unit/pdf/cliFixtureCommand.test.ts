@@ -29,7 +29,10 @@ import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 
 import { runCli } from '../../../src/beaver-extract/node/runCli';
-import { FIXTURE_SCHEMA_VERSION } from '../../../src/beaver-extract/cli/fixture/fixtureSchema';
+import {
+    FIXTURE_SCHEMA_VERSION,
+    validateFixture,
+} from '../../../src/beaver-extract/cli/fixture/fixtureSchema';
 import type { CliDeps } from '../../../src/beaver-extract/cli/runCliTypes';
 import type * as NodeApi from '../../../src/beaver-extract/node/api';
 
@@ -58,7 +61,7 @@ interface DepFakes {
 const FAKE_PDF_BYTES = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x34]); // %PDF-1.4
 const FAKE_PDF_SHA = createHash('sha256').update(FAKE_PDF_BYTES).digest('hex');
 
-function pageWithSentences(): unknown {
+function pageWithSentences(): any {
     return {
         index: 0,
         width: 595,
@@ -91,18 +94,106 @@ function pageWithSentences(): unknown {
     };
 }
 
+function structuredResult(page = pageWithSentences()): unknown {
+    const item = page.items[0];
+    const sentence = page.sentences[0];
+    const text = page.content ?? item.text;
+    return {
+        mode: 'structured',
+        schemaVersion: '4',
+        document: {
+            pageCount: 1,
+            bboxOrigin: 'top-left',
+            bboxPrecision: 1,
+            pages: [
+                {
+                    index: page.index,
+                    width: page.width,
+                    height: page.height,
+                    items: [
+                        {
+                            id: item.id,
+                            kind: item.kind,
+                            pageIndex: item.pageIndex,
+                            order: item.index,
+                            bbox: [item.bbox.l, item.bbox.t, item.bbox.r, item.bbox.b],
+                            text,
+                            sentences: [
+                                {
+                                    id: 's1',
+                                    order: sentence.index,
+                                    text: sentence.text,
+                                    bboxes: sentence.bboxes.map((bbox: any) => [
+                                        bbox.l,
+                                        bbox.t,
+                                        bbox.r,
+                                        bbox.b,
+                                    ]),
+                                },
+                            ],
+                        },
+                    ],
+                },
+            ],
+            citationIndex: {
+                [item.id]: {
+                    id: item.id,
+                    kind: 'item',
+                    pageIndex: page.index,
+                    itemId: item.id,
+                },
+                s1: {
+                    id: 's1',
+                    kind: 'sentence',
+                    pageIndex: page.index,
+                    itemId: item.id,
+                    sentenceId: 's1',
+                },
+            },
+        },
+    };
+}
+
+function markdownResult(page = pageWithSentences()): unknown {
+    return {
+        mode: 'markdown',
+        schemaVersion: '4',
+        document: {
+            pageCount: 1,
+            pageLabels: {},
+            pages: [
+                {
+                    index: page.index,
+                    width: page.width,
+                    height: page.height,
+                    markdown: page.content ?? 'Hello.',
+                },
+            ],
+        },
+    };
+}
+
+function extractPdfMock(): ReturnType<typeof vi.fn> {
+    return vi.fn().mockImplementation((input: { mode?: string }) => {
+        if (input.mode === 'markdown') return Promise.resolve(markdownResult());
+        return Promise.resolve(structuredResult());
+    });
+}
+
+function extractPdfMockForPage(page: any): ReturnType<typeof vi.fn> {
+    return vi.fn().mockImplementation((input: { mode?: string }) => {
+        if (input.mode === 'markdown') return Promise.resolve(markdownResult(page));
+        return Promise.resolve(structuredResult(page));
+    });
+}
+
 function makeDeps(api: Partial<DepFakes['api']> = {}): DepFakes {
     const stdout = new StringSink();
     const stderr = new StringSink();
     const fakeApi = {
         getPageCount: vi.fn(),
         getMetadata: vi.fn(),
-        extractPdf: vi.fn().mockResolvedValue({
-            pages: [pageWithSentences()],
-            analysis: {},
-            fullText: 'Hello.',
-            metadata: {},
-        }),
+        extractPdf: extractPdfMock(),
         analyzeLayout: vi.fn(),
         renderPages: vi.fn(),
         extractRawPageDetailed: vi.fn(),
@@ -147,7 +238,10 @@ function readFixtureJson(id: string): {
     updatedAt: string;
     pdfSha256: string;
     config: { pageIndices: number[]; analysisScope: unknown };
-    expected: { perPage: unknown[] };
+    expected: {
+        structured: { pages: unknown[] };
+        markdown: { pages: unknown[] };
+    };
 } {
     return JSON.parse(readFileSync(join(tmpRoot, id, 'fixture.json'), 'utf8'));
 }
@@ -183,7 +277,14 @@ describe('fixture capture', () => {
         expect(fix.config.pageIndices).toEqual([0]);
         expect(fix.config.analysisScope).toBe('document'); // default
         expect(fix.capturedAt).toBe(fix.updatedAt); // first capture
-        expect(fix.expected.perPage).toHaveLength(1);
+        expect(fix.expected.structured.pages).toHaveLength(1);
+        expect(fix.expected.markdown.pages).toHaveLength(1);
+        expect(fix.expected.structured.pages.map((p: any) => p.index)).toEqual(
+            fix.config.pageIndices,
+        );
+        expect(fix.expected.markdown.pages.map((p: any) => p.index)).toEqual(
+            fix.config.pageIndices,
+        );
 
         // Shared PDF was written.
         expect(existsSync(join(tmpRoot, '_shared', `${FAKE_PDF_SHA}.pdf`))).toBe(true);
@@ -270,6 +371,28 @@ describe('fixture capture', () => {
         expect(env.error.message).toMatch(/mutually exclusive/);
     });
 
+    it('rejects duplicate --pages entries', async () => {
+        const { deps, stderr } = makeDeps();
+        const code = await runCli(
+            [
+                'fixture',
+                'capture',
+                'fake.pdf',
+                '--root',
+                tmpRoot,
+                '--id',
+                'dupe-pages',
+                '--pages',
+                '0,0,1',
+                '--json',
+            ],
+            deps,
+        );
+        expect(code).toBe(1);
+        const env = JSON.parse(stderr.text()) as { error: { message: string } };
+        expect(env.error.message).toMatch(/duplicate page index/);
+    });
+
     it('reports wrote=true when --update actually rewrites a changed fixture', async () => {
         // Regression: previously `wrote` was recomputed by re-reading the
         // just-written file and comparing to itself, so existing-and-changed
@@ -297,12 +420,7 @@ describe('fixture capture', () => {
         mutated.content = 'Mutated content.';
 
         const { deps: updateDeps, stdout } = makeDeps({
-            extractPdf: vi.fn().mockResolvedValue({
-                pages: [mutated],
-                analysis: {},
-                fullText: 'Mutated content.',
-                metadata: {},
-            }),
+            extractPdf: extractPdfMockForPage(mutated),
         });
         const code = await runCli([...baseArgs, '--update'], updateDeps);
         expect(code).toBe(0);
@@ -497,12 +615,7 @@ describe('fixture update', () => {
         mutated.content = 'Different content.';
 
         const { deps } = makeDeps({
-            extractPdf: vi.fn().mockResolvedValue({
-                pages: [mutated],
-                analysis: {},
-                fullText: 'Different content.',
-                metadata: {},
-            }),
+            extractPdf: extractPdfMockForPage(mutated),
         });
 
         const code = await runCli(
@@ -514,7 +627,8 @@ describe('fixture update', () => {
         const fix = readFixtureJson('rebase__p0');
         expect(fix.capturedAt).toBe(capturedAt); // preserved
         expect(fix.updatedAt).not.toBe(capturedAt); // bumped
-        expect(fix.expected.perPage).toHaveLength(1);
+        expect(fix.expected.structured.pages).toHaveLength(1);
+        expect(fix.expected.markdown.pages).toHaveLength(1);
     });
 });
 
@@ -594,12 +708,7 @@ describe('fixture evaluate', () => {
         mutated.sentences = sentences;
 
         const { deps: evalDeps, stdout } = makeDeps({
-            extractPdf: vi.fn().mockResolvedValue({
-                pages: [mutated],
-                analysis: {},
-                fullText: '',
-                metadata: {},
-            }),
+            extractPdf: extractPdfMockForPage(mutated),
         });
 
         const code = await runCli(
@@ -646,6 +755,118 @@ describe('fixture loader validation', () => {
 });
 
 // ---------------------------------------------------------------------------
+// 6. schema migration
+// ---------------------------------------------------------------------------
+
+describe('fixture migrate', () => {
+    function writeSharedPdf(): void {
+        mkdirSync(join(tmpRoot, '_shared'), { recursive: true });
+        writeFileSync(
+            join(tmpRoot, '_shared', `${FAKE_PDF_SHA}.pdf`),
+            Buffer.from(FAKE_PDF_BYTES),
+        );
+    }
+
+    function writeRawFixture(id: string, fixture: Record<string, unknown>): void {
+        mkdirSync(join(tmpRoot, id), { recursive: true });
+        writeFileSync(
+            join(tmpRoot, id, 'fixture.json'),
+            JSON.stringify(fixture, null, 2),
+        );
+    }
+
+    it('migrates a synthetic v4 fixture to schema 5', async () => {
+        writeSharedPdf();
+        writeRawFixture('legacy__p0', buildLegacyFixture('legacy__p0', FAKE_PDF_SHA));
+
+        const { deps, stdout } = makeDeps();
+        const code = await runCli(
+            ['fixture', 'migrate', 'legacy__p0', '--root', tmpRoot, '--json'],
+            deps,
+        );
+        expect(code).toBe(0);
+        const env = JSON.parse(stdout.text()) as {
+            result: { fromSchema: number; toSchema: number; wrote: boolean };
+        };
+        expect(env.result).toMatchObject({
+            fromSchema: 4,
+            toSchema: FIXTURE_SCHEMA_VERSION,
+            wrote: true,
+        });
+        const parsed = JSON.parse(
+            readFileSync(join(tmpRoot, 'legacy__p0', 'fixture.json'), 'utf8'),
+        );
+        const migrated = validateFixture(parsed);
+        expect(migrated.schema).toBe(FIXTURE_SCHEMA_VERSION);
+        expect(migrated.expected.structured.pages.map((p) => p.index)).toEqual([0]);
+        expect(migrated.expected.markdown.pages.map((p) => p.index)).toEqual([0]);
+    });
+
+    it('reports wrote=false when re-run on an unchanged schema-5 fixture', async () => {
+        const { deps: capDeps } = makeDeps();
+        expect(
+            await runCli(
+                [
+                    'fixture',
+                    'capture',
+                    'fake.pdf',
+                    '--root',
+                    tmpRoot,
+                    '--id',
+                    'current__p0',
+                    '--pages',
+                    '0',
+                    '--json',
+                ],
+                capDeps,
+            ),
+        ).toBe(0);
+
+        const { deps, stdout } = makeDeps();
+        const code = await runCli(
+            ['fixture', 'migrate', 'current__p0', '--root', tmpRoot, '--json'],
+            deps,
+        );
+        expect(code).toBe(0);
+        const env = JSON.parse(stdout.text()) as { result: { wrote: boolean } };
+        expect(env.result.wrote).toBe(false);
+    });
+
+    it('fails when the folder id and fixture id differ', async () => {
+        writeSharedPdf();
+        writeRawFixture('folder__p0', buildLegacyFixture('other__p0', FAKE_PDF_SHA));
+
+        const { deps, stderr } = makeDeps();
+        const code = await runCli(
+            ['fixture', 'migrate', 'folder__p0', '--root', tmpRoot, '--json'],
+            deps,
+        );
+        expect(code).toBe(1);
+        const env = JSON.parse(stderr.text()) as { error: { message: string } };
+        expect(env.error.message).toMatch(/expected "folder__p0", got "other__p0"/);
+    });
+
+    it('surfaces malformed legacy config as a validation error', async () => {
+        writeSharedPdf();
+        const fixture = buildLegacyFixture('bad-config__p0', FAKE_PDF_SHA);
+        (fixture.config as Record<string, unknown>).analysisScope = 42;
+        writeRawFixture('bad-config__p0', fixture);
+
+        const { deps, stderr } = makeDeps();
+        const code = await runCli(
+            ['fixture', 'migrate', 'bad-config__p0', '--root', tmpRoot, '--json'],
+            deps,
+        );
+        expect(code).toBe(1);
+        const env = JSON.parse(stderr.text()) as {
+            error: { name: string; message: string };
+        };
+        expect(env.error.name).toBe('FixtureValidationError');
+        expect(env.error.message).toMatch(/config\.analysisScope/);
+    });
+});
+
+// ---------------------------------------------------------------------------
 // Synthetic fixture builder used by the malformed/orphan tests
 // ---------------------------------------------------------------------------
 
@@ -672,8 +893,84 @@ function buildSyntheticFixture(sha: string): Record<string, unknown> {
         },
         tolerance: { bboxAbsPt: 0.5 },
         expected: {
-            perPage: [],
-            totals: { itemCount: 0, sentenceCount: 0, degradedItems: 0 },
+            structured: { pages: [baseStructuredPage()] },
+            markdown: { pages: [baseMarkdownPage()] },
         },
+    };
+}
+
+function buildLegacyFixture(id: string, sha: string): Record<string, unknown> {
+    return {
+        schema: 4,
+        id,
+        capturedAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+        pdfSha256: sha,
+        pdfBytes: 8,
+        config: {
+            pageIndices: [0],
+            analysisScope: 'document',
+            splitterConfig: { type: 'sentencex' },
+            settings: {},
+            paragraphSettings: {},
+        },
+        fingerprints: {
+            extractorGitSha: null,
+            extractorVersion: null,
+            mupdfWasmSha256: '0'.repeat(64),
+            sentencexWasmSha256: '0'.repeat(64),
+        },
+        tolerance: { bboxAbsPt: 0.5 },
+        expected: {
+            perPage: [
+                {
+                    pageIndex: 0,
+                    pageWidth: 595,
+                    pageHeight: 842,
+                    content: 'Hello.',
+                    itemCount: 1,
+                    sentenceCount: 1,
+                    degradedItems: 0,
+                    items: [],
+                    sentences: [],
+                },
+            ],
+            totals: { itemCount: 1, sentenceCount: 1, degradedItems: 0 },
+        },
+    };
+}
+
+function baseStructuredPage(): Record<string, unknown> {
+    return {
+        index: 0,
+        width: 595,
+        height: 842,
+        items: [
+            {
+                id: 'p0:i0',
+                kind: 'text',
+                pageIndex: 0,
+                order: 0,
+                bbox: [10, 10, 90, 22],
+                text: 'Hello.',
+                sentences: [
+                    {
+                        id: 's1',
+                        order: 0,
+                        text: 'Hello.',
+                        bboxes: [[10, 10, 90, 22]],
+                    },
+                ],
+            },
+        ],
+    };
+}
+
+function baseMarkdownPage(): Record<string, unknown> {
+    return {
+        index: 0,
+        width: 595,
+        height: 842,
+        markdown: 'Hello.',
     };
 }

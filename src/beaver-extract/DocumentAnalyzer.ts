@@ -17,8 +17,30 @@ import type {
     PageOCRAnalysis,
     OCRIssueReason,
 } from "./types";
-import { DEFAULT_OCR_DETECTION_OPTIONS, bboxToTuple } from "./types";
+import { DEFAULT_OCR_DETECTION_OPTIONS, DEFAULT_MARGIN_ZONE, bboxToTuple } from "./types";
 import { bboxHeight, bboxWidth } from "./types";
+import { isRecoverablePageError } from "./wasmFatal";
+
+/**
+ * Minimum page count for the document-level near-empty guard to fire.
+ * Below this, a sparse document is more likely a legitimate cover /
+ * part-divider / short note than a scanned document missing its text layer.
+ */
+const NEAR_EMPTY_GUARD_MIN_PAGES = 3;
+
+/**
+ * Minimum number of text lines on a page before the fragmented-text check
+ * (see `analyzePage`) applies. Keeps a sparse page — a few stray marks — from
+ * being judged on a tiny, unrepresentative sample.
+ */
+const FRAGMENTED_TEXT_MIN_LINES = 50;
+
+/**
+ * Maximum mean characters-per-line for a page to count as fragmented. A font
+ * MuPDF cannot group into words emits one structured-text line per glyph
+ * (mean ~1); genuine text lines carry whole words and run far longer.
+ */
+const FRAGMENTED_TEXT_MAX_MEAN_LEN = 1.5;
 
 /**
  * Minimal interface that DocumentAnalyzer needs — implemented by a
@@ -279,6 +301,40 @@ function checkImageCoverage(
 // ============================================================================
 
 /**
+ * Decide whether a line belongs to the page body rather than the margin.
+ *
+ * The body region is the page inset by `DEFAULT_MARGIN_ZONE`; a line counts
+ * as body text when its bounding box overlaps that region at all. Margin
+ * furniture — running headers/footers, page numbers, and especially
+ * publisher watermarks ("Downloaded from …") and browser print banners —
+ * sits entirely outside the body region and is excluded.
+ *
+ * This keeps the OCR text-density measurement honest: a scanned document
+ * whose only text layer is a repeated margin stamp would otherwise have
+ * that stamp counted as page text and slip past the gate. The check is
+ * free — the detector already walks every sampled page and holds each
+ * line's bbox.
+ *
+ * Lines without a bbox cannot be placed and are conservatively kept.
+ */
+function isBodyLine(
+    bbox: BoundingBox | undefined,
+    pageWidth: number,
+    pageHeight: number,
+): boolean {
+    if (!bbox) return true;
+    const bodyL = DEFAULT_MARGIN_ZONE.left;
+    const bodyT = DEFAULT_MARGIN_ZONE.top;
+    const bodyR = pageWidth - DEFAULT_MARGIN_ZONE.right;
+    const bodyB = pageHeight - DEFAULT_MARGIN_ZONE.bottom;
+    // Degenerate body region (tiny page / oversized margins): disable the
+    // filter rather than discard every line.
+    if (bodyR <= bodyL || bodyB <= bodyT) return true;
+    const [l, t, r, b] = bboxToTuple(bbox);
+    return !(r < bodyL || l > bodyR || b < bodyT || t > bodyB);
+}
+
+/**
  * Analyze a single page for OCR-related issues.
  *
  * Key design decisions:
@@ -286,6 +342,9 @@ function checkImageCoverage(
  *   A scanned document that was previously OCR'd will have both large images AND
  *   a valid text layer. We only flag large_image_coverage when combined with
  *   insufficient or missing text.
+ * - Text density is measured from body lines only — margin watermarks,
+ *   running headers/footers, and page numbers are excluded via `isBodyLine`
+ *   so they cannot mask a scanned page as text-bearing.
  * - Bounding box checks (overflow, overlap) are optional and disabled by default.
  *   They're useful for word-level positioning accuracy but not for page-level
  *   text extraction.
@@ -318,15 +377,27 @@ function analyzePage(
         };
     }
 
-    // Collect all text and line bounding boxes
+    // Collect body text and line bounding boxes. Margin lines (watermarks,
+    // running headers/footers, page numbers) are excluded from the text
+    // measurement but still contribute their bbox to `lineBBoxes`, which the
+    // optional overflow/overlap checks need to see in full.
     let pageText = "";
     const lineBBoxes: BoundingBox[] = [];
+    // Count every text-bearing line (body and margin) and its characters so a
+    // degenerate line structure can be detected — see the fragmented-text
+    // check below.
+    let textLineCount = 0;
+    let textLineChars = 0;
 
     for (const block of textBlocks) {
         if (block.lines) {
             for (const line of block.lines) {
                 if (line.text) {
-                    pageText += line.text + "\n";
+                    textLineCount++;
+                    textLineChars += line.text.length;
+                    if (isBodyLine(line.bbox, rawPage.width, rawPage.height)) {
+                        pageText += line.text + "\n";
+                    }
                 }
                 if (line.bbox) {
                     lineBBoxes.push(line.bbox);
@@ -337,7 +408,22 @@ function analyzePage(
 
     const textLength = pageText.replace(/\s+/g, "").length;
 
-    // Check 2: Insufficient text combined with large image
+    // Check 2: Fragmented text lines. A font MuPDF cannot group into words —
+    // e.g. a Type 3 font with broken metrics and a custom encoding — yields a
+    // structured-text layer where every glyph becomes its own one-character
+    // line. The substituted characters can be ordinary letters, so the
+    // text-quality checks pass and the per-page text length looks healthy,
+    // yet the text never assembles into words and the document must still be
+    // routed to OCR. A page with many text lines averaging ~1 character each
+    // is unambiguously broken.
+    if (
+        textLineCount >= FRAGMENTED_TEXT_MIN_LINES &&
+        textLineChars / textLineCount <= FRAGMENTED_TEXT_MAX_MEAN_LEN
+    ) {
+        issues.push("fragmented_text_lines");
+    }
+
+    // Check 3: Insufficient text combined with large image
     // This catches scanned pages that weren't OCR'd properly
     // Note: A page with large images but sufficient good text is likely already OCR'd
     if (textLength < opts.minTextPerPage && hasLargeImage) {
@@ -345,13 +431,13 @@ function analyzePage(
         issues.push("large_image_coverage");
     }
 
-    // Check 3: Text quality analysis (applies regardless of images)
+    // Check 4: Text quality analysis (applies regardless of images)
     if (textLength > 0) {
         const textQualityIssues = analyzeTextQuality(pageText, opts);
         issues.push(...textQualityIssues);
     }
 
-    // Check 4: Bounding box validation (optional - for word-level accuracy)
+    // Check 5: Bounding box validation (optional - for word-level accuracy)
     // Disabled by default since most users need page-level text extraction
     if (opts.checkBoundingBoxes && lineBBoxes.length > 0) {
         const bboxIssues = validateBoundingBoxes(
@@ -413,8 +499,41 @@ export class DocumentAnalyzer {
     constructor(private mupdf: RawPageProvider) {}
 
     /**
+     * Sample one page for OCR analysis, pushing its `PageOCRAnalysis` onto
+     * `pageAnalyses` and folding its issues into `issueBreakdown`.
+     *
+     * Returns `false` (leaving both collections untouched) when the page is an
+     * unresolvable leaf of a malformed page tree — such pages are skipped so
+     * one bad leaf does not abort detection. Genuine extraction failures and
+     * WASM traps still propagate.
+     */
+    private tryAnalyzeOcrPage(
+        pageIndex: number,
+        opts: Required<OCRDetectionOptions>,
+        pageAnalyses: PageOCRAnalysis[],
+        issueBreakdown: Record<OCRIssueReason, number>,
+    ): boolean {
+        let rawPage: RawPageData;
+        try {
+            rawPage = this.mupdf.extractRawPage(pageIndex, { includeImages: true });
+        } catch (err) {
+            if (!isRecoverablePageError(err)) throw err;
+            return false;
+        }
+        const analysis = analyzePage(rawPage, opts);
+        pageAnalyses.push(analysis);
+        for (const issue of analysis.issues) {
+            issueBreakdown[issue]++;
+        }
+        return true;
+    }
+
+    /**
      * Perform detailed OCR detection analysis.
-     * Samples pages and analyzes text quality, bounding boxes, and image coverage.
+     * Samples pages and analyzes text quality, bounding boxes, and image
+     * coverage. A document-level near-empty guard additionally flags
+     * documents whose mean sampled text falls below `minMeanTextPerPage`,
+     * even when no per-page issue fires.
      *
      * @param options - Detection options
      * @returns Detailed analysis result
@@ -447,6 +566,7 @@ export class DocumentAnalyzer {
             high_newline_ratio: 0,
             low_alphanumeric_ratio: 0,
             invalid_characters: 0,
+            fragmented_text_lines: 0,
             large_image_coverage: 0,
             bbox_overflow: 0,
             excessive_line_overlap: 0,
@@ -457,14 +577,10 @@ export class DocumentAnalyzer {
         const initialPages = spreadPageIndices(0, sampleGrid.length, initialSampleSize)
             .map((pos) => sampleGrid[pos]);
 
+        // A malformed page tree can fail to resolve a sampled leaf;
+        // `tryAnalyzeOcrPage` drops those rather than aborting detection.
         for (const pageIndex of initialPages) {
-            const rawPage = this.mupdf.extractRawPage(pageIndex, { includeImages: true });
-            const analysis = analyzePage(rawPage, opts);
-            pageAnalyses.push(analysis);
-
-            for (const issue of analysis.issues) {
-                issueBreakdown[issue]++;
-            }
+            this.tryAnalyzeOcrPage(pageIndex, opts, pageAnalyses, issueBreakdown);
         }
 
         // Calculate initial issue ratio
@@ -486,13 +602,7 @@ export class DocumentAnalyzer {
 
             for (const pageIndex of sampleGrid) {
                 if (alreadySampled.has(pageIndex)) continue;
-                const rawPage = this.mupdf.extractRawPage(pageIndex, { includeImages: true });
-                const analysis = analyzePage(rawPage, opts);
-                pageAnalyses.push(analysis);
-
-                for (const issue of analysis.issues) {
-                    issueBreakdown[issue]++;
-                }
+                this.tryAnalyzeOcrPage(pageIndex, opts, pageAnalyses, issueBreakdown);
             }
 
             // Recalculate ratio with expanded sample
@@ -500,16 +610,80 @@ export class DocumentAnalyzer {
             issueRatio = pageAnalyses.length > 0 ? totalIssues / pageAnalyses.length : 0;
         }
 
+        // Fallback sweep: if page-tree corruption left the spread sample short
+        // of `initialSampleSize` resolvable pages, walk the remaining pages for
+        // any resolvable leaf. Without this, an all-skipped sample collapses
+        // `issueRatio` to 0 and a scanned/image-only document whose sampled
+        // leaves happen to be unresolvable would silently bypass the
+        // NO_TEXT_LAYER guard. Only runs for malformed documents — a normal
+        // sample already fills, so the loop body is never entered.
+        if (pageAnalyses.length < initialSampleSize) {
+            const sampled = new Set(pageAnalyses.map((p) => p.pageIndex));
+            for (let pageIndex = startPage; pageIndex < pageCount; pageIndex++) {
+                if (pageAnalyses.length >= initialSampleSize) break;
+                if (sampled.has(pageIndex)) continue;
+                this.tryAnalyzeOcrPage(pageIndex, opts, pageAnalyses, issueBreakdown);
+            }
+            const totalIssues = pageAnalyses.filter((p) => p.hasIssues).length;
+            issueRatio = pageAnalyses.length > 0 ? totalIssues / pageAnalyses.length : 0;
+        }
+
+        if (pageAnalyses.length === 0) {
+            // Not a single page of the document could be resolved — there is
+            // nothing to base an OCR verdict on, and extraction itself cannot
+            // proceed either. Surface the failure instead of defaulting
+            // `issueRatio` to 0 and reporting the text layer as acceptable.
+            throw new Error(
+                "OCR detection could not resolve any page of the document (malformed page tree)",
+            );
+        }
+
         // Keep the per-page analyses in document order for a deterministic
         // result (the expanded sample is interleaved with the initial one).
         pageAnalyses.sort((a, b) => a.pageIndex - b.pageIndex);
 
-        // Determine if OCR is needed
-        const needsOCR = issueRatio >= opts.confirmationThreshold;
+        // Document-level near-empty guard. `textLength` already excludes
+        // margin furniture (see `isBodyLine`), so the mean reflects body text
+        // only — a scanned document whose pages carry just a watermark or
+        // running header lands near zero here. Gated on a minimum page count:
+        // "text far below what the page count implies" is only meaningful when
+        // there are enough pages to imply substantial text. A 1-2 page PDF can
+        // legitimately be a cover, part-divider, or short note, so the guard
+        // does not fire on them (a genuinely scanned short document still has
+        // a large image and is caught by the per-page issue path instead).
+        const totalSampledText = pageAnalyses.reduce(
+            (sum, p) => sum + p.textLength,
+            0,
+        );
+        const meanTextPerPage = totalSampledText / pageAnalyses.length;
+        const documentNearEmpty =
+            pageCount >= NEAR_EMPTY_GUARD_MIN_PAGES &&
+            meanTextPerPage < opts.minMeanTextPerPage;
 
-        // Determine primary reason
+        // Document-level sufficient-text rescue
+        const cleanPages = pageAnalyses.filter((p) => !p.hasIssues);
+        const cleanMeanText =
+            cleanPages.length > 0
+                ? cleanPages.reduce((sum, p) => sum + p.textLength, 0) /
+                  cleanPages.length
+                : 0;
+        const documentHasUsableText =
+            cleanPages.length >= pageAnalyses.length / 2 &&
+            cleanMeanText >= opts.minTextPerPage;
+
+        // Determine if OCR is needed. The near-empty guard always forces a
+        // verdict; the per-page issue ratio is overridden by the
+        // sufficient-text rescue above.
+        const needsOCR =
+            documentNearEmpty ||
+            (issueRatio >= opts.confirmationThreshold &&
+                !documentHasUsableText);
+
+        // Determine primary reason. Gated on `needsOCR` so a document rescued
+        // by the sufficient-text guard reports `text_extraction_acceptable`
+        // rather than a stale per-page issue reason.
         let primaryReason = "text_extraction_acceptable";
-        if (needsOCR) {
+        if (needsOCR && issueRatio >= opts.confirmationThreshold) {
             // Find the most common issue
             const sortedIssues = Object.entries(issueBreakdown)
                 .filter(([, count]) => count > 0)
@@ -539,6 +713,7 @@ export class DocumentAnalyzer {
                         case "high_newline_ratio":
                         case "low_alphanumeric_ratio":
                         case "invalid_characters":
+                        case "fragmented_text_lines":
                             primaryReason = "poor_text_quality";
                             break;
                         case "bbox_overflow":
@@ -550,6 +725,15 @@ export class DocumentAnalyzer {
             } else {
                 primaryReason = "quality_threshold_exceeded";
             }
+        } else if (needsOCR && documentNearEmpty) {
+            // The near-empty guard is the sole trigger — no per-page issue
+            // crossed the confirmation threshold. Derive the reason from
+            // whether the sampled pages carry images: image-backed pages with
+            // no usable text are un-OCR'd scans, otherwise the text layer is
+            // simply missing.
+            primaryReason = pageAnalyses.some((p) => p.hasImages)
+                ? "scanned_without_ocr"
+                : "missing_text_content";
         }
 
         return {

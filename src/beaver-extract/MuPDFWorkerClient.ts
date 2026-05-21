@@ -8,7 +8,7 @@
  * create one worker per bundle and shutdown would only dispose one of
  * them.
  */
-import { getConfig, isConfigured } from "./config";
+import { getConfig, isConfigured, type PDFWorkerUrls } from "./config";
 import {
     ExtractionError,
     ExtractionErrorCode,
@@ -17,7 +17,6 @@ import {
     type PageImageResult,
     type PDFMetadata,
     type ExtractionSettings,
-    type ExtractionResult,
     type LayoutAnalysisResult,
     type OCRDetectionOptions,
     type OCRDetectionResult,
@@ -25,16 +24,43 @@ import {
     type PDFSearchResult,
 } from "./types";
 import type {
+    BeaverExtractResult,
+    StructuredExtractWithDebugResult,
+} from "./schema";
+import type {
     SentenceTraceResult,
     SentenceSplitterConfig,
     WorkerSentenceDebugOptions,
 } from "./sentenceTypes";
 import type { ParagraphDetectionSettings } from "./ParagraphDetector";
 
+const DEFAULT_IDLE_TIMEOUT_MS = 5 * 60 * 1000;
+let idleTimeoutMs = DEFAULT_IDLE_TIMEOUT_MS;
+
+/** Test-only: shorten the idle timeout so teardown can be asserted fast. */
+export function __setIdleTimeoutForTest(ms: number): void {
+    idleTimeoutMs = ms;
+}
+
+/** Test-only: restore the production idle timeout. */
+export function __resetIdleTimeoutForTest(): void {
+    idleTimeoutMs = DEFAULT_IDLE_TIMEOUT_MS;
+}
+
 interface PendingEntry {
     resolve: (value: any) => void;
     reject: (reason: any) => void;
     fatalCandidate?: FatalOperationCandidate;
+}
+
+interface StartupEntry {
+    worker: Worker;
+    urls: PDFWorkerUrls;
+    promise: Promise<void>;
+    resolve: () => void;
+    reject: (reason: any) => void;
+    configured: boolean;
+    timeoutId: ReturnType<typeof setTimeout> | undefined;
 }
 
 interface FatalOperationCandidate {
@@ -82,7 +108,15 @@ interface WorkerLogMessage {
     msg: string;
 }
 
-type WorkerReply = WorkerSuccessReply | WorkerFailureReply | WorkerLogMessage;
+interface WorkerLifecycleMessage {
+    kind: "ready" | "configured";
+}
+
+type WorkerReply =
+    | WorkerSuccessReply
+    | WorkerFailureReply
+    | WorkerLogMessage
+    | WorkerLifecycleMessage;
 
 /**
  * Snapshot of the worker-side document cache. Mirrors the `CacheStats` type
@@ -95,6 +129,7 @@ export interface MuPDFWorkerCacheStats {
     hits: number;
     misses: number;
     evictions: number;
+    discards: number;
     ttlMs: number;
     maxEntries: number;
     maxBytes: number;
@@ -127,6 +162,7 @@ export class WorkerAbortError extends Error {
 export class MuPDFWorkerClient {
     private worker: Worker | null = null;
     private spawnedFromWindowInternal: Window | null = null;
+    private startup: StartupEntry | null = null;
     private nextId = 1;
     private pending = new Map<number, PendingEntry>();
     /**
@@ -149,6 +185,7 @@ export class MuPDFWorkerClient {
     private fatalOperationKeys = new Set<string>();
     private fatalOperationEntries: Array<{ key: string; prefix: string }> = [];
     private fatalOperationPrefixCounts = new Map<string, number>();
+    private idleTimerId: ReturnType<typeof setTimeout> | undefined;
     // Populated only after a fatal reply so healthy dispatch never walks a
     // whole PDF on the UI thread before posting work to the worker.
     private pdfDigestCache = new WeakMap<object, Map<string, string>>();
@@ -156,6 +193,25 @@ export class MuPDFWorkerClient {
     /** The window that spawned the current worker. Used for stale detection. */
     get spawnedFromWindow(): Window | null {
         return this.spawnedFromWindowInternal;
+    }
+
+    private clearIdleTimer(): void {
+        if (this.idleTimerId === undefined) return;
+        clearTimeout(this.idleTimerId);
+        this.idleTimerId = undefined;
+    }
+
+    private armIdleTimer(): void {
+        this.clearIdleTimer();
+        if (this.disposed || !this.worker || this.pending.size !== 0) return;
+
+        const id = setTimeout(() => {
+            this.idleTimerId = undefined;
+            if (this.disposed || !this.worker || this.pending.size !== 0) return;
+            this.markStale("idle timeout");
+        }, idleTimeoutMs);
+        (id as any)?.unref?.();
+        this.idleTimerId = id;
     }
 
     private ensureWorker(): Worker {
@@ -193,7 +249,7 @@ export class MuPDFWorkerClient {
         this.lastSpawnTime = Date.now();
         cfg.log(`[MuPDFWorkerClient] spawned new worker`, 3);
         (worker as any).onmessage = (event: MessageEvent) =>
-            this.onWorkerMessage(event);
+            this.onWorkerMessage(worker, event);
         (worker as any).onerror = (event: any) => {
             const message = event?.message || "worker onerror";
             cfg.log(`[MuPDFWorkerClient] worker.onerror: ${message}`, 1);
@@ -205,19 +261,74 @@ export class MuPDFWorkerClient {
             this.markStale(`worker.onmessageerror: ${message}`);
         };
 
-        // Configure the worker before any op is dispatched. FIFO message
-        // ordering on a single Worker guarantees the configure frame is
-        // processed before any subsequent op postMessage. Stale-worker
-        // retries flow through this same path, so retried ops are
-        // automatically preceded by a fresh configure.
-        worker.postMessage({ kind: "configure", urls: cfg.worker });
-
         this.worker = worker;
         this.spawnedFromWindowInternal = mainWindow;
+        this.startup = this.createStartupEntry(worker, cfg.worker);
+        // Send one configure frame immediately for the normal fast path. The
+        // worker also emits `ready` after installing its message handler; if
+        // this early frame is lost during startup, the ready handler sends a
+        // second configure before any op is allowed through.
+        this.postConfigure(worker, "spawn");
         return worker;
     }
 
-    private onWorkerMessage(event: MessageEvent): void {
+    private createStartupEntry(worker: Worker, urls: PDFWorkerUrls): StartupEntry {
+        let resolve!: () => void;
+        let reject!: (reason: any) => void;
+        const promise = new Promise<void>((res, rej) => {
+            resolve = res;
+            reject = rej;
+        });
+        promise.catch(() => {
+            // Startup failures are surfaced through the op waiting on this
+            // promise; this handler prevents a standalone unhandled rejection
+            // if the worker dies before dispatch attaches its continuation.
+        });
+        const entry: StartupEntry = {
+            worker,
+            urls,
+            promise,
+            resolve: () => {
+                if (entry.configured) return;
+                entry.configured = true;
+                if (entry.timeoutId !== undefined) {
+                    clearTimeout(entry.timeoutId);
+                    entry.timeoutId = undefined;
+                }
+                resolve();
+            },
+            reject: (reason: any) => {
+                if (entry.configured) return;
+                if (entry.timeoutId !== undefined) {
+                    clearTimeout(entry.timeoutId);
+                    entry.timeoutId = undefined;
+                }
+                reject(reason);
+            },
+            configured: false,
+            timeoutId: undefined,
+        };
+        entry.timeoutId = setTimeout(() => {
+            if (this.startup !== entry || entry.configured) return;
+            this.markStale("configure handshake timed out");
+        }, 15000);
+        (entry.timeoutId as any)?.unref?.();
+        return entry;
+    }
+
+    private postConfigure(worker: Worker, reason: string): void {
+        const startup = this.startup;
+        if (!startup || startup.worker !== worker || startup.configured) return;
+        try {
+            worker.postMessage({ kind: "configure", urls: startup.urls });
+        } catch (e) {
+            this.markStale(
+                `configure postMessage threw during ${reason}: ${e instanceof Error ? e.message : String(e)}`,
+            );
+        }
+    }
+
+    private onWorkerMessage(worker: Worker, event: MessageEvent): void {
         const data = event.data as WorkerReply | undefined;
         if (!data || typeof data !== "object") return;
 
@@ -226,6 +337,18 @@ export class MuPDFWorkerClient {
             const log = data as WorkerLogMessage;
             const level = log.level === "error" ? 1 : log.level === "warn" ? 2 : 3;
             getConfig().log(log.msg, level);
+            return;
+        }
+
+        const lifecycle = data as WorkerLifecycleMessage;
+        if (lifecycle.kind === "ready") {
+            this.postConfigure(worker, "worker ready");
+            return;
+        }
+        if (lifecycle.kind === "configured") {
+            if (this.startup?.worker === worker) {
+                this.startup.resolve();
+            }
             return;
         }
 
@@ -244,16 +367,35 @@ export class MuPDFWorkerClient {
             entry.resolve(reply.result);
         } else {
             const error = rehydrateError(reply.error);
-            if (isFatalWorkerError(reply.error)) {
+            if (isUnconfiguredWorkerError(reply.error)) {
+                this.markStale("worker received op before configure");
+                entry.reject(new StaleWorkerError("worker received op before configure"));
+            } else if (isFatalWorkerError(reply.error)) {
                 if (entry.fatalCandidate) {
                     this.rememberFatalOperation(
                         this.computeFatalOperationKey(entry.fatalCandidate),
                     );
                 }
                 this.markStale("fatal WASM error from worker");
+            } else if (isHeapExhaustionWorkerError(reply.error)) {
+                this.markStale("MuPDF WASM heap exhaustion from worker");
             }
             entry.reject(error);
         }
+
+        this.armIdleTimer();
+    }
+
+    private pendingStartupFor(worker: Worker): Promise<void> | null {
+        const startup = this.startup;
+        if (!startup || startup.worker !== worker || startup.configured) {
+            return null;
+        }
+        return startup.promise.then(() => {
+            if (this.worker !== worker) {
+                throw new StaleWorkerError("stale worker: configured worker changed");
+            }
+        });
     }
 
     /**
@@ -261,9 +403,12 @@ export class MuPDFWorkerClient {
      * clear singleton state. Idempotent.
      */
     private markStale(reason: string): void {
+        this.clearIdleTimer();
         const w = this.worker;
         this.worker = null;
         this.spawnedFromWindowInternal = null;
+        const startup = this.startup;
+        this.startup = null;
 
         if (w) {
             try {
@@ -286,6 +431,9 @@ export class MuPDFWorkerClient {
         }
 
         const stale = new StaleWorkerError(`stale worker: ${reason}`);
+        if (startup && startup.worker === w) {
+            startup.reject(stale);
+        }
         const pending = Array.from(this.pending.values());
         this.pending.clear();
         for (const entry of pending) {
@@ -345,6 +493,92 @@ export class MuPDFWorkerClient {
             return Promise.reject(createKnownFatalWasmError());
         }
         const worker = this.ensureWorker();
+        const startup = this.pendingStartupFor(worker);
+        if (startup) {
+            return this.waitForStartup(worker, startup, signal).then(() =>
+                this.dispatchConfigured<T>(
+                    worker,
+                    op,
+                    args,
+                    signal,
+                    fatalCandidate,
+                ),
+            );
+        }
+        return this.dispatchConfigured<T>(
+            worker,
+            op,
+            args,
+            signal,
+            fatalCandidate,
+        );
+    }
+
+    private waitForStartup(
+        worker: Worker,
+        startup: Promise<void>,
+        signal?: AbortSignal,
+    ): Promise<void> {
+        if (signal?.aborted) {
+            this.markStale("startup aborted by caller");
+            return Promise.reject(new WorkerAbortError());
+        }
+        if (!signal) return startup;
+
+        return new Promise<void>((resolve, reject) => {
+            let settled = false;
+            const cleanup = () => {
+                signal.removeEventListener("abort", onAbort);
+            };
+            const settleResolve = () => {
+                if (settled) return;
+                settled = true;
+                cleanup();
+                if (signal.aborted) {
+                    this.markStale("startup aborted by caller");
+                    reject(new WorkerAbortError());
+                    return;
+                }
+                resolve();
+            };
+            const settleReject = (reason: any) => {
+                if (settled) return;
+                settled = true;
+                cleanup();
+                reject(reason);
+            };
+            const onAbort = () => {
+                if (settled) return;
+                settled = true;
+                cleanup();
+                if (this.worker === worker) {
+                    this.markStale("startup aborted by caller");
+                }
+                reject(new WorkerAbortError());
+            };
+
+            signal.addEventListener("abort", onAbort, { once: true });
+            if (signal.aborted) {
+                onAbort();
+                return;
+            }
+            startup.then(settleResolve, settleReject);
+        });
+    }
+
+    private dispatchConfigured<T>(
+        worker: Worker,
+        op: string,
+        args: Record<string, unknown>,
+        signal: AbortSignal | undefined,
+        fatalCandidate: FatalOperationCandidate | null,
+    ): Promise<T> {
+        if (signal?.aborted) {
+            return Promise.reject(new WorkerAbortError());
+        }
+        if (this.worker !== worker) {
+            return Promise.reject(new StaleWorkerError("configured worker changed"));
+        }
         const id = this.nextId++;
 
         return new Promise<T>((resolve, reject) => {
@@ -388,6 +622,7 @@ export class MuPDFWorkerClient {
                 return;
             }
             try {
+                this.clearIdleTimer();
                 worker.postMessage({ id, op, args });
             } catch (e) {
                 this.pending.delete(id);
@@ -515,8 +750,8 @@ export class MuPDFWorkerClient {
      * in the error payload (rehydrated by `rehydrateError`).
      *
      * `mode === "structured"` enables sentence-level extraction. The result
-     * is the same `ExtractionResult` shape; per-page sentence /
-     * paragraph / column / line data lives on `ProcessedPage`. Pass the
+     * is the same `InternalExtractionResult` shape; per-page sentence /
+     * paragraph / column / line data lives on `InternalProcessedPage`. Pass the
      * splitter as a serializable `structured.splitterConfig` (the
      * facade does the `splitter`/`language` translation before crossing
      * the worker boundary).
@@ -526,7 +761,10 @@ export class MuPDFWorkerClient {
         args?: {
             mode?: "markdown" | "structured";
             markdown?: { engine?: "block" | "paragraph" };
-            structured?: { splitterConfig?: SentenceSplitterConfig };
+            structured?: {
+                splitterConfig?: SentenceSplitterConfig;
+                bboxPrecision?: number;
+            };
             settings?: ExtractionSettings;
             paragraphSettings?: ParagraphDetectionSettings;
             pageIndices?: number[];
@@ -540,10 +778,10 @@ export class MuPDFWorkerClient {
             analysisWindow?: number;
         },
         signal?: AbortSignal,
-    ): Promise<ExtractionResult> {
+    ): Promise<BeaverExtractResult> {
         const bytes =
             pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
-        return this.call<ExtractionResult>("extract", {
+        return this.call<BeaverExtractResult>("extract", {
             pdfData: bytes,
             mode: args?.mode,
             markdown: args?.markdown,
@@ -554,6 +792,39 @@ export class MuPDFWorkerClient {
             pageRange: args?.pageRange,
             analysisWindow: args?.analysisWindow,
         }, { signal });
+    }
+
+    async structuredExtractWithDebug(
+        pdfData: Uint8Array | ArrayBuffer,
+        args: {
+            structured?: {
+                splitterConfig?: SentenceSplitterConfig;
+                bboxPrecision?: number;
+            };
+            settings?: ExtractionSettings;
+            paragraphSettings?: ParagraphDetectionSettings;
+            analysisWindow?: number;
+            capturePages: number[];
+            debugMode?: "triage" | "full";
+        },
+        signal?: AbortSignal,
+    ): Promise<StructuredExtractWithDebugResult> {
+        const bytes =
+            pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
+        return this.call<StructuredExtractWithDebugResult>(
+            "structuredExtractWithDebug",
+            {
+                pdfData: bytes,
+                mode: "structured",
+                structured: args.structured,
+                settings: args.settings,
+                paragraphSettings: args.paragraphSettings,
+                analysisWindow: args.analysisWindow,
+                capturePages: args.capturePages,
+                debugMode: args.debugMode,
+            },
+            { signal },
+        );
     }
 
     /**
@@ -642,7 +913,7 @@ export class MuPDFWorkerClient {
      * Single-page sentence-bbox extraction with pipeline intermediates.
      * Debug-only — production sentence-level extraction goes through
      * `extract({ mode: "structured" })` which returns the same
-     * `ExtractionResult` shape with `pages[i].sentences` populated.
+     * `InternalExtractionResult` shape with `pages[i].sentences` populated.
      *
      * Powers the dev visualizer / fixture capture / extract-trace
      * endpoints. Returns `SentenceTraceResult = { result, trace }`
@@ -698,6 +969,7 @@ export class MuPDFWorkerClient {
         nextId: number;
         dispatchCounts: Record<string, number>;
         lastSpawnTime: number | null;
+        idleTimerArmed: boolean;
     } {
         return {
             hasWorker: this.worker !== null,
@@ -708,6 +980,7 @@ export class MuPDFWorkerClient {
             nextId: this.nextId,
             dispatchCounts: { ...this.dispatchCounts },
             lastSpawnTime: this.lastSpawnTime,
+            idleTimerArmed: this.idleTimerId !== undefined,
         };
     }
 
@@ -816,13 +1089,30 @@ export class MuPDFWorkerClient {
         op: string,
         args: Record<string, unknown>,
     ): Promise<T> {
+        const startup = this.pendingStartupFor(worker);
+        if (startup) {
+            return startup.then(() => this.callUncountedConfigured<T>(worker, op, args));
+        }
+        return this.callUncountedConfigured<T>(worker, op, args);
+    }
+
+    private callUncountedConfigured<T>(
+        worker: Worker,
+        op: string,
+        args: Record<string, unknown>,
+    ): Promise<T> {
+        if (this.worker !== worker) {
+            return Promise.reject(new StaleWorkerError("configured worker changed"));
+        }
         const id = this.nextId++;
         return new Promise<T>((resolve, reject) => {
             this.pending.set(id, { resolve, reject });
             try {
+                this.clearIdleTimer();
                 worker.postMessage({ id, op, args });
             } catch (e) {
                 this.pending.delete(id);
+                this.armIdleTimer();
                 reject(
                     new Error(
                         `postMessage threw: ${e instanceof Error ? e.message : String(e)}`,
@@ -895,6 +1185,16 @@ function rehydrateError(payload: WorkerErrorPayload | undefined): Error {
 function isFatalWorkerError(payload: WorkerErrorPayload | undefined): boolean {
     return payload?.name === "ExtractionError"
         && payload.code === ExtractionErrorCode.WASM_ERROR;
+}
+
+function isHeapExhaustionWorkerError(payload: WorkerErrorPayload | undefined): boolean {
+    return payload?.name === "ExtractionError"
+        && payload.code === ExtractionErrorCode.HEAP_EXHAUSTION;
+}
+
+function isUnconfiguredWorkerError(payload: WorkerErrorPayload | undefined): boolean {
+    return payload?.name === "Error"
+        && payload.message === "MuPDF worker received op before configure message";
 }
 
 function createKnownFatalWasmError(): ExtractionError {

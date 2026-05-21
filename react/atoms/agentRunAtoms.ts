@@ -1032,7 +1032,7 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                 set(addPopupMessageAtom, {
                     type: 'info',
                     title: 'Indexing your library',
-                    text: 'We are processing your library to enable Pro features. You can use standard features in the meantime.',
+                    text: 'We are processing your library to enable Beta features. You can use standard features in the meantime.',
                     expire: true,
                     duration: 10000
                 });
@@ -1606,10 +1606,10 @@ export const sendWSMessageAtom = atom(
         for (const col of messageCollections) {
             attachments.push({
                 type: 'collection',
-                library_id: col.libraryID,
-                zotero_key: col.key,
+                library_id: col.library_id,
+                zotero_key: col.zotero_key,
                 name: col.name,
-                parent_key: col.parentKey,
+                parent_key: col.parent_key,
             });
         }
 

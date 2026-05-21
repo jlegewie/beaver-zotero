@@ -1339,6 +1339,51 @@ describe('executeEditNoteAction + undoEditNoteAction', () => {
         expect(savedHtml).toContain('Goodbye Goodbye Goodbye');
     });
 
+    it('execute append adds content before the footer and undo preserves later edits', async () => {
+        const footer = '<p><span style="color: #aaa;"><strong>Created by Beaver</strong> \u00b7 <a href="zotero://beaver/thread/thread-1/run/run-1">Open Message</a></span></p>';
+        const noteHtml = wrap(`<p>Existing body</p>${footer}`);
+        const item = makeMockItem(noteHtml);
+        (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(item);
+        (globalThis as any).Zotero.Notes._editorInstances = [];
+
+        const { executeEditNoteAction, undoEditNoteAction } = await importEditNoteActions();
+        const action = makeAction({
+            proposed_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                old_string: '',
+                new_string: '<p>Appended body</p>',
+                operation: 'append',
+            },
+        });
+
+        const result = await executeEditNoteAction(action);
+        expect(result.undo_full_html).toBeUndefined();
+        expect(result.undo_old_html).toBe('');
+        expect(result.undo_new_html).toBe('<p>Appended body</p>');
+
+        const editedHtml = item.setNote.mock.calls[0][0];
+        expect(editedHtml).toContain('<p>Existing body</p>');
+        expect(editedHtml).toContain('<p>Appended body</p>');
+        expect(editedHtml.indexOf('<p>Existing body</p>')).toBeLessThan(editedHtml.indexOf('<p>Appended body</p>'));
+        expect(editedHtml.indexOf('<p>Appended body</p>')).toBeLessThan(editedHtml.indexOf('Created by Beaver'));
+        expect(editedHtml).toContain('href="zotero://beaver/thread/thread-1/run/run-1"');
+
+        vi.clearAllMocks();
+        const editedAgainHtml = editedHtml.replace('Existing body', 'Later edited body');
+        const undoItem = makeMockItem(editedAgainHtml);
+        (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(undoItem);
+        (globalThis as any).Zotero.Notes._editorInstances = [];
+
+        await undoEditNoteAction({ ...action, result_data: result });
+
+        const restoredHtml = undoItem.setNote.mock.calls[0][0];
+        expect(restoredHtml).toContain('Later edited body');
+        expect(restoredHtml).not.toContain('Appended body');
+        expect(restoredHtml).toContain('Created by Beaver');
+        expect(restoredHtml).toContain('href="zotero://beaver/thread/thread-1/run/run-1"');
+    });
+
     it('execute rolls back in-memory on save failure', async () => {
         const noteHtml = wrap('<p>Hello world</p>');
         const item = makeMockItem(noteHtml, {

@@ -32,6 +32,7 @@ import type {
     RectTuple,
 } from "./mupdfApi";
 import { ERROR_CODES, postLog, workerError } from "./errors";
+import { isRecoverablePageError } from "../wasmFatal";
 import { ensureApi } from "./wasmInit";
 import {
     aspectRatioRotation,
@@ -39,11 +40,33 @@ import {
     type RotationAngle,
 } from "../PageRotationNormalizer";
 
-const STRUCTURED_TEXT_OPTIONS = "preserve-whitespace";
-const STRUCTURED_TEXT_OPTIONS_WITH_IMAGES = "preserve-whitespace,preserve-images";
-const STRUCTURED_TEXT_OPTIONS_DETAILED = "preserve-whitespace,preserve-ligatures";
+// `use-cid-for-unknown-unicode`: when MuPDF cannot resolve a glyph to a Unicode
+// codepoint it normally emits U+FFFD. Some born-digital PDFs (e.g. GNU
+// Ghostscript output) embed Type 1C font subsets whose builtin encoding maps
+// ordinary character codes to opaque glyph names with no ToUnicode CMap — the
+// whole text layer then extracts as U+FFFD and the document is wrongly rejected
+// as needing OCR. With this option MuPDF falls back to the character code,
+// which for these fonts is the correct Latin-1 codepoint, recovering the text.
+// The fallback only ever replaces characters that were already U+FFFD, so it
+// cannot corrupt correctly-decoded text; genuine symbol/math glyphs that stay
+// unmappable become a wrong-but-plausible character instead of U+FFFD (the same
+// best-effort behavior as Poppler and PyMuPDF).
+//
+// Duplicate-redraw collapsing: some PDFs — notably OCR tools that stamp the
+// invisible text layer many times per page — draw their whole text content
+// dozens of times at identical coordinates. MuPDF's `collect-styles` option
+// would collapse those (its `check_for_fake_bold` pass), but that pass scans
+// every prior glyph for every glyph — O(n^2) per page — making normal
+// documents ~7x slower to walk. `dedupOverlappingLines` (below) does the same
+// collapse as a cheap O(n) post-pass instead, so `collect-styles` is
+// intentionally NOT set here.
+const STRUCTURED_TEXT_OPTIONS = "preserve-whitespace,use-cid-for-unknown-unicode";
+const STRUCTURED_TEXT_OPTIONS_WITH_IMAGES =
+    "preserve-whitespace,preserve-images,use-cid-for-unknown-unicode";
+const STRUCTURED_TEXT_OPTIONS_DETAILED =
+    "preserve-whitespace,preserve-ligatures,use-cid-for-unknown-unicode";
 const STRUCTURED_TEXT_OPTIONS_DETAILED_WITH_IMAGES =
-    "preserve-whitespace,preserve-ligatures,preserve-images";
+    "preserve-whitespace,preserve-ligatures,preserve-images,use-cid-for-unknown-unicode";
 
 export interface RenderOptionsResolved {
     scale: number;
@@ -117,10 +140,66 @@ function normalizeStructuredTextBlocks(blocks: Array<RawBlock & { bbox: any }>):
 }
 
 /**
+ * Collapse page elements that are exact positional duplicates of an earlier
+ * one on the same page: text lines with identical text at the same rounded
+ * origin, and image blocks with the same rounded bbox.
+ *
+ * Some PDFs — notably OCR tools that stamp the invisible text layer many times
+ * per page — draw their whole content dozens of times at identical
+ * coordinates. MuPDF's structured-text walk faithfully returns every copy,
+ * inflating the page 30-50x and exploding downstream memory and time. This is
+ * the cheap O(n) equivalent of MuPDF's `collect-styles` fake-bold dedup (see
+ * the `STRUCTURED_TEXT_OPTIONS` comment).
+ *
+ * Returns a new block list: duplicate lines are dropped and any block left
+ * with no lines is removed. Origins are rounded to the nearest point so float
+ * noise between redraws cannot defeat the match; distinct text lines on a page
+ * are always more than a point apart, so normal documents pass through with
+ * nothing removed.
+ */
+function dedupOverlappingLines(blocks: RawBlock[]): RawBlock[] {
+    const seen = new Set<string>();
+    const out: RawBlock[] = [];
+    for (const block of blocks) {
+        if (block.type === "text" && block.lines) {
+            const kept = (block.lines as RawLine[]).filter((line) => {
+                const key = `t:${Math.round(line.bbox.l)},${Math.round(line.bbox.t)}:${line.text}`;
+                if (seen.has(key)) return false;
+                seen.add(key);
+                return true;
+            });
+            if (kept.length === 0) continue;
+            block.lines = kept;
+            out.push(block);
+        } else if (block.type === "image") {
+            const b = block.bbox;
+            const key = `i:${Math.round(b.l)},${Math.round(b.t)},${Math.round(b.r)},${Math.round(b.b)}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            out.push(block);
+        } else {
+            out.push(block);
+        }
+    }
+    return out;
+}
+
+/**
  * Open a PDF document and run the encryption check. Throws workerError
- * on encrypted / invalid input. Returns the open `doc` on success.
+ * on empty / encrypted / invalid input. Returns the open `doc` on success.
  */
 export async function openDocSafe(pdfData: Uint8Array | ArrayBuffer): Promise<DocumentLike> {
+    // Reject empty input before invoking the parser. A 0-byte file would
+    // otherwise surface as a generic `INVALID_PDF` parser error; classify it
+    // explicitly. `byteLength` covers both `Uint8Array` and `ArrayBuffer`.
+    if (!pdfData || pdfData.byteLength === 0) {
+        throw workerError(
+            ERROR_CODES.EMPTY_DOCUMENT,
+            "PDF file is empty (0 bytes)",
+            { pageCount: 0 },
+        );
+    }
+
     const { Document } = await ensureApi();
 
     let doc: DocumentLike;
@@ -266,7 +345,7 @@ export function extractRawPageFromDoc(
                 width,
                 height,
                 label,
-                blocks,
+                blocks: dedupOverlappingLines(blocks),
             };
         } finally {
             stext.destroy();
@@ -661,7 +740,7 @@ export function extractRawPageDetailedFromDoc(
             width,
             height,
             label,
-            blocks,
+            blocks: dedupOverlappingLines(blocks),
         } as RawPageDataDetailed;
     } finally {
         page.destroy();
@@ -812,7 +891,21 @@ export function collectPageLabels(doc: DocumentLike): Record<number, string> {
     const count = doc.countPages();
     const labels: Record<number, string> = {};
     for (let i = 0; i < count; i++) {
-        const page = doc.loadPage(i);
+        let page;
+        try {
+            page = doc.loadPage(i);
+        } catch (err) {
+            // A malformed page tree can claim `count` pages yet fail to
+            // resolve some leaves. Skip the bad index and keep going so one
+            // unresolvable page does not abort label collection (and, via
+            // `opExtract`, the whole document).
+            if (!isRecoverablePageError(err)) throw err;
+            postLog(
+                "warn",
+                `[mupdf-worker] collectPageLabels: skipping unresolvable page ${i}: ${String(err)}`,
+            );
+            continue;
+        }
         try {
             const label = page.getLabel();
             if (label) labels[i] = label;
@@ -834,6 +927,29 @@ export function resolvePageIndices(pageCount: number, pageIndices?: number[]): n
     return pageIndices && pageIndices.length
         ? pageIndices.filter((i) => i >= 0 && i < pageCount)
         : Array.from({ length: pageCount }, (_, i) => i);
+}
+
+/**
+ * Throw a classified error when an opened document resolves to no pages.
+ *
+ * A structurally broken PDF (e.g. an unrepairable xref) can still open
+ * successfully yet resolve to 0 pages. Without this guard the extraction
+ * ops fail with a raw, unclassified internal error (the OCR gate's plain
+ * `Error`, or `resolveAnalysisPages`'s `RangeError`). Call this right
+ * after the page count is resolved, before any per-page work.
+ *
+ * The `{ pageCount: 0 }` payload mirrors PAGE_OUT_OF_RANGE so the
+ * MuPDFWorkerClient rehydrator can populate `ExtractionError.pageCount`,
+ * which handlers surface as the response's `total_pages` field.
+ */
+export function assertDocumentHasPages(pageCount: number): void {
+    if (!Number.isInteger(pageCount) || pageCount <= 0) {
+        throw workerError(
+            ERROR_CODES.EMPTY_DOCUMENT,
+            "Document has no extractable pages — it may be empty or have a corrupt structure",
+            { pageCount: 0 },
+        );
+    }
 }
 
 /**
@@ -948,12 +1064,49 @@ export function resolvePageRangeOrThrow(
 }
 
 /**
+ * Return the document's true, loadable page count.
+ *
+ * `doc.countPages()` reports `/Root/Pages/Count` verbatim. In a corrupt
+ * or truncated PDF that value can exceed the number of pages the page
+ * tree can actually resolve — MuPDF only reconciles `Count` with reality
+ * the first time it walks the page tree (it then rewrites `Count` to the
+ * number of pages actually found). Loading any page forces that walk, so
+ * a throwaway `loadPage(0)` makes the subsequent `countPages()` reflect
+ * the pages that can really be read.
+ *
+ * Without this, a document claiming 24 pages but holding 7 drives the
+ * extractor to `loadPage(7)`, which throws `invalid page number` and
+ * aborts the whole extraction instead of returning the 7 real pages.
+ */
+export function resolveTruePageCount(doc: DocumentLike): number {
+    try {
+        const page = doc.loadPage(0);
+        page.destroy();
+    } catch (err) {
+        // A page-tree resolution failure still ran the tree walk (and its
+        // Count correction), so countPages() below is valid even though page
+        // 0 itself is unloadable — swallow it. Any other failure (WASM trap,
+        // heap exhaustion) leaves the MuPDF runtime unusable; rethrow so the
+        // caller aborts and discards the document, matching how every other
+        // page-load site treats non-recoverable errors.
+        if (!isRecoverablePageError(err)) throw err;
+    }
+    return doc.countPages();
+}
+
+/**
  * Build a RawPageProvider over an open Document. Lets DocumentAnalyzer
  * run inside the worker against an already-open `doc` (no extra opens).
+ *
+ * The page count is resolved once via `resolveTruePageCount` (not raw
+ * `doc.countPages()`): a corrupt or truncated PDF can advertise more
+ * pages in `/Root/Pages/Count` than its page tree can resolve, and
+ * `DocumentAnalyzer` samples page indices across that count.
  */
 export function rawPageProviderFromDoc(doc: DocumentLike): RawPageProvider {
+    const pageCount = resolveTruePageCount(doc);
     return {
-        getPageCount: () => doc.countPages(),
+        getPageCount: () => pageCount,
         extractRawPage: (i, opts) => extractRawPageFromDoc(doc, i, opts),
     };
 }

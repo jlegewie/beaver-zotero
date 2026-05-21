@@ -1,4 +1,13 @@
 import { ZoteroItemReference } from "./zotero";
+import {
+    baseCitationKey,
+    getRequestedRef,
+    getResolvedRef,
+    normalizeCitationTag,
+    parseRawCitationAttributes,
+    parseZoteroId,
+    requestedCitationKey,
+} from "../utils/citationGrammar";
 
 
 export enum CoordOrigin {
@@ -152,21 +161,23 @@ export function getCitationKey(params: CitationKeyParams): string {
  * Parameters for generating a full citation key (includes location info).
  */
 export interface FullCitationKeyParams extends CitationKeyParams {
-    sid?: string;   // Sentence ID (e.g., "s0-s8")
+    loc?: string;   // Unified Beaver Extract locator (e.g., "s343" or "p12")
+    sid?: string;   // Sentence ID (e.g., "s343")
     page?: string;  // Page number (e.g., "3")
 }
 
 /**
- * Generate a full citation key including location info (sid, page).
+ * Generate a full citation key including location info.
  * 
  * Used for matching in-text citations to their specific metadata.
  * Different locations within the same item get different full keys.
  * 
  * Key format:
  * - Base key only: "zotero:1-ABC123"
- * - With sid: "zotero:1-ABC123:sid=s0-s8"
+ * - With loc: "zotero:1-ABC123:s343"
+ * - With sid: "zotero:1-ABC123:s343"
  * - With page: "zotero:1-ABC123:page=3"
- * - With both: "zotero:1-ABC123:sid=s0-s8:page=3"
+ * - With sid and page: "zotero:1-ABC123:s343:page=3"
  * 
  * @param params Full citation key parameters
  * @returns Full citation key string
@@ -176,7 +187,8 @@ export function getFullCitationKey(params: FullCitationKeyParams): string {
     if (!baseKey) return '';
     
     const parts: string[] = [baseKey];
-    if (params.sid) parts.push(`sid=${params.sid}`);
+    if (params.loc) parts.push(params.loc);
+    else if (params.sid) parts.push(params.sid);
     if (params.page) parts.push(`page=${params.page}`);
     
     return parts.join(':');
@@ -208,10 +220,12 @@ export function parseItemReference(ref: string | undefined): { libraryID: number
  * All attribute names are normalized (e.g., attachment_id → att_id).
  */
 export interface NormalizedCitationAttrs {
+    id?: string;           // Format: "libraryID-itemKey"
     item_id?: string;      // Format: "libraryID-itemKey"
     att_id?: string;       // Format: "libraryID-itemKey"
     external_id?: string;  // External source ID
-    sid?: string;          // Sentence ID (e.g., "s0-s8")
+    loc?: string;          // Unified locator token (e.g., "page10", "s343", "p12")
+    sid?: string;          // Sentence ID (e.g., "s343")
     page?: string;         // Page number(s) - e.g., "10" or "10-12"
 }
 
@@ -220,90 +234,54 @@ export interface NormalizedCitationAttrs {
  * 
  * Normalizations:
  * - attachment_id → att_id
- * - Only keeps recognized attributes (item_id, att_id, external_id, sid, page)
+ * - Only keeps recognized attributes (id, item_id, att_id, external_id, loc, sid, page)
  * 
  * @param attributesStr Raw attribute string from citation tag
  * @returns Normalized attributes object
  */
 export function parseCitationAttributes(attributesStr: string): NormalizedCitationAttrs {
     const attrs: NormalizedCitationAttrs = {};
-    const attrRegex = /(\w+)=(?:"([^"]*)"|'([^']*)')/g;
-    let match: RegExpExecArray | null;
-    
-    while ((match = attrRegex.exec(attributesStr)) !== null) {
-        let name = match[1];
-        const value = match[2] ?? match[3];
-        
-        // Normalize attribute names
-        if (name === 'attachment_id') {
-            name = 'att_id';
-        }
-        
-        // Only keep recognized citation attributes
-        if (name === 'item_id') attrs.item_id = value;
+    const rawAttrs = parseRawCitationAttributes(attributesStr);
+
+    for (const [name, value] of Object.entries(rawAttrs)) {
+        if (name === 'id') attrs.id = value;
+        else if (name === 'item_id') attrs.item_id = value;
         else if (name === 'att_id') attrs.att_id = value;
+        else if (name === 'attachment_id') {
+            attrs.att_id = value;
+        }
         else if (name === 'external_id') attrs.external_id = value;
+        else if (name === 'loc') attrs.loc = value;
         else if (name === 'sid') attrs.sid = value;
         else if (name === 'page') attrs.page = value;
     }
-    
+
     return attrs;
 }
 
 /**
  * Compute a full citation key from normalized citation attributes.
- * Includes sid and page for unique identification of citation instances.
+ * Includes loc/sid/page for unique identification of citation instances.
  * Priority: att_id > item_id > external_id
  * 
  * @param attrs Normalized citation attributes
  * @returns Full citation key or empty string if no valid identifier
  */
 export function computeCitationKeyFromAttrs(attrs: NormalizedCitationAttrs): string {
-    // att_id takes priority (attachment reference)
-    const zoteroRef = parseItemReference(attrs.att_id) || parseItemReference(attrs.item_id);
-    
-    if (zoteroRef) {
-        return getFullCitationKey({
-            library_id: zoteroRef.libraryID,
-            zotero_key: zoteroRef.itemKey,
-            sid: attrs.sid,
-            page: attrs.page
-        });
-    }
-    
-    if (attrs.external_id) {
-        return getFullCitationKey({ 
-            external_source_id: attrs.external_id,
-            sid: attrs.sid,
-            page: attrs.page
-        });
-    }
-    
-    return '';
+    const normalized = normalizeCitationTag(attrs as Record<string, string>);
+    return normalized.ok ? requestedCitationKey(normalized.ref) : (normalized.requestedKey || '');
 }
 
 /**
  * Compute a base (item-only) citation key from normalized citation attributes.
- * Does NOT include sid/page - used for marker assignment.
+ * Does NOT include loc/sid/page - used for marker assignment.
  * 
  * @param attrs Normalized citation attributes
  * @returns Base citation key or empty string if no valid identifier
  */
 export function computeBaseCitationKeyFromAttrs(attrs: NormalizedCitationAttrs): string {
-    const zoteroRef = parseItemReference(attrs.att_id) || parseItemReference(attrs.item_id);
-    
-    if (zoteroRef) {
-        return getCitationKey({
-            library_id: zoteroRef.libraryID,
-            zotero_key: zoteroRef.itemKey
-        });
-    }
-    
-    if (attrs.external_id) {
-        return getCitationKey({ external_source_id: attrs.external_id });
-    }
-    
-    return '';
+    const normalized = normalizeCitationTag(attrs as Record<string, string>);
+    return normalized.ok ? baseCitationKey(normalized.ref) : (normalized.requestedKey || '');
 }
 
 /**
@@ -311,8 +289,11 @@ export function computeBaseCitationKeyFromAttrs(attrs: NormalizedCitationAttrs):
  * Uses the primary identifier (att_id > item_id > external_id).
  */
 export function getCitationIdentityKey(attrs: NormalizedCitationAttrs): string {
-    return attrs.att_id || attrs.item_id || attrs.external_id || '';
+    const normalized = normalizeCitationTag(attrs as Record<string, string>);
+    return normalized.ok ? baseCitationKey(normalized.ref) : (normalized.requestedKey || '');
 }
+
+export { getRequestedRef, getResolvedRef };
 
 export interface CitationData extends CitationMetadata {
     type: "item" | "attachment" | "note" | "annotation" | "external";

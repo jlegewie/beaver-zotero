@@ -6,11 +6,17 @@ import {
     CitationMetadata,
     CitationData,
     isExternalCitation,
-    getCitationKey,
     getCitationPages,
-    getFullCitationKey,
-    parseCitationAttributes
 } from '../types/citations';
+import {
+    baseCitationKey,
+    externalCompatKey,
+    getRequestedRef,
+    getResolvedRef,
+    normalizeCitationTag,
+    parseRawCitationAttributes,
+    requestedCitationKey,
+} from '../utils/citationGrammar';
 import { loadFullItemDataWithAllTypes } from '../../src/utils/zoteroUtils';
 import { externalReferenceMappingAtom, formatExternalCitation } from './externalReferences';
 import { getPref, setPref } from '../../src/utils/prefs';
@@ -30,6 +36,28 @@ import { isFirstRunOrigin } from '../agents/types';
  */
 export const citationKeyToMarkerAtom = atom<Record<string, string>>({});
 
+function getNextCitationMarker(current: Record<string, string>): string {
+    const maxMarker = Object.values(current).reduce((max, marker) => {
+        const parsed = parseInt(marker, 10);
+        return Number.isFinite(parsed) && parsed > max ? parsed : max;
+    }, 0);
+    return (maxMarker + 1).toString();
+}
+
+function getEarliestExistingMarker(current: Record<string, string>, keys: string[]): string | undefined {
+    const markers = keys
+        .map((key) => current[key])
+        .filter((marker): marker is string => !!marker);
+    if (markers.length === 0) return undefined;
+
+    const numericMarkers = markers
+        .map((marker) => parseInt(marker, 10))
+        .filter((marker) => Number.isFinite(marker));
+    if (numericMarkers.length === 0) return markers[0];
+
+    return Math.min(...numericMarkers).toString();
+}
+
 /**
  * Get or assign a numeric marker for a citation key.
  * Returns the existing marker if already assigned, otherwise assigns the next number.
@@ -41,8 +69,7 @@ export const getOrAssignCitationMarkerAtom = atom(
         if (current[citationKey]) {
             return current[citationKey];
         }
-        // Assign next number based on how many unique citations we've seen
-        const nextMarker = (Object.keys(current).length + 1).toString();
+        const nextMarker = getNextCitationMarker(current);
         set(citationKeyToMarkerAtom, { ...current, [citationKey]: nextMarker });
         return nextMarker;
     }
@@ -55,6 +82,27 @@ export const getOrAssignCitationMarkerAtom = atom(
 export const getCitationMarkerAtom = atom(
     (get) => (citationKey: string): string | undefined => {
         return get(citationKeyToMarkerAtom)[citationKey];
+    }
+);
+
+/**
+ * Ensure a group of citation base keys all resolve to the same marker.
+ */
+export const aliasCitationMarkerKeysAtom = atom(
+    null,
+    (get, set, keys: string[]): string | null => {
+        const uniqueKeys = [...new Set(keys.filter(Boolean))];
+        if (uniqueKeys.length === 0) return null;
+
+        const current = get(citationKeyToMarkerAtom);
+        const existingMarker = getEarliestExistingMarker(current, uniqueKeys);
+        const marker = existingMarker || getNextCitationMarker(current);
+        const next = { ...current };
+        for (const key of uniqueKeys) {
+            next[key] = marker;
+        }
+        set(citationKeyToMarkerAtom, next);
+        return marker;
     }
 );
 
@@ -135,48 +183,37 @@ export const citationDataMapAtom = atom<Record<string, CitationData>>({});
  * @returns Fallback key like "invalid:garbage" or null if no ID found
  */
 function getInvalidCitationFallbackKey(rawTag: string): string | null {
-    // Match att_id, attachment_id, item_id, or external_id attribute values
-    const match = rawTag.match(/(?:att_id|attachment_id|item_id|external_id)\s*=\s*"([^"]*)"/);
+    const match = rawTag.match(/^<citation\b([^>]*)/i);
     if (!match) return null;
-    // Normalize by stripping user-content- prefix to match lookup in ZoteroCitation
-    const normalizedId = match[1].replace('user-content-', '');
-    return `invalid:${normalizedId}`;
+    const normalized = normalizeCitationTag(parseRawCitationAttributes(match[1] || ''));
+    return !normalized.ok && normalized.rawIdentity ? `invalid:${normalized.rawIdentity}` : null;
 }
 
-/**
- * Compute full citation key from CitationMetadata.
- * 
- * Parses raw_tag to extract sid/page for unique identification,
- * since these location details aren't stored as direct fields on CitationMetadata.
- * 
- * @param citation Citation metadata
- * @returns Full citation key including sid/page if present
- */
-function getFullCitationKeyFromMetadata(citation: CitationMetadata): string {
-    // Parse raw_tag to get sid and page
-    let sid: string | undefined;
-    let page: string | undefined;
-    
-    if (citation.raw_tag) {
-        const attrs = parseCitationAttributes(citation.raw_tag);
-        sid = attrs.sid;
-        page = attrs.page;
+function addCitationKeys(keys: Set<string>, citation: CitationMetadata) {
+    for (const ref of [getRequestedRef(citation), getResolvedRef(citation)]) {
+        if (!ref) continue;
+        keys.add(requestedCitationKey(ref));
+        if (ref.kind === 'external') {
+            keys.add(externalCompatKey(ref.external_id, ref.loc));
+        }
     }
-    
-    return getFullCitationKey({
-        library_id: citation.library_id,
-        zotero_key: citation.zotero_key,
-        external_source_id: citation.external_source_id,
-        sid,
-        page
-    });
+}
+
+function getCitationMarkerBaseKeys(citation: CitationMetadata): string[] {
+    const keys: string[] = [];
+    for (const ref of [getRequestedRef(citation), getResolvedRef(citation)]) {
+        if (!ref) continue;
+        keys.push(baseCitationKey(ref));
+        if (ref.kind === 'external') keys.push(externalCompatKey(ref.external_id));
+    }
+    return [...new Set(keys.filter(Boolean))];
 }
 
 /**
  * Citation data mapped by full citation key for lookup.
  * 
  * This is the primary lookup mechanism for ZoteroCitation components:
- * - MarkdownRenderer injects citation_key prop during preprocessing
+ * - MarkdownRenderer injects data-requested-citation-key during preprocessing
  * - ZoteroCitation looks up metadata using this key
  * - Key includes sid/page for unique identification of citation instances
  * 
@@ -188,21 +225,42 @@ function getFullCitationKeyFromMetadata(citation: CitationMetadata): string {
 export const citationDataByCitationKeyAtom = atom<Record<string, CitationData>>((get) => {
     const dataMap = get(citationDataMapAtom);
     const byKey: Record<string, CitationData> = {};
+    const baseCandidates = new Map<string, CitationData>();
+    const ambiguousBaseKeys = new Set<string>();
     
     for (const citation of Object.values(dataMap)) {
-        // Use full citation key (includes sid/page from raw_tag)
-        const key = getFullCitationKeyFromMetadata(citation);
-        if (key) {
+        const keys = new Set<string>();
+        addCitationKeys(keys, citation);
+        for (const key of keys) {
             byKey[key] = citation;
         }
+
+        for (const ref of [getRequestedRef(citation), getResolvedRef(citation)]) {
+            if (!ref) continue;
+            const baseKeys = ref.kind === 'external'
+                ? [baseCitationKey(ref), externalCompatKey(ref.external_id)]
+                : [baseCitationKey(ref)];
+            for (const baseKey of baseKeys) {
+                const existing = baseCandidates.get(baseKey);
+                if (existing && existing.citation_id !== citation.citation_id) {
+                    ambiguousBaseKeys.add(baseKey);
+                } else {
+                    baseCandidates.set(baseKey, citation);
+                }
+            }
+        }
         
-        // For invalid citations without a valid key, also store under fallback key
-        // This allows ZoteroCitation to find them even when identifiers couldn't be parsed
-        if (citation.invalid && !key && citation.raw_tag) {
+        if (citation.invalid && citation.raw_tag) {
             const fallbackKey = getInvalidCitationFallbackKey(citation.raw_tag);
             if (fallbackKey) {
                 byKey[fallbackKey] = citation;
             }
+        }
+    }
+
+    for (const [baseKey, citation] of baseCandidates) {
+        if (!ambiguousBaseKeys.has(baseKey) && !byKey[baseKey]) {
+            byKey[baseKey] = citation;
         }
     }
     
@@ -265,19 +323,14 @@ export const updateCitationDataAtom = atom(
         // Extend the citation metadata with the attachment citation data
         for (const citation of metadata) {
 
-            // Get unique key (works for both Zotero and external citations)
-            // Uses getCitationKey to match key generation in ZoteroCitation component
-            const citationKey = getCitationKey({
-                library_id: citation.library_id,
-                zotero_key: citation.zotero_key,
-                external_source_id: citation.external_source_id
-            });
+            const resolvedRef = getResolvedRef(citation);
+            const citationKey = resolvedRef ? baseCitationKey(resolvedRef) : '';
             const prevCitation = prevMap[citation.citation_id];
 
             // Get or assign numeric citation using the shared thread-scoped atom.
             // This ensures markers assigned during streaming are preserved.
-            set(getOrAssignCitationMarkerAtom, citationKey);
-            const numericCitation = get(citationKeyToMarkerAtom)[citationKey] || null;
+            const markerKeys = getCitationMarkerBaseKeys(citation);
+            const numericCitation = set(aliasCitationMarkerKeysAtom, markerKeys) || null;
 
             // Use existing extended metadata if available
             if (prevCitation) {

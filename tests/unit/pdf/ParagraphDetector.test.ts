@@ -1064,3 +1064,371 @@ describe('hanging-indent leader suppression', () => {
         });
     });
 });
+
+// ---------------------------------------------------------------------------
+// Header detection
+//
+// Two layout rules exercised here:
+//   - Heading-capitalization guard: a candidate promoted by a same-size
+//     font-difference rule (italic/bold/different-font, no size cue) must
+//     begin like a heading — capital, digit, or opening quote/bracket. A
+//     lowercase-leading line is body prose (MuPDF reports a whole line's
+//     font as that of its leading run, so a paragraph beginning with an
+//     italic word reads as "different font") or an equation fragment.
+//   - Numbered section headings test the numeric outline prefix against
+//     the joined item text, so a heading long enough to wrap across lines
+//     is recognised even though only its first line carries the number.
+// ---------------------------------------------------------------------------
+describe('header detection', () => {
+    // Filler body block whose last line carries the whitespace a section
+    // heading sits above — without a real gap the header rules (which
+    // require `gapCheckPasses`) never get a chance to fire in `startNewItem`.
+    const FILLERS_BEFORE_HEADING: LeaderLineSpec[] = FILLERS.map((f, i) =>
+        i === FILLERS.length - 1 ? { ...f, gapAfter: 14 } : f,
+    );
+
+    function items(specs: LeaderLineSpec[], bodyStyles: TextStyle[]) {
+        return detectParagraphs(makeColumnPageResult(specs), bodyStyles).items;
+    }
+
+    describe('heading-capitalization guard', () => {
+        it('does not promote an equation fragment in a math-italic font', () => {
+            // Body-size italic in a font distinct from body — matches the
+            // same-size-italic header rule — but the line is the numerator
+            // of a fraction, beginning with a lowercase variable name.
+            const all = items(
+                [
+                    ...FILLERS_BEFORE_HEADING,
+                    { text: 'n(unemp | soc, s, t)', l: 0, size: 10, italic: true, font: 'Math-Italic' },
+                ],
+                [BODY],
+            );
+            const eq = all.find(it => it.text.includes('n(unemp'));
+            expect(eq).toBeDefined();
+            expect(eq!.type).toBe('paragraph');
+            expect(eq!.text.startsWith('## ')).toBe(false);
+        });
+
+        it('does not promote a prose line that merely begins with an italic word', () => {
+            // A hyphenated italic term ("congruence prin-/ciple") continues
+            // onto this line, so MuPDF reports the whole line in the italic
+            // font. The line is mid-paragraph body prose, lowercase-leading.
+            const all = items(
+                [
+                    ...FILLERS_BEFORE_HEADING,
+                    {
+                        text: 'ciple. This principle which holds that the data space should be the',
+                        l: 0,
+                        size: 10,
+                        italic: true,
+                        font: 'Times-Italic',
+                    },
+                ],
+                [BODY],
+            );
+            const prose = all.find(it => it.text.includes('ciple. This principle'));
+            expect(prose).toBeDefined();
+            expect(prose!.type).toBe('paragraph');
+        });
+
+        it('still promotes a same-size italic heading that begins with a capital', () => {
+            // The guard must not demote a genuine font-difference heading:
+            // an italic subsection title set in a distinct font, capitalised.
+            const all = items(
+                [
+                    ...FILLERS_BEFORE_HEADING,
+                    { text: 'Materials and Methods', l: 0, size: 10, italic: true, font: 'Times-Italic' },
+                ],
+                [BODY],
+            );
+            const heading = all.find(it => it.text.includes('Materials and Methods'));
+            expect(heading).toBeDefined();
+            expect(heading!.type).toBe('header');
+        });
+
+        it('still promotes a bold heading whose wrapped continuation begins lowercase', () => {
+            // A genuine bold heading long enough to wrap: the first line is
+            // capitalised, the continuation begins with a lowercase word
+            // ("and ..."). The guard is item-level — it judges the joined
+            // item text, which starts with the capitalised first line — so
+            // both lines stay in one heading item rather than the
+            // continuation splitting off as body text.
+            const all = items(
+                [
+                    ...FILLERS_BEFORE_HEADING,
+                    { text: 'Exploring strain and stage distribution', l: 0, size: 10, bold: true, font: 'Heading-Bold' },
+                    { text: 'and relatedness between strains within donors', l: 0, size: 10, bold: true, font: 'Heading-Bold' },
+                ],
+                [BODY],
+            );
+            const heading = all.find(it => it.text.includes('Exploring strain'));
+            expect(heading).toBeDefined();
+            expect(heading!.type).toBe('header');
+            expect(heading!.text).toContain('and relatedness between strains');
+        });
+    });
+
+    describe('numbered section headings', () => {
+        it('promotes a single-line numbered heading in a distinct font', () => {
+            const all = items(
+                [
+                    ...FILLERS_BEFORE_HEADING,
+                    { text: '3. Formulation of strategic objectives', l: 0, size: 10, font: 'Heading-Sans' },
+                ],
+                [BODY],
+            );
+            const heading = all.find(it => it.text.includes('Formulation of strategic'));
+            expect(heading).toBeDefined();
+            expect(heading!.type).toBe('header');
+        });
+
+        it('promotes a numbered heading that wraps across two lines', () => {
+            // The numeric outline prefix ("3.3.") sits only on the first
+            // line; the wrapped continuation carries no heading cue of its
+            // own. Both lines share the heading font, so they form one item.
+            const all = items(
+                [
+                    ...FILLERS_BEFORE_HEADING,
+                    { text: '3.3. Key success factors for successful', l: 0, size: 10, font: 'Heading-Sans' },
+                    { text: 'project management', l: 0, size: 10, font: 'Heading-Sans' },
+                ],
+                [BODY],
+            );
+            const heading = all.find(it => it.text.includes('Key success factors'));
+            expect(heading).toBeDefined();
+            expect(heading!.type).toBe('header');
+            expect(heading!.text).toContain('project management');
+        });
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Uniform-leading run protection
+//
+// A single detected column can stack two blocks with different line
+// leading — most commonly a single-spaced figure caption above a
+// double-spaced body paragraph. The per-column gap threshold is one
+// median, so when the loosely-leaded block is the minority the threshold
+// lands at the dense block's leading and every loose line is split into
+// its own paragraph. `startNewItem` protects a run of near-equal gaps: a
+// gap that does not notably exceed the surrounding leading is uniform
+// intra-paragraph leading, not a paragraph break.
+// ---------------------------------------------------------------------------
+describe('uniform-leading run protection', () => {
+    // Every wrapped-prose line is padded to the same width so it ends at the
+    // same right edge: the run-protection guard treats only full-width lines
+    // as wrapped. The pad ends with a word character, not punctuation — a
+    // wrapped line ends mid-sentence, never with sentence-final punctuation.
+    const WIDE = 88;
+    const wide = (label: string) => (label + ' xx').padEnd(WIDE, ' xx').slice(0, WIDE);
+
+    // Six tight caption lines (2pt gaps) dominate the column gap median, so
+    // the per-column threshold lands well below the loose body block's own
+    // 12pt double-spaced leading — the miscalibration the protection targets.
+    const tightCaption: LeaderLineSpec[] = Array.from({ length: 6 }, (_, i) => ({
+        text: wide(`Caption line ${i + 1}`),
+        l: 0,
+        size: 10,
+        gapAfter: i === 5 ? 20 : 2, // 20pt break separates caption / body
+    }));
+
+    it('keeps a double-spaced body paragraph whole below a single-spaced caption', () => {
+        // Without run protection each of the four 12pt-spaced body lines
+        // becomes its own paragraph because the gap clears the (caption-
+        // dominated) threshold.
+        const specs: LeaderLineSpec[] = [
+            ...tightCaption,
+            { text: wide('Body line one of a double spaced paragraph'), l: 0, size: 10, gapAfter: 12 },
+            { text: wide('Body line two of the same double spaced paragraph'), l: 0, size: 10, gapAfter: 12 },
+            { text: wide('Body line three of the same double spaced paragraph'), l: 0, size: 10, gapAfter: 12 },
+            { text: 'Body line four ends the paragraph.', l: 0, size: 10 },
+        ];
+        const paragraphs = paragraphTexts(makeColumnPageResult(specs), [BODY]);
+        // One caption paragraph + one body paragraph.
+        expect(paragraphs.length).toBe(2);
+        const body = paragraphs.find(p => p.includes('Body line one'))!;
+        expect(body).toBeDefined();
+        expect(body).toContain('Body line two');
+        expect(body).toContain('Body line three');
+        expect(body).toContain('Body line four');
+    });
+
+    it('still splits a genuine paragraph break inside a double-spaced block', () => {
+        // Same loose 12pt body leading, but a 24pt gap (a blank double-
+        // spaced line) marks a real paragraph boundary. Run protection
+        // suppresses only gaps that match the surrounding leading — a gap
+        // that notably exceeds it must still split.
+        const specs: LeaderLineSpec[] = [
+            ...tightCaption,
+            { text: wide('First body paragraph line one'), l: 0, size: 10, gapAfter: 12 },
+            { text: wide('First body paragraph line two'), l: 0, size: 10, gapAfter: 24 },
+            { text: wide('Second body paragraph line one'), l: 0, size: 10, gapAfter: 12 },
+            { text: wide('Second body paragraph line two'), l: 0, size: 10, gapAfter: 12 },
+            { text: 'Second body paragraph line three ends here.', l: 0, size: 10 },
+        ];
+        const paragraphs = paragraphTexts(makeColumnPageResult(specs), [BODY]);
+        // Caption + two distinct body paragraphs.
+        expect(paragraphs.length).toBe(3);
+        const first = paragraphs.find(p => p.includes('First body paragraph line one'))!;
+        expect(first).toBeDefined();
+        expect(first).toContain('First body paragraph line two');
+        expect(first).not.toContain('Second body paragraph');
+        const second = paragraphs.find(p => p.includes('Second body paragraph line one'))!;
+        expect(second).toBeDefined();
+        expect(second).toContain('Second body paragraph line two');
+        expect(second).toContain('Second body paragraph line three');
+    });
+
+    it('does not fuse short one-line items at uniform loose spacing', () => {
+        // Four short one-line entries below the same caption, each ending
+        // well short of the column right edge, at uniform 12pt gaps. They
+        // are NOT wrapped prose — a wrapped line is full-width — so the
+        // full-width guard keeps every entry its own paragraph even though
+        // the gaps clear the miscalibrated threshold.
+        const specs: LeaderLineSpec[] = [
+            ...tightCaption,
+            { text: 'Short entry one.', l: 0, size: 10, gapAfter: 12 },
+            { text: 'Short entry two.', l: 0, size: 10, gapAfter: 12 },
+            { text: 'Short entry three.', l: 0, size: 10, gapAfter: 12 },
+            { text: 'Short entry four.', l: 0, size: 10 },
+        ];
+        const paragraphs = paragraphTexts(makeColumnPageResult(specs), [BODY]);
+        // Caption + four separate short entries.
+        expect(paragraphs.length).toBe(5);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// OCR text-layer heading false positives
+//
+// PDFs whose text is a synthetic OCR layer carry no reliable per-line size
+// signal: OCRmyPDF / Tesseract render the invisible text in a single
+// "GlyphLessFont" and size each line from the scanned glyph heights, so a
+// body line lands 1-3pt above the body size and trips the larger-font
+// heading rule. Because every glyph shares one font, the font-difference
+// heading rules can never fire to check it. `processCurrentLinesAsItem`
+// demotes a size-cued candidate whose lines all span the full body-text
+// column measure — a wrapped body line, not a short title — but only on
+// OCR-layer documents and only where the column has enough lines for its
+// measure to be trustworthy.
+// ---------------------------------------------------------------------------
+describe('OCR text-layer heading false positives', () => {
+    const items = (specs: LeaderLineSpec[], bodyStyles: TextStyle[]) =>
+        detectParagraphs(makeColumnPageResult(specs), bodyStyles).items;
+
+    // ~74-char running-prose line — spans the column measure the body
+    // fillers establish, so it reads as a wrapped body line, not a title.
+    const FULL_MEASURE_PROSE =
+        'modern science but this is not so on the contrary this way of reasoning is';
+
+    const ocrFillers = (): LeaderLineSpec[] =>
+        Array.from({ length: 6 }, (_, i) => ({
+            text: `body prose line number ${i} that anchors the column measure here today`,
+            l: 0,
+            size: 9,
+            font: 'GlyphLessFont',
+            gapAfter: i === 5 ? 14 : 2,
+        }));
+
+    it('demotes a full-measure size-cued line on an OCR-layer document', () => {
+        const all = items(
+            [
+                ...ocrFillers(),
+                { text: FULL_MEASURE_PROSE, l: 0, size: 10, font: 'GlyphLessFont' },
+            ],
+            [bodyStyle(9, 'GlyphLessFont')],
+        );
+        const candidate = all.find(it => it.text.includes('modern science'));
+        expect(candidate).toBeDefined();
+        expect(candidate!.type).toBe('paragraph');
+    });
+
+    it('keeps a short size-cued heading on an OCR-layer document', () => {
+        // A real heading is set short — it does not fill the column measure.
+        const all = items(
+            [
+                ...ocrFillers(),
+                { text: 'Introduction', l: 0, size: 10, font: 'GlyphLessFont' },
+            ],
+            [bodyStyle(9, 'GlyphLessFont')],
+        );
+        const heading = all.find(it => it.text.includes('Introduction'));
+        expect(heading).toBeDefined();
+        expect(heading!.type).toBe('header');
+    });
+
+    it('leaves a full-measure size-cued line on a normal digital PDF alone', () => {
+        // Same geometry, real embedded fonts: font sizes are exact, so a
+        // larger-size line genuinely is a heading — the guard must not fire.
+        const all = items(
+            [
+                ...Array.from({ length: 6 }, (_, i) => ({
+                    text: `body prose line number ${i} that anchors the column measure here today`,
+                    l: 0,
+                    size: 9,
+                    font: 'Times-Roman',
+                    gapAfter: i === 5 ? 14 : 2,
+                })),
+                { text: FULL_MEASURE_PROSE, l: 0, size: 10, font: 'Times-Roman' },
+            ],
+            [bodyStyle(9, 'Times-Roman')],
+        );
+        const candidate = all.find(it => it.text.includes('modern science'));
+        expect(candidate).toBeDefined();
+        expect(candidate!.type).toBe('header');
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Short CJK section headings
+//
+// `minHeaderLength` is a character count calibrated for Latin scripts. CJK
+// section headings are routinely a single two-character word ("前言",
+// "引言", "结论"), so `isHeaderStyle` allows a 2-character floor when the
+// text is predominantly CJK. The candidate still has to clear a heading
+// rule (here a larger font size) to be promoted.
+// ---------------------------------------------------------------------------
+describe('short CJK section headings', () => {
+    const items = (specs: LeaderLineSpec[], bodyStyles: TextStyle[]) =>
+        detectParagraphs(makeColumnPageResult(specs), bodyStyles).items;
+
+    it('promotes a two-character CJK heading carrying a size cue', () => {
+        const all = items(
+            [
+                ...Array.from({ length: 4 }, (_, i) => ({
+                    text: '这是一行中文正文用来锚定页面的主体样式与栏宽度信息',
+                    l: 0,
+                    size: 15,
+                    font: 'CJKBody',
+                    gapAfter: i === 3 ? 20 : 2,
+                })),
+                { text: '前言', l: 0, size: 21, font: 'CJKHeading' },
+            ],
+            [bodyStyle(15, 'CJKBody')],
+        );
+        const heading = all.find(it => it.text.includes('前言'));
+        expect(heading).toBeDefined();
+        expect(heading!.type).toBe('header');
+    });
+
+    it('still rejects a two-character Latin candidate as too short', () => {
+        // The 2-character floor is gated to CJK content: a 2-char Latin
+        // line stays below minHeaderLength and is not a heading.
+        const all = items(
+            [
+                ...Array.from({ length: 4 }, (_, i) => ({
+                    text: 'A line of plain English body prose anchoring the column',
+                    l: 0,
+                    size: 15,
+                    font: 'Body-Serif',
+                    gapAfter: i === 3 ? 20 : 2,
+                })),
+                { text: 'Ab', l: 0, size: 21, font: 'Heading-Serif' },
+            ],
+            [bodyStyle(15, 'Body-Serif')],
+        );
+        const candidate = all.find(it => it.text.trim() === 'Ab');
+        expect(candidate).toBeDefined();
+        expect(candidate!.type).toBe('paragraph');
+    });
+});

@@ -33,10 +33,12 @@ import type {
     DocItem,
     LayoutAnalysisResult,
     MarginPosition,
-    ProcessedPage,
+    InternalProcessedPage,
     SentenceItem,
 } from "../types";
 import type { PageSentenceResult } from "../ParagraphSentenceMapper";
+import type { PageDebugData } from "../schema";
+import { rectToBBox } from "../schema/bbox";
 
 export type OverlayLevel =
     | "columns"
@@ -95,6 +97,16 @@ function itemStyle(item: DocItem): { color: string; prefix: string } {
 }
 
 function itemText(item: DocItem): string {
+    return "text" in item ? item.text : item.kind;
+}
+
+type DebugItem = NonNullable<PageDebugData["items"]>[number];
+
+function debugItemStyle(item: DebugItem): { color: string; prefix: string } {
+    return ITEM_KIND_STYLE[item.kind as DocItem["kind"]];
+}
+
+function debugItemText(item: DebugItem): string {
     return "text" in item ? item.text : item.kind;
 }
 
@@ -168,7 +180,7 @@ export interface OverlayResult {
 /**
  * Build a sentence overlay from a `PageSentenceResult`.
  *
- * Shared rect-construction loop used by the `ProcessedPage`-based
+ * Shared rect-construction loop used by the `InternalProcessedPage`-based
  * visualizer wrapper above and by fixture capture (which still needs
  * the trace-flavored result for splitter recording).
  *
@@ -278,7 +290,7 @@ export function buildSentenceOverlayFromResult(
 }
 
 // ---------------------------------------------------------------------------
-// Pure builders — consume `ProcessedPage` from a structured-mode extract
+// Pure builders — consume `InternalProcessedPage` from a structured-mode extract
 // (`extract({ mode: "structured", pageIndices: [n] })`). What the visualizer
 // paints is byte-identical to what production produces for that page.
 //
@@ -290,11 +302,11 @@ export function buildSentenceOverlayFromResult(
 // ---------------------------------------------------------------------------
 
 /**
- * Column overlay from a structured-mode `ProcessedPage`. Reads
+ * Column overlay from a structured-mode `InternalProcessedPage`. Reads
  * `page.columns` (`BoundingBox[]`, `{l,t,r,b,origin}`) and emits them in
  * the same top-left page frame used by production extraction.
  */
-export function buildColumnOverlayFromPage(page: ProcessedPage): OverlayResult {
+export function buildColumnOverlayFromPage(page: InternalProcessedPage): OverlayResult {
     const columns = page.columns;
     const rects: OverlayRect[] = columns.map((col, i) => ({
         rect: col,
@@ -316,10 +328,10 @@ export function buildColumnOverlayFromPage(page: ProcessedPage): OverlayResult {
 }
 
 /**
- * Line overlay from a structured-mode `ProcessedPage`. Lines are flattened
+ * Line overlay from a structured-mode `InternalProcessedPage`. Lines are flattened
  * from `page.items[].lines` in item reading order.
  */
-export function buildLineOverlayFromPage(page: ProcessedPage): OverlayResult {
+export function buildLineOverlayFromPage(page: InternalProcessedPage): OverlayResult {
     const lines = page.items.flatMap((item) => ("lines" in item ? item.lines : []));
     const rects: OverlayRect[] = lines.map((line, i) => ({
         rect: line.bbox,
@@ -343,10 +355,10 @@ export function buildLineOverlayFromPage(page: ProcessedPage): OverlayResult {
 }
 
 /**
- * Item overlay from a structured-mode `ProcessedPage`.
+ * Item overlay from a structured-mode `InternalProcessedPage`.
  */
 export function buildItemOverlayFromPage(
-    page: ProcessedPage,
+    page: InternalProcessedPage,
     kindFilter?: DocItem["kind"][],
 ): OverlayResult {
     const allowed = kindFilter ? new Set(kindFilter) : null;
@@ -391,10 +403,10 @@ export function buildItemOverlayFromPage(
 }
 
 /**
- * Sentence overlay from a structured-mode `ProcessedPage`. Thin wrapper
+ * Sentence overlay from a structured-mode `InternalProcessedPage`. Thin wrapper
  * over `buildSentenceOverlayFromResult`.
  */
-export function buildSentenceOverlayFromPage(page: ProcessedPage): OverlayResult {
+export function buildSentenceOverlayFromPage(page: InternalProcessedPage): OverlayResult {
     const projected: PageSentenceResult = {
         pageIndex: page.index,
         width: page.width,
@@ -404,6 +416,175 @@ export function buildSentenceOverlayFromPage(page: ProcessedPage): OverlayResult
         degradation: page.degradation,
     };
     return buildSentenceOverlayFromResult(projected);
+}
+
+export function buildColumnOverlayFromDebugPage(page: PageDebugData): OverlayResult {
+    const rects: OverlayRect[] = (page.columns ?? []).map((rect, i) => ({
+        rect: rectToBBox(rect),
+        color: OVERLAY_COLORS.column,
+        label: `C${i + 1}`,
+        group: i,
+    }));
+    return {
+        level: "columns",
+        pageIndex: page.pageIndex,
+        pageWidth: page.width,
+        pageHeight: page.height,
+        groupCount: rects.length,
+        rects,
+        stats: { columns: rects.length },
+    };
+}
+
+export function buildLineOverlayFromDebugPage(page: PageDebugData): OverlayResult {
+    const rects: OverlayRect[] = (page.lines ?? []).map((line, i) => ({
+        rect: rectToBBox(line.bbox),
+        color: OVERLAY_COLORS.line,
+        label: `L${i + 1}`,
+        group: i,
+    }));
+    return {
+        level: "lines",
+        pageIndex: page.pageIndex,
+        pageWidth: page.width,
+        pageHeight: page.height,
+        groupCount: rects.length,
+        rects,
+        stats: {
+            lines: rects.length,
+            columns: page.counts.columns,
+        },
+    };
+}
+
+export function buildItemOverlayFromDebugPage(page: PageDebugData): OverlayResult {
+    const items = page.items ?? [];
+    const kindCounts: Partial<Record<DocItem["kind"], number>> = {};
+    const rects: OverlayRect[] = items.map((item, i) => {
+        const kind = item.kind as DocItem["kind"];
+        const style = ITEM_KIND_STYLE[kind];
+        kindCounts[kind] = (kindCounts[kind] ?? 0) + 1;
+        return {
+            rect: rectToBBox(item.bbox),
+            color: style.color,
+            label: `${style.prefix}${item.order + 1}`,
+            group: i,
+        };
+    });
+    return {
+        level: "items",
+        pageIndex: page.pageIndex,
+        pageWidth: page.width,
+        pageHeight: page.height,
+        groupCount: rects.length,
+        rects,
+        stats: {
+            paragraphs: kindCounts.text ?? 0,
+            headers: kindCounts.section_header ?? 0,
+            textItems: kindCounts.text ?? 0,
+            footnotes: kindCounts.footnote ?? 0,
+            captions: kindCounts.caption ?? 0,
+            listItems: kindCounts.list_item ?? 0,
+            marginItems: kindCounts.margin ?? 0,
+            formulas: kindCounts.formula ?? 0,
+            tables: kindCounts.table ?? 0,
+            pictures: kindCounts.picture ?? 0,
+        },
+    };
+}
+
+export function buildSentenceOverlayFromDebugPage(page: PageDebugData): OverlayResult {
+    const degradedItemIds = new Set(
+        (page.degradation?.notes ?? []).map((n) => n.itemId),
+    );
+    const rects: OverlayRect[] = [];
+    let groupIdx = 0;
+    let bodyIdx = 0;
+    let sentenceLabelIdx = 0;
+    const sentencesByItem = new Map<string, NonNullable<PageDebugData["sentences"]>>();
+    for (const sentence of page.sentences ?? []) {
+        const list = sentencesByItem.get(sentence.itemId);
+        if (list) list.push(sentence);
+        else sentencesByItem.set(sentence.itemId, [sentence]);
+    }
+
+    const drawSentence = (
+        sentence: NonNullable<PageDebugData["sentences"]>[number],
+    ): void => {
+        if (sentence.bboxes.length === 0) return;
+        const isDegraded = degradedItemIds.has(sentence.itemId);
+        let color: string;
+        if (isDegraded) {
+            color = OVERLAY_COLORS.sentenceDegraded;
+        } else {
+            color = OVERLAY_COLORS.sentence[bodyIdx % OVERLAY_COLORS.sentence.length];
+            bodyIdx++;
+        }
+        let label = `S${sentenceLabelIdx + 1}`;
+        sentenceLabelIdx++;
+        if (sentence.joinWithNext) label = `${label}↪`;
+        const joinTail = sentence.joinWithNext ? " ↪" : "";
+        const annotationText =
+            `page ${page.pageIndex + 1}, item ${sentence.itemId}, s${sentence.order + 1}${joinTail}\n` +
+            sentence.text;
+        sentence.bboxes.forEach((rect, fragIdx) => {
+            rects.push({
+                rect: rectToBBox(rect),
+                color,
+                label: fragIdx === 0 ? label : undefined,
+                annotationText: fragIdx === 0 ? annotationText : undefined,
+                group: groupIdx,
+                degraded: isDegraded,
+            });
+        });
+        groupIdx++;
+    };
+
+    if ((page.items?.length ?? 0) > 0) {
+        for (const item of page.items ?? []) {
+            const itemSentences = sentencesByItem.get(item.id) ?? [];
+            if (itemSentences.some((sentence) => sentence.bboxes.length > 0)) {
+                for (const sentence of itemSentences) {
+                    drawSentence(sentence);
+                }
+                continue;
+            }
+
+            const style = debugItemStyle(item);
+            rects.push({
+                rect: rectToBBox(item.bbox),
+                color: style.color,
+                label: `${style.prefix}${item.order + 1}`,
+                annotationText:
+                    `page ${page.pageIndex + 1}, item ${item.id}, ${item.kind}\n` +
+                    debugItemText(item),
+                group: groupIdx,
+            });
+            groupIdx++;
+        }
+    } else {
+        for (const sentence of page.sentences ?? []) {
+            drawSentence(sentence);
+        }
+    }
+    return {
+        level: "sentences",
+        pageIndex: page.pageIndex,
+        pageWidth: page.width,
+        pageHeight: page.height,
+        groupCount: groupIdx,
+        rects,
+        stats: {
+            sentences: page.sentences?.length ?? 0,
+            headings: page.items?.filter((item) => item.kind === "section_header").length ?? 0,
+            fallbackItems: page.items?.filter((item) => {
+                const itemSentences = sentencesByItem.get(item.id) ?? [];
+                return !itemSentences.some((sentence) => sentence.bboxes.length > 0);
+            }).length ?? 0,
+            paragraphs: page.items?.filter((item) => item.kind === "text").length ?? 0,
+            degradation: page.degradation?.count ?? 0,
+        },
+    };
 }
 
 /**

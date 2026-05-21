@@ -79,6 +79,14 @@ interface ColumnThresholds {
     rightEdgeMode: number;
     leftEdgeMad: number;
     rightEdgeMad: number;
+    /**
+     * Widest text extent in the column — the rightmost edge of any line.
+     * Unlike `rightEdgeMode` (which a column full of short links / list
+     * entries drags to a small value), this marks the body text margin a
+     * wrapped line reaches. Used to tell a wrapped continuation line from
+     * a short standalone one-line item.
+     */
+    maxRightEdge: number;
     indentExcessThreshold: number;
     earlyEndExcessThreshold: number;
     /**
@@ -413,6 +421,21 @@ const PERMISSIVE_ICON_FONT_RE =
  * `isIconBulletLine`) before treating an MT* line as a list item.
  */
 const MATH_SYMBOL_FONT_RE = /(?:^|\+)MTSYN?\b/i;
+
+/**
+ * Synthetic OCR text-layer fonts. OCRmyPDF / Tesseract render the invisible
+ * text layer of a scanned PDF in a single placeholder font ("GlyphLessFont")
+ * and size each line from the scanned glyph heights, so per-line font size is
+ * estimation noise rather than a typographic choice. Used to gate heading
+ * heuristics that would otherwise trust the size cue. The `(?:^|\+)` anchor
+ * tolerates the random subset prefix MuPDF prepends to embedded fonts.
+ */
+const OCR_TEXT_LAYER_FONT_RE = /(?:^|\+)Glyph\s*Less\s*Font/i;
+
+/** True when `font` is a synthetic OCR text-layer placeholder font. */
+function isOcrTextLayerFont(font: string | undefined | null): boolean {
+    return !!font && OCR_TEXT_LAYER_FONT_RE.test(font);
+}
 
 /**
  * Recognized leading bullet glyphs (after optional whitespace). Covers the
@@ -799,6 +822,7 @@ function calculateColumnThresholds(
     const rightEdgeMode = modeLeftEdge(rightValues, pageThresholds.binPx);
     const leftEdgeMad = mad(leftValues);
     const rightEdgeMad = mad(rightValues);
+    const maxRightEdge = rightValues.length > 0 ? Math.max(...rightValues) : 0;
 
     // Calculate thresholds
     const indentExcessThreshold = Math.max(
@@ -841,6 +865,7 @@ function calculateColumnThresholds(
         rightEdgeMode,
         leftEdgeMad,
         rightEdgeMad,
+        maxRightEdge,
         indentExcessThreshold,
         earlyEndExcessThreshold,
         gapExcessThreshold,
@@ -946,6 +971,11 @@ function isHeaderStyle(
     const primaryBodyStyle = bodyStyles[0];
     let isPotentialHeader = false;
     const gapCheckPasses = precededByGap === null || precededByGap;
+    // True when the candidate carries an independent size cue (Rule 1).
+    // Used to exempt size-cued headings from the heading-capitalization
+    // guard below — a larger line is a heading regardless of its leading
+    // character.
+    const sizeIncreaseHeader = lineStyle.size > primaryBodyStyle.size;
 
     // Rule 1: Larger font size
     if (lineStyle.size > primaryBodyStyle.size) {
@@ -1022,12 +1052,20 @@ function isHeaderStyle(
     // outline prefix is what makes the rule safe: body lines that happen to
     // be in a different font (inline code, embedded glyphs) almost never
     // start with a "N." or "N.M" outline.
+    //
+    // Tested against `phraseText`, not the per-line `text`: a section
+    // heading long enough to wrap carries its numeric outline only on the
+    // first line ("3.3. Key success factors for successful\nproject
+    // management"). Per-line evaluation in `startNewItem` leaves
+    // `phraseTextOverride` null so the first line still triggers correctly;
+    // the multi-line item evaluator passes the joined text so every wrapped
+    // line of the same heading is recognised. Mirrors Rule 5.
     if (
         !isPotentialHeader &&
         gapCheckPasses &&
         Math.abs(lineStyle.size - primaryBodyStyle.size) < 0.5 &&
         lineStyle.font !== primaryBodyStyle.font &&
-        SECTION_PREFIX_RE.test(text)
+        SECTION_PREFIX_RE.test(phraseText)
     ) {
         isPotentialHeader = true;
     }
@@ -1035,6 +1073,40 @@ function isHeaderStyle(
     if (!isPotentialHeader) return false;
 
     // Apply disqualifying heuristics
+
+    // Heading-capitalization guard. Rules 2-6 promote a candidate on a
+    // same-or-smaller-size font difference alone — a signal that is
+    // unreliable in two recurring situations:
+    //   - MuPDF's JSON walk reports a single font per line, taken from the
+    //     line's leading run. A body paragraph line that merely begins with
+    //     an italic/bold word (e.g. the tail of a hyphenated italicised
+    //     term continued onto the next line) is reported entirely in that
+    //     emphasis font and reads as "different font, same size" vs. body.
+    //   - Inline equation fragments set in a math-italic font (variables,
+    //     function notation like "n(unemp | soc, s, t)") are a different
+    //     font at body size.
+    // Both produce a lowercase-leading line. Real section headings begin
+    // with a capital letter, a digit, or an opening quote/bracket — so a
+    // lowercase-leading candidate carrying no size cue is body prose or an
+    // equation, not a heading. Size-cued headings (Rule 1) keep their
+    // independent signal and are exempt.
+    //
+    // This is an item-level disqualifier: it runs only when an explicit
+    // `phraseTextOverride` is supplied, i.e. from the multi-line item
+    // evaluator, where `phraseText` is the joined item text and therefore
+    // begins with the item's FIRST line. The per-line boundary checks in
+    // `startNewItem` pass no override and are skipped — otherwise a genuine
+    // multi-line heading whose wrapped continuation starts with a lowercase
+    // word ("...stage distribution\nand relatedness between strains...")
+    // would have that continuation demoted, breaking the merge that keeps
+    // the heading intact.
+    if (
+        phraseTextOverride !== null &&
+        !sizeIncreaseHeader &&
+        /^["'“‘«([]?\p{Ll}/u.test(phraseText)
+    ) {
+        return false;
+    }
 
     // Author block on a paper's cover page commonly uses the same bold-encoded
     // subset font as section titles. Use the merged `phraseText` so multi-line
@@ -1059,8 +1131,15 @@ function isHeaderStyle(
         return false;
     }
 
-    // Too short
-    if (text.length < settings.minHeaderLength) {
+    // Too short. `minHeaderLength` is a character count calibrated for Latin
+    // scripts, where a 1-2 character "heading" is almost always noise. CJK
+    // headings are routinely a single two-character word ("前言", "引言",
+    // "结论", "摘要", "致谢"). Allow a 2-character floor when the text is predominantly
+    // CJK; the candidate still has to clear a heading rule above to get here.
+    const minLen = hasCJKContent(text)
+        ? Math.min(settings.minHeaderLength, 2)
+        : settings.minHeaderLength;
+    if (text.length < minLen) {
         return false;
     }
 
@@ -1088,6 +1167,7 @@ function startNewItem(
     line: PageLine,
     i: number,
     prevLine: PageLine | null,
+    nextLine: PageLine | null,
     currentLines: PageLine[],
     columnThresholds: ColumnThresholds,
     pageThresholds: PageThresholds,
@@ -1138,6 +1218,100 @@ function startNewItem(
             !prevEndsSentence
         ) {
             gapBreak = false;
+        }
+    }
+
+    // Uniform-leading run protection. A single detected column can stack
+    // two blocks with different line leading — most commonly a single-
+    // spaced figure caption above a double-spaced body paragraph. The
+    // per-column gap threshold is a single median, so on a page where the
+    // loosely-leaded block is the minority the threshold lands at the
+    // denser block's leading and every line of the looser block is split
+    // into its own paragraph. A genuine paragraph break is a gap *larger*
+    // than the surrounding leading; a run of near-equal gaps is uniform
+    // intra-paragraph leading whatever its absolute size. Clear the gap
+    // break when this gap does not notably exceed the leading already
+    // established inside the current item (or, while the item still has a
+    // single line, the leading to the following line).
+    //
+    // Three guards keep this narrowly targeted at over-split wrapped prose:
+    //
+    //   1. The surrounding leading must itself *exceed the column gap
+    //      threshold* — i.e. the threshold is demonstrably miscalibrated
+    //      for this block, since it would split every one of its
+    //      uniformly-leaded lines. On a well-calibrated page the threshold
+    //      already sits above body leading, so a gap that clears it is a
+    //      real break and this branch never fires.
+    //   2. The previous line must reach near the column's right edge. A
+    //      wrapped line is full-width *by definition*; a line that ends
+    //      early is the last line of its paragraph or a standalone
+    //      one-line item — a short list entry, a heading, the last line of
+    //      a caption — so the gap after it is a real boundary, not
+    //      intra-paragraph leading. This also shields genuine headers,
+    //      which are typically short: their gap survives for the header
+    //      rules below.
+    //   3. The previous line must not end with sentence-final punctuation.
+    //      Suppressing a gap only when the sentence visibly continues
+    //      across the line break keeps separate-but-uniformly-spaced
+    //      paragraphs (and list entries that happen to be full-width)
+    //      apart — they end with `.`/`!`/`?`. Wrapped prose lines end
+    //      mid-sentence (or with a hyphen).
+    //
+    // This must run *before* header detection. The header rules (2-6)
+    // promote a font-different line only when it is "preceded by a gap";
+    // on a miscalibrated page every uniformly-leaded body line clears the
+    // threshold, so that condition rubber-stamps mid-paragraph lines as
+    // headers (notably body lines that merely begin with an inline italic
+    // word). Clearing the spurious gap here restores the gap condition's
+    // meaning. The check is deliberately style-agnostic — running prose
+    // carries inline italic/bold emphasis whose spans make per-line style
+    // comparisons unreliable.
+    if (gapBreak && spacingTop > 0 && spacingTop < 50) {
+        let referenceLeading: number | null = null;
+        if (currentLines.length >= 2) {
+            // Leading already established by the accumulated item.
+            const internalGaps: number[] = [];
+            for (let j = 1; j < currentLines.length; j++) {
+                const g = currentLines[j].bbox.t - currentLines[j - 1].bbox.b;
+                if (g < 50 && g > -5) internalGaps.push(g);
+            }
+            if (internalGaps.length > 0) {
+                referenceLeading = median(internalGaps);
+            }
+        } else if (nextLine) {
+            // Item still has one line — confirm uniformity by looking
+            // ahead one line: a current gap no larger than the next gap
+            // cannot itself be the bigger-than-leading paragraph break.
+            const nextGap = nextLine.bbox.t - line.bbox.b;
+            if (nextGap > 0 && nextGap < 50) {
+                referenceLeading = nextGap;
+            }
+        }
+        // The previous line counts as a wrapped (full-width) line when it
+        // ends within ~20% of the column width of the widest text extent.
+        // `maxRightEdge` is used rather than `rightEdgeMode` because a
+        // column full of short links / list entries drags the mode to a
+        // small value, which would mis-read every short line as full-width.
+        const columnTextWidth =
+            columnThresholds.maxRightEdge - columnThresholds.leftEdgeMode;
+        const prevReachesRightEdge =
+            columnThresholds.maxRightEdge - prevLine.bbox.r <=
+            0.2 * columnTextWidth;
+        // A wrapped prose line ends mid-sentence; a finished paragraph or
+        // a standalone one-line item ends with sentence-final punctuation.
+        const prevEndsSentenceFinal = /[.!?]["'”’)\]]?$/u.test(
+            prevLine.text.trimEnd()
+        );
+        if (
+            referenceLeading !== null &&
+            referenceLeading > columnThresholds.gapExcessThreshold &&
+            prevReachesRightEdge &&
+            !prevEndsSentenceFinal
+        ) {
+            const uniformTol = Math.max(1.5, 0.3 * referenceLeading);
+            if (spacingTop <= referenceLeading + uniformTol) {
+                gapBreak = false;
+            }
         }
     }
 
@@ -1382,6 +1556,8 @@ function processCurrentLinesAsItem(
     pageIndex: number,
     bodyStyles: TextStyle[] | null,
     settings: Required<ParagraphDetectionSettings>,
+    columnThresholds: ColumnThresholds,
+    columnLineCount: number,
     bodyAllCaps: boolean = false,
     prevDocLine: PageLine | null = null
 ): {
@@ -1436,6 +1612,52 @@ function processCurrentLinesAsItem(
             isIconBulletLine(prevDocLine) &&
             !prevEndsTerminator
         ) {
+            isPotentialHeader = false;
+        }
+    }
+
+    // OCR-layer full-measure demotion: on PDFs whose only text is a
+    // synthetic OCR layer, font size carries no reliable heading signal.
+    // OCRmyPDF / Tesseract render the invisible text in a single fixed font
+    // ("GlyphLessFont") and size each line from the scanned glyph heights,
+    // so a stray body line routinely lands 1-3pt above the body size and
+    // trips the larger-font heading rule. Because every glyph shares one
+    // font, the font-difference heading rules (bold / italic / all-caps /
+    // section-number) can never fire — Rule 1's noisy size cue is the only
+    // signal, and it is unchecked.
+    //
+    // A heading is set short — it does not run to the full width of the body
+    // text column. So on an OCR-layer document, demote a size-cued candidate
+    // whose every line spans essentially the whole column measure: that is a
+    // wrapped line of body prose the OCR layer happened to size above the
+    // body, not a real title. A genuine wrapped heading keeps a short last
+    // line and survives. The guard is gated to OCR-layer documents because
+    // on a normal digital PDF font sizes are exact and a larger-size line
+    // genuinely is a heading.
+    //
+    // The column must hold enough lines for its measure to be meaningful:
+    // the column detector often isolates a heading into its own narrow
+    // column, where `rightEdgeMode - leftEdgeMode` collapses onto the
+    // heading's own width and every heading would trivially "fill" it.
+    if (
+        isPotentialHeader &&
+        bodyStyles &&
+        bodyStyles.length > 0 &&
+        columnLineCount >= 5 &&
+        isOcrTextLayerFont(bodyStyles[0].font)
+    ) {
+        const firstStyle = extractLineStyle(currentLines[0]);
+        const primaryBodyStyle = bodyStyles[0];
+        const columnMeasure =
+            columnThresholds.rightEdgeMode - columnThresholds.leftEdgeMode;
+        const sizeCued =
+            !!firstStyle && firstStyle.size > primaryBodyStyle.size;
+        const fillsColumnMeasure =
+            columnMeasure > 0 &&
+            currentLines.every(
+                l => l.bbox.r - l.bbox.l >= 0.9 * columnMeasure
+            );
+        if (sizeCued && fillsColumnMeasure) {
             isPotentialHeader = false;
         }
     }
@@ -1516,6 +1738,7 @@ function processColumnLines(
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
         const prevLine = i > 0 ? lines[i - 1] : null;
+        const nextLine = i + 1 < lines.length ? lines[i + 1] : null;
 
         const shouldStartNew =
             currentLines.length === 0 ||
@@ -1523,6 +1746,7 @@ function processColumnLines(
                 line,
                 i,
                 prevLine,
+                nextLine,
                 currentLines,
                 columnThresholds,
                 pageThresholds,
@@ -1543,6 +1767,8 @@ function processColumnLines(
                     pageIndex,
                     bodyStyles,
                     settings,
+                    columnThresholds,
+                    lines.length,
                     bodyAllCaps,
                     items.length === 0 ? prevDocLine : null
                 );
@@ -1576,6 +1802,8 @@ function processColumnLines(
             pageIndex,
             bodyStyles,
             settings,
+            columnThresholds,
+            lines.length,
             bodyAllCaps,
             items.length === 0 ? prevDocLine : null
         );

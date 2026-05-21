@@ -53,7 +53,7 @@ export function buildPreviewableEditOperations(
         const oldString = (entry.old_string as string | undefined) ?? '';
         const newString = (entry.new_string as string | undefined) ?? '';
         const operation = (entry.operation ?? 'str_replace') as EditOperation['operation'];
-        if (operation === 'rewrite' || oldString) {
+        if (operation === 'rewrite' || operation === 'append' || oldString) {
             edits.push({ oldString, newString, operation });
         }
     }
@@ -374,6 +374,7 @@ export function useEditNoteActions({
                 action?.result_data?.undo_after_context,
                 editData.target_before_context,
                 editData.target_after_context,
+                editData.operation,
             );
             return;
         }

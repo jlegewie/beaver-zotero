@@ -8,8 +8,8 @@
  */
 
 import { CITATION_TAG_PATTERN } from '../../../../react/utils/citationPreprocessing';
-import { parseCitationAttributes, parseItemReference } from '../../../../react/types/citations';
 import { ZoteroItemReference } from '../../../../react/types/zotero';
+import { normalizeCitationTag, parseRawCitationAttributes } from '../../../../react/utils/citationGrammar';
 
 
 /**
@@ -42,28 +42,22 @@ export function extractCitationReferences(content: string): ExtractedCitationRef
 
     let match: RegExpExecArray | null;
     while ((match = CITATION_TAG_PATTERN.exec(content)) !== null) {
-        const attrs = parseCitationAttributes(match[1]);
+        const normalized = normalizeCitationTag(parseRawCitationAttributes(match[1] || ''));
+        if (!normalized.ok || normalized.ref.kind !== 'zotero') continue;
 
-        // Try att_id first (attachment reference), then item_id
-        const refStr = attrs.att_id || attrs.item_id;
-        if (!refStr) continue;  // external_id only, or no identifier
-
-        const parsed = parseItemReference(refStr);
-        if (!parsed) continue;  // completely unparseable format
-
-        const key = `${parsed.libraryID}-${parsed.itemKey}`;
+        const key = `${normalized.ref.library_id}-${normalized.ref.zotero_key}`;
         if (seen.has(key)) continue;  // duplicate
         seen.add(key);
 
         // Validate Zotero key format — track invalid keys separately
-        if (!Zotero.Utilities.isValidObjectKey(parsed.itemKey)) {
+        if (!Zotero.Utilities.isValidObjectKey(normalized.ref.zotero_key)) {
             invalidKeys.push(key);
             continue;
         }
 
         references.push({
-            library_id: parsed.libraryID,
-            zotero_key: parsed.itemKey,
+            library_id: normalized.ref.library_id,
+            zotero_key: normalized.ref.zotero_key,
         });
     }
 

@@ -83,7 +83,7 @@ const cache: Map<string, CacheEntry> = new Map();
 const docToEntry: Map<DocumentLike, CacheEntry> = new Map();
 let totalBytes = 0;
 
-const counters = { hits: 0, misses: 0, evictions: 0 };
+const counters = { hits: 0, misses: 0, evictions: 0, discards: 0 };
 
 // One-time feature-detect for `crypto.subtle.digest`.
 let cryptoChecked = false;
@@ -98,9 +98,10 @@ let cryptoUsable = false;
  * doc handle is returned without re-parsing; on a miss the bytes are parsed
  * via the existing `openDocUncached` path and (if size allows) inserted.
  *
- * Callers MUST pair every successful `acquireDoc` with `releaseDoc(doc)`,
- * regardless of whether the work threw. Mixing `acquireDoc` with raw
- * `doc.destroy()` will corrupt the cache.
+ * Callers MUST pair every successful `acquireDoc` with `releaseDoc(doc)`;
+ * pass `discard=true` when the work threw so a potentially ballooned live
+ * document is destroyed immediately instead of cached. Mixing `acquireDoc`
+ * with raw `doc.destroy()` will corrupt the cache.
  */
 export async function acquireDoc(pdfData: Uint8Array | ArrayBuffer): Promise<DocumentLike> {
     sweepExpiredEntries();
@@ -187,11 +188,11 @@ export async function acquireDoc(pdfData: Uint8Array | ArrayBuffer): Promise<Doc
 }
 
 /**
- * Release a doc previously returned by `acquireDoc`. If the doc was cached,
- * mark it idle and (re)arm its TTL timer; if it was a bypass (oversized or
- * insertion-evicted), destroy it directly.
+ * Release a doc previously returned by `acquireDoc`. If `discard` is true,
+ * destroy the doc immediately. Otherwise cached docs are marked idle with a
+ * fresh TTL, and bypass docs are destroyed directly.
  */
-export function releaseDoc(doc: DocumentLike): void {
+export function releaseDoc(doc: DocumentLike, discard = false): void {
     const entry = docToEntry.get(doc);
     if (!entry) {
         // Bypass path: doc was never inserted (oversized, no-key, or already
@@ -201,7 +202,22 @@ export function releaseDoc(doc: DocumentLike): void {
         } catch (e) {
             postLog("warn", `[doc-cache] uncached doc.destroy() threw: ${e}`);
         }
-        postLog("info", "[doc-cache] RELEASE bypass — destroyed uncached doc");
+        postLog(
+            "info",
+            discard
+                ? "[doc-cache] DISCARD bypass — destroyed uncached doc"
+                : "[doc-cache] RELEASE bypass — destroyed uncached doc",
+        );
+        return;
+    }
+
+    if (discard) {
+        teardownEntry(entry);
+        counters.discards++;
+        postLog(
+            "info",
+            `[doc-cache] DISCARD key=${shortKey(entry.key)} bytes=${entry.byteLength} entries=${cache.size}`,
+        );
         return;
     }
 
@@ -242,34 +258,22 @@ export function sweepExpiredEntries(): void {
 
 /**
  * Tear down every cached entry. Used by `__cacheClear` and (transitively) by
- * the test config overrides. When `resetCounters` is true, also zero
- * hits/misses/evictions so live tests can assert exact values.
+ * the test config overrides. When `resetCounters` is true, also zero the
+ * lifetime counters.
  *
  * Order: clear timers and the reverse map BEFORE calling destroy(), so a
  * racing timer callback can't observe a half-torn-down entry.
  */
 export function clearAllCachedDocs(resetCounters: boolean = true): void {
     const entries = Array.from(cache.values());
-    cache.clear();
-    docToEntry.clear();
-    totalBytes = 0;
     for (const entry of entries) {
-        if (entry.ttlTimerId !== undefined) {
-            clearTimeout(entry.ttlTimerId);
-            entry.ttlTimerId = undefined;
-        }
-    }
-    for (const entry of entries) {
-        try {
-            entry.doc.destroy();
-        } catch (e) {
-            postLog("warn", `[doc-cache] doc.destroy() during clear threw: ${e}`);
-        }
+        teardownEntry(entry);
     }
     if (resetCounters) {
         counters.hits = 0;
         counters.misses = 0;
         counters.evictions = 0;
+        counters.discards = 0;
     }
 }
 
@@ -279,6 +283,7 @@ export interface CacheStats {
     hits: number;
     misses: number;
     evictions: number;
+    discards: number;
     ttlMs: number;
     maxEntries: number;
     maxBytes: number;
@@ -292,6 +297,7 @@ export function getCacheStats(): CacheStats {
         hits: counters.hits,
         misses: counters.misses,
         evictions: counters.evictions,
+        discards: counters.discards,
         ttlMs: config.ttlMs,
         maxEntries: config.maxEntries,
         maxBytes: config.maxBytes,
@@ -304,6 +310,15 @@ export function getCacheStats(): CacheStats {
 // ---------------------------------------------------------------------------
 
 function evictEntry(entry: CacheEntry): void {
+    teardownEntry(entry);
+    counters.evictions++;
+    postLog(
+        "info",
+        `[doc-cache] EVICT key=${shortKey(entry.key)} bytes=${entry.byteLength} entries=${cache.size}`,
+    );
+}
+
+function teardownEntry(entry: CacheEntry): void {
     cache.delete(entry.key);
     docToEntry.delete(entry.doc);
     totalBytes -= entry.byteLength;
@@ -314,13 +329,8 @@ function evictEntry(entry: CacheEntry): void {
     try {
         entry.doc.destroy();
     } catch (e) {
-        postLog("warn", `[doc-cache] doc.destroy() during eviction threw: ${e}`);
+        postLog("warn", `[doc-cache] doc.destroy() during teardown threw: ${e}`);
     }
-    counters.evictions++;
-    postLog(
-        "info",
-        `[doc-cache] EVICT key=${shortKey(entry.key)} bytes=${entry.byteLength} entries=${cache.size}`,
-    );
 }
 
 /**

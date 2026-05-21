@@ -64,8 +64,8 @@ const DowngradeAcknowledgmentPage: React.FC = () => {
     const getHeaderMessage = () => {
         return (
             <div className="display-flex flex-col gap-3 py-2 mt-2">
-                <div>
-                    Your plan has changed to <b>Free</b>. Here's what's different:
+                <div className="text-lg">
+                    Your account has been updated as we are discontinuing the Beta account type. Here's what's different:
                 </div>
                 <div className="display-flex flex-col gap-4 ml-1">
                     <div className="display-flex flex-row gap-2 items-start">
@@ -82,6 +82,14 @@ const DowngradeAcknowledgmentPage: React.FC = () => {
                     </div>
                     <div className="display-flex flex-row gap-2 items-start">
                         <Icon icon={TickIcon} className="scale-09 font-color-secondary mt-020" />
+                        <span>Organize and Edit your library</span>
+                    </div>
+                    <div className="display-flex flex-row gap-2 items-start">
+                        <Icon icon={TickIcon} className="scale-09 font-color-secondary mt-020" />
+                        <span>Read, Write and Edit Your Notes</span>
+                    </div>
+                    <div className="display-flex flex-row gap-2 items-start">
+                        <Icon icon={TickIcon} className="scale-09 font-color-secondary mt-020" />
                         <span>Limited free AI credits OR use your own API key</span>
                     </div>
                     <div className="display-flex flex-row gap-2 items-start">
@@ -93,7 +101,7 @@ const DowngradeAcknowledgmentPage: React.FC = () => {
                         <span>Local file processing with page-level citations</span>
                     </div>
                 </div>
-                <div className="mt-2">
+                <div className="mt-2 text-lg">
                     No longer included
                 </div>
                 <div className="display-flex flex-col gap-4 ml-1">
@@ -124,19 +132,19 @@ const DowngradeAcknowledgmentPage: React.FC = () => {
             {/* Scrollable content area */}
             <div className="overflow-y-auto scrollbar flex-1 p-4 mr-1 display-flex flex-col">
                 {/* Header */}
-                <OnboardingHeader message={getHeaderMessage()} tag="Free"/>
+                <OnboardingHeader message={getHeaderMessage()}/>
 
                 {/* Main content */}
                 <div className="display-flex flex-1"/>
-                <div className="display-flex flex-col gap-4 flex-1">
+                <div className="display-flex flex-col gap-4">
                     {/* Data deletion notice */}
                     <div className="display-flex flex-col gap-3 p-4 rounded-lg bg-senary mt-4">
                         <div className="display-flex flex-row gap-3 items-start">
                             <Icon icon={LockIcon} className="mt-020 scale-11" />
                             <div className="display-flex flex-col gap-2">
-                                <div className="font-semibold">Free Plan Privacy Notice</div>
+                                <div className="font-semibold">Privacy Notice</div>
                                 <div className="font-color-secondary">
-                                    The Free plan processes files locally on your device. Your library and PDFs are not synced to our servers.
+                                    Beaver processes files locally on your device. Your library and PDFs are not synced to our servers.
                                     Chat history is stored server-side and can be exported or deleted anytime.
                                 </div>
                                 <div className="font-color-secondary">
@@ -162,7 +170,7 @@ const DowngradeAcknowledgmentPage: React.FC = () => {
                     </div> */}
 
                     {/* Spacer */}
-                    <div className="flex-1" />
+                    {/* <div className="flex-1" /> */}
                 </div>
             </div>
 

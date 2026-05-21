@@ -7,20 +7,19 @@
  */
 
 import {
-    buildColumnOverlayFromPage,
-    buildItemOverlayFromPage,
-    buildLineOverlayFromPage,
-    buildSentenceOverlayFromPage,
+    buildColumnOverlayFromDebugPage,
+    buildItemOverlayFromDebugPage,
+    buildLineOverlayFromDebugPage,
+    buildSentenceOverlayFromDebugPage,
     buildMarginsOverlayFromAnalysis,
 } from '../../utils/extractionOverlay';
 import type { OverlayResult } from '../../utils/extractionOverlay';
 import { drawBBoxOverlayPNG } from '../../utils/canvasOverlay';
 import type {
     BoundingBox,
-    PageSentenceResult,
-    SentenceTrace,
 } from '../../../src/beaver-extract';
 import { projectAnalyzeLayout } from '../../../src/beaver-extract/debug/analyzeLayoutProjection';
+import { projectTracePage } from '../../../src/beaver-extract/debug/traceProjection';
 
 
 // =============================================================================
@@ -530,14 +529,11 @@ export async function handleTestPdfSearchScoredHttpRequest(request: any) {
 /**
  * Dev-only sentence-bboxes parity endpoint.
  *
- * Routes through `BeaverExtractor.extract({ mode: "structured", pageIndices:
- * [n] })` → MuPDF worker op (single round-trip; analysis-window load, font
- * bridging, filtered paragraph detection, splitter resolution, and
- * sentence mapping all run worker-side). The wire response is shaped as
- * `PageSentenceResult` — read fields off `pages[0]`.
+ * Routes through the full-document structured trace op and projects the
+ * requested page from its debug payload. This keeps sentence bboxes aligned
+ * with production structured extraction.
  *
- * @deprecated Prefer `npm run beaver-extract -- extract <pdf> --pages <n> --json`.
- *   Sentence bboxes live on `result.pages[0].sentences`.
+ * @deprecated Prefer `npm run beaver-extract -- trace <pdf> --page <n> --json`.
  *
  * Request body:
  *   { library_id, zotero_key | raw_bytes_base64,
@@ -553,49 +549,42 @@ export async function handleTestPdfSearchScoredHttpRequest(request: any) {
  *       analysisWindow?: number,
  *     } }
  *
- * Response: `{ ok: true, result: PageSentenceResult }` or the
+ * Response: `{ ok: true, result: { pageIndex, width, height, items, sentences } }` or the
  * structured `ExtractionError` envelope on failure.
  */
 export async function handleTestPdfSentenceBBoxesHttpRequest(request: any) {
-    const { BeaverExtractor } = await import('../../../src/beaver-extract');
-    const pageIndex = Number(request?.page_index);
+    const { getMuPDFWorkerClient } = await import('../../../src/beaver-extract');
+    const pageIndex = Number(request?.page_index ?? request?.page);
     const options = request?.options || {};
     return runPdfExtractorCall(
         request,
         (pdfData) =>
-            new BeaverExtractor().extract(pdfData, {
-                mode: 'structured',
-                pageIndices: [pageIndex],
+            getMuPDFWorkerClient().structuredExtractWithDebug(pdfData, {
+                capturePages: [pageIndex],
+                debugMode: 'full',
+                structured: {
+                    splitterConfig: options.splitter ?? (
+                        options.language
+                            ? { type: 'sentencex', language: options.language }
+                            : undefined
+                    ),
+                },
                 paragraphSettings: options.paragraphSettings,
                 analysisWindow: options.analysisWindow,
-                structured: {
-                    splitter: options.splitter,
-                    language: options.language,
-                },
             }),
         (extraction) => {
-            const page = extraction.pages[0];
-            if (!page) {
-                return {
-                    ok: false,
-                    error: {
-                        name: 'Error',
-                        message: `page_index ${pageIndex} not extracted`,
-                    },
-                };
-            }
-            // Reshape into PageSentenceResult so callers can
-            // consume the same shape the producer returns.
+            const page = extraction.debug.pages?.[String(pageIndex)];
+            if (!page) throw new Error(`page ${pageIndex} missing from trace`);
             return {
                 ok: true,
                 result: {
-                    pageIndex: page.index,
+                    pageIndex: page.pageIndex,
                     width: page.width,
                     height: page.height,
-                    items: page.items,
+                    items: page.items ?? [],
                     sentences: page.sentences ?? [],
                     degradation: page.degradation,
-                } satisfies PageSentenceResult,
+                },
             };
         },
     );
@@ -637,12 +626,8 @@ export async function handleTestPdfSentenceBBoxesHttpRequest(request: any) {
  *
  * Level dispatch notes:
  *   - `sentences`, `columns`, `lines`, `items`, `paragraphs` route through
- *     `BeaverExtractor.extract({ mode: "structured", pageIndices: [n] })`
- *     and project the resulting `ProcessedPage` into rects via the pure
- *     `build{Sentence,Column,Line,Item,Paragraph}OverlayFromPage` builders in
- *     `extractionOverlay.ts`. This is the same worker op production
- *     uses, so what the overlay paints is byte-identical to what an
- *     extraction call for the same page produces.
+ *     the full-document structured trace op and project the requested page
+ *     into rects via the pure debug-page overlay builders.
  *   - `margins` routes through `BeaverExtractor.analyzeLayout` (which runs
  *     the same shared analysis prefix structured extract runs) and
  *     surfaces `marginAnalysis` / `marginRemoval` for the requested
@@ -746,34 +731,30 @@ export async function handleTestPdfRenderOverlayHttpRequest(request: any) {
             // Same op production uses — what we paint here matches
             // what `extract({ mode: "structured" })` produces for
             // the same page byte-for-byte.
-            const result = await new BeaverExtractor().extract(pdfData, {
-                mode: 'structured',
-                pageIndices: [pageIndex],
-                structured: { language },
+            const traceOut = await client.structuredExtractWithDebug(pdfData, {
+                capturePages: [pageIndex],
+                debugMode: 'full',
+                structured: {
+                    splitterConfig: language
+                        ? { type: 'sentencex', language }
+                        : undefined,
+                },
                 analysisWindow,
             });
-            const page = result.pages[0];
-            if (!page) {
-                return {
-                    ok: false,
-                    error: {
-                        name: 'Error',
-                        message: `page_index ${pageIndex} not extracted`,
-                    },
-                };
-            }
+            const page = traceOut.debug.pages?.[String(pageIndex)];
+            if (!page) throw new Error(`page ${pageIndex} missing from trace`);
             switch (level) {
                 case 'sentences':
-                    overlay = buildSentenceOverlayFromPage(page);
+                    overlay = buildSentenceOverlayFromDebugPage(page);
                     break;
                 case 'columns':
-                    overlay = buildColumnOverlayFromPage(page);
+                    overlay = buildColumnOverlayFromDebugPage(page);
                     break;
                 case 'lines':
-                    overlay = buildLineOverlayFromPage(page);
+                    overlay = buildLineOverlayFromDebugPage(page);
                     break;
                 case 'items':
-                    overlay = buildItemOverlayFromPage(page);
+                    overlay = buildItemOverlayFromDebugPage(page);
                     break;
                 default:
                     throw new Error(`Unhandled overlay level: ${level}`);
@@ -897,132 +878,53 @@ export async function handleTestPdfRenderOverlayHttpRequest(request: any) {
  * `mode: "summary"` shape).
  */
 export async function handleTestPdfExtractTraceHttpRequest(request: any) {
-    const {
-        MarginFilter,
-        StyleAnalyzer,
-        DEFAULT_MARGINS,
-        DEFAULT_MARGIN_ZONE,
-        ExtractionError,
-        getMuPDFWorkerClient,
-    } = await import('../../../src/beaver-extract');
+    const { ExtractionError, getMuPDFWorkerClient } = await import('../../../src/beaver-extract');
 
     const loaded = await loadPdfBytesForTestEndpoint(request);
     if (!loaded.ok) return loaded;
     const { pdfData } = loaded;
 
-    const pageIndex = Number(request?.page_index);
+    const pageIndex = Number(request?.page_index ?? request?.page);
     if (!Number.isInteger(pageIndex) || pageIndex < 0) {
         return {
             ok: false,
             error: { name: 'Error', message: 'page_index (non-negative integer) is required' },
         };
     }
-    const includeChars = request?.include_chars === true;
-    const triage = request?.mode === 'triage';
 
-    // ------------------------------------------------------------------
-    // Resolve splitter, analysis window, paragraph settings, and the
-    // honored ExtractionSettings fields. Then run the worker trace op
-    // for the production pipeline + intermediates in one round-trip.
-    // ------------------------------------------------------------------
+    const mode = request?.mode === 'full' ? 'full' : 'triage';
     const opts = (request?.options ?? {}) as {
         splitter?: { type: 'sentencex'; language?: string } | { type: 'simple' };
         language?: string;
         analysisWindow?: number;
         paragraphSettings?: unknown;
     };
+    const splitterConfig = opts.splitter ?? {
+        type: 'sentencex' as const,
+        language: typeof opts.language === 'string' ? opts.language : undefined,
+    };
+    const settings = request?.settings && typeof request.settings === 'object'
+        ? request.settings
+        : undefined;
 
-    // Resolve a splitter config. Explicit `options.splitter` wins. Otherwise
-    // build a sentencex config seeded by `options.language`, falling back to
-    // the Zotero item's language when both are absent.
-    let splitterConfig:
-        | { type: 'sentencex'; language?: string }
-        | { type: 'simple' }
-        | undefined = opts.splitter;
-    if (!splitterConfig) {
-        let language: string | undefined =
-            typeof opts.language === 'string' ? opts.language : undefined;
-        if (!language && request?.library_id != null && request?.zotero_key != null) {
-            try {
-                const { getItemLanguage } = await import('../../../src/utils/zoteroUtils');
-                const raw = await getItemLanguage(request.library_id, request.zotero_key);
-                if (raw) language = raw;
-            } catch {
-                // Best effort.
-            }
-        }
-        splitterConfig = { type: 'sentencex', language };
-    }
-
-    const analysisWindow =
-        opts.analysisWindow != null ? Number(opts.analysisWindow) : undefined;
-
-    // ExtractionSettings — only page-local extraction fields are forwarded.
-    // checkTextLayer / minTextPerPage gate the document at extract() entry
-    // and don't apply to a single-page trace; silently ignored.
-    const settings =
-        request?.settings && typeof request.settings === 'object'
-            ? (request.settings as {
-                  margins?: unknown;
-                  marginZone?: unknown;
-                  repeatThreshold?: number;
-                  detectPageSequences?: boolean;
-                  graphicsLayerMode?: 'auto' | 'on' | 'off';
-              })
-            : undefined;
-    const customMargins = (settings?.margins ?? undefined) as
-        | typeof DEFAULT_MARGINS
-        | undefined;
-    const customMarginZone = (settings?.marginZone ?? undefined) as
-        | typeof DEFAULT_MARGIN_ZONE
-        | undefined;
-    const marginsToUse = customMargins ?? DEFAULT_MARGINS;
-    const marginZoneToUse = customMarginZone ?? DEFAULT_MARGIN_ZONE;
-
-    let result: PageSentenceResult;
-    let trace: SentenceTrace;
     try {
-        const out = await getMuPDFWorkerClient().extractSentenceDebug(
+        const out = await getMuPDFWorkerClient().structuredExtractWithDebug(
             pdfData,
-            pageIndex,
             {
-                splitterConfig,
-                analysisWindow,
+                capturePages: [pageIndex],
+                debugMode: mode,
+                structured: { splitterConfig },
+                analysisWindow: opts.analysisWindow != null ? Number(opts.analysisWindow) : undefined,
                 paragraphSettings: opts.paragraphSettings as never,
-                margins: customMargins,
-                marginZone: customMarginZone,
-                repeatThreshold: settings?.repeatThreshold,
-                detectPageSequences: settings?.detectPageSequences,
-                graphicsLayerMode: settings?.graphicsLayerMode,
+                settings: settings as never,
             },
         );
-        result = out.result;
-        trace = out.trace;
+        return {
+            ok: true,
+            ...projectTracePage(out.result, out.debug, pageIndex, mode),
+        };
     } catch (e) {
-        if (e instanceof RangeError) {
-            return {
-                ok: false,
-                error: {
-                    name: 'Error',
-                    message: e.message,
-                },
-            };
-        }
         if (e instanceof ExtractionError) {
-            // Wire-compat: pre-migration the analysis-window resolver threw
-            // RangeError for invalid pageIndex (mapped to `name:'Error'`).
-            // The worker path now produces ExtractionError(PAGE_OUT_OF_RANGE)
-            // for the same case — surface the legacy wire shape so existing
-            // live tests / HTTP clients keep working.
-            const { ExtractionErrorCode } = await import(
-                '../../../src/beaver-extract'
-            );
-            if (e.code === ExtractionErrorCode.PAGE_OUT_OF_RANGE) {
-                return {
-                    ok: false,
-                    error: { name: 'Error', message: e.message },
-                };
-            }
             return {
                 ok: false,
                 error: {
@@ -1034,420 +936,6 @@ export async function handleTestPdfExtractTraceHttpRequest(request: any) {
         }
         throw e;
     }
-
-    // Read the target page from `pagesForFilter` (the substituted detailed
-    // page) — bbox object identity in `trace.filteredResult.lineResult` /
-    // `paragraphResult` is matched against this page, not against
-    // `rawDoc.pages`. Reading from the wrong source breaks every
-    // cross-stage link below.
-    const targetPage = trace.pagesForFilter.find(
-        (p) => p.pageIndex === pageIndex,
-    );
-    if (!targetPage) {
-        return {
-            ok: false,
-            error: { name: 'Error', message: `page_index ${pageIndex} out of range` },
-        };
-    }
-
-    // ------------------------------------------------------------------
-    // Stage 1: smart-removal analysis (cross-page) — read from trace.
-    // ------------------------------------------------------------------
-    const smartRemoval = trace.marginRemoval;
-    const reasonByText = new Map<string, 'page_number' | 'repeat' | 'identifier'>();
-    for (const c of smartRemoval.candidates) {
-        reasonByText.set(c.text, c.reason);
-    }
-    const targetPageRemovals =
-        smartRemoval.removalsByPage.get(pageIndex) ?? new Set<string>();
-    // Body styles drive the simple-margin spare — keeping `keptBySimple`
-    // honest with the production pipeline (`MarginFilter
-    // .filterPageWithSmartRemoval` now spares body-styled lines from the
-    // simple-margin drop). Sourced from the trace's filtered result so the
-    // trace shares the production-side style profile.
-    const traceBodyStyles = trace.filteredResult.styleProfile.bodyStyles;
-    // Primary body style drives the heading-spare in smart-removal — a
-    // line whose font size meets the heading threshold is never treated as
-    // a marginal repeat (running headers are body-sized or smaller). The
-    // trace reports both: `smartRemoval` records the candidate match, and
-    // `finalKept` flips to true when the heading-spare overrides the drop.
-    const tracePrimaryBodyStyle =
-        trace.filteredResult.styleProfile.primaryBodyStyle;
-
-    // ------------------------------------------------------------------
-    // Stage 2: enumerate raw lines on the target page with stable IDs and
-    // margin-filter classification. This is the spine that everything
-    // else hangs off — item records reference these IDs.
-    // ------------------------------------------------------------------
-    type RawLineEntry = {
-        id: string;
-        text: string;
-        bbox: BoundingBox;
-        font: { name: string; family: string; size: number; weight: string; style: string };
-        marginPosition: 'top' | 'bottom' | 'left' | 'right' | null;
-        marginFilter: {
-            keptBySimple: boolean;
-            inSmartZone: boolean;
-            smartRemoval: 'page_number' | 'repeat' | 'identifier' | null;
-            finalKept: boolean;
-        };
-        role: 'heading' | 'body' | 'caption' | 'footnote';
-        finalParagraphId: string | null;
-        chars?: Array<{ c: string; bbox: BoundingBox }>;
-    };
-
-    const rawLineEntries: RawLineEntry[] = [];
-    // Map raw BoundingBox object → entry index, for cross-stage linking via
-    // bbox object identity. The line detector preserves the same BoundingBox
-    // reference (see ColumnDetector.extractFilteredBlocks → DetectedSpan
-    // construction), so this is safe within a single pipeline run.
-    const bboxToEntryIdx = new Map<object, number>();
-
-    let rawIdx = 0;
-    for (const block of targetPage.blocks) {
-        if (block.type !== 'text' || !block.lines) continue;
-        for (const line of block.lines) {
-            const id = `RL${rawIdx++}`;
-            const trimmed = (line.text || '').trim();
-            const normalized = trimmed.toLowerCase();
-            const marginPosition = MarginFilter.getMarginPosition(
-                line.bbox,
-                targetPage.width,
-                targetPage.height,
-                marginsToUse,
-            );
-            const inSmartZone =
-                MarginFilter.getMarginPosition(
-                    line.bbox,
-                    targetPage.width,
-                    targetPage.height,
-                    marginZoneToUse,
-                ) !== null;
-            const keptBySimple =
-                MarginFilter.isInsideContentArea(
-                    line,
-                    targetPage.width,
-                    targetPage.height,
-                    marginsToUse,
-                )
-                || StyleAnalyzer.looksLikeBodyContent(line, traceBodyStyles);
-            const smartReason = inSmartZone
-                ? targetPageRemovals.has(normalized)
-                    ? reasonByText.get(normalized) ?? 'repeat'
-                    : null
-                : null;
-            // Heading-spare only neutralises `repeat`-reason removals —
-            // page-number and identifier matches are structural and stay
-            // force-removed regardless of font size. Mirrors the gate in
-            // `MarginFilter.filterPageWithSmartRemoval`.
-            const sparedAsHeading =
-                smartReason === "repeat"
-                && StyleAnalyzer.isHeadingLine(line, tracePrimaryBodyStyle);
-            const finalKept =
-                keptBySimple && (smartReason === null || sparedAsHeading);
-
-            const entry: RawLineEntry = {
-                id,
-                text: line.text,
-                bbox: line.bbox,
-                font: {
-                    name: line.font.name,
-                    family: line.font.family,
-                    size: line.font.size,
-                    weight: line.font.weight,
-                    style: line.font.style,
-                },
-                marginPosition,
-                marginFilter: {
-                    keptBySimple,
-                    inSmartZone,
-                    smartRemoval: smartReason,
-                    finalKept,
-                },
-                role: 'body', // filled in once style profile exists
-                finalParagraphId: null,
-            };
-            bboxToEntryIdx.set(line.bbox, rawLineEntries.length);
-            rawLineEntries.push(entry);
-        }
-    }
-
-    // ------------------------------------------------------------------
-    // Stages 3-6: style profile + filter + columns + lines + paragraphs
-    // — read from `trace.filteredResult`, which the helper computed by
-    // running the production filtered-paragraph pipeline on
-    // `pagesForFilter` (detailed target page substituted in).
-    // ------------------------------------------------------------------
-    const styleProfile = trace.filteredResult.styleProfile;
-    const columnResult = trace.filteredResult.columnResult;
-    const lineResult = trace.filteredResult.lineResult;
-    const paragraphResult = trace.filteredResult.paragraphResult;
-
-    // Per-line role classification using the (window-wide) style profile.
-    {
-        let i = 0;
-        for (const block of targetPage.blocks) {
-            if (block.type !== 'text' || !block.lines) continue;
-            for (const line of block.lines) {
-                rawLineEntries[i].role = StyleAnalyzer.classifyRole(line, styleProfile);
-                i++;
-            }
-        }
-    }
-
-    // Map columnIndex → array of raw line IDs that contributed.
-    const columnLineIds: string[][] = columnResult.columns.map(() => []);
-    const linesUsed = new Set<number>();
-    for (const colResult of lineResult.columnResults) {
-        const colIdx = colResult.columnIndex;
-        for (const pageLine of colResult.lines) {
-            for (const span of pageLine.spans) {
-                const idx = bboxToEntryIdx.get(span.bbox);
-                if (idx !== undefined) {
-                    if (!columnLineIds[colIdx].includes(rawLineEntries[idx].id)) {
-                        columnLineIds[colIdx].push(rawLineEntries[idx].id);
-                    }
-                    linesUsed.add(idx);
-                }
-            }
-        }
-    }
-    // Lines that survived margin filtering (simple + smart) but weren't
-    // claimed by any column — useful when an agent wonders "why didn't
-    // this body line make it into a paragraph?"
-    const linesDroppedByColumns: string[] = [];
-    rawLineEntries.forEach((e, i) => {
-        if (e.marginFilter.finalKept && !linesUsed.has(i)) {
-            linesDroppedByColumns.push(e.id);
-        }
-    });
-
-    const paragraphsOut = paragraphResult.items.map((item, i) => {
-        const lineIds: string[] = [];
-        const constituentLines = paragraphResult.itemLines?.[i] ?? [];
-        for (const pageLine of constituentLines) {
-            for (const span of pageLine.spans) {
-                const idx = bboxToEntryIdx.get(span.bbox);
-                if (idx !== undefined) {
-                    if (!lineIds.includes(rawLineEntries[idx].id)) {
-                        lineIds.push(rawLineEntries[idx].id);
-                    }
-                    rawLineEntries[idx].finalParagraphId = item.id;
-                }
-            }
-        }
-        return {
-            id: item.id,
-            type: item.type,
-            columnIdx: item.columnIndex,
-            lineIds,
-            text: item.text,
-            bbox: {
-                l: item.bbox.l,
-                t: item.bbox.t,
-                r: item.bbox.r,
-                b: item.bbox.b,
-                origin: item.bbox.origin,
-            },
-        };
-    });
-
-    // ------------------------------------------------------------------
-    // Stage 7: sentences (paragraph-scoped). Already produced by the
-    // helper — `trace.sentenceResult` is the same reference as `result`.
-    // ------------------------------------------------------------------
-    const sentenceResult = result;
-    const detailed = trace.detailed;
-
-    // Mark which items degraded so we can flag fallback sentences.
-    const degradedItemIds = new Set(
-        (sentenceResult.degradation?.notes ?? []).map((n) => n.itemId),
-    );
-    const sentencesOut: Array<{
-        idx: number;
-        text: string;
-        parentId: string;
-        sentenceIndex: number;
-        joinWithNext?: boolean;
-        bboxes: BoundingBox[];
-        degraded: boolean;
-    }> = [];
-    sentenceResult.sentences.forEach((sentence, idx) => {
-        const entry: typeof sentencesOut[number] = {
-            idx,
-            text: sentence.text,
-            parentId: sentence.parentId,
-            sentenceIndex: sentence.index,
-            bboxes: sentence.bboxes,
-            degraded: degradedItemIds.has(sentence.parentId),
-        };
-        if (sentence.joinWithNext) {
-            entry.joinWithNext = true;
-        }
-        sentencesOut.push(entry);
-    });
-
-    // ------------------------------------------------------------------
-    // Optionally include per-character quads on raw_lines.
-    // Bridge by 3-decimal-rounded bbox key
-    // ------------------------------------------------------------------
-    if (includeChars) {
-        const detailedByBboxKey = new Map<string, typeof detailed.blocks[0]['lines'] extends (infer L)[] | undefined ? L : never>();
-        const keyOf = (b: BoundingBox) =>
-            `${b.l.toFixed(3)}|${b.t.toFixed(3)}|${b.r.toFixed(3)}|${b.b.toFixed(3)}|${b.origin}`;
-        for (const block of detailed.blocks) {
-            if (block.type !== 'text' || !block.lines) continue;
-            for (const line of block.lines) {
-                detailedByBboxKey.set(keyOf(line.bbox), line);
-            }
-        }
-        for (const entry of rawLineEntries) {
-            const detailedLine = detailedByBboxKey.get(keyOf(entry.bbox));
-            if (detailedLine && detailedLine.chars) {
-                entry.chars = detailedLine.chars.map((ch) => ({
-                    c: ch.c,
-                    bbox: ch.bbox,
-                }));
-            }
-        }
-    }
-
-    // ------------------------------------------------------------------
-    // Build the response.
-    // ------------------------------------------------------------------
-    const candidatesOut = smartRemoval.candidates.map((c) => ({
-        text: c.text,
-        originalText: c.originalText,
-        reason: c.reason,
-        position: c.position,
-        pageIndices: c.pageIndices,
-    }));
-
-    if (triage) {
-        // Triage view
-        const finalDropped = rawLineEntries
-            .filter((e) => !e.marginFilter.finalKept)
-            .map((e) => ({
-                id: e.id,
-                bbox: e.bbox,
-                marginPosition: e.marginPosition,
-                marginFilter: e.marginFilter,
-                role: e.role,
-                textPreview: e.text.slice(0, 80),
-            }));
-        return {
-            ok: true,
-            mode: 'triage',
-            page_index: pageIndex,
-            page_width: targetPage.width,
-            page_height: targetPage.height,
-            page_label: targetPage.label,
-            counts: {
-                rawLines: rawLineEntries.length,
-                rawLinesFinalKept: rawLineEntries.filter((e) => e.marginFilter.finalKept)
-                    .length,
-                rawLinesDroppedBySimple: rawLineEntries.filter(
-                    (e) => !e.marginFilter.keptBySimple,
-                ).length,
-                rawLinesDroppedBySmart: rawLineEntries.filter(
-                    (e) => e.marginFilter.smartRemoval !== null,
-                ).length,
-                columns: columnResult.columns.length,
-                paragraphs: paragraphsOut.length,
-                headers: paragraphsOut.filter((p) => p.type === 'header').length,
-                sentences: sentencesOut.length,
-            },
-            smart_removal: {
-                analysisRange: [
-                    trace.analysisPageIndices[0],
-                    trace.analysisPageIndices[trace.analysisPageIndices.length - 1],
-                ],
-                analysisPagesScanned: trace.analysisPageIndices.length,
-                candidates: candidatesOut,
-            },
-            primaryBodyStyle: styleProfile.primaryBodyStyle,
-            column_detection: {
-                isBroken: columnResult.isBroken,
-                columnCount: columnResult.columnCount,
-            },
-            graphics_layer: {
-                fillBoundaries: trace.fillBoundaries,
-                dividerLines: trace.dividerLines,
-            },
-            raw_lines_final_dropped: finalDropped,
-            lines_dropped_by_columns: linesDroppedByColumns,
-            sentence_stats: {
-                sentences: sentenceResult.sentences.length,
-                items: sentenceResult.items.length,
-                degradation: {
-                    count: sentenceResult.degradation?.count ?? 0,
-                    notes: sentenceResult.degradation?.notes ?? [],
-                },
-            },
-        };
-    }
-
-    // Top styles for the snapshot — Maps don't survive JSON, so flatten.
-    const topStyles = Array.from(styleProfile.styleCounts.values())
-        .sort((a, b) => b.count - a.count)
-        .slice(0, 10)
-        .map((entry) => ({
-            count: entry.count,
-            style: entry.style,
-            isBody: styleProfile.bodyStyles.some(
-                (s) =>
-                    s.size === entry.style.size &&
-                    s.font === entry.style.font &&
-                    s.bold === entry.style.bold &&
-                    s.italic === entry.style.italic,
-            ),
-        }));
-
-    return {
-        ok: true,
-        page_index: pageIndex,
-        page_width: targetPage.width,
-        page_height: targetPage.height,
-        page_label: targetPage.label,
-        raw_lines: rawLineEntries,
-        smart_removal: {
-            analysisRange: [
-                trace.analysisPageIndices[0],
-                trace.analysisPageIndices[trace.analysisPageIndices.length - 1],
-            ],
-            analysisPagesScanned: trace.analysisPageIndices.length,
-            candidates: candidatesOut,
-        },
-        style_profile: {
-            primaryBodyStyle: styleProfile.primaryBodyStyle,
-            bodyStyles: styleProfile.bodyStyles,
-            topStyles,
-        },
-        columns: columnResult.columns.map((rect, i) => ({
-            idx: i,
-            rect,
-            lineIds: columnLineIds[i],
-        })),
-        column_detection: {
-            isBroken: columnResult.isBroken,
-            columnCount: columnResult.columnCount,
-        },
-        graphics_layer: {
-            fillBoundaries: trace.fillBoundaries,
-            dividerLines: trace.dividerLines,
-        },
-        lines_dropped_by_columns: linesDroppedByColumns,
-        paragraphs: paragraphsOut,
-        sentences: sentencesOut,
-        sentence_stats: {
-            sentences: sentenceResult.sentences.length,
-            items: sentenceResult.items.length,
-            degradation: {
-                count: sentenceResult.degradation?.count ?? 0,
-                notes: sentenceResult.degradation?.notes ?? [],
-            },
-        },
-    };
 }
 
 /**

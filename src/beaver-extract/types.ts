@@ -649,7 +649,7 @@ export interface MarginRemovalResult {
 // ============================================================================
 
 /** A fully processed page */
-export interface ProcessedPage {
+export interface InternalProcessedPage {
     /** 0-based page index */
     index: number;
     /** Page label (e.g., "iv", "220") if available */
@@ -718,7 +718,7 @@ export interface StructuredPagePhaseTimings {
     /**
      * Document-page index this entry describes. Pairs positionally with
      * the same-index entry of `ExtractionTimings.perPageMs` and
-     * `ExtractionResult.pages[]`.
+     * `InternalExtractionResult.pages[]`.
      */
     pageIndex: number;
     /**
@@ -760,7 +760,7 @@ export interface StructuredPagePhaseTimings {
  * milliseconds (`performance.now()` deltas measured inside the worker).
  *
  * Recorded for both markdown engines so cross-engine comparisons stay
- * apples-to-apples. Optional on `ExtractionResult.metadata` so older
+ * apples-to-apples. Optional on `InternalExtractionResult.metadata` so older
  * callers and tests that don't need timings don't have to populate them.
  */
 export interface ExtractionTimings {
@@ -792,9 +792,9 @@ export interface ExtractionTimings {
 }
 
 /** The complete extraction result */
-export interface ExtractionResult {
+export interface InternalExtractionResult {
     /** Processed pages */
-    pages: ProcessedPage[];
+    pages: InternalProcessedPage[];
     /** Document-level analysis */
     analysis: DocumentAnalysis;
     /** Combined plain text from all pages */
@@ -816,7 +816,7 @@ export interface ExtractionResult {
         engine?: "block" | "paragraph" | "structured";
         /**
          * Per-phase worker timings. Optional — populated by `opExtract` /
-         * `runExtractFromIndices`; absent on direct ExtractionResult literals
+         * `runExtractFromIndices`; absent on direct InternalExtractionResult literals
          * built in tests or fixtures.
          */
         timings?: ExtractionTimings;
@@ -845,7 +845,7 @@ export interface LayoutAnalysisTimings {
 }
 
 /**
- * Result of a single `analyzeLayout` call. Mirrors `ExtractionResult`'s
+ * Result of a single `analyzeLayout` call. Mirrors `InternalExtractionResult`'s
  * field naming where applicable.
  *
  * Output is byte-identical to the analysis context built by
@@ -869,7 +869,7 @@ export interface LayoutAnalysisResult {
     /** Page count of the source document. */
     pageCount: number;
     /**
-     * Full-document page labels. Same shape as `ExtractionResult.pageLabels`
+     * Full-document page labels. Same shape as `InternalExtractionResult.pageLabels`
      * — collected via `collectPageLabels(doc)` over all pages so the field
      * is symmetric with extract.
      */
@@ -907,6 +907,15 @@ export interface LayoutAnalysisResult {
 export interface OCRDetectionOptions {
     /** Minimum text characters per page to consider valid (default: 100) */
     minTextPerPage?: number;
+    /**
+     * Document-level near-empty threshold (default: 24). When the mean
+     * extractable (non-whitespace) text across the sampled pages falls below
+     * this, the document is flagged as needing OCR regardless of the per-page
+     * issue ratio. Catches scanned documents that expose only a stray
+     * incidental text layer (running header, figure label, lone citation
+     * line) without a detectable large image.
+     */
+    minMeanTextPerPage?: number;
     /** Initial pages to sample for analysis (default: 6) */
     sampleSize?: number;
     /** Expanded sample size when uncertain (default: 20) */
@@ -958,6 +967,7 @@ export type OCRIssueReason =
     | "high_newline_ratio"
     | "low_alphanumeric_ratio"
     | "invalid_characters"
+    | "fragmented_text_lines"
     | "large_image_coverage"
     | "bbox_overflow"
     | "excessive_line_overlap";
@@ -997,6 +1007,7 @@ export interface OCRDetectionResult {
 /** Default OCR detection options */
 export const DEFAULT_OCR_DETECTION_OPTIONS: Required<OCRDetectionOptions> = {
     minTextPerPage: 100,
+    minMeanTextPerPage: 24,
     sampleSize: 6,
     expandedSampleSize: 20,
     expandLowerThreshold: 0.1,   // Expand if >10% issues (uncertain)
@@ -1025,8 +1036,11 @@ export enum ExtractionErrorCode {
     NO_TEXT_LAYER = "NO_TEXT_LAYER",
     ENCRYPTED = "ENCRYPTED",
     INVALID_PDF = "INVALID_PDF",
+    EMPTY_DOCUMENT = "EMPTY_DOCUMENT",
     PAGE_OUT_OF_RANGE = "PAGE_OUT_OF_RANGE",
+    STRUCTURED_PAGE_SELECTION_REJECTED = "STRUCTURED_PAGE_SELECTION_REJECTED",
     WASM_ERROR = "WASM_ERROR",
+    HEAP_EXHAUSTION = "HEAP_EXHAUSTION",
 }
 
 /** Structured error for extraction failures */

@@ -2,13 +2,14 @@
   "schema": 1,
   "id": "legewie-fagan",
   "capturedAt": "2026-05-11T16:39:19.582Z",
-  "updatedAt": "2026-05-11T16:39:19.582Z",
+  "updatedAt": "2026-05-17T16:36:49.134Z",
   "pdfSha256": "d86a26bf17a0e19194abe41f10b32b4cf86e8caddf3c854773802e5a76b607cf",
   "pdfBytes": 50492,
   "config": {
     "options": {},
     "effectiveOptions": {
       "minTextPerPage": 100,
+      "minMeanTextPerPage": 24,
       "sampleSize": 6,
       "expandedSampleSize": 20,
       "expandLowerThreshold": 0.1,
@@ -26,9 +27,9 @@
     }
   },
   "fingerprints": {
-    "extractorGitSha": "f79cc062",
-    "extractorVersion": "0.19.1-beta.1",
-    "mupdfWasmSha256": "202c1dc9703cc003d4c14050db2bac937a9151dd79e719ae0cf1741080fbf19e"
+    "extractorGitSha": "187a29ed",
+    "extractorVersion": "0.19.3",
+    "mupdfWasmSha256": "767d9960e2483f9ab925e46a1f560520ff3615d63fa11198c2fddf991f612578"
   },
   "tolerance": {
     "issueRatioAbs": 0.02,
@@ -56,7 +57,7 @@
         "pageIndex": 0,
         "hasIssues": false,
         "issues": [],
-        "textLength": 3523,
+        "textLength": 3280,
         "hasImages": false
       }
     ]

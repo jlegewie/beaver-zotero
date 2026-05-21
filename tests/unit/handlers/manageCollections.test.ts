@@ -33,6 +33,7 @@ const mockCollection: any = {
     ...((globalThis as any).Zotero ?? {}),
     Libraries: {
         get: vi.fn(() => ({ libraryID: 1, name: 'My Library', editable: true })),
+        getAll: vi.fn(() => [{ libraryID: 1, name: 'My Library', editable: true }]),
         userLibraryID: 1,
     },
     Collections: {
@@ -43,6 +44,9 @@ const mockCollection: any = {
     Items: {
         getAsync: vi.fn(async (ids: number[]) => ids.map((id) => ({ id, key: `KEY${id}` }))),
         loadDataTypes: vi.fn(async () => undefined),
+        // Default: a key resolves to no item. The not-a-collection path
+        // overrides this per-test with .mockImplementation().
+        getByLibraryAndKeyAsync: vi.fn(async () => null),
     },
 };
 
@@ -72,6 +76,9 @@ beforeEach(() => {
     Zot.Collections.getByLibraryAndKeyAsync.mockImplementation(async (_libraryID: number, key: string) => {
         return key === mockCollection.key ? mockCollection : null;
     });
+    // Default: a missed collection key is not an item either (.mockImplementation
+    // on this persists across tests, so re-install the default each time).
+    Zot.Items.getByLibraryAndKeyAsync.mockImplementation(async () => null);
     // Default: getCollectionByIdOrName resolves the plain key or the matching
     // compound '<lib>-<key>' form. Compound form with a wrong library returns
     // null, mirroring the real utils function's strict compound lookup.
@@ -110,6 +117,27 @@ describe('validateManageCollectionsAction', () => {
         } as any);
         expect(resp.valid).toBe(false);
         expect(resp.error_code).toBe('collection_not_found');
+    });
+
+    it('reports not_a_collection when the key belongs to a library item', async () => {
+        // A frequent agent error: passing a note/item key to this
+        // collection-only tool. The collection lookup misses, but the key
+        // resolves to an item, so the response names the object type.
+        Zot.Items.getByLibraryAndKeyAsync.mockImplementation(async () => ({
+            isAnnotation: () => false,
+            isAttachment: () => false,
+            isNote: () => true,
+            isRegularItem: () => false,
+        }));
+        const resp = await validateManageCollectionsAction({
+            event: 'agent_action_validate',
+            request_id: 'r2b',
+            action_type: 'manage_collections',
+            action_data: { action: 'delete', collection_key: '1-KYBU83VK' },
+        } as any);
+        expect(resp.valid).toBe(false);
+        expect(resp.error_code).toBe('not_a_collection');
+        expect(resp.error).toContain('note');
     });
 
     it('rejects rename with empty new_name', async () => {

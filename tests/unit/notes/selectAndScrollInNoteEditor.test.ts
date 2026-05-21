@@ -1261,6 +1261,42 @@ describe('openNoteAndSearchEdit', () => {
 
         expect(TextSelectionClass.create).not.toHaveBeenCalled();
     });
+
+    it('uses the end of the current note body as the pending append anchor', async () => {
+        vi.mocked(computeDiff).mockReturnValue([]);
+
+        const fullText = 'Intro text. This is the final paragraph before the footer.';
+        const { view, TextSelectionClass } = createMockEditorView(fullText);
+        installMockEditorInstance(1, view);
+        (globalThis as any).Zotero.Notes.open = vi.fn().mockResolvedValue(undefined);
+        (globalThis as any).Zotero.Items.getAsync = vi.fn().mockResolvedValue({
+            loadDataType: vi.fn().mockResolvedValue(undefined),
+            getNote: vi.fn(() =>
+                '<div data-schema-version="9"><p>Intro text.</p><p>This is the final paragraph before the footer.</p>'
+                + '<p><span style="color: rgb(170, 170, 170);">Edited by Beaver · <a href="zotero://beaver/thread/thread-1" rel="noopener noreferrer nofollow">Chat 1</a></span></p></div>'
+            ),
+        });
+
+        await openNoteAndSearchEdit(
+            1,
+            'NOTE0001',
+            '',
+            '<p>Appended text</p>',
+            false,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            'append',
+        );
+
+        const anchorStart = fullText.indexOf('Intro text. This is the final paragraph before the footer.');
+        expect(TextSelectionClass.create).toHaveBeenCalledWith(
+            expect.anything(),
+            anchorStart,
+            anchorStart + fullText.length
+        );
+    });
 });
 
 // =============================================================================

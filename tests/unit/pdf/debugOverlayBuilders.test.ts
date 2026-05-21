@@ -1,7 +1,7 @@
 /**
  * Pure rect-builder tests. Verifies the moved overlay builders match
  * the original `react/utils/extractionOverlay.ts` contract using
- * synthetic `ProcessedPage` data.
+ * synthetic `InternalProcessedPage` data.
  *
  * No PDF / WASM / sharp.
  */
@@ -9,18 +9,22 @@ import { describe, expect, it } from 'vitest';
 
 import {
     buildColumnOverlayFromPage,
+    buildColumnOverlayFromDebugPage,
     buildItemOverlayFromPage,
+    buildLineOverlayFromDebugPage,
     buildLineOverlayFromPage,
+    buildSentenceOverlayFromDebugPage,
     buildSentenceOverlayFromPage,
     OVERLAY_COLORS,
 } from '../../../src/beaver-extract/debug/overlayBuilders';
 import { bboxFromXYWH } from '../../../src/beaver-extract/types';
-import type { ProcessedPage } from '../../../src/beaver-extract/types';
+import type { InternalProcessedPage } from '../../../src/beaver-extract/types';
+import type { PageDebugData } from '../../../src/beaver-extract/schema';
 
 const bbox = (x: number, y: number, w: number, h: number) =>
     bboxFromXYWH(x, y, w, h, "top-left");
 
-function basePage(): ProcessedPage {
+function basePage(): InternalProcessedPage {
     return {
         index: 0,
         width: 600,
@@ -34,7 +38,7 @@ function basePage(): ProcessedPage {
 describe('debug/overlayBuilders', () => {
     describe('buildColumnOverlayFromPage', () => {
         it('emits one rect per column with C{n} labels', () => {
-            const page: ProcessedPage = {
+            const page: InternalProcessedPage = {
                 ...basePage(),
                 columns: [
                     bbox(50, 50, 240, 700),
@@ -63,7 +67,7 @@ describe('debug/overlayBuilders', () => {
 
     describe('buildLineOverlayFromPage', () => {
         it('emits one rect per line and counts distinct columns', () => {
-            const page: ProcessedPage = {
+            const page: InternalProcessedPage = {
                 ...basePage(),
                 items: [
                     {
@@ -105,7 +109,7 @@ describe('debug/overlayBuilders', () => {
 
     describe('buildItemOverlayFromPage', () => {
         it('uses kind-specific colors for every supported item kind', () => {
-            const page: ProcessedPage = {
+            const page: InternalProcessedPage = {
                 ...basePage(),
                 items: [
                     {
@@ -229,7 +233,7 @@ describe('debug/overlayBuilders', () => {
 
     describe('buildSentenceOverlayFromPage', () => {
         it('alternates body sentence colors and labels them sequentially', () => {
-            const page: ProcessedPage = {
+            const page: InternalProcessedPage = {
                 ...basePage(),
                 items: [
                     {
@@ -269,7 +273,7 @@ describe('debug/overlayBuilders', () => {
         });
 
         it('shows section headers directly in the sentence overlay', () => {
-            const page: ProcessedPage = {
+            const page: InternalProcessedPage = {
                 ...basePage(),
                 items: [
                     {
@@ -299,7 +303,7 @@ describe('debug/overlayBuilders', () => {
         });
 
         it('interleaves item fallbacks with sentence bboxes in reading order', () => {
-            const page: ProcessedPage = {
+            const page: InternalProcessedPage = {
                 ...basePage(),
                 items: [
                     {
@@ -354,6 +358,145 @@ describe('debug/overlayBuilders', () => {
             const out = buildSentenceOverlayFromPage(page);
             expect(out.rects.map((rect) => rect.label)).toEqual(["H1", "S1", "M3"]);
             expect(out.rects.map((rect) => rect.group)).toEqual([0, 1, 2]);
+        });
+    });
+
+    describe('debug-page builders', () => {
+        it('preserves column and line geometry from the debug projection', () => {
+            const page: PageDebugData = {
+                pageIndex: 0,
+                width: 600,
+                height: 800,
+                counts: { items: 1, sentences: 0, columns: 2, lines: 2 },
+                columns: [
+                    [50, 50, 290, 750],
+                    [310, 50, 550, 750],
+                ],
+                lines: [
+                    { id: 'p1:l0', bbox: [50, 100, 290, 120], text: 'A', columnIndex: 0 },
+                    { id: 'p2:l0', bbox: [310, 100, 550, 120], text: 'B', columnIndex: 1 },
+                ],
+            };
+
+            const columns = buildColumnOverlayFromDebugPage(page);
+            expect(columns.rects).toHaveLength(2);
+            expect(columns.rects[0].rect).toEqual(bbox(50, 50, 240, 700));
+
+            const lines = buildLineOverlayFromDebugPage(page);
+            expect(lines.rects).toHaveLength(2);
+            expect(lines.stats.columns).toBe(2);
+            expect(lines.rects[1].rect).toEqual(bbox(310, 100, 240, 20));
+        });
+
+        it('keeps item fallbacks in sentence overlays', () => {
+            const page: PageDebugData = {
+                pageIndex: 0,
+                width: 600,
+                height: 800,
+                counts: { items: 3, sentences: 1 },
+                items: [
+                    {
+                        id: 'heading1',
+                        kind: 'section_header',
+                        pageIndex: 0,
+                        order: 0,
+                        bbox: [0, 0, 100, 20],
+                        text: 'Title',
+                        level: 1,
+                    },
+                    {
+                        id: 'p1',
+                        kind: 'text',
+                        pageIndex: 0,
+                        order: 1,
+                        bbox: [0, 40, 110, 52],
+                        text: 'A.',
+                        sentences: [
+                            {
+                                id: 's1',
+                                order: 0,
+                                text: 'A.',
+                                bboxes: [[0, 40, 50, 52]],
+                            },
+                        ],
+                    },
+                    {
+                        id: 'formula1',
+                        kind: 'formula',
+                        pageIndex: 0,
+                        order: 2,
+                        bbox: [0, 80, 100, 100],
+                        text: 'E = mc^2',
+                    },
+                ],
+                sentences: [
+                    {
+                        id: 's1',
+                        itemId: 'p1',
+                        order: 0,
+                        text: 'A.',
+                        bboxes: [[0, 40, 50, 52]],
+                    },
+                ],
+            };
+
+            const out = buildSentenceOverlayFromDebugPage(page);
+            expect(out.rects.map((rect) => rect.label)).toEqual(['H1', 'S1', 'M3']);
+            expect(out.rects.map((rect) => rect.group)).toEqual([0, 1, 2]);
+            expect(out.stats.fallbackItems).toBe(2);
+        });
+
+        it('marks degraded canonical items in sentence overlays', () => {
+            const page: PageDebugData = {
+                pageIndex: 0,
+                width: 600,
+                height: 800,
+                counts: { items: 1, sentences: 1 },
+                items: [
+                    {
+                        id: 'p1',
+                        kind: 'text',
+                        pageIndex: 0,
+                        order: 0,
+                        bbox: [0, 0, 110, 12],
+                        text: 'A.',
+                        sentences: [
+                            {
+                                id: 's1',
+                                order: 0,
+                                text: 'A.',
+                                bboxes: [[0, 0, 50, 12]],
+                            },
+                        ],
+                    },
+                ],
+                sentences: [
+                    {
+                        id: 's1',
+                        itemId: 'p1',
+                        order: 0,
+                        text: 'A.',
+                        bboxes: [[0, 0, 50, 12]],
+                    },
+                ],
+                degradation: {
+                    count: 1,
+                    notes: [
+                        {
+                            itemId: 'p1',
+                            itemKind: 'text',
+                            reason: 'unmapped',
+                        },
+                    ],
+                },
+            };
+
+            const out = buildSentenceOverlayFromDebugPage(page);
+            expect(out.rects).toHaveLength(1);
+            expect(out.rects[0]).toMatchObject({
+                color: OVERLAY_COLORS.sentenceDegraded,
+                degraded: true,
+            });
         });
     });
 });

@@ -11,10 +11,14 @@
 export {
     OVERLAY_COLORS,
     buildColumnOverlayFromPage,
+    buildColumnOverlayFromDebugPage,
     buildItemOverlayFromPage,
+    buildItemOverlayFromDebugPage,
     buildLineOverlayFromPage,
+    buildLineOverlayFromDebugPage,
     buildMarginsOverlayFromAnalysis,
     buildSentenceOverlayFromPage,
+    buildSentenceOverlayFromDebugPage,
     buildSentenceOverlayFromResult,
 } from "../../src/beaver-extract/debug/overlayBuilders";
 

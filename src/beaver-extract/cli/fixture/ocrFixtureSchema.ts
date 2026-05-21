@@ -2,7 +2,7 @@
  * Runtime validators for the OCR fixture file format (`ocr.json`).
  *
  * Mirrors the structure of `fixtureSchema.ts` (used by extract fixtures)
- * but targets `OCRDetectionResult` rather than `ExtractionResult`. Every
+ * but targets `OCRDetectionResult` rather than `InternalExtractionResult`. Every
  * failure reports the JSON path of the offending field so a malformed
  * fixture surfaces a precise error rather than a deep-compare crash.
  *
@@ -16,6 +16,7 @@ import type {
     OCRDetectionOptions,
     OCRIssueReason,
 } from "../../types";
+import { DEFAULT_OCR_DETECTION_OPTIONS } from "../../types";
 
 export const OCR_FIXTURE_SCHEMA_VERSION = 1 as const;
 
@@ -38,10 +39,21 @@ const OCR_ISSUE_REASONS: readonly OCRIssueReason[] = [
     "high_newline_ratio",
     "low_alphanumeric_ratio",
     "invalid_characters",
+    "fragmented_text_lines",
     "large_image_coverage",
     "bbox_overflow",
     "excessive_line_overlap",
 ];
+
+/**
+ * Issue reasons introduced after the first fixtures were captured. These — and
+ * only these — may be absent from an older `ocr.json`; a missing count is read
+ * as 0. Every other reason stays required so a corrupt or hand-edited fixture
+ * that drops a field still fails validation fast.
+ */
+const OPTIONAL_OCR_ISSUE_REASONS: ReadonlySet<OCRIssueReason> = new Set([
+    "fragmented_text_lines",
+]);
 
 export interface SnapshotPageOcr {
     pageIndex: number;
@@ -168,6 +180,13 @@ function validateEffectiveOptions(
 ): Required<OCRDetectionOptions> {
     return {
         minTextPerPage: expectInt(v.minTextPerPage, `${source}.minTextPerPage`),
+        // Backward-compatible: fixtures captured before `minMeanTextPerPage`
+        // existed omit it — fall back to the current default so older
+        // `ocr.json` files still validate.
+        minMeanTextPerPage:
+            v.minMeanTextPerPage === undefined
+                ? DEFAULT_OCR_DETECTION_OPTIONS.minMeanTextPerPage
+                : expectInt(v.minMeanTextPerPage, `${source}.minMeanTextPerPage`),
         sampleSize: expectInt(v.sampleSize, `${source}.sampleSize`),
         expandedSampleSize: expectInt(v.expandedSampleSize, `${source}.expandedSampleSize`),
         expandLowerThreshold: expectFiniteNumber(
@@ -288,6 +307,13 @@ function validateIssueBreakdown(
     const v = expectObject(value, source);
     const out = {} as Record<OCRIssueReason, number>;
     for (const reason of OCR_ISSUE_REASONS) {
+        if (v[reason] === undefined && OPTIONAL_OCR_ISSUE_REASONS.has(reason)) {
+            // A reason added after this fixture was captured — absent counts
+            // as 0. All originally-required reasons still go through
+            // `expectInt`, so a fixture that drops one fails validation.
+            out[reason] = 0;
+            continue;
+        }
         out[reason] = expectInt(v[reason], `${source}.${reason}`);
     }
     return out;

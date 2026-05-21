@@ -23,26 +23,28 @@
 import { makeRemoteFilePath } from '../../src/services/attachmentFileCache';
 import { getAttachmentFileStatus, isRemoteAccessAvailable } from '../../src/services/agentDataProvider/utils';
 import type { CitationMetadata } from '../types/citations';
+import { getBestPDFAttachment } from '../../src/utils/zoteroItemHelpers';
+import { normalizeCitationTag, parseRawCitationAttributes } from './citationGrammar';
 
 // Regex for citation tags — matches self-closing and non-self-closing forms
-const CITATION_REGEX = /<citation\s+([^>]+?)\s*(\/>|>(?:.*?<\/citation>)?)/g;
-const ATT_ID_REGEX = /(?:att_id|attachment_id)\s*=\s*"([^"]*)"/;
+const CITATION_REGEX = /<citation(?:\s+([^>]*?))?\s*(\/>|>(?:.*?<\/citation>)?)/g;
 
 type PreloadFilePath =
-    | { filePath: string; isRemoteOnly: false }
-    | { filePath: string; isRemoteOnly: true };
+    | { item: Zotero.Item; filePath: string; isRemoteOnly: false }
+    | { item: Zotero.Item; filePath: string; isRemoteOnly: true };
 
 async function getPreloadFilePath(item: Zotero.Item): Promise<PreloadFilePath | null> {
-    // getFilePathAsync throws on non-attachment items (e.g., parent items
-    // referenced via <citation item_id="...">). Short-circuit here so callers
-    // don't pay for a thrown exception per parent-item citation.
-    if (!item.isAttachment()) return null;
+    if (!item.isAttachment()) {
+        const attachment = item.isRegularItem?.() ? getBestPDFAttachment(item) : null;
+        if (!attachment) return null;
+        item = attachment;
+    }
 
     const filePath = await item.getFilePathAsync();
-    if (filePath) return { filePath, isRemoteOnly: false };
+    if (filePath) return { item, filePath, isRemoteOnly: false };
 
     if (isRemoteAccessAvailable(item)) {
-        return { filePath: makeRemoteFilePath(item), isRemoteOnly: true };
+        return { item, filePath: makeRemoteFilePath(item), isRemoteOnly: true };
     }
 
     return null;
@@ -125,27 +127,21 @@ export async function preloadPageLabelsForContent(content: string): Promise<void
     let match: RegExpExecArray | null;
 
     while ((match = regex.exec(content)) !== null) {
-        const attMatch = ATT_ID_REGEX.exec(match[1]);
-        if (!attMatch) continue;
-
-        const ref = attMatch[1].replace('user-content-', '');
-        const dashIdx = ref.indexOf('-');
-        if (dashIdx <= 0) continue;
-
-        const libraryID = parseInt(ref.substring(0, dashIdx), 10);
-        const itemKey = ref.substring(dashIdx + 1);
-        if (!libraryID || !itemKey) continue;
+        const normalized = normalizeCitationTag(parseRawCitationAttributes(match[1] || ''));
+        if (!normalized.ok || normalized.ref.kind !== 'zotero') continue;
 
         try {
-            const item = Zotero.Items.getByLibraryAndKey(libraryID, itemKey);
-            if (!item || seen.has(item.id)) continue;
-            seen.add(item.id);
+            const item = Zotero.Items.getByLibraryAndKey(normalized.ref.library_id, normalized.ref.zotero_key);
+            if (!item) continue;
 
             const preloadPath = await getPreloadFilePath(item);
             if (!preloadPath) continue;
+            const preloadItem = preloadPath.item;
+            if (seen.has(preloadItem.id)) continue;
+            seen.add(preloadItem.id);
 
             // Cache hit → page_labels already in memory cache
-            const record = await cache.getMetadata(item.id, preloadPath.filePath);
+            const record = await cache.getMetadata(preloadItem.id, preloadPath.filePath);
             if (record) continue;
 
             // Do not download remote-only PDFs just to preload labels. A later
@@ -153,7 +149,7 @@ export async function preloadPageLabelsForContent(content: string): Promise<void
             if (preloadPath.isRemoteOnly) continue;
 
             // Local cache miss → run full extraction.
-            await getAttachmentFileStatus(item, false);
+            await getAttachmentFileStatus(preloadItem, false);
         } catch {
             // Skip items that can't be resolved
         }
@@ -190,13 +186,15 @@ export async function preloadPageLabelsForCitations(
 
         try {
             const item = Zotero.Items.getByLibraryAndKey(citation.library_id, citation.zotero_key);
-            if (!item || seen.has(item.id)) continue;
-            seen.add(item.id);
+            if (!item) continue;
 
             const preloadPath = await getPreloadFilePath(item);
             if (!preloadPath) continue;
+            const preloadItem = preloadPath.item;
+            if (seen.has(preloadItem.id)) continue;
+            seen.add(preloadItem.id);
 
-            const record = await cache.getMetadata(item.id, preloadPath.filePath);
+            const record = await cache.getMetadata(preloadItem.id, preloadPath.filePath);
             if (record) {
                 loaded = true;
                 continue;
@@ -204,7 +202,7 @@ export async function preloadPageLabelsForCitations(
 
             if (preloadPath.isRemoteOnly) continue;
 
-            await getAttachmentFileStatus(item, false);
+            await getAttachmentFileStatus(preloadItem, false);
             loaded = true;
         } catch {
             // Skip items that can't be resolved

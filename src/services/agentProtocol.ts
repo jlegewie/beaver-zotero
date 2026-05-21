@@ -555,6 +555,8 @@ export type AttachmentPagesErrorCode =
     | 'encrypted'           // PDF is password-protected
     | 'no_text_layer'       // PDF needs OCR
     | 'invalid_pdf'         // Invalid/corrupted PDF
+    | 'empty_document'      // PDF opened but has no readable pages
+    | 'pdf_too_complex'     // PDF exhausted the parser's memory
     | 'pdf_parser_crash'    // PDF crashes the local PDF parser
     | 'too_many_pages'      // PDF exceeds page count limit
     | 'page_out_of_range'   // Requested pages are out of range
@@ -589,6 +591,8 @@ export type AttachmentPageImagesErrorCode =
     | 'file_too_large'      // PDF file exceeds size limit
     | 'encrypted'           // PDF is password-protected
     | 'invalid_pdf'         // Invalid/corrupted PDF
+    | 'empty_document'      // PDF opened but has no readable pages
+    | 'pdf_too_complex'     // PDF exhausted the parser's memory
     | 'pdf_parser_crash'    // PDF crashes the local PDF parser
     | 'too_many_pages'      // PDF exceeds page count limit
     | 'page_out_of_range'   // Requested pages are out of range
@@ -622,6 +626,7 @@ export type AttachmentSearchErrorCode =
     | 'file_too_large'      // PDF file exceeds size limit
     | 'encrypted'           // PDF is password-protected
     | 'invalid_pdf'         // Invalid/corrupted PDF
+    | 'empty_document'      // PDF opened but has no readable pages
     | 'no_text_layer'       // PDF requires OCR — text search unavailable
     | 'too_many_pages'      // PDF exceeds page count limit
     | 'download_failed'     // Remote file download failed
@@ -1035,7 +1040,8 @@ export interface ErrorCandidate {
         | 'whitespace_relaxed'
         | 'word_overlap'
         | 'inline_tag_drift'
-        | 'structural_anchor';
+        | 'structural_anchor'
+        | 'fuzzy_window';
     score: number;
 }
 

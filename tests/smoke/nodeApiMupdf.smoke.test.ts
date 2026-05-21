@@ -34,15 +34,15 @@ describe.runIf(smokePdfExists())('Node API (smoke)', () => {
         const result = await extractPdf({
             pdfData: bytes,
             mode: 'structured',
-            pageIndices: [0],
         });
-        expect(result.pages).toHaveLength(1);
-        expect(result.pages[0].index).toBe(0);
-        expect(result.pages[0].width).toBeGreaterThan(0);
-        expect(result.pages[0].height).toBeGreaterThan(0);
+        expect(result.mode).toBe('structured');
+        if (result.mode !== 'structured') throw new Error('expected structured result');
+        expect(result.document.pages.length).toBeGreaterThan(0);
+        expect(result.document.pages[0].index).toBe(0);
+        expect(result.document.pages[0].width).toBeGreaterThan(0);
+        expect(result.document.pages[0].height).toBeGreaterThan(0);
         // Structured mode populates DocItems plus a flattened sentence view.
-        expect(Array.isArray(result.pages[0].sentences)).toBe(true);
-        expect(Array.isArray(result.pages[0].items)).toBe(true);
+        expect(Array.isArray(result.document.pages[0].items)).toBe(true);
     });
 
     it('runs analyzeLayout on page 0 and reports at least one analysis page', async () => {

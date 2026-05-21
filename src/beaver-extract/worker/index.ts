@@ -7,13 +7,20 @@
  * URLs supplied by `getConfig()` and would try to spawn a worker from
  * inside this worker. Worker code imports analyzers and types directly:
  *   import { StyleAnalyzer } from "../StyleAnalyzer";
- *   import type { RawPageData, ExtractionResult } from "../types";
+ *   import type { RawPageData, InternalExtractionResult } from "../types";
  *
  * Built as a separate worker bundle by the host's build system.
  *
- * Configuration: the main-thread client posts a `configure` message as the
- * first frame after spawning this worker (see `MuPDFWorkerClient.ensureWorker`).
- * Op messages received before configure throw via `getWorkerUrls()`.
+ * Configure handshake: an eager `configure` frame posted right after spawn
+ * can be lost during module-worker startup, so this worker does not rely on
+ * it alone. Once its `onmessage` handler is installed, the worker posts a
+ * `ready` message; the main-thread client (`MuPDFWorkerClient`) responds with
+ * a `configure` frame, and the worker acks it with `configured` after
+ * `setWorkerUrls`. The client holds all ops until that `configured` ack, so
+ * `getWorkerUrls()` is always populated by the time an op runs. The
+ * `isWorkerConfigured()` guard below stays as a last-resort safety net — a
+ * pre-configure op there yields a structured failure the client retries on a
+ * fresh worker.
  */
 
 import {
@@ -26,7 +33,7 @@ import { ensureApi } from "./wasmInit";
 import { isWorkerConfigured, setWorkerUrls, type WorkerUrls } from "./config";
 import { setPDFLogger } from "../logging";
 import { ERROR_CODES, postLog } from "./errors";
-import { isFatalWasmError } from "../wasmFatal";
+import { isFatalWasmError, isHeapExhaustionError } from "../wasmFatal";
 
 // Route analyzer-module logs through the existing `postLog` channel so the
 // main-thread `MuPDFWorkerClient` forwards them to the host-configured
@@ -46,6 +53,7 @@ import {
     opGetPageCount,
     opRenderPages,
     opSearch,
+    opStructuredExtractWithDebug,
     type OpReply,
 } from "./ops";
 import { requireWorkerSelf } from "./workerScope";
@@ -89,6 +97,10 @@ async function dispatch(op: string, args: Record<string, unknown> | undefined): 
         // orchestration ops
         case "extract":
             return await opExtract(a as Parameters<typeof opExtract>[0]);
+        case "structuredExtractWithDebug":
+            return await opStructuredExtractWithDebug(
+                a as Parameters<typeof opStructuredExtractWithDebug>[0],
+            );
         case "analyzeOCRNeeds":
             return await opAnalyzeOCRNeeds(a as Parameters<typeof opAnalyzeOCRNeeds>[0]);
         case "search":
@@ -132,6 +144,7 @@ workerSelf.onmessage = (event: MessageEvent) => {
         const cfg = data as IncomingConfigureMessage;
         if (cfg.urls && typeof cfg.urls === "object") {
             setWorkerUrls(cfg.urls);
+            workerSelf.postMessage({ kind: "configured" });
         }
         return;
     }
@@ -184,7 +197,18 @@ workerSelf.onmessage = (event: MessageEvent) => {
                         "This PDF crashed the MuPDF WASM parser and cannot be processed.",
                 };
             }
+            if (isHeapExhaustionError(e)) {
+                clearAllCachedDocs(false);
+                error = {
+                    name: "ExtractionError",
+                    code: ERROR_CODES.HEAP_EXHAUSTION,
+                    message:
+                        "MuPDF exhausted its WASM heap while processing this PDF. The worker will be restarted before the next operation.",
+                };
+            }
             workerSelf.postMessage({ id, ok: false, error });
         }
     });
 };
+
+workerSelf.postMessage({ kind: "ready" });

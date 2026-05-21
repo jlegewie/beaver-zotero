@@ -5,12 +5,13 @@
  * before they are rendered by React components.
  */
 
-import { 
-    parseCitationAttributes, 
-    computeCitationKeyFromAttrs, 
-    getCitationIdentityKey,
-    NormalizedCitationAttrs
-} from '../types/citations';
+import type { NormalizedCitationAttrs } from '../types/citations';
+import {
+    baseCitationKey,
+    normalizeCitationTag,
+    parseRawCitationAttributes,
+    requestedCitationKey,
+} from './citationGrammar';
 
 /**
  * State for tracking consecutive citations across preprocessing calls.
@@ -37,7 +38,7 @@ export function createPreprocessState(): CitationPreprocessState {
  */
 export interface PreprocessedCitation {
     /** Normalized attributes */
-    attrs: NormalizedCitationAttrs;
+    attrs: NormalizedCitationAttrs | Record<string, string>;
     /** Citation key for metadata lookup */
     citationKey: string;
     /** Whether this cites the same item as the previous citation */
@@ -46,6 +47,19 @@ export interface PreprocessedCitation {
     isAdjacent: boolean;
     /** The reconstructed HTML tag */
     html: string;
+}
+
+function escapeAttr(value: string): string {
+    return value
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
+function attr(name: string, value: string | number | undefined): string | null {
+    if (value == null) return null;
+    return `${name}="${escapeAttr(String(value))}"`;
 }
 
 /**
@@ -65,11 +79,11 @@ export function preprocessCitationMatch(
     fullString: string,
     state: CitationPreprocessState
 ): PreprocessedCitation {
-    // Parse and normalize attributes using shared utility
-    const normalizedAttrs = parseCitationAttributes(attributesStr);
-    
-    // Get identity key for consecutive detection
-    const identityKey = getCitationIdentityKey(normalizedAttrs);
+    const rawAttrs = parseRawCitationAttributes(attributesStr);
+    const normalized = normalizeCitationTag(rawAttrs);
+    const identityKey = normalized.ok
+        ? baseCitationKey(normalized.ref)
+        : (normalized.requestedKey || '');
     
     // Check if this citation references the same item as the previous one
     const isConsecutive = !!(identityKey && identityKey === state.lastIdentityKey);
@@ -82,33 +96,46 @@ export function preprocessCitationMatch(
     state.lastIdentityKey = identityKey;
     state.lastEndIndex = offset + matchLength;
     
-    // Build normalized attribute string for HTML output
-    const attrParts: string[] = [];
-    if (normalizedAttrs.item_id) attrParts.push(`item_id="${normalizedAttrs.item_id}"`);
-    if (normalizedAttrs.att_id) attrParts.push(`att_id="${normalizedAttrs.att_id}"`);
-    if (normalizedAttrs.external_id) attrParts.push(`external_id="${normalizedAttrs.external_id}"`);
-    if (normalizedAttrs.sid) attrParts.push(`sid="${normalizedAttrs.sid}"`);
-    if (normalizedAttrs.page) attrParts.push(`page="${normalizedAttrs.page}"`);
-    const normalizedAttrStr = attrParts.join(' ');
-    
-    // Compute citation_key for metadata lookup (single source of truth)
-    const citationKey = computeCitationKeyFromAttrs(normalizedAttrs);
-    const citationKeyAttr = citationKey ? `citation_key="${citationKey}"` : '';
-    
-    // Build final tag with normalized attributes
-    const baseAttrs = [normalizedAttrStr, citationKeyAttr].filter(Boolean).join(' ');
-    
-    let html: string;
-    if (isAdjacent) {
-        html = `<citation ${baseAttrs} consecutive="true" adjacent="true"></citation>`;
-    } else if (isConsecutive) {
-        html = `<citation ${baseAttrs} consecutive="true"></citation>`;
+    const attrParts: Array<string | null> = [];
+    let citationKey = '';
+
+    if (normalized.ok) {
+        const ref = normalized.ref;
+        citationKey = requestedCitationKey(ref);
+        if (ref.kind === 'zotero') {
+            attrParts.push(
+                attr('data-library-id', ref.library_id),
+                attr('data-zotero-key', ref.zotero_key),
+            );
+        } else {
+            attrParts.push(
+                attr('data-external-id', ref.external_id),
+                attr('data-external-source', ref.source),
+            );
+        }
+        if (ref.loc) {
+            attrParts.push(attr('data-loc', ref.loc.raw), attr('data-loc-kind', ref.loc.kind), attr('data-loc-value', ref.loc.value));
+        }
+        attrParts.push(attr('data-requested-citation-key', citationKey));
     } else {
-        html = `<citation ${baseAttrs}></citation>`;
+        citationKey = normalized.requestedKey || '';
+        attrParts.push(
+            attr('data-invalid-reason', normalized.reason),
+            attr('data-requested-citation-key', citationKey || undefined),
+            attr('data-raw-identity', normalized.rawIdentity),
+            attr('data-identity-attr', normalized.identityAttr),
+        );
     }
+
+    if (isConsecutive) attrParts.push(attr('data-consecutive', 'true'));
+    if (isAdjacent) attrParts.push(attr('data-adjacent', 'true'));
+
+    const baseAttrs = attrParts.filter((part): part is string => !!part).join(' ');
+    
+    const html = baseAttrs ? `<citation ${baseAttrs}></citation>` : '<citation></citation>';
     
     return {
-        attrs: normalizedAttrs,
+        attrs: rawAttrs,
         citationKey,
         isConsecutive,
         isAdjacent,
@@ -119,8 +146,13 @@ export function preprocessCitationMatch(
 /**
  * Unwrap backtick-wrapped citation tags (common LLM mistake).
  * Matches: `<citation att_id="...">` → <citation att_id="...">
+ *
+ * Handles every citation form supported by CITATION_TAG_PATTERN (self-closing,
+ * opening-only, and full pair), and multiple adjacent tags sharing one pair of
+ * backticks (e.g. consecutive citations of the same item):
+ * `<citation .../><citation .../>` → <citation .../><citation .../>
  */
-const UNWRAP_BACKTICK_PATTERN = /`(<citation[^>]*>)`/g;
+const UNWRAP_BACKTICK_PATTERN = /`(<citation[^>]*>(?:<\/citation>)?(?:\s*<citation[^>]*>(?:<\/citation>)?)*)`/g;
 
 /**
  * Regex pattern for matching citation tags in all formats:
@@ -128,7 +160,7 @@ const UNWRAP_BACKTICK_PATTERN = /`(<citation[^>]*>)`/g;
  * - Opening only (missing /): <citation att_id="...">
  * - Full pair: <citation att_id="..."></citation>
  */
-export const CITATION_TAG_PATTERN = /<citation\s+((?:[^>])+?)\s*(?:\/>|>(?:<\/citation>)?)/g;
+export const CITATION_TAG_PATTERN = /<citation(?:\s+([^>]*?))?\s*(?:\/>|>(?:<\/citation>)?)/g;
 
 /**
  * Preprocess citations in markdown content.
@@ -139,7 +171,7 @@ export const CITATION_TAG_PATTERN = /<citation\s+((?:[^>])+?)\s*(?:\/>|>(?:<\/ci
  * - Full pair: <citation att_id="..."></citation>
  * - Attribute variations: attachment_id → att_id
  * 
- * Injects citation_key for metadata lookup (e.g., "zotero:1-ABC123" or "external:xyz")
+ * Injects data-requested-citation-key for metadata lookup.
  * 
  * **State behavior across segments:**
  * - `lastIdentityKey` is preserved across calls (consecutive detection works across segments)
@@ -166,7 +198,7 @@ export function preprocessCitations(
 
     return content.replace(
         CITATION_TAG_PATTERN,
-        (match, attributesStr, offset, fullString) => {
+        (match, attributesStr = '', offset, fullString) => {
             const result = preprocessCitationMatch(
                 attributesStr,
                 offset,
@@ -195,4 +227,3 @@ export function preprocessCitationsWithRef(
     lastCitationKeyRef.value = state.lastIdentityKey;
     return result;
 }
-

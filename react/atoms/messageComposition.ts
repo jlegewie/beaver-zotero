@@ -10,7 +10,7 @@ import { InvalidItemsMessageContent } from '../components/ui/popup/InvalidItemsM
 import { syncingItemFilter } from "../../src/utils/sync";
 import { getCurrentReader } from "../utils/readerUtils";
 import { TextSelection } from "../types/attachments/apiTypes";
-import { ZoteroTag } from "../types/zotero";
+import { ZoteroTag, CollectionReference } from "../types/zotero";
 import { processingModeAtom } from "./profile";
 import { ProcessingMode } from "../types/profile";
 import { currentNoteItemAtom } from "./zoteroContext";
@@ -101,12 +101,6 @@ export const currentMessageItemsAtom = atom<Zotero.Item[]>([]);
  * Set when a collection action is triggered (context menu, slash menu).
  * Cleared after the message is sent.
  */
-export interface CollectionReference {
-    key: string;
-    name: string;
-    libraryID: number;
-    parentKey: string | null;
-}
 export const currentMessageCollectionsAtom = atom<CollectionReference[]>([]);
 
 /**

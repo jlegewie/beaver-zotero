@@ -7,8 +7,9 @@
  */
 
 import { ExternalReference } from "../types/externalReferences";
-import { ZoteroItemReference } from "../types/zotero";
+import { ZoteroItemReference, CollectionReference } from "../types/zotero";
 import { ToolReturnPart } from "./types";
+import { logger } from "../../src/utils/logger";
 
 // ============================================================================
 // Summary Types (from backend)
@@ -1134,12 +1135,20 @@ const GET_METADATA_TOOL_NAMES: readonly string[] = [
 // ============================================================================
 
 /**
- * Collection reference for UI display.
- * Matches CollectionReference from backend.
+ * Collection reference as sent by the backend in list_collections summaries.
+ *
+ * The current backend omits library scope here; `extractListCollectionsData`
+ * normalizes it into the canonical `CollectionReference`. The optional fields
+ * forward-support a backend that later emits a per-collection `library_id` or
+ * a compound `collection_key` ("<library_id>-<key>").
  */
-export interface CollectionReference {
+export interface BackendCollectionRef {
     collection_key: string;
     name: string;
+    /** Optional per-collection library scope (future backend format). */
+    library_id?: number | null;
+    /** Optional parent collection key (future backend format). */
+    parent_key?: string | null;
 }
 
 /**
@@ -1189,7 +1198,10 @@ export interface ListCollectionsResultSummary {
     has_more: boolean;
     library_id?: number | null;
     library_name?: string | null;
-    collections: CollectionReference[];
+    collections: BackendCollectionRef[];
+    /** Set on a failed list_collections response (no library scope in that case). */
+    error?: string | null;
+    error_code?: string | null;
 }
 
 /**
@@ -1281,6 +1293,8 @@ export type ListItemsResultItem = RegularListResultItem | NoteResultItem | Attac
 export interface CollectionInfo {
     collection_key: string;
     name: string;
+    /** Optional per-collection library scope (future backend format). */
+    library_id?: number | null;
     parent_key?: string | null;
     parent_name?: string | null;
     item_count: number;
@@ -1340,6 +1354,9 @@ export interface ListCollectionsResultContent {
     total_count: number;
     library_id?: number | null;
     library_name?: string | null;
+    /** Set on a failed list_collections response (no library scope in that case). */
+    error?: string | null;
+    error_code?: string | null;
 }
 
 /**
@@ -1642,7 +1659,8 @@ export function extractListItemsData(
 
 /**
  * Normalized list collections view data.
- * Uses CollectionReference (collection_key, name) which is available in both content and summary.
+ * Collections are canonical `CollectionReference`, normalized from the backend
+ * wire shape (content's `CollectionInfo` or summary's `BackendCollectionRef`).
  */
 export interface ListCollectionsViewData {
     collections: CollectionReference[];
@@ -1652,8 +1670,101 @@ export interface ListCollectionsViewData {
 }
 
 /**
+ * Parse a compound collection key of the form "<library_id>-<key>"
+ * (e.g. "6-ABCD1234") into its parts. Returns null for a plain Zotero key, so
+ * callers never pass a compound string to Zotero.Collections.getByLibraryAndKey.
+ * Zotero object keys are 8-character uppercase alphanumeric strings.
+ */
+function parseCompoundCollectionKey(
+    collectionKey: string
+): { library_id: number; zotero_key: string } | null {
+    const match = collectionKey.match(/^(\d+)-([A-Z0-9]{8})$/);
+    if (!match) return null;
+    return { library_id: parseInt(match[1], 10), zotero_key: match[2] };
+}
+
+/**
+ * Normalize a backend collection ref into a canonical `CollectionReference`.
+ *
+ * The library scope is resolved, in priority order, from:
+ *   1. a compound `collection_key` ("<library_id>-<key>") — authoritative,
+ *      since the library is bound to the key;
+ *   2. an explicit per-collection `library_id`;
+ *   3. the container `library_id`.
+ *
+ * When a compound key disagrees with an explicit/container `library_id`, the
+ * compound value wins (the mismatch is logged). Returns null when no library
+ * scope can be determined, so the caller can drop the collection defensively.
+ */
+function normalizeBackendCollection(
+    coll: BackendCollectionRef,
+    containerLibraryId: number | null | undefined
+): CollectionReference | null {
+    const compound = parseCompoundCollectionKey(coll.collection_key);
+    const zoteroKey = compound ? compound.zotero_key : coll.collection_key;
+
+    let libraryId: number | null = null;
+    if (compound) {
+        libraryId = compound.library_id;
+        const provided = coll.library_id ?? containerLibraryId;
+        if (provided != null && provided !== compound.library_id) {
+            logger(`normalizeBackendCollection: collection_key "${coll.collection_key}" embeds library ${compound.library_id} but library ${provided} was also provided; using ${compound.library_id}`, 1);
+        }
+    } else if (coll.library_id != null) {
+        libraryId = coll.library_id;
+    } else if (containerLibraryId != null) {
+        libraryId = containerLibraryId;
+    }
+
+    if (libraryId == null) return null;
+
+    return {
+        library_id: libraryId,
+        zotero_key: zoteroKey,
+        name: coll.name,
+        parent_key: coll.parent_key ?? null,
+    };
+}
+
+/**
+ * Normalize a backend collection list. Drops collections whose library scope
+ * cannot be resolved. Returns null when there were collections to show but none
+ * could be normalized, so the caller falls back to generic rendering instead of
+ * a misleading "No collections found".
+ */
+function normalizeCollections(
+    rawCollections: BackendCollectionRef[],
+    containerLibraryId: number | null | undefined
+): CollectionReference[] | null {
+    const collections = rawCollections
+        .map(coll => normalizeBackendCollection(coll, containerLibraryId))
+        .filter((c): c is CollectionReference => c !== null);
+    if (rawCollections.length > 0 && collections.length === 0) return null;
+    return collections;
+}
+
+/**
+ * A backend list_collections payload that carries an `error`/`error_code` is a
+ * failure response, not a renderable result — even when it includes an empty
+ * `collections` array (which list_collections error responses always do).
+ */
+function isListCollectionsError(obj: { error?: unknown; error_code?: unknown }): boolean {
+    return obj.error != null || obj.error_code != null;
+}
+
+/**
  * Extract list collections data from content or metadata.summary.
- * Uses metadata.summary (which contains CollectionReference[]) for dehydrated results.
+ *
+ * Normalizes backend collection refs into canonical `CollectionReference` via
+ * `normalizeCollections`, resolving each collection's library scope from a
+ * compound key, a per-collection `library_id`, or the result container.
+ *
+ * Returns null — so `ToolResultView` falls back to generic/error rendering —
+ * when the payload is an error response, when collections were present but none
+ * could be resolved to a library scope, or when an empty result lacks library
+ * scope. An empty `collections` array only renders the "No collections found"
+ * state when it is a genuine successful empty result (i.e. carries a container
+ * `library_id`); a scopeless empty array is an error/non-result payload.
  */
 export function extractListCollectionsData(
     content: unknown,
@@ -1662,13 +1773,11 @@ export function extractListCollectionsData(
     // Try content first (non-dehydrated)
     if (content && typeof content === 'object') {
         const obj = content as ListCollectionsResultContent;
-        if (Array.isArray(obj.collections) && obj.collections.length > 0) {
-            // Convert CollectionInfo to CollectionReference (keep key and name)
-            const collections: CollectionReference[] = obj.collections.map(coll => ({
-                collection_key: coll.collection_key,
-                name: coll.name,
-            }));
-            
+        if (Array.isArray(obj.collections) && !isListCollectionsError(obj)) {
+            const collections = normalizeCollections(obj.collections, obj.library_id);
+            if (collections == null || (collections.length === 0 && obj.library_id == null)) {
+                return null;
+            }
             return {
                 collections,
                 totalCount: obj.total_count,
@@ -1677,23 +1786,24 @@ export function extractListCollectionsData(
             };
         }
     }
-    
+
     // Fall back to metadata.summary (dehydrated)
     if (metadata?.summary && typeof metadata.summary === 'object') {
         const summary = metadata.summary as ListCollectionsResultSummary;
-        if (Array.isArray(summary.collections)) {
-            return { 
-                collections: summary.collections.map(coll => ({
-                    collection_key: coll.collection_key,
-                    name: coll.name,
-                })),
+        if (Array.isArray(summary.collections) && !isListCollectionsError(summary)) {
+            const collections = normalizeCollections(summary.collections, summary.library_id);
+            if (collections == null || (collections.length === 0 && summary.library_id == null)) {
+                return null;
+            }
+            return {
+                collections,
                 totalCount: summary.total_count,
                 libraryId: summary.library_id,
                 libraryName: summary.library_name,
             };
         }
     }
-    
+
     return null;
 }
 

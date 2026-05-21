@@ -209,6 +209,7 @@ describe('docCache', () => {
         expect(stats.hits).toBe(0);
         expect(stats.misses).toBe(0);
         expect(stats.evictions).toBe(0);
+        expect(stats.discards).toBe(0);
     });
 
     it('clearAllCachedDocs with resetCounters: false preserves counters', async () => {
@@ -228,6 +229,51 @@ describe('docCache', () => {
         expect(after.entries).toBe(0);
         expect(after.hits).toBe(1);
         expect(after.misses).toBe(1);
+    });
+
+    it('releaseDoc with discard destroys a cached doc instead of keeping it warm', async () => {
+        const bytes = new Uint8Array([9, 8, 7]);
+
+        const doc = await acquireDoc(bytes);
+        expect(getCacheStats().entries).toBe(1);
+
+        releaseDoc(doc, true);
+
+        const stats = getCacheStats();
+        expect(doc.destroy).toHaveBeenCalledTimes(1);
+        expect(stats.entries).toBe(0);
+        expect(stats.totalBytes).toBe(0);
+        expect(stats.discards).toBe(1);
+    });
+
+    it('releaseDoc without discard still keeps a cached doc reusable', async () => {
+        const bytes = new Uint8Array([3, 1, 4]);
+
+        const doc1 = await acquireDoc(bytes);
+        releaseDoc(doc1, false);
+        const doc2 = await acquireDoc(bytes);
+        releaseDoc(doc2, false);
+
+        expect(doc2).toBe(doc1);
+        expect(doc1.destroy).not.toHaveBeenCalled();
+        const stats = getCacheStats();
+        expect(stats.entries).toBe(1);
+        expect(stats.hits).toBe(1);
+        expect(stats.discards).toBe(0);
+    });
+
+    it('releaseDoc with discard still destroys a bypass doc', async () => {
+        __setCacheConfigForTest({ maxBytes: 1 });
+
+        const doc = await acquireDoc(new Uint8Array([1, 2]));
+        expect(getCacheStats().entries).toBe(0);
+
+        releaseDoc(doc, true);
+
+        const stats = getCacheStats();
+        expect(doc.destroy).toHaveBeenCalledTimes(1);
+        expect(stats.entries).toBe(0);
+        expect(stats.discards).toBe(0);
     });
 
     it('absolute deadline source-of-truth: an op landing past expiresAt misses', async () => {
@@ -324,6 +370,7 @@ describe('docCache', () => {
         expect(stats.misses).toBe(2);
         expect(stats.hits).toBe(1);
         expect(stats.evictions).toBeGreaterThanOrEqual(1);
+        expect(stats.discards).toBe(0);
         expect(stats.entries).toBe(1);
     });
 });

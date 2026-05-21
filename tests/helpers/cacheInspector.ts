@@ -443,6 +443,7 @@ export interface WorkerCacheStats {
     hits: number;
     misses: number;
     evictions: number;
+    discards: number;
     ttlMs: number;
     maxEntries: number;
     maxBytes: number;
@@ -458,6 +459,7 @@ export interface WorkerStatsSnapshot {
     nextId: number;
     dispatchCounts: Record<string, number>;
     lastSpawnTime: number | null;
+    idleTimerArmed: boolean;
 }
 
 export interface WorkerStatsResponse {

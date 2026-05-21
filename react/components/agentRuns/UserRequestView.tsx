@@ -9,6 +9,7 @@ import { LibraryButton } from '../library/LibraryButton';
 import { CollectionButton } from '../library/CollectionButton';
 import { TagButton } from '../library/TagButton';
 import { CollectionAttachment } from '../../types/attachments/apiTypes';
+import { collectionReferenceKey } from '../../types/zotero';
 import { EditIcon, Spinner } from '../icons/icons';
 import Button from '../ui/Button';
 import ModelSelectionButton from '../ui/buttons/ModelSelectionButton';
@@ -279,7 +280,7 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
 
                         {/* Collection attachments */}
                         {collectionAttachments.map((col) => (
-                            <MessageCollectionButton key={col.zotero_key} collection={{ key: col.zotero_key, name: col.name, libraryID: col.library_id, parentKey: col.parent_key }} canEdit={false} />
+                            <MessageCollectionButton key={collectionReferenceKey(col)} collection={col} canEdit={false} />
                         ))}
 
                         {/* Attachments */}
@@ -367,7 +368,7 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
 
                             {/* Collection attachments (read-only in edit mode) */}
                             {collectionAttachments.map((col) => (
-                                <MessageCollectionButton key={col.zotero_key} collection={{ key: col.zotero_key, name: col.name, libraryID: col.library_id, parentKey: col.parent_key }} canEdit={false} />
+                                <MessageCollectionButton key={collectionReferenceKey(col)} collection={col} canEdit={false} />
                             ))}
 
                             {/* Attachments (read-only in edit mode) */}

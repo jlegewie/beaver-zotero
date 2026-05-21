@@ -2,7 +2,7 @@ import { logger } from '../../../utils/logger';
 import { searchableLibraryIdsAtom } from '../../../../react/atoms/profile';
 import { store } from '../../../../react/store';
 import { MetadataEdit } from '../../../../react/types/agentActions/base';
-import { canSetField, SETTABLE_PRIMARY_FIELDS, sanitizeCreators } from '../../../utils/zoteroUtils';
+import { canSetField, resolveFieldForItemType, SETTABLE_PRIMARY_FIELDS, sanitizeCreators } from '../../../utils/zoteroUtils';
 import {
     WSAgentActionValidateRequest,
     WSAgentActionValidateResponse,
@@ -130,8 +130,18 @@ export function validateFieldEdit(item: Zotero.Item, field: string): FieldValida
         };
     }
     
-    // 3. Check if field is technically editable for this item type
+    // 3. Check if field is technically editable for this item type.
+    //    If the exact field is not valid, attempt a base-field remap: the agent
+    //    may have supplied a display label belonging to the wrong item type
+    //    (e.g. 'bookTitle' on a journalArticle, which shares the base field
+    //    'publicationTitle'). Genuine mismatches (no shared base field for this
+    //    type) still fall through to the error below.
     if (!canSetField(item, field)) {
+        const resolved = resolveFieldForItemType(item.itemTypeID, field);
+        if (resolved && resolved !== field && canSetField(item, resolved)) {
+            return { allowed: true };
+        }
+
         const itemType = Zotero.ItemTypes.getName(item.itemTypeID);
         const itemTypeID = item.itemTypeID;
         const typeFields = Zotero.ItemFields.getItemTypeFields(itemTypeID);
@@ -488,12 +498,15 @@ async function validateEditMetadataAction(
         }
     }
 
-    // Get current values for all edited fields
+    // Get current values for all edited fields. Keyed by the field name the
+    // agent supplied so the backend can match results to its request, but read
+    // via the type-resolved field so wrong-type labels return the real value.
     const currentValue: Record<string, any> = {};
     for (const edit of edits) {
         try {
+            const resolvedField = resolveFieldForItemType(item.itemTypeID, edit.field) ?? edit.field;
             // includeBaseMapped=true so base fields resolve to type-specific fields
-            const value = item.getField(edit.field, false, true);
+            const value = item.getField(resolvedField, false, true);
             currentValue[edit.field] = value ? String(value) : null;
         } catch {
             currentValue[edit.field] = null;
@@ -558,12 +571,21 @@ async function executeEditMetadataAction(
         // Apply each field edit (in-memory only, not persisted until saveTx)
         for (const edit of edits) {
             try {
+                // Resolve to the field valid for this item type. The agent may
+                // supply a display label belonging to the wrong type (e.g.
+                // 'bookTitle' on a journalArticle); resolveFieldForItemType
+                // remaps it via the shared base field ('publicationTitle').
+                // setField() rejects wrong-type labels, so the resolved name
+                // must be used for getField/setField and the rollback snapshot.
+                const resolvedField = resolveFieldForItemType(item.itemTypeID, edit.field) ?? edit.field;
                 // includeBaseMapped=true so base fields (e.g. 'publicationTitle')
                 // resolve to the type-specific field (e.g. 'bookTitle' on bookSection)
-                const oldValue = item.getField(edit.field, false, true);
-                fieldSnapshots.push({ field: edit.field, originalValue: oldValue });
-                item.setField(edit.field, edit.new_value);
+                const oldValue = item.getField(resolvedField, false, true);
+                fieldSnapshots.push({ field: resolvedField, originalValue: oldValue });
+                item.setField(resolvedField, edit.new_value);
                 appliedEdits.push({
+                    // Report the field the agent supplied so the backend can
+                    // match applied edits to its request.
                     field: edit.field,
                     old_value: oldValue ? String(oldValue) : null,
                     new_value: edit.new_value,

@@ -163,7 +163,7 @@ const PlanCards: React.FC<{ plans: PlanInfo[], subscribe: (sku: string) => Promi
     );
 };
 
-const formatPlanName = (plan: string | undefined): string => {
+export const formatPlanName = (plan: string | undefined): string => {
     if (!plan) return '';
     const isAnnual = plan.includes('annual');
     const base = plan.replace('_annual', '').split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');

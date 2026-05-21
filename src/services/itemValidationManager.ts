@@ -405,6 +405,8 @@ class ItemValidationManager {
                         return { isValid: false, reason: 'PDF is password-protected' };
                     } else if (error.code === ExtractionErrorCode.INVALID_PDF) {
                         return { isValid: false, reason: 'PDF file is invalid or corrupted' };
+                    } else if (error.code === ExtractionErrorCode.EMPTY_DOCUMENT) {
+                        return { isValid: false, reason: 'PDF has no readable pages' };
                     } else if (error.code === ExtractionErrorCode.WASM_ERROR) {
                         return { isValid: false, reason: 'PDF crashes the local PDF parser' };
                     }

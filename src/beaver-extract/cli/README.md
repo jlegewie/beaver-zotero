@@ -314,6 +314,11 @@ npm run beaver-extract -- fixture evaluate paper__p14
 # re-running with no algorithm change writes nothing.
 npm run beaver-extract -- fixture update paper__p14
 
+# Migrate a legacy fixture into the current fixture schema by re-running
+# extraction from the shared PDF. Safe to re-run; unchanged schema-current
+# fixtures report wrote=false in JSON mode.
+npm run beaver-extract -- fixture migrate paper__p14
+
 # Replace config (page indices, settings, splitter). Use --update to
 # allow overwriting the stored fixture; capture-time flags become the
 # new stored config.
@@ -406,11 +411,12 @@ src/beaver-extract/
 │   │   ├── analyzeLayout.ts         # `analyze-layout`
 │   │   ├── rawDetailed.ts           # `raw-detailed`
 │   │   ├── render.ts                # `render`
-│   │   ├── fixture.ts               # `fixture {capture,evaluate,update,list}`
+│   │   ├── fixture.ts               # `fixture {capture,evaluate,update,migrate,list}`
 │   │   └── ocrFixture.ts            # `ocr-fixture {capture,evaluate,update,list}`
 │   └── fixture/                 # extract + OCR fixture file format (Node-only)
 │       ├── fixtureFile.ts           # atomic read/write, _shared/ dedup
 │       ├── fixtureSchema.ts         # validators with targeted errors
+│       ├── pageDiff.ts              # structural diff for extract fixture pages
 │       ├── fingerprints.ts          # wasm + git + version provenance
 │       ├── ocrFixtureFile.ts        # OCR fixture read/write + _shared/ link
 │       ├── ocrFixtureSchema.ts      # OCR fixture validators
@@ -427,7 +433,6 @@ src/beaver-extract/
 │   ├── overlayBuilders.ts
 │   ├── overlaySvg.ts
 │   ├── analyzeLayoutProjection.ts
-│   ├── extractionSnapshot.ts    # projection + structural diff for extract fixtures
 │   └── ocrSnapshot.ts           # projection + diff for OCR fixtures
 └── worker/             # MuPDF worker ops, reused as-is from Node
 ```
