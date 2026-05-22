@@ -6,6 +6,19 @@ import { MockDBConnection } from '../../mocks/mockDBConnection';
 import { createMockAttachment } from '../../helpers/factories';
 import type { BeaverExtractResult } from '../../../src/beaver-extract/schema/schema';
 
+const mockIOUtils = (globalThis as any).IOUtils as {
+    exists: ReturnType<typeof vi.fn>;
+    stat: ReturnType<typeof vi.fn>;
+    read: ReturnType<typeof vi.fn>;
+    write: ReturnType<typeof vi.fn>;
+    remove: ReturnType<typeof vi.fn>;
+    makeDirectory: ReturnType<typeof vi.fn>;
+};
+
+function createCacheAttachment(): Parameters<DocumentCache['putResult']>[0]['item'] {
+    return createMockAttachment({ id: 100, key: 'ABCD1234', libraryID: 1 }) as Parameters<DocumentCache['putResult']>[0]['item'];
+}
+
 const structuredResult: BeaverExtractResult = {
     schemaVersion: '4',
     mode: 'structured',
@@ -29,20 +42,20 @@ describe('DocumentCache payloads', () => {
     beforeEach(async () => {
         vi.clearAllMocks();
         files = new Map([[sourcePath, new Uint8Array([1, 2, 3])]]);
-        vi.mocked(IOUtils.exists).mockImplementation(async (path: string) => files.has(path) || path === sourcePath);
-        vi.mocked(IOUtils.stat).mockResolvedValue({ lastModified: 10, size: 3 } as any);
-        vi.mocked(IOUtils.write).mockImplementation(async (path: string, bytes: Uint8Array) => {
+        mockIOUtils.exists.mockImplementation(async (path: string) => files.has(path) || path === sourcePath);
+        mockIOUtils.stat.mockResolvedValue({ lastModified: 10, size: 3 } as any);
+        mockIOUtils.write.mockImplementation(async (path: string, bytes: Uint8Array) => {
             files.set(path, new Uint8Array(bytes));
         });
-        vi.mocked(IOUtils.read).mockImplementation(async (path: string) => {
+        mockIOUtils.read.mockImplementation(async (path: string) => {
             const bytes = files.get(path);
             if (!bytes) throw new Error(`missing ${path}`);
             return bytes;
         });
-        vi.mocked(IOUtils.remove).mockImplementation(async (path: string) => {
+        mockIOUtils.remove.mockImplementation(async (path: string) => {
             files.delete(path);
         });
-        vi.mocked((IOUtils as any).makeDirectory).mockResolvedValue(undefined);
+        mockIOUtils.makeDirectory.mockResolvedValue(undefined);
 
         conn = new MockDBConnection();
         db = new BeaverDB(conn);
@@ -56,7 +69,7 @@ describe('DocumentCache payloads', () => {
     });
 
     it('putResult then getResult returns the cached extraction result', async () => {
-        const item = createMockAttachment({ id: 100, key: 'ABCD1234', libraryID: 1 }) as Zotero.Item;
+        const item = createCacheAttachment();
         await cache.putResult({
             item,
             filePath: sourcePath,
@@ -80,7 +93,7 @@ describe('DocumentCache payloads', () => {
     });
 
     it('maxSourceSizeBytes rejects a valid hit without deleting it', async () => {
-        const item = createMockAttachment({ id: 100, key: 'ABCD1234', libraryID: 1 }) as Zotero.Item;
+        const item = createCacheAttachment();
         await cache.putResult({
             item,
             filePath: sourcePath,
@@ -106,7 +119,7 @@ describe('DocumentCache payloads', () => {
     });
 
     it('corrupt gzip returns null, deletes payload, and keeps metadata', async () => {
-        const item = createMockAttachment({ id: 100, key: 'ABCD1234', libraryID: 1 }) as Zotero.Item;
+        const item = createCacheAttachment();
         await cache.putResult({
             item,
             filePath: sourcePath,
@@ -135,7 +148,7 @@ describe('DocumentCache payloads', () => {
     });
 
     it('putErrorMetadata deletes existing payload rows and files', async () => {
-        const item = createMockAttachment({ id: 100, key: 'ABCD1234', libraryID: 1 }) as Zotero.Item;
+        const item = createCacheAttachment();
         await cache.putResult({
             item,
             filePath: sourcePath,
@@ -170,7 +183,7 @@ describe('DocumentCache payloads', () => {
     });
 
     it('does not delete the active payload when source changes but output bytes match', async () => {
-        const item = createMockAttachment({ id: 100, key: 'ABCD1234', libraryID: 1 }) as Zotero.Item;
+        const item = createCacheAttachment();
         await cache.putResult({
             item,
             filePath: sourcePath,
@@ -186,7 +199,7 @@ describe('DocumentCache payloads', () => {
             },
         });
         const firstPayload = await db.getDocumentCachePayload(1, 'ABCD1234', 'structured');
-        vi.mocked(IOUtils.stat).mockResolvedValue({ lastModified: 20, size: 3 } as any);
+        mockIOUtils.stat.mockResolvedValue({ lastModified: 20, size: 3 } as any);
 
         await cache.putResult({
             item,
