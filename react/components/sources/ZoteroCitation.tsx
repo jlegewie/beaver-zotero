@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import Tooltip from '../ui/Tooltip';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { citationDataByCitationKeyAtom, pageLabelsVersionAtom } from '../../atoms/citations';
+import { citationDataByCitationKeyAtom, pageLabelsByAttachmentIdAtom, type PageLabelsByAttachmentId } from '../../atoms/citations';
 import { getPref } from '../../../src/utils/prefs';
 import { createZoteroURI } from '../../utils/zoteroURI';
 import {
@@ -20,7 +20,8 @@ import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '
 import { useCitationMarker } from '../../hooks/useCitationMarker';
 import { ZoteroItemReference } from '../../types/zotero';
 import { revealSource } from '../../utils/sourceUtils';
-import { resolvePageLabel, translatePageNumberToLabel } from '../../utils/pageLabels';
+import { resolvePageLabelFromLabels, translatePageNumberToLabelFromLabels } from '../../utils/pageLabels';
+import { getBestPDFAttachment } from '../../../src/utils/zoteroItemHelpers';
 import {
     baseCitationKey,
     CitationRef,
@@ -139,6 +140,17 @@ export function readCitationProps(props: Record<string, unknown>): CitationProps
     return { ok: false, requestedKey, rawIdentity, reason: invalidReason || 'missing_identity', consecutive, adjacent };
 }
 
+function getPageLabelsForItem(
+    item: Zotero.Item,
+    labelsByAttachmentId: PageLabelsByAttachmentId,
+): Record<number, string> | null {
+    const attachment = item.isAttachment()
+        ? item
+        : getBestPDFAttachment(item);
+    if (!attachment) return null;
+    return labelsByAttachmentId[attachment.id] ?? null;
+}
+
 const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
     const { exportRendering = false } = props;
     const parsedProps = useMemo(() => readCitationProps(props as Record<string, unknown>), [props]);
@@ -147,8 +159,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
     const citationDataByCitationKey = useAtomValue(citationDataByCitationKeyAtom);
     const externalReferenceToZoteroItem = useAtomValue(externalReferenceItemMappingAtom);
     const externalReferenceMap = useAtomValue(externalReferenceMappingAtom);
-    // Re-render when preloaded page labels become available
-    const pageLabelsVersion = useAtomValue(pageLabelsVersionAtom);
+    const labelsByAttachmentId = useAtomValue(pageLabelsByAttachmentIdAtom);
     
     // For opening external reference details dialog
     const setIsDetailsVisible = useSetAtom(isExternalReferenceDetailsDialogVisibleAtom);
@@ -262,7 +273,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
 
     // Derive citation display data from metadata
     // When metadata is not available (streaming), values are empty and component shows inactive "?"
-    const { formatted_citation, citation, url, previewText, pages } = useMemo(() => {
+    const { formatted_citation, citation, url, previewText, rawPages } = useMemo(() => {
         // No metadata yet - return empty values (component will show inactive state)
         if (!citationMetadata) {
             return {
@@ -270,7 +281,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
                 citation: '',
                 url: '',
                 previewText: '',
-                pages: [] as number[]
+                rawPages: [] as number[]
             };
         }
 
@@ -330,39 +341,39 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
             citation,
             url: finalUrl,
             previewText,
-            pages
+            rawPages: pages
         };
     }, [citationMetadata, mappedZoteroItem]);
 
-    // Resolve page labels separately so a page-label preload (which only bumps
-    // pageLabelsVersion) doesn't force the citation/preview/HTML-stripping work
-    // above to recompute.
+    // Resolve page labels separately so page-label preload updates don't force
+    // the citation/preview/HTML-stripping work above to recompute.
     const isZoteroCitationMetadata = !!citationMetadata && isZoteroCitation(citationMetadata);
     const citationLibraryId = isZoteroCitationMetadata ? citationMetadata!.library_id : undefined;
     const citationZoteroKey = isZoteroCitationMetadata ? citationMetadata!.zotero_key : undefined;
-    const { pageLabels, pagesDisplay } = useMemo(() => {
+    const { pageLabels, pagesDisplay, pages } = useMemo(() => {
         // Default labels: raw page numbers as strings.
-        let pageLabels: string[] = pages.map((p) => String(p));
+        let pageLabels: string[] = rawPages.map((p) => String(p));
 
-        if (usePageLabels && pages.length > 0 && citationLibraryId && citationZoteroKey) {
+        if (usePageLabels && rawPages.length > 0 && citationLibraryId && citationZoteroKey) {
             try {
                 const item = Zotero.Items.getByLibraryAndKey(citationLibraryId, citationZoteroKey);
                 if (item && typeof item !== 'boolean') {
-                    pageLabels = pages.map((p) => resolvePageLabel(item.id, p));
+                    const loadedLabels = getPageLabelsForItem(item, labelsByAttachmentId);
+                    pageLabels = rawPages.map((p) => resolvePageLabelFromLabels(loadedLabels, p));
                 }
             } catch (e) {
                 logger(`ZoteroCitation: Page label resolution failed: ${e}`);
             }
         }
 
-        const pagesDisplay = pages.length === 0
+        const pagesDisplay = rawPages.length === 0
             ? ''
             : usePageLabels
-                ? formatPageRangesWithLabels(pages, pageLabels)
-                : formatNumberRanges(pages);
+                ? formatPageRangesWithLabels(rawPages, pageLabels)
+                : formatNumberRanges(rawPages);
 
-        return { pageLabels, pagesDisplay };
-    }, [pages, usePageLabels, citationLibraryId, citationZoteroKey, pageLabelsVersion]);
+        return { pageLabels, pagesDisplay, pages: rawPages };
+    }, [rawPages, usePageLabels, citationLibraryId, citationZoteroKey, labelsByAttachmentId, citationMetadata]);
 
 
     // Render as soon as we have an identifier; citationMetadata may arrive later.
@@ -564,9 +575,12 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
             const startPage = pages.length > 0 ? pages[0] : undefined;
             // Fallback: use page prop directly when metadata doesn't provide pages
             const requestedPage = requestedRef ? getPageLocator(requestedRef) : undefined;
+            const loadedLabels = getPageLabelsForItem(item, labelsByAttachmentId);
+            // Zotero note clicks use the CSL locator as a PDF page label.
+            // When labels are available, store the visible label for the physical page.
             const navLocator = startPage
-                ? resolvePageLabel(item.id, startPage)
-                : (requestedPage ? translatePageNumberToLabel(item.id, requestedPage) : undefined);
+                ? resolvePageLabelFromLabels(loadedLabels, startPage)
+                : (requestedPage ? translatePageNumberToLabelFromLabels(loadedLabels, requestedPage) : undefined);
             const citationObj = {
                 citationItems: [{
                     uris: [Zotero.URI.getItemURI(item.parentItem || item)],

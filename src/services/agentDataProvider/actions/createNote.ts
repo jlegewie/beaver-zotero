@@ -462,7 +462,7 @@ async function executeCreateNoteAction(
         const markdownContent = `<h1>${title}</h1>\n\n${content}`;
 
         // Preload page labels for any citation references in content
-        await ta.track('preload_page_labels_ms', () =>
+        const pageLabelsByAttachmentId = await ta.track('preload_page_labels_ms', () =>
             preloadPageLabelsForContent(markdownContent)
         );
 
@@ -471,7 +471,7 @@ async function executeCreateNoteAction(
         let htmlContent = renderToHTML(
             markdownContent.trim(),
             "markdown",
-            { citationDataMap, externalMapping, externalReferencesMap },
+            { citationDataMap, externalMapping, externalReferencesMap, pageLabelsByAttachmentId },
         );
         ta.record('render_html_ms', Date.now() - renderStart);
 

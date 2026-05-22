@@ -65,11 +65,12 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
 
     const handleSaveAsNote = async () => {
         const content = getThreadContent({ includeRunLinks: false, userMessageAsBlockquote: true });
-        await preloadPageLabelsForContent(content);
+        const pageLabelsByAttachmentId = await preloadPageLabelsForContent(content);
         let htmlContent = renderToHTML(preprocessNoteContent(content), "markdown", {
             citationDataMap,
             externalMapping: externalReferenceMapping,
-            externalReferencesMap
+            externalReferencesMap,
+            pageLabelsByAttachmentId
         });
         const context = getZoteroTargetContextSync();
         const threadId = store.get(currentThreadIdAtom);
@@ -108,11 +109,12 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
 
     const handleSaveAsChildNote = async () => {
         const content = getThreadContent({ includeRunLinks: false, userMessageAsBlockquote: true });
-        await preloadPageLabelsForContent(content);
+        const pageLabelsByAttachmentId = await preloadPageLabelsForContent(content);
         let htmlContent = renderToHTML(preprocessNoteContent(content), "markdown", {
             citationDataMap,
             externalMapping: externalReferenceMapping,
-            externalReferencesMap
+            externalReferencesMap,
+            pageLabelsByAttachmentId
         });
         const context = getZoteroTargetContextSync();
         if (!context.parentReference) return;
