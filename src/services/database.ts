@@ -2349,4 +2349,12 @@ export class BeaverDB {
         return rows[0]?.count ?? 0;
     }
 
+    /** Delete every document-cache metadata and payload row. */
+    public async deleteAllDocumentCache(): Promise<void> {
+        await this.conn.executeTransaction(async () => {
+            await this.conn.queryAsync(`DELETE FROM document_cache_payloads`);
+            await this.conn.queryAsync(`DELETE FROM document_cache_metadata`);
+        });
+    }
+
 }

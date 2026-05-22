@@ -351,7 +351,7 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
         }
     };
 
-    // Clear the attachment file cache (metadata + content files)
+    // Clear the attachment file cache and the document cache (metadata + files on disk)
     const handleClearAttachmentFileCache = async () => {
         console.log("[Attachment Cache Reset] Starting...");
         try {
@@ -383,6 +383,15 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
             cache.clearMemoryCache();
 
             console.log(`[Attachment Cache Reset] ✓ Done! Cleared ${allRecords.length} records`);
+
+            // Also clear the document cache (metadata + payload files on disk)
+            const documentCache = Zotero.Beaver?.documentCache;
+            if (documentCache) {
+                const { metadataRows, payloadRows } = await documentCache.clearAll();
+                console.log(`[Attachment Cache Reset] ✓ Document cache cleared: ${metadataRows} metadata rows, ${payloadRows} payload rows`);
+            } else {
+                console.warn("[Attachment Cache Reset] DocumentCache not available");
+            }
         } catch (error) {
             console.error("[Attachment Cache Reset] Failed:", error);
         }
@@ -800,7 +809,7 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
             disabled: false,
         },
         {
-            label: "Clear Attachment File Cache",
+            label: "Clear Attachment + Document Cache",
             onClick: handleClearAttachmentFileCache,
             icon: PdfIcon,
             disabled: false,

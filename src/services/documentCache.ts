@@ -433,6 +433,35 @@ export class DocumentCache {
         }
     }
 
+    /**
+     * Completely clear the document cache: delete every metadata row, every
+     * payload row, and every file stored on disk under the cache directory.
+     */
+    async clearAll(): Promise<{ metadataRows: number; payloadRows: number }> {
+        // Abort in-flight extractions and drop pending write locks so they
+        // cannot repopulate the cache after it has been wiped.
+        for (const entry of this.extractionLocks.values()) {
+            entry.controller.abort();
+        }
+        this.extractionLocks.clear();
+        this.writeLocks.clear();
+
+        const metadataRows = await this.db.getDocumentCacheMetadataCount();
+        const payloadRows = await this.db.getDocumentCachePayloadCount();
+
+        await this.db.deleteAllDocumentCache();
+
+        // Wipe every file on disk by removing all children of the cache dir.
+        if (this.payloadCacheDir) {
+            const children = await IOUtils.getChildren(this.payloadCacheDir).catch(() => []);
+            for (const child of children) {
+                await IOUtils.remove(child, { recursive: true } as any).catch(() => undefined);
+            }
+        }
+
+        return { metadataRows, payloadRows };
+    }
+
     /** Remove stale rows and orphan payload files. */
     async runStartupGC(): Promise<void> {
         try {
