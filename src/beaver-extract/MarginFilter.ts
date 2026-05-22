@@ -18,7 +18,7 @@ import type {
     MarginRemovalResult,
     TextStyle,
 } from "./types";
-import { pdfLog } from "./logging";
+import { pdfLog, isAnalyzerLoggingEnabled } from "./logging";
 import { StyleAnalyzer } from "./StyleAnalyzer";
 
 // ============================================================================
@@ -781,8 +781,7 @@ export class MarginFilter {
                         removalsByPage.get(el.pageIndex)!.add(normalized);
                     }
 
-                    // Log the page number sequence detection (development only)
-                    if (process.env.NODE_ENV === "development") {
+                    if (isAnalyzerLoggingEnabled()) {
                         pdfLog(`[MarginFilter] Detected page number sequence in ${position} zone: ${values.slice(0, 5).join(", ")}...`, 3);
                     }
                 }
@@ -900,11 +899,10 @@ export class MarginFilter {
     }
 
     /**
-     * Log what elements will be removed.
-     * Only logs in development mode.
+     * Log removal candidates when {@link ExtractionSettings.analyzerLogging} is enabled.
      */
     static logRemovalCandidates(result: MarginRemovalResult): void {
-        if (process.env.NODE_ENV !== "development") return;
+        if (!isAnalyzerLoggingEnabled()) return;
 
         if (result.candidates.length === 0) {
             pdfLog("[MarginFilter] No margin elements identified for removal", 3);

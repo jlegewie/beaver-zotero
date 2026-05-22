@@ -16,7 +16,7 @@ import type {
     StyleProfile,
 } from "./types";
 import { styleToKey } from "./types";
-import { pdfLog } from "./logging";
+import { pdfLog, isAnalyzerLoggingEnabled } from "./logging";
 
 /** Minimum characters in a span to include in analysis */
 const DEFAULT_MIN_CHARS = 4;
@@ -311,11 +311,10 @@ export class StyleAnalyzer {
     }
 
     /**
-     * Log style analysis for debugging.
-     * Only logs in development mode.
+     * Log style analysis when {@link ExtractionSettings.analyzerLogging} is enabled.
      */
     static logStyleProfile(profile: StyleProfile): void {
-        if (process.env.NODE_ENV !== "development") return;
+        if (!isAnalyzerLoggingEnabled()) return;
 
         pdfLog("[StyleAnalyzer] Style analysis:", 3);
         pdfLog(`  Primary body style: ${styleToKey(profile.primaryBodyStyle)}`, 3);

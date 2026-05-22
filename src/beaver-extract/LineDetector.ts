@@ -21,7 +21,7 @@
 import type { BoundingBox, RawPageData, RawBlock, RawLine } from "./types";
 import { bboxHeight, bboxWidth, mergeBoxes } from "./types";
 import type { Rect } from "./ColumnDetector";
-import { pdfLog } from "./logging";
+import { pdfLog, isAnalyzerLoggingEnabled } from "./logging";
 
 // ============================================================================
 // Types
@@ -563,11 +563,10 @@ export function detectLinesOnPage(
 }
 
 /**
- * Log line detection results for debugging.
- * Only logs in development mode.
+ * Log line detection results when {@link ExtractionSettings.analyzerLogging} is enabled.
  */
 export function logLineDetection(result: PageLineResult): void {
-    if (process.env.NODE_ENV !== "development") return;
+    if (!isAnalyzerLoggingEnabled()) return;
 
     pdfLog(
         `[LineDetector] Page ${result.pageIndex}: ${result.allLines.length} lines detected ` +

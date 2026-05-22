@@ -59,8 +59,7 @@ let _config: PDFConfig | null = null;
  * startup and again on window reload) without ill effect.
  *
  * Also installs the analyzer-module log sink (see `./logging.ts`) so
- * bare `pdfLog()` calls from ColumnDetector / MarginFilter / etc. land
- * in the host-configured destination.
+ * opt-in analyzer logs land in the host-configured destination.
  */
 export function configurePDF(cfg: PDFConfig): void {
     _config = cfg;

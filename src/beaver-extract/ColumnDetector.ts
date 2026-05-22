@@ -7,7 +7,7 @@
 
 import type { BoundingBox, RawPageData, RawBlock, RawLine, TextStyle } from "./types";
 import { bboxHeight, bboxWidth } from "./types";
-import { pdfLog } from "./logging";
+import { pdfLog, isAnalyzerLoggingEnabled } from "./logging";
 import { StyleAnalyzer } from "./StyleAnalyzer";
 
 // ============================================================================
@@ -74,7 +74,7 @@ export interface ColumnDetectionOptions {
         end: number;
         thickness: number;
     }>;
-    /** Enable debug logging for column detection */
+    /** Enable verbose column-detection phase logging (default false). */
     debug?: boolean;
 }
 
@@ -1747,13 +1747,13 @@ function findCleanCut(
 
 /**
  * Log column detection results for debugging.
- * Only logs in development mode.
+ * Only logs when {@link ExtractionSettings.analyzerLogging} is enabled.
  */
 export function logColumnDetection(
     pageIndex: number,
     result: ColumnDetectionResult
 ): void {
-    if (process.env.NODE_ENV !== "development") return;
+    if (!isAnalyzerLoggingEnabled()) return;
 
     pdfLog(
         `[ColumnDetector] Page ${pageIndex}: ${result.columnCount} column(s) detected` +

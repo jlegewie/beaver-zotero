@@ -1045,11 +1045,11 @@ function createWSCallbacks(set: Setter): WSCallbacks {
         },
 
         onPart: async (event: WSPartEvent) => {
-            logger(`WS onPart (${event.part.part_kind}):`, {
-                runId: event.run_id,
-                messageIndex: event.message_index,
-                part: event.part,
-            });
+            // logger(`WS onPart (${event.part.part_kind}):`, {
+            //     runId: event.run_id,
+            //     messageIndex: event.message_index,
+            //     part: event.part,
+            // });
             // Load item data for tool call
             if (event.part.part_kind === "tool-call") {
                 const itemReferences = extractZoteroReferencesFromToolCall(event.part);

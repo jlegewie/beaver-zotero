@@ -79,6 +79,12 @@ export interface ExtractionSettings {
      * use tinted display containers.
      */
     graphicsLayerMode?: GraphicsLayerMode;
+    /**
+     * Emit verbose analyzer-module log lines (ColumnDetector, StyleAnalyzer,
+     * MarginFilter, LineDetector, ParagraphDetector). Default false — even
+     * in dev builds. Prefer the CLI `trace` command for structured debugging.
+     */
+    analyzerLogging?: boolean;
 }
 
 /** Default extraction settings */
@@ -90,6 +96,7 @@ export const DEFAULT_EXTRACTION_SETTINGS: Required<ExtractionSettings> = {
     repeatThreshold: 3,
     detectPageSequences: true,
     graphicsLayerMode: "off",
+    analyzerLogging: false,
 };
 
 /**

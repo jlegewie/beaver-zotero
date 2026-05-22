@@ -633,7 +633,7 @@ reader.
 #### Issue: Wrong reading order
 
 **Cause**: Column detection failing  
-**Solution**: Check `logColumnDetection()` output; may need to adjust filtering
+**Solution**: Run `beaver-extract trace` or `overlay --level columns` on the page; enable `settings.analyzerLogging` for stderr summaries.
 
 #### Issue: Coordinates don't match annotations
 
