@@ -139,15 +139,13 @@ describe('handleZoteroAttachmentPageImagesRequest page labels', () => {
                 opts.cachedPageCount == null && opts.needs_ocr === undefined
                     ? null
                     : {
-                          is_encrypted: false,
-                          is_invalid: false,
-                          page_count: opts.cachedPageCount,
-                          page_labels: opts.cachedPageLabels ?? null,
-                          needs_ocr: opts.needs_ocr,
-                          has_text_layer: opts.has_text_layer,
+                          pageCount: opts.cachedPageCount,
+                          pageLabels: opts.cachedPageLabels ?? null,
+                          errorCode: opts.needs_ocr ? 'no_text_layer' : null,
                       },
             ),
-            setMetadata: vi.fn().mockResolvedValue(undefined),
+            putMetadata: vi.fn().mockResolvedValue(undefined),
+            putErrorMetadata: vi.fn().mockResolvedValue(undefined),
         };
 
         const resolvedPdfItem = {
@@ -166,7 +164,7 @@ describe('handleZoteroAttachmentPageImagesRequest page labels', () => {
         };
         (globalThis as any).Zotero.Beaver = {
             data: { env: 'test' },
-            attachmentFileCache: cache,
+            documentCache: cache,
         };
 
         vi.mocked(resolveToPdfAttachment).mockResolvedValue({
@@ -192,7 +190,7 @@ describe('handleZoteroAttachmentPageImagesRequest page labels', () => {
             attachment: { library_id: 1, zotero_key: 'ABCD1234' },
             pages: [1],
             skip_local_limits: true,
-            prefer_page_labels: false,
+            prefer_pageLabels: false,
         });
 
         expect(response.pages).toEqual([
@@ -225,7 +223,8 @@ describe('handleZoteroAttachmentPageImagesRequest page labels', () => {
             skip_local_limits: true,
         });
 
-        expect(cache.setMetadata).not.toHaveBeenCalled();
+        expect(cache.putMetadata).not.toHaveBeenCalled();
+        expect(cache.putErrorMetadata).not.toHaveBeenCalled();
     });
 
     it('does NOT seed cache from image render when no prior writer (regression)', async () => {
@@ -247,7 +246,8 @@ describe('handleZoteroAttachmentPageImagesRequest page labels', () => {
             skip_local_limits: true,
         });
 
-        expect(cache.setMetadata).not.toHaveBeenCalled();
+        expect(cache.putMetadata).not.toHaveBeenCalled();
+        expect(cache.putErrorMetadata).not.toHaveBeenCalled();
     });
 
     it('does NOT overwrite cache from image render when needs_ocr is unknown (null)', async () => {
@@ -268,7 +268,8 @@ describe('handleZoteroAttachmentPageImagesRequest page labels', () => {
             skip_local_limits: true,
         });
 
-        expect(cache.setMetadata).not.toHaveBeenCalled();
+        expect(cache.putMetadata).not.toHaveBeenCalled();
+        expect(cache.putErrorMetadata).not.toHaveBeenCalled();
     });
 
     it('passes pageIndices: undefined for all-pages requests', async () => {
@@ -306,6 +307,7 @@ describe('handleZoteroAttachmentPageImagesRequest page labels', () => {
             skip_local_limits: true,
         });
 
-        expect(cache.setMetadata).not.toHaveBeenCalled();
+        expect(cache.putMetadata).not.toHaveBeenCalled();
+        expect(cache.putErrorMetadata).not.toHaveBeenCalled();
     });
 });

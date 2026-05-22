@@ -291,7 +291,7 @@ beforeEach(() => {
             _editorInstances: [],
         },
         Beaver: {
-            attachmentFileCache: null,
+            documentCache: null,
         },
     };
 

@@ -177,19 +177,6 @@ export interface WSDataError {
     details?: string;
 }
 
-export interface WSPageContent {
-    /** 1-indexed physical page number */
-    page_number: number;
-    /**
-     * PDF page label for this physical page (e.g. "iv", "38", "A-3"),
-     * when the document declares one. Populated whenever labels exist,
-     * independent of whether prefer_page_labels was set on the request.
-     */
-    page_label?: string;
-    /** Text content of the page */
-    content: string;
-}
-
 export interface WSPageImage {
     /** 1-indexed physical page number */
     page_number: number;
@@ -203,38 +190,6 @@ export interface WSPageImage {
     width: number;
     /** Image height in pixels */
     height: number;
-}
-
-/** Request from backend to fetch attachment page content */
-export interface WSZoteroAttachmentPagesRequest extends WSBaseEvent {
-    event: 'zotero_attachment_pages_request';
-    request_id: string;
-    attachment: ZoteroItemReference;
-    /**
-     * Start page, inclusive. Defaults to 1. Accepts either a 1-based
-     * physical index (number) or a PDF page label string (e.g. "iv", "A-3").
-     * String values are resolved against page labels when prefer_page_labels
-     * is true; string values that parse as integers are also accepted when
-     * prefer_page_labels is false.
-     */
-    start_page?: number | string;
-    /** End page, inclusive. Same type semantics as start_page. */
-    end_page?: number | string;
-    /** Skip local file size and page count limits. Default: false */
-    skip_local_limits?: boolean;
-    /**
-     * When true, resolve start_page/end_page against PDF page labels first,
-     * falling back to 1-based document index when no label matches.
-     */
-    prefer_page_labels?: boolean;
-    /**
-     * Maximum number of pages to return in a single response. When set, the
-     * frontend clamps the resolved [startPage, endPage] range to at most
-     * max_pages.
-     */
-    max_pages?: number;
-    /** Frontend-side extraction deadline in seconds. */
-    timeout_seconds?: number;
 }
 
 /** Request from backend to fetch a whole-document Beaver Extract result */
@@ -559,8 +514,8 @@ export interface WSZoteroDataResponse {
     errors?: WSDataError[];
 }
 
-/** Error codes for attachment page extraction failures */
-export type AttachmentPagesErrorCode =
+/** Error codes for document extraction failures */
+export type ZoteroDocumentErrorCode =
     | 'invalid_format'      // Invalid library_id or zotero_key format
     | 'not_found'           // Attachment not found in Zotero
     | 'not_attachment'      // Item is not an attachment
@@ -577,29 +532,10 @@ export type AttachmentPagesErrorCode =
     | 'too_many_pages'      // PDF exceeds page count limit
     | 'page_out_of_range'   // Requested pages are out of range
     | 'download_failed'     // Remote file download failed
-    | 'invalid_page_value'  // Non-parseable string or unresolved label
     | 'timeout'             // Extraction timed out
-    | 'extraction_failed';  // General extraction failure
-
-export type ZoteroDocumentErrorCode =
-    | AttachmentPagesErrorCode
+    | 'extraction_failed'  // General extraction failure
     | 'schema_version_mismatch'
     | 'mode_mismatch';
-
-/** Response to zotero attachment pages request */
-export interface WSZoteroAttachmentPagesResponse {
-    type: 'zotero_attachment_pages';
-    request_id: string;
-    attachment: ZoteroItemReference;
-    /** Extracted page content (empty array if error) */
-    pages: WSPageContent[];
-    /** Total number of pages in the document */
-    total_pages: number | null;
-    /** Error message if extraction failed */
-    error?: string | null;
-    /** Error code for programmatic handling */
-    error_code?: AttachmentPagesErrorCode | null;
-}
 
 /** Response to whole-document extraction request */
 export interface WSZoteroDocumentResponse {
@@ -1186,7 +1122,6 @@ export type WSEvent =
     | WSRetryEvent
     | WSAgentActionsEvent
     | WSMissingZoteroDataEvent
-    | WSZoteroAttachmentPagesRequest
     | WSZoteroDocumentRequest
     | WSZoteroAttachmentPageImagesRequest
     | WSZoteroAttachmentSearchRequest

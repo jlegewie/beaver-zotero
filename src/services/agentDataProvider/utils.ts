@@ -9,9 +9,8 @@ import { isAttachmentOnServer, isAttachmentAvailableRemotely, getAttachmentDataI
 import { addPopupMessageAtom } from '../../../react/utils/popupMessageUtils';
 import { wasItemAddedBeforeLastSync } from '../../../react/utils/sourceUtils';
 import { BeaverExtractor, ExtractionError, ExtractionErrorCode } from '../../beaver-extract';
-import { EXTRACTION_VERSION, isRemoteFilePath, makeRemoteFilePath } from '../attachmentFileCache';
-import type { AttachmentFileCacheRecord } from '../attachmentFileCache';
-import type { DocumentPreflightMetadata } from '../documentCache';
+import { isRemoteFilePath, makeRemoteFilePath } from '../documentFileIdentity';
+import type { DocumentCacheMetadata, DocumentPreflightMetadata } from '../documentCache';
 import { DeferredToolPreference } from '../agentProtocol';
 import { deferredToolPreferencesAtom } from '../../../react/atoms/deferredToolPreferences';
 import { isSupportedItem } from '../../utils/sync';
@@ -376,17 +375,17 @@ async function checkAttachmentAvailability(
 /**
  * Build a FrontendFileStatus from a cached metadata record.
  */
-function fileStatusFromCache(record: AttachmentFileCacheRecord, isPrimary: boolean): FrontendFileStatus {
-    if (record.is_encrypted) {
-        return { is_primary: isPrimary, mime_type: record.content_type, page_count: null, status: "unavailable", status_code: FileStatusCode.PdfEncrypted };
+function fileStatusFromCache(record: DocumentCacheMetadata, isPrimary: boolean): FrontendFileStatus {
+    if (record.errorCode === 'encrypted') {
+        return { is_primary: isPrimary, mime_type: record.contentType, page_count: null, status: "unavailable", status_code: FileStatusCode.PdfEncrypted };
     }
-    if (record.is_invalid) {
-        return { is_primary: isPrimary, mime_type: record.content_type, page_count: null, status: "unavailable", status_code: FileStatusCode.PdfInvalid };
+    if (record.errorCode === 'invalid_pdf') {
+        return { is_primary: isPrimary, mime_type: record.contentType, page_count: null, status: "unavailable", status_code: FileStatusCode.PdfInvalid };
     }
-    if (record.needs_ocr) {
-        return { is_primary: isPrimary, mime_type: record.content_type, page_count: record.page_count, status: "unavailable", status_code: FileStatusCode.PdfNeedsOcr };
+    if (record.errorCode === 'no_text_layer') {
+        return { is_primary: isPrimary, mime_type: record.contentType, page_count: record.pageCount, status: "unavailable", status_code: FileStatusCode.PdfNeedsOcr };
     }
-    return { is_primary: isPrimary, mime_type: record.content_type, page_count: record.page_count, status: "available" };
+    return { is_primary: isPrimary, mime_type: record.contentType, page_count: record.pageCount, status: "available" };
 }
 
 /**
@@ -421,10 +420,6 @@ async function extractPageLabelsFromData(pdfData: Uint8Array): Promise<Record<nu
  * Check ordering matches today's handler ordering: encrypted → invalid →
  * needs_ocr → too_many_pages.
  *
- * Two cache shapes are accepted. The attachment file cache encodes its error
- * state as boolean columns (`is_encrypted` / `is_invalid` / `needs_ocr`). The
- * document cache encodes it as a single nullable `errorCode` — `null` marks a
- * successful extraction.
  */
 export type PreflightErrorCode = 'encrypted' | 'invalid_pdf' | 'no_text_layer' | 'too_many_pages';
 
@@ -445,37 +440,19 @@ export interface PreflightOptions {
 }
 
 export function preflightCachedPdfMeta(
-    cachedMeta: AttachmentFileCacheRecord | DocumentPreflightMetadata | null,
+    cachedMeta: DocumentPreflightMetadata | null,
     opts: PreflightOptions,
 ): PreflightFailure | null {
     if (!cachedMeta) return null;
 
-    const pageCount = 'page_count' in cachedMeta
-        ? cachedMeta.page_count ?? null
-        : cachedMeta.pageCount ?? null;
-
-    if ('errorCode' in cachedMeta) {
-        // Document cache: a non-null `errorCode` is the authoritative error.
-        if (cachedMeta.errorCode) {
-            if (cachedMeta.errorCode === 'no_text_layer') {
-                // Image rendering skips the OCR gate; pages and search apply it.
-                if (opts.checkOcr) {
-                    return { code: 'no_text_layer', pageCount };
-                }
-            } else {
-                return { code: cachedMeta.errorCode, pageCount };
+    const pageCount = cachedMeta.pageCount ?? null;
+    if (cachedMeta.errorCode) {
+        if (cachedMeta.errorCode === 'no_text_layer') {
+            if (opts.checkOcr) {
+                return { code: 'no_text_layer', pageCount };
             }
-        }
-    } else {
-        // Attachment file cache: error state encoded as boolean columns.
-        if (cachedMeta.is_encrypted) {
-            return { code: 'encrypted', pageCount };
-        }
-        if (cachedMeta.is_invalid) {
-            return { code: 'invalid_pdf', pageCount };
-        }
-        if (opts.checkOcr && cachedMeta.needs_ocr) {
-            return { code: 'no_text_layer', pageCount };
+        } else {
+            return { code: cachedMeta.errorCode, pageCount };
         }
     }
 
@@ -487,143 +464,6 @@ export function preflightCachedPdfMeta(
         };
     }
     return null;
-}
-
-/**
- * Persist metadata to the attachment file cache after extraction.
- * Best-effort: errors are caught internally and logged — they never
- * propagate.
- *
- * Returns `true` when the metadata write succeeded, `false` when the
- * write was skipped due to shutdown OR failed internally. Callers that
- * chain a follow-up cache write (e.g., `setContentPages`) MUST gate on
- * the boolean — a `false` result means metadata is not in a known-good
- * state and downstream cache writes should be skipped.
- *
- * Shutdown handling: re-checks `Zotero.__beaverShuttingDown` between the
- * `IOUtils.stat` await and `cache.setMetadata` to avoid racing the
- * Zotero teardown after a yielded I/O.
- */
-export async function persistMetadataToCache(
-    attachment: Zotero.Item,
-    filePath: string,
-    contentType: string,
-    fields: {
-        page_count: number | null;
-        page_labels: Record<number, string>;
-        has_text_layer: boolean | null;
-        needs_ocr: boolean | null;
-        is_encrypted: boolean;
-        is_invalid: boolean;
-    }
-): Promise<boolean> {
-    const cache = Zotero.Beaver?.attachmentFileCache;
-    if (!cache) return false;
-
-    if (Zotero.__beaverShuttingDown) {
-        logger(`persistMetadataToCache: skipping write for ${attachment.libraryID}/${attachment.key} — shutdown signalled on entry`, 3);
-        return false;
-    }
-
-    try {
-        let file_mtime_ms = 0;
-        let file_size_bytes = 0;
-        if (!isRemoteFilePath(filePath)) {
-            const stat = await IOUtils.stat(filePath);
-            file_mtime_ms = stat.lastModified ?? 0;
-            file_size_bytes = stat.size ?? 0;
-        }
-        // Re-check after the stat await — shutdown can race in during the
-        // I/O. Without this, an already-closing DB would receive the write.
-        if (Zotero.__beaverShuttingDown) {
-            logger(`persistMetadataToCache: skipping write for ${attachment.libraryID}/${attachment.key} — shutdown signalled during stat`, 3);
-            return false;
-        }
-        await cache.setMetadata({
-            item_id: attachment.id,
-            library_id: attachment.libraryID,
-            zotero_key: attachment.key,
-            file_path: filePath,
-            file_mtime_ms,
-            file_size_bytes,
-            content_type: contentType,
-            page_count: fields.page_count,
-            page_labels: fields.page_labels,
-            has_text_layer: fields.has_text_layer,
-            needs_ocr: fields.needs_ocr,
-            is_encrypted: fields.is_encrypted,
-            is_invalid: fields.is_invalid,
-            extraction_version: EXTRACTION_VERSION,
-        });
-        return true;
-    } catch (error) {
-        logger(`persistMetadataToCache: ${error}`, 1);
-        return false;
-    }
-}
-
-/**
- * Backfill metadata for known error states (encrypted, invalid, no text layer).
- * Uses full upsert since error states are authoritative.
- *
- * For NO_TEXT_LAYER errors, the ExtractionError carries pageLabels and pageCount
- * extracted before the OCR check (the PDF is open and page tree is readable
- * regardless of text layer status). Encrypted/invalid PDFs throw before any
- * data is accessible, so those always write page_labels: {}.
- *
- * Errors are caught internally and logged — they never propagate.
- */
-export async function backfillMetadataForError(
-    item: Zotero.Item,
-    filePath: string,
-    error: ExtractionError,
-    fallbackPageCount: number | null,
-    callerTag: string,
-): Promise<void> {
-    const cache = Zotero.Beaver?.attachmentFileCache;
-    if (!cache) return;
-
-    const errorCode = error.code;
-
-    // Resolve page_labels:
-    //  - ENCRYPTED/INVALID_PDF: can't parse PDF → definitively empty
-    //  - NO_TEXT_LAYER: use labels extracted before the OCR check (fall back to {} if absent)
-    let pageLabels: Record<number, string>;
-    if (errorCode === ExtractionErrorCode.NO_TEXT_LAYER) {
-        pageLabels = error.pageLabels && Object.keys(error.pageLabels).length > 0
-            ? error.pageLabels
-            : {};
-    } else {
-        pageLabels = {};
-    }
-
-    try {
-        let file_mtime_ms = 0;
-        let file_size_bytes = 0;
-        if (!isRemoteFilePath(filePath)) {
-            const stat = await IOUtils.stat(filePath);
-            file_mtime_ms = stat.lastModified ?? 0;
-            file_size_bytes = stat.size ?? 0;
-        }
-        await cache.setMetadata({
-            item_id: item.id,
-            library_id: item.libraryID,
-            zotero_key: item.key,
-            file_path: filePath,
-            file_mtime_ms,
-            file_size_bytes,
-            content_type: item.attachmentContentType || 'application/pdf',
-            page_count: error.pageCount ?? fallbackPageCount,
-            page_labels: pageLabels,
-            has_text_layer: errorCode === ExtractionErrorCode.NO_TEXT_LAYER ? false : null,
-            needs_ocr: errorCode === ExtractionErrorCode.NO_TEXT_LAYER,
-            is_encrypted: errorCode === ExtractionErrorCode.ENCRYPTED,
-            is_invalid: errorCode === ExtractionErrorCode.INVALID_PDF,
-            extraction_version: EXTRACTION_VERSION,
-        });
-    } catch (cacheError) {
-        logger(`${callerTag}: cache backfill error: ${cacheError}`, 1);
-    }
 }
 
 /**
@@ -648,10 +488,13 @@ export async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary
     const { filePath, contentType } = availabilityCheck;
 
     // Cache-first: all writers produce complete records, so any hit is usable.
-    const cache = Zotero.Beaver?.attachmentFileCache;
+    const cache = Zotero.Beaver?.documentCache;
     if (cache) {
         try {
-            const cached = await cache.getMetadata(attachment.id, filePath);
+            const cached = await cache.getMetadata({
+                libraryId: attachment.libraryID,
+                zoteroKey: attachment.key,
+            }, filePath);
             if (cached) {
                 return fileStatusFromCache(cached, isPrimary);
             }
@@ -663,9 +506,11 @@ export async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary
     // Cache miss: run full extraction
     try {
         const isRemote = isRemoteFilePath(filePath);
+        let sourceSizeBytes = 0;
         let pdfData: Uint8Array;
         try {
             pdfData = await loadPdfData(attachment, filePath, isRemote);
+            sourceSizeBytes = isRemote ? pdfData.byteLength : 0;
         } catch (error) {
             if (!isRemote) throw error; // local I/O error — let outer catch deal with it
             logger(`getAttachmentFileStatus: remote download failed: ${error}`, 1);
@@ -686,7 +531,7 @@ export async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary
         } catch (error) {
             if (error instanceof ExtractionError) {
                 if (error.code === ExtractionErrorCode.ENCRYPTED) {
-                    await persistMetadataToCache(attachment, filePath, contentType, { page_count: null, page_labels: {}, has_text_layer: null, needs_ocr: false, is_encrypted: true, is_invalid: false });
+                    await cache?.putErrorMetadata({ item: attachment, filePath, sourceSizeBytes, contentType, errorCode: 'encrypted', pageCount: null, pageLabels: null });
                     return {
                         is_primary: isPrimary,
                         mime_type: contentType,
@@ -695,7 +540,7 @@ export async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary
                         status_code: FileStatusCode.PdfEncrypted,
                     };
                 } else if (error.code === ExtractionErrorCode.INVALID_PDF) {
-                    await persistMetadataToCache(attachment, filePath, contentType, { page_count: null, page_labels: {}, has_text_layer: null, needs_ocr: false, is_encrypted: false, is_invalid: true });
+                    await cache?.putErrorMetadata({ item: attachment, filePath, sourceSizeBytes, contentType, errorCode: 'invalid_pdf', pageCount: null, pageLabels: null });
                     return {
                         is_primary: isPrimary,
                         mime_type: contentType,
@@ -747,7 +592,7 @@ export async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary
         ]);
 
         if (ocrAnalysis.needsOCR) {
-            await persistMetadataToCache(attachment, filePath, contentType, { page_count: pageCount, page_labels: pageLabels, has_text_layer: false, needs_ocr: true, is_encrypted: false, is_invalid: false });
+            await cache?.putErrorMetadata({ item: attachment, filePath, sourceSizeBytes, contentType, errorCode: 'no_text_layer', pageCount, pageLabels });
             return {
                 is_primary: isPrimary,
                 mime_type: contentType,
@@ -758,7 +603,13 @@ export async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary
         }
 
         // All checks passed - file is fully accessible
-        await persistMetadataToCache(attachment, filePath, contentType, { page_count: pageCount, page_labels: pageLabels, has_text_layer: true, needs_ocr: false, is_encrypted: false, is_invalid: false });
+        await cache?.putMetadata({
+            item: attachment,
+            filePath,
+            sourceSizeBytes,
+            contentType,
+            metadata: { pageCount, pageLabels, errorCode: null },
+        });
         return {
             is_primary: isPrimary,
             mime_type: contentType,
@@ -822,10 +673,13 @@ export async function getAttachmentFileStatusLightweight(
     const fileExistsLocally = !isRemoteFilePath(filePath);
 
     // Cache-first: all writers produce complete records, so any hit is usable.
-    const cache = Zotero.Beaver?.attachmentFileCache;
+    const cache = Zotero.Beaver?.documentCache;
     if (cache) {
         try {
-            const cached = await cache.getMetadata(attachment.id, filePath);
+            const cached = await cache.getMetadata({
+                libraryId: attachment.libraryID,
+                zoteroKey: attachment.key,
+            }, filePath);
             if (cached) {
                 return { fileStatus: fileStatusFromCache(cached, isPrimary), fileExistsLocally };
             }

@@ -27,21 +27,15 @@ export interface PingResponse {
 }
 
 export interface CacheMetadataRecord {
-    item_id: number;
-    library_id: number;
-    zotero_key: string;
-    file_path: string;
-    file_mtime_ms: number;
-    file_size_bytes: number;
-    content_type: string;
-    page_count: number | null;
-    page_labels: string | null;
-    has_text_layer: boolean | number;
-    needs_ocr: boolean | number;
-    is_encrypted: boolean | number;
-    is_invalid: boolean | number;
-    extraction_version: string;
-    cached_at: string;
+    itemId: number;
+    libraryId: number;
+    zoteroKey: string;
+    filePath: string;
+    sourceSizeBytes: number;
+    contentType: string;
+    pageCount: number | null;
+    pageLabels: Record<string, string> | null;
+    errorCode: 'encrypted' | 'invalid_pdf' | 'no_text_layer' | null;
 }
 
 export interface ResolveItemResponse {
@@ -400,24 +394,6 @@ export async function invalidateCache(
 ): Promise<void> {
     const res = await post<{ ok?: boolean; error?: string }>(
         '/beaver/test/cache-invalidate',
-        { library_id: libraryId, zotero_key: key },
-    );
-    if (res.error) throw new Error(res.error);
-}
-
-export async function clearMemoryCache(): Promise<void> {
-    const res = await post<{ ok?: boolean; error?: string }>(
-        '/beaver/test/cache-clear-memory',
-    );
-    if (res.error) throw new Error(res.error);
-}
-
-export async function deleteContentCache(
-    libraryId: number,
-    key: string,
-): Promise<void> {
-    const res = await post<{ ok?: boolean; error?: string }>(
-        '/beaver/test/cache-delete-content',
         { library_id: libraryId, zotero_key: key },
     );
     if (res.error) throw new Error(res.error);

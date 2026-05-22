@@ -9,7 +9,7 @@
  */
 
 import { BeaverExtractor } from '../../beaver-extract';
-import type { AttachmentFileCacheRecord } from '../database';
+import type { DocumentCacheMetadata, PageLabels } from '../documentCache';
 import { logger } from '../../utils/logger';
 
 /**
@@ -57,7 +57,7 @@ export class InvalidPageValueError extends Error {
  */
 export function resolvePageValue(
     value: number | string,
-    labels: Record<number, string> | null,
+    labels: PageLabels | null,
     preferPageLabels: boolean,
 ): number {
     const matchLabel = (target: string): number | null => {
@@ -105,7 +105,7 @@ export function resolvePageValue(
 }
 
 /** Collect up to MAX_LABEL_SAMPLES distinct label values from the labels map. */
-function sampleLabels(labels: Record<number, string> | null): string[] | undefined {
+function sampleLabels(labels: PageLabels | null): string[] | undefined {
     if (!labels) return undefined;
     const seen = new Set<string>();
     const result: string[] = [];
@@ -121,7 +121,7 @@ function sampleLabels(labels: Record<number, string> | null): string[] | undefin
 /** Build a helpful error message for string inputs that didn't match any label. */
 function buildLabelMissMessage(
     value: string,
-    labels: Record<number, string> | null,
+    labels: PageLabels | null,
 ): string {
     if (!labels) {
         return `Invalid page value '${value}': no page labels are available for this document, and '${value}' is not a valid positive integer.`;
@@ -142,7 +142,7 @@ export interface PageLabelLoadResult {
      * Page labels map (0-indexed keys → label strings), or null when
      * unavailable.
      */
-    labels: Record<number, string> | null;
+    labels: PageLabels | null;
     /** Total page count, or null when unavailable. */
     pageCount: number | null;
     /**
@@ -155,7 +155,7 @@ export interface PageLabelLoadResult {
  * Ensure page labels are available for label-aware resolution.
  *
  * Resolution order:
- *   1. Cached metadata (any non-null `page_labels`, including `{}` which means
+ *   1. Cached metadata (any non-null `pageLabels`, including `{}` which means
  *      "already checked, no custom labels")
  *   2. Eager metadata-only load via `BeaverExtractor.getMetadata` —
  *      opens the PDF once, reads the catalog, closes. No text extraction.
@@ -166,19 +166,19 @@ export interface PageLabelLoadResult {
  */
 export async function ensurePageLabelsForResolution(
     filePath: string,
-    cachedMeta: AttachmentFileCacheRecord | null,
+    cachedMeta: DocumentCacheMetadata | null,
     extractor: BeaverExtractor,
     signal?: AbortSignal,
 ): Promise<PageLabelLoadResult> {
-    // 1. Cache hit — page_labels === null means "not yet checked";
+    // 1. Cache hit — pageLabels === null means "not yet checked";
     //    {} means "checked, no custom labels".
-    if (cachedMeta && cachedMeta.page_labels !== null) {
-        const normalised = Object.keys(cachedMeta.page_labels).length > 0
-            ? cachedMeta.page_labels
+    if (cachedMeta && cachedMeta.pageLabels !== null) {
+        const normalised = Object.keys(cachedMeta.pageLabels).length > 0
+            ? cachedMeta.pageLabels
             : null;
         return {
             labels: normalised,
-            pageCount: cachedMeta.page_count,
+            pageCount: cachedMeta.pageCount,
             pdfData: null,
         };
     }

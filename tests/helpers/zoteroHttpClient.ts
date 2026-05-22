@@ -36,14 +36,6 @@ export async function post<T>(path: string, body: unknown, opts?: RequestOptions
 // Attachment handlers
 // -------------------------------------------------------------------------
 
-export interface PagesResponse {
-    attachment: { library_id: number; zotero_key: string };
-    pages: Array<{ page_number: number; content: string }>;
-    total_pages: number | null;
-    error?: string | null;
-    error_code?: string | null;
-}
-
 export interface PageImagesResponse {
     attachment: { library_id: number; zotero_key: string };
     pages: Array<{
@@ -79,24 +71,6 @@ export interface SearchResponse {
     }>;
     error?: string | null;
     error_code?: string | null;
-}
-
-export function fetchPages(
-    attachment: AttachmentFixture,
-    extra?: {
-        start_page?: number;
-        end_page?: number;
-        skip_local_limits?: boolean;
-    },
-    opts?: RequestOptions,
-): Promise<PagesResponse> {
-    return post('/beaver/attachment/pages', {
-        attachment: {
-            library_id: attachment.library_id,
-            zotero_key: attachment.zotero_key,
-        },
-        ...extra,
-    }, opts);
 }
 
 export function fetchPageImages(

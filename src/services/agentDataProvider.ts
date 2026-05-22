@@ -9,7 +9,6 @@
 
 
 export { handleZoteroDataRequest } from './agentDataProvider/handleZoteroDataRequest';
-export { handleZoteroAttachmentPagesRequest } from './agentDataProvider/handleZoteroAttachmentPagesRequest';
 export { handleZoteroDocumentRequest } from './agentDataProvider/handleZoteroDocumentRequest';
 export { handleZoteroAttachmentPageImagesRequest } from './agentDataProvider/handleZoteroAttachmentPageImagesRequest';
 export { handleZoteroAttachmentSearchRequest } from './agentDataProvider/handleZoteroAttachmentSearchRequest';

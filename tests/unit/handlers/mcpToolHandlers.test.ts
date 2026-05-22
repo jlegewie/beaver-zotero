@@ -16,7 +16,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 const mockHandleItemSearchByTopicRequest = vi.fn();
 const mockHandleItemSearchByMetadataRequest = vi.fn();
-const mockHandleZoteroAttachmentPagesRequest = vi.fn();
+const mockHandleZoteroDocumentRequest = vi.fn();
 const mockHandleGetMetadataRequest = vi.fn();
 const mockHandleListCollectionsRequest = vi.fn();
 const mockHandleListTagsRequest = vi.fn();
@@ -25,7 +25,7 @@ const mockHandleListItemsRequest = vi.fn();
 vi.mock('../../../src/services/agentDataProvider', () => ({
     handleItemSearchByTopicRequest: (...args: any[]) => mockHandleItemSearchByTopicRequest(...args),
     handleItemSearchByMetadataRequest: (...args: any[]) => mockHandleItemSearchByMetadataRequest(...args),
-    handleZoteroAttachmentPagesRequest: (...args: any[]) => mockHandleZoteroAttachmentPagesRequest(...args),
+    handleZoteroDocumentRequest: (...args: any[]) => mockHandleZoteroDocumentRequest(...args),
     handleGetMetadataRequest: (...args: any[]) => mockHandleGetMetadataRequest(...args),
     handleListCollectionsRequest: (...args: any[]) => mockHandleListCollectionsRequest(...args),
     handleListTagsRequest: (...args: any[]) => mockHandleListTagsRequest(...args),
@@ -774,17 +774,31 @@ describe('MCP Tool Handlers (via useMcpServer)', () => {
     // =====================================================================
 
     describe('read_attachment', () => {
+        const mockDocumentResponse = (
+            pages: Array<{ index: number; markdown: string }>,
+            pageCount: number | null,
+            error?: string,
+        ) => ({
+            type: 'zotero_document',
+            result: error ? null : {
+                mode: 'markdown',
+                document: {
+                    pageCount,
+                    pages,
+                },
+            },
+            error,
+        });
+
         it('parses attachment_id correctly', async () => {
-            mockHandleZoteroAttachmentPagesRequest.mockResolvedValue({
-                type: 'zotero_attachment_pages',
-                pages: [{ page_number: 1, content: 'Hello' }],
-                total_pages: 10,
-            });
+            mockHandleZoteroDocumentRequest.mockResolvedValue(mockDocumentResponse([{ index: 0, markdown: 'Hello' }], 10));
 
             await callTool(endpoint, 'read_attachment', { attachment_id: '1-ABC12345' });
 
-            const req = mockHandleZoteroAttachmentPagesRequest.mock.calls[0][0];
+            const req = mockHandleZoteroDocumentRequest.mock.calls[0][0];
             expect(req.attachment).toEqual({ library_id: 1, zotero_key: 'ABC12345' });
+            expect(req.event).toBe('zotero_document_request');
+            expect(req.mode).toBe('markdown');
         });
 
         it('returns error for invalid attachment_id format (no dash)', async () => {
@@ -809,80 +823,62 @@ describe('MCP Tool Handlers (via useMcpServer)', () => {
         });
 
         it('defaults to page 1 with 30-page range', async () => {
-            mockHandleZoteroAttachmentPagesRequest.mockResolvedValue({
-                type: 'zotero_attachment_pages',
-                pages: [{ page_number: 1, content: 'page 1' }],
-                total_pages: 5,
-            });
+            mockHandleZoteroDocumentRequest.mockResolvedValue(mockDocumentResponse([{ index: 0, markdown: 'page 1' }], 5));
 
             await callTool(endpoint, 'read_attachment', { attachment_id: '1-KEY' });
 
-            const req = mockHandleZoteroAttachmentPagesRequest.mock.calls[0][0];
-            expect(req.start_page).toBe(1);
-            expect(req.end_page).toBe(30);
+            const text = (await callTool(endpoint, 'read_attachment', { attachment_id: '1-KEY' })).content[0].text;
+            expect(text).toContain('Showing pages 1-1');
         });
 
         it('respects start_page argument', async () => {
-            mockHandleZoteroAttachmentPagesRequest.mockResolvedValue({
-                type: 'zotero_attachment_pages',
-                pages: [{ page_number: 5, content: 'page 5' }],
-                total_pages: 50,
-            });
+            mockHandleZoteroDocumentRequest.mockResolvedValue(mockDocumentResponse([{ index: 4, markdown: 'page 5' }], 50));
 
-            await callTool(endpoint, 'read_attachment', {
+            const result = await callTool(endpoint, 'read_attachment', {
                 attachment_id: '1-KEY',
                 start_page: 5,
             });
 
-            const req = mockHandleZoteroAttachmentPagesRequest.mock.calls[0][0];
-            expect(req.start_page).toBe(5);
-            expect(req.end_page).toBe(34); // 5 + 30 - 1
+            expect(result.content[0].text).toContain('Showing pages 5-5');
         });
 
         it('respects end_page argument', async () => {
-            mockHandleZoteroAttachmentPagesRequest.mockResolvedValue({
-                type: 'zotero_attachment_pages',
-                pages: [{ page_number: 1, content: 'p1' }],
-                total_pages: 10,
-            });
+            mockHandleZoteroDocumentRequest.mockResolvedValue(mockDocumentResponse([
+                { index: 0, markdown: 'p1' },
+                { index: 5, markdown: 'p6' },
+            ], 10));
 
-            await callTool(endpoint, 'read_attachment', {
+            const result = await callTool(endpoint, 'read_attachment', {
                 attachment_id: '1-KEY',
                 start_page: 1,
                 end_page: 5,
             });
 
-            const req = mockHandleZoteroAttachmentPagesRequest.mock.calls[0][0];
-            expect(req.start_page).toBe(1);
-            expect(req.end_page).toBe(5);
+            expect(result.content[0].text).toContain('<page1>');
+            expect(result.content[0].text).not.toContain('<page6>');
         });
 
         it('caps page range to 30 pages max', async () => {
-            mockHandleZoteroAttachmentPagesRequest.mockResolvedValue({
-                type: 'zotero_attachment_pages',
-                pages: [],
-                total_pages: 100,
-            });
+            mockHandleZoteroDocumentRequest.mockResolvedValue(mockDocumentResponse([
+                { index: 38, markdown: 'page 39' },
+                { index: 39, markdown: 'page 40' },
+            ], 100));
 
-            await callTool(endpoint, 'read_attachment', {
+            const result = await callTool(endpoint, 'read_attachment', {
                 attachment_id: '1-KEY',
                 start_page: 10,
                 end_page: 100,
             });
 
-            const req = mockHandleZoteroAttachmentPagesRequest.mock.calls[0][0];
-            expect(req.end_page).toBe(39); // min(100, 10+30-1) = 39
+            expect(result.content[0].text).toContain('<page39>');
+            expect(result.content[0].text).not.toContain('<page40>');
         });
 
         it('returns formatted page text with XML tags', async () => {
-            mockHandleZoteroAttachmentPagesRequest.mockResolvedValue({
-                type: 'zotero_attachment_pages',
-                pages: [
-                    { page_number: 1, content: 'Introduction text' },
-                    { page_number: 2, content: 'Methods section' },
-                ],
-                total_pages: 20,
-            });
+            mockHandleZoteroDocumentRequest.mockResolvedValue(mockDocumentResponse([
+                { index: 0, markdown: 'Introduction text' },
+                { index: 1, markdown: 'Methods section' },
+            ], 20));
 
             const result = await callTool(endpoint, 'read_attachment', { attachment_id: '1-KEY' });
             const text = result.content[0].text;
@@ -899,11 +895,7 @@ describe('MCP Tool Handlers (via useMcpServer)', () => {
         });
 
         it('returns error on backend failure', async () => {
-            mockHandleZoteroAttachmentPagesRequest.mockResolvedValue({
-                type: 'zotero_attachment_pages',
-                pages: [],
-                error: 'File not found',
-            });
+            mockHandleZoteroDocumentRequest.mockResolvedValue(mockDocumentResponse([], null, 'File not found'));
 
             const result = await callTool(endpoint, 'read_attachment', { attachment_id: '1-KEY' });
 
@@ -912,11 +904,7 @@ describe('MCP Tool Handlers (via useMcpServer)', () => {
         });
 
         it('handles unknown total_pages', async () => {
-            mockHandleZoteroAttachmentPagesRequest.mockResolvedValue({
-                type: 'zotero_attachment_pages',
-                pages: [{ page_number: 1, content: 'text' }],
-                total_pages: null,
-            });
+            mockHandleZoteroDocumentRequest.mockResolvedValue(mockDocumentResponse([{ index: 0, markdown: 'text' }], null));
 
             const result = await callTool(endpoint, 'read_attachment', { attachment_id: '1-KEY' });
             const text = result.content[0].text;
@@ -925,16 +913,36 @@ describe('MCP Tool Handlers (via useMcpServer)', () => {
         });
 
         it('handles library_id with multiple digits', async () => {
-            mockHandleZoteroAttachmentPagesRequest.mockResolvedValue({
-                type: 'zotero_attachment_pages',
-                pages: [],
-                total_pages: 0,
-            });
+            mockHandleZoteroDocumentRequest.mockResolvedValue(mockDocumentResponse([{ index: 0, markdown: 'text' }], 1));
 
             await callTool(endpoint, 'read_attachment', { attachment_id: '12345-LONGKEY' });
 
-            const req = mockHandleZoteroAttachmentPagesRequest.mock.calls[0][0];
+            const req = mockHandleZoteroDocumentRequest.mock.calls[0][0];
             expect(req.attachment).toEqual({ library_id: 12345, zotero_key: 'LONGKEY' });
+        });
+
+        it('rejects start_page beyond the document page count', async () => {
+            mockHandleZoteroDocumentRequest.mockResolvedValue(mockDocumentResponse([{ index: 0, markdown: 'text' }], 10));
+
+            const result = await callTool(endpoint, 'read_attachment', {
+                attachment_id: '1-KEY',
+                start_page: 100,
+            });
+
+            expect(result.isError).toBe(true);
+            expect(result.content[0].text).toContain('out of range');
+        });
+
+        it('rejects an end_page before start_page', async () => {
+            const result = await callTool(endpoint, 'read_attachment', {
+                attachment_id: '1-KEY',
+                start_page: 10,
+                end_page: 5,
+            });
+
+            expect(result.isError).toBe(true);
+            expect(result.content[0].text).toContain('end_page must be greater than or equal to start_page');
+            expect(mockHandleZoteroDocumentRequest).not.toHaveBeenCalled();
         });
     });
 

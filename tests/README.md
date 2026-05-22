@@ -228,8 +228,6 @@ Integration tests exercise full pipelines. Same prerequisites as live tests plus
 | `POST /beaver/test/ping` | Verify Zotero + cache + DB are available |
 | `POST /beaver/test/cache-metadata` | Get raw cache metadata |
 | `POST /beaver/test/cache-invalidate` | Invalidate cache for a specific item |
-| `POST /beaver/test/cache-clear-memory` | Clear in-memory LRU cache |
-| `POST /beaver/test/cache-delete-content` | Delete content file only (keep metadata) |
 | `POST /beaver/test/resolve-item` | Resolve library_id + zotero_key to item_id |
 | `POST /beaver/test/note-create` | Create a Zotero note (optionally wrapped with schema-version) — used by `editNote.live.test.ts` |
 | `POST /beaver/test/note-delete` | Erase a note by library_id + zotero_key |
@@ -268,7 +266,7 @@ The reader's dev menu has a "Copy Fixture Capture Command" item that builds the 
 
 - **File placement**: One file per logical module/concern, in the appropriate subdirectory.
 - **File naming**: `<module>.test.ts` (unit), `<name>.live.test.ts` (live), `<name>.integration.test.ts` (integration).
-- **Test names**: Describe behavior — `"returns null when content file does not exist"`, not `"test getContentRange"`.
+- **Test names**: Describe behavior — `"returns null when content file does not exist"`, not `"test cache miss"`.
 - **Shared factories**: Use `helpers/factories.ts` for mock Zotero items. File-local helpers (`makeRecord`, etc.) go at the top of the test file.
 - **Cleanup**: Close DB connections in `afterEach`. Call `vi.clearAllMocks()` in `beforeEach`.
 - **Fixture updates**: Fixtures in `helpers/fixtures.ts` reference real items by `library_id + zotero_key`. Update keys to match your library.

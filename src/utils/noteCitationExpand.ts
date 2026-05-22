@@ -30,6 +30,7 @@ import {
     normalizeCitationTag,
     parseRawCitationAttributes,
 } from '../../react/utils/citationGrammar';
+import type { PageLabels } from '../services/documentCache';
 
 // =============================================================================
 // Page Label Resolution
@@ -48,7 +49,7 @@ import {
  * not read mutable cache state directly.
  */
 export function translatePageNumberToLabel(
-    pageLabels: Record<number, string> | null | undefined,
+    pageLabels: PageLabels | null | undefined,
     pageStr: string,
 ): string {
     if (!pageLabels || Object.keys(pageLabels).length === 0) return pageStr;
@@ -77,7 +78,7 @@ export function translatePageNumberToLabel(
  */
 export async function preloadPageLabelsForNewCitations(str: string): Promise<PageLabelsByAttachmentId> {
     const labelsByAttachmentId: PageLabelsByAttachmentId = {};
-    const cache = Zotero.Beaver?.attachmentFileCache;
+    const cache = Zotero.Beaver?.documentCache;
     if (!cache) return labelsByAttachmentId;
 
     const seen = new Set<number>();
@@ -101,14 +102,20 @@ export async function preloadPageLabelsForNewCitations(str: string): Promise<Pag
         try {
             const filePath = await attachmentItem.getFilePathAsync();
             if (!filePath) continue;
-            let record = await cache.getMetadata(attachmentItem.id, filePath);
+            let record = await cache.getMetadata({
+                libraryId: attachmentItem.libraryID,
+                zoteroKey: attachmentItem.key,
+            }, filePath);
             if (!record) {
                 // Cache miss — run a full extraction, then read labels back.
                 await getAttachmentFileStatus(attachmentItem, false);
-                record = await cache.getMetadata(attachmentItem.id, filePath);
+                record = await cache.getMetadata({
+                    libraryId: attachmentItem.libraryID,
+                    zoteroKey: attachmentItem.key,
+                }, filePath);
             }
-            if (record?.page_labels && Object.keys(record.page_labels).length > 0) {
-                labelsByAttachmentId[attachmentItem.id] = { ...record.page_labels };
+            if (record?.pageLabels && Object.keys(record.pageLabels).length > 0) {
+                labelsByAttachmentId[attachmentItem.id] = { ...record.pageLabels };
             }
         } catch {
             // Skip items that can't be resolved

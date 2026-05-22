@@ -17,8 +17,9 @@
  * so no rendering path reads mutable cache state synchronously.
  */
 
-import { makeRemoteFilePath } from '../../src/services/attachmentFileCache';
+import { makeRemoteFilePath } from '../../src/services/documentFileIdentity';
 import { getAttachmentFileStatus, isRemoteAccessAvailable } from '../../src/services/agentDataProvider/utils';
+import type { PageLabels } from '../../src/services/documentCache';
 import type { CitationMetadata } from '../types/citations';
 import { getBestPDFAttachmentAsync } from '../../src/utils/zoteroItemHelpers';
 import { normalizeCitationTag, parseRawCitationAttributes } from './citationGrammar';
@@ -31,14 +32,14 @@ type PreloadFilePath =
     | { item: Zotero.Item; filePath: string; isRemoteOnly: false }
     | { item: Zotero.Item; filePath: string; isRemoteOnly: true };
 
-function hasPageLabels(labels: Record<number, string> | null | undefined): labels is Record<number, string> {
+function hasPageLabels(labels: PageLabels | null | undefined): labels is PageLabels {
     return !!labels && Object.keys(labels).length > 0;
 }
 
 function addPageLabels(
     target: PageLabelsByAttachmentId,
     itemId: number,
-    labels: Record<number, string> | null | undefined,
+    labels: PageLabels | null | undefined,
 ): void {
     if (!hasPageLabels(labels)) return;
     target[itemId] = { ...labels };
@@ -69,7 +70,7 @@ async function getPreloadFilePath(item: Zotero.Item): Promise<PreloadFilePath | 
  * @returns The page label string, or the page number as string
  */
 export function resolvePageLabelFromLabels(
-    pageLabels: Record<number, string> | null | undefined,
+    pageLabels: PageLabels | null | undefined,
     pageNumber: number,
 ): string {
     if (!hasPageLabels(pageLabels)) return String(pageNumber);
@@ -85,7 +86,7 @@ export function resolvePageLabelFromLabels(
  * such as "§3.2", "fn. 5", or "xii" are returned unchanged.
  */
 export function translatePageNumberToLabelFromLabels(
-    pageLabels: Record<number, string> | null | undefined,
+    pageLabels: PageLabels | null | undefined,
     pageStr: string,
 ): string {
     if (!hasPageLabels(pageLabels)) return pageStr;
@@ -110,7 +111,7 @@ export function translatePageNumberToLabelFromLabels(
  *    On remote-only cache miss, skip rather than downloading during render.
  */
 export async function preloadPageLabelsForContent(content: string): Promise<PageLabelsByAttachmentId> {
-    const cache = Zotero.Beaver?.attachmentFileCache;
+    const cache = Zotero.Beaver?.documentCache;
     if (!cache) return {};
 
     const seen = new Set<number>();
@@ -133,9 +134,12 @@ export async function preloadPageLabelsForContent(content: string): Promise<Page
             seen.add(preloadItem.id);
 
             // Cache hit → page_labels already in memory cache
-            const record = await cache.getMetadata(preloadItem.id, preloadPath.filePath);
+            const record = await cache.getMetadata({
+                libraryId: preloadItem.libraryID,
+                zoteroKey: preloadItem.key,
+            }, preloadPath.filePath);
             if (record) {
-                addPageLabels(labelsByAttachmentId, preloadItem.id, record.page_labels);
+                addPageLabels(labelsByAttachmentId, preloadItem.id, record.pageLabels);
                 continue;
             }
 
@@ -145,8 +149,11 @@ export async function preloadPageLabelsForContent(content: string): Promise<Page
 
             // Local cache miss → run full extraction, then read labels back.
             await getAttachmentFileStatus(preloadItem, false);
-            const refreshed = await cache.getMetadata(preloadItem.id, preloadPath.filePath);
-            addPageLabels(labelsByAttachmentId, preloadItem.id, refreshed?.page_labels);
+            const refreshed = await cache.getMetadata({
+                libraryId: preloadItem.libraryID,
+                zoteroKey: preloadItem.key,
+            }, preloadPath.filePath);
+            addPageLabels(labelsByAttachmentId, preloadItem.id, refreshed?.pageLabels);
         } catch {
             // Skip items that can't be resolved
         }
@@ -167,7 +174,7 @@ export async function preloadPageLabelsForContent(content: string): Promise<Page
 export async function preloadPageLabelsForCitations(
     citations: ReadonlyArray<Pick<CitationMetadata, 'library_id' | 'zotero_key' | 'pages' | 'parts'>>
 ): Promise<PageLabelsByAttachmentId> {
-    const cache = Zotero.Beaver?.attachmentFileCache;
+    const cache = Zotero.Beaver?.documentCache;
     if (!cache) return {};
 
     const seen = new Set<number>();
@@ -192,17 +199,23 @@ export async function preloadPageLabelsForCitations(
             if (seen.has(preloadItem.id)) continue;
             seen.add(preloadItem.id);
 
-            const record = await cache.getMetadata(preloadItem.id, preloadPath.filePath);
+            const record = await cache.getMetadata({
+                libraryId: preloadItem.libraryID,
+                zoteroKey: preloadItem.key,
+            }, preloadPath.filePath);
             if (record) {
-                addPageLabels(labelsByAttachmentId, preloadItem.id, record.page_labels);
+                addPageLabels(labelsByAttachmentId, preloadItem.id, record.pageLabels);
                 continue;
             }
 
             if (preloadPath.isRemoteOnly) continue;
 
             await getAttachmentFileStatus(preloadItem, false);
-            const refreshed = await cache.getMetadata(preloadItem.id, preloadPath.filePath);
-            addPageLabels(labelsByAttachmentId, preloadItem.id, refreshed?.page_labels);
+            const refreshed = await cache.getMetadata({
+                libraryId: preloadItem.libraryID,
+                zoteroKey: preloadItem.key,
+            }, preloadPath.filePath);
+            addPageLabels(labelsByAttachmentId, preloadItem.id, refreshed?.pageLabels);
         } catch {
             // Skip items that can't be resolved
         }

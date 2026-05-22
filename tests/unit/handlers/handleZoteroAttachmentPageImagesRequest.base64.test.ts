@@ -92,10 +92,8 @@ function nodeBase64(bytes: Uint8Array): string {
 function setupZoteroEnv(pageCount: number) {
     const cache = {
         getMetadata: vi.fn().mockResolvedValue({
-            is_encrypted: false,
-            is_invalid: false,
-            page_count: pageCount,
-            page_labels: null,
+            pageCount: pageCount,
+            pageLabels: null,
         }),
     };
 
@@ -116,7 +114,7 @@ function setupZoteroEnv(pageCount: number) {
     };
     (globalThis as any).Zotero.Beaver = {
         data: { env: 'test' },
-        attachmentFileCache: cache,
+        documentCache: cache,
     };
 
     vi.mocked(resolveToPdfAttachment).mockResolvedValue({

@@ -16,7 +16,7 @@ import { MCPService } from '../../src/services/mcpService';
 import {
     handleItemSearchByTopicRequest,
     handleItemSearchByMetadataRequest,
-    handleZoteroAttachmentPagesRequest,
+    handleZoteroDocumentRequest,
     handleGetMetadataRequest,
     handleListCollectionsRequest,
     handleListTagsRequest,
@@ -32,8 +32,8 @@ import type {
     WSItemSearchByTopicResponse,
     WSItemSearchByMetadataRequest,
     WSItemSearchByMetadataResponse,
-    WSZoteroAttachmentPagesRequest,
-    WSZoteroAttachmentPagesResponse,
+    WSZoteroDocumentRequest,
+    WSZoteroDocumentResponse,
     WSGetMetadataRequest,
     WSGetMetadataResponse,
     WSListCollectionsRequest,
@@ -651,31 +651,57 @@ async function handleReadAttachment(args: any): Promise<any> {
     }
 
     const startPage = args.start_page ?? 1;
+    if (!Number.isInteger(startPage) || startPage < 1) {
+        return mcpError('start_page must be a positive integer.');
+    }
+
+    const requestedEndPage = args.end_page ?? (startPage + MAX_PAGES - 1);
+    if (!Number.isInteger(requestedEndPage) || requestedEndPage < 1) {
+        return mcpError('end_page must be a positive integer.');
+    }
+    if (requestedEndPage < startPage) {
+        return mcpError('end_page must be greater than or equal to start_page.');
+    }
+
     const endPage = args.end_page != null
-        ? Math.min(args.end_page, startPage + MAX_PAGES - 1)
+        ? Math.min(requestedEndPage, startPage + MAX_PAGES - 1)
         : startPage + MAX_PAGES - 1;
 
-    const wsRequest: WSZoteroAttachmentPagesRequest = {
-        event: 'zotero_attachment_pages_request',
+    const wsRequest: WSZoteroDocumentRequest = {
+        event: 'zotero_document_request',
         request_id: generateRequestId(),
         attachment: { library_id: parsed.libraryId, zotero_key: parsed.key },
-        start_page: startPage,
-        end_page: endPage,
+        mode: 'markdown',
     };
 
-    const response: WSZoteroAttachmentPagesResponse = await handleZoteroAttachmentPagesRequest(wsRequest);
+    const response: WSZoteroDocumentResponse = await handleZoteroDocumentRequest(wsRequest);
 
-    if (response.error) {
-        return mcpError(response.error);
+    if (response.error || !response.result) {
+        return mcpError(response.error ?? 'Failed to read attachment');
+    }
+    if (response.result.mode !== 'markdown') {
+        return mcpError('Attachment read returned an unexpected document mode.');
+    }
+
+    const totalPages = response.result.document.pageCount;
+    if (Number.isInteger(totalPages) && totalPages >= 0 && startPage > totalPages) {
+        return mcpError(`Requested start_page ${startPage} is out of range; attachment has ${totalPages} pages.`);
+    }
+
+    const requestedPages = response.result.document.pages.filter(
+        (page) => page.index + 1 >= startPage && page.index + 1 <= endPage,
+    );
+    if (requestedPages.length === 0) {
+        return mcpError(`Requested page window ${startPage}-${endPage} is out of range or contains no extractable pages.`);
     }
 
     // Build plain text response with <pageN> tags
-    const actualEnd = response.pages.length > 0
-        ? response.pages[response.pages.length - 1].page_number
+    const actualEnd = requestedPages.length > 0
+        ? requestedPages[requestedPages.length - 1].index + 1
         : startPage;
-    const header = `Attachment: ${args.attachment_id} | Total pages: ${response.total_pages ?? 'unknown'} | Showing pages ${startPage}-${actualEnd}`;
-    const pageTexts = response.pages.map(
-        (p) => `<page${p.page_number}>\n${p.content}\n</page${p.page_number}>`,
+    const header = `Attachment: ${args.attachment_id} | Total pages: ${response.result.document.pageCount ?? 'unknown'} | Showing pages ${startPage}-${actualEnd}`;
+    const pageTexts = requestedPages.map(
+        (p) => `<page${p.index + 1}>\n${p.markdown}\n</page${p.index + 1}>`,
     );
 
     return [header, '', ...pageTexts].join('\n');
