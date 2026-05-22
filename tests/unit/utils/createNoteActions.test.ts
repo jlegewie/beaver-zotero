@@ -28,7 +28,7 @@ vi.mock('../../../react/utils/citationRenderers', () => ({
 }));
 
 vi.mock('../../../react/utils/pageLabels', () => ({
-    preloadPageLabelsForContent: vi.fn().mockResolvedValue(undefined),
+    preloadPageLabelsForContent: vi.fn().mockResolvedValue({}),
 }));
 
 vi.mock('../../../react/utils/noteActions', () => ({

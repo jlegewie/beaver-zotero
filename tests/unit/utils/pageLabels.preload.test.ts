@@ -61,8 +61,9 @@ describe('preloadPageLabelsForContent', () => {
     it('no-ops when cache is unavailable', async () => {
         (globalThis as any).Zotero.Beaver = undefined;
 
-        await preloadPageLabelsForContent('<citation att_id="1-ABCD1234" />');
+        const labels = await preloadPageLabelsForContent('<citation att_id="1-ABCD1234" />');
 
+        expect(labels).toEqual({});
         expect(mockGetAttachmentFileStatus).not.toHaveBeenCalled();
     });
 
@@ -77,8 +78,9 @@ describe('preloadPageLabelsForContent', () => {
         };
         (globalThis as any).Zotero.Beaver = { attachmentFileCache: cache };
 
-        await preloadPageLabelsForContent('<citation att_id="1-ABCD1234" />');
+        const labels = await preloadPageLabelsForContent('<citation att_id="1-ABCD1234" />');
 
+        expect(labels).toEqual({ 42: { 0: 'i' } });
         expect(cache.getMetadata).toHaveBeenCalledWith(42, '/storage/ABCD1234/test.pdf');
         expect(mockGetAttachmentFileStatus).not.toHaveBeenCalled();
     });
@@ -87,6 +89,7 @@ describe('preloadPageLabelsForContent', () => {
         const item = makeItem(43, 'EFGH5678');
         const cache = {
             getMetadata: vi.fn().mockResolvedValue(null),
+            getPageLabelsSync: vi.fn(() => ({ 0: 'ii' })),
         };
 
         (globalThis as any).Zotero.Items = {
@@ -94,9 +97,10 @@ describe('preloadPageLabelsForContent', () => {
         };
         (globalThis as any).Zotero.Beaver = { attachmentFileCache: cache };
 
-        await preloadPageLabelsForContent('<citation att_id="1-EFGH5678" />');
+        const labels = await preloadPageLabelsForContent('<citation att_id="1-EFGH5678" />');
 
         expect(mockGetAttachmentFileStatus).toHaveBeenCalledWith(item, false);
+        expect(labels).toEqual({ 43: { 0: 'ii' } });
     });
 
     it('skips items without file path', async () => {
@@ -112,8 +116,9 @@ describe('preloadPageLabelsForContent', () => {
         };
         (globalThis as any).Zotero.Beaver = { attachmentFileCache: cache };
 
-        await preloadPageLabelsForContent('<citation att_id="1-IJKL9012" />');
+        const labels = await preloadPageLabelsForContent('<citation att_id="1-IJKL9012" />');
 
+        expect(labels).toEqual({});
         expect(cache.getMetadata).not.toHaveBeenCalled();
         expect(mockGetAttachmentFileStatus).not.toHaveBeenCalled();
     });
@@ -130,8 +135,9 @@ describe('preloadPageLabelsForContent', () => {
         };
         (globalThis as any).Zotero.Beaver = { attachmentFileCache: cache };
 
-        await preloadPageLabelsForContent('<citation att_id="1-REMOTE01" />');
+        const labels = await preloadPageLabelsForContent('<citation att_id="1-REMOTE01" />');
 
+        expect(labels).toEqual({ 48: { 0: 'i' } });
         expect(cache.getMetadata).toHaveBeenCalledWith(48, 'remote:h:syncedhash');
         expect(mockGetAttachmentFileStatus).not.toHaveBeenCalled();
     });
@@ -141,6 +147,7 @@ describe('preloadPageLabelsForContent', () => {
         const item = makeRemoteItem(49, 'REMOTE02');
         const cache = {
             getMetadata: vi.fn().mockResolvedValue(null),
+            getPageLabelsSync: vi.fn(() => ({ 0: '1' })),
         };
 
         (globalThis as any).Zotero.Items = {
@@ -148,8 +155,9 @@ describe('preloadPageLabelsForContent', () => {
         };
         (globalThis as any).Zotero.Beaver = { attachmentFileCache: cache };
 
-        await preloadPageLabelsForContent('<citation att_id="1-REMOTE02" />');
+        const labels = await preloadPageLabelsForContent('<citation att_id="1-REMOTE02" />');
 
+        expect(labels).toEqual({});
         expect(cache.getMetadata).toHaveBeenCalledWith(49, 'remote:h:syncedhash');
         expect(mockGetAttachmentFileStatus).not.toHaveBeenCalled();
     });
@@ -168,8 +176,9 @@ describe('preloadPageLabelsForContent', () => {
         };
         (globalThis as any).Zotero.Beaver = { attachmentFileCache: cache };
 
-        await preloadPageLabelsForContent('<citation att_id="1-PARENT01" />');
+        const labels = await preloadPageLabelsForContent('<citation att_id="1-PARENT01" />');
 
+        expect(labels).toEqual({});
         expect(parent.getFilePathAsync).not.toHaveBeenCalled();
         expect(cache.getMetadata).not.toHaveBeenCalled();
         expect(mockGetAttachmentFileStatus).not.toHaveBeenCalled();
@@ -184,16 +193,20 @@ describe('preloadPageLabelsForContent', () => {
         const attachment = makeItem(77, 'ATTACH01');
         const cache = {
             getMetadata: vi.fn().mockResolvedValue(null),
+            getPageLabelsSync: vi.fn(() => ({ 2: '3' })),
         };
 
         (globalThis as any).Zotero.Items = {
             getByLibraryAndKey: vi.fn(() => parent),
             get: vi.fn((itemID: number) => itemID === 77 ? attachment : false),
+            getAsync: vi.fn(async (itemIDs: number[]) => itemIDs.map((id) => id === 77 ? attachment : false)),
+            loadDataTypes: vi.fn().mockResolvedValue(undefined),
         };
         (globalThis as any).Zotero.Beaver = { attachmentFileCache: cache };
 
-        await preloadPageLabelsForContent('<citation id="1-PARENT01" loc="p3" />');
+        const labels = await preloadPageLabelsForContent('<citation id="1-PARENT01" loc="p3" />');
 
+        expect(labels).toEqual({ 77: { 2: '3' } });
         expect(cache.getMetadata).toHaveBeenCalledWith(77, '/storage/ATTACH01/test.pdf');
         expect(mockGetAttachmentFileStatus).toHaveBeenCalledWith(attachment, false);
         expect(parent.getFilePathAsync).not.toHaveBeenCalled();
@@ -203,6 +216,7 @@ describe('preloadPageLabelsForContent', () => {
         const item = makeItem(45, 'MNOP3456');
         const cache = {
             getMetadata: vi.fn().mockResolvedValue(null),
+            getPageLabelsSync: vi.fn(() => ({ 0: '1' })),
         };
 
         (globalThis as any).Zotero.Items = {
@@ -210,12 +224,13 @@ describe('preloadPageLabelsForContent', () => {
         };
         (globalThis as any).Zotero.Beaver = { attachmentFileCache: cache };
 
-        await preloadPageLabelsForContent(
+        const labels = await preloadPageLabelsForContent(
             '<citation att_id="1-MNOP3456" /><citation att_id="1-MNOP3456" />'
         );
 
         // Only called once despite two citations referencing the same item
         expect(mockGetAttachmentFileStatus).toHaveBeenCalledTimes(1);
+        expect(labels).toEqual({ 45: { 0: '1' } });
     });
 
     it('continues after individual item failure', async () => {
@@ -223,6 +238,7 @@ describe('preloadPageLabelsForContent', () => {
         const item2 = makeItem(47, 'UVWX1234');
         const cache = {
             getMetadata: vi.fn().mockResolvedValue(null),
+            getPageLabelsSync: vi.fn((itemId: number) => itemId === 47 ? { 0: '1' } : null),
         };
 
         (globalThis as any).Zotero.Items = {
@@ -239,12 +255,13 @@ describe('preloadPageLabelsForContent', () => {
             .mockRejectedValueOnce(new Error('DB error'))
             .mockResolvedValueOnce(null);
 
-        await preloadPageLabelsForContent(
+        const labels = await preloadPageLabelsForContent(
             '<citation att_id="1-QRST7890" /><citation att_id="1-UVWX1234" />'
         );
 
         // Second item still processed despite first failing
         expect(mockGetAttachmentFileStatus).toHaveBeenCalledWith(item2, false);
+        expect(labels).toEqual({ 47: { 0: '1' } });
     });
 });
 
@@ -266,16 +283,16 @@ describe('preloadPageLabelsForCitations', () => {
         };
         (globalThis as any).Zotero.Beaver = { attachmentFileCache: cache };
 
-        const loaded = await preloadPageLabelsForCitations([
+        const labels = await preloadPageLabelsForCitations([
             { library_id: 1, zotero_key: 'REMOTE03', pages: [1], parts: [] },
         ]);
 
         expect(cache.getMetadata).toHaveBeenCalledWith(50, 'remote:h:syncedhash');
         expect(mockGetAttachmentFileStatus).not.toHaveBeenCalled();
-        expect(loaded).toBe(true);
+        expect(labels).toEqual({ 50: { 0: 'i' } });
     });
 
-    it('returns false when nothing was loaded (all remote-only cache misses)', async () => {
+    it('returns empty labels when nothing was loaded (all remote-only cache misses)', async () => {
         mockIsRemoteAccessAvailable.mockReturnValue(true);
         const item = makeRemoteItem(51, 'REMOTE04');
         const cache = {
@@ -287,14 +304,14 @@ describe('preloadPageLabelsForCitations', () => {
         };
         (globalThis as any).Zotero.Beaver = { attachmentFileCache: cache };
 
-        const loaded = await preloadPageLabelsForCitations([
+        const labels = await preloadPageLabelsForCitations([
             { library_id: 1, zotero_key: 'REMOTE04', pages: [1], parts: [] },
         ]);
 
-        expect(loaded).toBe(false);
+        expect(labels).toEqual({});
     });
 
-    it('returns false when all citations are non-attachment parent items', async () => {
+    it('returns empty labels when all citations are non-attachment parent items', async () => {
         const parent = makeParentItem(52, 'PARENT02');
         const cache = {
             getMetadata: vi.fn(),
@@ -305,19 +322,20 @@ describe('preloadPageLabelsForCitations', () => {
         };
         (globalThis as any).Zotero.Beaver = { attachmentFileCache: cache };
 
-        const loaded = await preloadPageLabelsForCitations([
+        const labels = await preloadPageLabelsForCitations([
             { library_id: 1, zotero_key: 'PARENT02', pages: [1], parts: [] },
         ]);
 
         expect(parent.getFilePathAsync).not.toHaveBeenCalled();
         expect(cache.getMetadata).not.toHaveBeenCalled();
-        expect(loaded).toBe(false);
+        expect(labels).toEqual({});
     });
 
-    it('returns true after running extraction on a local cache miss', async () => {
+    it('returns labels after running extraction on a local cache miss', async () => {
         const item = makeItem(53, 'LOCAL01');
         const cache = {
             getMetadata: vi.fn().mockResolvedValue(null),
+            getPageLabelsSync: vi.fn(() => ({ 0: 'i' })),
         };
 
         (globalThis as any).Zotero.Items = {
@@ -325,12 +343,12 @@ describe('preloadPageLabelsForCitations', () => {
         };
         (globalThis as any).Zotero.Beaver = { attachmentFileCache: cache };
 
-        const loaded = await preloadPageLabelsForCitations([
+        const labels = await preloadPageLabelsForCitations([
             { library_id: 1, zotero_key: 'LOCAL01', pages: [1], parts: [] },
         ]);
 
         expect(mockGetAttachmentFileStatus).toHaveBeenCalledWith(item, false);
-        expect(loaded).toBe(true);
+        expect(labels).toEqual({ 53: { 0: 'i' } });
     });
 
     it('preloads parent-item citation metadata against the selected PDF attachment', async () => {
@@ -342,19 +360,22 @@ describe('preloadPageLabelsForCitations', () => {
         const attachment = makeItem(78, 'ATTACH02');
         const cache = {
             getMetadata: vi.fn().mockResolvedValue(null),
+            getPageLabelsSync: vi.fn(() => ({ 2: '3' })),
         };
 
         (globalThis as any).Zotero.Items = {
             getByLibraryAndKey: vi.fn(() => parent),
             get: vi.fn((itemID: number) => itemID === 78 ? attachment : false),
+            getAsync: vi.fn(async (itemIDs: number[]) => itemIDs.map((id) => id === 78 ? attachment : false)),
+            loadDataTypes: vi.fn().mockResolvedValue(undefined),
         };
         (globalThis as any).Zotero.Beaver = { attachmentFileCache: cache };
 
-        const loaded = await preloadPageLabelsForCitations([
+        const labels = await preloadPageLabelsForCitations([
             { library_id: 1, zotero_key: 'PARENT03', pages: [3], parts: [] },
         ]);
 
-        expect(loaded).toBe(true);
+        expect(labels).toEqual({ 78: { 2: '3' } });
         expect(cache.getMetadata).toHaveBeenCalledWith(78, '/storage/ATTACH02/test.pdf');
         expect(mockGetAttachmentFileStatus).toHaveBeenCalledWith(attachment, false);
         expect(parent.getFilePathAsync).not.toHaveBeenCalled();

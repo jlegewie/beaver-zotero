@@ -19,7 +19,7 @@ import {
     getOrAssignCitationMarkerAtom,
     updateCitationDataAtom,
 } from '../../../react/atoms/citations';
-import type { CitationData } from '../../../react/types/citations';
+import { getCitationPages, type CitationData } from '../../../react/types/citations';
 
 function citation(overrides: Partial<CitationData>): CitationData {
     return {
@@ -166,5 +166,24 @@ describe('updateCitationDataAtom', () => {
             'zotero:1-PARENT': '1',
             'zotero:1-ATTACH': '1',
         });
+    });
+});
+
+describe('getCitationPages', () => {
+    it('normalizes runtime string pages before navigation uses them', () => {
+        const data = citation({
+            parts: [
+                {
+                    part_id: 'p1',
+                    locations: [
+                        { page_idx: '2' as unknown as number },
+                        { page_idx: 'bad' as unknown as number },
+                    ],
+                },
+            ],
+            pages: ['5', 3, 'bad'] as unknown as number[],
+        });
+
+        expect(getCitationPages(data)).toEqual([3, 5]);
     });
 });

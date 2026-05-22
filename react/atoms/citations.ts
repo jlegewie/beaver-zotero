@@ -107,27 +107,47 @@ export const aliasCitationMarkerKeysAtom = atom(
 );
 
 /**
- * Reset citation markers. Called when creating a new thread or loading an existing one.
+ * PDF page labels keyed by Zotero attachment item ID, then 0-based page index.
+ */
+export type PageLabelsByAttachmentId = Record<number, Record<number, string>>;
+
+export const pageLabelsByAttachmentIdAtom = atom<PageLabelsByAttachmentId>({});
+
+/**
+ * Reset citation markers and thread-scoped page-label render state. Called when
+ * creating a new thread or loading an existing one.
  */
 export const resetCitationMarkersAtom = atom(
     null,
     (_get, set) => {
         set(citationKeyToMarkerAtom, {});
+        set(pageLabelsByAttachmentIdAtom, {});
     }
 );
 
-/**
- * Monotonic counter incremented after page labels for citations have been
- * preloaded into the attachment file cache. Citation components subscribe to
- * this atom so they re-render once labels become available — the cache itself
- * is mutable and doesn't drive React updates on its own.
- */
-export const pageLabelsVersionAtom = atom(0);
-
-export const bumpPageLabelsVersionAtom = atom(
+export const mergePageLabelsByAttachmentIdAtom = atom(
     null,
-    (get, set) => {
-        set(pageLabelsVersionAtom, get(pageLabelsVersionAtom) + 1);
+    (get, set, labelsByAttachmentId: PageLabelsByAttachmentId) => {
+        const entries = Object.entries(labelsByAttachmentId).filter(([, labels]) => (
+            labels && Object.keys(labels).length > 0
+        ));
+        if (entries.length === 0) return;
+
+        const current = get(pageLabelsByAttachmentIdAtom);
+        const next: PageLabelsByAttachmentId = { ...current };
+        let changed = false;
+
+        for (const [attachmentId, labels] of entries) {
+            const id = Number(attachmentId);
+            const existing = current[id];
+            if (existing && JSON.stringify(existing) === JSON.stringify(labels)) continue;
+            next[id] = { ...labels };
+            changed = true;
+        }
+
+        if (changed) {
+            set(pageLabelsByAttachmentIdAtom, next);
+        }
     }
 );
 
