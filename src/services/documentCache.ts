@@ -377,10 +377,11 @@ export class DocumentCache {
             let removedPayloads = 0;
             let removedFiles = 0;
             const metadataRows = await this.db.getAllDocumentCacheMetadata();
+            const missingOrTrashed = await this.getMissingOrTrashedKeys(metadataRows);
             for (const metadata of metadataRows) {
                 let stale = metadata.metadataFormatVersion !== DOCUMENT_METADATA_FORMAT_VERSION
                     || metadata.extractionSchemaVersion !== SCHEMA_VERSION
-                    || this.isAttachmentMissingOrDeleted(metadata.libraryId, metadata.zoteroKey);
+                    || missingOrTrashed.has(DocumentCache.itemKey(metadata.libraryId, metadata.zoteroKey));
                 if (!stale && !isRemoteFilePath(metadata.filePath)) {
                     stale = !(await IOUtils.exists(metadata.filePath).catch(() => false));
                 }
@@ -491,11 +492,68 @@ export class DocumentCache {
             || signature.size_bytes !== record.fileSignature.size_bytes;
     }
 
-    private isAttachmentMissingOrDeleted(libraryId: number, zoteroKey: string): boolean {
-        const item = Zotero.Items.getByLibraryAndKey(libraryId, zoteroKey);
-        if (!item) return true;
-        return !!item.deleted
-            || (typeof item.isInTrash === 'function' && item.isInTrash());
+    private static itemKey(libraryId: number, zoteroKey: string): string {
+        return `${libraryId}/${zoteroKey}`;
+    }
+
+    /**
+     * Identify cached items that no longer exist or have been moved to the trash.
+     */
+    private async getMissingOrTrashedKeys(
+        rows: DocumentCacheMetadataRecord[],
+    ): Promise<Set<string>> {
+        const stale = new Set<string>();
+        if (rows.length === 0) return stale;
+
+        // Group keys by library so each query targets a single libraryID.
+        const keysByLibrary = new Map<number, Set<string>>();
+        for (const row of rows) {
+            let keys = keysByLibrary.get(row.libraryId);
+            if (!keys) {
+                keys = new Set<string>();
+                keysByLibrary.set(row.libraryId, keys);
+            }
+            keys.add(row.zoteroKey);
+        }
+
+        const CHUNK_SIZE = 500;
+        for (const [libraryId, keySet] of keysByLibrary) {
+            const keys = [...keySet];
+            // Keys that exist and are not trashed (neither the item nor its parent).
+            const live = new Set<string>();
+            for (let i = 0; i < keys.length; i += CHUNK_SIZE) {
+                const chunk = keys.slice(i, i + CHUNK_SIZE);
+                const placeholders = chunk.map(() => '?').join(', ');
+                const sql = `
+                    SELECT i.key,
+                           CASE WHEN d.itemID IS NOT NULL THEN 1 ELSE 0 END AS trashed,
+                           CASE WHEN dp.itemID IS NOT NULL THEN 1 ELSE 0 END AS parentTrashed
+                    FROM items i
+                    LEFT JOIN deletedItems d ON d.itemID = i.itemID
+                    LEFT JOIN itemAttachments ia ON ia.itemID = i.itemID
+                    LEFT JOIN deletedItems dp ON dp.itemID = ia.parentItemID
+                    WHERE i.libraryID = ? AND i.key IN (${placeholders})
+                `;
+                // onRow callback avoids Proxy access issues on the returned rows.
+                await Zotero.DB.queryAsync(sql, [libraryId, ...chunk], {
+                    onRow: (row: any) => {
+                        const key = row.getResultByIndex(0);
+                        const trashed = row.getResultByIndex(1);
+                        const parentTrashed = row.getResultByIndex(2);
+                        if (!trashed && !parentTrashed) {
+                            live.add(key);
+                        }
+                    },
+                });
+            }
+            // Any cached key absent from the live set is missing or trashed.
+            for (const key of keys) {
+                if (!live.has(key)) {
+                    stale.add(DocumentCache.itemKey(libraryId, key));
+                }
+            }
+        }
+        return stale;
     }
 
     private isPayloadRowFresh(

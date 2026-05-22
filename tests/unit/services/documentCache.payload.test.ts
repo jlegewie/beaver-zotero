@@ -37,6 +37,10 @@ describe('DocumentCache payloads', () => {
     let db: BeaverDB;
     let cache: DocumentCache;
     let files: Map<string, Uint8Array>;
+    // Keys that exist in the mock Zotero items table.
+    let existingItemKeys: Set<string>;
+    // Keys whose item (or parent) is in the trash.
+    let trashedItemKeys: Set<string>;
     const sourcePath = '/tmp/source.pdf';
 
     beforeEach(async () => {
@@ -56,8 +60,20 @@ describe('DocumentCache payloads', () => {
             files.delete(path);
         });
         mockIOUtils.makeDirectory.mockResolvedValue(undefined);
-        (globalThis as any).Zotero.Items = {
-            getByLibraryAndKey: vi.fn(() => createCacheAttachment()),
+        existingItemKeys = new Set(['ABCD1234']);
+        trashedItemKeys = new Set();
+        // Mock the Zotero database lookup used by startup GC. Returns a row only
+        // for keys that exist; trashed state is reported via the second column.
+        (globalThis as any).Zotero.DB = {
+            queryAsync: vi.fn(async (_sql: string, params: any[], options?: any) => {
+                if (!options?.onRow) return [];
+                for (const key of params.slice(1)) {
+                    if (!existingItemKeys.has(key)) continue;
+                    const trashed = trashedItemKeys.has(key) ? 1 : 0;
+                    options.onRow({ getResultByIndex: (i: number) => [key, trashed, 0][i] });
+                }
+                return [];
+            }),
         };
 
         conn = new MockDBConnection();
@@ -115,7 +131,7 @@ describe('DocumentCache payloads', () => {
             create,
             metadata: (result) => ({
                 pageCount: result.document.pageCount,
-                pageLabels: result.document.pageLabels,
+                pageLabels: result.document.pageLabels ?? null,
             }),
         });
 
@@ -132,7 +148,7 @@ describe('DocumentCache payloads', () => {
             create,
             metadata: (result) => ({
                 pageCount: result.document.pageCount,
-                pageLabels: result.document.pageLabels,
+                pageLabels: result.document.pageLabels ?? null,
             }),
         });
 
@@ -322,11 +338,57 @@ describe('DocumentCache payloads', () => {
         const payload = await db.getDocumentCachePayload(1, 'ABCD1234', 'structured');
         expect(payload).not.toBeNull();
 
-        (globalThis as any).Zotero.Items.getByLibraryAndKey.mockReturnValue(null);
+        existingItemKeys.delete('ABCD1234');
         await cache.runStartupGC();
 
         expect(await db.getDocumentCacheMetadataByKey(1, 'ABCD1234')).toBeNull();
         expect(await db.getDocumentCachePayloadCount()).toBe(0);
         expect(files.has(payload!.payloadPath)).toBe(false);
+    });
+
+    it('startup GC removes cache entries for attachments moved to the trash', async () => {
+        const item = createCacheAttachment();
+        await cache.putResult({
+            item,
+            filePath: sourcePath,
+            mode: 'structured',
+            sourceSizeBytes: 3,
+            contentType: 'application/pdf',
+            result: structuredResult,
+            metadata: {
+                pageCount: 1,
+                pageLabels: { '0': '1' },
+            },
+        });
+        const payload = await db.getDocumentCachePayload(1, 'ABCD1234', 'structured');
+        expect(payload).not.toBeNull();
+
+        trashedItemKeys.add('ABCD1234');
+        await cache.runStartupGC();
+
+        expect(await db.getDocumentCacheMetadataByKey(1, 'ABCD1234')).toBeNull();
+        expect(await db.getDocumentCachePayloadCount()).toBe(0);
+        expect(files.has(payload!.payloadPath)).toBe(false);
+    });
+
+    it('startup GC keeps cache entries for attachments still present in Zotero', async () => {
+        const item = createCacheAttachment();
+        await cache.putResult({
+            item,
+            filePath: sourcePath,
+            mode: 'structured',
+            sourceSizeBytes: 3,
+            contentType: 'application/pdf',
+            result: structuredResult,
+            metadata: {
+                pageCount: 1,
+                pageLabels: { '0': '1' },
+            },
+        });
+
+        await cache.runStartupGC();
+
+        expect(await db.getDocumentCacheMetadataByKey(1, 'ABCD1234')).not.toBeNull();
+        expect(await db.getDocumentCachePayloadCount()).toBe(1);
     });
 });
