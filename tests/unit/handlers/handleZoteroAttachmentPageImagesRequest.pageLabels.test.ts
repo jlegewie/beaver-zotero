@@ -70,8 +70,8 @@ vi.mock('../../../src/beaver-extract', () => {
 });
 
 // Mock heavy transitive deps so we can `importActual` utils.ts and use the
-// real `preflightCachedPdfMeta` + `persistMetadataToCache` (the handler now
-// delegates to those — pure logic, exercising them is preferable to stubbing).
+// real `preflightCachedPdfMeta` (the handler delegates to it — pure logic,
+// exercising it is preferable to stubbing).
 vi.mock('../../../src/services/supabaseClient', () => ({
     supabase: { auth: { getSession: vi.fn() } },
 }));
@@ -121,8 +121,8 @@ describe('handleZoteroAttachmentPageImagesRequest page labels', () => {
         return setupRequestScenarioWithFullCache({
             cachedPageCount: opts.cachedPageCount,
             cachedPageLabels: opts.cachedPageLabels,
-            // Default to needs_ocr=false so the render-path metadata write
-            // is allowed in tests that don't care about the gate.
+            // Default to a complete, non-OCR record for tests that just need
+            // a plausible cache hit and don't exercise OCR-state branches.
             needs_ocr: false,
             has_text_layer: true,
         });
@@ -205,10 +205,11 @@ describe('handleZoteroAttachmentPageImagesRequest page labels', () => {
         expect(mockState.renderCalls).toHaveLength(1);
     });
 
-    it('refreshes metadata after a successful render only when needs_ocr is already known false', async () => {
-        // Prior writer (e.g. getAttachmentFileStatus) confirmed text-layer OK.
-        // Render-path may safely refresh page_count + page_labels without
-        // disturbing OCR state.
+    it('does NOT write metadata after a successful render even when a prior writer confirmed text-layer status', async () => {
+        // The image-render path never writes metadata. Rendering proves the
+        // PDF opens but never inspects the text layer, so metadata is owned
+        // exclusively by writers that run an authoritative text-layer check
+        // (file status, text extraction) — even when a prior record exists.
         const { cache } = setupRequestScenarioWithFullCache({
             cachedPageCount: 3,
             cachedPageLabels: null,
@@ -224,16 +225,7 @@ describe('handleZoteroAttachmentPageImagesRequest page labels', () => {
             skip_local_limits: true,
         });
 
-        expect(cache.setMetadata).toHaveBeenCalledTimes(1);
-        expect(cache.setMetadata).toHaveBeenCalledWith(expect.objectContaining({
-            item_id: 42,
-            page_count: 3,
-            page_labels: { 0: 'i', 1: '1', 2: '2' },
-            has_text_layer: true,
-            needs_ocr: false,
-            is_encrypted: false,
-            is_invalid: false,
-        }));
+        expect(cache.setMetadata).not.toHaveBeenCalled();
     });
 
     it('does NOT seed cache from image render when no prior writer (regression)', async () => {

@@ -27,7 +27,6 @@ import {
     checkRemotePdfSize,
     isRemoteAccessAvailable,
     preflightCachedPdfMeta,
-    persistMetadataToCache,
 } from './utils';
 import { ensurePageLabelsForResolution, resolvePageValue, InvalidPageValueError } from './pageLabelResolution';
 import {
@@ -380,52 +379,9 @@ export async function handleZoteroAttachmentPageImagesRequest(
             };
         });
 
-        // 11b. Write-through metadata only when it's safe to do so.
-        //
-        // Rendering proves the PDF opens, but it does NOT inspect the text
-        // layer. `setMetadata` is a full upsert, and downstream readers
-        // (`fileStatusFromCache` in utils.ts:384) treat a falsy `needs_ocr`
-        // as "available". So if the image-render path is the FIRST cache
-        // writer for a scanned/no-text PDF, writing `needs_ocr: null` would
-        // make the file appear text-ready and skip the OCR check on later
-        // `getAttachmentFileStatus` calls.
-        //
-        // Rule: only refresh page_count/page_labels when a prior writer
-        // has already set `needs_ocr === false` (i.e., an authoritative
-        // text-layer check has run). In that case we extend the existing
-        // record without disturbing OCR state. Otherwise leave the cache
-        // alone — a later text-extraction or status call will seed it
-        // correctly.
-        // Skip cache writes during shutdown — DB writes here race Zotero's
-        // teardown (same guard as sync.ts:266 and FileUploader.ts:338).
-        const canSafelyExtendCache = cache != null
-            && cachedMeta != null
-            && cachedMeta.needs_ocr === false
-            && cachedMeta.is_encrypted === false
-            && cachedMeta.is_invalid === false;
-        if (cache && !canSafelyExtendCache) {
-            logger(
-                `handleZoteroAttachmentPageImagesRequest: skipping metadata write for ${requestKey} (no authoritative needs_ocr in cache)`,
-                3,
-            );
-        }
-        if (canSafelyExtendCache) {
-            const persistedPageLabels = Object.keys(renderResult.pageLabels).length > 0 ? renderResult.pageLabels : {};
-            await persistMetadataToCache(
-                pdfItem,
-                effectiveFilePath,
-                pdfItem.attachmentContentType || 'application/pdf',
-                {
-                    page_count: renderResult.pageCount,
-                    page_labels: persistedPageLabels,
-                    has_text_layer: cachedMeta!.has_text_layer,
-                    needs_ocr: cachedMeta!.needs_ocr,
-                    is_encrypted: false,
-                    is_invalid: false,
-                },
-            );
-            throwIfTimedOut('metadata_cache_persist');
-        }
+        // The image-render path deliberately does NOT write metadata to the
+        // cache. Rendering proves the PDF opens, but it never inspects the
+        // text layer.
 
         throwIfTimedOut('success_response');
         return {

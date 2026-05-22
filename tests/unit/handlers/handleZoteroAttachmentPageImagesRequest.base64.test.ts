@@ -55,8 +55,8 @@ vi.mock('../../../src/beaver-extract', () => {
 });
 
 // Mock heavy transitive deps so we can `importActual` utils.ts and use the
-// real `preflightCachedPdfMeta` + `persistMetadataToCache` (the handler now
-// delegates to those — pure logic, exercising them is preferable to stubbing).
+// real `preflightCachedPdfMeta` (the handler delegates to it — pure logic,
+// exercising it is preferable to stubbing).
 vi.mock('../../../src/services/supabaseClient', () => ({
     supabase: { auth: { getSession: vi.fn() } },
 }));
