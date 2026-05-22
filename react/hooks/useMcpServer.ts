@@ -640,7 +640,14 @@ async function handleSearchByMetadata(args: any): Promise<any> {
     };
 }
 
-async function handleReadAttachment(args: any): Promise<any> {
+/**
+ * Handler for the MCP `read_attachment` tool.
+ *
+ * Exported so the dev-only `/beaver/test/read-attachment` endpoint can
+ * exercise the exact tool code path (page-argument validation, document
+ * request, page-window slicing) in automated tests.
+ */
+export async function handleReadAttachment(args: any): Promise<any> {
     const MAX_PAGES = 30;
 
     const parsed = parseItemId(args.attachment_id);

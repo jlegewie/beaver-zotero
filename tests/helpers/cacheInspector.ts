@@ -409,6 +409,75 @@ export async function resolveItem(
     });
 }
 
+/** Completely wipe the document cache (metadata rows, payload rows, files). */
+export async function clearAllCache(): Promise<{
+    metadataRows: number;
+    payloadRows: number;
+}> {
+    const res = await post<{
+        ok?: boolean;
+        metadataRows?: number;
+        payloadRows?: number;
+        error?: string;
+    }>('/beaver/test/cache-clear-all', {});
+    if (res.error) throw new Error(res.error);
+    return { metadataRows: res.metadataRows ?? 0, payloadRows: res.payloadRows ?? 0 };
+}
+
+export interface FileStatus {
+    is_primary: boolean;
+    mime_type: string;
+    page_count: number | null;
+    status: 'available' | 'unavailable';
+    status_code?: string;
+}
+
+/** Trigger `getAttachmentFileStatus` for an attachment (writes the doc cache). */
+export async function triggerFileStatus(
+    libraryId: number,
+    key: string,
+    isPrimary = true,
+): Promise<FileStatus> {
+    const res = await post<{ ok: boolean; status?: FileStatus; error?: string }>(
+        '/beaver/test/file-status',
+        { library_id: libraryId, zotero_key: key, is_primary: isPrimary },
+    );
+    if (!res.ok || !res.status) throw new Error(res.error ?? 'file-status failed');
+    return res.status;
+}
+
+/**
+ * MCP error object shape — `read_attachment` returns this on failure.
+ */
+export interface McpToolError {
+    content: Array<{ type: string; text: string }>;
+    isError: true;
+}
+
+export type ReadAttachmentResult = string | McpToolError;
+
+/** Returns true when a `read_attachment` result is an MCP error object. */
+export function isMcpToolError(result: ReadAttachmentResult): result is McpToolError {
+    return typeof result === 'object' && result !== null && (result as McpToolError).isError === true;
+}
+
+/**
+ * Invoke the MCP `read_attachment` tool handler via the dev endpoint.
+ * `attachmentId` is the `<libraryId>-<zoteroKey>` form the tool expects.
+ */
+export async function readAttachment(body: {
+    attachment_id: string;
+    start_page?: number;
+    end_page?: number;
+}): Promise<ReadAttachmentResult> {
+    const res = await post<{ result: ReadAttachmentResult; error?: string }>(
+        '/beaver/test/read-attachment',
+        body,
+    );
+    if (res.error) throw new Error(res.error);
+    return res.result;
+}
+
 // ---------------------------------------------------------------------------
 // MuPDF worker singleton stats / cache lifecycle (dev-only)
 // ---------------------------------------------------------------------------

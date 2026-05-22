@@ -50,6 +50,34 @@ export async function handleTestCacheInvalidateHttpRequest(request: any) {
 }
 
 /**
+ * Dev-only: completely clear the document cache (metadata rows, payload
+ * rows, and payload files on disk). Mirrors the DevTools "Clear Document
+ * Cache" menu item, exposed over HTTP so tests can reset to a cold cache.
+ */
+export async function handleTestCacheClearAllHttpRequest(_request: any) {
+    const cache = Zotero.Beaver?.documentCache;
+    if (!cache) return { error: 'cache not available' };
+    const { metadataRows, payloadRows } = await cache.clearAll();
+    return { ok: true, metadataRows, payloadRows };
+}
+
+/**
+ * Dev-only: invoke the MCP `read_attachment` tool handler directly.
+ *
+ * Exercises the exact tool code path — `start_page` / `end_page` integer
+ * validation, the `zotero_document_request` round-trip, and page-window
+ * slicing — so tests can assert on it without a live MCP client.
+ *
+ * Returns the tool's raw result: a plain string on success, or an MCP
+ * error object (`{ content, isError: true }`) on failure.
+ */
+export async function handleTestReadAttachmentHttpRequest(request: any) {
+    const { handleReadAttachment } = await import('../useMcpServer');
+    const result = await handleReadAttachment(request || {});
+    return { result };
+}
+
+/**
  * Dev-only: snapshot of MuPDFWorkerClient dispatch / spawn counters and
  * the worker-side document cache.
  *

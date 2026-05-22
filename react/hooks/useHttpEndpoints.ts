@@ -50,6 +50,8 @@ import {
     handleTestPingHttpRequest,
     handleTestCacheMetadataHttpRequest,
     handleTestCacheInvalidateHttpRequest,
+    handleTestCacheClearAllHttpRequest,
+    handleTestReadAttachmentHttpRequest,
     handleTestWorkerStatsHttpRequest,
     handleTestWorkerMarkStaleHttpRequest,
     handleTestWorkerCacheClearHttpRequest,
@@ -149,6 +151,8 @@ const ENDPOINT_PATHS = [
     '/beaver/test/ping',
     '/beaver/test/cache-metadata',
     '/beaver/test/cache-invalidate',
+    '/beaver/test/cache-clear-all',
+    '/beaver/test/read-attachment',
     '/beaver/test/resolve-item',
     // Test-only endpoints (note seeding/teardown/inspection)
     '/beaver/test/note-create',
@@ -667,6 +671,12 @@ function registerEndpoints(): boolean {
 
         Zotero.Server.Endpoints['/beaver/test/cache-invalidate'] =
             createEndpoint(handleTestCacheInvalidateHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/cache-clear-all'] =
+            createEndpoint(handleTestCacheClearAllHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/read-attachment'] =
+            createEndpoint(handleTestReadAttachmentHttpRequest);
 
         Zotero.Server.Endpoints['/beaver/test/resolve-item'] =
             createEndpoint(handleTestResolveItemHttpRequest);
