@@ -87,9 +87,11 @@ describe('preloadPageLabelsForContent', () => {
 
     it('calls getAttachmentFileStatus on cache miss', async () => {
         const item = makeItem(43, 'EFGH5678');
+        // Miss on first read, labels available after getAttachmentFileStatus.
         const cache = {
-            getMetadata: vi.fn().mockResolvedValue(null),
-            getPageLabelsSync: vi.fn(() => ({ 0: 'ii' })),
+            getMetadata: vi.fn()
+                .mockResolvedValueOnce(null)
+                .mockResolvedValue({ item_id: 43, page_labels: { 0: 'ii' } }),
         };
 
         (globalThis as any).Zotero.Items = {
@@ -147,7 +149,6 @@ describe('preloadPageLabelsForContent', () => {
         const item = makeRemoteItem(49, 'REMOTE02');
         const cache = {
             getMetadata: vi.fn().mockResolvedValue(null),
-            getPageLabelsSync: vi.fn(() => ({ 0: '1' })),
         };
 
         (globalThis as any).Zotero.Items = {
@@ -192,8 +193,9 @@ describe('preloadPageLabelsForContent', () => {
         };
         const attachment = makeItem(77, 'ATTACH01');
         const cache = {
-            getMetadata: vi.fn().mockResolvedValue(null),
-            getPageLabelsSync: vi.fn(() => ({ 2: '3' })),
+            getMetadata: vi.fn()
+                .mockResolvedValueOnce(null)
+                .mockResolvedValue({ item_id: 77, page_labels: { 2: '3' } }),
         };
 
         (globalThis as any).Zotero.Items = {
@@ -215,8 +217,9 @@ describe('preloadPageLabelsForContent', () => {
     it('deduplicates by item ID', async () => {
         const item = makeItem(45, 'MNOP3456');
         const cache = {
-            getMetadata: vi.fn().mockResolvedValue(null),
-            getPageLabelsSync: vi.fn(() => ({ 0: '1' })),
+            getMetadata: vi.fn()
+                .mockResolvedValueOnce(null)
+                .mockResolvedValue({ item_id: 45, page_labels: { 0: '1' } }),
         };
 
         (globalThis as any).Zotero.Items = {
@@ -237,12 +240,11 @@ describe('preloadPageLabelsForContent', () => {
         const item1 = makeItem(46, 'QRST7890');
         const item2 = makeItem(47, 'UVWX1234');
         const cache = {
-            getMetadata: vi.fn().mockResolvedValue(null),
-            getPageLabelsSync: vi.fn((itemId: number) => itemId === 47 ? { 0: '1' } : null),
+            getMetadata: vi.fn().mockResolvedValue({ item_id: 47, page_labels: { 0: '1' } }),
         };
 
         (globalThis as any).Zotero.Items = {
-            getByLibraryAndKey: vi.fn((libId: number, key: string) => {
+            getByLibraryAndKey: vi.fn((_libId: number, key: string) => {
                 if (key === 'QRST7890') return item1;
                 if (key === 'UVWX1234') return item2;
                 return null;
@@ -250,7 +252,8 @@ describe('preloadPageLabelsForContent', () => {
         };
         (globalThis as any).Zotero.Beaver = { attachmentFileCache: cache };
 
-        // First item's getMetadata throws
+        // First item's getMetadata throws; second item misses on first read,
+        // then resolves to labels after getAttachmentFileStatus runs.
         cache.getMetadata
             .mockRejectedValueOnce(new Error('DB error'))
             .mockResolvedValueOnce(null);
@@ -334,8 +337,9 @@ describe('preloadPageLabelsForCitations', () => {
     it('returns labels after running extraction on a local cache miss', async () => {
         const item = makeItem(53, 'LOCAL01');
         const cache = {
-            getMetadata: vi.fn().mockResolvedValue(null),
-            getPageLabelsSync: vi.fn(() => ({ 0: 'i' })),
+            getMetadata: vi.fn()
+                .mockResolvedValueOnce(null)
+                .mockResolvedValue({ item_id: 53, page_labels: { 0: 'i' } }),
         };
 
         (globalThis as any).Zotero.Items = {
@@ -359,8 +363,9 @@ describe('preloadPageLabelsForCitations', () => {
         };
         const attachment = makeItem(78, 'ATTACH02');
         const cache = {
-            getMetadata: vi.fn().mockResolvedValue(null),
-            getPageLabelsSync: vi.fn(() => ({ 2: '3' })),
+            getMetadata: vi.fn()
+                .mockResolvedValueOnce(null)
+                .mockResolvedValue({ item_id: 78, page_labels: { 2: '3' } }),
         };
 
         (globalThis as any).Zotero.Items = {

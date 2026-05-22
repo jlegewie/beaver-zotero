@@ -423,33 +423,6 @@ describe('AttachmentFileCache — metadata (Tier 1)', () => {
     });
 
     // ===================================================================
-    // getPageLabelsSync
-    // ===================================================================
-
-    describe('getPageLabelsSync', () => {
-        it('returns labels from record in memory cache', async () => {
-            const labels = { 0: 'A', 1: 'B' };
-            await cache.setMetadata(makeRecord({ page_labels: labels }));
-
-            expect(cache.getPageLabelsSync(100)).toEqual(labels);
-        });
-
-        it('returns null when no record exists', () => {
-            expect(cache.getPageLabelsSync(999)).toBeNull();
-        });
-
-        it('returns null for record with page_labels=null', async () => {
-            await cache.setMetadata(makeRecord({ page_labels: null }));
-            expect(cache.getPageLabelsSync(100)).toBeNull();
-        });
-
-        it('returns null for record with page_labels={} (resolved, no labels)', async () => {
-            await cache.setMetadata(makeRecord({ page_labels: {} }));
-            expect(cache.getPageLabelsSync(100)).toBeNull();
-        });
-    });
-
-    // ===================================================================
     // Error-state metadata (encrypted, OCR, invalid)
     // ===================================================================
 

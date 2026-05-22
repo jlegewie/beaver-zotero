@@ -67,15 +67,15 @@ function installZoteroItems(byKey: Map<string, ItemStub>) {
     };
 }
 
-// Stub for the sync page-label cache read path that
-// `translatePageNumberToLabel` uses. Map `attachmentItem.id` → `string[]`
-// where index 0 is the label for 1-based page 1.
+// Explicit page-label map (attachment item ID → 0-based page index → label)
+// threaded into enrichOldStringCitationRefs. Index 0 is the label for 1-based
+// page 1. Populated by installPageLabelCache.
+let pageLabels: Record<number, Record<number, string>> = {};
 function installPageLabelCache(labelsByItemId: Map<number, string[]>) {
-    (globalThis as any).Zotero = (globalThis as any).Zotero ?? {};
-    (globalThis as any).Zotero.Beaver = (globalThis as any).Zotero.Beaver ?? {};
-    (globalThis as any).Zotero.Beaver.attachmentFileCache = {
-        getPageLabelsSync: vi.fn((itemId: number) => labelsByItemId.get(itemId) ?? null),
-    };
+    pageLabels = {};
+    for (const [itemId, labels] of labelsByItemId) {
+        pageLabels[itemId] = { ...labels };
+    }
 }
 
 beforeEach(() => {
@@ -199,6 +199,7 @@ describe('enrichOldStringCitationRefs (att_id)', () => {
         const result = enrichOldStringCitationRefs(
             '<p><citation att_id="1-ATTKEY000" page="3"/></p>',
             metadata,
+            pageLabels,
         );
         expect(result).toBe(
             '<p><citation item_id="1-PARENT1234" page="3" ref="c_PARENT_0"/></p>',
@@ -229,6 +230,7 @@ describe('enrichOldStringCitationRefs (att_id)', () => {
         const result = enrichOldStringCitationRefs(
             '<p><citation att_id="1-ATTKEY000" page="3"/></p>',
             metadata,
+            pageLabels,
         );
         // The rewritten tag carries the translated label so the downstream
         // matcher aligns with the simplified form.
@@ -256,6 +258,7 @@ describe('enrichOldStringCitationRefs (att_id)', () => {
         const result = enrichOldStringCitationRefs(
             '<p><citation att_id="1-ATTKEY000" page="3"/></p>',
             metadata,
+            pageLabels,
         );
         expect(result).toBe(
             '<p><citation item_id="1-PARENT1234" page="3" ref="c_PARENT_0"/></p>',
@@ -285,6 +288,7 @@ describe('enrichOldStringCitationRefs (att_id)', () => {
         const result = enrichOldStringCitationRefs(
             '<p><citation att_id="1-ATTKEY000" page="3"/></p>',
             metadata,
+            pageLabels,
         );
         // Translated lookup for "iii" misses (metadata has "3"); fallback to
         // the raw "3" matches. The enriched tag carries the page variant that

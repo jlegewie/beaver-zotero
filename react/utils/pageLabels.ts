@@ -12,9 +12,9 @@
  * The resolver functions translate physical page numbers to visible page
  * labels for display and Zotero note export.
  *
- * The legacy cache-backed lookup functions remain for non-React callers. New
- * React/static render paths should preload labels and pass/read
- * `PageLabelsByAttachmentId` instead.
+ * All callers resolve labels up-front (via the `preload*` functions) and pass
+ * an explicit `PageLabelsByAttachmentId` map into the `*FromLabels` resolvers,
+ * so no rendering path reads mutable cache state synchronously.
  */
 
 import { makeRemoteFilePath } from '../../src/services/attachmentFileCache';
@@ -42,11 +42,6 @@ function addPageLabels(
 ): void {
     if (!hasPageLabels(labels)) return;
     target[itemId] = { ...labels };
-}
-
-function readPageLabelsFromCache(cache: any, itemId: number): Record<number, string> | null {
-    if (typeof cache.getPageLabelsSync !== 'function') return null;
-    return cache.getPageLabelsSync(itemId);
 }
 
 async function getPreloadFilePath(item: Zotero.Item): Promise<PreloadFilePath | null> {
@@ -105,50 +100,6 @@ export function translatePageNumberToLabelFromLabels(
 }
 
 /**
- * Resolve a 1-based page number (from getCitationPages) to its display label
- * using the legacy cache-backed lookup.
- *
- * @param itemId - Zotero item ID (typically an attachment)
- * @param pageNumber - 1-based page number
- * @returns The page label string, or the page number as string
- */
-export function resolvePageLabel(itemId: number, pageNumber: number): string {
-    try {
-        const cache = Zotero.Beaver?.attachmentFileCache;
-        if (!cache) return String(pageNumber);
-
-        const pageLabels = cache.getPageLabelsSync(itemId);
-        return resolvePageLabelFromLabels(pageLabels, pageNumber);
-    } catch {
-        return String(pageNumber);
-    }
-}
-
-/**
- * Translate a page number string (1-based, as humans see it) to its display
- * label using the legacy cache-backed lookup.
- *
- * Only translates strings that are purely numeric page references (digits with
- * optional whitespace/range separators like "-", "–", ","). Non-page locators
- * such as "§3.2", "fn. 5", or "xii" are returned unchanged.
- *
- * @param itemId - Zotero item ID (typically an attachment)
- * @param pageStr - Page string (e.g., "15", "7-8")
- * @returns Resolved page label string
- */
-export function translatePageNumberToLabel(itemId: number, pageStr: string): string {
-    try {
-        const cache = Zotero.Beaver?.attachmentFileCache;
-        if (!cache) return pageStr;
-
-        const pageLabels = cache.getPageLabelsSync(itemId);
-        return translatePageNumberToLabelFromLabels(pageLabels, pageStr);
-    } catch {
-        return pageStr;
-    }
-}
-
-/**
  * Pre-load attachment page labels into the in-memory cache for all citations
  * in the given content string. Must be called (and awaited) before synchronous
  * rendering with `renderToMarkdown` or `renderToHTML`.
@@ -192,9 +143,10 @@ export async function preloadPageLabelsForContent(content: string): Promise<Page
             // explicit content request will populate the cache if needed.
             if (preloadPath.isRemoteOnly) continue;
 
-            // Local cache miss → run full extraction.
+            // Local cache miss → run full extraction, then read labels back.
             await getAttachmentFileStatus(preloadItem, false);
-            addPageLabels(labelsByAttachmentId, preloadItem.id, readPageLabelsFromCache(cache, preloadItem.id));
+            const refreshed = await cache.getMetadata(preloadItem.id, preloadPath.filePath);
+            addPageLabels(labelsByAttachmentId, preloadItem.id, refreshed?.page_labels);
         } catch {
             // Skip items that can't be resolved
         }
@@ -249,7 +201,8 @@ export async function preloadPageLabelsForCitations(
             if (preloadPath.isRemoteOnly) continue;
 
             await getAttachmentFileStatus(preloadItem, false);
-            addPageLabels(labelsByAttachmentId, preloadItem.id, readPageLabelsFromCache(cache, preloadItem.id));
+            const refreshed = await cache.getMetadata(preloadItem.id, preloadPath.filePath);
+            addPageLabels(labelsByAttachmentId, preloadItem.id, refreshed?.page_labels);
         } catch {
             // Skip items that can't be resolved
         }

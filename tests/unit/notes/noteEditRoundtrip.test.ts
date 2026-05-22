@@ -2063,12 +2063,11 @@ describe('page locator normalization in citation expansion', () => {
 // =============================================================================
 
 describe('Page label translation during citation expansion', () => {
+    // Explicit page-label map keyed by the mock attachment item ID (99),
+    // populated by setupPageLabels and threaded into expandToRawHtml.
+    let pageLabels: Record<number, Record<number, string>> = {};
     function setupPageLabels(labels: string[] | null) {
-        (globalThis as any).Zotero.Beaver = {
-            attachmentFileCache: {
-                getPageLabelsSync: vi.fn(() => labels),
-            },
-        };
+        pageLabels = labels ? { 99: { ...labels } } : {};
     }
 
     it('translates model page number to label with offset labels', () => {
@@ -2092,7 +2091,7 @@ describe('Page label translation during citation expansion', () => {
         const { metadata } = simplifyNoteHtml(wrap('<p>Text</p>'), 1);
 
         const input = '<citation att_id="1-ABC123" page="15"/>';
-        expandToRawHtml(input, metadata, 'new');
+        expandToRawHtml(input, metadata, 'new', undefined, pageLabels);
 
         // Page 15 → pageLabels[14] = "352"
         expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '352');
@@ -2119,7 +2118,7 @@ describe('Page label translation during citation expansion', () => {
         const { metadata } = simplifyNoteHtml(wrap('<p>Text</p>'), 1);
 
         const input = '<citation att_id="1-DEF456" page="15"/>';
-        expandToRawHtml(input, metadata, 'new');
+        expandToRawHtml(input, metadata, 'new', undefined, pageLabels);
 
         // Page 15 → pageLabels[14] = "15" (identity)
         expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '15');
@@ -2144,7 +2143,7 @@ describe('Page label translation during citation expansion', () => {
         const { metadata } = simplifyNoteHtml(wrap('<p>Text</p>'), 1);
 
         const input = '<citation att_id="1-GHI789" page="15"/>';
-        expandToRawHtml(input, metadata, 'new');
+        expandToRawHtml(input, metadata, 'new', undefined, pageLabels);
 
         expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '15');
     });
@@ -2189,7 +2188,7 @@ describe('Page label translation during citation expansion', () => {
 
         // Model changes item_id but keeps the same page="2"
         const editedSimplified = simplified.replace(/item_id="1-ITEMKEY"/, 'item_id="1-NEWKEY"');
-        expandToRawHtml(editedSimplified, metadata, 'new');
+        expandToRawHtml(editedSimplified, metadata, 'new', undefined, pageLabels);
 
         // Page "2" should NOT be translated to "ii" — it's an existing display label
         expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '2');
@@ -2223,7 +2222,7 @@ describe('Page label translation during citation expansion', () => {
 
         // Model changes page from "2" to "5" — this is a label, not a page index
         const editedSimplified = simplified.replace(/page="2"/, 'page="5"');
-        expandToRawHtml(editedSimplified, metadata, 'new');
+        expandToRawHtml(editedSimplified, metadata, 'new', undefined, pageLabels);
 
         // Page "5" should pass through unchanged (no translation for existing citations)
         expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '5');

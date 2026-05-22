@@ -165,24 +165,6 @@ export class AttachmentFileCache {
         }
     }
 
-    /**
-     * Synchronous lookup of page labels from the in-memory metadata cache.
-     * Returns populated labels when available, null otherwise.
-     *
-     * Returns null for:
-     * - no record at all
-     * - record with `page_labels: null` (labels not yet checked)
-     * - record with `page_labels: {}` (checked, none found)
-     *
-     * Designed for use in synchronous rendering paths (e.g., citation export).
-     * Call `getMetadata` first to populate the cache if needed.
-     */
-    getPageLabelsSync(itemId: number): Record<number, string> | null {
-        const labels = this.memoryCache.get(itemId)?.page_labels;
-        if (!labels || Object.keys(labels).length === 0) return null;
-        return labels;
-    }
-
     /** Clear the in-memory metadata cache and pending write locks. */
     clearMemoryCache(): void {
         this.memoryCache.clear();

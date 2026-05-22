@@ -24,6 +24,7 @@ import {
 import type { SimplificationMetadata } from './noteHtmlSimplifier';
 import type { ExternalReference } from '../../react/types/externalReferences';
 import type { ZoteroItemReference } from '../../react/types/zotero';
+import type { PageLabelsByAttachmentId } from '../../react/atoms/citations';
 import {
     getPageLocator,
     normalizeCitationTag,
@@ -35,43 +36,49 @@ import {
 // =============================================================================
 
 /**
- * Translate a page number string (1-based, as humans see it) to its display label.
+ * Translate a page number string (1-based, as humans see it) to its display
+ * label against an explicit page-label map (0-based index → label string).
  *
  * Only translates strings that are purely numeric page references (digits with
  * optional whitespace/range separators like "-", "–", ","). Non-page locators
  * such as "§3.2", "fn. 5", or "xii" are returned unchanged.
  *
- * Equivalent to react/utils/pageLabels.ts:translatePageNumberToLabel but usable from src/.
+ * Labels are passed in explicitly (resolved up-front via
+ * `preloadPageLabelsForNewCitations`) so expansion stays synchronous and does
+ * not read mutable cache state directly.
  */
-export function translatePageNumberToLabel(itemId: number, pageStr: string): string {
-    try {
-        const cache = Zotero.Beaver?.attachmentFileCache;
-        if (!cache) return pageStr;
-        const pageLabels = cache.getPageLabelsSync(itemId);
-        if (!pageLabels) return pageStr;
-        // Only translate strings that look like pure numeric page references
-        // (digits, whitespace, range/list separators). Anything else (letters,
-        // "§", ".", etc.) means a structured locator — return unchanged.
-        if (!/^\s*\d[\d\s,\-–]*$/.test(pageStr)) return pageStr;
-        return pageStr.replace(/\d+/g, (numStr) => {
-            // Interpret as 1-based page number → 0-based index
-            const pageIndex = parseInt(numStr, 10) - 1;
-            if (isNaN(pageIndex) || pageIndex < 0) return numStr;
-            return pageLabels[pageIndex] ?? numStr;
-        });
-    } catch {
-        return pageStr;
-    }
+export function translatePageNumberToLabel(
+    pageLabels: Record<number, string> | null | undefined,
+    pageStr: string,
+): string {
+    if (!pageLabels || Object.keys(pageLabels).length === 0) return pageStr;
+    // Only translate strings that look like pure numeric page references
+    // (digits, whitespace, range/list separators). Anything else (letters,
+    // "§", ".", etc.) means a structured locator — return unchanged.
+    if (!/^\s*\d[\d\s,\-–]*$/.test(pageStr)) return pageStr;
+    return pageStr.replace(/\d+/g, (numStr) => {
+        // Interpret as 1-based page number → 0-based index
+        const pageIndex = parseInt(numStr, 10) - 1;
+        if (isNaN(pageIndex) || pageIndex < 0) return numStr;
+        return pageLabels[pageIndex] ?? numStr;
+    });
 }
 
 /**
- * Pre-load page labels into the in-memory cache for citations in a string
- * that have page attributes. Must be called (and awaited) before expandToRawHtml()
- * so that synchronous translatePageNumberToLabel lookups succeed.
+ * Resolve page labels for citations in a string that carry page attributes.
+ *
+ * Returns a `PageLabelsByAttachmentId` map (attachment item ID → 0-based page
+ * index → label). Callers thread the returned map into `expandToRawHtml` so
+ * expansion can translate model-provided 1-based page numbers to display
+ * labels without reading mutable cache state synchronously.
+ *
+ * On a metadata cache miss a full extraction is run via
+ * `getAttachmentFileStatus`; the freshly written labels are then read back.
  */
-export async function preloadPageLabelsForNewCitations(str: string): Promise<void> {
+export async function preloadPageLabelsForNewCitations(str: string): Promise<PageLabelsByAttachmentId> {
+    const labelsByAttachmentId: PageLabelsByAttachmentId = {};
     const cache = Zotero.Beaver?.attachmentFileCache;
-    if (!cache) return;
+    if (!cache) return labelsByAttachmentId;
 
     const seen = new Set<number>();
     const regex = /<citation\s+([^/]*?)\s*\/>/g;
@@ -94,13 +101,21 @@ export async function preloadPageLabelsForNewCitations(str: string): Promise<voi
         try {
             const filePath = await attachmentItem.getFilePathAsync();
             if (!filePath) continue;
-            const record = await cache.getMetadata(attachmentItem.id, filePath);
-            if (record) continue;
-            await getAttachmentFileStatus(attachmentItem, false);
+            let record = await cache.getMetadata(attachmentItem.id, filePath);
+            if (!record) {
+                // Cache miss — run a full extraction, then read labels back.
+                await getAttachmentFileStatus(attachmentItem, false);
+                record = await cache.getMetadata(attachmentItem.id, filePath);
+            }
+            if (record?.page_labels && Object.keys(record.page_labels).length > 0) {
+                labelsByAttachmentId[attachmentItem.id] = { ...record.page_labels };
+            }
         } catch {
             // Skip items that can't be resolved
         }
     }
+
+    return labelsByAttachmentId;
 }
 
 /**
@@ -194,21 +209,26 @@ function attrsChanged(
 
 /**
  * Resolve page for a citation, optionally translating 1-based page numbers to labels.
- * @param itemId - Zotero item ID for the attachment (or regular item)
  * @param item - The Zotero item (used to find best PDF attachment for regular items)
  * @param page - Raw page string from the citation attributes
  * @param shouldTranslate - If true, translate 1-based page numbers to labels (for model-provided pages)
+ * @param pageLabels - Pre-resolved label map keyed by attachment item ID
  */
-function resolvePageForCitation(item: any, page: string | undefined, shouldTranslate: boolean): string | undefined {
+function resolvePageForCitation(
+    item: any,
+    page: string | undefined,
+    shouldTranslate: boolean,
+    pageLabels?: PageLabelsByAttachmentId,
+): string | undefined {
     if (!page) return undefined;
     let resolved = normalizePageLocator(page);
     if (shouldTranslate && resolved) {
         if (item.isAttachment()) {
-            resolved = translatePageNumberToLabel(item.id, resolved);
+            resolved = translatePageNumberToLabel(pageLabels?.[item.id] ?? null, resolved);
         } else {
             const att = getBestPDFAttachment(item);
             if (att) {
-                resolved = translatePageNumberToLabel(att.id, resolved);
+                resolved = translatePageNumberToLabel(pageLabels?.[att.id] ?? null, resolved);
             }
         }
     }
@@ -216,7 +236,11 @@ function resolvePageForCitation(item: any, page: string | undefined, shouldTrans
 }
 
 /** Build a new citation from simplified attributes (item_id format: "LIB-KEY") */
-function buildCitationFromSimplifiedAttrs(attrs: { item_id: string; page?: string }, shouldTranslatePage: boolean): string {
+function buildCitationFromSimplifiedAttrs(
+    attrs: { item_id: string; page?: string },
+    shouldTranslatePage: boolean,
+    pageLabels?: PageLabelsByAttachmentId,
+): string {
     const dashIdx = attrs.item_id.indexOf('-');
     if (dashIdx === -1) {
         throw new Error(`Invalid item_id format: "${attrs.item_id}". Expected "libraryID-itemKey".`);
@@ -227,12 +251,17 @@ function buildCitationFromSimplifiedAttrs(attrs: { item_id: string; page?: strin
     if (!item) {
         throw new Error(`Item not found: ${attrs.item_id}`);
     }
-    const resolvedPage = resolvePageForCitation(item, attrs.page, shouldTranslatePage);
+    const resolvedPage = resolvePageForCitation(item, attrs.page, shouldTranslatePage, pageLabels);
     return stripInlineItemDataFromDataCitations(createCitationHTML(item, resolvedPage));
 }
 
 /** Build a new citation from an attachment ID (att_id format: "LIB-KEY") */
-function buildCitationFromAttId(attId: string, page?: string, shouldTranslatePage = true): string {
+function buildCitationFromAttId(
+    attId: string,
+    page?: string,
+    shouldTranslatePage = true,
+    pageLabels?: PageLabelsByAttachmentId,
+): string {
     const dashIdx = attId.indexOf('-');
     if (dashIdx === -1) {
         throw new Error(`Invalid att_id format: "${attId}". Expected "libraryID-itemKey".`);
@@ -243,7 +272,7 @@ function buildCitationFromAttId(attId: string, page?: string, shouldTranslatePag
     if (!item) {
         throw new Error(`Attachment not found: ${attId}`);
     }
-    const resolvedPage = resolvePageForCitation(item, page, shouldTranslatePage);
+    const resolvedPage = resolvePageForCitation(item, page, shouldTranslatePage, pageLabels);
     // createCitationHTML handles attachment-to-parent resolution internally
     return stripInlineItemDataFromDataCitations(createCitationHTML(item, resolvedPage));
 }
@@ -357,12 +386,17 @@ function buildExternalRefLinkHTML(ref: ExternalReference, page?: string): string
  *   auto-resolved to a Zotero `item_id` if the work is in the library, or
  *   converted to an inline `<a>` link otherwise. When omitted, `external_id`
  *   citations throw the same "item_id or att_id" error as before.
+ * @param pageLabels - Optional pre-resolved page-label map (attachment item ID
+ *   → 0-based page index → label). Used to translate model-provided 1-based
+ *   page numbers on NEW citations into display labels. Resolve it up-front via
+ *   `preloadPageLabelsForNewCitations`.
  */
 export function expandToRawHtml(
     str: string,
     metadata: SimplificationMetadata,
     context: 'old' | 'new',
     externalRefContext?: ExternalRefContext,
+    pageLabels?: PageLabelsByAttachmentId,
 ): string {
     // Expand citations (all self-closing: <citation ... />)
     str = str.replace(
@@ -393,7 +427,7 @@ export function expandToRawHtml(
                             // to a label. Translating here corrupts the locator — e.g.,
                             // label "15" gets treated as 1-based index and converted to
                             // the PDF's physical page label at that index (e.g., "352").
-                            return buildCitationFromSimplifiedAttrs(newAttrs, false);
+                            return buildCitationFromSimplifiedAttrs(newAttrs, false, pageLabels);
                         }
                     }
                     return stored.rawHtml; // exact original
@@ -444,15 +478,15 @@ export function expandToRawHtml(
             const normalizedCitation = normalizeCitationTag(parseRawCitationAttributes(attrStr));
             if (itemId) {
                 const attrs = parseSimplifiedCitationAttrs(attrStr);
-                return buildCitationFromSimplifiedAttrs(attrs, true);
+                return buildCitationFromSimplifiedAttrs(attrs, true, pageLabels);
             }
             if (attId) {
                 const page = normalizedCitation.ok ? getPageLocator(normalizedCitation.ref) : extractAttr(attrStr, 'page');
-                return buildCitationFromAttId(attId, page, true);
+                return buildCitationFromAttId(attId, page, true, pageLabels);
             }
             if (normalizedCitation.ok && normalizedCitation.ref.kind === 'zotero') {
                 const attrs = parseSimplifiedCitationAttrs(attrStr);
-                return buildCitationFromSimplifiedAttrs(attrs, true);
+                return buildCitationFromSimplifiedAttrs(attrs, true, pageLabels);
             }
             // external_id: chat-side external work ID (e.g. OpenAlex W-id). Two-tier
             // fallback so the model's research effort isn't lost when it tries to
@@ -465,7 +499,7 @@ export function expandToRawHtml(
                 const mappedItemRef = externalRefContext?.externalItemMapping?.[externalId];
                 if (mappedItemRef) {
                     const itemIdStr = `${mappedItemRef.library_id}-${mappedItemRef.zotero_key}`;
-                    return buildCitationFromSimplifiedAttrs({ item_id: itemIdStr, page }, true);
+                    return buildCitationFromSimplifiedAttrs({ item_id: itemIdStr, page }, true, pageLabels);
                 }
 
                 // Tier 2: emit an inline hyperlink from the ExternalReference
