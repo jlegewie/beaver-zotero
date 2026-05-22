@@ -8,6 +8,7 @@ import {
 describe('createTimeoutController', () => {
     afterEach(() => {
         vi.useRealTimers();
+        vi.restoreAllMocks();
     });
 
     it('falls back to the default for non-positive or non-finite values', () => {
@@ -49,5 +50,31 @@ describe('createTimeoutController', () => {
         );
 
         timeout.dispose();
+    });
+
+    it('uses the main window AbortController when the current global has none', () => {
+        const originalAbortController = globalThis.AbortController;
+        const mainWindow = { AbortController: originalAbortController };
+        vi.spyOn(Zotero, 'getMainWindow').mockReturnValue(mainWindow as any);
+        Object.defineProperty(globalThis, 'AbortController', {
+            value: undefined,
+            configurable: true,
+            writable: true,
+        });
+
+        try {
+            const timeout = createTimeoutController(1, 30);
+
+            expect(timeout.signal).toBeInstanceOf(AbortSignal);
+            expect(Zotero.getMainWindow).toHaveBeenCalled();
+
+            timeout.dispose();
+        } finally {
+            Object.defineProperty(globalThis, 'AbortController', {
+                value: originalAbortController,
+                configurable: true,
+                writable: true,
+            });
+        }
     });
 });

@@ -1,3 +1,5 @@
+import { createAbortController } from '../../utils/abortController';
+
 /** Default timeout in seconds if not specified by backend */
 export const DEFAULT_TIMEOUT_SECONDS = 25;
 export const DEFAULT_PAGES_TIMEOUT_SECONDS = 40;
@@ -60,7 +62,7 @@ export function createTimeoutController(
             : defaultSeconds;
     const timeoutSeconds = Math.min(parsedTimeoutSeconds, MAX_PDF_TIMEOUT_SECONDS);
     const startTime = Date.now();
-    const controller = new AbortController();
+    const controller = createAbortController();
     const timer = setTimeout(() => controller.abort(), timeoutSeconds * 1000);
 
     return {

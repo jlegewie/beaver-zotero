@@ -10,6 +10,7 @@ import type {
 import { getFileSignature, isRemoteFilePath, type FileSignature } from './documentFileIdentity';
 import { logger } from '../utils/logger';
 import { gzipString, gunzipToString } from '../utils/gzip';
+import { createAbortController } from '../utils/abortController';
 import { SCHEMA_VERSION } from '../beaver-extract/schema/schema';
 import type { BeaverExtractResult } from '../beaver-extract/schema/schema';
 import {
@@ -236,7 +237,7 @@ export class DocumentCache {
         const refreshedExisting = this.extractionLocks.get(lockKey);
         if (refreshedExisting) return this.waitForSharedExtraction(refreshedExisting, input.abortSignal);
 
-        const controller = new AbortController();
+        const controller = createAbortController();
         const entry: ExtractionLockEntry = {
             controller,
             waiters: new Set(),
