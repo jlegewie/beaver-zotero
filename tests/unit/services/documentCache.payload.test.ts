@@ -15,8 +15,10 @@ const mockIOUtils = (globalThis as any).IOUtils as {
     makeDirectory: ReturnType<typeof vi.fn>;
 };
 
-function createCacheAttachment(): Parameters<DocumentCache['putResult']>[0]['item'] {
-    return createMockAttachment({ id: 100, key: 'ABCD1234', libraryID: 1 }) as Parameters<DocumentCache['putResult']>[0]['item'];
+type CacheAttachmentItem = Parameters<DocumentCache['putResult']>[0]['item'];
+
+function createCacheAttachment(): CacheAttachmentItem {
+    return createMockAttachment({ id: 100, key: 'ABCD1234', libraryID: 1 }) as unknown as CacheAttachmentItem;
 }
 
 const structuredResult: BeaverExtractResult = {
