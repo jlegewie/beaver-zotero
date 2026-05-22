@@ -309,11 +309,14 @@ export async function handleZoteroDocumentRequest(
         if (!pdfBytes) {
             throw new Error('PDF data was not loaded before extraction');
         }
+        // `checkTextLayer: true` is set explicitly (it also matches the
+        // extractor default)
+        const extractSettings = { checkTextLayer: true as const };
         const createSharedResult = async (extractSignal: AbortSignal) =>
-            extractor.extract(pdfBytes, { mode }, extractSignal);
+            extractor.extract(pdfBytes, { mode, settings: extractSettings }, extractSignal);
 
         const createUnsharedResult = async () => {
-            const extracted = await extractor.extract(pdfBytes, { mode }, signal);
+            const extracted = await extractor.extract(pdfBytes, { mode, settings: extractSettings }, signal);
             throwIfTimedOut('pdf_extract');
             return extracted;
         };
