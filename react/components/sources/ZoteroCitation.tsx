@@ -21,7 +21,7 @@ import { useCitationMarker } from '../../hooks/useCitationMarker';
 import { ZoteroItemReference } from '../../types/zotero';
 import { revealSource } from '../../utils/sourceUtils';
 import { resolvePageLabelFromLabels, translatePageNumberToLabelFromLabels } from '../../utils/pageLabels';
-import { getBestPDFAttachment } from '../../../src/utils/zoteroItemHelpers';
+import { getBestPDFAttachment, getBestPDFAttachmentAsync } from '../../../src/utils/zoteroItemHelpers';
 import {
     baseCitationKey,
     CitationRef,
@@ -436,12 +436,36 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
             return;
         }
 
+        // Get locator data before regular-item handling. Some citations are
+        // resolved to parent items even though the raw tag includes page
+        // locators; those should navigate to the item's PDF attachment.
+        const boundingBoxData = getCitationBoundingBoxes(citationMetadata);
+        const pages = getCitationPages(citationMetadata);
+        const hasPdfLocator = boundingBoxData.length > 0 || pages.length > 0;
+        let pdfItem = item;
+
         // Handle regular items
         if (item.isRegularItem()) {
-            logger(`ZoteroCitation: Selecting regular item (${item.id})`);
-            // await selectItemById(item.id);
-            revealSource({ library_id: item.libraryID, zotero_key: item.key } as ZoteroItemReference);
-            return;
+            if (hasPdfLocator) {
+                const attachment = await getBestPDFAttachmentAsync(item);
+                const isPdfAttachment = !!attachment && (
+                    attachment.isPDFAttachment?.() ||
+                    attachment.attachmentContentType === 'application/pdf'
+                );
+                if (isPdfAttachment) {
+                    logger(`ZoteroCitation: Regular item locator resolved to PDF attachment (${attachment.id})`);
+                    pdfItem = attachment;
+                } else {
+                    logger(`ZoteroCitation: Regular item has locator but no PDF attachment (${item.id})`);
+                    revealSource({ library_id: item.libraryID, zotero_key: item.key } as ZoteroItemReference);
+                    return;
+                }
+            } else {
+                logger(`ZoteroCitation: Selecting regular item (${item.id})`);
+                // await selectItemById(item.id);
+                revealSource({ library_id: item.libraryID, zotero_key: item.key } as ZoteroItemReference);
+                return;
+            }
         }
 
         // Handle file links
@@ -458,15 +482,12 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
         //     return;
         // }
 
-        // Get bounding box data from citation
-        const boundingBoxData = getCitationBoundingBoxes(citationMetadata);
-        const pages = getCitationPages(citationMetadata);
         logger(`ZoteroCitation: Citation Location (boundingBoxData.length: ${boundingBoxData.length}, pages.length: ${pages.length})`);
 
         // Handle regular items
-        if (item.isAttachment() && boundingBoxData.length == 0 && pages.length == 0) {
-            logger(`ZoteroCitation: Selecting attachment (${item.id})`);
-            await selectItemById(item.id);
+        if (pdfItem.isAttachment() && boundingBoxData.length == 0 && pages.length == 0) {
+            logger(`ZoteroCitation: Selecting attachment (${pdfItem.id})`);
+            await selectItemById(pdfItem.id);
             return;
         }
 
@@ -475,7 +496,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
             logger(`ZoteroCitation: Current Reader (${reader?.itemID})`);
             
             // Check if we need to open or switch to the correct PDF
-            if (!reader || reader.itemID !== item.id) {
+            if (!reader || reader.itemID !== pdfItem.id) {
                 logger(`ZoteroCitation: Opening PDF in reader or switching to the correct PDF`);
 
                 // Determine the page to open
@@ -487,8 +508,8 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
                 }
 
                 // Open the PDF at page
-                logger(`ZoteroCitation: Opening item ${item.id} at page ${pageIndex}`);
-                reader = await Zotero.Reader.open(item.id, { pageIndex: pageIndex - 1 });
+                logger(`ZoteroCitation: Opening item ${pdfItem.id} at page ${pageIndex}`);
+                reader = await Zotero.Reader.open(pdfItem.id, { pageIndex: pageIndex - 1 });
 
                 // Wait for reader to initialize (should already be done by getCurrentReaderAndWaitForView)
                 await new Promise(resolve => setTimeout(resolve, 300));

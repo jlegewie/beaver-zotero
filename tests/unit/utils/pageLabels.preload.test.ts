@@ -199,6 +199,8 @@ describe('preloadPageLabelsForContent', () => {
         (globalThis as any).Zotero.Items = {
             getByLibraryAndKey: vi.fn(() => parent),
             get: vi.fn((itemID: number) => itemID === 77 ? attachment : false),
+            getAsync: vi.fn(async (itemIDs: number[]) => itemIDs.map((id) => id === 77 ? attachment : false)),
+            loadDataTypes: vi.fn().mockResolvedValue(undefined),
         };
         (globalThis as any).Zotero.Beaver = { attachmentFileCache: cache };
 
@@ -364,6 +366,8 @@ describe('preloadPageLabelsForCitations', () => {
         (globalThis as any).Zotero.Items = {
             getByLibraryAndKey: vi.fn(() => parent),
             get: vi.fn((itemID: number) => itemID === 78 ? attachment : false),
+            getAsync: vi.fn(async (itemIDs: number[]) => itemIDs.map((id) => id === 78 ? attachment : false)),
+            loadDataTypes: vi.fn().mockResolvedValue(undefined),
         };
         (globalThis as any).Zotero.Beaver = { attachmentFileCache: cache };
 

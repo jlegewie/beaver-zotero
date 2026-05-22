@@ -20,7 +20,7 @@
 import { makeRemoteFilePath } from '../../src/services/attachmentFileCache';
 import { getAttachmentFileStatus, isRemoteAccessAvailable } from '../../src/services/agentDataProvider/utils';
 import type { CitationMetadata } from '../types/citations';
-import { getBestPDFAttachment } from '../../src/utils/zoteroItemHelpers';
+import { getBestPDFAttachmentAsync } from '../../src/utils/zoteroItemHelpers';
 import { normalizeCitationTag, parseRawCitationAttributes } from './citationGrammar';
 import type { PageLabelsByAttachmentId } from '../atoms/citations';
 
@@ -51,7 +51,7 @@ function readPageLabelsFromCache(cache: any, itemId: number): Record<number, str
 
 async function getPreloadFilePath(item: Zotero.Item): Promise<PreloadFilePath | null> {
     if (!item.isAttachment()) {
-        const attachment = item.isRegularItem?.() ? getBestPDFAttachment(item) : null;
+        const attachment = item.isRegularItem?.() ? await getBestPDFAttachmentAsync(item) : null;
         if (!attachment) return null;
         item = attachment;
     }
