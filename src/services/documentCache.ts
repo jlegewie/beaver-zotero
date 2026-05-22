@@ -53,12 +53,19 @@ interface CacheMetadataInput {
     errorCode?: DocumentCacheErrorCode | null;
 }
 
+interface ExtractionLockEntry {
+    promise: Promise<BeaverExtractResult | null>;
+    controller: AbortController;
+    waiters: Set<symbol>;
+    settled: boolean;
+}
+
 /** Full-document PDF extraction cache backed by SQLite metadata and gzip payload files. */
 export class DocumentCache {
     private db: BeaverDB;
     private payloadCacheDir = '';
     private writeLocks = new Map<string, Promise<void>>();
-    private extractionLocks = new Map<string, Promise<BeaverExtractResult | null>>();
+    private extractionLocks = new Map<string, ExtractionLockEntry>();
 
     constructor(db: BeaverDB) {
         this.db = db;
@@ -203,6 +210,7 @@ export class DocumentCache {
         contentType: string;
         maxSourceSizeBytes?: number;
         sharedTimeoutMs?: number;
+        abortSignal?: AbortSignal;
         expectedSourceIdentity?: DocumentCacheSourceIdentity | null;
         create: (signal: AbortSignal) => Promise<BeaverExtractResult>;
         metadata: (result: BeaverExtractResult) => CacheMetadataInput;
@@ -211,11 +219,6 @@ export class DocumentCache {
             libraryId: input.item.libraryID,
             zoteroKey: input.item.key,
         };
-        const cached = await this.getResult(ref, input.mode, input.filePath, {
-            maxSourceSizeBytes: input.maxSourceSizeBytes,
-        });
-        if (cached) return cached;
-
         const source = input.expectedSourceIdentity
             ?? await this.getSourceIdentity(input.filePath, input.sourceSizeBytes);
         if (input.maxSourceSizeBytes != null && source.sourceSizeBytes > input.maxSourceSizeBytes) {
@@ -223,18 +226,32 @@ export class DocumentCache {
         }
         const lockKey = `${ref.libraryId}/${ref.zoteroKey}/${input.mode}/${this.sourceIdentityKey(source)}`;
         const existing = this.extractionLocks.get(lockKey);
-        if (existing) return existing;
+        if (existing) return this.waitForSharedExtraction(existing, input.abortSignal);
 
-        const next = (async () => {
+        const cached = await this.getResult(ref, input.mode, input.filePath, {
+            maxSourceSizeBytes: input.maxSourceSizeBytes,
+        });
+        if (cached) return cached;
+
+        const refreshedExisting = this.extractionLocks.get(lockKey);
+        if (refreshedExisting) return this.waitForSharedExtraction(refreshedExisting, input.abortSignal);
+
+        const controller = new AbortController();
+        const entry: ExtractionLockEntry = {
+            controller,
+            waiters: new Set(),
+            settled: false,
+            promise: Promise.resolve(null),
+        };
+        const timer = input.sharedTimeoutMs != null && input.sharedTimeoutMs > 0
+            ? setTimeout(() => controller.abort(), input.sharedTimeoutMs)
+            : null;
+        entry.promise = (async () => {
             const refreshed = await this.getResult(ref, input.mode, input.filePath, {
                 maxSourceSizeBytes: input.maxSourceSizeBytes,
             });
             if (refreshed) return refreshed;
 
-            const controller = new AbortController();
-            const timer = input.sharedTimeoutMs != null && input.sharedTimeoutMs > 0
-                ? setTimeout(() => controller.abort(), input.sharedTimeoutMs)
-                : null;
             let result: BeaverExtractResult;
             try {
                 result = await input.create(controller.signal);
@@ -258,13 +275,59 @@ export class DocumentCache {
                 throw error;
             })
             .finally(() => {
-                if (this.extractionLocks.get(lockKey) === next) {
+                entry.settled = true;
+                if (this.extractionLocks.get(lockKey) === entry) {
                     this.extractionLocks.delete(lockKey);
                 }
             });
 
-        this.extractionLocks.set(lockKey, next);
-        return next;
+        this.extractionLocks.set(lockKey, entry);
+        return this.waitForSharedExtraction(entry, input.abortSignal);
+    }
+
+    private waitForSharedExtraction(
+        entry: ExtractionLockEntry,
+        abortSignal?: AbortSignal,
+    ): Promise<BeaverExtractResult | null> {
+        const waiter = Symbol('document-cache-waiter');
+        entry.waiters.add(waiter);
+
+        let onAbort: (() => void) | null = null;
+        const cleanupWaiter = () => {
+            if (onAbort) {
+                abortSignal?.removeEventListener('abort', onAbort);
+            }
+            entry.waiters.delete(waiter);
+            if (!entry.settled && entry.waiters.size === 0) {
+                entry.controller.abort();
+            }
+        };
+
+        if (!abortSignal) {
+            return entry.promise.finally(() => {
+                if (entry.waiters.has(waiter)) {
+                    cleanupWaiter();
+                }
+            });
+        }
+
+        const abortPromise = new Promise<never>((_, reject) => {
+            onAbort = () => {
+                cleanupWaiter();
+                reject(new Error('Operation aborted'));
+            };
+            if (abortSignal.aborted) {
+                onAbort();
+            } else {
+                abortSignal.addEventListener('abort', onAbort, { once: true });
+            }
+        });
+
+        return Promise.race([entry.promise, abortPromise]).finally(() => {
+            if (entry.waiters.has(waiter)) {
+                cleanupWaiter();
+            }
+        });
     }
 
     /** Store fresh source-level metadata without writing a payload. */
@@ -647,13 +710,28 @@ export class DocumentCache {
         const tempPath = PathUtils.join(dir, `${zoteroKey}.${mode}.${sha256}.${nonce}.tmp`);
 
         const exists = await IOUtils.exists(finalPath).catch(() => false);
-        if (!exists) {
+        if (exists && !(await this.payloadFileMatches(finalPath, bytes, sha256))) {
+            await IOUtils.remove(finalPath).catch(() => undefined);
+        }
+        const validExists = await IOUtils.exists(finalPath).catch(() => false);
+        if (!validExists) {
             await IOUtils.write(tempPath, bytes);
             await IOUtils.write(finalPath, bytes);
             await IOUtils.remove(tempPath).catch(() => undefined);
         }
 
         return { path: finalPath, size: bytes.byteLength, sha256 };
+    }
+
+    private async payloadFileMatches(path: string, expectedBytes: Uint8Array, expectedSha256: string): Promise<boolean> {
+        try {
+            const existing = await IOUtils.read(path);
+            if (existing.byteLength !== expectedBytes.byteLength) return false;
+            const existingSha256 = await this.sha256Hex(existing);
+            return existingSha256 === expectedSha256;
+        } catch {
+            return false;
+        }
     }
 
     private async deletePayload(payload: DocumentCachePayloadRecord, removeFile = true): Promise<void> {

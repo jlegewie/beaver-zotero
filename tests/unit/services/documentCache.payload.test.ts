@@ -161,6 +161,97 @@ describe('DocumentCache payloads', () => {
         expect(await db.getDocumentCachePayloadCount()).toBe(1);
     });
 
+    it('keeps shared extraction alive while another waiter remains active', async () => {
+        const item = createCacheAttachment();
+        const firstController = new AbortController();
+        const expectedSourceIdentity = await cache.getSourceIdentitySnapshot(sourcePath);
+        let createCalls = 0;
+        let createSignal: AbortSignal | null = null;
+        let releaseCreate!: () => void;
+        const createBarrier = new Promise<void>((resolve) => {
+            releaseCreate = resolve;
+        });
+        const create = vi.fn(async (signal: AbortSignal) => {
+            createCalls++;
+            createSignal = signal;
+            await createBarrier;
+            expect(signal.aborted).toBe(false);
+            return structuredResult;
+        });
+
+        const first = cache.getOrCreateResult({
+            item,
+            filePath: sourcePath,
+            mode: 'structured',
+            sourceSizeBytes: 3,
+            contentType: 'application/pdf',
+            abortSignal: firstController.signal,
+            expectedSourceIdentity,
+            create,
+            metadata: (result) => ({
+                pageCount: result.document.pageCount,
+                pageLabels: result.document.pageLabels ?? null,
+            }),
+        });
+
+        while (createCalls === 0) {
+            await Promise.resolve();
+        }
+
+        const second = cache.getOrCreateResult({
+            item,
+            filePath: sourcePath,
+            mode: 'structured',
+            sourceSizeBytes: 3,
+            contentType: 'application/pdf',
+            expectedSourceIdentity,
+            create,
+            metadata: (result) => ({
+                pageCount: result.document.pageCount,
+                pageLabels: result.document.pageLabels ?? null,
+            }),
+        });
+
+        await Promise.resolve();
+        await Promise.resolve();
+
+        firstController.abort();
+        await expect(first).rejects.toThrow('Operation aborted');
+        expect(createSignal?.aborted).toBe(false);
+
+        releaseCreate();
+        await expect(second).resolves.toEqual(structuredResult);
+        expect(create).toHaveBeenCalledTimes(1);
+        expect(await db.getDocumentCachePayloadCount()).toBe(1);
+    });
+
+    it('passes the caller abort signal to cold result creation', async () => {
+        const item = createCacheAttachment();
+        const controller = new AbortController();
+        const create = vi.fn(async (signal: AbortSignal) => {
+            expect(signal.aborted).toBe(true);
+            throw new Error('aborted');
+        });
+        controller.abort();
+
+        await expect(cache.getOrCreateResult({
+            item,
+            filePath: sourcePath,
+            mode: 'structured',
+            sourceSizeBytes: 3,
+            contentType: 'application/pdf',
+            abortSignal: controller.signal,
+            create,
+            metadata: (result) => ({
+                pageCount: result.document.pageCount,
+                pageLabels: result.document.pageLabels ?? null,
+            }),
+        })).rejects.toThrow('aborted');
+
+        expect(create).toHaveBeenCalledTimes(1);
+        expect(await db.getDocumentCachePayloadCount()).toBe(0);
+    });
+
     it('skips storing a result when the local source changes after the initial snapshot', async () => {
         const item = createCacheAttachment();
         const expectedSourceIdentity = await cache.getSourceIdentitySnapshot(sourcePath);
@@ -233,6 +324,46 @@ describe('DocumentCache payloads', () => {
 
         expect(await db.getDocumentCachePayloadCount()).toBe(0);
         expect(await db.getDocumentCacheMetadataByKey(1, 'ABCD1234')).not.toBeNull();
+    });
+
+    it('overwrites a corrupt orphan at the content-addressed payload path', async () => {
+        const item = createCacheAttachment();
+        await cache.putResult({
+            item,
+            filePath: sourcePath,
+            mode: 'structured',
+            sourceSizeBytes: 3,
+            contentType: 'application/pdf',
+            result: structuredResult,
+            metadata: {
+                pageCount: 1,
+                pageLabels: { '0': '1' },
+            },
+        });
+        const firstPayload = await db.getDocumentCachePayload(1, 'ABCD1234', 'structured');
+        await db.deleteDocumentCacheMetadata(1, 'ABCD1234');
+        files.set(firstPayload!.payloadPath, new Uint8Array([9, 9, 9]));
+
+        await cache.putResult({
+            item,
+            filePath: sourcePath,
+            mode: 'structured',
+            sourceSizeBytes: 3,
+            contentType: 'application/pdf',
+            result: structuredResult,
+            metadata: {
+                pageCount: 1,
+                pageLabels: { '0': '1' },
+            },
+        });
+
+        const secondPayload = await db.getDocumentCachePayload(1, 'ABCD1234', 'structured');
+        expect(secondPayload?.payloadPath).toBe(firstPayload?.payloadPath);
+        await expect(cache.getResult(
+            { libraryId: 1, zoteroKey: 'ABCD1234' },
+            'structured',
+            sourcePath,
+        )).resolves.toEqual(structuredResult);
     });
 
     it('putErrorMetadata deletes existing payload rows and files', async () => {

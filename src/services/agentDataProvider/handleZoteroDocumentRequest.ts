@@ -339,6 +339,7 @@ export async function handleZoteroDocumentRequest(
                 contentType: pdfItem.attachmentContentType || 'application/pdf',
                 maxSourceSizeBytes,
                 sharedTimeoutMs: MAX_PDF_TIMEOUT_SECONDS * 1000,
+                abortSignal: signal,
                 expectedSourceIdentity: isRemoteOnly ? null : initialSourceIdentity,
                 create: createSharedResult,
                 metadata: buildMetadata,
