@@ -80,6 +80,9 @@ export interface AttachmentFileCacheRecord {
 export type DocumentCacheExtractionMode = 'structured' | 'markdown';
 export type DocumentCachePageLabels = Record<string, string>;
 
+/** Authoritative error reason for a cached document; `null` marks a successful extraction. */
+export type DocumentCacheErrorCode = 'encrypted' | 'invalid_pdf' | 'no_text_layer';
+
 export interface DocumentCacheFileSignature {
     mtime_ms: number;
     size_bytes: number;
@@ -96,10 +99,7 @@ export interface DocumentCacheMetadataRecord {
     contentType: string;
     pageCount: number | null;
     pageLabels: DocumentCachePageLabels | null;
-    hasTextLayer: boolean | null;
-    needsOcr: boolean | null;
-    isEncrypted: boolean;
-    isInvalid: boolean;
+    errorCode: DocumentCacheErrorCode | null;
     extractionSchemaVersion: string;
     metadataFormatVersion: number;
     createdAt: string;
@@ -404,6 +404,12 @@ export class BeaverDB {
             ON attachment_file_cache(library_id, zotero_key);
         `);
 
+        // Drop and recreate the document cache tables if the schema is stale
+        if (await this.documentCacheSchemaIsStale()) {
+            await this.conn.queryAsync(`DROP TABLE IF EXISTS document_cache_payloads`);
+            await this.conn.queryAsync(`DROP TABLE IF EXISTS document_cache_metadata`);
+        }
+
         await this.conn.queryAsync(`
             CREATE TABLE IF NOT EXISTS document_cache_metadata (
                 id                         INTEGER PRIMARY KEY,
@@ -417,10 +423,7 @@ export class BeaverDB {
                 content_type               TEXT NOT NULL,
                 page_count                 INTEGER,
                 page_labels_json           TEXT,
-                has_text_layer             INTEGER,
-                needs_ocr                  INTEGER,
-                is_encrypted               INTEGER NOT NULL DEFAULT 0,
-                is_invalid                 INTEGER NOT NULL DEFAULT 0,
+                error_code                 TEXT,
                 extraction_schema_version  TEXT NOT NULL,
                 metadata_format_version    INTEGER NOT NULL,
                 created_at                 TEXT NOT NULL DEFAULT (datetime('now')),
@@ -1824,10 +1827,7 @@ export class BeaverDB {
             contentType: row.content_type,
             pageCount: row.page_count ?? null,
             pageLabels,
-            hasTextLayer: row.has_text_layer == null ? null : Boolean(row.has_text_layer),
-            needsOcr: row.needs_ocr == null ? null : Boolean(row.needs_ocr),
-            isEncrypted: Boolean(row.is_encrypted),
-            isInvalid: Boolean(row.is_invalid),
+            errorCode: row.error_code ?? null,
             extractionSchemaVersion: row.extraction_schema_version,
             metadataFormatVersion: row.metadata_format_version,
             createdAt: row.created_at,
@@ -1861,6 +1861,24 @@ export class BeaverDB {
         };
     }
 
+    /**
+     * Detect stale `document_cache_metadata` table whose schema does
+     * not match the current shape.
+     */
+    private async documentCacheSchemaIsStale(): Promise<boolean> {
+        const columns = new Set<string>();
+        await this.conn.queryAsync(
+            `SELECT name FROM pragma_table_info('document_cache_metadata')`,
+            [],
+            { onRow: (row: any) => columns.add(row.getResultByIndex(0)) },
+        );
+        if (columns.size === 0) return false; // table does not exist
+        if (!columns.has('error_code')) return true;
+        // `status` and the legacy boolean columns are no longer part of the schema.
+        return ['status', 'has_text_layer', 'needs_ocr', 'is_encrypted', 'is_invalid']
+            .some((col) => columns.has(col));
+    }
+
     private async selectDocumentCacheMetadata(sql: string, params: any[] = []): Promise<DocumentCacheMetadataRecord[]> {
         const rows: any[] = [];
         await this.conn.queryAsync(sql, params, {
@@ -1877,15 +1895,12 @@ export class BeaverDB {
                     content_type: row.getResultByIndex(8),
                     page_count: row.getResultByIndex(9),
                     page_labels_json: row.getResultByIndex(10),
-                    has_text_layer: row.getResultByIndex(11),
-                    needs_ocr: row.getResultByIndex(12),
-                    is_encrypted: row.getResultByIndex(13),
-                    is_invalid: row.getResultByIndex(14),
-                    extraction_schema_version: row.getResultByIndex(15),
-                    metadata_format_version: row.getResultByIndex(16),
-                    created_at: row.getResultByIndex(17),
-                    updated_at: row.getResultByIndex(18),
-                    last_accessed_at: row.getResultByIndex(19),
+                    error_code: row.getResultByIndex(11),
+                    extraction_schema_version: row.getResultByIndex(12),
+                    metadata_format_version: row.getResultByIndex(13),
+                    created_at: row.getResultByIndex(14),
+                    updated_at: row.getResultByIndex(15),
+                    last_accessed_at: row.getResultByIndex(16),
                 });
             },
         });
@@ -1924,8 +1939,8 @@ export class BeaverDB {
     private static documentCacheMetadataSelect(): string {
         return `SELECT id, item_id, library_id, zotero_key, file_path, file_mtime_ms,
                        file_size_bytes, source_size_bytes, content_type, page_count,
-                       page_labels_json, has_text_layer, needs_ocr, is_encrypted,
-                       is_invalid, extraction_schema_version, metadata_format_version,
+                       page_labels_json, error_code,
+                       extraction_schema_version, metadata_format_version,
                        created_at, updated_at, last_accessed_at
                 FROM document_cache_metadata`;
     }
@@ -1966,10 +1981,7 @@ export class BeaverDB {
             && current.contentType === inspected.contentType
             && current.pageCount === inspected.pageCount
             && JSON.stringify(current.pageLabels) === JSON.stringify(inspected.pageLabels)
-            && current.hasTextLayer === inspected.hasTextLayer
-            && current.needsOcr === inspected.needsOcr
-            && current.isEncrypted === inspected.isEncrypted
-            && current.isInvalid === inspected.isInvalid
+            && current.errorCode === inspected.errorCode
             && current.extractionSchemaVersion === inspected.extractionSchemaVersion
             && current.metadataFormatVersion === inspected.metadataFormatVersion;
     }
@@ -1989,9 +2001,9 @@ export class BeaverDB {
                 `INSERT INTO document_cache_metadata
                     (item_id, library_id, zotero_key, file_path, file_mtime_ms, file_size_bytes,
                      source_size_bytes, content_type, page_count, page_labels_json,
-                     has_text_layer, needs_ocr, is_encrypted, is_invalid,
+                     error_code,
                      extraction_schema_version, metadata_format_version, updated_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
                  ON CONFLICT(library_id, zotero_key) DO UPDATE SET
                     item_id = excluded.item_id,
                     file_path = excluded.file_path,
@@ -2001,10 +2013,7 @@ export class BeaverDB {
                     content_type = excluded.content_type,
                     page_count = excluded.page_count,
                     page_labels_json = excluded.page_labels_json,
-                    has_text_layer = excluded.has_text_layer,
-                    needs_ocr = excluded.needs_ocr,
-                    is_encrypted = excluded.is_encrypted,
-                    is_invalid = excluded.is_invalid,
+                    error_code = excluded.error_code,
                     extraction_schema_version = excluded.extraction_schema_version,
                     metadata_format_version = excluded.metadata_format_version,
                     updated_at = datetime('now')`,
@@ -2019,10 +2028,7 @@ export class BeaverDB {
                     record.contentType,
                     record.pageCount,
                     record.pageLabels ? JSON.stringify(record.pageLabels) : null,
-                    record.hasTextLayer == null ? null : (record.hasTextLayer ? 1 : 0),
-                    record.needsOcr == null ? null : (record.needsOcr ? 1 : 0),
-                    record.isEncrypted ? 1 : 0,
-                    record.isInvalid ? 1 : 0,
+                    record.errorCode,
                     record.extractionSchemaVersion,
                     record.metadataFormatVersion,
                 ],
@@ -2052,15 +2058,6 @@ export class BeaverDB {
         const rows = await this.selectDocumentCacheMetadata(
             `${BeaverDB.documentCacheMetadataSelect()} WHERE id = ?`,
             [id],
-        );
-        return rows[0] ?? null;
-    }
-
-    /** Get document-cache metadata by local item ID. */
-    public async getDocumentCacheMetadataByItemId(itemId: number): Promise<DocumentCacheMetadataRecord | null> {
-        const rows = await this.selectDocumentCacheMetadata(
-            `${BeaverDB.documentCacheMetadataSelect()} WHERE item_id = ?`,
-            [itemId],
         );
         return rows[0] ?? null;
     }

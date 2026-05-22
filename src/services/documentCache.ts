@@ -1,5 +1,6 @@
 import { BeaverDB } from './database';
 import type {
+    DocumentCacheErrorCode,
     DocumentCacheExtractionMode,
     DocumentCacheMetadataInput,
     DocumentCacheMetadataRecord,
@@ -27,10 +28,7 @@ export type DocumentPayloadRecord = DocumentCachePayloadRecord;
 export interface DocumentPreflightMetadata {
     pageCount: number | null;
     pageLabels: PageLabels | null;
-    hasTextLayer: boolean | null;
-    needsOcr: boolean | null;
-    isEncrypted: boolean;
-    isInvalid: boolean;
+    errorCode: DocumentCacheErrorCode | null;
     contentType: string;
 }
 
@@ -40,7 +38,7 @@ export interface DocumentCacheStats {
     payload_cache_dir: string;
 }
 
-type DocumentRef = { itemId?: number; libraryId: number; zoteroKey: string };
+type DocumentRef = { libraryId: number; zoteroKey: string };
 
 interface SourceIdentity {
     filePath: string;
@@ -51,10 +49,8 @@ interface SourceIdentity {
 interface CacheMetadataInput {
     pageCount: number | null;
     pageLabels: PageLabels | Record<number, string> | null;
-    hasTextLayer: boolean | null;
-    needsOcr: boolean | null;
-    isEncrypted?: boolean;
-    isInvalid?: boolean;
+    /** Authoritative error reason; omitted or `null` marks a successful extraction. */
+    errorCode?: DocumentCacheErrorCode | null;
 }
 
 /** Full-document PDF extraction cache backed by SQLite metadata and gzip payload files. */
@@ -91,15 +87,9 @@ export class DocumentCache {
         filePath: string,
     ): Promise<DocumentCacheMetadata | null> {
         try {
-            const record = await this.db.getDocumentCacheMetadataByKey(ref.libraryId, ref.zoteroKey)
-                ?? (ref.itemId != null
-                    ? await this.db.getDocumentCacheMetadataByItemId(ref.itemId)
-                    : null);
+            const record = await this.db.getDocumentCacheMetadataByKey(ref.libraryId, ref.zoteroKey);
             if (!record) return null;
 
-            if (record.libraryId !== ref.libraryId || record.zoteroKey !== ref.zoteroKey) {
-                return null;
-            }
             if (await this.isMetadataStale(record, filePath)) {
                 const deletedPayloads = await this.db.deleteDocumentCacheMetadataIfUnchanged(record);
                 if (deletedPayloads) {
@@ -245,7 +235,7 @@ export class DocumentCache {
         filePath: string;
         sourceSizeBytes: number;
         contentType: string;
-        errorState: 'encrypted' | 'invalid_pdf' | 'no_text_layer';
+        errorCode: DocumentCacheErrorCode;
         pageCount: number | null;
         pageLabels: PageLabels | Record<number, string> | null;
     }): Promise<void> {
@@ -254,10 +244,7 @@ export class DocumentCache {
             const metadata: CacheMetadataInput = {
                 pageCount: input.pageCount,
                 pageLabels: input.pageLabels,
-                hasTextLayer: input.errorState === 'no_text_layer' ? false : null,
-                needsOcr: input.errorState === 'no_text_layer' ? true : false,
-                isEncrypted: input.errorState === 'encrypted',
-                isInvalid: input.errorState === 'invalid_pdf',
+                errorCode: input.errorCode,
             };
             const source = await this.getSourceIdentity(input.filePath, input.sourceSizeBytes);
             if (Zotero.__beaverShuttingDown) return;
@@ -449,10 +436,7 @@ export class DocumentCache {
             contentType,
             pageCount: metadata.pageCount,
             pageLabels: this.normalizePageLabels(metadata.pageLabels),
-            hasTextLayer: metadata.hasTextLayer,
-            needsOcr: metadata.needsOcr,
-            isEncrypted: metadata.isEncrypted ?? false,
-            isInvalid: metadata.isInvalid ?? false,
+            errorCode: metadata.errorCode ?? null,
             extractionSchemaVersion: SCHEMA_VERSION,
             metadataFormatVersion: DOCUMENT_METADATA_FORMAT_VERSION,
         };

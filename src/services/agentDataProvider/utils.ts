@@ -420,6 +420,11 @@ async function extractPageLabelsFromData(pdfData: Uint8Array): Promise<Record<nu
  *
  * Check ordering matches today's handler ordering: encrypted → invalid →
  * needs_ocr → too_many_pages.
+ *
+ * Two cache shapes are accepted. The attachment file cache encodes its error
+ * state as boolean columns (`is_encrypted` / `is_invalid` / `needs_ocr`). The
+ * document cache encodes it as a single nullable `errorCode` — `null` marks a
+ * successful extraction.
  */
 export type PreflightErrorCode = 'encrypted' | 'invalid_pdf' | 'no_text_layer' | 'too_many_pages';
 
@@ -448,25 +453,32 @@ export function preflightCachedPdfMeta(
     const pageCount = 'page_count' in cachedMeta
         ? cachedMeta.page_count ?? null
         : cachedMeta.pageCount ?? null;
-    const isEncrypted = 'is_encrypted' in cachedMeta
-        ? cachedMeta.is_encrypted
-        : cachedMeta.isEncrypted;
-    const isInvalid = 'is_invalid' in cachedMeta
-        ? cachedMeta.is_invalid
-        : cachedMeta.isInvalid;
-    const needsOcr = 'needs_ocr' in cachedMeta
-        ? cachedMeta.needs_ocr
-        : cachedMeta.needsOcr;
 
-    if (isEncrypted) {
-        return { code: 'encrypted', pageCount };
+    if ('errorCode' in cachedMeta) {
+        // Document cache: a non-null `errorCode` is the authoritative error.
+        if (cachedMeta.errorCode) {
+            if (cachedMeta.errorCode === 'no_text_layer') {
+                // Image rendering skips the OCR gate; pages and search apply it.
+                if (opts.checkOcr) {
+                    return { code: 'no_text_layer', pageCount };
+                }
+            } else {
+                return { code: cachedMeta.errorCode, pageCount };
+            }
+        }
+    } else {
+        // Attachment file cache: error state encoded as boolean columns.
+        if (cachedMeta.is_encrypted) {
+            return { code: 'encrypted', pageCount };
+        }
+        if (cachedMeta.is_invalid) {
+            return { code: 'invalid_pdf', pageCount };
+        }
+        if (opts.checkOcr && cachedMeta.needs_ocr) {
+            return { code: 'no_text_layer', pageCount };
+        }
     }
-    if (isInvalid) {
-        return { code: 'invalid_pdf', pageCount };
-    }
-    if (opts.checkOcr && needsOcr) {
-        return { code: 'no_text_layer', pageCount };
-    }
+
     if (opts.applyPageCountCap && pageCount != null && pageCount > opts.maxPageCount) {
         return {
             code: 'too_many_pages',

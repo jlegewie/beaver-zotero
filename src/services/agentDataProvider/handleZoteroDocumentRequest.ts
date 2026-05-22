@@ -146,7 +146,6 @@ export async function handleZoteroDocumentRequest(
             logger(`handleZoteroDocumentRequest: document cache not available for ${requestKey}`, 1);
         }
         const docRef = {
-            itemId: pdfItem.id,
             libraryId: pdfItem.libraryID,
             zoteroKey: pdfItem.key,
         };
@@ -325,10 +324,6 @@ export async function handleZoteroDocumentRequest(
             metadata: {
                 pageCount: result.document.pageCount,
                 pageLabels,
-                hasTextLayer: true,
-                needsOcr: false,
-                isEncrypted: false,
-                isInvalid: false,
             },
         });
         return {
@@ -363,7 +358,7 @@ export async function handleZoteroDocumentRequest(
                     filePath: resolvedFilePath,
                     sourceSizeBytes: loadedPdfData?.byteLength ?? 0,
                     contentType: resolvedPdfItem.attachmentContentType || 'application/pdf',
-                    errorState: error.code === ExtractionErrorCode.ENCRYPTED
+                    errorCode: error.code === ExtractionErrorCode.ENCRYPTED
                         ? 'encrypted'
                         : error.code === ExtractionErrorCode.INVALID_PDF
                             ? 'invalid_pdf'

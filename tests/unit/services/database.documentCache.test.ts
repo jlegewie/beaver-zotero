@@ -13,10 +13,7 @@ function makeMetadata(overrides: Partial<DocumentCacheMetadataInput> = {}): Docu
         contentType: 'application/pdf',
         pageCount: 3,
         pageLabels: { '0': 'i', '1': '1' },
-        hasTextLayer: true,
-        needsOcr: false,
-        isEncrypted: false,
-        isInvalid: false,
+        errorCode: null,
         extractionSchemaVersion: '4',
         metadataFormatVersion: 1,
         ...overrides,
@@ -66,8 +63,7 @@ describe('BeaverDB document cache methods', () => {
             zoteroKey: 'ABCD1234',
             pageCount: 3,
             pageLabels: { '0': 'i', '1': '1' },
-            hasTextLayer: true,
-            needsOcr: false,
+            errorCode: null,
         });
     });
 
@@ -92,21 +88,48 @@ describe('BeaverDB document cache methods', () => {
         expect(await db.getDocumentCachePayload(1, 'ABCD1234', 'structured')).toBeNull();
     });
 
-    it('round trips SQLite booleans and null page labels', async () => {
+    it('round trips error code and null page labels', async () => {
         await db.upsertDocumentCacheMetadata(makeMetadata({
             pageLabels: null,
-            hasTextLayer: null,
-            needsOcr: null,
-            isEncrypted: true,
-            isInvalid: true,
+            errorCode: 'encrypted',
         }));
 
-        const row = await db.getDocumentCacheMetadataByKey(1, 'ABCD1234');
-        expect(row?.pageLabels).toBeNull();
-        expect(row?.hasTextLayer).toBeNull();
-        expect(row?.needsOcr).toBeNull();
-        expect(row?.isEncrypted).toBe(true);
-        expect(row?.isInvalid).toBe(true);
+        const errored = await db.getDocumentCacheMetadataByKey(1, 'ABCD1234');
+        expect(errored?.pageLabels).toBeNull();
+        expect(errored?.errorCode).toBe('encrypted');
+
+        await db.upsertDocumentCacheMetadata(makeMetadata({ errorCode: null }));
+        const ready = await db.getDocumentCacheMetadataByKey(1, 'ABCD1234');
+        expect(ready?.errorCode).toBeNull();
+    });
+
+    it('rebuilds a stale document cache schema without touching unrelated tables', async () => {
+        const raw = conn.getRawDB();
+        // A pre-existing draft schema with the old boolean columns and no `error_code`.
+        raw.exec('DROP TABLE IF EXISTS document_cache_payloads');
+        raw.exec('DROP TABLE IF EXISTS document_cache_metadata');
+        raw.exec(`
+            CREATE TABLE document_cache_metadata (
+                id INTEGER PRIMARY KEY, library_id INTEGER, zotero_key TEXT,
+                is_encrypted INTEGER, needs_ocr INTEGER
+            )
+        `);
+        raw.exec(`INSERT INTO document_cache_metadata (library_id, zotero_key) VALUES (1, 'STALE001')`);
+        raw.exec(`CREATE TABLE unrelated_marker (id INTEGER PRIMARY KEY, note TEXT)`);
+        raw.exec(`INSERT INTO unrelated_marker (note) VALUES ('keep me')`);
+
+        const rebuilt = new BeaverDB(conn);
+        await rebuilt.initDatabase('0.99.0');
+
+        // Stale rows are gone and the new shape round-trips.
+        expect(await rebuilt.getDocumentCacheMetadataCount()).toBe(0);
+        await rebuilt.upsertDocumentCacheMetadata(makeMetadata());
+        const row = await rebuilt.getDocumentCacheMetadataByKey(1, 'ABCD1234');
+        expect(row?.errorCode).toBeNull();
+
+        // Unrelated tables are untouched.
+        const marker = raw.prepare('SELECT note FROM unrelated_marker').get() as { note: string };
+        expect(marker.note).toBe('keep me');
     });
 
     it('upserts and replaces payload rows by library/key/mode', async () => {

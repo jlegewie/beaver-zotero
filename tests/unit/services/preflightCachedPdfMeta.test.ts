@@ -25,6 +25,7 @@ vi.mock('../../../react/atoms/profile', () => ({
 
 import { preflightCachedPdfMeta } from '../../../src/services/agentDataProvider/utils';
 import type { AttachmentFileCacheRecord } from '../../../src/services/database';
+import type { DocumentPreflightMetadata } from '../../../src/services/documentCache';
 
 function makeRecord(
     overrides: Partial<AttachmentFileCacheRecord> = {},
@@ -158,5 +159,76 @@ describe('preflightCachedPdfMeta', () => {
             { checkOcr: true, applyPageCountCap: true, maxPageCount: 1000 },
         );
         expect(result?.code).toBe('no_text_layer');
+    });
+});
+
+/**
+ * The document cache passes the camelCase `errorCode` shape. The same helper
+ * must handle it without touching the attachment-cache branch.
+ */
+describe('preflightCachedPdfMeta — document cache shape', () => {
+    function makeDocMeta(
+        overrides: Partial<DocumentPreflightMetadata> = {},
+    ): DocumentPreflightMetadata {
+        return {
+            pageCount: 10,
+            pageLabels: null,
+            errorCode: null,
+            contentType: 'application/pdf',
+            ...overrides,
+        };
+    }
+
+    it('returns null when errorCode is null', () => {
+        const result = preflightCachedPdfMeta(makeDocMeta(), {
+            checkOcr: true,
+            applyPageCountCap: true,
+            maxPageCount: 1000,
+        });
+        expect(result).toBeNull();
+    });
+
+    it('still fires the page-count cap when errorCode is null', () => {
+        const result = preflightCachedPdfMeta(
+            makeDocMeta({ pageCount: 1500 }),
+            { checkOcr: true, applyPageCountCap: true, maxPageCount: 1000 },
+        );
+        expect(result).toEqual({
+            code: 'too_many_pages',
+            pageCount: 1500,
+            maxPageCount: 1000,
+        });
+    });
+
+    it('returns "encrypted" for errorCode=encrypted', () => {
+        const result = preflightCachedPdfMeta(
+            makeDocMeta({ errorCode: 'encrypted', pageCount: 5 }),
+            { checkOcr: true, applyPageCountCap: true, maxPageCount: 1000 },
+        );
+        expect(result).toEqual({ code: 'encrypted', pageCount: 5 });
+    });
+
+    it('returns "invalid_pdf" for errorCode=invalid_pdf', () => {
+        const result = preflightCachedPdfMeta(
+            makeDocMeta({ errorCode: 'invalid_pdf', pageCount: null }),
+            { checkOcr: true, applyPageCountCap: true, maxPageCount: 1000 },
+        );
+        expect(result).toEqual({ code: 'invalid_pdf', pageCount: null });
+    });
+
+    it('returns "no_text_layer" for errorCode=no_text_layer when checkOcr=true', () => {
+        const result = preflightCachedPdfMeta(
+            makeDocMeta({ errorCode: 'no_text_layer', pageCount: 7 }),
+            { checkOcr: true, applyPageCountCap: true, maxPageCount: 1000 },
+        );
+        expect(result).toEqual({ code: 'no_text_layer', pageCount: 7 });
+    });
+
+    it('returns null for errorCode=no_text_layer when checkOcr=false (image-render path)', () => {
+        const result = preflightCachedPdfMeta(
+            makeDocMeta({ errorCode: 'no_text_layer', pageCount: 7 }),
+            { checkOcr: false, applyPageCountCap: false, maxPageCount: 1000 },
+        );
+        expect(result).toBeNull();
     });
 });

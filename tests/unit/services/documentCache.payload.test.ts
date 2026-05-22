@@ -80,8 +80,6 @@ describe('DocumentCache payloads', () => {
             metadata: {
                 pageCount: 1,
                 pageLabels: { '0': '1' },
-                hasTextLayer: true,
-                needsOcr: false,
             },
         });
 
@@ -104,8 +102,6 @@ describe('DocumentCache payloads', () => {
             metadata: {
                 pageCount: 1,
                 pageLabels: { '0': '1' },
-                hasTextLayer: true,
-                needsOcr: false,
             },
         });
 
@@ -130,8 +126,6 @@ describe('DocumentCache payloads', () => {
             metadata: {
                 pageCount: 1,
                 pageLabels: { '0': '1' },
-                hasTextLayer: true,
-                needsOcr: false,
             },
         });
         const payload = await db.getDocumentCachePayload(1, 'ABCD1234', 'structured');
@@ -159,8 +153,6 @@ describe('DocumentCache payloads', () => {
             metadata: {
                 pageCount: 1,
                 pageLabels: { '0': '1' },
-                hasTextLayer: true,
-                needsOcr: false,
             },
         });
         const payload = await db.getDocumentCachePayload(1, 'ABCD1234', 'structured');
@@ -170,7 +162,7 @@ describe('DocumentCache payloads', () => {
             filePath: sourcePath,
             sourceSizeBytes: 3,
             contentType: 'application/pdf',
-            errorState: 'no_text_layer',
+            errorCode: 'no_text_layer',
             pageCount: 1,
             pageLabels: { '0': '1' },
         });
@@ -178,8 +170,26 @@ describe('DocumentCache payloads', () => {
         expect(await db.getDocumentCachePayloadCount()).toBe(0);
         expect(files.has(payload!.payloadPath)).toBe(false);
         const metadata = await db.getDocumentCacheMetadataByKey(1, 'ABCD1234');
-        expect(metadata?.needsOcr).toBe(true);
-        expect(metadata?.hasTextLayer).toBe(false);
+        expect(metadata?.errorCode).toBe('no_text_layer');
+    });
+
+    it('putErrorMetadata stores the error code and preserves page metadata', async () => {
+        const item = createCacheAttachment();
+
+        await cache.putErrorMetadata({
+            item,
+            filePath: sourcePath,
+            sourceSizeBytes: 3,
+            contentType: 'application/pdf',
+            errorCode: 'encrypted',
+            pageCount: 7,
+            pageLabels: { '0': 'i' },
+        });
+
+        const metadata = await db.getDocumentCacheMetadataByKey(1, 'ABCD1234');
+        expect(metadata?.errorCode).toBe('encrypted');
+        expect(metadata?.pageCount).toBe(7);
+        expect(metadata?.pageLabels).toEqual({ '0': 'i' });
     });
 
     it('does not delete the active payload when source changes but output bytes match', async () => {
@@ -194,8 +204,6 @@ describe('DocumentCache payloads', () => {
             metadata: {
                 pageCount: 1,
                 pageLabels: { '0': '1' },
-                hasTextLayer: true,
-                needsOcr: false,
             },
         });
         const firstPayload = await db.getDocumentCachePayload(1, 'ABCD1234', 'structured');
@@ -211,8 +219,6 @@ describe('DocumentCache payloads', () => {
             metadata: {
                 pageCount: 1,
                 pageLabels: { '0': '1' },
-                hasTextLayer: true,
-                needsOcr: false,
             },
         });
 
