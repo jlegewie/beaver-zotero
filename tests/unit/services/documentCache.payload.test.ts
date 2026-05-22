@@ -217,7 +217,8 @@ describe('DocumentCache payloads', () => {
 
         firstController.abort();
         await expect(first).rejects.toThrow('Operation aborted');
-        expect(createSignal?.aborted).toBe(false);
+        expect(createSignal).not.toBeNull();
+        expect(createSignal!.aborted).toBe(false);
 
         releaseCreate();
         await expect(second).resolves.toEqual(structuredResult);
