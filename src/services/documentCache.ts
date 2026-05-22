@@ -40,7 +40,7 @@ export interface DocumentCacheStats {
 
 type DocumentRef = { libraryId: number; zoteroKey: string };
 
-interface SourceIdentity {
+export interface DocumentCacheSourceIdentity {
     filePath: string;
     fileSignature: FileSignature;
     sourceSizeBytes: number;
@@ -58,6 +58,7 @@ export class DocumentCache {
     private db: BeaverDB;
     private payloadCacheDir = '';
     private writeLocks = new Map<string, Promise<void>>();
+    private extractionLocks = new Map<string, Promise<BeaverExtractResult | null>>();
 
     constructor(db: BeaverDB) {
         this.db = db;
@@ -178,6 +179,94 @@ export class DocumentCache {
         }
     }
 
+    /** Snapshot the current source identity used for cache freshness checks. */
+    async getSourceIdentitySnapshot(
+        filePath: string,
+        sourceSizeBytes = 0,
+    ): Promise<DocumentCacheSourceIdentity> {
+        return this.getSourceIdentity(filePath, sourceSizeBytes);
+    }
+
+    /**
+     * Return a cached full-document result or run one shared cold extraction.
+     *
+     * Concurrent callers for the same attachment, mode, and source identity
+     * await the same creation promise, avoiding duplicate full-document
+     * extraction while still validating the cache again after acquiring the
+     * in-flight slot.
+     */
+    async getOrCreateResult(input: {
+        item: Zotero.Item;
+        filePath: string;
+        mode: ExtractionMode;
+        sourceSizeBytes: number;
+        contentType: string;
+        maxSourceSizeBytes?: number;
+        sharedTimeoutMs?: number;
+        expectedSourceIdentity?: DocumentCacheSourceIdentity | null;
+        create: (signal: AbortSignal) => Promise<BeaverExtractResult>;
+        metadata: (result: BeaverExtractResult) => CacheMetadataInput;
+    }): Promise<BeaverExtractResult | null> {
+        const ref = {
+            libraryId: input.item.libraryID,
+            zoteroKey: input.item.key,
+        };
+        const cached = await this.getResult(ref, input.mode, input.filePath, {
+            maxSourceSizeBytes: input.maxSourceSizeBytes,
+        });
+        if (cached) return cached;
+
+        const source = input.expectedSourceIdentity
+            ?? await this.getSourceIdentity(input.filePath, input.sourceSizeBytes);
+        if (input.maxSourceSizeBytes != null && source.sourceSizeBytes > input.maxSourceSizeBytes) {
+            return null;
+        }
+        const lockKey = `${ref.libraryId}/${ref.zoteroKey}/${input.mode}/${this.sourceIdentityKey(source)}`;
+        const existing = this.extractionLocks.get(lockKey);
+        if (existing) return existing;
+
+        const next = (async () => {
+            const refreshed = await this.getResult(ref, input.mode, input.filePath, {
+                maxSourceSizeBytes: input.maxSourceSizeBytes,
+            });
+            if (refreshed) return refreshed;
+
+            const controller = new AbortController();
+            const timer = input.sharedTimeoutMs != null && input.sharedTimeoutMs > 0
+                ? setTimeout(() => controller.abort(), input.sharedTimeoutMs)
+                : null;
+            let result: BeaverExtractResult;
+            try {
+                result = await input.create(controller.signal);
+            } finally {
+                if (timer) clearTimeout(timer);
+            }
+            await this.putResult({
+                item: input.item,
+                filePath: input.filePath,
+                mode: input.mode,
+                sourceSizeBytes: input.sourceSizeBytes,
+                contentType: input.contentType,
+                result,
+                metadata: input.metadata(result),
+                expectedSourceIdentity: source,
+            });
+            return result;
+        })()
+            .catch((error) => {
+                logger(`DocumentCache.getOrCreateResult error: ${error}`, 1);
+                throw error;
+            })
+            .finally(() => {
+                if (this.extractionLocks.get(lockKey) === next) {
+                    this.extractionLocks.delete(lockKey);
+                }
+            });
+
+        this.extractionLocks.set(lockKey, next);
+        return next;
+    }
+
     /** Store fresh source-level metadata without writing a payload. */
     async putMetadata(input: {
         item: Zotero.Item;
@@ -212,6 +301,7 @@ export class DocumentCache {
         contentType: string;
         result: BeaverExtractResult;
         metadata: CacheMetadataInput;
+        expectedSourceIdentity?: DocumentCacheSourceIdentity | null;
     }): Promise<void> {
         if (Zotero.__beaverShuttingDown) return;
         const lockKey = `${input.item.libraryID}/${input.item.key}/${input.mode}`;
@@ -289,7 +379,8 @@ export class DocumentCache {
             const metadataRows = await this.db.getAllDocumentCacheMetadata();
             for (const metadata of metadataRows) {
                 let stale = metadata.metadataFormatVersion !== DOCUMENT_METADATA_FORMAT_VERSION
-                    || metadata.extractionSchemaVersion !== SCHEMA_VERSION;
+                    || metadata.extractionSchemaVersion !== SCHEMA_VERSION
+                    || this.isAttachmentMissingOrDeleted(metadata.libraryId, metadata.zoteroKey);
                 if (!stale && !isRemoteFilePath(metadata.filePath)) {
                     stale = !(await IOUtils.exists(metadata.filePath).catch(() => false));
                 }
@@ -344,12 +435,16 @@ export class DocumentCache {
         contentType: string;
         result: BeaverExtractResult;
         metadata: CacheMetadataInput;
+        expectedSourceIdentity?: DocumentCacheSourceIdentity | null;
     }): Promise<void> {
         if (Zotero.__beaverShuttingDown) return;
         if (input.result.mode !== input.mode || input.result.schemaVersion !== SCHEMA_VERSION) {
             return;
         }
         const source = await this.getSourceIdentity(input.filePath, input.sourceSizeBytes);
+        if (input.expectedSourceIdentity && !this.sourceIdentityMatches(source, input.expectedSourceIdentity)) {
+            return;
+        }
         if (Zotero.__beaverShuttingDown) return;
 
         const payloadWrite = await this.writePayloadFile(
@@ -396,6 +491,13 @@ export class DocumentCache {
             || signature.size_bytes !== record.fileSignature.size_bytes;
     }
 
+    private isAttachmentMissingOrDeleted(libraryId: number, zoteroKey: string): boolean {
+        const item = Zotero.Items.getByLibraryAndKey(libraryId, zoteroKey);
+        if (!item) return true;
+        return !!item.deleted
+            || (typeof item.isInTrash === 'function' && item.isInTrash());
+    }
+
     private isPayloadRowFresh(
         payload: DocumentCachePayloadRecord,
         metadata: DocumentCacheMetadataRecord,
@@ -411,7 +513,7 @@ export class DocumentCache {
             && payload.sourceSizeBytes === metadata.sourceSizeBytes;
     }
 
-    private async getSourceIdentity(filePath: string, sourceSizeBytes: number): Promise<SourceIdentity> {
+    private async getSourceIdentity(filePath: string, sourceSizeBytes: number): Promise<DocumentCacheSourceIdentity> {
         const fileSignature = await getFileSignature(filePath);
         return {
             filePath,
@@ -420,9 +522,28 @@ export class DocumentCache {
         };
     }
 
+    private sourceIdentityKey(source: DocumentCacheSourceIdentity): string {
+        return [
+            source.filePath,
+            source.fileSignature.mtime_ms,
+            source.fileSignature.size_bytes,
+            source.sourceSizeBytes,
+        ].join('|');
+    }
+
+    private sourceIdentityMatches(
+        current: DocumentCacheSourceIdentity,
+        expected: DocumentCacheSourceIdentity,
+    ): boolean {
+        return current.filePath === expected.filePath
+            && current.fileSignature.mtime_ms === expected.fileSignature.mtime_ms
+            && current.fileSignature.size_bytes === expected.fileSignature.size_bytes
+            && current.sourceSizeBytes === expected.sourceSizeBytes;
+    }
+
     private buildMetadataInput(
         item: Zotero.Item,
-        source: SourceIdentity,
+        source: DocumentCacheSourceIdentity,
         contentType: string,
         metadata: CacheMetadataInput,
     ): DocumentCacheMetadataInput {

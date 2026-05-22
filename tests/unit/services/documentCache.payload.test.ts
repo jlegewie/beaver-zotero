@@ -56,6 +56,9 @@ describe('DocumentCache payloads', () => {
             files.delete(path);
         });
         mockIOUtils.makeDirectory.mockResolvedValue(undefined);
+        (globalThis as any).Zotero.Items = {
+            getByLibraryAndKey: vi.fn(() => createCacheAttachment()),
+        };
 
         conn = new MockDBConnection();
         db = new BeaverDB(conn);
@@ -88,6 +91,81 @@ describe('DocumentCache payloads', () => {
             'structured',
             sourcePath,
         )).resolves.toEqual(structuredResult);
+    });
+
+    it('coalesces concurrent cold result creation for the same source identity', async () => {
+        const item = createCacheAttachment();
+        let createCalls = 0;
+        let releaseCreate!: () => void;
+        const createBarrier = new Promise<void>((resolve) => {
+            releaseCreate = resolve;
+        });
+        const create = vi.fn(async (_signal: AbortSignal) => {
+            createCalls++;
+            await createBarrier;
+            return structuredResult;
+        });
+
+        const first = cache.getOrCreateResult({
+            item,
+            filePath: sourcePath,
+            mode: 'structured',
+            sourceSizeBytes: 3,
+            contentType: 'application/pdf',
+            create,
+            metadata: (result) => ({
+                pageCount: result.document.pageCount,
+                pageLabels: result.document.pageLabels,
+            }),
+        });
+
+        while (createCalls === 0) {
+            await Promise.resolve();
+        }
+
+        const second = cache.getOrCreateResult({
+            item,
+            filePath: sourcePath,
+            mode: 'structured',
+            sourceSizeBytes: 3,
+            contentType: 'application/pdf',
+            create,
+            metadata: (result) => ({
+                pageCount: result.document.pageCount,
+                pageLabels: result.document.pageLabels,
+            }),
+        });
+
+        releaseCreate();
+        await expect(Promise.all([first, second])).resolves.toEqual([
+            structuredResult,
+            structuredResult,
+        ]);
+        expect(create).toHaveBeenCalledTimes(1);
+        expect(await db.getDocumentCachePayloadCount()).toBe(1);
+    });
+
+    it('skips storing a result when the local source changes after the initial snapshot', async () => {
+        const item = createCacheAttachment();
+        const expectedSourceIdentity = await cache.getSourceIdentitySnapshot(sourcePath);
+        mockIOUtils.stat.mockResolvedValue({ lastModified: 20, size: 3 } as any);
+
+        await cache.putResult({
+            item,
+            filePath: sourcePath,
+            mode: 'structured',
+            sourceSizeBytes: 3,
+            contentType: 'application/pdf',
+            result: structuredResult,
+            metadata: {
+                pageCount: 1,
+                pageLabels: { '0': '1' },
+            },
+            expectedSourceIdentity,
+        });
+
+        expect(await db.getDocumentCacheMetadataByKey(1, 'ABCD1234')).toBeNull();
+        expect(await db.getDocumentCachePayloadCount()).toBe(0);
     });
 
     it('maxSourceSizeBytes rejects a valid hit without deleting it', async () => {
@@ -225,5 +303,30 @@ describe('DocumentCache payloads', () => {
         const secondPayload = await db.getDocumentCachePayload(1, 'ABCD1234', 'structured');
         expect(secondPayload?.payloadPath).toBe(firstPayload?.payloadPath);
         expect(files.has(secondPayload!.payloadPath)).toBe(true);
+    });
+
+    it('startup GC removes cache entries for attachments missing from Zotero', async () => {
+        const item = createCacheAttachment();
+        await cache.putResult({
+            item,
+            filePath: sourcePath,
+            mode: 'structured',
+            sourceSizeBytes: 3,
+            contentType: 'application/pdf',
+            result: structuredResult,
+            metadata: {
+                pageCount: 1,
+                pageLabels: { '0': '1' },
+            },
+        });
+        const payload = await db.getDocumentCachePayload(1, 'ABCD1234', 'structured');
+        expect(payload).not.toBeNull();
+
+        (globalThis as any).Zotero.Items.getByLibraryAndKey.mockReturnValue(null);
+        await cache.runStartupGC();
+
+        expect(await db.getDocumentCacheMetadataByKey(1, 'ABCD1234')).toBeNull();
+        expect(await db.getDocumentCachePayloadCount()).toBe(0);
+        expect(files.has(payload!.payloadPath)).toBe(false);
     });
 });

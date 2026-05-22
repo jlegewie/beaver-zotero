@@ -75,3 +75,36 @@ export function createTimeoutController(
         dispose: () => clearTimeout(timer),
     };
 }
+
+/** Await shared work while preserving the caller's own abort/timeout result. */
+export async function awaitWithRequestAbort<T>(
+    promise: Promise<T>,
+    signal: AbortSignal,
+    throwIfTimedOut: (phase: string) => void,
+    phase: string,
+): Promise<T> {
+    if (signal.aborted) {
+        throwIfTimedOut(phase);
+    }
+
+    let onAbort: (() => void) | null = null;
+    const abortPromise = new Promise<never>((_, reject) => {
+        onAbort = () => {
+            try {
+                throwIfTimedOut(phase);
+                reject(new Error('Operation aborted'));
+            } catch (error) {
+                reject(error);
+            }
+        };
+        signal.addEventListener('abort', onAbort, { once: true });
+    });
+
+    try {
+        return await Promise.race([promise, abortPromise]);
+    } finally {
+        if (onAbort) {
+            signal.removeEventListener('abort', onAbort);
+        }
+    }
+}

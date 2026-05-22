@@ -16,6 +16,7 @@ import {
 import type { ZoteroDocumentErrorCode } from '../agentProtocol';
 import { BeaverExtractor, ExtractionError, ExtractionErrorCode, WorkerAbortError } from '../../beaver-extract';
 import { makeRemoteFilePath } from '../documentFileIdentity';
+import type { DocumentCacheSourceIdentity } from '../documentCache';
 import {
     resolveToPdfAttachment,
     validateZoteroItemReference,
@@ -25,8 +26,10 @@ import {
     preflightCachedPdfMeta,
 } from './utils';
 import {
+    MAX_PDF_TIMEOUT_SECONDS,
     DEFAULT_PAGES_TIMEOUT_SECONDS,
     TimeoutError,
+    awaitWithRequestAbort,
     createTimeoutController,
 } from './timeout';
 
@@ -149,6 +152,12 @@ export async function handleZoteroDocumentRequest(
             libraryId: pdfItem.libraryID,
             zoteroKey: pdfItem.key,
         };
+        const initialSourceIdentity: DocumentCacheSourceIdentity | null = cache && !isRemoteOnly
+            ? await cache.getSourceIdentitySnapshot(effectiveFilePath).catch((error) => {
+                logger(`handleZoteroDocumentRequest: source identity snapshot failed for ${requestKey}: ${error}`, 1);
+                return null;
+            })
+            : null;
         const cachedMeta = cache ? await cache.getMetadata(docRef, effectiveFilePath).catch(() => null) : null;
         throwIfTimedOut('metadata_cache_lookup');
 
@@ -296,8 +305,58 @@ export async function handleZoteroDocumentRequest(
             `handleZoteroDocumentRequest: full-document extract for ${requestKey} mode=${mode}`,
             3,
         );
-        const result = await extractor.extract(pdfData, { mode }, signal);
-        throwIfTimedOut('pdf_extract');
+        const pdfBytes = pdfData;
+        if (!pdfBytes) {
+            throw new Error('PDF data was not loaded before extraction');
+        }
+        const createSharedResult = async (extractSignal: AbortSignal) =>
+            extractor.extract(pdfBytes, { mode }, extractSignal);
+
+        const createUnsharedResult = async () => {
+            const extracted = await extractor.extract(pdfBytes, { mode }, signal);
+            throwIfTimedOut('pdf_extract');
+            return extracted;
+        };
+
+        const buildMetadata = (extracted: Awaited<ReturnType<typeof createUnsharedResult>>) => {
+            const extractedPageLabels = extracted.document.pageLabels ?? Object.fromEntries(
+                extracted.document.pages
+                    .filter((page) => page.label)
+                    .map((page) => [String(page.index), page.label as string]),
+            );
+            return {
+                pageCount: extracted.document.pageCount,
+                pageLabels: extractedPageLabels,
+            };
+        };
+
+        const resultPromise = cache
+            ? cache.getOrCreateResult({
+                item: pdfItem,
+                filePath: effectiveFilePath,
+                mode,
+                sourceSizeBytes: isRemoteOnly ? pdfBytes.byteLength : 0,
+                contentType: pdfItem.attachmentContentType || 'application/pdf',
+                maxSourceSizeBytes,
+                sharedTimeoutMs: MAX_PDF_TIMEOUT_SECONDS * 1000,
+                expectedSourceIdentity: isRemoteOnly ? null : initialSourceIdentity,
+                create: createSharedResult,
+                metadata: buildMetadata,
+            })
+            : createUnsharedResult();
+        const result = cache
+            ? await awaitWithRequestAbort(resultPromise, signal, throwIfTimedOut, 'pdf_extract')
+            : await resultPromise;
+        throwIfTimedOut('document_result_ready');
+
+        if (!result) {
+            throwIfTimedOut('file_too_large_response');
+            return errorResponse(
+                `The PDF file for ${pdfKey} exceeds the ${maxFileSizeMB}MB limit`,
+                'file_too_large',
+                totalPages,
+            );
+        }
 
         if (result.mode !== mode) {
             throwIfTimedOut('mode_mismatch_response');
@@ -309,23 +368,6 @@ export async function handleZoteroDocumentRequest(
         }
 
         throwIfTimedOut('success_response');
-        const pageLabels = result.document.pageLabels ?? Object.fromEntries(
-            result.document.pages
-                .filter((page) => page.label)
-                .map((page) => [String(page.index), page.label as string]),
-        );
-        await cache?.putResult({
-            item: pdfItem,
-            filePath: effectiveFilePath,
-            mode,
-            sourceSizeBytes: isRemoteOnly ? pdfData.byteLength : 0,
-            contentType: pdfItem.attachmentContentType || 'application/pdf',
-            result,
-            metadata: {
-                pageCount: result.document.pageCount,
-                pageLabels,
-            },
-        });
         return {
             type: 'zotero_document',
             request_id,
