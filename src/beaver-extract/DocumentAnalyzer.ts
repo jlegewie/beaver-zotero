@@ -732,10 +732,7 @@ export class DocumentAnalyzer {
                         case "no_text_blocks":
                         case "no_body_text":
                         case "insufficient_text":
-                            // Mirror the document-near-empty disambiguation
-                            primaryReason = pageAnalyses.some((p) => p.hasImages)
-                                ? "scanned_without_ocr"
-                                : "missing_text_content";
+                            primaryReason = "missing_text_content";
                             break;
                         case "large_image_coverage":
                             // This shouldn't happen anymore since we combine with text issues
