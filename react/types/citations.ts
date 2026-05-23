@@ -47,14 +47,42 @@ export function bboxesToZoteroRects(bboxes: BoundingBox[]): number[][] {
     return bboxes.map(bbox => bboxToZoteroRect(bbox));
 }
 
-// Adjust bboxes from page/MediaBox origin to viewport (CropBox) origin
+// Adjust bboxes from page/MediaBox origin to viewport (CropBox) origin.
+// Expects bottom-left origin; convert with convertBoundingBoxToBottomLeft first
+// when the input is top-left (e.g. from the structured-extraction pipeline).
 export function toZoteroRectFromBBox(
 	bbox: BoundingBox,
 	viewBoxLL: [number, number]
 ): number[] {
+	if (bbox.coord_origin !== CoordOrigin.BOTTOMLEFT) {
+		throw new Error(`Expected BOTTOMLEFT coordinates, got ${bbox.coord_origin}`);
+	}
 	const [vx, vy] = viewBoxLL; // CropBox lower-left
 	// bbox has bottom-left origin: l, b, r, t
 	return [bbox.l + vx, bbox.b + vy, bbox.r + vx, bbox.t + vy];
+}
+
+// Convert a top-left-origin bbox to bottom-left using the page height. Returns
+// the input unchanged when it is already bottom-left so callers can apply this
+// unconditionally to citation bboxes regardless of their producer.
+//
+// Edge semantics are preserved: `t` is the visual top edge (larger y in BL),
+// `b` the visual bottom edge (smaller y in BL). Mirrors `bboxToReaderFrame`
+// and `flipOrigin` in src/beaver-extract/types.ts -- do not swap the edges.
+export function convertBoundingBoxToBottomLeft(
+	bbox: BoundingBox,
+	pageHeight: number
+): BoundingBox {
+	if (bbox.coord_origin === CoordOrigin.BOTTOMLEFT) {
+		return bbox;
+	}
+	return {
+		l: bbox.l,
+		r: bbox.r,
+		t: pageHeight - bbox.t,
+		b: pageHeight - bbox.b,
+		coord_origin: CoordOrigin.BOTTOMLEFT,
+	};
 }
 
 
