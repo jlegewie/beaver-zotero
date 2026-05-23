@@ -2,8 +2,8 @@
  * Whole-document extraction handler for zotero_document_request.
  *
  * This mirrors the attachment-pages acquisition flow but returns the
- * Beaver Extract result directly and does not integrate structured output
- * into attachmentFileCache.
+ * Beaver Extract result directly and caches full-document output via
+ * DocumentCache.
  */
 
 import { logger } from '../../utils/logger';
@@ -15,19 +15,21 @@ import {
 } from '../agentProtocol';
 import type { ZoteroDocumentErrorCode } from '../agentProtocol';
 import { BeaverExtractor, ExtractionError, ExtractionErrorCode, WorkerAbortError } from '../../beaver-extract';
-import { makeRemoteFilePath } from '../attachmentFileCache';
+import { makeRemoteFilePath } from '../documentFileIdentity';
+import type { DocumentCacheSourceIdentity } from '../documentCache';
 import {
     resolveToPdfAttachment,
     validateZoteroItemReference,
-    backfillMetadataForError,
     loadPdfData,
     checkRemotePdfSize,
     isRemoteAccessAvailable,
     preflightCachedPdfMeta,
 } from './utils';
 import {
+    MAX_PDF_TIMEOUT_SECONDS,
     DEFAULT_PAGES_TIMEOUT_SECONDS,
     TimeoutError,
+    awaitWithRequestAbort,
     createTimeoutController,
 } from './timeout';
 
@@ -53,6 +55,7 @@ export async function handleZoteroDocumentRequest(
     let resolvedPdfItem: Zotero.Item | null = null;
     let resolvedFilePath: string | null = null;
     let totalPages: number | null = null;
+    let loadedPdfData: Uint8Array | null = null;
 
     const errorResponse = (
         error: string,
@@ -141,11 +144,21 @@ export async function handleZoteroDocumentRequest(
             }
         }
 
-        const cache = Zotero.Beaver?.attachmentFileCache;
+        const cache = Zotero.Beaver?.documentCache;
         if (!cache) {
-            logger(`handleZoteroDocumentRequest: cache not available for ${requestKey}`, 1);
+            logger(`handleZoteroDocumentRequest: document cache not available for ${requestKey}`, 1);
         }
-        const cachedMeta = cache ? await cache.getMetadata(pdfItem.id, effectiveFilePath).catch(() => null) : null;
+        const docRef = {
+            libraryId: pdfItem.libraryID,
+            zoteroKey: pdfItem.key,
+        };
+        const initialSourceIdentity: DocumentCacheSourceIdentity | null = cache && !isRemoteOnly
+            ? await cache.getSourceIdentitySnapshot(effectiveFilePath).catch((error) => {
+                logger(`handleZoteroDocumentRequest: source identity snapshot failed for ${requestKey}: ${error}`, 1);
+                return null;
+            })
+            : null;
+        const cachedMeta = cache ? await cache.getMetadata(docRef, effectiveFilePath).catch(() => null) : null;
         throwIfTimedOut('metadata_cache_lookup');
 
         const preflight = preflightCachedPdfMeta(cachedMeta, {
@@ -178,11 +191,42 @@ export async function handleZoteroDocumentRequest(
             }
         }
 
+        const maxSourceSizeBytes = maxFileSizeMB * 1024 * 1024;
+        const cachedResult = cache
+            ? await cache.getResult(
+                { libraryId: pdfItem.libraryID, zoteroKey: pdfItem.key },
+                mode,
+                effectiveFilePath,
+                { maxSourceSizeBytes },
+            ).catch(() => null)
+            : null;
+        throwIfTimedOut('payload_cache_lookup');
+        if (cachedResult) {
+            if (maxPages != null && cachedResult.document.pageCount > maxPages) {
+                throwIfTimedOut('cached_result_too_many_pages_response');
+                return errorResponse(
+                    `The PDF file for ${pdfKey} has ${cachedResult.document.pageCount} pages, which exceeds the ${maxPages}-page limit`,
+                    'too_many_pages',
+                    cachedResult.document.pageCount,
+                );
+            }
+            return {
+                type: 'zotero_document',
+                request_id,
+                resolved_attachment: {
+                    library_id: pdfItem.libraryID,
+                    zotero_key: pdfItem.key,
+                },
+                content_type: pdfItem.attachmentContentType || cachedMeta?.contentType || 'application/pdf',
+                result: cachedResult,
+            };
+        }
+
         let pdfData: Uint8Array | null = null;
         const extractor = new BeaverExtractor();
 
-        if (cachedMeta?.page_count != null) {
-            totalPages = cachedMeta.page_count;
+        if (cachedMeta?.pageCount != null) {
+            totalPages = cachedMeta.pageCount;
         }
 
         if (totalPages == null) {
@@ -198,6 +242,7 @@ export async function handleZoteroDocumentRequest(
                     'download_failed',
                 );
             }
+            loadedPdfData = pdfData;
             if (isRemoteOnly) {
                 const exceeded = checkRemotePdfSize(pdfData, false, maxFileSizeMB);
                 if (exceeded) {
@@ -243,6 +288,7 @@ export async function handleZoteroDocumentRequest(
                     'download_failed',
                 );
             }
+            loadedPdfData = pdfData;
             if (isRemoteOnly) {
                 const exceeded = checkRemotePdfSize(pdfData, false, maxFileSizeMB);
                 if (exceeded) {
@@ -259,8 +305,62 @@ export async function handleZoteroDocumentRequest(
             `handleZoteroDocumentRequest: full-document extract for ${requestKey} mode=${mode}`,
             3,
         );
-        const result = await extractor.extract(pdfData, { mode }, signal);
-        throwIfTimedOut('pdf_extract');
+        const pdfBytes = pdfData;
+        if (!pdfBytes) {
+            throw new Error('PDF data was not loaded before extraction');
+        }
+        // `checkTextLayer: true` is set explicitly (it also matches the
+        // extractor default)
+        const extractSettings = { checkTextLayer: true as const };
+        const createSharedResult = async (extractSignal: AbortSignal) =>
+            extractor.extract(pdfBytes, { mode, settings: extractSettings }, extractSignal);
+
+        const createUnsharedResult = async () => {
+            const extracted = await extractor.extract(pdfBytes, { mode, settings: extractSettings }, signal);
+            throwIfTimedOut('pdf_extract');
+            return extracted;
+        };
+
+        const buildMetadata = (extracted: Awaited<ReturnType<typeof createUnsharedResult>>) => {
+            const extractedPageLabels = extracted.document.pageLabels ?? Object.fromEntries(
+                extracted.document.pages
+                    .filter((page) => page.label)
+                    .map((page) => [String(page.index), page.label as string]),
+            );
+            return {
+                pageCount: extracted.document.pageCount,
+                pageLabels: extractedPageLabels,
+            };
+        };
+
+        const resultPromise = cache
+            ? cache.getOrCreateResult({
+                item: pdfItem,
+                filePath: effectiveFilePath,
+                mode,
+                sourceSizeBytes: isRemoteOnly ? pdfBytes.byteLength : 0,
+                contentType: pdfItem.attachmentContentType || 'application/pdf',
+                maxSourceSizeBytes,
+                sharedTimeoutMs: MAX_PDF_TIMEOUT_SECONDS * 1000,
+                abortSignal: signal,
+                expectedSourceIdentity: isRemoteOnly ? null : initialSourceIdentity,
+                create: createSharedResult,
+                metadata: buildMetadata,
+            })
+            : createUnsharedResult();
+        const result = cache
+            ? await awaitWithRequestAbort(resultPromise, signal, throwIfTimedOut, 'pdf_extract')
+            : await resultPromise;
+        throwIfTimedOut('document_result_ready');
+
+        if (!result) {
+            throwIfTimedOut('file_too_large_response');
+            return errorResponse(
+                `The PDF file for ${pdfKey} exceeds the ${maxFileSizeMB}MB limit`,
+                'file_too_large',
+                totalPages,
+            );
+        }
 
         if (result.mode !== mode) {
             throwIfTimedOut('mode_mismatch_response');
@@ -296,7 +396,22 @@ export async function handleZoteroDocumentRequest(
 
         if (error instanceof ExtractionError) {
             if (resolvedPdfItem && resolvedFilePath && (error.code === ExtractionErrorCode.ENCRYPTED || error.code === ExtractionErrorCode.INVALID_PDF || error.code === ExtractionErrorCode.NO_TEXT_LAYER)) {
-                await backfillMetadataForError(resolvedPdfItem, resolvedFilePath, error, totalPages, 'handleZoteroDocumentRequest');
+                const pageLabels = error.code === ExtractionErrorCode.NO_TEXT_LAYER
+                    ? error.pageLabels ?? null
+                    : null;
+                await Zotero.Beaver?.documentCache?.putErrorMetadata({
+                    item: resolvedPdfItem,
+                    filePath: resolvedFilePath,
+                    sourceSizeBytes: loadedPdfData?.byteLength ?? 0,
+                    contentType: resolvedPdfItem.attachmentContentType || 'application/pdf',
+                    errorCode: error.code === ExtractionErrorCode.ENCRYPTED
+                        ? 'encrypted'
+                        : error.code === ExtractionErrorCode.INVALID_PDF
+                            ? 'invalid_pdf'
+                            : 'no_text_layer',
+                    pageCount: error.pageCount ?? totalPages,
+                    pageLabels,
+                });
             }
 
             const totalPagesForError = error.pageCount ?? totalPages;

@@ -22,6 +22,7 @@ export type PDFLogLevel = 1 | 2 | 3;
 export type PDFLogger = (msg: string, level: PDFLogLevel) => void;
 
 let _logger: PDFLogger | null = null;
+let _analyzerLogging = false;
 
 /**
  * Install the bundle-local log sink. Idempotent — a later call replaces
@@ -32,10 +33,34 @@ export function setPDFLogger(fn: PDFLogger): void {
 }
 
 /**
+ * Enable or disable verbose analyzer-module logging for the current
+ * extraction. Default is false — callers opt in via
+ * `ExtractionSettings.analyzerLogging`.
+ */
+export function setAnalyzerLogging(enabled: boolean): void {
+    _analyzerLogging = enabled;
+}
+
+/** Whether analyzer summary / debug logs should be emitted. */
+export function isAnalyzerLoggingEnabled(): boolean {
+    return _analyzerLogging;
+}
+
+/**
  * Forward a message to the installed sink. No-op when no sink has been
  * installed (so analyzer modules can be imported in isolated unit tests
  * without a configure step).
  */
 export function pdfLog(msg: string, level: PDFLogLevel = 3): void {
     if (_logger) _logger(msg, level);
+}
+
+/**
+ * Like `pdfLog`, but gated on {@link isAnalyzerLoggingEnabled}. Use for
+ * opt-in analyzer debug output; operational warnings may still call
+ * `pdfLog` directly.
+ */
+export function analyzerPdfLog(msg: string, level: PDFLogLevel = 3): void {
+    if (!_analyzerLogging) return;
+    pdfLog(msg, level);
 }

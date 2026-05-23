@@ -27,6 +27,7 @@ const ioUtils = {
     exists: vi.fn().mockResolvedValue(false),
     stat: vi.fn().mockResolvedValue({ lastModified: 0, size: 0 }),
     read: vi.fn().mockResolvedValue(new Uint8Array()),
+    write: vi.fn().mockResolvedValue(undefined),
     readUTF8: vi.fn().mockResolvedValue(''),
     writeUTF8: vi.fn().mockResolvedValue(undefined),
     remove: vi.fn().mockResolvedValue(undefined),

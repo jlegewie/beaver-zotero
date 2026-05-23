@@ -487,12 +487,15 @@ async function validateEditNoteAction(
     // 10. Pre-check new_string (tag validity, citation items exist, dry-run expand)
     const pre = precheckNewString(request.request_id, new_string, metadata, externalRefContext);
     if (!pre.ok) return pre.response;
-    // 10b. Preload page labels for any `att_id` citations that may appear in
-    //      old_string so the att_id enrichment branch can translate 1-based
-    //      page numbers to the display labels stored at insert time.
-    //      (executeEditNoteAction preloads for new_string at step 3; old_string
-    //      may reference different attachments, and enrichment runs here.)
-    await preloadPageLabelsForNewCitations(old_string ?? '');
+    // 10b. Preload page labels for citations in new_string and old_string.
+    //      new_string labels feed the matcher's new-citation expansion;
+    //      old_string labels feed the `att_id` enrichment branch below, which
+    //      translates 1-based page numbers to the display labels stored at
+    //      insert time. The resolved map is threaded explicitly into the
+    //      matcher and enrichment so expansion stays synchronous.
+    const newPageLabels = await preloadPageLabelsForNewCitations(new_string);
+    const oldPageLabels = await preloadPageLabelsForNewCitations(old_string ?? '');
+    const pageLabels = { ...newPageLabels, ...oldPageLabels };
     // 10c. Enrich no-ref citations in old_string with refs from metadata.
     //      When the model reuses the form it wrote in an earlier edit_note
     //      (citation without ref) as its old_string in a follow-up edit,
@@ -500,7 +503,7 @@ async function validateEditNoteAction(
     //      expansion succeeds instead of throwing "New citations (without a
     //      ref) can only appear in new_string". `buildNormalizedActionData`
     //      propagates the enriched value to the executor automatically.
-    old_string = applyOldStringEnrichment(old_string, metadata);
+    old_string = applyOldStringEnrichment(old_string, metadata, pageLabels);
 
     // 11. Normalize raw HTML to match what simplifyNoteHtml exposes to the
     //     model, then strip data-citation-items so matching stays focused on
@@ -519,6 +522,7 @@ async function validateEditNoteAction(
         simplified,
         strippedHtml,
         externalRefContext,
+        pageLabels,
     };
     let base: BaseExpansion;
     try {
@@ -685,7 +689,7 @@ async function executeEditNoteAction(
 
     // 3. Pre-load page labels so new citations resolve page indices to labels.
     //    Done before reading the note to avoid async gaps between read and write.
-    await preloadPageLabelsForNewCitations(new_string);
+    const newPageLabels = await preloadPageLabelsForNewCitations(new_string);
 
     // 4. Get current note HTML (kept for rollback on save failure)
     //    Avoid async operations between here and item.setNote() to preserve atomicity.
@@ -703,7 +707,7 @@ async function executeEditNoteAction(
     if (operation === 'rewrite') {
         let expandedNew: string;
         try {
-            expandedNew = expandToRawHtml(new_string, metadata, 'new', externalRefContext);
+            expandedNew = expandToRawHtml(new_string, metadata, 'new', externalRefContext, newPageLabels);
         } catch (e: any) {
             return {
                 type: 'agent_action_execute_response',
@@ -802,7 +806,7 @@ async function executeEditNoteAction(
     if (operation === 'append') {
         let expandedNew: string;
         try {
-            expandedNew = expandToRawHtml(new_string, metadata, 'new', externalRefContext);
+            expandedNew = expandToRawHtml(new_string, metadata, 'new', externalRefContext, newPageLabels);
         } catch (e: any) {
             return {
                 type: 'agent_action_execute_response',
@@ -907,11 +911,12 @@ async function executeEditNoteAction(
     // 5a. Preload labels for `att_id` citations in old_string so the enrichment
     //     below can translate page numbers to labels for skipped/stale
     //     validation paths. Step 3 above preloaded for new_string only.
-    await preloadPageLabelsForNewCitations(old_string ?? '');
+    const oldPageLabels = await preloadPageLabelsForNewCitations(old_string ?? '');
+    const pageLabels = { ...newPageLabels, ...oldPageLabels };
 
     // 5b. Defense-in-depth: validator normally already enriched, re-run for
     //     skipped/stale validation paths. See applyOldStringEnrichment.
-    old_string = applyOldStringEnrichment(old_string, metadata);
+    old_string = applyOldStringEnrichment(old_string, metadata, pageLabels);
 
     // 6. Normalize + strip data-citation-items from raw HTML for matching.
     //    Snapshot the cache first so rebuild can preserve itemData for URIs
@@ -931,6 +936,7 @@ async function executeEditNoteAction(
         simplified,
         strippedHtml,
         externalRefContext,
+        pageLabels,
     };
     let base: BaseExpansion;
     try {

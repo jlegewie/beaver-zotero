@@ -16,7 +16,6 @@ import { ApiService } from './apiService';
 import {
     handleZoteroDataRequest,
     handleExternalReferenceCheckRequest,
-    handleZoteroAttachmentPagesRequest,
     handleZoteroDocumentRequest,
     handleZoteroAttachmentPageImagesRequest,
     handleZoteroAttachmentSearchRequest,
@@ -434,25 +433,6 @@ export class AgentService {
 
                 case 'missing_zotero_data':
                     this.callbacks.onMissingZoteroData?.(event);
-                    break;
-
-                case 'zotero_attachment_pages_request':
-                    logger("AgentService: Received zotero_attachment_pages_request", event, 1);
-                    handleZoteroAttachmentPagesRequest(event)
-                        .then(res => this.send(res))
-                        .catch(err => {
-                            logger(`AgentService: zotero_attachment_pages_request failed: ${err}`, 1);
-                            // Send error response to backend so it doesn't timeout
-                            this.send({
-                                type: 'zotero_attachment_pages',
-                                request_id: event.request_id,
-                                attachment: event.attachment,
-                                pages: [],
-                                total_pages: null,
-                                error: String(err),
-                                error_code: 'extraction_failed',
-                            });
-                        });
                     break;
 
                 case 'zotero_document_request':

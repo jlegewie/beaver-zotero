@@ -2,7 +2,7 @@ import { atom } from "jotai";
 import { currentMessageItemsAtom, currentMessageContentAtom, updateMessageItemsFromZoteroSelectionAtom, updateReaderAttachmentAtom } from "./messageComposition";
 import { isLibraryTabAtom, isWebSearchEnabledAtom, removePopupMessagesByTypeAtom, userScrolledAtom, windowUserScrolledAtom } from "./ui";
 
-import { citationMetadataAtom, citationDataMapAtom, updateCitationDataAtom, resetCitationMarkersAtom, bumpPageLabelsVersionAtom } from "./citations";
+import { citationMetadataAtom, citationDataMapAtom, updateCitationDataAtom, resetCitationMarkersAtom, mergePageLabelsByAttachmentIdAtom } from "./citations";
 import { preloadPageLabelsForCitations } from "../utils/pageLabels";
 import { isExternalCitation } from "../types/citations";
 import { agentRunService, agentService } from "../../src/services/agentService";
@@ -427,8 +427,8 @@ export const loadThreadAtom = atom(
                 // Preload PDF page labels in the background so subsequent
                 // renders can resolve page locators to their display labels.
                 preloadPageLabelsForCitations(citationMetadata)
-                    .then((loaded) => {
-                        if (loaded) set(bumpPageLabelsVersionAtom);
+                    .then((labelsByAttachmentId) => {
+                        set(mergePageLabelsByAttachmentIdAtom, labelsByAttachmentId);
                     })
                     .catch((err) =>
                         logger(`loadThreadAtom: Failed to preload page labels: ${err}`, 1)

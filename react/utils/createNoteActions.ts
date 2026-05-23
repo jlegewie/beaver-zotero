@@ -87,13 +87,13 @@ export async function executeCreateNoteAction(action: AgentAction, runId?: strin
     const markdownContent = `<h1>${title}</h1>\n\n${content}`;
 
     // Preload page labels for citation references
-    await preloadPageLabelsForContent(markdownContent);
+    const pageLabelsByAttachmentId = await preloadPageLabelsForContent(markdownContent);
 
     // Convert markdown to HTML with citation context
     let htmlContent = renderToHTML(
         markdownContent.trim(),
         "markdown",
-        { citationDataMap, externalMapping, externalReferencesMap },
+        { citationDataMap, externalMapping, externalReferencesMap, pageLabelsByAttachmentId },
     );
 
     // Add Beaver footer with thread/run link

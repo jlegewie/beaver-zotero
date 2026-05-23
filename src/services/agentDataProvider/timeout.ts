@@ -1,3 +1,5 @@
+import { createAbortController } from '../../utils/abortController';
+
 /** Default timeout in seconds if not specified by backend */
 export const DEFAULT_TIMEOUT_SECONDS = 25;
 export const DEFAULT_PAGES_TIMEOUT_SECONDS = 40;
@@ -60,7 +62,7 @@ export function createTimeoutController(
             : defaultSeconds;
     const timeoutSeconds = Math.min(parsedTimeoutSeconds, MAX_PDF_TIMEOUT_SECONDS);
     const startTime = Date.now();
-    const controller = new AbortController();
+    const controller = createAbortController();
     const timer = setTimeout(() => controller.abort(), timeoutSeconds * 1000);
 
     return {
@@ -74,4 +76,37 @@ export function createTimeoutController(
         },
         dispose: () => clearTimeout(timer),
     };
+}
+
+/** Await shared work while preserving the caller's own abort/timeout result. */
+export async function awaitWithRequestAbort<T>(
+    promise: Promise<T>,
+    signal: AbortSignal,
+    throwIfTimedOut: (phase: string) => void,
+    phase: string,
+): Promise<T> {
+    if (signal.aborted) {
+        throwIfTimedOut(phase);
+    }
+
+    let onAbort: (() => void) | null = null;
+    const abortPromise = new Promise<never>((_, reject) => {
+        onAbort = () => {
+            try {
+                throwIfTimedOut(phase);
+                reject(new Error('Operation aborted'));
+            } catch (error) {
+                reject(error);
+            }
+        };
+        signal.addEventListener('abort', onAbort, { once: true });
+    });
+
+    try {
+        return await Promise.race([promise, abortPromise]);
+    } finally {
+        if (onAbort) {
+            signal.removeEventListener('abort', onAbort);
+        }
+    }
 }

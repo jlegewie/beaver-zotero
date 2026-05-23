@@ -312,11 +312,13 @@ export const getCitationPages = (citation: CitationData | CitationMetadata | nul
     // Collect pages from parts (sentence-level citations with locations)
     const pagesFromParts = (citation.parts || [])
         .flatMap(p => p.locations || [])  
-        .map(l => l.page_idx + 1)
-        .filter((page): page is number => page !== undefined);
+        .map(l => Number(l.page_idx) + 1)
+        .filter((page): page is number => Number.isFinite(page) && page > 0);
     
     // Collect pages from direct pages field (page-level citations)
-    const directPages = citation.pages || [];
+    const directPages = (citation.pages || [])
+        .map(page => Number(page))
+        .filter((page): page is number => Number.isFinite(page) && page > 0);
     
     // Combine both sources, removing duplicates
     const allPages = [...new Set([...pagesFromParts, ...directPages])];

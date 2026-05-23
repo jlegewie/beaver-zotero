@@ -176,11 +176,12 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
         sections.push(`## Beaver\n\n${combinedContent}`);
         const noteMarkdown = sections.join('\n\n---\n\n');
 
-        await preloadPageLabelsForContent(noteMarkdown);
+        const pageLabelsByAttachmentId = await preloadPageLabelsForContent(noteMarkdown);
         let formattedContent = renderToHTML(preprocessNoteContent(noteMarkdown), "markdown", {
             citationDataMap,
             externalMapping: externalReferenceMapping,
-            externalReferencesMap
+            externalReferencesMap,
+            pageLabelsByAttachmentId
         });
         const context = getZoteroTargetContextSync();
         const threadId = store.get(currentThreadIdAtom);
@@ -226,11 +227,12 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
         sections.push(`## Beaver\n\n${combinedContent}`);
         const noteMarkdown = sections.join('\n\n---\n\n');
 
-        await preloadPageLabelsForContent(noteMarkdown);
+        const pageLabelsByAttachmentId = await preloadPageLabelsForContent(noteMarkdown);
         let formattedContent = renderToHTML(preprocessNoteContent(noteMarkdown), "markdown", {
             citationDataMap,
             externalMapping: externalReferenceMapping,
-            externalReferencesMap
+            externalReferencesMap,
+            pageLabelsByAttachmentId
         });
         const context = getZoteroTargetContextSync();
 

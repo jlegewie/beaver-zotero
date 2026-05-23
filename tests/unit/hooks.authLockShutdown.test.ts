@@ -77,10 +77,6 @@ vi.mock('../../src/services/database', () => ({
     BeaverDB: class MockBeaverDB {},
 }));
 
-vi.mock('../../src/services/attachmentFileCache', () => ({
-    AttachmentFileCache: class MockAttachmentFileCache {},
-}));
-
 vi.mock('../../react/eventBus', () => ({
     default: {},
 }));

@@ -8,7 +8,7 @@
 
 
 export async function handleTestPingHttpRequest(_request: any) {
-    const cache = Zotero.Beaver?.attachmentFileCache;
+    const cache = Zotero.Beaver?.documentCache;
     const db = Zotero.Beaver?.db;
     return {
         ok: true,
@@ -24,9 +24,10 @@ export async function handleTestCacheMetadataHttpRequest(request: any) {
 
     let record;
     if (item_id != null) {
-        record = await db.getAttachmentFileCache(item_id);
+        const allRecords = await db.getAllDocumentCacheMetadata();
+        record = allRecords.find((row: any) => row.itemId === item_id) ?? null;
     } else if (library_id != null && zotero_key != null) {
-        record = await db.getAttachmentFileCacheByKey(library_id, zotero_key);
+        record = await db.getDocumentCacheMetadataByKey(library_id, zotero_key);
     } else {
         return { error: 'Provide item_id or library_id + zotero_key' };
     }
@@ -35,43 +36,45 @@ export async function handleTestCacheMetadataHttpRequest(request: any) {
 
 export async function handleTestCacheInvalidateHttpRequest(request: any) {
     const { library_id, zotero_key, item_id } = request;
-    const cache = Zotero.Beaver?.attachmentFileCache;
+    const cache = Zotero.Beaver?.documentCache;
     if (!cache) return { error: 'cache not available' };
 
     if (item_id != null && library_id != null && zotero_key != null) {
-        await cache.invalidate(item_id, library_id, zotero_key);
+        await cache.invalidate(library_id, zotero_key);
     } else if (library_id != null && zotero_key != null) {
-        // Resolve item_id from DB
-        const db = Zotero.Beaver?.db;
-        if (!db) return { error: 'db not available' };
-        const record = await db.getAttachmentFileCacheByKey(library_id, zotero_key);
-        if (record) {
-            await cache.invalidate(record.item_id, library_id, zotero_key);
-        } else {
-            // No cache entry, nothing to invalidate
-        }
+        await cache.invalidate(library_id, zotero_key);
     } else {
         return { error: 'Provide library_id + zotero_key (and optionally item_id)' };
     }
     return { ok: true };
 }
 
-export async function handleTestCacheClearMemoryHttpRequest(_request: any) {
-    const cache = Zotero.Beaver?.attachmentFileCache;
+/**
+ * Dev-only: completely clear the document cache (metadata rows, payload
+ * rows, and payload files on disk). Mirrors the DevTools "Clear Document
+ * Cache" menu item, exposed over HTTP so tests can reset to a cold cache.
+ */
+export async function handleTestCacheClearAllHttpRequest(_request: any) {
+    const cache = Zotero.Beaver?.documentCache;
     if (!cache) return { error: 'cache not available' };
-    cache.clearMemoryCache();
-    return { ok: true };
+    const { metadataRows, payloadRows } = await cache.clearAll();
+    return { ok: true, metadataRows, payloadRows };
 }
 
-export async function handleTestCacheDeleteContentHttpRequest(request: any) {
-    const { library_id, zotero_key } = request;
-    const cache = Zotero.Beaver?.attachmentFileCache;
-    if (!cache) return { error: 'cache not available' };
-    if (library_id == null || zotero_key == null) {
-        return { error: 'Provide library_id + zotero_key' };
-    }
-    await cache.deleteContent(library_id, zotero_key);
-    return { ok: true };
+/**
+ * Dev-only: invoke the MCP `read_attachment` tool handler directly.
+ *
+ * Exercises the exact tool code path — `start_page` / `end_page` integer
+ * validation, the `zotero_document_request` round-trip, and page-window
+ * slicing — so tests can assert on it without a live MCP client.
+ *
+ * Returns the tool's raw result: a plain string on success, or an MCP
+ * error object (`{ content, isError: true }`) on failure.
+ */
+export async function handleTestReadAttachmentHttpRequest(request: any) {
+    const { handleReadAttachment } = await import('../useMcpServer');
+    const result = await handleReadAttachment(request || {});
+    return { result };
 }
 
 /**

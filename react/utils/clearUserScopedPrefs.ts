@@ -15,7 +15,7 @@ import { clearPref } from '../../src/utils/prefs';
  * Intentionally left in place: install-level upgrade flags, UI/citation/agent
  * preferences, onboarding tour completion, local-only customizations, and DB
  * tables (threads/messages/sync_logs are user_id-scoped on the backend;
- * embeddings/attachment_file_cache are library-scoped).
+ * embeddings and document cache entries are library-scoped).
  */
 export function clearUserScopedPrefs(): void {
     // Identity (callers may immediately re-set userId/userEmail to the new

@@ -55,8 +55,8 @@ vi.mock('../../../src/beaver-extract', () => {
 });
 
 // Mock heavy transitive deps so we can `importActual` utils.ts and use the
-// real `preflightCachedPdfMeta` + `persistMetadataToCache` (the handler now
-// delegates to those — pure logic, exercising them is preferable to stubbing).
+// real `preflightCachedPdfMeta` (the handler delegates to it — pure logic,
+// exercising it is preferable to stubbing).
 vi.mock('../../../src/services/supabaseClient', () => ({
     supabase: { auth: { getSession: vi.fn() } },
 }));
@@ -92,10 +92,8 @@ function nodeBase64(bytes: Uint8Array): string {
 function setupZoteroEnv(pageCount: number) {
     const cache = {
         getMetadata: vi.fn().mockResolvedValue({
-            is_encrypted: false,
-            is_invalid: false,
-            page_count: pageCount,
-            page_labels: null,
+            pageCount: pageCount,
+            pageLabels: null,
         }),
     };
 
@@ -116,7 +114,7 @@ function setupZoteroEnv(pageCount: number) {
     };
     (globalThis as any).Zotero.Beaver = {
         data: { env: 'test' },
-        attachmentFileCache: cache,
+        documentCache: cache,
     };
 
     vi.mocked(resolveToPdfAttachment).mockResolvedValue({

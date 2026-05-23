@@ -96,7 +96,6 @@ describe("DocumentAnalyzer margin-text exclusion", () => {
 
         expect(result.pageAnalyses[0].textLength).toBe(0);
         expect(result.needsOCR).toBe(true);
-        expect(result.primaryReason).toBe("missing_text_content");
     });
 
     it("excludes watermarks in every margin edge", () => {
@@ -127,7 +126,6 @@ describe("DocumentAnalyzer margin-text exclusion", () => {
 
         expect(result.pageAnalyses[0].textLength).toBe(nonWs(bodyText));
         expect(result.needsOCR).toBe(false);
-        expect(result.primaryReason).toBe("text_extraction_acceptable");
     });
 
     it("keeps a body line that bleeds into the side margins", () => {

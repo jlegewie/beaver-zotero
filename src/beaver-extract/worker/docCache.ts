@@ -129,7 +129,7 @@ export async function acquireDoc(pdfData: Uint8Array | ArrayBuffer): Promise<Doc
             counters.hits++;
             postLog(
                 "info",
-                `[doc-cache] HIT key=${shortKey(key)} bytes=${existing.byteLength} entries=${cache.size}`,
+                `[worker-cache] HIT key=${shortKey(key)} bytes=${existing.byteLength} entries=${cache.size}`,
             );
             return existing.doc;
         }
@@ -138,7 +138,7 @@ export async function acquireDoc(pdfData: Uint8Array | ArrayBuffer): Promise<Doc
     counters.misses++;
     postLog(
         "info",
-        `[doc-cache] MISS — parsing ${byteLengthOf(pdfData)} bytes${key ? ` key=${shortKey(key)}` : " (cache disabled)"}`,
+        `[worker-cache] MISS — parsing ${byteLengthOf(pdfData)} bytes${key ? ` key=${shortKey(key)}` : " (cache disabled)"}`,
     );
     const doc = await openDocUncached(pdfData);
 
@@ -153,7 +153,7 @@ export async function acquireDoc(pdfData: Uint8Array | ArrayBuffer): Promise<Doc
         // Oversized — never insert. releaseDoc destroys directly.
         postLog(
             "info",
-            `[doc-cache] BYPASS oversized bytes=${byteLength} > maxBytes=${config.maxBytes}`,
+            `[worker-cache] BYPASS oversized bytes=${byteLength} > maxBytes=${config.maxBytes}`,
         );
         return doc;
     }
@@ -163,7 +163,7 @@ export async function acquireDoc(pdfData: Uint8Array | ArrayBuffer): Promise<Doc
         // doc as a bypass; releaseDoc will destroy it.
         postLog(
             "info",
-            `[doc-cache] BYPASS no room bytes=${byteLength} totalBytes=${totalBytes} entries=${cache.size}`,
+            `[worker-cache] BYPASS no room bytes=${byteLength} totalBytes=${totalBytes} entries=${cache.size}`,
         );
         return doc;
     }
@@ -182,7 +182,7 @@ export async function acquireDoc(pdfData: Uint8Array | ArrayBuffer): Promise<Doc
     totalBytes += byteLength;
     postLog(
         "info",
-        `[doc-cache] INSERT key=${shortKey(key)} bytes=${byteLength} entries=${cache.size} totalBytes=${totalBytes}`,
+        `[worker-cache] INSERT key=${shortKey(key)} bytes=${byteLength} entries=${cache.size} totalBytes=${totalBytes}`,
     );
     return doc;
 }
@@ -200,13 +200,13 @@ export function releaseDoc(doc: DocumentLike, discard = false): void {
         try {
             doc.destroy();
         } catch (e) {
-            postLog("warn", `[doc-cache] uncached doc.destroy() threw: ${e}`);
+            postLog("warn", `[worker-cache] uncached doc.destroy() threw: ${e}`);
         }
         postLog(
             "info",
             discard
-                ? "[doc-cache] DISCARD bypass — destroyed uncached doc"
-                : "[doc-cache] RELEASE bypass — destroyed uncached doc",
+                ? "[worker-cache] DISCARD bypass — destroyed uncached doc"
+                : "[worker-cache] RELEASE bypass — destroyed uncached doc",
         );
         return;
     }
@@ -216,7 +216,7 @@ export function releaseDoc(doc: DocumentLike, discard = false): void {
         counters.discards++;
         postLog(
             "info",
-            `[doc-cache] DISCARD key=${shortKey(entry.key)} bytes=${entry.byteLength} entries=${cache.size}`,
+            `[worker-cache] DISCARD key=${shortKey(entry.key)} bytes=${entry.byteLength} entries=${cache.size}`,
         );
         return;
     }
@@ -236,7 +236,7 @@ export function releaseDoc(doc: DocumentLike, discard = false): void {
     }, config.ttlMs);
     postLog(
         "info",
-        `[doc-cache] RELEASE key=${shortKey(entry.key)} expires_in_ms=${config.ttlMs}`,
+        `[worker-cache] RELEASE key=${shortKey(entry.key)} expires_in_ms=${config.ttlMs}`,
     );
 }
 
@@ -314,7 +314,7 @@ function evictEntry(entry: CacheEntry): void {
     counters.evictions++;
     postLog(
         "info",
-        `[doc-cache] EVICT key=${shortKey(entry.key)} bytes=${entry.byteLength} entries=${cache.size}`,
+        `[worker-cache] EVICT key=${shortKey(entry.key)} bytes=${entry.byteLength} entries=${cache.size}`,
     );
 }
 
@@ -329,7 +329,7 @@ function teardownEntry(entry: CacheEntry): void {
     try {
         entry.doc.destroy();
     } catch (e) {
-        postLog("warn", `[doc-cache] doc.destroy() during teardown threw: ${e}`);
+        postLog("warn", `[worker-cache] doc.destroy() during teardown threw: ${e}`);
     }
 }
 
@@ -378,7 +378,7 @@ async function fingerprintOf(pdfData: Uint8Array | ArrayBuffer): Promise<string 
         if (!cryptoUsable) {
             postLog(
                 "warn",
-                "[doc-cache] crypto.subtle.digest unavailable — cache disabled",
+                "[worker-cache] crypto.subtle.digest unavailable — cache disabled",
             );
         }
     }
@@ -408,7 +408,7 @@ async function fingerprintOf(pdfData: Uint8Array | ArrayBuffer): Promise<string 
     try {
         hashBuffer = await globalThis.crypto.subtle.digest("SHA-256", buffer);
     } catch (e) {
-        postLog("warn", `[doc-cache] SHA-256 digest failed, bypassing cache: ${e}`);
+        postLog("warn", `[worker-cache] SHA-256 digest failed, bypassing cache: ${e}`);
         return null;
     }
     return `${byteLength}|${toHex(new Uint8Array(hashBuffer))}`;

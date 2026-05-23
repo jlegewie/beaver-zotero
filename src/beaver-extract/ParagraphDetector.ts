@@ -19,7 +19,7 @@ import type { PageLine, PageLineResult, ColumnLineResult } from "./LineDetector"
 import type { BoundingBox, TextStyle, StyleProfile } from "./types";
 import { bboxHeight, mergeBoxes } from "./types";
 import type { Rect } from "./ColumnDetector";
-import { pdfLog } from "./logging";
+import { pdfLog, isAnalyzerLoggingEnabled } from "./logging";
 
 // ============================================================================
 // Types
@@ -1932,11 +1932,10 @@ export function detectParagraphs(
 }
 
 /**
- * Log paragraph detection results for debugging.
- * Only logs in development mode.
+ * Log paragraph detection results when {@link ExtractionSettings.analyzerLogging} is enabled.
  */
 export function logParagraphDetection(result: PageParagraphResult): void {
-    if (process.env.NODE_ENV !== "development") return;
+    if (!isAnalyzerLoggingEnabled()) return;
 
     pdfLog(
         `[ParagraphDetector] Page ${result.pageIndex}: ` +

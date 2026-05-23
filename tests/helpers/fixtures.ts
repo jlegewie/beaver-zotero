@@ -98,7 +98,7 @@ export const MISSING_FILE_PDF: AttachmentFixture = {
 
 // Group library PDF
 export const GROUP_LIB_PDF: AttachmentFixture = {
-    library_id: 3,
+    library_id: 2,
     zotero_key: 'WTY4J27Q',
     description: 'Group library PDF (11 pages)',
 };

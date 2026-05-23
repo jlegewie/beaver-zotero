@@ -26,7 +26,6 @@ import { getZoteroUserIdentifier } from '../../src/utils/zoteroUtils';
 import {
     handleZoteroDataRequest,
     handleExternalReferenceCheckRequest,
-    handleZoteroAttachmentPagesRequest,
     handleZoteroDocumentRequest,
     handleZoteroAttachmentPageImagesRequest,
     handleZoteroAttachmentSearchRequest,
@@ -51,8 +50,8 @@ import {
     handleTestPingHttpRequest,
     handleTestCacheMetadataHttpRequest,
     handleTestCacheInvalidateHttpRequest,
-    handleTestCacheClearMemoryHttpRequest,
-    handleTestCacheDeleteContentHttpRequest,
+    handleTestCacheClearAllHttpRequest,
+    handleTestReadAttachmentHttpRequest,
     handleTestWorkerStatsHttpRequest,
     handleTestWorkerMarkStaleHttpRequest,
     handleTestWorkerCacheClearHttpRequest,
@@ -86,7 +85,6 @@ import {
 import type {
     WSZoteroDataRequest,
     WSExternalReferenceCheckRequest,
-    WSZoteroAttachmentPagesRequest,
     WSZoteroDocumentRequest,
     WSZoteroAttachmentPageImagesRequest,
     WSZoteroAttachmentSearchRequest,
@@ -131,7 +129,6 @@ const ENDPOINT_PATHS = [
     '/beaver/external-reference-check',
     '/beaver/search/metadata',
     '/beaver/search/topic',
-    '/beaver/attachment/pages',
     '/beaver/attachment/document',
     '/beaver/attachment/page-images',
     '/beaver/attachment/search',
@@ -154,8 +151,8 @@ const ENDPOINT_PATHS = [
     '/beaver/test/ping',
     '/beaver/test/cache-metadata',
     '/beaver/test/cache-invalidate',
-    '/beaver/test/cache-clear-memory',
-    '/beaver/test/cache-delete-content',
+    '/beaver/test/cache-clear-all',
+    '/beaver/test/read-attachment',
     '/beaver/test/resolve-item',
     // Test-only endpoints (note seeding/teardown/inspection)
     '/beaver/test/note-create',
@@ -315,30 +312,6 @@ async function handleTopicSearchHttpRequest(request: any) {
     
     return {
         items: response.items,
-    };
-}
-
-async function handleAttachmentPagesHttpRequest(request: any) {
-    const wsRequest: WSZoteroAttachmentPagesRequest = {
-        event: 'zotero_attachment_pages_request',
-        request_id: generateRequestId(),
-        attachment: request.attachment,
-        start_page: request.start_page,
-        end_page: request.end_page,
-        skip_local_limits: request.skip_local_limits,
-        prefer_page_labels: request.prefer_page_labels,
-        max_pages: request.max_pages,
-        timeout_seconds: request.timeout_seconds,
-    };
-
-    const response = await handleZoteroAttachmentPagesRequest(wsRequest);
-    
-    return {
-        attachment: response.attachment,
-        pages: response.pages,
-        total_pages: response.total_pages,
-        error: response.error,
-        error_code: response.error_code,
     };
 }
 
@@ -642,9 +615,6 @@ function registerEndpoints(): boolean {
     Zotero.Server.Endpoints['/beaver/search/topic'] = 
         createEndpoint(handleTopicSearchHttpRequest);
     
-    Zotero.Server.Endpoints['/beaver/attachment/pages'] = 
-        createEndpoint(handleAttachmentPagesHttpRequest);
-
     Zotero.Server.Endpoints['/beaver/attachment/document'] =
         createEndpoint(handleAttachmentDocumentHttpRequest);
     
@@ -702,11 +672,11 @@ function registerEndpoints(): boolean {
         Zotero.Server.Endpoints['/beaver/test/cache-invalidate'] =
             createEndpoint(handleTestCacheInvalidateHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/cache-clear-memory'] =
-            createEndpoint(handleTestCacheClearMemoryHttpRequest);
+        Zotero.Server.Endpoints['/beaver/test/cache-clear-all'] =
+            createEndpoint(handleTestCacheClearAllHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/cache-delete-content'] =
-            createEndpoint(handleTestCacheDeleteContentHttpRequest);
+        Zotero.Server.Endpoints['/beaver/test/read-attachment'] =
+            createEndpoint(handleTestReadAttachmentHttpRequest);
 
         Zotero.Server.Endpoints['/beaver/test/resolve-item'] =
             createEndpoint(handleTestResolveItemHttpRequest);

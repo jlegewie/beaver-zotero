@@ -191,8 +191,10 @@ export async function executeEditNoteAction(
     const noteId = `${library_id}-${zotero_key}`;
     const { simplified, metadata } = getOrSimplify(noteId, oldHtml, library_id);
 
-    // 5. Pre-load page labels so new citations resolve page indices to labels
-    await preloadPageLabelsForNewCitations(new_string);
+    // 5. Pre-load page labels so new citations resolve page indices to labels.
+    //    The resolved map is threaded explicitly into every expandToRawHtml
+    //    call below so expansion stays synchronous.
+    const newPageLabels = await preloadPageLabelsForNewCitations(new_string);
 
     // Snapshot external-reference state once so every expandToRawHtml('new', ...)
     // below can resolve `<citation external_id="..."/>` consistently.
@@ -202,7 +204,7 @@ export async function executeEditNoteAction(
     if (operation === 'rewrite') {
         let expandedNew: string;
         try {
-            expandedNew = expandToRawHtml(new_string, metadata, 'new', externalRefContext);
+            expandedNew = expandToRawHtml(new_string, metadata, 'new', externalRefContext, newPageLabels);
         } catch (e: any) {
             throw new Error(e.message || String(e));
         }
@@ -269,7 +271,7 @@ export async function executeEditNoteAction(
     if (operation === 'append') {
         let expandedNew: string;
         try {
-            expandedNew = expandToRawHtml(new_string, metadata, 'new', externalRefContext);
+            expandedNew = expandToRawHtml(new_string, metadata, 'new', externalRefContext, newPageLabels);
         } catch (e: any) {
             throw new Error(e.message || String(e));
         }
@@ -362,6 +364,7 @@ export async function executeEditNoteAction(
         simplified,
         strippedHtml,
         externalRefContext,
+        pageLabels: newPageLabels,
     };
     let base: BaseExpansion;
     try {
@@ -634,13 +637,19 @@ export async function undoEditNoteAction(
     if (expandedOld === undefined || (!isDeletion && expandedNew === undefined)) {
         const { metadata } = getOrSimplify(noteId, currentHtml, library_id);
         const externalRefContext = getExternalRefContext();
+        // Resolve page labels for new_string citations so the fallback
+        // expansion translates 1-based page numbers the same way the
+        // original execute did.
+        const undoPageLabels = isDeletion
+            ? {}
+            : await preloadPageLabelsForNewCitations(new_string);
 
         try {
             if (expandedOld === undefined) {
                 expandedOld = expandToRawHtml(old_string ?? '', metadata, 'old');
             }
             if (!isDeletion && expandedNew === undefined) {
-                expandedNew = expandToRawHtml(new_string, metadata, 'new', externalRefContext);
+                expandedNew = expandToRawHtml(new_string, metadata, 'new', externalRefContext, undoPageLabels);
             }
         } catch (e: any) {
             throw new Error(`Failed to expand strings for undo: ${e.message || String(e)}`);

@@ -201,7 +201,6 @@ describe('MuPDF worker smoke — orchestration ops', () => {
             expect(res.error?.payload?.ocrAnalysis).toBeDefined();
             const ocr = res.error!.payload!.ocrAnalysis as any;
             expect(ocr.needsOCR).toBe(true);
-            expect(typeof ocr.primaryReason).toBe('string');
             expect(typeof res.error!.payload!.pageCount).toBe('number');
             expect(res.error!.payload!.pageLabels).toBeDefined();
         });
@@ -228,7 +227,6 @@ describe('MuPDF worker smoke — orchestration ops', () => {
 
             const result = res.result;
             expect(result.needsOCR).toBe(false);
-            expect(typeof result.primaryReason).toBe('string');
             expect(typeof result.issueRatio).toBe('number');
             expect(result.issueBreakdown).toBeDefined();
             expect(typeof result.sampledPages).toBe('number');
@@ -239,7 +237,6 @@ describe('MuPDF worker smoke — orchestration ops', () => {
             const res = await pdfAnalyzeOcr(NO_TEXT_PDF);
             expect(res.ok).toBe(true);
             expect(res.result.needsOCR).toBe(true);
-            expect(typeof res.result.primaryReason).toBe('string');
         });
     });
 

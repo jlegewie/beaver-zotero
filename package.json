@@ -54,6 +54,7 @@
         "diff": "^8.0.4",
         "jotai": "^2.12.1",
         "p-queue": "^9.0.1",
+        "pako": "^1.0.11",
         "prop-types": "^15.8.1",
         "prosemirror-model": "^1.25.4",
         "prosemirror-state": "^1.4.4",

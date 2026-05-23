@@ -91,10 +91,9 @@ describe("DocumentAnalyzer document-level near-empty guard", () => {
 
         expect(result.issueRatio).toBe(0);
         expect(result.needsOCR).toBe(true);
-        expect(result.primaryReason).toBe("missing_text_content");
     });
 
-    it("reports scanned_without_ocr when the near-empty pages carry images", () => {
+    it("flags a near-empty document whose pages carry sub-threshold images", () => {
         // Images present but each below the large-image coverage threshold, so
         // the per-page `insufficient_text` + `large_image_coverage` checks do
         // not fire; only the document-level guard catches it.
@@ -105,7 +104,6 @@ describe("DocumentAnalyzer document-level near-empty guard", () => {
 
         expect(result.issueRatio).toBe(0);
         expect(result.needsOCR).toBe(true);
-        expect(result.primaryReason).toBe("scanned_without_ocr");
     });
 
     it("does not flag ordinary prose documents", () => {
@@ -113,7 +111,6 @@ describe("DocumentAnalyzer document-level near-empty guard", () => {
         const result = new DocumentAnalyzer(makeProvider(pages)).analyzeOCRNeeds();
 
         expect(result.needsOCR).toBe(false);
-        expect(result.primaryReason).toBe("text_extraction_acceptable");
     });
 
     it("does not flag a document whose mean text is just above the threshold", () => {
@@ -139,7 +136,6 @@ describe("DocumentAnalyzer document-level near-empty guard", () => {
         });
 
         expect(result.needsOCR).toBe(true);
-        expect(result.primaryReason).toBe("missing_text_content");
     });
 
     it("can be disabled with minMeanTextPerPage = 0", () => {
@@ -166,6 +162,5 @@ describe("DocumentAnalyzer document-level near-empty guard", () => {
         const result = new DocumentAnalyzer(makeProvider(pages)).analyzeOCRNeeds();
 
         expect(result.needsOCR).toBe(true);
-        expect(result.primaryReason).toBe("missing_text_content");
     });
 });

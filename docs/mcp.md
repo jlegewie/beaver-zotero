@@ -210,7 +210,7 @@ Read the text content of a PDF attachment from the user's Zotero library. Maximu
 
 **Response**: Plain text with page content wrapped in `<pageN>...</pageN>` XML tags. Includes a header with attachment ID, total page count, and the page range shown.
 
-**Underlying handler**: `handleZoteroAttachmentPagesRequest` from `src/services/agentDataProvider/`.
+**Underlying handler**: `handleZoteroDocumentRequest` from `src/services/agentDataProvider/`, sliced to the requested page window.
 
 ---
 

@@ -351,40 +351,19 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
         }
     };
 
-    // Clear the attachment file cache (metadata + content files)
-    const handleClearAttachmentFileCache = async () => {
-        console.log("[Attachment Cache Reset] Starting...");
+    // Clear the document cache (metadata + payload files on disk)
+    const handleClearDocumentCache = async () => {
+        console.log("[Document Cache Reset] Starting...");
         try {
-            const cache = Zotero.Beaver?.attachmentFileCache;
-            if (!cache) {
-                console.error("[Attachment Cache Reset] AttachmentFileCache not available");
-                return;
+            const documentCache = Zotero.Beaver?.documentCache;
+            if (documentCache) {
+                const { metadataRows, payloadRows } = await documentCache.clearAll();
+                console.log(`[Document Cache Reset] Done: ${metadataRows} metadata rows, ${payloadRows} payload rows`);
+            } else {
+                console.warn("[Document Cache Reset] DocumentCache not available");
             }
-
-            const db = Zotero.Beaver?.db as BeaverDB | null;
-            if (!db) {
-                console.error("[Attachment Cache Reset] Database not available");
-                return;
-            }
-
-            // Get all records to find unique library IDs
-            const allRecords = await db.getAllAttachmentFileCache();
-            const libraryIds = new Set(allRecords.map(r => r.library_id));
-
-            console.log(`[Attachment Cache Reset] Found ${allRecords.length} records across ${libraryIds.size} libraries`);
-
-            // Invalidate each library (clears metadata + content files)
-            for (const libraryId of libraryIds) {
-                await cache.invalidateByLibrary(libraryId);
-                console.log(`[Attachment Cache Reset] Cleared library ${libraryId}`);
-            }
-
-            // Clear in-memory cache
-            cache.clearMemoryCache();
-
-            console.log(`[Attachment Cache Reset] ✓ Done! Cleared ${allRecords.length} records`);
         } catch (error) {
-            console.error("[Attachment Cache Reset] Failed:", error);
+            console.error("[Document Cache Reset] Failed:", error);
         }
     };
 
@@ -577,7 +556,6 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
             console.log("=".repeat(60));
             
             console.group("[OCR Detection Test] Summary");
-            console.log(`Primary Reason: ${result.primaryReason}`);
             console.log(`Issue Ratio: ${(result.issueRatio * 100).toFixed(1)}% of sampled pages have issues`);
             console.log(`Pages Sampled: ${result.sampledPages} of ${result.totalPages} total`);
             console.groupEnd();
@@ -800,8 +778,8 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
             disabled: false,
         },
         {
-            label: "Clear Attachment File Cache",
-            onClick: handleClearAttachmentFileCache,
+            label: "Clear Document Cache",
+            onClick: handleClearDocumentCache,
             icon: PdfIcon,
             disabled: false,
         },

@@ -19,10 +19,9 @@ import {
     WSSearchHit,
 } from '../agentProtocol';
 import { BeaverExtractor, ExtractionError, ExtractionErrorCode, WorkerAbortError } from '../../beaver-extract';
-import { makeRemoteFilePath } from '../attachmentFileCache';
+import { makeRemoteFilePath } from '../documentFileIdentity';
 import {
     validateZoteroItemReference,
-    backfillMetadataForError,
     loadPdfData,
     checkRemotePdfSize,
     isRemoteAccessAvailable,
@@ -48,6 +47,7 @@ export async function handleZoteroAttachmentSearchRequest(
     let resolvedItem: Zotero.Item | null = null;
     let resolvedFilePath: string | null = null;
     let totalPages: number | null = null;
+    let loadedPdfData: Uint8Array | null = null;
 
     // Helper to create error response
     const errorResponse = (
@@ -167,8 +167,11 @@ export async function handleZoteroAttachmentSearchRequest(
         }
 
         // 5b. Try metadata cache for fast prechecks
-        const cache = Zotero.Beaver?.attachmentFileCache;
-        const cachedMeta = cache ? await cache.getMetadata(zoteroItem.id, effectiveFilePath).catch(() => null) : null;
+        const cache = Zotero.Beaver?.documentCache;
+        const cachedMeta = cache ? await cache.getMetadata({
+            libraryId: zoteroItem.libraryID,
+            zoteroKey: zoteroItem.key,
+        }, effectiveFilePath).catch(() => null) : null;
         throwIfTimedOut('metadata_cache_lookup');
 
         const preflight = preflightCachedPdfMeta(cachedMeta, {
@@ -204,6 +207,7 @@ export async function handleZoteroAttachmentSearchRequest(
         let pdfData: Uint8Array;
         try {
             pdfData = await loadPdfData(zoteroItem, effectiveFilePath, isRemoteOnly);
+            loadedPdfData = pdfData;
             throwIfTimedOut('pdf_data_load_for_search');
         } catch (error) {
             if (!isRemoteOnly) throw error; // local I/O error — let outer handler deal with it
@@ -295,9 +299,26 @@ export async function handleZoteroAttachmentSearchRequest(
 
         // Handle known extraction errors
         if (error instanceof ExtractionError) {
-            // Backfill metadata for known error states
             if (resolvedItem && resolvedFilePath && (error.code === ExtractionErrorCode.ENCRYPTED || error.code === ExtractionErrorCode.INVALID_PDF || error.code === ExtractionErrorCode.NO_TEXT_LAYER)) {
-                await backfillMetadataForError(resolvedItem, resolvedFilePath, error, null, 'handleZoteroAttachmentSearchRequest');
+                const cache = Zotero.Beaver?.documentCache;
+                const errorCode = error.code === ExtractionErrorCode.ENCRYPTED
+                    ? 'encrypted'
+                    : error.code === ExtractionErrorCode.INVALID_PDF
+                        ? 'invalid_pdf'
+                        : 'no_text_layer';
+                await cache?.putErrorMetadata({
+                    item: resolvedItem,
+                    filePath: resolvedFilePath,
+                    sourceSizeBytes: loadedPdfData?.byteLength ?? 0,
+                    contentType: resolvedItem.attachmentContentType || 'application/pdf',
+                    errorCode,
+                    pageCount: error.code === ExtractionErrorCode.NO_TEXT_LAYER
+                        ? error.pageCount ?? totalPages
+                        : null,
+                    pageLabels: error.code === ExtractionErrorCode.NO_TEXT_LAYER
+                        ? error.pageLabels ?? null
+                        : null,
+                });
             }
 
             switch (error.code) {

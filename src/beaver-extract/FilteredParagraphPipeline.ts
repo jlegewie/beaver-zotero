@@ -8,13 +8,15 @@
  */
 
 import { MarginFilter } from "./MarginFilter";
-import { detectColumns, type ColumnDetectionResult } from "./ColumnDetector";
-import { detectLinesOnPage, type PageLineResult } from "./LineDetector";
+import { detectColumns, logColumnDetection, type ColumnDetectionResult } from "./ColumnDetector";
+import { detectLinesOnPage, logLineDetection, type PageLineResult } from "./LineDetector";
 import {
     detectParagraphs,
+    logParagraphDetection,
     type PageParagraphResult,
     type ParagraphDetectionSettings,
 } from "./ParagraphDetector";
+import { isAnalyzerLoggingEnabled } from "./logging";
 import {
     DEFAULT_MARGINS,
     DEFAULT_MARGIN_ZONE,
@@ -357,8 +359,10 @@ export function detectFilteredParagraphs(
         bodyStyles: styleProfile.bodyStyles,
         fillBoundaries,
         dividerLines,
+        debug: isAnalyzerLoggingEnabled(),
     });
     const columnDetectMs = performance.now() - tColumnDetect;
+    logColumnDetection(filteredPage.pageIndex, columnResult);
 
     let lineResult: PageLineResult;
     let paragraphResult: PageParagraphResult;
@@ -369,6 +373,7 @@ export function detectFilteredParagraphs(
         const tLineDetect = performance.now();
         lineResult = detectLinesOnPage(filteredPage, columnResult.columns);
         lineDetectMs = performance.now() - tLineDetect;
+        logLineDetection(lineResult);
         if (lineResult.allLines.length > 0) {
             const tParagraphDetect = performance.now();
             paragraphResult = detectParagraphs(
@@ -379,6 +384,7 @@ export function detectFilteredParagraphs(
                 { trackItemLines: true },
             );
             paragraphDetectMs = performance.now() - tParagraphDetect;
+            logParagraphDetection(paragraphResult);
         } else {
             paragraphResult = emptyParagraphResult(filteredPage);
         }

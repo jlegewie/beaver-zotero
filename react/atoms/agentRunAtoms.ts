@@ -71,7 +71,7 @@ import {
     resetRunMessages,
 } from '../agents/atoms';
 import { userIdAtom } from './auth';
-import { citationMetadataAtom, updateCitationDataAtom, resetCitationMarkersAtom, bumpPageLabelsVersionAtom } from './citations';
+import { citationMetadataAtom, updateCitationDataAtom, resetCitationMarkersAtom, mergePageLabelsByAttachmentIdAtom } from './citations';
 import { preloadPageLabelsForCitations } from '../utils/pageLabels';
 import {
     addAgentActionsAtom,
@@ -1045,11 +1045,11 @@ function createWSCallbacks(set: Setter): WSCallbacks {
         },
 
         onPart: async (event: WSPartEvent) => {
-            logger(`WS onPart (${event.part.part_kind}):`, {
-                runId: event.run_id,
-                messageIndex: event.message_index,
-                part: event.part,
-            });
+            // logger(`WS onPart (${event.part.part_kind}):`, {
+            //     runId: event.run_id,
+            //     messageIndex: event.message_index,
+            //     part: event.part,
+            // });
             // Load item data for tool call
             if (event.part.part_kind === "tool-call") {
                 const itemReferences = extractZoteroReferencesFromToolCall(event.part);
@@ -1151,12 +1151,12 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                 await set(updateCitationDataAtom);
 
                 // Preload PDF page labels for cited attachments so the rendering
-                // path can resolve page numbers to display labels synchronously.
+                // path can resolve page numbers from explicit render state.
                 // Runs after metadata is exposed to avoid blocking the UI on PDF
-                // extraction; citation components re-render via the version atom.
+                // extraction.
                 preloadPageLabelsForCitations(event.citations)
-                    .then((loaded) => {
-                        if (loaded) set(bumpPageLabelsVersionAtom);
+                    .then((labelsByAttachmentId) => {
+                        set(mergePageLabelsByAttachmentIdAtom, labelsByAttachmentId);
                     })
                     .catch((err) =>
                         logger(`WS onRunComplete: Failed to preload page labels: ${err}`, 1)

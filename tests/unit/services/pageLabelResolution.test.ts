@@ -13,7 +13,7 @@ import {
     InvalidPageValueError,
     ensurePageLabelsForResolution,
 } from '../../../src/services/agentDataProvider/pageLabelResolution';
-import type { AttachmentFileCacheRecord } from '../../../src/services/database';
+import type { DocumentCacheMetadata } from '../../../src/services/documentCache';
 
 // Mock the logger to keep test output clean
 vi.mock('../../../src/utils/logger', () => ({
@@ -30,24 +30,24 @@ const mockIOUtils = (globalThis as any).IOUtils as {
 // ---------------------------------------------------------------------------
 
 function makeCachedMeta(
-    overrides: Partial<AttachmentFileCacheRecord> = {}
-): AttachmentFileCacheRecord {
+    overrides: Partial<DocumentCacheMetadata> = {}
+): DocumentCacheMetadata {
     return {
-        item_id: 1,
-        library_id: 1,
-        zotero_key: 'ABCD1234',
-        file_path: '/data/test.pdf',
-        file_mtime_ms: 1700000000000,
-        file_size_bytes: 100000,
-        content_type: 'application/pdf',
-        page_count: 10,
-        page_labels: null,
-        has_text_layer: true,
-        needs_ocr: false,
-        is_encrypted: false,
-        is_invalid: false,
-        extraction_version: '1',
-        cached_at: '2025-01-01T00:00:00Z',
+        id: 1,
+        libraryId: 1,
+        zoteroKey: 'ABCD1234',
+        filePath: '/data/test.pdf',
+        fileSignature: { mtime_ms: 1700000000000, size_bytes: 100000 },
+        sourceSizeBytes: 100000,
+        contentType: 'application/pdf',
+        pageCount: 10,
+        pageLabels: null,
+        errorCode: null,
+        extractionSchemaVersion: '1',
+        metadataFormatVersion: 1,
+        createdAt: '2025-01-01T00:00:00Z',
+        updatedAt: '2025-01-01T00:00:00Z',
+        lastAccessedAt: null,
         ...overrides,
     };
 }
@@ -256,8 +256,8 @@ describe('ensurePageLabelsForResolution', () => {
 
     it('returns labels from cache when cachedMeta has populated page_labels', async () => {
         const cachedMeta = makeCachedMeta({
-            page_labels: { 0: 'i', 1: 'ii', 2: '1' },
-            page_count: 3,
+            pageLabels: { 0: 'i', 1: 'ii', 2: '1' },
+            pageCount: 3,
         });
         const extractor = makeMockExtractor({ pageCount: 999, pageLabels: { 0: 'wrong' } });
 
@@ -272,11 +272,11 @@ describe('ensurePageLabelsForResolution', () => {
     });
 
     it('normalises empty labels object from cache to null', async () => {
-        // page_labels: {} means "already checked, no custom labels" —
+        // pageLabels: {} means "already checked, no custom labels" —
         // resolver should see null so it falls through to numeric.
         const cachedMeta = makeCachedMeta({
-            page_labels: {},
-            page_count: 5,
+            pageLabels: {},
+            pageCount: 5,
         });
         const extractor = makeMockExtractor({ pageCount: 999, pageLabels: { 0: 'wrong' } });
 
@@ -306,7 +306,7 @@ describe('ensurePageLabelsForResolution', () => {
     });
 
     it('does an eager load when cachedMeta has null page_labels (never checked)', async () => {
-        const cachedMeta = makeCachedMeta({ page_labels: null, page_count: null });
+        const cachedMeta = makeCachedMeta({ pageLabels: null, pageCount: null });
         const pdfBytes = new Uint8Array([1, 2, 3]);
         mockIOUtils.read.mockResolvedValueOnce(pdfBytes);
         const extractor = makeMockExtractor({

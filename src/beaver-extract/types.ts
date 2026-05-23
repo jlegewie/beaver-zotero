@@ -79,6 +79,12 @@ export interface ExtractionSettings {
      * use tinted display containers.
      */
     graphicsLayerMode?: GraphicsLayerMode;
+    /**
+     * Emit verbose analyzer-module log lines (ColumnDetector, StyleAnalyzer,
+     * MarginFilter, LineDetector, ParagraphDetector). Default false — even
+     * in dev builds. Prefer the CLI `trace` command for structured debugging.
+     */
+    analyzerLogging?: boolean;
 }
 
 /** Default extraction settings */
@@ -90,6 +96,7 @@ export const DEFAULT_EXTRACTION_SETTINGS: Required<ExtractionSettings> = {
     repeatThreshold: 3,
     detectPageSequences: true,
     graphicsLayerMode: "off",
+    analyzerLogging: false,
 };
 
 /**
@@ -962,6 +969,7 @@ export interface OCRDetectionOptions {
 /** Reasons why a page might need OCR */
 export type OCRIssueReason =
     | "no_text_blocks"
+    | "no_body_text"
     | "insufficient_text"
     | "high_whitespace_ratio"
     | "high_newline_ratio"
@@ -990,8 +998,6 @@ export interface PageOCRAnalysis {
 export interface OCRDetectionResult {
     /** Whether the document likely needs OCR */
     needsOCR: boolean;
-    /** Primary reason for the decision */
-    primaryReason: string;
     /** Ratio of pages with issues (0-1) */
     issueRatio: number;
     /** Breakdown by issue type */

@@ -18,16 +18,14 @@ import {
     WSPageImage,
 } from '../agentProtocol';
 import { BeaverExtractor, ExtractionError, ExtractionErrorCode, WorkerAbortError } from '../../beaver-extract';
-import { makeRemoteFilePath } from '../attachmentFileCache';
+import { makeRemoteFilePath } from '../documentFileIdentity';
 import {
     resolveToPdfAttachment,
     validateZoteroItemReference,
-    backfillMetadataForError,
     loadPdfData,
     checkRemotePdfSize,
     isRemoteAccessAvailable,
     preflightCachedPdfMeta,
-    persistMetadataToCache,
 } from './utils';
 import { ensurePageLabelsForResolution, resolvePageValue, InvalidPageValueError } from './pageLabelResolution';
 import {
@@ -58,9 +56,6 @@ export async function handleZoteroAttachmentPageImagesRequest(
     const requestKey = `${attachment.library_id}-${attachment.zotero_key}`;
     let errorKey = requestKey;
 
-    // Hoisted for catch-block metadata backfill
-    let resolvedPdfItem: Zotero.Item | null = null;
-    let resolvedFilePath: string | null = null;
     let resolvedCachedPageCount: number | null = null;
 
     // Helper to create error response
@@ -118,7 +113,6 @@ export async function handleZoteroAttachmentPageImagesRequest(
         }
         const { item: pdfItem, key: pdfKey } = resolveResult;
         errorKey = pdfKey;
-        resolvedPdfItem = pdfItem;
 
         // 3. Get the file path — returns false if missing or nonexistent
         const rawFilePath = await pdfItem.getFilePathAsync();
@@ -126,7 +120,6 @@ export async function handleZoteroAttachmentPageImagesRequest(
         const filePath = rawFilePath || null;  // normalize false → null
         const isRemoteOnly = !filePath && isRemoteAccessAvailable(pdfItem);
         const effectiveFilePath = filePath || (isRemoteOnly ? makeRemoteFilePath(pdfItem) : null);
-        resolvedFilePath = effectiveFilePath;
 
         if (!effectiveFilePath) {
             const onServer = isAttachmentAvailableRemotely(pdfItem);
@@ -158,10 +151,13 @@ export async function handleZoteroAttachmentPageImagesRequest(
         }
 
         // 4b. Try metadata cache for fast prechecks
-        const cache = Zotero.Beaver?.attachmentFileCache;
-        const cachedMeta = cache ? await cache.getMetadata(pdfItem.id, effectiveFilePath).catch(() => null) : null;
+        const cache = Zotero.Beaver?.documentCache;
+        const cachedMeta = cache ? await cache.getMetadata({
+            libraryId: pdfItem.libraryID,
+            zoteroKey: pdfItem.key,
+        }, effectiveFilePath).catch(() => null) : null;
         throwIfTimedOut('metadata_cache_lookup');
-        resolvedCachedPageCount = cachedMeta?.page_count ?? null;
+        resolvedCachedPageCount = cachedMeta?.pageCount ?? null;
 
         // Determine once whether this is an all-pages request
         const requestingAllPages = !pages || pages.length === 0;
@@ -208,13 +204,13 @@ export async function handleZoteroAttachmentPageImagesRequest(
             if (labelResult.pdfData) {
                 pdfData = labelResult.pdfData;
             }
-        } else if (cachedMeta?.page_labels && Object.keys(cachedMeta.page_labels).length > 0) {
-            pageLabels = cachedMeta.page_labels;
+        } else if (cachedMeta?.pageLabels && Object.keys(cachedMeta.pageLabels).length > 0) {
+            pageLabels = cachedMeta.pageLabels;
         }
 
         // 5b. Adopt cached page count when available (no doc-open).
-        if (totalPages == null && cachedMeta?.page_count != null) {
-            totalPages = cachedMeta.page_count;
+        if (totalPages == null && cachedMeta?.pageCount != null) {
+            totalPages = cachedMeta.pageCount;
         }
 
         // 5c. Upfront getPageCount ONLY when rendering all pages and we have
@@ -380,52 +376,9 @@ export async function handleZoteroAttachmentPageImagesRequest(
             };
         });
 
-        // 11b. Write-through metadata only when it's safe to do so.
-        //
-        // Rendering proves the PDF opens, but it does NOT inspect the text
-        // layer. `setMetadata` is a full upsert, and downstream readers
-        // (`fileStatusFromCache` in utils.ts:384) treat a falsy `needs_ocr`
-        // as "available". So if the image-render path is the FIRST cache
-        // writer for a scanned/no-text PDF, writing `needs_ocr: null` would
-        // make the file appear text-ready and skip the OCR check on later
-        // `getAttachmentFileStatus` calls.
-        //
-        // Rule: only refresh page_count/page_labels when a prior writer
-        // has already set `needs_ocr === false` (i.e., an authoritative
-        // text-layer check has run). In that case we extend the existing
-        // record without disturbing OCR state. Otherwise leave the cache
-        // alone — a later text-extraction or status call will seed it
-        // correctly.
-        // Skip cache writes during shutdown — DB writes here race Zotero's
-        // teardown (same guard as sync.ts:266 and FileUploader.ts:338).
-        const canSafelyExtendCache = cache != null
-            && cachedMeta != null
-            && cachedMeta.needs_ocr === false
-            && cachedMeta.is_encrypted === false
-            && cachedMeta.is_invalid === false;
-        if (cache && !canSafelyExtendCache) {
-            logger(
-                `handleZoteroAttachmentPageImagesRequest: skipping metadata write for ${requestKey} (no authoritative needs_ocr in cache)`,
-                3,
-            );
-        }
-        if (canSafelyExtendCache) {
-            const persistedPageLabels = Object.keys(renderResult.pageLabels).length > 0 ? renderResult.pageLabels : {};
-            await persistMetadataToCache(
-                pdfItem,
-                effectiveFilePath,
-                pdfItem.attachmentContentType || 'application/pdf',
-                {
-                    page_count: renderResult.pageCount,
-                    page_labels: persistedPageLabels,
-                    has_text_layer: cachedMeta!.has_text_layer,
-                    needs_ocr: cachedMeta!.needs_ocr,
-                    is_encrypted: false,
-                    is_invalid: false,
-                },
-            );
-            throwIfTimedOut('metadata_cache_persist');
-        }
+        // The image-render path deliberately does NOT write metadata to the
+        // cache. Rendering proves the PDF opens, but it never inspects the
+        // text layer.
 
         throwIfTimedOut('success_response');
         return {
@@ -449,11 +402,6 @@ export async function handleZoteroAttachmentPageImagesRequest(
         logger(`handleZoteroAttachmentPageImagesRequest: Rendering failed: ${error}`, 1);
 
         if (error instanceof ExtractionError) {
-            // Backfill metadata for known error states
-            if (resolvedPdfItem && resolvedFilePath && (error.code === ExtractionErrorCode.ENCRYPTED || error.code === ExtractionErrorCode.INVALID_PDF)) {
-                await backfillMetadataForError(resolvedPdfItem, resolvedFilePath, error, resolvedCachedPageCount, 'handleZoteroAttachmentPageImagesRequest');
-            }
-
             // PAGE_OUT_OF_RANGE carries `pageCount` in payload (worker strict resolvers).
             const totalPagesForError = error.pageCount ?? resolvedCachedPageCount ?? null;
 

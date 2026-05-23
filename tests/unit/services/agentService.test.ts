@@ -20,7 +20,7 @@ vi.mock('../../../src/utils/logger', () => ({
 vi.mock('../../../src/services/agentDataProvider', () => ({
     handleZoteroDataRequest: vi.fn(),
     handleExternalReferenceCheckRequest: vi.fn(),
-    handleZoteroAttachmentPagesRequest: vi.fn(),
+    handleZoteroDocumentRequest: vi.fn(),
     handleZoteroAttachmentPageImagesRequest: vi.fn(),
     handleZoteroAttachmentSearchRequest: vi.fn(),
     handleItemSearchByMetadataRequest: vi.fn(),

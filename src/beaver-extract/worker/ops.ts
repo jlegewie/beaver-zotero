@@ -24,6 +24,7 @@ import { PageExtractor } from "../PageExtractor";
 import { buildPageAnalysisContext } from "../PageAnalysisContext";
 import { resolveAnalysisPages } from "../AnalysisWindow";
 import { detectColumns, logColumnDetection } from "../ColumnDetector";
+import { setAnalyzerLogging } from "../logging";
 import type { PageLine } from "../LineDetector";
 import {
     collectMarginItemsFromFilteredPage,
@@ -551,6 +552,8 @@ export function runExtractFromIndices(
     fontApi?: FontApi,
     pageCache?: PageWalkCache,
 ): InternalExtractionResult {
+    setAnalyzerLogging(!!opts.analyzerLogging);
+    try {
     const tStart = performance.now();
 
     // Structured mode pre-walks every target in detailed mode FIRST so
@@ -819,6 +822,7 @@ export function runExtractFromIndices(
                 headerMargin: opts.margins.top,
                 footerMargin: opts.margins.bottom,
                 bodyStyles: styleProfile.bodyStyles,
+                debug: !!opts.analyzerLogging,
             });
             logColumnDetection(rawPage.pageIndex, columnResult);
 
@@ -880,6 +884,9 @@ export function runExtractFromIndices(
     };
 
     return baseResult;
+    } finally {
+        setAnalyzerLogging(false);
+    }
 }
 
 function pageLabelsToStringKeys(
@@ -1260,7 +1267,7 @@ export async function opExtract(
             if (ocr.needsOCR) {
                 throw workerError(
                     ERROR_CODES.NO_TEXT_LAYER,
-                    `Document may require OCR: ${ocr.primaryReason} (${Math.round(ocr.issueRatio * 100)}% of sampled pages have issues)`,
+                    `Document may require OCR (${Math.round(ocr.issueRatio * 100)}% of sampled pages have issues)`,
                     { ocrAnalysis: ocr, pageLabels, pageCount },
                 );
             }
@@ -1365,7 +1372,7 @@ export async function opStructuredExtractWithDebug(
             if (ocr.needsOCR) {
                 throw workerError(
                     ERROR_CODES.NO_TEXT_LAYER,
-                    `Document may require OCR: ${ocr.primaryReason} (${Math.round(ocr.issueRatio * 100)}% of sampled pages have issues)`,
+                    `Document may require OCR (${Math.round(ocr.issueRatio * 100)}% of sampled pages have issues)`,
                     { ocrAnalysis: ocr, pageLabels, pageCount },
                 );
             }
@@ -1461,6 +1468,7 @@ export async function opAnalyzeLayout(
         // optional OCR gate.
         const requestedRepeatThreshold = args.settings?.repeatThreshold;
         const opts = { ...DEFAULT_EXTRACTION_SETTINGS, ...(args.settings || {}) };
+        setAnalyzerLogging(!!opts.analyzerLogging);
         // Classify a 0-page document before `rawPageProviderFromDoc`, whose
         // `resolveTruePageCount` probe would otherwise throw a raw
         // "invalid page number" error for a page-less document. The second
@@ -1480,7 +1488,7 @@ export async function opAnalyzeLayout(
             if (ocr.needsOCR) {
                 throw workerError(
                     ERROR_CODES.NO_TEXT_LAYER,
-                    `Document may require OCR: ${ocr.primaryReason} (${Math.round(ocr.issueRatio * 100)}% of sampled pages have issues)`,
+                    `Document may require OCR (${Math.round(ocr.issueRatio * 100)}% of sampled pages have issues)`,
                     { ocrAnalysis: ocr, pageLabels, pageCount },
                 );
             }
@@ -1550,6 +1558,7 @@ export async function opAnalyzeLayout(
         docFailed = true;
         throw e;
     } finally {
+        setAnalyzerLogging(false);
         releaseDoc(doc, docFailed);
     }
 }

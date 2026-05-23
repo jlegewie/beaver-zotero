@@ -52,30 +52,65 @@ export interface FailedEmbeddingRecord {
     next_retry_after: string;            // Don't retry before this time (ISO string)
 }
 
-/**
- * Interface for the 'attachment_file_cache' table row
- *
- * Table stores cached metadata and content-cache flags for PDF attachments.
- * Metadata is keyed by item_id. Content (page text) is stored on disk as JSON
- * under <profileDir>/beaver/content-cache/<libraryId>/<zoteroKey>.json.
- */
-export interface AttachmentFileCacheRecord {
-    item_id: number;
-    library_id: number;
-    zotero_key: string;
-    file_path: string;
-    file_mtime_ms: number;
-    file_size_bytes: number;
-    content_type: string;
-    page_count: number | null;
-    page_labels: Record<number, string> | null;
-    has_text_layer: boolean | null;
-    needs_ocr: boolean | null;
-    is_encrypted: boolean;
-    is_invalid: boolean;
-    extraction_version: string;
-    cached_at: string;
+export type DocumentCacheExtractionMode = 'structured' | 'markdown';
+export type DocumentCachePageLabels = Record<string, string>;
+
+/** Authoritative error reason for a cached document; `null` marks a successful extraction. */
+export type DocumentCacheErrorCode = 'encrypted' | 'invalid_pdf' | 'no_text_layer';
+
+export interface DocumentCacheFileSignature {
+    mtime_ms: number;
+    size_bytes: number;
 }
+
+export interface DocumentCacheMetadataRecord {
+    id: number;
+    itemId: number;
+    libraryId: number;
+    zoteroKey: string;
+    filePath: string;
+    fileSignature: DocumentCacheFileSignature;
+    sourceSizeBytes: number;
+    contentType: string;
+    pageCount: number | null;
+    pageLabels: DocumentCachePageLabels | null;
+    errorCode: DocumentCacheErrorCode | null;
+    extractionSchemaVersion: string;
+    metadataFormatVersion: number;
+    createdAt: string;
+    updatedAt: string;
+    lastAccessedAt: string | null;
+}
+
+export interface DocumentCachePayloadRecord {
+    id: number;
+    metadataId: number;
+    itemId: number;
+    libraryId: number;
+    zoteroKey: string;
+    mode: DocumentCacheExtractionMode;
+    sourceFilePath: string;
+    sourceFileSignature: DocumentCacheFileSignature;
+    sourceSizeBytes: number;
+    payloadPath: string;
+    payloadSizeBytes: number;
+    payloadSha256: string | null;
+    extractionSchemaVersion: string;
+    cacheFormatVersion: number;
+    createdAt: string;
+    updatedAt: string;
+    lastAccessedAt: string | null;
+}
+
+export type DocumentCacheMetadataInput = Omit<
+    DocumentCacheMetadataRecord,
+    'id' | 'createdAt' | 'updatedAt' | 'lastAccessedAt'
+>;
+
+export type DocumentCachePayloadInput = Omit<
+    DocumentCachePayloadRecord,
+    'id' | 'createdAt' | 'updatedAt' | 'lastAccessedAt'
+>;
 
 /**
  * Maximum number of failures before an item is considered permanently failed.
@@ -149,6 +184,8 @@ export class BeaverDB {
      */
     public async initDatabase(pluginVersion: string): Promise<void> {
         const previousVersion = getPref('installedVersion') || '0.1';
+
+        await this.conn.queryAsync(`PRAGMA foreign_keys = ON`);
 
         // Delete all tables in test versions
         if (previousVersion.startsWith('0.1') || previousVersion == '0.2.4') {
@@ -311,35 +348,87 @@ export class BeaverDB {
             ON failed_embeddings(next_retry_after);
         `);
 
-        // Attachment file cache table - stores metadata for PDF attachments
+        await this.conn.queryAsync(`DROP TABLE IF EXISTS attachment_file_cache`);
+
+        // Drop and recreate the document cache tables if the schema is stale
+        if (await this.documentCacheSchemaIsStale()) {
+            await this.conn.queryAsync(`DROP TABLE IF EXISTS document_cache_payloads`);
+            await this.conn.queryAsync(`DROP TABLE IF EXISTS document_cache_metadata`);
+        }
+
         await this.conn.queryAsync(`
-            CREATE TABLE IF NOT EXISTS attachment_file_cache (
-                item_id              INTEGER PRIMARY KEY,
-                library_id           INTEGER NOT NULL,
-                zotero_key           TEXT NOT NULL,
-                file_path            TEXT NOT NULL,
-                file_mtime_ms        INTEGER NOT NULL,
-                file_size_bytes      INTEGER NOT NULL,
-                content_type         TEXT NOT NULL,
-                page_count           INTEGER,
-                page_labels_json     TEXT,
-                has_text_layer       INTEGER,
-                needs_ocr            INTEGER,
-                is_encrypted         INTEGER NOT NULL DEFAULT 0,
-                is_invalid           INTEGER NOT NULL DEFAULT 0,
-                extraction_version   TEXT NOT NULL,
-                cached_at            TEXT NOT NULL DEFAULT (datetime('now'))
+            CREATE TABLE IF NOT EXISTS document_cache_metadata (
+                id                         INTEGER PRIMARY KEY,
+                item_id                    INTEGER NOT NULL,
+                library_id                 INTEGER NOT NULL,
+                zotero_key                 TEXT NOT NULL,
+                file_path                  TEXT NOT NULL,
+                file_mtime_ms              INTEGER NOT NULL,
+                file_size_bytes            INTEGER NOT NULL,
+                source_size_bytes          INTEGER NOT NULL,
+                content_type               TEXT NOT NULL,
+                page_count                 INTEGER,
+                page_labels_json           TEXT,
+                error_code                 TEXT,
+                extraction_schema_version  TEXT NOT NULL,
+                metadata_format_version    INTEGER NOT NULL,
+                created_at                 TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at                 TEXT NOT NULL DEFAULT (datetime('now')),
+                last_accessed_at           TEXT,
+                UNIQUE(library_id, zotero_key)
             );
         `);
 
         await this.conn.queryAsync(`
-            CREATE INDEX IF NOT EXISTS idx_afc_library
-            ON attachment_file_cache(library_id);
+            CREATE INDEX IF NOT EXISTS idx_dcm_item_id
+            ON document_cache_metadata(item_id);
         `);
 
         await this.conn.queryAsync(`
-            CREATE INDEX IF NOT EXISTS idx_afc_library_key
-            ON attachment_file_cache(library_id, zotero_key);
+            CREATE INDEX IF NOT EXISTS idx_dcm_library
+            ON document_cache_metadata(library_id);
+        `);
+
+        await this.conn.queryAsync(`
+            CREATE TABLE IF NOT EXISTS document_cache_payloads (
+                id                         INTEGER PRIMARY KEY,
+                metadata_id                INTEGER NOT NULL,
+                item_id                    INTEGER NOT NULL,
+                library_id                 INTEGER NOT NULL,
+                zotero_key                 TEXT NOT NULL,
+                mode                       TEXT NOT NULL,
+                source_file_path           TEXT NOT NULL,
+                source_file_mtime_ms       INTEGER NOT NULL,
+                source_file_size_bytes     INTEGER NOT NULL,
+                source_size_bytes          INTEGER NOT NULL,
+                payload_path               TEXT NOT NULL,
+                payload_size_bytes         INTEGER NOT NULL,
+                payload_sha256             TEXT,
+                extraction_schema_version  TEXT NOT NULL,
+                cache_format_version       INTEGER NOT NULL,
+                created_at                 TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at                 TEXT NOT NULL DEFAULT (datetime('now')),
+                last_accessed_at           TEXT,
+                FOREIGN KEY (metadata_id)
+                    REFERENCES document_cache_metadata(id)
+                    ON DELETE CASCADE,
+                UNIQUE(library_id, zotero_key, mode)
+            );
+        `);
+
+        await this.conn.queryAsync(`
+            CREATE INDEX IF NOT EXISTS idx_dcp_metadata_id
+            ON document_cache_payloads(metadata_id);
+        `);
+
+        await this.conn.queryAsync(`
+            CREATE INDEX IF NOT EXISTS idx_dcp_item_id
+            ON document_cache_payloads(item_id);
+        `);
+
+        await this.conn.queryAsync(`
+            CREATE INDEX IF NOT EXISTS idx_dcp_library
+            ON document_cache_payloads(library_id);
         `);
     }
 
@@ -1425,15 +1514,11 @@ export class BeaverDB {
     }
 
     // =============================================
-    // Attachment File Cache Methods
+    // Document Cache Methods
     // =============================================
 
-    /**
-     * Parse a database row into an AttachmentFileCacheRecord.
-     * Converts SQLite integer booleans and JSON strings.
-     */
-    private static rowToAttachmentFileCacheRecord(row: any): AttachmentFileCacheRecord {
-        let pageLabels: Record<number, string> | null = null;
+    private static rowToDocumentCacheMetadataRecord(row: any): DocumentCacheMetadataRecord {
+        let pageLabels: DocumentCachePageLabels | null = null;
         if (row.page_labels_json) {
             try {
                 pageLabels = JSON.parse(row.page_labels_json);
@@ -1442,219 +1527,547 @@ export class BeaverDB {
             }
         }
         return {
-            item_id: row.item_id,
-            library_id: row.library_id,
-            zotero_key: row.zotero_key,
-            file_path: row.file_path,
-            file_mtime_ms: row.file_mtime_ms,
-            file_size_bytes: row.file_size_bytes,
-            content_type: row.content_type,
-            page_count: row.page_count ?? null,
-            page_labels: pageLabels,
-            has_text_layer: row.has_text_layer == null ? null : Boolean(row.has_text_layer),
-            needs_ocr: row.needs_ocr == null ? null : Boolean(row.needs_ocr),
-            is_encrypted: Boolean(row.is_encrypted),
-            is_invalid: Boolean(row.is_invalid),
-            extraction_version: row.extraction_version,
-            cached_at: row.cached_at,
+            id: row.id,
+            itemId: row.item_id,
+            libraryId: row.library_id,
+            zoteroKey: row.zotero_key,
+            filePath: row.file_path,
+            fileSignature: {
+                mtime_ms: row.file_mtime_ms,
+                size_bytes: row.file_size_bytes,
+            },
+            sourceSizeBytes: row.source_size_bytes,
+            contentType: row.content_type,
+            pageCount: row.page_count ?? null,
+            pageLabels,
+            errorCode: row.error_code ?? null,
+            extractionSchemaVersion: row.extraction_schema_version,
+            metadataFormatVersion: row.metadata_format_version,
+            createdAt: row.created_at,
+            updatedAt: row.updated_at,
+            lastAccessedAt: row.last_accessed_at ?? null,
+        };
+    }
+
+    private static rowToDocumentCachePayloadRecord(row: any): DocumentCachePayloadRecord {
+        return {
+            id: row.id,
+            metadataId: row.metadata_id,
+            itemId: row.item_id,
+            libraryId: row.library_id,
+            zoteroKey: row.zotero_key,
+            mode: row.mode,
+            sourceFilePath: row.source_file_path,
+            sourceFileSignature: {
+                mtime_ms: row.source_file_mtime_ms,
+                size_bytes: row.source_file_size_bytes,
+            },
+            sourceSizeBytes: row.source_size_bytes,
+            payloadPath: row.payload_path,
+            payloadSizeBytes: row.payload_size_bytes,
+            payloadSha256: row.payload_sha256 ?? null,
+            extractionSchemaVersion: row.extraction_schema_version,
+            cacheFormatVersion: row.cache_format_version,
+            createdAt: row.created_at,
+            updatedAt: row.updated_at,
+            lastAccessedAt: row.last_accessed_at ?? null,
         };
     }
 
     /**
-     * Insert or update an attachment file cache record.
-     * Uses INSERT ON CONFLICT to avoid accidental field resets.
+     * Detect stale `document_cache_metadata` table whose schema does
+     * not match the current shape.
      */
-    public async upsertAttachmentFileCache(record: Omit<AttachmentFileCacheRecord, 'cached_at'>): Promise<void> {
-        const now = new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
-        const pageLabelsJson = record.page_labels ? JSON.stringify(record.page_labels) : null;
-
+    private async documentCacheSchemaIsStale(): Promise<boolean> {
+        const columns = new Set<string>();
         await this.conn.queryAsync(
-            `INSERT INTO attachment_file_cache
-                (item_id, library_id, zotero_key, file_path, file_mtime_ms, file_size_bytes,
-                 content_type, page_count, page_labels_json, has_text_layer, needs_ocr,
-                 is_encrypted, is_invalid, extraction_version, cached_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-             ON CONFLICT(item_id) DO UPDATE SET
-                library_id = excluded.library_id,
-                zotero_key = excluded.zotero_key,
-                file_path = excluded.file_path,
-                file_mtime_ms = excluded.file_mtime_ms,
-                file_size_bytes = excluded.file_size_bytes,
-                content_type = excluded.content_type,
-                page_count = excluded.page_count,
-                page_labels_json = excluded.page_labels_json,
-                has_text_layer = excluded.has_text_layer,
-                needs_ocr = excluded.needs_ocr,
-                is_encrypted = excluded.is_encrypted,
-                is_invalid = excluded.is_invalid,
-                extraction_version = excluded.extraction_version,
-                cached_at = excluded.cached_at`,
-            [
-                record.item_id,
-                record.library_id,
-                record.zotero_key,
-                record.file_path,
-                record.file_mtime_ms,
-                record.file_size_bytes,
-                record.content_type,
-                record.page_count,
-                pageLabelsJson,
-                record.has_text_layer == null ? null : (record.has_text_layer ? 1 : 0),
-                record.needs_ocr == null ? null : (record.needs_ocr ? 1 : 0),
-                record.is_encrypted ? 1 : 0,
-                record.is_invalid ? 1 : 0,
-                record.extraction_version,
-                now,
-            ]
+            `SELECT name FROM pragma_table_info('document_cache_metadata')`,
+            [],
+            { onRow: (row: any) => columns.add(row.getResultByIndex(0)) },
         );
+        if (columns.size === 0) return false; // table does not exist
+        if (!columns.has('error_code')) return true;
+        // `status` and the legacy boolean columns are no longer part of the schema.
+        return ['status', 'has_text_layer', 'needs_ocr', 'is_encrypted', 'is_invalid']
+            .some((col) => columns.has(col));
     }
 
-    /**
-     * Insert or update multiple attachment file cache records in a batch.
-     */
-    public async upsertAttachmentFileCacheBatch(records: Array<Omit<AttachmentFileCacheRecord, 'cached_at'>>): Promise<void> {
-        if (records.length === 0) return;
-
-        const now = new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
-
-        await this.conn.executeTransaction(async () => {
-            for (const record of records) {
-                const pageLabelsJson = record.page_labels ? JSON.stringify(record.page_labels) : null;
-                await this.conn.queryAsync(
-                    `INSERT INTO attachment_file_cache
-                        (item_id, library_id, zotero_key, file_path, file_mtime_ms, file_size_bytes,
-                         content_type, page_count, page_labels_json, has_text_layer, needs_ocr,
-                         is_encrypted, is_invalid, extraction_version, cached_at)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                     ON CONFLICT(item_id) DO UPDATE SET
-                        library_id = excluded.library_id,
-                        zotero_key = excluded.zotero_key,
-                        file_path = excluded.file_path,
-                        file_mtime_ms = excluded.file_mtime_ms,
-                        file_size_bytes = excluded.file_size_bytes,
-                        content_type = excluded.content_type,
-                        page_count = excluded.page_count,
-                        page_labels_json = excluded.page_labels_json,
-                        has_text_layer = excluded.has_text_layer,
-                        needs_ocr = excluded.needs_ocr,
-                        is_encrypted = excluded.is_encrypted,
-                        is_invalid = excluded.is_invalid,
-                        extraction_version = excluded.extraction_version,
-                        cached_at = excluded.cached_at`,
-                    [
-                        record.item_id,
-                        record.library_id,
-                        record.zotero_key,
-                        record.file_path,
-                        record.file_mtime_ms,
-                        record.file_size_bytes,
-                        record.content_type,
-                        record.page_count,
-                        pageLabelsJson,
-                        record.has_text_layer == null ? null : (record.has_text_layer ? 1 : 0),
-                        record.needs_ocr == null ? null : (record.needs_ocr ? 1 : 0),
-                        record.is_encrypted ? 1 : 0,
-                        record.is_invalid ? 1 : 0,
-                        record.extraction_version,
-                        now,
-                    ]
-                );
-            }
+    private async selectDocumentCacheMetadata(sql: string, params: any[] = []): Promise<DocumentCacheMetadataRecord[]> {
+        const rows: any[] = [];
+        await this.conn.queryAsync(sql, params, {
+            onRow: (row: any) => {
+                rows.push({
+                    id: row.getResultByIndex(0),
+                    item_id: row.getResultByIndex(1),
+                    library_id: row.getResultByIndex(2),
+                    zotero_key: row.getResultByIndex(3),
+                    file_path: row.getResultByIndex(4),
+                    file_mtime_ms: row.getResultByIndex(5),
+                    file_size_bytes: row.getResultByIndex(6),
+                    source_size_bytes: row.getResultByIndex(7),
+                    content_type: row.getResultByIndex(8),
+                    page_count: row.getResultByIndex(9),
+                    page_labels_json: row.getResultByIndex(10),
+                    error_code: row.getResultByIndex(11),
+                    extraction_schema_version: row.getResultByIndex(12),
+                    metadata_format_version: row.getResultByIndex(13),
+                    created_at: row.getResultByIndex(14),
+                    updated_at: row.getResultByIndex(15),
+                    last_accessed_at: row.getResultByIndex(16),
+                });
+            },
         });
+        return rows.map((row) => BeaverDB.rowToDocumentCacheMetadataRecord(row));
     }
 
-    /**
-     * Get an attachment file cache record by item ID.
-     */
-    public async getAttachmentFileCache(itemId: number): Promise<AttachmentFileCacheRecord | null> {
-        const rows = await this.conn.queryAsync(
-            `SELECT * FROM attachment_file_cache WHERE item_id = ?`,
-            [itemId]
-        );
-        if (rows.length === 0) return null;
-        return BeaverDB.rowToAttachmentFileCacheRecord(rows[0]);
+    private async selectDocumentCachePayloads(sql: string, params: any[] = []): Promise<DocumentCachePayloadRecord[]> {
+        const rows: any[] = [];
+        await this.conn.queryAsync(sql, params, {
+            onRow: (row: any) => {
+                rows.push({
+                    id: row.getResultByIndex(0),
+                    metadata_id: row.getResultByIndex(1),
+                    item_id: row.getResultByIndex(2),
+                    library_id: row.getResultByIndex(3),
+                    zotero_key: row.getResultByIndex(4),
+                    mode: row.getResultByIndex(5),
+                    source_file_path: row.getResultByIndex(6),
+                    source_file_mtime_ms: row.getResultByIndex(7),
+                    source_file_size_bytes: row.getResultByIndex(8),
+                    source_size_bytes: row.getResultByIndex(9),
+                    payload_path: row.getResultByIndex(10),
+                    payload_size_bytes: row.getResultByIndex(11),
+                    payload_sha256: row.getResultByIndex(12),
+                    extraction_schema_version: row.getResultByIndex(13),
+                    cache_format_version: row.getResultByIndex(14),
+                    created_at: row.getResultByIndex(15),
+                    updated_at: row.getResultByIndex(16),
+                    last_accessed_at: row.getResultByIndex(17),
+                });
+            },
+        });
+        return rows.map((row) => BeaverDB.rowToDocumentCachePayloadRecord(row));
     }
 
-    /**
-     * Get an attachment file cache record by library ID and Zotero key.
-     */
-    public async getAttachmentFileCacheByKey(libraryId: number, zoteroKey: string): Promise<AttachmentFileCacheRecord | null> {
-        const rows = await this.conn.queryAsync(
-            `SELECT * FROM attachment_file_cache WHERE library_id = ? AND zotero_key = ?`,
-            [libraryId, zoteroKey]
-        );
-        if (rows.length === 0) return null;
-        return BeaverDB.rowToAttachmentFileCacheRecord(rows[0]);
+    private static documentCacheMetadataSelect(): string {
+        return `SELECT id, item_id, library_id, zotero_key, file_path, file_mtime_ms,
+                       file_size_bytes, source_size_bytes, content_type, page_count,
+                       page_labels_json, error_code,
+                       extraction_schema_version, metadata_format_version,
+                       created_at, updated_at, last_accessed_at
+                FROM document_cache_metadata`;
     }
 
-    /**
-     * Get attachment file cache records for multiple item IDs.
-     */
-    public async getAttachmentFileCacheBatch(itemIds: number[]): Promise<Map<number, AttachmentFileCacheRecord>> {
-        if (itemIds.length === 0) return new Map();
+    private static documentCachePayloadSelect(): string {
+        return `SELECT id, metadata_id, item_id, library_id, zotero_key, mode,
+                       source_file_path, source_file_mtime_ms, source_file_size_bytes,
+                       source_size_bytes, payload_path, payload_size_bytes,
+                       payload_sha256, extraction_schema_version, cache_format_version,
+                       created_at, updated_at, last_accessed_at
+                FROM document_cache_payloads`;
+    }
 
-        const result = new Map<number, AttachmentFileCacheRecord>();
-        const chunkSize = 500;
+    private static documentMetadataSourceChanged(
+        existing: DocumentCacheMetadataRecord,
+        incoming: DocumentCacheMetadataInput,
+    ): boolean {
+        return existing.filePath !== incoming.filePath
+            || existing.fileSignature.mtime_ms !== incoming.fileSignature.mtime_ms
+            || existing.fileSignature.size_bytes !== incoming.fileSignature.size_bytes
+            || existing.sourceSizeBytes !== incoming.sourceSizeBytes
+            || existing.extractionSchemaVersion !== incoming.extractionSchemaVersion
+            || existing.metadataFormatVersion !== incoming.metadataFormatVersion;
+    }
 
-        for (let i = 0; i < itemIds.length; i += chunkSize) {
-            const chunk = itemIds.slice(i, i + chunkSize);
-            const placeholders = chunk.map(() => '?').join(',');
-            const rows = await this.conn.queryAsync(
-                `SELECT * FROM attachment_file_cache WHERE item_id IN (${placeholders})`,
-                chunk
-            );
-            for (const row of rows) {
-                result.set(row.item_id, BeaverDB.rowToAttachmentFileCacheRecord(row));
+    private static documentCacheMetadataMatches(
+        current: DocumentCacheMetadataRecord,
+        inspected: DocumentCacheMetadataRecord,
+    ): boolean {
+        return current.id === inspected.id
+            && current.itemId === inspected.itemId
+            && current.libraryId === inspected.libraryId
+            && current.zoteroKey === inspected.zoteroKey
+            && current.filePath === inspected.filePath
+            && current.fileSignature.mtime_ms === inspected.fileSignature.mtime_ms
+            && current.fileSignature.size_bytes === inspected.fileSignature.size_bytes
+            && current.sourceSizeBytes === inspected.sourceSizeBytes
+            && current.contentType === inspected.contentType
+            && current.pageCount === inspected.pageCount
+            && JSON.stringify(current.pageLabels) === JSON.stringify(inspected.pageLabels)
+            && current.errorCode === inspected.errorCode
+            && current.extractionSchemaVersion === inspected.extractionSchemaVersion
+            && current.metadataFormatVersion === inspected.metadataFormatVersion;
+    }
+
+    /** Insert or update document-cache metadata by library/key. */
+    public async upsertDocumentCacheMetadata(
+        record: DocumentCacheMetadataInput,
+    ): Promise<{ metadata: DocumentCacheMetadataRecord; deletedPayloads: DocumentCachePayloadRecord[] }> {
+        let deletedPayloads: DocumentCachePayloadRecord[] = [];
+        await this.conn.executeTransaction(async () => {
+            const existing = await this.getDocumentCacheMetadataByKey(record.libraryId, record.zoteroKey);
+            if (existing && BeaverDB.documentMetadataSourceChanged(existing, record)) {
+                deletedPayloads = await this.getDocumentCachePayloadsForMetadata(existing.id);
+                await this.deleteDocumentCachePayloadRowsForMetadata(existing.id);
             }
+            await this.conn.queryAsync(
+                `INSERT INTO document_cache_metadata
+                    (item_id, library_id, zotero_key, file_path, file_mtime_ms, file_size_bytes,
+                     source_size_bytes, content_type, page_count, page_labels_json,
+                     error_code,
+                     extraction_schema_version, metadata_format_version, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                 ON CONFLICT(library_id, zotero_key) DO UPDATE SET
+                    item_id = excluded.item_id,
+                    file_path = excluded.file_path,
+                    file_mtime_ms = excluded.file_mtime_ms,
+                    file_size_bytes = excluded.file_size_bytes,
+                    source_size_bytes = excluded.source_size_bytes,
+                    content_type = excluded.content_type,
+                    page_count = excluded.page_count,
+                    page_labels_json = excluded.page_labels_json,
+                    error_code = excluded.error_code,
+                    extraction_schema_version = excluded.extraction_schema_version,
+                    metadata_format_version = excluded.metadata_format_version,
+                    updated_at = datetime('now')`,
+                [
+                    record.itemId,
+                    record.libraryId,
+                    record.zoteroKey,
+                    record.filePath,
+                    record.fileSignature.mtime_ms,
+                    record.fileSignature.size_bytes,
+                    record.sourceSizeBytes,
+                    record.contentType,
+                    record.pageCount,
+                    record.pageLabels ? JSON.stringify(record.pageLabels) : null,
+                    record.errorCode,
+                    record.extractionSchemaVersion,
+                    record.metadataFormatVersion,
+                ],
+            );
+        });
+        const metadata = await this.getDocumentCacheMetadataByKey(record.libraryId, record.zoteroKey);
+        if (!metadata) {
+            throw new Error('Document cache metadata upsert failed');
         }
-
-        return result;
+        return { metadata, deletedPayloads };
     }
 
-    /**
-     * Delete an attachment file cache record by item ID.
-     */
-    public async deleteAttachmentFileCache(itemId: number): Promise<void> {
-        await this.conn.queryAsync(
-            `DELETE FROM attachment_file_cache WHERE item_id = ?`,
-            [itemId]
+    /** Get document-cache metadata by library/key. */
+    public async getDocumentCacheMetadataByKey(
+        libraryId: number,
+        zoteroKey: string,
+    ): Promise<DocumentCacheMetadataRecord | null> {
+        const rows = await this.selectDocumentCacheMetadata(
+            `${BeaverDB.documentCacheMetadataSelect()} WHERE library_id = ? AND zotero_key = ?`,
+            [libraryId, zoteroKey],
+        );
+        return rows[0] ?? null;
+    }
+
+    /** Get document-cache metadata by primary key. */
+    public async getDocumentCacheMetadataById(id: number): Promise<DocumentCacheMetadataRecord | null> {
+        const rows = await this.selectDocumentCacheMetadata(
+            `${BeaverDB.documentCacheMetadataSelect()} WHERE id = ?`,
+            [id],
+        );
+        return rows[0] ?? null;
+    }
+
+    /** Get all document-cache metadata rows. */
+    public async getAllDocumentCacheMetadata(): Promise<DocumentCacheMetadataRecord[]> {
+        return this.selectDocumentCacheMetadata(
+            `${BeaverDB.documentCacheMetadataSelect()} ORDER BY library_id, zotero_key`,
         );
     }
 
-    /**
-     * Delete all attachment file cache records for a library.
-     */
-    public async deleteAttachmentFileCacheByLibrary(libraryId: number): Promise<void> {
+    /** Delete one metadata row and return its payload rows for file cleanup. */
+    public async deleteDocumentCacheMetadata(
+        libraryId: number,
+        zoteroKey: string,
+    ): Promise<DocumentCachePayloadRecord[]> {
+        const metadata = await this.getDocumentCacheMetadataByKey(libraryId, zoteroKey);
+        if (!metadata) return [];
+        const payloads = await this.getDocumentCachePayloadsForMetadata(metadata.id);
         await this.conn.queryAsync(
-            `DELETE FROM attachment_file_cache WHERE library_id = ?`,
-            [libraryId]
+            `DELETE FROM document_cache_metadata WHERE library_id = ? AND zotero_key = ?`,
+            [libraryId, zoteroKey],
         );
+        return payloads;
     }
 
-    /**
-     * Get count of attachment file cache records.
-     */
-    public async getAttachmentFileCacheCount(libraryId?: number): Promise<number> {
-        let sql = 'SELECT COUNT(*) as count FROM attachment_file_cache';
-        const params: any[] = [];
+    /** Delete a metadata row only if it still matches the inspected record. */
+    public async deleteDocumentCacheMetadataIfUnchanged(
+        metadata: DocumentCacheMetadataRecord,
+    ): Promise<DocumentCachePayloadRecord[] | null> {
+        let deletedPayloads: DocumentCachePayloadRecord[] | null = null;
+        await this.conn.executeTransaction(async () => {
+            const current = await this.getDocumentCacheMetadataById(metadata.id);
+            if (!current) {
+                deletedPayloads = [];
+                return;
+            }
+            if (!BeaverDB.documentCacheMetadataMatches(current, metadata)) {
+                deletedPayloads = null;
+                return;
+            }
 
-        if (libraryId !== undefined) {
-            sql += ' WHERE library_id = ?';
-            params.push(libraryId);
+            deletedPayloads = await this.getDocumentCachePayloadsForMetadata(metadata.id);
+            await this.conn.queryAsync(
+                `DELETE FROM document_cache_metadata WHERE id = ?`,
+                [metadata.id],
+            );
+        });
+        return deletedPayloads;
+    }
+
+    /** Delete metadata rows for a library and return payload rows for file cleanup. */
+    public async deleteDocumentCacheMetadataByLibrary(libraryId: number): Promise<DocumentCachePayloadRecord[]> {
+        const payloads = await this.selectDocumentCachePayloads(
+            `${BeaverDB.documentCachePayloadSelect()} WHERE library_id = ?`,
+            [libraryId],
+        );
+        await this.conn.queryAsync(
+            `DELETE FROM document_cache_metadata WHERE library_id = ?`,
+            [libraryId],
+        );
+        return payloads;
+    }
+
+    /** Insert or update a document-cache payload by library/key/mode. */
+    public async upsertDocumentCachePayload(record: DocumentCachePayloadInput): Promise<DocumentCachePayloadRecord> {
+        await this.conn.queryAsync(
+            `INSERT INTO document_cache_payloads
+                (metadata_id, item_id, library_id, zotero_key, mode,
+                 source_file_path, source_file_mtime_ms, source_file_size_bytes,
+                 source_size_bytes, payload_path, payload_size_bytes, payload_sha256,
+                 extraction_schema_version, cache_format_version, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+             ON CONFLICT(library_id, zotero_key, mode) DO UPDATE SET
+                metadata_id = excluded.metadata_id,
+                item_id = excluded.item_id,
+                source_file_path = excluded.source_file_path,
+                source_file_mtime_ms = excluded.source_file_mtime_ms,
+                source_file_size_bytes = excluded.source_file_size_bytes,
+                source_size_bytes = excluded.source_size_bytes,
+                payload_path = excluded.payload_path,
+                payload_size_bytes = excluded.payload_size_bytes,
+                payload_sha256 = excluded.payload_sha256,
+                extraction_schema_version = excluded.extraction_schema_version,
+                cache_format_version = excluded.cache_format_version,
+                updated_at = datetime('now')`,
+            [
+                record.metadataId,
+                record.itemId,
+                record.libraryId,
+                record.zoteroKey,
+                record.mode,
+                record.sourceFilePath,
+                record.sourceFileSignature.mtime_ms,
+                record.sourceFileSignature.size_bytes,
+                record.sourceSizeBytes,
+                record.payloadPath,
+                record.payloadSizeBytes,
+                record.payloadSha256,
+                record.extractionSchemaVersion,
+                record.cacheFormatVersion,
+            ],
+        );
+        const payload = await this.getDocumentCachePayload(record.libraryId, record.zoteroKey, record.mode);
+        if (!payload) {
+            throw new Error('Document cache payload upsert failed');
         }
-
-        const rows = await this.conn.queryAsync(sql, params);
-        return rows[0]?.count || 0;
+        return payload;
     }
 
-    /**
-     * Get all attachment file cache records (for GC operations).
-     */
-    public async getAllAttachmentFileCache(): Promise<AttachmentFileCacheRecord[]> {
-        const rows = await this.conn.queryAsync(
-            `SELECT * FROM attachment_file_cache ORDER BY library_id, item_id`
+    /** Get a payload row by library/key/mode. */
+    public async getDocumentCachePayload(
+        libraryId: number,
+        zoteroKey: string,
+        mode: DocumentCacheExtractionMode,
+    ): Promise<DocumentCachePayloadRecord | null> {
+        const rows = await this.selectDocumentCachePayloads(
+            `${BeaverDB.documentCachePayloadSelect()} WHERE library_id = ? AND zotero_key = ? AND mode = ?`,
+            [libraryId, zoteroKey, mode],
         );
-        return rows.map((row: any) => BeaverDB.rowToAttachmentFileCacheRecord(row));
+        return rows[0] ?? null;
+    }
+
+    /** Get a payload row by primary key. */
+    public async getDocumentCachePayloadById(id: number): Promise<DocumentCachePayloadRecord | null> {
+        const rows = await this.selectDocumentCachePayloads(
+            `${BeaverDB.documentCachePayloadSelect()} WHERE id = ?`,
+            [id],
+        );
+        return rows[0] ?? null;
+    }
+
+    /** Get payload rows for one metadata row. */
+    public async getDocumentCachePayloadsForMetadata(metadataId: number): Promise<DocumentCachePayloadRecord[]> {
+        return this.selectDocumentCachePayloads(
+            `${BeaverDB.documentCachePayloadSelect()} WHERE metadata_id = ?`,
+            [metadataId],
+        );
+    }
+
+    /** Get all payload rows. */
+    public async getAllDocumentCachePayloads(): Promise<DocumentCachePayloadRecord[]> {
+        return this.selectDocumentCachePayloads(
+            `${BeaverDB.documentCachePayloadSelect()} ORDER BY library_id, zotero_key, mode`,
+        );
+    }
+
+    private async deleteDocumentCachePayloadRowsForMetadata(metadataId: number): Promise<void> {
+        await this.conn.queryAsync(
+            `DELETE FROM document_cache_payloads WHERE metadata_id = ?`,
+            [metadataId],
+        );
+    }
+
+    /** Delete a payload row and return it for file cleanup. */
+    public async deleteDocumentCachePayload(
+        libraryId: number,
+        zoteroKey: string,
+        mode: DocumentCacheExtractionMode,
+    ): Promise<DocumentCachePayloadRecord | null> {
+        const payload = await this.getDocumentCachePayload(libraryId, zoteroKey, mode);
+        if (!payload) return null;
+        await this.conn.queryAsync(
+            `DELETE FROM document_cache_payloads WHERE id = ?`,
+            [payload.id],
+        );
+        return payload;
+    }
+
+    /** Delete a payload row only if it still matches the inspected record. */
+    public async deleteDocumentCachePayloadIfUnchanged(
+        payload: DocumentCachePayloadRecord,
+    ): Promise<DocumentCachePayloadRecord | null> {
+        await this.conn.queryAsync(
+            `DELETE FROM document_cache_payloads
+             WHERE id = ?
+               AND metadata_id = ?
+               AND item_id = ?
+               AND library_id = ?
+               AND zotero_key = ?
+               AND mode = ?
+               AND source_file_path = ?
+               AND source_file_mtime_ms = ?
+               AND source_file_size_bytes = ?
+               AND source_size_bytes = ?
+               AND payload_path = ?
+               AND payload_size_bytes = ?
+               AND COALESCE(payload_sha256, '') = COALESCE(?, '')
+               AND extraction_schema_version = ?
+               AND cache_format_version = ?`,
+            [
+                payload.id,
+                payload.metadataId,
+                payload.itemId,
+                payload.libraryId,
+                payload.zoteroKey,
+                payload.mode,
+                payload.sourceFilePath,
+                payload.sourceFileSignature.mtime_ms,
+                payload.sourceFileSignature.size_bytes,
+                payload.sourceSizeBytes,
+                payload.payloadPath,
+                payload.payloadSizeBytes,
+                payload.payloadSha256,
+                payload.extractionSchemaVersion,
+                payload.cacheFormatVersion,
+            ],
+        );
+
+        const current = await this.getDocumentCachePayloadById(payload.id);
+        if (current && (
+            current.metadataId !== payload.metadataId
+            || current.itemId !== payload.itemId
+            || current.libraryId !== payload.libraryId
+            || current.zoteroKey !== payload.zoteroKey
+            || current.mode !== payload.mode
+            || current.sourceFilePath !== payload.sourceFilePath
+            || current.sourceFileSignature.mtime_ms !== payload.sourceFileSignature.mtime_ms
+            || current.sourceFileSignature.size_bytes !== payload.sourceFileSignature.size_bytes
+            || current.sourceSizeBytes !== payload.sourceSizeBytes
+            || current.payloadPath !== payload.payloadPath
+            || current.payloadSizeBytes !== payload.payloadSizeBytes
+            || current.payloadSha256 !== payload.payloadSha256
+            || current.extractionSchemaVersion !== payload.extractionSchemaVersion
+            || current.cacheFormatVersion !== payload.cacheFormatVersion
+        )) {
+            return null;
+        }
+        return current ? null : payload;
+    }
+
+    /** Delete payload rows for one metadata row and return them for file cleanup. */
+    public async deleteDocumentCachePayloadsForMetadata(metadataId: number): Promise<DocumentCachePayloadRecord[]> {
+        const payloads = await this.getDocumentCachePayloadsForMetadata(metadataId);
+        await this.deleteDocumentCachePayloadRowsForMetadata(metadataId);
+        return payloads;
+    }
+
+    /** Delete all payload rows for a library and return them for file cleanup. */
+    public async deleteDocumentCachePayloadsByLibrary(libraryId: number): Promise<DocumentCachePayloadRecord[]> {
+        const payloads = await this.selectDocumentCachePayloads(
+            `${BeaverDB.documentCachePayloadSelect()} WHERE library_id = ?`,
+            [libraryId],
+        );
+        await this.conn.queryAsync(
+            `DELETE FROM document_cache_payloads WHERE library_id = ?`,
+            [libraryId],
+        );
+        return payloads;
+    }
+
+    /** Mark a metadata row as accessed. */
+    public async touchDocumentCacheMetadata(id: number): Promise<void> {
+        await this.conn.queryAsync(
+            `UPDATE document_cache_metadata SET last_accessed_at = datetime('now') WHERE id = ?`,
+            [id],
+        );
+    }
+
+    /** Mark a payload row as accessed. */
+    public async touchDocumentCachePayload(id: number): Promise<void> {
+        await this.conn.queryAsync(
+            `UPDATE document_cache_payloads SET last_accessed_at = datetime('now') WHERE id = ?`,
+            [id],
+        );
+    }
+
+    /** Count document-cache metadata rows. */
+    public async getDocumentCacheMetadataCount(libraryId?: number): Promise<number> {
+        const rows: Array<{ count: number }> = [];
+        const sql = libraryId == null
+            ? `SELECT COUNT(*) FROM document_cache_metadata`
+            : `SELECT COUNT(*) FROM document_cache_metadata WHERE library_id = ?`;
+        await this.conn.queryAsync(sql, libraryId == null ? [] : [libraryId], {
+            onRow: (row: any) => rows.push({ count: row.getResultByIndex(0) }),
+        });
+        return rows[0]?.count ?? 0;
+    }
+
+    /** Count document-cache payload rows. */
+    public async getDocumentCachePayloadCount(libraryId?: number): Promise<number> {
+        const rows: Array<{ count: number }> = [];
+        const sql = libraryId == null
+            ? `SELECT COUNT(*) FROM document_cache_payloads`
+            : `SELECT COUNT(*) FROM document_cache_payloads WHERE library_id = ?`;
+        await this.conn.queryAsync(sql, libraryId == null ? [] : [libraryId], {
+            onRow: (row: any) => rows.push({ count: row.getResultByIndex(0) }),
+        });
+        return rows[0]?.count ?? 0;
+    }
+
+    /** Delete every document-cache metadata and payload row. */
+    public async deleteAllDocumentCache(): Promise<void> {
+        await this.conn.executeTransaction(async () => {
+            await this.conn.queryAsync(`DELETE FROM document_cache_payloads`);
+            await this.conn.queryAsync(`DELETE FROM document_cache_metadata`);
+        });
     }
 
 }

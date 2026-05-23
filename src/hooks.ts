@@ -5,7 +5,7 @@ import { BeaverUIFactory } from "./ui/ui";
 import eventBus from "../react/eventBus";
 import { CitationService } from "./services/CitationService";
 import { BeaverDB } from "./services/database";
-import { AttachmentFileCache } from "./services/attachmentFileCache";
+import { DocumentCache } from "./services/documentCache";
 import { uiManager } from "../react/ui/UIManager";
 import { getPref, setPref } from "./utils/prefs";
 import { addPendingVersionNotification } from "./utils/versionNotificationPrefs";
@@ -238,12 +238,21 @@ async function onStartup() {
         await dbConnection.test();
         await beaverDB.initDatabase(version);
 
-        // -------- Initialize Attachment File Cache --------
-        const attachmentFileCache = new AttachmentFileCache(beaverDB);
-        await attachmentFileCache.init();
-        await attachmentFileCache.runStartupGC();
-        addon.attachmentFileCache = attachmentFileCache;
-        ztoolkit.log("AttachmentFileCache initialized successfully");
+        // -------- Initialize Document Cache --------
+        const documentCache = new DocumentCache(beaverDB);
+        await documentCache.init();
+        await documentCache.runStartupGC();
+        addon.documentCache = documentCache;
+        ztoolkit.log("DocumentCache initialized successfully");
+
+        try {
+            const legacyContentCache = PathUtils.join(Zotero.Profile.dir, "beaver", "content-cache");
+            if (await IOUtils.exists(legacyContentCache)) {
+                await IOUtils.remove(legacyContentCache, { recursive: true });
+            }
+        } catch (error) {
+            ztoolkit.log(`Legacy content-cache cleanup failed: ${error}`);
+        }
 
         // -------- Initialize Citation Service with caching --------
         const citationService = new CitationService(ztoolkit);
@@ -455,54 +464,50 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         //    and dies with `worker.terminate()`.
         await withShutdownTimeout(disposeMuPDFWorker(), "disposeMuPDFWorker");
 
-        // 3. Clear attachment file cache
-        if (addon.attachmentFileCache) {
-            addon.attachmentFileCache.clearMemoryCache();
-            addon.attachmentFileCache = undefined;
-        }
+        addon.documentCache = undefined;
 
-        // 4. Close database connection
+        // 3. Close database connection
         if (addon.db) {
             await withShutdownTimeout(addon.db.closeDatabase(), "closeDatabase");
             addon.db = undefined;
         }
 
-        // 5. Dispose CitationService
+        // 4. Dispose CitationService
         if (addon.citationService) {
             addon.citationService.dispose();
             addon.citationService = undefined;
         }
 
-        // 6. Unregister keyboard shortcuts (clears interval, unregisters Zotero.Reader listeners)
+        // 5. Unregister keyboard shortcuts (clears interval, unregisters Zotero.Reader listeners)
         BeaverUIFactory.unregisterShortcuts();
 
-        // 7. Clean up UIManager (restores Zotero.Reader.onChangeSidebarWidth)
+        // 6. Clean up UIManager (restores Zotero.Reader.onChangeSidebarWidth)
         if (uiManager) {
             uiManager.cleanup();
         }
 
-        // 8. Unload stylesheets
+        // 7. Unload stylesheets
         unloadKatexStylesheet(win);
         unloadStylesheet();
 
-        // 9. Unregister ztoolkit
+        // 8. Unregister ztoolkit
         ztoolkit.unregisterAll();
         addon.data.dialog?.window?.close();
 
-        // 10. Close separate Beaver and preferences windows if open
+        // 9. Close separate Beaver and preferences windows if open
         BeaverUIFactory.closeBeaverWindow();
         BeaverUIFactory.closePreferencesWindow();
 
-        // 11. Unregister quit observer
+        // 10. Unregister quit observer
         unregisterQuitObserver();
 
-        // 12. Unregister context menus
+        // 11. Unregister context menus
         cleanupContextMenus();
 
-        // 13. Unregister reader integration listeners
+        // 12. Unregister reader integration listeners
         cleanupReaderIntegration();
 
-        // 13b. Unregister reader toolbar menu
+        // 13. Unregister reader toolbar menu
         cleanupReaderToolbarMenu();
 
         // 14. Unregister protocol handler
@@ -631,10 +636,7 @@ async function onShutdown(): Promise<void> {
     
         await disposeMuPDFWorker();
 
-        if (addon.attachmentFileCache) {
-            addon.attachmentFileCache.clearMemoryCache();
-            addon.attachmentFileCache = undefined;
-        }
+        addon.documentCache = undefined;
 
         if (addon.db) {
             await addon.db.closeDatabase();

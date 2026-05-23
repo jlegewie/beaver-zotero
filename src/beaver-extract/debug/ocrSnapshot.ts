@@ -36,7 +36,6 @@ export type { OcrSnapshot, SnapshotPageOcr } from "../cli/fixture/ocrFixtureSche
 export function projectOcrSnapshot(result: OCRDetectionResult): OcrSnapshot {
     return {
         needsOCR: result.needsOCR,
-        primaryReason: result.primaryReason,
         issueRatio: round3(result.issueRatio),
         issueBreakdown: normalizeBreakdown(result.issueBreakdown),
         sampledPages: result.sampledPages,
@@ -60,6 +59,7 @@ function normalizeBreakdown(
 ): Record<OCRIssueReason, number> {
     return {
         no_text_blocks: raw.no_text_blocks ?? 0,
+        no_body_text: raw.no_body_text ?? 0,
         insufficient_text: raw.insufficient_text ?? 0,
         high_whitespace_ratio: raw.high_whitespace_ratio ?? 0,
         high_newline_ratio: raw.high_newline_ratio ?? 0,
@@ -162,7 +162,6 @@ function diffSnapshot(
     cap: number,
 ): void {
     diffScalar("expected.needsOCR", e.needsOCR, a.needsOCR, diffs);
-    diffScalar("expected.primaryReason", e.primaryReason, a.primaryReason, diffs);
 
     if (Math.abs(e.issueRatio - a.issueRatio) > opts.issueRatioAbs) {
         diffs.push({
