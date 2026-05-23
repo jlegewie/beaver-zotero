@@ -34,6 +34,7 @@ export interface OcrFingerprints {
 
 const OCR_ISSUE_REASONS: readonly OCRIssueReason[] = [
     "no_text_blocks",
+    "no_body_text",
     "insufficient_text",
     "high_whitespace_ratio",
     "high_newline_ratio",
@@ -53,6 +54,7 @@ const OCR_ISSUE_REASONS: readonly OCRIssueReason[] = [
  */
 const OPTIONAL_OCR_ISSUE_REASONS: ReadonlySet<OCRIssueReason> = new Set([
     "fragmented_text_lines",
+    "no_body_text",
 ]);
 
 export interface SnapshotPageOcr {

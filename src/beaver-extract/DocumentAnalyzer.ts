@@ -423,7 +423,33 @@ function analyzePage(
         issues.push("fragmented_text_lines");
     }
 
-    // Check 3: Insufficient text combined with large image
+    // Check 3: Text blocks exist but none carry body text. Check 1 already
+    // returned for pages with no text blocks at all; reaching here with
+    // `textLength === 0` means every text block fell in the margin zone —
+    // only running headers/footers, page numbers, or a printer's imposition
+    // mark survived. This is the signature of a page whose body is an
+    // un-OCR'd scan or failed to render (corrupt content stream). Unlike the
+    // `insufficient_text` check below, no large-image qualifier is required:
+    // with zero body characters there is nothing to extract regardless of
+    // what (if anything) the page draws. Counting these pages per-page —
+    // rather than relying only on the document-wide near-empty mean — keeps
+    // a few content-rich pages (front matter) from masking a long tail of
+    // empty body pages.
+    if (textLength === 0) {
+        issues.push("no_body_text");
+        if (hasLargeImage) {
+            issues.push("large_image_coverage");
+        }
+        return {
+            pageIndex: rawPage.pageIndex,
+            hasIssues: true,
+            issues,
+            textLength: 0,
+            hasImages,
+        };
+    }
+
+    // Check 4: Insufficient text combined with large image
     // This catches scanned pages that weren't OCR'd properly
     // Note: A page with large images but sufficient good text is likely already OCR'd
     if (textLength < opts.minTextPerPage && hasLargeImage) {
@@ -431,13 +457,13 @@ function analyzePage(
         issues.push("large_image_coverage");
     }
 
-    // Check 4: Text quality analysis (applies regardless of images)
+    // Check 5: Text quality analysis (applies regardless of images)
     if (textLength > 0) {
         const textQualityIssues = analyzeTextQuality(pageText, opts);
         issues.push(...textQualityIssues);
     }
 
-    // Check 5: Bounding box validation (optional - for word-level accuracy)
+    // Check 6: Bounding box validation (optional - for word-level accuracy)
     // Disabled by default since most users need page-level text extraction
     if (opts.checkBoundingBoxes && lineBBoxes.length > 0) {
         const bboxIssues = validateBoundingBoxes(
@@ -561,6 +587,7 @@ export class DocumentAnalyzer {
         const pageAnalyses: PageOCRAnalysis[] = [];
         const issueBreakdown: Record<OCRIssueReason, number> = {
             no_text_blocks: 0,
+            no_body_text: 0,
             insufficient_text: 0,
             high_whitespace_ratio: 0,
             high_newline_ratio: 0,
@@ -695,6 +722,7 @@ export class DocumentAnalyzer {
                 // (large_image_coverage is now only flagged with text problems)
                 const hasLargeImages = issueBreakdown.large_image_coverage > 0;
                 const hasTextProblems = issueBreakdown.no_text_blocks > 0 ||
+                    issueBreakdown.no_body_text > 0 ||
                     issueBreakdown.insufficient_text > 0;
 
                 if (hasLargeImages && hasTextProblems) {
@@ -702,6 +730,7 @@ export class DocumentAnalyzer {
                 } else {
                     switch (topIssue) {
                         case "no_text_blocks":
+                        case "no_body_text":
                         case "insufficient_text":
                             primaryReason = "missing_text_content";
                             break;

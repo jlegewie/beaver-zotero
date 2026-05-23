@@ -969,6 +969,7 @@ export interface OCRDetectionOptions {
 /** Reasons why a page might need OCR */
 export type OCRIssueReason =
     | "no_text_blocks"
+    | "no_body_text"
     | "insufficient_text"
     | "high_whitespace_ratio"
     | "high_newline_ratio"
