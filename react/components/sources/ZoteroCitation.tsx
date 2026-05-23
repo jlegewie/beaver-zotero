@@ -629,7 +629,8 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
 
     // Determine the CSS class based on citation type and state
     const isNoteCitation = citationMetadata?.type === 'note';
-    const hasLocator = !isNoteCitation && (pages.length > 0 || (citationMetadata && getCitationBoundingBoxes(citationMetadata).length > 0));
+    const hasBoundingBoxes = !isNoteCitation && !!citationMetadata && getCitationBoundingBoxes(citationMetadata).length > 0;
+    const hasLocator = !isNoteCitation && (pages.length > 0 || hasBoundingBoxes);
     const citationClassBase = isExternal && !mappedZoteroItem
         ? "zotero-citation external-citation"
         : hasLocator
@@ -692,7 +693,9 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
                     <span className="display-flex flex-row items-center gap-15">
                         <Icon icon={PdfIcon} className="font-color-tertiary" />
                         <span className="text-sm font-color-tertiary">
-                            {pages[0] != null ? `Opens PDF on page ${pageLabels[0]}` : 'Opens PDF at location'}
+                            {hasBoundingBoxes
+                                ? (pages[0] != null ? `Highlights passage on page ${pageLabels[0]}` : 'Highlights passage in PDF')
+                                : (pages[0] != null ? `Opens PDF on page ${pageLabels[0]}` : 'Opens PDF at location')}
                         </span>
                     </span>
                 </span>
