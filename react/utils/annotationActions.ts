@@ -1,4 +1,4 @@
-import { BoundingBox, CoordOrigin, PageLocation, toZoteroRectFromBBox } from '../types/citations';
+import { BoundingBox, CoordOrigin, PageLocation, convertBoundingBoxToBottomLeft, toZoteroRectFromBBox } from '../types/citations';
 import { getCurrentReader, getCurrentReaderAndWaitForView } from './readerUtils';
 import { ZoteroReader } from './annotationUtils';
 import { logger } from '../../src/utils/logger';
@@ -51,25 +51,6 @@ function isReaderForAttachmentKey(reader: ZoteroReader | null, attachmentKey: st
     return (reader as any)._item === undefined || (reader as any)._item?.key === attachmentKey;
 }
 
-function convertBoundingBoxToBottomLeft(
-    bbox: BoundingBox,
-    viewport: any
-): BoundingBox {
-    if (bbox.coord_origin === CoordOrigin.BOTTOMLEFT) {
-        return bbox;
-    }
-
-    const height = viewport?.height ?? 0;
-    const converted: BoundingBox = {
-        l: bbox.l,
-        r: bbox.r,
-        coord_origin: CoordOrigin.BOTTOMLEFT,
-        b: height - bbox.t,
-        t: height - bbox.b,
-    };
-    return converted;
-}
-
 async function convertLocationToRects(
     reader: ZoteroReader,
     location: PageLocation
@@ -78,9 +59,6 @@ async function convertLocationToRects(
     const { viewBox, height, width, rotation } = await getPageViewportInfo(reader, location.page_idx);
     const viewBoxLL: [number, number] = [viewBox[0], viewBox[1]];
 
-    // Create viewport object for coordinate conversion
-    const viewport = { height };
-
     if (!location.boxes) {
         throw new Error('Location boxes missing');
     }
@@ -88,7 +66,7 @@ async function convertLocationToRects(
     // Only apply rotation transformation if page is actually rotated
     const rects = rotation !== 0
         ? location.boxes
-            .map((box) => convertBoundingBoxToBottomLeft(box, viewport))
+            .map((box) => convertBoundingBoxToBottomLeft(box, height))
             .map((box) => {
                 logger(`Applying rotation ${rotation}° to box: l=${box.l}, b=${box.b}, r=${box.r}, t=${box.t}, rotated dims: w=${width}, h=${height}`, 2);
                 const rotated = applyRotationToBoundingBox(box, rotation, width, height);
@@ -98,7 +76,7 @@ async function convertLocationToRects(
             .map((box) => toZoteroRectFromBBox(box, viewBoxLL))
             .filter((rect) => Array.isArray(rect) && rect.length === 4)
         : location.boxes
-            .map((box) => convertBoundingBoxToBottomLeft(box, viewport))
+            .map((box) => convertBoundingBoxToBottomLeft(box, height))
             .map((box) => toZoteroRectFromBBox(box, viewBoxLL))
             .filter((rect) => Array.isArray(rect) && rect.length === 4);
 
@@ -207,9 +185,6 @@ async function convertNotePositionToRect(
         x = 12;
     }
 
-    // Create viewport object for coordinate conversion
-    const viewport = { height };
-
     let converted: BoundingBox = convertBoundingBoxToBottomLeft(
         {
             l: x,
@@ -218,7 +193,7 @@ async function convertNotePositionToRect(
             t: y + NOTE_RECT_SIZE,
             coord_origin: CoordOrigin.BOTTOMLEFT,
         },
-        viewport
+        height
     );
     
     // Apply rotation transformation only if page is rotated

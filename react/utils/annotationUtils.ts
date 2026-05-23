@@ -2,7 +2,7 @@ import { logger } from "../../src/utils/logger";
 import { getCurrentReader } from "./readerUtils";
 import { ZoteroItemReference } from "../types/zotero";
 import { getPageViewportInfo, applyRotationToBoundingBox } from './pdfUtils';
-import { toZoteroRectFromBBox } from '../types/citations';
+import { convertBoundingBoxToBottomLeft, toZoteroRectFromBBox } from '../types/citations';
 import { getCurrentReaderAndWaitForView } from './readerUtils';
 
 /**
@@ -407,8 +407,12 @@ export const createBoundingBoxHighlights = async (
             const { viewBox, rotation, width, height } = await getPageViewportInfo(reader, pageIndex);
             const viewBoxLL: [number, number] = [viewBox[0], viewBox[1]];
             
-            // Combine all bboxes on this page and apply rotation transformation only if rotated
-            const combinedBboxes = allBboxesOnPage.flat();
+            // Combine all bboxes on this page, normalize to bottom-left origin
+            // (sentence-level citations from beaver-extract arrive as top-left),
+            // then apply rotation transformation only if rotated.
+            const combinedBboxes = allBboxesOnPage
+                .flat()
+                .map(b => convertBoundingBoxToBottomLeft(b, height));
             const rects = rotation !== 0
                 ? combinedBboxes
                     .map(b => applyRotationToBoundingBox(b, rotation, width, height))
