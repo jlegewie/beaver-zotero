@@ -354,15 +354,20 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
         // Default labels: raw page numbers as strings.
         let pageLabels: string[] = rawPages.map((p) => String(p));
 
-        if (usePageLabels && rawPages.length > 0 && citationLibraryId && citationZoteroKey) {
-            try {
-                const item = Zotero.Items.getByLibraryAndKey(citationLibraryId, citationZoteroKey);
-                if (item && typeof item !== 'boolean') {
-                    const loadedLabels = getPageLabelsForItem(item, labelsByAttachmentId);
-                    pageLabels = rawPages.map((p) => resolvePageLabelFromLabels(loadedLabels, p));
+        if (usePageLabels && rawPages.length > 0) {
+            const backendLabels = citationMetadata?.page_labels;
+            if (backendLabels && Object.keys(backendLabels).length > 0) {
+                pageLabels = rawPages.map((p) => resolvePageLabelFromLabels(backendLabels, p));
+            } else if (citationLibraryId && citationZoteroKey) {
+                try {
+                    const item = Zotero.Items.getByLibraryAndKey(citationLibraryId, citationZoteroKey);
+                    if (item && typeof item !== 'boolean') {
+                        const loadedLabels = getPageLabelsForItem(item, labelsByAttachmentId);
+                        pageLabels = rawPages.map((p) => resolvePageLabelFromLabels(loadedLabels, p));
+                    }
+                } catch (e) {
+                    logger(`ZoteroCitation: Page label resolution failed: ${e}`);
                 }
-            } catch (e) {
-                logger(`ZoteroCitation: Page label resolution failed: ${e}`);
             }
         }
 
