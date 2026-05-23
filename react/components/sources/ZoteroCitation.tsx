@@ -671,8 +671,8 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
             {isExternal && !mappedZoteroItem && (
                 <span className="px-3 py-15 border-top-quinary block">
                     <span className="display-flex flex-row items-center gap-15">
-                        <Icon icon={GlobalSearchIcon} className="font-color-tertiary" />
-                        <span className="text-sm font-color-tertiary">
+                        <Icon icon={GlobalSearchIcon} className="font-color-secondary" />
+                        <span className="text-sm font-color-secondary">
                             View details
                         </span>
                     </span>
@@ -681,8 +681,8 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
             {isNoteCitation && (!isExternal || !!mappedZoteroItem) && (
                 <span className="px-3 py-15 border-top-quinary block">
                     <span className="display-flex flex-row items-center gap-15">
-                        <Icon icon={NoteIcon} className="font-color-tertiary" />
-                        <span className="text-sm font-color-tertiary">
+                        <Icon icon={NoteIcon} className="font-color-secondary" />
+                        <span className="text-sm font-color-secondary">
                             Opens note
                         </span>
                     </span>
@@ -691,8 +691,8 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
             {hasLocator && (!isExternal || !!mappedZoteroItem) && (
                 <span className="px-3 py-15 border-top-quinary block">
                     <span className="display-flex flex-row items-center gap-15">
-                        <Icon icon={PdfIcon} className="font-color-tertiary" />
-                        <span className="text-sm font-color-tertiary">
+                        <Icon icon={PdfIcon} className="font-color-secondary" />
+                        <span className="text-sm font-color-secondary">
                             {hasBoundingBoxes
                                 ? (pages[0] != null ? `Highlights passage on page ${pageLabels[0]}` : 'Highlights passage in PDF')
                                 : (pages[0] != null ? `Opens PDF on page ${pageLabels[0]}` : 'Opens PDF at location')}
@@ -703,8 +703,8 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
             {!hasLocator && !isNoteCitation && (!isExternal || !!mappedZoteroItem) && (
                 <span className="px-3 py-15 border-top-quinary block">
                     <span className="display-flex flex-row items-center gap-15">
-                        <Icon icon={LibraryIcon} className="font-color-tertiary" />
-                        <span className="text-sm font-color-tertiary">
+                        <Icon icon={LibraryIcon} className="font-color-secondary" />
+                        <span className="text-sm font-color-secondary">
                             Reveals item in library
                         </span>
                     </span>
