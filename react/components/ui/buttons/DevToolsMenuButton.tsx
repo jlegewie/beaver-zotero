@@ -556,7 +556,6 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
             console.log("=".repeat(60));
             
             console.group("[OCR Detection Test] Summary");
-            console.log(`Primary Reason: ${result.primaryReason}`);
             console.log(`Issue Ratio: ${(result.issueRatio * 100).toFixed(1)}% of sampled pages have issues`);
             console.log(`Pages Sampled: ${result.sampledPages} of ${result.totalPages} total`);
             console.groupEnd();

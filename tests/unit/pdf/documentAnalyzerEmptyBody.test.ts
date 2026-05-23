@@ -100,7 +100,6 @@ describe("DocumentAnalyzer per-page no-body-text check", () => {
         expect(result.pageAnalyses[0].textLength).toBe(0);
         expect(result.pageAnalyses[0].issues).toContain("no_body_text");
         expect(result.needsOCR).toBe(true);
-        expect(result.primaryReason).toBe("missing_text_content");
     });
 
     it("flags a body-empty page even when its image is too small to count as a large image", () => {
@@ -144,7 +143,6 @@ describe("DocumentAnalyzer per-page no-body-text check", () => {
 
         expect(result.issueBreakdown.no_body_text).toBeGreaterThan(0);
         expect(result.needsOCR).toBe(true);
-        expect(result.primaryReason).toBe("missing_text_content");
     });
 
     it("does not route a healthy document to OCR for a single empty body page", () => {
@@ -158,6 +156,5 @@ describe("DocumentAnalyzer per-page no-body-text check", () => {
         const result = new DocumentAnalyzer(makeProvider(pages)).analyzeOCRNeeds();
 
         expect(result.needsOCR).toBe(false);
-        expect(result.primaryReason).toBe("text_extraction_acceptable");
     });
 });

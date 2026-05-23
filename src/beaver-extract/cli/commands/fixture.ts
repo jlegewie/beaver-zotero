@@ -196,7 +196,7 @@ function buildCaptureCommand(deps: CliDeps): Command {
                     const ocr = await deps.api.analyzeOCRNeeds(bytes);
                     if (ocr.needsOCR) {
                         throw new Error(
-                            `PDF needs OCR (${ocr.primaryReason}); use \`ocr-fixture capture\` for OCR-detection fixtures, or pass --allow-ocr to capture anyway`,
+                            `PDF needs OCR; use \`ocr-fixture capture\` for OCR-detection fixtures, or pass --allow-ocr to capture anyway`,
                         );
                     }
                 }
