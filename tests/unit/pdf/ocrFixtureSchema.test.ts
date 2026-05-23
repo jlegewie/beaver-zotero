@@ -48,7 +48,6 @@ function wellFormed(): Record<string, unknown> {
         tolerance: { issueRatioAbs: 0.02, textLengthAbs: 5 },
         expected: {
             needsOCR: false,
-            primaryReason: "text_extraction_acceptable",
             issueRatio: 0,
             issueBreakdown: {
                 no_text_blocks: 0,

@@ -237,7 +237,6 @@ function buildCaptureCommand(deps: CliDeps): Command {
                     sharedPdf: sharedPdfPath(root, sha),
                     sourcePdfLink,
                     needsOCR: snapshot.needsOCR,
-                    primaryReason: snapshot.primaryReason,
                     wrote,
                     capturedAt: fixture.capturedAt,
                     updatedAt: fixture.updatedAt,
@@ -440,7 +439,6 @@ function buildUpdateCommand(deps: CliDeps): Command {
                     wrote,
                     sourcePdfLink,
                     needsOCR: expected.needsOCR,
-                    primaryReason: expected.primaryReason,
                     capturedAt: previous.capturedAt,
                     updatedAt: wrote ? candidate.updatedAt : previous.updatedAt,
                 });

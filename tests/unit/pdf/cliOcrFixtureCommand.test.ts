@@ -44,7 +44,6 @@ const FAKE_PDF_SHA = createHash("sha256").update(FAKE_PDF_BYTES).digest("hex");
 function baseOcrResult(overrides: Partial<OCRDetectionResult> = {}): OCRDetectionResult {
     return {
         needsOCR: false,
-        primaryReason: "text_extraction_acceptable",
         issueRatio: 0,
         issueBreakdown: {
             no_text_blocks: 0,
@@ -262,7 +261,7 @@ describe("ocr-fixture capture", () => {
         expect(await runCli(baseArgs, makeDeps().deps)).toBe(0);
 
         const { deps: updateDeps, stdout } = makeDeps(
-            baseOcrResult({ needsOCR: true, primaryReason: "scanned_without_ocr" }),
+            baseOcrResult({ needsOCR: true }),
         );
         const code = await runCli([...baseArgs, "--update"], updateDeps);
         expect(code).toBe(0);
@@ -333,7 +332,7 @@ describe("ocr-fixture evaluate", () => {
     it("exits 1 with a structured envelope when the snapshot drifts", async () => {
         await captureBaseline();
         const { deps, stdout } = makeDeps(
-            baseOcrResult({ needsOCR: true, primaryReason: "scanned_without_ocr" }),
+            baseOcrResult({ needsOCR: true }),
         );
         const code = await runCli(
             ["ocr-fixture", "evaluate", "EVAL", "--root", tmpRoot, "--json"],

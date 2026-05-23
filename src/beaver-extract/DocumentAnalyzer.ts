@@ -706,68 +706,8 @@ export class DocumentAnalyzer {
             (issueRatio >= opts.confirmationThreshold &&
                 !documentHasUsableText);
 
-        // Determine primary reason. Gated on `needsOCR` so a document rescued
-        // by the sufficient-text guard reports `text_extraction_acceptable`
-        // rather than a stale per-page issue reason.
-        let primaryReason = "text_extraction_acceptable";
-        if (needsOCR && issueRatio >= opts.confirmationThreshold) {
-            // Find the most common issue
-            const sortedIssues = Object.entries(issueBreakdown)
-                .filter(([, count]) => count > 0)
-                .sort((a, b) => b[1] - a[1]);
-
-            if (sortedIssues.length > 0) {
-                const topIssue = sortedIssues[0][0] as OCRIssueReason;
-                // Check if this looks like a scanned document without OCR
-                // (large_image_coverage is now only flagged with text problems)
-                const hasLargeImages = issueBreakdown.large_image_coverage > 0;
-                const hasTextProblems = issueBreakdown.no_text_blocks > 0 ||
-                    issueBreakdown.no_body_text > 0 ||
-                    issueBreakdown.insufficient_text > 0;
-
-                if (hasLargeImages && hasTextProblems) {
-                    primaryReason = "scanned_without_ocr";
-                } else {
-                    switch (topIssue) {
-                        case "no_text_blocks":
-                        case "no_body_text":
-                        case "insufficient_text":
-                            primaryReason = "missing_text_content";
-                            break;
-                        case "large_image_coverage":
-                            // This shouldn't happen anymore since we combine with text issues
-                            primaryReason = "scanned_without_ocr";
-                            break;
-                        case "high_whitespace_ratio":
-                        case "high_newline_ratio":
-                        case "low_alphanumeric_ratio":
-                        case "invalid_characters":
-                        case "fragmented_text_lines":
-                            primaryReason = "poor_text_quality";
-                            break;
-                        case "bbox_overflow":
-                        case "excessive_line_overlap":
-                            primaryReason = "extraction_formatting_issues";
-                            break;
-                    }
-                }
-            } else {
-                primaryReason = "quality_threshold_exceeded";
-            }
-        } else if (needsOCR && documentNearEmpty) {
-            // The near-empty guard is the sole trigger — no per-page issue
-            // crossed the confirmation threshold. Derive the reason from
-            // whether the sampled pages carry images: image-backed pages with
-            // no usable text are un-OCR'd scans, otherwise the text layer is
-            // simply missing.
-            primaryReason = pageAnalyses.some((p) => p.hasImages)
-                ? "scanned_without_ocr"
-                : "missing_text_content";
-        }
-
         return {
             needsOCR,
-            primaryReason,
             issueRatio,
             issueBreakdown,
             pageAnalyses,

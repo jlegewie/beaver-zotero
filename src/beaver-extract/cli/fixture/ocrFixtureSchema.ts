@@ -67,7 +67,6 @@ export interface SnapshotPageOcr {
 
 export interface OcrSnapshot {
     needsOCR: boolean;
-    primaryReason: string;
     issueRatio: number;
     issueBreakdown: Record<OCRIssueReason, number>;
     sampledPages: number;
@@ -279,7 +278,6 @@ function validateTolerance(
 function validateSnapshot(value: unknown, source: string): OcrSnapshot {
     const v = expectObject(value, source);
     const needsOCR = expectBool(v.needsOCR, `${source}.needsOCR`);
-    const primaryReason = expectString(v.primaryReason, `${source}.primaryReason`);
     const issueRatio = expectFiniteNumber(v.issueRatio, `${source}.issueRatio`);
     const issueBreakdown = validateIssueBreakdown(
         v.issueBreakdown,
@@ -293,7 +291,6 @@ function validateSnapshot(value: unknown, source: string): OcrSnapshot {
     );
     return {
         needsOCR,
-        primaryReason,
         issueRatio,
         issueBreakdown,
         sampledPages,

@@ -998,8 +998,6 @@ export interface PageOCRAnalysis {
 export interface OCRDetectionResult {
     /** Whether the document likely needs OCR */
     needsOCR: boolean;
-    /** Primary reason for the decision */
-    primaryReason: string;
     /** Ratio of pages with issues (0-1) */
     issueRatio: number;
     /** Breakdown by issue type */

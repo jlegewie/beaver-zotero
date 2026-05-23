@@ -1267,7 +1267,7 @@ export async function opExtract(
             if (ocr.needsOCR) {
                 throw workerError(
                     ERROR_CODES.NO_TEXT_LAYER,
-                    `Document may require OCR: ${ocr.primaryReason} (${Math.round(ocr.issueRatio * 100)}% of sampled pages have issues)`,
+                    `Document may require OCR (${Math.round(ocr.issueRatio * 100)}% of sampled pages have issues)`,
                     { ocrAnalysis: ocr, pageLabels, pageCount },
                 );
             }
@@ -1372,7 +1372,7 @@ export async function opStructuredExtractWithDebug(
             if (ocr.needsOCR) {
                 throw workerError(
                     ERROR_CODES.NO_TEXT_LAYER,
-                    `Document may require OCR: ${ocr.primaryReason} (${Math.round(ocr.issueRatio * 100)}% of sampled pages have issues)`,
+                    `Document may require OCR (${Math.round(ocr.issueRatio * 100)}% of sampled pages have issues)`,
                     { ocrAnalysis: ocr, pageLabels, pageCount },
                 );
             }
@@ -1488,7 +1488,7 @@ export async function opAnalyzeLayout(
             if (ocr.needsOCR) {
                 throw workerError(
                     ERROR_CODES.NO_TEXT_LAYER,
-                    `Document may require OCR: ${ocr.primaryReason} (${Math.round(ocr.issueRatio * 100)}% of sampled pages have issues)`,
+                    `Document may require OCR (${Math.round(ocr.issueRatio * 100)}% of sampled pages have issues)`,
                     { ocrAnalysis: ocr, pageLabels, pageCount },
                 );
             }

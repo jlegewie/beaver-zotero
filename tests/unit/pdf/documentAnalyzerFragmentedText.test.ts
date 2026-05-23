@@ -76,7 +76,6 @@ describe("DocumentAnalyzer fragmented-text check", () => {
         const result = new DocumentAnalyzer(makeProvider(pages)).analyzeOCRNeeds();
 
         expect(result.needsOCR).toBe(true);
-        expect(result.primaryReason).toBe("poor_text_quality");
         expect(result.issueBreakdown.fragmented_text_lines).toBeGreaterThan(0);
         expect(result.pageAnalyses[0].issues).toContain("fragmented_text_lines");
     });
