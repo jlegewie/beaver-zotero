@@ -285,7 +285,42 @@ declare namespace Zotero {
 
             getAllDocumentCacheMetadata(): Promise<import("../src/services/database").DocumentCacheMetadataRecord[]>;
 
+            // --- Background job queue ---
+            enqueueBackgroundJob(
+                input: import("../src/services/database").BackgroundJobInput,
+            ): Promise<{ enqueued: boolean; id: number }>;
+
+            claimNextBackgroundJob(
+                now: number,
+                visibilityTimeoutMs: number,
+            ): Promise<import("../src/services/database").BackgroundJobRecord | null>;
+
+            peekBackgroundJobs(
+                limit?: number,
+            ): Promise<import("../src/services/database").BackgroundJobRecord[]>;
+
+            completeBackgroundJob(id: number): Promise<void>;
+
+            failBackgroundJob(
+                id: number,
+                error: string,
+                opts: {
+                    maxAttempts: number;
+                    backoffMs: (attempt: number) => number;
+                    now: number;
+                },
+            ): Promise<{ dead: boolean }>;
+
+            releaseBackgroundJob(id: number, now: number): Promise<void>;
+
+            getBackgroundQueueStats(
+                now: number,
+            ): Promise<import("../src/services/database").BackgroundQueueStats>;
         }
+
+        const backgroundExtractor:
+            | import("../src/services/backgroundExtractor").BackgroundExtractor
+            | undefined;
 
         /**
          * Citation object for CSL formatting
@@ -456,10 +491,15 @@ declare namespace _ZoteroTypes {
         /** Set to true at the start of shutdown to signal all in-flight operations to bail out */
         __beaverShuttingDown?: boolean;
         /**
-         * Cross-bundle singleton MuPDFWorkerClient. Typed as `unknown` to avoid
-         * pulling the implementation file into the global typings (which would
-         * risk circular references). Callers cast at the boundary.
+         * Cross-bundle MuPDFWorkerClient singletons, one per slot name.
+         * Typed as `unknown` to avoid pulling the implementation file into
+         * the global typings (which would risk circular references).
+         * Callers cast at the boundary.
+         *
+         *  - `_hot`: user-facing agent extraction (low-latency).
+         *  - `_background`: background/queue extraction (independent heap).
          */
-        __beaverMuPDFWorkerClient?: unknown;
+        __beaverMuPDFWorkerClient_hot?: unknown;
+        __beaverMuPDFWorkerClient_background?: unknown;
     }
 }

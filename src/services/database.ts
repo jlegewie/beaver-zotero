@@ -113,6 +113,63 @@ export type DocumentCachePayloadInput = Omit<
 >;
 
 /**
+ * Background extraction job kinds. v1 only ships `hot_timeout_retry` —
+ * future kinds (manual attachment add, library-wide indexing, mtime
+ * change) will reuse the same row shape.
+ */
+export type BackgroundJobType = 'hot_timeout_retry';
+
+/**
+ * Payload carried alongside a background job. Shaped for the v1
+ * timeout-retry extraction; future job types may extend this with
+ * discriminated unions.
+ */
+export interface BackgroundJobPayload {
+    maxPages: number | null;
+    maxFileSizeMB: number;
+    timeoutSeconds: number;
+}
+
+/**
+ * Single row in `background_jobs`. Timestamps are epoch milliseconds so
+ * `MIN(available_at, ?)` UPSERTs compare arithmetically.
+ */
+export interface BackgroundJobRecord {
+    id: number;
+    jobType: BackgroundJobType;
+    libraryId: number;
+    itemId: number | null;
+    zoteroKey: string;
+    mode: DocumentCacheExtractionMode;
+    priority: number;
+    payload: BackgroundJobPayload | null;
+    enqueuedAt: number;
+    availableAt: number;
+    attemptCount: number;
+    lastError: string | null;
+}
+
+export interface BackgroundJobInput {
+    jobType: BackgroundJobType;
+    libraryId: number;
+    itemId?: number | null;
+    zoteroKey: string;
+    mode: DocumentCacheExtractionMode;
+    priority?: number;
+    payload?: BackgroundJobPayload | null;
+    /** Epoch ms. Used for both `enqueued_at` and `available_at`. */
+    now: number;
+}
+
+export interface BackgroundQueueStats {
+    pending: number;
+    available: number;
+    deferred: number;
+    dead: number;
+    byJobType: Record<string, number>;
+}
+
+/**
  * Maximum number of failures before an item is considered permanently failed.
  * After this many failures, the item won't be retried automatically.
  */
@@ -429,6 +486,49 @@ export class BeaverDB {
         await this.conn.queryAsync(`
             CREATE INDEX IF NOT EXISTS idx_dcp_library
             ON document_cache_payloads(library_id);
+        `);
+
+        // Background job queue: one row per (library_id, zotero_key, mode).
+        // Uses epoch-ms timestamps throughout so visibility-bump UPSERTs can
+        // compare via MIN(available_at, ?) without string-vs-number drift.
+        await this.conn.queryAsync(`
+            CREATE TABLE IF NOT EXISTS background_jobs (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_type        TEXT NOT NULL,
+                library_id      INTEGER NOT NULL,
+                item_id         INTEGER,
+                zotero_key      TEXT NOT NULL,
+                mode            TEXT NOT NULL,
+                priority        INTEGER NOT NULL DEFAULT 100,
+                payload_json    TEXT,
+                enqueued_at     INTEGER NOT NULL,
+                available_at    INTEGER NOT NULL,
+                attempt_count   INTEGER NOT NULL DEFAULT 0,
+                last_error      TEXT,
+                UNIQUE(library_id, zotero_key, mode)
+            );
+        `);
+
+        await this.conn.queryAsync(`
+            CREATE INDEX IF NOT EXISTS idx_background_jobs_visible
+            ON background_jobs (available_at, priority);
+        `);
+
+        // Dead-letter table for jobs that exceeded MAX_ATTEMPTS. Surfaced
+        // through the dev queue-stats endpoint; no automatic retry.
+        await this.conn.queryAsync(`
+            CREATE TABLE IF NOT EXISTS background_jobs_dead (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_type        TEXT NOT NULL,
+                library_id      INTEGER NOT NULL,
+                zotero_key      TEXT NOT NULL,
+                mode            TEXT NOT NULL,
+                payload_json    TEXT,
+                enqueued_at     INTEGER NOT NULL,
+                died_at         INTEGER NOT NULL,
+                attempt_count   INTEGER NOT NULL,
+                last_error      TEXT
+            );
         `);
     }
 
@@ -2070,4 +2170,318 @@ export class BeaverDB {
         });
     }
 
+    // =====================================================================
+    // Background job queue
+    // =====================================================================
+
+    /**
+     * Insert a new background job, or merge with the existing row that
+     * already covers `(library_id, zotero_key, mode)`. Returns the job id
+     * and whether the row was newly inserted.
+     *
+     * Merge semantics:
+     *  - `priority` lowers to `MIN(existing, input)`.
+     *  - `available_at` lowers to `MIN(existing, input.now)` so an urgent
+     *    re-enqueue overrides a deferred prior visibility window.
+     *  - `payload_json` and `job_type` only overwrite when the incoming
+     *    job has a strictly higher (lower-numbered) priority, otherwise
+     *    they stay untouched.
+     */
+    public async enqueueBackgroundJob(
+        input: BackgroundJobInput,
+    ): Promise<{ enqueued: boolean; id: number }> {
+        const priority = input.priority ?? 100;
+        const payloadJson = input.payload ? JSON.stringify(input.payload) : null;
+        const itemId = input.itemId ?? null;
+
+        let enqueued = false;
+        let id = 0;
+
+        await this.conn.executeTransaction(async () => {
+            await this.conn.queryAsync(
+                `INSERT OR IGNORE INTO background_jobs (
+                    job_type, library_id, item_id, zotero_key, mode,
+                    priority, payload_json, enqueued_at, available_at,
+                    attempt_count, last_error
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL)`,
+                [
+                    input.jobType,
+                    input.libraryId,
+                    itemId,
+                    input.zoteroKey,
+                    input.mode,
+                    priority,
+                    payloadJson,
+                    input.now,
+                    input.now,
+                ],
+            );
+
+            const changesRows: number[] = [];
+            await this.conn.queryAsync(`SELECT changes()`, [], {
+                onRow: (row: any) => {
+                    changesRows.push(row.getResultByIndex(0));
+                },
+            });
+            enqueued = (changesRows[0] ?? 0) === 1;
+
+            if (!enqueued) {
+                await this.conn.queryAsync(
+                    `UPDATE background_jobs SET
+                        priority = MIN(priority, ?),
+                        available_at = MIN(available_at, ?),
+                        job_type = CASE WHEN ? < priority THEN ? ELSE job_type END,
+                        payload_json = CASE WHEN ? < priority THEN ? ELSE payload_json END
+                     WHERE library_id = ? AND zotero_key = ? AND mode = ?`,
+                    [
+                        priority,
+                        input.now,
+                        priority, input.jobType,
+                        priority, payloadJson,
+                        input.libraryId, input.zoteroKey, input.mode,
+                    ],
+                );
+            }
+
+            const idRows: number[] = [];
+            await this.conn.queryAsync(
+                `SELECT id FROM background_jobs
+                 WHERE library_id = ? AND zotero_key = ? AND mode = ?`,
+                [input.libraryId, input.zoteroKey, input.mode],
+                {
+                    onRow: (row: any) => {
+                        idRows.push(row.getResultByIndex(0));
+                    },
+                },
+            );
+            id = idRows[0] ?? 0;
+        });
+
+        return { enqueued, id };
+    }
+
+    /**
+     * Claim the next visible job (pgmq-style): pick lowest-priority, then
+     * oldest-available row whose `available_at <= now`, then bump its
+     * `available_at` forward by `visibilityTimeoutMs` so a crash/abort
+     * leaves the row safe to re-pick later.
+     *
+     * Returns `null` when no row is visible, or when an optimistic-claim
+     * race lost (currently impossible with one consumer; cheap insurance).
+     */
+    public async claimNextBackgroundJob(
+        now: number,
+        visibilityTimeoutMs: number,
+    ): Promise<BackgroundJobRecord | null> {
+        const candidates = await this.selectBackgroundJobs(
+            `SELECT id, job_type, library_id, item_id, zotero_key, mode,
+                    priority, payload_json, enqueued_at, available_at,
+                    attempt_count, last_error
+             FROM background_jobs
+             WHERE available_at <= ?
+             ORDER BY priority ASC, available_at ASC
+             LIMIT 1`,
+            [now],
+        );
+        if (candidates.length === 0) return null;
+        const candidate = candidates[0];
+
+        const newAvailableAt = now + visibilityTimeoutMs;
+        const changesRows: number[] = [];
+        await this.conn.executeTransaction(async () => {
+            await this.conn.queryAsync(
+                `UPDATE background_jobs
+                 SET available_at = ?
+                 WHERE id = ? AND available_at <= ?`,
+                [newAvailableAt, candidate.id, now],
+            );
+            await this.conn.queryAsync(`SELECT changes()`, [], {
+                onRow: (row: any) => {
+                    changesRows.push(row.getResultByIndex(0));
+                },
+            });
+        });
+
+        if ((changesRows[0] ?? 0) !== 1) return null;
+        return { ...candidate, availableAt: newAvailableAt };
+    }
+
+    /** Read up to `limit` jobs (default 100) without claiming. */
+    public async peekBackgroundJobs(limit = 100): Promise<BackgroundJobRecord[]> {
+        return this.selectBackgroundJobs(
+            `SELECT id, job_type, library_id, item_id, zotero_key, mode,
+                    priority, payload_json, enqueued_at, available_at,
+                    attempt_count, last_error
+             FROM background_jobs
+             ORDER BY priority ASC, available_at ASC
+             LIMIT ?`,
+            [limit],
+        );
+    }
+
+    /** Mark a claimed job as completed by removing its row. */
+    public async completeBackgroundJob(id: number): Promise<void> {
+        await this.conn.queryAsync(
+            `DELETE FROM background_jobs WHERE id = ?`,
+            [id],
+        );
+    }
+
+    /**
+     * Record a failed attempt. After `maxAttempts` total attempts the row
+     * moves to `background_jobs_dead`. Otherwise the attempt counter
+     * bumps and `available_at` slides forward by `backoffMs(attempt)`.
+     */
+    public async failBackgroundJob(
+        id: number,
+        error: string,
+        opts: {
+            maxAttempts: number;
+            backoffMs: (attempt: number) => number;
+            now: number;
+        },
+    ): Promise<{ dead: boolean }> {
+        const rows = await this.selectBackgroundJobs(
+            `SELECT id, job_type, library_id, item_id, zotero_key, mode,
+                    priority, payload_json, enqueued_at, available_at,
+                    attempt_count, last_error
+             FROM background_jobs
+             WHERE id = ?`,
+            [id],
+        );
+        if (rows.length === 0) return { dead: false };
+        const current = rows[0];
+        const nextAttempt = current.attemptCount + 1;
+
+        if (nextAttempt >= opts.maxAttempts) {
+            await this.conn.executeTransaction(async () => {
+                await this.conn.queryAsync(
+                    `INSERT INTO background_jobs_dead (
+                        job_type, library_id, zotero_key, mode, payload_json,
+                        enqueued_at, died_at, attempt_count, last_error
+                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    [
+                        current.jobType,
+                        current.libraryId,
+                        current.zoteroKey,
+                        current.mode,
+                        current.payload ? JSON.stringify(current.payload) : null,
+                        current.enqueuedAt,
+                        opts.now,
+                        nextAttempt,
+                        error,
+                    ],
+                );
+                await this.conn.queryAsync(
+                    `DELETE FROM background_jobs WHERE id = ?`,
+                    [id],
+                );
+            });
+            return { dead: true };
+        }
+
+        const nextAvailableAt = opts.now + opts.backoffMs(nextAttempt);
+        await this.conn.queryAsync(
+            `UPDATE background_jobs
+             SET attempt_count = attempt_count + 1,
+                 last_error = ?,
+                 available_at = ?
+             WHERE id = ?`,
+            [error, nextAvailableAt, id],
+        );
+        return { dead: false };
+    }
+
+    /**
+     * Release a claimed job without counting it as a failed attempt. Used
+     * when the processor itself aborts an in-flight job (e.g. shutdown),
+     * so the row can be picked again on the next start without burning an
+     * attempt or recording a misleading error.
+     */
+    public async releaseBackgroundJob(id: number, now: number): Promise<void> {
+        await this.conn.queryAsync(
+            `UPDATE background_jobs SET available_at = ? WHERE id = ?`,
+            [now, id],
+        );
+    }
+
+    /** Counts surfaced through the dev queue-stats endpoint. */
+    public async getBackgroundQueueStats(
+        now: number,
+    ): Promise<BackgroundQueueStats> {
+        const totalsRows: number[] = [];
+        await this.conn.queryAsync(
+            `SELECT COUNT(*) FROM background_jobs`,
+            [],
+            { onRow: (row: any) => totalsRows.push(row.getResultByIndex(0)) },
+        );
+        const pending = totalsRows[0] ?? 0;
+
+        const availableRows: number[] = [];
+        await this.conn.queryAsync(
+            `SELECT COUNT(*) FROM background_jobs WHERE available_at <= ?`,
+            [now],
+            { onRow: (row: any) => availableRows.push(row.getResultByIndex(0)) },
+        );
+        const available = availableRows[0] ?? 0;
+        const deferred = pending - available;
+
+        const deadRows: number[] = [];
+        await this.conn.queryAsync(
+            `SELECT COUNT(*) FROM background_jobs_dead`,
+            [],
+            { onRow: (row: any) => deadRows.push(row.getResultByIndex(0)) },
+        );
+        const dead = deadRows[0] ?? 0;
+
+        const byJobType: Record<string, number> = {};
+        await this.conn.queryAsync(
+            `SELECT job_type, COUNT(*) FROM background_jobs GROUP BY job_type`,
+            [],
+            {
+                onRow: (row: any) => {
+                    const jobType: string = row.getResultByIndex(0);
+                    const count: number = row.getResultByIndex(1);
+                    byJobType[jobType] = count;
+                },
+            },
+        );
+
+        return { pending, available, deferred, dead, byJobType };
+    }
+
+    private async selectBackgroundJobs(
+        sql: string,
+        params: any[] = [],
+    ): Promise<BackgroundJobRecord[]> {
+        const rows: BackgroundJobRecord[] = [];
+        await this.conn.queryAsync(sql, params, {
+            onRow: (row: any) => {
+                const payloadJson = row.getResultByIndex(7);
+                let payload: BackgroundJobPayload | null = null;
+                if (payloadJson) {
+                    try {
+                        payload = JSON.parse(payloadJson) as BackgroundJobPayload;
+                    } catch (_e) {
+                        payload = null;
+                    }
+                }
+                rows.push({
+                    id: row.getResultByIndex(0),
+                    jobType: row.getResultByIndex(1) as BackgroundJobType,
+                    libraryId: row.getResultByIndex(2),
+                    itemId: row.getResultByIndex(3) ?? null,
+                    zoteroKey: row.getResultByIndex(4),
+                    mode: row.getResultByIndex(5) as DocumentCacheExtractionMode,
+                    priority: row.getResultByIndex(6),
+                    payload,
+                    enqueuedAt: row.getResultByIndex(8),
+                    availableAt: row.getResultByIndex(9),
+                    attemptCount: row.getResultByIndex(10),
+                    lastError: row.getResultByIndex(11) ?? null,
+                });
+            },
+        });
+        return rows;
+    }
 }

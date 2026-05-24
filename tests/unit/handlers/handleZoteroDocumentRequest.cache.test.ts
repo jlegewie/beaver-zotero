@@ -56,6 +56,16 @@ vi.mock('../../../src/beaver-extract', () => {
         }
     }
 
+    const mockClient = {
+        async getPageCount(_pdfData: Uint8Array): Promise<number> {
+            return 1;
+        },
+        async extract(_pdfData: Uint8Array, args: any, _signal?: AbortSignal): Promise<any> {
+            mockState.extractCalls.push(args);
+            return structuredResult;
+        },
+    };
+
     return {
         BeaverExtractor: MockBeaverExtractor,
         ExtractionError: MockExtractionError,
@@ -69,6 +79,9 @@ vi.mock('../../../src/beaver-extract', () => {
             WASM_ERROR: 'wasm_error',
             HEAP_EXHAUSTION: 'heap_exhaustion',
         },
+        getMuPDFWorkerClient: vi.fn(() => mockClient),
+        getExistingMuPDFWorkerClient: vi.fn(() => null),
+        disposeMuPDFWorker: vi.fn().mockResolvedValue(undefined),
     };
 });
 

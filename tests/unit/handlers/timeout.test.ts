@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+    ExternalAbortError,
     MAX_PDF_TIMEOUT_SECONDS,
     TimeoutError,
     createTimeoutController,
@@ -50,6 +51,51 @@ describe('createTimeoutController', () => {
         );
 
         timeout.dispose();
+    });
+
+    it('relays an external abort and surfaces it as ExternalAbortError', () => {
+        const external = new AbortController();
+        const timeout = createTimeoutController(60, 30, external.signal);
+
+        expect(timeout.signal.aborted).toBe(false);
+        external.abort();
+        expect(timeout.signal.aborted).toBe(true);
+        expect(() => timeout.throwIfTimedOut('test_phase')).toThrow(ExternalAbortError);
+
+        timeout.dispose();
+    });
+
+    it('aborts immediately when the external signal is already aborted at construction', () => {
+        const external = new AbortController();
+        external.abort();
+        const timeout = createTimeoutController(60, 30, external.signal);
+
+        expect(timeout.signal.aborted).toBe(true);
+        expect(() => timeout.throwIfTimedOut('test_phase')).toThrow(ExternalAbortError);
+
+        timeout.dispose();
+    });
+
+    it('still raises TimeoutError when the deadline fires without an external abort', () => {
+        vi.useFakeTimers();
+        const external = new AbortController();
+        const timeout = createTimeoutController(1, 30, external.signal);
+
+        vi.advanceTimersByTime(1000);
+
+        expect(() => timeout.throwIfTimedOut('test_phase')).toThrow(TimeoutError);
+
+        timeout.dispose();
+    });
+
+    it('dispose detaches the external abort listener', () => {
+        const external = new AbortController();
+        const timeout = createTimeoutController(60, 30, external.signal);
+        timeout.dispose();
+        // After dispose, aborting the external signal should NOT abort
+        // the controller's signal (listener was removed).
+        external.abort();
+        expect(timeout.signal.aborted).toBe(false);
     });
 
     it('uses the main window AbortController when the current global has none', () => {
