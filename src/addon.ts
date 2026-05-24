@@ -6,6 +6,7 @@ import { BeaverDB } from "./services/database";
 import { AIProvider } from "./services/OpenAIProvider";
 import { CitationService } from "./services/CitationService";
 import { DocumentCache } from "./services/documentCache";
+import { BackgroundExtractor } from "./services/backgroundExtractor";
 
 class Addon {
     public data: {
@@ -28,6 +29,7 @@ class Addon {
     public citationService?: CitationService;
     public db?: BeaverDB;
     public documentCache?: DocumentCache;
+    public backgroundExtractor?: BackgroundExtractor;
     public pluginVersion?: typeof version;
     // Lifecycle hooks
     public hooks: typeof hooks;

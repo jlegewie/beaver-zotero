@@ -6,6 +6,7 @@ import eventBus from "../react/eventBus";
 import { CitationService } from "./services/CitationService";
 import { BeaverDB } from "./services/database";
 import { DocumentCache } from "./services/documentCache";
+import { BackgroundExtractor } from "./services/backgroundExtractor";
 import { uiManager } from "../react/ui/UIManager";
 import { getPref, setPref } from "./utils/prefs";
 import { addPendingVersionNotification } from "./utils/versionNotificationPrefs";
@@ -245,6 +246,12 @@ async function onStartup() {
         addon.documentCache = documentCache;
         ztoolkit.log("DocumentCache initialized successfully");
 
+        // -------- Initialize background extraction processor --------
+        const backgroundExtractor = new BackgroundExtractor();
+        addon.backgroundExtractor = backgroundExtractor;
+        backgroundExtractor.start();
+        ztoolkit.log("BackgroundExtractor started");
+
         try {
             const legacyContentCache = PathUtils.join(Zotero.Profile.dir, "beaver", "content-cache");
             if (await IOUtils.exists(legacyContentCache)) {
@@ -374,20 +381,30 @@ async function onMainWindowUnload(win: Window): Promise<void> {
     ztoolkit.log("onMainWindowUnload: Starting cleanup");
 
     try {
-        // Worker-window hygiene: the MuPDF worker is owned by the realm that
-        // spawned it. If the closing window is that realm, terminate the
-        // worker now — even on early-return paths — otherwise the singleton
-        // on Zotero outlives its parent window and the next postMessage
-        // throws. The next caller will lazily respawn against the new window.
+        // Worker-window hygiene: the MuPDF workers are owned by the realm
+        // that spawned them. If the closing window is that realm for either
+        // slot, terminate the corresponding worker now — even on early-return
+        // paths — otherwise the singleton on Zotero outlives its parent
+        // window and the next postMessage throws. The next caller will
+        // lazily respawn the slot against the new window.
         try {
-            const client = (Zotero as any).__beaverMuPDFWorkerClient as
+            const hotClient = (Zotero as any).__beaverMuPDFWorkerClient_hot as
                 | { spawnedFromWindow: Window | null }
                 | undefined;
-            if (client?.spawnedFromWindow === win) {
-                await withShutdownTimeout(
-                    disposeMuPDFWorker(),
-                    "disposeMuPDFWorker",
-                );
+            const backgroundClient = (Zotero as any).__beaverMuPDFWorkerClient_background as
+                | { spawnedFromWindow: Window | null }
+                | undefined;
+            const slots: Array<["hot" | "background", typeof hotClient]> = [
+                ["hot", hotClient],
+                ["background", backgroundClient],
+            ];
+            for (const [name, client] of slots) {
+                if (client?.spawnedFromWindow === win) {
+                    await withShutdownTimeout(
+                        disposeMuPDFWorker(name),
+                        `disposeMuPDFWorker(${name})`,
+                    );
+                }
             }
         } catch (_e) {
             // best-effort
@@ -460,13 +477,28 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         // stale held-lock cannot block authentication on the next load.
         await cleanupSupabaseWindowState(win);
 
-        // 2. Terminate the MuPDF worker. Sentencex lives inside the worker
-        //    and dies with `worker.terminate()`.
+        // 2. Stop the background extraction processor. It owns the
+        //    background MuPDFWorkerClient and an in-flight extraction may
+        //    still be running; the stop() call aborts it cooperatively and
+        //    disposes the worker.
+        if (addon.backgroundExtractor) {
+            await withShutdownTimeout(
+                addon.backgroundExtractor.stop(),
+                "backgroundExtractor.stop",
+            );
+            addon.backgroundExtractor = undefined;
+        }
+
+        // 3. Terminate the remaining MuPDF worker(s). Sentencex lives
+        //    inside the worker and dies with `worker.terminate()`. With
+        //    `name` omitted, disposes any slot still alive (the hot one
+        //    in the steady state; the background slot was already
+        //    disposed by step 2).
         await withShutdownTimeout(disposeMuPDFWorker(), "disposeMuPDFWorker");
 
         addon.documentCache = undefined;
 
-        // 3. Close database connection
+        // 4. Close database connection
         if (addon.db) {
             await withShutdownTimeout(addon.db.closeDatabase(), "closeDatabase");
             addon.db = undefined;
@@ -633,7 +665,14 @@ async function onShutdown(): Promise<void> {
         try {
             await cleanupSupabaseWindowState(Zotero.getMainWindow());
         } catch (_e) { /* may not be available during shutdown */ }
-    
+
+        if (addon.backgroundExtractor) {
+            try {
+                await addon.backgroundExtractor.stop();
+            } catch (_e) { /* best-effort */ }
+            addon.backgroundExtractor = undefined;
+        }
+
         await disposeMuPDFWorker();
 
         addon.documentCache = undefined;

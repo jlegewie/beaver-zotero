@@ -82,6 +82,12 @@ import {
     handleTestPdfExtractTraceHttpRequest,
     handleTestPdfAnalyzeLayoutHttpRequest,
 } from './httpHandlers/testPdfHandlers';
+import {
+    handleTestBackgroundEnqueueHttpRequest,
+    handleTestBackgroundStatsHttpRequest,
+    handleTestBackgroundPeekHttpRequest,
+    handleTestBackgroundProcessOnceHttpRequest,
+} from './httpHandlers/testBackgroundHandlers';
 import type {
     WSZoteroDataRequest,
     WSExternalReferenceCheckRequest,
@@ -187,6 +193,11 @@ const ENDPOINT_PATHS = [
     // Document-wide style + margin analysis context (mirrors what
     // `extract({ mode: "structured" })` builds before per-page processing)
     '/beaver/test/pdf-analyze-layout',
+    // Background queue inspection / driving (dev-only)
+    '/beaver/test/background-enqueue',
+    '/beaver/test/background-stats',
+    '/beaver/test/background-peek',
+    '/beaver/test/background-process-once',
 ] as const;
 
 /**
@@ -767,6 +778,19 @@ function registerEndpoints(): boolean {
         // debugging.
         Zotero.Server.Endpoints['/beaver/test/pdf-analyze-layout'] =
             createEndpoint(handleTestPdfAnalyzeLayoutHttpRequest);
+
+        // Background queue (dev-only)
+        Zotero.Server.Endpoints['/beaver/test/background-enqueue'] =
+            createEndpoint(handleTestBackgroundEnqueueHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/background-stats'] =
+            createEndpoint(handleTestBackgroundStatsHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/background-peek'] =
+            createEndpoint(handleTestBackgroundPeekHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/background-process-once'] =
+            createEndpoint(handleTestBackgroundProcessOnceHttpRequest);
     }
 
     logger(`useHttpEndpoints: Registered ${ENDPOINT_PATHS.length} HTTP endpoints`, 3);

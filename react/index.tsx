@@ -31,8 +31,8 @@ import { BeaverTemporaryAnnotations } from './utils/annotationUtils';
 // Configure the PDF package (webpack bundle copy). The esbuild bundle
 // configures its own copy from `src/hooks.ts`. Both must run because each
 // bundle has its own module-scope config in `src/beaver-extract/config.ts`.
-// The cross-bundle `MuPDFWorkerClient` singleton is shared via
-// `Zotero.__beaverMuPDFWorkerClient` regardless.
+// The cross-bundle `MuPDFWorkerClient` per-name singletons are shared via
+// `Zotero.__beaverMuPDFWorkerClient_hot` / `_background` regardless.
 configurePDFForBeaver();
 
 /**

@@ -1,14 +1,24 @@
 /**
  * MuPDFWorkerClient — main-thread client for the MuPDF WASM worker.
  *
- * Cross-bundle singleton: the client lives in a slot supplied by
- * `getConfig().workerClientSlot` — the host wires this to a shared
- * global so every bundle that imports this file (transitively or
- * directly) sees the same client. Module-scope state would otherwise
- * create one worker per bundle and shutdown would only dispose one of
- * them.
+ * Cross-bundle per-name singletons: each client lives in the slot
+ * supplied by `getConfig().workerClientSlots[name]` — the host wires
+ * those slots to shared globals so every bundle that imports this file
+ * (transitively or directly) sees the same client per name. Module-scope
+ * state would otherwise create one worker per bundle and shutdown would
+ * only dispose one of them.
+ *
+ * Two names are defined: `"hot"` (user-facing agent work) and
+ * `"background"` (long-running background extraction). They run as
+ * independent workers with independent WASM heaps so a leak or long
+ * extract in one slot does not block the other.
  */
-import { getConfig, isConfigured, type PDFWorkerUrls } from "./config";
+import {
+    getConfig,
+    isConfigured,
+    type PDFWorkerSlotName,
+    type PDFWorkerUrls,
+} from "./config";
 import {
     ExtractionError,
     ExtractionErrorCode,
@@ -34,17 +44,52 @@ import type {
 } from "./sentenceTypes";
 import type { ParagraphDetectionSettings } from "./ParagraphDetector";
 
-const DEFAULT_IDLE_TIMEOUT_MS = 5 * 60 * 1000;
-let idleTimeoutMs = DEFAULT_IDLE_TIMEOUT_MS;
+const DEFAULT_IDLE_TIMEOUT_MS_HOT = 5 * 60 * 1000;
+const DEFAULT_IDLE_TIMEOUT_MS_BACKGROUND = 60 * 1000;
 
-/** Test-only: shorten the idle timeout so teardown can be asserted fast. */
-export function __setIdleTimeoutForTest(ms: number): void {
-    idleTimeoutMs = ms;
+function defaultIdleTimeoutForSlot(name: PDFWorkerSlotName): number {
+    return name === "background"
+        ? DEFAULT_IDLE_TIMEOUT_MS_BACKGROUND
+        : DEFAULT_IDLE_TIMEOUT_MS_HOT;
 }
 
-/** Test-only: restore the production idle timeout. */
-export function __resetIdleTimeoutForTest(): void {
-    idleTimeoutMs = DEFAULT_IDLE_TIMEOUT_MS;
+/**
+ * Test-time idle timeout overrides keyed by slot name. New `MuPDFWorkerClient`
+ * instances pick these up at construction so tests can shorten timeouts
+ * before triggering a spawn.
+ */
+const testIdleTimeoutOverrides: Partial<Record<PDFWorkerSlotName, number>> = {};
+
+/**
+ * Test-only override of the idle timeout. Accepts either the historical
+ * single-arg `(ms)` form (defaults to the `"hot"` slot) or the new
+ * `(name, ms)` form for per-slot overrides.
+ */
+export function __setIdleTimeoutForTest(
+    arg1: number | PDFWorkerSlotName,
+    arg2?: number,
+): void {
+    const name: PDFWorkerSlotName =
+        typeof arg1 === "string" ? arg1 : "hot";
+    const ms = typeof arg1 === "number" ? arg1 : arg2!;
+    testIdleTimeoutOverrides[name] = ms;
+    const slot = isConfigured() ? getConfig().workerClientSlots[name] : null;
+    const existing = slot?.get() as MuPDFWorkerClient | undefined;
+    if (existing) {
+        existing.setIdleTimeoutForTest(ms);
+    }
+}
+
+/** Test-only: restore the production idle timeout for a slot (default hot). */
+export function __resetIdleTimeoutForTest(
+    name: PDFWorkerSlotName = "hot",
+): void {
+    delete testIdleTimeoutOverrides[name];
+    const slot = isConfigured() ? getConfig().workerClientSlots[name] : null;
+    const existing = slot?.get() as MuPDFWorkerClient | undefined;
+    if (existing) {
+        existing.setIdleTimeoutForTest(defaultIdleTimeoutForSlot(name));
+    }
 }
 
 interface PendingEntry {
@@ -160,6 +205,8 @@ export class WorkerAbortError extends Error {
 }
 
 export class MuPDFWorkerClient {
+    private readonly slotName: PDFWorkerSlotName;
+    private idleTimeoutMs: number;
     private worker: Worker | null = null;
     private spawnedFromWindowInternal: Window | null = null;
     private startup: StartupEntry | null = null;
@@ -190,9 +237,31 @@ export class MuPDFWorkerClient {
     // whole PDF on the UI thread before posting work to the worker.
     private pdfDigestCache = new WeakMap<object, Map<string, string>>();
 
+    constructor(opts: {
+        slotName?: PDFWorkerSlotName;
+        idleTimeoutMs?: number;
+    } = {}) {
+        this.slotName = opts.slotName ?? "hot";
+        const override = testIdleTimeoutOverrides[this.slotName];
+        this.idleTimeoutMs =
+            opts.idleTimeoutMs
+            ?? override
+            ?? defaultIdleTimeoutForSlot(this.slotName);
+    }
+
     /** The window that spawned the current worker. Used for stale detection. */
     get spawnedFromWindow(): Window | null {
         return this.spawnedFromWindowInternal;
+    }
+
+    /** The logical slot name this client owns. */
+    get name(): PDFWorkerSlotName {
+        return this.slotName;
+    }
+
+    /** Test-only: change the idle timeout on a live instance. */
+    setIdleTimeoutForTest(ms: number): void {
+        this.idleTimeoutMs = ms;
     }
 
     private clearIdleTimer(): void {
@@ -209,7 +278,7 @@ export class MuPDFWorkerClient {
             this.idleTimerId = undefined;
             if (this.disposed || !this.worker || this.pending.size !== 0) return;
             this.markStale("idle timeout");
-        }, idleTimeoutMs);
+        }, this.idleTimeoutMs);
         (id as any)?.unref?.();
         this.idleTimerId = id;
     }
@@ -1152,7 +1221,7 @@ export class MuPDFWorkerClient {
         this.disposed = true;
         this.markStale("dispose");
         if (isConfigured()) {
-            const slot = getConfig().workerClientSlot;
+            const slot = getConfig().workerClientSlots[this.slotName];
             if (slot.get() === this) {
                 slot.set(undefined);
             }
@@ -1316,33 +1385,58 @@ function stableStringify(value: unknown): string {
 }
 
 /**
- * Get (or lazily spawn) the cross-bundle MuPDFWorkerClient singleton. The
- * actual storage location lives in `getConfig().workerClientSlot` — the
- * host wires that slot to a shared global so every bundle resolves to the
- * same client instance.
+ * Get (or lazily spawn) the cross-bundle MuPDFWorkerClient for `name`. The
+ * actual storage location lives in `getConfig().workerClientSlots[name]` —
+ * the host wires each slot to a shared global so every bundle resolves to
+ * the same client instance per name. Defaults to `"hot"` so existing call
+ * sites stay valid.
  */
-export function getMuPDFWorkerClient(): MuPDFWorkerClient {
-    const slot = getConfig().workerClientSlot;
+export function getMuPDFWorkerClient(
+    name: PDFWorkerSlotName = "hot",
+): MuPDFWorkerClient {
+    const slot = getConfig().workerClientSlots[name];
     const existing = slot.get() as MuPDFWorkerClient | undefined;
     if (existing) return existing;
-    const client = new MuPDFWorkerClient();
+    const client = new MuPDFWorkerClient({ slotName: name });
     slot.set(client);
     return client;
 }
 
 /**
- * Dispose the singleton MuPDFWorkerClient. Safe to call multiple times.
+ * Read the existing client in `name`'s slot without spawning. Returns
+ * `null` when the slot is empty or the package isn't configured. Used by
+ * introspection paths (dev stats, cooperative throttle) that must not
+ * pollute the slot just to peek.
+ */
+export function getExistingMuPDFWorkerClient(
+    name: PDFWorkerSlotName = "hot",
+): MuPDFWorkerClient | null {
+    if (!isConfigured()) return null;
+    const slot = getConfig().workerClientSlots[name];
+    const existing = slot.get() as MuPDFWorkerClient | undefined;
+    return existing ?? null;
+}
+
+/**
+ * Dispose the MuPDFWorkerClient for the given slot, or both when `name`
+ * is omitted. Safe to call multiple times.
  *
  * Early-returns when the package was never configured (e.g. error paths
  * during shutdown that run before `configurePDF` ever fired). The async
  * signature lets callers `await` it uniformly with other shutdown steps,
  * even though the underlying `worker.terminate()` is synchronous.
  */
-export async function disposeMuPDFWorker(): Promise<void> {
+export async function disposeMuPDFWorker(
+    name?: PDFWorkerSlotName,
+): Promise<void> {
     if (!isConfigured()) return;
-    const existing = getConfig().workerClientSlot.get() as
-        | MuPDFWorkerClient
-        | undefined;
-    if (!existing) return;
-    existing.dispose();
+    const slots = getConfig().workerClientSlots;
+    const targets: PDFWorkerSlotName[] =
+        name === undefined ? ["hot", "background"] : [name];
+    for (const slotName of targets) {
+        const existing = slots[slotName].get() as
+            | MuPDFWorkerClient
+            | undefined;
+        if (existing) existing.dispose();
+    }
 }
