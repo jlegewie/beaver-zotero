@@ -41,7 +41,7 @@ import { logger } from '../utils/logger';
 import { safeIsInTrash } from '../utils/zoteroUtils';
 
 const IDLE_INTERVAL_MS = 30_000;
-const BUSY_INTERVAL_MS = 250;
+const BUSY_INTERVAL_MS = 10;
 const VISIBILITY_TIMEOUT_MS = 6 * 60_000;
 const RECYCLE_AFTER_N = 8;
 const MAX_ATTEMPTS = 3;
