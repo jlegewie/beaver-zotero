@@ -577,6 +577,13 @@ export interface BackgroundEnqueueRequest {
     priority?: number;
     payload?: BackgroundJobPayload | null;
     item_id?: number | null;
+    /**
+     * Wake the background loop after inserting. Defaults to `false` so
+     * tests can inspect deterministic queue state via peek/stats without
+     * the auto-tick claiming the row. Tests that exercise the auto-drain
+     * path pass `true` and pair it with `waitForQueueDrain()`.
+     */
+    notify?: boolean;
 }
 
 export interface BackgroundEnqueueResponse {
@@ -645,4 +652,36 @@ export async function backgroundProcessOnce(): Promise<BackgroundProcessOnceResp
 
 export async function backgroundClear(): Promise<{ ok: boolean; error?: string }> {
     return post('/beaver/test/background-clear', {});
+}
+
+/**
+ * Poll `/beaver/test/background-stats` until `queue.pending` is zero (or
+ * the timeout expires). The producer-side `notify()` in
+ * `handleTestBackgroundEnqueueHttpRequest` schedules a tick at 0ms that
+ * races the explicit `processOnce` HTTP call. For fast-completing jobs
+ * (missing item, non-PDF) the row may be drained by the background loop
+ * before `processOnce` claims it, so tests cannot rely on a deterministic
+ * winner. This helper waits for the queue to actually drain and returns
+ * the final stats snapshot.
+ */
+export async function waitForQueueDrain(
+    opts: { timeoutMs?: number; pollMs?: number } = {},
+): Promise<BackgroundQueueStats> {
+    const timeoutMs = opts.timeoutMs ?? 30_000;
+    const pollMs = opts.pollMs ?? 100;
+    const start = Date.now();
+    let lastStats: BackgroundQueueStats | null = null;
+    while (Date.now() - start < timeoutMs) {
+        const stats = await backgroundStats();
+        if (stats.queue) {
+            lastStats = stats.queue;
+            if (stats.queue.pending === 0) return stats.queue;
+        }
+        await new Promise((r) => setTimeout(r, pollMs));
+    }
+    throw new Error(
+        `background queue did not drain within ${timeoutMs}ms; last stats: ${JSON.stringify(
+            lastStats,
+        )}`,
+    );
 }

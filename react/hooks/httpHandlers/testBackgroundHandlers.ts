@@ -21,6 +21,14 @@ interface EnqueueRequest {
     priority?: number;
     payload?: BackgroundJobPayload | null;
     item_id?: number | null;
+    /**
+     * Whether to wake the background loop after inserting the row.
+     * Defaults to `false` so live tests can inspect deterministic
+     * queue state (peek, stats) without the auto-tick claiming the row
+     * before the assertion. Tests that intentionally exercise the
+     * auto-drain path pass `true` and pair it with a polling helper.
+     */
+    notify?: boolean;
 }
 
 export async function handleTestBackgroundEnqueueHttpRequest(
@@ -36,6 +44,7 @@ export async function handleTestBackgroundEnqueueHttpRequest(
         priority,
         payload,
         item_id,
+        notify,
     } = request;
     if (library_id == null || !zotero_key || !mode || !job_type) {
         return {
@@ -54,9 +63,13 @@ export async function handleTestBackgroundEnqueueHttpRequest(
         now: Date.now(),
     };
     const result = await db.enqueueBackgroundJob(input);
-    // Wake the background loop so manual dev enqueues are picked up
-    // immediately rather than on the next idle poll.
-    Zotero.Beaver?.backgroundExtractor?.notify();
+    if (notify === true) {
+        // Wake the background loop so the auto-tick picks up the row
+        // immediately. Off by default for deterministic test inspection;
+        // production callers exercise the wake path via the real
+        // `handleZoteroDocumentRequest` timeout branch instead.
+        Zotero.Beaver?.backgroundExtractor?.notify();
+    }
     return { ok: true, enqueued: result.enqueued, id: result.id };
 }
 
