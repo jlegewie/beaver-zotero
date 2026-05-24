@@ -131,6 +131,7 @@ import { markExternalReferenceImportedAtom } from './externalReferences';
 import type { CreateItemProposedData, CreateItemResultData } from '../types/agentActions/items';
 import { appendRunIfMissing, findResumeChainRoot, findRunForResume, hasOnlyThinkingParts, resolveErrorRunId, toRunError } from '../agents/runResumeHelpers';
 import { prewarmMuPDFWorker } from '../../src/beaver-extract';
+import { BeaverTemporaryAnnotations } from '../utils/annotationUtils';
 
 // =============================================================================
 // Helper Functions
@@ -270,6 +271,17 @@ function buildModelSelectionOptions(model: ModelConfig | null): ModelSelectionOp
     }
 
     return options;
+}
+
+/**
+ * Clear reader-only citation highlights before removing the runs that created them.
+ */
+async function cleanupTemporaryAnnotationsForRunReplacement(logPrefix: string): Promise<void> {
+    try {
+        await BeaverTemporaryAnnotations.cleanupAll();
+    } catch (error) {
+        logger(`${logPrefix}: Error cleaning up temporary annotations: ${error}`);
+    }
 }
 
 /**
@@ -528,6 +540,8 @@ async function startAutoRetryRun(
         // reflects what the backend will delete via retry_run_id.
         const rootIndex = threadRuns.findIndex(r => r.id === rootRun.id);
         if (rootIndex >= 0) {
+            await cleanupTemporaryAnnotationsForRunReplacement(logPrefix);
+
             const runIdsToRemove = threadRuns.slice(rootIndex).map(r => r.id);
             set(threadRunsAtom, threadRuns.slice(0, rootIndex));
             set(threadAgentActionsAtom, prev => prev.filter(a => !runIdsToRemove.includes(a.run_id)));
@@ -2026,6 +2040,8 @@ export const regenerateFromRunAtom = atom(
                 }
             }
 
+            await cleanupTemporaryAnnotationsForRunReplacement('regenerateFromRunAtom');
+
             // Truncate runs - keep only runs before the target
             const truncatedRuns = threadRuns.slice(0, runIndex);
             set(threadRunsAtom, truncatedRuns);
@@ -2206,6 +2222,8 @@ export const regenerateWithEditedPromptAtom = atom(
                     await undoAppliedActionsInReverse(actionsInRemovedRuns);
                 }
             }
+
+            await cleanupTemporaryAnnotationsForRunReplacement('regenerateWithEditedPromptAtom');
 
             // Truncate runs - keep only runs before the target
             const truncatedRuns = threadRuns.slice(0, runIndex);
