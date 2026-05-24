@@ -95,9 +95,12 @@ vi.mock('../../../react/atoms/profile', () => ({
     searchableLibraryIdsAtom: { toString: () => 'searchableLibraryIdsAtom' },
 }));
 
-vi.mock('../../../src/services/agentDataProvider/utils', async () => {
-    const actual = await vi.importActual<typeof import('../../../src/services/agentDataProvider/utils')>(
-        '../../../src/services/agentDataProvider/utils',
+// `documentExtractionCore` imports these helpers directly from
+// `documentExtraction`. `utils.ts` only re-exports them — mocking it would
+// not intercept the call, so mock the shared module instead.
+vi.mock('../../../src/services/documentExtraction', async () => {
+    const actual = await vi.importActual<typeof import('../../../src/services/documentExtraction')>(
+        '../../../src/services/documentExtraction',
     );
     return {
         ...actual,
@@ -110,7 +113,7 @@ vi.mock('../../../src/services/agentDataProvider/utils', async () => {
 });
 
 import { handleZoteroDocumentRequest } from '../../../src/services/agentDataProvider/handleZoteroDocumentRequest';
-import { resolveToPdfAttachment, loadPdfData } from '../../../src/services/agentDataProvider/utils';
+import { resolveToPdfAttachment, loadPdfData } from '../../../src/services/documentExtraction';
 
 describe('handleZoteroDocumentRequest document cache integration', () => {
     const resolvedPdfItem = {

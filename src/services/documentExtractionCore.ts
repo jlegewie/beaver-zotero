@@ -44,7 +44,7 @@ import {
     checkRemotePdfSize,
     isRemoteAccessAvailable,
     preflightCachedPdfMeta,
-} from './agentDataProvider/utils';
+} from './documentExtraction';
 
 export interface ResolvedAttachment {
     libraryId: number;
@@ -71,6 +71,11 @@ export interface ExtractAndCacheArgs {
      * release the work without counting it as a failure.
      */
     externalAbortSignal?: AbortSignal;
+    /**
+     * Invoked once on remote-download failure (before the error is rethrown
+     * internally)
+     */
+    onRemoteDownloadFailure?: (error: unknown) => void;
 }
 
 export type ExtractAndCacheResult =
@@ -355,7 +360,7 @@ export async function extractAndCacheDocument(
 
         if (totalPages == null) {
             try {
-                pdfData = await loadPdfData(pdfItem, effectiveFilePath, isRemoteOnly);
+                pdfData = await loadPdfData(pdfItem, effectiveFilePath, isRemoteOnly, args.onRemoteDownloadFailure);
                 throwIfTimedOut('pdf_data_load_for_page_count');
             } catch (error) {
                 if (aborted()) return aborted()!;
@@ -408,7 +413,7 @@ export async function extractAndCacheDocument(
 
         if (!pdfData) {
             try {
-                pdfData = await loadPdfData(pdfItem, effectiveFilePath, isRemoteOnly);
+                pdfData = await loadPdfData(pdfItem, effectiveFilePath, isRemoteOnly, args.onRemoteDownloadFailure);
                 throwIfTimedOut('pdf_data_load');
             } catch (error) {
                 if (aborted()) return aborted()!;

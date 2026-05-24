@@ -38,7 +38,9 @@ import type { DocumentCache } from './documentCache';
  */
 type QueueDB = NonNullable<typeof Zotero.Beaver.db>;
 import { logger } from '../utils/logger';
-import { safeIsInTrash } from '../utils/zoteroUtils';
+// Import `safeIsInTrash` from the react-free helper module
+import { safeIsInTrash } from '../utils/zoteroItemUtils';
+import { createAbortController } from '../utils/abortController';
 
 const IDLE_INTERVAL_MS = 30_000;
 const BUSY_INTERVAL_MS = 10;
@@ -235,7 +237,10 @@ export class BackgroundExtractor {
     }
 
     private async runJob(record: BackgroundJobRecord, db: QueueDB): Promise<void> {
-        const abortController = new AbortController();
+        // Use the shim from `../utils/abortController`: in the chrome JS
+        // realm where this runs, `AbortController` is not a top-level
+        // global — it lives on the main window instead.
+        const abortController = createAbortController();
         this.inFlightAbortController = abortController;
         this.inFlightJobId = record.id;
         const completion = this.processJob(record, db, abortController.signal);

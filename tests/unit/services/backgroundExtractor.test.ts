@@ -36,7 +36,9 @@ vi.mock('../../../src/beaver-extract', () => ({
     }),
 }));
 
-vi.mock('../../../src/utils/zoteroUtils', () => ({
+// `backgroundExtractor.ts` imports `safeIsInTrash` from `zoteroItemUtils`
+// (the react-free helper module), not `zoteroUtils`.
+vi.mock('../../../src/utils/zoteroItemUtils', () => ({
     safeIsInTrash: vi.fn(() => false),
 }));
 
@@ -134,7 +136,7 @@ describe('BackgroundExtractor', () => {
     });
 
     it('completes the job when the item is in the trash', async () => {
-        const { safeIsInTrash } = await import('../../../src/utils/zoteroUtils');
+        const { safeIsInTrash } = await import('../../../src/utils/zoteroItemUtils');
         (safeIsInTrash as any).mockReturnValueOnce(true);
         await db.enqueueBackgroundJob({
             jobType: 'hot_timeout_retry',

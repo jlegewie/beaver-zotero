@@ -15,6 +15,10 @@ import {
 import type { ZoteroDocumentErrorCode } from '../agentProtocol';
 import { extractAndCacheDocument } from '../documentExtractionCore';
 import { MAX_PDF_TIMEOUT_SECONDS } from './timeout';
+// Hot-path handler keeps the remote-download-failed popup behavior by
+// passing the popup notifier through `onRemoteDownloadFailure`. The
+// background extractor deliberately omits it.
+import { notifyRemoteDownloadFailure } from './utils';
 
 /**
  * Handle zotero_document_request event.
@@ -45,6 +49,7 @@ export async function handleZoteroDocumentRequest(
         maxFileSizeMB: max_file_size_mb ?? 0,
         timeoutSeconds: timeout_seconds ?? 0,
         workerName: 'hot',
+        onRemoteDownloadFailure: notifyRemoteDownloadFailure,
     });
 
     if (result.kind === 'ok') {
