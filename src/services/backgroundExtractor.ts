@@ -79,6 +79,21 @@ export class BackgroundExtractor {
     private inFlightJobId: number | null = null;
     private jobsProcessedSinceRecycle = 0;
     /**
+     * True while `tick()` is executing (from entry to its `finally`).
+     * Used to (1) bounce re-entrant ticks when two timers race, and
+     * (2) tell `notify()` to defer the wake to the active tick instead
+     * of scheduling a parallel one.
+     */
+    private tickRunning = false;
+    /**
+     * Set by `notify()` when a tick is already running. The active
+     * tick's tail consumes it to reschedule at 0ms, overriding its
+     * default idle reschedule. Prevents the wake from being dropped
+     * when an enqueue races with a tick that's about to schedule
+     * `IDLE_INTERVAL_MS`.
+     */
+    private pendingWake = false;
+    /**
      * Latched once shutdown is observed (via `Zotero.__beaverShuttingDown`
      * or `stop()` called during shutdown).
      */
@@ -90,6 +105,7 @@ export class BackgroundExtractor {
         this.started = true;
         this.stopRequested = false;
         this.dbWritesPermanentlyDisabled = false;
+        this.pendingWake = false;
         this.scheduleTick(BUSY_INTERVAL_MS);
     }
 
@@ -119,6 +135,7 @@ export class BackgroundExtractor {
             logger(`BackgroundExtractor.stop: disposeMuPDFWorker failed: ${e}`, 1);
         }
         this.started = false;
+        this.pendingWake = false;
     }
 
     /**
@@ -129,30 +146,38 @@ export class BackgroundExtractor {
     }
 
     /**
-     * Producer-side wake. Producers call this after enqueueing a job they
-     * want picked up immediately, instead of waiting for the next idle tick
-     * (up to `IDLE_INTERVAL_MS`). Safe to call any time.
+     * Producer-side wake. Producers call this after enqueueing a job
+     * they want picked up immediately, instead of waiting for the next
+     * idle tick (up to `IDLE_INTERVAL_MS`). Safe to call any time.
      *
      * Behavior:
-     *  - No-op when the processor is not started, has been stopped, or is
-     *    in (latched) shutdown — the wake should not resurrect a stopped
-     *    loop.
-     *  - No-op when a job is already in flight. The active `tick()` will
-     *    reschedule itself when it finishes, so an extra wake is wasted.
-     *  - Otherwise reschedules the next tick to fire immediately. If a
-     *    longer-delay idle timer was pending, `scheduleTick(0)` cancels it
-     *    via `clearTimeout` before installing the new one.
+     *  - No-op when the processor is not started, has been stopped, or
+     *    is in (latched) shutdown.
+     *  - When a tick is already running (or a job is in flight from a
+     *    direct `processOnce()` call), records a `pendingWake` that the
+     *    active tick's tail consumes by rescheduling at 0ms instead of
+     *    `IDLE_INTERVAL_MS`. This avoids two failure modes:
+     *      (a) Scheduling a parallel 0ms tick that the active tick's
+     *          own reschedule later cancels — dropping the wake.
+     *      (b) Two ticks entering `processOnce()` concurrently and
+     *          claiming different rows, leaking the first job's abort
+     *          controller (only the latest `inFlight` is tracked).
+     *  - Otherwise (idle, between ticks): reschedules the next tick to
+     *    fire immediately.
      *
-     * Bulk producers (e.g. library indexers) should call this **once after
-     * a batch commit**, not per row, to avoid thrashing the timer and to
-     * sidestep visibility races where the tick fires before the
-     * transaction commits.
+     * Bulk producers (e.g. library indexers) should call this **once
+     * after a batch commit**, not per row, to avoid thrashing the
+     * timer and to sidestep visibility races where the tick fires
+     * before the transaction commits.
      */
     notify(): void {
         if (!this.started || this.stopRequested) return;
         if (this.dbWritesPermanentlyDisabled) return;
         if (Zotero.__beaverShuttingDown === true) return;
-        if (this.inFlight) return;
+        if (this.tickRunning || this.inFlight) {
+            this.pendingWake = true;
+            return;
+        }
         this.scheduleTick(0);
     }
 
@@ -239,29 +264,49 @@ export class BackgroundExtractor {
 
     private async tick(): Promise<void> {
         if (this.stopRequested) return;
+        // Re-entrancy guard: if a stale timer races with the active
+        // tick (e.g. two timers queued before the first set
+        // `currentTickId = undefined`), bail out cleanly so two ticks
+        // do not run `processOnce()` in parallel.
+        if (this.tickRunning) return;
+        this.tickRunning = true;
+        try {
+            const result = await this.processOnce();
 
-        const result = await this.processOnce();
+            if (this.stopRequested) return;
 
-        if (this.stopRequested) return;
-
-        if (result.processed) {
-            this.jobsProcessedSinceRecycle += 1;
-            if (this.jobsProcessedSinceRecycle >= RECYCLE_AFTER_N) {
-                try {
-                    await disposeMuPDFWorker('background');
-                } catch (e) {
-                    logger(
-                        `BackgroundExtractor: recycle disposeMuPDFWorker failed: ${e}`,
-                        1,
-                    );
+            if (result.processed) {
+                this.jobsProcessedSinceRecycle += 1;
+                if (this.jobsProcessedSinceRecycle >= RECYCLE_AFTER_N) {
+                    try {
+                        await disposeMuPDFWorker('background');
+                    } catch (e) {
+                        logger(
+                            `BackgroundExtractor: recycle disposeMuPDFWorker failed: ${e}`,
+                            1,
+                        );
+                    }
+                    this.jobsProcessedSinceRecycle = 0;
                 }
-                this.jobsProcessedSinceRecycle = 0;
             }
-            this.scheduleTick(BUSY_INTERVAL_MS);
-            return;
-        }
 
-        this.scheduleTick(IDLE_INTERVAL_MS);
+            // Always honor a wake recorded during this tick — even when
+            // the queue was empty this iteration — so a notify() racing
+            // a pre-claim await is not swallowed by the default idle
+            // reschedule. JS is single-threaded between these two lines,
+            // so no notify() can sneak in and have its flag cleared.
+            const wakeNow = this.pendingWake;
+            this.pendingWake = false;
+            if (wakeNow) {
+                this.scheduleTick(0);
+                return;
+            }
+            this.scheduleTick(
+                result.processed ? BUSY_INTERVAL_MS : IDLE_INTERVAL_MS,
+            );
+        } finally {
+            this.tickRunning = false;
+        }
     }
 
     private async runJob(record: BackgroundJobRecord, db: QueueDB): Promise<void> {

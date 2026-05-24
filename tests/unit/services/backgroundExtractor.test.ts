@@ -689,7 +689,7 @@ describe('BackgroundExtractor', () => {
             setTimeoutSpy.mockRestore();
         });
 
-        it('is a no-op while a job is in flight', async () => {
+        it('records a pendingWake (instead of scheduling) while a job is in flight', async () => {
             await db.enqueueBackgroundJob({
                 jobType: 'hot_timeout_retry',
                 libraryId: 1,
@@ -712,7 +712,14 @@ describe('BackgroundExtractor', () => {
 
             const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
             proc.notify();
+            // No new timer installed: the wake is deferred to the active
+            // tick's tail to avoid racing it with a parallel 0ms timer
+            // that could be cleared (losing the wake) or fire concurrently
+            // (two ticks claim, only one inFlight tracked).
             expect(setTimeoutSpy).not.toHaveBeenCalled();
+            // The wake is recorded as pending so the next tick reschedules
+            // at 0 instead of IDLE_INTERVAL_MS.
+            expect((proc as any).pendingWake).toBe(true);
             setTimeoutSpy.mockRestore();
 
             // Clean up: let the in-flight job finish so stop() returns.
@@ -743,6 +750,78 @@ describe('BackgroundExtractor', () => {
                 (Zotero as any).__beaverShuttingDown = undefined;
                 await proc.stop();
             }
+        });
+
+        it('active tick consumes pendingWake and reschedules at 0 instead of IDLE_INTERVAL_MS', async () => {
+            // Queue intentionally empty: processOnce returns 'empty' and
+            // tick would normally reschedule at IDLE_INTERVAL_MS (30s).
+            // With pendingWake set, the tick must reschedule at 0 so an
+            // enqueue that raced with this tick is picked up immediately.
+            const { BackgroundExtractor } = await loadProcessor();
+            const proc = new BackgroundExtractor();
+            proc.start();
+
+            // Simulate a notify() that arrived while the tick was active.
+            (proc as any).pendingWake = true;
+
+            const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
+            try {
+                // Drive a tick body directly to avoid racing real timers.
+                await (proc as any).tick();
+                const lastCall = setTimeoutSpy.mock.calls.at(-1);
+                expect(lastCall?.[1]).toBe(0);
+                // Wake consumed.
+                expect((proc as any).pendingWake).toBe(false);
+            } finally {
+                setTimeoutSpy.mockRestore();
+                await proc.stop();
+            }
+        });
+
+        it('re-entrant tick() bails out cleanly so two ticks do not run processOnce in parallel', async () => {
+            await db.enqueueBackgroundJob({
+                jobType: 'hot_timeout_retry',
+                libraryId: 1,
+                zoteroKey: 'AAAAAAAA',
+                mode: 'structured',
+                payload: payload(),
+                now: 0,
+            });
+            // Suspend the first tick mid-extract so we can launch a
+            // second one against the same processor instance.
+            mockState.nextResult = new Promise<any>((resolve) => {
+                mockState.extractResolve = resolve;
+            });
+
+            const { BackgroundExtractor } = await loadProcessor();
+            const proc = new BackgroundExtractor();
+
+            // First tick: enters tickRunning=true, claims a job, awaits.
+            const t1 = (proc as any).tick();
+            // Yield enough microtasks for tick to enter processOnce and
+            // park on the suspended extract promise.
+            await new Promise((r) => setTimeout(r, 0));
+            expect((proc as any).tickRunning).toBe(true);
+            expect(mockState.extractCalls).toHaveLength(1);
+
+            // Second tick fires concurrently — must short-circuit via
+            // the re-entrancy guard without entering processOnce.
+            const t2 = (proc as any).tick();
+            await t2;
+            // No second extract invocation: the second tick bailed out.
+            expect(mockState.extractCalls).toHaveLength(1);
+
+            // Resolve the suspended extract so the first tick can finish.
+            mockState.extractResolve!({
+                kind: 'ok',
+                cached: false,
+                result: {} as any,
+                totalPages: 1,
+                resolvedAttachment: { libraryId: 1, zoteroKey: 'AAAAAAAA' },
+                contentType: 'application/pdf',
+            });
+            await t1;
+            expect((proc as any).tickRunning).toBe(false);
         });
     });
 
