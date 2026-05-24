@@ -128,6 +128,34 @@ export class BackgroundExtractor {
         await this.abortAndAwaitInFlight();
     }
 
+    /**
+     * Producer-side wake. Producers call this after enqueueing a job they
+     * want picked up immediately, instead of waiting for the next idle tick
+     * (up to `IDLE_INTERVAL_MS`). Safe to call any time.
+     *
+     * Behavior:
+     *  - No-op when the processor is not started, has been stopped, or is
+     *    in (latched) shutdown — the wake should not resurrect a stopped
+     *    loop.
+     *  - No-op when a job is already in flight. The active `tick()` will
+     *    reschedule itself when it finishes, so an extra wake is wasted.
+     *  - Otherwise reschedules the next tick to fire immediately. If a
+     *    longer-delay idle timer was pending, `scheduleTick(0)` cancels it
+     *    via `clearTimeout` before installing the new one.
+     *
+     * Bulk producers (e.g. library indexers) should call this **once after
+     * a batch commit**, not per row, to avoid thrashing the timer and to
+     * sidestep visibility races where the tick fires before the
+     * transaction commits.
+     */
+    notify(): void {
+        if (!this.started || this.stopRequested) return;
+        if (this.dbWritesPermanentlyDisabled) return;
+        if (Zotero.__beaverShuttingDown === true) return;
+        if (this.inFlight) return;
+        this.scheduleTick(0);
+    }
+
     private async abortAndAwaitInFlight(): Promise<void> {
         if (this.inFlightAbortController) {
             try {

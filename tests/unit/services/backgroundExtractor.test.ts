@@ -635,6 +635,117 @@ describe('BackgroundExtractor', () => {
         }
     });
 
+    describe('notify()', () => {
+        it('is a no-op before start() — does not schedule a tick', async () => {
+            const { BackgroundExtractor } = await loadProcessor();
+            const proc = new BackgroundExtractor();
+            const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
+            const initialCalls = setTimeoutSpy.mock.calls.length;
+
+            proc.notify();
+
+            expect(setTimeoutSpy.mock.calls.length).toBe(initialCalls);
+            setTimeoutSpy.mockRestore();
+        });
+
+        it('after start(), reschedules the next tick to 0ms', async () => {
+            const { BackgroundExtractor } = await loadProcessor();
+            const proc = new BackgroundExtractor();
+            const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
+
+            // start() schedules a tick at BUSY_INTERVAL_MS (10).
+            proc.start();
+            try {
+                const callsAfterStart = setTimeoutSpy.mock.calls.length;
+                expect(callsAfterStart).toBeGreaterThan(0);
+                // Sanity-check the start delay was nonzero so the
+                // 0-delay assertion below is meaningful.
+                const startDelay = setTimeoutSpy.mock.calls[callsAfterStart - 1][1];
+                expect(startDelay).toBeGreaterThan(0);
+
+                proc.notify();
+
+                // notify() should have installed a fresh setTimeout
+                // with delay 0.
+                const lastCall = setTimeoutSpy.mock.calls.at(-1);
+                expect(lastCall?.[1]).toBe(0);
+            } finally {
+                // Tear down the scheduled tick so it does not fire into
+                // a later test.
+                await proc.stop();
+                setTimeoutSpy.mockRestore();
+            }
+        });
+
+        it('is a no-op after stop()', async () => {
+            const { BackgroundExtractor } = await loadProcessor();
+            const proc = new BackgroundExtractor();
+            proc.start();
+            await proc.stop();
+
+            const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
+            proc.notify();
+            expect(setTimeoutSpy).not.toHaveBeenCalled();
+            setTimeoutSpy.mockRestore();
+        });
+
+        it('is a no-op while a job is in flight', async () => {
+            await db.enqueueBackgroundJob({
+                jobType: 'hot_timeout_retry',
+                libraryId: 1,
+                zoteroKey: 'AAAAAAAA',
+                mode: 'structured',
+                payload: payload(),
+                now: 0,
+            });
+            mockState.nextResult = new Promise<any>((resolve) => {
+                mockState.extractResolve = resolve;
+            });
+
+            const { BackgroundExtractor } = await loadProcessor();
+            const proc = new BackgroundExtractor();
+            proc.start();
+            // Drive the tick once by calling processOnce directly so we
+            // can observe an in-flight job without racing the timer.
+            const processOncePromise = proc.processOnce();
+            await new Promise((r) => setTimeout(r, 0));
+
+            const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
+            proc.notify();
+            expect(setTimeoutSpy).not.toHaveBeenCalled();
+            setTimeoutSpy.mockRestore();
+
+            // Clean up: let the in-flight job finish so stop() returns.
+            mockState.extractResolve!({
+                kind: 'ok',
+                cached: false,
+                result: {} as any,
+                totalPages: 1,
+                resolvedAttachment: { libraryId: 1, zoteroKey: 'AAAAAAAA' },
+                contentType: 'application/pdf',
+            });
+            await processOncePromise;
+            await proc.stop();
+        });
+
+        it('is a no-op when Zotero.__beaverShuttingDown is set', async () => {
+            const { BackgroundExtractor } = await loadProcessor();
+            const proc = new BackgroundExtractor();
+            proc.start();
+            (Zotero as any).__beaverShuttingDown = true;
+
+            const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
+            try {
+                proc.notify();
+                expect(setTimeoutSpy).not.toHaveBeenCalled();
+            } finally {
+                setTimeoutSpy.mockRestore();
+                (Zotero as any).__beaverShuttingDown = undefined;
+                await proc.stop();
+            }
+        });
+    });
+
     it('skips failBackgroundJob during shutdown so transient errors do not write', async () => {
         await db.enqueueBackgroundJob({
             jobType: 'hot_timeout_retry',

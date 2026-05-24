@@ -88,6 +88,9 @@ export async function handleZoteroDocumentRequest(
                 },
                 now: Date.now(),
             });
+            // Wake the background loop so the retry starts immediately
+            // rather than waiting for the next idle poll.
+            Zotero.Beaver?.backgroundExtractor?.notify();
         } catch (e) {
             logger(`handleZoteroDocumentRequest: background enqueue failed: ${e}`, 1);
         }

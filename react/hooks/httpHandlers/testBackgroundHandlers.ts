@@ -54,6 +54,9 @@ export async function handleTestBackgroundEnqueueHttpRequest(
         now: Date.now(),
     };
     const result = await db.enqueueBackgroundJob(input);
+    // Wake the background loop so manual dev enqueues are picked up
+    // immediately rather than on the next idle poll.
+    Zotero.Beaver?.backgroundExtractor?.notify();
     return { ok: true, enqueued: result.enqueued, id: result.id };
 }
 
