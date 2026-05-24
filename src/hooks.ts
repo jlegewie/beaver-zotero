@@ -317,6 +317,15 @@ async function onStartup() {
         // If startup fails after opening the DB, close it immediately
         // to prevent AsyncShutdown timeout → FATAL ERROR crash.
         ztoolkit.log(`Startup failed, closing database: ${error}`);
+        // Stop the background extractor
+        try {
+            if (addon.backgroundExtractor) {
+                await addon.backgroundExtractor.stop();
+                addon.backgroundExtractor = undefined;
+            }
+        } catch (stopError) {
+            ztoolkit.log(`Failed to stop backgroundExtractor during startup error recovery: ${stopError}`);
+        }
         try {
             if (addon.db) {
                 await addon.db.closeDatabase();
@@ -400,6 +409,18 @@ async function onMainWindowUnload(win: Window): Promise<void> {
             ];
             for (const [name, client] of slots) {
                 if (client?.spawnedFromWindow === win) {
+                    // For the background slot, abort the processor's
+                    // in-flight job FIRST.
+                    if (name === "background" && addon.backgroundExtractor) {
+                        try {
+                            await withShutdownTimeout(
+                                addon.backgroundExtractor.abortInFlight(),
+                                "backgroundExtractor.abortInFlight",
+                            );
+                        } catch (_e) {
+                            // best-effort
+                        }
+                    }
                     await withShutdownTimeout(
                         disposeMuPDFWorker(name),
                         `disposeMuPDFWorker(${name})`,

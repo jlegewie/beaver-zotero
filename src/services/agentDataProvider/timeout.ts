@@ -5,7 +5,7 @@ export const DEFAULT_TIMEOUT_SECONDS = 25;
 export const DEFAULT_PAGES_TIMEOUT_SECONDS = 40;
 export const DEFAULT_SEARCH_TIMEOUT_SECONDS = 30;
 export const DEFAULT_IMAGES_TIMEOUT_SECONDS = 60;
-export const MAX_PDF_TIMEOUT_SECONDS = 120;
+export const MAX_PDF_TIMEOUT_SECONDS = 180;
 
 /** Timeout error for cooperative cancellation */
 export class TimeoutError extends Error {

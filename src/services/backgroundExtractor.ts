@@ -110,6 +110,23 @@ export class BackgroundExtractor {
             clearTimeout(this.currentTickId);
             this.currentTickId = undefined;
         }
+        await this.abortAndAwaitInFlight();
+        try {
+            await disposeMuPDFWorker('background');
+        } catch (e) {
+            logger(`BackgroundExtractor.stop: disposeMuPDFWorker failed: ${e}`, 1);
+        }
+        this.started = false;
+    }
+
+    /**
+     * Abort any in-flight job and wait for it to settle
+     */
+    async abortInFlight(): Promise<void> {
+        await this.abortAndAwaitInFlight();
+    }
+
+    private async abortAndAwaitInFlight(): Promise<void> {
         if (this.inFlightAbortController) {
             try {
                 this.inFlightAbortController.abort();
@@ -121,15 +138,9 @@ export class BackgroundExtractor {
             try {
                 await this.inFlight;
             } catch (_e) {
-                // logged below
+                // logged by processJob
             }
         }
-        try {
-            await disposeMuPDFWorker('background');
-        } catch (e) {
-            logger(`BackgroundExtractor.stop: disposeMuPDFWorker failed: ${e}`, 1);
-        }
-        this.started = false;
     }
 
     /**

@@ -444,6 +444,73 @@ describe('BackgroundExtractor', () => {
         expect(mockState.disposeCalls).toContain('background');
     });
 
+    it('abortInFlight() releases the in-flight job without stopping the processor or disposing the worker', async () => {
+        // Models the window-unload-but-app-alive case
+        await db.enqueueBackgroundJob({
+            jobType: 'hot_timeout_retry',
+            libraryId: 1,
+            zoteroKey: 'AAAAAAAA',
+            mode: 'structured',
+            payload: payload(),
+            now: 0,
+        });
+        mockState.nextResult = new Promise<any>((resolve) => {
+            mockState.extractResolve = resolve;
+        });
+
+        const { BackgroundExtractor } = await loadProcessor();
+        const proc = new BackgroundExtractor();
+        const processOncePromise = proc.processOnce();
+
+        await new Promise((r) => setTimeout(r, 0));
+        const claimedRows = await db.peekBackgroundJobs();
+        expect(claimedRows).toHaveLength(1);
+        const claimedAvailableAt = claimedRows[0].availableAt;
+        const beforeReleaseMs = Date.now();
+
+        // Abort without stopping. The processor should NOT mark itself
+        // stopped and should NOT dispose the worker.
+        const abortPromise = proc.abortInFlight();
+        mockState.extractResolve!({
+            kind: 'external_abort',
+            phase: 'external_abort',
+            pageCount: null,
+            resolvedAttachment: { libraryId: 1, zoteroKey: 'AAAAAAAA' },
+        });
+        await abortPromise;
+        await processOncePromise;
+
+        // Row released — available_at reset to roughly now(), well under
+        // the visibility-timeout-bump value captured pre-release. The
+        // attempt count is untouched (no failBackgroundJob fired).
+        const rows = await db.peekBackgroundJobs();
+        expect(rows).toHaveLength(1);
+        expect(rows[0].attemptCount).toBe(0);
+        expect(rows[0].availableAt).toBeLessThan(claimedAvailableAt);
+        expect(rows[0].availableAt).toBeGreaterThanOrEqual(beforeReleaseMs);
+
+        // abortInFlight does NOT dispose the background worker — the
+        // caller (onMainWindowUnload) does that as a separate step.
+        expect(mockState.disposeCalls).not.toContain('background');
+
+        // The processor is still runnable — a subsequent processOnce
+        // would attempt to claim again (proves we did not mark
+        // stopRequested / set started=false).
+        mockState.nextResult = { kind: 'ok', cached: false, result: {} as any, totalPages: 0, resolvedAttachment: { libraryId: 1, zoteroKey: 'AAAAAAAA' }, contentType: 'application/pdf' };
+        const followup = await proc.processOnce();
+        // The released row's available_at is ~now(), so the next claim
+        // should pick it up immediately and complete it.
+        expect(followup.processed).toBe(true);
+        expect(mockState.extractCalls).toHaveLength(2);
+    });
+
+    it('abortInFlight() is a no-op when there is no in-flight job', async () => {
+        const { BackgroundExtractor } = await loadProcessor();
+        const proc = new BackgroundExtractor();
+        await expect(proc.abortInFlight()).resolves.toBeUndefined();
+        expect(mockState.disposeCalls).toHaveLength(0);
+    });
+
     it('latches db-write disable when stop() is called during shutdown', async () => {
         await db.enqueueBackgroundJob({
             jobType: 'hot_timeout_retry',
