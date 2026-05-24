@@ -242,6 +242,10 @@ export class BackgroundExtractor {
         );
         if (!record) return { processed: false, reason: 'empty' };
 
+        logger(
+            `BackgroundExtractor: claimed job id=${record.id} type=${record.jobType} ${record.libraryId}-${record.zoteroKey} mode=${record.mode} attempt=${record.attemptCount + 1}`,
+            3,
+        );
         await this.runJob(record, db);
         return { processed: true, reason: 'job_done' };
     }
@@ -402,6 +406,10 @@ export class BackgroundExtractor {
         switch (result.kind) {
             case 'ok':
                 await db.completeBackgroundJob(record.id);
+                logger(
+                    `BackgroundExtractor: job id=${record.id} done (ok) pages=${result.totalPages}`,
+                    3,
+                );
                 dispatchBackgroundEvent('background-job:done', {
                     id: record.id,
                     reason: 'ok',
@@ -409,6 +417,10 @@ export class BackgroundExtractor {
                 return;
             case 'external_abort':
                 await db.releaseBackgroundJob(record.id, Date.now());
+                logger(
+                    `BackgroundExtractor: job id=${record.id} released (external_abort)`,
+                    3,
+                );
                 dispatchBackgroundEvent('background-job:done', {
                     id: record.id,
                     reason: 'external_abort',
@@ -416,6 +428,10 @@ export class BackgroundExtractor {
                 return;
             case 'cached_error':
                 await db.completeBackgroundJob(record.id);
+                logger(
+                    `BackgroundExtractor: job id=${record.id} done (cached_error:${result.code})`,
+                    3,
+                );
                 dispatchBackgroundEvent('background-job:done', {
                     id: record.id,
                     reason: `cached_error:${result.code}`,
@@ -446,6 +462,10 @@ export class BackgroundExtractor {
                     return;
                 }
                 await db.completeBackgroundJob(record.id);
+                logger(
+                    `BackgroundExtractor: job id=${record.id} done (terminal:${result.code})`,
+                    3,
+                );
                 dispatchBackgroundEvent('background-job:done', {
                     id: record.id,
                     reason: `terminal:${result.code}`,
@@ -467,7 +487,16 @@ export class BackgroundExtractor {
             now: Date.now(),
         });
         if (outcome.dead) {
+            logger(
+                `BackgroundExtractor: job id=${id} dead-lettered: ${error}`,
+                1,
+            );
             dispatchBackgroundEvent('background-job:dead', { id, error });
+        } else {
+            logger(
+                `BackgroundExtractor: job id=${id} failed, retry scheduled: ${error}`,
+                2,
+            );
         }
     }
 }

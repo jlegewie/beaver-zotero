@@ -547,7 +547,7 @@ export async function extractAndCacheDocument(
         }
 
         if (signal.aborted || error instanceof WorkerAbortError || error instanceof TimeoutError) {
-            logger(`extractAndCacheDocument: Timed out after ${timeoutSeconds}s`, 1);
+            logger(`extractAndCacheDocument[${workerName}]: Timed out after ${timeoutSeconds}s`, 1);
             return {
                 kind: 'timeout',
                 phase: error instanceof TimeoutError ? error.phase : 'unknown',
@@ -557,7 +557,7 @@ export async function extractAndCacheDocument(
             };
         }
 
-        logger(`extractAndCacheDocument: Extraction failed: ${error}`, 1);
+        logger(`extractAndCacheDocument[${workerName}]: Extraction failed: ${error}`, 1);
         const errorKey = resolvedAttachment
             ? `${resolvedAttachment.libraryId}-${resolvedAttachment.zoteroKey}`
             : requestKey;

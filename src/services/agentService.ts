@@ -298,7 +298,16 @@ export class AgentService {
                 api_key: sanitizedData.custom_model.api_key ? '[REDACTED]' : undefined
             };
         }
-        const sanitizedMessage = JSON.stringify(sanitizedData);
+        // Strip large payloads from the LOG copy only. The wire payload at
+        // line :311 uses the original `data`
+        if ('type' in sanitizedData && sanitizedData.type === 'zotero_attachment_page_images' && 'pages' in sanitizedData) {
+            const n = Array.isArray((sanitizedData as any).pages) ? (sanitizedData as any).pages.length : 0;
+            sanitizedData.pages = `[stripped ${n} page image(s) for log]`;
+        }
+        if ('type' in sanitizedData && sanitizedData.type === 'zotero_document' && 'result' in sanitizedData) {
+            sanitizedData.result = '[stripped document result for log]';
+        }
+        // Log the sanitized and stripped data
         logger(`AgentService: Sending "${sanitizedData.type}"`, sanitizedData, 1);
         
         this.ws.send(message);

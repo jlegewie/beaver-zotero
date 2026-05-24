@@ -316,17 +316,17 @@ export class MuPDFWorkerClient {
         const worker = new WorkerCtor(cfg.workerUrl, { type: "module" });
         this.spawnCount++;
         this.lastSpawnTime = Date.now();
-        cfg.log(`[MuPDFWorkerClient] spawned new worker`, 3);
+        cfg.log(`[MuPDFWorkerClient ${this.slotName}] spawned new worker`, 3);
         (worker as any).onmessage = (event: MessageEvent) =>
             this.onWorkerMessage(worker, event);
         (worker as any).onerror = (event: any) => {
             const message = event?.message || "worker onerror";
-            cfg.log(`[MuPDFWorkerClient] worker.onerror: ${message}`, 1);
+            cfg.log(`[MuPDFWorkerClient ${this.slotName}] worker.onerror: ${message}`, 1);
             this.markStale(`worker.onerror: ${message}`);
         };
         (worker as any).onmessageerror = (event: any) => {
             const message = event?.message || "worker onmessageerror";
-            cfg.log(`[MuPDFWorkerClient] worker.onmessageerror: ${message}`, 1);
+            cfg.log(`[MuPDFWorkerClient ${this.slotName}] worker.onmessageerror: ${message}`, 1);
             this.markStale(`worker.onmessageerror: ${message}`);
         };
 
@@ -425,7 +425,7 @@ export class MuPDFWorkerClient {
         const entry = this.pending.get(reply.id);
         if (!entry) {
             getConfig().log(
-                `[MuPDFWorkerClient] received reply for unknown id ${reply.id}`,
+                `[MuPDFWorkerClient ${this.slotName}] received reply for unknown id ${reply.id}`,
                 2,
             );
             return;
@@ -493,7 +493,7 @@ export class MuPDFWorkerClient {
             // shutdown teardown after configure has been wiped.
             if (isConfigured()) {
                 getConfig().log(
-                    `[MuPDFWorkerClient] markStale (${reason}); rejecting ${pendingCount} pending`,
+                    `[MuPDFWorkerClient ${this.slotName}] markStale (${reason}); rejecting ${pendingCount} pending`,
                     2,
                 );
             }
@@ -523,7 +523,7 @@ export class MuPDFWorkerClient {
             throw new WorkerAbortError();
         }
         this.dispatchCounts[op] = (this.dispatchCounts[op] ?? 0) + 1;
-        getConfig().log(`[MuPDFWorkerClient] dispatch op=${op}`, 3);
+        getConfig().log(`[MuPDFWorkerClient ${this.slotName}] dispatch op=${op}`, 3);
         try {
             return await this.dispatch<T>(op, args, opts.signal);
         } catch (e) {
@@ -537,7 +537,7 @@ export class MuPDFWorkerClient {
                 }
                 this.retryCount++;
                 getConfig().log(
-                    `[MuPDFWorkerClient] retry op=${op} after stale worker`,
+                    `[MuPDFWorkerClient ${this.slotName}] retry op=${op} after stale worker`,
                     2,
                 );
                 return await this.dispatch<T>(op, args, opts.signal);
@@ -1093,7 +1093,7 @@ export class MuPDFWorkerClient {
                 {},
             );
         } catch (e) {
-            getConfig().log(`[MuPDFWorkerClient] getCacheStats failed: ${e}`, 2);
+            getConfig().log(`[MuPDFWorkerClient ${this.slotName}] getCacheStats failed: ${e}`, 2);
             return null;
         }
     }
@@ -1119,7 +1119,7 @@ export class MuPDFWorkerClient {
             );
         } catch (e) {
             getConfig().log(
-                `[MuPDFWorkerClient] clearWorkerCacheForTest failed: ${e}`,
+                `[MuPDFWorkerClient ${this.slotName}] clearWorkerCacheForTest failed: ${e}`,
                 2,
             );
             return null;
