@@ -217,6 +217,19 @@ function addCitationKeys(keys: Set<string>, citation: CitationMetadata) {
             keys.add(externalCompatKey(ref.external_id, ref.loc));
         }
     }
+
+    if (citation.raw_tag) {
+        const match = citation.raw_tag.match(/^<citation\b([^>]*)/i);
+        if (match) {
+            const normalized = normalizeCitationTag(parseRawCitationAttributes(match[1] || ''));
+            if (normalized.ok) {
+                keys.add(requestedCitationKey(normalized.ref));
+                if (normalized.ref.kind === 'external') {
+                    keys.add(externalCompatKey(normalized.ref.external_id, normalized.ref.loc));
+                }
+            }
+        }
+    }
 }
 
 function getCitationMarkerBaseKeys(citation: CitationMetadata): string[] {

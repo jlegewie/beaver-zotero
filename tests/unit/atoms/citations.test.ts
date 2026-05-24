@@ -93,6 +93,33 @@ describe('citationDataByCitationKeyAtom', () => {
         expect(byKey['external:openalex:W1:p2']).toBe(data);
     });
 
+    it('indexes raw tag range keys when backend refs carry only the first locator', () => {
+        const store = createStore();
+        const data = citation({
+            citation_id: 'c1',
+            library_id: 1,
+            zotero_key: 'ATTACH',
+            raw_tag: '<citation att_id="1-ATTACH" sid="s343-s345"/>',
+            requested_ref: {
+                kind: 'zotero',
+                library_id: 1,
+                zotero_key: 'ATTACH',
+                loc: { kind: 'sentence', raw: 's343', value: '343' },
+            },
+            resolved_ref: {
+                kind: 'zotero',
+                library_id: 1,
+                zotero_key: 'ATTACH',
+                loc: { kind: 'sentence', raw: 's343', value: '343' },
+            },
+        });
+        store.set(citationDataMapAtom, { c1: data });
+
+        const byKey = store.get(citationDataByCitationKeyAtom);
+        expect(byKey['zotero:1-ATTACH:s343-s345']).toBe(data);
+        expect(byKey['zotero:1-ATTACH:s343']).toBe(data);
+    });
+
     it('indexes invalid citation fallback keys from normalized raw identity', () => {
         const store = createStore();
         const data = citation({
