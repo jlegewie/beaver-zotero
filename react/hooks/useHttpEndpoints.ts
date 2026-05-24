@@ -87,6 +87,7 @@ import {
     handleTestBackgroundStatsHttpRequest,
     handleTestBackgroundPeekHttpRequest,
     handleTestBackgroundProcessOnceHttpRequest,
+    handleTestBackgroundClearHttpRequest,
 } from './httpHandlers/testBackgroundHandlers';
 import type {
     WSZoteroDataRequest,
@@ -198,6 +199,7 @@ const ENDPOINT_PATHS = [
     '/beaver/test/background-stats',
     '/beaver/test/background-peek',
     '/beaver/test/background-process-once',
+    '/beaver/test/background-clear',
 ] as const;
 
 /**
@@ -791,6 +793,9 @@ function registerEndpoints(): boolean {
 
         Zotero.Server.Endpoints['/beaver/test/background-process-once'] =
             createEndpoint(handleTestBackgroundProcessOnceHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/background-clear'] =
+            createEndpoint(handleTestBackgroundClearHttpRequest);
     }
 
     logger(`useHttpEndpoints: Registered ${ENDPOINT_PATHS.length} HTTP endpoints`, 3);

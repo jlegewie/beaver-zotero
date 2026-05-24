@@ -530,3 +530,119 @@ export async function workerMarkStale(
 ): Promise<{ ok: boolean; before: WorkerStatsSnapshot; after: WorkerStatsSnapshot }> {
     return post('/beaver/test/worker-mark-stale', body);
 }
+
+// ---------------------------------------------------------------------------
+// Background extraction queue (dev-only)
+//
+// Talks to the `/beaver/test/background-*` endpoints registered in
+// `useHttpEndpoints.ts` from `react/hooks/httpHandlers/testBackgroundHandlers.ts`.
+// ---------------------------------------------------------------------------
+
+export type BackgroundJobType = 'hot_timeout_retry';
+
+export interface BackgroundJobPayload {
+    maxPages: number | null;
+    maxFileSizeMB: number;
+    timeoutSeconds: number;
+}
+
+export interface BackgroundJobRecord {
+    id: number;
+    jobType: BackgroundJobType;
+    libraryId: number;
+    itemId: number | null;
+    zoteroKey: string;
+    mode: 'structured' | 'markdown';
+    priority: number;
+    payload: BackgroundJobPayload | null;
+    enqueuedAt: number;
+    availableAt: number;
+    attemptCount: number;
+    lastError: string | null;
+}
+
+export interface BackgroundQueueStats {
+    pending: number;
+    available: number;
+    deferred: number;
+    dead: number;
+    byJobType: Record<string, number>;
+}
+
+export interface BackgroundEnqueueRequest {
+    library_id: number;
+    zotero_key: string;
+    mode: 'structured' | 'markdown';
+    job_type: BackgroundJobType;
+    priority?: number;
+    payload?: BackgroundJobPayload | null;
+    item_id?: number | null;
+}
+
+export interface BackgroundEnqueueResponse {
+    ok: boolean;
+    enqueued?: boolean;
+    id?: number;
+    error?: string;
+}
+
+export interface BackgroundStatsResponse {
+    ok: boolean;
+    queue?: BackgroundQueueStats;
+    workers?: {
+        hot: WorkerStatsSnapshot | null;
+        background: WorkerStatsSnapshot | null;
+    };
+    error?: string;
+}
+
+export interface BackgroundPeekResponse {
+    ok: boolean;
+    jobs?: BackgroundJobRecord[];
+    error?: string;
+}
+
+export type BackgroundProcessOnceReason =
+    | 'stopped'
+    | 'shutting_down'
+    | 'no_window'
+    | 'hot_busy'
+    | 'empty'
+    | 'job_done';
+
+export interface BackgroundProcessOnceResponse {
+    ok: boolean;
+    processed?: boolean;
+    reason?: BackgroundProcessOnceReason;
+    error?: string;
+}
+
+export async function backgroundEnqueue(
+    body: BackgroundEnqueueRequest,
+): Promise<BackgroundEnqueueResponse> {
+    return post<BackgroundEnqueueResponse>(
+        '/beaver/test/background-enqueue',
+        body,
+    );
+}
+
+export async function backgroundStats(): Promise<BackgroundStatsResponse> {
+    return post<BackgroundStatsResponse>('/beaver/test/background-stats', {});
+}
+
+export async function backgroundPeek(
+    body: { limit?: number } = {},
+): Promise<BackgroundPeekResponse> {
+    return post<BackgroundPeekResponse>('/beaver/test/background-peek', body);
+}
+
+export async function backgroundProcessOnce(): Promise<BackgroundProcessOnceResponse> {
+    return post<BackgroundProcessOnceResponse>(
+        '/beaver/test/background-process-once',
+        {},
+    );
+}
+
+export async function backgroundClear(): Promise<{ ok: boolean; error?: string }> {
+    return post('/beaver/test/background-clear', {});
+}

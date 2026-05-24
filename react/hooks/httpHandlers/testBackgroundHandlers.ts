@@ -97,3 +97,18 @@ export async function handleTestBackgroundProcessOnceHttpRequest(
     const result = await processor.processOnce();
     return { ok: true, ...result };
 }
+
+/**
+ * Dev-only: purge both the live queue and the dead-letter table. Lets
+ * live tests start each case from a known-empty state. Direct SQL is used
+ * to avoid expanding the production-facing `BeaverDB` surface.
+ */
+export async function handleTestBackgroundClearHttpRequest(_request: unknown) {
+    const db = Zotero.Beaver?.db;
+    if (!db) return { ok: false, error: 'db not available' };
+    const conn = (db as unknown as { conn: { queryAsync: (sql: string) => Promise<unknown> } }).conn;
+    if (!conn?.queryAsync) return { ok: false, error: 'db connection unavailable' };
+    await conn.queryAsync(`DELETE FROM background_jobs`);
+    await conn.queryAsync(`DELETE FROM background_jobs_dead`);
+    return { ok: true };
+}
