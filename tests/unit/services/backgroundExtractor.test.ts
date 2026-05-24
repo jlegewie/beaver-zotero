@@ -67,6 +67,9 @@ function setupZoteroGlobal() {
             getByLibraryAndKeyAsync: vi.fn(async (_libraryId: number, _key: string) => item),
         },
         Beaver: {} as any,
+        // Reset shutdown flag explicitly: a previous test's leak would
+        // otherwise cause processOnce to short-circuit with 'shutting_down'.
+        __beaverShuttingDown: undefined,
     };
     mockState.mainWindow = win;
     return { win, item };
@@ -407,8 +410,16 @@ describe('BackgroundExtractor', () => {
         const proc = new BackgroundExtractor();
         const processOncePromise = proc.processOnce();
 
-        // Give the extractor a chance to claim and start the job.
+        // Give the extractor a chance to claim and start the job. After
+        // the claim, `available_at` has been bumped by VISIBILITY_TIMEOUT_MS
+        // (~6 minutes) — capture it so the post-release assertion below
+        // verifies the row was actually released, not just left untouched.
         await new Promise((r) => setTimeout(r, 0));
+        const claimedRows = await db.peekBackgroundJobs();
+        expect(claimedRows).toHaveLength(1);
+        const claimedAvailableAt = claimedRows[0].availableAt;
+        const beforeReleaseMs = Date.now();
+
         const stopPromise = proc.stop();
         // Resolve the suspended extraction with an external_abort outcome.
         mockState.extractResolve!({
@@ -421,11 +432,171 @@ describe('BackgroundExtractor', () => {
         await processOncePromise;
         await stopPromise;
 
-        // Job released, not failed.
+        // Job released (not failed), and available_at reset by
+        // releaseBackgroundJob so the row is immediately retryable —
+        // NOT left hidden for the visibility timeout.
         const rows = await db.peekBackgroundJobs();
         expect(rows).toHaveLength(1);
         expect(rows[0].attemptCount).toBe(0);
+        expect(rows[0].availableAt).toBeLessThan(claimedAvailableAt);
+        expect(rows[0].availableAt).toBeGreaterThanOrEqual(beforeReleaseMs);
         // Worker dispose called for background slot.
         expect(mockState.disposeCalls).toContain('background');
+    });
+
+    it('latches db-write disable when stop() is called during shutdown', async () => {
+        await db.enqueueBackgroundJob({
+            jobType: 'hot_timeout_retry',
+            libraryId: 1,
+            zoteroKey: 'AAAAAAAA',
+            mode: 'structured',
+            payload: payload(),
+            now: 0,
+        });
+        mockState.nextResult = new Promise<any>((resolve) => {
+            mockState.extractResolve = resolve;
+        });
+
+        const { BackgroundExtractor } = await loadProcessor();
+        const proc = new BackgroundExtractor();
+        const processOncePromise = proc.processOnce();
+
+        // Let the claim happen and processJob enter the extract await.
+        await new Promise((r) => setTimeout(r, 0));
+        const claimedRows = await db.peekBackgroundJobs();
+        expect(claimedRows).toHaveLength(1);
+        const claimedAvailableAt = claimedRows[0].availableAt;
+
+        // Shutdown begins; stop() observes the flag and latches.
+        (Zotero as any).__beaverShuttingDown = true;
+        const stopPromise = proc.stop();
+
+        // Cleanup runs to completion elsewhere and clears the global
+        // flag BEFORE the trailing extract resolves.
+        (Zotero as any).__beaverShuttingDown = undefined;
+
+        // Trailing async now resolves with an `ok` result that would
+        // normally trigger completeBackgroundJob. The latched flag
+        // must suppress it.
+        mockState.extractResolve!({
+            kind: 'ok',
+            cached: false,
+            result: {} as any,
+            totalPages: 1,
+            resolvedAttachment: { libraryId: 1, zoteroKey: 'AAAAAAAA' },
+            contentType: 'application/pdf',
+        });
+
+        await processOncePromise;
+        await stopPromise;
+
+        // Row unchanged: no completion, no release, available_at
+        // exactly where the claim left it.
+        const rows = await db.peekBackgroundJobs();
+        expect(rows).toHaveLength(1);
+        expect(rows[0].attemptCount).toBe(0);
+        expect(rows[0].availableAt).toBe(claimedAvailableAt);
+    });
+
+    it('returns shutting_down and does not claim when Zotero.__beaverShuttingDown is set', async () => {
+        await db.enqueueBackgroundJob({
+            jobType: 'hot_timeout_retry',
+            libraryId: 1,
+            zoteroKey: 'AAAAAAAA',
+            mode: 'structured',
+            payload: payload(),
+            now: 0,
+        });
+        // Snapshot the row BEFORE shutdown so we can assert nothing changed.
+        const before = await db.peekBackgroundJobs();
+        expect(before).toHaveLength(1);
+        const beforeAvailableAt = before[0].availableAt;
+
+        (Zotero as any).__beaverShuttingDown = true;
+
+        try {
+            const { BackgroundExtractor } = await loadProcessor();
+            const proc = new BackgroundExtractor();
+            const result = await proc.processOnce();
+
+            expect(result).toEqual({ processed: false, reason: 'shutting_down' });
+            // No claim happened — extract was not called, available_at
+            // unchanged (would have been bumped by VISIBILITY_TIMEOUT_MS).
+            expect(mockState.extractCalls).toHaveLength(0);
+            const after = await db.peekBackgroundJobs();
+            expect(after).toHaveLength(1);
+            expect(after[0].availableAt).toBe(beforeAvailableAt);
+        } finally {
+            (Zotero as any).__beaverShuttingDown = undefined;
+        }
+    });
+
+    it('skips DB writes when Zotero.__beaverShuttingDown is true', async () => {
+        // Models the trailing-async scenario
+        await db.enqueueBackgroundJob({
+            jobType: 'hot_timeout_retry',
+            libraryId: 1,
+            zoteroKey: 'AAAAAAAA',
+            mode: 'structured',
+            payload: payload(),
+            now: 0,
+        });
+        mockState.nextResult = {
+            kind: 'ok',
+            cached: false,
+            result: {} as any,
+            totalPages: 1,
+            resolvedAttachment: { libraryId: 1, zoteroKey: 'AAAAAAAA' },
+            contentType: 'application/pdf',
+        };
+        (Zotero as any).__beaverShuttingDown = true;
+
+        try {
+            const { BackgroundExtractor } = await loadProcessor();
+            const proc = new BackgroundExtractor();
+            await proc.processOnce();
+
+            // Row was claimed but the success path's completeBackgroundJob
+            // was skipped — row remains, attempt_count untouched.
+            const rows = await db.peekBackgroundJobs();
+            expect(rows).toHaveLength(1);
+            expect(rows[0].attemptCount).toBe(0);
+        } finally {
+            (Zotero as any).__beaverShuttingDown = undefined;
+        }
+    });
+
+    it('skips failBackgroundJob during shutdown so transient errors do not write', async () => {
+        await db.enqueueBackgroundJob({
+            jobType: 'hot_timeout_retry',
+            libraryId: 1,
+            zoteroKey: 'AAAAAAAA',
+            mode: 'structured',
+            payload: payload(),
+            now: 0,
+        });
+        mockState.nextResult = {
+            kind: 'timeout',
+            phase: 'pdf_extract',
+            pageCount: null,
+            resolvedAttachment: { libraryId: 1, zoteroKey: 'AAAAAAAA' },
+        };
+        (Zotero as any).__beaverShuttingDown = true;
+
+        try {
+            const { BackgroundExtractor } = await loadProcessor();
+            const proc = new BackgroundExtractor();
+            await proc.processOnce();
+
+            // recordFailure's failBackgroundJob was skipped — attempt_count
+            // unchanged, no dead-letter row created.
+            const rows = await db.peekBackgroundJobs();
+            expect(rows).toHaveLength(1);
+            expect(rows[0].attemptCount).toBe(0);
+            const stats = await db.getBackgroundQueueStats(Date.now());
+            expect(stats.dead).toBe(0);
+        } finally {
+            (Zotero as any).__beaverShuttingDown = undefined;
+        }
     });
 });

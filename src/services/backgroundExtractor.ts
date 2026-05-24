@@ -57,6 +57,7 @@ const COOPERATIVE_THROTTLE = true;
 
 export type ProcessOnceReason =
     | 'stopped'
+    | 'shutting_down'
     | 'no_window'
     | 'hot_busy'
     | 'empty'
@@ -75,12 +76,18 @@ export class BackgroundExtractor {
     private inFlightAbortController: AbortController | null = null;
     private inFlightJobId: number | null = null;
     private jobsProcessedSinceRecycle = 0;
+    /**
+     * Latched once shutdown is observed (via `Zotero.__beaverShuttingDown`
+     * or `stop()` called during shutdown).
+     */
+    private dbWritesPermanentlyDisabled = false;
 
     /** Schedule the first tick. Safe to call more than once (idempotent). */
     start(): void {
         if (this.started) return;
         this.started = true;
         this.stopRequested = false;
+        this.dbWritesPermanentlyDisabled = false;
         this.scheduleTick(BUSY_INTERVAL_MS);
     }
 
@@ -94,6 +101,11 @@ export class BackgroundExtractor {
      */
     async stop(): Promise<void> {
         this.stopRequested = true;
+        // Latch the per-instance disable NOW if global shutdown is in
+        // progress
+        if (Zotero.__beaverShuttingDown === true) {
+            this.dbWritesPermanentlyDisabled = true;
+        }
         if (this.currentTickId !== undefined) {
             clearTimeout(this.currentTickId);
             this.currentTickId = undefined;
@@ -121,12 +133,29 @@ export class BackgroundExtractor {
     }
 
     /**
+     * Skip DB writes once global shutdown has been observed
+     */
+    private shouldSkipDbWrites(): boolean {
+        if (this.dbWritesPermanentlyDisabled) return true;
+        if (Zotero.__beaverShuttingDown === true) {
+            this.dbWritesPermanentlyDisabled = true;
+            return true;
+        }
+        return false;
+    }
+
+    /**
      * Drive a single iteration of the tick loop synchronously and return
      * what happened. Used by tests and the dev `process-once` endpoint.
      * Never schedules a follow-up tick.
      */
     async processOnce(): Promise<ProcessOnceResult> {
         if (this.stopRequested) return { processed: false, reason: 'stopped' };
+
+        // Global shutdown check BEFORE claim
+        if (this.shouldSkipDbWrites()) {
+            return { processed: false, reason: 'shutting_down' };
+        }
 
         const win = Zotero.getMainWindow?.() ?? null;
         if (!win) return { processed: false, reason: 'no_window' };
@@ -230,6 +259,7 @@ export class BackgroundExtractor {
             );
         }
         if (!item || safeIsInTrash(item) === true) {
+            if (this.shouldSkipDbWrites()) return;
             await db.completeBackgroundJob(record.id);
             dispatchBackgroundEvent('background-job:done', {
                 id: record.id,
@@ -240,6 +270,7 @@ export class BackgroundExtractor {
 
         const payload = record.payload;
         if (!payload) {
+            if (this.shouldSkipDbWrites()) return;
             await db.completeBackgroundJob(record.id);
             dispatchBackgroundEvent('background-job:done', {
                 id: record.id,
@@ -278,6 +309,7 @@ export class BackgroundExtractor {
         record: BackgroundJobRecord,
         db: QueueDB,
     ): Promise<void> {
+        if (this.shouldSkipDbWrites()) return;
         switch (result.kind) {
             case 'ok':
                 await db.completeBackgroundJob(record.id);
@@ -339,6 +371,7 @@ export class BackgroundExtractor {
         id: number,
         error: string,
     ): Promise<void> {
+        if (this.shouldSkipDbWrites()) return;
         const outcome = await db.failBackgroundJob(id, error, {
             maxAttempts: MAX_ATTEMPTS,
             backoffMs: BACKOFF_MS,
