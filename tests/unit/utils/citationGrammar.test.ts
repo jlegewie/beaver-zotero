@@ -3,6 +3,8 @@ import {
     baseCitationKey,
     externalCompatKey,
     getPageLocator,
+    getRequestedRef,
+    getResolvedRef,
     locatorFromLegacyPage,
     normalizeCitationTag,
     parseLoc,
@@ -83,5 +85,29 @@ describe('citationGrammar', () => {
 
         expect(externalCompatKey('W1')).toBe('external:W1');
         expect(requestedCitationKey({ kind: 'external', external_id: 'W1', source: 'openalex' })).toBe('external:openalex:W1');
+    });
+
+    it('prefers backend refs and back-fills missing loc from raw tags', () => {
+        const requested = getRequestedRef({
+            requested_ref: { kind: 'zotero', library_id: 1, zotero_key: 'REQUESTED' },
+            raw_tag: '<citation item_id="1-ORIGINAL" page="4"/>',
+        });
+        expect(requested).toEqual({
+            kind: 'zotero',
+            library_id: 1,
+            zotero_key: 'REQUESTED',
+            loc: { kind: 'page', value: '4', raw: '4' },
+        });
+
+        const resolved = getResolvedRef({
+            resolved_ref: { kind: 'external', external_id: 'W123', source: 'openalex' },
+            raw_tag: '<citation external_id="W123" loc="page3"/>',
+        });
+        expect(resolved).toEqual({
+            kind: 'external',
+            external_id: 'W123',
+            source: 'openalex',
+            loc: { kind: 'page', value: '3', raw: 'page3' },
+        });
     });
 });

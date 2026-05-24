@@ -1,6 +1,7 @@
 import { ZoteroItemReference } from "./zotero";
 import {
     baseCitationKey,
+    type CitationRef,
     getRequestedRef,
     getResolvedRef,
     normalizeCitationTag,
@@ -128,6 +129,10 @@ export interface CitationMetadata {
     parts: CitationPart[];
     /** Page numbers cited directly (e.g., [10] or [10, 11, 12] for ranges). */
     pages?: number[];
+    requested_ref?: CitationRef;
+    resolved_ref?: CitationRef;
+    invalid_reason?: string;
+    page_labels?: Record<number, string>;
     
     /** The agent run ID of the citation. */
     run_id: string;

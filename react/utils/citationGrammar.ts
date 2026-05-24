@@ -52,6 +52,9 @@ type CitationMetadataLike = {
     zotero_key?: string;
     external_source?: ExternalCitationSource;
     external_source_id?: string;
+    requested_ref?: CitationRef;
+    resolved_ref?: CitationRef;
+    page_labels?: Record<number, string>;
     raw_tag?: string;
 };
 
@@ -235,7 +238,23 @@ export function getPageLocator(ref: CitationRef): string | undefined {
     return ref.loc?.kind === 'page' ? ref.loc.value : undefined;
 }
 
+function locFromRawTag(rawTag: string | undefined): Locator | undefined {
+    if (!rawTag) return undefined;
+    const match = rawTag.match(/^<citation\b([^>]*)/i);
+    if (!match) return undefined;
+    const attrs = parseRawCitationAttributes(match[1] || '');
+    const normalized = normalizeCitationTag(attrs);
+    return normalized.ok ? normalized.ref.loc : undefined;
+}
+
+function withLocFromRawTag<T extends CitationRef>(ref: T, rawTag: string | undefined): T {
+    if (ref.loc) return ref;
+    const loc = locFromRawTag(rawTag);
+    return loc ? ({ ...ref, loc } as T) : ref;
+}
+
 export function getRequestedRef(meta: CitationMetadataLike): CitationRef | null {
+    if (meta.requested_ref) return withLocFromRawTag(meta.requested_ref, meta.raw_tag);
     if (!meta.raw_tag) return null;
     const match = meta.raw_tag.match(/^<citation\b([^>]*)/i);
     if (!match) return null;
@@ -245,6 +264,7 @@ export function getRequestedRef(meta: CitationMetadataLike): CitationRef | null 
 }
 
 export function getResolvedRef(meta: CitationMetadataLike): CitationRef | null {
+    if (meta.resolved_ref) return withLocFromRawTag(meta.resolved_ref, meta.raw_tag);
     const requested = getRequestedRef(meta);
     const loc = requested?.loc;
 
