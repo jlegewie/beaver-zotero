@@ -318,6 +318,7 @@ export async function handleZoteroAttachmentSearchRequest(
                     pageLabels: error.code === ExtractionErrorCode.NO_TEXT_LAYER
                         ? error.pageLabels ?? null
                         : null,
+                    pages: null,
                 });
             }
 

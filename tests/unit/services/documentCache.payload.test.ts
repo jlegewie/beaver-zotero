@@ -5,6 +5,7 @@ import { gzipString } from '../../../src/utils/gzip';
 import { MockDBConnection } from '../../mocks/mockDBConnection';
 import { createMockAttachment } from '../../helpers/factories';
 import type { BeaverExtractResult } from '../../../src/beaver-extract/schema/schema';
+import type { PageGeometry } from '../../../src/services/documentCache';
 
 const mockIOUtils = (globalThis as any).IOUtils as {
     exists: ReturnType<typeof vi.fn>;
@@ -16,6 +17,9 @@ const mockIOUtils = (globalThis as any).IOUtils as {
 };
 
 type CacheAttachmentItem = Parameters<DocumentCache['putResult']>[0]['item'];
+const onePageGeometry: PageGeometry[] = [
+    { viewBox: [0, 0, 100, 200], width: 100, height: 200, rotation: 0 },
+];
 
 function createCacheAttachment(): CacheAttachmentItem {
     return createMockAttachment({ id: 100, key: 'ABCD1234', libraryID: 1 }) as unknown as CacheAttachmentItem;
@@ -29,7 +33,7 @@ const structuredResult: BeaverExtractResult = {
         pageLabels: { '0': '1' },
         bboxOrigin: 'top-left',
         bboxPrecision: 2,
-        pages: [{ index: 0, label: '1', width: 100, height: 200, items: [] }],
+        pages: [{ index: 0, label: '1', width: 100, height: 200, viewBox: [0, 0, 100, 200], rotation: 0, items: [] }],
         citationIndex: {},
     },
 };
@@ -101,6 +105,7 @@ describe('DocumentCache payloads', () => {
             metadata: {
                 pageCount: 1,
                 pageLabels: { '0': '1' },
+                pages: [{ viewBox: [0, 0, 100, 200], width: 100, height: 200, rotation: 0 }],
             },
         });
 
@@ -134,6 +139,7 @@ describe('DocumentCache payloads', () => {
             metadata: (result) => ({
                 pageCount: result.document.pageCount,
                 pageLabels: result.document.pageLabels ?? null,
+                pages: onePageGeometry,
             }),
         });
 
@@ -151,6 +157,7 @@ describe('DocumentCache payloads', () => {
             metadata: (result) => ({
                 pageCount: result.document.pageCount,
                 pageLabels: result.document.pageLabels ?? null,
+                pages: onePageGeometry,
             }),
         });
 
@@ -193,6 +200,7 @@ describe('DocumentCache payloads', () => {
             metadata: (result) => ({
                 pageCount: result.document.pageCount,
                 pageLabels: result.document.pageLabels ?? null,
+                pages: onePageGeometry,
             }),
         });
 
@@ -211,6 +219,7 @@ describe('DocumentCache payloads', () => {
             metadata: (result) => ({
                 pageCount: result.document.pageCount,
                 pageLabels: result.document.pageLabels ?? null,
+                pages: onePageGeometry,
             }),
         });
 
@@ -248,6 +257,7 @@ describe('DocumentCache payloads', () => {
             metadata: (result) => ({
                 pageCount: result.document.pageCount,
                 pageLabels: result.document.pageLabels ?? null,
+                pages: onePageGeometry,
             }),
         })).rejects.toThrow('aborted');
 
@@ -270,6 +280,7 @@ describe('DocumentCache payloads', () => {
             metadata: {
                 pageCount: 1,
                 pageLabels: { '0': '1' },
+                pages: onePageGeometry,
             },
             expectedSourceIdentity,
         });
@@ -290,6 +301,7 @@ describe('DocumentCache payloads', () => {
             metadata: {
                 pageCount: 1,
                 pageLabels: { '0': '1' },
+                pages: onePageGeometry,
             },
         });
 
@@ -314,6 +326,7 @@ describe('DocumentCache payloads', () => {
             metadata: {
                 pageCount: 1,
                 pageLabels: { '0': '1' },
+                pages: onePageGeometry,
             },
         });
         const payload = await db.getDocumentCachePayload(1, 'ABCD1234', 'structured');
@@ -341,6 +354,7 @@ describe('DocumentCache payloads', () => {
             metadata: {
                 pageCount: 1,
                 pageLabels: { '0': '1' },
+                pages: onePageGeometry,
             },
         });
         const firstPayload = await db.getDocumentCachePayload(1, 'ABCD1234', 'structured');
@@ -357,6 +371,7 @@ describe('DocumentCache payloads', () => {
             metadata: {
                 pageCount: 1,
                 pageLabels: { '0': '1' },
+                pages: onePageGeometry,
             },
         });
 
@@ -381,6 +396,7 @@ describe('DocumentCache payloads', () => {
             metadata: {
                 pageCount: 1,
                 pageLabels: { '0': '1' },
+                pages: onePageGeometry,
             },
         });
         const payload = await db.getDocumentCachePayload(1, 'ABCD1234', 'structured');
@@ -393,6 +409,7 @@ describe('DocumentCache payloads', () => {
             errorCode: 'no_text_layer',
             pageCount: 1,
             pageLabels: { '0': '1' },
+            pages: onePageGeometry,
         });
 
         expect(await db.getDocumentCachePayloadCount()).toBe(0);
@@ -412,6 +429,7 @@ describe('DocumentCache payloads', () => {
             errorCode: 'encrypted',
             pageCount: 7,
             pageLabels: { '0': 'i' },
+            pages: onePageGeometry,
         });
 
         const metadata = await db.getDocumentCacheMetadataByKey(1, 'ABCD1234');
@@ -432,6 +450,7 @@ describe('DocumentCache payloads', () => {
             metadata: {
                 pageCount: 1,
                 pageLabels: { '0': '1' },
+                pages: onePageGeometry,
             },
         });
         const firstPayload = await db.getDocumentCachePayload(1, 'ABCD1234', 'structured');
@@ -447,6 +466,7 @@ describe('DocumentCache payloads', () => {
             metadata: {
                 pageCount: 1,
                 pageLabels: { '0': '1' },
+                pages: onePageGeometry,
             },
         });
 
@@ -467,6 +487,7 @@ describe('DocumentCache payloads', () => {
             metadata: {
                 pageCount: 1,
                 pageLabels: { '0': '1' },
+                pages: onePageGeometry,
             },
         });
         const payload = await db.getDocumentCachePayload(1, 'ABCD1234', 'structured');
@@ -492,6 +513,7 @@ describe('DocumentCache payloads', () => {
             metadata: {
                 pageCount: 1,
                 pageLabels: { '0': '1' },
+                pages: onePageGeometry,
             },
         });
         const payload = await db.getDocumentCachePayload(1, 'ABCD1234', 'structured');
@@ -517,6 +539,7 @@ describe('DocumentCache payloads', () => {
             metadata: {
                 pageCount: 1,
                 pageLabels: { '0': '1' },
+                pages: onePageGeometry,
             },
         });
 

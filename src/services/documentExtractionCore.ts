@@ -15,6 +15,7 @@
 import type {
     BeaverExtractResult,
 } from '../beaver-extract/schema';
+import type { PageGeometry } from '../beaver-extract/types';
 import {
     ExtractionError,
     ExtractionErrorCode,
@@ -76,6 +77,33 @@ export interface ExtractAndCacheArgs {
      * internally)
      */
     onRemoteDownloadFailure?: (error: unknown) => void;
+}
+
+export function buildExtractedDocumentCacheMetadata(extracted: BeaverExtractResult): {
+    pageCount: number;
+    pageLabels: Record<string, string>;
+    pages: (PageGeometry | null)[];
+} {
+    const doc = extracted.document;
+    const extractedPageLabels = doc.pageLabels ?? Object.fromEntries(
+        doc.pages
+            .filter((page) => page.label)
+            .map((page) => [String(page.index), page.label as string]),
+    );
+    const pages: (PageGeometry | null)[] = new Array(doc.pageCount).fill(null);
+    for (const page of doc.pages) {
+        pages[page.index] = {
+            viewBox: page.viewBox,
+            width: page.viewBox[2] - page.viewBox[0],
+            height: page.viewBox[3] - page.viewBox[1],
+            rotation: page.rotation,
+        };
+    }
+    return {
+        pageCount: doc.pageCount,
+        pageLabels: extractedPageLabels,
+        pages,
+    };
 }
 
 export type ExtractAndCacheResult =
@@ -464,18 +492,6 @@ export async function extractAndCacheDocument(
             return extracted;
         };
 
-        const buildMetadata = (extracted: BeaverExtractResult) => {
-            const extractedPageLabels = extracted.document.pageLabels ?? Object.fromEntries(
-                extracted.document.pages
-                    .filter((page) => page.label)
-                    .map((page) => [String(page.index), page.label as string]),
-            );
-            return {
-                pageCount: extracted.document.pageCount,
-                pageLabels: extractedPageLabels,
-            };
-        };
-
         const resultPromise = cache
             ? cache.getOrCreateResult({
                 item: pdfItem,
@@ -488,7 +504,7 @@ export async function extractAndCacheDocument(
                 abortSignal: signal,
                 expectedSourceIdentity: isRemoteOnly ? null : initialSourceIdentity,
                 create: createSharedResult,
-                metadata: buildMetadata,
+                metadata: buildExtractedDocumentCacheMetadata,
             })
             : createUnsharedResult();
         const result = cache
@@ -585,6 +601,7 @@ export async function extractAndCacheDocument(
                             : 'no_text_layer',
                     pageCount: error.pageCount ?? totalPages,
                     pageLabels,
+                    pages: null,
                 });
 
                 const cachedCode = error.code === ExtractionErrorCode.ENCRYPTED

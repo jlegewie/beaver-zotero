@@ -11,6 +11,8 @@ function structuredPage(): StructuredPage {
         index: 0,
         width: 100,
         height: 200,
+        viewBox: [0, 0, 100, 200],
+        rotation: 0,
         items: [
             {
                 id: "p0",
@@ -37,6 +39,8 @@ function markdownPage(markdown = "Hello world."): MarkdownPage {
         index: 0,
         width: 100,
         height: 200,
+        viewBox: [0, 0, 100, 200],
+        rotation: 0,
         markdown,
     };
 }

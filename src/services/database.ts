@@ -2,6 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { ThreadData } from '../../react/atoms/threads';
 import { getPref } from '../utils/prefs';
 import { SyncMethod, SyncType } from '../../react/atoms/sync';
+import type { PageGeometry } from '../beaver-extract/types';
 
 
 /* 
@@ -74,6 +75,7 @@ export interface DocumentCacheMetadataRecord {
     contentType: string;
     pageCount: number | null;
     pageLabels: DocumentCachePageLabels | null;
+    pages: (PageGeometry | null)[] | null;
     errorCode: DocumentCacheErrorCode | null;
     extractionSchemaVersion: string;
     metadataFormatVersion: number;
@@ -426,6 +428,7 @@ export class BeaverDB {
                 content_type               TEXT NOT NULL,
                 page_count                 INTEGER,
                 page_labels_json           TEXT,
+                pages_json                 TEXT,
                 error_code                 TEXT,
                 extraction_schema_version  TEXT NOT NULL,
                 metadata_format_version    INTEGER NOT NULL,
@@ -1626,6 +1629,14 @@ export class BeaverDB {
                 pageLabels = null;
             }
         }
+        let pages: (PageGeometry | null)[] | null = null;
+        if (row.pages_json) {
+            try {
+                pages = JSON.parse(row.pages_json);
+            } catch {
+                pages = null;
+            }
+        }
         return {
             id: row.id,
             itemId: row.item_id,
@@ -1640,6 +1651,7 @@ export class BeaverDB {
             contentType: row.content_type,
             pageCount: row.page_count ?? null,
             pageLabels,
+            pages,
             errorCode: row.error_code ?? null,
             extractionSchemaVersion: row.extraction_schema_version,
             metadataFormatVersion: row.metadata_format_version,
@@ -1686,6 +1698,7 @@ export class BeaverDB {
             { onRow: (row: any) => columns.add(row.getResultByIndex(0)) },
         );
         if (columns.size === 0) return false; // table does not exist
+        if (!columns.has('pages_json')) return true;
         if (!columns.has('error_code')) return true;
         // `status` and the legacy boolean columns are no longer part of the schema.
         return ['status', 'has_text_layer', 'needs_ocr', 'is_encrypted', 'is_invalid']
@@ -1708,12 +1721,13 @@ export class BeaverDB {
                     content_type: row.getResultByIndex(8),
                     page_count: row.getResultByIndex(9),
                     page_labels_json: row.getResultByIndex(10),
-                    error_code: row.getResultByIndex(11),
-                    extraction_schema_version: row.getResultByIndex(12),
-                    metadata_format_version: row.getResultByIndex(13),
-                    created_at: row.getResultByIndex(14),
-                    updated_at: row.getResultByIndex(15),
-                    last_accessed_at: row.getResultByIndex(16),
+                    pages_json: row.getResultByIndex(11),
+                    error_code: row.getResultByIndex(12),
+                    extraction_schema_version: row.getResultByIndex(13),
+                    metadata_format_version: row.getResultByIndex(14),
+                    created_at: row.getResultByIndex(15),
+                    updated_at: row.getResultByIndex(16),
+                    last_accessed_at: row.getResultByIndex(17),
                 });
             },
         });
@@ -1752,7 +1766,7 @@ export class BeaverDB {
     private static documentCacheMetadataSelect(): string {
         return `SELECT id, item_id, library_id, zotero_key, file_path, file_mtime_ms,
                        file_size_bytes, source_size_bytes, content_type, page_count,
-                       page_labels_json, error_code,
+                       page_labels_json, pages_json, error_code,
                        extraction_schema_version, metadata_format_version,
                        created_at, updated_at, last_accessed_at
                 FROM document_cache_metadata`;
@@ -1794,6 +1808,7 @@ export class BeaverDB {
             && current.contentType === inspected.contentType
             && current.pageCount === inspected.pageCount
             && JSON.stringify(current.pageLabels) === JSON.stringify(inspected.pageLabels)
+            && JSON.stringify(current.pages) === JSON.stringify(inspected.pages)
             && current.errorCode === inspected.errorCode
             && current.extractionSchemaVersion === inspected.extractionSchemaVersion
             && current.metadataFormatVersion === inspected.metadataFormatVersion;
@@ -1814,9 +1829,9 @@ export class BeaverDB {
                 `INSERT INTO document_cache_metadata
                     (item_id, library_id, zotero_key, file_path, file_mtime_ms, file_size_bytes,
                      source_size_bytes, content_type, page_count, page_labels_json,
-                     error_code,
+                     pages_json, error_code,
                      extraction_schema_version, metadata_format_version, updated_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
                  ON CONFLICT(library_id, zotero_key) DO UPDATE SET
                     item_id = excluded.item_id,
                     file_path = excluded.file_path,
@@ -1826,6 +1841,7 @@ export class BeaverDB {
                     content_type = excluded.content_type,
                     page_count = excluded.page_count,
                     page_labels_json = excluded.page_labels_json,
+                    pages_json = excluded.pages_json,
                     error_code = excluded.error_code,
                     extraction_schema_version = excluded.extraction_schema_version,
                     metadata_format_version = excluded.metadata_format_version,
@@ -1841,6 +1857,7 @@ export class BeaverDB {
                     record.contentType,
                     record.pageCount,
                     record.pageLabels ? JSON.stringify(record.pageLabels) : null,
+                    JSON.stringify(record.pages ?? null),
                     record.errorCode,
                     record.extractionSchemaVersion,
                     record.metadataFormatVersion,

@@ -56,6 +56,8 @@ export interface MarkdownPage {
     label?: string;
     width: number;
     height: number;
+    viewBox: Rect;
+    rotation: 0 | 90 | 180 | 270;
     markdown: string;
 }
 
@@ -71,8 +73,16 @@ export interface StructuredDocument {
 export interface StructuredPage {
     index: number;
     label?: string;
+    /**
+     * `width`/`height` are rotation-applied (MuPDF `fz_bound_page`
+     * semantics); `rotation` is the raw `/Rotate` value; `viewBox` is the
+     * unrotated CropBox intersected with MediaBox. Do not re-derive rotation
+     * transforms from width/height; they are already rotated.
+     */
     width: number;
     height: number;
+    viewBox: Rect;
+    rotation: 0 | 90 | 180 | 270;
     items: DocumentItem[];
 }
 
