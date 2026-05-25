@@ -27,20 +27,114 @@ async function getCurrentReaderAndWaitForView(window?: Window, waitForPDF: boole
     const reader = getCurrentReader(window)
     if (!reader) return undefined;
 
-    // Wait for reader to be initialized
-    await reader._initPromise;
-    await reader._internalReader?._primaryView?.initializedPromise;
-    
-    // Optionally wait for PDF document to be loaded
-    if (waitForPDF && reader.type === 'pdf') {
-        
+    await waitForReaderView(reader, waitForPDF);
+    return reader;
+}
+
+async function delay(ms: number): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Waits for a reader instance and its primary view to be ready for navigation.
+ */
+async function waitForReaderView(reader: any, waitForPDF: boolean = false): Promise<void> {
+    await reader?._initPromise;
+    await reader?._internalReader?._primaryView?.initializedPromise;
+
+    if (waitForPDF && reader?.type === 'pdf') {
         const pdfLoaded = await waitForPDFDocument(reader, 3000);
         if (!pdfLoaded) {
-            logger(`getCurrentReaderAndWaitForView: PDF document failed to load within timeout`, 1);
+            logger(`waitForReaderView: PDF document failed to load within timeout`, 1);
         }
     }
-    
-    return reader;
+}
+
+/**
+ * Waits for Zotero.Reader.open() to produce or select a reader for an item.
+ */
+async function waitForReaderForItem(itemID: number, openedReader?: any, timeoutMs: number = 5000): Promise<any | undefined> {
+    if (openedReader?.itemID === itemID) {
+        await waitForReaderView(openedReader, true);
+        return openedReader;
+    }
+
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+        const reader = getCurrentReader();
+        if (reader?.itemID === itemID) {
+            await waitForReaderView(reader, true);
+            return reader;
+        }
+        await delay(100);
+    }
+
+    return undefined;
+}
+
+function getAnnotationPageIndex(annotationItem: Zotero.Item): number | undefined {
+    try {
+        const position = JSON.parse((annotationItem as any).annotationPosition || '{}');
+        return typeof position?.pageIndex === 'number' ? position.pageIndex : undefined;
+    } catch {
+        return undefined;
+    }
+}
+
+function isAnnotationLoadedInReader(reader: any, annotationID: string): boolean | null {
+    const annotationLists = [
+        reader?._internalReader?._state?.annotations,
+        reader?._internalReader?._primaryView?._annotations,
+    ].filter(Array.isArray);
+
+    if (annotationLists.length === 0) return null;
+    return annotationLists.some((annotations) => annotations.some((annotation: any) => annotation?.id === annotationID));
+}
+
+/**
+ * Navigates to an annotation once the reader has had time to load and render it.
+ */
+async function navigateReaderToAnnotation(reader: any, annotationID: string, pageIndex?: number): Promise<boolean> {
+    for (let attempt = 0; attempt < 6; attempt++) {
+        const annotationLoaded = isAnnotationLoadedInReader(reader, annotationID);
+        if (annotationLoaded === false) {
+            if (attempt === 1 && typeof pageIndex === 'number') {
+                try {
+                    await reader?.navigate?.({ pageIndex });
+                } catch {
+                    // Page navigation is a best-effort fallback before retrying annotation navigation.
+                }
+            }
+            await delay(150);
+            continue;
+        }
+
+        try {
+            await reader?.navigate?.({ annotationID });
+            return true;
+        } catch {
+            // Retry while the newly opened reader finishes registering annotations.
+        }
+
+        try {
+            await reader?._internalReader?.navigate?.({ annotationID });
+            return true;
+        } catch {
+            // Retry below.
+        }
+
+        if (attempt === 1 && typeof pageIndex === 'number') {
+            try {
+                await reader?.navigate?.({ pageIndex });
+            } catch {
+                // Page navigation is a best-effort fallback before retrying annotation navigation.
+            }
+        }
+
+        await delay(150);
+    }
+
+    return false;
 }
 
 /**
@@ -50,7 +144,12 @@ async function getCurrentReaderAndWaitForView(window?: Window, waitForPDF: boole
  * @param page - The page number to navigate to.
  */
 async function navigateToPage(itemID: number, page: number): Promise<void | _ZoteroTypes.ReaderInstance> {
-    const reader = await Zotero.Reader.open(itemID, {pageIndex: page - 1})
+    const pageIndex = page - 1;
+    const openedReader = await Zotero.Reader.open(itemID, {pageIndex})
+    const reader = await waitForReaderForItem(itemID, openedReader);
+    if (reader) {
+        await reader.navigate?.({ pageIndex });
+    }
     return reader;
 }
 
@@ -68,18 +167,36 @@ async function navigateToPageInCurrentReader(page: number) {
  */
 async function navigateToAnnotation(annotationItem: Zotero.Item) {
     if (!annotationItem.isAnnotation()) return;
+    const parentID = annotationItem.parentID;
+    if (!parentID) return;
+
+    const annotationID = annotationItem.key;
+    const pageIndex = getAnnotationPageIndex(annotationItem);
     // Get reader
     const reader = getCurrentReader();
     
     // Navigate to annotation if reader is open and current item is the annotation's parent
-    if (reader && reader.itemID === annotationItem.parentID) {
-        reader.navigate({annotationID: annotationItem.key});
+    if (reader && reader.itemID === parentID) {
+        await waitForReaderView(reader, true);
+        const didNavigate = await navigateReaderToAnnotation(reader, annotationID, pageIndex);
+        if (!didNavigate && typeof pageIndex === 'number') {
+            await reader.navigate?.({ pageIndex });
+        }
         return;
     }
 
     // Open reader if not open
-    if (annotationItem.parentID) {
-        await Zotero.Reader.open(annotationItem.parentID, {pageLabel: annotationItem.annotationPageLabel});
+    const openedReader = await Zotero.Reader.open(parentID, {annotationID} as any);
+    const openedOrSelectedReader = await waitForReaderForItem(parentID, openedReader);
+    if (!openedOrSelectedReader) return;
+
+    const didNavigate = await navigateReaderToAnnotation(openedOrSelectedReader, annotationID, pageIndex);
+    if (!didNavigate) {
+        if (typeof pageIndex === 'number') {
+            await openedOrSelectedReader.navigate?.({ pageIndex });
+        } else if (annotationItem.annotationPageLabel) {
+            await openedOrSelectedReader.navigate?.({ pageLabel: annotationItem.annotationPageLabel });
+        }
     }
 }
 
@@ -273,4 +390,3 @@ export {
     navigateToPageInCurrentReader,
     navigateToAnnotation
 };
-
