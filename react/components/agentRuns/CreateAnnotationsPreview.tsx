@@ -1,12 +1,14 @@
-import React from 'react';
-import { Icon, TickIcon, CancelIcon, FileDiffIcon } from '../icons/icons';
+import React, { useCallback } from 'react';
 import Tooltip from '../ui/Tooltip';
-import { truncateText } from '../../utils/stringUtils';
+import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
+import { navigateToAnnotation, navigateToPage } from '../../utils/readerUtils';
+import { logger } from '../../../src/utils/logger';
 import type {
     CreateHighlightAnnotationsProposedData,
     CreateHighlightAnnotationsResultData,
     CreateNoteAnnotationsProposedData,
     CreateNoteAnnotationsResultData,
+    CreatedAnnotation,
     FailedAnnotation,
     HighlightAnnotationItem,
     NoteAnnotationItem,
@@ -47,54 +49,30 @@ const COLOR_VALUES: Record<string, string> = {
     teal: '#7fffd4',
 };
 
-function pageLabelForItem(kind: 'highlight' | 'note', item: HighlightAnnotationItem | NoteAnnotationItem): string {
+function pageIndexForItem(kind: 'highlight' | 'note', item: HighlightAnnotationItem | NoteAnnotationItem): number | null {
     const raw = item as any;
-    if (raw.page_label ?? raw.pageLabel) return raw.page_label ?? raw.pageLabel;
     if (kind === 'highlight') {
         const firstLoc = raw.page_locations?.[0] ?? raw.pageLocations?.[0] ?? raw.locations?.[0];
-        const first = firstLoc?.page_idx ?? firstLoc?.pageIndex ?? firstLoc?.page_index;
-        return typeof first === 'number' ? String(first + 1) : '';
+        const idx = firstLoc?.page_idx ?? firstLoc?.pageIndex ?? firstLoc?.page_index;
+        return typeof idx === 'number' ? idx : null;
     }
     const notePosition = raw.note_position ?? raw.notePosition;
-    const pageIndex = notePosition?.page_index ?? notePosition?.pageIndex;
-    return typeof pageIndex === 'number' ? String(pageIndex + 1) : '';
+    const idx = notePosition?.page_index ?? notePosition?.pageIndex;
+    return typeof idx === 'number' ? idx : null;
 }
 
 function statusForItem(
     item: HighlightAnnotationItem | NoteAnnotationItem,
-    createdByClient: Map<string, number>,
+    createdByClient: Map<string, CreatedAnnotation[]>,
     failedByClient: Map<string, FailedAnnotation[]>,
 ): 'created' | 'failed' | 'partial' | 'pending' {
     const clientItemId = (item as any).client_item_id ?? (item as any).clientItemId ?? '';
-    const created = createdByClient.get(clientItemId) ?? 0;
-    const failed = failedByClient.get(clientItemId)?.length ?? 0;
-    if (created > 0 && failed > 0) return 'partial';
-    if (created > 0) return 'created';
-    if (failed > 0) return 'failed';
+    const createdCount = createdByClient.get(clientItemId)?.length ?? 0;
+    const failedCount = failedByClient.get(clientItemId)?.length ?? 0;
+    if (createdCount > 0 && failedCount > 0) return 'partial';
+    if (createdCount > 0) return 'created';
+    if (failedCount > 0) return 'failed';
     return 'pending';
-}
-
-function StatusIcon({
-    state,
-    failures,
-}: {
-    state: 'created' | 'failed' | 'partial' | 'pending';
-    failures: FailedAnnotation[];
-}) {
-    if (state === 'pending') return <span className="display-flex" style={{ width: 16 }} />;
-    if (state === 'created') {
-        return <Icon icon={TickIcon} className="font-color-green scale-11" />;
-    }
-    const message = failures
-        .map((failure) => failure.error_code ? `${failure.error_code}: ${failure.error}` : failure.error)
-        .join('\n');
-    return (
-        <Tooltip content={message || 'Failed'} showArrow>
-            <span className="display-flex">
-                <Icon icon={state === 'partial' ? FileDiffIcon : CancelIcon} className="font-color-red scale-11" />
-            </span>
-        </Tooltip>
-    );
 }
 
 /**
@@ -103,7 +81,6 @@ function StatusIcon({
 export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> = ({
     kind,
     actionData,
-    currentValue,
     resultData,
     status,
     isStreaming,
@@ -113,11 +90,13 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
         : [];
     const created = Array.isArray(resultData?.created) ? resultData.created : [];
     const failed = Array.isArray(resultData?.failed) ? resultData.failed as FailedAnnotation[] : [];
-    const createdByClient = new Map<string, number>();
+    const createdByClient = new Map<string, CreatedAnnotation[]>();
     const failedByClient = new Map<string, FailedAnnotation[]>();
 
     for (const entry of created) {
-        createdByClient.set(entry.client_item_id, (createdByClient.get(entry.client_item_id) ?? 0) + 1);
+        const list = createdByClient.get(entry.client_item_id) ?? [];
+        list.push(entry);
+        createdByClient.set(entry.client_item_id, list);
     }
     for (const entry of failed) {
         const list = failedByClient.get(entry.client_item_id) ?? [];
@@ -125,13 +104,39 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
         failedByClient.set(entry.client_item_id, list);
     }
 
-    const requestedRef = actionData.requested_ref;
     const resolvedRef = actionData.resolved_ref;
-    const resolutionDiffers = Boolean(
-        currentValue?.resolution_differs ||
-        (requestedRef?.zotero_key && resolvedRef?.zotero_key && requestedRef.zotero_key !== resolvedRef.zotero_key),
-    );
     const noun = kind === 'highlight' ? 'highlight' : 'note';
+
+    const handleItemClick = useCallback(async (
+        item: HighlightAnnotationItem | NoteAnnotationItem,
+        createdEntries: CreatedAnnotation[],
+    ) => {
+        try {
+            const firstCreated = createdEntries[0];
+            if (firstCreated) {
+                const annotationItem = await Zotero.Items.getByLibraryAndKeyAsync(
+                    firstCreated.library_id,
+                    firstCreated.zotero_key,
+                );
+                if (annotationItem) {
+                    await navigateToAnnotation(annotationItem as Zotero.Item);
+                    return;
+                }
+            }
+
+            if (!resolvedRef?.zotero_key || typeof resolvedRef.library_id !== 'number') return;
+            const pageIndex = pageIndexForItem(kind, item);
+            const pdfItem = await Zotero.Items.getByLibraryAndKeyAsync(
+                resolvedRef.library_id,
+                resolvedRef.zotero_key,
+            );
+            if (!pdfItem) return;
+            const page = typeof pageIndex === 'number' ? pageIndex + 1 : 1;
+            await navigateToPage((pdfItem as Zotero.Item).id, page);
+        } catch (error) {
+            logger(`CreateAnnotationsPreview: navigation failed: ${error}`, 1);
+        }
+    }, [kind, resolvedRef?.library_id, resolvedRef?.zotero_key]);
 
     return (
         <div className={`create-annotations-preview overflow-hidden ${status === 'rejected' || status === 'undone' ? 'opacity-60' : ''}`}>
@@ -149,39 +154,55 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
                         const clientItemId = rawItem.client_item_id ?? rawItem.clientItemId ?? '';
                         const itemStatus = statusForItem(item, createdByClient, failedByClient);
                         const failures = failedByClient.get(clientItemId) ?? [];
+                        const createdEntries = createdByClient.get(clientItemId) ?? [];
                         const text = kind === 'highlight'
-                            ? truncateText(rawItem.text ?? '', 90)
-                            : truncateText(rawItem.comment ?? '', 90);
+                            ? (rawItem.text ?? '')
+                            : (rawItem.comment ?? '');
                         const color = kind === 'highlight' ? rawItem.color : 'yellow';
+                        const isFailed = itemStatus === 'failed';
+                        const failureMessage = failures
+                            .map((failure) => failure.error_code ? `${failure.error_code}: ${failure.error}` : failure.error)
+                            .join('\n');
 
-                        return (
+                        const row = (
                             <div
                                 key={`${clientItemId}-${rawItem.index}`}
-                                className="display-flex flex-row items-start gap-2 py-1 border-bottom-quinary"
+                                className="create-annotations-preview-row display-flex flex-row items-start gap-2 py-15 cursor-pointer"
+                                onClick={() => handleItemClick(item, createdEntries)}
                             >
-                                <div className="display-flex mt-010">
-                                    <StatusIcon state={itemStatus} failures={failures} />
-                                </div>
-                                {kind === 'highlight' && (
-                                    <span
-                                        className="mt-025"
-                                        style={{
-                                            width: 10,
-                                            height: 10,
-                                            borderRadius: 2,
-                                            background: COLOR_VALUES[color] ?? COLOR_VALUES.yellow,
-                                            border: '1px solid var(--color-border-quinary)',
-                                            flex: '0 0 auto',
-                                        }}
-                                    />
-                                )}
+                                <ZoteroIcon
+                                    icon={kind === 'highlight' ? ZOTERO_ICONS.ANNOTATE_HIGHLIGHT : ZOTERO_ICONS.ANNOTATE_NOTE}
+                                    size={14}
+                                    color={COLOR_VALUES[color] ?? COLOR_VALUES.yellow}
+                                    style={{ marginTop: 2 }}
+                                />
+
                                 <div className="display-flex flex-col min-w-0 flex-1 gap-025">
-                                    <div className="text-sm font-color-primary truncate">
-                                        {text || rawItem.title || `${noun} annotation`}
+                                    <div
+                                        className="font-color-secondary"
+                                        style={{
+                                            display: '-webkit-box',
+                                            WebkitLineClamp: 3,
+                                            WebkitBoxOrient: 'vertical',
+                                            overflow: 'hidden',
+                                            wordBreak: 'break-word',
+                                            textDecoration: isFailed ? 'line-through' : undefined,
+                                        }}
+                                    >
+                                        {rawItem.title || text || `${noun} annotation`}
                                     </div>
                                 </div>
                             </div>
                         );
+
+                        if (isFailed && failureMessage) {
+                            return (
+                                <Tooltip key={`${clientItemId}-${rawItem.index}`} content={failureMessage} showArrow>
+                                    {row}
+                                </Tooltip>
+                            );
+                        }
+                        return row;
                     })}
                 </div>
             </div>
