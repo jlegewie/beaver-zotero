@@ -99,6 +99,7 @@ import {
     buildPendingApprovalFromAction,
     clearAllPendingApprovalsAtom,
 } from '../agents/agentActions';
+import { getAppliedPdfAnnotationCount } from '../agents/agentActionCounts';
 import { undoEditMetadataAction } from '../utils/editMetadataActions';
 import { undoCreateItemAction } from '../utils/createItemActions';
 import { undoCreateCollectionAction } from '../utils/createCollectionActions';
@@ -690,7 +691,7 @@ function confirmUndoAppliedActions(actions: ActionsToUndo): UndoConfirmResult {
     const changeLines: string[] = [];
     if (annotations.length > 0) {
         const annotationCount = annotations.reduce(
-            (sum, action) => sum + (Array.isArray(action.result_data?.created) ? action.result_data.created.length : 1),
+            (sum, action) => sum + getAppliedPdfAnnotationCount(action),
             0,
         );
         changeLines.push(`• ${annotationCount} PDF annotation${annotationCount === 1 ? '' : 's'}`);
