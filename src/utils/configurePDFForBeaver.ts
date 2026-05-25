@@ -2,8 +2,8 @@
  * Beaver-side adapter for the PDF package.
  *
  * Sole owner of the Zotero / Firefox glue (`chrome://` URLs,
- * `ChromeUtils.importESModule`, the `Zotero.__beaverMuPDFWorkerClient`
- * singleton slot, the Beaver logger). The package itself
+ * `ChromeUtils.importESModule`, the per-name `Zotero.__beaverMuPDFWorkerClient_*`
+ * singleton slots, the Beaver logger). The package itself
  * (`src/beaver-extract/`) has no Zotero awareness; it just consumes the
  * config installed here.
  *
@@ -26,10 +26,18 @@ export function configurePDFForBeaver(): void {
     configurePDF({
         workerUrl: "chrome://beaver/content/scripts/mupdf-worker.js",
         getWorkerHost: () => Zotero.getMainWindow?.() ?? null,
-        workerClientSlot: {
-            get: () => (Zotero as any).__beaverMuPDFWorkerClient,
-            set: (v) => {
-                (Zotero as any).__beaverMuPDFWorkerClient = v;
+        workerClientSlots: {
+            hot: {
+                get: () => (Zotero as any).__beaverMuPDFWorkerClient_hot,
+                set: (v) => {
+                    (Zotero as any).__beaverMuPDFWorkerClient_hot = v;
+                },
+            },
+            background: {
+                get: () => (Zotero as any).__beaverMuPDFWorkerClient_background,
+                set: (v) => {
+                    (Zotero as any).__beaverMuPDFWorkerClient_background = v;
+                },
             },
         },
         log: (msg, level) => logger(msg, level),

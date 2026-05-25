@@ -9,7 +9,7 @@
  *   - postMessage is called WITHOUT a transfer list (regression guard for
  *     the buffer-reuse issue documented in the plan).
  *   - The singleton is parked in the configured slot (Beaver wires this
- *     to `Zotero.__beaverMuPDFWorkerClient`) and `disposeMuPDFWorker`
+ *     to `Zotero.__beaverMuPDFWorkerClient_hot`) and `disposeMuPDFWorker`
  *     clears it.
  *   - Spawn posts a `configure` frame as the first message before any op.
  */
@@ -22,6 +22,7 @@ import {
 
 import {
     getMuPDFWorkerClient,
+    getExistingMuPDFWorkerClient,
     disposeMuPDFWorker,
     WorkerAbortError,
     __setIdleTimeoutForTest,
@@ -42,7 +43,7 @@ describe('MuPDFWorkerClient', () => {
     afterEach(async () => {
         await disposeMuPDFWorker();
         __resetIdleTimeoutForTest();
-        delete (globalThis as any).Zotero.__beaverMuPDFWorkerClient;
+        delete (globalThis as any).Zotero.__beaverMuPDFWorkerClient_hot;
     });
 
     it('returns count from a successful getPageCount round-trip', async () => {
@@ -243,7 +244,7 @@ describe('MuPDFWorkerClient', () => {
         // Reconfigure with a spy log sink for this test.
         configurePDFForTests({
             slotHost: (globalThis as any).Zotero,
-            slotKey: '__beaverMuPDFWorkerClient',
+            slotKey: '__beaverMuPDFWorkerClient_hot',
             getWorkerHost: () => (globalThis as any).Zotero.getMainWindow(),
             log: logSpy,
         });
@@ -266,9 +267,9 @@ describe('MuPDFWorkerClient', () => {
         expect(logSpy).toHaveBeenCalledWith('hello from worker', 2);
     });
 
-    it('parks the singleton in the configured slot (Zotero.__beaverMuPDFWorkerClient)', () => {
+    it('parks the singleton in the configured slot (Zotero.__beaverMuPDFWorkerClient_hot)', () => {
         const client = getMuPDFWorkerClient();
-        expect((globalThis as any).Zotero.__beaverMuPDFWorkerClient).toBe(
+        expect((globalThis as any).Zotero.__beaverMuPDFWorkerClient_hot).toBe(
             client,
         );
         expect(getMuPDFWorkerClient()).toBe(client);
@@ -290,7 +291,7 @@ describe('MuPDFWorkerClient', () => {
         await expect(promise).rejects.toThrow();
         expect(MockWorker.instances.length).toBe(1);
         expect(
-            (globalThis as any).Zotero.__beaverMuPDFWorkerClient,
+            (globalThis as any).Zotero.__beaverMuPDFWorkerClient_hot,
         ).toBeUndefined();
     });
 
@@ -305,7 +306,7 @@ describe('MuPDFWorkerClient', () => {
 
         expect(worker.terminate).toHaveBeenCalledOnce();
         expect(
-            (globalThis as any).Zotero.__beaverMuPDFWorkerClient,
+            (globalThis as any).Zotero.__beaverMuPDFWorkerClient_hot,
         ).toBeUndefined();
     });
 
@@ -1044,5 +1045,60 @@ describe('MuPDFWorkerClient', () => {
             });
         });
 
+    });
+
+    // ------------------------------------------------------------------
+    // Named slots: hot vs background
+    // ------------------------------------------------------------------
+    describe('named slots', () => {
+        afterEach(async () => {
+            await disposeMuPDFWorker();
+            __resetIdleTimeoutForTest('hot');
+            __resetIdleTimeoutForTest('background');
+            delete (globalThis as any).Zotero.__beaverMuPDFWorkerClient_hot;
+            delete (globalThis as any).Zotero.__beaverMuPDFWorkerClient_background;
+        });
+
+        it('getMuPDFWorkerClient("background") returns a different instance than default ("hot")', () => {
+            const hot = getMuPDFWorkerClient();
+            const bg = getMuPDFWorkerClient('background');
+            expect(hot).not.toBe(bg);
+            expect((hot as any).name).toBe('hot');
+            expect((bg as any).name).toBe('background');
+        });
+
+        it('parks each instance in its own slot', () => {
+            const hot = getMuPDFWorkerClient('hot');
+            const bg = getMuPDFWorkerClient('background');
+            expect((globalThis as any).Zotero.__beaverMuPDFWorkerClient_hot).toBe(hot);
+            expect((globalThis as any).Zotero.__beaverMuPDFWorkerClient_background).toBe(bg);
+        });
+
+        it('getExistingMuPDFWorkerClient returns null on a fresh slot and does not spawn', () => {
+            expect(getExistingMuPDFWorkerClient('hot')).toBeNull();
+            expect(getExistingMuPDFWorkerClient('background')).toBeNull();
+            // No client was created — slot still empty.
+            expect((globalThis as any).Zotero.__beaverMuPDFWorkerClient_hot).toBeUndefined();
+            expect((globalThis as any).Zotero.__beaverMuPDFWorkerClient_background).toBeUndefined();
+        });
+
+        it('disposeMuPDFWorker("hot") clears only the hot slot', async () => {
+            const hot = getMuPDFWorkerClient('hot');
+            const bg = getMuPDFWorkerClient('background');
+            await disposeMuPDFWorker('hot');
+            expect((globalThis as any).Zotero.__beaverMuPDFWorkerClient_hot).toBeUndefined();
+            expect((globalThis as any).Zotero.__beaverMuPDFWorkerClient_background).toBe(bg);
+            // hot was disposed; new lookup returns a different fresh instance.
+            const hot2 = getMuPDFWorkerClient('hot');
+            expect(hot2).not.toBe(hot);
+        });
+
+        it('disposeMuPDFWorker() with no argument disposes both slots', async () => {
+            getMuPDFWorkerClient('hot');
+            getMuPDFWorkerClient('background');
+            await disposeMuPDFWorker();
+            expect((globalThis as any).Zotero.__beaverMuPDFWorkerClient_hot).toBeUndefined();
+            expect((globalThis as any).Zotero.__beaverMuPDFWorkerClient_background).toBeUndefined();
+        });
     });
 });

@@ -92,7 +92,7 @@ describe('BeaverExtractor.extract({ mode: "structured" }) — single worker roun
 
     afterEach(async () => {
         await disposeMuPDFWorker();
-        delete (globalThis as any).Zotero.__beaverMuPDFWorkerClient;
+        delete (globalThis as any).Zotero.__beaverMuPDFWorkerClient_hot;
     });
 
     it('dispatches exactly one extract op (no fan-out)', async () => {

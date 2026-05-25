@@ -9,8 +9,8 @@
  * If the host loads this package into more than one bundle (e.g. a separate
  * main-thread bundle and UI bundle), each bundle has its own copy of this
  * module and must be configured independently. The cross-bundle
- * `MuPDFWorkerClient` singleton is shared via the `workerClientSlot`
- * accessor (which the host implements over a shared global slot).
+ * `MuPDFWorkerClient` instances are shared via the per-name slots in
+ * `workerClientSlots` (which the host implements over shared globals).
  */
 
 import { setPDFLogger } from "./logging";
@@ -20,13 +20,26 @@ import { setPDFLogger } from "./logging";
 export type PDFLogSink = (msg: string, level: number) => void;
 
 /**
- * Cross-bundle slot accessor for the singleton `MuPDFWorkerClient`. The
+ * Cross-bundle slot accessor for a `MuPDFWorkerClient` instance. The
  * package never sees the underlying storage (typically a property on a
  * shared global like `Zotero`).
  */
 export interface PDFWorkerClientSlot {
     get(): unknown | undefined;
     set(client: unknown | undefined): void;
+}
+
+/** Logical name for a worker slot. */
+export type PDFWorkerSlotName = "hot" | "background";
+
+/**
+ * Per-name slots — separate WASM heaps so user-facing agent work
+ * (`hot`) is not contended by long-running background extraction
+ * (`background`).
+ */
+export interface PDFWorkerClientSlots {
+    hot: PDFWorkerClientSlot;
+    background: PDFWorkerClientSlot;
 }
 
 /** Worker-side URLs sent to the worker as the first message after spawn. */
@@ -42,8 +55,8 @@ export interface PDFConfig {
     workerUrl: string;
     /** Returns the host window from which the Worker is constructed. */
     getWorkerHost: () => Window | null;
-    /** Cross-bundle singleton slot accessor. */
-    workerClientSlot: PDFWorkerClientSlot;
+    /** Per-name cross-bundle slot accessors. */
+    workerClientSlots: PDFWorkerClientSlots;
     /** Logger sink (see `PDFLogSink`). */
     log: PDFLogSink;
 

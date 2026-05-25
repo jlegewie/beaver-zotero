@@ -14,6 +14,7 @@ const HIGHLIGHT_COLORS: Record<string, string> = {
     green: '#90ee90',
     blue: '#5ac8fa',
     purple: '#d4a5ff',
+    magenta: '#eb52f7',
     gray: '#d3d3d3',
     pink: '#ff66c4',
     brown: '#e6a86e',

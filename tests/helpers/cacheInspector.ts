@@ -530,3 +530,158 @@ export async function workerMarkStale(
 ): Promise<{ ok: boolean; before: WorkerStatsSnapshot; after: WorkerStatsSnapshot }> {
     return post('/beaver/test/worker-mark-stale', body);
 }
+
+// ---------------------------------------------------------------------------
+// Background extraction queue (dev-only)
+//
+// Talks to the `/beaver/test/background-*` endpoints registered in
+// `useHttpEndpoints.ts` from `react/hooks/httpHandlers/testBackgroundHandlers.ts`.
+// ---------------------------------------------------------------------------
+
+export type BackgroundJobType = 'hot_timeout_retry';
+
+export interface BackgroundJobPayload {
+    maxPages: number | null;
+    maxFileSizeMB: number;
+    timeoutSeconds: number;
+}
+
+export interface BackgroundJobRecord {
+    id: number;
+    jobType: BackgroundJobType;
+    libraryId: number;
+    itemId: number | null;
+    zoteroKey: string;
+    mode: 'structured' | 'markdown';
+    priority: number;
+    payload: BackgroundJobPayload | null;
+    enqueuedAt: number;
+    availableAt: number;
+    attemptCount: number;
+    lastError: string | null;
+}
+
+export interface BackgroundQueueStats {
+    pending: number;
+    available: number;
+    deferred: number;
+    dead: number;
+    byJobType: Record<string, number>;
+}
+
+export interface BackgroundEnqueueRequest {
+    library_id: number;
+    zotero_key: string;
+    mode: 'structured' | 'markdown';
+    job_type: BackgroundJobType;
+    priority?: number;
+    payload?: BackgroundJobPayload | null;
+    item_id?: number | null;
+    /**
+     * Wake the background loop after inserting. Defaults to `false` so
+     * tests can inspect deterministic queue state via peek/stats without
+     * the auto-tick claiming the row. Tests that exercise the auto-drain
+     * path pass `true` and pair it with `waitForQueueDrain()`.
+     */
+    notify?: boolean;
+}
+
+export interface BackgroundEnqueueResponse {
+    ok: boolean;
+    enqueued?: boolean;
+    id?: number;
+    error?: string;
+}
+
+export interface BackgroundStatsResponse {
+    ok: boolean;
+    queue?: BackgroundQueueStats;
+    workers?: {
+        hot: WorkerStatsSnapshot | null;
+        background: WorkerStatsSnapshot | null;
+    };
+    error?: string;
+}
+
+export interface BackgroundPeekResponse {
+    ok: boolean;
+    jobs?: BackgroundJobRecord[];
+    error?: string;
+}
+
+export type BackgroundProcessOnceReason =
+    | 'stopped'
+    | 'shutting_down'
+    | 'no_window'
+    | 'hot_busy'
+    | 'empty'
+    | 'job_done';
+
+export interface BackgroundProcessOnceResponse {
+    ok: boolean;
+    processed?: boolean;
+    reason?: BackgroundProcessOnceReason;
+    error?: string;
+}
+
+export async function backgroundEnqueue(
+    body: BackgroundEnqueueRequest,
+): Promise<BackgroundEnqueueResponse> {
+    return post<BackgroundEnqueueResponse>(
+        '/beaver/test/background-enqueue',
+        body,
+    );
+}
+
+export async function backgroundStats(): Promise<BackgroundStatsResponse> {
+    return post<BackgroundStatsResponse>('/beaver/test/background-stats', {});
+}
+
+export async function backgroundPeek(
+    body: { limit?: number } = {},
+): Promise<BackgroundPeekResponse> {
+    return post<BackgroundPeekResponse>('/beaver/test/background-peek', body);
+}
+
+export async function backgroundProcessOnce(): Promise<BackgroundProcessOnceResponse> {
+    return post<BackgroundProcessOnceResponse>(
+        '/beaver/test/background-process-once',
+        {},
+    );
+}
+
+export async function backgroundClear(): Promise<{ ok: boolean; error?: string }> {
+    return post('/beaver/test/background-clear', {});
+}
+
+/**
+ * Poll `/beaver/test/background-stats` until `queue.pending` is zero (or
+ * the timeout expires). The producer-side `notify()` in
+ * `handleTestBackgroundEnqueueHttpRequest` schedules a tick at 0ms that
+ * races the explicit `processOnce` HTTP call. For fast-completing jobs
+ * (missing item, non-PDF) the row may be drained by the background loop
+ * before `processOnce` claims it, so tests cannot rely on a deterministic
+ * winner. This helper waits for the queue to actually drain and returns
+ * the final stats snapshot.
+ */
+export async function waitForQueueDrain(
+    opts: { timeoutMs?: number; pollMs?: number } = {},
+): Promise<BackgroundQueueStats> {
+    const timeoutMs = opts.timeoutMs ?? 30_000;
+    const pollMs = opts.pollMs ?? 100;
+    const start = Date.now();
+    let lastStats: BackgroundQueueStats | null = null;
+    while (Date.now() - start < timeoutMs) {
+        const stats = await backgroundStats();
+        if (stats.queue) {
+            lastStats = stats.queue;
+            if (stats.queue.pending === 0) return stats.queue;
+        }
+        await new Promise((r) => setTimeout(r, pollMs));
+    }
+    throw new Error(
+        `background queue did not drain within ${timeoutMs}ms; last stats: ${JSON.stringify(
+            lastStats,
+        )}`,
+    );
+}

@@ -163,7 +163,7 @@ export async function acquireDoc(pdfData: Uint8Array | ArrayBuffer): Promise<Doc
         // doc as a bypass; releaseDoc will destroy it.
         postLog(
             "info",
-            `[worker-cache] BYPASS no room bytes=${byteLength} totalBytes=${totalBytes} entries=${cache.size}`,
+            `[worker-cache] BYPASS no room bytes=${byteLength}, totalBytes=${totalBytes}, entries=${cache.size}`,
         );
         return doc;
     }
@@ -182,7 +182,7 @@ export async function acquireDoc(pdfData: Uint8Array | ArrayBuffer): Promise<Doc
     totalBytes += byteLength;
     postLog(
         "info",
-        `[worker-cache] INSERT key=${shortKey(key)} bytes=${byteLength} entries=${cache.size} totalBytes=${totalBytes}`,
+        `[worker-cache] INSERT key=${shortKey(key)} bytes=${byteLength} entries=${cache.size}, totalBytes=${totalBytes}`,
     );
     return doc;
 }

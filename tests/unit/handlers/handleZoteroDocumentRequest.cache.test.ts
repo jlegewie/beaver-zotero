@@ -56,6 +56,16 @@ vi.mock('../../../src/beaver-extract', () => {
         }
     }
 
+    const mockClient = {
+        async getPageCount(_pdfData: Uint8Array): Promise<number> {
+            return 1;
+        },
+        async extract(_pdfData: Uint8Array, args: any, _signal?: AbortSignal): Promise<any> {
+            mockState.extractCalls.push(args);
+            return structuredResult;
+        },
+    };
+
     return {
         BeaverExtractor: MockBeaverExtractor,
         ExtractionError: MockExtractionError,
@@ -69,6 +79,9 @@ vi.mock('../../../src/beaver-extract', () => {
             WASM_ERROR: 'wasm_error',
             HEAP_EXHAUSTION: 'heap_exhaustion',
         },
+        getMuPDFWorkerClient: vi.fn(() => mockClient),
+        getExistingMuPDFWorkerClient: vi.fn(() => null),
+        disposeMuPDFWorker: vi.fn().mockResolvedValue(undefined),
     };
 });
 
@@ -82,9 +95,12 @@ vi.mock('../../../react/atoms/profile', () => ({
     searchableLibraryIdsAtom: { toString: () => 'searchableLibraryIdsAtom' },
 }));
 
-vi.mock('../../../src/services/agentDataProvider/utils', async () => {
-    const actual = await vi.importActual<typeof import('../../../src/services/agentDataProvider/utils')>(
-        '../../../src/services/agentDataProvider/utils',
+// `documentExtractionCore` imports these helpers directly from
+// `documentExtraction`. `utils.ts` only re-exports them — mocking it would
+// not intercept the call, so mock the shared module instead.
+vi.mock('../../../src/services/documentExtraction', async () => {
+    const actual = await vi.importActual<typeof import('../../../src/services/documentExtraction')>(
+        '../../../src/services/documentExtraction',
     );
     return {
         ...actual,
@@ -97,7 +113,7 @@ vi.mock('../../../src/services/agentDataProvider/utils', async () => {
 });
 
 import { handleZoteroDocumentRequest } from '../../../src/services/agentDataProvider/handleZoteroDocumentRequest';
-import { resolveToPdfAttachment, loadPdfData } from '../../../src/services/agentDataProvider/utils';
+import { resolveToPdfAttachment, loadPdfData } from '../../../src/services/documentExtraction';
 
 describe('handleZoteroDocumentRequest document cache integration', () => {
     const resolvedPdfItem = {

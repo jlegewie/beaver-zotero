@@ -5,12 +5,12 @@ import { safeIsInTrash, safeFileExists, isLinkedUrlAttachment } from '../../util
 import { syncingItemFilter, syncingItemFilterAsync } from '../../utils/sync';
 import { getPref } from '../../utils/prefs';
 
-import { isAttachmentOnServer, isAttachmentAvailableRemotely, getAttachmentDataInMemory, DownloadOptions } from '../../utils/webAPI';
+import { isAttachmentOnServer, isAttachmentAvailableRemotely } from '../../utils/webAPI';
 import { addPopupMessageAtom } from '../../../react/utils/popupMessageUtils';
 import { wasItemAddedBeforeLastSync } from '../../../react/utils/sourceUtils';
 import { BeaverExtractor, ExtractionError, ExtractionErrorCode } from '../../beaver-extract';
 import { isRemoteFilePath, makeRemoteFilePath } from '../documentFileIdentity';
-import type { DocumentCacheMetadata, DocumentPreflightMetadata } from '../documentCache';
+import type { DocumentCacheMetadata } from '../documentCache';
 import { DeferredToolPreference } from '../agentProtocol';
 import { deferredToolPreferencesAtom } from '../../../react/atoms/deferredToolPreferences';
 import { isSupportedItem } from '../../utils/sync';
@@ -19,18 +19,25 @@ import { searchableLibraryIdsAtom } from '../../../react/atoms/profile';
 import { serializeAttachment } from '../../utils/zoteroSerializers';
 import { getPDFPageCountFromFulltext, getPDFPageCountFromWorker } from '../../../react/utils/pdfUtils';
 import { TimingAccumulator } from '../../utils/timing';
-
-// ---------------------------------------------------------------------------
-// Remote PDF download cache
-// ---------------------------------------------------------------------------
-
-/**
- * Check if remote file access is enabled AND the file is reachable on the
- * server (either already hashed-and-synced, or pending on-demand download).
- */
-export function isRemoteAccessAvailable(item: Zotero.Item): boolean {
-    return getPref('accessRemoteFiles') && isAttachmentAvailableRemotely(item);
-}
+// Re-export shared document-extraction helpers so existing agent-data-provider
+// callers keep importing them from `./utils`.
+import {
+    loadPdfData as loadPdfDataPrimitive,
+    isRemoteAccessAvailable,
+} from '../documentExtraction';
+export {
+    isRemoteAccessAvailable,
+    validateZoteroItemReference,
+    checkRemotePdfSize,
+    preflightCachedPdfMeta,
+    resolveToPdfAttachment,
+} from '../documentExtraction';
+export type {
+    PreflightErrorCode,
+    PreflightFailure,
+    PreflightOptions,
+    PdfAttachmentResolveResult,
+} from '../documentExtraction';
 
 // ---------------------------------------------------------------------------
 // Remote download failure notification (rate-limited to once per 8 hours)
@@ -123,7 +130,7 @@ function describeRemoteDownloadFailure(error: unknown): { title: string; text: s
     };
 }
 
-function notifyRemoteDownloadFailure(error: unknown): void {
+export function notifyRemoteDownloadFailure(error: unknown): void {
     const now = Date.now();
     if (now - _remoteDownloadFailureLastNotifiedAt < REMOTE_FAILURE_NOTIFY_INTERVAL_MS) return;
     _remoteDownloadFailureLastNotifiedAt = now;
@@ -144,136 +151,25 @@ function notifyRemoteDownloadFailure(error: unknown): void {
 }
 
 // ---------------------------------------------------------------------------
-// Agent-context download options (fail fast)
+// loadPdfData — wrapper around the react-free primitive
 // ---------------------------------------------------------------------------
 
-const AGENT_DOWNLOAD_OPTIONS: DownloadOptions = {
-    errorDelayIntervals: [],   // no retries — agent context can't afford the delay
-    timeout: 20_000,           // 20s per-request timeout (30s backend timeout - 10s buffer)
-};
-
 /**
- * Brief in-memory cache for remote PDF downloads.
- * Avoids redundant server round-trips when multiple operations target the
- * same remote file within a short window (e.g., metadata check followed by
- * content extraction, or page-images after pages).
- */
-const _remoteDataCache = new Map<string, { data: Uint8Array; ts: number }>();
-/** In-flight downloads keyed by hash — coalesces concurrent requests for the same file. */
-const _remoteInflight = new Map<string, Promise<Uint8Array>>();
-const REMOTE_CACHE_TTL_MS = 120_000;
-const REMOTE_CACHE_MAX = 10;
-
-/**
- * Load PDF data from local disk or remote server.
- * Remote downloads are briefly cached in memory (keyed by synced hash)
- * to avoid redundant downloads across sequential handler calls.
+ * Load PDF data from local disk or remote server. Thin webpack-side wrapper
+ * that injects `notifyRemoteDownloadFailure` so the user sees the
+ * remote-download-failed popup. The primitive (used by the background
+ * extractor) takes no callback — background failures surface through
+ * `__beaverEventBus`'s `background-job:failed` event instead.
  *
- * @throws On download failure (callers should catch and produce their own error response)
+ * @throws On download failure (callers should catch and produce their own
+ *   error response).
  */
 export async function loadPdfData(
     item: Zotero.Item,
     filePath: string,
     isRemoteOnly: boolean,
 ): Promise<Uint8Array> {
-    if (!isRemoteOnly) {
-        return IOUtils.read(filePath);
-    }
-
-    // Cache key must track the same invalidation signal as makeRemoteFilePath:
-    // hash changes on synced-hash items, item.version bumps on on-demand items
-    // whose hash isn't populated until the first real download.
-    const cacheKey = makeRemoteFilePath(item);
-
-    const itemRef = `${item.libraryID}-${item.key}`;
-
-    const cached = _remoteDataCache.get(cacheKey);
-    if (cached && Date.now() - cached.ts < REMOTE_CACHE_TTL_MS) {
-        cached.ts = Date.now(); // refresh TTL on read
-        logger(`loadPdfData: remote cache hit for ${itemRef} (${(cached.data.length / 1024 / 1024).toFixed(2)}MB)`, 3);
-        return cached.data;
-    }
-
-    // Coalesce with an in-flight download for the same key
-    const inflight = _remoteInflight.get(cacheKey);
-    if (inflight) {
-        logger(`loadPdfData: awaiting in-flight remote download for ${itemRef}`, 3);
-        return inflight;
-    }
-
-    logger(`loadPdfData: downloading remote PDF for ${itemRef}`, 3);
-    const startedAt = Date.now();
-    const downloadPromise = getAttachmentDataInMemory(item, AGENT_DOWNLOAD_OPTIONS);
-    _remoteInflight.set(cacheKey, downloadPromise);
-
-    let data: Uint8Array;
-    try {
-        data = await downloadPromise;
-        logger(`loadPdfData: downloaded remote PDF for ${itemRef} (${(data.length / 1024 / 1024).toFixed(2)}MB in ${Date.now() - startedAt}ms)`, 3);
-    } catch (error) {
-        notifyRemoteDownloadFailure(error);
-        throw error;
-    } finally {
-        _remoteInflight.delete(cacheKey);
-    }
-
-    // Only cache data within the configured size limit to avoid pinning
-    // oversized buffers in memory (the caller will reject them anyway).
-    const maxMB = getPref('maxFileSizeMB');
-    const withinSizeLimit = (data.length / 1024 / 1024) <= maxMB;
-
-    if (withinSizeLimit) {
-        // Evict expired entries when at capacity
-        if (_remoteDataCache.size >= REMOTE_CACHE_MAX) {
-            const now = Date.now();
-            for (const [k, v] of _remoteDataCache) {
-                if (now - v.ts > REMOTE_CACHE_TTL_MS) _remoteDataCache.delete(k);
-            }
-        }
-        if (_remoteDataCache.size >= REMOTE_CACHE_MAX) {
-            const oldest = _remoteDataCache.keys().next().value;
-            if (oldest !== undefined) _remoteDataCache.delete(oldest);
-        }
-        _remoteDataCache.set(cacheKey, { data, ts: Date.now() });
-    }
-
-    return data;
-}
-
-/**
- * Check whether remote PDF data exceeds the configured size limit.
- * Returns size info when the limit is exceeded, or null when within limits.
- */
-export function checkRemotePdfSize(
-    data: Uint8Array,
-    skipLimits?: boolean,
-    maxFileSizeMB?: number,
-): { sizeMB: number; maxMB: number } | null {
-    if (skipLimits) return null;
-    const maxMB = maxFileSizeMB ?? getPref('maxFileSizeMB');
-    const sizeMB = data.length / 1024 / 1024;
-    return sizeMB > maxMB ? { sizeMB, maxMB } : null;
-}
-
-/**
- * Validate that a ZoteroItemReference has correctly formatted fields.
- * - library_id must be a finite positive integer
- * - zotero_key must be exactly 8 alphanumeric characters
- *
- * @returns null if valid, or an error message string if invalid
- */
-export function validateZoteroItemReference(ref: ZoteroItemReference): string | null {
-    const { library_id, zotero_key } = ref;
-
-    if (typeof library_id !== 'number' || !Number.isFinite(library_id) || library_id < 1 || library_id !== Math.floor(library_id)) {
-        return `Invalid library_id: '${library_id}'. Must be a positive integer.`;
-    }
-
-    if (typeof zotero_key !== 'string' || !Zotero.Utilities.isValidObjectKey(zotero_key)) {
-        return `Invalid zotero_key: '${zotero_key}'. Must be exactly 8 characters from Zotero's allowed set (e.g., '3RRUYX5J').`;
-    }
-
-    return null;
+    return loadPdfDataPrimitive(item, filePath, isRemoteOnly, notifyRemoteDownloadFailure);
 }
 
 /**
@@ -404,67 +300,9 @@ async function extractPageLabelsFromData(pdfData: Uint8Array): Promise<Record<nu
     }
 }
 
-/**
- * Pre-flight gate against `cachedMeta` — short-circuits the handler when the
- * cached record carries an authoritative error state (encrypted / invalid /
- * needs OCR) or violates the page-count cap. Pure function; returns a
- * neutral failure descriptor that each handler maps onto its own response
- * wording via its local `errorResponse(...)`.
- *
- * Caller controls per-request predicates:
- * - `applyPageCountCap` — handlers gate this on shape-of-request (e.g., the
- *   pages handler only fires the cap for "effectively unbounded" extracts).
- * - `checkOcr` — image rendering does not gate on text layer; pages and
- *   search do.
- *
- * Check ordering matches today's handler ordering: encrypted → invalid →
- * needs_ocr → too_many_pages.
- *
- */
-export type PreflightErrorCode = 'encrypted' | 'invalid_pdf' | 'no_text_layer' | 'too_many_pages';
-
-export interface PreflightFailure {
-    code: PreflightErrorCode;
-    pageCount: number | null;
-    /** Populated only when code === 'too_many_pages'. */
-    maxPageCount?: number;
-}
-
-export interface PreflightOptions {
-    /** If false, skip the OCR check (image rendering doesn't need a text layer). */
-    checkOcr: boolean;
-    /** If true and `page_count` is known, fire the page-count cap. Caller decides per-request. */
-    applyPageCountCap: boolean;
-    /** From `getPref('maxPageCount')`. Required when `applyPageCountCap` is true. */
-    maxPageCount: number;
-}
-
-export function preflightCachedPdfMeta(
-    cachedMeta: DocumentPreflightMetadata | null,
-    opts: PreflightOptions,
-): PreflightFailure | null {
-    if (!cachedMeta) return null;
-
-    const pageCount = cachedMeta.pageCount ?? null;
-    if (cachedMeta.errorCode) {
-        if (cachedMeta.errorCode === 'no_text_layer') {
-            if (opts.checkOcr) {
-                return { code: 'no_text_layer', pageCount };
-            }
-        } else {
-            return { code: cachedMeta.errorCode, pageCount };
-        }
-    }
-
-    if (opts.applyPageCountCap && pageCount != null && pageCount > opts.maxPageCount) {
-        return {
-            code: 'too_many_pages',
-            pageCount,
-            maxPageCount: opts.maxPageCount,
-        };
-    }
-    return null;
-}
+// `preflightCachedPdfMeta`, `PreflightOptions`, `PreflightFailure`, and
+// `PreflightErrorCode` live in `../documentExtraction` and are re-exported
+// at the top of this file.
 
 /**
  * Get file status information for an attachment.
@@ -1529,75 +1367,11 @@ export function extractErrorDetails(error: unknown): { message: string; details:
     return { message: String(error), details: null };
 }
 
-/**
- * Result of resolving a Zotero item to a PDF attachment.
- */
-export type PdfAttachmentResolveResult =
-    | { resolved: true; item: Zotero.Item; key: string }
-    | { resolved: false; error: string; error_code: 'not_attachment' | 'is_linked_url' | 'not_pdf' };
-
-/**
- * Resolve a Zotero item to a PDF attachment.
- * - If the item is already a PDF attachment, returns it directly.
- * - If it's a regular item with exactly one PDF attachment, auto-resolves to that attachment.
- * - Notes, annotations, non-PDF attachments, and ambiguous items return an error.
- *
- * @param item - Zotero item to resolve
- * @param uniqueKey - Human-readable key for error messages (e.g. "1-ABCDE123")
- */
-export async function resolveToPdfAttachment(
-    item: Zotero.Item,
-    uniqueKey: string
-): Promise<PdfAttachmentResolveResult> {
-    if (item.isAttachment()) {
-        if (item.isPDFAttachment()) {
-            return { resolved: true, item, key: uniqueKey };
-        }
-        if (item.attachmentLinkMode === Zotero.Attachments.LINK_MODE_LINKED_URL) {
-            return {
-                resolved: false,
-                error: `Attachment ${uniqueKey} is a linked URL, not a stored file. Beaver cannot access linked URL attachments.`,
-                error_code: 'is_linked_url',
-            };
-        }
-        const contentType = item.attachmentContentType || 'unknown';
-        return {
-            resolved: false,
-            error: `Attachment ${uniqueKey} is not a PDF (type: ${contentType})`,
-            error_code: 'not_pdf',
-        };
-    }
-
-    if (item.isRegularItem()) {
-        const info = await getAttachmentInfo(item);
-
-        if (info.count === 1 && info.bestAttachmentKey) {
-            const [libIdStr, key] = info.bestAttachmentKey.split('-');
-            const resolvedItem = await Zotero.Items.getByLibraryAndKeyAsync(parseInt(libIdStr, 10), key);
-            if (!resolvedItem) {
-                return {
-                    resolved: false,
-                    error: `The id '${uniqueKey}' is a regular item with one attachment (${info.text}) but it could not be resolved.`,
-                    error_code: 'not_attachment',
-                };
-            }
-            await resolvedItem.loadAllData();
-            return resolveToPdfAttachment(resolvedItem, info.bestAttachmentKey);
-        }
-
-        const message = info.count > 0
-            ? `The id '${uniqueKey}' is a regular item, not an attachment. The item has ${info.count} attachments: ${info.text}`
-            : `The id '${uniqueKey}' is a regular item, not an attachment. The item has no attachments.`;
-        return { resolved: false, error: message, error_code: 'not_attachment' };
-    }
-
-    const kind = item.isNote() ? 'note' : item.isAnnotation() ? 'annotation' : 'non-attachment item';
-    return {
-        resolved: false,
-        error: `The id '${uniqueKey}' is a ${kind}, not an attachment.`,
-        error_code: 'not_attachment',
-    };
-}
+// `PdfAttachmentResolveResult` and `resolveToPdfAttachment` live in
+// `../documentExtraction` and are re-exported at the top of this file.
+// `getAttachmentInfo` stays here because other webpack-side callers depend
+// on its richer (text-with-filename) shape, and it transitively uses
+// `isSupportedItem` from `src/utils/sync.ts` (which is not esbuild-safe).
 
 export async function getAttachmentInfo(item: Zotero.Item): Promise<{ count: number, text: string, bestAttachmentKey: string | null }> {
     if (!item.isRegularItem()) {
