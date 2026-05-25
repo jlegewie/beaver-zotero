@@ -11,6 +11,7 @@ import { EditNotePreview } from './EditNotePreview';
 import { CreateNotePreview } from './CreateNotePreview';
 import { ManageTagsPreview } from './ManageTagsPreview';
 import { ManageCollectionsPreview } from './ManageCollectionsPreview';
+import { CreateAnnotationsPreview } from './CreateAnnotationsPreview';
 import type { ActionStatus, PreviewData } from './agentActionViewHelpers';
 
 /**
@@ -134,6 +135,32 @@ export const ActionPreview: React.FC<{
                 status={status}
                 resultData={previewData.resultData as any}
                 errorMessage={previewData.errorMessage}
+            />
+        );
+    }
+
+    if (toolName === 'create_highlight_annotations' || previewData.actionType === 'create_highlight_annotations') {
+        return (
+            <CreateAnnotationsPreview
+                kind="highlight"
+                actionData={previewData.actionData}
+                currentValue={previewData.currentValue}
+                resultData={previewData.resultData as any}
+                status={status}
+                isStreaming={isStreaming}
+            />
+        );
+    }
+
+    if (toolName === 'create_note_annotations' || previewData.actionType === 'create_note_annotations') {
+        return (
+            <CreateAnnotationsPreview
+                kind="note"
+                actionData={previewData.actionData}
+                currentValue={previewData.currentValue}
+                resultData={previewData.resultData as any}
+                status={status}
+                isStreaming={isStreaming}
             />
         );
     }

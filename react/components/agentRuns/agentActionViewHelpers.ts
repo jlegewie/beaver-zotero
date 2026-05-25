@@ -34,7 +34,7 @@ export function confirmOverwriteManualChanges(modifiedFields: string[]): boolean
 }
 
 /** Tools that should remain expanded after approval resolves (never auto-collapse) */
-export const NEVER_AUTO_COLLAPSE_TOOLS = new Set(['create_note']);
+export const NEVER_AUTO_COLLAPSE_TOOLS = new Set(['create_note', 'create_highlight_annotations', 'create_note_annotations']);
 
 /**
  * Shorten a backend error_message for inline display in action previews.
@@ -159,6 +159,10 @@ export function getActionLabel(toolName: string): string {
             return 'Note Edit';
         case 'create_note':
             return 'Create Note';
+        case 'create_highlight_annotations':
+            return 'Highlight';
+        case 'create_note_annotations':
+            return 'Note';
         case 'create_item':
         case 'create_items':
             return 'Import';
@@ -192,6 +196,18 @@ export function getActionTitle(
             return itemTitle ? itemTitle : null;
         case 'create_note':
             return actionData?.title ?? null;
+        case 'create_highlight_annotations': {
+            const count = actionData?.items?.length ?? 0;
+            const attachmentTitle = actionData?.attachment_title ?? actionData?.resolved_ref?.zotero_key;
+            const suffix = attachmentTitle ? ` in "${truncateText(String(attachmentTitle), 50)}"` : '';
+            return `${count} highlight${count === 1 ? '' : 's'}${suffix}`;
+        }
+        case 'create_note_annotations': {
+            const count = actionData?.items?.length ?? 0;
+            const attachmentTitle = actionData?.attachment_title ?? actionData?.resolved_ref?.zotero_key;
+            const suffix = attachmentTitle ? ` in "${truncateText(String(attachmentTitle), 50)}"` : '';
+            return `${count} note${count === 1 ? '' : 's'}${suffix}`;
+        }
         case 'create_collection':
             return actionData?.name ?? actionData?.proposed_data?.name ?? null;
         case 'organize_items': {

@@ -9,6 +9,7 @@ import {
     ackAgentActionsAtom,
     rejectAgentActionAtom,
     setAgentActionsToErrorAtom,
+    isCreateAnnotationsAgentAction,
 } from '../../agents/agentActions';
 import {
     approvalResponseIntentsAtom,
@@ -29,6 +30,11 @@ import { executeCreateItemActions, undoCreateItemActions } from '../../utils/cre
 import { executeCreateNoteAction, undoCreateNoteAction } from '../../utils/createNoteActions';
 import { executeManageTagsAction, undoManageTagsAction } from '../../utils/manageTagsActions';
 import { executeManageCollectionsAction, undoManageCollectionsAction } from '../../utils/manageCollectionsActions';
+import {
+    executeCreateHighlightAnnotationsAction,
+    executeCreateNoteAnnotationsAction,
+    undoCreateAnnotationsAction,
+} from '../../utils/createAnnotationsActions';
 import type { CreateItemProposedData } from '../../types/agentActions/items';
 import { shortItemTitle } from '../../../src/utils/zoteroUtils';
 import { logger } from '../../../src/utils/logger';
@@ -315,6 +321,20 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                     result_data: result,
                 }]);
                 logger(`AgentActionView: Applied create_note action ${action!.id}`, 1);
+            } else if (toolName === 'create_highlight_annotations') {
+                const result = await executeCreateHighlightAnnotationsAction(action!);
+                await ackAgentActions(runId, [{
+                    action_id: action!.id,
+                    result_data: result,
+                }]);
+                logger(`AgentActionView: Applied create_highlight_annotations action ${action!.id}`, 1);
+            } else if (toolName === 'create_note_annotations') {
+                const result = await executeCreateNoteAnnotationsAction(action!);
+                await ackAgentActions(runId, [{
+                    action_id: action!.id,
+                    result_data: result,
+                }]);
+                logger(`AgentActionView: Applied create_note_annotations action ${action!.id}`, 1);
             } else if (toolName === 'create_items' || toolName === 'create_item') {
                 const actionsToApply = actions.filter((candidate) => candidate.status !== 'applied');
                 if (actionsToApply.length === 0) return;
@@ -425,6 +445,10 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                 await undoCreateNoteAction(action);
                 undoAgentAction(action.id);
                 logger(`AgentActionView: Undone create_note action ${action.id}`, 1);
+            } else if (toolName === 'create_highlight_annotations' || toolName === 'create_note_annotations') {
+                await undoCreateAnnotationsAction(action);
+                undoAgentAction(action.id);
+                logger(`AgentActionView: Undone ${toolName} action ${action.id}`, 1);
             } else if (toolName === 'create_items' || toolName === 'create_item') {
                 const actionsToUndo = actions.filter((candidate) => candidate.status === 'applied');
                 if (actionsToUndo.length === 0) return;
@@ -501,6 +525,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         const getToolIcon = () => {
             if (toolName === 'edit_metadata' || toolName === 'edit_item') return PropertyEditIcon;
             if (toolName === 'create_note') return FileDiffIcon;
+            if (toolName === 'create_highlight_annotations' || toolName === 'create_note_annotations') return FileDiffIcon;
             if (toolName === 'create_collection') return FolderAddIcon;
             if (toolName === 'organize_items') return TaskDoneIcon;
             if (toolName === 'manage_tags') return TagIcon;
@@ -523,6 +548,9 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     };
 
     const actionTitle = getActionTitle(toolName, action?.proposed_data, itemTitle, actions);
+    const bulkAnnotationRevealRef = action && isCreateAnnotationsAgentAction(action)
+        ? action.proposed_data.resolved_ref
+        : null;
 
     if (isStreaming) {
         const effectiveArgs = streamingArgs ?? {};
@@ -588,7 +616,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                         <div className="two-line-header">
                             <span className="font-color-primary font-medium">{getActionLabel(toolName)}</span>
                             {actionTitle && <span className="font-color-secondary ml-15">{actionTitle}</span>}
-                            {((action?.proposed_data?.library_id && action?.proposed_data?.zotero_key) || (toolName === 'create_note' && action?.status === 'applied' && action?.result_data?.library_id && action?.result_data?.zotero_key)) && (
+                            {((action?.proposed_data?.library_id && action?.proposed_data?.zotero_key) || (bulkAnnotationRevealRef?.library_id && bulkAnnotationRevealRef?.zotero_key) || (toolName === 'create_note' && action?.status === 'applied' && action?.result_data?.library_id && action?.result_data?.zotero_key)) && (
                                 <>
                                     {'\u00A0'}
                                     <Tooltip content={toolName === 'create_note' ? 'Open note' : 'Reveal in Zotero'} singleLine>
@@ -602,9 +630,13 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                                                 if (toolName === 'create_note' && action?.status === 'applied' && action?.result_data?.library_id && action?.result_data?.zotero_key) {
                                                     openNoteByKey(action.result_data.library_id, action.result_data.zotero_key);
                                                 } else {
-                                                    revealSource({
+                                                    const revealRef = bulkAnnotationRevealRef ?? {
                                                         library_id: action?.proposed_data?.library_id,
                                                         zotero_key: action?.proposed_data?.zotero_key,
+                                                    };
+                                                    revealSource({
+                                                        library_id: revealRef.library_id,
+                                                        zotero_key: revealRef.zotero_key,
                                                     });
                                                 }
                                             }}

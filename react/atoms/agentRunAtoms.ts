@@ -90,6 +90,8 @@ import {
     isEditNoteAgentAction,
     isCreateNoteAgentAction,
     hasAppliedZoteroItem,
+    hasAppliedBulkAnnotations,
+    isCreateAnnotationsAgentAction,
     AgentAction,
     addPendingApprovalAtom,
     removePendingApprovalAtom,
@@ -105,6 +107,7 @@ import { undoManageTagsAction } from '../utils/manageTagsActions';
 import { undoManageCollectionsAction } from '../utils/manageCollectionsActions';
 import { undoEditNoteAction } from '../utils/editNoteActions';
 import { undoCreateNoteAction } from '../utils/createNoteActions';
+import { undoCreateAnnotationsAction } from '../utils/createAnnotationsActions';
 import { processToolReturnResults } from '../agents/toolResultProcessing';
 import { addWarningAtom, clearWarningsAtom } from './warnings';
 import { backendHighTokenUsageRunsAtom, softCapTriggeredRunsAtom } from './messageUIState';
@@ -599,6 +602,9 @@ async function undoAppliedActionsInReverse(actions: AgentAction[]): Promise<void
     const indexed = actions
         .map((action, index) => ({ action, index }))
         .filter(({ action }) => {
+            if (isCreateAnnotationsAgentAction(action)) {
+                return hasAppliedBulkAnnotations(action);
+            }
             if (isAnnotationAgentAction(action) || isZoteroNoteAgentAction(action)) {
                 return hasAppliedZoteroItem(action);
             }
@@ -616,7 +622,9 @@ async function undoAppliedActionsInReverse(actions: AgentAction[]): Promise<void
 
     for (const { action } of indexed) {
         try {
-            if (isAnnotationAgentAction(action) || isZoteroNoteAgentAction(action)) {
+            if (isCreateAnnotationsAgentAction(action)) {
+                await undoCreateAnnotationsAction(action);
+            } else if (isAnnotationAgentAction(action) || isZoteroNoteAgentAction(action)) {
                 const item = await Zotero.Items.getByLibraryAndKeyAsync(
                     action.result_data!.library_id,
                     action.result_data!.zotero_key
@@ -681,7 +689,11 @@ function confirmUndoAppliedActions(actions: ActionsToUndo): UndoConfirmResult {
     // Build a list of changes
     const changeLines: string[] = [];
     if (annotations.length > 0) {
-        changeLines.push(`• ${annotations.length} PDF annotation${annotations.length === 1 ? '' : 's'}`);
+        const annotationCount = annotations.reduce(
+            (sum, action) => sum + (Array.isArray(action.result_data?.created) ? action.result_data.created.length : 1),
+            0,
+        );
+        changeLines.push(`• ${annotationCount} PDF annotation${annotationCount === 1 ? '' : 's'}`);
     }
     if (zoteroNotes.length > 0) {
         changeLines.push(`• ${zoteroNotes.length} Zotero note${zoteroNotes.length === 1 ? '' : 's'}`);
@@ -1977,8 +1989,10 @@ export const regenerateFromRunAtom = atom(
             
             // Categorize by type - only include applied actions
             const annotationsToDelete = actionsInRemovedRuns
-                .filter(isAnnotationAgentAction)
-                .filter(hasAppliedZoteroItem);
+                .filter((action) =>
+                    (isAnnotationAgentAction(action) && hasAppliedZoteroItem(action)) ||
+                    (isCreateAnnotationsAgentAction(action) && hasAppliedBulkAnnotations(action))
+                );
             const zoteroNotesToDelete = actionsInRemovedRuns
                 .filter(isZoteroNoteAgentAction)
                 .filter(hasAppliedZoteroItem);
@@ -2162,8 +2176,10 @@ export const regenerateWithEditedPromptAtom = atom(
             
             // Categorize by type - only include applied actions
             const annotationsToDelete = actionsInRemovedRuns
-                .filter(isAnnotationAgentAction)
-                .filter(hasAppliedZoteroItem);
+                .filter((action) =>
+                    (isAnnotationAgentAction(action) && hasAppliedZoteroItem(action)) ||
+                    (isCreateAnnotationsAgentAction(action) && hasAppliedBulkAnnotations(action))
+                );
             const zoteroNotesToDelete = actionsInRemovedRuns
                 .filter(isZoteroNoteAgentAction)
                 .filter(hasAppliedZoteroItem);
