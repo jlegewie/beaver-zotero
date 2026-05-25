@@ -177,19 +177,25 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
 
     const hasAssociatedItem =
         toolName === 'edit_metadata' ||
-        toolName === 'edit_item';
+        toolName === 'edit_item' ||
+        toolName === 'create_highlight_annotations' ||
+        toolName === 'create_note_annotations';
 
     useEffect(() => {
         if (!hasAssociatedItem || itemTitle) return;
 
         const fetchTitle = async () => {
             const libraryId: number | undefined =
-                action?.proposed_data?.library_id ?? pendingApproval?.actionData?.library_id;
+                action?.proposed_data?.resolved_ref?.library_id ??
+                action?.proposed_data?.library_id ??
+                pendingApproval?.actionData?.library_id;
             const zoteroKey: string | undefined =
-                action?.proposed_data?.zotero_key ?? pendingApproval?.actionData?.zotero_key;
-
+                action?.proposed_data?.resolved_ref?.zotero_key ??
+                action?.proposed_data?.zotero_key ??
+                pendingApproval?.actionData?.zotero_key;
+            
             if (!libraryId || !zoteroKey) return;
-
+            
             const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryId, zoteroKey);
             if (item) {
                 const title = await shortItemTitle(item);
@@ -614,7 +620,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                             <Icon icon={getHeaderIcon()} className={shouldShowStatusIcon() ? config.iconClassName : undefined} />
                         </div>
                         <div className="two-line-header">
-                            <span className="font-color-primary font-medium">{getActionLabel(toolName)}</span>
+                            <span className="font-color-primary font-medium">{getActionLabel(toolName, action?.proposed_data)}</span>
                             {actionTitle && <span className="font-color-secondary ml-15">{actionTitle}</span>}
                             {((action?.proposed_data?.library_id && action?.proposed_data?.zotero_key) || (bulkAnnotationRevealRef?.library_id && bulkAnnotationRevealRef?.zotero_key) || (toolName === 'create_note' && action?.status === 'applied' && action?.result_data?.library_id && action?.result_data?.zotero_key)) && (
                                 <>
