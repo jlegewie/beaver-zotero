@@ -11,6 +11,7 @@ import { PageGeometry } from "../../beaver-extract/types";
 import { logger } from "../../utils/logger";
 import { getAttachmentFileStatus } from "../agentDataProvider/utils";
 import { isRemoteFilePath } from "../documentFileIdentity";
+import { BEAVER_ANNOTATION_AUTHOR } from "../../constants/annotations";
 
 const HIGHLIGHT_COLORS: Record<string, string> = {
     red: "#ff6666",
@@ -317,7 +318,7 @@ export async function createHighlightAnnotation(
         pageIndex: input.pageIndex,
         rects,
     });
-    item.annotationAuthorName = "Beaver";
+    item.annotationAuthorName = BEAVER_ANNOTATION_AUTHOR;
     await item.saveTx();
 
     return { library_id: attachment.libraryID, zotero_key: item.key };
@@ -351,7 +352,7 @@ export async function createNoteAnnotation(
     };
     Object.assign(item, sortIndexField);
     item.annotationPosition = JSON.stringify({ pageIndex, rects: [rect] });
-    item.annotationAuthorName = "Beaver";
+    item.annotationAuthorName = BEAVER_ANNOTATION_AUTHOR;
     await item.saveTx();
 
     return { library_id: attachment.libraryID, zotero_key: item.key };

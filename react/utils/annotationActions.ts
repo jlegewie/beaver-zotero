@@ -4,6 +4,7 @@ import { ZoteroReader } from './annotationUtils';
 import { logger } from '../../src/utils/logger';
 import { getPageViewportInfo, isPDFDocumentAvailable, waitForPDFDocument, applyRotationToBoundingBox } from './pdfUtils';
 import { isLibraryEditable } from '../../src/utils/zoteroUtils';
+import { BEAVER_ANNOTATION_AUTHOR } from '../../src/constants/annotations';
 import { AnnotationProposedAction, isHighlightAnnotationAction, isNoteAnnotationAction, AnnotationResultData } from '../types/agentActions/base';
 
 
@@ -141,8 +142,8 @@ async function createHighlightAnnotation(
         temporary: false,
         dateCreated: now,
         dateModified: now,
-        authorName: 'Beaver',
-        annotationAuthorName: 'Beaver'
+        authorName: BEAVER_ANNOTATION_AUTHOR,
+        annotationAuthorName: BEAVER_ANNOTATION_AUTHOR
     };
 
     const iframeWindow = (reader as any)?._internalReader?._primaryView?._iframeWindow;
@@ -232,8 +233,8 @@ async function createNoteAnnotation(
         notePosition: annotation.proposed_data.note_position,
         dateCreated: now,
         dateModified: now,
-        authorName: 'Beaver',
-        annotationAuthorName: 'Beaver'
+        authorName: BEAVER_ANNOTATION_AUTHOR,
+        annotationAuthorName: BEAVER_ANNOTATION_AUTHOR
     };
 
     const iframeWindow = (reader as any)?._internalReader?._primaryView?._iframeWindow;

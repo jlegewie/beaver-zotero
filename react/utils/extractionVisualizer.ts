@@ -11,6 +11,7 @@
  */
 
 import { logger } from "../../src/utils/logger";
+import { BEAVER_VISUALIZER_ANNOTATION_AUTHOR } from "../../src/constants/annotations";
 import {
     BeaverExtractor,
     bboxToReaderFrame,
@@ -203,7 +204,7 @@ async function pushOverlayToReader(
             lastModifiedByUser: "",
             dateModified: new Date().toISOString(),
             annotationType: "highlight",
-            annotationAuthorName: "Beaver Visualizer",
+            annotationAuthorName: BEAVER_VISUALIZER_ANNOTATION_AUTHOR,
             annotationText: label,
             annotationComment: comment,
             annotationColor: head.color,

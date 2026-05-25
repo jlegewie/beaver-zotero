@@ -1,4 +1,5 @@
 import { logger } from "../../src/utils/logger";
+import { BEAVER_ANNOTATION_AUTHOR } from '../../src/constants/annotations';
 import { getCurrentReader } from "./readerUtils";
 import { ZoteroItemReference } from "../types/zotero";
 import { getPageViewportInfo, applyRotationToBoundingBox } from './pdfUtils';
@@ -452,7 +453,7 @@ export const createBoundingBoxHighlights = async (
                 
                 // Backup annotation properties
                 annotationType: 'highlight',
-                annotationAuthorName: 'Beaver',
+                annotationAuthorName: BEAVER_ANNOTATION_AUTHOR,
                 annotationText: annotationText,
                 annotationComment: '',
                 annotationColor: '#00bbff',
