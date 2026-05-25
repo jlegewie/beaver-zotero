@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
+import { navigateToAnnotation } from '../../utils/readerUtils';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { AgentRunStatus } from '../../agents/types';
 import {
@@ -94,6 +95,15 @@ interface AgentActionViewProps {
     streamingArgs?: Record<string, any> | null;
     runStatus?: AgentRunStatus;
 }
+
+type HeaderLinkAction = {
+    tooltip: string;
+    onClick: () => void | Promise<void>;
+};
+
+type HeaderLinkActionRule = HeaderLinkAction & {
+    matches: () => boolean;
+};
 
 export const AgentActionView: React.FC<AgentActionViewProps> = ({
     toolcallId,
@@ -557,6 +567,55 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const bulkAnnotationRevealRef = action && isCreateAnnotationsAgentAction(action)
         ? action.proposed_data.resolved_ref
         : null;
+    const headerLinkActionRules: HeaderLinkActionRule[] = [
+        {
+            matches: () => (
+                toolName === 'create_note' &&
+                action?.status === 'applied' &&
+                !!action?.result_data?.library_id &&
+                !!action?.result_data?.zotero_key
+            ),
+            tooltip: 'Open note',
+            onClick: () => openNoteByKey(action!.result_data!.library_id, action!.result_data!.zotero_key),
+        },
+        {
+            matches: () => (
+                (toolName === 'create_highlight_annotations' || toolName === 'create_note_annotations')&&
+                action?.status === 'applied' &&
+                action?.result_data?.created?.length > 0
+            ),
+            tooltip: 'Open annotation',
+            onClick: async () => {
+                const firstCreated = action!.result_data!.created[0];
+                const annotationItem = await Zotero.Items.getByLibraryAndKeyAsync(
+                    firstCreated.library_id,
+                    firstCreated.zotero_key,
+                );
+                if (annotationItem) {
+                    await navigateToAnnotation(annotationItem as Zotero.Item);
+                }
+            },
+        },
+    ];
+
+    const defaultHeaderLinkAction: HeaderLinkAction | null = (() => {
+        const revealRef = bulkAnnotationRevealRef ?? {
+            library_id: action?.proposed_data?.library_id,
+            zotero_key: action?.proposed_data?.zotero_key,
+        };
+        if (!revealRef.library_id || !revealRef.zotero_key) return null;
+
+        return {
+            tooltip: 'Reveal in Zotero',
+            onClick: () => {
+                revealSource({
+                    library_id: revealRef.library_id,
+                    zotero_key: revealRef.zotero_key,
+                });
+            },
+        };
+    })();
+    const headerLinkAction = headerLinkActionRules.find((rule) => rule.matches()) ?? defaultHeaderLinkAction;
 
     if (isStreaming) {
         const effectiveArgs = streamingArgs ?? {};
@@ -622,29 +681,18 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                         <div className="two-line-header">
                             <span className="font-color-primary font-medium">{getActionLabel(toolName, action?.proposed_data)}</span>
                             {actionTitle && <span className="font-color-secondary ml-15">{actionTitle}</span>}
-                            {((action?.proposed_data?.library_id && action?.proposed_data?.zotero_key) || (bulkAnnotationRevealRef?.library_id && bulkAnnotationRevealRef?.zotero_key) || (toolName === 'create_note' && action?.status === 'applied' && action?.result_data?.library_id && action?.result_data?.zotero_key)) && (
+                            {headerLinkAction && (
                                 <>
                                     {'\u00A0'}
-                                    <Tooltip content={toolName === 'create_note' ? 'Open note' : 'Reveal in Zotero'} singleLine>
+                                    <Tooltip content={headerLinkAction.tooltip} singleLine>
                                         <span
                                             className="font-color-secondary scale-10"
                                             style={{ display: 'inline-flex', verticalAlign: 'middle', cursor: 'pointer' }}
                                             role="button"
-                                            onClick={(e) => {
+                                            onClick={async (e) => {
                                                 e.stopPropagation();
                                                 e.preventDefault();
-                                                if (toolName === 'create_note' && action?.status === 'applied' && action?.result_data?.library_id && action?.result_data?.zotero_key) {
-                                                    openNoteByKey(action.result_data.library_id, action.result_data.zotero_key);
-                                                } else {
-                                                    const revealRef = bulkAnnotationRevealRef ?? {
-                                                        library_id: action?.proposed_data?.library_id,
-                                                        zotero_key: action?.proposed_data?.zotero_key,
-                                                    };
-                                                    revealSource({
-                                                        library_id: revealRef.library_id,
-                                                        zotero_key: revealRef.zotero_key,
-                                                    });
-                                                }
+                                                await headerLinkAction.onClick();
                                             }}
                                         >
                                             <Icon icon={ArrowUpRightIcon} />
