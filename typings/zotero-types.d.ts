@@ -1,6 +1,10 @@
 export {};
 
 declare global {
+    type ZoteroAnnotationItem = Omit<Zotero.Item, "annotationSortIndex"> & {
+        annotationSortIndex: string;
+    };
+
     interface ZoteroItemPane {
         collapsed: boolean;
     }
