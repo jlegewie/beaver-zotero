@@ -143,12 +143,6 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
             <div className="display-flex flex-col px-3 py-2 gap-2">
 
                 <div className="display-flex flex-col gap-1">
-                    {isStreaming && items.length === 0 && (
-                        <>
-                            <div className="shimmer-text text-sm font-color-secondary">Preparing annotations...</div>
-                            <div className="shimmer-text text-sm font-color-secondary">Reading locations...</div>
-                        </>
-                    )}
                     {items.map((item) => {
                         const rawItem = item as any;
                         const clientItemId = rawItem.client_item_id ?? rawItem.clientItemId ?? '';
@@ -163,6 +157,8 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
                         const failureMessage = failures
                             .map((failure) => failure.error_code ? `${failure.error_code}: ${failure.error}` : failure.error)
                             .join('\n');
+                        const pageIndex = pageIndexForItem(kind, item);
+                        const pageNumber = typeof pageIndex === 'number' ? pageIndex + 1 : null;
 
                         const row = (
                             <div
@@ -177,21 +173,17 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
                                     style={{ marginTop: 2 }}
                                 />
 
-                                <div className="display-flex flex-col min-w-0 flex-1 gap-025">
-                                    <div
-                                        className="font-color-secondary"
-                                        style={{
-                                            display: '-webkit-box',
-                                            WebkitLineClamp: 3,
-                                            WebkitBoxOrient: 'vertical',
-                                            overflow: 'hidden',
-                                            wordBreak: 'break-word',
-                                            textDecoration: isFailed ? 'line-through' : undefined,
-                                        }}
-                                    >
+                                <div className="display-flex flex-row min-w-0 flex-1 justify-between gap-3">
+                                    <div className="truncate">
                                         {rawItem.title || text || `${noun} annotation`}
                                     </div>
+                                    {pageNumber !== null && (
+                                        <div className="font-color-tertiary whitespace-nowrap">
+                                            {`Page ${pageNumber}`}
+                                        </div>
+                                    )}
                                 </div>
+
                             </div>
                         );
 
