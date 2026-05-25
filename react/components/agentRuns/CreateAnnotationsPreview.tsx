@@ -136,20 +136,6 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
     return (
         <div className={`create-annotations-preview overflow-hidden ${status === 'rejected' || status === 'undone' ? 'opacity-60' : ''}`}>
             <div className="display-flex flex-col px-3 py-2 gap-2">
-                <div className="display-flex flex-col gap-1">
-                    <div className="text-sm font-color-primary font-medium">
-                        {currentValue?.attachment_title ?? 'PDF attachment'}
-                    </div>
-                    <div className="text-xs font-color-secondary">
-                        {currentValue?.library_name}
-                        {resolutionDiffers && (
-                            <span className="ml-2 font-color-secondary">Anchored to the PDF attachment</span>
-                        )}
-                        {currentValue?.needs_extraction && (
-                            <span className="ml-2 font-color-secondary">Extraction required</span>
-                        )}
-                    </div>
-                </div>
 
                 <div className="display-flex flex-col gap-1">
                     {isStreaming && items.length === 0 && (
@@ -163,13 +149,10 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
                         const clientItemId = rawItem.client_item_id ?? rawItem.clientItemId ?? '';
                         const itemStatus = statusForItem(item, createdByClient, failedByClient);
                         const failures = failedByClient.get(clientItemId) ?? [];
-                        const pageLabel = pageLabelForItem(kind, item);
                         const text = kind === 'highlight'
                             ? truncateText(rawItem.text ?? '', 90)
                             : truncateText(rawItem.comment ?? '', 90);
-                        const comment = kind === 'highlight' ? rawItem.comment : null;
                         const color = kind === 'highlight' ? rawItem.color : 'yellow';
-                        const locRaw = rawItem.loc_raw ?? rawItem.locRaw ?? rawItem.loc?.raw;
 
                         return (
                             <div
@@ -193,17 +176,6 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
                                     />
                                 )}
                                 <div className="display-flex flex-col min-w-0 flex-1 gap-025">
-                                    <div className="display-flex flex-row items-center gap-1 min-w-0">
-                                        <span className="text-xs px-1 rounded bg-quaternary font-color-secondary">
-                                            {locRaw || 'loc'}
-                                        </span>
-                                        {pageLabel && (
-                                            <span className="text-xs font-color-secondary">p. {pageLabel}</span>
-                                        )}
-                                        {comment && (
-                                            <span className="text-xs font-color-secondary">comment</span>
-                                        )}
-                                    </div>
                                     <div className="text-sm font-color-primary truncate">
                                         {text || rawItem.title || `${noun} annotation`}
                                     </div>
@@ -211,18 +183,6 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
                             </div>
                         );
                     })}
-                </div>
-
-                <div className="text-xs font-color-secondary display-flex flex-row gap-2">
-                    <span>
-                        {items.length} {noun}{items.length === 1 ? '' : 's'}
-                    </span>
-                    {created.length > 0 && (
-                        <span>{created.length} created</span>
-                    )}
-                    {failed.length > 0 && (
-                        <span className="font-color-red">{failed.length} failed</span>
-                    )}
                 </div>
             </div>
         </div>
