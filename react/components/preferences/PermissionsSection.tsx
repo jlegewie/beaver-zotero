@@ -95,6 +95,13 @@ const PermissionsSection: React.FC = () => {
                 </div>
                 <div className="border-top-quinary" style={{ padding: '8px 12px' }}>
                     <DeferredToolPreferenceSetting
+                        toolName="create_highlight_annotations"
+                        label="PDF Annotations"
+                        description="Creating highlight and note annotations on PDF attachments"
+                    />
+                </div>
+                <div className="border-top-quinary" style={{ padding: '8px 12px' }}>
+                    <DeferredToolPreferenceSetting
                         toolName="create_items"
                         label="Item Imports"
                         description="Importing new items from external sources"
