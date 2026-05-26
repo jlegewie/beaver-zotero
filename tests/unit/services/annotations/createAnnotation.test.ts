@@ -160,42 +160,53 @@ describe("createAnnotation geometry primitives", () => {
       side: "left",
       x: 0,
       y: 100,
+      coord_origin: CoordOrigin.TOPLEFT,
+    };
+    const bottomLeftNote: NotePosition = {
+      ...leftNote,
+      coord_origin: CoordOrigin.BOTTOMLEFT,
     };
 
-    it("places a left-side note with fixed margin and size", () => {
+    it("places a top-left-origin left-side note using y as the anchor center", () => {
       expect(computeNoteRect(leftNote, baseGeometry)).toEqual([
-        12, 100, 30, 118,
+        12, 491, 30, 509,
       ]);
     });
 
-    it("places a right-side note with fixed margin and size", () => {
+    it("places a top-left-origin right-side note using y as the anchor center", () => {
       expect(
         computeNoteRect({ ...leftNote, side: "right" }, baseGeometry),
-      ).toEqual([370, 100, 388, 118]);
+      ).toEqual([370, 491, 388, 509]);
+    });
+
+    it("supports bottom-left-origin note positions", () => {
+      expect(computeNoteRect(bottomLeftNote, baseGeometry)).toEqual([
+        12, 91, 30, 109,
+      ]);
     });
 
     it("applies 90-degree page rotation to notes", () => {
-      expect(computeNoteRect(leftNote, geometry({ rotation: 90 }))).toEqual([
-        282, 12, 300, 30,
+      expect(computeNoteRect(bottomLeftNote, geometry({ rotation: 90 }))).toEqual([
+        291, 12, 309, 30,
       ]);
     });
 
     it("applies 180-degree page rotation to notes", () => {
-      expect(computeNoteRect(leftNote, geometry({ rotation: 180 }))).toEqual([
-        370, 482, 388, 500,
+      expect(computeNoteRect(bottomLeftNote, geometry({ rotation: 180 }))).toEqual([
+        370, 491, 388, 509,
       ]);
     });
 
     it("applies 270-degree page rotation to notes", () => {
-      expect(computeNoteRect(leftNote, geometry({ rotation: 270 }))).toEqual([
-        100, 570, 118, 588,
+      expect(computeNoteRect(bottomLeftNote, geometry({ rotation: 270 }))).toEqual([
+        91, 570, 109, 588,
       ]);
     });
 
     it("adds the viewBox offset to note rects", () => {
       expect(
         computeNoteRect(leftNote, geometry({ viewBox: [5, 7, 405, 607] })),
-      ).toEqual([17, 107, 35, 125]);
+      ).toEqual([17, 498, 35, 516]);
     });
   });
 });

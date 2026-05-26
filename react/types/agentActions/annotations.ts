@@ -27,8 +27,10 @@ export interface NotePosition {
     side: 'left' | 'right';
     /** Absolute X coordinate in PDF points */
     x: number;
-    /** Absolute Y coordinate in PDF points */
+    /** Vertical anchor center in PDF points, interpreted using coord_origin. */
     y: number;
+    /** Coordinate origin for y. Backend-generated note positions use top-left origin. */
+    coord_origin?: CoordOrigin;
 }
 
 /**
@@ -233,11 +235,16 @@ export function normalizeNotePosition(raw: any): NotePosition | undefined {
     const y = typeof notePosition.y === 'number' ? notePosition.y : Number(notePosition.y ?? 0);
 
     const side = rawSide === 'left' ? 'left' : 'right';
+    const rawOrigin = notePosition.coord_origin ?? notePosition.coordOrigin ?? notePosition.origin;
+    const coordOrigin = rawOrigin === CoordOrigin.BOTTOMLEFT || rawOrigin === 'b'
+        ? CoordOrigin.BOTTOMLEFT
+        : CoordOrigin.TOPLEFT;
 
     return {
         page_index: pageIndex,
         side,
         x,
         y,
+        coord_origin: coordOrigin,
     };
 }

@@ -161,13 +161,17 @@ export function computeNoteRect(
     const x = notePosition.side === "right"
         ? geometry.width - NOTE_RECT_SIZE - NOTE_SIDE_MARGIN
         : NOTE_SIDE_MARGIN;
+    const yCenter = notePosition.coord_origin === CoordOrigin.BOTTOMLEFT
+        ? notePosition.y
+        : geometry.height - notePosition.y;
+    const yBottom = yCenter - NOTE_RECT_SIZE / 2;
 
     let converted = convertBoundingBoxToBottomLeft(
         {
             l: x,
-            b: notePosition.y,
+            b: yBottom,
             r: x + NOTE_RECT_SIZE,
-            t: notePosition.y + NOTE_RECT_SIZE,
+            t: yBottom + NOTE_RECT_SIZE,
             coord_origin: CoordOrigin.BOTTOMLEFT,
         },
         geometry.height,

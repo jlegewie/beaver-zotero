@@ -170,7 +170,7 @@ async function convertNotePositionToRect(
         throw new Error('Note annotation missing position');
     }
 
-    const { page_index, side, y } = annotation.proposed_data.note_position;
+    const { page_index, side, y, coord_origin } = annotation.proposed_data.note_position;
     
     // Get viewport info directly from PDF document (no need for rendered page)
     const { viewBox, height, width, rotation } = await getPageViewportInfo(reader, page_index);
@@ -187,12 +187,17 @@ async function convertNotePositionToRect(
         x = 12;
     }
 
+    const yCenter = coord_origin === CoordOrigin.BOTTOMLEFT
+        ? y
+        : height - y;
+    const yBottom = yCenter - NOTE_RECT_SIZE / 2;
+
     let converted: BoundingBox = convertBoundingBoxToBottomLeft(
         {
             l: x,
-            b: y,
+            b: yBottom,
             r: x + NOTE_RECT_SIZE,
-            t: y + NOTE_RECT_SIZE,
+            t: yBottom + NOTE_RECT_SIZE,
             coord_origin: CoordOrigin.BOTTOMLEFT,
         },
         height
