@@ -1,7 +1,7 @@
 import React, { useCallback, useRef } from 'react';
 import Tooltip from '../ui/Tooltip';
 import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
-import { AlertIcon, Icon } from '../icons/icons';
+import { AlertIcon, HighlighterIcon, Icon, NoteIcon, PdfIcon } from '../icons/icons';
 import { navigateToAnnotation, navigateToPage } from '../../utils/readerUtils';
 import { BeaverTemporaryAnnotations, createBoundingBoxHighlights, createTemporaryNoteAnnotation } from '../../utils/annotationUtils';
 import { logger } from '../../../src/utils/logger';
@@ -17,6 +17,8 @@ import type {
 } from '../../types/agentActions/createAnnotations';
 
 type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error' | 'awaiting';
+
+const TOOLTIP_WIDTH = '250px';
 
 interface CreateAnnotationsPreviewProps {
     kind: 'highlight' | 'note';
@@ -262,7 +264,7 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
     }, [kind, resolvedRef?.library_id, resolvedRef?.zotero_key, status]);
 
     return (
-        <div ref={previewRootRef} className={`create-annotations-preview overflow-hidden ${status === 'rejected' || status === 'undone' ? 'opacity-60' : ''}`}>
+        <div ref={previewRootRef} className="create-annotations-preview overflow-hidden">
             <div className="display-flex flex-col px-3 py-2 gap-2">
 
                 <div className="display-flex flex-col gap-1">
@@ -278,16 +280,65 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
                         const color = kind === 'highlight' ? rawItem.color : 'yellow';
                         const isFailed = itemStatus === 'failed';
                         const isPartial = itemStatus === 'partial';
+                        const isCreated = itemStatus === 'created' || itemStatus === 'partial';
                         const failureMessage = failures
                             .map((failure) => failure.error_code ? `${failure.error_code}: ${failure.error}` : failure.error)
                             .join('\n');
                         const pageIndex = pageIndexForItem(kind, item);
                         const pageNumber = typeof pageIndex === 'number' ? pageIndex + 1 : null;
 
+                        const kindLabel = kind === 'highlight' ? 'Highlight Annotation' : 'Sticky Note';
+                        const tooltipContent = text || rawItem.title || '';
+                        const footerLabel = isFailed
+                            ? failureMessage || `Failed to create ${noun}`
+                            : isCreated
+                                ? `Click to view in PDF`
+                                : `Click to preview in PDF`;
+                        const footerIcon = isFailed ? AlertIcon : PdfIcon;
+                        const footerClass = isFailed ? 'font-color-red' : 'font-color-tertiary';
+
+                        const tooltipCustomContent = (
+                            <span className="block" style={{ overflow: 'hidden' }}>
+                                <span className="px-3 py-15 display-flex flex-row border-bottom-quinary gap-1">
+                                    <Icon icon={kind === 'highlight' ? HighlighterIcon : NoteIcon} size={12} className="mt-015" />
+                                    <span className="font-color-primary text-sm">
+                                        {kindLabel}
+                                    </span>
+                                    <span className="flex-1" />
+                                    {pageNumber !== null && (
+                                        <span className="font-color-secondary text-sm">{`Page ${pageNumber}`}</span>
+                                    )}
+                                </span>
+                                {tooltipContent && (
+                                    <span
+                                        className="font-color-secondary text-sm px-3 py-15 block"
+                                        style={{
+                                            wordBreak: 'break-word',
+                                            overflowWrap: 'anywhere',
+                                            whiteSpace: 'pre-wrap',
+                                            display: '-webkit-box',
+                                            WebkitLineClamp: 5,
+                                            WebkitBoxOrient: 'vertical',
+                                            overflow: 'hidden',
+                                        }}
+                                    >
+                                        {tooltipContent}
+                                    </span>
+                                )}
+                                <span className="px-3 py-15 border-top-quinary block">
+                                    <span className="display-flex flex-row items-center gap-15">
+                                        <span className={`text-sm ${footerClass}`}>
+                                            {footerLabel}
+                                        </span>
+                                    </span>
+                                </span>
+                            </span>
+                        );
+
+                        const isDimmed = status === 'rejected' || status === 'undone';
                         const row = (
                             <div
-                                key={`${clientItemId}-${rawItem.index}`}
-                                className="create-annotations-preview-row display-flex flex-row items-start gap-2 py-15 cursor-pointer"
+                                className={`create-annotations-preview-row display-flex flex-row items-start gap-2 py-15 cursor-pointer ${isDimmed ? 'opacity-60' : ''}`}
                                 onClick={(event) => handleItemClick(item, createdEntries, event.currentTarget.ownerDocument)}
                             >
                                 {isFailed ? (
@@ -315,14 +366,18 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
                             </div>
                         );
 
-                        if ((isFailed || isPartial) && failureMessage) {
-                            return (
-                                <Tooltip key={`${clientItemId}-${rawItem.index}`} content={failureMessage} showArrow>
-                                    {row}
-                                </Tooltip>
-                            );
-                        }
-                        return row;
+                        return (
+                            <Tooltip
+                                key={`${clientItemId}-${rawItem.index}`}
+                                content={tooltipContent || kindLabel}
+                                customContent={tooltipCustomContent}
+                                width={TOOLTIP_WIDTH}
+                                padding={false}
+                                stayOpenOnAnchorClick
+                            >
+                                {row}
+                            </Tooltip>
+                        );
                     })}
                 </div>
             </div>
