@@ -17,14 +17,14 @@ const MAX_ITEM_TEXT_LENGTH = 30;
 const ANNOTATION_TEXT_BY_TYPE = {
     highlight: 'Highlight',
     underline: 'Underline',
-    note: 'Note',
+    note: 'Sticky Note',
     image: 'Area',
 }
 
 export const ANNOTATION_ICON_BY_TYPE = {
     highlight: ZOTERO_ICONS.ANNOTATE_HIGHLIGHT,
     underline: ZOTERO_ICONS.ANNOTATE_UNDERLINE,
-    note: ZOTERO_ICONS.ANNOTATE_NOTE,
+    note: ZOTERO_ICONS.ANNOTATION,
     text: ZOTERO_ICONS.ANNOTATE_TEXT,
     image: ZOTERO_ICONS.ANNOTATE_AREA,
 }

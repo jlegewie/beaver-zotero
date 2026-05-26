@@ -56,12 +56,18 @@ export interface MarkdownPage {
     label?: string;
     width: number;
     height: number;
+    viewBox: Rect;
+    rotation: 0 | 90 | 180 | 270;
     markdown: string;
 }
 
 export interface StructuredDocument {
     pageCount: number;
     pageLabels?: Record<string, string>;
+    /**
+     * Origin for all public extraction rects on `pages[].items[].bbox` and
+     * `pages[].items[].sentences[].bboxes`.
+     */
     bboxOrigin: BBoxOrigin;
     bboxPrecision: number;
     pages: StructuredPage[];
@@ -71,8 +77,16 @@ export interface StructuredDocument {
 export interface StructuredPage {
     index: number;
     label?: string;
+    /**
+     * `width`/`height` define the public extraction bbox frame for this page.
+     * On rotated PDF pages, this frame may differ from the unrotated PDF user
+     * space in `viewBox`. `rotation` is the normalized raw `/Rotate` value.
+     */
     width: number;
     height: number;
+    /** Effective CropBox intersected with MediaBox in unrotated PDF user space. */
+    viewBox: Rect;
+    rotation: 0 | 90 | 180 | 270;
     items: DocumentItem[];
 }
 
@@ -105,6 +119,7 @@ export interface DocumentItemBase {
     kind: DocumentItemKind;
     pageIndex: number;
     order: number;
+    /** Rect in the document's public extraction bbox frame. */
     bbox: Rect;
 }
 
@@ -177,6 +192,7 @@ export interface Sentence {
     id: string;
     order: number;
     text: string;
+    /** Sentence fragment rects in the document's public extraction bbox frame. */
     bboxes: Rect[];
     joinWithNext?: boolean;
 }

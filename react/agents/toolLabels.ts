@@ -149,6 +149,8 @@ const TOOL_BASE_LABELS: Record<string, string> = {
     // Annotations
     add_highlight_annotations: 'Highlight annotations',
     add_note_annotations: 'Note annotations',
+    create_highlight_annotations: 'Creating highlight annotations',
+    create_note_annotations: 'Creating sticky notes',
 
     // Suggestions
     return_suggestions: 'Suggestions',

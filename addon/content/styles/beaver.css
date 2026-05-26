@@ -500,6 +500,20 @@
     background-color: var(--material-mix-quarternary);
 }
 
+/* Create Annotations Preview — clickable row hover */
+[id^="beaver-pane-"] .create-annotations-preview-row {
+    border-radius: 4px;
+    padding-left: 6px;
+    padding-right: 6px;
+    margin-left: -6px;
+    margin-right: -6px;
+    transition: background-color 0.15s ease;
+}
+
+[id^="beaver-pane-"] .create-annotations-preview-row:hover {
+    background-color: var(--material-mix-quarternary);
+}
+
 /* Preview text: 2-line clamp */
 [id^="beaver-pane-"] .action-card-preview {
     display: -webkit-box;

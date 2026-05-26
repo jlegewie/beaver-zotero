@@ -286,10 +286,10 @@ export function parseRawCitationAttributes(attributesStr: string | undefined): R
     const attrs: Record<string, string> = {};
     if (!attributesStr) return attrs;
 
-    const attrRegex = /([\w-]+)=(?:"([^"]*)"|'([^']*)')/g;
+    const attrRegex = /([\w-]+)=(?:"([^"]*)"|\\"([^\\"]*)\\"|'([^']*)'|\\'([^\\']*)\\')/g;
     let match: RegExpExecArray | null;
     while ((match = attrRegex.exec(attributesStr)) !== null) {
-        attrs[match[1]] = match[2] ?? match[3] ?? '';
+        attrs[match[1]] = match[2] ?? match[3] ?? match[4] ?? match[5] ?? '';
     }
     return attrs;
 }

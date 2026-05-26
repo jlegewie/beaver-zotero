@@ -67,6 +67,9 @@ import {
     handleTestNoteUndoHttpRequest,
 } from './httpHandlers/testNoteHandlers';
 import {
+    handleTestAnnotationCreateHttpRequest,
+} from './httpHandlers/testAnnotationHandlers';
+import {
     handleTestPdfPageCountHttpRequest,
     handleTestPdfPageLabelsHttpRequest,
     handleTestPdfRenderPagesHttpRequest,
@@ -168,6 +171,8 @@ const ENDPOINT_PATHS = [
     '/beaver/test/note-open-editor',
     '/beaver/test/note-close-editor',
     '/beaver/test/note-undo',
+    // Test-only endpoints (headless PDF annotations)
+    '/beaver/test/annotation-create',
     // Test-only endpoints (MuPDF worker singleton stats / lifecycle)
     '/beaver/test/worker-stats',
     '/beaver/test/worker-mark-stale',
@@ -726,6 +731,10 @@ function registerEndpoints(): boolean {
 
         Zotero.Server.Endpoints['/beaver/test/note-undo'] =
             createEndpoint(handleTestNoteUndoHttpRequest);
+
+        // Headless PDF annotation primitives (dev-only)
+        Zotero.Server.Endpoints['/beaver/test/annotation-create'] =
+            createEndpoint(handleTestAnnotationCreateHttpRequest);
 
         // MuPDF worker plumbing (dev-only)
         Zotero.Server.Endpoints['/beaver/test/pdf-page-count'] =

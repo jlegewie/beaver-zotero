@@ -14,6 +14,7 @@ import type {
     RawPageDataDetailed,
     RawLineDetailed,
     RawChar,
+    PageGeometry,
     PDFPageSearchResult,
     PageImageOptions,
     PageImageResult,
@@ -284,6 +285,8 @@ export function extractRawPageFromDoc(
         const pb = page.getBounds("CropBox");
         const width = pb[2] - pb[0];
         const height = pb[3] - pb[1];
+        const viewBox = page.getViewBox();
+        const rotation = page.getRotation();
 
         let label: string | undefined;
         try {
@@ -344,6 +347,8 @@ export function extractRawPageFromDoc(
                 pageNumber: pageIndex + 1,
                 width,
                 height,
+                viewBox,
+                rotation,
                 label,
                 blocks: dedupOverlappingLines(blocks),
             };
@@ -605,6 +610,8 @@ export function extractRawPageDetailedFromDoc(
         const pb = page.getBounds("CropBox");
         const width = pb[2] - pb[0];
         const height = pb[3] - pb[1];
+        const viewBox = page.getViewBox();
+        const rotation = page.getRotation();
 
         let label: string | undefined;
         try {
@@ -739,6 +746,8 @@ export function extractRawPageDetailedFromDoc(
             pageNumber: pageIndex + 1,
             width,
             height,
+            viewBox,
+            rotation,
             label,
             blocks: dedupOverlappingLines(blocks),
         } as RawPageDataDetailed;
@@ -916,6 +925,51 @@ export function collectPageLabels(doc: DocumentLike): Record<number, string> {
         }
     }
     return labels;
+}
+
+/**
+ * Collect per-page labels and viewer geometry in one page-tree sweep.
+ */
+export function collectPagesData(doc: DocumentLike): {
+    pageLabels: Record<number, string>;
+    pages: (PageGeometry | null)[];
+} {
+    const count = doc.countPages();
+    const pageLabels: Record<number, string> = {};
+    const pages: (PageGeometry | null)[] = new Array(count).fill(null);
+
+    for (let i = 0; i < count; i++) {
+        let page;
+        try {
+            page = doc.loadPage(i);
+        } catch (err) {
+            if (!isRecoverablePageError(err)) throw err;
+            postLog(
+                "warn",
+                `[mupdf-worker] collectPagesData: skipping unresolvable page ${i}: ${String(err)}`,
+            );
+            continue;
+        }
+        try {
+            try {
+                const label = page.getLabel();
+                if (label) pageLabels[i] = label;
+            } catch (_) {
+                // label not available
+            }
+            const viewBox = page.getViewBox();
+            pages[i] = {
+                viewBox,
+                width: viewBox[2] - viewBox[0],
+                height: viewBox[3] - viewBox[1],
+                rotation: page.getRotation(),
+            };
+        } finally {
+            page.destroy();
+        }
+    }
+
+    return { pageLabels, pages };
 }
 
 /**

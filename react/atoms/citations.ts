@@ -252,6 +252,7 @@ function getCitationMarkerBaseKeys(citation: CitationMetadata): string[] {
  * 
  * Key format:
  * - Zotero citations: "zotero:{library_id}-{zotero_key}" or with location: "zotero:1-ABC:sid=s0-s8"
+ * - Structured-document locators use the raw token, e.g. "zotero:1-ABC:heading3"
  * - External citations: "external:{external_source_id}" or with location
  * - Invalid citations (fallback): "invalid:{raw_id_value}"
  */

@@ -17,12 +17,14 @@ import {
     validateMarkdownExtractResult,
     validateStructuredExtractResult,
 } from '../beaver-extract/schema/validators';
+import type { PageGeometry } from '../beaver-extract/types';
 
 export const DOCUMENT_METADATA_FORMAT_VERSION = 1;
 export const DOCUMENT_PAYLOAD_FORMAT_VERSION = 1;
 
 export type ExtractionMode = DocumentCacheExtractionMode;
 export type PageLabels = DocumentCachePageLabels;
+export type { PageGeometry } from '../beaver-extract/types';
 export type DocumentCacheMetadata = DocumentCacheMetadataRecord;
 export type DocumentPayloadRecord = DocumentCachePayloadRecord;
 
@@ -50,6 +52,7 @@ export interface DocumentCacheSourceIdentity {
 interface CacheMetadataInput {
     pageCount: number | null;
     pageLabels: PageLabels | Record<number, string> | null;
+    pages: (PageGeometry | null)[] | null;
     /** Authoritative error reason; omitted or `null` marks a successful extraction. */
     errorCode?: DocumentCacheErrorCode | null;
 }
@@ -392,12 +395,14 @@ export class DocumentCache {
         errorCode: DocumentCacheErrorCode;
         pageCount: number | null;
         pageLabels: PageLabels | Record<number, string> | null;
+        pages: (PageGeometry | null)[] | null;
     }): Promise<void> {
         if (Zotero.__beaverShuttingDown) return;
         try {
             const metadata: CacheMetadataInput = {
                 pageCount: input.pageCount,
                 pageLabels: input.pageLabels,
+                pages: input.pages,
                 errorCode: input.errorCode,
             };
             const source = await this.getSourceIdentity(input.filePath, input.sourceSizeBytes);
@@ -708,6 +713,7 @@ export class DocumentCache {
             contentType,
             pageCount: metadata.pageCount,
             pageLabels: this.normalizePageLabels(metadata.pageLabels),
+            pages: metadata.pages ?? null,
             errorCode: metadata.errorCode ?? null,
             extractionSchemaVersion: SCHEMA_VERSION,
             metadataFormatVersion: DOCUMENT_METADATA_FORMAT_VERSION,

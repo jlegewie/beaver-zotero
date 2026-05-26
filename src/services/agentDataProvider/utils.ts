@@ -284,22 +284,6 @@ function fileStatusFromCache(record: DocumentCacheMetadata, isPrimary: boolean):
     return { is_primary: isPrimary, mime_type: record.contentType, page_count: record.pageCount, status: "available" };
 }
 
-/**
- * Extract page labels from PDF data using MuPDF.
- * Returns the label mapping (empty {} if no custom labels or on error).
- *
- * Routes through `BeaverExtractor.getMetadata`, which delegates to the
- * MuPDF worker.
- */
-async function extractPageLabelsFromData(pdfData: Uint8Array): Promise<Record<number, string>> {
-    try {
-        const { pageLabels } = await new BeaverExtractor().getMetadata(pdfData);
-        return pageLabels;
-    } catch {
-        return {};
-    }
-}
-
 // `preflightCachedPdfMeta`, `PreflightOptions`, `PreflightFailure`, and
 // `PreflightErrorCode` live in `../documentExtraction` and are re-exported
 // at the top of this file.
@@ -362,14 +346,14 @@ export async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary
         }
         const extractor = new BeaverExtractor();
 
-        // Get page count - this also validates the PDF and detects encryption
-        let pageCount: number;
+        // Get metadata - this also validates the PDF and detects encryption.
+        let metadata: Awaited<ReturnType<BeaverExtractor['getMetadata']>>;
         try {
-            pageCount = await extractor.getPageCount(pdfData);
+            metadata = await extractor.getMetadata(pdfData);
         } catch (error) {
             if (error instanceof ExtractionError) {
                 if (error.code === ExtractionErrorCode.ENCRYPTED) {
-                    await cache?.putErrorMetadata({ item: attachment, filePath, sourceSizeBytes, contentType, errorCode: 'encrypted', pageCount: null, pageLabels: null });
+                    await cache?.putErrorMetadata({ item: attachment, filePath, sourceSizeBytes, contentType, errorCode: 'encrypted', pageCount: null, pageLabels: null, pages: null });
                     return {
                         is_primary: isPrimary,
                         mime_type: contentType,
@@ -378,7 +362,7 @@ export async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary
                         status_code: FileStatusCode.PdfEncrypted,
                     };
                 } else if (error.code === ExtractionErrorCode.INVALID_PDF) {
-                    await cache?.putErrorMetadata({ item: attachment, filePath, sourceSizeBytes, contentType, errorCode: 'invalid_pdf', pageCount: null, pageLabels: null });
+                    await cache?.putErrorMetadata({ item: attachment, filePath, sourceSizeBytes, contentType, errorCode: 'invalid_pdf', pageCount: null, pageLabels: null, pages: null });
                     return {
                         is_primary: isPrimary,
                         mime_type: contentType,
@@ -410,6 +394,7 @@ export async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary
             }
             throw error;
         }
+        const { pageCount, pageLabels, pages } = metadata;
 
         // A document that opened but resolves to zero pages is empty or
         // structurally corrupt. Report as invalid without persisting metadata.
@@ -423,14 +408,10 @@ export async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary
             };
         }
 
-        // Analyze OCR needs and extract page labels in parallel
-        const [ocrAnalysis, pageLabels] = await Promise.all([
-            extractor.analyzeOCRNeeds(pdfData),
-            extractPageLabelsFromData(pdfData),
-        ]);
+        const ocrAnalysis = await extractor.analyzeOCRNeeds(pdfData);
 
         if (ocrAnalysis.needsOCR) {
-            await cache?.putErrorMetadata({ item: attachment, filePath, sourceSizeBytes, contentType, errorCode: 'no_text_layer', pageCount, pageLabels });
+            await cache?.putErrorMetadata({ item: attachment, filePath, sourceSizeBytes, contentType, errorCode: 'no_text_layer', pageCount, pageLabels, pages: pages ?? null });
             return {
                 is_primary: isPrimary,
                 mime_type: contentType,
@@ -446,7 +427,7 @@ export async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary
             filePath,
             sourceSizeBytes,
             contentType,
-            metadata: { pageCount, pageLabels, errorCode: null },
+            metadata: { pageCount, pageLabels, pages: pages ?? null, errorCode: null },
         });
         return {
             is_primary: isPrimary,

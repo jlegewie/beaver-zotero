@@ -7,6 +7,8 @@ interface InternalPageForProjection {
     label?: string;
     width: number;
     height: number;
+    viewBox: [number, number, number, number];
+    rotation: 0 | 90 | 180 | 270;
     items: DocItem[];
     sentences?: SentenceItem[];
 }
@@ -116,6 +118,8 @@ export function projectStructuredPage(
         label: page.label,
         width: page.width,
         height: page.height,
+        viewBox: page.viewBox,
+        rotation: page.rotation,
         items,
     };
 }

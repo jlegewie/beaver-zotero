@@ -3,18 +3,14 @@ import { useSetAtom } from 'jotai';
 import { activePreviewAtom } from '../../atoms/ui';
 import { currentMessageItemsAtom } from '../../atoms/messageComposition';
 import { navigateToAnnotation } from '../../utils/readerUtils';
-import { Annotation } from '../../types/attachments/apiTypes';
 import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import { ANNOTATION_ICON_BY_TYPE } from '../input/MessageItemButton';
-import Button from '../ui/Button';
-import IconButton from '../ui/IconButton';
-import { CancelIcon } from '../icons/icons';
 import { toAnnotation } from '../../types/attachments/converters';
 
 const ANNOTATION_TEXT_BY_TYPE = {
     highlight: 'Highlighted Text',
     underline: 'Underlined Text',
-    note: 'Note Annotation',
+    note: 'Sticky Note',
     image: 'Selected Area',
 }
 
@@ -29,28 +25,15 @@ const AnnotationPreviewContent: React.FC<AnnotationPreviewContentProps> = ({ ite
     const setCurrentMessageItems = useSetAtom(currentMessageItemsAtom);
     const [imagePath, setImagePath] = useState<string | null>(null);
     const [imageError, setImageError] = useState<boolean>(false);
-    const [annotation, setAnnotation] = useState<Annotation | null>(null);
-    const [annotationIcon, setAnnotationIcon] = useState<string | null>(null);
-    const [annotationText, setAnnotationText] = useState<string | null>(null);
 
-    useEffect(() => {
-        if (item) {
-            const annotation = toAnnotation(item);
-            if (annotation) {
-                setAnnotation(annotation);
-                setAnnotationIcon(ANNOTATION_ICON_BY_TYPE[annotation.annotation_type] || ZOTERO_ICONS.ANNOTATE_TEXT);
-                setAnnotationText(ANNOTATION_TEXT_BY_TYPE[annotation.annotation_type] || 'Annotation');
-            } else {
-                setAnnotation(null);
-                setAnnotationIcon(null);
-                setAnnotationText(null);
-            }
-        } else {
-            setAnnotation(null);
-            setAnnotationIcon(null);
-            setAnnotationText(null);
-        }
-    }, [item, setAnnotation, setAnnotationIcon, setAnnotationText]);
+    // Get annotation data
+    const annotation = toAnnotation(item);
+    const annotationIcon = annotation?.annotation_type
+        ? ANNOTATION_ICON_BY_TYPE[annotation.annotation_type] || ZOTERO_ICONS.ANNOTATION
+        : ZOTERO_ICONS.ANNOTATION;
+    const annotationText = annotation?.annotation_type
+        ? ANNOTATION_TEXT_BY_TYPE[annotation.annotation_type] || 'Annotation'
+        : 'Annotation';
 
     // Fetch image path for image annotations
     useEffect(() => {

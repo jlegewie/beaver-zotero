@@ -33,6 +33,13 @@ export interface LibMuPdf {
     _wasm_load_page(ptr: number, index: number): number;
     _wasm_drop_page(ptr: number): void;
     _wasm_bound_page(ptr: number, boxIdx: number): number;
+    _wasm_pdf_page_get_obj(page: number): number;
+    _wasm_pdf_dict_gets_inheritable(dict: number, key: number): number;
+    _wasm_pdf_is_array(obj: number): number;
+    _wasm_pdf_array_len(obj: number): number;
+    _wasm_pdf_array_get(obj: number, index: number): number;
+    _wasm_pdf_is_number(obj: number): number;
+    _wasm_pdf_to_real(obj: number): number;
     _wasm_page_label(ptr: number): number;
     _wasm_needs_password?(ptr: number): number;
     _wasm_new_stext_page_from_page(page: number, opts: number): number;
@@ -207,6 +214,8 @@ export interface CollectGraphicsOptions {
 export interface PageLike {
     pointer: number;
     getBounds(box?: "MediaBox" | "CropBox" | "BleedBox" | "TrimBox" | "ArtBox"): RectTuple;
+    getRotation(): 0 | 90 | 180 | 270;
+    getViewBox(): [number, number, number, number];
     getLabel(): string | undefined;
     toStructuredText(options?: string): StructuredTextLike;
     toPixmap(matrix: MatrixTuple, colorspace: ColorSpaceLike, alpha?: boolean, showExtras?: boolean): PixmapLike;
@@ -825,6 +834,41 @@ export function makeDocumentApi(libmupdf: LibMuPdf): MuPDFApi {
         ];
     };
 
+    const readBoxArray = (pageObj: number, key: string): [number, number, number, number] | null => {
+        const arr = libmupdf._wasm_pdf_dict_gets_inheritable(pageObj, STRING(key));
+        if (!arr || !libmupdf._wasm_pdf_is_array(arr) || libmupdf._wasm_pdf_array_len(arr) < 4) {
+            return null;
+        }
+
+        const out: number[] = [];
+        for (let i = 0; i < 4; i++) {
+            const elem = libmupdf._wasm_pdf_array_get(arr, i);
+            if (!elem || !libmupdf._wasm_pdf_is_number(elem)) return null;
+            const v = libmupdf._wasm_pdf_to_real(elem);
+            if (!Number.isFinite(v)) return null;
+            out.push(v);
+        }
+
+        const x0 = Math.min(out[0], out[2]);
+        const y0 = Math.min(out[1], out[3]);
+        const x1 = Math.max(out[0], out[2]);
+        const y1 = Math.max(out[1], out[3]);
+        if (!(x1 > x0) || !(y1 > y0)) return null;
+        return [x0, y0, x1, y1];
+    };
+
+    const intersectBoxes = (
+        a: [number, number, number, number],
+        b: [number, number, number, number],
+    ): [number, number, number, number] | null => {
+        const x0 = Math.max(a[0], b[0]);
+        const y0 = Math.max(a[1], b[1]);
+        const x1 = Math.min(a[2], b[2]);
+        const y1 = Math.min(a[3], b[3]);
+        if (!(x1 > x0) || !(y1 > y0)) return null;
+        return [x0, y0, x1, y1];
+    };
+
     const fromQuad = (ptr: number): QuadTuple => {
         const a = ptr >> 2;
         return [
@@ -985,6 +1029,28 @@ export function makeDocumentApi(libmupdf: LibMuPdf): MuPDFApi {
             };
             const boxIdx = boxTypes[box] ?? 1;
             return fromRect(libmupdf._wasm_bound_page(this.pointer, boxIdx));
+        }
+        getRotation(): 0 | 90 | 180 | 270 {
+            const pageObj = libmupdf._wasm_pdf_page_get_obj(this.pointer);
+            if (!pageObj) return 0;
+            const rotateObj = libmupdf._wasm_pdf_dict_gets_inheritable(pageObj, STRING("Rotate"));
+            if (!rotateObj || !libmupdf._wasm_pdf_is_number(rotateObj)) return 0;
+            const value = libmupdf._wasm_pdf_to_real(rotateObj);
+            if (!Number.isFinite(value)) return 0;
+
+            if (value % 90 !== 0) return 0;
+            const positive = ((value % 360) + 360) % 360;
+            return positive as 0 | 90 | 180 | 270;
+        }
+        getViewBox(): [number, number, number, number] {
+            const pageObj = libmupdf._wasm_pdf_page_get_obj(this.pointer);
+            if (!pageObj) return [0, 0, 612, 792];
+            const cropBox = readBoxArray(pageObj, "CropBox");
+            const mediaBox = readBoxArray(pageObj, "MediaBox") ?? [0, 0, 612, 792];
+            if (cropBox) {
+                return intersectBoxes(cropBox, mediaBox) ?? mediaBox;
+            }
+            return mediaBox;
         }
         getLabel() {
             const ptr = libmupdf._wasm_page_label(this.pointer);

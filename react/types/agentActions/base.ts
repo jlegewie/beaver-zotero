@@ -10,6 +10,12 @@ import type {
     EditNoteProposedData,
     EditNoteResultData
 } from './editNote';
+import type {
+    CreateHighlightAnnotationsProposedData,
+    CreateHighlightAnnotationsResultData,
+    CreateNoteAnnotationsProposedData,
+    CreateNoteAnnotationsResultData,
+} from './createAnnotations';
 
 
 /**
@@ -326,7 +332,7 @@ export interface ConfirmExternalSearchProposedData {
 /**
  * Types of actions that can be proposed by the AI
  */
-export type ActionType = 'highlight_annotation' | 'note_annotation' | 'zotero_note' | 'create_item' | 'edit_metadata' | 'create_collection' | 'organize_items' | 'manage_tags' | 'manage_collections' | 'confirm_extraction' | 'confirm_external_search' | 'edit_note' | 'create_note';
+export type ActionType = 'highlight_annotation' | 'note_annotation' | 'create_highlight_annotations' | 'create_note_annotations' | 'zotero_note' | 'create_item' | 'edit_metadata' | 'create_collection' | 'organize_items' | 'manage_tags' | 'manage_collections' | 'confirm_extraction' | 'confirm_external_search' | 'edit_note' | 'create_note';
 
 /**
  * Union type for all proposed data types
@@ -359,7 +365,9 @@ export type ProposedData =
     OrganizeItemsProposedData |
     ConfirmExtractionProposedData |
     ConfirmExternalSearchProposedData |
-    EditNoteProposedData;
+    EditNoteProposedData |
+    CreateHighlightAnnotationsProposedData |
+    CreateNoteAnnotationsProposedData;
 
 /**
  * Type of result data after applying an action
@@ -373,7 +381,9 @@ export type ActionResultDataType =
     ManageTagsResultData |
     ManageCollectionsResultData |
     EditMetadataResultData |
-    EditNoteResultData;
+    EditNoteResultData |
+    CreateHighlightAnnotationsResultData |
+    CreateNoteAnnotationsResultData;
 
 /**
  * Core proposed action model matching the backend schema
@@ -423,3 +433,15 @@ export {
     isAnnotationAction,
     isAnnotationTool
 } from './annotations';
+
+export type {
+    BackendLocator,
+    CreatedAnnotation,
+    CreateHighlightAnnotationsProposedData,
+    CreateHighlightAnnotationsResultData,
+    CreateNoteAnnotationsProposedData,
+    CreateNoteAnnotationsResultData,
+    FailedAnnotation,
+    HighlightAnnotationItem,
+    NoteAnnotationItem,
+} from './createAnnotations';

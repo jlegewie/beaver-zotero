@@ -120,6 +120,20 @@ describe('citationDataByCitationKeyAtom', () => {
         expect(byKey['zotero:1-ATTACH:s343']).toBe(data);
     });
 
+    it('indexes structured-document sid locator keys from raw tags', () => {
+        const store = createStore();
+        const data = citation({
+            citation_id: 'c1',
+            library_id: 1,
+            zotero_key: 'NLNMPWNQ',
+            raw_tag: '<citation att_id="1-NLNMPWNQ" sid="heading3"/>',
+        });
+        store.set(citationDataMapAtom, { c1: data });
+
+        const byKey = store.get(citationDataByCitationKeyAtom);
+        expect(byKey['zotero:1-NLNMPWNQ:heading3']).toBe(data);
+    });
+
     it('indexes invalid citation fallback keys from normalized raw identity', () => {
         const store = createStore();
         const data = citation({

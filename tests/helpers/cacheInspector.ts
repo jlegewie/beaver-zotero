@@ -26,6 +26,13 @@ export interface PingResponse {
     db_available: boolean;
 }
 
+export interface CachedPageGeometry {
+    viewBox: [number, number, number, number];
+    width: number;
+    height: number;
+    rotation: 0 | 90 | 180 | 270;
+}
+
 export interface CacheMetadataRecord {
     itemId: number;
     libraryId: number;
@@ -35,6 +42,7 @@ export interface CacheMetadataRecord {
     contentType: string;
     pageCount: number | null;
     pageLabels: Record<string, string> | null;
+    pages: (CachedPageGeometry | null)[] | null;
     errorCode: 'encrypted' | 'invalid_pdf' | 'no_text_layer' | null;
 }
 

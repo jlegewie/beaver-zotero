@@ -120,6 +120,25 @@ describe('preprocessCitations', () => {
             expect(result).toContain('data-requested-citation-key="zotero:1-ABC:s0-s8"');
         });
 
+        it('generates citation key for structured-document sid locators', () => {
+            const result = preprocessCitations(
+                '<citation att_id="1-NLNMPWNQ" sid="heading3"/>'
+            );
+            expect(result).toContain('data-zotero-key="NLNMPWNQ"');
+            expect(result).toContain('data-loc="heading3"');
+            expect(result).toContain('data-loc-kind="heading"');
+            expect(result).toContain('data-requested-citation-key="zotero:1-NLNMPWNQ:heading3"');
+        });
+
+        it('handles escaped quotes in citation attributes', () => {
+            const result = preprocessCitations(
+                String.raw`<citation att_id=\"1-NLNMPWNQ\" sid=\"heading3\"/>`
+            );
+            expect(result).toContain('data-zotero-key="NLNMPWNQ"');
+            expect(result).toContain('data-loc="heading3"');
+            expect(result).toContain('data-requested-citation-key="zotero:1-NLNMPWNQ:heading3"');
+        });
+
         it('generates external citation key', () => {
             const result = preprocessCitations(
                 '<citation external_id="semantic_scholar:123"></citation>'

@@ -12,7 +12,7 @@ const structuredResult = {
         pageLabels: { '0': '1' },
         bboxOrigin: 'top-left' as const,
         bboxPrecision: 2,
-        pages: [{ index: 0, label: '1', width: 100, height: 200, items: [] }],
+        pages: [{ index: 0, label: '1', width: 100, height: 200, viewBox: [0, 0, 100, 200], rotation: 0, items: [] }],
         citationIndex: {},
     },
 };

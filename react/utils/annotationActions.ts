@@ -4,6 +4,7 @@ import { ZoteroReader } from './annotationUtils';
 import { logger } from '../../src/utils/logger';
 import { getPageViewportInfo, isPDFDocumentAvailable, waitForPDFDocument, applyRotationToBoundingBox } from './pdfUtils';
 import { isLibraryEditable } from '../../src/utils/zoteroUtils';
+import { BEAVER_ANNOTATION_AUTHOR } from '../../src/constants/annotations';
 import { AnnotationProposedAction, isHighlightAnnotationAction, isNoteAnnotationAction, AnnotationResultData } from '../types/agentActions/base';
 
 
@@ -15,7 +16,7 @@ const HIGHLIGHT_COLORS: Record<string, string> = {
     blue: '#5ac8fa',
     purple: '#d4a5ff',
     magenta: '#eb52f7',
-    gray: '#d3d3d3',
+    gray: '#838383',
     pink: '#ff66c4',
     brown: '#e6a86e',
     cyan: '#7fdbff',
@@ -141,8 +142,8 @@ async function createHighlightAnnotation(
         temporary: false,
         dateCreated: now,
         dateModified: now,
-        authorName: 'Beaver',
-        annotationAuthorName: 'Beaver'
+        authorName: BEAVER_ANNOTATION_AUTHOR,
+        annotationAuthorName: BEAVER_ANNOTATION_AUTHOR
     };
 
     const iframeWindow = (reader as any)?._internalReader?._primaryView?._iframeWindow;
@@ -169,7 +170,7 @@ async function convertNotePositionToRect(
         throw new Error('Note annotation missing position');
     }
 
-    const { page_index, side, y } = annotation.proposed_data.note_position;
+    const { page_index, side, y, coord_origin } = annotation.proposed_data.note_position;
     
     // Get viewport info directly from PDF document (no need for rendered page)
     const { viewBox, height, width, rotation } = await getPageViewportInfo(reader, page_index);
@@ -186,12 +187,17 @@ async function convertNotePositionToRect(
         x = 12;
     }
 
+    const yCenter = coord_origin === CoordOrigin.BOTTOMLEFT
+        ? y
+        : height - y;
+    const yBottom = yCenter - NOTE_RECT_SIZE / 2;
+
     let converted: BoundingBox = convertBoundingBoxToBottomLeft(
         {
             l: x,
-            b: y,
+            b: yBottom,
             r: x + NOTE_RECT_SIZE,
-            t: y + NOTE_RECT_SIZE,
+            t: yBottom + NOTE_RECT_SIZE,
             coord_origin: CoordOrigin.BOTTOMLEFT,
         },
         height
@@ -232,8 +238,8 @@ async function createNoteAnnotation(
         notePosition: annotation.proposed_data.note_position,
         dateCreated: now,
         dateModified: now,
-        authorName: 'Beaver',
-        annotationAuthorName: 'Beaver'
+        authorName: BEAVER_ANNOTATION_AUTHOR,
+        annotationAuthorName: BEAVER_ANNOTATION_AUTHOR
     };
 
     const iframeWindow = (reader as any)?._internalReader?._primaryView?._iframeWindow;

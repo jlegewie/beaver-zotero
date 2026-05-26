@@ -230,6 +230,12 @@ function validateStructuredPage(value: unknown, source: string): StructuredPage 
         index: expectInt(v.index, `${source}.index`),
         width: expectFiniteNumber(v.width, `${source}.width`),
         height: expectFiniteNumber(v.height, `${source}.height`),
+        viewBox: v.viewBox !== undefined
+            ? validateRect(v.viewBox, `${source}.viewBox`)
+            : [0, 0, expectFiniteNumber(v.width, `${source}.width`), expectFiniteNumber(v.height, `${source}.height`)],
+        rotation: v.rotation !== undefined
+            ? validateRotation(v.rotation, `${source}.rotation`)
+            : 0,
         items,
     };
     if (v.label !== undefined) out.label = expectString(v.label, `${source}.label`);
@@ -242,6 +248,12 @@ function validateMarkdownPage(value: unknown, source: string): MarkdownPage {
         index: expectInt(v.index, `${source}.index`),
         width: expectFiniteNumber(v.width, `${source}.width`),
         height: expectFiniteNumber(v.height, `${source}.height`),
+        viewBox: v.viewBox !== undefined
+            ? validateRect(v.viewBox, `${source}.viewBox`)
+            : [0, 0, expectFiniteNumber(v.width, `${source}.width`), expectFiniteNumber(v.height, `${source}.height`)],
+        rotation: v.rotation !== undefined
+            ? validateRotation(v.rotation, `${source}.rotation`)
+            : 0,
         markdown: expectString(v.markdown, `${source}.markdown`),
     };
     if (v.label !== undefined) out.label = expectString(v.label, `${source}.label`);
@@ -376,6 +388,14 @@ function validateRect(value: unknown, source: string): Rect {
         expectFiniteNumber(arr[2], `${source}[2]`),
         expectFiniteNumber(arr[3], `${source}[3]`),
     ];
+}
+
+function validateRotation(value: unknown, source: string): 0 | 90 | 180 | 270 {
+    const rotation = expectInt(value, source);
+    if (rotation === 0 || rotation === 90 || rotation === 180 || rotation === 270) {
+        return rotation;
+    }
+    throw new FixtureValidationError(`${source}: expected one of 0, 90, 180, 270`);
 }
 
 // ---------------------------------------------------------------------------
