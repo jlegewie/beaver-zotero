@@ -541,7 +541,8 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         const getToolIcon = () => {
             if (toolName === 'edit_metadata' || toolName === 'edit_item') return PropertyEditIcon;
             if (toolName === 'create_note') return NoteIcon;
-            if (toolName === 'create_highlight_annotations' || toolName === 'create_note_annotations') return HighlighterIcon;
+            if (toolName === 'create_highlight_annotations') return HighlighterIcon;
+            if (toolName === 'create_note_annotations') return NoteIcon;
             if (toolName === 'create_collection') return FolderAddIcon;
             if (toolName === 'organize_items') return TaskDoneIcon;
             if (toolName === 'manage_tags') return TagIcon;
