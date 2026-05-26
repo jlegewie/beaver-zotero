@@ -167,7 +167,7 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
                                 onClick={() => handleItemClick(item, createdEntries)}
                             >
                                 <ZoteroIcon
-                                    icon={kind === 'highlight' ? ZOTERO_ICONS.ANNOTATE_HIGHLIGHT : ZOTERO_ICONS.ANNOTATE_NOTE}
+                                    icon={kind === 'highlight' ? ZOTERO_ICONS.ANNOTATE_HIGHLIGHT : ZOTERO_ICONS.ANNOTATION}
                                     size={14}
                                     color={COLOR_VALUES[color] ?? COLOR_VALUES.yellow}
                                     style={{ marginTop: 2 }}
