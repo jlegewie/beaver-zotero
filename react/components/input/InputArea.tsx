@@ -310,7 +310,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     }
 
     const webSearchTooltipContent = isWebSearchAllowed
-        ? (isWebSearchEnabled ? 'Disable web search' : 'Enable web search')
+        ? (isWebSearchEnabled ? 'Stop requesting web search' : 'Request web search')
         : 'Web search requires Beaver credits';
     const webSearchDescription = isWebSearchAllowed
         ? (isWebSearchEnabled ? 'Web search is enabled.' : 'Web search is disabled.')
@@ -456,15 +456,26 @@ const InputArea: React.FC<InputAreaProps> = ({
                         <Tooltip
                             key={String(isWebSearchAllowed)}
                             content={webSearchTooltipContent}
-                            singleLine={isWebSearchAllowed}
-                            padding={isWebSearchAllowed}
-                            width={!isWebSearchAllowed ? '250px' : undefined}
-                            customContent={!isWebSearchAllowed ? (
-                                <div className="px-2 py-1 display-flex flex-col gap-1">
-                                    <span className="text-base font-color-secondary font-semibold">Web search requires Beaver credits</span>
-                                    <span className="text-sm font-color-tertiary">Use a Beaver model, or enable Plus Tools in Settings → API Keys</span>
-                                </div>
-                            ) : undefined}
+                            padding={false}
+                            width={!isWebSearchAllowed ? '250px' : isWebSearchEnabled ? '220px' : '190px'}
+                            customContent={
+                                !isWebSearchAllowed ? (
+                                    <div className="px-2 py-1 display-flex flex-col gap-1">
+                                        <span className="text-base font-color-secondary font-medium">Web search requires Beaver credits</span>
+                                        <span className="text-sm font-color-tertiary">Use a Beaver model, or enable Plus Tools in Settings → API Keys</span>
+                                    </div>
+                                ) : isWebSearchEnabled ? (
+                                    <div className="px-2 py-1 display-flex flex-col gap-1">
+                                        <span className="text-base font-color-secondary font-medium">Stop requesting web search</span>
+                                        <span className="text-sm font-color-tertiary">May still search the web when helpful</span>
+                                    </div>
+                                ) : (
+                                    <div className="px-2 py-1 display-flex flex-col gap-1">
+                                        <span className="text-base font-color-secondary font-medium">Request web search</span>
+                                        <span className="text-sm font-color-tertiary">May search the web either way</span>
+                                    </div>
+                                )
+                            }
                         >
                             <IconButton
                                 icon={GlobalSearchIcon}
