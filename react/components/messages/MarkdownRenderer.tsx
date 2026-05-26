@@ -12,6 +12,7 @@ import {
     preprocessCitations, 
     createPreprocessState 
 } from '../../utils/citationPreprocessing';
+import { processPartialContent } from '../../utils/markdownPartialContent';
 
 const citationDataAttributes = [
     'data-library-id', 'dataLibraryId',
@@ -238,51 +239,6 @@ function parseContentIntoSegments(content: string): Segment[] {
     return segments;
 }
 
-
-/**
- * Process partial tags at the end of content (streaming-safe).
- * Pure function \u2014 extracted so it can be called from useMemo.
- */
-function processPartialContent(content: string, exportRendering: boolean): string {
-    let processed = content;
-
-    // Remove invisible or control characters
-    // Includes: zero-width space, zero-width non-joiner, soft hyphen, etc.
-    processed = exportRendering
-        ? processed.normalize("NFC").replace(/[\u200B-\u200D\uFEFF\u00AD]/g, '')
-        : processed.normalize("NFKC").replace(/[\u200B-\u200D\uFEFF\u00AD]/g, '');
-
-    // Complete unclosed bold formatting for rendering during streaming
-    // Strategy: Count ** pairs and if there's an odd number, temporarily add closing **
-    const boldMarkers = (processed.match(/\*\*/g) || []).length;
-    if (boldMarkers % 2 === 1) {
-        if (!processed.endsWith('**')) {
-            processed = processed + '**';
-        }
-    }
-
-    // Clean up backticks around complete citations (handles both /> and > endings)
-    processed = processed.replace(/`(<citation[^>]*\/?>)`/g, '$1');
-
-    // Filter out other partial tags
-    const partialTagPatterns = [
-        /<citation[^>]*$/,                // Partial citation tag
-        /<note[^>]*$/,                    // Partial note opening tag
-        /<\/note$/,                       // Partial note closing tag
-        /<[a-z][a-z0-9]*(?:\s+[^>]*)?$/i, // Any partial HTML tag
-        /\$\$[^$]*$/                      // Unclosed math equation
-    ];
-
-    for (const pattern of partialTagPatterns) {
-        const match = processed.match(pattern);
-        if (match && match.index !== undefined && match.index + match[0].length === processed.length) {
-            processed = processed.substring(0, match.index);
-            break;
-        }
-    }
-
-    return processed;
-}
 
 const MarkdownRenderer: React.FC<MarkdownRendererProps> = React.memo(function MarkdownRenderer({
     content,
