@@ -3,6 +3,7 @@ import { navigateToAnnotation } from '../../utils/readerUtils';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { AgentRunStatus } from '../../agents/types';
 import {
+    AgentAction,
     PendingApproval,
     getAgentActionsByToolcallAtom,
     removePendingApprovalAtom,
@@ -104,6 +105,17 @@ type HeaderLinkAction = {
 type HeaderLinkActionRule = HeaderLinkAction & {
     matches: () => boolean;
 };
+
+function getCreateAnnotationsDisplayStatus(action: AgentAction): ActionStatus | null {
+    if (!isCreateAnnotationsAgentAction(action) || action.status !== 'applied') return null;
+    const createdCount = Array.isArray(action.result_data?.created)
+        ? action.result_data.created.length
+        : 0;
+    const failedCount = Array.isArray(action.result_data?.failed)
+        ? action.result_data.failed.length
+        : 0;
+    return createdCount === 0 && failedCount > 0 ? 'error' : null;
+}
 
 export const AgentActionView: React.FC<AgentActionViewProps> = ({
     toolcallId,
@@ -258,11 +270,12 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     }, [isProcessingApproval, isExternallyProcessing, action?.status, hasToolReturn, isRunPending, action]);
 
     const isProcessing = isProcessingApproval || isProcessingAction || isExternallyProcessing;
+    const actionDisplayStatus = action ? getCreateAnnotationsDisplayStatus(action) : null;
     const status: ActionStatus | 'awaiting' = (isAwaitingApproval || isProcessing)
         ? 'awaiting'
         : isMultiAction
             ? getOverallStatus(actions)
-            : (action?.status ?? 'pending');
+            : (actionDisplayStatus ?? action?.status ?? 'pending');
     const isConfirmExtraction = toolName === 'confirm_extraction';
     const isConfirmExternalSearch = toolName === 'confirm_external_search';
     const isConfirmAction = isConfirmExtraction || isConfirmExternalSearch;
