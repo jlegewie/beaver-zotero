@@ -85,12 +85,16 @@ function resolveHighlightColor(color?: string | null): string {
     return HIGHLIGHT_COLORS[color] ?? DEFAULT_HIGHLIGHT_COLOR;
 }
 
-function buildSortIndex(pageIndex: number, rect: number[]): string {
-    const yPos = Math.round(rect?.[1] ?? 0);
-    const xPos = Math.round(rect?.[0] ?? 0);
+function sortIndexCoordinate(value: number | undefined): string {
+    const rounded = Number.isFinite(value) ? Math.round(value ?? 0) : 0;
+    return Math.max(0, rounded).toString().padStart(5, "0");
+}
+
+export function buildSortIndex(pageIndex: number, rect: number[]): string {
+    const yPos = Number.isFinite(rect?.[1]) ? Math.max(0, Math.round(rect[1])) : 0;
     return `${pageIndex.toString().padStart(5, "0")}|${yPos
         .toString()
-        .padStart(6, "0")}|${xPos.toString().padStart(5, "0")}`;
+        .padStart(6, "0")}|${sortIndexCoordinate(rect?.[0])}`;
 }
 
 function isUsableRect(rect: number[]): boolean {

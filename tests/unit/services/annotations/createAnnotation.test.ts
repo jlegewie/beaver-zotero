@@ -5,6 +5,7 @@ vi.mock("../../../../src/services/agentDataProvider/utils", () => ({
 }));
 
 import {
+  buildSortIndex,
   computeNoteRect,
   convertHighlightBoxesToRects,
 } from "../../../../src/services/annotations/createAnnotation";
@@ -151,6 +152,12 @@ describe("createAnnotation geometry primitives", () => {
       );
 
       expect(rects).toEqual([[15, 25, 55, 75]]);
+    });
+  });
+
+  describe("buildSortIndex", () => {
+    it("clamps negative coordinates to Zotero's non-negative sort-index format", () => {
+      expect(buildSortIndex(1, [-120, 404, 20, 420])).toBe("00001|000404|00000");
     });
   });
 
