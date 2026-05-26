@@ -12,43 +12,40 @@ import {
     CreateNoteAnnotationsAgentAction,
 } from '../../agents/agentActions';
 import { AgentRun } from '../../agents/types';
-import { CreatedAnnotation } from '../../types/agentActions/createAnnotations';
 import {
-    TickIcon,
     CancelIcon,
-    ArrowUpRightIcon,
     Icon,
     Spinner,
     CheckmarkCircleIcon,
-    AlertIcon,
-    DeleteIcon,
     HighlighterIcon,
     NoteIcon,
+    ArrowDownIcon,
+    ArrowRightIcon,
 } from '../icons/icons';
 import IconButton from '../ui/IconButton';
 import Tooltip from '../ui/Tooltip';
+import Button from '../ui/Button';
+import CreateAnnotationsPreview from './CreateAnnotationsPreview';
 import {
     executeCreateHighlightAnnotationsAction,
     executeCreateNoteAnnotationsAction,
     undoCreateAnnotationsAction,
 } from '../../utils/createAnnotationsActions';
-import { navigateToAnnotation } from '../../utils/readerUtils';
 import { logger } from '../../../src/utils/logger';
-import { textWithTrailingNoWrap } from '../../utils/textWithTrailingNoWrap';
 
 type CreateAnnotationsAction =
     | CreateHighlightAnnotationsAgentAction
     | CreateNoteAnnotationsAgentAction;
+
+type SummaryKind = 'highlight' | 'note';
+type SummaryStatus = 'applied' | 'pending';
 
 interface CreateAnnotationsAgentActionDisplayProps {
     run: AgentRun;
     actions: AgentAction[];
 }
 
-type SummaryKind = 'highlight' | 'note';
-type SummaryStatus = 'applied' | 'pending' | 'failed';
-
-interface RowProps {
+interface GroupProps {
     kind: SummaryKind;
     status: SummaryStatus;
     count: number;
@@ -62,29 +59,28 @@ function appliedCount(action: CreateAnnotationsAction): number {
         : 0;
 }
 
-function failedCount(action: CreateAnnotationsAction): number {
-    return Array.isArray(action.result_data?.failed)
-        ? action.result_data!.failed.length
-        : 0;
-}
-
 function proposedCount(action: CreateAnnotationsAction): number {
     return Array.isArray(action.proposed_data?.items)
         ? action.proposed_data.items.length
         : 0;
 }
 
-function pluralizeHighlights(count: number): string {
-    return count === 1 ? 'Highlight' : 'Highlights';
-}
-
-function pluralizeNotes(count: number): string {
+function nounFor(kind: SummaryKind, count: number): string {
+    if (kind === 'highlight') return count === 1 ? 'Highlight' : 'Highlights';
     return count === 1 ? 'Sticky Note' : 'Sticky Notes';
 }
 
-const SummaryRow: React.FC<RowProps> = ({ kind, status, count, actions, runId }) => {
-    const [isBusy, setIsBusy] = useState(false);
+const CreateAnnotationsGroup: React.FC<GroupProps> = ({
+    kind,
+    status,
+    count,
+    actions,
+    runId,
+}) => {
+    const [isExpanded, setIsExpanded] = useState(false);
     const [isHovered, setIsHovered] = useState(false);
+    const [isProcessing, setIsProcessing] = useState(false);
+    const [clickedButton, setClickedButton] = useState<'dismiss' | 'undo' | 'apply' | null>(null);
 
     const ackAgentActions = useSetAtom(ackAgentActionsAtom);
     const rejectAgentAction = useSetAtom(rejectAgentActionAtom);
@@ -92,40 +88,45 @@ const SummaryRow: React.FC<RowProps> = ({ kind, status, count, actions, runId })
     const setAgentActionsToError = useSetAtom(setAgentActionsToErrorAtom);
 
     const isApplied = status === 'applied';
-    const isFailed = status === 'failed';
-    const noun = kind === 'highlight' ? pluralizeHighlights(count) : pluralizeNotes(count);
-    const verb = isFailed ? 'Failed' : isApplied ? 'Created' : 'Create';
-    const label = `${verb} ${count} ${noun}`;
+    const label = `${isApplied ? 'Created' : 'Create'} ${count} ${nounFor(kind, count)}`;
 
-    const firstCreatedRef: CreatedAnnotation | null = useMemo(() => {
-        if (!isApplied) return null;
+    const toggleExpanded = useCallback(() => {
+        if (isProcessing) return;
+        setIsExpanded((prev) => !prev);
+    }, [isProcessing]);
+
+    const handleDismissAll = useCallback(() => {
+        if (isProcessing) return;
+        setClickedButton('dismiss');
         for (const action of actions) {
-            const created = action.result_data?.created;
-            if (Array.isArray(created) && created.length > 0) {
-                return created[0];
-            }
+            rejectAgentAction(action.id);
         }
-        return null;
-    }, [actions, isApplied]);
+        setTimeout(() => setClickedButton(null), 100);
+    }, [actions, isProcessing, rejectAgentAction]);
 
-    const handleReveal = useCallback(async () => {
-        if (!firstCreatedRef) return;
+    const handleDeleteAll = useCallback(async () => {
+        if (isProcessing) return;
+        setIsProcessing(true);
+        setClickedButton('undo');
         try {
-            const item = await Zotero.Items.getByLibraryAndKeyAsync(
-                firstCreatedRef.library_id,
-                firstCreatedRef.zotero_key,
-            );
-            if (item) {
-                await navigateToAnnotation(item as Zotero.Item);
+            for (const action of actions) {
+                try {
+                    await undoCreateAnnotationsAction(action);
+                    undoAgentAction(action.id);
+                } catch (err) {
+                    logger(`CreateAnnotationsAgentActionDisplay: delete failed for ${action.id}: ${err}`, 1);
+                }
             }
-        } catch (err) {
-            logger(`CreateAnnotationsAgentActionDisplay: reveal failed: ${err}`, 1);
+        } finally {
+            setIsProcessing(false);
+            setClickedButton(null);
         }
-    }, [firstCreatedRef]);
+    }, [actions, isProcessing, undoAgentAction]);
 
-    const handleApply = useCallback(async () => {
-        if (isBusy) return;
-        setIsBusy(true);
+    const handleApplyAll = useCallback(async () => {
+        if (isProcessing) return;
+        setIsProcessing(true);
+        setClickedButton('apply');
         try {
             for (const action of actions) {
                 try {
@@ -146,127 +147,115 @@ const SummaryRow: React.FC<RowProps> = ({ kind, status, count, actions, runId })
                 }
             }
         } finally {
-            setIsBusy(false);
+            setIsProcessing(false);
+            setClickedButton(null);
         }
-    }, [actions, ackAgentActions, isBusy, runId, setAgentActionsToError]);
+    }, [actions, ackAgentActions, isProcessing, runId, setAgentActionsToError]);
 
-    const handleDelete = useCallback(async () => {
-        if (isBusy) return;
-        setIsBusy(true);
-        try {
-            for (const action of actions) {
-                try {
-                    await undoCreateAnnotationsAction(action);
-                    undoAgentAction(action.id);
-                } catch (err) {
-                    logger(`CreateAnnotationsAgentActionDisplay: delete failed for ${action.id}: ${err}`, 1);
-                }
-            }
-        } finally {
-            setIsBusy(false);
-        }
-    }, [actions, isBusy, undoAgentAction]);
-
-    const handleDismiss = useCallback(() => {
-        for (const action of actions) {
-            rejectAgentAction(action.id);
-        }
-    }, [actions, rejectAgentAction]);
-
-    const getHeaderIcon = () => {
-        if (isBusy) return Spinner;
-        if (isFailed) return AlertIcon;
+    const headerIcon = (() => {
+        if (isProcessing) return Spinner;
+        if (isHovered && isExpanded) return ArrowDownIcon;
+        if (isHovered && !isExpanded) return ArrowRightIcon;
         if (isApplied) return CheckmarkCircleIcon;
         return kind === 'highlight' ? HighlighterIcon : NoteIcon;
-    };
+    })();
+    const headerIconClassName = !isProcessing && !isHovered && isApplied
+        ? 'font-color-green scale-11'
+        : undefined;
 
-    const headerIconClassName = isFailed
-        ? 'font-color-red scale-11'
-        : isApplied
-            ? 'font-color-green scale-11'
-            : undefined;
-
-    const titleClickable = isApplied && firstCreatedRef !== null;
+    const showHeaderActions = !isExpanded && !isProcessing;
 
     return (
         <div className="border-popup rounded-md display-flex flex-col min-w-0">
-            <div className="display-flex flex-row bg-senary items-start py-15 gap-1">
-                <div
-                    className={`display-flex flex-row ml-3 gap-2 min-w-0 ${titleClickable ? 'cursor-pointer' : ''}`}
-                    onMouseEnter={() => titleClickable && setIsHovered(true)}
+            <div
+                className={`display-flex flex-row py-15 bg-senary items-start ${isExpanded ? 'border-bottom-quinary' : ''}`}
+            >
+                <button
+                    type="button"
+                    className="variant-ghost-secondary display-flex flex-row py-15 gap-2 text-left mt-015"
+                    style={{ fontSize: '0.95rem', background: 'transparent', border: 0, padding: 0 }}
+                    aria-expanded={isExpanded}
+                    onClick={toggleExpanded}
+                    disabled={isProcessing}
+                    onMouseEnter={() => setIsHovered(true)}
                     onMouseLeave={() => setIsHovered(false)}
-                    onClick={titleClickable ? handleReveal : undefined}
                 >
-                    <div className="display-flex mt-015" style={{ flexShrink: 0 }}>
-                        <Icon icon={getHeaderIcon()} className={headerIconClassName} />
+                    <div className="display-flex flex-row ml-3 gap-2">
+                        <div className="flex-1 display-flex mt-010 font-color-primary">
+                            <Icon icon={headerIcon} className={headerIconClassName} />
+                        </div>
+                        <div className="display-flex">
+                            <span className="font-color-primary font-medium">{label}</span>
+                        </div>
                     </div>
-                    <div
-                        className="min-w-0"
-                        style={{
-                            display: '-webkit-box',
-                            WebkitLineClamp: 2,
-                            WebkitBoxOrient: 'vertical',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            wordBreak: 'break-word',
-                        }}
-                    >
-                        <span
-                            className={`font-medium ${isHovered ? 'font-color-primary' : 'font-color-primary'}`}
-                            style={{ transition: 'color 0.15s ease' }}
-                        >
-                            {titleClickable
-                                ? textWithTrailingNoWrap(
-                                    label,
-                                    <span
-                                        className="font-color-secondary scale-10"
-                                        style={{ display: 'inline-flex', verticalAlign: 'middle', cursor: 'pointer', marginLeft: '1px' }}
-                                    >
-                                        <Icon icon={ArrowUpRightIcon} />
-                                    </span>,
-                                )
-                                : label}
-                        </span>
-                    </div>
-                </div>
+                </button>
 
                 <div className="flex-1" />
 
-                <div className={`display-flex flex-row items-center gap-1 ${isApplied ? 'mr-2' : 'mr-3 mt-020'}`}>
-                    {isApplied ? (
-                        <Tooltip content={`Delete ${kind === 'highlight' ? 'highlights' : 'sticky notes'}`} showArrow singleLine>
+                {showHeaderActions && (
+                    <div className="display-flex flex-row items-center gap-25 mr-3 mt-015">
+                        <Tooltip content="Dismiss" showArrow singleLine>
                             <IconButton
-                                icon={DeleteIcon}
+                                icon={CancelIcon}
                                 variant="ghost-secondary"
-                                onClick={handleDelete}
-                                disabled={isBusy}
-                                className="scale-90 mt-020"
+                                onClick={handleDismissAll}
+                                disabled={isProcessing}
                             />
                         </Tooltip>
-                    ) : !isFailed ? (
-                        <>
-                            <Tooltip content="Dismiss" showArrow singleLine>
-                                <IconButton
-                                    icon={CancelIcon}
-                                    variant="ghost-secondary"
-                                    iconClassName="font-color-red"
-                                    onClick={handleDismiss}
-                                    disabled={isBusy}
-                                />
-                            </Tooltip>
-                            <Tooltip content={`Create ${kind === 'highlight' ? 'highlights' : 'sticky notes'}`} showArrow singleLine>
-                                <IconButton
-                                    icon={TickIcon}
-                                    variant="ghost-secondary"
-                                    iconClassName="font-color-green scale-14"
-                                    onClick={handleApply}
-                                    disabled={isBusy}
-                                />
-                            </Tooltip>
-                        </>
-                    ) : null}
-                </div>
+                    </div>
+                )}
             </div>
+
+            {isExpanded && (
+                <div className="display-flex flex-col">
+                    <div className="display-flex flex-col">
+                        {actions.map((action, idx) => (
+                            <div
+                                key={action.id}
+                                className={idx > 0 ? 'border-top-quinary' : undefined}
+                            >
+                                <CreateAnnotationsPreview
+                                    kind={kind}
+                                    actionData={action.proposed_data as any}
+                                    resultData={action.result_data as any}
+                                    status={action.status as any}
+                                />
+                            </div>
+                        ))}
+                    </div>
+
+                    <div className="display-flex flex-row gap-2 px-2 py-2">
+                        <div className="flex-1" />
+                        <Button
+                            variant="outline"
+                            onClick={handleDismissAll}
+                            disabled={isProcessing}
+                            loading={isProcessing && clickedButton === 'dismiss'}
+                        >
+                            Dismiss
+                        </Button>
+                        {isApplied ? (
+                            <Button
+                                variant="outline"
+                                onClick={handleDeleteAll}
+                                disabled={isProcessing}
+                                loading={isProcessing && clickedButton === 'undo'}
+                            >
+                                Delete All
+                            </Button>
+                        ) : (
+                            <Button
+                                variant="solid"
+                                onClick={handleApplyAll}
+                                disabled={isProcessing}
+                                loading={isProcessing && clickedButton === 'apply'}
+                            >
+                                Apply All
+                            </Button>
+                        )}
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
@@ -274,10 +263,14 @@ const SummaryRow: React.FC<RowProps> = ({ kind, status, count, actions, runId })
 /**
  * Summary display for bulk PDF annotation actions (create_highlight_annotations
  * and create_note_annotations) at the end of a completed run. Aggregates
- * applied, failed, and pending annotations across all batch actions and renders
- * one row per status × kind combination (e.g. "Created 4 Highlights").
+ * applied + pending annotations per kind and renders one expandable card per
+ * status × kind bucket (e.g. "Created 4 Highlights"). Each card reuses
+ * CreateAnnotationsPreview for the per-item list when expanded.
  */
-const CreateAnnotationsAgentActionDisplay: React.FC<CreateAnnotationsAgentActionDisplayProps> = ({ run, actions }) => {
+const CreateAnnotationsAgentActionDisplay: React.FC<CreateAnnotationsAgentActionDisplayProps> = ({
+    run,
+    actions,
+}) => {
     const buckets = useMemo(() => {
         const result: Record<`${SummaryStatus}-${SummaryKind}`, {
             count: number;
@@ -285,8 +278,6 @@ const CreateAnnotationsAgentActionDisplay: React.FC<CreateAnnotationsAgentAction
         }> = {
             'applied-highlight': { count: 0, actions: [] },
             'applied-note': { count: 0, actions: [] },
-            'failed-highlight': { count: 0, actions: [] },
-            'failed-note': { count: 0, actions: [] },
             'pending-highlight': { count: 0, actions: [] },
             'pending-note': { count: 0, actions: [] },
         };
@@ -300,16 +291,10 @@ const CreateAnnotationsAgentActionDisplay: React.FC<CreateAnnotationsAgentAction
             const typed = action as CreateAnnotationsAction;
 
             if (action.status === 'applied') {
-                const created = appliedCount(typed);
-                const failed = failedCount(typed);
-                if (created > 0) {
+                const n = appliedCount(typed);
+                if (n > 0) {
                     const key = `applied-${kind}` as const;
-                    result[key].count += created;
-                    result[key].actions.push(typed);
-                }
-                if (created === 0 && failed > 0) {
-                    const key = `failed-${kind}` as const;
-                    result[key].count += failed;
+                    result[key].count += n;
                     result[key].actions.push(typed);
                 }
             } else if (action.status === 'pending') {
@@ -325,70 +310,30 @@ const CreateAnnotationsAgentActionDisplay: React.FC<CreateAnnotationsAgentAction
         return result;
     }, [actions]);
 
-    const rows: Array<RowProps> = [];
-    if (buckets['applied-highlight'].count > 0) {
-        rows.push({
-            kind: 'highlight',
-            status: 'applied',
-            count: buckets['applied-highlight'].count,
-            actions: buckets['applied-highlight'].actions,
-            runId: run.id,
-        });
-    }
-    if (buckets['applied-note'].count > 0) {
-        rows.push({
-            kind: 'note',
-            status: 'applied',
-            count: buckets['applied-note'].count,
-            actions: buckets['applied-note'].actions,
-            runId: run.id,
-        });
-    }
-    if (buckets['failed-highlight'].count > 0) {
-        rows.push({
-            kind: 'highlight',
-            status: 'failed',
-            count: buckets['failed-highlight'].count,
-            actions: buckets['failed-highlight'].actions,
-            runId: run.id,
-        });
-    }
-    if (buckets['failed-note'].count > 0) {
-        rows.push({
-            kind: 'note',
-            status: 'failed',
-            count: buckets['failed-note'].count,
-            actions: buckets['failed-note'].actions,
-            runId: run.id,
-        });
-    }
-    if (buckets['pending-highlight'].count > 0) {
-        rows.push({
-            kind: 'highlight',
-            status: 'pending',
-            count: buckets['pending-highlight'].count,
-            actions: buckets['pending-highlight'].actions,
-            runId: run.id,
-        });
-    }
-    if (buckets['pending-note'].count > 0) {
-        rows.push({
-            kind: 'note',
-            status: 'pending',
-            count: buckets['pending-note'].count,
-            actions: buckets['pending-note'].actions,
-            runId: run.id,
-        });
+    const groups: GroupProps[] = [];
+    for (const status of ['applied', 'pending'] as const) {
+        for (const kind of ['highlight', 'note'] as const) {
+            const bucket = buckets[`${status}-${kind}`];
+            if (bucket.count > 0) {
+                groups.push({
+                    kind,
+                    status,
+                    count: bucket.count,
+                    actions: bucket.actions,
+                    runId: run.id,
+                });
+            }
+        }
     }
 
-    if (rows.length === 0) return null;
+    if (groups.length === 0) return null;
 
     return (
         <>
-            {rows.map((row) => (
-                <SummaryRow
-                    key={`${row.status}-${row.kind}`}
-                    {...row}
+            {groups.map((group) => (
+                <CreateAnnotationsGroup
+                    key={`${group.status}-${group.kind}`}
+                    {...group}
                 />
             ))}
         </>
