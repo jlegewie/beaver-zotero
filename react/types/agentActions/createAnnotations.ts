@@ -24,7 +24,7 @@ export interface HighlightAnnotationItem {
     index: number;
     /**
      * Opaque backend correlation token. One token can produce multiple
-     * CreatedAnnotation rows when a highlight spans multiple pages.
+     * CreatedAnnotationResult rows when a highlight spans multiple pages.
      */
     client_item_id: string;
     title: string;
@@ -49,13 +49,13 @@ export interface NoteAnnotationItem {
     page_label?: string | null;
 }
 
-export interface CreatedAnnotation extends ZoteroItemReference {
+export interface CreatedAnnotationResult extends ZoteroItemReference {
     client_item_id: string;
     index: number;
     loc_raw: string;
 }
 
-export interface FailedAnnotation {
+export interface FailedAnnotationResult {
     client_item_id: string;
     index: number;
     loc_raw: string;
@@ -78,8 +78,8 @@ export interface CreateNoteAnnotationsProposedData {
 export interface CreateHighlightAnnotationsResultData {
     requested_ref: ZoteroItemReference;
     resolved_ref: ZoteroItemReference;
-    created: CreatedAnnotation[];
-    failed: FailedAnnotation[];
+    created: CreatedAnnotationResult[];
+    failed: FailedAnnotationResult[];
     total_created: number;
     total_failed: number;
 }
@@ -87,8 +87,8 @@ export interface CreateHighlightAnnotationsResultData {
 export interface CreateNoteAnnotationsResultData {
     requested_ref: ZoteroItemReference;
     resolved_ref: ZoteroItemReference;
-    created: CreatedAnnotation[];
-    failed: FailedAnnotation[];
+    created: CreatedAnnotationResult[];
+    failed: FailedAnnotationResult[];
     total_created: number;
     total_failed: number;
 }

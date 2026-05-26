@@ -5,12 +5,12 @@
 
 import { AgentAction } from '../agents/agentActions';
 import {
-    CreatedAnnotation,
+    CreatedAnnotationResult,
     CreateHighlightAnnotationsProposedData,
     CreateHighlightAnnotationsResultData,
     CreateNoteAnnotationsProposedData,
     CreateNoteAnnotationsResultData,
-    FailedAnnotation,
+    FailedAnnotationResult,
 } from '../types/agentActions/createAnnotations';
 import { MissingPageGeometryError, createHighlightAnnotation, createNoteAnnotation } from '../../src/services/annotations/createAnnotation';
 import { getAttachmentFileStatus } from '../../src/services/agentDataProvider/utils';
@@ -45,8 +45,8 @@ export async function executeCreateHighlightAnnotationsAction(
 
     await getAttachmentFileStatus(attachment, false);
 
-    const created: CreatedAnnotation[] = [];
-    const failed: FailedAnnotation[] = [];
+    const created: CreatedAnnotationResult[] = [];
+    const failed: FailedAnnotationResult[] = [];
 
     for (const item of items) {
         if (!item.page_locations?.length) {
@@ -111,8 +111,8 @@ export async function executeCreateNoteAnnotationsAction(
 
     await getAttachmentFileStatus(attachment, false);
 
-    const created: CreatedAnnotation[] = [];
-    const failed: FailedAnnotation[] = [];
+    const created: CreatedAnnotationResult[] = [];
+    const failed: FailedAnnotationResult[] = [];
 
     for (const item of items) {
         try {

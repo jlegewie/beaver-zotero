@@ -10,8 +10,8 @@ import type {
     CreateHighlightAnnotationsResultData,
     CreateNoteAnnotationsProposedData,
     CreateNoteAnnotationsResultData,
-    CreatedAnnotation,
-    FailedAnnotation,
+    CreatedAnnotationResult,
+    FailedAnnotationResult,
     HighlightAnnotationItem,
     NoteAnnotationItem,
 } from '../../types/agentActions/createAnnotations';
@@ -69,8 +69,8 @@ function pageIndexForItem(kind: 'highlight' | 'note', item: HighlightAnnotationI
 
 function statusForItem(
     item: HighlightAnnotationItem | NoteAnnotationItem,
-    createdByClient: Map<string, CreatedAnnotation[]>,
-    failedByClient: Map<string, FailedAnnotation[]>,
+    createdByClient: Map<string, CreatedAnnotationResult[]>,
+    failedByClient: Map<string, FailedAnnotationResult[]>,
 ): 'created' | 'failed' | 'partial' | 'pending' {
     const clientItemId = (item as any).client_item_id ?? (item as any).clientItemId ?? '';
     const createdCount = createdByClient.get(clientItemId)?.length ?? 0;
@@ -154,9 +154,9 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
         ? actionData.items as Array<HighlightAnnotationItem | NoteAnnotationItem>
         : [];
     const created = Array.isArray(resultData?.created) ? resultData.created : [];
-    const failed = Array.isArray(resultData?.failed) ? resultData.failed as FailedAnnotation[] : [];
-    const createdByClient = new Map<string, CreatedAnnotation[]>();
-    const failedByClient = new Map<string, FailedAnnotation[]>();
+    const failed = Array.isArray(resultData?.failed) ? resultData.failed as FailedAnnotationResult[] : [];
+    const createdByClient = new Map<string, CreatedAnnotationResult[]>();
+    const failedByClient = new Map<string, FailedAnnotationResult[]>();
 
     for (const entry of created) {
         const list = createdByClient.get(entry.client_item_id) ?? [];
@@ -174,7 +174,7 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
 
     const handleItemClick = useCallback(async (
         item: HighlightAnnotationItem | NoteAnnotationItem,
-        createdEntries: CreatedAnnotation[],
+        createdEntries: CreatedAnnotationResult[],
         ownerDocument?: Document,
     ) => {
         try {
@@ -281,9 +281,7 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
                         const isFailed = itemStatus === 'failed';
                         const isPartial = itemStatus === 'partial';
                         const isCreated = itemStatus === 'created' || itemStatus === 'partial';
-                        const failureMessage = failures
-                            .map((failure) => failure.error_code ? `${failure.error_code}: ${failure.error}` : failure.error)
-                            .join('\n');
+                        const failureMessage = failures.map((failure) => failure.error).join('\n');
                         const pageIndex = pageIndexForItem(kind, item);
                         const pageNumber = typeof pageIndex === 'number' ? pageIndex + 1 : null;
 

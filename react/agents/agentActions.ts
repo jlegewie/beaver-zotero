@@ -19,12 +19,12 @@ import {
 import type { CreateItemProposedData, CreateItemResultData } from '../types/agentActions/items';
 import type { ManageCollectionsProposedData, ManageCollectionsResultData } from '../types/agentActions/base';
 import type {
-    CreatedAnnotation,
+    CreatedAnnotationResult,
     CreateHighlightAnnotationsProposedData,
     CreateHighlightAnnotationsResultData,
     CreateNoteAnnotationsProposedData,
     CreateNoteAnnotationsResultData,
-    FailedAnnotation,
+    FailedAnnotationResult,
     HighlightAnnotationItem,
     NoteAnnotationItem,
 } from '../types/agentActions/createAnnotations';
@@ -316,7 +316,7 @@ function normalizeNoteAnnotationItem(item: any): NoteAnnotationItem {
     };
 }
 
-function normalizeCreatedAnnotation(item: any): CreatedAnnotation {
+function normalizeCreatedAnnotation(item: any): CreatedAnnotationResult {
     return {
         ...normalizeZoteroItemReference(item),
         client_item_id: String(item?.client_item_id ?? item?.clientItemId ?? ''),
@@ -325,7 +325,7 @@ function normalizeCreatedAnnotation(item: any): CreatedAnnotation {
     };
 }
 
-function normalizeFailedAnnotation(item: any): FailedAnnotation {
+function normalizeFailedAnnotation(item: any): FailedAnnotationResult {
     return {
         client_item_id: String(item?.client_item_id ?? item?.clientItemId ?? ''),
         index: typeof item?.index === 'number' ? item.index : Number(item?.index ?? 0),

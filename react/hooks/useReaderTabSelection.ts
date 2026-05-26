@@ -13,7 +13,7 @@ import { store } from '../store';
 import { threadAgentActionsAtom, getZoteroItemReferenceFromAgentAction, hasAppliedBulkAnnotations, AgentAction } from '../agents/agentActions';
 import { isBeaverAuthoredAnnotation } from '../../src/constants/annotations';
 import { getItemValidationAtom } from '../atoms/itemValidation';
-import type { CreatedAnnotation } from '../types/agentActions/createAnnotations';
+import type { CreatedAnnotationResult } from '../types/agentActions/createAnnotations';
 
 /**
  * Module-level variable to track the Zotero notifier observer ID.
@@ -246,7 +246,7 @@ export function useReaderTabSelection() {
                                 if (ref?.zotero_key === item.key && ref?.library_id === item.libraryID) return true;
                                 if (hasAppliedBulkAnnotations(action)) {
                                     return action.result_data!.created.some(
-                                        (created: CreatedAnnotation) => created.zotero_key === item.key && created.library_id === item.libraryID,
+                                        (created: CreatedAnnotationResult) => created.zotero_key === item.key && created.library_id === item.libraryID,
                                     );
                                 }
                                 return false;

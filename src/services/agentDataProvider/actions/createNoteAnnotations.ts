@@ -8,9 +8,9 @@ import { MissingPageGeometryError, createNoteAnnotation } from '../../annotation
 import { getAttachmentFileStatus, getDeferredToolPreference, validateLibraryAccess } from '../utils';
 import { TimeoutContext, checkAborted, TimeoutError } from '../timeout';
 import type {
-    CreatedAnnotation,
+    CreatedAnnotationResult,
     CreateNoteAnnotationsProposedData,
-    FailedAnnotation,
+    FailedAnnotationResult,
     NoteAnnotationItem,
 } from '../../../../react/types/agentActions/createAnnotations';
 import type { ZoteroItemReference } from '../../../../react/types/zotero';
@@ -211,8 +211,8 @@ export async function executeCreateNoteAnnotationsAction(
         await getAttachmentFileStatus(attachment, false);
         checkAborted(ctx, 'create_note_annotations:after_extract');
 
-        const created: CreatedAnnotation[] = [];
-        const failed: FailedAnnotation[] = [];
+        const created: CreatedAnnotationResult[] = [];
+        const failed: FailedAnnotationResult[] = [];
 
         for (const item of items) {
             checkAborted(ctx, `create_note_annotations:item_${item.index}`);

@@ -436,12 +436,12 @@ export {
 
 export type {
     BackendLocator,
-    CreatedAnnotation,
+    CreatedAnnotationResult,
     CreateHighlightAnnotationsProposedData,
     CreateHighlightAnnotationsResultData,
     CreateNoteAnnotationsProposedData,
     CreateNoteAnnotationsResultData,
-    FailedAnnotation,
+    FailedAnnotationResult,
     HighlightAnnotationItem,
     NoteAnnotationItem,
 } from './createAnnotations';

@@ -8,9 +8,9 @@ import { MissingPageGeometryError, createHighlightAnnotation } from '../../annot
 import { getAttachmentFileStatus, getDeferredToolPreference, validateLibraryAccess } from '../utils';
 import { TimeoutContext, checkAborted, TimeoutError } from '../timeout';
 import type {
-    CreatedAnnotation,
+    CreatedAnnotationResult,
     CreateHighlightAnnotationsProposedData,
-    FailedAnnotation,
+    FailedAnnotationResult,
     HighlightAnnotationItem,
 } from '../../../../react/types/agentActions/createAnnotations';
 import type { ZoteroItemReference } from '../../../../react/types/zotero';
@@ -208,8 +208,8 @@ export async function executeCreateHighlightAnnotationsAction(
         await getAttachmentFileStatus(attachment, false);
         checkAborted(ctx, 'create_highlight_annotations:after_extract');
 
-        const created: CreatedAnnotation[] = [];
-        const failed: FailedAnnotation[] = [];
+        const created: CreatedAnnotationResult[] = [];
+        const failed: FailedAnnotationResult[] = [];
 
         for (const item of items) {
             checkAborted(ctx, `create_highlight_annotations:item_${item.index}`);
