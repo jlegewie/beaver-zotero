@@ -2,6 +2,7 @@ import React, { useCallback } from 'react';
 import Tooltip from '../ui/Tooltip';
 import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import { navigateToAnnotation, navigateToPage } from '../../utils/readerUtils';
+import { BeaverTemporaryAnnotations, createBoundingBoxHighlights } from '../../utils/annotationUtils';
 import { logger } from '../../../src/utils/logger';
 import type {
     CreateHighlightAnnotationsProposedData,
@@ -49,6 +50,8 @@ const COLOR_VALUES: Record<string, string> = {
     teal: '#7fffd4',
 };
 
+let cleanupPreviewClickListeners: Array<() => void> = [];
+
 function pageIndexForItem(kind: 'highlight' | 'note', item: HighlightAnnotationItem | NoteAnnotationItem): number | null {
     const raw = item as any;
     if (kind === 'highlight') {
@@ -73,6 +76,57 @@ function statusForItem(
     if (createdCount > 0) return 'created';
     if (failedCount > 0) return 'failed';
     return 'pending';
+}
+
+function getHighlightLocations(item: HighlightAnnotationItem | NoteAnnotationItem): any[] {
+    const raw = item as any;
+    const locations = raw.page_locations ?? raw.pageLocations ?? raw.locations;
+    return Array.isArray(locations) ? locations : [];
+}
+
+function colorWithPreviewAlpha(colorName: string | undefined): string {
+    const hex = COLOR_VALUES[colorName || 'yellow'] ?? COLOR_VALUES.yellow;
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    return `rgba(${r}, ${g}, ${b}, 0.45)`;
+}
+
+function clearPreviewClickListeners(): void {
+    for (const cleanup of cleanupPreviewClickListeners) {
+        cleanup();
+    }
+    cleanupPreviewClickListeners = [];
+}
+
+function installPreviewDismissOnNextClick(reader: any, ownerDocument?: Document): void {
+    clearPreviewClickListeners();
+
+    const documents = [
+        ownerDocument,
+        Zotero.getMainWindow()?.document,
+        reader?._iframeWindow?.document,
+        reader?._internalReader?._primaryView?._iframeWindow?.document,
+    ].filter(Boolean) as Document[];
+    const seenDocuments = new Set<Document>();
+
+    setTimeout(() => {
+        for (const doc of documents) {
+            if (seenDocuments.has(doc)) continue;
+            seenDocuments.add(doc);
+
+            const dismiss = () => {
+                clearPreviewClickListeners();
+                BeaverTemporaryAnnotations.cleanupAll(reader).catch(error => {
+                    logger(`CreateAnnotationsPreview: failed to clean up preview annotation: ${error}`, 1);
+                });
+            };
+            doc.addEventListener('pointerdown', dismiss, { capture: true, once: true });
+            cleanupPreviewClickListeners.push(() => {
+                doc.removeEventListener('pointerdown', dismiss, true);
+            });
+        }
+    }, 0);
 }
 
 /**
@@ -110,8 +164,12 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
     const handleItemClick = useCallback(async (
         item: HighlightAnnotationItem | NoteAnnotationItem,
         createdEntries: CreatedAnnotation[],
+        ownerDocument?: Document,
     ) => {
         try {
+            await BeaverTemporaryAnnotations.cleanupAll();
+            clearPreviewClickListeners();
+
             const firstCreated = createdEntries[0];
             if (firstCreated) {
                 const annotationItem = await Zotero.Items.getByLibraryAndKeyAsync(
@@ -132,11 +190,39 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
             );
             if (!pdfItem) return;
             const page = typeof pageIndex === 'number' ? pageIndex + 1 : 1;
-            await navigateToPage((pdfItem as Zotero.Item).id, page);
+            const reader = await navigateToPage((pdfItem as Zotero.Item).id, page) as any;
+
+            if (kind === 'highlight' && (status === 'pending' || status === 'awaiting' || status === 'undone')) {
+                const rawItem = item as any;
+                const locations = getHighlightLocations(item)
+                    .map((loc: any) => {
+                        const rawPageIndex = loc.page_idx ?? loc.pageIndex ?? loc.page_index ?? loc.page ?? 0;
+                        return {
+                            page: Number(rawPageIndex) + 1,
+                            bboxes: loc.boxes ?? loc.boundingBoxes ?? loc.bboxes ?? loc.rects ?? [],
+                        };
+                    })
+                    .filter((loc: any) => loc.page > 0 && loc.bboxes.length > 0);
+
+                const annotationReferences = await createBoundingBoxHighlights(
+                    locations,
+                    rawItem.text ?? rawItem.title ?? '',
+                    rawItem.title ?? rawItem.text ?? 'Beaver annotation preview',
+                    { color: colorWithPreviewAlpha(rawItem.color) },
+                );
+
+                if (annotationReferences.length > 0) {
+                    BeaverTemporaryAnnotations.addToTracking(annotationReferences);
+                    installPreviewDismissOnNextClick(reader, ownerDocument);
+                    setTimeout(() => {
+                        reader?.navigate?.({ annotationID: annotationReferences[0].zotero_key });
+                    }, 100);
+                }
+            }
         } catch (error) {
             logger(`CreateAnnotationsPreview: navigation failed: ${error}`, 1);
         }
-    }, [kind, resolvedRef?.library_id, resolvedRef?.zotero_key]);
+    }, [kind, resolvedRef?.library_id, resolvedRef?.zotero_key, status]);
 
     return (
         <div className={`create-annotations-preview overflow-hidden ${status === 'rejected' || status === 'undone' ? 'opacity-60' : ''}`}>
@@ -164,7 +250,7 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
                             <div
                                 key={`${clientItemId}-${rawItem.index}`}
                                 className="create-annotations-preview-row display-flex flex-row items-start gap-2 py-15 cursor-pointer"
-                                onClick={() => handleItemClick(item, createdEntries)}
+                                onClick={(event) => handleItemClick(item, createdEntries, event.currentTarget.ownerDocument)}
                             >
                                 <ZoteroIcon
                                     icon={kind === 'highlight' ? ZOTERO_ICONS.ANNOTATE_HIGHLIGHT : ZOTERO_ICONS.ANNOTATION}

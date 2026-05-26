@@ -376,7 +376,8 @@ export const BeaverTemporaryAnnotations = {
 export const createBoundingBoxHighlights = async (
     boundingBoxData: any[],
     previewText: string,
-    annotationText: string
+    annotationText: string,
+    options: { color?: string } = {},
 ): Promise<ZoteroItemReference[]> => {
     if (boundingBoxData.length === 0) return [];
     
@@ -400,6 +401,8 @@ export const createBoundingBoxHighlights = async (
             pageGroups.get(page)!.push(bboxes);
         }
         
+        const color = options.color ?? '#00bbff';
+
         // Create one annotation per page with combined rects
         for (const [page, allBboxesOnPage] of pageGroups) {
             const pageIndex = page - 1; // Convert to 0-based index
@@ -433,7 +436,7 @@ export const createBoundingBoxHighlights = async (
                 
                 // Required annotation properties
                 type: 'highlight',
-                color: '#00bbff', // Blue highlight
+                color,
                 sortIndex: `${pageIndex.toString().padStart(5, '0')}|000000|00000`,
                 position: {
                     pageIndex: pageIndex,
@@ -456,7 +459,7 @@ export const createBoundingBoxHighlights = async (
                 annotationAuthorName: BEAVER_ANNOTATION_AUTHOR,
                 annotationText: annotationText,
                 annotationComment: '',
-                annotationColor: '#00bbff',
+                annotationColor: color,
                 annotationPageLabel: '',
                 annotationSortIndex: `${pageIndex.toString().padStart(5, '0')}|000000|00000`,
                 annotationPosition: JSON.stringify({
