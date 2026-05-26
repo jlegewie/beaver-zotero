@@ -8,7 +8,6 @@
  */
 
 import { logger } from '../../utils/logger';
-import { getPref } from '../../utils/prefs';
 
 import { isAttachmentAvailableRemotely } from '../../utils/webAPI';  // kept for file_missing message check
 import {
@@ -33,6 +32,7 @@ import {
     TimeoutError,
     createTimeoutController,
 } from './timeout';
+import { effectiveMaxFileSizeMB, effectiveMaxPageCount } from '../attachmentLimits';
 
 // Convert raw bytes to base64 in 32 KB chunks
 function uint8ToBase64(bytes: Uint8Array): string {
@@ -52,7 +52,7 @@ function uint8ToBase64(bytes: Uint8Array): string {
 export async function handleZoteroAttachmentPageImagesRequest(
     request: WSZoteroAttachmentPageImagesRequest
 ): Promise<WSZoteroAttachmentPageImagesResponse> {
-    const { attachment, pages, scale, dpi, format, jpeg_quality, skip_local_limits, prefer_page_labels, request_id, timeout_seconds } = request;
+    const { attachment, pages, scale, dpi, format, jpeg_quality, prefer_page_labels, request_id, timeout_seconds } = request;
     const requestKey = `${attachment.library_id}-${attachment.zotero_key}`;
     let errorKey = requestKey;
 
@@ -132,9 +132,9 @@ export async function handleZoteroAttachmentPageImagesRequest(
             );
         }
 
-        // 4. Check file size limit (skip if skip_local_limits is true; skip for remote — checked after download)
-        if (!skip_local_limits && !isRemoteOnly) {
-            const maxFileSizeMB = getPref('maxFileSizeMB');
+        // 4. Check file size limit (remote files are checked after download)
+        const maxFileSizeMB = effectiveMaxFileSizeMB();
+        if (!isRemoteOnly) {
             const fileSize = await Zotero.Attachments.getTotalFileSize(pdfItem);
             throwIfTimedOut('file_size_check');
 
@@ -143,7 +143,7 @@ export async function handleZoteroAttachmentPageImagesRequest(
                 if (fileSizeInMB > maxFileSizeMB) {
                     throwIfTimedOut('file_too_large_response');
                     return errorResponse(
-                        `The PDF file for ${pdfKey} has a file size of ${fileSizeInMB.toFixed(1)}MB, which exceeds the ${maxFileSizeMB}MB limit`,
+                        `The PDF file for ${pdfKey} has a file size of ${fileSizeInMB.toFixed(1)}MB, which exceeds the ${maxFileSizeMB}MB limit.`,
                         'file_too_large'
                     );
                 }
@@ -165,8 +165,8 @@ export async function handleZoteroAttachmentPageImagesRequest(
         // Image rendering does not require a text layer, so checkOcr is false.
         const preflight = preflightCachedPdfMeta(cachedMeta, {
             checkOcr: false,
-            applyPageCountCap: !skip_local_limits && requestingAllPages,
-            maxPageCount: getPref('maxPageCount'),
+            applyPageCountCap: true,
+            maxPageCount: effectiveMaxPageCount(),
         });
         if (preflight) {
             switch (preflight.code) {
@@ -179,7 +179,7 @@ export async function handleZoteroAttachmentPageImagesRequest(
                 case 'too_many_pages':
                     throwIfTimedOut('cached_too_many_pages_response');
                     return errorResponse(
-                        `The PDF file for ${pdfKey} has ${preflight.pageCount} pages, which exceeds the ${preflight.maxPageCount}-page limit`,
+                        `The PDF file for ${pdfKey} has ${preflight.pageCount} pages, which exceeds the ${preflight.maxPageCount}-page limit.`,
                         'too_many_pages',
                     );
                 // 'no_text_layer' cannot occur here (checkOcr: false). Any future
@@ -213,12 +213,10 @@ export async function handleZoteroAttachmentPageImagesRequest(
             totalPages = cachedMeta.pageCount;
         }
 
-        // 5c. Upfront getPageCount ONLY when rendering all pages and we have
-        // no cached page_count — needed to gate `maxPageCount` before
-        // committing to a multi-thousand-page render. Bounded requests get
-        // pageCount back inside `renderPages`.
+        // 5c. Upfront getPageCount when the count is not cached so the hard
+        // page-count cap applies before any render work starts.
         const needsUpfrontPageCount =
-            totalPages == null && requestingAllPages && !skip_local_limits;
+            totalPages == null;
         if (needsUpfrontPageCount) {
             if (!pdfData) {
                 try {
@@ -234,11 +232,11 @@ export async function handleZoteroAttachmentPageImagesRequest(
                     );
                 }
                 if (isRemoteOnly) {
-                    const exceeded = checkRemotePdfSize(pdfData, skip_local_limits);
+                    const exceeded = checkRemotePdfSize(pdfData, false, maxFileSizeMB);
                     if (exceeded) {
                         throwIfTimedOut('remote_file_too_large_response');
                         return errorResponse(
-                            `The PDF file for ${pdfKey} has a file size of ${exceeded.sizeMB.toFixed(1)}MB, which exceeds the ${exceeded.maxMB}MB limit`,
+                            `The PDF file for ${pdfKey} has a file size of ${exceeded.sizeMB.toFixed(1)}MB, which exceeds the ${exceeded.maxMB}MB limit.`,
                             'file_too_large'
                         );
                     }
@@ -248,13 +246,13 @@ export async function handleZoteroAttachmentPageImagesRequest(
             throwIfTimedOut('page_count_extraction');
         }
 
-        // 6. Check page count limit for all-pages requests when totalPages known.
-        if (!skip_local_limits && requestingAllPages && totalPages != null) {
-            const maxPageCount = getPref('maxPageCount');
+        // 6. Check page count limit when totalPages is known.
+        if (totalPages != null) {
+            const maxPageCount = effectiveMaxPageCount();
             if (totalPages > maxPageCount) {
                 throwIfTimedOut('too_many_pages_response');
                 return errorResponse(
-                    `The PDF file for ${pdfKey} has ${totalPages} pages, which exceeds the ${maxPageCount}-page limit`,
+                    `The PDF file for ${pdfKey} has ${totalPages} pages, which exceeds the ${maxPageCount}-page limit.`,
                     'too_many_pages'
                 );
             }
@@ -325,11 +323,11 @@ export async function handleZoteroAttachmentPageImagesRequest(
                 );
             }
             if (isRemoteOnly) {
-                const exceeded = checkRemotePdfSize(pdfData, skip_local_limits);
+                const exceeded = checkRemotePdfSize(pdfData, false, maxFileSizeMB);
                 if (exceeded) {
                     throwIfTimedOut('remote_file_too_large_response');
                     return errorResponse(
-                        `The PDF file for ${pdfKey} has a file size of ${exceeded.sizeMB.toFixed(1)}MB, which exceeds the ${exceeded.maxMB}MB limit`,
+                        `The PDF file for ${pdfKey} has a file size of ${exceeded.sizeMB.toFixed(1)}MB, which exceeds the ${exceeded.maxMB}MB limit.`,
                         'file_too_large'
                     );
                 }

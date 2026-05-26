@@ -21,8 +21,6 @@ declare namespace _ZoteroTypes {
       "annotationToolEnabled": boolean;
       "maxAddAttachmentToMessage": number;
       "readerExplainPrompt": string;
-      "maxFileSizeMB": number;
-      "maxPageCount": number;
       "accessRemoteFiles": boolean;
       "autoApplyAnnotations": boolean;
       "autoCreateNotes": boolean;

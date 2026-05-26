@@ -8,7 +8,6 @@
  */
 
 import { logger } from '../../utils/logger';
-import { getPref } from '../../utils/prefs';
 
 import { isAttachmentAvailableRemotely } from '../../utils/webAPI';  // kept for file_missing message check
 import {
@@ -32,6 +31,7 @@ import {
     TimeoutError,
     createTimeoutController,
 } from './timeout';
+import { effectiveMaxFileSizeMB, effectiveMaxPageCount } from '../attachmentLimits';
 
 
 /**
@@ -41,7 +41,7 @@ import {
 export async function handleZoteroAttachmentSearchRequest(
     request: WSZoteroAttachmentSearchRequest
 ): Promise<WSZoteroAttachmentSearchResponse> {
-    const { attachment, query, max_hits_per_page, skip_local_limits, request_id, timeout_seconds } = request;
+    const { attachment, query, max_hits_per_page, request_id, timeout_seconds } = request;
 
     // Hoisted for catch-block metadata backfill
     let resolvedItem: Zotero.Item | null = null;
@@ -147,9 +147,9 @@ export async function handleZoteroAttachmentSearchRequest(
             }
         }
 
-        // 5. Check file size before reading (skip if skip_local_limits is true; skip for remote — checked after download)
-        if (!skip_local_limits && !isRemoteOnly) {
-            const maxFileSizeMB = getPref('maxFileSizeMB');
+        // 5. Check file size before reading (remote files are checked after download).
+        const maxFileSizeMB = effectiveMaxFileSizeMB();
+        if (!isRemoteOnly) {
             const fileSize = await Zotero.Attachments.getTotalFileSize(zoteroItem);
             throwIfTimedOut('file_size_check');
 
@@ -159,7 +159,7 @@ export async function handleZoteroAttachmentSearchRequest(
                 if (fileSizeInMB > maxFileSizeMB) {
                     throwIfTimedOut('file_too_large_response');
                     return errorResponse(
-                        `PDF file size of ${fileSizeInMB.toFixed(1)}MB exceeds the ${maxFileSizeMB}MB limit`,
+                        `PDF file size of ${fileSizeInMB.toFixed(1)}MB exceeds the ${maxFileSizeMB}MB limit.`,
                         'file_too_large'
                     );
                 }
@@ -176,8 +176,8 @@ export async function handleZoteroAttachmentSearchRequest(
 
         const preflight = preflightCachedPdfMeta(cachedMeta, {
             checkOcr: true,
-            applyPageCountCap: !skip_local_limits,
-            maxPageCount: getPref('maxPageCount'),
+            applyPageCountCap: true,
+            maxPageCount: effectiveMaxPageCount(),
         });
         if (preflight) {
             switch (preflight.code) {
@@ -197,7 +197,7 @@ export async function handleZoteroAttachmentSearchRequest(
                 case 'too_many_pages':
                     throwIfTimedOut('cached_too_many_pages_response');
                     return errorResponse(
-                        `PDF has ${preflight.pageCount} pages, which exceeds the ${preflight.maxPageCount}-page limit`,
+                        `PDF has ${preflight.pageCount} pages, which exceeds the ${preflight.maxPageCount}-page limit.`,
                         'too_many_pages',
                     );
             }
@@ -219,11 +219,11 @@ export async function handleZoteroAttachmentSearchRequest(
             );
         }
         if (isRemoteOnly) {
-            const exceeded = checkRemotePdfSize(pdfData, skip_local_limits);
+            const exceeded = checkRemotePdfSize(pdfData, false, maxFileSizeMB);
             if (exceeded) {
                 throwIfTimedOut('remote_file_too_large_response');
                 return errorResponse(
-                    `PDF file size of ${exceeded.sizeMB.toFixed(1)}MB exceeds the ${exceeded.maxMB}MB limit`,
+                    `PDF file size of ${exceeded.sizeMB.toFixed(1)}MB exceeds the ${exceeded.maxMB}MB limit.`,
                     'file_too_large'
                 );
             }
@@ -234,7 +234,7 @@ export async function handleZoteroAttachmentSearchRequest(
         // The cache fast-path above (lines 157-165) already covers the
         // `cachedMeta.page_count > maxPageCount` case before any worker call.
         const extractor = new BeaverExtractor();
-        const maxPageCount = !skip_local_limits ? getPref('maxPageCount') : undefined;
+        const maxPageCount = effectiveMaxPageCount();
         const searchResult = await extractor.search(
             pdfData,
             query,
@@ -251,7 +251,7 @@ export async function handleZoteroAttachmentSearchRequest(
             );
             throwIfTimedOut('too_many_pages_response');
             return errorResponse(
-                `PDF has ${searchResult.totalPages} pages, which exceeds the ${maxPageCount}-page limit`,
+                `PDF has ${searchResult.totalPages} pages, which exceeds the ${maxPageCount}-page limit.`,
                 'too_many_pages'
             );
         }

@@ -176,6 +176,24 @@ describe('ItemValidationManager document-cache frontend validation', () => {
         expect(BeaverExtractorMock).not.toHaveBeenCalled();
     });
 
+    it('rejects cached metadata over the hard page-count cap before dispatching to MuPDF', async () => {
+        (globalThis as any).Zotero.Beaver = {
+            documentCache: {
+                getMetadata: vi.fn().mockResolvedValue(makeMetadata({ pageCount: 801 })),
+            },
+        };
+
+        const result = await itemValidationManager.validateItem(makeAttachment(), {
+            validationType: ItemValidationType.FRONTEND,
+            forceRefresh: true,
+        });
+
+        expect(result.isValid).toBe(false);
+        expect(result.reason).toContain('exceeds the 800-page limit');
+        expect((globalThis as any).IOUtils.read).not.toHaveBeenCalled();
+        expect(BeaverExtractorMock).not.toHaveBeenCalled();
+    });
+
     it('falls back to MuPDF when document-cache metadata is absent', async () => {
         (globalThis as any).Zotero.Beaver = {
             documentCache: {
@@ -192,5 +210,23 @@ describe('ItemValidationManager document-cache frontend validation', () => {
         expect((globalThis as any).IOUtils.read).toHaveBeenCalledWith('/tmp/test.pdf');
         expect(BeaverExtractorMock).toHaveBeenCalledTimes(1);
         expect(extractorMethods.getPageCount).toHaveBeenCalledTimes(1);
+    });
+
+    it('rejects parser metadata over the hard page-count cap before OCR analysis', async () => {
+        extractorMethods.getPageCount.mockResolvedValueOnce(801);
+        (globalThis as any).Zotero.Beaver = {
+            documentCache: {
+                getMetadata: vi.fn().mockResolvedValue(null),
+            },
+        };
+
+        const result = await itemValidationManager.validateItem(makeAttachment(), {
+            validationType: ItemValidationType.FRONTEND,
+            forceRefresh: true,
+        });
+
+        expect(result.isValid).toBe(false);
+        expect(result.reason).toContain('exceeds the 800-page limit');
+        expect(extractorMethods.analyzeOCRNeeds).not.toHaveBeenCalled();
     });
 });

@@ -11,6 +11,7 @@ import { BeaverExtractor, ExtractionError, ExtractionErrorCode } from '../beaver
 import { safeFileExists } from '../utils/zoteroUtils';
 import { isRemoteAccessAvailable } from './agentDataProvider/utils';
 import type { DocumentCacheMetadata } from './documentCache';
+import { effectiveMaxFileSizeMB, effectiveMaxPageCount } from './attachmentLimits';
 
 /**
  * Types of item validation
@@ -292,6 +293,15 @@ class ItemValidationManager {
         if (metadata.pageCount === 0) {
             return { isValid: false, reason: 'PDF has no readable pages' };
         }
+        if (metadata.pageCount != null) {
+            const maxPageCount = effectiveMaxPageCount();
+            if (metadata.pageCount > maxPageCount) {
+                return {
+                    isValid: false,
+                    reason: `PDF has ${metadata.pageCount} pages, which exceeds the ${maxPageCount}-page limit.`,
+                };
+            }
+        }
 
         // Successful extraction metadata proves page readability and text-layer status.
         if (metadata.errorCode === null && metadata.pageCount != null) {
@@ -411,7 +421,7 @@ class ItemValidationManager {
         }
 
         // 5. Check file size limits
-        const maxFileSizeMB = getPref('maxFileSizeMB');
+        const maxFileSizeMB = effectiveMaxFileSizeMB();
         try {
             const fileSize = await Zotero.Attachments.getTotalFileSize(attachment);
             if (fileSize) {
@@ -460,6 +470,14 @@ class ItemValidationManager {
                     }
                 }
                 throw error;
+            }
+
+            const maxPageCount = effectiveMaxPageCount();
+            if (pageCount > maxPageCount) {
+                return {
+                    isValid: false,
+                    reason: `PDF has ${pageCount} pages, which exceeds the ${maxPageCount}-page limit.`,
+                };
             }
 
             // Check if PDF needs OCR

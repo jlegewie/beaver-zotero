@@ -36,8 +36,8 @@ import type { DocumentCacheExtractionMode } from './database';
 import type { DocumentCacheSourceIdentity } from './documentCache';
 import { makeRemoteFilePath } from './documentFileIdentity';
 import { logger } from '../utils/logger';
-import { getPref } from '../utils/prefs';
 import { isAttachmentAvailableRemotely } from '../utils/webAPI';
+import { effectiveMaxFileSizeMB, effectiveMaxPageCount } from './attachmentLimits';
 import {
     resolveToPdfAttachment,
     validateZoteroItemReference,
@@ -145,14 +145,6 @@ export type ExtractAndCacheResult =
           resolvedAttachment: ResolvedAttachment | null;
       };
 
-function effectiveMaxFileSizeMB(requested?: number | null): number {
-    const hardMax = getPref('maxFileSizeMB');
-    if (requested == null || !Number.isFinite(requested) || requested <= 0) {
-        return hardMax;
-    }
-    return Math.min(requested, hardMax);
-}
-
 /**
  * Run the whole-document extraction pipeline, populate the document cache,
  * and return a tagged-union result. Never throws for expected outcomes —
@@ -185,7 +177,7 @@ export async function extractAndCacheDocument(
     }
 
     const maxFileSizeMB = effectiveMaxFileSizeMB(args.maxFileSizeMB);
-    const maxPages = args.maxPages != null && args.maxPages > 0 ? args.maxPages : null;
+    const maxPages = effectiveMaxPageCount(args.maxPages);
 
     const timeout = createTimeoutController(
         args.timeoutSeconds,
@@ -285,7 +277,7 @@ export async function extractAndCacheDocument(
                     return {
                         kind: 'response_error',
                         code: 'file_too_large',
-                        message: `The PDF file for ${resolvedKeyStr} has a file size of ${fileSizeInMB.toFixed(1)}MB, which exceeds the ${maxFileSizeMB}MB limit`,
+                        message: `The PDF file for ${resolvedKeyStr} has a file size of ${fileSizeInMB.toFixed(1)}MB, which exceeds the ${maxFileSizeMB}MB limit.`,
                         pageCount: null,
                         resolvedAttachment,
                     };
@@ -312,8 +304,8 @@ export async function extractAndCacheDocument(
 
         const preflight = preflightCachedPdfMeta(cachedMeta, {
             checkOcr: true,
-            applyPageCountCap: maxPages != null,
-            maxPageCount: maxPages ?? Number.MAX_SAFE_INTEGER,
+            applyPageCountCap: true,
+            maxPageCount: maxPages,
         });
         if (preflight) {
             switch (preflight.code) {
@@ -345,7 +337,7 @@ export async function extractAndCacheDocument(
                     return {
                         kind: 'response_error',
                         code: 'too_many_pages',
-                        message: `The PDF file for ${resolvedKeyStr} has ${preflight.pageCount} pages, which exceeds the ${preflight.maxPageCount}-page limit`,
+                        message: `The PDF file for ${resolvedKeyStr} has ${preflight.pageCount} pages, which exceeds the ${preflight.maxPageCount}-page limit.`,
                         pageCount: preflight.pageCount,
                         resolvedAttachment,
                     };
@@ -363,11 +355,11 @@ export async function extractAndCacheDocument(
             : null;
         throwIfTimedOut('payload_cache_lookup');
         if (cachedResult) {
-            if (maxPages != null && cachedResult.document.pageCount > maxPages) {
+            if (cachedResult.document.pageCount > maxPages) {
                 return {
                     kind: 'response_error',
                     code: 'too_many_pages',
-                    message: `The PDF file for ${resolvedKeyStr} has ${cachedResult.document.pageCount} pages, which exceeds the ${maxPages}-page limit`,
+                    message: `The PDF file for ${resolvedKeyStr} has ${cachedResult.document.pageCount} pages, which exceeds the ${maxPages}-page limit.`,
                     pageCount: cachedResult.document.pageCount,
                     resolvedAttachment,
                 };
@@ -411,7 +403,7 @@ export async function extractAndCacheDocument(
                     return {
                         kind: 'response_error',
                         code: 'file_too_large',
-                        message: `The PDF file for ${resolvedKeyStr} has a file size of ${exceeded.sizeMB.toFixed(1)}MB, which exceeds the ${exceeded.maxMB}MB limit`,
+                        message: `The PDF file for ${resolvedKeyStr} has a file size of ${exceeded.sizeMB.toFixed(1)}MB, which exceeds the ${exceeded.maxMB}MB limit.`,
                         pageCount: null,
                         resolvedAttachment,
                     };
@@ -421,11 +413,11 @@ export async function extractAndCacheDocument(
             throwIfTimedOut('page_count_extraction');
         }
 
-        if (maxPages != null && totalPages > maxPages) {
+        if (totalPages > maxPages) {
             return {
                 kind: 'response_error',
                 code: 'too_many_pages',
-                message: `The PDF file for ${resolvedKeyStr} has ${totalPages} pages, which exceeds the ${maxPages}-page limit`,
+                message: `The PDF file for ${resolvedKeyStr} has ${totalPages} pages, which exceeds the ${maxPages}-page limit.`,
                 pageCount: totalPages,
                 resolvedAttachment,
             };
@@ -464,7 +456,7 @@ export async function extractAndCacheDocument(
                     return {
                         kind: 'response_error',
                         code: 'file_too_large',
-                        message: `The PDF file for ${resolvedKeyStr} has a file size of ${exceeded.sizeMB.toFixed(1)}MB, which exceeds the ${exceeded.maxMB}MB limit`,
+                        message: `The PDF file for ${resolvedKeyStr} has a file size of ${exceeded.sizeMB.toFixed(1)}MB, which exceeds the ${exceeded.maxMB}MB limit.`,
                         pageCount: totalPages,
                         resolvedAttachment,
                     };
@@ -518,7 +510,7 @@ export async function extractAndCacheDocument(
             return {
                 kind: 'response_error',
                 code: 'file_too_large',
-                message: `The PDF file for ${resolvedKeyStr} exceeds the ${maxFileSizeMB}MB limit`,
+                message: `The PDF file for ${resolvedKeyStr} exceeds the ${maxFileSizeMB}MB limit.`,
                 pageCount: totalPages,
                 resolvedAttachment,
             };

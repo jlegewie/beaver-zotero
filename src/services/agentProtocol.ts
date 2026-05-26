@@ -226,7 +226,7 @@ export interface WSZoteroAttachmentPageImagesRequest extends WSBaseEvent {
     format?: 'png' | 'jpeg';
     /** JPEG quality (1-100), only used for format="jpeg". Default: 85 */
     jpeg_quality?: number;
-    /** Skip local file size and page count limits. Default: false */
+    /** Skip caller-specific soft limits. Beaver's hard caps still apply. Default: false */
     skip_local_limits?: boolean;
     /**
      * When true, resolve `pages` entries against PDF page labels first,
@@ -612,7 +612,7 @@ export interface WSZoteroAttachmentSearchRequest extends WSBaseEvent {
     query: string;
     /** Maximum hits to return per page. Default: 100 */
     max_hits_per_page?: number;
-    /** Skip local file size and page count limits. Default: false */
+    /** Skip caller-specific soft limits. Beaver's hard caps still apply. Default: false */
     skip_local_limits?: boolean;
     /** Frontend-side search deadline in seconds. */
     timeout_seconds?: number;

@@ -10,6 +10,7 @@ import { addPopupMessageAtom } from '../../../react/utils/popupMessageUtils';
 import { wasItemAddedBeforeLastSync } from '../../../react/utils/sourceUtils';
 import { BeaverExtractor, ExtractionError, ExtractionErrorCode } from '../../beaver-extract';
 import { isRemoteFilePath, makeRemoteFilePath } from '../documentFileIdentity';
+import { effectiveMaxFileSizeMB } from '../attachmentLimits';
 import type { DocumentCacheMetadata } from '../documentCache';
 import { DeferredToolPreference } from '../agentProtocol';
 import { deferredToolPreferencesAtom } from '../../../react/atoms/deferredToolPreferences';
@@ -240,7 +241,7 @@ async function checkAttachmentAvailability(
     // entire storage directory with OS.File.stat() per entry — very expensive.
     // Skip for remote files (size unknown until download).
     if (!isRemoteFilePath(filePath)) {
-        const maxFileSizeMB = getPref('maxFileSizeMB');
+        const maxFileSizeMB = effectiveMaxFileSizeMB();
         try {
             const stat = await IOUtils.stat(filePath);
             const fileSizeInMB = (stat.size ?? 0) / 1024 / 1024;
@@ -254,7 +255,7 @@ async function checkAttachmentAvailability(
                         mime_type: contentType,
                         page_count: null,
                         status: "unavailable",
-                        status_reason: `File size of ${fileSizeInMB.toFixed(1)}MB exceeds the ${maxFileSizeMB}MB limit`,
+                        status_reason: `File size of ${fileSizeInMB.toFixed(1)}MB exceeds the ${maxFileSizeMB}MB limit.`,
                     }
                 };
             }
