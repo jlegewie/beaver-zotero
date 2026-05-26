@@ -81,16 +81,16 @@ const PermissionsSection: React.FC = () => {
                 </div>
                 <div className="border-top-quinary" style={{ padding: '8px 12px' }}>
                     <DeferredToolPreferenceSetting
-                        toolName="edit_note"
-                        label="Note Edits"
-                        description="Changes to Zotero note content via string replacement"
+                        toolName="create_note"
+                        label="Note Creation"
+                        description="Creating new Zotero notes"
                     />
                 </div>
                 <div className="border-top-quinary" style={{ padding: '8px 12px' }}>
                     <DeferredToolPreferenceSetting
-                        toolName="create_note"
-                        label="Note Creation"
-                        description="Creating new Zotero notes from agent responses"
+                        toolName="edit_note"
+                        label="Note Edits"
+                        description="Changes to Zotero note content"
                     />
                 </div>
                 <div className="border-top-quinary" style={{ padding: '8px 12px' }}>
