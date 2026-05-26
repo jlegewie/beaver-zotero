@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useRef } from 'react';
 import Tooltip from '../ui/Tooltip';
 import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import { navigateToAnnotation, navigateToPage } from '../../utils/readerUtils';
@@ -38,7 +38,7 @@ const COLOR_VALUES: Record<string, string> = {
     green: '#90ee90',
     blue: '#5ac8fa',
     purple: '#d4a5ff',
-    gray: '#d3d3d3',
+    gray: '#838383',
     pink: '#ff66c4',
     brown: '#e6a86e',
     cyan: '#7fdbff',
@@ -99,7 +99,7 @@ function clearPreviewClickListeners(): void {
     cleanupPreviewClickListeners = [];
 }
 
-function installPreviewDismissOnNextClick(reader: any, ownerDocument?: Document): void {
+function installPreviewDismissOnNextClick(reader: any, ownerDocument?: Document, ignoredClickRoot?: Element | null): void {
     clearPreviewClickListeners();
 
     const documents = [
@@ -115,13 +115,20 @@ function installPreviewDismissOnNextClick(reader: any, ownerDocument?: Document)
             if (seenDocuments.has(doc)) continue;
             seenDocuments.add(doc);
 
-            const dismiss = () => {
+            const dismiss = (event: PointerEvent) => {
+                const target = event.target;
+                const targetNode = target && typeof (target as Node).nodeType === 'number'
+                    ? target as Node
+                    : null;
+                if (ignoredClickRoot && targetNode && ignoredClickRoot.contains(targetNode)) {
+                    return;
+                }
                 clearPreviewClickListeners();
                 BeaverTemporaryAnnotations.cleanupAll(reader).catch(error => {
                     logger(`CreateAnnotationsPreview: failed to clean up preview annotation: ${error}`, 1);
                 });
             };
-            doc.addEventListener('pointerdown', dismiss, { capture: true, once: true });
+            doc.addEventListener('pointerdown', dismiss, { capture: true });
             cleanupPreviewClickListeners.push(() => {
                 doc.removeEventListener('pointerdown', dismiss, true);
             });
@@ -139,6 +146,7 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
     status,
     isStreaming,
 }) => {
+    const previewRootRef = useRef<HTMLDivElement | null>(null);
     const items = Array.isArray(actionData.items)
         ? actionData.items as Array<HighlightAnnotationItem | NoteAnnotationItem>
         : [];
@@ -192,7 +200,11 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
             const page = typeof pageIndex === 'number' ? pageIndex + 1 : 1;
             const reader = await navigateToPage((pdfItem as Zotero.Item).id, page) as any;
 
-            if (kind === 'highlight' && (status === 'pending' || status === 'awaiting' || status === 'undone')) {
+            const canCreatePreview = status === 'pending'
+                || status === 'awaiting'
+                || status === 'rejected'
+                || status === 'undone';
+            if (kind === 'highlight' && canCreatePreview) {
                 const rawItem = item as any;
                 const locations = getHighlightLocations(item)
                     .map((loc: any) => {
@@ -213,7 +225,7 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
 
                 if (annotationReferences.length > 0) {
                     BeaverTemporaryAnnotations.addToTracking(annotationReferences);
-                    installPreviewDismissOnNextClick(reader, ownerDocument);
+                    installPreviewDismissOnNextClick(reader, ownerDocument, previewRootRef.current);
                     setTimeout(() => {
                         reader?.navigate?.({ annotationID: annotationReferences[0].zotero_key });
                     }, 100);
@@ -225,7 +237,7 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
     }, [kind, resolvedRef?.library_id, resolvedRef?.zotero_key, status]);
 
     return (
-        <div className={`create-annotations-preview overflow-hidden ${status === 'rejected' || status === 'undone' ? 'opacity-60' : ''}`}>
+        <div ref={previewRootRef} className={`create-annotations-preview overflow-hidden ${status === 'rejected' || status === 'undone' ? 'opacity-60' : ''}`}>
             <div className="display-flex flex-col px-3 py-2 gap-2">
 
                 <div className="display-flex flex-col gap-1">
