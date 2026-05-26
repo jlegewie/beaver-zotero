@@ -5,9 +5,6 @@ import { currentMessageItemsAtom } from '../../atoms/messageComposition';
 import { navigateToAnnotation } from '../../utils/readerUtils';
 import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import { ANNOTATION_ICON_BY_TYPE } from '../input/MessageItemButton';
-import Button from '../ui/Button';
-import IconButton from '../ui/IconButton';
-import { CancelIcon } from '../icons/icons';
 import { toAnnotation } from '../../types/attachments/converters';
 
 const ANNOTATION_TEXT_BY_TYPE = {
