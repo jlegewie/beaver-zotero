@@ -1304,10 +1304,11 @@ export interface PageImageResult {
 // ============================================================================
 
 /**
- * Geometry of a single PDF page, mirroring PDF.js `page._pageInfo`.
+ * Geometry used by annotation/cache consumers.
  * `viewBox` is the effective view box (CropBox intersected with MediaBox,
  * with MediaBox defaulting to US Letter when absent) in PDF user-space before
- * `/Rotate` is applied. `width` and `height` are convenience derivations.
+ * `/Rotate` is applied. `width` and `height` are unrotated `viewBox`
+ * derivations, not public extraction bbox-frame dimensions.
  */
 export interface PageGeometry {
     /** Effective view box [x0, y0, x1, y1] in PDF user-space, unrotated. */

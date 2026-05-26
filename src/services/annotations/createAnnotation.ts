@@ -1,17 +1,17 @@
 import {
     BoundingBox,
     CoordOrigin,
-    convertBoundingBoxToBottomLeft,
-    toZoteroRectFromBBox,
 } from "../../../react/types/citations";
-import { applyRotationToBoundingBox } from "../../../react/utils/pdfUtils";
 import { ZoteroItemReference } from "../../../react/types/zotero";
 import { NotePosition } from "../../../react/types/agentActions/annotations";
 import { PageGeometry } from "../../beaver-extract/types";
-import { logger } from "../../utils/logger";
 import { getAttachmentFileStatus } from "../agentDataProvider/utils";
 import { isRemoteFilePath } from "../documentFileIdentity";
 import { BEAVER_ANNOTATION_AUTHOR } from "../../constants/annotations";
+import {
+    displayBoxToZoteroRect,
+    sourceBboxesToZoteroRects,
+} from "./annotationGeometry";
 
 const HIGHLIGHT_COLORS: Record<string, string> = {
     red: "#ff6666",
@@ -97,14 +97,6 @@ export function buildSortIndex(pageIndex: number, rect: number[]): string {
         .padStart(6, "0")}|${sortIndexCoordinate(rect?.[0])}`;
 }
 
-function isUsableRect(rect: number[]): boolean {
-    return (
-        Array.isArray(rect) &&
-        rect.length === 4 &&
-        !rect.some((value) => !Number.isFinite(value))
-    );
-}
-
 function geometryError(
     attachment: Zotero.Item,
     pageIndex: number,
@@ -122,79 +114,52 @@ function geometryError(
 
 /**
  * Convert extraction bounding boxes into Zotero PDF annotation rectangles.
+ *
+ * Extraction bboxes use Beaver Extract's public page frame. Zotero stores
+ * `position.rects` in unrotated PDF user space, so conversion goes through
+ * the shared extraction-frame-to-annotation-frame helper.
  */
 export function convertHighlightBoxesToRects(
     boxes: BoundingBox[],
     geometry: PageGeometry,
 ): number[][] {
-    const viewBoxLL: [number, number] = [
-        geometry.viewBox[0],
-        geometry.viewBox[1],
-    ];
-
-    return boxes
-        .map((box) => convertBoundingBoxToBottomLeft(box, geometry.height))
-        .map((box) => {
-            if (geometry.rotation === 0) return box;
-            logger(
-                `Applying rotation ${geometry.rotation}° to box: l=${box.l}, b=${box.b}, r=${box.r}, t=${box.t}, rotated dims: w=${geometry.width}, h=${geometry.height}`,
-                2,
-            );
-            // geometry.width/height are viewBox-derived (unrotated); the helper's parameter names say
-            // "rotatedWidth/rotatedHeight" but it re-swaps internally, so re-derive the math before changing this.
-            const rotated = applyRotationToBoundingBox(
-                box,
-                geometry.rotation,
-                geometry.width,
-                geometry.height,
-            );
-            logger(`Result: l=${rotated.l}, b=${rotated.b}, r=${rotated.r}, t=${rotated.t}`, 2);
-            return rotated;
-        })
-        .map((box) => toZoteroRectFromBBox(box, viewBoxLL))
-        .filter(isUsableRect);
+    return sourceBboxesToZoteroRects(boxes, geometry);
 }
 
 /**
  * Compute the Zotero position rectangle for a PDF note annotation.
+ *
+ * `notePosition` is expressed in the **display** frame — `side` /
+ * `y` describe where on the visible (post-`/Rotate`) page the note
+ * should anchor. We build the bbox in that display frame then route
+ * through `displayBoxToZoteroRect` to land in unrotated PDF user-space
+ * (the frame Zotero stores `position.rects` in). PDF.js re-applies the
+ * `/Rotate` transform when rendering.
  */
 export function computeNoteRect(
     notePosition: NotePosition,
     geometry: PageGeometry,
 ): number[] {
-    const x = notePosition.side === "right"
-        ? geometry.width - NOTE_RECT_SIZE - NOTE_SIDE_MARGIN
-        : NOTE_SIDE_MARGIN;
-    const yCenter = notePosition.coord_origin === CoordOrigin.BOTTOMLEFT
-        ? notePosition.y
-        : geometry.height - notePosition.y;
-    const yBottom = yCenter - NOTE_RECT_SIZE / 2;
+    const isQuarterTurn = geometry.rotation === 90 || geometry.rotation === 270;
+    const displayWidth = isQuarterTurn ? geometry.height : geometry.width;
+    const displayHeight = isQuarterTurn ? geometry.width : geometry.height;
 
-    let converted = convertBoundingBoxToBottomLeft(
+    const x = notePosition.side === "right"
+        ? displayWidth - NOTE_RECT_SIZE - NOTE_SIDE_MARGIN
+        : NOTE_SIDE_MARGIN;
+    const yTop = notePosition.coord_origin === CoordOrigin.TOPLEFT
+        ? notePosition.y - NOTE_RECT_SIZE / 2
+        : displayHeight - notePosition.y - NOTE_RECT_SIZE / 2;
+
+    return displayBoxToZoteroRect(
         {
             l: x,
-            b: yBottom,
+            t: yTop,
             r: x + NOTE_RECT_SIZE,
-            t: yBottom + NOTE_RECT_SIZE,
-            coord_origin: CoordOrigin.BOTTOMLEFT,
+            b: yTop + NOTE_RECT_SIZE,
         },
-        geometry.height,
+        geometry,
     );
-
-    if (geometry.rotation !== 0) {
-        logger(`Applying rotation ${geometry.rotation}° to note position`, 2);
-        converted = applyRotationToBoundingBox(
-            converted,
-            geometry.rotation,
-            geometry.width,
-            geometry.height,
-        );
-    }
-
-    return toZoteroRectFromBBox(converted, [
-        geometry.viewBox[0],
-        geometry.viewBox[1],
-    ]);
 }
 
 function getCachedPageGeometry(

@@ -209,13 +209,16 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
                 const rawItem = item as any;
                 const locations = getHighlightLocations(item)
                     .map((loc: any) => {
-                        const rawPageIndex = loc.page_idx ?? loc.pageIndex ?? loc.page_index ?? loc.page ?? 0;
+                        const rawPageIndex = loc.page_idx ?? loc.pageIndex ?? loc.page_index;
+                        const pageIndex = rawPageIndex !== undefined && rawPageIndex !== null
+                            ? Number(rawPageIndex)
+                            : Number(loc.page ?? 1) - 1;
                         return {
-                            page: Number(rawPageIndex) + 1,
-                            bboxes: loc.boxes ?? loc.boundingBoxes ?? loc.bboxes ?? loc.rects ?? [],
+                            pageIndex,
+                            boxes: loc.boxes ?? loc.boundingBoxes ?? loc.bboxes ?? loc.rects ?? [],
                         };
                     })
-                    .filter((loc: any) => loc.page > 0 && loc.bboxes.length > 0);
+                    .filter((loc: any) => loc.pageIndex >= 0 && loc.boxes.length > 0);
 
                 const annotationReferences = await createBoundingBoxHighlights(
                     locations,

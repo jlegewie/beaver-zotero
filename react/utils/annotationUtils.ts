@@ -2,9 +2,12 @@ import { logger } from "../../src/utils/logger";
 import { BEAVER_ANNOTATION_AUTHOR } from '../../src/constants/annotations';
 import { getCurrentReader } from "./readerUtils";
 import { ZoteroItemReference } from "../types/zotero";
-import { getPageViewportInfo, applyRotationToBoundingBox } from './pdfUtils';
-import { convertBoundingBoxToBottomLeft, toZoteroRectFromBBox } from '../types/citations';
+import { getPageViewportInfo } from './pdfUtils';
+import {
+    sourceBboxesToZoteroRects,
+} from '../../src/services/annotations/annotationGeometry';
 import { getCurrentReaderAndWaitForView } from './readerUtils';
+import type { BoundingBox } from '../types/citations';
 
 /**
 * Types for the Zotero Reader API
@@ -368,13 +371,16 @@ export const BeaverTemporaryAnnotations = {
 
 
 /**
- * Create temporary annotations for bounding boxes
- * @param boundingBoxData Array of bounding box data
- * @param item The Zotero item to create the annotations for
+ * Create temporary highlight annotations for extracted bounding boxes.
  * @returns Array of annotation references
  */
+interface TemporaryHighlightLocation {
+    pageIndex: number;
+    boxes: BoundingBox[];
+}
+
 export const createBoundingBoxHighlights = async (
-    boundingBoxData: any[],
+    boundingBoxData: TemporaryHighlightLocation[],
     previewText: string,
     annotationText: string,
     options: { color?: string } = {},
@@ -392,36 +398,28 @@ export const createBoundingBoxHighlights = async (
         const tempAnnotations: any[] = [];
         const annotationReferences: ZoteroItemReference[] = [];
         
-        // Group bounding boxes by page
-        const pageGroups = new Map<number, any[][]>();
-        for (const { page, bboxes } of boundingBoxData) {
-            if (!pageGroups.has(page)) {
-                pageGroups.set(page, []);
+        const pageGroups = new Map<number, BoundingBox[][]>();
+        for (const { pageIndex, boxes } of boundingBoxData) {
+            if (!pageGroups.has(pageIndex)) {
+                pageGroups.set(pageIndex, []);
             }
-            pageGroups.get(page)!.push(bboxes);
+            pageGroups.get(pageIndex)!.push(boxes);
         }
         
         const color = options.color ?? '#00bbff';
 
         // Create one annotation per page with combined rects
-        for (const [page, allBboxesOnPage] of pageGroups) {
-            const pageIndex = page - 1; // Convert to 0-based index
-
-            // Get viewport info directly from PDF document (no need for rendered page)
+        for (const [pageIndex, allBboxesOnPage] of pageGroups) {
             const { viewBox, rotation, width, height } = await getPageViewportInfo(reader, pageIndex);
-            const viewBoxLL: [number, number] = [viewBox[0], viewBox[1]];
-            
-            // Combine all bboxes on this page, normalize to bottom-left origin
-            // (sentence-level citations from beaver-extract arrive as top-left),
-            // then apply rotation transformation only if rotated.
-            const combinedBboxes = allBboxesOnPage
-                .flat()
-                .map(b => convertBoundingBoxToBottomLeft(b, height));
-            const rects = rotation !== 0
-                ? combinedBboxes
-                    .map(b => applyRotationToBoundingBox(b, rotation, width, height))
-                    .map(b => toZoteroRectFromBBox(b, viewBoxLL))
-                : combinedBboxes.map(b => toZoteroRectFromBBox(b, viewBoxLL));
+            const geometry = {
+                viewBox: [viewBox[0], viewBox[1], viewBox[2], viewBox[3]] as [number, number, number, number],
+                width,
+                height,
+                rotation: (((rotation % 360) + 360) % 360) as 0 | 90 | 180 | 270,
+            };
+
+            const rects = sourceBboxesToZoteroRects(allBboxesOnPage.flat(), geometry);
+            if (rects.length === 0) continue;
             
             // Create unique IDs for the temporary annotation
             const tempId = `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -448,7 +446,7 @@ export const createBoundingBoxHighlights = async (
                 comment: '',
                 text: previewText,
                 authorName: 'Beaver',
-                pageLabel: page.toString(),
+                pageLabel: (pageIndex + 1).toString(),
                 isExternal: false,
                 readOnly: false,
                 lastModifiedByUser: '',

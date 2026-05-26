@@ -525,7 +525,14 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
             if (boundingBoxData.length > 0) {
                 logger(`ZoteroCitation: Highlighting bounding boxes`);
                 // Scenario 1: With bounding boxes - create temporary highlights
-                const annotationReferences = await createBoundingBoxHighlights(boundingBoxData, previewText, BEAVER_ANNOTATION_TEXT);
+                const annotationReferences = await createBoundingBoxHighlights(
+                    boundingBoxData.map(({ page, bboxes }) => ({
+                        pageIndex: page - 1,
+                        boxes: bboxes,
+                    })),
+                    previewText,
+                    BEAVER_ANNOTATION_TEXT,
+                );
                 BeaverTemporaryAnnotations.addToTracking(annotationReferences);
                 const annotationIds = annotationReferences.map(reference => reference.zotero_key);
                 // Navigate to the first annotation if created successfully

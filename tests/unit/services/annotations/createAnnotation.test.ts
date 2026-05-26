@@ -23,11 +23,14 @@ const baseGeometry: PageGeometry = {
   rotation: 0,
 };
 
+// Fits inside both the unrotated portrait frame (400x600) and the
+// MuPDF /Rotate-applied landscape frame (600x400), so the same fixture
+// works for every rotation case without crossing page edges.
 const rotationFixtureBox: BoundingBox = {
   l: 10,
-  t: 420,
+  t: 20,
   r: 110,
-  b: 450,
+  b: 50,
   coord_origin: CoordOrigin.TOPLEFT,
 };
 
@@ -81,7 +84,7 @@ describe("createAnnotation geometry primitives", () => {
         geometry({ rotation: 90 }),
       );
 
-      expect(rects).toEqual([[220, 10, 250, 110]]);
+      expect(rects).toEqual([[20, 10, 50, 110]]);
     });
 
     it("applies 180-degree page rotation", () => {
@@ -90,7 +93,7 @@ describe("createAnnotation geometry primitives", () => {
         geometry({ rotation: 180 }),
       );
 
-      expect(rects).toEqual([[290, 420, 390, 450]]);
+      expect(rects).toEqual([[290, 550, 390, 580]]);
     });
 
     it("applies 270-degree page rotation", () => {
@@ -99,7 +102,7 @@ describe("createAnnotation geometry primitives", () => {
         geometry({ rotation: 270 }),
       );
 
-      expect(rects).toEqual([[150, 490, 180, 590]]);
+      expect(rects).toEqual([[550, 290, 580, 390]]);
     });
 
     it("passes bottom-left input through unchanged before the viewBox offset", () => {
@@ -192,6 +195,12 @@ describe("createAnnotation geometry primitives", () => {
       ]);
     });
 
+    // `notePosition` is expressed in the **display** (post-/Rotate)
+    // frame, so the stored rect is the inverse of PDF.js's viewport
+    // transform — `side: 'left'` always lands on the visible left edge
+    // of the rendered page regardless of /Rotate. The expected rects
+    // below are derived from `viewport.convertToPdfPoint` for each
+    // rotation case.
     it("applies 90-degree page rotation to notes", () => {
       expect(computeNoteRect(bottomLeftNote, geometry({ rotation: 90 }))).toEqual([
         291, 12, 309, 30,

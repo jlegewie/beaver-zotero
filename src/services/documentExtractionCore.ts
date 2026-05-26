@@ -92,6 +92,8 @@ export function buildExtractedDocumentCacheMetadata(extracted: BeaverExtractResu
     );
     const pages: (PageGeometry | null)[] = new Array(doc.pageCount).fill(null);
     for (const page of doc.pages) {
+        // Annotation cache geometry uses unrotated PDF user-space dimensions.
+        // Structured-page width/height describe the extraction bbox frame.
         pages[page.index] = {
             viewBox: page.viewBox,
             width: page.viewBox[2] - page.viewBox[0],

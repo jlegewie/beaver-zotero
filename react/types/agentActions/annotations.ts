@@ -122,25 +122,32 @@ export function isAnnotationTool(functionName: string | undefined): boolean {
 }
 
 /**
- * Normalize a bounding box from various formats
+ * Normalize a bounding box from various formats.
+ * Tuple rects are Beaver Extract rects and therefore use top-left origin.
  */
 export function normalizeBoundingBox(raw: any): BoundingBox | null {
     if (!raw) return null;
-    const l = typeof raw.l === 'number' ? raw.l : Number(raw.l);
-    const t = typeof raw.t === 'number' ? raw.t : Number(raw.t);
-    const r = typeof raw.r === 'number' ? raw.r : Number(raw.r);
-    const b = typeof raw.b === 'number' ? raw.b : Number(raw.b);
+    const tuple = Array.isArray(raw) ? raw : null;
+    const l = tuple
+        ? Number(tuple[0])
+        : typeof raw.l === 'number' ? raw.l : Number(raw.l);
+    const t = tuple
+        ? Number(tuple[1])
+        : typeof raw.t === 'number' ? raw.t : Number(raw.t);
+    const r = tuple
+        ? Number(tuple[2])
+        : typeof raw.r === 'number' ? raw.r : Number(raw.r);
+    const b = tuple
+        ? Number(tuple[3])
+        : typeof raw.b === 'number' ? raw.b : Number(raw.b);
     if ([l, t, r, b].some((value) => Number.isNaN(value))) {
         return null;
     }
 
-    let coordOrigin: CoordOrigin;
-    const rawOrigin = raw.coord_origin || raw.coordOrigin;
-    if (rawOrigin === CoordOrigin.TOPLEFT || rawOrigin === 't') {
-        coordOrigin = CoordOrigin.TOPLEFT;
-    } else {
-        coordOrigin = CoordOrigin.BOTTOMLEFT;
-    }
+    const rawOrigin = tuple ? undefined : raw.coord_origin || raw.coordOrigin;
+    const coordOrigin = rawOrigin === CoordOrigin.BOTTOMLEFT || rawOrigin === 'b'
+        ? CoordOrigin.BOTTOMLEFT
+        : CoordOrigin.TOPLEFT;
 
     return {
         l,
