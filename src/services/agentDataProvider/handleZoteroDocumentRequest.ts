@@ -13,7 +13,10 @@ import {
     WSZoteroDocumentResponse,
 } from '../agentProtocol';
 import type { ZoteroDocumentErrorCode } from '../agentProtocol';
-import { extractAndCacheDocument } from '../documentExtractionCore';
+import {
+    extractAndCacheDocument,
+    type ResolvedAttachment,
+} from '../documentExtractionCore';
 import { MAX_PDF_TIMEOUT_SECONDS } from './timeout';
 // Hot-path handler keeps the remote-download-failed popup behavior by
 // passing the popup notifier through `onRemoteDownloadFailure`. The
@@ -29,13 +32,23 @@ export async function handleZoteroDocumentRequest(
 ): Promise<WSZoteroDocumentResponse> {
     const { attachment, mode, max_pages, max_file_size_mb, request_id, timeout_seconds } = request;
 
+    const toProtocolAttachment = (resolved: ResolvedAttachment | null | undefined) => {
+        if (!resolved) return null;
+        return {
+            library_id: resolved.libraryId,
+            zotero_key: resolved.zoteroKey,
+        };
+    };
+
     const errorResponse = (
         error: string,
         error_code: ZoteroDocumentErrorCode,
         total_pages: number | null = null,
+        resolved_attachment: ResolvedAttachment | null = null,
     ): WSZoteroDocumentResponse => ({
         type: 'zotero_document',
         request_id,
+        resolved_attachment: toProtocolAttachment(resolved_attachment),
         total_pages,
         error,
         error_code,
@@ -98,6 +111,7 @@ export async function handleZoteroDocumentRequest(
             `PDF extraction timed out after ${result.timeoutSeconds} seconds`,
             'timeout',
             result.pageCount,
+            result.resolvedAttachment,
         );
     }
 
@@ -108,9 +122,10 @@ export async function handleZoteroDocumentRequest(
             `PDF extraction interrupted`,
             'timeout',
             result.pageCount,
+            result.resolvedAttachment,
         );
     }
 
     // cached_error / response_error — return the existing message shape.
-    return errorResponse(result.message, result.code, result.pageCount);
+    return errorResponse(result.message, result.code, result.pageCount, result.resolvedAttachment);
 }
