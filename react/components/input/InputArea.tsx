@@ -435,16 +435,31 @@ const InputArea: React.FC<InputAreaProps> = ({
                     <div className="display-flex flex-row items-center gap-4">
                         <Tooltip
                             key={String(isWebSearchAllowed)}
-                            content={isWebSearchAllowed ? (isWebSearchEnabled ? 'Disable web search' : 'Enable web search') : 'Web search requires Beaver credits'}
-                            singleLine={isWebSearchAllowed}
-                            padding={isWebSearchAllowed}
-                            width={!isWebSearchAllowed ? '250px' : undefined}
-                            customContent={!isWebSearchAllowed ? (
-                                <div className="px-2 py-1 display-flex flex-col gap-1">
-                                    <span className="text-base font-color-secondary font-semibold">Web search requires Beaver credits</span>
-                                    <span className="text-sm font-color-tertiary">Use a Beaver model, or enable Plus Tools in Settings → API Keys</span>
-                                </div>
-                            ) : undefined}
+                            content={
+                                !isWebSearchAllowed
+                                    ? 'Web search requires Beaver credits'
+                                    : (isWebSearchEnabled ? 'Stop requesting web search' : 'Request web search')
+                            }
+                            padding={false}
+                            width={!isWebSearchAllowed ? "250px" : isWebSearchEnabled ? "220px" : "190px"}
+                            customContent={
+                                !isWebSearchAllowed ? (
+                                    <div className="px-2 py-1 display-flex flex-col gap-1">
+                                        <span className="text-base font-color-secondary font-medium">Web search requires Beaver credits</span>
+                                        <span className="text-sm font-color-tertiary">Use a Beaver model, or enable Plus Tools in Settings → API Keys</span>
+                                    </div>
+                                ) : isWebSearchEnabled ? (
+                                    <div className="px-2 py-1 display-flex flex-col gap-1">
+                                        <span className="text-base font-color-secondary font-medium">Stop requesting web search</span>
+                                        <span className="text-sm font-color-tertiary">May still search the web when helpful</span>
+                                    </div>
+                                ) : (
+                                    <div className="px-2 py-1 display-flex flex-col gap-1">
+                                        <span className="text-base font-color-secondary font-medium">Request web search</span>
+                                        <span className="text-sm font-color-tertiary">May search the web either way</span>
+                                    </div>
+                                )
+                            }
                         >
                             <IconButton
                                 icon={GlobalSearchIcon}
