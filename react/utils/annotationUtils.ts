@@ -4,10 +4,15 @@ import { getCurrentReader } from "./readerUtils";
 import { ZoteroItemReference } from "../types/zotero";
 import { getPageViewportInfo } from './pdfUtils';
 import {
+    displayBoxToZoteroRect,
     sourceBboxesToZoteroRects,
 } from '../../src/services/annotations/annotationGeometry';
 import { getCurrentReaderAndWaitForView } from './readerUtils';
 import type { BoundingBox } from '../types/citations';
+import type { NotePosition } from '../types/agentActions/annotations';
+
+const TEMPORARY_NOTE_RECT_SIZE = 18;
+const TEMPORARY_NOTE_SIDE_MARGIN = 12;
 
 /**
 * Types for the Zotero Reader API
@@ -378,6 +383,113 @@ interface TemporaryHighlightLocation {
     pageIndex: number;
     boxes: BoundingBox[];
 }
+
+/**
+ * Compute the stored Zotero rect for a temporary PDF note annotation preview.
+ */
+async function computeTemporaryNoteRect(reader: any, notePosition: NotePosition): Promise<number[]> {
+    const { viewBox, rotation, width, height } = await getPageViewportInfo(reader, notePosition.page_index);
+    const normalizedRotation = (((rotation % 360) + 360) % 360) as 0 | 90 | 180 | 270;
+    const isQuarterTurn = normalizedRotation === 90 || normalizedRotation === 270;
+    const displayWidth = isQuarterTurn ? height : width;
+    const displayHeight = isQuarterTurn ? width : height;
+    const x = notePosition.side === 'right'
+        ? displayWidth - TEMPORARY_NOTE_RECT_SIZE - TEMPORARY_NOTE_SIDE_MARGIN
+        : TEMPORARY_NOTE_SIDE_MARGIN;
+    const yTop = notePosition.coord_origin === 't'
+        ? notePosition.y - TEMPORARY_NOTE_RECT_SIZE / 2
+        : displayHeight - notePosition.y - TEMPORARY_NOTE_RECT_SIZE / 2;
+
+    return displayBoxToZoteroRect(
+        {
+            l: x,
+            t: yTop,
+            r: x + TEMPORARY_NOTE_RECT_SIZE,
+            b: yTop + TEMPORARY_NOTE_RECT_SIZE,
+        },
+        {
+            viewBox: [viewBox[0], viewBox[1], viewBox[2], viewBox[3]] as [number, number, number, number],
+            width,
+            height,
+            rotation: normalizedRotation,
+        },
+    );
+}
+
+/**
+ * Create a temporary note annotation at the proposed PDF page position.
+ * @returns Array with the temporary annotation reference, or empty on failure.
+ */
+export const createTemporaryNoteAnnotation = async (
+    notePosition: NotePosition,
+    comment: string,
+    options: { color?: string; pageLabel?: string | null } = {},
+): Promise<ZoteroItemReference[]> => {
+    try {
+        const reader = await getCurrentReaderAndWaitForView();
+        if (!reader || !reader._internalReader || !reader._iframeWindow) {
+            logger('createTemporaryNoteAnnotation: No active reader found for creating note preview');
+            return [];
+        }
+
+        const rect = await computeTemporaryNoteRect(reader, notePosition);
+        if (!Array.isArray(rect) || rect.length !== 4 || rect.some(value => !Number.isFinite(value))) {
+            return [];
+        }
+
+        const pageIndex = notePosition.page_index;
+        const tempId = `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const color = options.color ?? '#ffd400';
+        const sortIndex = `${pageIndex.toString().padStart(5, '0')}|${Math.round(rect[1]).toString().padStart(6, '0')}|${Math.round(rect[0]).toString().padStart(5, '0')}`;
+        const now = new Date().toISOString();
+        const pageLabel = options.pageLabel ?? (pageIndex + 1).toString();
+
+        const tempAnnotation = {
+            id: tempId,
+            key: tempId,
+            libraryID: reader._item.libraryID,
+            type: 'note',
+            color,
+            sortIndex,
+            position: {
+                pageIndex,
+                rects: [rect],
+            },
+            tags: [],
+            comment,
+            authorName: 'Beaver',
+            pageLabel,
+            isExternal: false,
+            readOnly: false,
+            lastModifiedByUser: '',
+            dateModified: now,
+            annotationType: 'note',
+            annotationAuthorName: BEAVER_ANNOTATION_AUTHOR,
+            annotationComment: comment,
+            annotationColor: color,
+            annotationPageLabel: pageLabel,
+            annotationSortIndex: sortIndex,
+            annotationPosition: JSON.stringify({
+                pageIndex,
+                rects: [rect],
+            }),
+            annotationIsExternal: false,
+            isTemporary: true,
+        };
+
+        reader._internalReader.setAnnotations(
+            Components.utils.cloneInto([tempAnnotation], reader._iframeWindow)
+        );
+
+        return [{
+            zotero_key: tempId,
+            library_id: reader._item.libraryID,
+        }];
+    } catch (error) {
+        logger('createTemporaryNoteAnnotation: Failed to create note preview: ' + error);
+        return [];
+    }
+};
 
 export const createBoundingBoxHighlights = async (
     boundingBoxData: TemporaryHighlightLocation[],

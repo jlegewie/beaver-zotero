@@ -3,7 +3,7 @@ import Tooltip from '../ui/Tooltip';
 import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import { AlertIcon, Icon } from '../icons/icons';
 import { navigateToAnnotation, navigateToPage } from '../../utils/readerUtils';
-import { BeaverTemporaryAnnotations, createBoundingBoxHighlights } from '../../utils/annotationUtils';
+import { BeaverTemporaryAnnotations, createBoundingBoxHighlights, createTemporaryNoteAnnotation } from '../../utils/annotationUtils';
 import { logger } from '../../../src/utils/logger';
 import type {
     CreateHighlightAnnotationsProposedData,
@@ -225,6 +225,27 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
                     rawItem.text ?? rawItem.title ?? '',
                     rawItem.title ?? rawItem.text ?? 'Beaver annotation preview',
                     { color: colorWithPreviewAlpha(rawItem.color) },
+                );
+
+                if (annotationReferences.length > 0) {
+                    BeaverTemporaryAnnotations.addToTracking(annotationReferences);
+                    installPreviewDismissOnNextClick(reader, ownerDocument, previewRootRef.current);
+                    setTimeout(() => {
+                        reader?.navigate?.({ annotationID: annotationReferences[0].zotero_key });
+                    }, 100);
+                }
+            } else if (kind === 'note' && canCreatePreview) {
+                const rawItem = item as any;
+                const notePosition = rawItem.note_position ?? rawItem.notePosition;
+                if (!notePosition) return;
+
+                const annotationReferences = await createTemporaryNoteAnnotation(
+                    notePosition,
+                    rawItem.comment ?? rawItem.title ?? '',
+                    {
+                        color: colorWithPreviewAlpha('yellow'),
+                        pageLabel: rawItem.page_label ?? rawItem.pageLabel ?? null,
+                    },
                 );
 
                 if (annotationReferences.length > 0) {
