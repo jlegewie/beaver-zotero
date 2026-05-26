@@ -81,6 +81,31 @@ function statusForItem(
     return 'pending';
 }
 
+function formatAnnotationFailureMessage(
+    failure: FailedAnnotationResult,
+    noun: 'highlight' | 'note',
+): string {
+    switch (failure.error_code) {
+        case 'page_extraction_failed':
+            return 'Could not create annotation because the PDF could not be processed.';
+        case 'page_geometry_unavailable':
+            return 'Could not create annotation because the target position was not found in the PDF.';
+        case 'apply_failed':
+            return `Failed to create ${noun}.`;
+        default:
+            return `Failed to create ${noun}.`;
+    }
+}
+
+function formatAnnotationFailureMessages(
+    failures: FailedAnnotationResult[],
+    noun: 'highlight' | 'note',
+): string {
+    return Array.from(new Set(
+        failures.map((failure) => formatAnnotationFailureMessage(failure, noun)),
+    )).join('\n');
+}
+
 function getHighlightLocations(item: HighlightAnnotationItem | NoteAnnotationItem): any[] {
     const raw = item as any;
     const locations = raw.page_locations ?? raw.pageLocations ?? raw.locations;
@@ -281,7 +306,7 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
                         const isFailed = itemStatus === 'failed';
                         const isPartial = itemStatus === 'partial';
                         const isCreated = itemStatus === 'created' || itemStatus === 'partial';
-                        const failureMessage = failures.map((failure) => failure.error).join('\n');
+                        const failureMessage = formatAnnotationFailureMessages(failures, noun);
                         const pageIndex = pageIndexForItem(kind, item);
                         const pageNumber = typeof pageIndex === 'number' ? pageIndex + 1 : null;
 
