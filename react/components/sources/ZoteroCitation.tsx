@@ -56,7 +56,7 @@ type CitationDisplayState = 'streaming' | 'ready' | 'invalid' | 'error';
  * Supported citation tag formats from LLM:
  *   <citation item_id="libraryID-itemKey"/>      - parent item reference
  *   <citation att_id="libraryID-itemKey"/>       - attachment reference
- *   <citation att_id="..." sid="..."/>           - attachment with sentence ID
+ *   <citation att_id="..." sid="..."/>           - attachment with sentence/structured record ID
  *   <citation att_id="..." page="..."/>          - attachment with page reference
  *   <citation external_id="..."/>                - external reference
  * 

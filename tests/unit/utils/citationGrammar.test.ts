@@ -10,6 +10,7 @@ import {
     parseLoc,
     parseZoteroId,
     requestedCitationKey,
+    parseRawCitationAttributes,
 } from '../../../react/utils/citationGrammar';
 
 describe('citationGrammar', () => {
@@ -59,6 +60,10 @@ describe('citationGrammar', () => {
             ok: true,
             ref: { kind: 'zotero', library_id: 1, zotero_key: 'ATT', loc: { kind: 'sentence', value: '0-8', raw: 's0-s8' } },
         });
+        expect(normalizeCitationTag({ att_id: '1-ATT', sid: 'heading3' })).toMatchObject({
+            ok: true,
+            ref: { kind: 'zotero', library_id: 1, zotero_key: 'ATT', loc: { kind: 'heading', value: '3', raw: 'heading3' } },
+        });
         expect(normalizeCitationTag({ att_id: '1-ATT', loc: 'p12' })).toMatchObject({
             ok: true,
             ref: { kind: 'zotero', library_id: 1, zotero_key: 'ATT', loc: { kind: 'paragraph', value: '12', raw: 'p12' } },
@@ -75,6 +80,13 @@ describe('citationGrammar', () => {
         expect(normalizeCitationTag({ id: 'bad', external_id: 'W1' })).toMatchObject({ ok: false, reason: 'conflicting_identity' });
         expect(normalizeCitationTag({ id: 'bad' })).toMatchObject({ ok: false, reason: 'invalid_zotero_id', rawIdentity: 'bad' });
         expect(normalizeCitationTag({ external_id: '   ' })).toMatchObject({ ok: false, reason: 'invalid_external_id' });
+    });
+
+    it('parses escaped quote citation attributes', () => {
+        expect(parseRawCitationAttributes('att_id=\\"1-NLNMPWNQ\\" sid=\\"heading3\\"')).toEqual({
+            att_id: '1-NLNMPWNQ',
+            sid: 'heading3',
+        });
     });
 
     it('builds requested, base, and external compatibility keys', () => {
