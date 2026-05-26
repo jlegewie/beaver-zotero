@@ -55,11 +55,11 @@ import {
     FolderDetailIcon,
     TaskDoneIcon,
     TagIcon,
-    DeleteIcon,
+    HighlighterIcon,
     DocumentValidationIcon,
     DollarCircleIcon,
     GlobalSearchIcon,
-    FileDiffIcon,
+    NoteIcon,
 } from '../icons/icons';
 import { revealSource, openNoteByKey, getCurrentCollectionKeyForItem } from '../../utils/sourceUtils';
 import Button from '../ui/Button';
@@ -540,8 +540,8 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const getHeaderIcon = () => {
         const getToolIcon = () => {
             if (toolName === 'edit_metadata' || toolName === 'edit_item') return PropertyEditIcon;
-            if (toolName === 'create_note') return FileDiffIcon;
-            if (toolName === 'create_highlight_annotations' || toolName === 'create_note_annotations') return FileDiffIcon;
+            if (toolName === 'create_note') return NoteIcon;
+            if (toolName === 'create_highlight_annotations' || toolName === 'create_note_annotations') return HighlighterIcon;
             if (toolName === 'create_collection') return FolderAddIcon;
             if (toolName === 'organize_items') return TaskDoneIcon;
             if (toolName === 'manage_tags') return TagIcon;
