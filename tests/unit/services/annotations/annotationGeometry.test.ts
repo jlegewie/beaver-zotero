@@ -39,11 +39,53 @@ describe("annotationGeometry", () => {
         [20, 10, 50, 110],
       ]);
       expect(sourceBboxesToZoteroRects([sourceBox], geometry({ rotation: 180 }))).toEqual([
-        [290, 550, 390, 580],
+        [290, 20, 390, 50],
       ]);
       expect(sourceBboxesToZoteroRects([sourceBox], geometry({ rotation: 270 }))).toEqual([
-        [550, 290, 580, 390],
+        [350, 490, 380, 590],
       ]);
+    });
+
+    it("converts bboxes from rotated display pages back to unrotated PDF space", () => {
+      expect(
+        sourceBboxesToZoteroRects(
+          [
+            {
+              l: 411.9,
+              t: 665.9,
+              r: 434.4,
+              b: 676.5,
+              coord_origin: CoordOrigin.TOPLEFT,
+            },
+          ],
+          {
+            viewBox: [0, 0, 486, 711],
+            width: 486,
+            height: 711,
+            rotation: 180,
+          },
+        ),
+      ).toEqual([[51.60000000000002, 665.9, 74.10000000000002, 676.5]]);
+
+      expect(
+        sourceBboxesToZoteroRects(
+          [
+            {
+              l: 34,
+              t: 355.5,
+              r: 44.6,
+              b: 434.5,
+              coord_origin: CoordOrigin.TOPLEFT,
+            },
+          ],
+          {
+            viewBox: [0, 0, 486, 711],
+            width: 486,
+            height: 711,
+            rotation: 270,
+          },
+        ),
+      ).toEqual([[51.5, 666.4, 130.5, 677]]);
     });
 
     it("adds the viewBox offset after converting to PDF user space", () => {

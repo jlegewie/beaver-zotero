@@ -222,8 +222,8 @@ function normalizeRotation(rotation: number): 0 | 90 | 180 | 270 {
 }
 
 /**
- * Convert a public source-MuPDF/top-left bbox to Zotero reader annotation
- * coordinates. The returned bottom-left bbox keeps semantic edges:
+ * Convert a public extraction/display-frame top-left bbox to Zotero reader
+ * annotation coordinates. The returned bottom-left bbox keeps semantic edges:
  * `t` is the visual top edge and `b` the visual bottom edge.
  */
 export function bboxToReaderFrame(
@@ -250,14 +250,14 @@ export function bboxToReaderFrame(
         case 180:
             l = ctx.pageWidth - bbox.r + dx;
             r = ctx.pageWidth - bbox.l + dx;
-            bottom = ctx.pageHeight - bbox.b + dy;
-            top = ctx.pageHeight - bbox.t + dy;
+            bottom = bbox.t + dy;
+            top = bbox.b + dy;
             break;
         case 270:
-            l = ctx.pageHeight - bbox.b + dx;
-            r = ctx.pageHeight - bbox.t + dx;
-            bottom = ctx.pageWidth - bbox.r + dy;
-            top = ctx.pageWidth - bbox.l + dy;
+            l = ctx.pageWidth - bbox.b + dx;
+            r = ctx.pageWidth - bbox.t + dx;
+            bottom = ctx.pageHeight - bbox.r + dy;
+            top = ctx.pageHeight - bbox.l + dy;
             break;
         case 0:
         default:

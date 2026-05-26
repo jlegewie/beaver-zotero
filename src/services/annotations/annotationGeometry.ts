@@ -15,7 +15,7 @@ function isUsableRect(rect: number[]): boolean {
 }
 
 /**
- * Convert a top-left bbox in Beaver Extract's public page frame to a Zotero
+ * Convert a top-left bbox in Beaver Extract's public display page frame to a Zotero
  * annotation rect in unrotated PDF user space (`[left, bottom, right, top]`).
  */
 export function sourceBboxToZoteroRect(
@@ -38,14 +38,14 @@ export function sourceBboxToZoteroRect(
         case 180:
             l = geometry.width - bbox.r + dx;
             r = geometry.width - bbox.l + dx;
-            bottom = geometry.height - bbox.b + dy;
-            top = geometry.height - bbox.t + dy;
+            bottom = bbox.t + dy;
+            top = bbox.b + dy;
             break;
         case 270:
-            l = geometry.height - bbox.b + dx;
-            r = geometry.height - bbox.t + dx;
-            bottom = geometry.width - bbox.r + dy;
-            top = geometry.width - bbox.l + dy;
+            l = geometry.width - bbox.b + dx;
+            r = geometry.width - bbox.t + dx;
+            bottom = geometry.height - bbox.r + dy;
+            top = geometry.height - bbox.l + dy;
             break;
         case 0:
         default:

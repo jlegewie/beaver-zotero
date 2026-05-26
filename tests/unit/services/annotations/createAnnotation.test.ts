@@ -93,7 +93,7 @@ describe("createAnnotation geometry primitives", () => {
         geometry({ rotation: 180 }),
       );
 
-      expect(rects).toEqual([[290, 550, 390, 580]]);
+      expect(rects).toEqual([[290, 20, 390, 50]]);
     });
 
     it("applies 270-degree page rotation", () => {
@@ -102,7 +102,7 @@ describe("createAnnotation geometry primitives", () => {
         geometry({ rotation: 270 }),
       );
 
-      expect(rects).toEqual([[550, 290, 580, 390]]);
+      expect(rects).toEqual([[350, 490, 380, 590]]);
     });
 
     it("passes bottom-left input through unchanged before the viewBox offset", () => {
