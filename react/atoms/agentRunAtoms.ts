@@ -1072,13 +1072,13 @@ function createWSCallbacks(set: Setter): WSCallbacks {
         },
 
         onPart: async (event: WSPartEvent) => {
-            // logger(`WS onPart (${event.part.part_kind}):`, {
-            //     runId: event.run_id,
-            //     messageIndex: event.message_index,
-            //     part: event.part,
-            // });
             // Load item data for tool call
             if (event.part.part_kind === "tool-call") {
+                logger(`WS onPart (${event.part.part_kind}):`, {
+                    runId: event.run_id,
+                    messageIndex: event.message_index,
+                    part: event.part,
+                });
                 const itemReferences = extractZoteroReferencesFromToolCall(event.part);
                 if (itemReferences.length > 0) {
                     logger(`WS onPart: Loading ${itemReferences.length} item data for tool call`, 1);
