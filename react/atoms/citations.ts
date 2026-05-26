@@ -433,16 +433,42 @@ export const updateCitationDataAtom = atom(
                 if (!item) throw new Error(`Item not found for citation ${citation.citation_id}`);
                 await loadFullItemDataWithAllTypes([item]);
 
+                const isAnnotationItem = item.isAnnotation();
                 const parentItem = item.parentItem;
-                const itemToCite = item.isNote() ? item : parentItem || item;
+                // Annotations live two levels deep: regular item -> attachment ->
+                // annotation. Use the grandparent regular item for the
+                // bibliographic citation so an annotation citation shares its
+                // marker with sibling citations of the same paper.
+                const grandparentItem = isAnnotationItem ? parentItem?.parentItem ?? null : null;
+                const itemToCite = item.isNote()
+                    ? item
+                    : isAnnotationItem
+                        ? grandparentItem || parentItem || item
+                        : parentItem || item;
+
+                const baseDisplayName = getDisplayNameFromItem(itemToCite, null, 30);
+                let displayName = getDisplayNameFromItem(itemToCite);
+                if (item.isNote()) {
+                    displayName = `Note: ${baseDisplayName}`;
+                } else if (isAnnotationItem) {
+                    displayName = `Annotation: ${baseDisplayName}`;
+                }
 
                 newCitationDataMap[citation.citation_id] = {
                     ...citation,
-                    type: item.isRegularItem() ? "item" : item.isAttachment() ? "attachment" : item.isNote() ? "note" : item.isAnnotation() ? "annotation" : "external",
+                    type: item.isRegularItem()
+                        ? "item"
+                        : item.isAttachment()
+                            ? "attachment"
+                            : item.isNote()
+                                ? "note"
+                                : isAnnotationItem
+                                    ? "annotation"
+                                    : "external",
                     parentKey: parentItem?.key || null,
                     icon: item.getItemTypeIconName(),
-                    name: item.isNote() ? `Note: ${getDisplayNameFromItem(itemToCite, null, 30)}` : getDisplayNameFromItem(itemToCite),
-                    citation: item.isNote() ? `Note: ${getDisplayNameFromItem(itemToCite, null, 30)}` : getDisplayNameFromItem(itemToCite),
+                    name: displayName,
+                    citation: displayName,
                     formatted_citation: getReferenceFromItem(itemToCite),
                     url: createZoteroURI(item),
                     numericCitation

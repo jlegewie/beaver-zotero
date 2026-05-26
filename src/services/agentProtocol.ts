@@ -510,6 +510,8 @@ export interface WSZoteroDataResponse {
     attachments: AttachmentDataWithStatus[];
     /** Note metadata for successfully retrieved notes */
     notes?: NoteResultItem[];
+    /** Annotation metadata for successfully retrieved annotations */
+    annotations?: AnnotationResultItem[];
     /** Optional errors for references that couldn't be retrieved */
     errors?: WSDataError[];
 }
@@ -775,6 +777,42 @@ export interface AttachmentResultItem {
     content_type?: string | null;
     parent_item_id?: string | null;
     parent_title?: string | null;
+    date_modified?: string | null;
+}
+
+/**
+ * Annotation result item.
+ *
+ * Annotations are children of attachments, which are children of regular
+ * items. The result surfaces both the parent attachment and the bibliographic
+ * regular item so callers can:
+ *  - render an annotation citation against the bibliographic parent.
+ *  - power an LLM-facing tool (e.g. get_annotations) with clear identity
+ *    names: `annotation_id` for the annotation itself, `attachment_id` for
+ *    the PDF, `item_id` for the paper/book/record.
+ */
+export interface AnnotationResultItem {
+    result_type: 'annotation';
+    /** Annotation id, format "library_id-zotero_key". */
+    annotation_id: string;
+    /** "highlight" | "underline" | "note" | "image" | "ink" | "text" */
+    annotation_type?: string | null;
+    /** Highlighted/selected text, when present. */
+    text?: string | null;
+    /** Comment attached to the annotation, when present. */
+    comment?: string | null;
+    /** Color hex (e.g. "#ffd400"). */
+    color?: string | null;
+    /** 1-based page number of the annotation's location. */
+    page?: number | null;
+    /** Tag names attached to the annotation. */
+    tags?: string[];
+    /** Parent attachment id ("library_id-zotero_key"). */
+    attachment_id?: string | null;
+    /** Bibliographic regular item id ("library_id-zotero_key"). */
+    item_id?: string | null;
+    /** Title of the bibliographic regular item. */
+    item_title?: string | null;
     date_modified?: string | null;
 }
 

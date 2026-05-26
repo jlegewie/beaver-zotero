@@ -268,6 +268,7 @@ async function handleZoteroDataHttpRequest(request: any) {
         items: response.items,
         attachments: response.attachments,
         notes: response.notes,
+        annotations: response.annotations,
         errors: response.errors,
     };
 }

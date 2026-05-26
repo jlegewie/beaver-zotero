@@ -5,7 +5,7 @@ import { getCollectionClientDateModifiedAsISOString, getCitationKeyFromItem, get
 import { syncingItemFilterAsync } from './sync';
 import { isAttachmentOnServer } from './webAPI';
 import { skippedItemsManager } from '../services/skippedItemsManager';
-import { NoteResultItem } from '../services/agentProtocol';
+import { AnnotationResultItem, NoteResultItem } from '../services/agentProtocol';
 
 export interface FileData {
     // filename: string;
@@ -576,5 +576,65 @@ export function serializeNote(
         parent_item_id: parentInfo?.item_id ?? null,
         parent_title: parentInfo?.title ?? null,
         date_modified: note.dateModified,
+    };
+}
+
+/**
+ * Serializes a Zotero annotation item into an AnnotationResultItem.
+ *
+ * Annotations are children of attachments, which are children of regular
+ * items. The bibliographic parent (regular item) is therefore two levels up.
+ * Callers pass it in as `itemInfo`. The PDF attachment is `attachmentInfo`.
+ *
+ * `page` is the 1-based page number derived from the annotation's stored
+ * position. Page labels (e.g. roman numerals) are intentionally omitted: this
+ * shape is designed to be consumed by the agent, which reasons in 1-based
+ * page numbers.
+ */
+export function serializeAnnotation(
+    annotation: Zotero.Item,
+    attachmentInfo?: { item_id: string } | null,
+    itemInfo?: { item_id: string; title: string } | null,
+): AnnotationResultItem {
+    const ann = annotation as Zotero.Item & {
+        annotationType?: string;
+        annotationText?: string;
+        annotationComment?: string;
+        annotationColor?: string;
+        annotationPosition?: string;
+    };
+
+    // Derive 1-based page from the annotation's position. Zotero stores
+    // annotationPosition as a JSON string with a 0-based pageIndex.
+    let page: number | null = null;
+    if (typeof ann.annotationPosition === 'string' && ann.annotationPosition) {
+        try {
+            const parsed = JSON.parse(ann.annotationPosition);
+            if (parsed && typeof parsed.pageIndex === 'number' && parsed.pageIndex >= 0) {
+                page = parsed.pageIndex + 1;
+            }
+        } catch {
+            // Malformed position is non-fatal — page stays null.
+        }
+    }
+
+    const tagObjects = annotation.getTags?.() ?? [];
+    const tags = tagObjects
+        .map((t: any) => (typeof t === 'string' ? t : t?.tag))
+        .filter((name: any): name is string => typeof name === 'string' && name.length > 0);
+
+    return {
+        result_type: 'annotation',
+        annotation_id: `${annotation.libraryID}-${annotation.key}`,
+        annotation_type: ann.annotationType ?? null,
+        text: ann.annotationText ?? null,
+        comment: ann.annotationComment ?? null,
+        color: ann.annotationColor ?? null,
+        page,
+        tags,
+        attachment_id: attachmentInfo?.item_id ?? null,
+        item_id: itemInfo?.item_id ?? null,
+        item_title: itemInfo?.title ?? null,
+        date_modified: annotation.dateModified,
     };
 }

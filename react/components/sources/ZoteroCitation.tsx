@@ -34,7 +34,7 @@ import {
     isExternalReferenceDetailsDialogVisibleAtom,
     selectedExternalReferenceAtom
 } from '../../atoms/ui';
-import { Icon, LibraryIcon, PdfIcon, GlobalSearchIcon, NoteIcon } from '../icons/icons';
+import { Icon, LibraryIcon, PdfIcon, GlobalSearchIcon, NoteIcon, HighlighterIcon } from '../icons/icons';
 
 const TOOLTIP_WIDTH = '250px';
 export const BEAVER_ANNOTATION_TEXT = 'Beaver Citation';
@@ -441,6 +441,32 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
             return;
         }
 
+        // Handle annotation citations: open the parent attachment in the
+        // reader and navigate via annotationID
+        if (item.isAnnotation()) {
+            const parentAttachment = item.parentItem;
+            if (!parentAttachment || !parentAttachment.isAttachment()) {
+                logger(`ZoteroCitation: Annotation ${item.id} has no parent attachment`);
+                return;
+            }
+            try {
+                let reader = await getCurrentReaderAndWaitForView(undefined, true);
+                if (!reader || reader.itemID !== parentAttachment.id) {
+                    reader = await Zotero.Reader.open(parentAttachment.id);
+                    await new Promise((resolve) => setTimeout(resolve, 300));
+                    reader = await getCurrentReaderAndWaitForView(undefined, true);
+                }
+                if (reader) {
+                    setTimeout(() => {
+                        reader.navigate({ annotationID: item.key });
+                    }, 100);
+                }
+            } catch (error) {
+                logger('ZoteroCitation: Failed to open annotation: ' + error);
+            }
+            return;
+        }
+
         // Get locator data before regular-item handling. Some citations are
         // resolved to parent items even though the raw tag includes page
         // locators; those should navigate to the item's PDF attachment.
@@ -641,11 +667,12 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
 
     // Determine the CSS class based on citation type and state
     const isNoteCitation = citationMetadata?.type === 'note';
-    const hasBoundingBoxes = !isNoteCitation && !!citationMetadata && getCitationBoundingBoxes(citationMetadata).length > 0;
-    const hasLocator = !isNoteCitation && (pages.length > 0 || hasBoundingBoxes);
+    const isAnnotationCitation = citationMetadata?.type === 'annotation';
+    const hasBoundingBoxes = !isNoteCitation && !isAnnotationCitation && !!citationMetadata && getCitationBoundingBoxes(citationMetadata).length > 0;
+    const hasLocator = !isNoteCitation && !isAnnotationCitation && (pages.length > 0 || hasBoundingBoxes);
     const citationClassBase = isExternal && !mappedZoteroItem
         ? "zotero-citation external-citation"
-        : hasLocator
+        : (hasLocator || isAnnotationCitation)
         ? "zotero-citation with-locator"
         : "zotero-citation";
     const citationClass = isStreaming
@@ -700,6 +727,16 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
                     </span>
                 </span>
             )}
+            {isAnnotationCitation && (!isExternal || !!mappedZoteroItem) && (
+                <span className="px-3 py-15 border-top-quinary block">
+                    <span className="display-flex flex-row items-center gap-15">
+                        <Icon icon={HighlighterIcon} className="font-color-secondary" />
+                        <span className="text-sm font-color-secondary">
+                            Opens annotation in PDF
+                        </span>
+                    </span>
+                </span>
+            )}
             {hasLocator && (!isExternal || !!mappedZoteroItem) && (
                 <span className="px-3 py-15 border-top-quinary block">
                     <span className="display-flex flex-row items-center gap-15">
@@ -712,7 +749,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
                     </span>
                 </span>
             )}
-            {!hasLocator && !isNoteCitation && (!isExternal || !!mappedZoteroItem) && (
+            {!hasLocator && !isNoteCitation && !isAnnotationCitation && (!isExternal || !!mappedZoteroItem) && (
                 <span className="px-3 py-15 border-top-quinary block">
                     <span className="display-flex flex-row items-center gap-15">
                         <Icon icon={LibraryIcon} className="font-color-secondary" />

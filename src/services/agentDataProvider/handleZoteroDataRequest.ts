@@ -32,6 +32,7 @@ export async function handleZoteroDataRequest(request: WSZoteroDataRequest): Pro
         items: result.items,
         attachments: result.attachments,
         notes: result.notes.length > 0 ? result.notes : undefined,
+        annotations: result.annotations.length > 0 ? result.annotations : undefined,
         errors: result.errors.length > 0 ? result.errors : undefined,
     };
 }

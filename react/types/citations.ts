@@ -118,7 +118,7 @@ export interface CitationMetadata {
     
     // Common fields for all citation types
     /** Citation type discriminator */
-    citation_type?: "item" | "attachment" | "external_reference" | "note";
+    citation_type?: "item" | "attachment" | "external_reference" | "note" | "annotation";
     /** The display marker, e.g., '1', '2'.. */
     marker?: string;
     /** The author-year of the citation. */
