@@ -1,6 +1,7 @@
 import React, { useCallback, useRef } from 'react';
 import Tooltip from '../ui/Tooltip';
 import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
+import { AlertIcon, Icon } from '../icons/icons';
 import { navigateToAnnotation, navigateToPage } from '../../utils/readerUtils';
 import { BeaverTemporaryAnnotations, createBoundingBoxHighlights } from '../../utils/annotationUtils';
 import { logger } from '../../../src/utils/logger';
@@ -252,6 +253,7 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
                             : (rawItem.comment ?? '');
                         const color = kind === 'highlight' ? rawItem.color : 'yellow';
                         const isFailed = itemStatus === 'failed';
+                        const isPartial = itemStatus === 'partial';
                         const failureMessage = failures
                             .map((failure) => failure.error_code ? `${failure.error_code}: ${failure.error}` : failure.error)
                             .join('\n');
@@ -264,19 +266,23 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
                                 className="create-annotations-preview-row display-flex flex-row items-start gap-2 py-15 cursor-pointer"
                                 onClick={(event) => handleItemClick(item, createdEntries, event.currentTarget.ownerDocument)}
                             >
-                                <ZoteroIcon
-                                    icon={kind === 'highlight' ? ZOTERO_ICONS.ANNOTATE_HIGHLIGHT : ZOTERO_ICONS.ANNOTATION}
-                                    size={14}
-                                    color={COLOR_VALUES[color] ?? COLOR_VALUES.yellow}
-                                    style={{ marginTop: 2 }}
-                                />
+                                {isFailed ? (
+                                    <Icon icon={AlertIcon} size={14} className="font-color-red" style={{ marginTop: 2 }} />
+                                ) : (
+                                    <ZoteroIcon
+                                        icon={kind === 'highlight' ? ZOTERO_ICONS.ANNOTATE_HIGHLIGHT : ZOTERO_ICONS.ANNOTATION}
+                                        size={14}
+                                        color={COLOR_VALUES[color] ?? COLOR_VALUES.yellow}
+                                        style={{ marginTop: 2 }}
+                                    />
+                                )}
 
                                 <div className="display-flex flex-row min-w-0 flex-1 justify-between gap-3">
-                                    <div className="truncate">
+                                    <div className={`truncate ${isFailed ? 'font-color-red' : ''}`}>
                                         {rawItem.title || text || `${noun} annotation`}
                                     </div>
-                                    {pageNumber !== null && (
-                                        <div className="font-color-tertiary whitespace-nowrap">
+                                    {(isFailed || isPartial || pageNumber !== null) && (
+                                        <div className='font-color-tertiary whitespace-nowrap'>
                                             {`Page ${pageNumber}`}
                                         </div>
                                     )}
@@ -285,7 +291,7 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
                             </div>
                         );
 
-                        if (isFailed && failureMessage) {
+                        if ((isFailed || isPartial) && failureMessage) {
                             return (
                                 <Tooltip key={`${clientItemId}-${rawItem.index}`} content={failureMessage} showArrow>
                                     {row}
