@@ -6,11 +6,13 @@ import {
     isCreateItemAgentAction,
     isZoteroNoteAgentAction,
     isCreateNoteAgentAction,
+    isCreateAnnotationsAgentAction,
     CreateItemAgentAction,
     AgentAction,
 } from '../../agents/agentActions';
 import CreateItemAgentActionDisplay from './CreateItemAgentActionDisplay';
 import NoteAgentActionDisplay from './NoteAgentActionDisplay';
+import CreateAnnotationsAgentActionDisplay from './CreateAnnotationsAgentActionDisplay';
 
 interface AgentActionsReviewProps {
     run: AgentRun;
@@ -18,7 +20,8 @@ interface AgentActionsReviewProps {
 
 /**
  * Displays agent actions for a completed run.
- * Supports create_item actions from citations and zotero_note actions.
+ * Supports create_item actions from citations, zotero_note/create_note actions,
+ * and bulk PDF annotation actions (create_highlight_annotations / create_note_annotations).
  */
 export const AgentActionsReview: React.FC<AgentActionsReviewProps> = ({ run }) => {
     const getAgentActionsByRun = useAtomValue(getAgentActionsByRunAtom);
@@ -40,6 +43,12 @@ export const AgentActionsReview: React.FC<AgentActionsReviewProps> = ({ run }) =
         (action) => isZoteroNoteAgentAction(action) || isCreateNoteAgentAction(action)
     ) as AgentAction[];
 
+    // Get bulk PDF annotation actions (create_highlight_annotations / create_note_annotations)
+    const annotationActions = getAgentActionsByRun(
+        run.id,
+        (action) => isCreateAnnotationsAgentAction(action)
+    ) as AgentAction[];
+
     // Don't show during streaming
     if (run.status === 'in_progress') {
         return null;
@@ -49,8 +58,10 @@ export const AgentActionsReview: React.FC<AgentActionsReviewProps> = ({ run }) =
         !createItemActions.every(a => a.status === 'rejected' || a.status === 'undone');
     const hasNotes = noteActions.length > 0 &&
         !noteActions.every(a => a.status === 'rejected' || a.status === 'undone');
+    const hasAnnotations = annotationActions.length > 0 &&
+        !annotationActions.every(a => a.status === 'rejected' || a.status === 'undone');
 
-    if (!hasCreateItems && !hasNotes) {
+    if (!hasCreateItems && !hasNotes && !hasAnnotations) {
         return null;
     }
 
@@ -66,6 +77,12 @@ export const AgentActionsReview: React.FC<AgentActionsReviewProps> = ({ run }) =
                 <NoteAgentActionDisplay
                     run={run}
                     actions={noteActions}
+                />
+            )}
+            {hasAnnotations && (
+                <CreateAnnotationsAgentActionDisplay
+                    run={run}
+                    actions={annotationActions}
                 />
             )}
         </div>
