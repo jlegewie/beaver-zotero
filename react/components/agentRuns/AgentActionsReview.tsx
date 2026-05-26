@@ -79,12 +79,12 @@ export const AgentActionsReview: React.FC<AgentActionsReviewProps> = ({ run }) =
                     actions={noteActions}
                 />
             )}
-            {hasAnnotations && (
+            {/* {hasAnnotations && (
                 <CreateAnnotationsAgentActionDisplay
                     run={run}
                     actions={annotationActions}
                 />
-            )}
+            )} */}
         </div>
     );
 };
