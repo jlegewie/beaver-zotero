@@ -1009,13 +1009,14 @@ export interface WSListLibrariesRequest extends WSBaseEvent {
     request_id: string;
 }
 
-/** Library information */
-export interface LibraryInfo {
+/** Per-library count snapshot */
+export interface LibrarySummary {
     library_id: number;
     name: string;
     is_group: boolean;
     read_only: boolean;
     item_count: number;
+    note_count: number;
     collection_count: number;
     tag_count: number;
 }
@@ -1024,7 +1025,7 @@ export interface LibraryInfo {
 export interface WSListLibrariesResponse {
     type: 'list_libraries';
     request_id: string;
-    libraries: LibraryInfo[];
+    libraries: LibrarySummary[];
     total_count: number;
     error?: string | null;
     error_code?: string | null;
@@ -1264,6 +1265,8 @@ export interface ApplicationStateInput {
     library_selection?: ZoteroItemReference[];
     /** Frontend embedding index status */
     indexing_status?: IndexingStatus;
+    /** Per-library summary stats (counts) for searchable libraries. */
+    libraries?: LibrarySummary[];
 }
 
 /** Frontend embedding index status reported with each agent run. */
