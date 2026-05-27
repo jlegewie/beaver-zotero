@@ -27,6 +27,7 @@ import {
     TaskDailyIcon,
     TagIcon,
     PropertyEditIcon,
+    HighlighterIcon,
 } from '../icons/icons';
 import { toolExpandedAtom, toggleToolExpandedAtom, setToolExpandedAtom } from '../../atoms/messageUIState';
 
@@ -54,6 +55,9 @@ const TOOL_ICONS: Record<string, IconComponent> = {
     get_metadata: FileViewIcon,
     edit_metadata: PropertyEditIcon,
     edit_item: PropertyEditIcon,
+
+    // Annotation tools
+    get_annotations: HighlighterIcon,
 
     // Reading tools
     search_in_documents: TextAlignLeftIcon,

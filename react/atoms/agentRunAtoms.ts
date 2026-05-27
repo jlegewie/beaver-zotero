@@ -136,6 +136,7 @@ import type { CreateItemProposedData, CreateItemResultData } from '../types/agen
 import { appendRunIfMissing, findResumeChainRoot, findRunForResume, hasOnlyThinkingParts, resolveErrorRunId, toRunError } from '../agents/runResumeHelpers';
 import { prewarmMuPDFWorker } from '../../src/beaver-extract';
 import { BeaverTemporaryAnnotations } from '../utils/annotationUtils';
+import { getLibrarySummaries } from '../../src/services/agentDataProvider/libraryCounts';
 
 // =============================================================================
 // Helper Functions
@@ -1817,6 +1818,10 @@ export const sendWSMessageAtom = atom(
             };
         }
 
+        const libraries = searchableLibraryIds.length > 0
+            ? await getLibrarySummaries(searchableLibraryIds)
+            : undefined;
+
         // Application state
         const applicationState = {
             current_view: currentView,
@@ -1825,6 +1830,7 @@ export const sendWSMessageAtom = atom(
             ...(currentLibrary ? { current_library: currentLibrary } : {}),
             ...(currentCollection ? { current_collection: currentCollection } : {}),
             ...(indexingStatus ? { indexing_status: indexingStatus } : {}),
+            ...(libraries ? { libraries } : {}),
         };
 
         // Build the message
