@@ -17,6 +17,7 @@ describe('citationGrammar', () => {
     it('parses registered locator prefixes and ranges', () => {
         expect(parseLoc('p10')).toEqual({ kind: 'paragraph', value: '10', raw: 'p10' });
         expect(parseLoc('page12')).toEqual({ kind: 'page', value: '12', raw: 'page12' });
+        expect(parseLoc('pageiv')).toEqual({ kind: 'page', value: 'iv', raw: 'pageiv' });
         expect(parseLoc('s343')).toEqual({ kind: 'sentence', value: '343', raw: 's343' });
         expect(parseLoc('s0-s8')).toEqual({ kind: 'sentence', value: '0-8', raw: 's0-s8' });
         expect(parseLoc('paragraph12')).toEqual({ kind: 'paragraph', value: '12', raw: 'paragraph12' });

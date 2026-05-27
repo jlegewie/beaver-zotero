@@ -72,7 +72,7 @@ export function validateNewString(
     const compoundRegex = /<citation\s+(?!.*ref=)([^/]*items="[^"]*"[^/]*)\/>/g;
     let compMatch;
     while ((compMatch = compoundRegex.exec(newString)) !== null) {
-        return 'Error: Cannot create new compound citations. Insert individual <citation item_id="..." /> tags instead.';
+        return 'Error: Cannot create new compound citations. Insert individual <citation id="..." /> tags instead.';
     }
 
     return null;
@@ -315,6 +315,7 @@ export function enrichOldStringCitationRefs(
         const rawLoc = extractAttr(attrStr, 'loc');
         const page = normalized.ok
             ? (getPageLocator(normalized.ref) ??
+                // Keep accepting pre-v0.20 shorthand in old_string enrichment.
                 (rawLoc && /^p\d+$/.test(rawLoc) ? rawLoc.slice(1) : undefined))
             : extractAttr(attrStr, 'page') || undefined;
 
@@ -461,7 +462,7 @@ export function buildPartialSimplifiedTagMessage(partial: PartialSimplifiedTag):
         + 'To rename across all citations, use `str_replace_all` on the FULL '
         + '`<citation .../>` tag from `read_note` (including `ref`), not on a prefix.\n'
         + 'To replace a citation, copy the full tag (including `ref`) as old_string '
-        + 'and write a new `<citation item_id="..." page="..."/>` (without `ref`) as '
+        + 'and write a new `<citation id="..." loc="page..."/>` (without `ref`) as '
         + 'new_string. The `ref` attribute is read-only.'
     );
 }

@@ -223,7 +223,7 @@ describe('handleZoteroDocumentRequest document cache integration', () => {
             type: 'zotero_document',
             request_id: 'req-too-many-pages',
             total_pages: 23,
-            error: 'The PDF file for 1-ABCD1234 has 23 pages, which exceeds the 20-page limit',
+            error: 'The PDF file for 1-ABCD1234 has 23 pages, which exceeds the 20-page limit.',
             error_code: 'too_many_pages',
         });
         expect(response).not.toHaveProperty('result');

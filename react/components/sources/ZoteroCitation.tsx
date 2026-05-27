@@ -54,11 +54,11 @@ type CitationDisplayState = 'streaming' | 'ready' | 'invalid' | 'error';
  * Props for ZoteroCitation component.
  * 
  * Supported citation tag formats from LLM:
- *   <citation item_id="libraryID-itemKey"/>      - parent item reference
- *   <citation att_id="libraryID-itemKey"/>       - attachment reference
- *   <citation att_id="..." sid="..."/>           - attachment with sentence/structured record ID
- *   <citation att_id="..." page="..."/>          - attachment with page reference
+ *   <citation id="libraryID-itemKey"/>           - Zotero item reference
+ *   <citation id="..." loc="page5"/>             - Zotero item with page reference
+ *   <citation id="..." loc="s25"/>               - Zotero item with sentence/record ID
  *   <citation external_id="..."/>                - external reference
+ * Legacy item_id/att_id/page attrs are still accepted by preprocessing.
  * 
  * Note: Props are passed from HTML attributes after sanitization,
  * so values may have 'user-content-' prefix added by rehype-sanitize.

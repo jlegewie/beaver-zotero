@@ -35,7 +35,7 @@ function makeRemoteItem(id: number, key: string) {
 }
 
 // Mirrors real Zotero behavior: getFilePathAsync throws on non-attachment
-// items (e.g., parent items referenced via <citation item_id="...">).
+// items (e.g., parent items referenced via <citation id="...">).
 function makeParentItem(id: number, key: string) {
     return {
         id,

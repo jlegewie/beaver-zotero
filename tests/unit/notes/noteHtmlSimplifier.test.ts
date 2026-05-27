@@ -239,7 +239,7 @@ describe('simplifyNoteHtml', () => {
         const html = wrap(`<p>${rawCitation('ABCD1234')}</p>`);
         const { simplified, metadata } = simplifyNoteHtml(html, 1);
         expect(simplified).toContain('ref="c_ABCD1234_0"');
-        expect(simplified).toContain('item_id="1-ABCD1234"');
+        expect(simplified).toContain('id="1-ABCD1234"');
         expect(simplified).toContain('label="(Author, 2024)"');
         expect(simplified).toContain('/>');
         expect(metadata.elements.has('c_ABCD1234_0')).toBe(true);
@@ -343,7 +343,19 @@ describe('simplifyNoteHtml', () => {
     it('includes page locator in citation', () => {
         const html = wrap(`<p>${rawCitation('PG1', 1, '42')}</p>`);
         const { simplified } = simplifyNoteHtml(html, 1);
-        expect(simplified).toContain('page="42"');
+        expect(simplified).toContain('loc="page42"');
+    });
+
+    it('prefixes roman page locators with page in citation loc', () => {
+        const html = wrap(`<p>${rawCitation('ROMAN1', 1, 'iv')}</p>`);
+        const { simplified } = simplifyNoteHtml(html, 1);
+        expect(simplified).toContain('loc="pageiv"');
+    });
+
+    it('escapes page locator values in citation loc', () => {
+        const html = wrap(`<p>${rawCitation('ESCLOC1', 1, '5" & <x>')}</p>`);
+        const { simplified } = simplifyNoteHtml(html, 1);
+        expect(simplified).toContain('loc="page5&quot; &amp; &lt;x&gt;"');
     });
 
     it('recovers label when visible text is empty parentheses "()"', () => {
@@ -600,10 +612,10 @@ describe('expandToRawHtml', () => {
         expect(() => expandToRawHtml(input, metadata, 'new')).toThrow(/compound/i);
     });
 
-    it('throws for citation missing item_id and att_id', () => {
+    it('throws for citation missing id and legacy identity attrs', () => {
         const metadata: SimplificationMetadata = { elements: new Map() };
         const input = '<citation label="Nothing"/>';
-        expect(() => expandToRawHtml(input, metadata, 'new')).toThrow(/item_id or att_id/);
+        expect(() => expandToRawHtml(input, metadata, 'new')).toThrow(/id/);
     });
 
     it('throws when item not found for new citation via item_id', () => {
@@ -995,7 +1007,7 @@ describe('citation round-trips', () => {
         const html = wrap(`<p>${raw}</p>`);
         const { simplified, metadata } = simplifyNoteHtml(html, 1);
 
-        expect(simplified).toContain('page="42"');
+        expect(simplified).toContain('loc="page42"');
         const citationTag = simplified.match(/<citation [^/]*\/>/)?.[0];
         const expanded = expandToRawHtml(citationTag!, metadata, 'old');
         expect(expanded).toBe(pmNormCitation('RT2', '42'));
@@ -1046,13 +1058,13 @@ describe('citation round-trips', () => {
 
         // All expand to identical raw HTML
         const expandedOld = expandToRawHtml(
-            '<citation item_id="1-DUP" label="(Author, 2024)" ref="c_DUP_0"/>', metadata, 'old'
+            '<citation id="1-DUP" label="(Author, 2024)" ref="c_DUP_0"/>', metadata, 'old'
         );
         expect(countOccurrences(contentHtml, expandedOld)).toBe(12);
 
         // Each ref is unique in simplified HTML, so expand-before gives the correct raw position
         for (let i = 0; i < 12; i++) {
-            const oldStr = `<citation item_id="1-DUP" label="(Author, 2024)" ref="c_DUP_${i}"/>`;
+            const oldStr = `<citation id="1-DUP" label="(Author, 2024)" ref="c_DUP_${i}"/>`;
             const pos = simplified.indexOf(oldStr);
             expect(pos).toBeGreaterThanOrEqual(0); // unique match
 
@@ -1076,7 +1088,7 @@ describe('citation round-trips', () => {
         const { simplified, metadata } = simplifyNoteHtml(html, 1);
         const strippedHtml = stripDataCitationItems(normalizeNoteHtml(html));
         for (const ref of ['c_DUP_5', 'c_DUP_10'] as const) {
-            const oldStr = `<citation item_id="1-DUP" label="(Author, 2024)" ref="${ref}"/>`;
+            const oldStr = `<citation id="1-DUP" label="(Author, 2024)" ref="${ref}"/>`;
             const expandedOld = expandToRawHtml(oldStr, metadata, 'old');
 
             expect(findUniqueRawMatchPosition(
@@ -1095,7 +1107,7 @@ describe('citation round-trips', () => {
         const { simplified, metadata } = simplifyNoteHtml(html, 1);
         const strippedHtml = stripDataCitationItems(normalizeNoteHtml(html));
         const expandedOld = expandToRawHtml(
-            '<citation item_id="1-AMB" label="(Author, 2024)" ref="c_AMB_0"/>', metadata, 'old'
+            '<citation id="1-AMB" label="(Author, 2024)" ref="c_AMB_0"/>', metadata, 'old'
         );
 
         expect(findUniqueRawMatchPosition(
@@ -1112,7 +1124,7 @@ describe('citation round-trips', () => {
         const originalHtml = wrap(`<p>alpha</p><p>${raw}</p><p>${raw}</p><p>omega</p>`);
         const { simplified, metadata } = simplifyNoteHtml(originalHtml, 1);
         const strippedOriginal = stripDataCitationItems(normalizeNoteHtml(originalHtml));
-        const oldStr = '<citation item_id="1-DUP" label="(Author, 2024)" ref="c_DUP_1"/>';
+        const oldStr = '<citation id="1-DUP" label="(Author, 2024)" ref="c_DUP_1"/>';
         const expandedOriginal = expandToRawHtml(oldStr, metadata, 'old');
 
         const targetContext = captureValidatedEditTargetContext(
@@ -1182,7 +1194,7 @@ describe('citation round-trips', () => {
         const contentHtml = stripNoteWrapperDiv(stripDataCitationItems(normalizeNoteHtml(html)));
 
         const expandedRaw = expandToRawHtml(
-            '<citation item_id="1-CTX" label="(Author, 2024)" ref="c_CTX_0"/>', metadata, 'old'
+            '<citation id="1-CTX" label="(Author, 2024)" ref="c_CTX_0"/>', metadata, 'old'
         );
         const expandedFooBar = `foo ${expandedRaw} bar`;
 
@@ -1190,7 +1202,7 @@ describe('citation round-trips', () => {
         expect(countOccurrences(contentHtml, expandedFooBar)).toBe(2);
 
         // old_string for c_CTX_2 with surrounding text — unique in simplified
-        const oldStr = 'foo <citation item_id="1-CTX" label="(Author, 2024)" ref="c_CTX_2"/> bar';
+        const oldStr = 'foo <citation id="1-CTX" label="(Author, 2024)" ref="c_CTX_2"/> bar';
         const pos = simplified.indexOf(oldStr);
         expect(pos).toBeGreaterThanOrEqual(0);
 
@@ -1221,7 +1233,7 @@ describe('citation round-trips', () => {
         const { simplified, metadata } = simplifyNoteHtml(html, 1);
 
         // Change page from 10 to 99 in the simplified tag
-        const modified = simplified.replace('page="10"', 'page="99"');
+        const modified = simplified.replace('loc="page10"', 'loc="page99"');
         const citationTag = modified.match(/<citation [^/]*\/>/)?.[0];
         const expanded = expandToRawHtml(citationTag!, metadata, 'old');
         // Should have called createCitationHTML with the new page
@@ -1257,7 +1269,7 @@ describe('citation round-trips', () => {
 
         // Build a new_string that keeps the existing citation and adds a new one
         const existingTag = simplified.match(/<citation [^/]*\/>/)?.[0];
-        const newString = `${existingTag} and <citation item_id="1-BRAND" label="Brand New"/>`;
+        const newString = `${existingTag} and <citation id="1-BRAND" label="Brand New"/>`;
         const expanded = expandToRawHtml(newString, metadata, 'new');
         // Existing citation restored from metadata (PM-normalized version)
         expect(expanded).toContain(pmNormCitation('EXI1'));
@@ -1506,7 +1518,7 @@ describe('validateNewString', () => {
     });
 
     it('accepts new single citation (no ref)', () => {
-        const str = '<citation item_id="1-NEW" label="Test"/>';
+        const str = '<citation id="1-NEW" label="Test"/>';
         expect(validateNewString(str, metaWithElements)).toBeNull();
     });
 
@@ -1580,7 +1592,7 @@ describe('checkDuplicateCitations', () => {
                 ['c_EX_0', { rawHtml: '', type: 'citation', originalAttrs: { item_id: '1-EX' } }],
             ]),
         };
-        const newStr = '<citation item_id="1-OTHER" label="Other"/>';
+        const newStr = '<citation id="1-OTHER" label="Other"/>';
         expect(checkDuplicateCitations(newStr, metadata)).toBeNull();
     });
 
@@ -1590,7 +1602,7 @@ describe('checkDuplicateCitations', () => {
                 ['c_DUP_0', { rawHtml: '', type: 'citation', originalAttrs: { item_id: '1-DUP' } }],
             ]),
         };
-        const newStr = '<citation item_id="1-DUP" label="Dup"/>';
+        const newStr = '<citation id="1-DUP" label="Dup"/>';
         const result = checkDuplicateCitations(newStr, metadata);
         expect(result).toContain('already cited');
         expect(result).toContain('c_DUP_0');
