@@ -75,7 +75,9 @@ export function resolvePageLabelFromLabels(
 ): string {
     if (!hasPageLabels(pageLabels)) return String(pageNumber);
     const pageIndex = pageNumber - 1;
-    return pageLabels[pageIndex] ?? String(pageNumber);
+    const label = pageLabels[pageIndex];
+    if (label == null || label.trim() === '') return String(pageNumber);
+    return label;
 }
 
 /**
@@ -96,7 +98,9 @@ export function translatePageNumberToLabelFromLabels(
     return pageStr.replace(/\d+/g, (numStr) => {
         const pageIndex = parseInt(numStr, 10) - 1;
         if (isNaN(pageIndex) || pageIndex < 0) return numStr;
-        return pageLabels[pageIndex] ?? numStr;
+        const label = pageLabels[pageIndex];
+        if (label == null || label.trim() === '') return numStr;
+        return label;
     });
 }
 
