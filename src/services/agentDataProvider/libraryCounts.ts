@@ -39,6 +39,10 @@ async function countNotes(libraryId: number): Promise<number> {
             JOIN itemNotes N ON I.itemID = N.itemID
             WHERE I.libraryID = ?
             AND I.itemID NOT IN (SELECT itemID FROM deletedItems)
+            AND (
+                N.parentItemID IS NULL
+                OR N.parentItemID NOT IN (SELECT itemID FROM deletedItems)
+            )
         `;
         let count = 0;
         await Zotero.DB.queryAsync(sql, [libraryId], {

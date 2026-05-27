@@ -28,6 +28,7 @@ describe('getLibrarySummaries', () => {
     });
 
     it('returns sorted count summaries for requested libraries', async () => {
+        const noteCountSql: string[] = [];
         getAllLibraries.mockReturnValue([
             {
                 libraryID: 2,
@@ -62,6 +63,7 @@ describe('getLibrarySummaries', () => {
                 if (sql.includes('LEFT JOIN itemNotes')) {
                     count = libraryId === 1 ? 12 : 4;
                 } else if (sql.includes('JOIN itemNotes N')) {
+                    noteCountSql.push(sql);
                     count = libraryId === 1 ? 5 : 1;
                 } else if (sql.includes('FROM collections')) {
                     count = libraryId === 1 ? 3 : 2;
@@ -95,6 +97,13 @@ describe('getLibrarySummaries', () => {
                 tag_count: 1,
             },
         ]);
+        expect(noteCountSql).toHaveLength(2);
+        for (const sql of noteCountSql) {
+            expect(sql).toContain('N.parentItemID IS NULL');
+            expect(sql).toContain(
+                'N.parentItemID NOT IN (SELECT itemID FROM deletedItems)'
+            );
+        }
     });
 
     it('isolates count failures to the failed count', async () => {
