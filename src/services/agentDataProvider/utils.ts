@@ -816,10 +816,16 @@ export async function processAttachmentsWithBatchData(
     item: Zotero.Item,
     context: AttachmentProcessingContext,
     batchData: BatchAttachmentData,
-    options?: { skipHash?: boolean; skipWorkerFallback?: boolean; timing?: TimingAccumulator }
+    options?: {
+        skipHash?: boolean;
+        skipWorkerFallback?: boolean;
+        timing?: TimingAccumulator;
+        includeAnnotationsCount?: boolean;
+    }
 ): Promise<AttachmentDataWithStatus[]> {
     const skipHash = options?.skipHash ?? false;
     const skipWorkerFallback = options?.skipWorkerFallback ?? false;
+    const includeAnnotationsCount = options?.includeAnnotationsCount ?? false;
     const ta = options?.timing;
     const attachmentIds = item.getAttachments();
     if (attachmentIds.length === 0) {
@@ -848,7 +854,12 @@ export async function processAttachmentsWithBatchData(
         }
 
         // Serialize attachment
-        const serializeFn = () => serializeAttachment(attachment, undefined, { skipFileHash: true, skipSyncingFilter: true, skipHash });
+        const serializeFn = () => serializeAttachment(attachment, undefined, {
+            skipFileHash: true,
+            skipSyncingFilter: true,
+            skipHash,
+            includeAnnotationsCount,
+        });
         const attachmentData = ta
             ? await ta.track('att_serialize_ms', serializeFn)
             : await serializeFn();
@@ -897,6 +908,7 @@ export function toAttachmentSummary(a: AttachmentDataWithStatus): AttachmentSumm
         mime_type: a.attachment.mime_type,
         is_primary: a.file_status?.is_primary ?? false,
         page_count: a.file_status?.page_count ?? null,
+        annotations_count: a.attachment.annotations_count,
         status: a.file_status?.status === 'available' ? 'available' : 'unavailable',
         status_code: a.file_status?.status_code,
         status_reason: a.file_status?.status_reason,
@@ -918,9 +930,14 @@ export function toAttachmentSummary(a: AttachmentDataWithStatus): AttachmentSumm
 export async function processAttachmentsParallel(
     item: Zotero.Item,
     context: AttachmentProcessingContext,
-    options?: { skipHash?: boolean; timing?: TimingAccumulator }
+    options?: {
+        skipHash?: boolean;
+        timing?: TimingAccumulator;
+        includeAnnotationsCount?: boolean;
+    }
 ): Promise<AttachmentDataWithStatus[]> {
     const skipHash = options?.skipHash ?? false;
+    const includeAnnotationsCount = options?.includeAnnotationsCount ?? false;
     const ta = options?.timing;
     const attachmentIds = item.getAttachments();
     if (attachmentIds.length === 0) {
@@ -950,7 +967,12 @@ export async function processAttachmentsParallel(
         }
 
         // Serialize attachment (skip file hash — not needed for search results)
-        const serializeFn = () => serializeAttachment(attachment, undefined, { skipFileHash: true, skipSyncingFilter: true, skipHash });
+        const serializeFn = () => serializeAttachment(attachment, undefined, {
+            skipFileHash: true,
+            skipSyncingFilter: true,
+            skipHash,
+            includeAnnotationsCount,
+        });
         const attachmentData = ta
             ? await ta.track('att_serialize_ms', serializeFn)
             : await serializeFn();

@@ -778,6 +778,7 @@ export interface AttachmentResultItem {
     parent_item_id?: string | null;
     parent_title?: string | null;
     date_modified?: string | null;
+    annotations_count?: number | null;
 }
 
 /**

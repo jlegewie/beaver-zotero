@@ -104,7 +104,11 @@ async function resolveCitedItems(
         try {
             const [itemData, rawAttachments] = await Promise.all([
                 serializeItemSummary(item),
-                processAttachmentsWithBatchData(item, attachmentContext, batchAttachmentData, { skipHash: true, skipWorkerFallback: true }),
+                processAttachmentsWithBatchData(item, attachmentContext, batchAttachmentData, {
+                    skipHash: true,
+                    skipWorkerFallback: true,
+                    includeAnnotationsCount: true,
+                }),
             ]);
             results.push({ ...itemData, attachments: rawAttachments.map(toAttachmentSummary) });
         } catch (error) {

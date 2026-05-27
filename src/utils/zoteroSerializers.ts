@@ -355,11 +355,17 @@ export async function serializeItemSummary(item: Zotero.Item): Promise<ItemSumma
 export async function serializeAttachment(
     item: Zotero.Item,
     clientDateModified: string | undefined,
-    options?: { skipFileHash?: boolean, skipSyncingFilter?: boolean, skipHash?: boolean }
+    options?: {
+        skipFileHash?: boolean,
+        skipSyncingFilter?: boolean,
+        skipHash?: boolean,
+        includeAnnotationsCount?: boolean,
+    }
 ): Promise<AttachmentDataWithMimeType | null> {
     const skipFileHash = options?.skipFileHash ?? false;
     const skipSyncingFilter = options?.skipSyncingFilter ?? false;
     const skipHash = options?.skipHash ?? false;
+    const includeAnnotationsCount = options?.includeAnnotationsCount ?? false;
 
     // 1. File: Confirm that the item is an attachment and passes the syncing filter (exists locally or on server)
     const passesSyncingFilter = skipSyncingFilter ? true : (await syncingItemFilterAsync(item));
@@ -455,6 +461,11 @@ export async function serializeAttachment(
         zotero_version: item.version,
         zotero_synced: item.synced,
     };
+
+    if (includeAnnotationsCount) {
+        await item.loadDataType("childItems");
+        attachmentData.annotations_count = item.isFileAttachment?.() ? item.getAnnotations().length : 0;
+    }
 
     return attachmentData;
 }

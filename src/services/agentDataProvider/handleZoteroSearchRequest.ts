@@ -239,6 +239,11 @@ export async function handleZoteroSearchRequest(
             }
         }
 
+        const attachmentItems = paginatedZoteroItems.filter((item) => item.isAttachment());
+        if (attachmentItems.length) {
+            await Zotero.Items.loadDataTypes(attachmentItems, ["childItems"]);
+        }
+
         // Batch-load parent items for child items (notes, attachments)
         const childParentIds = new Set<number>();
         for (const item of paginatedZoteroItems) {
@@ -279,6 +284,7 @@ export async function handleZoteroSearchRequest(
                     parent_item_id: parentInfo?.item_id ?? null,
                     parent_title: parentInfo?.title ?? null,
                     date_modified: item.dateModified,
+                    annotations_count: item.isFileAttachment?.() ? item.getAnnotations().length : 0,
                 };
                 items.push(attachmentItem);
             } else {

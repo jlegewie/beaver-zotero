@@ -387,7 +387,12 @@ export async function lookupZoteroReferences(
         })),
         Promise.all(attachmentsToSerialize.map(async (attachment): Promise<AttachmentDataWithStatus | null> => {
             try {
-                const serialized = await serializeAttachment(attachment, undefined, { skipFileHash: true, skipSyncingFilter: true, skipHash: true });
+                const serialized = await serializeAttachment(attachment, undefined, {
+                    skipFileHash: true,
+                    skipSyncingFilter: true,
+                    skipHash: true,
+                    includeAnnotationsCount: true,
+                });
                 if (!serialized) {
                     errors.push({
                         reference: { library_id: attachment.libraryID, zotero_key: attachment.key },

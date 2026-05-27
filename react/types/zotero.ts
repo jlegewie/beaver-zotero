@@ -152,6 +152,7 @@ export interface AttachmentSummary {
     mime_type: string;
     is_primary: boolean;
     page_count?: number | null;
+    annotations_count?: number | null;
     status: AttachmentReadability;
     status_code?: FileStatusCodeValue | null;
     status_reason?: string | null;
@@ -230,6 +231,7 @@ export interface AttachmentData extends ZoteroItemBase {
     link_mode?: number | null;
     tags?: any[] | null;
     collections?: string[] | null;
+    annotations_count?: number | null;
 
     // file metadata
     filename: string;

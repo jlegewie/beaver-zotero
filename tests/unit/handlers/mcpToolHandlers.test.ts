@@ -168,6 +168,7 @@ function makeSearchResultItem(overrides: any = {}) {
                 library_id: 1,
                 zotero_key: 'ATT00001',
                 filename: 'paper.pdf',
+                annotations_count: 2,
             },
             file_status: {
                 status: 'available',
@@ -432,6 +433,7 @@ describe('MCP Tool Handlers (via useMcpServer)', () => {
             expect(att.attachment_id).toBe('1-ATT00001');
             expect(att.filename).toBe('paper.pdf');
             expect(att.page_count).toBe(25);
+            expect(att.annotations_count).toBe(2);
             expect(att.status).toBe('available');
         });
 
@@ -1076,6 +1078,7 @@ describe('MCP Tool Handlers (via useMcpServer)', () => {
                         filename: 'paper.pdf',
                         contentType: 'application/pdf',
                         path: '/some/path/paper.pdf',
+                        annotations_count: 4,
                     }],
                 }],
                 not_found: [],
@@ -1090,6 +1093,7 @@ describe('MCP Tool Handlers (via useMcpServer)', () => {
             expect(att.content_type).toBe('application/pdf');
             expect(att.status).toBe('available');
             expect(att.page_count).toBeNull();
+            expect(att.annotations_count).toBe(4);
         });
 
         it('marks attachment as unavailable when path is missing', async () => {
