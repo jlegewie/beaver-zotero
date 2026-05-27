@@ -905,6 +905,25 @@ export interface WSGetMetadataResponse {
     error_code?: string | null;
 }
 
+/** Request from backend for get_annotations */
+export interface WSGetAnnotationsRequest extends WSBaseEvent {
+    event: 'get_annotations_request';
+    request_id: string;
+    attachment_id: string;
+    limit: number;
+    offset: number;
+}
+
+/** Response to get_annotations request */
+export interface WSGetAnnotationsResponse {
+    type: 'get_annotations';
+    request_id: string;
+    annotations: AnnotationResultItem[];
+    total_count: number;
+    error?: string | null;
+    error_code?: string | null;
+}
+
 // =============================================================================
 // Library Management: List Collections
 // =============================================================================
@@ -1174,6 +1193,7 @@ export type WSEvent =
     | WSListCollectionsRequest
     | WSListTagsRequest
     | WSGetMetadataRequest
+    | WSGetAnnotationsRequest
     | WSListLibrariesRequest
     // Note tools
     | WSReadNoteRequest
