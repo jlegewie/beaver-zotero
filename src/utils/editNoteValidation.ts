@@ -312,11 +312,8 @@ export function enrichOldStringCitationRefs(
         if (extractAttr(attrStr, 'ref') !== undefined) continue;
 
         const normalized = normalizeCitationTag(parseRawCitationAttributes(attrStr));
-        const rawLoc = extractAttr(attrStr, 'loc');
         const page = normalized.ok
-            ? (getPageLocator(normalized.ref) ??
-                // Keep accepting pre-v0.20 shorthand in old_string enrichment.
-                (rawLoc && /^p\d+$/.test(rawLoc) ? rawLoc.slice(1) : undefined))
+            ? getPageLocator(normalized.ref)
             : extractAttr(attrStr, 'page') || undefined;
 
         const explicitItemId = extractAttr(attrStr, 'item_id');

@@ -206,7 +206,7 @@ describe('preloadPageLabelsForContent', () => {
         };
         (globalThis as any).Zotero.Beaver = { documentCache: cache };
 
-        const labels = await preloadPageLabelsForContent('<citation id="1-PARENT01" loc="p3" />');
+        const labels = await preloadPageLabelsForContent('<citation id="1-PARENT01" loc="page3" />');
 
         expect(labels).toEqual({ 77: { 2: '3' } });
         expect(cache.getMetadata).toHaveBeenCalledWith({ libraryId: 1, zoteroKey: 'ATTACH01' }, '/storage/ATTACH01/test.pdf');
@@ -384,5 +384,67 @@ describe('preloadPageLabelsForCitations', () => {
         expect(cache.getMetadata).toHaveBeenCalledWith({ libraryId: 1, zoteroKey: 'ATTACH02' }, '/storage/ATTACH02/test.pdf');
         expect(mockGetAttachmentFileStatus).toHaveBeenCalledWith(attachment, false);
         expect(parent.getFilePathAsync).not.toHaveBeenCalled();
+    });
+
+    it('preloads citation metadata when only requested/resolved refs carry the page locator', async () => {
+        const item = makeItem(55, 'LOCAL02');
+        const cache = {
+            getMetadata: vi.fn()
+                .mockResolvedValueOnce(null)
+                .mockResolvedValue({ item_id: 55, pageLabels: { 3: '4' } }),
+        };
+
+        (globalThis as any).Zotero.Items = {
+            getByLibraryAndKey: vi.fn(() => item),
+        };
+        (globalThis as any).Zotero.Beaver = { documentCache: cache };
+
+        const labels = await preloadPageLabelsForCitations([
+            {
+                parts: [],
+                requested_ref: {
+                    kind: 'zotero',
+                    library_id: 1,
+                    zotero_key: 'REQUESTED',
+                    loc: { kind: 'page', value: '4', raw: 'page4' },
+                },
+                resolved_ref: {
+                    kind: 'zotero',
+                    library_id: 1,
+                    zotero_key: 'LOCAL02',
+                },
+            },
+        ]);
+
+        expect(mockGetAttachmentFileStatus).toHaveBeenCalledWith(item, false);
+        expect(labels).toEqual({ 55: { 3: '4' } });
+    });
+
+    it('does not treat paragraph locators as page-label preload signals', async () => {
+        const item = makeItem(56, 'LOCAL03');
+        const cache = {
+            getMetadata: vi.fn(),
+        };
+
+        (globalThis as any).Zotero.Items = {
+            getByLibraryAndKey: vi.fn(() => item),
+        };
+        (globalThis as any).Zotero.Beaver = { documentCache: cache };
+
+        const labels = await preloadPageLabelsForCitations([
+            {
+                parts: [],
+                resolved_ref: {
+                    kind: 'zotero',
+                    library_id: 1,
+                    zotero_key: 'LOCAL03',
+                },
+                raw_tag: '<citation id="1-LOCAL03" loc="p3"/>',
+            },
+        ]);
+
+        expect(labels).toEqual({});
+        expect(cache.getMetadata).not.toHaveBeenCalled();
+        expect(mockGetAttachmentFileStatus).not.toHaveBeenCalled();
     });
 });

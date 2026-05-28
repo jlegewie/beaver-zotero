@@ -198,7 +198,7 @@ describe('enrichOldStringCitationRefs (att_id)', () => {
         );
     });
 
-    it('tolerates pre-v0.20 p-prefixed page locators in old_string', () => {
+    it('does not treat p-prefixed paragraph locators as page locators in old_string', () => {
         installZoteroItems(new Map([
             ['1-ATTKEY000', {
                 libraryID: 1,
@@ -213,9 +213,7 @@ describe('enrichOldStringCitationRefs (att_id)', () => {
             '<p><citation id="1-ATTKEY000" loc="p3"/></p>',
             metadata,
         );
-        expect(result).toBe(
-            '<p><citation item_id="1-PARENT1234" page="3" ref="c_PARENT_0"/></p>',
-        );
+        expect(result).toBeNull();
     });
 
     it('preserves page attribute in the rewritten citation', () => {
