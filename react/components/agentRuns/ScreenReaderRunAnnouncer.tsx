@@ -20,9 +20,24 @@ function isTerminalRun(run: AgentRun): boolean {
     return run.status === 'completed' || run.status === 'error' || run.status === 'canceled';
 }
 
+// Module-level so the library, reader, and window surfaces coordinate
+const MAX_TRACKED_FINISHED_RUNS = 200;
 const announcingSurfaceByRunId = new Map<string, ScreenReaderSurface>();
 const announcedFinishedRunIds = new Set<string>();
 const STATUS_ANNOUNCEMENT_CLEAR_MS = 5000;
+
+/** Mark a run as announced and release its surface ownership */
+function markRunAnnounced(runId: string): void {
+    announcedFinishedRunIds.add(runId);
+    announcingSurfaceByRunId.delete(runId);
+    while (announcedFinishedRunIds.size > MAX_TRACKED_FINISHED_RUNS) {
+        const oldest = announcedFinishedRunIds.values().next().value;
+        if (oldest === undefined) {
+            break;
+        }
+        announcedFinishedRunIds.delete(oldest);
+    }
+}
 
 /**
  * Return true when the announcer is mounted in a visible Beaver surface.
@@ -168,6 +183,15 @@ export const ScreenReaderRunAnnouncer: React.FC<ScreenReaderRunAnnouncerProps> =
         }
 
         announcingSurfaceByRunId.set(run.id, surface);
+        // Drop oldest ownership entries for runs that were claimed but never
+        // reached terminal handling (e.g. the panel closed mid-generation).
+        while (announcingSurfaceByRunId.size > MAX_TRACKED_FINISHED_RUNS) {
+            const oldest = announcingSurfaceByRunId.keys().next().value;
+            if (oldest === undefined) {
+                break;
+            }
+            announcingSurfaceByRunId.delete(oldest);
+        }
         announceStatus('Message sent. Beaver is generating a response.');
     };
 
@@ -190,7 +214,7 @@ export const ScreenReaderRunAnnouncer: React.FC<ScreenReaderRunAnnouncerProps> =
             return;
         }
 
-        announcedFinishedRunIds.add(run.id);
+        markRunAnnounced(run.id);
         focusReaderText(
             message,
             run.status === 'error' ? { kind: 'run-error-action', runId: run.id } : { kind: 'input' },
