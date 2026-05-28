@@ -26,6 +26,24 @@ interface SettingsRowProps {
     className?: string;
 }
 
+function hasInteractiveContent(node: React.ReactNode): boolean {
+    return React.Children.toArray(node).some((child) => {
+        if (!React.isValidElement(child)) {
+            return false;
+        }
+
+        const type = child.type;
+        if (typeof type === 'string' && ['a', 'button', 'input', 'select', 'textarea'].includes(type)) {
+            return true;
+        }
+        if (typeof type !== 'string' && 'path' in (child.props as Record<string, unknown>)) {
+            return true;
+        }
+
+        return hasInteractiveContent((child.props as { children?: React.ReactNode }).children);
+    });
+}
+
 /** Individual setting row with title, description, and optional control */
 export const SettingsRow: React.FC<SettingsRowProps> = ({
     title, description, control, onClick, disabled, tooltip, hasBorder = false, className = ''
@@ -43,6 +61,7 @@ export const SettingsRow: React.FC<SettingsRowProps> = ({
             'aria-labelledby': titleId,
         })
         : control;
+    const hideDescriptionFromScreenReaders = !!control && !!description && !hasInteractiveContent(description);
 
     return (
         <div
@@ -59,7 +78,13 @@ export const SettingsRow: React.FC<SettingsRowProps> = ({
             <div className="display-flex flex-col gap-05 flex-1 min-w-0">
                 <div id={titleId} className="font-color-primary text-base font-medium">{title}</div>
                 {description && (
-                    <div id={descId} className="font-color-secondary text-base">{description}</div>
+                    <div
+                        id={descId}
+                        className="font-color-secondary text-base"
+                        aria-hidden={hideDescriptionFromScreenReaders ? true : undefined}
+                    >
+                        {description}
+                    </div>
                 )}
             </div>
             {control && (
