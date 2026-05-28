@@ -73,7 +73,6 @@ export const SettingsRow: React.FC<SettingsRowProps> = ({
                 if (target.tagName === 'A' || target.closest('a')) return;
                 onClick();
             }}
-            title={tooltip}
         >
             <div className="display-flex flex-col gap-05 flex-1 min-w-0">
                 <div id={titleId} className="font-color-primary text-base font-medium">{title}</div>
