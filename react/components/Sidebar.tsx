@@ -44,6 +44,7 @@ import {
 import UpdateRequiredPage from './pages/UpdateRequiredPage';
 import FirstRunPage from './pages/FirstRunPage';
 import { isFirstRunVisibleAtom } from '../atoms/firstRun';
+import ScreenReaderRunAnnouncer from './agentRuns/ScreenReaderRunAnnouncer';
 
 interface SidebarProps {
     location: 'library' | 'reader';
@@ -209,6 +210,7 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
     if (isFirstRunVisible) {
         return (
             <div className="bg-sidepane h-full w-full display-flex flex-col min-w-0 relative">
+                <ScreenReaderRunAnnouncer />
                 <Header isWindow={isWindow} />
                 <FirstRunPage isWindow={isWindow} inputRef={inputRef} />
                 <DialogContainer />
@@ -234,6 +236,7 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
     {/* Main page */}
     return (
         <div className="bg-sidepane h-full w-full display-flex flex-col min-w-0 relative">
+            <ScreenReaderRunAnnouncer />
 
             {/* Header */}
             <Header isWindow={isWindow} />

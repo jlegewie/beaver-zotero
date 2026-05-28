@@ -47,6 +47,7 @@ const PreferencePage: React.FC = () => {
     });
     const [addSelectedOnNewThread, setAddSelectedOnNewThread] = useState(() => getPref('addSelectedItemsOnNewThread'));
     const [addSelectedOnOpen, setAddSelectedOnOpen] = useState(() => getPref('addSelectedItemsOnOpen'));
+    const [focusResponseForScreenReaders, setFocusResponseForScreenReaders] = useState(() => getPref('focusResponseForScreenReaders'));
     const [showDiffPreview, setShowDiffPreview] = useState(() => getPref('showDiffPreviewInNoteEditor') !== false);
     const diffPreviewSupported = isDiffPreviewSupported();
     const [consentToShare, setConsentToShare] = useState(() => profileWithPlan?.consent_to_share || false);
@@ -299,6 +300,12 @@ const PreferencePage: React.FC = () => {
         setPref("addSelectedItemsOnOpen", newValue);
         setAddSelectedOnOpen(newValue);
     }, [addSelectedOnOpen]);
+
+    const handleFocusResponseForScreenReadersToggle = useCallback(() => {
+        const newValue = !focusResponseForScreenReaders;
+        setPref("focusResponseForScreenReaders", newValue);
+        setFocusResponseForScreenReaders(newValue);
+    }, [focusResponseForScreenReaders]);
 
     const handleShowDiffPreviewToggle = useCallback(() => {
         if (!diffPreviewSupported) return;
@@ -575,6 +582,22 @@ const PreferencePage: React.FC = () => {
                                             type="checkbox"
                                             checked={addSelectedOnOpen}
                                             onChange={handleAddSelectedOnOpenToggle}
+                                            onClick={(e) => e.stopPropagation()}
+                                            style={{ cursor: 'pointer', margin: 0 }}
+                                        />
+                                    }
+                                />
+                                <SettingsRow
+                                    title="Focus Completed Responses for Screen Readers"
+                                    description="Move focus to the latest Beaver response after generation finishes"
+                                    onClick={handleFocusResponseForScreenReadersToggle}
+                                    hasBorder
+                                    tooltip="When enabled, focus moves from the chat input to a screen-reader-only copy of the completed response so VoiceOver can read it."
+                                    control={
+                                        <input
+                                            type="checkbox"
+                                            checked={focusResponseForScreenReaders}
+                                            onChange={handleFocusResponseForScreenReadersToggle}
                                             onClick={(e) => e.stopPropagation()}
                                             style={{ cursor: 'pointer', margin: 0 }}
                                         />

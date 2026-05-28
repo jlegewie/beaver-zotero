@@ -85,10 +85,7 @@ export const ModelResponseView: React.FC<ModelResponseViewProps> = React.memo(fu
 
             {/* Text parts (markdown rendered) */}
             {textParts.length > 0 && (
-                // Live region so screen readers announce the response. aria-busy
-                // suppresses chatty token-by-token announcements while streaming,
-                // then reads the settled answer once when it flips to false.
-                <div aria-live="polite" aria-atomic="true" aria-busy={isStreaming}>
+                <div>
                     {textParts.map((part, index) => (
                         part.part_kind === 'text' && (
                             <TextPartView
