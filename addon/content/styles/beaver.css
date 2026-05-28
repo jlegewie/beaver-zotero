@@ -70,6 +70,19 @@
     --webapp-ring: #111729;
 }
 
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+}
+
 /* Separate window: sizing and constraints.
  * Root font-size is mirrored from the main Zotero window in beaverWindow.js
  * so `rem` units resolve identically to the sidebar. */
@@ -2537,9 +2550,16 @@
 }
 
 [id^="beaver-pane-"] .thread-list-item-hovered .thread-list-item-actions,
-[id^="beaver-pane-"] .thread-list-item-editing .thread-list-item-actions {
+[id^="beaver-pane-"] .thread-list-item-editing .thread-list-item-actions,
+[id^="beaver-pane-"] .thread-list-item:focus-within .thread-list-item-actions {
     opacity: 1;
     pointer-events: auto;
+}
+
+[id^="beaver-pane-"] .thread-list-item:focus-visible,
+[id^="beaver-pane-"] .recent-chats-item:focus-visible {
+    outline: 2px solid var(--accent-blue);
+    outline-offset: -2px;
 }
 
 [id^="beaver-pane-"] .thread-rename-input {

@@ -105,6 +105,7 @@ const AdvancedSection: React.FC = () => {
                         <div className="display-flex flex-row items-center gap-2">
                             <input
                                 type="checkbox"
+                                aria-label="Enable MCP Server"
                                 checked={mcpServerEnabled}
                                 onChange={handleMcpServerToggle}
                                 onClick={(e) => e.stopPropagation()}
