@@ -195,9 +195,18 @@ export function normalizePageLocations(raw: any): PageLocation[] | undefined {
                       .filter(Boolean) as BoundingBox[])
                 : [];
 
+            const rawReadingOrder =
+                loc?.reading_order_offset ??
+                loc?.readingOrderOffset;
+            const readingOrderOffset =
+                typeof rawReadingOrder === 'number' && Number.isFinite(rawReadingOrder)
+                    ? rawReadingOrder
+                    : (rawReadingOrder === null ? null : undefined);
+
             return {
                 page_idx: pageIndex,
                 boxes,
+                ...(readingOrderOffset !== undefined ? { reading_order_offset: readingOrderOffset } : {}),
             } as PageLocation;
         })
         .filter(Boolean) as PageLocation[];

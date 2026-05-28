@@ -16,8 +16,8 @@ import {
 // ---------------------------------------------------------------------------
 // dirToRotation — oracle values from real MuPDF detailed walk on the
 // sample pages. Captured from
-//   /Users/jlegewie/Zotero beaver-dev/storage/G7TTJKFH/...page index 1
-//   /Users/jlegewie/Zotero beaver-dev/storage/KPK583ZF/...page index 13, 20
+//   /beaver-dev/storage/G7TTJKFH/...page index 1
+//   /beaver-dev/storage/KPK583ZF/...page index 13, 20
 // using `stext.walk → beginLine(_, _, dir)`.
 // ---------------------------------------------------------------------------
 
@@ -118,6 +118,8 @@ function page(width: number, height: number, lines: RawLine[]): RawPageData {
         pageNumber: 1,
         width,
         height,
+        viewBox: [0, 0, width, height],
+        rotation: 0,
         blocks: [block],
     };
 }
