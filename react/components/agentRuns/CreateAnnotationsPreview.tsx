@@ -74,14 +74,24 @@ function pageIndexForItem(kind: 'highlight' | 'note', item: HighlightAnnotationI
  */
 function pageLabelForItem(kind: 'highlight' | 'note', item: HighlightAnnotationItem | NoteAnnotationItem): string | null {
     const raw = item as any;
-    let label: unknown;
-    if (kind === 'highlight') {
-        const firstLoc = raw.page_locations?.[0] ?? raw.pageLocations?.[0] ?? raw.locations?.[0];
-        label = firstLoc?.page_label ?? firstLoc?.pageLabel;
-    } else {
-        label = raw.page_label ?? raw.pageLabel;
+    const nonBlank = (value: unknown): string | null =>
+        typeof value === 'string' && value.trim() !== '' ? value : null;
+
+    if (kind !== 'highlight') {
+        return nonBlank(raw.page_label ?? raw.pageLabel);
     }
-    return typeof label === 'string' && label.trim() !== '' ? label : null;
+
+    const locations = raw.page_locations ?? raw.pageLocations ?? raw.locations;
+    const firstLocLabel = nonBlank(locations?.[0]?.page_label ?? locations?.[0]?.pageLabel);
+    if (firstLocLabel) return firstLocLabel;
+
+    // Single-page highlights may carry only an item-level label; the create
+    // executors use it as a fallback for single-location items, so mirror that
+    // here to keep the preview chip in sync with the saved annotation label.
+    if (locations?.length === 1) {
+        return nonBlank(raw.page_label ?? raw.pageLabel);
+    }
+    return null;
 }
 
 function statusForItem(
