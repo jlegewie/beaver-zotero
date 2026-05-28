@@ -83,7 +83,7 @@ describe('screen reader announcements', () => {
         expect(buildRunCompletionAnnouncement(makeRun({
             status: 'error',
             error: { type: 'server_error', message: 'Server unavailable.' },
-        }))).toBe('Beaver response failed: Server unavailable.');
+        }))).toBe('Beaver response failed: Server unavailable. Press Tab or Enter to move to error actions, or Escape to message Beaver.');
 
         expect(buildRunCompletionAnnouncement(makeRun({ status: 'canceled' }))).toBe('Response canceled.');
     });

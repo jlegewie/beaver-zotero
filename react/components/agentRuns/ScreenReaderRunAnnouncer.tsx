@@ -9,6 +9,10 @@ interface ScreenReaderRunAnnouncerProps {
     inputRef?: React.RefObject<HTMLTextAreaElement | null>;
 }
 
+type ReaderFocusTarget =
+    | { kind: 'input' }
+    | { kind: 'run-error-action'; runId: string };
+
 function isTerminalRun(run: AgentRun): boolean {
     return run.status === 'completed' || run.status === 'error' || run.status === 'canceled';
 }
@@ -27,7 +31,7 @@ export const ScreenReaderRunAnnouncer: React.FC<ScreenReaderRunAnnouncerProps> =
     const previousActiveRunIdRef = useRef<string | null>(null);
     const nextAnnouncementIdRef = useRef(0);
     const [statusAnnouncement, setStatusAnnouncement] = useState('');
-    const [readerAnnouncement, setReaderAnnouncement] = useState<{ id: number; text: string } | null>(null);
+    const [readerAnnouncement, setReaderAnnouncement] = useState<{ id: number; text: string; focusTarget: ReaderFocusTarget } | null>(null);
 
     const announceStatus = (message: string) => {
         nextAnnouncementIdRef.current += 1;
@@ -50,11 +54,12 @@ export const ScreenReaderRunAnnouncer: React.FC<ScreenReaderRunAnnouncerProps> =
         }
     };
 
-    const focusReaderText = (message: string) => {
+    const focusReaderText = (message: string, focusTarget: ReaderFocusTarget = { kind: 'input' }) => {
         nextAnnouncementIdRef.current += 1;
         setReaderAnnouncement({
             id: nextAnnouncementIdRef.current,
             text: message,
+            focusTarget,
         });
 
         const win = readerRef.current?.ownerDocument.defaultView;
@@ -92,7 +97,10 @@ export const ScreenReaderRunAnnouncer: React.FC<ScreenReaderRunAnnouncerProps> =
         }
 
         announcedFinishedRunIds.add(run.id);
-        focusReaderText(message);
+        focusReaderText(
+            message,
+            run.status === 'error' ? { kind: 'run-error-action', runId: run.id } : { kind: 'input' },
+        );
     };
 
     useEffect(() => {
@@ -126,18 +134,49 @@ export const ScreenReaderRunAnnouncer: React.FC<ScreenReaderRunAnnouncerProps> =
         }
     }, [activeRun, threadRuns]);
 
+    const focusInput = (): boolean => {
+        const input = inputRef?.current;
+        if (!input) {
+            return false;
+        }
+
+        input.focus();
+        return true;
+    };
+
+    const focusRunErrorAction = (runId: string): boolean => {
+        const doc = readerRef.current?.ownerDocument;
+        const panel = doc?.getElementById(`run-error-${runId}`);
+        const action = panel?.querySelector<HTMLButtonElement>(
+            '[data-run-error-primary-action="true"]:not([disabled]), [data-run-error-action]:not([disabled])',
+        );
+
+        if (!action) {
+            return false;
+        }
+
+        action.focus({ preventScroll: true });
+        return true;
+    };
+
     const handleReaderKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
         if (event.key !== 'Enter' && event.key !== 'Escape' && event.key !== 'Tab') {
             return;
         }
 
-        const input = inputRef?.current;
-        if (!input) {
+        const focusTarget = readerAnnouncement?.focusTarget;
+        if (
+            focusTarget?.kind === 'run-error-action' &&
+            (event.key === 'Enter' || event.key === 'Tab') &&
+            focusRunErrorAction(focusTarget.runId)
+        ) {
+            event.preventDefault();
             return;
         }
 
-        event.preventDefault();
-        input.focus();
+        if (focusInput()) {
+            event.preventDefault();
+        }
     };
 
     return (

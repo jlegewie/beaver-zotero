@@ -144,6 +144,20 @@ export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error, 
 
     // Generic header title
     const headerTitle = typeMap[error.type] || "An error occurred";
+    const canTryWithBeaver = Boolean(error.has_beaver_fallback && hasCredits && isLastRun && defaultBeaverModel && error.type !== "usage_limit_exceeded");
+    const canGetBeaverCredits = Boolean((error.has_beaver_fallback || error.type === "usage_limit_exceeded") && !hasCredits);
+    const canResume = Boolean(error.is_resumable && isLastRun);
+    const canRetry = isLastRun;
+    const primaryErrorAction = canResume
+        ? 'resume'
+        : canTryWithBeaver
+            ? 'try-with-beaver'
+            : canGetBeaverCredits
+                ? 'get-beaver-credits'
+                : canRetry
+                    ? 'retry'
+                    : null;
+    const primaryActionAttr = (action: string) => primaryErrorAction === action ? 'true' : undefined;
 
     return (
         <div className="px-4 user-select-text" ref={contentRef} onContextMenu={handleContextMenu}>
@@ -192,43 +206,51 @@ export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error, 
                             </div>
 
                             <div className="display-flex flex-row gap-3 items-center">
-                                {error.has_beaver_fallback && hasCredits && isLastRun && defaultBeaverModel && error.type !== "usage_limit_exceeded" && (
+                                {canTryWithBeaver && (
                                     <Button
                                         variant="error"
                                         iconClassName="font-color-red"
                                         rightIcon={DollarCircleIcon}
                                         onClick={handleRetryWithBeaver}
                                         disabled={!defaultBeaverModel}
+                                        data-run-error-action="try-with-beaver"
+                                        data-run-error-primary-action={primaryActionAttr('try-with-beaver')}
                                     >
                                         Try with Beaver
                                     </Button>
                                 )}
-                                {(error.has_beaver_fallback || error.type === "usage_limit_exceeded") && !hasCredits && (
+                                {canGetBeaverCredits && (
                                     <Button
                                         variant="error"
                                         iconClassName="font-color-red"
                                         onClick={() => openPreferencesWindow('billing')}
+                                        data-run-error-action="get-beaver-credits"
+                                        data-run-error-primary-action={primaryActionAttr('get-beaver-credits')}
                                     >
                                         Get Beaver Credits
                                     </Button>
                                 )}
                                 <div className="flex-1" />
-                                {error.is_resumable && isLastRun && (
+                                {canResume && (
                                     <Button
                                         variant="error"
                                         iconClassName="font-color-red"
                                         rightIcon={LinkForwardIcon}
                                         onClick={handleResume}
+                                        data-run-error-action="resume"
+                                        data-run-error-primary-action={primaryActionAttr('resume')}
                                     >
                                         Resume
                                     </Button>
                                 )}
-                                {isLastRun && (
+                                {canRetry && (
                                     <Button
                                         variant="error"
                                         iconClassName="font-color-red"
                                         rightIcon={RepeatIcon}
                                         onClick={handleRetry}
+                                        data-run-error-action="retry"
+                                        data-run-error-primary-action={primaryActionAttr('retry')}
                                     >
                                         <span className="font-color-red">Retry</span>
                                     </Button>

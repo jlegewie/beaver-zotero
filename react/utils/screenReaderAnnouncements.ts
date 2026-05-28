@@ -76,7 +76,8 @@ export function buildRunCompletionAnnouncement(run: AgentRun): string | null {
 
     if (run.status === 'error') {
         const message = run.error?.message ? toScreenReaderText(run.error.message) : 'Unknown error.';
-        return `Beaver response failed: ${message}`;
+        const punctuatedMessage = /[.!?]$/.test(message) ? message : `${message}.`;
+        return `Beaver response failed: ${punctuatedMessage} Press Tab or Enter to move to error actions, or Escape to message Beaver.`;
     }
 
     if (run.status === 'canceled') {
