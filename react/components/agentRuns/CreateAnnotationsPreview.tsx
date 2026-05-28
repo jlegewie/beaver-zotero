@@ -67,6 +67,33 @@ function pageIndexForItem(kind: 'highlight' | 'note', item: HighlightAnnotationI
     return typeof idx === 'number' ? idx : null;
 }
 
+/**
+ * Resolve the page label to display for an item: a highlight's first page
+ * location carries its own label, a note carries it at the item level. Blank
+ * labels are treated as absent so the caller falls back to the page number.
+ */
+function pageLabelForItem(kind: 'highlight' | 'note', item: HighlightAnnotationItem | NoteAnnotationItem): string | null {
+    const raw = item as any;
+    const nonBlank = (value: unknown): string | null =>
+        typeof value === 'string' && value.trim() !== '' ? value : null;
+
+    if (kind !== 'highlight') {
+        return nonBlank(raw.page_label ?? raw.pageLabel);
+    }
+
+    const locations = raw.page_locations ?? raw.pageLocations ?? raw.locations;
+    const firstLocLabel = nonBlank(locations?.[0]?.page_label ?? locations?.[0]?.pageLabel);
+    if (firstLocLabel) return firstLocLabel;
+
+    // Single-page highlights may carry only an item-level label; the create
+    // executors use it as a fallback for single-location items, so mirror that
+    // here to keep the preview chip in sync with the saved annotation label.
+    if (locations?.length === 1) {
+        return nonBlank(raw.page_label ?? raw.pageLabel);
+    }
+    return null;
+}
+
 function statusForItem(
     item: HighlightAnnotationItem | NoteAnnotationItem,
     createdByClient: Map<string, CreatedAnnotationResult[]>,
@@ -234,7 +261,14 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
                 || status === 'undone';
             if (kind === 'highlight' && canCreatePreview) {
                 const rawItem = item as any;
-                const locations = getHighlightLocations(item)
+                const rawHighlightLocations = getHighlightLocations(item);
+                // Item-level label is only a safe fallback for single-page
+                // highlights; for multi-page items each location carries its
+                // own label (mirrors the create-annotation executors).
+                const itemPageLabelFallback = rawHighlightLocations.length === 1
+                    ? (rawItem.page_label ?? rawItem.pageLabel ?? null)
+                    : null;
+                const locations = rawHighlightLocations
                     .map((loc: any) => {
                         const rawPageIndex = loc.page_idx ?? loc.pageIndex ?? loc.page_index;
                         const pageIndex = rawPageIndex !== undefined && rawPageIndex !== null
@@ -243,6 +277,7 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
                         return {
                             pageIndex,
                             boxes: loc.boxes ?? loc.boundingBoxes ?? loc.bboxes ?? loc.rects ?? [],
+                            pageLabel: loc.page_label ?? loc.pageLabel ?? itemPageLabelFallback,
                         };
                     })
                     .filter((loc: any) => loc.pageIndex >= 0 && loc.boxes.length > 0);
@@ -309,6 +344,8 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
                         const failureMessage = formatAnnotationFailureMessages(failures, noun);
                         const pageIndex = pageIndexForItem(kind, item);
                         const pageNumber = typeof pageIndex === 'number' ? pageIndex + 1 : null;
+                        const pageLabel = pageLabelForItem(kind, item);
+                        const pageDisplay = pageLabel ?? (pageNumber !== null ? String(pageNumber) : null);
 
                         const kindLabel = kind === 'highlight' ? 'Highlight Annotation' : 'Sticky Note';
                         const tooltipContent = text || rawItem.title || '';
@@ -328,8 +365,8 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
                                         {kindLabel}
                                     </span>
                                     <span className="flex-1" />
-                                    {pageNumber !== null && (
-                                        <span className="font-color-secondary text-sm">{`Page ${pageNumber}`}</span>
+                                    {pageDisplay !== null && (
+                                        <span className="font-color-secondary text-sm">{`Page ${pageDisplay}`}</span>
                                     )}
                                 </span>
                                 {tooltipContent && (
@@ -379,9 +416,9 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
                                     <div className={`truncate ${isFailed ? 'font-color-red' : ''}`}>
                                         {rawItem.title || text || `${noun} annotation`}
                                     </div>
-                                    {(isFailed || isPartial || pageNumber !== null) && (
+                                    {(isFailed || isPartial || pageDisplay !== null) && (
                                         <div className='font-color-tertiary whitespace-nowrap'>
-                                            {`Page ${pageNumber}`}
+                                            {pageDisplay !== null ? `Page ${pageDisplay}` : ''}
                                         </div>
                                     )}
                                 </div>

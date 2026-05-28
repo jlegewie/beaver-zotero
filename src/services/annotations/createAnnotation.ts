@@ -89,6 +89,20 @@ function resolveHighlightColor(color?: string | null): string {
     return HIGHLIGHT_COLORS[color] ?? DEFAULT_HIGHLIGHT_COLOR;
 }
 
+/**
+ * Return the first candidate label that is present and non-blank (after
+ * trimming), else null. A whitespace-only `/PageLabels` entry is treated as
+ * "no label" so the caller falls back to the physical page number.
+ */
+function firstNonBlankPageLabel(...candidates: (string | null | undefined)[]): string | null {
+    for (const candidate of candidates) {
+        if (typeof candidate === "string" && candidate.trim() !== "") {
+            return candidate;
+        }
+    }
+    return null;
+}
+
 /** Coerce `value` to a non-negative integer ≤ `max`. NaN/Infinity/null/negatives become 0. */
 function clampNonNegativeInt(value: unknown, max: number): number {
     if (typeof value !== 'number' || !Number.isFinite(value)) return 0;
@@ -259,13 +273,17 @@ export async function getPageGeometryForAttachment(
     const cache = Zotero.Beaver?.documentCache;
     const cached = await cache?.getMetadata(ref, filePath);
     const cachedGeometry = getCachedPageGeometry(cached, pageIndex);
-    if (cachedGeometry) return cachedGeometry;
+    if (cachedGeometry) {
+        return cachedGeometry;
+    }
 
     await getAttachmentFileStatus(attachment, false);
 
     const refreshed = await cache?.getMetadata(ref, filePath);
     const refreshedGeometry = getCachedPageGeometry(refreshed, pageIndex);
-    if (refreshedGeometry) return refreshedGeometry;
+    if (refreshedGeometry) {
+        return refreshedGeometry;
+    }
 
     if (!refreshed) {
         throw geometryError(
@@ -341,7 +359,8 @@ export async function createHighlightAnnotation(
     item.annotationText = input.text ?? "";
     item.annotationComment = input.comment ?? "";
     item.annotationColor = resolveHighlightColor(input.color);
-    item.annotationPageLabel = input.pageLabel ?? String(input.pageIndex + 1);
+    item.annotationPageLabel =
+        firstNonBlankPageLabel(input.pageLabel) ?? String(input.pageIndex + 1);
     const sortIndexField: Pick<ZoteroAnnotationItem, "annotationSortIndex"> = {
         annotationSortIndex: sortIndex,
     };
@@ -383,7 +402,8 @@ export async function createNoteAnnotation(
     item.annotationType = "note";
     item.annotationComment = input.comment;
     item.annotationColor = resolveHighlightColor(input.color);
-    item.annotationPageLabel = input.pageLabel ?? String(pageIndex + 1);
+    item.annotationPageLabel =
+        firstNonBlankPageLabel(input.pageLabel) ?? String(pageIndex + 1);
     const sortIndexField: Pick<ZoteroAnnotationItem, "annotationSortIndex"> = {
         annotationSortIndex: sortIndex,
     };

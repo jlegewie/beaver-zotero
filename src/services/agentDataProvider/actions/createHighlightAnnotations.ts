@@ -224,6 +224,14 @@ export async function executeCreateHighlightAnnotationsAction(
                 continue;
             }
 
+            // The item-level label is only a valid fallback for single-page
+            // highlights; for a multi-page item it is the first page's label,
+            // so reusing it would mislabel later pages. Per-page labels come
+            // from each loc.page_label instead.
+            const itemPageLabelFallback = item.page_locations.length === 1
+                ? (item.page_label ?? null)
+                : null;
+
             for (const loc of item.page_locations) {
                 try {
                     const ref = await createHighlightAnnotation(attachment, {
@@ -232,7 +240,7 @@ export async function executeCreateHighlightAnnotationsAction(
                         text: item.text,
                         color: item.color,
                         comment: item.comment ?? item.title,
-                        pageLabel: item.page_label ?? null,
+                        pageLabel: loc.page_label ?? itemPageLabelFallback,
                         readingOrderOffset: loc.reading_order_offset ?? null,
                     });
                     created.push({
