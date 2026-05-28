@@ -251,7 +251,14 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
                 || status === 'undone';
             if (kind === 'highlight' && canCreatePreview) {
                 const rawItem = item as any;
-                const locations = getHighlightLocations(item)
+                const rawHighlightLocations = getHighlightLocations(item);
+                // Item-level label is only a safe fallback for single-page
+                // highlights; for multi-page items each location carries its
+                // own label (mirrors the create-annotation executors).
+                const itemPageLabelFallback = rawHighlightLocations.length === 1
+                    ? (rawItem.page_label ?? rawItem.pageLabel ?? null)
+                    : null;
+                const locations = rawHighlightLocations
                     .map((loc: any) => {
                         const rawPageIndex = loc.page_idx ?? loc.pageIndex ?? loc.page_index;
                         const pageIndex = rawPageIndex !== undefined && rawPageIndex !== null
@@ -260,6 +267,7 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
                         return {
                             pageIndex,
                             boxes: loc.boxes ?? loc.boundingBoxes ?? loc.bboxes ?? loc.rects ?? [],
+                            pageLabel: loc.page_label ?? loc.pageLabel ?? itemPageLabelFallback,
                         };
                     })
                     .filter((loc: any) => loc.pageIndex >= 0 && loc.boxes.length > 0);
