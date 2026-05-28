@@ -253,8 +253,26 @@ function withLocFromRawTag<T extends CitationRef>(ref: T, rawTag: string | undef
     return loc ? ({ ...ref, loc } as T) : ref;
 }
 
+function withLoc<T extends CitationRef>(ref: T, loc: Locator | undefined): T {
+    return !ref.loc && loc ? ({ ...ref, loc } as T) : ref;
+}
+
+function withExternalSource<T extends CitationRef>(
+    ref: T,
+    source: ExternalCitationSource | undefined,
+): T {
+    return ref.kind === 'external' && !ref.source && source
+        ? ({ ...ref, source } as T)
+        : ref;
+}
+
 export function getRequestedRef(meta: CitationMetadataLike): CitationRef | null {
-    if (meta.requested_ref) return withLocFromRawTag(meta.requested_ref, meta.raw_tag);
+    if (meta.requested_ref) {
+        return withExternalSource(
+            withLocFromRawTag(meta.requested_ref, meta.raw_tag),
+            meta.external_source,
+        );
+    }
     if (!meta.raw_tag) return null;
     const match = meta.raw_tag.match(/^<citation\b([^>]*)/i);
     if (!match) return null;
@@ -264,9 +282,15 @@ export function getRequestedRef(meta: CitationMetadataLike): CitationRef | null 
 }
 
 export function getResolvedRef(meta: CitationMetadataLike): CitationRef | null {
-    if (meta.resolved_ref) return withLocFromRawTag(meta.resolved_ref, meta.raw_tag);
     const requested = getRequestedRef(meta);
     const loc = requested?.loc;
+
+    if (meta.resolved_ref) {
+        return withExternalSource(
+            withLoc(withLocFromRawTag(meta.resolved_ref, meta.raw_tag), loc),
+            meta.external_source,
+        );
+    }
 
     if (meta.library_id && meta.zotero_key) {
         return { kind: 'zotero', library_id: meta.library_id, zotero_key: meta.zotero_key, ...(loc ? { loc } : {}) };

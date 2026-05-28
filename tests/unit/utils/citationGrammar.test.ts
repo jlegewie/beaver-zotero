@@ -122,5 +122,21 @@ describe('citationGrammar', () => {
             source: 'openalex',
             loc: { kind: 'page', value: '3', raw: 'page3' },
         });
+
+        const resolvedWithRequestedLoc = getResolvedRef({
+            requested_ref: {
+                kind: 'zotero',
+                library_id: 1,
+                zotero_key: 'ATTACHMENT',
+                loc: { kind: 'page', value: '4', raw: 'page4' },
+            },
+            resolved_ref: { kind: 'zotero', library_id: 1, zotero_key: 'PARENT' },
+        });
+        expect(resolvedWithRequestedLoc).toEqual({
+            kind: 'zotero',
+            library_id: 1,
+            zotero_key: 'PARENT',
+            loc: { kind: 'page', value: '4', raw: 'page4' },
+        });
     });
 });

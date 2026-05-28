@@ -2,6 +2,7 @@ import { ZoteroItemReference } from "./zotero";
 import {
     baseCitationKey,
     type CitationRef,
+    type ExternalCitationSource,
     getRequestedRef,
     getResolvedRef,
     normalizeCitationTag,
@@ -113,7 +114,7 @@ export interface CitationMetadata {
     zotero_key?: string;
     
     // External reference fields (for external references)
-    external_source?: "semantic_scholar" | "openalex";
+    external_source?: ExternalCitationSource;
     external_source_id?: string;
     
     // Common fields for all citation types
@@ -146,10 +147,18 @@ export interface CitationMetadata {
  * Helper functions for CitationMetadata
  */
 export const isExternalCitation = (citation: CitationMetadata): boolean => {
+    const ref = getResolvedRef(citation) ?? getRequestedRef(citation);
+    if (ref) {
+        return ref.kind === 'external';
+    }
     return !!(citation.external_source && citation.external_source_id);
 };
 
 export const isZoteroCitation = (citation: CitationMetadata): boolean => {
+    const ref = getResolvedRef(citation) ?? getRequestedRef(citation);
+    if (ref) {
+        return ref.kind === 'zotero';
+    }
     return !!(citation.library_id && citation.zotero_key);
 };
 
