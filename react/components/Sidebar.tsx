@@ -61,21 +61,86 @@ interface SidebarShellProps {
 /**
  * Provides a named Beaver landmark for screen reader navigation.
  */
+const FOCUSABLE_SELECTOR = [
+    'a[href]',
+    'area[href]',
+    'button:not([disabled])',
+    'input:not([disabled]):not([type="hidden"])',
+    'select:not([disabled])',
+    'textarea:not([disabled])',
+    '[contenteditable="true"]',
+    '[tabindex]:not([tabindex="-1"])',
+].join(',');
+
+/**
+ * Returns visible, sequentially focusable elements inside Beaver.
+ */
+const getFocusableElements = (root: HTMLElement): HTMLElement[] => {
+    const win = root.ownerDocument.defaultView;
+    if (!win) return [];
+
+    const elements: HTMLElement[] = [];
+    root.querySelectorAll(FOCUSABLE_SELECTOR).forEach((node) => {
+        if (!(node instanceof win.HTMLElement)) return;
+        if (node.tabIndex < 0) return;
+        if ('disabled' in node && Boolean(node.disabled)) return;
+        if (node.closest('[hidden],[aria-hidden="true"],[inert]')) return;
+
+        const style = win.getComputedStyle(node);
+        if (!style || style.display === 'none' || style.visibility === 'hidden') return;
+        if (node.getClientRects().length === 0) return;
+
+        elements.push(node);
+    });
+
+    return elements;
+};
+
 const SidebarShell = ({
     children,
     className = "bg-sidepane h-full w-full display-flex flex-col min-w-0 relative",
     id,
     isWindow,
-}: SidebarShellProps) => (
-    <div
-        id={id}
-        className={className}
-        role={isWindow ? "main" : "region"}
-        aria-label="Beaver"
-    >
-        {children}
-    </div>
-);
+}: SidebarShellProps) => {
+    const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+        if (event.key !== 'Tab' || event.altKey || event.ctrlKey || event.metaKey || event.defaultPrevented) {
+            return;
+        }
+
+        const root = event.currentTarget;
+        const activeElement = root.ownerDocument.activeElement;
+        const win = root.ownerDocument.defaultView;
+        if (!win || !(activeElement instanceof win.HTMLElement) || !root.contains(activeElement)) {
+            return;
+        }
+
+        const focusableElements = getFocusableElements(root);
+        const activeIndex = focusableElements.indexOf(activeElement);
+        if (activeIndex === -1) {
+            return;
+        }
+
+        const nextIndex = activeIndex + (event.shiftKey ? -1 : 1);
+        if (nextIndex < 0 || nextIndex >= focusableElements.length) {
+            return;
+        }
+
+        event.preventDefault();
+        focusableElements[nextIndex].focus();
+    };
+
+    return (
+        <div
+            id={id}
+            className={className}
+            role={isWindow ? "main" : "region"}
+            aria-label="Beaver"
+            onKeyDown={handleKeyDown}
+        >
+            {children}
+        </div>
+    );
+};
 
 const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
     const inputRef = useRef<HTMLTextAreaElement>(null);

@@ -17,15 +17,38 @@ const announcedStartedRunIds = new Set<string>();
 const announcedFinishedRunIds = new Set<string>();
 
 /**
- * Optionally moves focus to a screen-reader-only response reader when a run completes.
+ * Announces run state changes and optionally moves focus to a hidden response reader.
  */
 export const ScreenReaderRunAnnouncer: React.FC<ScreenReaderRunAnnouncerProps> = ({ inputRef }) => {
     const activeRun = useAtomValue(activeRunAtom);
     const threadRuns = useAtomValue(threadRunsAtom);
+    const statusRef = useRef<HTMLDivElement | null>(null);
     const readerRef = useRef<HTMLDivElement | null>(null);
     const previousActiveRunIdRef = useRef<string | null>(null);
     const nextAnnouncementIdRef = useRef(0);
+    const [statusAnnouncement, setStatusAnnouncement] = useState('');
     const [readerAnnouncement, setReaderAnnouncement] = useState<{ id: number; text: string } | null>(null);
+
+    const announceStatus = (message: string) => {
+        nextAnnouncementIdRef.current += 1;
+        const announcementId = nextAnnouncementIdRef.current;
+        const win = statusRef.current?.ownerDocument.defaultView;
+        setStatusAnnouncement('');
+
+        const updateAnnouncement = () => {
+            if (announcementId !== nextAnnouncementIdRef.current) {
+                return;
+            }
+
+            setStatusAnnouncement(message);
+        };
+
+        if (win) {
+            win.setTimeout(updateAnnouncement, 20);
+        } else {
+            updateAnnouncement();
+        }
+    };
 
     const focusReaderText = (message: string) => {
         nextAnnouncementIdRef.current += 1;
@@ -40,7 +63,7 @@ export const ScreenReaderRunAnnouncer: React.FC<ScreenReaderRunAnnouncerProps> =
         }, 50);
     };
 
-    const focusGeneratingMessage = (run: AgentRun) => {
+    const announceGeneratingMessage = (run: AgentRun) => {
         if (!getPref('focusResponseForScreenReaders')) {
             return;
         }
@@ -49,7 +72,7 @@ export const ScreenReaderRunAnnouncer: React.FC<ScreenReaderRunAnnouncerProps> =
         }
 
         announcedStartedRunIds.add(run.id);
-        focusReaderText('Message sent. Beaver is generating a response.');
+        announceStatus('Message sent. Beaver is generating a response.');
     };
 
     const focusResponseReader = (run: AgentRun) => {
@@ -78,7 +101,7 @@ export const ScreenReaderRunAnnouncer: React.FC<ScreenReaderRunAnnouncerProps> =
         }
 
         previousActiveRunIdRef.current = activeRun.id;
-        focusGeneratingMessage(activeRun);
+        announceGeneratingMessage(activeRun);
 
         if (isTerminalRun(activeRun)) {
             focusResponseReader(activeRun);
@@ -118,15 +141,26 @@ export const ScreenReaderRunAnnouncer: React.FC<ScreenReaderRunAnnouncerProps> =
     };
 
     return (
-        <div
-            key={readerAnnouncement?.id ?? 0}
-            ref={readerRef}
-            className="sr-only"
-            tabIndex={-1}
-            onKeyDown={handleReaderKeyDown}
-        >
-            {readerAnnouncement?.text ?? ''}
-        </div>
+        <>
+            <div
+                ref={statusRef}
+                className="sr-only"
+                role="status"
+                aria-live="polite"
+                aria-atomic="true"
+            >
+                {statusAnnouncement}
+            </div>
+            <div
+                key={readerAnnouncement?.id ?? 0}
+                ref={readerRef}
+                className="sr-only"
+                tabIndex={-1}
+                onKeyDown={handleReaderKeyDown}
+            >
+                {readerAnnouncement?.text ?? ''}
+            </div>
+        </>
     );
 };
 
