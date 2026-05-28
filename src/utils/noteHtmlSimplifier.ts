@@ -285,8 +285,8 @@ export function simplifyNoteHtml(rawHtml: string, libraryID: number): Simplifica
                         originalAttrs: { item_id: itemId, page: page || undefined },
                     });
 
-                    let tag = `<citation item_id="${itemId}"`;
-                    if (page) tag += ` page="${escapeAttr(page)}"`;
+                    let tag = `<citation id="${itemId}"`;
+                    if (page) tag += ` loc="${escapeAttr(`page${page}`)}"`;
                     tag += ` label="${escapeAttr(label)}"`;
                     tag += ` ref="${ref}"/>`;
                     return tag;

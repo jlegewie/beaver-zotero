@@ -22,13 +22,19 @@ import { getAttachmentFileStatus, isRemoteAccessAvailable } from '../../src/serv
 import type { PageLabels } from '../../src/services/documentCache';
 import type { CitationMetadata } from '../types/citations';
 import { getBestPDFAttachmentAsync } from '../../src/utils/zoteroItemHelpers';
-import { normalizeCitationTag, parseRawCitationAttributes } from './citationGrammar';
+import {
+    getPageLocator,
+    getRequestedRef,
+    getResolvedRef,
+    normalizeCitationTag,
+    parseRawCitationAttributes,
+} from './citationGrammar';
 import type { PageLabelsByAttachmentId } from '../atoms/citations';
 
 // Regex for citation tags — matches self-closing and non-self-closing forms
 const CITATION_REGEX = /<citation(?:\s+([^>]*?))?\s*(\/>|>(?:.*?<\/citation>)?)/g;
 
-type PreloadFilePath =
+export type PreloadFilePath =
     | { item: Zotero.Item; filePath: string; isRemoteOnly: false }
     | { item: Zotero.Item; filePath: string; isRemoteOnly: true };
 
@@ -45,7 +51,7 @@ function addPageLabels(
     target[itemId] = { ...labels };
 }
 
-async function getPreloadFilePath(item: Zotero.Item): Promise<PreloadFilePath | null> {
+export async function getCitationPreloadFilePath(item: Zotero.Item): Promise<PreloadFilePath | null> {
     if (!item.isAttachment()) {
         const attachment = item.isRegularItem?.() ? await getBestPDFAttachmentAsync(item) : null;
         if (!attachment) return null;
@@ -75,7 +81,9 @@ export function resolvePageLabelFromLabels(
 ): string {
     if (!hasPageLabels(pageLabels)) return String(pageNumber);
     const pageIndex = pageNumber - 1;
-    return pageLabels[pageIndex] ?? String(pageNumber);
+    const label = pageLabels[pageIndex];
+    if (label == null || label.trim() === '') return String(pageNumber);
+    return label;
 }
 
 /**
@@ -96,7 +104,9 @@ export function translatePageNumberToLabelFromLabels(
     return pageStr.replace(/\d+/g, (numStr) => {
         const pageIndex = parseInt(numStr, 10) - 1;
         if (isNaN(pageIndex) || pageIndex < 0) return numStr;
-        return pageLabels[pageIndex] ?? numStr;
+        const label = pageLabels[pageIndex];
+        if (label == null || label.trim() === '') return numStr;
+        return label;
     });
 }
 
@@ -127,7 +137,7 @@ export async function preloadPageLabelsForContent(content: string): Promise<Page
             const item = Zotero.Items.getByLibraryAndKey(normalized.ref.library_id, normalized.ref.zotero_key);
             if (!item) continue;
 
-            const preloadPath = await getPreloadFilePath(item);
+            const preloadPath = await getCitationPreloadFilePath(item);
             if (!preloadPath) continue;
             const preloadItem = preloadPath.item;
             if (seen.has(preloadItem.id)) continue;
@@ -172,7 +182,7 @@ export async function preloadPageLabelsForContent(content: string): Promise<Page
  * are omitted because renderers fall back to raw page numbers.
  */
 export async function preloadPageLabelsForCitations(
-    citations: ReadonlyArray<Pick<CitationMetadata, 'library_id' | 'zotero_key' | 'pages' | 'parts'>>
+    citations: ReadonlyArray<Partial<CitationMetadata>>
 ): Promise<PageLabelsByAttachmentId> {
     const cache = Zotero.Beaver?.documentCache;
     if (!cache) return {};
@@ -181,19 +191,29 @@ export async function preloadPageLabelsForCitations(
     const labelsByAttachmentId: PageLabelsByAttachmentId = {};
 
     for (const citation of citations) {
-        if (!citation.library_id || !citation.zotero_key) continue;
-
         // Skip citations that don't have any page locators — labels aren't needed.
         const hasPages =
             (citation.pages && citation.pages.length > 0) ||
             (citation.parts || []).some((p) => (p.locations || []).length > 0);
-        if (!hasPages) continue;
+        const requestedRef = getRequestedRef(citation);
+        const resolvedRef = getResolvedRef(citation);
+        const hasPageLocator =
+            !!(requestedRef && getPageLocator(requestedRef)) ||
+            !!(resolvedRef && getPageLocator(resolvedRef));
+        if (!hasPages && !hasPageLocator) continue;
+
+        const zoteroRef = resolvedRef?.kind === 'zotero'
+            ? resolvedRef
+            : requestedRef?.kind === 'zotero'
+                ? requestedRef
+                : null;
+        if (!zoteroRef) continue;
 
         try {
-            const item = Zotero.Items.getByLibraryAndKey(citation.library_id, citation.zotero_key);
+            const item = Zotero.Items.getByLibraryAndKey(zoteroRef.library_id, zoteroRef.zotero_key);
             if (!item) continue;
 
-            const preloadPath = await getPreloadFilePath(item);
+            const preloadPath = await getCitationPreloadFilePath(item);
             if (!preloadPath) continue;
             const preloadItem = preloadPath.item;
             if (seen.has(preloadItem.id)) continue;

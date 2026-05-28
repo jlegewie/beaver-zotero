@@ -1,10 +1,9 @@
 import { ZoteroItemReference } from "../types/zotero";
 import { renderToHTML, RenderContextData } from "./citationRenderers";
-import { preloadPageLabelsForContent } from "./pageLabels";
+import { prepareCitationRenderContext } from "./citationRenderContext";
 import { hasSchemaVersionWrapper } from "../../src/utils/noteWrapper";
 import { store } from "../store";
 import { currentThreadNameAtom } from "../atoms/threads";
-import { mergePageLabelsByAttachmentIdAtom } from "../atoms/citations";
 
 /**
  * Schema version used by the Zotero note editor for modern notes.
@@ -69,19 +68,7 @@ export interface SavedNoteReference {
 
 export async function saveStreamingNote(options: SaveStreamingNoteOptions): Promise<SavedNoteReference> {
     const { markdownContent, parentReference, targetLibraryId, contextData, threadId, runId } = options;
-    const pageLabelsByAttachmentId = await preloadPageLabelsForContent(markdownContent);
-    const renderContextData = contextData
-        ? {
-            ...contextData,
-            pageLabelsByAttachmentId: {
-                ...(contextData.pageLabelsByAttachmentId ?? {}),
-                ...pageLabelsByAttachmentId,
-            },
-        }
-        : undefined;
-    if (!renderContextData) {
-        store.set(mergePageLabelsByAttachmentIdAtom, pageLabelsByAttachmentId);
-    }
+    const renderContextData = await prepareCitationRenderContext(markdownContent, contextData);
     let htmlContent = renderToHTML(markdownContent.trim(), "markdown", renderContextData);
 
     if (threadId && runId) {

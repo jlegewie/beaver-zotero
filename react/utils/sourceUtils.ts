@@ -14,6 +14,11 @@ import { safeFileExists } from '../../src/utils/zoteroUtils';
 import { getNoteContentPreviewText } from './noteText';
 import type { EditNoteOperation } from '../types/agentActions/editNote';
 import { getBeaverFooterAppendPoint } from '../../src/utils/noteEditFooter';
+import {
+    getPageLocator,
+    normalizeCitationTag,
+    parseRawCitationAttributes,
+} from './citationGrammar';
 
 // Constants
 export const MAX_NOTE_TITLE_LENGTH = 20;
@@ -829,9 +834,12 @@ function normalizeSearchFragment(html: string | undefined): string {
 }
 
 function appendCitationPageWithStyle(tag: string, label: string, style: 'short' | 'word'): string {
-    const pageMatch = tag.match(/\bpage="([^"]*)"/);
-    if (!pageMatch || !pageMatch[1]) return label;
-    const page = pageMatch[1].replace(/&quot;/g, '"').replace(/&amp;/g, '&');
+    const attrMatch = tag.match(/^<citation\b([^>]*)\/>/i);
+    const attrs = parseRawCitationAttributes(attrMatch?.[1] || '');
+    const normalized = normalizeCitationTag(attrs);
+    let page = normalized.ok ? getPageLocator(normalized.ref) : (attrs.page || null);
+    if (!page) return label;
+    page = page.replace(/&quot;/g, '"').replace(/&amp;/g, '&');
     const suffix = style === 'word' ? `, page ${page}` : `, p. ${page}`;
     const locatorWithParen = /^(.*?)(,\s*(?:p{1,2}\.|page)\s+[^)]*)(\))$/i;
     if (locatorWithParen.test(label)) {
