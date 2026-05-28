@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useId } from 'react';
 import { StopIcon, GlobalSearchIcon } from '../icons/icons';
 import { useAtom, useSetAtom, useAtomValue } from 'jotai';
 import { newThreadAtom, currentThreadIdAtom } from '../../atoms/threads';
@@ -66,6 +66,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     const isWebSearchAllowed = useAtomValue(isWebSearchAllowedAtom);
     const currentNoteItem = useAtomValue(currentNoteItemAtom);
     const pendingActionFocus = useAtomValue(pendingActionInputFocusAtom);
+    const webSearchDescriptionId = useId();
 
     // WebSocket state
     const sendWSMessage = useSetAtom(sendWSMessageAtom);
@@ -291,6 +292,12 @@ const InputArea: React.FC<InputAreaProps> = ({
         }
     };
 
+    const handleWebSearchToggle = (e: React.MouseEvent) => {
+        e.preventDefault();
+        if (isAwaitingApproval || !isWebSearchAllowed) return;
+        setIsWebSearchEnabled(!isWebSearchEnabled);
+    };
+
     const getPlaceholderText = () => {
         if (placeholder !== undefined) return placeholder;
         if (isAwaitingApproval) return "Add instructions to reject";
@@ -299,6 +306,13 @@ const InputArea: React.FC<InputAreaProps> = ({
         if (currentNoteItem) return "@ to add a source, / for actions";
         return "@ to add a source, / for actions, drag to add annotations";
     }
+
+    const webSearchTooltipContent = isWebSearchAllowed
+        ? (isWebSearchEnabled ? 'Disable web search' : 'Enable web search')
+        : 'Web search requires Beaver credits';
+    const webSearchDescription = isWebSearchAllowed
+        ? (isWebSearchEnabled ? 'Web search is enabled.' : 'Web search is disabled.')
+        : 'Web search is unavailable. It requires Beaver credits. Use a Beaver model, or enable Plus Tools in Settings, API Keys.';
 
     return (
         <div
@@ -434,9 +448,12 @@ const InputArea: React.FC<InputAreaProps> = ({
                     )}
                     <div className="flex-1" />
                     <div className="display-flex flex-row items-center gap-4">
+                        <span id={webSearchDescriptionId} className="sr-only">
+                            {webSearchDescription}
+                        </span>
                         <Tooltip
                             key={String(isWebSearchAllowed)}
-                            content={isWebSearchAllowed ? (isWebSearchEnabled ? 'Disable web search' : 'Enable web search') : 'Web search requires Beaver credits'}
+                            content={webSearchTooltipContent}
                             singleLine={isWebSearchAllowed}
                             padding={isWebSearchAllowed}
                             width={!isWebSearchAllowed ? '250px' : undefined}
@@ -450,10 +467,14 @@ const InputArea: React.FC<InputAreaProps> = ({
                             <IconButton
                                 icon={GlobalSearchIcon}
                                 variant="ghost-secondary"
-                                className="scale-12 mt-015"
+                                className={`scale-12 mt-015 ${!isWebSearchAllowed ? 'opacity-50 cursor-not-allowed' : ''}`}
                                 iconClassName={isWebSearchEnabled ? 'font-color-accent-blue stroke-width-2' : ''}
-                                onClick={() => setIsWebSearchEnabled(!isWebSearchEnabled)}
-                                disabled={isAwaitingApproval || !isWebSearchAllowed}
+                                ariaLabel="Web search"
+                                ariaPressed={isWebSearchEnabled}
+                                ariaDescribedBy={webSearchDescriptionId}
+                                ariaDisabled={isAwaitingApproval || !isWebSearchAllowed || undefined}
+                                onClick={handleWebSearchToggle}
+                                disabled={isAwaitingApproval}
                             />
                         </Tooltip>
                         <Button

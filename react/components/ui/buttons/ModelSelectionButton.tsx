@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import MenuButton from '../MenuButton';
 import { MenuItem } from '../menu/ContextMenu';
 import { BrainIcon, ArrowDownIcon, Icon } from '../../icons/icons';
@@ -9,8 +9,13 @@ import {
   updateSelectedModelAtom,
   validateSelectedModelAtom,
 } from '../../../atoms/models';
+import type { ModelConfig } from '../../../atoms/models';
 
 const MAX_MODEL_NAME_LENGTH = 25;
+
+const getModelSelectionKey = (model: Pick<ModelConfig, 'id' | 'access_mode'>) => {
+    return `${model.id}:${model.access_mode || 'app_key'}`;
+};
 
 /**
  * Component for displaying a model menu item
@@ -49,14 +54,65 @@ const ModelMenuItemContent: React.FC<{
 const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaElement>, disabled?: boolean}> = ({ inputRef, disabled = false }) => {
     const selectedModel = useAtomValue(selectedModelAtom);
     const availableModels = useAtomValue(availableModelsAtom);
+    const liveRegionRef = useRef<HTMLDivElement | null>(null);
+    const previousSelectedKeyRef = useRef<string | null>(null);
+    const hasInitializedSelectionRef = useRef(false);
+    const announcementTimerRef = useRef<{ win: Window; id: number } | null>(null);
+    const [selectionAnnouncement, setSelectionAnnouncement] = useState('');
 
     const updateSelectedModel = useSetAtom(updateSelectedModelAtom);
     const validateSelectedModel = useSetAtom(validateSelectedModelAtom);
+    const selectedKey = selectedModel ? getModelSelectionKey(selectedModel) : null;
 
     // Watch for api key changes
     useEffect(() => {
         validateSelectedModel();
     }, [availableModels, validateSelectedModel]);
+
+    useEffect(() => {
+        return () => {
+            if (announcementTimerRef.current) {
+                announcementTimerRef.current.win.clearTimeout(announcementTimerRef.current.id);
+            }
+        };
+    }, []);
+
+    useEffect(() => {
+        if (!hasInitializedSelectionRef.current) {
+            hasInitializedSelectionRef.current = true;
+            previousSelectedKeyRef.current = selectedKey;
+            return;
+        }
+
+        if (previousSelectedKeyRef.current === selectedKey) {
+            return;
+        }
+
+        previousSelectedKeyRef.current = selectedKey;
+        const message = selectedModel
+            ? `Selected AI model: ${selectedModel.name}`
+            : 'No AI model selected';
+
+        if (announcementTimerRef.current) {
+            announcementTimerRef.current.win.clearTimeout(announcementTimerRef.current.id);
+            announcementTimerRef.current = null;
+        }
+
+        // Clear first so selecting the same visible name through a different
+        // access mode is still announced by screen readers.
+        setSelectionAnnouncement('');
+        const win = liveRegionRef.current?.ownerDocument.defaultView;
+        if (!win) {
+            setSelectionAnnouncement(message);
+            return;
+        }
+
+        const id = win.setTimeout(() => {
+            setSelectionAnnouncement(message);
+            announcementTimerRef.current = null;
+        }, 50);
+        announcementTimerRef.current = { win, id };
+    }, [selectedKey, selectedModel]);
 
     const custom_models = useMemo(() => availableModels.filter((model) => model.is_custom), [availableModels]);
     const included_models = useMemo(() => availableModels.filter((model) => model.allow_app_key && model.is_enabled && !model.is_custom) || [], [availableModels]);
@@ -65,19 +121,15 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
     const menuItems = useMemo((): MenuItem[] => {
         const items: MenuItem[] = [];
 
-        // Helper to create a composite key for selection comparison
-        const getModelKey = (model: any) => {
-            return `${model.id}:${model.access_mode || 'app_key'}`;
-        };
-        const selectedKey = selectedModel ? getModelKey(selectedModel) : null;
-
         included_models.sort((a, b) => a.name.localeCompare(b.name)).forEach((model) => {
             // Create a model variant with access_mode set to 'app_key'
             const modelWithAccessMode = { ...model, access_mode: 'app_key' as const };
-            const modelKey = getModelKey(modelWithAccessMode);
+            const modelKey = getModelSelectionKey(modelWithAccessMode);
             
             items.push({
                 label: model.name,
+                role: 'menuitemradio',
+                ariaChecked: selectedKey === modelKey,
                 onClick: () => {
                     updateSelectedModel(modelWithAccessMode);
                 },
@@ -100,10 +152,12 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
             });
 
             custom_models.forEach((model) => {
-                const modelKey = getModelKey(model);
+                const modelKey = getModelSelectionKey(model);
                 
                 items.push({
                     label: model.name,
+                    role: 'menuitemradio',
+                    ariaChecked: selectedKey === modelKey,
                     onClick: () => {
                         updateSelectedModel(model);
                     },
@@ -127,10 +181,12 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
             byok_models.sort((a, b) => a.name.localeCompare(b.name)).forEach((model) => {
                 // Create a model variant with access_mode set to 'byok'
                 const modelWithAccessMode = { ...model, access_mode: 'byok' as const };
-                const modelKey = getModelKey(modelWithAccessMode);
+                const modelKey = getModelSelectionKey(modelWithAccessMode);
                 
                 items.push({
                     label: model.name,
+                    role: 'menuitemradio',
+                    ariaChecked: selectedKey === modelKey,
                     onClick: () => {
                         updateSelectedModel(modelWithAccessMode);
                     },
@@ -145,13 +201,17 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
         }
 
         return items;
-    }, [custom_models, included_models, byok_models, updateSelectedModel, selectedModel]);
+    }, [custom_models, included_models, byok_models, updateSelectedModel, selectedKey]);
 
     const getButtonLabel = () => {
         if (!selectedModel) return 'None Selected';
         return selectedModel && selectedModel.name.length > MAX_MODEL_NAME_LENGTH
             ? `${selectedModel.name.slice(0, (MAX_MODEL_NAME_LENGTH - 2))}...`
             : selectedModel?.name || '';
+    };
+
+    const getAccessibleButtonLabel = () => {
+        return selectedModel?.name || 'None Selected';
     };
 
     const handleAfterClose = () => {
@@ -179,22 +239,33 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
     }
 
     return (
-        <MenuButton
-            menuItems={menuItems}
-            variant="ghost-secondary"
-            customContent={agentComponent}
-            buttonLabel={getButtonLabel()}
-            rightIcon={ArrowDownIcon}
-            className="truncate"
-            style={dynamicStyle}
-            iconClassName="scale-11 -mr-015"
-            rightIconClassName="scale-11 -ml-1"
-            ariaLabel="Select AI Model"
-            tooltipContent={availableModels.length === 0 ? 'No models available' : 'Choose AI model'}
-            showArrow={false}
-            disabled={disabled || availableModels.length === 0}
-            onAfterClose={handleAfterClose}
-        />
+        <>
+            <div
+                ref={liveRegionRef}
+                className="sr-only"
+                role="status"
+                aria-live="polite"
+                aria-atomic="true"
+            >
+                {selectionAnnouncement}
+            </div>
+            <MenuButton
+                menuItems={menuItems}
+                variant="ghost-secondary"
+                customContent={agentComponent}
+                buttonLabel={getButtonLabel()}
+                rightIcon={ArrowDownIcon}
+                className="truncate"
+                style={dynamicStyle}
+                iconClassName="scale-11 -mr-015"
+                rightIconClassName="scale-11 -ml-1"
+                ariaLabel={`AI model: ${getAccessibleButtonLabel()}. Choose AI model`}
+                tooltipContent={availableModels.length === 0 ? 'No models available' : 'Choose AI model'}
+                showArrow={false}
+                disabled={disabled || availableModels.length === 0}
+                onAfterClose={handleAfterClose}
+            />
+        </>
     );
 };
 

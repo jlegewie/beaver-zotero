@@ -39,6 +39,10 @@ export interface MenuItem {
     isGroupHeader?: boolean;
     /** Whether this item is a divider */
     isDivider?: boolean;
+    /** Optional menu item role override for selectable menu items */
+    role?: 'menuitem' | 'menuitemradio' | 'menuitemcheckbox';
+    /** Checked state for radio or checkbox menu items */
+    ariaChecked?: boolean;
     /** Action buttons to display on hover (e.g., edit, delete) */
     actionButtons?: {
         /** Icon component for the button */
@@ -102,6 +106,23 @@ export interface ContextMenuProps {
     /** Optional custom footer content to render at the bottom of the menu */
     footer?: ReactNode;
 }
+
+/**
+ * Scrolls a focused menu item into the visible area of its menu container.
+ */
+const scrollItemIntoMenuView = (
+    menuElement: HTMLDivElement,
+    itemElement: HTMLDivElement,
+) => {
+    const menuRect = menuElement.getBoundingClientRect();
+    const itemRect = itemElement.getBoundingClientRect();
+
+    if (itemRect.top < menuRect.top) {
+        menuElement.scrollTop -= menuRect.top - itemRect.top;
+    } else if (itemRect.bottom > menuRect.bottom) {
+        menuElement.scrollTop += itemRect.bottom - menuRect.bottom;
+    }
+};
 
 /**
 * A reusable context menu component
@@ -361,8 +382,9 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
             return;
         }
 
+        const menuElement = menuRef.current;
         const focusedItem = itemRefs.current[focusedIndex];
-        if (!focusedItem) {
+        if (!menuElement || !focusedItem) {
             return;
         }
 
@@ -371,6 +393,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
         } catch (e) {
             focusedItem.focus();
         }
+        scrollItemIntoMenuView(menuElement, focusedItem);
     }, [focusedIndex, isOpen]);
     
     if (!isOpen) return null;
@@ -405,7 +428,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
                     ref={(element) => {
                         itemRefs.current[index] = element;
                     }}
-                    role={item.isGroupHeader || item.isDivider ? 'presentation' : 'menuitem'}
+                    role={item.isGroupHeader || item.isDivider ? 'presentation' : item.role ?? 'menuitem'}
                     tabIndex={focusedIndex === index && isFocusableItem(item) ? 0 : -1}
                     className={`
                         ${item.isDivider ? 'border-t border-quinary my-1' : ''}
@@ -442,6 +465,11 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
                         }
                     }}
                     aria-disabled={!item.isGroupHeader && !item.isDivider ? item.disabled : undefined}
+                    aria-checked={
+                        !item.isGroupHeader && !item.isDivider && item.ariaChecked !== undefined
+                            ? item.ariaChecked
+                            : undefined
+                    }
                     aria-label={!item.isGroupHeader && !item.isDivider ? item.label : undefined}
                 >
                     {item.isDivider ? null : item.isGroupHeader ? (

@@ -37,7 +37,7 @@ export const SettingsRow: React.FC<SettingsRowProps> = ({
     // so screen readers announce what each checkbox/select/etc. controls. Skip if
     // the control already declares its own label.
     const controlProps = React.isValidElement(control) ? (control.props as Record<string, unknown>) : null;
-    const controlHasLabel = !!controlProps && (controlProps['aria-label'] != null || controlProps['aria-labelledby'] != null);
+    const controlHasLabel = !!controlProps && (controlProps['aria-label'] != null || controlProps['aria-labelledby'] != null || controlProps.ariaLabel != null);
     const labelledControl = React.isValidElement(control) && !controlHasLabel
         ? React.cloneElement(control as React.ReactElement<Record<string, unknown>>, {
             'aria-labelledby': titleId,
@@ -72,13 +72,20 @@ export const SettingsRow: React.FC<SettingsRowProps> = ({
     );
 };
 
-export const DocLink: React.FC<{ path: string; children: React.ReactNode }> = ({ path, children }) => (
+export const DocLink: React.FC<{ path: string; children: React.ReactNode }> = ({ path, children }) => {
+    const href = `${process.env.WEBAPP_BASE_URL}/docs/${path}`;
+    return (
     <a
-        onClick={() => Zotero.launchURL(`${process.env.WEBAPP_BASE_URL}/docs/${path}`)}
+        href={href}
+        onClick={(event) => {
+            event.preventDefault();
+            Zotero.launchURL(href);
+        }}
         target="_blank"
         rel="noopener noreferrer"
         className="text-link"
     >
         {children}
     </a>
-);
+    );
+};

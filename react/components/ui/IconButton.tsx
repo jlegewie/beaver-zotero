@@ -16,6 +16,12 @@ interface IconButtonProps {
     iconClassName?: string;
     /** Accessible label for the button */
     ariaLabel?: string;
+    /** ID of an element that describes the button for assistive technology */
+    ariaDescribedBy?: string;
+    /** Whether the button is currently pressed when used as a toggle */
+    ariaPressed?: React.AriaAttributes['aria-pressed'];
+    /** Whether the button is unavailable while remaining focusable */
+    ariaDisabled?: React.AriaAttributes['aria-disabled'];
     /** Whether the button is disabled */
     disabled?: boolean;
     /** Additional style for the button */
@@ -45,7 +51,10 @@ const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(({
     loading = false,
     title,
     onMouseEnter,
-    onMouseLeave
+    onMouseLeave,
+    ariaDescribedBy,
+    ariaPressed,
+    ariaDisabled
 }, ref) => {
     // Use the existing icon-button class for ghost variant for compatibility
     // Use the variant-{type} classes for the other variants
@@ -60,6 +69,9 @@ const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(({
             className={buttonClass}
             onClick={onClick}
             aria-label={ariaLabel}
+            aria-describedby={ariaDescribedBy}
+            aria-pressed={ariaPressed}
+            aria-disabled={ariaDisabled}
             disabled={disabled || loading}
             title={title}
             type="button"

@@ -34,6 +34,7 @@ const BEAVER_PREFERENCES_WINDOW_NAME = 'beaver-preferences-window';
 export class BeaverUIFactory {
     // Store root references per window
     private static windowRoots = new WeakMap<Window, Set<any>>();
+    private static toolbarFocusHandlers = new WeakMap<Window, EventListener>();
 
     static registerChatPanel(win: BeaverWindow) {
         const windowHref = win.location?.href ?? 'unknown';
@@ -180,7 +181,8 @@ export class BeaverUIFactory {
         chatToggleBtn.setAttribute("tooltiptext", `Toggle Beaver (${shortcut})`);
         chatToggleBtn.setAttribute("aria-label", "Toggle Beaver");
         chatToggleBtn.setAttribute("aria-pressed", "false");
-        chatToggleBtn.setAttribute("tabindex", "-1");
+        chatToggleBtn.setAttribute("tabindex", "0");
+        chatToggleBtn.setAttribute("style", "-moz-user-focus: normal;");
         chatToggleBtn.addEventListener("command", () => triggerToggleChat(win));
 
         const syncButton = toolbar.querySelector("#zotero-tb-sync");
@@ -196,6 +198,105 @@ export class BeaverUIFactory {
         } else {
             toolbar.appendChild(chatToggleBtn);
         }
+
+        this.installToolbarFocusHandler(win);
+    }
+
+    /**
+     * Include the Beaver toggle in Zotero's title-bar keyboard path.
+     */
+    private static installToolbarFocusHandler(win: BeaverWindow) {
+        this.removeToolbarFocusHandler(win);
+
+        const titleBar = win.document.getElementById("zotero-title-bar");
+        if (!titleBar) {
+            return;
+        }
+
+        const isHidden = (element: Element | null): boolean => {
+            if (!element) {
+                return true;
+            }
+            const htmlElement = element as HTMLElement & { disabled?: boolean; hidden?: boolean };
+            const parent = htmlElement.parentNode as (HTMLElement & { hidden?: boolean }) | null;
+            const style = win.getComputedStyle(htmlElement);
+            return Boolean(
+                htmlElement.disabled
+                || htmlElement.hidden
+                || parent?.hidden
+                || style?.display === "none"
+            );
+        };
+
+        const focusIfVisible = (selector: string): boolean => {
+            const target = win.document.querySelector(selector) as HTMLElement | null;
+            if (isHidden(target)) {
+                return false;
+            }
+            target?.focus();
+            return true;
+        };
+
+        const getFocusDirection = (event: KeyboardEvent): "forward" | "backward" | null => {
+            if (event.altKey || event.ctrlKey || event.metaKey) {
+                return null;
+            }
+            if (event.key === "Tab") {
+                return event.shiftKey ? "backward" : "forward";
+            }
+            if (event.shiftKey) {
+                return null;
+            }
+            // Zotero's title bar treats vertical arrows like Tab/Shift+Tab.
+            if (event.key === "ArrowDown") {
+                return "forward";
+            }
+            if (event.key === "ArrowUp") {
+                return "backward";
+            }
+            return null;
+        };
+
+        const handler = ((event: KeyboardEvent) => {
+            const focusDirection = getFocusDirection(event);
+            if (!focusDirection) {
+                return;
+            }
+
+            const target = event.target as Element | null;
+            const targetId = target?.id;
+            let handled = false;
+
+            if (focusDirection === "forward" && targetId === "zotero-tb-sync-error") {
+                handled = focusIfVisible("#zotero-beaver-tb-chat-toggle");
+            } else if (focusDirection === "forward" && targetId === "zotero-beaver-tb-chat-toggle") {
+                handled = focusIfVisible("#zotero-tb-sync");
+            } else if (focusDirection === "backward" && targetId === "zotero-tb-sync") {
+                handled = focusIfVisible("#zotero-beaver-tb-chat-toggle");
+            } else if (focusDirection === "backward" && targetId === "zotero-beaver-tb-chat-toggle") {
+                handled = focusIfVisible("#zotero-tb-sync-error")
+                    || focusIfVisible("#zotero-tb-tabs-menu");
+            }
+
+            if (handled) {
+                event.preventDefault();
+                event.stopImmediatePropagation();
+            }
+        }) as EventListener;
+
+        titleBar.addEventListener("keydown", handler, true);
+        this.toolbarFocusHandlers.set(win, handler);
+    }
+
+    private static removeToolbarFocusHandler(win: BeaverWindow) {
+        const handler = this.toolbarFocusHandlers.get(win);
+        if (!handler) {
+            return;
+        }
+
+        const titleBar = win.document?.getElementById("zotero-title-bar");
+        titleBar?.removeEventListener("keydown", handler, true);
+        this.toolbarFocusHandlers.delete(win);
     }
 
     /**
@@ -295,6 +396,8 @@ export class BeaverUIFactory {
             // Only try to remove DOM elements if document is still accessible
             if (win.document) {
                 try {
+                    this.removeToolbarFocusHandler(win);
+
                     const elementIds = [
                         "beaver-pane-library",
                         "beaver-pane-reader",

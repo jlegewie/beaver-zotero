@@ -161,12 +161,10 @@ const PreferencePage: React.FC = () => {
             return;
         }
         setKeyboardShortcut(nextShortcut.toUpperCase());
-
-        // if (nextShortcut !== getPref('keyboardShortcut')) {
-        //     setPref('keyboardShortcut', nextShortcut);
-        //     BeaverUIFactory.registerShortcuts();
-        //     logger(`Updated keyboard shortcut to ${nextShortcut.toUpperCase()}`);
-        // }
+        if (nextShortcut !== getPref('keyboardShortcut')) {
+            setPref('keyboardShortcut', nextShortcut);
+            logger(`Updated keyboard shortcut to ${nextShortcut.toUpperCase()}`);
+        }
     }, []);
 
     // --- Verify Sync Handler ---
@@ -408,7 +406,8 @@ const PreferencePage: React.FC = () => {
     const rebuildIndexButtonProps = getRebuildIndexButtonProps();
     const sidebarShortcutLabel = `${Zotero.isMac ? '⌘' : 'Ctrl'}+${keyboardShortcut}`;
     const windowShortcutLabel = `${Zotero.isMac ? '⌘⇧' : 'Ctrl+Shift'}+${keyboardShortcut}`;
-    const tabs = useMemo<{ id: PreferencePageTab; label: string; icon: React.ComponentType<React.SVGProps<SVGSVGElement>> | React.ReactElement }[]>(() => [
+    type VisiblePreferencePageTab = Exclude<PreferencePageTab, 'account'>;
+    const tabs = useMemo<{ id: VisiblePreferencePageTab; label: string; icon: React.ComponentType<React.SVGProps<SVGSVGElement>> | React.ReactElement }[]>(() => [
         { id: 'general', label: 'General', icon: SettingsIcon },
         { id: 'sync', label: isDatabaseSyncSupported ? 'Sync' : 'Search', icon: isDatabaseSyncSupported ? SyncIcon : SearchIcon },
         { id: 'permissions', label: 'Permissions', icon: LockIcon },
@@ -417,6 +416,30 @@ const PreferencePage: React.FC = () => {
         { id: 'actions', label: 'Actions', icon: ZapIcon },
         { id: 'advanced', label: 'Advanced', icon: ToolsIcon },
     ], [isDatabaseSyncSupported]);
+    const effectiveActiveTab: VisiblePreferencePageTab = activeTab === 'account' ? 'general' : activeTab;
+
+    const handleTabKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+        const navigationKeys = ['ArrowLeft', 'ArrowRight', 'Home', 'End'];
+        if (!navigationKeys.includes(event.key)) {
+            return;
+        }
+
+        event.preventDefault();
+        const currentIndex = tabs.findIndex((tab) => tab.id === effectiveActiveTab);
+        const normalizedIndex = currentIndex >= 0 ? currentIndex : 0;
+        const nextIndex = event.key === 'Home'
+            ? 0
+            : event.key === 'End'
+                ? tabs.length - 1
+                : event.key === 'ArrowLeft'
+                    ? (normalizedIndex - 1 + tabs.length) % tabs.length
+                    : (normalizedIndex + 1) % tabs.length;
+        const nextTab = tabs[nextIndex];
+        setActiveTab(nextTab.id);
+        event.currentTarget.ownerDocument
+            .getElementById(`beaver-preferences-tab-${nextTab.id}`)
+            ?.focus();
+    }, [effectiveActiveTab, setActiveTab, tabs]);
 
     // Backward compatibility for existing entry points that still request "account".
     React.useEffect(() => {
@@ -433,21 +456,30 @@ const PreferencePage: React.FC = () => {
           <div className="display-flex flex-col gap-2 p-4">
             <div className="display-flex flex-row items-center gap-3 px-1">
                 <Icon icon={SettingsIcon} className="scale-16 mt-020" />
-                <h1 className="text-2xl font-semibold  font-color-primary" style={{ marginBlock: "0rem" }}>
+                <h1 id="beaver-preferences-title" className="text-2xl font-semibold  font-color-primary" style={{ marginBlock: "0rem" }}>
                     Settings
                 </h1>
                 {/* <Button variant="outline" rightIcon={CancelIcon} onClick={() => togglePreferencePage((prev) => !prev)} className="mt-1">Close</Button> */}
             </div>
 
 
-            <div className="display-flex flex-row items-center mb-3 mt-2" style={{ borderRadius: '6px', overflow: 'hidden', border: '1px solid var(--fill-quarternary)', width: 'fit-content' }}>
+            <div
+                role="tablist"
+                aria-label="Settings sections"
+                className="display-flex flex-row items-center mb-3 mt-2"
+                style={{ borderRadius: '6px', overflow: 'hidden', border: '1px solid var(--fill-quarternary)', width: 'fit-content' }}
+                onKeyDown={handleTabKeyDown}
+            >
                 {tabs.map((tab, index) => (
                     <button
                         key={tab.id}
                         type="button"
                         onClick={() => setActiveTab(tab.id)}
-                        aria-label={`Open ${tab.label} tab`}
-                        aria-pressed={tab.id === activeTab}
+                        id={`beaver-preferences-tab-${tab.id}`}
+                        role="tab"
+                        aria-selected={tab.id === effectiveActiveTab}
+                        aria-controls="beaver-preferences-panel"
+                        tabIndex={tab.id === effectiveActiveTab ? 0 : -1}
                         className="text-base"
                         style={{
                             borderLeft: index > 0 ? '1px solid var(--fill-quarternary)' : 'none',
@@ -455,8 +487,8 @@ const PreferencePage: React.FC = () => {
                             borderBottom: 'none',
                             borderRight: 'none',
                             borderRadius: 0,
-                            background: tab.id === activeTab ? 'var(--fill-quinary)' : 'transparent',
-                            color: tab.id === activeTab ? 'var(--fill-primary)' : 'var(--fill-secondary)',
+                            background: tab.id === effectiveActiveTab ? 'var(--fill-quinary)' : 'transparent',
+                            color: tab.id === effectiveActiveTab ? 'var(--fill-primary)' : 'var(--fill-secondary)',
                             padding: '4px 12px',
                             minHeight: '20px',
                             display: 'inline-flex',
@@ -477,8 +509,13 @@ const PreferencePage: React.FC = () => {
                 ))}
             </div>
 
+            <div
+                role="tabpanel"
+                id="beaver-preferences-panel"
+                aria-labelledby={`beaver-preferences-tab-${effectiveActiveTab}`}
+            >
             {/* ===== GENERAL TAB ===== */}
-            {activeTab === 'general' && (
+            {effectiveActiveTab === 'general' && (
                 <>
                     {user ? (
                         <>
@@ -588,11 +625,11 @@ const PreferencePage: React.FC = () => {
                                     }
                                 />
                                 <SettingsRow
-                                    title="Focus Completed Responses for Screen Readers"
-                                    description="Move focus to the latest Beaver response after generation finishes"
+                                    title="Announce Responses for Screen Readers"
+                                    description="Move focus to screen-reader text when Beaver starts and finishes generating a response"
                                     onClick={handleFocusResponseForScreenReadersToggle}
                                     hasBorder
-                                    tooltip="When enabled, focus moves from the chat input to a screen-reader-only copy of the completed response so VoiceOver can read it."
+                                    tooltip="When enabled, focus moves from the chat input to screen-reader-only status text while Beaver generates, then to a screen-reader-only copy of the completed response."
                                     control={
                                         <input
                                             type="checkbox"
@@ -685,7 +722,7 @@ const PreferencePage: React.FC = () => {
             )}
 
             {/* ===== SYNC TAB ===== */}
-            {activeTab === 'sync' && (
+            {effectiveActiveTab === 'sync' && (
                 <>
                     {/* <div className="text-base font-color-secondary mt-1 mb-4" style={{ paddingLeft: '2px' }}>
                         {isDatabaseSyncSupported ? (
@@ -848,29 +885,30 @@ const PreferencePage: React.FC = () => {
             )}
 
             {/* ===== PERMISSIONS TAB ===== */}
-            {activeTab === 'permissions' && (
+            {effectiveActiveTab === 'permissions' && (
                 <PermissionsSection />
             )}
 
             {/* ===== PLAN & USAGE TAB ===== */}
-            {activeTab === 'billing' && (
+            {effectiveActiveTab === 'billing' && (
                 <BillingSection />
             )}
 
             {/* ===== MODELS & API KEYS TAB ===== */}
-            {activeTab === 'models' && (
+            {effectiveActiveTab === 'models' && (
                 <ApiKeysSection />
             )}
 
             {/* ===== ACTIONS TAB ===== */}
-            {activeTab === 'actions' && (
+            {effectiveActiveTab === 'actions' && (
                 <ActionsPreferenceSection />
             )}
 
             {/* ===== ADVANCED TAB ===== */}
-            {activeTab === 'advanced' && (
+            {effectiveActiveTab === 'advanced' && (
                 <AdvancedSection />
             )}
+            </div>
 
             {/* Spacer at the bottom */}
             {/* <div style={{ height: "20px" }} /> */}
