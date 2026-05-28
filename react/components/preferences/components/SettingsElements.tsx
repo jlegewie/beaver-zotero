@@ -33,15 +33,14 @@ export const SettingsRow: React.FC<SettingsRowProps> = ({
     const titleId = React.useId();
     const descId = React.useId();
 
-    // Give the control an accessible name from the visible title (and description)
-    // so screen readers announce what each checkbox/select/etc. controls. Skip if
-    // the control already declares its own label.
+    // Give the control an accessible name from the visible title so screen
+    // readers announce what each checkbox/select/etc. controls. Avoid attaching
+    // the full row description by default because it makes keyboard navigation noisy.
     const controlProps = React.isValidElement(control) ? (control.props as Record<string, unknown>) : null;
     const controlHasLabel = !!controlProps && (controlProps['aria-label'] != null || controlProps['aria-labelledby'] != null || controlProps.ariaLabel != null);
     const labelledControl = React.isValidElement(control) && !controlHasLabel
         ? React.cloneElement(control as React.ReactElement<Record<string, unknown>>, {
             'aria-labelledby': titleId,
-            ...(description && controlProps && controlProps['aria-describedby'] == null ? { 'aria-describedby': descId } : {}),
         })
         : control;
 
