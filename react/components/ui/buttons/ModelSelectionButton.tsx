@@ -17,6 +17,20 @@ const getModelSelectionKey = (model: Pick<ModelConfig, 'id' | 'access_mode'>) =>
     return `${model.id}:${model.access_mode || 'app_key'}`;
 };
 
+const isBeaverModel = (model: Pick<ModelConfig, 'access_mode' | 'allow_app_key' | 'is_custom'>) => {
+    return !model.is_custom && (model.access_mode === 'app_key' || (!model.access_mode && model.allow_app_key));
+};
+
+const getAccessibleModelLabel = (model: ModelConfig | null, isRecommended = false) => {
+    if (!model) {
+        return 'None Selected';
+    }
+    if (isBeaverModel(model)) {
+        return isRecommended ? 'Beaver model (recommended)' : `Beaver model: ${model.name}`;
+    }
+    return model.name;
+};
+
 /**
  * Component for displaying a model menu item
  */
@@ -63,6 +77,13 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
     const updateSelectedModel = useSetAtom(updateSelectedModelAtom);
     const validateSelectedModel = useSetAtom(validateSelectedModelAtom);
     const selectedKey = selectedModel ? getModelSelectionKey(selectedModel) : null;
+    const custom_models = useMemo(() => availableModels.filter((model) => model.is_custom), [availableModels]);
+    const included_models = useMemo(() => availableModels.filter((model) => model.allow_app_key && model.is_enabled && !model.is_custom) || [], [availableModels]);
+    const byok_models = useMemo(() => availableModels.filter((model) => model.allow_byok && model.is_enabled && !model.is_custom), [availableModels]);
+    const selectedModelAccessibleLabel = getAccessibleModelLabel(
+        selectedModel,
+        !!selectedModel && included_models.length === 1 && isBeaverModel(selectedModel),
+    );
 
     // Watch for api key changes
     useEffect(() => {
@@ -90,7 +111,7 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
 
         previousSelectedKeyRef.current = selectedKey;
         const message = selectedModel
-            ? `Selected AI model: ${selectedModel.name}`
+            ? `Selected AI model: ${selectedModelAccessibleLabel}`
             : 'No AI model selected';
 
         if (announcementTimerRef.current) {
@@ -112,11 +133,7 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
             announcementTimerRef.current = null;
         }, 50);
         announcementTimerRef.current = { win, id };
-    }, [selectedKey, selectedModel]);
-
-    const custom_models = useMemo(() => availableModels.filter((model) => model.is_custom), [availableModels]);
-    const included_models = useMemo(() => availableModels.filter((model) => model.allow_app_key && model.is_enabled && !model.is_custom) || [], [availableModels]);
-    const byok_models = useMemo(() => availableModels.filter((model) => model.allow_byok && model.is_enabled && !model.is_custom), [availableModels]);
+    }, [selectedKey, selectedModel, selectedModelAccessibleLabel]);
 
     const menuItems = useMemo((): MenuItem[] => {
         const items: MenuItem[] = [];
@@ -125,9 +142,10 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
             // Create a model variant with access_mode set to 'app_key'
             const modelWithAccessMode = { ...model, access_mode: 'app_key' as const };
             const modelKey = getModelSelectionKey(modelWithAccessMode);
+            const accessibleLabel = getAccessibleModelLabel(modelWithAccessMode, included_models.length === 1);
             
             items.push({
-                label: model.name,
+                label: accessibleLabel,
                 role: 'menuitemradio',
                 ariaChecked: selectedKey === modelKey,
                 onClick: () => {
@@ -210,10 +228,6 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
             : selectedModel?.name || '';
     };
 
-    const getAccessibleButtonLabel = () => {
-        return selectedModel?.name || 'None Selected';
-    };
-
     const handleAfterClose = () => {
         if (inputRef?.current) {
             inputRef.current.focus();
@@ -259,7 +273,7 @@ const ModelSelectionButton: React.FC<{inputRef?: React.RefObject<HTMLTextAreaEle
                 style={dynamicStyle}
                 iconClassName="scale-11 -mr-015"
                 rightIconClassName="scale-11 -ml-1"
-                ariaLabel={`AI model: ${getAccessibleButtonLabel()}. Choose AI model`}
+                ariaLabel={`AI model: ${selectedModelAccessibleLabel}. Choose AI model`}
                 tooltipContent={availableModels.length === 0 ? 'No models available' : 'Choose AI model'}
                 showArrow={false}
                 disabled={disabled || availableModels.length === 0}
