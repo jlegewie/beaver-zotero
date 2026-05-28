@@ -89,6 +89,20 @@ function resolveHighlightColor(color?: string | null): string {
     return HIGHLIGHT_COLORS[color] ?? DEFAULT_HIGHLIGHT_COLOR;
 }
 
+/**
+ * Return the first candidate label that is present and non-blank (after
+ * trimming), else null. A whitespace-only `/PageLabels` entry is treated as
+ * "no label" so the caller falls back to the physical page number.
+ */
+function firstNonBlankPageLabel(...candidates: (string | null | undefined)[]): string | null {
+    for (const candidate of candidates) {
+        if (typeof candidate === "string" && candidate.trim() !== "") {
+            return candidate;
+        }
+    }
+    return null;
+}
+
 /** Coerce `value` to a non-negative integer ≤ `max`. NaN/Infinity/null/negatives become 0. */
 function clampNonNegativeInt(value: unknown, max: number): number {
     if (typeof value !== 'number' || !Number.isFinite(value)) return 0;
@@ -224,12 +238,34 @@ function getCachedPageGeometry(
 }
 
 /**
- * Resolve a page's cached geometry, refreshing document metadata on cache miss.
+ * Resolve the PDF's `/PageLabels` label for a page from cached metadata.
+ *
+ * Keyed by 0-based page index (as a string) in the document cache. This is the
+ * same label source Zotero's reader uses for manually created annotations, so
+ * Beaver annotations show the same logical page label (e.g. "226", "iv")
+ * instead of the physical page number. Null when the PDF defines no label.
+ */
+function getCachedPageLabel(
+    cached: { pageLabels?: Record<string, string> | null } | null | undefined,
+    pageIndex: number,
+): string | null {
+    return cached?.pageLabels?.[String(pageIndex)] ?? null;
+}
+
+export interface ResolvedAnnotationPage {
+    geometry: PageGeometry;
+    /** PDF `/PageLabels` label for the page, or null when none is defined. */
+    pageLabel: string | null;
+}
+
+/**
+ * Resolve a page's cached geometry and PDF page label, refreshing document
+ * metadata on cache miss.
  */
 export async function getPageGeometryForAttachment(
     attachment: Zotero.Item,
     pageIndex: number,
-): Promise<PageGeometry> {
+): Promise<ResolvedAnnotationPage> {
     if (!attachment.isPDFAttachment()) {
         throw new Error("getPageGeometryForAttachment: attachment is not a PDF");
     }
@@ -259,13 +295,17 @@ export async function getPageGeometryForAttachment(
     const cache = Zotero.Beaver?.documentCache;
     const cached = await cache?.getMetadata(ref, filePath);
     const cachedGeometry = getCachedPageGeometry(cached, pageIndex);
-    if (cachedGeometry) return cachedGeometry;
+    if (cachedGeometry) {
+        return { geometry: cachedGeometry, pageLabel: getCachedPageLabel(cached, pageIndex) };
+    }
 
     await getAttachmentFileStatus(attachment, false);
 
     const refreshed = await cache?.getMetadata(ref, filePath);
     const refreshedGeometry = getCachedPageGeometry(refreshed, pageIndex);
-    if (refreshedGeometry) return refreshedGeometry;
+    if (refreshedGeometry) {
+        return { geometry: refreshedGeometry, pageLabel: getCachedPageLabel(refreshed, pageIndex) };
+    }
 
     if (!refreshed) {
         throw geometryError(
@@ -319,7 +359,7 @@ export async function createHighlightAnnotation(
         throw new Error("createHighlightAnnotation: attachment is not a PDF");
     }
 
-    const geometry = await getPageGeometryForAttachment(
+    const { geometry, pageLabel: cachedPageLabel } = await getPageGeometryForAttachment(
         attachment,
         input.pageIndex,
     );
@@ -341,7 +381,8 @@ export async function createHighlightAnnotation(
     item.annotationText = input.text ?? "";
     item.annotationComment = input.comment ?? "";
     item.annotationColor = resolveHighlightColor(input.color);
-    item.annotationPageLabel = input.pageLabel ?? String(input.pageIndex + 1);
+    item.annotationPageLabel =
+        firstNonBlankPageLabel(input.pageLabel, cachedPageLabel) ?? String(input.pageIndex + 1);
     const sortIndexField: Pick<ZoteroAnnotationItem, "annotationSortIndex"> = {
         annotationSortIndex: sortIndex,
     };
@@ -368,7 +409,7 @@ export async function createNoteAnnotation(
     }
 
     const pageIndex = input.notePosition.page_index;
-    const geometry = await getPageGeometryForAttachment(attachment, pageIndex);
+    const { geometry, pageLabel: cachedPageLabel } = await getPageGeometryForAttachment(attachment, pageIndex);
     const rect = computeNoteRect(input.notePosition, geometry);
     const sortIndex = buildSortIndex({
         pageIndex,
@@ -383,7 +424,8 @@ export async function createNoteAnnotation(
     item.annotationType = "note";
     item.annotationComment = input.comment;
     item.annotationColor = resolveHighlightColor(input.color);
-    item.annotationPageLabel = input.pageLabel ?? String(pageIndex + 1);
+    item.annotationPageLabel =
+        firstNonBlankPageLabel(input.pageLabel, cachedPageLabel) ?? String(pageIndex + 1);
     const sortIndexField: Pick<ZoteroAnnotationItem, "annotationSortIndex"> = {
         annotationSortIndex: sortIndex,
     };
