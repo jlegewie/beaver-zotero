@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeCitationKeyFromAttrs, getFullCitationKey, parseCitationAttributes } from '../../../react/types/citations';
+import { computeCitationKeyFromAttrs, getCitationKey, getFullCitationKey, parseCitationAttributes } from '../../../react/types/citations';
 
 describe('parseCitationAttributes', () => {
     describe('double-quoted attributes', () => {
@@ -129,6 +129,58 @@ describe('parseCitationAttributes', () => {
                 sid: 's343',
                 page: '4',
             })).toBe('zotero:1-ABC:s343:page=4');
+        });
+
+        it('builds base keys from structured refs', () => {
+            expect(getCitationKey({
+                resolved_ref: { kind: 'zotero', library_id: 1, zotero_key: 'RESOLVED' },
+            })).toBe('zotero:1-RESOLVED');
+
+            expect(getCitationKey({
+                requested_ref: { kind: 'external', source: 'openalex', external_id: 'W123' },
+            })).toBe('external:openalex:W123');
+        });
+
+        it('keeps ref-only footer citations from collapsing to the empty key', () => {
+            const keys = [
+                getCitationKey({
+                    resolved_ref: { kind: 'zotero', library_id: 1, zotero_key: 'SOURCE1' },
+                }),
+                getCitationKey({
+                    resolved_ref: { kind: 'zotero', library_id: 1, zotero_key: 'SOURCE2' },
+                }),
+            ];
+
+            expect(keys).toEqual(['zotero:1-SOURCE1', 'zotero:1-SOURCE2']);
+            expect(new Set(keys).size).toBe(2);
+            expect(keys).not.toContain('');
+        });
+
+        it('uses structured refs before stale legacy identity fields', () => {
+            expect(getCitationKey({
+                library_id: 1,
+                zotero_key: 'STALE',
+                external_source_id: 'STALE',
+                resolved_ref: { kind: 'external', source: 'openalex', external_id: 'W123' },
+            })).toBe('external:openalex:W123');
+
+            expect(getCitationKey({
+                library_id: 1,
+                zotero_key: 'STALE',
+                requested_ref: { kind: 'zotero', library_id: 2, zotero_key: 'REQUESTED' },
+            })).toBe('zotero:2-REQUESTED');
+        });
+
+        it('uses raw tags only after structured and legacy identity fields', () => {
+            expect(getCitationKey({
+                library_id: 1,
+                zotero_key: 'LEGACY',
+                raw_tag: '<citation item_id="2-RAW"/>',
+            })).toBe('zotero:1-LEGACY');
+
+            expect(getCitationKey({
+                raw_tag: '<citation item_id="2-RAW"/>',
+            })).toBe('zotero:2-RAW');
         });
     });
 });

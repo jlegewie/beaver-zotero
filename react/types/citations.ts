@@ -147,7 +147,7 @@ export interface CitationMetadata {
  * Helper functions for CitationMetadata
  */
 export const isExternalCitation = (citation: CitationMetadata): boolean => {
-    const ref = getResolvedRef(citation) ?? getRequestedRef(citation);
+    const ref = getCitationIdentityRef(citation);
     if (ref) {
         return ref.kind === 'external';
     }
@@ -155,7 +155,7 @@ export const isExternalCitation = (citation: CitationMetadata): boolean => {
 };
 
 export const isZoteroCitation = (citation: CitationMetadata): boolean => {
-    const ref = getResolvedRef(citation) ?? getRequestedRef(citation);
+    const ref = getCitationIdentityRef(citation);
     if (ref) {
         return ref.kind === 'zotero';
     }
@@ -171,7 +171,11 @@ export interface CitationKeyParams {
     library_id?: number;
     zotero_key?: string;
     // External reference
+    external_source?: ExternalCitationSource;
     external_source_id?: string;
+    requested_ref?: CitationRef;
+    resolved_ref?: CitationRef;
+    raw_tag?: string;
 }
 
 /**
@@ -183,20 +187,52 @@ export interface CitationKeyParams {
  * 
  * Key format:
  * - Zotero citations: "zotero:{library_id}-{zotero_key}"
- * - External citations: "external:{external_source_id}"
+ * - Structured external citations: "external:{source}:{external_id}"
+ * - Legacy external citations: "external:{external_source_id}"
  * - Unknown: "" (empty string)
  * 
  * @param params Citation key parameters
  * @returns Base citation key string
  */
 export function getCitationKey(params: CitationKeyParams): string {
+    const ref = getCitationIdentityRef(params);
+    if (ref) {
+        return baseCitationKey(ref);
+    }
     if (params.library_id && params.zotero_key) {
         return `zotero:${params.library_id}-${params.zotero_key}`;
     }
     if (params.external_source_id) {
         return `external:${params.external_source_id}`;
     }
+    const rawRef = getRequestedRef({ external_source: params.external_source, raw_tag: params.raw_tag });
+    if (rawRef) {
+        return baseCitationKey(rawRef);
+    }
     return '';
+}
+
+function getStructuredCitationRef(params: CitationKeyParams): CitationRef | null {
+    if (params.resolved_ref) {
+        return getResolvedRef({
+            resolved_ref: params.resolved_ref,
+            requested_ref: params.requested_ref,
+            external_source: params.external_source,
+            raw_tag: params.raw_tag,
+        });
+    }
+    if (params.requested_ref) {
+        return getRequestedRef({
+            requested_ref: params.requested_ref,
+            external_source: params.external_source,
+            raw_tag: params.raw_tag,
+        });
+    }
+    return null;
+}
+
+function getCitationIdentityRef(params: CitationKeyParams): CitationRef | null {
+    return getStructuredCitationRef(params);
 }
 
 /**
