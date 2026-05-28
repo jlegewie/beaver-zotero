@@ -5,6 +5,10 @@ import { AgentRun } from '../../agents/types';
 import { buildRunCompletionAnnouncement, extractAssistantResponseText } from '../../utils/screenReaderAnnouncements';
 import { getPref } from '../../../src/utils/prefs';
 
+interface ScreenReaderRunAnnouncerProps {
+    inputRef?: React.RefObject<HTMLTextAreaElement | null>;
+}
+
 function isTerminalRun(run: AgentRun): boolean {
     return run.status === 'completed' || run.status === 'error' || run.status === 'canceled';
 }
@@ -15,7 +19,7 @@ const announcedFinishedRunIds = new Set<string>();
 /**
  * Optionally moves focus to a screen-reader-only response reader when a run completes.
  */
-export const ScreenReaderRunAnnouncer: React.FC = () => {
+export const ScreenReaderRunAnnouncer: React.FC<ScreenReaderRunAnnouncerProps> = ({ inputRef }) => {
     const activeRun = useAtomValue(activeRunAtom);
     const threadRuns = useAtomValue(threadRunsAtom);
     const readerRef = useRef<HTMLDivElement | null>(null);
@@ -58,7 +62,7 @@ export const ScreenReaderRunAnnouncer: React.FC = () => {
 
         const responseText = run.status === 'completed' ? extractAssistantResponseText(run) : '';
         const message = responseText
-            ? `Beaver response: ${responseText}`
+            ? `Beaver response: ${responseText} End of response. Press Enter to message Beaver.`
             : buildRunCompletionAnnouncement(run);
         if (!message) {
             return;
@@ -99,12 +103,27 @@ export const ScreenReaderRunAnnouncer: React.FC = () => {
         }
     }, [activeRun, threadRuns]);
 
+    const handleReaderKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+        if (event.key !== 'Enter' && event.key !== 'Escape' && event.key !== 'Tab') {
+            return;
+        }
+
+        const input = inputRef?.current;
+        if (!input) {
+            return;
+        }
+
+        event.preventDefault();
+        input.focus();
+    };
+
     return (
         <div
             key={readerAnnouncement?.id ?? 0}
             ref={readerRef}
             className="sr-only"
             tabIndex={-1}
+            onKeyDown={handleReaderKeyDown}
         >
             {readerAnnouncement?.text ?? ''}
         </div>

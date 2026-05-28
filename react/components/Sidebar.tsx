@@ -210,7 +210,7 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
     if (isFirstRunVisible) {
         return (
             <div className="bg-sidepane h-full w-full display-flex flex-col min-w-0 relative">
-                <ScreenReaderRunAnnouncer />
+                <ScreenReaderRunAnnouncer inputRef={inputRef} />
                 <Header isWindow={isWindow} />
                 <FirstRunPage isWindow={isWindow} inputRef={inputRef} />
                 <DialogContainer />
@@ -236,7 +236,7 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
     {/* Main page */}
     return (
         <div className="bg-sidepane h-full w-full display-flex flex-col min-w-0 relative">
-            <ScreenReaderRunAnnouncer />
+            <ScreenReaderRunAnnouncer inputRef={inputRef} />
 
             {/* Header */}
             <Header isWindow={isWindow} />
