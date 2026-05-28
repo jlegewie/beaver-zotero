@@ -408,6 +408,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                             e.currentTarget.style.height = `${e.currentTarget.scrollHeight}px`;
                         }}
                         placeholder={getPlaceholderText()}
+                        aria-label="Message Beaver"
                         className="chat-input"
                         onKeyDown={(e) => {
                             // When slash menu is open, handle navigation and dismiss keys
@@ -457,6 +458,13 @@ const InputArea: React.FC<InputAreaProps> = ({
                         </Tooltip>
                         <Button
                             rightIcon={isPending && !(isAwaitingApproval && messageContent.trim().length > 0) ? StopIcon : undefined}
+                            ariaLabel={
+                                isAwaitingApproval && messageContent.trim().length > 0
+                                    ? pendingApprovalsMap.size > 1 ? 'Reject all proposed actions' : 'Reject proposed action'
+                                    : isPending
+                                        ? 'Stop generating'
+                                        : 'Send message'
+                            }
                             type="button"
                             variant={
                                 (
