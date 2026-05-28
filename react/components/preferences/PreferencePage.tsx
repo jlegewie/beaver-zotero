@@ -61,8 +61,6 @@ const PreferencePage: React.FC = () => {
     const connectionStatus = useAtomValue(connectionStatusAtom);
     const setFileStatus = useSetAtom(fileStatusAtom);
     const [activeTab, setActiveTab] = useAtom(activePreferencePageTabAtom);
-    const tabListRef = React.useRef<HTMLDivElement | null>(null);
-    const hasFocusedInitialTabRef = React.useRef(false);
 
     // --- Manual File Status Refresh (when no real-time subscription) ---
     const [manualRefreshTime, setManualRefreshTime] = useState<Date | null>(null);
@@ -443,25 +441,6 @@ const PreferencePage: React.FC = () => {
             ?.focus();
     }, [effectiveActiveTab, setActiveTab, tabs]);
 
-    React.useEffect(() => {
-        if (hasFocusedInitialTabRef.current) {
-            return;
-        }
-
-        const doc = tabListRef.current?.ownerDocument;
-        const win = doc?.defaultView;
-        if (!doc || !win) {
-            return;
-        }
-
-        const timeoutId = win.setTimeout(() => {
-            doc.getElementById(`beaver-preferences-tab-${effectiveActiveTab}`)?.focus();
-            hasFocusedInitialTabRef.current = true;
-        }, 0);
-
-        return () => win.clearTimeout(timeoutId);
-    }, [effectiveActiveTab]);
-
     // Backward compatibility for existing entry points that still request "account".
     React.useEffect(() => {
         if (activeTab === 'account') {
@@ -485,7 +464,6 @@ const PreferencePage: React.FC = () => {
 
 
             <div
-                ref={tabListRef}
                 role="tablist"
                 aria-label="Settings sections"
                 className="display-flex flex-row items-center mb-3 mt-2"

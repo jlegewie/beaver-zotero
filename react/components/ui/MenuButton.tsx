@@ -162,4 +162,4 @@ const MenuButton: React.FC<MenuButtonProps> = ({
     );
 };
 
-export default MenuButton; 
+export default MenuButton;

@@ -295,8 +295,7 @@ const InputArea: React.FC<InputAreaProps> = ({
         }
     };
 
-    const handleWebSearchToggle = (e: React.MouseEvent) => {
-        e.preventDefault();
+    const handleWebSearchToggle = () => {
         if (isAwaitingApproval || !isWebSearchAllowed) return;
         setIsWebSearchEnabled(!isWebSearchEnabled);
     };
@@ -470,14 +469,13 @@ const InputArea: React.FC<InputAreaProps> = ({
                             <IconButton
                                 icon={GlobalSearchIcon}
                                 variant="ghost-secondary"
-                                className={`scale-12 mt-015 ${!isWebSearchAllowed ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                className="scale-12 mt-015"
                                 iconClassName={isWebSearchEnabled ? 'font-color-accent-blue stroke-width-2' : ''}
                                 ariaLabel="Web search"
                                 ariaPressed={isWebSearchEnabled}
                                 ariaDescribedBy={webSearchDescriptionId}
-                                ariaDisabled={isAwaitingApproval || !isWebSearchAllowed || undefined}
                                 onClick={handleWebSearchToggle}
-                                disabled={isAwaitingApproval}
+                                disabled={isAwaitingApproval || !isWebSearchAllowed}
                             />
                         </Tooltip>
                         <Button
