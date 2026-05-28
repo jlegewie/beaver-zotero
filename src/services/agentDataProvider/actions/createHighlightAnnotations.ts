@@ -227,7 +227,7 @@ export async function executeCreateHighlightAnnotationsAction(
             // The item-level label is only a valid fallback for single-page
             // highlights; for a multi-page item it is the first page's label,
             // so reusing it would mislabel later pages. Per-page labels come
-            // from each loc.page_label (or the cache) instead.
+            // from each loc.page_label instead.
             const itemPageLabelFallback = item.page_locations.length === 1
                 ? (item.page_label ?? null)
                 : null;

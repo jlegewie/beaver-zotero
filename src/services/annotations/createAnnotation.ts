@@ -8,10 +8,6 @@ import { PageGeometry } from "../../beaver-extract/types";
 import { getAttachmentFileStatus } from "../agentDataProvider/utils";
 import { isRemoteFilePath } from "../documentFileIdentity";
 import { BEAVER_ANNOTATION_AUTHOR } from "../../constants/annotations";
-import { ensurePageLabelsForResolution } from "../agentDataProvider/pageLabelResolution";
-import type { DocumentCacheMetadata } from "../documentCache";
-import { BeaverExtractor } from "../../beaver-extract";
-import { logger } from "../../utils/logger";
 import {
     displayBoxToZoteroRect,
     sourceBboxesToZoteroRects,
@@ -242,65 +238,12 @@ function getCachedPageGeometry(
 }
 
 /**
- * Resolve the PDF's `/PageLabels` label for a page from cached metadata.
- *
- * Keyed by 0-based page index (as a string) in the document cache. This is the
- * same label source Zotero's reader uses for manually created annotations, so
- * Beaver annotations show the same logical page label (e.g. "226", "iv")
- * instead of the physical page number. Null when the PDF defines no label.
- */
-function getCachedPageLabel(
-    cached: { pageLabels?: Record<string, string> | null } | null | undefined,
-    pageIndex: number,
-): string | null {
-    return cached?.pageLabels?.[String(pageIndex)] ?? null;
-}
-
-/**
- * Resolve the page label for a cached-geometry hit.
- *
- * A metadata row's `pageLabels === null` is the "not yet checked" sentinel
- * (vs `{}` = "checked, no custom labels"). Older cache rows written before
- * label extraction can carry geometry but a null label map; for those, do a
- * cheap metadata-only load (page labels + count, no full re-extraction) rather
- * than silently falling back to the physical page number. `filePath` is
- * guaranteed local here — the caller rejects remote attachments earlier.
- */
-async function resolveCachedPageLabel(
-    cached: DocumentCacheMetadata | null | undefined,
-    filePath: string,
-    pageIndex: number,
-): Promise<string | null> {
-    if (cached?.pageLabels != null) {
-        return getCachedPageLabel(cached, pageIndex);
-    }
-    try {
-        const result = await ensurePageLabelsForResolution(
-            filePath,
-            cached ?? null,
-            new BeaverExtractor(),
-        );
-        return result.labels?.[pageIndex] ?? null;
-    } catch (error) {
-        logger(`resolveCachedPageLabel: eager label load failed: ${error}`, 1);
-        return null;
-    }
-}
-
-export interface ResolvedAnnotationPage {
-    geometry: PageGeometry;
-    /** PDF `/PageLabels` label for the page, or null when none is defined. */
-    pageLabel: string | null;
-}
-
-/**
- * Resolve a page's cached geometry and PDF page label, refreshing document
- * metadata on cache miss.
+ * Resolve a page's cached geometry, refreshing document metadata on cache miss.
  */
 export async function getPageGeometryForAttachment(
     attachment: Zotero.Item,
     pageIndex: number,
-): Promise<ResolvedAnnotationPage> {
+): Promise<PageGeometry> {
     if (!attachment.isPDFAttachment()) {
         throw new Error("getPageGeometryForAttachment: attachment is not a PDF");
     }
@@ -331,8 +274,7 @@ export async function getPageGeometryForAttachment(
     const cached = await cache?.getMetadata(ref, filePath);
     const cachedGeometry = getCachedPageGeometry(cached, pageIndex);
     if (cachedGeometry) {
-        const pageLabel = await resolveCachedPageLabel(cached, filePath, pageIndex);
-        return { geometry: cachedGeometry, pageLabel };
+        return cachedGeometry;
     }
 
     await getAttachmentFileStatus(attachment, false);
@@ -340,7 +282,7 @@ export async function getPageGeometryForAttachment(
     const refreshed = await cache?.getMetadata(ref, filePath);
     const refreshedGeometry = getCachedPageGeometry(refreshed, pageIndex);
     if (refreshedGeometry) {
-        return { geometry: refreshedGeometry, pageLabel: getCachedPageLabel(refreshed, pageIndex) };
+        return refreshedGeometry;
     }
 
     if (!refreshed) {
@@ -395,7 +337,7 @@ export async function createHighlightAnnotation(
         throw new Error("createHighlightAnnotation: attachment is not a PDF");
     }
 
-    const { geometry, pageLabel: cachedPageLabel } = await getPageGeometryForAttachment(
+    const geometry = await getPageGeometryForAttachment(
         attachment,
         input.pageIndex,
     );
@@ -418,7 +360,7 @@ export async function createHighlightAnnotation(
     item.annotationComment = input.comment ?? "";
     item.annotationColor = resolveHighlightColor(input.color);
     item.annotationPageLabel =
-        firstNonBlankPageLabel(input.pageLabel, cachedPageLabel) ?? String(input.pageIndex + 1);
+        firstNonBlankPageLabel(input.pageLabel) ?? String(input.pageIndex + 1);
     const sortIndexField: Pick<ZoteroAnnotationItem, "annotationSortIndex"> = {
         annotationSortIndex: sortIndex,
     };
@@ -445,7 +387,7 @@ export async function createNoteAnnotation(
     }
 
     const pageIndex = input.notePosition.page_index;
-    const { geometry, pageLabel: cachedPageLabel } = await getPageGeometryForAttachment(attachment, pageIndex);
+    const geometry = await getPageGeometryForAttachment(attachment, pageIndex);
     const rect = computeNoteRect(input.notePosition, geometry);
     const sortIndex = buildSortIndex({
         pageIndex,
@@ -461,7 +403,7 @@ export async function createNoteAnnotation(
     item.annotationComment = input.comment;
     item.annotationColor = resolveHighlightColor(input.color);
     item.annotationPageLabel =
-        firstNonBlankPageLabel(input.pageLabel, cachedPageLabel) ?? String(pageIndex + 1);
+        firstNonBlankPageLabel(input.pageLabel) ?? String(pageIndex + 1);
     const sortIndexField: Pick<ZoteroAnnotationItem, "annotationSortIndex"> = {
         annotationSortIndex: sortIndex,
     };
