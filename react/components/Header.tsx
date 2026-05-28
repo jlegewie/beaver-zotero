@@ -95,7 +95,7 @@ const Header: React.FC<HeaderProps> = ({ onClose, isWindow = false }) => {
                             icon={CancelIcon}
                             onClick={handleClose}
                             className="scale-14"
-                            ariaLabel="Close chat"
+                            ariaLabel="Close Beaver panel"
                         />
                     </Tooltip>
                 )}
@@ -180,7 +180,7 @@ const Header: React.FC<HeaderProps> = ({ onClose, isWindow = false }) => {
                     {/* User account menu */}
                     <UserAccountMenuButton
                         className="scale-14"
-                        ariaLabel="User settings"
+                        ariaLabel="Beaver settings"
                     />
                 </div>
             )}

@@ -57,6 +57,14 @@ export function useToggleSidebar() {
                 }
             });
 
+            // Announce the state change to screen readers, and when closing
+            // move focus to the toolbar button so it isn't lost on the now
+            // hidden sidebar content.
+            uiManager.announceSidebarState(newIsVisible);
+            if (!newIsVisible) {
+                uiManager.focusToggleButton();
+            }
+
             return newIsVisible;
         });
     });

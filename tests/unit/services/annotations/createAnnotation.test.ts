@@ -159,8 +159,116 @@ describe("createAnnotation geometry primitives", () => {
   });
 
   describe("buildSortIndex", () => {
-    it("clamps negative coordinates to Zotero's non-negative sort-index format", () => {
-      expect(buildSortIndex(1, [-120, 404, 20, 420])).toBe("00001|000404|00000");
+    const SORT_INDEX_REGEX = /^\d{5}\|\d{6}\|\d{5}$/;
+
+    it("emits page|offset|top in the canonical Zotero PDF format", () => {
+      // viewBox [0,0,400,600], rect top = 420 → displayTop = 600 - 420 = 180.
+      // No reading-order offset supplied, so offset falls back to displayTop.
+      expect(
+        buildSortIndex({
+          pageIndex: 1,
+          viewBox: [0, 0, 400, 600],
+          rect: [50, 404, 200, 420],
+        }),
+      ).toBe("00001|000180|00180");
+    });
+
+    it("uses the supplied reading-order offset as the offset", () => {
+      // Same rect/viewBox; readingOrderOffset=7 wins over displayTop in field 2.
+      // Field 3 is still displayTop (180).
+      expect(
+        buildSortIndex({
+          pageIndex: 1,
+          viewBox: [0, 0, 400, 600],
+          rect: [50, 404, 200, 420],
+          readingOrderOffset: 7,
+        }),
+      ).toBe("00001|000007|00180");
+    });
+
+    it("uses displayTop, not left-x, in the third field", () => {
+      // Two annotations on the same logical line should NOT differ in field 3
+      // by their left-x — they sort by displayTop instead. With identical
+      // rect[3] and different rect[0], field 3 stays the same.
+      const left = buildSortIndex({
+        pageIndex: 0,
+        viewBox: [0, 0, 400, 600],
+        rect: [50, 404, 200, 420],
+      });
+      const right = buildSortIndex({
+        pageIndex: 0,
+        viewBox: [0, 0, 400, 600],
+        rect: [250, 404, 380, 420],
+      });
+      expect(left).toBe(right);
+    });
+
+    it("preserves reading order across two sentences in the same paragraph", () => {
+      // Two highlights in the same visual paragraph; backend assigns
+      // consecutive reading-order indices. The earlier one must lex-sort
+      // before the later one regardless of their rect y values.
+      const sentenceA = buildSortIndex({
+        pageIndex: 6,
+        viewBox: [0, 0, 400, 600],
+        rect: [50, 400, 200, 420],
+        readingOrderOffset: 5,
+      });
+      const sentenceB = buildSortIndex({
+        pageIndex: 6,
+        viewBox: [0, 0, 400, 600],
+        // Slightly higher rect[3] (lower displayTop) than A — without the
+        // readingOrderOffset, displayTop would order B *before* A. The
+        // readingOrderOffset must win.
+        rect: [50, 410, 200, 440],
+        readingOrderOffset: 6,
+      });
+      expect(sentenceA < sentenceB).toBe(true);
+    });
+
+    it("computes displayTop from viewBox[3] - rect[3] (handles cropbox offset)", () => {
+      // Cropbox [10, 20, 410, 620]: a bbox 30pt below display top has
+      // rect[3] = viewBox[3] - 30 = 590. displayTop should be 30, not 10
+      // (which is what pageHeight - rect[3] would give).
+      expect(
+        buildSortIndex({
+          pageIndex: 0,
+          viewBox: [10, 20, 410, 620],
+          rect: [50, 570, 200, 590],
+        }),
+      ).toBe("00000|000030|00030");
+    });
+
+    it("handles negative, NaN, Infinity, and missing values as zero", () => {
+      // readingOrderOffset absent + invalid rect/viewBox → all-zero fields,
+      // still matching the canonical regex.
+      const out = buildSortIndex({
+        pageIndex: -5,
+        viewBox: [0, 0, Number.NaN, 600],
+        rect: [Number.NaN, Number.POSITIVE_INFINITY, 0, Number.NEGATIVE_INFINITY],
+      });
+      expect(out).toBe("00000|000000|00000");
+      expect(out).toMatch(SORT_INDEX_REGEX);
+
+      // null readingOrderOffset falls back to displayTop computation.
+      const outNull = buildSortIndex({
+        pageIndex: 0,
+        viewBox: [0, 0, 400, 600],
+        rect: [50, 404, 200, 420],
+        readingOrderOffset: null,
+      });
+      expect(outNull).toBe("00000|000180|00180");
+    });
+
+    it("clamps oversized values so the format regex always validates", () => {
+      const out = buildSortIndex({
+        pageIndex: 10_000_000,
+        viewBox: [0, 0, 0, 10_000_000],
+        rect: [0, 0, 0, -1],
+        readingOrderOffset: 10_000_000,
+      });
+      expect(out).toMatch(SORT_INDEX_REGEX);
+      // page clamped to 99999, offset clamped to 999999, top clamped to 99999.
+      expect(out).toBe("99999|999999|99999");
     });
   });
 

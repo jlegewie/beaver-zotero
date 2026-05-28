@@ -59,9 +59,10 @@ const PreferenceToggle: React.FC<PreferenceToggleProps> = ({
         >
             <div className="display-flex flex-row gap-2 items-start">
                 <input
-                    type="checkbox" 
+                    type="checkbox"
                     className={`mr-1 scale-90 ${tag ? 'mt-15' : 'mt-020'}`}
                     style={{minWidth: 'auto'}}
+                    aria-label={subtitle ? `${title} ${subtitle}` : title}
                     checked={checked}
                     onChange={handleToggle}
                     onClick={(e) => e.stopPropagation()}

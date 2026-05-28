@@ -382,6 +382,8 @@ export const BeaverTemporaryAnnotations = {
 interface TemporaryHighlightLocation {
     pageIndex: number;
     boxes: BoundingBox[];
+    /** PDF page label for this page; falls back to the page number when absent. */
+    pageLabel?: string | null;
 }
 
 /**
@@ -511,17 +513,24 @@ export const createBoundingBoxHighlights = async (
         const annotationReferences: ZoteroItemReference[] = [];
         
         const pageGroups = new Map<number, BoundingBox[][]>();
-        for (const { pageIndex, boxes } of boundingBoxData) {
+        const pageLabels = new Map<number, string | null>();
+        for (const { pageIndex, boxes, pageLabel } of boundingBoxData) {
             if (!pageGroups.has(pageIndex)) {
                 pageGroups.set(pageIndex, []);
             }
             pageGroups.get(pageIndex)!.push(boxes);
+            // First non-blank label seen for the page wins; entries on the same
+            // page carry the same label.
+            if (!pageLabels.get(pageIndex) && typeof pageLabel === 'string' && pageLabel.trim() !== '') {
+                pageLabels.set(pageIndex, pageLabel);
+            }
         }
-        
+
         const color = options.color ?? '#00bbff';
 
         // Create one annotation per page with combined rects
         for (const [pageIndex, allBboxesOnPage] of pageGroups) {
+            const pageLabel = pageLabels.get(pageIndex) ?? (pageIndex + 1).toString();
             const { viewBox, rotation, width, height } = await getPageViewportInfo(reader, pageIndex);
             const geometry = {
                 viewBox: [viewBox[0], viewBox[1], viewBox[2], viewBox[3]] as [number, number, number, number],
@@ -558,7 +567,7 @@ export const createBoundingBoxHighlights = async (
                 comment: '',
                 text: previewText,
                 authorName: 'Beaver',
-                pageLabel: (pageIndex + 1).toString(),
+                pageLabel,
                 isExternal: false,
                 readOnly: false,
                 lastModifiedByUser: '',
@@ -570,7 +579,7 @@ export const createBoundingBoxHighlights = async (
                 annotationText: annotationText,
                 annotationComment: '',
                 annotationColor: color,
-                annotationPageLabel: '',
+                annotationPageLabel: pageLabel,
                 annotationSortIndex: `${pageIndex.toString().padStart(5, '0')}|000000|00000`,
                 annotationPosition: JSON.stringify({
                     pageIndex: pageIndex,

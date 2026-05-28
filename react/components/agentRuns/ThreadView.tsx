@@ -414,8 +414,10 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
         }
 
         return (
-            <div 
+            <div
                 id="beaver-thread-view"
+                role="log"
+                aria-label="Chat history"
                 className={`display-flex flex-col flex-1 min-h-0 overflow-y-auto gap-4 scrollbar min-w-0 pb-4 ${className || ''}`}
                 onScroll={handleScroll}
                 ref={setScrollContainerRef}
