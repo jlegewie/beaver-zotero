@@ -34,6 +34,7 @@ export function useObservePaneCollapse(location: SidebarLocation) {
                         // Cleanup the pane and update the toolbar button
                         uiManager.handleCleanup(location);
                         uiManager.updateToolbarButton(false);
+                        uiManager.announceSidebarState(false);
                         // Close the sidebar
                         setSidebarVisible(false);
                     }

@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, type ReactNode } from 'react';
 import InputArea from "./input/InputArea"
 import Header from "./Header"
 import { useEventSubscription } from '../hooks/useEventSubscription';
@@ -44,11 +44,103 @@ import {
 import UpdateRequiredPage from './pages/UpdateRequiredPage';
 import FirstRunPage from './pages/FirstRunPage';
 import { isFirstRunVisibleAtom } from '../atoms/firstRun';
+import ScreenReaderRunAnnouncer from './agentRuns/ScreenReaderRunAnnouncer';
 
 interface SidebarProps {
     location: 'library' | 'reader';
     isWindow?: boolean;
 }
+
+interface SidebarShellProps {
+    children: ReactNode;
+    className?: string;
+    id?: string;
+    isWindow: boolean;
+}
+
+/**
+ * Provides a named Beaver landmark for screen reader navigation.
+ */
+const FOCUSABLE_SELECTOR = [
+    'a[href]',
+    'area[href]',
+    'button:not([disabled])',
+    'input:not([disabled]):not([type="hidden"])',
+    'select:not([disabled])',
+    'textarea:not([disabled])',
+    '[contenteditable="true"]',
+    '[tabindex]:not([tabindex="-1"])',
+].join(',');
+
+/**
+ * Returns visible, sequentially focusable elements inside Beaver.
+ */
+const getFocusableElements = (root: HTMLElement): HTMLElement[] => {
+    const win = root.ownerDocument.defaultView;
+    if (!win) return [];
+
+    const elements: HTMLElement[] = [];
+    root.querySelectorAll(FOCUSABLE_SELECTOR).forEach((node) => {
+        if (!(node instanceof win.HTMLElement)) return;
+        if (node.tabIndex < 0) return;
+        if ('disabled' in node && Boolean(node.disabled)) return;
+        if (node.closest('[hidden],[aria-hidden="true"],[inert]')) return;
+
+        const style = win.getComputedStyle(node);
+        if (!style || style.display === 'none' || style.visibility === 'hidden') return;
+        if (node.getClientRects().length === 0) return;
+
+        elements.push(node);
+    });
+
+    return elements;
+};
+
+const SidebarShell = ({
+    children,
+    className = "bg-sidepane h-full w-full display-flex flex-col min-w-0 relative",
+    id,
+    isWindow,
+}: SidebarShellProps) => {
+    const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+        if (event.key !== 'Tab' || event.altKey || event.ctrlKey || event.metaKey || event.defaultPrevented) {
+            return;
+        }
+
+        const root = event.currentTarget;
+        const activeElement = root.ownerDocument.activeElement;
+        const win = root.ownerDocument.defaultView;
+        if (!win || !(activeElement instanceof win.HTMLElement) || !root.contains(activeElement)) {
+            return;
+        }
+
+        const focusableElements = getFocusableElements(root);
+        const activeIndex = focusableElements.indexOf(activeElement);
+        if (activeIndex === -1) {
+            return;
+        }
+
+        const nextIndex = activeIndex + (event.shiftKey ? -1 : 1);
+        if (nextIndex < 0 || nextIndex >= focusableElements.length) {
+            return;
+        }
+
+        event.preventDefault();
+        focusableElements[nextIndex].focus();
+    };
+
+    return (
+        <div
+            id={id}
+            className={className}
+            role={isWindow ? "main" : "region"}
+            aria-label="Beaver"
+            onKeyDown={handleKeyDown}
+        >
+            {children}
+        </div>
+    );
+};
 
 const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
     const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -103,7 +195,11 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
 
     if (isLoadingThread || isMigratingData) {
         return (
-            <div id="thread-loading" className="display-flex flex-col flex-1 w-full">
+            <SidebarShell
+                id="thread-loading"
+                className="display-flex flex-col flex-1 w-full"
+                isWindow={isWindow}
+            >
                 <Header isWindow={isWindow} />
                 <div className="display-flex flex-1 items-center justify-center">
                     <div className="display-flex flex-col items-center gap-3">
@@ -113,18 +209,18 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
                         </span>
                     </div>
                 </div>
-            </div>
+            </SidebarShell>
         );
     }
 
     {/* Login page — only when there is no session at all. */}
     if (!isAuthenticated) {
         return (
-            <div className="bg-sidepane h-full w-full display-flex flex-col min-w-0 relative">
+            <SidebarShell isWindow={isWindow}>
                 <Header isWindow={isWindow} />
                 <LoginPage emailInputRef={loginEmailRef} />
                 <DialogContainer />
-            </div>
+            </SidebarShell>
         );
     }
 
@@ -133,44 +229,44 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
         cause when a transient network failure cleared isProfileLoaded. */}
     if (!isProfileLoaded) {
         return (
-            <div className="bg-sidepane h-full w-full display-flex flex-col min-w-0 relative">
+            <SidebarShell isWindow={isWindow}>
                 <Header isWindow={isWindow} />
                 <ProfileLoadingPage />
                 <DialogContainer />
-            </div>
+            </SidebarShell>
         );
     }
 
     {/* Update required page - blocks access until user updates */}
     if (updateRequired) {
         return (
-            <div className="bg-sidepane h-full w-full display-flex flex-col min-w-0 relative">
+            <SidebarShell isWindow={isWindow}>
                 <Header isWindow={isWindow} />
                 <UpdateRequiredPage />
                 <DialogContainer />
-            </div>
+            </SidebarShell>
         );
     }
 
     {/* Plan transition: Downgrade acknowledgment page (Pro → Free) */}
     if (pendingDowngradeAck) {
         return (
-            <div className="bg-sidepane h-full w-full display-flex flex-col min-w-0 relative">
+            <SidebarShell isWindow={isWindow}>
                 <Header isWindow={isWindow} />
                 <DowngradeAcknowledgmentPage />
                 <DialogContainer />
-            </div>
+            </SidebarShell>
         );
     }
 
     {/* Plan transition: Upgrade consent page (Free → Pro) */}
     if (pendingUpgradeConsent) {
         return (
-            <div className="bg-sidepane h-full w-full display-flex flex-col min-w-0 relative">
+            <SidebarShell isWindow={isWindow}>
                 <Header isWindow={isWindow} />
                 <UpgradeConsentPage />
                 <DialogContainer />
-            </div>
+            </SidebarShell>
         );
     }
 
@@ -184,22 +280,22 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
     
     if (needsOnboarding) {
         return (
-            <div className="bg-sidepane h-full w-full display-flex flex-col min-w-0 relative">
+            <SidebarShell isWindow={isWindow}>
                 <Header isWindow={isWindow} />
                 <OnboardingRouter />
                 <DialogContainer />
-            </div>
+            </SidebarShell>
         );
     }
 
     {/* Device authorization page */}
     if (!isDeviceAuthorized) {
         return (
-            <div className="bg-sidepane h-full w-full display-flex flex-col min-w-0 relative">
+            <SidebarShell isWindow={isWindow}>
                 <Header isWindow={isWindow} />
                 <DeviceAuthorizationPage />
                 <DialogContainer />
-            </div>
+            </SidebarShell>
         );
     }
 
@@ -208,11 +304,12 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
         - Free user, device authorized, never completed first-run on this account. */}
     if (isFirstRunVisible) {
         return (
-            <div className="bg-sidepane h-full w-full display-flex flex-col min-w-0 relative">
+            <SidebarShell isWindow={isWindow}>
+                <ScreenReaderRunAnnouncer inputRef={inputRef} surface={isWindow ? 'window' : 'sidebar'} />
                 <Header isWindow={isWindow} />
                 <FirstRunPage isWindow={isWindow} inputRef={inputRef} />
                 <DialogContainer />
-            </div>
+            </SidebarShell>
         );
     }
 
@@ -233,7 +330,8 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
 
     {/* Main page */}
     return (
-        <div className="bg-sidepane h-full w-full display-flex flex-col min-w-0 relative">
+        <SidebarShell isWindow={isWindow}>
+            <ScreenReaderRunAnnouncer inputRef={inputRef} surface={isWindow ? 'window' : 'sidebar'} />
 
             {/* Header */}
             <Header isWindow={isWindow} />
@@ -281,7 +379,7 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
 
             {/* Dialog Container */}
             <DialogContainer />
-        </div>
+        </SidebarShell>
     );
 };
 
