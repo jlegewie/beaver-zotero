@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
     baseCitationKey,
+    citationIndexCandidateIdsForLocator,
     externalCompatKey,
     getPageLocator,
     getRequestedRef,
@@ -31,6 +32,13 @@ describe('citationGrammar', () => {
         expect(parseLoc('table3')).toEqual({ kind: 'table', value: '3', raw: 'table3' });
         expect(parseLoc('tab3')).toEqual({ kind: 'table', value: '3', raw: 'tab3' });
         expect(parseLoc('p10-p12')).toEqual({ kind: 'paragraph', value: '10-12', raw: 'p10-p12' });
+    });
+
+    it('maps accepted locator aliases to structured citation index ids', () => {
+        expect(citationIndexCandidateIdsForLocator(parseLoc('paragraph12')!)).toEqual(['p12']);
+        expect(citationIndexCandidateIdsForLocator(parseLoc('tab3')!)).toEqual(['table3']);
+        expect(citationIndexCandidateIdsForLocator(parseLoc('p10-p12')!)).toEqual(['p10', 'p12']);
+        expect(citationIndexCandidateIdsForLocator(parseLoc('heading3')!)).toEqual(['heading3']);
     });
 
     it('keeps unknown and legacy page locators stable', () => {

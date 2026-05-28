@@ -5,29 +5,14 @@ import { citationDataMapAtom } from '../atoms/citations';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../atoms/externalReferences';
 import { CITATION_TAG_PATTERN } from './citationPreprocessing';
 import {
+    citationIndexCandidateIdsForLocator,
     normalizeCitationTag,
     parseRawCitationAttributes,
     requestedCitationKey,
+    type Locator,
 } from './citationGrammar';
 import { getCitationPreloadFilePath, preloadPageLabelsForContent } from './pageLabels';
 import type { CitationIndexEntry, StructuredExtractResult } from '../../src/beaver-extract/schema/schema';
-
-function locatorCandidateIds(raw: string): string[] {
-    const ids = new Set<string>([raw]);
-    const parts = raw.split('-');
-    if (parts.length === 2 && parts[0] && parts[1]) {
-        const left = parts[0];
-        const right = parts[1];
-        ids.add(left);
-        if (/^[A-Za-z_]/.test(right)) {
-            ids.add(right);
-        } else {
-            const prefix = left.match(/^[A-Za-z_]+/)?.[0];
-            ids.add(prefix ? `${prefix}${right}` : right);
-        }
-    }
-    return [...ids];
-}
 
 function citationPartsFromEntries(entries: CitationIndexEntry[]): CitationPart[] {
     const byPage = new Map<number, CitationPart>();
@@ -55,12 +40,12 @@ function pageLabelsFromEntries(entries: CitationIndexEntry[]): Record<number, st
 
 function resolveEntriesFromStructuredResult(
     result: StructuredExtractResult,
-    rawLocator: string,
+    locator: Locator,
 ): CitationIndexEntry[] {
     const index = result.document.citationIndex ?? {};
     const entries: CitationIndexEntry[] = [];
     const seen = new Set<string>();
-    for (const id of locatorCandidateIds(rawLocator)) {
+    for (const id of citationIndexCandidateIdsForLocator(locator)) {
         const entry = index[id];
         if (!entry || seen.has(entry.id)) continue;
         seen.add(entry.id);
@@ -124,7 +109,7 @@ export async function buildLocalCitationDataMapForContent(
             const result = await resultPromise;
             if (!result) continue;
 
-            const entries = resolveEntriesFromStructuredResult(result, normalized.ref.loc.raw);
+            const entries = resolveEntriesFromStructuredResult(result, normalized.ref.loc);
             const parts = citationPartsFromEntries(entries);
             if (parts.length === 0) continue;
 

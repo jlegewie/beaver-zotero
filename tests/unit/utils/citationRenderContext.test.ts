@@ -55,6 +55,20 @@ function structuredResult() {
                     itemId: 'p4',
                     sentenceId: 's26',
                 },
+                p12: {
+                    id: 'p12',
+                    kind: 'item',
+                    pageIndex: 1,
+                    pageLabel: '6',
+                    itemId: 'p12',
+                },
+                table3: {
+                    id: 'table3',
+                    kind: 'item',
+                    pageIndex: 4,
+                    pageLabel: '12',
+                    itemId: 'table3',
+                },
             },
         },
     };
@@ -135,6 +149,27 @@ describe('citation render context', () => {
             9: { 0: 'i' },
             42: { 2: '7' },
         });
+    });
+
+    it('resolves accepted locator aliases through canonical citation-index ids', async () => {
+        const map = await buildLocalCitationDataMapForContent(
+            [
+                'Paragraph <citation id="1-ATTACH01" loc="paragraph12"/>',
+                'Table <citation id="1-ATTACH01" loc="tab3"/>',
+            ].join('\n')
+        );
+
+        expect(map['local:zotero:1-ATTACH01:paragraph12']?.parts).toEqual([
+            { part_id: 'p12', locations: [{ page_idx: 1 }] },
+        ]);
+        expect(map['local:zotero:1-ATTACH01:paragraph12']?.pages).toEqual([2]);
+        expect(map['local:zotero:1-ATTACH01:paragraph12']?.page_labels).toEqual({ 1: '6' });
+
+        expect(map['local:zotero:1-ATTACH01:tab3']?.parts).toEqual([
+            { part_id: 'table3', locations: [{ page_idx: 4 }] },
+        ]);
+        expect(map['local:zotero:1-ATTACH01:tab3']?.pages).toEqual([5]);
+        expect(map['local:zotero:1-ATTACH01:tab3']?.page_labels).toEqual({ 4: '12' });
     });
 
     it('does not synthesize metadata for explicit page locators', async () => {
