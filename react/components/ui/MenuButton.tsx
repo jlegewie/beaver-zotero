@@ -121,7 +121,7 @@ const MenuButton: React.FC<MenuButtonProps> = ({
             :
                 <>
                     {icon && <Icon icon={icon} className={iconClassName} />}
-                    {buttonLabel && <span className="sr-only">{buttonLabel}</span>}
+                    {buttonLabel && <span>{buttonLabel}</span>}
                     {rightIcon && <Icon icon={rightIcon} className={rightIconClassName} />}
                 </>
             }
