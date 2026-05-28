@@ -203,9 +203,13 @@ export function normalizePageLocations(raw: any): PageLocation[] | undefined {
                     ? rawReadingOrder
                     : (rawReadingOrder === null ? null : undefined);
 
+            const rawPageLabel = loc?.page_label ?? loc?.pageLabel;
+            const pageLabel = typeof rawPageLabel === 'string' ? rawPageLabel : null;
+
             return {
                 page_idx: pageIndex,
                 boxes,
+                page_label: pageLabel,
                 ...(readingOrderOffset !== undefined ? { reading_order_offset: readingOrderOffset } : {}),
             } as PageLocation;
         })

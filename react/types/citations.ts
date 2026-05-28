@@ -91,6 +91,8 @@ export interface PageLocation {
     /** Physical or logical location inside an attachment. */
     page_idx: number; // 0-based page index
     boxes?: BoundingBox[];
+    /** PDF /PageLabels label for this page, or null when none is defined. */
+    page_label?: string | null;
     /** Per-page cumulative character offset in reading order (Zotero sortIndex offset). */
     reading_order_offset?: number | null;
 }

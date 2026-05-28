@@ -56,6 +56,7 @@ describe("annotation action normalization", () => {
       ).toEqual([
         {
           page_idx: 2,
+          page_label: null,
           boxes: [
             {
               l: 10,
@@ -92,6 +93,25 @@ describe("annotation action normalization", () => {
         locations: [{ page_idx: 1, boxes: [] }],
       });
       expect(out?.[0].reading_order_offset).toBeUndefined();
+    });
+
+    it("carries the per-page page_label through (snake_case and camelCase)", () => {
+      const snake = normalizePageLocations({
+        locations: [{ page_idx: 1, boxes: [], page_label: "226" }],
+      });
+      expect(snake?.[0].page_label).toBe("226");
+
+      const camel = normalizePageLocations({
+        locations: [{ page_idx: 1, boxes: [], pageLabel: "iv" }],
+      });
+      expect(camel?.[0].page_label).toBe("iv");
+    });
+
+    it("sets page_label to null when absent", () => {
+      const out = normalizePageLocations({
+        locations: [{ page_idx: 1, boxes: [] }],
+      });
+      expect(out?.[0].page_label).toBeNull();
     });
   });
 });

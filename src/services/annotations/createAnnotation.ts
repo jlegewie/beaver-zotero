@@ -8,6 +8,10 @@ import { PageGeometry } from "../../beaver-extract/types";
 import { getAttachmentFileStatus } from "../agentDataProvider/utils";
 import { isRemoteFilePath } from "../documentFileIdentity";
 import { BEAVER_ANNOTATION_AUTHOR } from "../../constants/annotations";
+import { ensurePageLabelsForResolution } from "../agentDataProvider/pageLabelResolution";
+import type { DocumentCacheMetadata } from "../documentCache";
+import { BeaverExtractor } from "../../beaver-extract";
+import { logger } from "../../utils/logger";
 import {
     displayBoxToZoteroRect,
     sourceBboxesToZoteroRects,
@@ -252,6 +256,37 @@ function getCachedPageLabel(
     return cached?.pageLabels?.[String(pageIndex)] ?? null;
 }
 
+/**
+ * Resolve the page label for a cached-geometry hit.
+ *
+ * A metadata row's `pageLabels === null` is the "not yet checked" sentinel
+ * (vs `{}` = "checked, no custom labels"). Older cache rows written before
+ * label extraction can carry geometry but a null label map; for those, do a
+ * cheap metadata-only load (page labels + count, no full re-extraction) rather
+ * than silently falling back to the physical page number. `filePath` is
+ * guaranteed local here — the caller rejects remote attachments earlier.
+ */
+async function resolveCachedPageLabel(
+    cached: DocumentCacheMetadata | null | undefined,
+    filePath: string,
+    pageIndex: number,
+): Promise<string | null> {
+    if (cached?.pageLabels != null) {
+        return getCachedPageLabel(cached, pageIndex);
+    }
+    try {
+        const result = await ensurePageLabelsForResolution(
+            filePath,
+            cached ?? null,
+            new BeaverExtractor(),
+        );
+        return result.labels?.[pageIndex] ?? null;
+    } catch (error) {
+        logger(`resolveCachedPageLabel: eager label load failed: ${error}`, 1);
+        return null;
+    }
+}
+
 export interface ResolvedAnnotationPage {
     geometry: PageGeometry;
     /** PDF `/PageLabels` label for the page, or null when none is defined. */
@@ -296,7 +331,8 @@ export async function getPageGeometryForAttachment(
     const cached = await cache?.getMetadata(ref, filePath);
     const cachedGeometry = getCachedPageGeometry(cached, pageIndex);
     if (cachedGeometry) {
-        return { geometry: cachedGeometry, pageLabel: getCachedPageLabel(cached, pageIndex) };
+        const pageLabel = await resolveCachedPageLabel(cached, filePath, pageIndex);
+        return { geometry: cachedGeometry, pageLabel };
     }
 
     await getAttachmentFileStatus(attachment, false);
