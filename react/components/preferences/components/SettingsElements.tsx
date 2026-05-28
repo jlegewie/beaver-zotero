@@ -29,31 +29,48 @@ interface SettingsRowProps {
 /** Individual setting row with title, description, and optional control */
 export const SettingsRow: React.FC<SettingsRowProps> = ({
     title, description, control, onClick, disabled, tooltip, hasBorder = false, className = ''
-}) => (
-    <div
-        className={`display-flex flex-row items-center justify-between gap-4 ${hasBorder ? 'border-top-quinary' : ''} ${onClick && !disabled ? 'cursor-pointer' : ''} ${disabled ? 'opacity-60 cursor-not-allowed' : ''} ${className}`}
-        style={{ padding: '8px 12px', minHeight: '38px' }}
-        onClick={(e) => {
-            if (disabled || !onClick) return;
-            const target = e.target as HTMLElement;
-            if (target.tagName === 'A' || target.closest('a')) return;
-            onClick();
-        }}
-        title={tooltip}
-    >
-        <div className="display-flex flex-col gap-05 flex-1 min-w-0">
-            <div className="font-color-primary text-base font-medium">{title}</div>
-            {description && (
-                <div className="font-color-secondary text-base">{description}</div>
+}) => {
+    const titleId = React.useId();
+    const descId = React.useId();
+
+    // Give the control an accessible name from the visible title (and description)
+    // so screen readers announce what each checkbox/select/etc. controls. Skip if
+    // the control already declares its own label.
+    const controlProps = React.isValidElement(control) ? (control.props as Record<string, unknown>) : null;
+    const controlHasLabel = !!controlProps && (controlProps['aria-label'] != null || controlProps['aria-labelledby'] != null);
+    const labelledControl = React.isValidElement(control) && !controlHasLabel
+        ? React.cloneElement(control as React.ReactElement<Record<string, unknown>>, {
+            'aria-labelledby': titleId,
+            ...(description && controlProps && controlProps['aria-describedby'] == null ? { 'aria-describedby': descId } : {}),
+        })
+        : control;
+
+    return (
+        <div
+            className={`display-flex flex-row items-center justify-between gap-4 ${hasBorder ? 'border-top-quinary' : ''} ${onClick && !disabled ? 'cursor-pointer' : ''} ${disabled ? 'opacity-60 cursor-not-allowed' : ''} ${className}`}
+            style={{ padding: '8px 12px', minHeight: '38px' }}
+            onClick={(e) => {
+                if (disabled || !onClick) return;
+                const target = e.target as HTMLElement;
+                if (target.tagName === 'A' || target.closest('a')) return;
+                onClick();
+            }}
+            title={tooltip}
+        >
+            <div className="display-flex flex-col gap-05 flex-1 min-w-0">
+                <div id={titleId} className="font-color-primary text-base font-medium">{title}</div>
+                {description && (
+                    <div id={descId} className="font-color-secondary text-base">{description}</div>
+                )}
+            </div>
+            {control && (
+                <div className="display-flex flex-row items-center flex-shrink-0">
+                    {labelledControl}
+                </div>
             )}
         </div>
-        {control && (
-            <div className="display-flex flex-row items-center flex-shrink-0">
-                {control}
-            </div>
-        )}
-    </div>
-);
+    );
+};
 
 export const DocLink: React.FC<{ path: string; children: React.ReactNode }> = ({ path, children }) => (
     <a

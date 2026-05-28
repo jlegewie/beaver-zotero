@@ -2537,9 +2537,16 @@
 }
 
 [id^="beaver-pane-"] .thread-list-item-hovered .thread-list-item-actions,
-[id^="beaver-pane-"] .thread-list-item-editing .thread-list-item-actions {
+[id^="beaver-pane-"] .thread-list-item-editing .thread-list-item-actions,
+[id^="beaver-pane-"] .thread-list-item:focus-within .thread-list-item-actions {
     opacity: 1;
     pointer-events: auto;
+}
+
+[id^="beaver-pane-"] .thread-list-item:focus-visible,
+[id^="beaver-pane-"] .recent-chats-item:focus-visible {
+    outline: 2px solid var(--accent-blue);
+    outline-offset: -2px;
 }
 
 [id^="beaver-pane-"] .thread-rename-input {

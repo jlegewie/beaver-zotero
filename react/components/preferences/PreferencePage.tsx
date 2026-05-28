@@ -743,6 +743,7 @@ const PreferencePage: React.FC = () => {
                                             )}
                                             <input
                                                 type="checkbox"
+                                                aria-label="Coordinate with Zotero Sync"
                                                 checked={localSyncToggle}
                                                 onChange={() => handleSyncToggleChange(!localSyncToggle)}
                                                 onClick={(e) => e.stopPropagation()}
