@@ -304,8 +304,8 @@ function normalizeHighlightAnnotationItem(item: any): HighlightAnnotationItem {
 }
 
 function normalizeNoteAnnotationItem(item: any): NoteAnnotationItem {
-    const rawReadingOrder = item?.reading_order_index ?? item?.readingOrderIndex;
-    const readingOrderIndex =
+    const rawReadingOrder = item?.reading_order_offset ?? item?.readingOrderOffset;
+    const readingOrderOffset =
         typeof rawReadingOrder === 'number' && Number.isFinite(rawReadingOrder)
             ? rawReadingOrder
             : (rawReadingOrder === null ? null : undefined);
@@ -318,7 +318,7 @@ function normalizeNoteAnnotationItem(item: any): NoteAnnotationItem {
             x: 0,
             y: 0,
         },
-        ...(readingOrderIndex !== undefined ? { reading_order_index: readingOrderIndex } : {}),
+        ...(readingOrderOffset !== undefined ? { reading_order_offset: readingOrderOffset } : {}),
     };
 }
 

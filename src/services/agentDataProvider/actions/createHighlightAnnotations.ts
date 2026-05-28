@@ -233,7 +233,7 @@ export async function executeCreateHighlightAnnotationsAction(
                         color: item.color,
                         comment: item.comment ?? item.title,
                         pageLabel: item.page_label ?? null,
-                        readingOrderIndex: loc.reading_order_index ?? null,
+                        readingOrderOffset: loc.reading_order_offset ?? null,
                     });
                     created.push({
                         client_item_id: item.client_item_id,

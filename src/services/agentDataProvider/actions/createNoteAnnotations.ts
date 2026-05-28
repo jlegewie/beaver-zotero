@@ -44,8 +44,8 @@ function getActionData(request: WSAgentActionValidateRequest | WSAgentActionExec
 }
 
 function normalizeItem(raw: any): NoteAnnotationItem {
-    const rawReadingOrder = raw?.reading_order_index ?? raw?.readingOrderIndex;
-    const readingOrderIndex =
+    const rawReadingOrder = raw?.reading_order_offset ?? raw?.readingOrderOffset;
+    const readingOrderOffset =
         typeof rawReadingOrder === 'number' && Number.isFinite(rawReadingOrder)
             ? rawReadingOrder
             : (rawReadingOrder === null ? null : undefined);
@@ -63,7 +63,7 @@ function normalizeItem(raw: any): NoteAnnotationItem {
             y: 0,
         },
         page_label: raw?.page_label ?? raw?.pageLabel ?? null,
-        ...(readingOrderIndex !== undefined ? { reading_order_index: readingOrderIndex } : {}),
+        ...(readingOrderOffset !== undefined ? { reading_order_offset: readingOrderOffset } : {}),
     };
 }
 
@@ -228,7 +228,7 @@ export async function executeCreateNoteAnnotationsAction(
                     comment: item.comment,
                     color: 'yellow',
                     pageLabel: item.page_label ?? null,
-                    readingOrderIndex: item.reading_order_index ?? null,
+                    readingOrderOffset: item.reading_order_offset ?? null,
                 });
                 created.push({
                     client_item_id: item.client_item_id,

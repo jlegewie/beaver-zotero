@@ -72,7 +72,7 @@ export interface CreateHighlightInput {
     comment?: string | null;
     pageLabel?: string | null;
     /** Backend-supplied per-page cumulative character offset in reading order. */
-    readingOrderIndex?: number | null;
+    readingOrderOffset?: number | null;
 }
 
 export interface CreateNoteInput {
@@ -80,8 +80,8 @@ export interface CreateNoteInput {
     comment: string;
     color?: string | null;
     pageLabel?: string | null;
-    /** See CreateHighlightInput.readingOrderIndex. */
-    readingOrderIndex?: number | null;
+    /** See CreateHighlightInput.readingOrderOffset. */
+    readingOrderOffset?: number | null;
 }
 
 function resolveHighlightColor(color?: string | null): string {
@@ -104,7 +104,7 @@ export interface BuildSortIndexInput {
     /** Zotero rect [left, bottom, right, top] in unrotated PDF user space. */
     rect: number[];
     /** Backend-supplied per-page cumulative character offset in reading order. */
-    readingOrderIndex?: number | null;
+    readingOrderOffset?: number | null;
 }
 
 /**
@@ -136,7 +136,7 @@ export function buildSortIndex(input: BuildSortIndexInput): string {
             : 0;
     const displayTop = clampNonNegativeInt(displayTopRaw, 99999);
 
-    const rawIndex = input.readingOrderIndex;
+    const rawIndex = input.readingOrderOffset;
     const hasIndex = typeof rawIndex === 'number' && Number.isFinite(rawIndex);
     const offset = hasIndex
         ? clampNonNegativeInt(rawIndex, 999999)
@@ -332,7 +332,7 @@ export async function createHighlightAnnotation(
         pageIndex: input.pageIndex,
         viewBox: geometry.viewBox,
         rect: rects[0],
-        readingOrderIndex: input.readingOrderIndex,
+        readingOrderOffset: input.readingOrderOffset,
     });
     const item = new Zotero.Item("annotation");
     item.libraryID = attachment.libraryID;
@@ -374,7 +374,7 @@ export async function createNoteAnnotation(
         pageIndex,
         viewBox: geometry.viewBox,
         rect,
-        readingOrderIndex: input.readingOrderIndex,
+        readingOrderOffset: input.readingOrderOffset,
     });
 
     const item = new Zotero.Item("annotation");

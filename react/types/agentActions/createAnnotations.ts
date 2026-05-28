@@ -48,7 +48,7 @@ export interface NoteAnnotationItem {
     note_position: NotePosition;
     page_label?: string | null;
     /** Per-page cumulative character offset in reading order (Zotero sortIndex offset). */
-    reading_order_index?: number | null;
+    reading_order_offset?: number | null;
 }
 
 export interface CreatedAnnotationResult extends ZoteroItemReference {

@@ -69,7 +69,7 @@ export async function executeCreateHighlightAnnotationsAction(
                     color: item.color,
                     comment: item.comment ?? item.title,
                     pageLabel: item.page_label ?? null,
-                    readingOrderIndex: loc.reading_order_index ?? null,
+                    readingOrderOffset: loc.reading_order_offset ?? null,
                 });
                 created.push({
                     client_item_id: item.client_item_id,
@@ -122,7 +122,7 @@ export async function executeCreateNoteAnnotationsAction(
                 comment: item.comment,
                 color: 'yellow',
                 pageLabel: item.page_label ?? null,
-                readingOrderIndex: item.reading_order_index ?? null,
+                readingOrderOffset: item.reading_order_offset ?? null,
             });
             created.push({
                 client_item_id: item.client_item_id,

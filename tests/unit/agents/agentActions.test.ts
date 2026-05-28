@@ -79,8 +79,8 @@ describe('getAppliedPdfAnnotationCount', () => {
     });
 });
 
-describe('toAgentAction reading_order_index plumbing', () => {
-    it('preserves reading_order_index on bulk highlight page_locations', () => {
+describe('toAgentAction reading_order_offset plumbing', () => {
+    it('preserves reading_order_offset on bulk highlight page_locations', () => {
         const action = toAgentAction({
             id: 'a',
             run_id: 'r',
@@ -99,17 +99,17 @@ describe('toAgentAction reading_order_index plumbing', () => {
                         text: 'hi',
                         color: 'yellow',
                         page_locations: [
-                            { page_idx: 6, boxes: [], reading_order_index: 7 },
+                            { page_idx: 6, boxes: [], reading_order_offset: 7 },
                         ],
                     },
                 ],
             },
         });
         const data = action.proposed_data as CreateHighlightAnnotationsProposedData;
-        expect(data.items[0].page_locations[0].reading_order_index).toBe(7);
+        expect(data.items[0].page_locations[0].reading_order_offset).toBe(7);
     });
 
-    it('accepts camelCase readingOrderIndex on the wire for highlights', () => {
+    it('accepts camelCase readingOrderOffset on the wire for highlights', () => {
         const action = toAgentAction({
             action_type: 'create_highlight_annotations',
             proposed_data: {
@@ -122,17 +122,17 @@ describe('toAgentAction reading_order_index plumbing', () => {
                         text: 'hi',
                         color: 'yellow',
                         page_locations: [
-                            { page_idx: 0, boxes: [], readingOrderIndex: 3 },
+                            { page_idx: 0, boxes: [], readingOrderOffset: 3 },
                         ],
                     },
                 ],
             },
         });
         const data = action.proposed_data as CreateHighlightAnnotationsProposedData;
-        expect(data.items[0].page_locations[0].reading_order_index).toBe(3);
+        expect(data.items[0].page_locations[0].reading_order_offset).toBe(3);
     });
 
-    it('preserves reading_order_index on bulk note items', () => {
+    it('preserves reading_order_offset on bulk note items', () => {
         const action = toAgentAction({
             id: 'a',
             run_id: 'r',
@@ -150,16 +150,16 @@ describe('toAgentAction reading_order_index plumbing', () => {
                         loc: { kind: 'sentence', value: '4', raw: 's4' },
                         comment: 'hi',
                         note_position: { page_index: 6, side: 'right', x: 400, y: 200 },
-                        reading_order_index: 11,
+                        reading_order_offset: 11,
                     },
                 ],
             },
         });
         const data = action.proposed_data as CreateNoteAnnotationsProposedData;
-        expect(data.items[0].reading_order_index).toBe(11);
+        expect(data.items[0].reading_order_offset).toBe(11);
     });
 
-    it('accepts camelCase readingOrderIndex on the wire for notes', () => {
+    it('accepts camelCase readingOrderOffset on the wire for notes', () => {
         const action = toAgentAction({
             action_type: 'create_note_annotations',
             proposed_data: {
@@ -171,12 +171,12 @@ describe('toAgentAction reading_order_index plumbing', () => {
                         loc: { kind: 'sentence', value: '4', raw: 's4' },
                         comment: 'hi',
                         note_position: { page_index: 0, side: 'left', x: 12, y: 100 },
-                        readingOrderIndex: 4,
+                        readingOrderOffset: 4,
                     },
                 ],
             },
         });
         const data = action.proposed_data as CreateNoteAnnotationsProposedData;
-        expect(data.items[0].reading_order_index).toBe(4);
+        expect(data.items[0].reading_order_offset).toBe(4);
     });
 });

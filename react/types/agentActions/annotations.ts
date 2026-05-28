@@ -196,9 +196,9 @@ export function normalizePageLocations(raw: any): PageLocation[] | undefined {
                 : [];
 
             const rawReadingOrder =
-                loc?.reading_order_index ??
-                loc?.readingOrderIndex;
-            const readingOrderIndex =
+                loc?.reading_order_offset ??
+                loc?.readingOrderOffset;
+            const readingOrderOffset =
                 typeof rawReadingOrder === 'number' && Number.isFinite(rawReadingOrder)
                     ? rawReadingOrder
                     : (rawReadingOrder === null ? null : undefined);
@@ -206,7 +206,7 @@ export function normalizePageLocations(raw: any): PageLocation[] | undefined {
             return {
                 page_idx: pageIndex,
                 boxes,
-                ...(readingOrderIndex !== undefined ? { reading_order_index: readingOrderIndex } : {}),
+                ...(readingOrderOffset !== undefined ? { reading_order_offset: readingOrderOffset } : {}),
             } as PageLocation;
         })
         .filter(Boolean) as PageLocation[];

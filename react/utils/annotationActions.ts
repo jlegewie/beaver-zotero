@@ -88,13 +88,13 @@ async function convertLocationToRects(
 /**
  * Build a Zotero PDF sort-index string in canonical `page|offset|top` format.
  *
- * Legacy single-action path: no backend reading-order index is available
+ * Legacy single-action path: no backend reading-order offset is available
  * here, so the offset field falls back to display-top. Matches Zotero's
  * reader formula (Math.floor(viewBox[3] - rect[3])) at
  * /reader/src/pdf/selection.js:399.
  *
  * The bulk path in src/services/annotations/createAnnotation.ts uses the
- * backend-supplied reading_order_index as the offset and is preferred for
+ * backend-supplied reading_order_offset as the offset and is preferred for
  * any new code; this helper exists backward compatibility.
  */
 function generateSortIndex(pageIndex: number, rect: number[], viewBox: number[]): string {

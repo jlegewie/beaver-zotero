@@ -163,7 +163,7 @@ describe("createAnnotation geometry primitives", () => {
 
     it("emits page|offset|top in the canonical Zotero PDF format", () => {
       // viewBox [0,0,400,600], rect top = 420 → displayTop = 600 - 420 = 180.
-      // No reading-order index supplied, so offset falls back to displayTop.
+      // No reading-order offset supplied, so offset falls back to displayTop.
       expect(
         buildSortIndex({
           pageIndex: 1,
@@ -173,15 +173,15 @@ describe("createAnnotation geometry primitives", () => {
       ).toBe("00001|000180|00180");
     });
 
-    it("uses the supplied reading-order index as the offset", () => {
-      // Same rect/viewBox; readingOrderIndex=7 wins over displayTop in field 2.
+    it("uses the supplied reading-order offset as the offset", () => {
+      // Same rect/viewBox; readingOrderOffset=7 wins over displayTop in field 2.
       // Field 3 is still displayTop (180).
       expect(
         buildSortIndex({
           pageIndex: 1,
           viewBox: [0, 0, 400, 600],
           rect: [50, 404, 200, 420],
-          readingOrderIndex: 7,
+          readingOrderOffset: 7,
         }),
       ).toBe("00001|000007|00180");
     });
@@ -211,16 +211,16 @@ describe("createAnnotation geometry primitives", () => {
         pageIndex: 6,
         viewBox: [0, 0, 400, 600],
         rect: [50, 400, 200, 420],
-        readingOrderIndex: 5,
+        readingOrderOffset: 5,
       });
       const sentenceB = buildSortIndex({
         pageIndex: 6,
         viewBox: [0, 0, 400, 600],
         // Slightly higher rect[3] (lower displayTop) than A — without the
-        // readingOrderIndex, displayTop would order B *before* A. The
-        // readingOrderIndex must win.
+        // readingOrderOffset, displayTop would order B *before* A. The
+        // readingOrderOffset must win.
         rect: [50, 410, 200, 440],
-        readingOrderIndex: 6,
+        readingOrderOffset: 6,
       });
       expect(sentenceA < sentenceB).toBe(true);
     });
@@ -239,7 +239,7 @@ describe("createAnnotation geometry primitives", () => {
     });
 
     it("handles negative, NaN, Infinity, and missing values as zero", () => {
-      // readingOrderIndex absent + invalid rect/viewBox → all-zero fields,
+      // readingOrderOffset absent + invalid rect/viewBox → all-zero fields,
       // still matching the canonical regex.
       const out = buildSortIndex({
         pageIndex: -5,
@@ -249,12 +249,12 @@ describe("createAnnotation geometry primitives", () => {
       expect(out).toBe("00000|000000|00000");
       expect(out).toMatch(SORT_INDEX_REGEX);
 
-      // null readingOrderIndex falls back to displayTop computation.
+      // null readingOrderOffset falls back to displayTop computation.
       const outNull = buildSortIndex({
         pageIndex: 0,
         viewBox: [0, 0, 400, 600],
         rect: [50, 404, 200, 420],
-        readingOrderIndex: null,
+        readingOrderOffset: null,
       });
       expect(outNull).toBe("00000|000180|00180");
     });
@@ -264,7 +264,7 @@ describe("createAnnotation geometry primitives", () => {
         pageIndex: 10_000_000,
         viewBox: [0, 0, 0, 10_000_000],
         rect: [0, 0, 0, -1],
-        readingOrderIndex: 10_000_000,
+        readingOrderOffset: 10_000_000,
       });
       expect(out).toMatch(SORT_INDEX_REGEX);
       // page clamped to 99999, offset clamped to 999999, top clamped to 99999.

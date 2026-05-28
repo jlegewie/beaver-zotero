@@ -92,7 +92,7 @@ export interface PageLocation {
     page_idx: number; // 0-based page index
     boxes?: BoundingBox[];
     /** Per-page cumulative character offset in reading order (Zotero sortIndex offset). */
-    reading_order_index?: number | null;
+    reading_order_offset?: number | null;
 }
 
 export interface CitationPart {
