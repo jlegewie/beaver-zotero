@@ -56,7 +56,7 @@ function isReaderForAttachmentKey(reader: ZoteroReader | null, attachmentKey: st
 async function convertLocationToRects(
     reader: ZoteroReader,
     location: PageLocation
-): Promise<number[][]> {
+): Promise<{ rects: number[][]; viewBox: number[] }> {
     // Get viewport info directly from PDF document (no need for rendered page)
     const { viewBox, height, width, rotation } = await getPageViewportInfo(reader, location.page_idx);
     const viewBoxLL: [number, number] = [viewBox[0], viewBox[1]];
@@ -82,15 +82,39 @@ async function convertLocationToRects(
             .map((box) => toZoteroRectFromBBox(box, viewBoxLL))
             .filter((rect) => Array.isArray(rect) && rect.length === 4);
 
-    return rects;
+    return { rects, viewBox };
 }
 
-function generateSortIndex(pageIndex: number, rect: number[]): string {
-    const yPos = Math.round(rect?.[1] ?? 0);
-    const xPos = Math.round(rect?.[0] ?? 0);
-    return `${pageIndex.toString().padStart(5, '0')}|${yPos.toString().padStart(6, '0')}|${xPos
-        .toString()
-        .padStart(5, '0')}`;
+/**
+ * Build a Zotero PDF sort-index string in canonical `page|offset|top` format.
+ *
+ * Legacy single-action path: no backend reading-order index is available
+ * here, so the offset field falls back to display-top. Matches Zotero's
+ * reader formula (Math.floor(viewBox[3] - rect[3])) at
+ * /reader/src/pdf/selection.js:399.
+ *
+ * The bulk path in src/services/annotations/createAnnotation.ts uses the
+ * backend-supplied reading_order_index as the offset and is preferred for
+ * any new code; this helper exists backward compatibility.
+ */
+function generateSortIndex(pageIndex: number, rect: number[], viewBox: number[]): string {
+    const clamp = (v: unknown, max: number): number => {
+        if (typeof v !== 'number' || !Number.isFinite(v)) return 0;
+        const floored = Math.floor(v);
+        if (floored <= 0) return 0;
+        return floored > max ? max : floored;
+    };
+    const viewBoxTop = viewBox?.[3];
+    const rectTop = rect?.[3];
+    const displayTopRaw =
+        typeof viewBoxTop === 'number' && Number.isFinite(viewBoxTop)
+        && typeof rectTop === 'number' && Number.isFinite(rectTop)
+            ? Math.floor(viewBoxTop - rectTop)
+            : 0;
+    const page = clamp(pageIndex, 99999).toString().padStart(5, '0');
+    const offset = clamp(displayTopRaw, 999999).toString().padStart(6, '0');
+    const top = clamp(displayTopRaw, 99999).toString().padStart(5, '0');
+    return `${page}|${offset}|${top}`;
 }
 
 async function createHighlightAnnotation(
@@ -113,19 +137,21 @@ async function createHighlightAnnotation(
         logger('Highlight annotation spans multiple pages; applying first page only for now', 2);
     }
 
-    const rects = allSamePage
-        ? (await Promise.all(
+    const conversions = allSamePage
+        ? await Promise.all(
             annotation.proposed_data.highlight_locations.map((loc: PageLocation) =>
-            convertLocationToRects(reader, loc)
+                convertLocationToRects(reader, loc)
             )
-        )).flat()
-        : await convertLocationToRects(reader, primaryLocation);
+        )
+        : [await convertLocationToRects(reader, primaryLocation)];
+    const rects = conversions.flatMap((c) => c.rects);
     if (rects.length === 0) {
         throw new Error('Highlight annotation failed to compute rectangles');
     }
+    const primaryViewBox = conversions[0].viewBox;
 
     const now = (new Date()).toISOString();
-    const sortIndex = generateSortIndex(primaryLocation.page_idx, rects[0]);
+    const sortIndex = generateSortIndex(primaryLocation.page_idx, rects[0], primaryViewBox);
     const data = {
         type: 'highlight',
         color: resolveHighlightColor(annotation.proposed_data.color),
@@ -165,7 +191,7 @@ async function createHighlightAnnotation(
 async function convertNotePositionToRect(
     reader: ZoteroReader,
     annotation: AnnotationProposedAction
-): Promise<{ pageIndex: number; rect: number[] }> {
+): Promise<{ pageIndex: number; rect: number[]; viewBox: number[] }> {
     if (!annotation.proposed_data.note_position) {
         throw new Error('Note annotation missing position');
     }
@@ -212,6 +238,7 @@ async function convertNotePositionToRect(
     return {
         pageIndex: page_index,
         rect: toZoteroRectFromBBox(converted, viewBoxLL),
+        viewBox,
     };
 }
 
@@ -219,8 +246,8 @@ async function createNoteAnnotation(
     reader: ZoteroReader,
     annotation: AnnotationProposedAction
 ): Promise<string> {
-    const { pageIndex, rect } = await convertNotePositionToRect(reader, annotation);
-    const sortIndex = generateSortIndex(pageIndex, rect);
+    const { pageIndex, rect, viewBox } = await convertNotePositionToRect(reader, annotation);
+    const sortIndex = generateSortIndex(pageIndex, rect, viewBox);
 
     const now = (new Date()).toISOString();
     const data = {

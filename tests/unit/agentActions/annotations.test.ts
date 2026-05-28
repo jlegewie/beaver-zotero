@@ -68,5 +68,30 @@ describe("annotation action normalization", () => {
         },
       ]);
     });
+
+    it("preserves reading_order_index (snake_case)", () => {
+      const out = normalizePageLocations({
+        locations: [
+          { page_idx: 3, boxes: [], reading_order_index: 5 },
+        ],
+      });
+      expect(out?.[0]).toMatchObject({ page_idx: 3, reading_order_index: 5 });
+    });
+
+    it("accepts camelCase readingOrderIndex from the wire", () => {
+      const out = normalizePageLocations({
+        locations: [
+          { page_idx: 3, boxes: [], readingOrderIndex: 9 },
+        ],
+      });
+      expect(out?.[0]).toMatchObject({ page_idx: 3, reading_order_index: 9 });
+    });
+
+    it("omits reading_order_index when neither field is present", () => {
+      const out = normalizePageLocations({
+        locations: [{ page_idx: 1, boxes: [] }],
+      });
+      expect(out?.[0].reading_order_index).toBeUndefined();
+    });
   });
 });

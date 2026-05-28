@@ -1,6 +1,24 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+// `toAgentAction` transitively imports the Supabase client and Zotero-aware
+// profile atoms, which require live globals at import time. Stub the leaf
+// modules before the SUT is loaded so unit tests can run cold.
+vi.mock('../../../src/services/supabaseClient', () => ({
+    supabase: { auth: { getSession: vi.fn() } },
+}));
+vi.mock('../../../src/utils/logger', () => ({ logger: vi.fn() }));
+vi.mock('../../../src/utils/zoteroUtils', () => ({
+    loadFullItemDataWithAllTypes: vi.fn(),
+    getZoteroUserIdentifier: vi.fn(() => ({ userID: undefined, localUserKey: 'test' })),
+}));
+
 import type { AgentAction } from '../../../react/agents/agentActions';
+import { toAgentAction } from '../../../react/agents/agentActions';
 import { getAppliedPdfAnnotationCount } from '../../../react/agents/agentActionCounts';
+import type {
+    CreateHighlightAnnotationsProposedData,
+    CreateNoteAnnotationsProposedData,
+} from '../../../react/types/agentActions/createAnnotations';
 
 describe('getAppliedPdfAnnotationCount', () => {
     it('counts unique logical annotations for bulk annotation actions', () => {
@@ -58,5 +76,107 @@ describe('getAppliedPdfAnnotationCount', () => {
         } as AgentAction;
 
         expect(getAppliedPdfAnnotationCount(action)).toBe(1);
+    });
+});
+
+describe('toAgentAction reading_order_index plumbing', () => {
+    it('preserves reading_order_index on bulk highlight page_locations', () => {
+        const action = toAgentAction({
+            id: 'a',
+            run_id: 'r',
+            action_type: 'create_highlight_annotations',
+            status: 'pending',
+            proposed_data: {
+                requested_ref: { library_id: 1, zotero_key: 'P' },
+                resolved_ref: { library_id: 1, zotero_key: 'P' },
+                items: [
+                    {
+                        index: 0,
+                        client_item_id: 'c1',
+                        title: '',
+                        loc_raw: 's4',
+                        loc: { kind: 'sentence', value: '4', raw: 's4' },
+                        text: 'hi',
+                        color: 'yellow',
+                        page_locations: [
+                            { page_idx: 6, boxes: [], reading_order_index: 7 },
+                        ],
+                    },
+                ],
+            },
+        });
+        const data = action.proposed_data as CreateHighlightAnnotationsProposedData;
+        expect(data.items[0].page_locations[0].reading_order_index).toBe(7);
+    });
+
+    it('accepts camelCase readingOrderIndex on the wire for highlights', () => {
+        const action = toAgentAction({
+            action_type: 'create_highlight_annotations',
+            proposed_data: {
+                items: [
+                    {
+                        index: 0,
+                        client_item_id: 'c1',
+                        loc_raw: 's4',
+                        loc: { kind: 'sentence', value: '4', raw: 's4' },
+                        text: 'hi',
+                        color: 'yellow',
+                        page_locations: [
+                            { page_idx: 0, boxes: [], readingOrderIndex: 3 },
+                        ],
+                    },
+                ],
+            },
+        });
+        const data = action.proposed_data as CreateHighlightAnnotationsProposedData;
+        expect(data.items[0].page_locations[0].reading_order_index).toBe(3);
+    });
+
+    it('preserves reading_order_index on bulk note items', () => {
+        const action = toAgentAction({
+            id: 'a',
+            run_id: 'r',
+            action_type: 'create_note_annotations',
+            status: 'pending',
+            proposed_data: {
+                requested_ref: { library_id: 1, zotero_key: 'P' },
+                resolved_ref: { library_id: 1, zotero_key: 'P' },
+                items: [
+                    {
+                        index: 0,
+                        client_item_id: 'c1',
+                        title: '',
+                        loc_raw: 's4',
+                        loc: { kind: 'sentence', value: '4', raw: 's4' },
+                        comment: 'hi',
+                        note_position: { page_index: 6, side: 'right', x: 400, y: 200 },
+                        reading_order_index: 11,
+                    },
+                ],
+            },
+        });
+        const data = action.proposed_data as CreateNoteAnnotationsProposedData;
+        expect(data.items[0].reading_order_index).toBe(11);
+    });
+
+    it('accepts camelCase readingOrderIndex on the wire for notes', () => {
+        const action = toAgentAction({
+            action_type: 'create_note_annotations',
+            proposed_data: {
+                items: [
+                    {
+                        index: 0,
+                        client_item_id: 'c1',
+                        loc_raw: 's4',
+                        loc: { kind: 'sentence', value: '4', raw: 's4' },
+                        comment: 'hi',
+                        note_position: { page_index: 0, side: 'left', x: 12, y: 100 },
+                        readingOrderIndex: 4,
+                    },
+                ],
+            },
+        });
+        const data = action.proposed_data as CreateNoteAnnotationsProposedData;
+        expect(data.items[0].reading_order_index).toBe(4);
     });
 });
