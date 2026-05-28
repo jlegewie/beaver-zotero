@@ -3,7 +3,7 @@ import React from "react";
 
 /** Section label displayed above a settings group */
 export const SectionLabel: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-    <div className="text-lg font-color-primary font-bold" style={{ marginTop: '20px', marginBottom: '6px', paddingLeft: '2px' }}>
+    <div role="heading" aria-level={2} className="text-lg font-color-primary font-bold" style={{ marginTop: '20px', marginBottom: '6px', paddingLeft: '2px' }}>
         {children}
     </div>
 );

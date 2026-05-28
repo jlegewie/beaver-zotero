@@ -178,6 +178,8 @@ export class BeaverUIFactory {
         const chatToggleBtn = win.document.createXULElement("toolbarbutton");
         chatToggleBtn.setAttribute("id", "zotero-beaver-tb-chat-toggle");
         chatToggleBtn.setAttribute("tooltiptext", `Toggle Beaver (${shortcut})`);
+        chatToggleBtn.setAttribute("aria-label", "Toggle Beaver");
+        chatToggleBtn.setAttribute("aria-pressed", "false");
         chatToggleBtn.addEventListener("command", () => triggerToggleChat(win));
 
         const syncButton = toolbar.querySelector("#zotero-tb-sync");
