@@ -7,7 +7,10 @@ import { getPref } from '../../../src/utils/prefs';
 
 interface ScreenReaderRunAnnouncerProps {
     inputRef?: React.RefObject<HTMLTextAreaElement | null>;
+    surface: ScreenReaderSurface;
 }
+
+type ScreenReaderSurface = 'sidebar' | 'window';
 
 type ReaderFocusTarget =
     | { kind: 'input' }
@@ -17,19 +20,69 @@ function isTerminalRun(run: AgentRun): boolean {
     return run.status === 'completed' || run.status === 'error' || run.status === 'canceled';
 }
 
-const announcedStartedRunIds = new Set<string>();
+const announcingSurfaceByRunId = new Map<string, ScreenReaderSurface>();
 const announcedFinishedRunIds = new Set<string>();
+const STATUS_ANNOUNCEMENT_CLEAR_MS = 5000;
+
+/**
+ * Return true when the announcer is mounted in a visible Beaver surface.
+ */
+function isElementExposed(element: HTMLElement | null): boolean {
+    if (!element) {
+        return false;
+    }
+
+    const win = element.ownerDocument.defaultView;
+    if (!win) {
+        return false;
+    }
+
+    let current: Element | null = element;
+    while (current) {
+        if (
+            current.hasAttribute('hidden') ||
+            current.getAttribute('aria-hidden') === 'true' ||
+            current.hasAttribute('inert')
+        ) {
+            return false;
+        }
+
+        const style = win.getComputedStyle(current);
+        if (
+            !style ||
+            style.display === 'none' ||
+            style.visibility === 'hidden' ||
+            style.visibility === 'collapse'
+        ) {
+            return false;
+        }
+
+        current = current.parentElement;
+    }
+
+    return true;
+}
+
+/**
+ * Return true when this Beaver surface owns the current user interaction.
+ */
+function isActiveSurface(element: HTMLElement | null): boolean {
+    const win = element?.ownerDocument.defaultView;
+    return Boolean(win?.document?.hasFocus?.());
+}
 
 /**
  * Announces run state changes and optionally moves focus to a hidden response reader.
  */
-export const ScreenReaderRunAnnouncer: React.FC<ScreenReaderRunAnnouncerProps> = ({ inputRef }) => {
+export const ScreenReaderRunAnnouncer: React.FC<ScreenReaderRunAnnouncerProps> = ({ inputRef, surface }) => {
     const activeRun = useAtomValue(activeRunAtom);
     const threadRuns = useAtomValue(threadRunsAtom);
     const statusRef = useRef<HTMLDivElement | null>(null);
     const readerRef = useRef<HTMLDivElement | null>(null);
+    const isInitialRenderRef = useRef(true);
     const previousActiveRunIdRef = useRef<string | null>(null);
     const nextAnnouncementIdRef = useRef(0);
+    const clearStatusTimerRef = useRef<{ win: Window; id: number } | null>(null);
     const [statusAnnouncement, setStatusAnnouncement] = useState('');
     const [readerAnnouncement, setReaderAnnouncement] = useState<{ id: number; text: string; focusTarget: ReaderFocusTarget } | null>(null);
 
@@ -37,6 +90,10 @@ export const ScreenReaderRunAnnouncer: React.FC<ScreenReaderRunAnnouncerProps> =
         nextAnnouncementIdRef.current += 1;
         const announcementId = nextAnnouncementIdRef.current;
         const win = statusRef.current?.ownerDocument.defaultView;
+        if (clearStatusTimerRef.current) {
+            clearStatusTimerRef.current.win.clearTimeout(clearStatusTimerRef.current.id);
+            clearStatusTimerRef.current = null;
+        }
         setStatusAnnouncement('');
 
         const updateAnnouncement = () => {
@@ -45,6 +102,21 @@ export const ScreenReaderRunAnnouncer: React.FC<ScreenReaderRunAnnouncerProps> =
             }
 
             setStatusAnnouncement(message);
+            win?.setTimeout(() => {
+                if (announcementId === nextAnnouncementIdRef.current) {
+                    statusRef.current?.focus({ preventScroll: true });
+                }
+            }, 0);
+
+            if (win) {
+                const id = win.setTimeout(() => {
+                    if (announcementId === nextAnnouncementIdRef.current) {
+                        setStatusAnnouncement('');
+                    }
+                    clearStatusTimerRef.current = null;
+                }, STATUS_ANNOUNCEMENT_CLEAR_MS);
+                clearStatusTimerRef.current = { win, id };
+            }
         };
 
         if (win) {
@@ -54,7 +126,23 @@ export const ScreenReaderRunAnnouncer: React.FC<ScreenReaderRunAnnouncerProps> =
         }
     };
 
+    useEffect(() => {
+        return () => {
+            if (clearStatusTimerRef.current) {
+                clearStatusTimerRef.current.win.clearTimeout(clearStatusTimerRef.current.id);
+                clearStatusTimerRef.current = null;
+            }
+            if (statusRef.current) {
+                statusRef.current.textContent = '';
+            }
+        };
+    }, []);
+
     const focusReaderText = (message: string, focusTarget: ReaderFocusTarget = { kind: 'input' }) => {
+        if (!isElementExposed(readerRef.current)) {
+            return;
+        }
+
         nextAnnouncementIdRef.current += 1;
         setReaderAnnouncement({
             id: nextAnnouncementIdRef.current,
@@ -72,16 +160,22 @@ export const ScreenReaderRunAnnouncer: React.FC<ScreenReaderRunAnnouncerProps> =
         if (!getPref('focusResponseForScreenReaders')) {
             return;
         }
-        if (announcedStartedRunIds.has(run.id)) {
+        if (announcingSurfaceByRunId.has(run.id)) {
+            return;
+        }
+        if (!isActiveSurface(statusRef.current)) {
             return;
         }
 
-        announcedStartedRunIds.add(run.id);
+        announcingSurfaceByRunId.set(run.id, surface);
         announceStatus('Message sent. Beaver is generating a response.');
     };
 
     const focusResponseReader = (run: AgentRun) => {
         if (!getPref('focusResponseForScreenReaders')) {
+            return;
+        }
+        if (announcingSurfaceByRunId.get(run.id) !== surface) {
             return;
         }
         if (announcedFinishedRunIds.has(run.id)) {
@@ -104,6 +198,12 @@ export const ScreenReaderRunAnnouncer: React.FC<ScreenReaderRunAnnouncerProps> =
     };
 
     useEffect(() => {
+        if (isInitialRenderRef.current) {
+            isInitialRenderRef.current = false;
+            previousActiveRunIdRef.current = activeRun?.id ?? null;
+            return;
+        }
+
         if (!activeRun) {
             return;
         }
@@ -187,6 +287,7 @@ export const ScreenReaderRunAnnouncer: React.FC<ScreenReaderRunAnnouncerProps> =
                 role="status"
                 aria-live="polite"
                 aria-atomic="true"
+                tabIndex={-1}
             >
                 {statusAnnouncement}
             </div>

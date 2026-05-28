@@ -305,7 +305,7 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
     if (isFirstRunVisible) {
         return (
             <SidebarShell isWindow={isWindow}>
-                <ScreenReaderRunAnnouncer inputRef={inputRef} />
+                <ScreenReaderRunAnnouncer inputRef={inputRef} surface={isWindow ? 'window' : 'sidebar'} />
                 <Header isWindow={isWindow} />
                 <FirstRunPage isWindow={isWindow} inputRef={inputRef} />
                 <DialogContainer />
@@ -331,7 +331,7 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
     {/* Main page */}
     return (
         <SidebarShell isWindow={isWindow}>
-            <ScreenReaderRunAnnouncer inputRef={inputRef} />
+            <ScreenReaderRunAnnouncer inputRef={inputRef} surface={isWindow ? 'window' : 'sidebar'} />
 
             {/* Header */}
             <Header isWindow={isWindow} />

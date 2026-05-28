@@ -157,6 +157,9 @@ const InputArea: React.FC<InputAreaProps> = ({
     } = useSlashMenu(inputRef, verticalPosition);
 
     useEffect(() => {
+        if (isPending && getPref('focusResponseForScreenReaders')) {
+            return;
+        }
         inputRef.current?.focus();
     }, []);
 
