@@ -22,7 +22,13 @@ import { getAttachmentFileStatus, isRemoteAccessAvailable } from '../../src/serv
 import type { PageLabels } from '../../src/services/documentCache';
 import type { CitationMetadata } from '../types/citations';
 import { getBestPDFAttachmentAsync } from '../../src/utils/zoteroItemHelpers';
-import { normalizeCitationTag, parseRawCitationAttributes } from './citationGrammar';
+import {
+    getPageLocator,
+    getRequestedRef,
+    getResolvedRef,
+    normalizeCitationTag,
+    parseRawCitationAttributes,
+} from './citationGrammar';
 import type { PageLabelsByAttachmentId } from '../atoms/citations';
 
 // Regex for citation tags — matches self-closing and non-self-closing forms
@@ -176,7 +182,7 @@ export async function preloadPageLabelsForContent(content: string): Promise<Page
  * are omitted because renderers fall back to raw page numbers.
  */
 export async function preloadPageLabelsForCitations(
-    citations: ReadonlyArray<Pick<CitationMetadata, 'library_id' | 'zotero_key' | 'pages' | 'parts'>>
+    citations: ReadonlyArray<Partial<CitationMetadata>>
 ): Promise<PageLabelsByAttachmentId> {
     const cache = Zotero.Beaver?.documentCache;
     if (!cache) return {};
@@ -185,16 +191,26 @@ export async function preloadPageLabelsForCitations(
     const labelsByAttachmentId: PageLabelsByAttachmentId = {};
 
     for (const citation of citations) {
-        if (!citation.library_id || !citation.zotero_key) continue;
-
         // Skip citations that don't have any page locators — labels aren't needed.
         const hasPages =
             (citation.pages && citation.pages.length > 0) ||
             (citation.parts || []).some((p) => (p.locations || []).length > 0);
-        if (!hasPages) continue;
+        const requestedRef = getRequestedRef(citation);
+        const resolvedRef = getResolvedRef(citation);
+        const hasPageLocator =
+            !!(requestedRef && getPageLocator(requestedRef)) ||
+            !!(resolvedRef && getPageLocator(resolvedRef));
+        if (!hasPages && !hasPageLocator) continue;
+
+        const zoteroRef = resolvedRef?.kind === 'zotero'
+            ? resolvedRef
+            : requestedRef?.kind === 'zotero'
+                ? requestedRef
+                : null;
+        if (!zoteroRef) continue;
 
         try {
-            const item = Zotero.Items.getByLibraryAndKey(citation.library_id, citation.zotero_key);
+            const item = Zotero.Items.getByLibraryAndKey(zoteroRef.library_id, zoteroRef.zotero_key);
             if (!item) continue;
 
             const preloadPath = await getPreloadFilePath(item);
