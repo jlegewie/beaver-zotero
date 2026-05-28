@@ -124,12 +124,34 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
     footer
 }) => {
     const menuRef = useRef<HTMLDivElement | null>(null);
+    const itemRefs = useRef<Array<HTMLDivElement | null>>([]);
     const [focusedIndex, setFocusedIndex] = useState<number>(-1);
     const [hoveredIndex, setHoveredIndex] = useState<number>(-1);
     const [activeActionsIndex, setActiveActionsIndex] = useState<number>(-1);
     const [adjustedPosition, setAdjustedPosition] = useState<MenuPosition>(position);
     const [arrowPosition, setArrowPosition] = useState<string>('50%');
     const [placement, setPlacement] = useState<'top' | 'bottom' | 'left' | 'right'>('bottom');
+
+    const isFocusableItem = (item: MenuItem): boolean => {
+        return !item.disabled && !item.isGroupHeader && !item.isDivider;
+    };
+
+    const findFocusableIndex = (startIndex: number, step: 1 | -1): number => {
+        if (menuItems.length === 0) {
+            return -1;
+        }
+
+        let index = startIndex;
+        for (let checked = 0; checked < menuItems.length; checked++) {
+            const normalizedIndex = (index + menuItems.length) % menuItems.length;
+            if (isFocusableItem(menuItems[normalizedIndex])) {
+                return normalizedIndex;
+            }
+            index += step;
+        }
+
+        return -1;
+    };
     
     // Block scrolling when menu is open
     useEffect(() => {
@@ -290,23 +312,13 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
                 case 'ArrowDown':
                     e.preventDefault();
                     setFocusedIndex((prev: number) => {
-                        let next = (prev + 1) % menuItems.length;
-                        // Skip disabled items, headers, and dividers
-                        while ((menuItems[next].disabled || menuItems[next].isGroupHeader || menuItems[next].isDivider) && next !== prev) {
-                            next = (next + 1) % menuItems.length;
-                        }
-                        return next;
+                        return findFocusableIndex(prev >= 0 ? prev + 1 : 0, 1);
                     });
                     break;
                 case 'ArrowUp':
                     e.preventDefault();
                     setFocusedIndex((prev: number) => {
-                        let next = (prev - 1 + menuItems.length) % menuItems.length;
-                        // Skip disabled items, headers, and dividers
-                        while ((menuItems[next].disabled || menuItems[next].isGroupHeader || menuItems[next].isDivider) && next !== prev) {
-                            next = (next - 1 + menuItems.length) % menuItems.length;
-                        }
-                        return next;
+                        return findFocusableIndex(prev >= 0 ? prev - 1 : menuItems.length - 1, -1);
                     });
                     break;
                 case 'Enter':
@@ -332,9 +344,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
     useEffect(() => {
         if (isOpen && menuRef.current) {
             menuRef.current.focus();
-            const firstEnabled = menuItems.findIndex(item => 
-                !item.disabled && !item.isGroupHeader && !item.isDivider
-            );
+            const firstEnabled = menuItems.findIndex(isFocusableItem);
             if (firstEnabled >= 0) {
                 setFocusedIndex(firstEnabled);
             }
@@ -345,6 +355,23 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
         // Reset hovered index when menu opens/closes
         setHoveredIndex(-1);
     }, [isOpen]);
+
+    useEffect(() => {
+        if (!isOpen || focusedIndex < 0) {
+            return;
+        }
+
+        const focusedItem = itemRefs.current[focusedIndex];
+        if (!focusedItem) {
+            return;
+        }
+
+        try {
+            focusedItem.focus({ preventScroll: true });
+        } catch (e) {
+            focusedItem.focus();
+        }
+    }, [focusedIndex, isOpen]);
     
     if (!isOpen) return null;
     
@@ -375,8 +402,11 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
             {menuItems.map((item, index) => (
                 <div
                     key={index}
-                    role={item.isGroupHeader ? 'presentation' : 'menuitem'}
-                    tabIndex={focusedIndex === index && !item.isGroupHeader ? 0 : -1}
+                    ref={(element) => {
+                        itemRefs.current[index] = element;
+                    }}
+                    role={item.isGroupHeader || item.isDivider ? 'presentation' : 'menuitem'}
+                    tabIndex={focusedIndex === index && isFocusableItem(item) ? 0 : -1}
                     className={`
                         ${item.isDivider ? 'border-t border-quinary my-1' : ''}
                         ${item.isGroupHeader ? 'px-2 py-1 font-color-tertiary text-xs font-medium mt-1 first:mt-0' : 
@@ -411,7 +441,8 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
                             setFocusedIndex(index);
                         }
                     }}
-                    aria-disabled={item.disabled || item.isGroupHeader || item.isDivider}
+                    aria-disabled={!item.isGroupHeader && !item.isDivider ? item.disabled : undefined}
+                    aria-label={!item.isGroupHeader && !item.isDivider ? item.label : undefined}
                 >
                     {item.isDivider ? null : item.isGroupHeader ? (
                         // Render group header
