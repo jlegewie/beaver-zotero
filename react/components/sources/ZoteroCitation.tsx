@@ -647,11 +647,12 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
             // Fallback: use page prop directly when metadata doesn't provide pages
             const requestedPage = requestedRef ? getPageLocator(requestedRef) : undefined;
             const loadedLabels = getPageLabelsForItem(item, labelsByAttachmentId);
+            const exportLabels = loadedLabels ?? citationMetadata?.page_labels;
             // Zotero note clicks use the CSL locator as a PDF page label.
             // When labels are available, store the visible label for the physical page.
             const navLocator = startPage
-                ? resolvePageLabelFromLabels(loadedLabels, startPage)
-                : (requestedPage ? translatePageNumberToLabelFromLabels(loadedLabels, requestedPage) : undefined);
+                ? resolvePageLabelFromLabels(exportLabels, startPage)
+                : (requestedPage ? translatePageNumberToLabelFromLabels(exportLabels, requestedPage) : undefined);
             const citationObj = {
                 citationItems: [{
                     uris: [Zotero.URI.getItemURI(item.parentItem || item)],

@@ -34,7 +34,7 @@ import type { PageLabelsByAttachmentId } from '../atoms/citations';
 // Regex for citation tags — matches self-closing and non-self-closing forms
 const CITATION_REGEX = /<citation(?:\s+([^>]*?))?\s*(\/>|>(?:.*?<\/citation>)?)/g;
 
-type PreloadFilePath =
+export type PreloadFilePath =
     | { item: Zotero.Item; filePath: string; isRemoteOnly: false }
     | { item: Zotero.Item; filePath: string; isRemoteOnly: true };
 
@@ -51,7 +51,7 @@ function addPageLabels(
     target[itemId] = { ...labels };
 }
 
-async function getPreloadFilePath(item: Zotero.Item): Promise<PreloadFilePath | null> {
+export async function getCitationPreloadFilePath(item: Zotero.Item): Promise<PreloadFilePath | null> {
     if (!item.isAttachment()) {
         const attachment = item.isRegularItem?.() ? await getBestPDFAttachmentAsync(item) : null;
         if (!attachment) return null;
@@ -137,7 +137,7 @@ export async function preloadPageLabelsForContent(content: string): Promise<Page
             const item = Zotero.Items.getByLibraryAndKey(normalized.ref.library_id, normalized.ref.zotero_key);
             if (!item) continue;
 
-            const preloadPath = await getPreloadFilePath(item);
+            const preloadPath = await getCitationPreloadFilePath(item);
             if (!preloadPath) continue;
             const preloadItem = preloadPath.item;
             if (seen.has(preloadItem.id)) continue;
@@ -213,7 +213,7 @@ export async function preloadPageLabelsForCitations(
             const item = Zotero.Items.getByLibraryAndKey(zoteroRef.library_id, zoteroRef.zotero_key);
             if (!item) continue;
 
-            const preloadPath = await getPreloadFilePath(item);
+            const preloadPath = await getCitationPreloadFilePath(item);
             if (!preloadPath) continue;
             const preloadItem = preloadPath.item;
             if (seen.has(preloadItem.id)) continue;
