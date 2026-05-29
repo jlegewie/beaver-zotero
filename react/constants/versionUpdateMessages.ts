@@ -48,7 +48,7 @@ export interface VersionUpdateMessageConfig {
 const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
     {
         version: "0.5.0",
-        title: "Beaver Version 0.5.0",
+        title: "Group libraries and PDF annotations",
         text: "Bug fixes and stability, support for group libraries and annotation tool.",
         featureList: [
             {
@@ -69,7 +69,7 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
     },
     {
         version: "0.6.0",
-        title: "Beaver Version 0.6.0",
+        title: "Agent 2.0 and improved search",
         text: "New agent, improved metadata search and increased page balance.",
         featureList: [
             {
@@ -88,7 +88,7 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
     },
     {
         version: "0.7.0",
-        title: "Beaver Version 0.7.0",
+        title: "Filter by tags and collections",
         text: "Support for tags and collections and other improvements.",
         featureList: [
             {
@@ -104,7 +104,7 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
     },
     {
         version: "0.7.3",
-        title: "Beaver Version 0.7.3",
+        title: "Consistent UI and annotation updates",
         featureList: [
             {
                 title: "Under the hood improvements to annotation tools",
@@ -118,13 +118,13 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
     },
     {
         version: "0.7.9",
-        title: "Beaver Version 0.7.9",
+        title: "Appearance and consistency fixes",
         text: "Fixed appearance issues: Beaver now looks and behaves consistently across all systems and configurations.",
         featureList: []
     },
     {
         version: "0.8.0",
-        title: "Beaver Version 0.8.0",
+        title: "Search 250M works and generate notes",
         text: "Search 250M+ scholarly works. Generate & save Zotero notes. And more...",
         featureList: [
             {
@@ -145,7 +145,7 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
     },
     {
         version: "0.9.0",
-        title: "Beaver Version 0.9.0",
+        title: "New research agent and window mode",
         text: "New research agent, flexible window mode, and more",
         featureList: [
             {
@@ -164,7 +164,7 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
     },
     {
         version: "0.9.4",
-        title: "Beaver Version 0.9.4",
+        title: "Keyboard shortcuts and bug fixes",
         featureList: [
             {
                 title: "Copy text with keyboard shortcut (cmd/ctrl+c)",
@@ -180,7 +180,7 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
     },
     {
         version: "0.10.0",
-        title: "Beaver Version 0.10",
+        title: "Introducing Beaver Free",
         text: "Version 0.10 introduces Beaver Free, ensuring the platform remains sustainable and available to everyone in the long term.",
         featureList: [
             {
@@ -195,7 +195,7 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
     },
     {
         version: "0.11.0",
-        title: "New in Beaver 0.11",
+        title: "Library organization and metadata editing",
         // subtitle: "Organize your library, edit metadata, and enjoy more efficient AI usage.",
         steps: [
             {
@@ -248,7 +248,7 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
     },
     {
         version: "0.11.2",
-        title: "Beaver Version 0.11.2",
+        title: "Improved metadata editing",
         featureList: [
             {
                 title: "Improved Metadata Editing",
@@ -262,7 +262,7 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
     },
     {
         version: "0.12.0",
-        title: "New in Beaver 0.12",
+        title: "A new brain and the extract tool",
         steps: [
             {
                 title: "A New Brain for Beaver",
@@ -285,7 +285,7 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
     },
     {
         version: "0.13",
-        title: "New in Beaver 0.13",
+        title: "MCP server and shareable links",
         steps: [
             {
                 title: "Beaver MCP server",
@@ -309,7 +309,7 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
     },
     {
         version: "0.13.3",
-        title: "Beaver Version 0.13.3",
+        title: "Redesigned chat history",
         inPanel: true,
         featureList: [
             {
@@ -324,7 +324,7 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
     },
     {
         version: "0.14.0",
-        title: "New in Beaver 0.14",
+        title: "Smart homepage and custom actions",
         steps: [
             {
                 title: "Smart homepage",
@@ -343,7 +343,7 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
     },
     {
         version: "0.15.0",
-        title: "New in Beaver 0.15",
+        title: "Introducing Beaver Plus",
         steps: [
             {
                 title: "Introducing Beaver Plus",
@@ -358,7 +358,7 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
     },
     {
         version: "0.16.0",
-        title: "Beaver Version 0.16",
+        title: "Right-click Actions and longer documents",
         featureList: [
             {
                 title: "Beaver Actions from the right-click menu (Zotero 8+ only)",
@@ -377,7 +377,7 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
     },
     {
         version: "0.17.0",
-        title: "New in Beaver 0.17",
+        title: "Your notes writing and reviewing assistant",
         subtitle: "Turn Beaver into a full-featured writing and reviewing assistant for your research notes.",
         steps: [
             {
@@ -397,7 +397,7 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
     },
     {
         version: "0.18.0",
-        title: "New in Beaver 0.18",
+        title: "Beaver can now see PDF pages",
         // subtitle: "Visual PDF understanding and better library management.",
         steps: [
             {
