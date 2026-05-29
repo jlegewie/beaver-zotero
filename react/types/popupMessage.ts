@@ -22,6 +22,8 @@ export interface PopupMessage {
     id: string;
     cancelable?: boolean; // Defaults to true
     type: PopupMessageType;
+    /** Release version shown by version update messages. */
+    version?: string;
     title?: string;
     text?: string;
     customContent?: React.ReactNode;

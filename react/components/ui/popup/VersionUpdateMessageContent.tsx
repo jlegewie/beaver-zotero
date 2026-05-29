@@ -83,6 +83,7 @@ const LegacyVersionContent: React.FC<{
  * Flattens step-based and legacy feature lists into a single feature list.
  */
 const FloatingVersionCard: React.FC<{
+    version?: string;
     title?: string;
     text?: string;
     subtitle?: string;
@@ -91,7 +92,7 @@ const FloatingVersionCard: React.FC<{
     learnMoreUrl?: string;
     learnMoreLabel?: string;
     onDismiss: () => void;
-}> = ({ title, text, subtitle, features, footer, learnMoreUrl, learnMoreLabel, onDismiss }) => {
+}> = ({ version, title, text, subtitle, features, footer, learnMoreUrl, learnMoreLabel, onDismiss }) => {
     const handleOpenBeaver = () => {
         eventManager.dispatch('toggleChat', { forceOpen: true });
         onDismiss();
@@ -103,14 +104,32 @@ const FloatingVersionCard: React.FC<{
         }
     };
 
+    function formatVersion(version: string): string {
+        const isBeta = /-beta\.\d+$/.test(version);
+
+        let cleanVersion = version.replace(/-beta\.\d+$/, "");
+
+        cleanVersion = cleanVersion.replace(/\.0$/, "");
+
+        return isBeta ? `${cleanVersion} Beta` : cleanVersion;
+    }
+
+    const versionString = version ? `Beaver v${formatVersion(version)}` : 'Now Available';
+
     return (
         <div className="display-flex flex-col gap-4 w-full">
             {/* Header: NOW AVAILABLE + dismiss */}
             <div className="display-flex flex-col gap-05 w-full">
                 <div className="display-flex flex-row items-center justify-between w-full">
-                    <span className="text-sm font-medium font-color-tertiary" style={{ textTransform: 'uppercase' }}>
-                        Now Available
-                    </span>
+                    {version ? (
+                        <span className="text-base font-semibold font-color-secondary">
+                            {versionString}
+                        </span>
+                    ) : (
+                        <span className="text-base font-medium font-color-secondary" style={{ textTransform: 'uppercase' }}>
+                            {versionString}
+                        </span>
+                    )}
                     <IconButton
                         icon={CancelIcon}
                         variant="ghost-secondary"
@@ -139,14 +158,14 @@ const FloatingVersionCard: React.FC<{
                     {features.map((feature, index) => (
                         <div key={index} className="display-flex flex-row gap-2 items-start">
                             <div className="flex-shrink-0">
-                                <Icon icon={TickIcon} className="scale-12 mt-020 font-color-secondary" />
+                                <Icon icon={TickIcon} className="scale-12 mt-020 font-color-primary" />
                             </div>
                             <div className="display-flex flex-col gap-1">
-                                <span className="font-color-secondary text-base font-medium">
+                                <span className="font-color-primary text-base font-semibold">
                                     {feature.title}
                                 </span>
                                 {feature.description && (
-                                    <span className="font-color-tertiary text-md">
+                                    <span className="font-color-secondary text-md">
                                         {parseTextWithLinksAndNewlines(feature.description)}
                                     </span>
                                 )}
@@ -201,12 +220,13 @@ function buildFeatureList(message: PopupMessage): PopupMessageFeature[] {
 }
 
 const VersionUpdateMessageContent: React.FC<VersionUpdateMessageContentProps> = ({ message, onDismiss, isFloating }) => {
-    const { text, featureList, learnMoreUrl, learnMoreLabel, footer, steps, subtitle } = message;
+    const { version, text, featureList, learnMoreUrl, learnMoreLabel, footer, steps, subtitle } = message;
 
     // Floating mode: render the card layout
     if (isFloating) {
         return (
             <FloatingVersionCard
+                version={version}
                 title={message.title}
                 text={text}
                 subtitle={subtitle}
