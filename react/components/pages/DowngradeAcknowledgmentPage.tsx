@@ -138,7 +138,7 @@ const DowngradeAcknowledgmentPage: React.FC = () => {
             {/* Scrollable content area */}
             <div className="overflow-y-auto scrollbar flex-1 p-4 mr-1 display-flex flex-col">
                 {/* Header */}
-                <OnboardingHeader message={getHeaderMessage()}/>
+                <OnboardingHeader title="Account update" message={getHeaderMessage()}/>
 
                 {/* Main content */}
                 <div className="display-flex flex-1"/>
