@@ -7,14 +7,10 @@ import { OnboardingHeader, OnboardingFooter } from "./onboarding";
 import { Icon, CancelIcon, TickIcon, LockIcon } from "../icons/icons";
 
 /**
- * Downgrade acknowledgment page for Pro → Free transitions
- * 
- * Shows when a user is downgraded from Pro to Free plan.
- * Informs user about:
- * - Features no longer available
- * - Data deletion timeline (14 days grace period)
- * 
- * No consent required, just acknowledgment.
+ * Beta sunset acknowledgment page
+ *
+ * Shown when a user on the legacy cloud-processing Beta plan is transitioned
+ * to the Free plan (beta account type is being discontinued).
  */
 const DowngradeAcknowledgmentPage: React.FC = () => {
     const [profileWithPlan, setProfileWithPlan] = useAtom(profileWithPlanAtom);
@@ -49,9 +45,11 @@ const DowngradeAcknowledgmentPage: React.FC = () => {
         }
     };
 
-    // Calculate days until deletion
+    // Calculate days until deletion. Default mirrors the 14-day grace period
+    // referenced in the Terms (tier adjustments / inactivity) when no explicit
+    // date is provided by the backend.
     const getDaysUntilDeletion = (): number => {
-        if (!dataDeletionScheduledFor) return 7;
+        if (!dataDeletionScheduledFor) return 14;
         const now = new Date();
         const deletionDate = new Date(dataDeletionScheduledFor);
         const diffTime = deletionDate.getTime() - now.getTime();
@@ -65,7 +63,20 @@ const DowngradeAcknowledgmentPage: React.FC = () => {
         return (
             <div className="display-flex flex-col gap-3 py-2 mt-2">
                 <div className="text-lg">
-                    Your account has been updated as we are discontinuing the Beta account type. Here's what's different:
+                    We're discontinuing the cloud processing Beta so we can focus development on version 0.20 and beyond. Two features that previously required the beta are now included for everyone, on both free and paid plans:
+                </div>
+                <div className="display-flex flex-col gap-4 ml-1">
+                    <div className="display-flex flex-row gap-2 items-start">
+                        <Icon icon={TickIcon} className="scale-09 font-color-secondary mt-020" />
+                        <span>Sentence-level citations</span>
+                    </div>
+                    <div className="display-flex flex-row gap-2 items-start">
+                        <Icon icon={TickIcon} className="scale-09 font-color-secondary mt-020" />
+                        <span>PDF annotations to add highlights and notes to your PDFs</span>
+                    </div>
+                </div>
+                <div className="mt-2 text-lg">
+                    Also included
                 </div>
                 <div className="display-flex flex-col gap-4 ml-1">
                     <div className="display-flex flex-row gap-2 items-start">
@@ -98,7 +109,7 @@ const DowngradeAcknowledgmentPage: React.FC = () => {
                     </div>
                     <div className="display-flex flex-row gap-2 items-start">
                         <Icon icon={TickIcon} className="scale-09 font-color-secondary mt-020" />
-                        <span>Local file processing with page-level citations</span>
+                        <span>Local file processing</span>
                     </div>
                 </div>
                 <div className="mt-2 text-lg">
@@ -109,14 +120,9 @@ const DowngradeAcknowledgmentPage: React.FC = () => {
                         <Icon icon={CancelIcon} className="scale-90 font-color-secondary mt-020" />
                         <span>Full-text keyword and semantic search</span>
                     </div>
-                    <div className="display-flex flex-row gap-2 items-start">
-                        <Icon icon={CancelIcon} className="scale-90 font-color-secondary mt-020" />
-                        <span>Cloud processing for tables, figures & complex layouts</span>
-                    </div>
-                    <div className="display-flex flex-row gap-2 items-start">
-                        <Icon icon={CancelIcon} className="scale-90 font-color-secondary mt-020" />
-                        <span>Sentence-level citations</span>
-                    </div>
+                </div>
+                <div className="font-color-secondary ml-1 mt-1">
+                    Full-text search will return as an optional add-on.
                 </div>
             </div>
         );
@@ -144,33 +150,16 @@ const DowngradeAcknowledgmentPage: React.FC = () => {
                             <div className="display-flex flex-col gap-2">
                                 <div className="font-semibold">Privacy Notice</div>
                                 <div className="font-color-secondary">
-                                    Beaver processes files locally on your device. Your library and PDFs are not synced to our servers.
+                                    Beaver now processes files locally on your device. Your library and PDFs are no longer synced to our servers.
                                     Chat history is stored server-side and can be exported or deleted anytime.
                                 </div>
                                 <div className="font-color-secondary">
-                                    Your previously synced data will be deleted from our servers 
-                                    within <strong>{daysUntilDeletion} days</strong>.
+                                    The copies of your files we processed during the beta will be deleted from our servers
+                                    within <strong>{daysUntilDeletion} days</strong>. This does not affect your original files in Zotero.
                                 </div>
                             </div>
                         </div>
                     </div>
-
-                    {/* Upgrade reminder */}
-                    {/* <div className="display-flex flex-col gap-3 p-4 rounded-lg border-quinary">
-                        <div className="display-flex flex-row gap-3 items-start">
-                            <Icon icon={AlertCircleIcon} className="mt-020 scale-11 font-color-warning" />
-                            <div className="display-flex flex-col gap-2">
-                                <div className="font-semibold">Want to upgrade again?</div>
-                                <div className="font-color-secondary">
-                                    You can upgrade back to Pro at any time. If you upgrade within {daysUntilDeletion} days, 
-                                    your existing indexed data will be preserved.
-                                </div>
-                            </div>
-                        </div>
-                    </div> */}
-
-                    {/* Spacer */}
-                    {/* <div className="flex-1" /> */}
                 </div>
             </div>
 
@@ -187,5 +176,3 @@ const DowngradeAcknowledgmentPage: React.FC = () => {
 };
 
 export default DowngradeAcknowledgmentPage;
-
-
