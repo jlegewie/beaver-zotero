@@ -10,6 +10,7 @@ import { logger } from '../../src/utils/logger';
 import { addFloatingPopupMessageAtom } from '../atoms/floatingPopup';
 import { addPopupMessageAtom } from '../utils/popupMessageUtils';
 import { getPendingVersionNotifications, clearPendingVersionNotifications } from '../../src/utils/versionNotificationPrefs';
+import { compareVersions } from '../../src/utils/compareVersions';
 import { getVersionUpdateMessageConfig } from '../constants/versionUpdateMessages';
 import { isDatabaseSyncSupportedAtom, profileWithPlanAtom, syncedLibraryIdsAtom, syncWithZoteroAtom } from '../atoms/profile';
 import { getStorageModeForLibrary } from '../../src/utils/webAPI';
@@ -178,15 +179,7 @@ export const useUpgradeHandler = () => {
         }
 
         // Sort descending to find the most recent version
-        const sorted = [...pendingVersions].sort((a, b) => {
-            const pa = a.split('.').map(Number);
-            const pb = b.split('.').map(Number);
-            for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-                const diff = (pb[i] ?? 0) - (pa[i] ?? 0);
-                if (diff !== 0) return diff;
-            }
-            return 0;
-        });
+        const sorted = [...pendingVersions].sort((a, b) => compareVersions(b, a));
 
         // Clear all pending notifications regardless
         clearPendingVersionNotifications();

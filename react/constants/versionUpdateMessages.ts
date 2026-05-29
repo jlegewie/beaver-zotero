@@ -1,4 +1,5 @@
 import { PopupMessageFeature } from '../types/popupMessage';
+import { compareVersions } from '../../src/utils/compareVersions';
 
 /**
  * Example prompt shown as a chat bubble in the feature tour
@@ -43,20 +44,6 @@ export interface VersionUpdateMessageConfig {
     /** When true, display inside the sidebar panel instead of as a floating popup */
     inPanel?: boolean;
 }
-
-const compareVersions = (v1: string, v2: string): number => {
-    const parts1 = v1.split('.').map(Number);
-    const parts2 = v2.split('.').map(Number);
-    const len = Math.max(parts1.length, parts2.length);
-
-    for (let i = 0; i < len; i++) {
-        const p1 = parts1[i] ?? 0;
-        const p2 = parts2[i] ?? 0;
-        if (p1 > p2) return 1;
-        if (p1 < p2) return -1;
-    }
-    return 0;
-};
 
 const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
     {
