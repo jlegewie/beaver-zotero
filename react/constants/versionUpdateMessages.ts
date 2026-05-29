@@ -434,7 +434,7 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
     },
     {
         version: "0.19.0",
-        title: "Beaver 0.19: Performance and maintenance",
+        title: "Performance and maintenance",
         inPanel: true,
         featureList: [
             {
@@ -451,6 +451,23 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
             },
         ],
         footer: `<a href="https://github.com/jlegewie/beaver-zotero/releases/tag/v0.19.0" target='_blank'>Full changelog</a>`,
+    },
+    {
+        version: "0.20.0-beta.1",
+        title: "Sentence-level citations and PDF annotations",
+        inPanel: false,
+        featureList: [
+            {
+                title: "Sentence-level citations",
+                description: "Citations now pinpoint the exact sentences, not just the page. Hover to preview the source text, or click to open the PDF with those sentences highlighted.",
+            },
+            {
+                title: "AI-powered PDF annotations",
+                description: 'Just ask Beaver to "highlight key findings" or "everything relevant to my project" and it annotates the PDF for you. <a href="https://www.beaverapp.ai/docs/annotations">Learn more</a>',
+                
+            },
+        ],
+        footer: `<a href="https://github.com/jlegewie/beaver-zotero/releases/tag/v0.20.0-beta.1" target='_blank'>Full changelog</a>`,
     },
 ];
 

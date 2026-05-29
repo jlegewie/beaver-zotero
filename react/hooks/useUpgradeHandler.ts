@@ -206,6 +206,7 @@ export const useUpgradeHandler = () => {
 
             addFloatingPopupMessage({
                 type: 'version_update',
+                version: latestFloating.version,
                 title: latestFloating.title,
                 text: latestFloating.text,
                 featureList: latestFloating.featureList,
@@ -224,6 +225,7 @@ export const useUpgradeHandler = () => {
 
             addPopupMessage({
                 type: 'version_update',
+                version: latestInPanel.version,
                 title: latestInPanel.title,
                 text: latestInPanel.text,
                 featureList: latestInPanel.featureList,
