@@ -42,6 +42,9 @@ export interface BeaverEvents {
             | 'copy-ocr-fixture-command';
     };
     focusInput: Record<string, never>;
+    'background-worker:status': {
+        running: boolean;
+    };
 }
 
 export type BeaverEventName = keyof BeaverEvents;

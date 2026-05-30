@@ -41,6 +41,8 @@ import { logger } from '../utils/logger';
 // Import `safeIsInTrash` from the react-free helper module
 import { safeIsInTrash } from '../utils/zoteroItemUtils';
 import { createAbortController } from '../utils/abortController';
+import { getPref } from '../utils/prefs';
+import { getSystemIdleTimeMs, registerIdleObserver } from '../utils/idleService';
 
 const IDLE_INTERVAL_MS = 30_000;
 const BUSY_INTERVAL_MS = 10;
@@ -49,6 +51,26 @@ const RECYCLE_AFTER_N = 8;
 const MAX_ATTEMPTS = 3;
 const BACKOFF_MS = (attempt: number) =>
     Math.min(60_000 * Math.pow(2, attempt - 1), 30 * 60_000);
+
+/**
+ * Defer the first claim by this much after `start()` so the loop does not
+ * compete with main-window load and lets Zotero finish auto-sync.
+ */
+const STARTUP_DELAY_MS = 30_000;
+/**
+ * Threshold at which the user is considered idle. Jobs at or above
+ * `LOW_PRIORITY_CEILING` only claim once `nsIUserIdleService.idleTime`
+ * passes this mark.
+ */
+const IDLE_THRESHOLD_MS = 30_000;
+const IDLE_THRESHOLD_SEC = 30;
+/**
+ * Exclusive upper bound used by the idle-aware claim. Jobs enqueued with
+ * `priority < LOW_PRIORITY_CEILING` (e.g. hot-path retries) run any time;
+ * `priority >= LOW_PRIORITY_CEILING` only runs while the user is idle.
+ */
+const LOW_PRIORITY_CEILING = 100;
+const PREF_ENABLED = 'backgroundExtractorEnabled';
 
 /**
  * Cooperative throttle: when the hot worker has pending dispatches, the
@@ -60,7 +82,9 @@ const COOPERATIVE_THROTTLE = true;
 export type ProcessOnceReason =
     | 'stopped'
     | 'shutting_down'
+    | 'disabled'
     | 'no_window'
+    | 'sync_in_progress'
     | 'hot_busy'
     | 'empty'
     | 'job_done';
@@ -98,6 +122,34 @@ export class BackgroundExtractor {
      * or `stop()` called during shutdown).
      */
     private dbWritesPermanentlyDisabled = false;
+    /**
+     * Set to `false` while the user has flipped the kill-switch pref off.
+     * Re-checked at every claim; an in-flight job is not interrupted.
+     */
+    private prefEnabled = true;
+    /**
+     * Mirrors `Zotero.Sync.Runner.syncInProgress`. Maintained via the
+     * `['sync']` notifier observer registered in `start()`. While true,
+     * the loop returns `sync_in_progress` from `processOnce()` and waits
+     * for the `'finish'` event to drain.
+     */
+    private syncInProgress = false;
+    /**
+     * Earliest epoch-ms at which a tick may fire. Set in `start()` to
+     * `Date.now() + STARTUP_DELAY_MS`. Producers and observers that call
+     * `notify()` during the delay record their intent (no events are
+     * lost) but the scheduler clamps the actual wake to this floor.
+     */
+    private startupDelayUntil = 0;
+    private prefObserverSymbol: symbol | null = null;
+    private syncObserverId: string | null = null;
+    private unregisterIdleObserver: (() => void) | null = null;
+    private workerRunning = false;
+
+    /** Return the current background worker activity state for UI subscribers. */
+    getStatus(): { running: boolean } {
+        return { running: this.workerRunning };
+    }
 
     /** Schedule the first tick. Safe to call more than once (idempotent). */
     start(): void {
@@ -106,7 +158,83 @@ export class BackgroundExtractor {
         this.stopRequested = false;
         this.dbWritesPermanentlyDisabled = false;
         this.pendingWake = false;
-        this.scheduleTick(BUSY_INTERVAL_MS);
+        this.startupDelayUntil = Date.now() + STARTUP_DELAY_MS;
+
+        // Pref: read initial value before registering the observer so a
+        // race-flip during startup is caught by the observer.
+        this.prefEnabled = (getPref(PREF_ENABLED) as boolean | undefined) ?? true;
+
+        // Sync: register the observer FIRST, then read the current
+        // `syncInProgress` getter. This closes the race window — if a
+        // sync starts between read and register we would miss it; the
+        // other ordering catches an already-running sync via the getter
+        // and any subsequent transitions via the observer.
+        try {
+            const syncObs = {
+                notify: (
+                    event: string,
+                    _type: string,
+                    _ids: string[] | number[],
+                    _extraData: object,
+                ) => {
+                    if (event === 'start') {
+                        this.syncInProgress = true;
+                    } else if (event === 'finish' || event === 'stop') {
+                        // Zotero's sync runner emits 'finish' on normal
+                        // completion (syncRunner.js); 'stop' is accepted
+                        // defensively but is not part of the sync flow.
+                        this.syncInProgress = false;
+                        this.notify();
+                    }
+                },
+            };
+            this.syncObserverId = Zotero.Notifier.registerObserver(
+                syncObs,
+                ['sync'],
+                'beaver-bg-extractor',
+            );
+        } catch (e) {
+            logger(`BackgroundExtractor: registerObserver(sync) failed: ${e}`, 1);
+        }
+        try {
+            this.syncInProgress = (Zotero as any).Sync?.Runner?.syncInProgress === true;
+        } catch {
+            this.syncInProgress = false;
+        }
+
+        // Pref observer: registered against the full global pref path so
+        // `getPref(PREF_ENABLED)`-equivalent flips trigger a wake. Going
+        // from disabled → enabled re-arms the loop via `notify()`.
+        try {
+            this.prefObserverSymbol = Zotero.Prefs.registerObserver(
+                'extensions.zotero.beaver.backgroundExtractorEnabled',
+                (value: unknown) => {
+                    const next = value !== false;
+                    const wasEnabled = this.prefEnabled;
+                    this.prefEnabled = next;
+                    if (!wasEnabled && next) this.notify();
+                },
+                true, // global pref path (not a branch-relative key)
+            );
+        } catch (e) {
+            logger(`BackgroundExtractor: registerObserver(pref) failed: ${e}`, 1);
+        }
+
+        // Idle observer: push-based wake the moment the user crosses
+        // the 30s idle threshold, instead of waiting up to IDLE_INTERVAL_MS
+        // for the next poll tick.
+        try {
+            this.unregisterIdleObserver = registerIdleObserver(
+                { onIdle: () => this.notify() },
+                IDLE_THRESHOLD_SEC,
+            );
+        } catch (e) {
+            logger(`BackgroundExtractor: registerIdleObserver failed: ${e}`, 1);
+        }
+
+        // First tick deferred by STARTUP_DELAY_MS so the loop does not
+        // compete with main-window load / auto-sync kickoff.
+        this.scheduleTick(STARTUP_DELAY_MS);
     }
 
     /**
@@ -124,6 +252,32 @@ export class BackgroundExtractor {
         if (Zotero.__beaverShuttingDown === true) {
             this.dbWritesPermanentlyDisabled = true;
         }
+        // Tear down observers BEFORE the rest of shutdown so notifier or
+        // idle callbacks cannot fire into a half-disposed processor.
+        if (this.prefObserverSymbol) {
+            try {
+                Zotero.Prefs.unregisterObserver(this.prefObserverSymbol);
+            } catch {
+                // best-effort
+            }
+            this.prefObserverSymbol = null;
+        }
+        if (this.syncObserverId) {
+            try {
+                Zotero.Notifier.unregisterObserver(this.syncObserverId);
+            } catch {
+                // best-effort
+            }
+            this.syncObserverId = null;
+        }
+        if (this.unregisterIdleObserver) {
+            try {
+                this.unregisterIdleObserver();
+            } catch {
+                // best-effort
+            }
+            this.unregisterIdleObserver = null;
+        }
         if (this.currentTickId !== undefined) {
             clearTimeout(this.currentTickId);
             this.currentTickId = undefined;
@@ -134,6 +288,7 @@ export class BackgroundExtractor {
         } catch (e) {
             logger(`BackgroundExtractor.stop: disposeMuPDFWorker failed: ${e}`, 1);
         }
+        this.setWorkerRunning(false);
         this.started = false;
         this.pendingWake = false;
     }
@@ -143,6 +298,7 @@ export class BackgroundExtractor {
      */
     async abortInFlight(): Promise<void> {
         await this.abortAndAwaitInFlight();
+        this.setWorkerRunning(false);
     }
 
     /**
@@ -178,7 +334,11 @@ export class BackgroundExtractor {
             this.pendingWake = true;
             return;
         }
-        this.scheduleTick(0);
+        // Clamp to the startup-delay floor so a producer enqueue or an
+        // observer callback during the first 30s cannot defeat the
+        // delay. Once we are past the floor this is a no-op (max(0, neg)).
+        const delay = Math.max(0, this.startupDelayUntil - Date.now());
+        this.scheduleTick(delay);
     }
 
     private async abortAndAwaitInFlight(): Promise<void> {
@@ -210,43 +370,81 @@ export class BackgroundExtractor {
         return false;
     }
 
+    private setWorkerRunning(running: boolean): void {
+        if (this.workerRunning === running) return;
+        this.workerRunning = running;
+        dispatchBackgroundEvent('background-worker:status', { running });
+    }
+
     /**
      * Drive a single iteration of the tick loop synchronously and return
      * what happened. Used by tests and the dev `process-once` endpoint.
      * Never schedules a follow-up tick.
      */
-    async processOnce(): Promise<ProcessOnceResult> {
-        if (this.stopRequested) return { processed: false, reason: 'stopped' };
+    async processOnce(
+        options: { keepRunningAfterJob?: boolean } = {},
+    ): Promise<ProcessOnceResult> {
+        const inactive = (reason: ProcessOnceReason): ProcessOnceResult => {
+            this.setWorkerRunning(false);
+            return { processed: false, reason };
+        };
+
+        if (this.stopRequested) return inactive('stopped');
 
         // Global shutdown check BEFORE claim
         if (this.shouldSkipDbWrites()) {
-            return { processed: false, reason: 'shutting_down' };
+            return inactive('shutting_down');
+        }
+
+        if (!this.prefEnabled) {
+            return inactive('disabled');
         }
 
         const win = Zotero.getMainWindow?.() ?? null;
-        if (!win) return { processed: false, reason: 'no_window' };
+        if (!win) return inactive('no_window');
+
+        if (this.syncInProgress) {
+            return inactive('sync_in_progress');
+        }
 
         if (COOPERATIVE_THROTTLE) {
             const hot = getExistingMuPDFWorkerClient('hot');
             if (hot && hot.getStats().pendingCount > 0) {
-                return { processed: false, reason: 'hot_busy' };
+                return inactive('hot_busy');
             }
         }
 
         const db = Zotero.Beaver?.db;
-        if (!db) return { processed: false, reason: 'empty' };
+        if (!db) return inactive('empty');
+
+        // Idle gate: when the user is actively using the OS we still
+        // run user-blocking work (priority < LOW_PRIORITY_CEILING, e.g.
+        // hot-path retries) but defer library-scale indexing.
+        const idleMs = getSystemIdleTimeMs();
+        const maxPriority =
+            idleMs >= IDLE_THRESHOLD_MS ? undefined : LOW_PRIORITY_CEILING;
 
         const record = await db.claimNextBackgroundJob(
             Date.now(),
             VISIBILITY_TIMEOUT_MS,
+            maxPriority,
         );
-        if (!record) return { processed: false, reason: 'empty' };
+        if (!record) return inactive('empty');
 
         logger(
             `BackgroundExtractor: claimed job id=${record.id} type=${record.jobType} ${record.libraryId}-${record.zoteroKey} mode=${record.mode} attempt=${record.attemptCount + 1}`,
             3,
         );
-        await this.runJob(record, db);
+        this.setWorkerRunning(true);
+        let completedJob = false;
+        try {
+            await this.runJob(record, db);
+            completedJob = true;
+        } finally {
+            if (!options.keepRunningAfterJob || !completedJob) {
+                this.setWorkerRunning(false);
+            }
+        }
         return { processed: true, reason: 'job_done' };
     }
 
@@ -275,7 +473,7 @@ export class BackgroundExtractor {
         if (this.tickRunning) return;
         this.tickRunning = true;
         try {
-            const result = await this.processOnce();
+            const result = await this.processOnce({ keepRunningAfterJob: true });
 
             if (this.stopRequested) return;
 
@@ -302,7 +500,10 @@ export class BackgroundExtractor {
             const wakeNow = this.pendingWake;
             this.pendingWake = false;
             if (wakeNow) {
-                this.scheduleTick(0);
+                // Same startup-delay clamp as `notify()` — a wake recorded
+                // during the first 30s must not bypass the delay floor.
+                const delay = Math.max(0, this.startupDelayUntil - Date.now());
+                this.scheduleTick(delay);
                 return;
             }
             this.scheduleTick(
