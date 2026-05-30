@@ -33,6 +33,11 @@ export const EMPTY_LIBRARY_DISCOVER_FOLLOWUPS: FirstRunFollowup[] = [
 export const FIRST_RUN_FOLLOWUPS: Record<CardKind, FirstRunFollowup[]> = {
     reading_assistant: [
         {
+            id: 'skim_with_highlights',
+            title: 'Skim this paper with highlights',
+            prompt: 'Help me skim this paper. Use highlight annotations to mark the key passages I should read to get the gist: the central argument and contribution, data and methods, main findings, and key conclusions. Aim for 6-10 short highlights in the main body of the paper. Be selective: together they should be the shortest path to understanding what the paper says.',
+        },
+        {
             id: 'related_in_library',
             title: 'Find related papers in my library',
             prompt: 'Find papers in my library related to this one. Briefly compare their findings and methodology.',
@@ -41,7 +46,24 @@ export const FIRST_RUN_FOLLOWUPS: Record<CardKind, FirstRunFollowup[]> = {
             id: 'find_recent_external',
             title: 'Find related papers online',
             prompt: 'Use external search to find recent papers on the topic of this paper. Prefer the last 5 years and highly-cited work. Return up to 8 results, each with title, first author, year, citation count, and a brief description of how it relates to this paper.',
-            
+
+        },
+    ],
+    skim_paper: [
+        {
+            id: 'summarize_from_highlights',
+            title: 'Summarize using these highlights',
+            prompt: 'Write a concise summary of this paper covering the research question, methodology, key findings, and main conclusions. Build on the highlights you just created and cite them to support each claim. Save the summary as a Zotero note attached to the item.',
+        },
+        {
+            id: 'highlight_key_findings',
+            title: 'Highlight the key findings',
+            prompt: 'Read this paper and identify the key findings. For each one, create a highlight annotation with 1-3 specific sentences that states the finding, with a brief comment explaining its significance. Focus on empirical results and novel contributions, not background or literature review. Aim for 3-6 highlights covering the most important findings.',
+        },
+        {
+            id: 'note_annotate_methods',
+            title: 'Add notes to the methods section',
+            prompt: 'Find the methods section of this paper and add note annotations that explain its key components: research design, data sources, sample details, key variables, and analytical techniques. Keep each note brief so I can understand the method choices when reviewing later.',
         },
     ],
     literature_review: [
