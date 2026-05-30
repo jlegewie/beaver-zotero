@@ -586,6 +586,19 @@ export function lineSegmentToTopLeftFrame(
 }
 
 /**
+ * Convert a MuPDF rune code into a JS string, replacing unpaired
+ * surrogates with U+FFFD.
+ *
+ * @internal Exported for unit testing.
+ */
+export function sanitizeRune(runeCode: number): string {
+    if (runeCode >= 0xd800 && runeCode <= 0xdfff) {
+        return "\uFFFD";
+    }
+    return String.fromCodePoint(runeCode);
+}
+
+/**
  * Install the global JS-device and path-walker callback dispatchers.
  *
  * The WASM bundle's EM_JS bindings dereference
@@ -1209,15 +1222,13 @@ export function makeDocumentApi(libmupdf: LibMuPdf): MuPDFApi {
                             if (walker.onChar) {
                                 while (ch) {
                                     const runeCode = libmupdf._wasm_stext_char_get_c(ch);
-                                    // fromCodePoint (not fromCharCode) so
-                                    // non-BMP characters (emoji, U+1D400
-                                    // math bold, extended CJK) survive
-                                    // intact. Without this the rune is
-                                    // truncated to a single UTF-16 unit
-                                    // and the `text.length === chars.length`
-                                    // invariant in ParagraphSentenceMapper
-                                    // fails, forcing a degradation fallback.
-                                    const rune = String.fromCodePoint(runeCode);
+                                    // sanitizeRune decodes with fromCodePoint
+                                    // (not fromCharCode) so non-BMP characters
+                                    // (emoji, U+1D400 math bold, extended CJK)
+                                    // survive intact, and maps unpaired
+                                    // surrogates to U+FFFD so invalid Unicode
+                                    // never reaches the wire. See its docstring.
+                                    const rune = sanitizeRune(runeCode);
                                     const quad = fromQuad(libmupdf._wasm_stext_char_get_quad(ch));
                                     walker.onChar(rune, quad);
                                     ch = libmupdf._wasm_stext_char_get_next(ch);
