@@ -83,7 +83,7 @@ export const BUILTIN_ACTIONS: Action[] = [
     {
         id: 'builtin-skim-paper',
         title: 'Skim this paper',
-        text: 'Help me skim this paper. Use highlight annotations to mark the key passages I should read to get the gist: the central argument and contribution, data and methods, main findings, and key conclusions. Aim for 6-10 short highlights (2-3 sentences each) in the main body of the paper, avoid the introduction. Be selective: together they should be the shortest path to understanding what the paper says. After completing the highlights, provide a short summary structured in the following format: "**Central argument and contribution**. [1-2 sentence summary] [citations to relevant annotations] etc.',
+        text: 'Help me skim this paper. Use highlight annotations to mark the key passages I should read to get the gist: the central argument and contribution, data and methods, main findings, and key conclusions. Aim for 4-8 short highlights (2-3 sentences each) in the main body of the paper, avoid the introduction. Be extremely selective and only highlight short passages so I can skim it quickly. After completingthe highlights, provide a short summary structured in the following format: **Central argument and contribution**. [1-2 sentence summary] [citations to relevant annotations] etc.',
         targetType: 'attachment',
         sortOrder: 200,
     },
