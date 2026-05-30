@@ -120,13 +120,13 @@ export const BUILTIN_ACTIONS: Action[] = [
         sortOrder: 230,
     },
 
-    {
-        id: 'builtin-annotate-methods',
-        title: 'Annotate the methods section',
-        text: 'Find the methods/methodology section of this paper and create highlight annotations to mark and explain its key components: research design, data sources, sample details, key variables, analytical techniques, and any robustness checks. For each highlight, add a brief explanatory comment so I can understand the method choices when reviewing later.',
-        targetType: 'attachment',
-        sortOrder: 240,
-    },
+    // {
+    //     id: 'builtin-annotate-methods',
+    //     title: 'Annotate the methods section',
+    //     text: 'Find the methods/methodology section of this paper and create highlight annotations to mark and explain its key components: research design, data sources, sample details, key variables, analytical techniques, and any robustness checks. For each highlight, add a brief explanatory comment so I can understand the method choices when reviewing later.',
+    //     targetType: 'attachment',
+    //     sortOrder: 240,
+    // },
 
     // ═══════════════════════════════════════════════════════════════════
     // TARGET TYPE: note (a Zotero note is selected)
