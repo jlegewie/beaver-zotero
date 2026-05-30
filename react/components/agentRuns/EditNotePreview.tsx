@@ -778,8 +778,8 @@ export function lookupCitationItemFromAttachment(attId: string): { itemData: any
 
 /**
  * Recover a citation label from a simplified <citation> tag's attributes
- * (item_id for single citations, att_id for attachment-based citations,
- * items for compound citations).
+ * (id for unified citations, legacy item_id/att_id attrs, or items for
+ * compound citations).
  */
 export function recoverSimplifiedCitationLabel(tag: string): string | null {
     const openTag = tag.match(/^<citation\b([^>]*)/i);
@@ -793,7 +793,7 @@ export function recoverSimplifiedCitationLabel(tag: string): string | null {
             : lookupCitationItem(id) || lookupCitationItemFromAttachment(id);
         return ci ? formatCitationText([ci]) : null;
     }
-    // Single citation: item_id="1-KEY"
+    // Legacy single citation: item_id="1-KEY"
     const itemIdMatch = tag.match(/\bitem_id="([^"]*)"/);
     if (itemIdMatch) {
         const ci = lookupCitationItem(itemIdMatch[1]);
@@ -842,7 +842,7 @@ export function recoverRawCitationLabel(encodedCitation: string): string | null 
 // ---- HTML stripping ----
 
 /**
- * Extract the page attribute from a simplified citation tag and append it
+ * Extract the page locator from a simplified citation tag and append it
  * to the label text so page changes are visible in the diff preview.
  */
 function appendCitationPage(tag: string, label: string): string {
@@ -886,7 +886,7 @@ export function stripHtmlTags(html: string): string {
         )
         // Convert simplified self-closing citation tags to their label text.
         // When label is empty or "()", recover by looking up the item.
-        // Also appends page info from the page attribute when present.
+        // Also appends page info from loc/page attributes when present.
         .replace(/<citation\b(?:[^>"']|"[^"]*"|'[^']*')*\blabel="([^"]*)"(?:[^>"']|"[^"]*"|'[^']*')*\/>/gi,
             (match, label) => {
                 const text = (label && label !== '()') ? label : (recoverSimplifiedCitationLabel(match) || label || '[citation]');

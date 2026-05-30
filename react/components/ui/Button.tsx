@@ -4,7 +4,7 @@ import Spinner from '../icons/Spinner';
 
 export type ButtonVariant = 'solid' | 'surface' | 'outline' | 'subtle' | 'ghost' | 'surface-light' | 'ghost-secondary' | 'ghost-tertiary' | 'error';
 
-interface ButtonProps {
+interface ButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'children' | 'className' | 'disabled' | 'onClick' | 'onMouseEnter' | 'onMouseLeave' | 'style' | 'title' | 'type'> {
     /** Button variant */
     variant: ButtonVariant;
     /** Button contents */
@@ -58,7 +58,8 @@ const Button: React.FC<ButtonProps> = ({
     loading = false,
     loadingText,
     title,
-    type = 'button'
+    type = 'button',
+    ...buttonProps
 }) => {
     const hasText = !!children;
     const isIconOnly = !!icon && !children;
@@ -84,6 +85,7 @@ const Button: React.FC<ButtonProps> = ({
             title={title}
             type={type}
             style={style}
+            {...buttonProps}
         >
             {icon && (React.isValidElement(icon) ? icon : <Icon icon={icon as React.ComponentType<React.SVGProps<SVGSVGElement>>} className={iconClassName} />)}
             {children}

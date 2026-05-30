@@ -14,6 +14,7 @@ pref("keyboardShortcut", "j");
 pref("statefulChat", true);
 pref("addSelectedItemsOnOpen", true);
 pref("addSelectedItemsOnNewThread", true);
+pref("focusResponseForScreenReaders", false);
 pref("annotationToolEnabled", true);
 pref("maxAddAttachmentToMessage", 10);
 pref("readerExplainPrompt", "Explain the selected passage or annotation(s) from this paper in plain language. Provide context for any technical terms, statistical methods, or domain-specific concepts. If it references other work, briefly explain that context too.");
@@ -83,6 +84,9 @@ pref("onboardingSignInTextShown", false);
 
 // MCP server
 pref("mcpServerEnabled", false);
+
+// Background extractor kill-switch (drains the background_jobs queue)
+pref("backgroundExtractorEnabled", true);
 
 // Flags to show notifications, run consistency check and collection sync on upgrade
 pref("runConsistencyCheck", false);

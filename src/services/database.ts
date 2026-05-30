@@ -163,6 +163,11 @@ export interface BackgroundJobInput {
     now: number;
 }
 
+export interface BackgroundJobEnqueueResult {
+    enqueued: boolean;
+    id: number;
+}
+
 export interface BackgroundQueueStats {
     pending: number;
     available: number;
@@ -2206,7 +2211,41 @@ export class BeaverDB {
      */
     public async enqueueBackgroundJob(
         input: BackgroundJobInput,
-    ): Promise<{ enqueued: boolean; id: number }> {
+    ): Promise<BackgroundJobEnqueueResult> {
+        const [result] = await this.enqueueBackgroundJobs([input]);
+        return result;
+    }
+
+    /**
+     * Enqueue a batch of background jobs in one transaction.
+     *
+     * Results are returned in input order. Duplicate jobs within the batch
+     * or already present in the queue use the same merge semantics as
+     * `enqueueBackgroundJob`.
+     */
+    public async enqueueBackgroundJobs(
+        inputs: BackgroundJobInput[],
+    ): Promise<BackgroundJobEnqueueResult[]> {
+        if (inputs.length === 0) return [];
+
+        const results: BackgroundJobEnqueueResult[] = [];
+
+        await this.conn.executeTransaction(async () => {
+            for (const input of inputs) {
+                results.push(await this.enqueueBackgroundJobInTransaction(input));
+            }
+        });
+
+        return results;
+    }
+
+    /**
+     * Insert or merge one background job. Must be called inside an active
+     * transaction so callers can choose single-job or batch atomicity.
+     */
+    private async enqueueBackgroundJobInTransaction(
+        input: BackgroundJobInput,
+    ): Promise<BackgroundJobEnqueueResult> {
         const priority = input.priority ?? 100;
         const payloadJson = input.payload ? JSON.stringify(input.payload) : null;
         const itemId = input.itemId ?? null;
@@ -2214,65 +2253,63 @@ export class BeaverDB {
         let enqueued = false;
         let id = 0;
 
-        await this.conn.executeTransaction(async () => {
+        await this.conn.queryAsync(
+            `INSERT OR IGNORE INTO background_jobs (
+                job_type, library_id, item_id, zotero_key, mode,
+                priority, payload_json, enqueued_at, available_at,
+                attempt_count, last_error
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL)`,
+            [
+                input.jobType,
+                input.libraryId,
+                itemId,
+                input.zoteroKey,
+                input.mode,
+                priority,
+                payloadJson,
+                input.now,
+                input.now,
+            ],
+        );
+
+        const changesRows: number[] = [];
+        await this.conn.queryAsync(`SELECT changes()`, [], {
+            onRow: (row: any) => {
+                changesRows.push(row.getResultByIndex(0));
+            },
+        });
+        enqueued = (changesRows[0] ?? 0) === 1;
+
+        if (!enqueued) {
             await this.conn.queryAsync(
-                `INSERT OR IGNORE INTO background_jobs (
-                    job_type, library_id, item_id, zotero_key, mode,
-                    priority, payload_json, enqueued_at, available_at,
-                    attempt_count, last_error
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL)`,
+                `UPDATE background_jobs SET
+                    priority = MIN(priority, ?),
+                    available_at = MIN(available_at, ?),
+                    job_type = CASE WHEN ? < priority THEN ? ELSE job_type END,
+                    payload_json = CASE WHEN ? < priority THEN ? ELSE payload_json END
+                 WHERE library_id = ? AND zotero_key = ? AND mode = ?`,
                 [
-                    input.jobType,
-                    input.libraryId,
-                    itemId,
-                    input.zoteroKey,
-                    input.mode,
                     priority,
-                    payloadJson,
                     input.now,
-                    input.now,
+                    priority, input.jobType,
+                    priority, payloadJson,
+                    input.libraryId, input.zoteroKey, input.mode,
                 ],
             );
+        }
 
-            const changesRows: number[] = [];
-            await this.conn.queryAsync(`SELECT changes()`, [], {
+        const idRows: number[] = [];
+        await this.conn.queryAsync(
+            `SELECT id FROM background_jobs
+             WHERE library_id = ? AND zotero_key = ? AND mode = ?`,
+            [input.libraryId, input.zoteroKey, input.mode],
+            {
                 onRow: (row: any) => {
-                    changesRows.push(row.getResultByIndex(0));
+                    idRows.push(row.getResultByIndex(0));
                 },
-            });
-            enqueued = (changesRows[0] ?? 0) === 1;
-
-            if (!enqueued) {
-                await this.conn.queryAsync(
-                    `UPDATE background_jobs SET
-                        priority = MIN(priority, ?),
-                        available_at = MIN(available_at, ?),
-                        job_type = CASE WHEN ? < priority THEN ? ELSE job_type END,
-                        payload_json = CASE WHEN ? < priority THEN ? ELSE payload_json END
-                     WHERE library_id = ? AND zotero_key = ? AND mode = ?`,
-                    [
-                        priority,
-                        input.now,
-                        priority, input.jobType,
-                        priority, payloadJson,
-                        input.libraryId, input.zoteroKey, input.mode,
-                    ],
-                );
-            }
-
-            const idRows: number[] = [];
-            await this.conn.queryAsync(
-                `SELECT id FROM background_jobs
-                 WHERE library_id = ? AND zotero_key = ? AND mode = ?`,
-                [input.libraryId, input.zoteroKey, input.mode],
-                {
-                    onRow: (row: any) => {
-                        idRows.push(row.getResultByIndex(0));
-                    },
-                },
-            );
-            id = idRows[0] ?? 0;
-        });
+            },
+        );
+        id = idRows[0] ?? 0;
 
         return { enqueued, id };
     }
@@ -2283,22 +2320,34 @@ export class BeaverDB {
      * `available_at` forward by `visibilityTimeoutMs` so a crash/abort
      * leaves the row safe to re-pick later.
      *
+     * `maxPriority` is an exclusive upper bound — when provided, only rows
+     * with `priority < maxPriority` are eligible. Used by the background
+     * extractor to gate library-scale work (priority >= 100) behind user
+     * idleness while still letting hot-path retries (priority < 100) run.
+     *
      * Returns `null` when no row is visible, or when an optimistic-claim
      * race lost (currently impossible with one consumer; cheap insurance).
      */
     public async claimNextBackgroundJob(
         now: number,
         visibilityTimeoutMs: number,
+        maxPriority?: number,
     ): Promise<BackgroundJobRecord | null> {
+        const params: unknown[] = [now];
+        let priorityClause = '';
+        if (maxPriority !== undefined) {
+            priorityClause = ' AND priority < ?';
+            params.push(maxPriority);
+        }
         const candidates = await this.selectBackgroundJobs(
             `SELECT id, job_type, library_id, item_id, zotero_key, mode,
                     priority, payload_json, enqueued_at, available_at,
                     attempt_count, last_error
              FROM background_jobs
-             WHERE available_at <= ?
+             WHERE available_at <= ?${priorityClause}
              ORDER BY priority ASC, available_at ASC
              LIMIT 1`,
-            [now],
+            params,
         );
         if (candidates.length === 0) return null;
         const candidate = candidates[0];

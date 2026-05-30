@@ -76,6 +76,49 @@ describe('BeaverDB background queue', () => {
         expect(modes).toEqual(['markdown', 'structured']);
     });
 
+    it('enqueueBackgroundJobs enqueues a batch in one call and returns results in input order', async () => {
+        const results = await db.enqueueBackgroundJobs([
+            makeInput({ zoteroKey: 'AAAAAAAA', priority: 100, now: 1_000 }),
+            makeInput({ zoteroKey: 'BBBBBBBB', priority: 50, now: 2_000 }),
+            makeInput({ zoteroKey: 'CCCCCCCC', priority: 75, now: 3_000 }),
+        ]);
+
+        expect(results).toHaveLength(3);
+        expect(results.map((r) => r.enqueued)).toEqual([true, true, true]);
+        expect(results.every((r) => r.id > 0)).toBe(true);
+
+        const rows = await db.peekBackgroundJobs();
+        expect(rows).toHaveLength(3);
+        expect(rows.map((r) => r.zoteroKey).sort()).toEqual([
+            'AAAAAAAA',
+            'BBBBBBBB',
+            'CCCCCCCC',
+        ]);
+    });
+
+    it('enqueueBackgroundJobs dedupes repeated jobs with the single-job merge semantics', async () => {
+        const results = await db.enqueueBackgroundJobs([
+            makeInput({ zoteroKey: 'AAAAAAAA', priority: 200, now: 5_000 }),
+            makeInput({ zoteroKey: 'AAAAAAAA', priority: 50, now: 3_000 }),
+            makeInput({ zoteroKey: 'AAAAAAAA', priority: 75, now: 4_000 }),
+        ]);
+
+        expect(results).toHaveLength(3);
+        expect(results.map((r) => r.enqueued)).toEqual([true, false, false]);
+        expect(results[1].id).toBe(results[0].id);
+        expect(results[2].id).toBe(results[0].id);
+
+        const rows = await db.peekBackgroundJobs();
+        expect(rows).toHaveLength(1);
+        expect(rows[0].priority).toBe(50);
+        expect(rows[0].availableAt).toBe(3_000);
+    });
+
+    it('enqueueBackgroundJobs returns an empty result for an empty batch', async () => {
+        await expect(db.enqueueBackgroundJobs([])).resolves.toEqual([]);
+        await expect(db.peekBackgroundJobs()).resolves.toHaveLength(0);
+    });
+
     it('claims jobs in (priority asc, available_at asc) order and bumps availability', async () => {
         await db.enqueueBackgroundJob(
             makeInput({ zoteroKey: 'AAAAAAAA', priority: 100, now: 10_000 }),
@@ -102,6 +145,66 @@ describe('BeaverDB background queue', () => {
         // No remaining visible jobs (all bumped to now + visibility).
         const claimed4 = await db.claimNextBackgroundJob(now, visibility);
         expect(claimed4).toBeNull();
+    });
+
+    describe('maxPriority gate', () => {
+        it('with maxPriority=100, skips priority-100 jobs and claims only lower-priority ones', async () => {
+            await db.enqueueBackgroundJob(
+                makeInput({ zoteroKey: 'AAAAAAAA', priority: 100, now: 10_000 }),
+            );
+            await db.enqueueBackgroundJob(
+                makeInput({ zoteroKey: 'BBBBBBBB', priority: 50, now: 20_000 }),
+            );
+
+            const now = 30_000;
+            const visibility = 60_000;
+            const claim = await db.claimNextBackgroundJob(now, visibility, 100);
+            expect(claim?.zoteroKey).toBe('BBBBBBBB');
+
+            // The priority-100 row is left untouched.
+            const next = await db.claimNextBackgroundJob(now, visibility, 100);
+            expect(next).toBeNull();
+            const rows = await db.peekBackgroundJobs();
+            const remaining = rows.find((r) => r.zoteroKey === 'AAAAAAAA');
+            expect(remaining).toBeTruthy();
+            expect(remaining!.availableAt).toBe(10_000);
+        });
+
+        it('with maxPriority=undefined, any priority is claimed (preserves existing behavior)', async () => {
+            await db.enqueueBackgroundJob(
+                makeInput({ zoteroKey: 'AAAAAAAA', priority: 100, now: 10_000 }),
+            );
+
+            const claim = await db.claimNextBackgroundJob(30_000, 60_000);
+            expect(claim?.zoteroKey).toBe('AAAAAAAA');
+        });
+
+        it('within the eligible set, ordering is still (priority ASC, available_at ASC)', async () => {
+            await db.enqueueBackgroundJob(
+                makeInput({ zoteroKey: 'AAAAAAAA', priority: 99, now: 10_000 }),
+            );
+            await db.enqueueBackgroundJob(
+                makeInput({ zoteroKey: 'BBBBBBBB', priority: 50, now: 20_000 }),
+            );
+            await db.enqueueBackgroundJob(
+                makeInput({ zoteroKey: 'CCCCCCCC', priority: 50, now: 15_000 }),
+            );
+            // Out-of-gate row that must be ignored.
+            await db.enqueueBackgroundJob(
+                makeInput({ zoteroKey: 'DDDDDDDD', priority: 100, now: 5_000 }),
+            );
+
+            const now = 30_000;
+            const visibility = 60_000;
+            const c1 = await db.claimNextBackgroundJob(now, visibility, 100);
+            expect(c1?.zoteroKey).toBe('CCCCCCCC');
+            const c2 = await db.claimNextBackgroundJob(now, visibility, 100);
+            expect(c2?.zoteroKey).toBe('BBBBBBBB');
+            const c3 = await db.claimNextBackgroundJob(now, visibility, 100);
+            expect(c3?.zoteroKey).toBe('AAAAAAAA');
+            const c4 = await db.claimNextBackgroundJob(now, visibility, 100);
+            expect(c4).toBeNull();
+        });
     });
 
     it('hides claimed jobs until the visibility timeout expires', async () => {

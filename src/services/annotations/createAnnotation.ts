@@ -71,6 +71,8 @@ export interface CreateHighlightInput {
     color?: string | null;
     comment?: string | null;
     pageLabel?: string | null;
+    /** Backend-supplied per-page cumulative character offset in reading order. */
+    readingOrderOffset?: number | null;
 }
 
 export interface CreateNoteInput {
@@ -78,6 +80,8 @@ export interface CreateNoteInput {
     comment: string;
     color?: string | null;
     pageLabel?: string | null;
+    /** See CreateHighlightInput.readingOrderOffset. */
+    readingOrderOffset?: number | null;
 }
 
 function resolveHighlightColor(color?: string | null): string {
@@ -85,16 +89,80 @@ function resolveHighlightColor(color?: string | null): string {
     return HIGHLIGHT_COLORS[color] ?? DEFAULT_HIGHLIGHT_COLOR;
 }
 
-function sortIndexCoordinate(value: number | undefined): string {
-    const rounded = Number.isFinite(value) ? Math.round(value ?? 0) : 0;
-    return Math.max(0, rounded).toString().padStart(5, "0");
+/**
+ * Return the first candidate label that is present and non-blank (after
+ * trimming), else null. A whitespace-only `/PageLabels` entry is treated as
+ * "no label" so the caller falls back to the physical page number.
+ */
+function firstNonBlankPageLabel(...candidates: (string | null | undefined)[]): string | null {
+    for (const candidate of candidates) {
+        if (typeof candidate === "string" && candidate.trim() !== "") {
+            return candidate;
+        }
+    }
+    return null;
 }
 
-export function buildSortIndex(pageIndex: number, rect: number[]): string {
-    const yPos = Number.isFinite(rect?.[1]) ? Math.max(0, Math.round(rect[1])) : 0;
-    return `${pageIndex.toString().padStart(5, "0")}|${yPos
-        .toString()
-        .padStart(6, "0")}|${sortIndexCoordinate(rect?.[0])}`;
+/** Coerce `value` to a non-negative integer ≤ `max`. NaN/Infinity/null/negatives become 0. */
+function clampNonNegativeInt(value: unknown, max: number): number {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return 0;
+    const floored = Math.floor(value);
+    if (floored <= 0) return 0;
+    return floored > max ? max : floored;
+}
+
+export interface BuildSortIndexInput {
+    pageIndex: number;
+    /** PDF user-space viewBox of the page (PageGeometry.viewBox). */
+    viewBox: [number, number, number, number] | readonly number[];
+    /** Zotero rect [left, bottom, right, top] in unrotated PDF user space. */
+    rect: number[];
+    /** Backend-supplied per-page cumulative character offset in reading order. */
+    readingOrderOffset?: number | null;
+}
+
+/**
+ * Build a Zotero PDF annotation sort index in the canonical `page|offset|top`
+ * format (Zotero's PDF format is enforced by chrome/content/zotero/xpcom/data/
+ * item.js as `^\d{5}\|\d{6}\|\d{5}$`).
+ *
+ * - `offset` uses the backend's per-page reading-order character offset when
+ *   supplied. That offset lives on the same character scale as Zotero's native
+ *   sortIndex offset (the closest-glyph index from the reader's getSortIndex),
+ *   so Beaver annotations interleave with manually created ones instead of
+ *   clustering. Falls back to display-top so the y-direction is still correct.
+ * - `top` is `Math.floor(viewBox[3] - rect[3])`, matching Zotero's reader at
+ *   /reader/src/pdf/selection.js:399. Using `viewBox[3]` directly
+ *   (not `viewBox[3]-viewBox[1]`) avoids a cropbox-offset discrepancy in the
+ *   Beaver rect conversion (see annotationGeometry.ts).
+ */
+export function buildSortIndex(input: BuildSortIndexInput): string {
+    const rect = Array.isArray(input.rect) ? input.rect : [];
+    const viewBox = Array.isArray(input.viewBox) ? input.viewBox : [];
+    const rectTop = rect[3];
+    const viewBoxTop = viewBox[3];
+    const displayTopRaw =
+        typeof viewBoxTop === 'number'
+        && Number.isFinite(viewBoxTop)
+        && typeof rectTop === 'number'
+        && Number.isFinite(rectTop)
+            ? Math.floor(viewBoxTop - rectTop)
+            : 0;
+    const displayTop = clampNonNegativeInt(displayTopRaw, 99999);
+
+    const rawIndex = input.readingOrderOffset;
+    const hasIndex = typeof rawIndex === 'number' && Number.isFinite(rawIndex);
+    const offset = hasIndex
+        ? clampNonNegativeInt(rawIndex, 999999)
+        : clampNonNegativeInt(displayTopRaw, 999999);
+
+    const page = clampNonNegativeInt(input.pageIndex, 99999);
+
+    return [
+        page.toString().padStart(5, '0'),
+        offset.toString().padStart(6, '0'),
+        displayTop.toString().padStart(5, '0'),
+    ].join('|');
 }
 
 function geometryError(
@@ -205,13 +273,17 @@ export async function getPageGeometryForAttachment(
     const cache = Zotero.Beaver?.documentCache;
     const cached = await cache?.getMetadata(ref, filePath);
     const cachedGeometry = getCachedPageGeometry(cached, pageIndex);
-    if (cachedGeometry) return cachedGeometry;
+    if (cachedGeometry) {
+        return cachedGeometry;
+    }
 
     await getAttachmentFileStatus(attachment, false);
 
     const refreshed = await cache?.getMetadata(ref, filePath);
     const refreshedGeometry = getCachedPageGeometry(refreshed, pageIndex);
-    if (refreshedGeometry) return refreshedGeometry;
+    if (refreshedGeometry) {
+        return refreshedGeometry;
+    }
 
     if (!refreshed) {
         throw geometryError(
@@ -274,7 +346,12 @@ export async function createHighlightAnnotation(
         throw new Error("Highlight annotation produced no rects");
     }
 
-    const sortIndex = buildSortIndex(input.pageIndex, rects[0]);
+    const sortIndex = buildSortIndex({
+        pageIndex: input.pageIndex,
+        viewBox: geometry.viewBox,
+        rect: rects[0],
+        readingOrderOffset: input.readingOrderOffset,
+    });
     const item = new Zotero.Item("annotation");
     item.libraryID = attachment.libraryID;
     item.parentID = attachment.id;
@@ -282,7 +359,8 @@ export async function createHighlightAnnotation(
     item.annotationText = input.text ?? "";
     item.annotationComment = input.comment ?? "";
     item.annotationColor = resolveHighlightColor(input.color);
-    item.annotationPageLabel = input.pageLabel ?? String(input.pageIndex + 1);
+    item.annotationPageLabel =
+        firstNonBlankPageLabel(input.pageLabel) ?? String(input.pageIndex + 1);
     const sortIndexField: Pick<ZoteroAnnotationItem, "annotationSortIndex"> = {
         annotationSortIndex: sortIndex,
     };
@@ -311,7 +389,12 @@ export async function createNoteAnnotation(
     const pageIndex = input.notePosition.page_index;
     const geometry = await getPageGeometryForAttachment(attachment, pageIndex);
     const rect = computeNoteRect(input.notePosition, geometry);
-    const sortIndex = buildSortIndex(pageIndex, rect);
+    const sortIndex = buildSortIndex({
+        pageIndex,
+        viewBox: geometry.viewBox,
+        rect,
+        readingOrderOffset: input.readingOrderOffset,
+    });
 
     const item = new Zotero.Item("annotation");
     item.libraryID = attachment.libraryID;
@@ -319,7 +402,8 @@ export async function createNoteAnnotation(
     item.annotationType = "note";
     item.annotationComment = input.comment;
     item.annotationColor = resolveHighlightColor(input.color);
-    item.annotationPageLabel = input.pageLabel ?? String(pageIndex + 1);
+    item.annotationPageLabel =
+        firstNonBlankPageLabel(input.pageLabel) ?? String(pageIndex + 1);
     const sortIndexField: Pick<ZoteroAnnotationItem, "annotationSortIndex"> = {
         annotationSortIndex: sortIndex,
     };

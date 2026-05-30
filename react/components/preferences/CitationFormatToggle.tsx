@@ -21,9 +21,10 @@ const CitationFormatToggle: React.FC<CitationFormatToggleProps> = ({ checked, on
         >
             <div className="display-flex flex-row gap-2 items-start">
                 <input
-                    type="checkbox" 
+                    type="checkbox"
                     className="mr-1 scale-90 mt-020"
                     style={{minWidth: 'auto'}}
+                    aria-label={`Citation format: ${checked ? "Numeric" : "Author-Year"}`}
                     checked={checked}
                     onChange={handleToggle}
                     onClick={(e) => e.stopPropagation()}

@@ -54,11 +54,11 @@ type CitationDisplayState = 'streaming' | 'ready' | 'invalid' | 'error';
  * Props for ZoteroCitation component.
  * 
  * Supported citation tag formats from LLM:
- *   <citation item_id="libraryID-itemKey"/>      - parent item reference
- *   <citation att_id="libraryID-itemKey"/>       - attachment reference
- *   <citation att_id="..." sid="..."/>           - attachment with sentence/structured record ID
- *   <citation att_id="..." page="..."/>          - attachment with page reference
+ *   <citation id="libraryID-itemKey"/>           - Zotero item reference
+ *   <citation id="..." loc="page5"/>             - Zotero item with page reference
+ *   <citation id="..." loc="s25"/>               - Zotero item with sentence/record ID
  *   <citation external_id="..."/>                - external reference
+ * Legacy item_id/att_id/page attrs are still accepted by preprocessing.
  * 
  * Note: Props are passed from HTML attributes after sanitization,
  * so values may have 'user-content-' prefix added by rehype-sanitize.
@@ -193,20 +193,24 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
             }
         }
 
-        const zoteroRef = parsedProps.ok && parsedProps.ref.kind === 'zotero'
-            ? { libraryID: parsedProps.ref.library_id, itemKey: parsedProps.ref.zotero_key }
-            : null;
-
         let markerKey = parsedProps.ok ? baseCitationKey(parsedProps.ref) : '';
         const resolvedRef = metadata ? getResolvedRef(metadata) : null;
         if (resolvedRef) {
             markerKey = baseCitationKey(resolvedRef);
         }
+
+        const displayRef = resolvedRef ?? (parsedProps.ok ? parsedProps.ref : null);
+        const zoteroRef = displayRef?.kind === 'zotero'
+            ? { libraryID: displayRef.library_id, itemKey: displayRef.zotero_key }
+            : null;
+        const externalSourceId = displayRef?.kind === 'external'
+            ? displayRef.external_id
+            : metadata?.external_source_id;
         
         // Determine citation type
         const isExternal = metadata 
             ? isExternalCitation(metadata) 
-            : (parsedProps.ok && parsedProps.ref.kind === 'external') || citationKey.startsWith('external:');
+            : displayRef?.kind === 'external' || citationKey.startsWith('external:');
         
         // Determine display state (FSM)
         const hasIdentifier = parsedProps.ok || !!citationKey || (!parsedProps.ok && !!parsedProps.rawIdentity);
@@ -233,6 +237,8 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
             itemKey: zoteroRef?.itemKey ?? metadata?.zotero_key ?? '',
             hasIdentifier,
             requestedRef: parsedProps.ok ? parsedProps.ref : null,
+            resolvedRef,
+            externalSourceId,
         };
     }, [parsedProps, citationDataByCitationKey]);
 
@@ -245,12 +251,14 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
         displayState,
         libraryID,
         itemKey,
-        requestedRef
+        requestedRef,
+        resolvedRef,
+        externalSourceId
     } = identity;
 
     // For external citations, check if they map to a Zotero item
-    const mappedZoteroItem = isExternal && citationMetadata && isExternalCitation(citationMetadata)
-        ? externalReferenceToZoteroItem[citationMetadata.external_source_id!]
+    const mappedZoteroItem = isExternal && externalSourceId
+        ? externalReferenceToZoteroItem[externalSourceId]
         : undefined;
     
     // Compute effective libraryID and itemKey (accounting for mapped external citations)
@@ -348,8 +356,12 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
     // Resolve page labels separately so page-label preload updates don't force
     // the citation/preview/HTML-stripping work above to recompute.
     const isZoteroCitationMetadata = !!citationMetadata && isZoteroCitation(citationMetadata);
-    const citationLibraryId = isZoteroCitationMetadata ? citationMetadata!.library_id : undefined;
-    const citationZoteroKey = isZoteroCitationMetadata ? citationMetadata!.zotero_key : undefined;
+    const citationLibraryId = resolvedRef?.kind === 'zotero'
+        ? resolvedRef.library_id
+        : (isZoteroCitationMetadata ? citationMetadata!.library_id : undefined);
+    const citationZoteroKey = resolvedRef?.kind === 'zotero'
+        ? resolvedRef.zotero_key
+        : (isZoteroCitationMetadata ? citationMetadata!.zotero_key : undefined);
     const { pageLabels, pagesDisplay, pages } = useMemo(() => {
         // Default labels: raw page numbers as strings.
         let pageLabels: string[] = rawPages.map((p) => String(p));
@@ -403,8 +415,8 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
         // External citations without Zotero mapping - open details dialog
         if (isExternal && !mappedZoteroItem) {
             logger('ZoteroCitation: External citation - opening details dialog');
-            if (citationMetadata?.external_source_id) {
-                const externalReference = externalReferenceMap[citationMetadata.external_source_id];
+            if (externalSourceId) {
+                const externalReference = externalReferenceMap[externalSourceId];
                 if (externalReference) {
                     setSelectedReference(externalReference);
                     setIsDetailsVisible(true);
@@ -610,8 +622,8 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
 
         // External citations cannot be exported as proper Zotero citations
         if (isExternal && !mappedZoteroItem) {
-            if (citationMetadata?.external_source_id) {
-                const externalReference = externalReferenceMap[citationMetadata.external_source_id];
+            if (externalSourceId) {
+                const externalReference = externalReferenceMap[externalSourceId];
                 if (externalReference && externalReference.url) {
                     return (
                         <span>
@@ -635,11 +647,12 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
             // Fallback: use page prop directly when metadata doesn't provide pages
             const requestedPage = requestedRef ? getPageLocator(requestedRef) : undefined;
             const loadedLabels = getPageLabelsForItem(item, labelsByAttachmentId);
+            const exportLabels = loadedLabels ?? citationMetadata?.page_labels;
             // Zotero note clicks use the CSL locator as a PDF page label.
             // When labels are available, store the visible label for the physical page.
             const navLocator = startPage
-                ? resolvePageLabelFromLabels(loadedLabels, startPage)
-                : (requestedPage ? translatePageNumberToLabelFromLabels(loadedLabels, requestedPage) : undefined);
+                ? resolvePageLabelFromLabels(exportLabels, startPage)
+                : (requestedPage ? translatePageNumberToLabelFromLabels(exportLabels, requestedPage) : undefined);
             const citationObj = {
                 citationItems: [{
                     uris: [Zotero.URI.getItemURI(item.parentItem || item)],

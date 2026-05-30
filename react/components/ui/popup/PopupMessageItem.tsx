@@ -111,7 +111,12 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message, onRemove, 
             onMouseEnter={() => setIsHovering(true)}
             onMouseLeave={() => setIsHovering(false)}
         >
-            <div className="p-3 display-flex flex-col items-start gap-2">
+            <div
+                className= {`
+                    ${message.type === 'version_update' && isFloating ? 'p-4' : 'p-3'}
+                    display-flex flex-col items-start gap-2
+                `}
+            >
                 {/* Floating version_update/welcome_onboarding/reader_tip render their own headers */}
                 {!(isFloating && (message.type === 'version_update' || message.type === 'welcome_onboarding' || message.type === 'reader_tip' || message.type === 'note_tip')) && (
                     <PopupMessageHeader

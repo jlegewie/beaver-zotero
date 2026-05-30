@@ -945,16 +945,22 @@ function translateDegradationItemIds(
 
 function toMarkdownExtractResult(
     result: InternalExtractionResult,
+    includeDiagnostics = false,
 ): MarkdownExtractResult {
     return {
         mode: "markdown",
         schemaVersion: SCHEMA_VERSION,
         createdAt: result.metadata.extractedAt,
-        diagnostics: {
-            settings: result.metadata.settings,
-            engine: result.metadata.engine ?? "paragraph",
-            timings: result.metadata.timings,
-        },
+        // Profiling/diagnostics payload is opt-in.
+        ...(includeDiagnostics
+            ? {
+                diagnostics: {
+                    settings: result.metadata.settings,
+                    engine: result.metadata.engine ?? "paragraph",
+                    timings: result.metadata.timings,
+                },
+            }
+            : {}),
         document: {
             pageCount: result.analysis.pageCount,
             pageLabels: pageLabelsToStringKeys(result.pageLabels),
@@ -974,6 +980,7 @@ function toMarkdownExtractResult(
 function toStructuredExtractResult(
     result: InternalExtractionResult,
     bboxPrecision: number,
+    includeDiagnostics = false,
     debug?: ExtractionDebug,
 ): StructuredExtractResult {
     const pages = result.pages.map((page) =>
@@ -995,12 +1002,17 @@ function toStructuredExtractResult(
         mode: "structured",
         schemaVersion: SCHEMA_VERSION,
         createdAt: result.metadata.extractedAt,
-        diagnostics: {
-            settings: result.metadata.settings,
-            engine: "structured",
-            timings: result.metadata.timings,
-            ...(degradation ? { degradation } : {}),
-        },
+        // Profiling/diagnostics payload is opt-in.
+        ...(includeDiagnostics
+            ? {
+                diagnostics: {
+                    settings: result.metadata.settings,
+                    engine: "structured",
+                    timings: result.metadata.timings,
+                    ...(degradation ? { degradation } : {}),
+                },
+            }
+            : {}),
         document: {
             pageCount: result.analysis.pageCount,
             pageLabels: pageLabelsToStringKeys(result.pageLabels),
@@ -1187,6 +1199,8 @@ export async function opExtract(
         pageIndices?: number[];
         pageRange?: { startIndex: number; endIndex?: number; maxPages?: number };
         analysisWindow?: number;
+        /** Attach the opt-in `diagnostics` block */
+        includeDiagnostics?: boolean;
     },
 ): Promise<OpReply<BeaverExtractResult>> {
     // Defense in depth: the facade enforces this too, but the worker is
@@ -1326,8 +1340,9 @@ export async function opExtract(
             ? toStructuredExtractResult(
                 internal,
                 args.structured?.bboxPrecision ?? 1,
+                args.includeDiagnostics ?? false,
               )
-            : toMarkdownExtractResult(internal);
+            : toMarkdownExtractResult(internal, args.includeDiagnostics ?? false);
         return { result };
     } catch (e) {
         docFailed = true;

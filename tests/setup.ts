@@ -152,6 +152,17 @@ function testRemoveDiacritics(s: string): string {
         get: vi.fn().mockReturnValue(undefined),
         set: vi.fn(),
         clear: vi.fn(),
+        registerObserver: vi.fn(() => Symbol('pref-obs')),
+        unregisterObserver: vi.fn(),
+    },
+    Notifier: {
+        registerObserver: vi.fn(() => 'beaver-bg-extractor'),
+        unregisterObserver: vi.fn(),
+    },
+    Sync: {
+        Runner: {
+            syncInProgress: false,
+        },
     },
     debug: vi.fn(),
     getMainWindow: vi.fn(() => getTestWindow()),

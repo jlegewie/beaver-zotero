@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useId } from 'react';
 import { StopIcon, GlobalSearchIcon } from '../icons/icons';
 import { useAtom, useSetAtom, useAtomValue } from 'jotai';
 import { newThreadAtom, currentThreadIdAtom } from '../../atoms/threads';
@@ -66,6 +66,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     const isWebSearchAllowed = useAtomValue(isWebSearchAllowedAtom);
     const currentNoteItem = useAtomValue(currentNoteItemAtom);
     const pendingActionFocus = useAtomValue(pendingActionInputFocusAtom);
+    const webSearchDescriptionId = useId();
 
     // WebSocket state
     const sendWSMessage = useSetAtom(sendWSMessageAtom);
@@ -156,6 +157,9 @@ const InputArea: React.FC<InputAreaProps> = ({
     } = useSlashMenu(inputRef, verticalPosition);
 
     useEffect(() => {
+        if (isPending && getPref('focusResponseForScreenReaders')) {
+            return;
+        }
         inputRef.current?.focus();
     }, []);
 
@@ -291,6 +295,11 @@ const InputArea: React.FC<InputAreaProps> = ({
         }
     };
 
+    const handleWebSearchToggle = () => {
+        if (isAwaitingApproval || !isWebSearchAllowed) return;
+        setIsWebSearchEnabled(!isWebSearchEnabled);
+    };
+
     const getPlaceholderText = () => {
         if (placeholder !== undefined) return placeholder;
         if (isAwaitingApproval) return "Add instructions to reject";
@@ -299,6 +308,13 @@ const InputArea: React.FC<InputAreaProps> = ({
         if (currentNoteItem) return "@ to add a source, / for actions";
         return "@ to add a source, / for actions, drag to add annotations";
     }
+
+    const webSearchTooltipContent = isWebSearchAllowed
+        ? (isWebSearchEnabled ? 'Stop requesting web search' : 'Request web search')
+        : 'Web search requires Beaver credits';
+    const webSearchDescription = isWebSearchAllowed
+        ? (isWebSearchEnabled ? 'Web search is enabled.' : 'Web search is disabled.')
+        : 'Web search is unavailable. It requires Beaver credits. Use a Beaver model, or enable Plus Tools in Settings, API Keys.';
 
     return (
         <div
@@ -408,6 +424,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                             e.currentTarget.style.height = `${e.currentTarget.scrollHeight}px`;
                         }}
                         placeholder={getPlaceholderText()}
+                        aria-label="Message Beaver"
                         className="chat-input"
                         onKeyDown={(e) => {
                             // When slash menu is open, handle navigation and dismiss keys
@@ -433,15 +450,14 @@ const InputArea: React.FC<InputAreaProps> = ({
                     )}
                     <div className="flex-1" />
                     <div className="display-flex flex-row items-center gap-4">
+                        <span id={webSearchDescriptionId} className="sr-only">
+                            {webSearchDescription}
+                        </span>
                         <Tooltip
                             key={String(isWebSearchAllowed)}
-                            content={
-                                !isWebSearchAllowed
-                                    ? 'Web search requires Beaver credits'
-                                    : (isWebSearchEnabled ? 'Stop requesting web search' : 'Request web search')
-                            }
+                            content={webSearchTooltipContent}
                             padding={false}
-                            width={!isWebSearchAllowed ? "250px" : isWebSearchEnabled ? "220px" : "190px"}
+                            width={!isWebSearchAllowed ? '250px' : isWebSearchEnabled ? '220px' : '190px'}
                             customContent={
                                 !isWebSearchAllowed ? (
                                     <div className="px-2 py-1 display-flex flex-col gap-1">
@@ -466,12 +482,22 @@ const InputArea: React.FC<InputAreaProps> = ({
                                 variant="ghost-secondary"
                                 className="scale-12 mt-015"
                                 iconClassName={isWebSearchEnabled ? 'font-color-accent-blue stroke-width-2' : ''}
-                                onClick={() => setIsWebSearchEnabled(!isWebSearchEnabled)}
+                                ariaLabel="Web search"
+                                ariaPressed={isWebSearchEnabled}
+                                ariaDescribedBy={webSearchDescriptionId}
+                                onClick={handleWebSearchToggle}
                                 disabled={isAwaitingApproval || !isWebSearchAllowed}
                             />
                         </Tooltip>
                         <Button
                             rightIcon={isPending && !(isAwaitingApproval && messageContent.trim().length > 0) ? StopIcon : undefined}
+                            ariaLabel={
+                                isAwaitingApproval && messageContent.trim().length > 0
+                                    ? pendingApprovalsMap.size > 1 ? 'Reject all proposed actions' : 'Reject proposed action'
+                                    : isPending
+                                        ? 'Stop generating'
+                                        : 'Send message'
+                            }
                             type="button"
                             variant={
                                 (

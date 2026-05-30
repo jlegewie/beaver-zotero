@@ -845,6 +845,11 @@ export class MuPDFWorkerClient {
              * around each target; `Infinity` covers the whole doc.
              */
             analysisWindow?: number;
+            /**
+             * Attach the opt-in `diagnostics` block (settings, engine,
+             * per-page timings) to the result. Default false.
+             */
+            includeDiagnostics?: boolean;
         },
         signal?: AbortSignal,
     ): Promise<BeaverExtractResult> {
@@ -860,6 +865,7 @@ export class MuPDFWorkerClient {
             pageIndices: args?.pageIndices,
             pageRange: args?.pageRange,
             analysisWindow: args?.analysisWindow,
+            includeDiagnostics: args?.includeDiagnostics,
         }, { signal });
     }
 

@@ -9,7 +9,7 @@ import { citationDataMapAtom } from '../atoms/citations';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../atoms/externalReferences';
 import { currentThreadIdAtom } from '../atoms/threads';
 import { renderToHTML } from './citationRenderers';
-import { preloadPageLabelsForContent } from './pageLabels';
+import { prepareCitationRenderContext } from './citationRenderContext';
 import { wrapWithSchemaVersion, getBeaverNoteFooterHTML } from './noteActions';
 import { logger } from '../../src/utils/logger';
 import { resolveCreateNoteParent } from '../../src/services/agentDataProvider/actions/resolveCreateNoteParent';
@@ -86,14 +86,17 @@ export async function executeCreateNoteAction(action: AgentAction, runId?: strin
     // Build markdown content with title heading
     const markdownContent = `<h1>${title}</h1>\n\n${content}`;
 
-    // Preload page labels for citation references
-    const pageLabelsByAttachmentId = await preloadPageLabelsForContent(markdownContent);
+    const renderContextData = await prepareCitationRenderContext(markdownContent, {
+        citationDataMap,
+        externalMapping,
+        externalReferencesMap,
+    });
 
     // Convert markdown to HTML with citation context
     let htmlContent = renderToHTML(
         markdownContent.trim(),
         "markdown",
-        { citationDataMap, externalMapping, externalReferencesMap, pageLabelsByAttachmentId },
+        renderContextData,
     );
 
     // Add Beaver footer with thread/run link

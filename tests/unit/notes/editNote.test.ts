@@ -1035,7 +1035,7 @@ describe('unsupported action type', () => {
 
 describe('validateEditNoteAction — partial element fallback', () => {
     const CITATION_RAW = '<span class="citation" data-citation="...">(Legewie, 2018)</span>';
-    const CITATION_SIMPLIFIED = '<citation item_id="1-KEY" ref="c_KEY_0"/>';
+    const CITATION_SIMPLIFIED = '<citation id="1-KEY" ref="c_KEY_0"/>';
     const RAW_HTML = `<div data-schema-version="9">${CITATION_RAW}—ein theoretisch bildungsfördernder Effekt</div>`;
     const SIMPLIFIED = `${CITATION_SIMPLIFIED}—ein theoretisch bildungsfördernder Effekt`;
 
@@ -1141,7 +1141,7 @@ describe('validateEditNoteAction — partial element fallback', () => {
         // twice in rawHtml — disambiguation uses prefix expansion to locate the
         // correct occurrence and attach context anchors.
         const oldString = '/>—ein theoretisch';
-        const simplifiedWithTag = `BEFORE <citation item_id="1-KEY" ref="c_KEY_0"/>${simplified.substring('BEFORE '.length)}`;
+        const simplifiedWithTag = `BEFORE <citation id="1-KEY" ref="c_KEY_0"/>${simplified.substring('BEFORE '.length)}`;
         vi.mocked(getOrSimplify).mockReturnValue({
             simplified: simplifiedWithTag,
             metadata: { elements: new Map() },
@@ -1181,7 +1181,7 @@ describe('validateEditNoteAction — partial element fallback', () => {
         // (citation tag) gets expanded to the raw citation text, and the
         // resulting raw position correctly locates the first occurrence.
         const RAWCIT = '<span class="citation" data-citation="x">(Cite)</span>';
-        const CIT_TAG = '<citation item_id="1-KEY" ref="c_KEY_0"/>';
+        const CIT_TAG = '<citation id="1-KEY" ref="c_KEY_0"/>';
         const rawHtml = `<div data-schema-version="9">${RAWCIT}—ein theoretisch BBB—ein theoretisch CCC</div>`;
         const simplified = `${CIT_TAG}—ein theoretisch BBB—ein theoretisch CCC`;
 

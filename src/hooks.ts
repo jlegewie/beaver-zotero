@@ -10,6 +10,7 @@ import { BackgroundExtractor } from "./services/backgroundExtractor";
 import { uiManager } from "../react/ui/UIManager";
 import { getPref, setPref } from "./utils/prefs";
 import { addPendingVersionNotification } from "./utils/versionNotificationPrefs";
+import { compareVersions } from "./utils/compareVersions";
 import { getAllVersionUpdateMessageVersions } from "../react/constants/versionUpdateMessages";
 import { disposeMuPDFWorker } from "./beaver-extract";
 import { configurePDFForBeaver } from "./utils/configurePDFForBeaver";
@@ -121,26 +122,6 @@ function unregisterQuitObserver(): void {
     } finally {
         quitObserverRegistered = false;
     }
-}
-
-/**
- * Compares two semantic version strings.
- * @param v1 Version string 1
- * @param v2 Version string 2
- * @returns 1 if v1 > v2, -1 if v1 < v2, 0 if v1 === v2
- */
-function compareVersions(v1: string, v2: string): number {
-    const parts1 = v1.split('.').map(Number);
-    const parts2 = v2.split('.').map(Number);
-    const len = Math.max(parts1.length, parts2.length);
-
-    for (let i = 0; i < len; i++) {
-        const p1 = parts1[i] || 0;
-        const p2 = parts2[i] || 0;
-        if (p1 > p2) return 1;
-        if (p1 < p2) return -1;
-    }
-    return 0;
 }
 
 /**

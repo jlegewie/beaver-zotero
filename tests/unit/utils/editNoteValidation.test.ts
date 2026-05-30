@@ -105,6 +105,41 @@ describe('enrichOldStringCitationRefs (item_id)', () => {
         );
     });
 
+    it('injects ref when a unique unified id + loc match is found in metadata', () => {
+        const metadata = buildMetadata([
+            { ref: 'c_AAAA_0', itemId: '1-AAAAAAAA', page: '12' },
+        ]);
+        const result = enrichOldStringCitationRefs(
+            '<p>Body <citation id="1-AAAAAAAA" loc="page12"/></p>',
+            metadata,
+        );
+        expect(result).toBe(
+            '<p>Body <citation id="1-AAAAAAAA" loc="page12" ref="c_AAAA_0"/></p>',
+        );
+    });
+
+    it('does not enrich paragraph-located citations as unpaged item citations', () => {
+        const metadata = buildMetadata([
+            { ref: 'c_AAAA_0', itemId: '1-AAAAAAAA' },
+        ]);
+        const result = enrichOldStringCitationRefs(
+            '<p>Body <citation id="1-AAAAAAAA" loc="p3"/></p>',
+            metadata,
+        );
+        expect(result).toBeNull();
+    });
+
+    it('does not enrich sentence-located citations as unpaged item citations', () => {
+        const metadata = buildMetadata([
+            { ref: 'c_AAAA_0', itemId: '1-AAAAAAAA' },
+        ]);
+        const result = enrichOldStringCitationRefs(
+            '<p>Body <citation id="1-AAAAAAAA" sid="s3"/></p>',
+            metadata,
+        );
+        expect(result).toBeNull();
+    });
+
     it('skips citations that already carry a ref', () => {
         const metadata = buildMetadata([
             { ref: 'c_AAAA_0', itemId: '1-AAAAAAAA' },
@@ -177,12 +212,48 @@ describe('enrichOldStringCitationRefs (att_id)', () => {
             { ref: 'c_PARENT_0', itemId: '1-PARENT1234', page: '3' },
         ]);
         const result = enrichOldStringCitationRefs(
-            '<p><citation id="1-ATTKEY000" loc="p3"/></p>',
+            '<p><citation id="1-ATTKEY000" loc="page3"/></p>',
             metadata,
         );
         expect(result).toBe(
             '<p><citation item_id="1-PARENT1234" page="3" ref="c_PARENT_0"/></p>',
         );
+    });
+
+    it('does not treat p-prefixed paragraph locators as page locators in old_string', () => {
+        installZoteroItems(new Map([
+            ['1-ATTKEY000', {
+                libraryID: 1,
+                parentKey: 'PARENT1234',
+                isAttachment: () => true,
+            }],
+        ]));
+        const metadata = buildMetadata([
+            { ref: 'c_PARENT_0', itemId: '1-PARENT1234', page: '3' },
+        ]);
+        const result = enrichOldStringCitationRefs(
+            '<p><citation id="1-ATTKEY000" loc="p3"/></p>',
+            metadata,
+        );
+        expect(result).toBeNull();
+    });
+
+    it('does not enrich paragraph-located attachment citations as unpaged parent citations', () => {
+        installZoteroItems(new Map([
+            ['1-ATTKEY000', {
+                libraryID: 1,
+                parentKey: 'PARENT1234',
+                isAttachment: () => true,
+            }],
+        ]));
+        const metadata = buildMetadata([
+            { ref: 'c_PARENT_0', itemId: '1-PARENT1234' },
+        ]);
+        const result = enrichOldStringCitationRefs(
+            '<p><citation id="1-ATTKEY000" loc="p3"/></p>',
+            metadata,
+        );
+        expect(result).toBeNull();
     });
 
     it('preserves page attribute in the rewritten citation', () => {

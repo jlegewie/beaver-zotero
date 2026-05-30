@@ -18,6 +18,7 @@ declare namespace _ZoteroTypes {
       "statefulChat": boolean;
       "addSelectedItemsOnOpen": boolean;
       "addSelectedItemsOnNewThread": boolean;
+      "focusResponseForScreenReaders": boolean;
       "annotationToolEnabled": boolean;
       "maxAddAttachmentToMessage": number;
       "readerExplainPrompt": string;
@@ -56,6 +57,7 @@ declare namespace _ZoteroTypes {
       "onboardingWelcomeShownAt": string;
       "onboardingSignInTextShown": boolean;
       "mcpServerEnabled": boolean;
+      "backgroundExtractorEnabled": boolean;
       "runConsistencyCheck": boolean;
       "runCollectionSync": boolean;
       "runWebDAVSync": boolean;

@@ -66,7 +66,7 @@ export function translatePageNumberToLabel(
 }
 
 /**
- * Resolve page labels for citations in a string that carry page attributes.
+ * Resolve page labels for citations in a string that carry page locators.
  *
  * Returns a `PageLabelsByAttachmentId` map (attachment item ID → 0-based page
  * index → label). Callers thread the returned map into `expandToRawHtml` so
@@ -198,7 +198,7 @@ export function extractAttr(attrStr: string, name: string): string | undefined {
 function parseSimplifiedCitationAttrs(attrStr: string): { item_id: string; page?: string } {
     const normalized = normalizeCitationTag(parseRawCitationAttributes(attrStr));
     if (!normalized.ok || normalized.ref.kind !== 'zotero') {
-        throw new Error('Citation must have an item_id attribute.');
+        throw new Error('Citation must have an "id" attribute. Legacy "item_id" / "att_id" are also accepted.');
     }
     const item_id = `${normalized.ref.library_id}-${normalized.ref.zotero_key}`;
     const page = getPageLocator(normalized.ref);
@@ -392,7 +392,7 @@ function buildExternalRefLinkHTML(ref: ExternalReference, page?: string): string
  *   `external_id` (chat-side external work IDs from search tools) are
  *   auto-resolved to a Zotero `item_id` if the work is in the library, or
  *   converted to an inline `<a>` link otherwise. When omitted, `external_id`
- *   citations throw the same "item_id or att_id" error as before.
+ *   citations throw the standard missing identity error.
  * @param pageLabels - Optional pre-resolved page-label map (attachment item ID
  *   → 0-based page index → label). Used to translate model-provided 1-based
  *   page numbers on NEW citations into display labels. Resolve it up-front via
@@ -410,7 +410,9 @@ export function expandToRawHtml(
         /<citation\s+([^/]*?)\s*\/>/g,
         (match, attrStr) => {
             const ref = extractAttr(attrStr, 'ref');
-            const itemId = extractAttr(attrStr, 'item_id') || extractAttr(attrStr, 'id');
+            const explicitItemId = extractAttr(attrStr, 'item_id');
+            const unifiedId = extractAttr(attrStr, 'id');
+            const itemId = explicitItemId || unifiedId;
             const attId = extractAttr(attrStr, 'att_id') || extractAttr(attrStr, 'attachment_id');
             const items = extractAttr(attrStr, 'items');
             const externalId = extractAttr(attrStr, 'external_id');
@@ -463,19 +465,22 @@ export function expandToRawHtml(
                 // this, the validator's `applyOldStringEnrichment` silently
                 // no-ops and the model only sees the generic "no ref" message,
                 // never learning which identifier was unresolvable.
-                const ident = itemId
-                    ? `item_id="${itemId}"`
-                    : attId
-                        ? `att_id="${attId}"`
-                        : externalId
-                            ? `external_id="${externalId}"`
-                            : items
-                                ? `items="${items}"`
-                                : 'unknown';
+                const ident = unifiedId
+                    ? `id="${unifiedId}"`
+                    : explicitItemId
+                        ? `item_id="${explicitItemId}"`
+                        : attId
+                            ? `att_id="${attId}"`
+                            : externalId
+                                ? `external_id="${externalId}"`
+                                : items
+                                    ? `items="${items}"`
+                                    : 'unknown';
+                const locAttr = extractAttr(attrStr, 'loc');
                 const pageAttr = extractAttr(attrStr, 'page');
-                const pageStr = pageAttr ? ` page="${pageAttr}"` : '';
+                const locatorStr = locAttr ? ` loc="${locAttr}"` : pageAttr ? ` page="${pageAttr}"` : '';
                 throw new Error(
-                    `Citation \`<citation ${ident}${pageStr}/>\` referenced in old_string `
+                    `Citation \`<citation ${ident}${locatorStr}/>\` referenced in old_string `
                     + 'was not found in the note. To reference an existing citation, copy '
                     + 'its full <citation .../> tag (including `ref`) verbatim from '
                     + 'read_note. New citations (without a ref) can only appear in new_string.'
@@ -518,20 +523,20 @@ export function expandToRawHtml(
                 }
 
                 // Tier 3: no data at all — give the model an actionable error
-                // instead of the generic "item_id or att_id" message.
+                // instead of the generic missing identity message.
                 throw new Error(
                     `Error: Citation external_id="${externalId}" not found in this thread's `
-                    + 'external reference cache. To cite a Zotero item use item_id="LIB-KEY", '
+                    + 'external reference cache. To cite a Zotero item use id="LIB-KEY", '
                     + 'or att_id="LIB-KEY" for a PDF attachment. external_id is only valid '
                     + 'for works returned by a search tool earlier in this thread.'
                 );
             }
             if (items) {
                 throw new Error(
-                    'Error: Cannot create new compound citations. Insert individual <citation item_id="..." /> tags instead.'
+                    'Error: Cannot create new compound citations. Insert individual <citation id="..." /> tags instead.'
                 );
             }
-            throw new Error('Error: Citation must have an item_id or att_id attribute.');
+            throw new Error('Error: Citation must have an "id" attribute. Legacy "item_id" / "att_id" are also accepted.');
         }
     );
 

@@ -27,6 +27,9 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false, inputRef }) => {
     const libraryHasItems = useAtomValue(libraryHasItemsAtom);
     const showActions = libraryHasItems !== false && actions.length > 0;
 
+    // Beta versions use a pre-release tag (e.g. "0.20.0-beta.1")
+    const isBeta = /-beta\.\d+$/.test(Zotero.Beaver?.pluginVersion ?? "");
+
     return (
         <div
             id="welcome-page"
@@ -68,6 +71,13 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false, inputRef }) => {
                 <div className="relative -mx-4 px-4 mb-3">
                     <PreviewAndPopupContainer />
                 </div>
+
+                {isBeta && (
+                    <div className="text-sm font-color-secondary mb-2 bg-quinary p-2 rounded-md">
+                        You're using a beta version. Please report any issues to{" "}
+                        <a href="mailto:contact@beaverapp.ai">contact@beaverapp.ai</a>.
+                    </div>
+                )}
             </div>
         </div>
     );
