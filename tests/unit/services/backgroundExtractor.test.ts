@@ -46,6 +46,14 @@ vi.mock('../../../src/utils/logger', () => ({
     logger: vi.fn(),
 }));
 
+// Default to "always idle" so existing test cases (which enqueue
+// priority-100 jobs) clear the idle gate without modification. Specific
+// new cases override `getSystemIdleTimeMs` per-test to simulate active use.
+vi.mock('../../../src/utils/idleService', () => ({
+    getSystemIdleTimeMs: vi.fn(() => Number.MAX_SAFE_INTEGER),
+    registerIdleObserver: vi.fn(() => () => {}),
+}));
+
 function payload(overrides: Partial<BackgroundJobPayload> = {}): BackgroundJobPayload {
     return {
         maxPages: 200,
@@ -73,6 +81,13 @@ function setupZoteroGlobal() {
         // otherwise cause processOnce to short-circuit with 'shutting_down'.
         __beaverShuttingDown: undefined,
     };
+    // Reset nested state that the shallow spread above shares with the
+    // setup.ts stubs — a previous test mutating these would otherwise
+    // bleed across cases.
+    if ((globalThis as any).Zotero.Sync?.Runner) {
+        (globalThis as any).Zotero.Sync.Runner.syncInProgress = false;
+    }
+    (globalThis as any).Zotero.Prefs.get = vi.fn().mockReturnValue(undefined);
     mockState.mainWindow = win;
     return { win, item };
 }
@@ -653,13 +668,15 @@ describe('BackgroundExtractor', () => {
             const proc = new BackgroundExtractor();
             const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
 
-            // start() schedules a tick at BUSY_INTERVAL_MS (10).
+            // start() schedules the first tick at STARTUP_DELAY_MS.
             proc.start();
+            // Pretend the startup delay has elapsed so this test can
+            // assert the post-delay 0-delay wake behavior of notify().
+            // The startup-delay clamp is exercised by its own case.
+            (proc as any).startupDelayUntil = 0;
             try {
                 const callsAfterStart = setTimeoutSpy.mock.calls.length;
                 expect(callsAfterStart).toBeGreaterThan(0);
-                // Sanity-check the start delay was nonzero so the
-                // 0-delay assertion below is meaningful.
                 const startDelay = setTimeoutSpy.mock.calls[callsAfterStart - 1][1];
                 expect(startDelay).toBeGreaterThan(0);
 
@@ -670,8 +687,6 @@ describe('BackgroundExtractor', () => {
                 const lastCall = setTimeoutSpy.mock.calls.at(-1);
                 expect(lastCall?.[1]).toBe(0);
             } finally {
-                // Tear down the scheduled tick so it does not fire into
-                // a later test.
                 await proc.stop();
                 setTimeoutSpy.mockRestore();
             }
@@ -760,6 +775,9 @@ describe('BackgroundExtractor', () => {
             const { BackgroundExtractor } = await loadProcessor();
             const proc = new BackgroundExtractor();
             proc.start();
+            // Bypass the startup-delay clamp; the clamp is covered by
+            // its own test.
+            (proc as any).startupDelayUntil = 0;
 
             // Simulate a notify() that arrived while the tick was active.
             (proc as any).pendingWake = true;
@@ -822,6 +840,272 @@ describe('BackgroundExtractor', () => {
             });
             await t1;
             expect((proc as any).tickRunning).toBe(false);
+        });
+    });
+
+    describe('good-citizen gates', () => {
+        it('returns disabled when the kill-switch pref is false at start()', async () => {
+            (Zotero as any).Prefs.get = vi.fn(() => false);
+
+            const { BackgroundExtractor } = await loadProcessor();
+            const proc = new BackgroundExtractor();
+            await proc.start();
+            try {
+                await db.enqueueBackgroundJob({
+                    jobType: 'hot_timeout_retry',
+                    libraryId: 1,
+                    zoteroKey: 'AAAAAAAA',
+                    mode: 'structured',
+                    payload: payload(),
+                    now: 0,
+                });
+                const result = await proc.processOnce();
+                expect(result).toEqual({ processed: false, reason: 'disabled' });
+                expect(mockState.extractCalls).toHaveLength(0);
+            } finally {
+                await proc.stop();
+            }
+        });
+
+        it('pref observer flipping back to true triggers a wake and re-arms claiming', async () => {
+            (Zotero as any).Prefs.get = vi.fn(() => false);
+            const registerObserver = vi.fn(() => Symbol('pref-obs'));
+            (Zotero as any).Prefs.registerObserver = registerObserver;
+
+            const { BackgroundExtractor } = await loadProcessor();
+            const proc = new BackgroundExtractor();
+            await proc.start();
+            try {
+                expect(registerObserver).toHaveBeenCalled();
+                const handler = registerObserver.mock.calls[0][1] as (v: unknown) => void;
+                // Pref flips back to true — handler must re-enable the loop.
+                handler(true);
+
+                await db.enqueueBackgroundJob({
+                    jobType: 'hot_timeout_retry',
+                    libraryId: 1,
+                    zoteroKey: 'AAAAAAAA',
+                    mode: 'structured',
+                    payload: payload(),
+                    now: 0,
+                });
+                const result = await proc.processOnce();
+                expect(result.processed).toBe(true);
+            } finally {
+                await proc.stop();
+            }
+        });
+
+        it('returns sync_in_progress when Zotero.Sync.Runner.syncInProgress is true at start()', async () => {
+            (Zotero as any).Sync.Runner.syncInProgress = true;
+
+            const { BackgroundExtractor } = await loadProcessor();
+            const proc = new BackgroundExtractor();
+            await proc.start();
+            try {
+                await db.enqueueBackgroundJob({
+                    jobType: 'hot_timeout_retry',
+                    libraryId: 1,
+                    zoteroKey: 'AAAAAAAA',
+                    mode: 'structured',
+                    payload: payload(),
+                    now: 0,
+                });
+                const result = await proc.processOnce();
+                expect(result).toEqual({ processed: false, reason: 'sync_in_progress' });
+                expect(mockState.extractCalls).toHaveLength(0);
+            } finally {
+                await proc.stop();
+            }
+        });
+
+        it('sync stop notifier clears the in-progress flag and schedules a wake', async () => {
+            (Zotero as any).Sync.Runner.syncInProgress = true;
+            const registerObserver = vi.fn(() => 'beaver-bg-extractor');
+            (Zotero as any).Notifier.registerObserver = registerObserver;
+
+            const { BackgroundExtractor } = await loadProcessor();
+            const proc = new BackgroundExtractor();
+            await proc.start();
+            try {
+                expect(registerObserver).toHaveBeenCalled();
+                const observer = registerObserver.mock.calls[0][0] as {
+                    notify: (event: string, type: string, ids: number[], extra: unknown) => void;
+                };
+                observer.notify('stop', 'sync', [], {});
+
+                await db.enqueueBackgroundJob({
+                    jobType: 'hot_timeout_retry',
+                    libraryId: 1,
+                    zoteroKey: 'AAAAAAAA',
+                    mode: 'structured',
+                    payload: payload(),
+                    now: 0,
+                });
+                const result = await proc.processOnce();
+                expect(result.processed).toBe(true);
+            } finally {
+                await proc.stop();
+            }
+        });
+
+        it('not idle + priority=100 job in queue returns empty (gated by maxPriority)', async () => {
+            const idleMod = await import('../../../src/utils/idleService');
+            (idleMod.getSystemIdleTimeMs as any).mockReturnValueOnce(0);
+            const claimSpy = vi.spyOn(db, 'claimNextBackgroundJob');
+            await db.enqueueBackgroundJob({
+                jobType: 'hot_timeout_retry',
+                libraryId: 1,
+                zoteroKey: 'AAAAAAAA',
+                mode: 'structured',
+                priority: 100,
+                payload: payload(),
+                now: 0,
+            });
+
+            const { BackgroundExtractor } = await loadProcessor();
+            const proc = new BackgroundExtractor();
+            const result = await proc.processOnce();
+
+            expect(result).toEqual({ processed: false, reason: 'empty' });
+            expect(claimSpy).toHaveBeenCalledWith(expect.any(Number), expect.any(Number), 100);
+            expect(mockState.extractCalls).toHaveLength(0);
+            claimSpy.mockRestore();
+        });
+
+        it('not idle + priority=50 job in queue still claims and runs', async () => {
+            const idleMod = await import('../../../src/utils/idleService');
+            (idleMod.getSystemIdleTimeMs as any).mockReturnValueOnce(0);
+            await db.enqueueBackgroundJob({
+                jobType: 'hot_timeout_retry',
+                libraryId: 1,
+                zoteroKey: 'AAAAAAAA',
+                mode: 'structured',
+                priority: 50,
+                payload: payload(),
+                now: 0,
+            });
+
+            const { BackgroundExtractor } = await loadProcessor();
+            const proc = new BackgroundExtractor();
+            const result = await proc.processOnce();
+
+            expect(result.processed).toBe(true);
+            expect(mockState.extractCalls).toHaveLength(1);
+        });
+
+        it('idle + priority=100 job claims with maxPriority=undefined', async () => {
+            const idleMod = await import('../../../src/utils/idleService');
+            (idleMod.getSystemIdleTimeMs as any).mockReturnValueOnce(Number.MAX_SAFE_INTEGER);
+            const claimSpy = vi.spyOn(db, 'claimNextBackgroundJob');
+            await db.enqueueBackgroundJob({
+                jobType: 'hot_timeout_retry',
+                libraryId: 1,
+                zoteroKey: 'AAAAAAAA',
+                mode: 'structured',
+                priority: 100,
+                payload: payload(),
+                now: 0,
+            });
+
+            const { BackgroundExtractor } = await loadProcessor();
+            const proc = new BackgroundExtractor();
+            const result = await proc.processOnce();
+
+            expect(result.processed).toBe(true);
+            expect(claimSpy).toHaveBeenCalledWith(expect.any(Number), expect.any(Number), undefined);
+            claimSpy.mockRestore();
+        });
+
+        it('in-flight job continues even when sync starts and the OS goes active mid-run', async () => {
+            await db.enqueueBackgroundJob({
+                jobType: 'hot_timeout_retry',
+                libraryId: 1,
+                zoteroKey: 'AAAAAAAA',
+                mode: 'structured',
+                payload: payload(),
+                now: 0,
+            });
+            mockState.nextResult = new Promise<any>((resolve) => {
+                mockState.extractResolve = resolve;
+            });
+
+            const { BackgroundExtractor } = await loadProcessor();
+            const proc = new BackgroundExtractor();
+            await proc.start();
+            try {
+                const processOncePromise = proc.processOnce();
+                await new Promise((r) => setTimeout(r, 0));
+
+                // Flip both gates AFTER the claim is in flight. Neither
+                // should abort the in-flight job — they only affect the
+                // next claim.
+                (proc as any).syncInProgress = true;
+                const idleMod = await import('../../../src/utils/idleService');
+                (idleMod.getSystemIdleTimeMs as any).mockReturnValue(0);
+
+                mockState.extractResolve!({
+                    kind: 'ok',
+                    cached: false,
+                    result: {} as any,
+                    totalPages: 1,
+                    resolvedAttachment: { libraryId: 1, zoteroKey: 'AAAAAAAA' },
+                    contentType: 'application/pdf',
+                });
+                const result = await processOncePromise;
+                expect(result.processed).toBe(true);
+                const rows = await db.peekBackgroundJobs();
+                expect(rows).toHaveLength(0);
+            } finally {
+                await proc.stop();
+            }
+        });
+
+        it('stop() unregisters pref, notifier, and idle observers', async () => {
+            const prefDisposer = vi.fn();
+            const notifierDisposer = vi.fn();
+            const idleDisposer = vi.fn();
+            (Zotero as any).Prefs.unregisterObserver = prefDisposer;
+            (Zotero as any).Notifier.unregisterObserver = notifierDisposer;
+            const idleMod = await import('../../../src/utils/idleService');
+            (idleMod.registerIdleObserver as any).mockReturnValueOnce(idleDisposer);
+
+            const { BackgroundExtractor } = await loadProcessor();
+            const proc = new BackgroundExtractor();
+            await proc.start();
+            await proc.stop();
+
+            expect(prefDisposer).toHaveBeenCalledTimes(1);
+            expect(notifierDisposer).toHaveBeenCalledTimes(1);
+            expect(idleDisposer).toHaveBeenCalledTimes(1);
+        });
+
+        it('startup-delay clamp: notify() during the first 30s schedules at ~STARTUP_DELAY_MS', async () => {
+            vi.useFakeTimers();
+            try {
+                const { BackgroundExtractor } = await loadProcessor();
+                const proc = new BackgroundExtractor();
+                const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
+
+                proc.start();
+                // Drop the initial start() tick scheduling from the assertions
+                // by snapshotting the call index BEFORE notify().
+                const initialCalls = setTimeoutSpy.mock.calls.length;
+
+                proc.notify();
+
+                // The next scheduled tick must be clamped close to the
+                // remaining startup delay, not 0.
+                const lastCall = setTimeoutSpy.mock.calls.at(-1);
+                expect(setTimeoutSpy.mock.calls.length).toBeGreaterThan(initialCalls);
+                expect(lastCall?.[1]).toBeGreaterThan(0);
+                expect(lastCall?.[1]).toBeLessThanOrEqual(30_000);
+
+                await proc.stop();
+                setTimeoutSpy.mockRestore();
+            } finally {
+                vi.useRealTimers();
+            }
         });
     });
 

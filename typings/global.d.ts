@@ -293,6 +293,7 @@ declare namespace Zotero {
             claimNextBackgroundJob(
                 now: number,
                 visibilityTimeoutMs: number,
+                maxPriority?: number,
             ): Promise<import("../src/services/database").BackgroundJobRecord | null>;
 
             peekBackgroundJobs(

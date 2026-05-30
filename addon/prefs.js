@@ -87,6 +87,9 @@ pref("onboardingSignInTextShown", false);
 // MCP server
 pref("mcpServerEnabled", false);
 
+// Background extractor kill-switch (drains the background_jobs queue)
+pref("backgroundExtractorEnabled", true);
+
 // Flags to show notifications, run consistency check and collection sync on upgrade
 pref("runConsistencyCheck", false);
 pref("runCollectionSync", false);

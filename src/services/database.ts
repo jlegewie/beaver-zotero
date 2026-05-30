@@ -2266,22 +2266,34 @@ export class BeaverDB {
      * `available_at` forward by `visibilityTimeoutMs` so a crash/abort
      * leaves the row safe to re-pick later.
      *
+     * `maxPriority` is an exclusive upper bound — when provided, only rows
+     * with `priority < maxPriority` are eligible. Used by the background
+     * extractor to gate library-scale work (priority >= 100) behind user
+     * idleness while still letting hot-path retries (priority < 100) run.
+     *
      * Returns `null` when no row is visible, or when an optimistic-claim
      * race lost (currently impossible with one consumer; cheap insurance).
      */
     public async claimNextBackgroundJob(
         now: number,
         visibilityTimeoutMs: number,
+        maxPriority?: number,
     ): Promise<BackgroundJobRecord | null> {
+        const params: unknown[] = [now];
+        let priorityClause = '';
+        if (maxPriority !== undefined) {
+            priorityClause = ' AND priority < ?';
+            params.push(maxPriority);
+        }
         const candidates = await this.selectBackgroundJobs(
             `SELECT id, job_type, library_id, item_id, zotero_key, mode,
                     priority, payload_json, enqueued_at, available_at,
                     attempt_count, last_error
              FROM background_jobs
-             WHERE available_at <= ?
+             WHERE available_at <= ?${priorityClause}
              ORDER BY priority ASC, available_at ASC
              LIMIT 1`,
-            [now],
+            params,
         );
         if (candidates.length === 0) return null;
         const candidate = candidates[0];

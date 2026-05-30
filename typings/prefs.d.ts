@@ -58,6 +58,7 @@ declare namespace _ZoteroTypes {
       "onboardingWelcomeShownAt": string;
       "onboardingSignInTextShown": boolean;
       "mcpServerEnabled": boolean;
+      "backgroundExtractorEnabled": boolean;
       "runConsistencyCheck": boolean;
       "runCollectionSync": boolean;
       "runWebDAVSync": boolean;
