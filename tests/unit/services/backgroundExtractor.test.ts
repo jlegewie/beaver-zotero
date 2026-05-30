@@ -1005,26 +1005,36 @@ describe('BackgroundExtractor', () => {
 
         it('not idle + priority=100 job in queue returns empty (gated by maxPriority)', async () => {
             const idleMod = await import('../../../src/utils/idleService');
-            (idleMod.getSystemIdleTimeMs as any).mockReturnValueOnce(0);
+            (idleMod.getSystemIdleTimeMs as any).mockReturnValue(0);
             const claimSpy = vi.spyOn(db, 'claimNextBackgroundJob');
-            await db.enqueueBackgroundJob({
-                jobType: 'hot_timeout_retry',
-                libraryId: 1,
-                zoteroKey: 'AAAAAAAA',
-                mode: 'structured',
-                priority: 100,
-                payload: payload(),
-                now: 0,
-            });
+            try {
+                await db.enqueueBackgroundJob({
+                    jobType: 'hot_timeout_retry',
+                    libraryId: 1,
+                    zoteroKey: 'AAAAAAAA',
+                    mode: 'structured',
+                    priority: 100,
+                    payload: payload(),
+                    now: 0,
+                });
 
-            const { BackgroundExtractor } = await loadProcessor();
-            const proc = new BackgroundExtractor();
-            const result = await proc.processOnce();
+                const { BackgroundExtractor } = await loadProcessor();
+                const proc = new BackgroundExtractor();
+                const result = await proc.processOnce();
 
-            expect(result).toEqual({ processed: false, reason: 'empty' });
-            expect(claimSpy).toHaveBeenCalledWith(expect.any(Number), expect.any(Number), 100);
-            expect(mockState.extractCalls).toHaveLength(0);
-            claimSpy.mockRestore();
+                expect(result).toEqual({ processed: false, reason: 'empty' });
+                expect(claimSpy).toHaveBeenCalledWith(
+                    expect.any(Number),
+                    expect.any(Number),
+                    100,
+                );
+                expect(mockState.extractCalls).toHaveLength(0);
+            } finally {
+                (idleMod.getSystemIdleTimeMs as any).mockReturnValue(
+                    Number.MAX_SAFE_INTEGER,
+                );
+                claimSpy.mockRestore();
+            }
         });
 
         it('not idle + priority=50 job in queue still claims and runs', async () => {
