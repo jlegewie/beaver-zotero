@@ -65,6 +65,8 @@ export interface ExtractInput {
     pageIndices?: number[];
     pageRange?: PageRange;
     analysisWindow?: number;
+    /** Attach the opt-in `diagnostics` block */
+    includeDiagnostics?: boolean;
 }
 
 export interface AnalyzeLayoutInput {
