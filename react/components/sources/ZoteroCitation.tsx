@@ -22,6 +22,7 @@ import { ZoteroItemReference } from '../../types/zotero';
 import { revealSource } from '../../utils/sourceUtils';
 import { resolvePageLabelFromLabels, translatePageNumberToLabelFromLabels } from '../../utils/pageLabels';
 import { getBestPDFAttachment, getBestPDFAttachmentAsync } from '../../../src/utils/zoteroItemHelpers';
+import { BEAVER_CITATION_ANNOTATION_AUTHOR } from '../../../src/constants/annotations';
 import {
     baseCitationKey,
     CitationRef,
@@ -37,7 +38,7 @@ import {
 import { Icon, LibraryIcon, PdfIcon, GlobalSearchIcon, NoteIcon, HighlighterIcon } from '../icons/icons';
 
 const TOOLTIP_WIDTH = '250px';
-export const BEAVER_ANNOTATION_TEXT = 'Beaver Citation';
+export const BEAVER_ANNOTATION_TEXT = BEAVER_CITATION_ANNOTATION_AUTHOR;
 
 /**
  * Citation display state - explicit FSM for citation lifecycle.
@@ -572,6 +573,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
                     })),
                     previewText,
                     BEAVER_ANNOTATION_TEXT,
+                    { authorName: BEAVER_CITATION_ANNOTATION_AUTHOR },
                 );
                 BeaverTemporaryAnnotations.addToTracking(annotationReferences);
                 const annotationIds = annotationReferences.map(reference => reference.zotero_key);
