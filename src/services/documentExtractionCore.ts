@@ -57,8 +57,9 @@ export interface ExtractAndCacheArgs {
     zoteroKey: string;
     mode: DocumentCacheExtractionMode;
     /**
-     * Reject threshold for total document page count. `null` disables the
-     * cap. Counted in *document* pages, not requested pages.
+     * Reject threshold for total document page count. `null` falls back to
+     * Beaver's hard page-count cap. Counted in *document* pages, not requested
+     * pages.
      */
     maxPages: number | null;
     maxFileSizeMB: number;
