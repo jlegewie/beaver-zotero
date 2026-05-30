@@ -36,7 +36,7 @@ export const CitationTipContent: React.FC = () => (
         <br />
         <span style={gray}>1</span> points to an item in your library.
         <br />
-        <span style={green}>2</span> opens a specific page in your PDF.
+        <span style={green}>2</span> opens your PDF and highlights the exact passage it's based on.
         <br />
         <span style={blue}>3</span> is an external reference you can explore or import to your library.
     </div>
