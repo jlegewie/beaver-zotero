@@ -91,9 +91,7 @@ export const BUILTIN_ACTIONS: Action[] = [
     {
         id: 'builtin-key-findings',
         title: 'Highlight key findings',
-        text: 'Read this paper and identify the key findings. For each one, create a highlight annotation on the specific sentence that states the finding, with a brief comment explaining its significance. Focus on empirical results and novel contributions, not background or literature review. Aim for 5-10 highlights covering the most important findings.',
-        // title: 'Extract key findings',
-        // text: 'Read this paper and extract the key findings as a numbered list. For each finding, include a citation with sentence number where it appears. Focus on empirical results and novel contributions, not background or literature review. Save as a Zotero note attached to the parent item.',
+        text: 'Read this paper and identify the key findings. For each one, create a highlight annotation with 1-3 specific sentences that states the finding, with a brief comment explaining its significance. Focus on empirical results and novel contributions, not background or literature review. Aim for 3-6 highlights covering the most important findings. After completing the highlights, provide a short summary with citations to the new annotations.',
         targetType: 'attachment',
         sortOrder: 210,
     },
