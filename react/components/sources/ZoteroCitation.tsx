@@ -562,11 +562,13 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
             // Handle the three scenarios
             if (boundingBoxData.length > 0) {
                 logger(`ZoteroCitation: Highlighting bounding boxes`);
+                const loadedPageLabels = getPageLabelsForItem(pdfItem, labelsByAttachmentId);
                 // Scenario 1: With bounding boxes - create temporary highlights
                 const annotationReferences = await createBoundingBoxHighlights(
-                    boundingBoxData.map(({ page, bboxes }) => ({
+                    boundingBoxData.map(({ page, bboxes, pageLabel }) => ({
                         pageIndex: page - 1,
                         boxes: bboxes,
+                        pageLabel: pageLabel ?? resolvePageLabelFromLabels(loadedPageLabels, page),
                     })),
                     previewText,
                     BEAVER_ANNOTATION_TEXT,

@@ -19,7 +19,7 @@ import {
     getOrAssignCitationMarkerAtom,
     updateCitationDataAtom,
 } from '../../../react/atoms/citations';
-import { getCitationPages, isExternalCitation, isZoteroCitation, type CitationData } from '../../../react/types/citations';
+import { getCitationBoundingBoxes, getCitationPages, isExternalCitation, isZoteroCitation, type CitationData } from '../../../react/types/citations';
 
 function citation(overrides: Partial<CitationData>): CitationData {
     return {
@@ -269,5 +269,54 @@ describe('getCitationPages', () => {
         });
 
         expect(getCitationPages(data)).toEqual([3, 5]);
+    });
+});
+
+describe('getCitationBoundingBoxes', () => {
+    it('carries per-location page labels for temporary citation highlights', () => {
+        const data = citation({
+            parts: [
+                {
+                    part_id: 'p1',
+                    locations: [
+                        {
+                            page_idx: 1,
+                            page_label: 'iv',
+                            boxes: [{ l: 1, t: 2, r: 3, b: 4, coord_origin: 't' as any }],
+                        },
+                    ],
+                },
+            ],
+        });
+
+        expect(getCitationBoundingBoxes(data)).toEqual([
+            {
+                page: 2,
+                pageLabel: 'iv',
+                bboxes: [{ l: 1, t: 2, r: 3, b: 4, coord_origin: 't' }],
+            },
+        ]);
+    });
+
+    it('falls back to citation-level page labels when the location has none', () => {
+        const data = citation({
+            page_labels: { 2: '7' },
+            parts: [
+                {
+                    part_id: 'p1',
+                    locations: [
+                        {
+                            page_idx: 2,
+                            boxes: [{ l: 1, t: 2, r: 3, b: 4, coord_origin: 't' as any }],
+                        },
+                    ],
+                },
+            ],
+        });
+
+        expect(getCitationBoundingBoxes(data)[0]).toMatchObject({
+            page: 3,
+            pageLabel: '7',
+        });
     });
 });

@@ -410,6 +410,8 @@ export const getCitationPages = (citation: CitationData | CitationMetadata | nul
 export interface CitationBoundingBoxData {
     page: number;
     bboxes: BoundingBox[];
+    /** PDF /PageLabels label for this page, when available. */
+    pageLabel?: string | null;
 }
 
 export const getCitationBoundingBoxes = (citation: CitationData | CitationMetadata | null | undefined): CitationBoundingBoxData[] => {
@@ -423,9 +425,12 @@ export const getCitationBoundingBoxes = (citation: CitationData | CitationMetada
         
         for (const locator of part.locations) {
             if (locator.page_idx !== undefined && locator.boxes && locator.boxes.length > 0) {
+                const pageIndex = Number(locator.page_idx);
+                if (!Number.isFinite(pageIndex) || pageIndex < 0) continue;
                 result.push({
-                    page: locator.page_idx + 1,
-                    bboxes: locator.boxes
+                    page: pageIndex + 1,
+                    bboxes: locator.boxes,
+                    pageLabel: locator.page_label ?? citation.page_labels?.[pageIndex] ?? null,
                 });
             }
         }
