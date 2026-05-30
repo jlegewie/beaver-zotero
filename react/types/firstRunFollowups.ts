@@ -56,14 +56,9 @@ export const FIRST_RUN_FOLLOWUPS: Record<CardKind, FirstRunFollowup[]> = {
             prompt: 'Write a concise summary of this paper covering the research question, methodology, key findings, and main conclusions. Build on the highlights you just created and cite them to support each claim. Save the summary as a Zotero note attached to the item.',
         },
         {
-            id: 'highlight_key_findings',
-            title: 'Highlight the key findings',
-            prompt: 'Read this paper and identify the key findings. For each one, create a highlight annotation with 1-3 specific sentences that states the finding, with a brief comment explaining its significance. Focus on empirical results and novel contributions, not background or literature review. Aim for 3-6 highlights covering the most important findings.',
-        },
-        {
             id: 'note_annotate_methods',
-            title: 'Add notes to the methods section',
-            prompt: 'Find the methods section of this paper and add note annotations that explain its key components: research design, data sources, sample details, key variables, and analytical techniques. Keep each note brief so I can understand the method choices when reviewing later.',
+            title: 'Add sticky notes with section summaries',
+            prompt: 'Add a note annotation to each main section of this paper with a short summary. Each note should use simple language to clearly summarize the section so I can understand the section when reviewing later.',
         },
     ],
     literature_review: [
