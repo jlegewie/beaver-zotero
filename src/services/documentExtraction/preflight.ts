@@ -17,7 +17,7 @@ export interface PreflightOptions {
     checkOcr: boolean;
     /** If true and `page_count` is known, apply the page-count cap. */
     applyPageCountCap: boolean;
-    /** From `getPref('maxPageCount')`. Required when `applyPageCountCap` is true. */
+    /** Required when `applyPageCountCap` is true. */
     maxPageCount: number;
 }
 

@@ -19,4 +19,9 @@ describe('pageLabels', () => {
         expect(resolvePageLabelFromLabels(labels, 2)).toBe('1');
         expect(resolvePageLabelFromLabels(labels, 3)).toBe('2');
     });
+
+    it('falls back to the page number when the label is empty', () => {
+        expect(resolvePageLabelFromLabels({ 0: '' }, 1)).toBe('1');
+        expect(resolvePageLabelFromLabels({ 0: '   ' }, 1)).toBe('1');
+    });
 });

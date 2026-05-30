@@ -178,6 +178,7 @@ const ActionCard: React.FC<ActionCardProps> = ({
                 value={editTitle}
                 onChange={(e) => setEditTitle(e.target.value)}
                 placeholder="Action title..."
+                aria-label="Action title"
                 maxLength={MAX_TITLE_LENGTH}
                 className="chat-input text-base font-medium font-color-primary action-edit-title font-medium"
             />
@@ -191,6 +192,7 @@ const ActionCard: React.FC<ActionCardProps> = ({
                     e.currentTarget.style.height = `${e.currentTarget.scrollHeight}px`;
                 }}
                 placeholder="Enter prompt text..."
+                aria-label="Action prompt text"
                 maxLength={MAX_PROMPT_TEXT_LENGTH}
                 className="chat-input custom-prompt-edit-textarea text-base"
                 rows={2}

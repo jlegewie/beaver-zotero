@@ -19,6 +19,19 @@ vi.mock('../../../src/utils/noteEditorIO', () => ({
     getLiveNoteHtmlCandidates: vi.fn(() => []),
 }));
 
+vi.mock('../../../src/utils/zoteroSerializers', () => ({
+    serializeItemSummary: vi.fn(async (item: any) => ({
+        id: `${item.libraryID}-${item.key}`,
+        title: item.title || item.key,
+    })),
+}));
+
+vi.mock('../../../src/services/agentDataProvider/utils', () => ({
+    prepareBatchAttachmentData: vi.fn(async () => new Map()),
+    processAttachmentsWithBatchData: vi.fn(async () => []),
+    toAttachmentSummary: vi.fn((attachment: any) => attachment),
+}));
+
 // Mock logger
 vi.mock('../../../src/utils/logger', () => ({
     logger: vi.fn(),
@@ -38,6 +51,12 @@ vi.mock('../../../src/utils/zoteroUtils', () => ({
 
 vi.mock('../../../react/atoms/profile', () => ({
     userIdentifierAtom: {},
+    searchableLibraryIdsAtom: {},
+    syncWithZoteroAtom: {},
+}));
+
+vi.mock('../../../react/atoms/auth', () => ({
+    userIdAtom: {},
 }));
 
 vi.mock('../../../react/store', () => ({
@@ -79,6 +98,17 @@ function makeMockItem(overrides: any = {}) {
     };
 }
 
+function makeMockRegularItem(key: string, overrides: any = {}) {
+    return {
+        libraryID: 1,
+        key,
+        title: `Title ${key}`,
+        deleted: false,
+        isRegularItem: vi.fn(() => true),
+        ...overrides,
+    };
+}
+
 
 // =============================================================================
 // Setup
@@ -91,6 +121,7 @@ beforeEach(() => {
         ...(globalThis as any).Zotero,
         Items: {
             getByLibraryAndKeyAsync: vi.fn().mockResolvedValue(makeMockItem()),
+            loadDataTypes: vi.fn().mockResolvedValue(undefined),
         },
     };
 });
@@ -220,6 +251,67 @@ describe('handleReadNoteRequest — pagination', () => {
         expect(response.lines_returned).toBe('3');
         expect(response.has_more).toBe(true);
         expect(response.next_offset).toBe(4);
+    });
+});
+
+describe('handleReadNoteRequest — cited_items extraction', () => {
+    it('populates cited_items from unified, compound, and legacy item citations', async () => {
+        vi.mocked(getOrSimplify).mockReturnValueOnce({
+            simplified: [
+                '<p><citation id="1-CITED1" ref="c_CITED1_0"/></p>',
+                '<p><citation items="1-A, 1-B:page=4" ref="c_A+B_0"/></p>',
+                '<p><citation item_id="1-LEGACY" ref="c_LEGACY_0"/></p>',
+            ].join('\n'),
+            metadata: { elements: new Map() },
+            isStale: false,
+        });
+
+        const note = makeMockItem();
+        const items = new Map([
+            ['1-CITED1', makeMockRegularItem('CITED1')],
+            ['1-A', makeMockRegularItem('A')],
+            ['1-B', makeMockRegularItem('B')],
+            ['1-LEGACY', makeMockRegularItem('LEGACY')],
+        ]);
+        const getByLibraryAndKeyAsync = vi.fn(async (libraryId: number, key: string) => {
+            if (key === 'ABCD1234') return note;
+            return items.get(`${libraryId}-${key}`) ?? null;
+        });
+        (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = getByLibraryAndKeyAsync;
+
+        const response = await handleReadNoteRequest(makeRequest());
+
+        expect(response.success).toBe(true);
+        expect(response.cited_items?.map((item: any) => item.id)).toEqual([
+            '1-CITED1',
+            '1-A',
+            '1-B',
+            '1-LEGACY',
+        ]);
+        expect((globalThis as any).Zotero.Items.loadDataTypes).toHaveBeenCalledWith(
+            expect.arrayContaining([...items.values()]),
+            ["primaryData", "itemData", "creators", "tags", "collections", "childItems"],
+        );
+    });
+
+    it('does not populate cited_items from attachment citations', async () => {
+        vi.mocked(getOrSimplify).mockReturnValueOnce({
+            simplified: '<p><citation att_id="1-ATTACH1" page="3"/></p>',
+            metadata: { elements: new Map() },
+            isStale: false,
+        });
+
+        const note = makeMockItem();
+        const getByLibraryAndKeyAsync = vi.fn(async (_libraryId: number, key: string) => {
+            return key === 'ABCD1234' ? note : makeMockRegularItem(key);
+        });
+        (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = getByLibraryAndKeyAsync;
+
+        const response = await handleReadNoteRequest(makeRequest());
+
+        expect(response.success).toBe(true);
+        expect(response.cited_items).toBeUndefined();
+        expect(getByLibraryAndKeyAsync).not.toHaveBeenCalledWith(1, 'ATTACH1');
     });
 });
 

@@ -5,6 +5,7 @@ import {
     isAttachmentAvailableRemotely,
 } from '../../utils/webAPI';
 import { makeRemoteFilePath } from '../documentFileIdentity';
+import { effectiveMaxFileSizeMB } from '../attachmentLimits';
 
 import type { DownloadOptions } from '../../utils/webAPI';
 
@@ -74,7 +75,7 @@ export async function loadPdfData(
         _remoteInflight.delete(cacheKey);
     }
 
-    const maxMB = getPref('maxFileSizeMB');
+    const maxMB = effectiveMaxFileSizeMB();
     const withinSizeLimit = (data.length / 1024 / 1024) <= maxMB;
 
     if (withinSizeLimit) {
@@ -103,7 +104,7 @@ export function checkRemotePdfSize(
     maxFileSizeMB?: number,
 ): { sizeMB: number; maxMB: number } | null {
     if (skipLimits) return null;
-    const maxMB = maxFileSizeMB ?? getPref('maxFileSizeMB');
+    const maxMB = effectiveMaxFileSizeMB(maxFileSizeMB);
     const sizeMB = data.length / 1024 / 1024;
     return sizeMB > maxMB ? { sizeMB, maxMB } : null;
 }

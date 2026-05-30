@@ -9,19 +9,19 @@ import {
 describe('preprocessCitations', () => {
     describe('backtick unwrapping', () => {
         it('unwraps backtick-wrapped opening citation tag', () => {
-            const result = preprocessCitations('text `<citation item_id="1-ABC">` more');
+            const result = preprocessCitations('text `<citation id="1-ABC">` more');
             expect(result).toContain('<citation');
             expect(result).not.toContain('`');
         });
 
         it('unwraps backtick-wrapped self-closing citation tag', () => {
-            const result = preprocessCitations('text `<citation item_id="1-ABC"/>` more');
+            const result = preprocessCitations('text `<citation id="1-ABC"/>` more');
             expect(result).toContain('<citation');
             expect(result).not.toContain('`');
         });
 
         it('unwraps multiple backtick-wrapped citations', () => {
-            const input = '`<citation item_id="1-ABC">` and `<citation item_id="1-DEF">`';
+            const input = '`<citation id="1-ABC">` and `<citation id="1-DEF">`';
             const result = preprocessCitations(input);
             expect(result).not.toContain('`');
             expect(result).toContain('data-zotero-key="ABC"');
@@ -46,7 +46,7 @@ describe('preprocessCitations', () => {
         });
 
         it('unwraps backtick-wrapped full-pair citation tag', () => {
-            const result = preprocessCitations('text `<citation item_id="1-ABC"></citation>` more');
+            const result = preprocessCitations('text `<citation id="1-ABC"></citation>` more');
             expect(result).not.toContain('`');
             expect(result).toContain('data-zotero-key="ABC"');
         });
@@ -60,7 +60,7 @@ describe('preprocessCitations', () => {
         });
 
         it('does not affect citations without backticks', () => {
-            const input = 'text <citation item_id="1-ABC"></citation> more';
+            const input = 'text <citation id="1-ABC"></citation> more';
             const result = preprocessCitations(input);
             expect(result).toContain('data-requested-citation-key="zotero:1-ABC"');
         });
@@ -74,34 +74,34 @@ describe('preprocessCitations', () => {
 
     describe('citation tag format handling', () => {
         it('processes self-closing citation tags', () => {
-            const result = preprocessCitations('<citation item_id="1-ABC"/>');
+            const result = preprocessCitations('<citation id="1-ABC"/>');
             expect(result).toContain('data-library-id="1"');
             expect(result).toContain('data-zotero-key="ABC"');
             expect(result).toContain('data-requested-citation-key="zotero:1-ABC"');
         });
 
         it('processes opening-only citation tags', () => {
-            const result = preprocessCitations('<citation item_id="1-ABC">');
+            const result = preprocessCitations('<citation id="1-ABC">');
             expect(result).toContain('data-requested-citation-key="zotero:1-ABC"');
         });
 
         it('processes full pair citation tags', () => {
-            const result = preprocessCitations('<citation item_id="1-ABC"></citation>');
+            const result = preprocessCitations('<citation id="1-ABC"></citation>');
             expect(result).toContain('data-requested-citation-key="zotero:1-ABC"');
         });
 
         it('handles single-quoted attributes in citation tags', () => {
-            const result = preprocessCitations("<citation item_id='1-ABC' page='5'></citation>");
+            const result = preprocessCitations("<citation id='1-ABC' loc='page5'></citation>");
             expect(result).toContain('data-zotero-key="ABC"');
-            expect(result).toContain('data-loc="5"');
+            expect(result).toContain('data-loc="page5"');
             expect(result).toContain('data-loc-kind="page"');
-            expect(result).toContain('data-requested-citation-key="zotero:1-ABC:5"');
+            expect(result).toContain('data-requested-citation-key="zotero:1-ABC:page5"');
         });
 
         it('handles mixed-quote attributes in citation tags', () => {
-            const result = preprocessCitations('<citation item_id="1-ABC" page=\'5\'></citation>');
+            const result = preprocessCitations('<citation id="1-ABC" loc=\'page5\'></citation>');
             expect(result).toContain('data-zotero-key="ABC"');
-            expect(result).toContain('data-loc="5"');
+            expect(result).toContain('data-loc="page5"');
         });
     });
 
@@ -120,6 +120,25 @@ describe('preprocessCitations', () => {
             expect(result).toContain('data-requested-citation-key="zotero:1-ABC:s0-s8"');
         });
 
+        it('generates citation key for structured-document sid locators', () => {
+            const result = preprocessCitations(
+                '<citation att_id="1-NLNMPWNQ" sid="heading3"/>'
+            );
+            expect(result).toContain('data-zotero-key="NLNMPWNQ"');
+            expect(result).toContain('data-loc="heading3"');
+            expect(result).toContain('data-loc-kind="heading"');
+            expect(result).toContain('data-requested-citation-key="zotero:1-NLNMPWNQ:heading3"');
+        });
+
+        it('handles escaped quotes in citation attributes', () => {
+            const result = preprocessCitations(
+                String.raw`<citation att_id=\"1-NLNMPWNQ\" sid=\"heading3\"/>`
+            );
+            expect(result).toContain('data-zotero-key="NLNMPWNQ"');
+            expect(result).toContain('data-loc="heading3"');
+            expect(result).toContain('data-requested-citation-key="zotero:1-NLNMPWNQ:heading3"');
+        });
+
         it('generates external citation key', () => {
             const result = preprocessCitations(
                 '<citation external_id="semantic_scholar:123"></citation>'
@@ -133,7 +152,7 @@ describe('preprocessCitations', () => {
         it('marks consecutive citations for same item', () => {
             const state = createPreprocessState();
             const result = preprocessCitations(
-                '<citation item_id="1-ABC"></citation> text <citation item_id="1-ABC"></citation>',
+                '<citation id="1-ABC"></citation> text <citation id="1-ABC"></citation>',
                 state
             );
             // Second citation should be consecutive
@@ -143,7 +162,7 @@ describe('preprocessCitations', () => {
         it('marks adjacent citations (only whitespace between)', () => {
             const state = createPreprocessState();
             const result = preprocessCitations(
-                '<citation item_id="1-ABC"></citation> <citation item_id="1-ABC"></citation>',
+                '<citation id="1-ABC"></citation> <citation id="1-ABC"></citation>',
                 state
             );
             expect(result).toContain('data-adjacent="true"');
@@ -152,7 +171,7 @@ describe('preprocessCitations', () => {
         it('does not mark different items as consecutive', () => {
             const state = createPreprocessState();
             const result = preprocessCitations(
-                '<citation item_id="1-ABC"></citation> <citation item_id="1-DEF"></citation>',
+                '<citation id="1-ABC"></citation> <citation id="1-DEF"></citation>',
                 state
             );
             expect(result).not.toContain('data-consecutive="true"');
@@ -160,16 +179,16 @@ describe('preprocessCitations', () => {
 
         it('preserves lastIdentityKey across segments', () => {
             const state = createPreprocessState();
-            preprocessCitations('<citation item_id="1-ABC"></citation>', state);
-            const result = preprocessCitations('<citation item_id="1-ABC"></citation>', state);
+            preprocessCitations('<citation id="1-ABC"></citation>', state);
+            const result = preprocessCitations('<citation id="1-ABC"></citation>', state);
             // Same identity key across segments = consecutive
             expect(result).toContain('data-consecutive="true"');
         });
 
         it('resets lastEndIndex per segment (no false adjacency)', () => {
             const state = createPreprocessState();
-            preprocessCitations('<citation item_id="1-ABC"></citation>', state);
-            const result = preprocessCitations('<citation item_id="1-ABC"></citation>', state);
+            preprocessCitations('<citation id="1-ABC"></citation>', state);
+            const result = preprocessCitations('<citation id="1-ABC"></citation>', state);
             // Cross-segment should be consecutive but NOT adjacent
             expect(result).toContain('data-consecutive="true"');
             expect(result).not.toContain('data-adjacent="true"');
@@ -178,16 +197,16 @@ describe('preprocessCitations', () => {
 
     describe('combined backtick + single-quote scenarios', () => {
         it('unwraps backtick-wrapped citation with single-quoted attrs', () => {
-            const result = preprocessCitations("`<citation item_id='1-ABC'>`");
+            const result = preprocessCitations("`<citation id='1-ABC'>`");
             expect(result).not.toContain('`');
             expect(result).toContain('data-requested-citation-key="zotero:1-ABC"');
         });
 
         it('handles inline text with backtick-wrapped single-quoted citation', () => {
-            const input = "See `<citation item_id='1-ABC' page='5'>` for details.";
+            const input = "See `<citation id='1-ABC' loc='page5'>` for details.";
             const result = preprocessCitations(input);
             expect(result).toContain('data-zotero-key="ABC"');
-            expect(result).toContain('data-loc="5"');
+            expect(result).toContain('data-loc="page5"');
             expect(result).not.toContain('`<citation');
         });
     });
@@ -196,30 +215,30 @@ describe('preprocessCitations', () => {
 describe('CITATION_TAG_PATTERN', () => {
     it('matches self-closing tag', () => {
         CITATION_TAG_PATTERN.lastIndex = 0;
-        const match = CITATION_TAG_PATTERN.exec('<citation item_id="1-ABC"/>');
+        const match = CITATION_TAG_PATTERN.exec('<citation id="1-ABC"/>');
         expect(match).not.toBeNull();
-        expect(match![1]).toContain('item_id="1-ABC"');
+        expect(match![1]).toContain('id="1-ABC"');
     });
 
     it('matches opening-only tag', () => {
         CITATION_TAG_PATTERN.lastIndex = 0;
-        const match = CITATION_TAG_PATTERN.exec('<citation item_id="1-ABC">');
+        const match = CITATION_TAG_PATTERN.exec('<citation id="1-ABC">');
         expect(match).not.toBeNull();
-        expect(match![1]).toContain('item_id="1-ABC"');
+        expect(match![1]).toContain('id="1-ABC"');
     });
 
     it('matches full pair', () => {
         CITATION_TAG_PATTERN.lastIndex = 0;
-        const match = CITATION_TAG_PATTERN.exec('<citation item_id="1-ABC"></citation>');
+        const match = CITATION_TAG_PATTERN.exec('<citation id="1-ABC"></citation>');
         expect(match).not.toBeNull();
-        expect(match![1]).toContain('item_id="1-ABC"');
+        expect(match![1]).toContain('id="1-ABC"');
     });
 
     it('matches tag with single-quoted attributes', () => {
         CITATION_TAG_PATTERN.lastIndex = 0;
-        const match = CITATION_TAG_PATTERN.exec("<citation item_id='1-ABC'></citation>");
+        const match = CITATION_TAG_PATTERN.exec("<citation id='1-ABC'></citation>");
         expect(match).not.toBeNull();
-        expect(match![1]).toContain("item_id='1-ABC'");
+        expect(match![1]).toContain("id='1-ABC'");
     });
 
     it('matches tag with mixed-quote attributes', () => {
@@ -247,17 +266,17 @@ describe('preprocessCitationMatch', () => {
     it('returns normalized html with citation_key', () => {
         const state = createPreprocessState();
         const result = preprocessCitationMatch(
-            'item_id="1-ABC" page="5"',
+            'id="1-ABC" loc="page5"',
             0,
             40,
-            '<citation item_id="1-ABC" page="5"></citation>',
+            '<citation id="1-ABC" loc="page5"></citation>',
             state
         );
-        expect(result.attrs).toEqual({ item_id: '1-ABC', page: '5' });
-        expect(result.citationKey).toBe('zotero:1-ABC:5');
+        expect(result.attrs).toEqual({ id: '1-ABC', loc: 'page5' });
+        expect(result.citationKey).toBe('zotero:1-ABC:page5');
         expect(result.isConsecutive).toBe(false);
         expect(result.isAdjacent).toBe(false);
-        expect(result.html).toContain('data-requested-citation-key="zotero:1-ABC:5"');
+        expect(result.html).toContain('data-requested-citation-key="zotero:1-ABC:page5"');
     });
 
     it('handles single-quoted attributes', () => {

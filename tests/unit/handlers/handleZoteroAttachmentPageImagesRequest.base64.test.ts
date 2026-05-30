@@ -43,9 +43,12 @@ vi.mock('../../../src/beaver-extract', () => {
         }
     }
 
+    class MockWorkerAbortError extends Error {}
+
     return {
         BeaverExtractor: MockPDFExtractor,
         ExtractionError: MockExtractionError,
+        WorkerAbortError: MockWorkerAbortError,
         ExtractionErrorCode: {
             ENCRYPTED: 'encrypted',
             INVALID_PDF: 'invalid_pdf',
@@ -111,6 +114,9 @@ function setupZoteroEnv(pageCount: number) {
 
     (globalThis as any).Zotero.Items = {
         getByLibraryAndKeyAsync: vi.fn().mockResolvedValue(requestItem),
+    };
+    (globalThis as any).Zotero.Attachments = {
+        getTotalFileSize: vi.fn().mockResolvedValue(1024),
     };
     (globalThis as any).Zotero.Beaver = {
         data: { env: 'test' },

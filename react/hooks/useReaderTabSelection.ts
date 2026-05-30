@@ -10,8 +10,10 @@ import { hasAuthorizedAccessAtom, isDeviceAuthorizedAtom } from '../atoms/profil
 import { BEAVER_ANNOTATION_TEXT } from '../components/sources/ZoteroCitation';
 import { BeaverTemporaryAnnotations, ZoteroReader } from '../utils/annotationUtils';
 import { store } from '../store';
-import { threadAgentActionsAtom, getZoteroItemReferenceFromAgentAction, AgentAction } from '../agents/agentActions';
+import { threadAgentActionsAtom, getZoteroItemReferenceFromAgentAction, hasAppliedBulkAnnotations, AgentAction } from '../agents/agentActions';
+import { isBeaverAuthoredAnnotation } from '../../src/constants/annotations';
 import { getItemValidationAtom } from '../atoms/itemValidation';
+import type { CreatedAnnotationResult } from '../types/agentActions/createAnnotations';
 
 /**
  * Module-level variable to track the Zotero notifier observer ID.
@@ -235,14 +237,21 @@ export function useReaderTabSelection() {
                         try {
                             const item = Zotero.Items.get(ids[0]);
                             if(!item.isAnnotation() || !isValidAnnotationType(item.annotationType)) return;
+                            if (isBeaverAuthoredAnnotation(item.annotationAuthorName)) return;
+                            if (item.annotationText === BEAVER_ANNOTATION_TEXT) return;
                             // Check if this annotation was created by an agent action
                             const agentActions = store.get(threadAgentActionsAtom);
                             const isFromAgentAction = agentActions.some((action: AgentAction) => {
                                 const ref = getZoteroItemReferenceFromAgentAction(action);
-                                return ref?.zotero_key === item.key && ref?.library_id === item.libraryID;
+                                if (ref?.zotero_key === item.key && ref?.library_id === item.libraryID) return true;
+                                if (hasAppliedBulkAnnotations(action)) {
+                                    return action.result_data!.created.some(
+                                        (created: CreatedAnnotationResult) => created.zotero_key === item.key && created.library_id === item.libraryID,
+                                    );
+                                }
+                                return false;
                             });
                             if (isFromAgentAction) return;
-                            if(item.annotationText === BEAVER_ANNOTATION_TEXT) return;
                             await addItemToCurrentMessageItems(item);
                         } catch (e) {
                             logger(`useReaderTabSelection: Item not loaded for ID ${ids[0]}: ${e}`);

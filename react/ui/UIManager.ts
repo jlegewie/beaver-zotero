@@ -129,6 +129,69 @@ class UIManager {
         } else {
             this.elements.chatToggleButton?.removeAttribute("selected");
         }
+        // Expose the open/closed state to screen readers as a toggle button.
+        this.elements.chatToggleButton?.setAttribute("aria-pressed", isVisible ? "true" : "false");
+    }
+
+    /**
+     * Announce the sidebar open/closed state to screen readers via a polite
+     * live region in the main window. Only call this for genuine user toggles
+     * (not initial render or shutdown) to avoid spurious announcements.
+     */
+    public announceSidebarState(isVisible: boolean): void {
+        try {
+            const win = Zotero.getMainWindow();
+            if (!win || win.closed || !win.document) {
+                return;
+            }
+            const region = this.getLiveRegion(win);
+            if (!region) {
+                return;
+            }
+            const message = isVisible ? "Beaver panel opened" : "Beaver panel closed";
+            // Clear then set so an identical, repeated message is still announced.
+            region.textContent = "";
+            win.setTimeout(() => { region.textContent = message; }, 50);
+        } catch (e) {
+            // Silently handle errors
+        }
+    }
+
+    /**
+     * Move focus to the toolbar toggle button. Used when the panel closes so
+     * keyboard/screen-reader users land on a predictable, visible control
+     * instead of losing focus to the hidden sidebar content.
+     */
+    public focusToggleButton(): void {
+        try {
+            const win = Zotero.getMainWindow();
+            if (!win || win.closed || !win.document) {
+                return;
+            }
+            const btn = win.document.querySelector("#zotero-beaver-tb-chat-toggle") as HTMLElement | null;
+            btn?.focus();
+        } catch (e) {
+            // Silently handle errors
+        }
+    }
+
+    private getLiveRegion(win: Window): HTMLElement | null {
+        try {
+            let region = win.document.getElementById("beaver-a11y-live-region") as HTMLElement | null;
+            if (!region) {
+                region = win.document.createElement("div");
+                region.id = "beaver-a11y-live-region";
+                region.setAttribute("aria-live", "polite");
+                region.setAttribute("role", "status");
+                region.setAttribute("aria-atomic", "true");
+                // Visually hidden, but available to assistive technology.
+                region.style.cssText = "position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap;border:0;";
+                win.document.documentElement.appendChild(region);
+            }
+            return region;
+        } catch (e) {
+            return null;
+        }
     }
 
     public handleCleanup(location: SidebarLocation): void {
@@ -281,6 +344,11 @@ class UIManager {
                 const chatToggleButton = win.document.querySelector("#zotero-beaver-tb-chat-toggle") as HTMLElement | null;
                 if (chatToggleButton) {
                     chatToggleButton.remove();
+                }
+
+                const liveRegion = win.document.getElementById("beaver-a11y-live-region");
+                if (liveRegion) {
+                    liveRegion.remove();
                 }
             } catch (e) {
                 // Ignore UI cleanup errors during shutdown

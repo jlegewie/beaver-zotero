@@ -553,6 +553,7 @@ function formatSearchResultItem(entry: ItemSearchFrontendResultItem, includeSimi
             attachment_id: `${a.attachment.library_id}-${a.attachment.zotero_key}`,
             filename: a.attachment.filename || null,
             page_count: a.file_status?.page_count ?? null,
+            annotations_count: a.attachment.annotations_count,
             status: a.file_status?.status ?? 'unavailable',
         }));
     }
@@ -764,6 +765,7 @@ async function handleGetItemDetails(args: any): Promise<any> {
                 filename: a.filename || null,
                 content_type: a.contentType || null,
                 page_count: null,
+                annotations_count: a.annotations_count,
                 status: a.path ? 'available' : 'unavailable',
             }));
         }

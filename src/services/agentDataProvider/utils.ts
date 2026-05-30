@@ -10,6 +10,7 @@ import { addPopupMessageAtom } from '../../../react/utils/popupMessageUtils';
 import { wasItemAddedBeforeLastSync } from '../../../react/utils/sourceUtils';
 import { BeaverExtractor, ExtractionError, ExtractionErrorCode } from '../../beaver-extract';
 import { isRemoteFilePath, makeRemoteFilePath } from '../documentFileIdentity';
+import { effectiveMaxFileSizeMB } from '../attachmentLimits';
 import type { DocumentCacheMetadata } from '../documentCache';
 import { DeferredToolPreference } from '../agentProtocol';
 import { deferredToolPreferencesAtom } from '../../../react/atoms/deferredToolPreferences';
@@ -240,7 +241,7 @@ async function checkAttachmentAvailability(
     // entire storage directory with OS.File.stat() per entry — very expensive.
     // Skip for remote files (size unknown until download).
     if (!isRemoteFilePath(filePath)) {
-        const maxFileSizeMB = getPref('maxFileSizeMB');
+        const maxFileSizeMB = effectiveMaxFileSizeMB();
         try {
             const stat = await IOUtils.stat(filePath);
             const fileSizeInMB = (stat.size ?? 0) / 1024 / 1024;
@@ -254,7 +255,7 @@ async function checkAttachmentAvailability(
                         mime_type: contentType,
                         page_count: null,
                         status: "unavailable",
-                        status_reason: `File size of ${fileSizeInMB.toFixed(1)}MB exceeds the ${maxFileSizeMB}MB limit`,
+                        status_reason: `File size of ${fileSizeInMB.toFixed(1)}MB exceeds the ${maxFileSizeMB}MB limit.`,
                     }
                 };
             }
@@ -282,22 +283,6 @@ function fileStatusFromCache(record: DocumentCacheMetadata, isPrimary: boolean):
         return { is_primary: isPrimary, mime_type: record.contentType, page_count: record.pageCount, status: "unavailable", status_code: FileStatusCode.PdfNeedsOcr };
     }
     return { is_primary: isPrimary, mime_type: record.contentType, page_count: record.pageCount, status: "available" };
-}
-
-/**
- * Extract page labels from PDF data using MuPDF.
- * Returns the label mapping (empty {} if no custom labels or on error).
- *
- * Routes through `BeaverExtractor.getMetadata`, which delegates to the
- * MuPDF worker.
- */
-async function extractPageLabelsFromData(pdfData: Uint8Array): Promise<Record<number, string>> {
-    try {
-        const { pageLabels } = await new BeaverExtractor().getMetadata(pdfData);
-        return pageLabels;
-    } catch {
-        return {};
-    }
 }
 
 // `preflightCachedPdfMeta`, `PreflightOptions`, `PreflightFailure`, and
@@ -362,14 +347,14 @@ export async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary
         }
         const extractor = new BeaverExtractor();
 
-        // Get page count - this also validates the PDF and detects encryption
-        let pageCount: number;
+        // Get metadata - this also validates the PDF and detects encryption.
+        let metadata: Awaited<ReturnType<BeaverExtractor['getMetadata']>>;
         try {
-            pageCount = await extractor.getPageCount(pdfData);
+            metadata = await extractor.getMetadata(pdfData);
         } catch (error) {
             if (error instanceof ExtractionError) {
                 if (error.code === ExtractionErrorCode.ENCRYPTED) {
-                    await cache?.putErrorMetadata({ item: attachment, filePath, sourceSizeBytes, contentType, errorCode: 'encrypted', pageCount: null, pageLabels: null });
+                    await cache?.putErrorMetadata({ item: attachment, filePath, sourceSizeBytes, contentType, errorCode: 'encrypted', pageCount: null, pageLabels: null, pages: null });
                     return {
                         is_primary: isPrimary,
                         mime_type: contentType,
@@ -378,7 +363,7 @@ export async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary
                         status_code: FileStatusCode.PdfEncrypted,
                     };
                 } else if (error.code === ExtractionErrorCode.INVALID_PDF) {
-                    await cache?.putErrorMetadata({ item: attachment, filePath, sourceSizeBytes, contentType, errorCode: 'invalid_pdf', pageCount: null, pageLabels: null });
+                    await cache?.putErrorMetadata({ item: attachment, filePath, sourceSizeBytes, contentType, errorCode: 'invalid_pdf', pageCount: null, pageLabels: null, pages: null });
                     return {
                         is_primary: isPrimary,
                         mime_type: contentType,
@@ -410,6 +395,7 @@ export async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary
             }
             throw error;
         }
+        const { pageCount, pageLabels, pages } = metadata;
 
         // A document that opened but resolves to zero pages is empty or
         // structurally corrupt. Report as invalid without persisting metadata.
@@ -423,14 +409,10 @@ export async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary
             };
         }
 
-        // Analyze OCR needs and extract page labels in parallel
-        const [ocrAnalysis, pageLabels] = await Promise.all([
-            extractor.analyzeOCRNeeds(pdfData),
-            extractPageLabelsFromData(pdfData),
-        ]);
+        const ocrAnalysis = await extractor.analyzeOCRNeeds(pdfData);
 
         if (ocrAnalysis.needsOCR) {
-            await cache?.putErrorMetadata({ item: attachment, filePath, sourceSizeBytes, contentType, errorCode: 'no_text_layer', pageCount, pageLabels });
+            await cache?.putErrorMetadata({ item: attachment, filePath, sourceSizeBytes, contentType, errorCode: 'no_text_layer', pageCount, pageLabels, pages: pages ?? null });
             return {
                 is_primary: isPrimary,
                 mime_type: contentType,
@@ -446,7 +428,7 @@ export async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary
             filePath,
             sourceSizeBytes,
             contentType,
-            metadata: { pageCount, pageLabels, errorCode: null },
+            metadata: { pageCount, pageLabels, pages: pages ?? null, errorCode: null },
         });
         return {
             is_primary: isPrimary,
@@ -834,10 +816,16 @@ export async function processAttachmentsWithBatchData(
     item: Zotero.Item,
     context: AttachmentProcessingContext,
     batchData: BatchAttachmentData,
-    options?: { skipHash?: boolean; skipWorkerFallback?: boolean; timing?: TimingAccumulator }
+    options?: {
+        skipHash?: boolean;
+        skipWorkerFallback?: boolean;
+        timing?: TimingAccumulator;
+        includeAnnotationsCount?: boolean;
+    }
 ): Promise<AttachmentDataWithStatus[]> {
     const skipHash = options?.skipHash ?? false;
     const skipWorkerFallback = options?.skipWorkerFallback ?? false;
+    const includeAnnotationsCount = options?.includeAnnotationsCount ?? false;
     const ta = options?.timing;
     const attachmentIds = item.getAttachments();
     if (attachmentIds.length === 0) {
@@ -866,7 +854,12 @@ export async function processAttachmentsWithBatchData(
         }
 
         // Serialize attachment
-        const serializeFn = () => serializeAttachment(attachment, undefined, { skipFileHash: true, skipSyncingFilter: true, skipHash });
+        const serializeFn = () => serializeAttachment(attachment, undefined, {
+            skipFileHash: true,
+            skipSyncingFilter: true,
+            skipHash,
+            includeAnnotationsCount,
+        });
         const attachmentData = ta
             ? await ta.track('att_serialize_ms', serializeFn)
             : await serializeFn();
@@ -915,6 +908,7 @@ export function toAttachmentSummary(a: AttachmentDataWithStatus): AttachmentSumm
         mime_type: a.attachment.mime_type,
         is_primary: a.file_status?.is_primary ?? false,
         page_count: a.file_status?.page_count ?? null,
+        annotations_count: a.attachment.annotations_count,
         status: a.file_status?.status === 'available' ? 'available' : 'unavailable',
         status_code: a.file_status?.status_code,
         status_reason: a.file_status?.status_reason,
@@ -936,9 +930,14 @@ export function toAttachmentSummary(a: AttachmentDataWithStatus): AttachmentSumm
 export async function processAttachmentsParallel(
     item: Zotero.Item,
     context: AttachmentProcessingContext,
-    options?: { skipHash?: boolean; timing?: TimingAccumulator }
+    options?: {
+        skipHash?: boolean;
+        timing?: TimingAccumulator;
+        includeAnnotationsCount?: boolean;
+    }
 ): Promise<AttachmentDataWithStatus[]> {
     const skipHash = options?.skipHash ?? false;
+    const includeAnnotationsCount = options?.includeAnnotationsCount ?? false;
     const ta = options?.timing;
     const attachmentIds = item.getAttachments();
     if (attachmentIds.length === 0) {
@@ -968,7 +967,12 @@ export async function processAttachmentsParallel(
         }
 
         // Serialize attachment (skip file hash — not needed for search results)
-        const serializeFn = () => serializeAttachment(attachment, undefined, { skipFileHash: true, skipSyncingFilter: true, skipHash });
+        const serializeFn = () => serializeAttachment(attachment, undefined, {
+            skipFileHash: true,
+            skipSyncingFilter: true,
+            skipHash,
+            includeAnnotationsCount,
+        });
         const attachmentData = ta
             ? await ta.track('att_serialize_ms', serializeFn)
             : await serializeFn();

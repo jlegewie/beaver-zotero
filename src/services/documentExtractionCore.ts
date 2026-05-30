@@ -15,6 +15,7 @@
 import type {
     BeaverExtractResult,
 } from '../beaver-extract/schema';
+import type { PageGeometry } from '../beaver-extract/types';
 import {
     ExtractionError,
     ExtractionErrorCode,
@@ -35,8 +36,8 @@ import type { DocumentCacheExtractionMode } from './database';
 import type { DocumentCacheSourceIdentity } from './documentCache';
 import { makeRemoteFilePath } from './documentFileIdentity';
 import { logger } from '../utils/logger';
-import { getPref } from '../utils/prefs';
 import { isAttachmentAvailableRemotely } from '../utils/webAPI';
+import { effectiveMaxFileSizeMB, effectiveMaxPageCount } from './attachmentLimits';
 import {
     resolveToPdfAttachment,
     validateZoteroItemReference,
@@ -78,6 +79,35 @@ export interface ExtractAndCacheArgs {
     onRemoteDownloadFailure?: (error: unknown) => void;
 }
 
+export function buildExtractedDocumentCacheMetadata(extracted: BeaverExtractResult): {
+    pageCount: number;
+    pageLabels: Record<string, string>;
+    pages: (PageGeometry | null)[];
+} {
+    const doc = extracted.document;
+    const extractedPageLabels = doc.pageLabels ?? Object.fromEntries(
+        doc.pages
+            .filter((page) => page.label)
+            .map((page) => [String(page.index), page.label as string]),
+    );
+    const pages: (PageGeometry | null)[] = new Array(doc.pageCount).fill(null);
+    for (const page of doc.pages) {
+        // Annotation cache geometry uses unrotated PDF user-space dimensions.
+        // Structured-page width/height describe the extraction bbox frame.
+        pages[page.index] = {
+            viewBox: page.viewBox,
+            width: page.viewBox[2] - page.viewBox[0],
+            height: page.viewBox[3] - page.viewBox[1],
+            rotation: page.rotation,
+        };
+    }
+    return {
+        pageCount: doc.pageCount,
+        pageLabels: extractedPageLabels,
+        pages,
+    };
+}
+
 export type ExtractAndCacheResult =
     | {
           kind: 'ok';
@@ -115,14 +145,6 @@ export type ExtractAndCacheResult =
           resolvedAttachment: ResolvedAttachment | null;
       };
 
-function effectiveMaxFileSizeMB(requested?: number | null): number {
-    const hardMax = getPref('maxFileSizeMB');
-    if (requested == null || !Number.isFinite(requested) || requested <= 0) {
-        return hardMax;
-    }
-    return Math.min(requested, hardMax);
-}
-
 /**
  * Run the whole-document extraction pipeline, populate the document cache,
  * and return a tagged-union result. Never throws for expected outcomes —
@@ -155,7 +177,7 @@ export async function extractAndCacheDocument(
     }
 
     const maxFileSizeMB = effectiveMaxFileSizeMB(args.maxFileSizeMB);
-    const maxPages = args.maxPages != null && args.maxPages > 0 ? args.maxPages : null;
+    const maxPages = effectiveMaxPageCount(args.maxPages);
 
     const timeout = createTimeoutController(
         args.timeoutSeconds,
@@ -255,7 +277,7 @@ export async function extractAndCacheDocument(
                     return {
                         kind: 'response_error',
                         code: 'file_too_large',
-                        message: `The PDF file for ${resolvedKeyStr} has a file size of ${fileSizeInMB.toFixed(1)}MB, which exceeds the ${maxFileSizeMB}MB limit`,
+                        message: `The PDF file for ${resolvedKeyStr} has a file size of ${fileSizeInMB.toFixed(1)}MB, which exceeds the ${maxFileSizeMB}MB limit.`,
                         pageCount: null,
                         resolvedAttachment,
                     };
@@ -282,8 +304,8 @@ export async function extractAndCacheDocument(
 
         const preflight = preflightCachedPdfMeta(cachedMeta, {
             checkOcr: true,
-            applyPageCountCap: maxPages != null,
-            maxPageCount: maxPages ?? Number.MAX_SAFE_INTEGER,
+            applyPageCountCap: true,
+            maxPageCount: maxPages,
         });
         if (preflight) {
             switch (preflight.code) {
@@ -315,7 +337,7 @@ export async function extractAndCacheDocument(
                     return {
                         kind: 'response_error',
                         code: 'too_many_pages',
-                        message: `The PDF file for ${resolvedKeyStr} has ${preflight.pageCount} pages, which exceeds the ${preflight.maxPageCount}-page limit`,
+                        message: `The PDF file for ${resolvedKeyStr} has ${preflight.pageCount} pages, which exceeds the ${preflight.maxPageCount}-page limit.`,
                         pageCount: preflight.pageCount,
                         resolvedAttachment,
                     };
@@ -333,11 +355,11 @@ export async function extractAndCacheDocument(
             : null;
         throwIfTimedOut('payload_cache_lookup');
         if (cachedResult) {
-            if (maxPages != null && cachedResult.document.pageCount > maxPages) {
+            if (cachedResult.document.pageCount > maxPages) {
                 return {
                     kind: 'response_error',
                     code: 'too_many_pages',
-                    message: `The PDF file for ${resolvedKeyStr} has ${cachedResult.document.pageCount} pages, which exceeds the ${maxPages}-page limit`,
+                    message: `The PDF file for ${resolvedKeyStr} has ${cachedResult.document.pageCount} pages, which exceeds the ${maxPages}-page limit.`,
                     pageCount: cachedResult.document.pageCount,
                     resolvedAttachment,
                 };
@@ -381,7 +403,7 @@ export async function extractAndCacheDocument(
                     return {
                         kind: 'response_error',
                         code: 'file_too_large',
-                        message: `The PDF file for ${resolvedKeyStr} has a file size of ${exceeded.sizeMB.toFixed(1)}MB, which exceeds the ${exceeded.maxMB}MB limit`,
+                        message: `The PDF file for ${resolvedKeyStr} has a file size of ${exceeded.sizeMB.toFixed(1)}MB, which exceeds the ${exceeded.maxMB}MB limit.`,
                         pageCount: null,
                         resolvedAttachment,
                     };
@@ -391,11 +413,11 @@ export async function extractAndCacheDocument(
             throwIfTimedOut('page_count_extraction');
         }
 
-        if (maxPages != null && totalPages > maxPages) {
+        if (totalPages > maxPages) {
             return {
                 kind: 'response_error',
                 code: 'too_many_pages',
-                message: `The PDF file for ${resolvedKeyStr} has ${totalPages} pages, which exceeds the ${maxPages}-page limit`,
+                message: `The PDF file for ${resolvedKeyStr} has ${totalPages} pages, which exceeds the ${maxPages}-page limit.`,
                 pageCount: totalPages,
                 resolvedAttachment,
             };
@@ -434,7 +456,7 @@ export async function extractAndCacheDocument(
                     return {
                         kind: 'response_error',
                         code: 'file_too_large',
-                        message: `The PDF file for ${resolvedKeyStr} has a file size of ${exceeded.sizeMB.toFixed(1)}MB, which exceeds the ${exceeded.maxMB}MB limit`,
+                        message: `The PDF file for ${resolvedKeyStr} has a file size of ${exceeded.sizeMB.toFixed(1)}MB, which exceeds the ${exceeded.maxMB}MB limit.`,
                         pageCount: totalPages,
                         resolvedAttachment,
                     };
@@ -464,18 +486,6 @@ export async function extractAndCacheDocument(
             return extracted;
         };
 
-        const buildMetadata = (extracted: BeaverExtractResult) => {
-            const extractedPageLabels = extracted.document.pageLabels ?? Object.fromEntries(
-                extracted.document.pages
-                    .filter((page) => page.label)
-                    .map((page) => [String(page.index), page.label as string]),
-            );
-            return {
-                pageCount: extracted.document.pageCount,
-                pageLabels: extractedPageLabels,
-            };
-        };
-
         const resultPromise = cache
             ? cache.getOrCreateResult({
                 item: pdfItem,
@@ -488,7 +498,7 @@ export async function extractAndCacheDocument(
                 abortSignal: signal,
                 expectedSourceIdentity: isRemoteOnly ? null : initialSourceIdentity,
                 create: createSharedResult,
-                metadata: buildMetadata,
+                metadata: buildExtractedDocumentCacheMetadata,
             })
             : createUnsharedResult();
         const result = cache
@@ -500,7 +510,7 @@ export async function extractAndCacheDocument(
             return {
                 kind: 'response_error',
                 code: 'file_too_large',
-                message: `The PDF file for ${resolvedKeyStr} exceeds the ${maxFileSizeMB}MB limit`,
+                message: `The PDF file for ${resolvedKeyStr} exceeds the ${maxFileSizeMB}MB limit.`,
                 pageCount: totalPages,
                 resolvedAttachment,
             };
@@ -585,6 +595,7 @@ export async function extractAndCacheDocument(
                             : 'no_text_layer',
                     pageCount: error.pageCount ?? totalPages,
                     pageLabels,
+                    pages: null,
                 });
 
                 const cachedCode = error.code === ExtractionErrorCode.ENCRYPTED

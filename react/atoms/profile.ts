@@ -5,6 +5,7 @@ import { getZoteroUserIdentifier } from "../../src/utils/zoteroUtils";
 import { ZoteroLibrary } from "../types/zotero";
 import { fileStatusAtom } from "./files";
 import { compareVersions } from "../utils/compareVersions";
+import { effectiveMaxFileSizeMB, effectiveMaxPageCount } from "../../src/services/attachmentLimits";
 
 // Profile and plan state
 export const isProfileInvalidAtom = atom<boolean>(false);
@@ -141,8 +142,8 @@ export const planFeaturesAtom = atom<PlanFeatures>((get) => {
         databaseSync: profile?.plan.sync_database || false,
         uploadFiles: profile?.plan.upload_files || false,
         maxUserAttachments: profile?.plan.max_user_attachments || 2,
-        uploadFileSizeLimit: profile?.plan.max_file_size_mb || 10,
-        maxPageCount: profile?.plan.max_page_count || 100,
+        uploadFileSizeLimit: effectiveMaxFileSizeMB(profile?.plan.max_file_size_mb ?? 10),
+        maxPageCount: effectiveMaxPageCount(profile?.plan.max_page_count ?? 100),
     } as PlanFeatures;
 });
 

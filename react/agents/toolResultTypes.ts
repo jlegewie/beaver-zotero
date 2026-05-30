@@ -1263,6 +1263,7 @@ export interface AttachmentResultItem {
     parent_item_id?: string | null;
     parent_title?: string | null;
     date_modified?: string | null;
+    annotations_count?: number | null;
 }
 
 /** Result item from zotero_search (regular, note, or attachment) */
@@ -1964,11 +1965,89 @@ export function isNoteAnnotationToolResult(toolName: string): boolean {
  */
 export function extractAnnotationAttachmentId(args: string | Record<string, any> | null): string | null {
     if (!args) return null;
-    
+
     try {
         const parsedArgs = typeof args === 'string' ? JSON.parse(args) : args;
         return parsedArgs?.attachment_id ?? null;
     } catch {
         return null;
     }
+}
+
+// ============================================================================
+// Get Annotations Tool Results
+// ============================================================================
+
+/** Valid tool names for get_annotations results */
+const GET_ANNOTATIONS_TOOL_NAMES: readonly string[] = [
+    'get_annotations',
+] as const;
+
+/**
+ * Dehydrated summary for the get_annotations tool. The backend stores the
+ * full tool result in GCS and ships only this summary inline, so the UI
+ * renders directly from `metadata.summary` (the result `content` is replaced
+ * by a storage_ref placeholder). Annotations are slim ZoteroItemReference
+ * entries — the frontend resolves each one locally to read type, color,
+ * text, comment, page label, and tags, matching the ItemSearchResultSummary
+ * pattern.
+ */
+export interface GetAnnotationsResultSummary {
+    tool_name: 'get_annotations';
+    attachment_id: string;
+    result_count: number;
+    total_count: number;
+    has_more: boolean;
+    annotations: ZoteroItemReference[];
+}
+
+/**
+ * Type guard for get_annotations tool results. Reads from `metadata.summary`
+ * because get_annotations is dehydrated — see `DEHYDRATABLE_TOOLS` on the
+ * backend.
+ */
+export function isGetAnnotationsResult(
+    toolName: string,
+    _content: unknown,
+    metadata?: Record<string, unknown>
+): metadata is { summary: GetAnnotationsResultSummary } {
+    if (!GET_ANNOTATIONS_TOOL_NAMES.includes(toolName)) return false;
+    if (!metadata?.summary || typeof metadata.summary !== 'object') return false;
+    const summary = metadata.summary as Record<string, unknown>;
+    if (!Array.isArray(summary.annotations)) return false;
+    return summary.annotations.every((a: unknown) => {
+        if (!a || typeof a !== 'object') return false;
+        const ref = a as Record<string, unknown>;
+        return typeof ref.library_id === 'number' && typeof ref.zotero_key === 'string';
+    });
+}
+
+/**
+ * Normalized view data for the get_annotations result view.
+ */
+export interface GetAnnotationsViewData {
+    annotations: ZoteroItemReference[];
+    totalCount: number;
+    attachmentId?: string | null;
+}
+
+/**
+ * Extract annotation references from metadata.summary.
+ */
+export function extractGetAnnotationsData(
+    _content: unknown,
+    metadata?: Record<string, unknown>
+): GetAnnotationsViewData | null {
+    if (!metadata?.summary || typeof metadata.summary !== 'object') return null;
+    const summary = metadata.summary as GetAnnotationsResultSummary;
+    if (!Array.isArray(summary.annotations)) return null;
+
+    return {
+        annotations: summary.annotations.map(ref => ({
+            library_id: ref.library_id,
+            zotero_key: ref.zotero_key,
+        })),
+        totalCount: typeof summary.total_count === 'number' ? summary.total_count : summary.annotations.length,
+        attachmentId: summary.attachment_id ?? null,
+    };
 }

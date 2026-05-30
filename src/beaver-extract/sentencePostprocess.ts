@@ -746,8 +746,13 @@ const REF_TAIL_B7_RE =
 // where the year precedes a semicolon-separated volume. The capitalized
 // journal-token prefix plus end anchor keep it from treating arbitrary
 // prose numbers as publication metadata.
-const REF_TAIL_B8_TOKEN_RE_SRC =
-    `(?:\\p{Lu}{2,}|\\p{Lu}[\\p{L}&.'\\-]*\\p{Ll}[\\p{L}&.'\\-]*)`;
+// Single greedy alternative (no internal ambiguity) instead of the
+// `\p{Lu}{2,}|\p{Lu}[\p{L}&.'\-]*\p{Ll}[\p{L}&.'\-]*` disjunction:
+// both branches could match the same Capital word in many overlapping
+// ways, which combined with the outer `{1,8}` quantifier and the end
+// anchor produced catastrophic backtracking on long lowercase-start
+// references-list paragraphs.
+const REF_TAIL_B8_TOKEN_RE_SRC = `\\p{Lu}[\\p{L}&.'\\-]+`;
 const REF_TAIL_B8_RE = new RegExp(
     `\\b(?:${REF_TAIL_B8_TOKEN_RE_SRC}\\s+){1,8}` +
         `(?:19|20)\\d{2};\\d{1,5}` +
@@ -764,8 +769,10 @@ const REF_TAIL_B9_MONTH_RE_SRC =
     `(?:January|February|March|April|May|June|July|August|September` +
     `|October|November|December` +
     `|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sept|Sep|Oct|Nov|Dec)`;
-const REF_TAIL_B9_SOURCE_TOKEN_RE_SRC =
-    `(?:\\p{Lu}{2,}|\\p{Lu}[\\p{L}&.'\\-]*\\p{Ll}[\\p{L}&.'\\-]*)`;
+// See REF_TAIL_B8_TOKEN_RE_SRC: single greedy alternative avoids the
+// overlapping-match catastrophic-backtracking blowup that the original
+// disjunction caused under outer `{0,5}` repetition + end anchor.
+const REF_TAIL_B9_SOURCE_TOKEN_RE_SRC = `\\p{Lu}[\\p{L}&.'\\-]+`;
 const REF_TAIL_B9_RE = new RegExp(
     `\\b(?:${REF_TAIL_B9_SOURCE_TOKEN_RE_SRC}\\s+){0,5}` +
         `${REF_TAIL_B9_SOURCE_TOKEN_RE_SRC}\\s+` +

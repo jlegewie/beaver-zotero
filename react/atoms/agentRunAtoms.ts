@@ -90,6 +90,8 @@ import {
     isEditNoteAgentAction,
     isCreateNoteAgentAction,
     hasAppliedZoteroItem,
+    hasAppliedBulkAnnotations,
+    isCreateAnnotationsAgentAction,
     AgentAction,
     addPendingApprovalAtom,
     removePendingApprovalAtom,
@@ -97,6 +99,7 @@ import {
     buildPendingApprovalFromAction,
     clearAllPendingApprovalsAtom,
 } from '../agents/agentActions';
+import { getAppliedPdfAnnotationCount } from '../agents/agentActionCounts';
 import { undoEditMetadataAction } from '../utils/editMetadataActions';
 import { undoCreateItemAction } from '../utils/createItemActions';
 import { undoCreateCollectionAction } from '../utils/createCollectionActions';
@@ -105,6 +108,7 @@ import { undoManageTagsAction } from '../utils/manageTagsActions';
 import { undoManageCollectionsAction } from '../utils/manageCollectionsActions';
 import { undoEditNoteAction } from '../utils/editNoteActions';
 import { undoCreateNoteAction } from '../utils/createNoteActions';
+import { undoCreateAnnotationsAction } from '../utils/createAnnotationsActions';
 import { processToolReturnResults } from '../agents/toolResultProcessing';
 import { addWarningAtom, clearWarningsAtom } from './warnings';
 import { backendHighTokenUsageRunsAtom, softCapTriggeredRunsAtom } from './messageUIState';
@@ -132,6 +136,7 @@ import type { CreateItemProposedData, CreateItemResultData } from '../types/agen
 import { appendRunIfMissing, findResumeChainRoot, findRunForResume, hasOnlyThinkingParts, resolveErrorRunId, toRunError } from '../agents/runResumeHelpers';
 import { prewarmMuPDFWorker } from '../../src/beaver-extract';
 import { BeaverTemporaryAnnotations } from '../utils/annotationUtils';
+import { getLibrarySummaries } from '../../src/services/agentDataProvider/libraryCounts';
 
 // =============================================================================
 // Helper Functions
@@ -599,6 +604,9 @@ async function undoAppliedActionsInReverse(actions: AgentAction[]): Promise<void
     const indexed = actions
         .map((action, index) => ({ action, index }))
         .filter(({ action }) => {
+            if (isCreateAnnotationsAgentAction(action)) {
+                return hasAppliedBulkAnnotations(action);
+            }
             if (isAnnotationAgentAction(action) || isZoteroNoteAgentAction(action)) {
                 return hasAppliedZoteroItem(action);
             }
@@ -616,7 +624,9 @@ async function undoAppliedActionsInReverse(actions: AgentAction[]): Promise<void
 
     for (const { action } of indexed) {
         try {
-            if (isAnnotationAgentAction(action) || isZoteroNoteAgentAction(action)) {
+            if (isCreateAnnotationsAgentAction(action)) {
+                await undoCreateAnnotationsAction(action);
+            } else if (isAnnotationAgentAction(action) || isZoteroNoteAgentAction(action)) {
                 const item = await Zotero.Items.getByLibraryAndKeyAsync(
                     action.result_data!.library_id,
                     action.result_data!.zotero_key
@@ -681,7 +691,11 @@ function confirmUndoAppliedActions(actions: ActionsToUndo): UndoConfirmResult {
     // Build a list of changes
     const changeLines: string[] = [];
     if (annotations.length > 0) {
-        changeLines.push(`• ${annotations.length} PDF annotation${annotations.length === 1 ? '' : 's'}`);
+        const annotationCount = annotations.reduce(
+            (sum, action) => sum + getAppliedPdfAnnotationCount(action),
+            0,
+        );
+        changeLines.push(`• ${annotationCount} PDF annotation${annotationCount === 1 ? '' : 's'}`);
     }
     if (zoteroNotes.length > 0) {
         changeLines.push(`• ${zoteroNotes.length} Zotero note${zoteroNotes.length === 1 ? '' : 's'}`);
@@ -1059,13 +1073,13 @@ function createWSCallbacks(set: Setter): WSCallbacks {
         },
 
         onPart: async (event: WSPartEvent) => {
-            // logger(`WS onPart (${event.part.part_kind}):`, {
-            //     runId: event.run_id,
-            //     messageIndex: event.message_index,
-            //     part: event.part,
-            // });
             // Load item data for tool call
             if (event.part.part_kind === "tool-call") {
+                logger(`WS onPart (${event.part.part_kind}):`, {
+                    runId: event.run_id,
+                    messageIndex: event.message_index,
+                    part: event.part,
+                });
                 const itemReferences = extractZoteroReferencesFromToolCall(event.part);
                 if (itemReferences.length > 0) {
                     logger(`WS onPart: Loading ${itemReferences.length} item data for tool call`, 1);
@@ -1804,6 +1818,10 @@ export const sendWSMessageAtom = atom(
             };
         }
 
+        const libraries = searchableLibraryIds.length > 0
+            ? await getLibrarySummaries(searchableLibraryIds)
+            : undefined;
+
         // Application state
         const applicationState = {
             current_view: currentView,
@@ -1812,6 +1830,7 @@ export const sendWSMessageAtom = atom(
             ...(currentLibrary ? { current_library: currentLibrary } : {}),
             ...(currentCollection ? { current_collection: currentCollection } : {}),
             ...(indexingStatus ? { indexing_status: indexingStatus } : {}),
+            ...(libraries ? { libraries } : {}),
         };
 
         // Build the message
@@ -1977,8 +1996,10 @@ export const regenerateFromRunAtom = atom(
             
             // Categorize by type - only include applied actions
             const annotationsToDelete = actionsInRemovedRuns
-                .filter(isAnnotationAgentAction)
-                .filter(hasAppliedZoteroItem);
+                .filter((action) =>
+                    (isAnnotationAgentAction(action) && hasAppliedZoteroItem(action)) ||
+                    (isCreateAnnotationsAgentAction(action) && hasAppliedBulkAnnotations(action))
+                );
             const zoteroNotesToDelete = actionsInRemovedRuns
                 .filter(isZoteroNoteAgentAction)
                 .filter(hasAppliedZoteroItem);
@@ -2162,8 +2183,10 @@ export const regenerateWithEditedPromptAtom = atom(
             
             // Categorize by type - only include applied actions
             const annotationsToDelete = actionsInRemovedRuns
-                .filter(isAnnotationAgentAction)
-                .filter(hasAppliedZoteroItem);
+                .filter((action) =>
+                    (isAnnotationAgentAction(action) && hasAppliedZoteroItem(action)) ||
+                    (isCreateAnnotationsAgentAction(action) && hasAppliedBulkAnnotations(action))
+                );
             const zoteroNotesToDelete = actionsInRemovedRuns
                 .filter(isZoteroNoteAgentAction)
                 .filter(hasAppliedZoteroItem);

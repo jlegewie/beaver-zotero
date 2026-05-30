@@ -120,6 +120,9 @@ const TOOL_BASE_LABELS: Record<string, string> = {
     get_metadata: 'Get metadata',
     edit_metadata: 'Edit metadata',
 
+    // Annotation tools
+    get_annotations: 'Get annotations',
+
     // Note tools
     read_note: 'Reading note',
     edit_note: 'Edit note',
@@ -149,6 +152,8 @@ const TOOL_BASE_LABELS: Record<string, string> = {
     // Annotations
     add_highlight_annotations: 'Highlight annotations',
     add_note_annotations: 'Note annotations',
+    create_highlight_annotations: 'Creating highlight annotations',
+    create_note_annotations: 'Creating sticky notes',
 
     // Suggestions
     return_suggestions: 'Suggestions',
@@ -506,6 +511,18 @@ export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): st
             // Fallback: just show page range or base label
             if (pageRange) {
                 return `${baseLabel}: ${pageRange}`;
+            }
+            return baseLabel;
+        }
+
+        // === Annotation tools ===
+        case 'get_annotations': {
+            const attachmentId = args.attachment_id as string | undefined;
+            if (attachmentId) {
+                const item = getItemFromAttachmentId(attachmentId);
+                if (item) {
+                    return `${baseLabel}: ${getItemDisplayName(item)}`;
+                }
             }
             return baseLabel;
         }

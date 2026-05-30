@@ -66,6 +66,8 @@ function pageWithSentences(): any {
         index: 0,
         width: 595,
         height: 842,
+        viewBox: [0, 0, 595, 842],
+        rotation: 0,
         content: 'Hello.',
         columns: [],
         items: [
@@ -110,6 +112,8 @@ function structuredResult(page = pageWithSentences()): unknown {
                     index: page.index,
                     width: page.width,
                     height: page.height,
+                    viewBox: page.viewBox,
+                    rotation: page.rotation,
                     items: [
                         {
                             id: item.id,
@@ -166,6 +170,8 @@ function markdownResult(page = pageWithSentences()): unknown {
                     index: page.index,
                     width: page.width,
                     height: page.height,
+                    viewBox: page.viewBox,
+                    rotation: page.rotation,
                     markdown: page.content ?? 'Hello.',
                 },
             ],
@@ -945,6 +951,8 @@ function baseStructuredPage(): Record<string, unknown> {
         index: 0,
         width: 595,
         height: 842,
+        viewBox: [0, 0, 595, 842],
+        rotation: 0,
         items: [
             {
                 id: 'p0:i0',
@@ -971,6 +979,8 @@ function baseMarkdownPage(): Record<string, unknown> {
         index: 0,
         width: 595,
         height: 842,
+        viewBox: [0, 0, 595, 842],
+        rotation: 0,
         markdown: 'Hello.',
     };
 }

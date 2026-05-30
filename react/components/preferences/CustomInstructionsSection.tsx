@@ -44,6 +44,7 @@ const CustomInstructionsSection: React.FC = () => {
                     value={customInstructions}
                     onChange={handleCustomInstructionsChange}
                     placeholder="Enter custom instructions here..."
+                    aria-label="Custom instructions"
                     rows={5}
                     className="chat-input custom-prompt-edit-textarea text-base"
                     style={{ width: '100%', boxSizing: 'border-box', resize: 'vertical' }}
@@ -60,6 +61,7 @@ const CustomInstructionsSection: React.FC = () => {
                     value={readerExplainPrompt}
                     onChange={handleReaderExplainPromptChange}
                     placeholder="Explain the selected passage from this paper in plain language..."
+                    aria-label="Reader explain prompt"
                     rows={4}
                     className="chat-input custom-prompt-edit-textarea text-base"
                     style={{ width: '100%', boxSizing: 'border-box', resize: 'vertical' }}

@@ -104,6 +104,7 @@ import {
     DEFAULT_PAGE_IMAGE_OPTIONS,
     collectDocumentInfo,
     collectPageLabels,
+    collectPagesData,
     extractGraphicsFromDoc,
     extractRawPageDetailedFromDoc,
     assertDocumentHasPages,
@@ -149,9 +150,9 @@ export async function opGetMetadata(
     let docFailed = false;
     try {
         const pageCount = doc.countPages();
-        const pageLabels = collectPageLabels(doc);
+        const { pageLabels, pages } = collectPagesData(doc);
         const info = collectDocumentInfo(doc);
-        return { result: { pageCount, pageLabels, ...info } };
+        return { result: { pageCount, pageLabels, pages, ...info } };
     } catch (e) {
         docFailed = true;
         throw e;
@@ -714,6 +715,8 @@ export function runExtractFromIndices(
                 // Always MuPDF-frame dims (rawPage came pre-rotation).
                 width: rawPage.width,
                 height: rawPage.height,
+                viewBox: rawPage.viewBox,
+                rotation: rawPage.rotation,
                 content: filtered.paragraphResult.pageContent,
                 // Column rects come out of the (possibly normalized)
                 // pipeline in the upright working frame; project back
@@ -784,6 +787,8 @@ export function runExtractFromIndices(
                 // frame (the mapper reports source dims).
                 width: sentenceResult.width,
                 height: sentenceResult.height,
+                viewBox: rawPage.viewBox,
+                rotation: rawPage.rotation,
                 content: filteredResult.paragraphResult.pageContent,
                 columns: filteredResult.columnResult.columns.map((col) =>
                     projectColumnRect(
@@ -940,16 +945,22 @@ function translateDegradationItemIds(
 
 function toMarkdownExtractResult(
     result: InternalExtractionResult,
+    includeDiagnostics = false,
 ): MarkdownExtractResult {
     return {
         mode: "markdown",
         schemaVersion: SCHEMA_VERSION,
         createdAt: result.metadata.extractedAt,
-        diagnostics: {
-            settings: result.metadata.settings,
-            engine: result.metadata.engine ?? "paragraph",
-            timings: result.metadata.timings,
-        },
+        // Profiling/diagnostics payload is opt-in.
+        ...(includeDiagnostics
+            ? {
+                diagnostics: {
+                    settings: result.metadata.settings,
+                    engine: result.metadata.engine ?? "paragraph",
+                    timings: result.metadata.timings,
+                },
+            }
+            : {}),
         document: {
             pageCount: result.analysis.pageCount,
             pageLabels: pageLabelsToStringKeys(result.pageLabels),
@@ -958,6 +969,8 @@ function toMarkdownExtractResult(
                 label: page.label,
                 width: page.width,
                 height: page.height,
+                viewBox: page.viewBox,
+                rotation: page.rotation,
                 markdown: page.content,
             })),
         },
@@ -967,6 +980,7 @@ function toMarkdownExtractResult(
 function toStructuredExtractResult(
     result: InternalExtractionResult,
     bboxPrecision: number,
+    includeDiagnostics = false,
     debug?: ExtractionDebug,
 ): StructuredExtractResult {
     const pages = result.pages.map((page) =>
@@ -988,12 +1002,17 @@ function toStructuredExtractResult(
         mode: "structured",
         schemaVersion: SCHEMA_VERSION,
         createdAt: result.metadata.extractedAt,
-        diagnostics: {
-            settings: result.metadata.settings,
-            engine: "structured",
-            timings: result.metadata.timings,
-            ...(degradation ? { degradation } : {}),
-        },
+        // Profiling/diagnostics payload is opt-in.
+        ...(includeDiagnostics
+            ? {
+                diagnostics: {
+                    settings: result.metadata.settings,
+                    engine: "structured",
+                    timings: result.metadata.timings,
+                    ...(degradation ? { degradation } : {}),
+                },
+            }
+            : {}),
         document: {
             pageCount: result.analysis.pageCount,
             pageLabels: pageLabelsToStringKeys(result.pageLabels),
@@ -1180,6 +1199,8 @@ export async function opExtract(
         pageIndices?: number[];
         pageRange?: { startIndex: number; endIndex?: number; maxPages?: number };
         analysisWindow?: number;
+        /** Attach the opt-in `diagnostics` block */
+        includeDiagnostics?: boolean;
     },
 ): Promise<OpReply<BeaverExtractResult>> {
     // Defense in depth: the facade enforces this too, but the worker is
@@ -1319,8 +1340,9 @@ export async function opExtract(
             ? toStructuredExtractResult(
                 internal,
                 args.structured?.bboxPrecision ?? 1,
+                args.includeDiagnostics ?? false,
               )
-            : toMarkdownExtractResult(internal);
+            : toMarkdownExtractResult(internal, args.includeDiagnostics ?? false);
         return { result };
     } catch (e) {
         docFailed = true;

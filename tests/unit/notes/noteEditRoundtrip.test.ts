@@ -611,7 +611,7 @@ describe('edit + undo roundtrip', () => {
 
         // Replace old_string with itself + a new citation
         const oldStr = existingTag!;
-        const newStr = `${existingTag} <citation item_id="1-NEWKEY" label="New Ref, 2025"/>`;
+        const newStr = `${existingTag} <citation id="1-NEWKEY" label="New Ref, 2025"/>`;
 
         const expandedOld = expandToRawHtml(oldStr, metadata, 'old');
         const expandedNew = expandToRawHtml(newStr, metadata, 'new');
@@ -689,9 +689,9 @@ describe('citation-specific roundtrips', () => {
         // The simplifier coerces them to strings via String().
         const { simplified, metadata } = simplifyNoteHtml(FIXTURE_B, 1);
 
-        // Numeric locators should be coerced to strings and appear as page attributes
-        expect(simplified).toContain('page="2"');
-        expect(simplified).toContain('page="15"');
+        // Numeric locators should be coerced to strings and appear as loc attributes
+        expect(simplified).toContain('loc="page2"');
+        expect(simplified).toContain('loc="page15"');
 
         // Full roundtrip
         const expanded = expandToRawHtml(simplified, metadata, 'old');
@@ -849,7 +849,7 @@ describe('data-citation-items through edit pipeline', () => {
         const html = wrap('<p>Plain text note</p>');
         const { simplified, metadata } = simplifyNoteHtml(html, 1);
 
-        const newStr = 'Plain text note <citation item_id="1-NEWITEM" label="New, 2025"/>';
+        const newStr = 'Plain text note <citation id="1-NEWITEM" label="New, 2025"/>';
         const expandedNew = expandToRawHtml(newStr, metadata, 'new');
 
         // The expanded result should contain a citation with data-citation
@@ -956,7 +956,7 @@ describe('sequential edits and undo', () => {
         const { simplified: s2, metadata: m2 } = simplifyNoteHtml(edit1.newHtml, 1);
         const expandedOld2 = expandToRawHtml('and conclusion', m2, 'old');
         const expandedNew2 = expandToRawHtml(
-            'and conclusion <citation item_id="1-NEWSEQ" label="New, 2025"/>',
+            'and conclusion <citation id="1-NEWSEQ" label="New, 2025"/>',
             m2, 'new'
         );
         const stripped2 = stripDataCitationItems(edit1.newHtml);
@@ -1048,7 +1048,7 @@ describe('executeEditNoteAction + undoEditNoteAction', () => {
                     zotero_key: 'NOTE0001',
                     old_string: `Target text ${targetCitationTag} end.`,
                     new_string:
-                        `Target text <citation item_id="1-SAMEKEY" page="9" label="Inserted, 2024"/> `
+                        `Target text <citation id="1-SAMEKEY" loc="page9" label="Inserted, 2024"/> `
                         + `${targetCitationTag} end.`,
                 },
             }),
@@ -1077,7 +1077,7 @@ describe('executeEditNoteAction + undoEditNoteAction', () => {
                     library_id: 1,
                     zotero_key: 'NOTE0001',
                     old_string: `Target start ${targetCitationTag} target end.`,
-                    new_string: 'Target start <citation item_id="1-DUP" page="42" label="Mock Title, p. 42" ref="c_DUP_5"/> target end.',
+                    new_string: 'Target start <citation id="1-DUP" loc="page42" label="Mock Title, p. 42" ref="c_DUP_5"/> target end.',
                 },
             }),
         };
@@ -1260,7 +1260,7 @@ describe('executeEditNoteAction + undoEditNoteAction', () => {
         if (!targetCitationTag) {
             throw new Error('Expected duplicate citation to simplify to ref c_DUP_10');
         }
-        const newString = '<citation item_id="1-DUP" page="42" label="Mock Title, p. 42" ref="c_DUP_10"/>';
+        const newString = '<citation id="1-DUP" loc="page42" label="Mock Title, p. 42" ref="c_DUP_10"/>';
         // Use PM-normalized HTML for context capture (expanded strings are PM-canonical)
         const targetContext = captureValidatedEditTargetContext(
             stripDataCitationItems(noteHtml),
@@ -1452,7 +1452,7 @@ describe('executeEditNoteAction + undoEditNoteAction', () => {
         const { simplified: editedSimplified } = simplifyNoteHtml(editedHtml, 1);
 
         const shiftedRefs = [...editedSimplified.matchAll(
-            /<citation [^>]*item_id="1-SAMEKEY"[^>]*page="([^"]*)"[^>]*ref="([^"]+)"[^>]*\/>/g
+            /<citation [^>]*id="1-SAMEKEY"[^>]*loc="page([^"]*)"[^>]*ref="([^"]+)"[^>]*\/>/g
         )].map(match => ({ page: match[1], ref: match[2] }));
 
         expect(shiftedRefs).toEqual([
@@ -1525,7 +1525,7 @@ describe('executeEditNoteAction + undoEditNoteAction', () => {
                 library_id: 1,
                 zotero_key: 'NOTE0001',
                 old_string: 'Hello world',
-                new_string: 'Hello world <citation item_id="1-NEW1" page="4" label="Mock Title, p. 4"/>',
+                new_string: 'Hello world <citation id="1-NEW1" loc="page4" label="Mock Title, p. 4"/>',
             },
         });
 
@@ -1563,7 +1563,7 @@ describe('executeEditNoteAction + undoEditNoteAction', () => {
                 library_id: 1,
                 zotero_key: 'NOTE0001',
                 old_string: 'Original sentence.',
-                new_string: 'Revised sentence with support <citation item_id="1-NEW1" page="4" label="Mock Title, p. 4"/>.',
+                new_string: 'Revised sentence with support <citation id="1-NEW1" loc="page4" label="Mock Title, p. 4"/>.',
             },
         });
 
@@ -1625,11 +1625,11 @@ describe('executeEditNoteAction + undoEditNoteAction', () => {
                     + `${oldCitationTag}</p>`,
                 new_string:
                     `<p>${sharedLead}The brief documents that Black, Latino, and White students were `
-                    + `exposed to Operation Impact at very different rates <citation item_id="1-OLD1" `
-                    + `page="3" label="Mock Title, p. 3"/>.</p>\n\n`
+                    + `exposed to Operation Impact at very different rates <citation id="1-OLD1" `
+                    + `loc="page3" label="Mock Title, p. 3"/>.</p>\n\n`
                     + '<p>The brief also argues that the modest crime reduction did not offset the '
                     + 'educational harms and recommends restorative rather than punitive approaches to '
-                    + 'discipline <citation item_id="1-OLD1" page="7-8" '
+                    + 'discipline <citation id="1-OLD1" loc="page7-8" '
                     + 'label="Mock Title, p. 7-8"/>.</p>',
             },
         });
@@ -1726,9 +1726,9 @@ describe('edge cases', () => {
 
         const { simplified, metadata } = simplifyNoteHtml(html, 1);
 
-        expect(simplified).toContain('page="10-12"');
-        expect(simplified).toContain('page="§3.2"');
-        expect(simplified).toContain('page="fn. 5"');
+        expect(simplified).toContain('loc="page10-12"');
+        expect(simplified).toContain('loc="page§3.2"');
+        expect(simplified).toContain('loc="pagefn. 5"');
 
         // Full roundtrip
         const expanded = expandToRawHtml(simplified, metadata, 'old');
@@ -1886,7 +1886,7 @@ describe('page locator normalization in citation expansion', () => {
         const { metadata } = simplifyNoteHtml(html, 1);
 
         // Insert a new citation (no ref) with a page range
-        const input = '<citation item_id="1-NEWITEM" page="222, 237-238"/>';
+        const input = '<citation id="1-NEWITEM" loc="page222, 237-238"/>';
         const expanded = expandToRawHtml(input, metadata, 'new');
 
         // createCitationHTML should have been called with the normalized single page
@@ -1897,11 +1897,24 @@ describe('page locator normalization in citation expansion', () => {
         expect(expanded).toContain('data-citation=');
     });
 
+    it('legacy new citation with page range is still accepted', () => {
+        const html = wrap(`<p>Some text ${rawCitation('EX1', 1, '10', 'Author, 2024, p. 10')}</p>`);
+        const { metadata } = simplifyNoteHtml(html, 1);
+
+        const input = '<citation item_id="1-LEGACYITEM" page="222, 237-238"/>';
+        expandToRawHtml(input, metadata, 'new');
+
+        expect(createCitationHTML).toHaveBeenCalledWith(
+            expect.objectContaining({ key: 'LEGACYITEM' }),
+            '222'
+        );
+    });
+
     it('new citation with en-dash range: locator is normalized to first page', () => {
         const html = wrap(`<p>Text ${rawCitation('EX1', 1, '', 'Author, 2024')}</p>`);
         const { metadata } = simplifyNoteHtml(html, 1);
 
-        const input = '<citation item_id="1-RANGEITEM" page="100–105"/>';
+        const input = '<citation id="1-RANGEITEM" loc="page100–105"/>';
         expandToRawHtml(input, metadata, 'new');
 
         expect(createCitationHTML).toHaveBeenCalledWith(
@@ -1914,7 +1927,7 @@ describe('page locator normalization in citation expansion', () => {
         const html = wrap(`<p>Text ${rawCitation('EX1', 1, '', 'Author, 2024')}</p>`);
         const { metadata } = simplifyNoteHtml(html, 1);
 
-        const input = '<citation item_id="1-SINGLEITEM" page="42"/>';
+        const input = '<citation id="1-SINGLEITEM" loc="page42"/>';
         expandToRawHtml(input, metadata, 'new');
 
         expect(createCitationHTML).toHaveBeenCalledWith(
@@ -1927,7 +1940,7 @@ describe('page locator normalization in citation expansion', () => {
         const html = wrap(`<p>Text ${rawCitation('EX1', 1, '', 'Author, 2024')}</p>`);
         const { metadata } = simplifyNoteHtml(html, 1);
 
-        const input = '<citation item_id="1-SECITEM" page="§3.2"/>';
+        const input = '<citation id="1-SECITEM" loc="page§3.2"/>';
         expandToRawHtml(input, metadata, 'new');
 
         expect(createCitationHTML).toHaveBeenCalledWith(
@@ -1937,7 +1950,7 @@ describe('page locator normalization in citation expansion', () => {
     });
 
     it('existing citation with changed page range: normalized to first page', () => {
-        // Citation originally has page="10"
+        // Citation originally has loc="page10"
         const cit = rawCitation('PGCHG', 1, '10', 'Author, 2024, p. 10');
         const html = wrap(`<p>Text ${cit}</p>`);
         const { simplified, metadata } = simplifyNoteHtml(html, 1);
@@ -1945,7 +1958,7 @@ describe('page locator normalization in citation expansion', () => {
         // LLM changes page to a range
         const tag = simplified.match(/<citation [^/]*ref="c_PGCHG_0"[^/]*\/>/)?.[0];
         expect(tag).toBeTruthy();
-        const modified = tag!.replace('page="10"', 'page="10, 15-18"');
+        const modified = tag!.replace('loc="page10"', 'loc="page10, 15-18"');
         const expanded = expandToRawHtml(modified, metadata, 'new');
 
         // Should have been called with normalized page
@@ -1986,7 +1999,7 @@ describe('page locator normalization in citation expansion', () => {
         // old_string: just the existing citation
         // new_string: existing citation + new citation with page range
         const oldStr = existingTag!;
-        const newStr = `${existingTag} <citation item_id="1-NEWCIT" page="50-55"/>`;
+        const newStr = `${existingTag} <citation id="1-NEWCIT" loc="page50-55"/>`;
 
         const expandedOld = expandToRawHtml(oldStr, metadata, 'old');
         const expandedNew = expandToRawHtml(newStr, metadata, 'new');
@@ -2168,7 +2181,7 @@ describe('Page label translation during citation expansion', () => {
         const labels = ['i', 'ii', 'iii', '1', '2', '3'];
         setupPageLabels(labels);
 
-        // Original citation has page="2" (a display label, not a page number)
+        // Original citation has loc="page2" (a display label, not a page number)
         const citHtml = rawCitation('ITEMKEY', 1, '2', '(Author, 2024, p. 2)');
         const noteHtml = wrap(`<p>Text ${citHtml} more text</p>`);
 
@@ -2186,8 +2199,8 @@ describe('Page label translation during citation expansion', () => {
         invalidateSimplificationCache('test');
         const { simplified, metadata } = simplifyNoteHtml(noteHtml, 1);
 
-        // Model changes item_id but keeps the same page="2"
-        const editedSimplified = simplified.replace(/item_id="1-ITEMKEY"/, 'item_id="1-NEWKEY"');
+        // Model changes id but keeps the same loc="page2"
+        const editedSimplified = simplified.replace(/id="1-ITEMKEY"/, 'id="1-NEWKEY"');
         expandToRawHtml(editedSimplified, metadata, 'new', undefined, pageLabels);
 
         // Page "2" should NOT be translated to "ii" — it's an existing display label
@@ -2221,7 +2234,7 @@ describe('Page label translation during citation expansion', () => {
         const { simplified, metadata } = simplifyNoteHtml(noteHtml, 1);
 
         // Model changes page from "2" to "5" — this is a label, not a page index
-        const editedSimplified = simplified.replace(/page="2"/, 'page="5"');
+        const editedSimplified = simplified.replace(/loc="page2"/, 'loc="page5"');
         expandToRawHtml(editedSimplified, metadata, 'new', undefined, pageLabels);
 
         // Page "5" should pass through unchanged (no translation for existing citations)

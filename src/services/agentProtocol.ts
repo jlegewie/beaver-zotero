@@ -226,7 +226,7 @@ export interface WSZoteroAttachmentPageImagesRequest extends WSBaseEvent {
     format?: 'png' | 'jpeg';
     /** JPEG quality (1-100), only used for format="jpeg". Default: 85 */
     jpeg_quality?: number;
-    /** Skip local file size and page count limits. Default: false */
+    /** Skip caller-specific soft limits. Beaver's hard caps still apply. Default: false */
     skip_local_limits?: boolean;
     /**
      * When true, resolve `pages` entries against PDF page labels first,
@@ -510,6 +510,8 @@ export interface WSZoteroDataResponse {
     attachments: AttachmentDataWithStatus[];
     /** Note metadata for successfully retrieved notes */
     notes?: NoteResultItem[];
+    /** Annotation metadata for successfully retrieved annotations */
+    annotations?: AnnotationResultItem[];
     /** Optional errors for references that couldn't be retrieved */
     errors?: WSDataError[];
 }
@@ -612,7 +614,7 @@ export interface WSZoteroAttachmentSearchRequest extends WSBaseEvent {
     query: string;
     /** Maximum hits to return per page. Default: 100 */
     max_hits_per_page?: number;
-    /** Skip local file size and page count limits. Default: false */
+    /** Skip caller-specific soft limits. Beaver's hard caps still apply. Default: false */
     skip_local_limits?: boolean;
     /** Frontend-side search deadline in seconds. */
     timeout_seconds?: number;
@@ -776,6 +778,43 @@ export interface AttachmentResultItem {
     parent_item_id?: string | null;
     parent_title?: string | null;
     date_modified?: string | null;
+    annotations_count?: number | null;
+}
+
+/**
+ * Annotation result item.
+ *
+ * Annotations are children of attachments, which are children of regular
+ * items. The result surfaces both the parent attachment and the bibliographic
+ * regular item so callers can:
+ *  - render an annotation citation against the bibliographic parent.
+ *  - power an LLM-facing tool (e.g. get_annotations) with clear identity
+ *    names: `annotation_id` for the annotation itself, `attachment_id` for
+ *    the PDF, `item_id` for the paper/book/record.
+ */
+export interface AnnotationResultItem {
+    result_type: 'annotation';
+    /** Annotation id, format "library_id-zotero_key". */
+    annotation_id: string;
+    /** "highlight" | "underline" | "note" | "image" | "ink" | "text" */
+    annotation_type?: string | null;
+    /** Highlighted/selected text, when present. */
+    text?: string | null;
+    /** Comment attached to the annotation, when present. */
+    comment?: string | null;
+    /** Color hex (e.g. "#ffd400"). */
+    color?: string | null;
+    /** 1-based page number of the annotation's location. */
+    page?: number | null;
+    /** Tag names attached to the annotation. */
+    tags?: string[];
+    /** Parent attachment id ("library_id-zotero_key"). */
+    attachment_id?: string | null;
+    /** Bibliographic regular item id ("library_id-zotero_key"). */
+    item_id?: string | null;
+    /** Title of the bibliographic regular item. */
+    item_title?: string | null;
+    date_modified?: string | null;
 }
 
 /** Result item from zotero_search (regular, note, or attachment) */
@@ -866,6 +905,25 @@ export interface WSGetMetadataResponse {
     error_code?: string | null;
 }
 
+/** Request from backend for get_annotations */
+export interface WSGetAnnotationsRequest extends WSBaseEvent {
+    event: 'get_annotations_request';
+    request_id: string;
+    attachment_id: string;
+    limit: number;
+    offset: number;
+}
+
+/** Response to get_annotations request */
+export interface WSGetAnnotationsResponse {
+    type: 'get_annotations';
+    request_id: string;
+    annotations: AnnotationResultItem[];
+    total_count: number;
+    error?: string | null;
+    error_code?: string | null;
+}
+
 // =============================================================================
 // Library Management: List Collections
 // =============================================================================
@@ -951,13 +1009,14 @@ export interface WSListLibrariesRequest extends WSBaseEvent {
     request_id: string;
 }
 
-/** Library information */
-export interface LibraryInfo {
+/** Per-library count snapshot */
+export interface LibrarySummary {
     library_id: number;
     name: string;
     is_group: boolean;
     read_only: boolean;
     item_count: number;
+    note_count: number;
     collection_count: number;
     tag_count: number;
 }
@@ -966,7 +1025,7 @@ export interface LibraryInfo {
 export interface WSListLibrariesResponse {
     type: 'list_libraries';
     request_id: string;
-    libraries: LibraryInfo[];
+    libraries: LibrarySummary[];
     total_count: number;
     error?: string | null;
     error_code?: string | null;
@@ -980,7 +1039,7 @@ export interface WSListLibrariesResponse {
 export type DeferredToolPreference = 'always_ask' | 'always_apply' | 'continue_without_applying';
 
 /** Agent action type for deferred tools */
-export type AgentActionType = 'highlight_annotation' | 'note_annotation' | 'zotero_note' | 'create_item' | 'edit_metadata' | 'create_collection' | 'organize_items' | 'manage_tags' | 'manage_collections' | 'confirm_extraction' | 'confirm_external_search' | 'edit_note' | 'create_note';
+export type AgentActionType = 'highlight_annotation' | 'note_annotation' | 'create_highlight_annotations' | 'create_note_annotations' | 'zotero_note' | 'create_item' | 'edit_metadata' | 'create_collection' | 'organize_items' | 'manage_tags' | 'manage_collections' | 'confirm_extraction' | 'confirm_external_search' | 'edit_note' | 'create_note';
 
 /** Request from backend to validate an agent action */
 export interface WSAgentActionValidateRequest extends WSBaseEvent {
@@ -1135,6 +1194,7 @@ export type WSEvent =
     | WSListCollectionsRequest
     | WSListTagsRequest
     | WSGetMetadataRequest
+    | WSGetAnnotationsRequest
     | WSListLibrariesRequest
     // Note tools
     | WSReadNoteRequest
@@ -1205,6 +1265,8 @@ export interface ApplicationStateInput {
     library_selection?: ZoteroItemReference[];
     /** Frontend embedding index status */
     indexing_status?: IndexingStatus;
+    /** Per-library summary stats (counts) for searchable libraries. */
+    libraries?: LibrarySummary[];
 }
 
 /** Frontend embedding index status reported with each agent run. */

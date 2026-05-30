@@ -33,6 +33,8 @@ import {
     extractExtractData,
     isReadNoteResult,
     extractReadNoteData,
+    isGetAnnotationsResult,
+    extractGetAnnotationsData,
 } from '../../agents/toolResultTypes';
 import { ItemSearchResultView } from './ItemSearchResultView';
 import { FulltextSearchResultView } from './FulltextSearchResultView';
@@ -43,6 +45,7 @@ import { ListCollectionsResultView } from './ListCollectionsResultView';
 import { ListTagsResultView } from './ListTagsResultView';
 import { ExtractResultView } from './ExtractResultView';
 import { ReadNoteResultView } from './ReadNoteResultView';
+import { GetAnnotationsResultView } from './GetAnnotationsResultView';
 
 interface ToolResultViewProps {
     toolcall: ToolCallPart;
@@ -194,6 +197,19 @@ export const ToolResultView: React.FC<ToolResultViewProps> = ({ toolcall, result
         const data = extractExtractData(content, metadata);
         if (data) {
             return <ExtractResultView items={data.items} />;
+        }
+    }
+
+    // Get annotations results (get_annotations)
+    if (isGetAnnotationsResult(toolName, content, metadata)) {
+        const data = extractGetAnnotationsData(content, metadata);
+        if (data) {
+            return (
+                <GetAnnotationsResultView
+                    annotations={data.annotations}
+                    totalCount={data.totalCount}
+                />
+            );
         }
     }
 

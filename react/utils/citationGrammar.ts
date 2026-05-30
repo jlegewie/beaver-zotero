@@ -1,3 +1,4 @@
+import { ID_PREFIXES } from '../../src/beaver-extract/schema/schema';
 import type { ZoteroItemReference } from '../types/zotero';
 
 export type LocatorKind =
@@ -76,6 +77,19 @@ const LOC_PREFIXES: Array<{ prefix: string; kind: LocatorKind; numericOnly?: boo
     { prefix: 's', kind: 'sentence', numericOnly: true },
 ];
 
+const CITATION_INDEX_PREFIXES: Partial<Record<LocatorKind, string>> = {
+    sentence: ID_PREFIXES.sentence,
+    paragraph: ID_PREFIXES.text,
+    heading: ID_PREFIXES.section_header,
+    list: ID_PREFIXES.list_item,
+    caption: ID_PREFIXES.caption,
+    footnote: ID_PREFIXES.footnote,
+    figure: ID_PREFIXES.picture,
+    equation: ID_PREFIXES.formula,
+    table: ID_PREFIXES.table,
+    margin: ID_PREFIXES.margin,
+};
+
 function stripClobberPrefix(value: string): string {
     return value.startsWith(CLOBBER_PREFIX) ? value.slice(CLOBBER_PREFIX.length) : value;
 }
@@ -116,6 +130,46 @@ export function parseLoc(token: string | undefined): Locator | undefined {
     }
 
     return { kind: first.kind, value, raw };
+}
+
+function rawRangeCandidateIds(raw: string): string[] {
+    const ids = new Set<string>([raw]);
+    const parts = raw.split('-');
+    if (parts.length === 2 && parts[0] && parts[1]) {
+        const left = parts[0];
+        const right = parts[1];
+        ids.add(left);
+        if (/^[A-Za-z_]/.test(right)) {
+            ids.add(right);
+        } else {
+            const prefix = left.match(/^[A-Za-z_]+/)?.[0];
+            ids.add(prefix ? `${prefix}${right}` : right);
+        }
+    }
+    return [...ids];
+}
+
+/**
+ * Return structured extraction citation-index ids addressed by a locator.
+ */
+export function citationIndexCandidateIdsForLocator(locator: Locator): string[] {
+    const prefix = CITATION_INDEX_PREFIXES[locator.kind];
+    if (!prefix) return rawRangeCandidateIds(locator.raw);
+
+    const ids = new Set<string>();
+    const values = locator.value.split('-');
+    const addValue = (value: string) => {
+        if (/^\d+$/.test(value)) ids.add(`${prefix}${value}`);
+    };
+
+    if (values.length === 1) {
+        addValue(values[0]);
+    } else if (values.length === 2) {
+        addValue(values[0]);
+        addValue(values[1]);
+    }
+
+    return ids.size > 0 ? [...ids] : rawRangeCandidateIds(locator.raw);
 }
 
 /**
@@ -253,8 +307,26 @@ function withLocFromRawTag<T extends CitationRef>(ref: T, rawTag: string | undef
     return loc ? ({ ...ref, loc } as T) : ref;
 }
 
+function withLoc<T extends CitationRef>(ref: T, loc: Locator | undefined): T {
+    return !ref.loc && loc ? ({ ...ref, loc } as T) : ref;
+}
+
+function withExternalSource<T extends CitationRef>(
+    ref: T,
+    source: ExternalCitationSource | undefined,
+): T {
+    return ref.kind === 'external' && !ref.source && source
+        ? ({ ...ref, source } as T)
+        : ref;
+}
+
 export function getRequestedRef(meta: CitationMetadataLike): CitationRef | null {
-    if (meta.requested_ref) return withLocFromRawTag(meta.requested_ref, meta.raw_tag);
+    if (meta.requested_ref) {
+        return withExternalSource(
+            withLocFromRawTag(meta.requested_ref, meta.raw_tag),
+            meta.external_source,
+        );
+    }
     if (!meta.raw_tag) return null;
     const match = meta.raw_tag.match(/^<citation\b([^>]*)/i);
     if (!match) return null;
@@ -264,9 +336,15 @@ export function getRequestedRef(meta: CitationMetadataLike): CitationRef | null 
 }
 
 export function getResolvedRef(meta: CitationMetadataLike): CitationRef | null {
-    if (meta.resolved_ref) return withLocFromRawTag(meta.resolved_ref, meta.raw_tag);
     const requested = getRequestedRef(meta);
     const loc = requested?.loc;
+
+    if (meta.resolved_ref) {
+        return withExternalSource(
+            withLoc(withLocFromRawTag(meta.resolved_ref, meta.raw_tag), loc),
+            meta.external_source,
+        );
+    }
 
     if (meta.library_id && meta.zotero_key) {
         return { kind: 'zotero', library_id: meta.library_id, zotero_key: meta.zotero_key, ...(loc ? { loc } : {}) };
@@ -286,10 +364,10 @@ export function parseRawCitationAttributes(attributesStr: string | undefined): R
     const attrs: Record<string, string> = {};
     if (!attributesStr) return attrs;
 
-    const attrRegex = /([\w-]+)=(?:"([^"]*)"|'([^']*)')/g;
+    const attrRegex = /([\w-]+)=(?:"([^"]*)"|\\"([^\\"]*)\\"|'([^']*)'|\\'([^\\']*)\\')/g;
     let match: RegExpExecArray | null;
     while ((match = attrRegex.exec(attributesStr)) !== null) {
-        attrs[match[1]] = match[2] ?? match[3] ?? '';
+        attrs[match[1]] = match[2] ?? match[3] ?? match[4] ?? match[5] ?? '';
     }
     return attrs;
 }

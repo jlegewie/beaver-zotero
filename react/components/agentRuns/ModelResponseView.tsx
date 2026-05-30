@@ -84,15 +84,19 @@ export const ModelResponseView: React.FC<ModelResponseViewProps> = React.memo(fu
             )}
 
             {/* Text parts (markdown rendered) */}
-            {textParts.map((part, index) => (
-                part.part_kind === 'text' && (
-                    <TextPartView
-                        key={`text-${index}`}
-                        part={part}
-                        runId={runId}
-                    />
-                )
-            ))}
+            {textParts.length > 0 && (
+                <div>
+                    {textParts.map((part, index) => (
+                        part.part_kind === 'text' && (
+                            <TextPartView
+                                key={`text-${index}`}
+                                part={part}
+                                runId={runId}
+                            />
+                        )
+                    ))}
+                </div>
+            )}
 
             {/* Tool call parts */}
             {toolCallParts.length > 0 && (

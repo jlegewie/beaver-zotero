@@ -103,6 +103,7 @@ export async function handleGetMetadataRequest(
                                 contentType: attachment.attachmentContentType || null,
                                 path: await attachment.getFilePath() || null,
                                 url: attachment.getField('url') || null,
+                                annotations_count: attachment.isFileAttachment?.() ? attachment.getAnnotations().length : 0,
                             });
                         } catch (error) {
                             logger(`handleGetMetadataRequest: Error processing attachment ${attachment.key}: ${error}`, 2);

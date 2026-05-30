@@ -314,7 +314,16 @@ const RecentChats: React.FC = () => {
                 <div
                     key={thread.id}
                     className="recent-chats-item"
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`${thread.name || 'Unnamed conversation'}, ${formatCompactTime(thread.updatedAt)}`}
                     onClick={() => handleSelectThread(thread.id, thread.name)}
+                    onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            handleSelectThread(thread.id, thread.name);
+                        }
+                    }}
                 >
                     <span className="recent-chats-item-name truncate">
                         {thread.name || 'Unnamed conversation'}

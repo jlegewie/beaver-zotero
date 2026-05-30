@@ -19,7 +19,7 @@ import {
     getOrAssignCitationMarkerAtom,
     updateCitationDataAtom,
 } from '../../../react/atoms/citations';
-import { getCitationPages, type CitationData } from '../../../react/types/citations';
+import { getCitationPages, isExternalCitation, isZoteroCitation, type CitationData } from '../../../react/types/citations';
 
 function citation(overrides: Partial<CitationData>): CitationData {
     return {
@@ -120,6 +120,20 @@ describe('citationDataByCitationKeyAtom', () => {
         expect(byKey['zotero:1-ATTACH:s343']).toBe(data);
     });
 
+    it('indexes structured-document sid locator keys from raw tags', () => {
+        const store = createStore();
+        const data = citation({
+            citation_id: 'c1',
+            library_id: 1,
+            zotero_key: 'NLNMPWNQ',
+            raw_tag: '<citation att_id="1-NLNMPWNQ" sid="heading3"/>',
+        });
+        store.set(citationDataMapAtom, { c1: data });
+
+        const byKey = store.get(citationDataByCitationKeyAtom);
+        expect(byKey['zotero:1-NLNMPWNQ:heading3']).toBe(data);
+    });
+
     it('indexes invalid citation fallback keys from normalized raw identity', () => {
         const store = createStore();
         const data = citation({
@@ -193,6 +207,49 @@ describe('updateCitationDataAtom', () => {
             'zotero:1-PARENT': '1',
             'zotero:1-ATTACH': '1',
         });
+    });
+
+    it('uses future resolved_ref metadata for external citation data', async () => {
+        const store = createStore();
+        store.set(citationMetadataAtom, [citation({
+            citation_id: 'c1',
+            resolved_ref: { kind: 'external', source: 'openalex', external_id: 'W123' },
+        })]);
+
+        await store.set(updateCitationDataAtom);
+
+        const data = store.get(citationDataMapAtom).c1;
+        expect(data.type).toBe('external');
+        expect(data.external_source).toBe('openalex');
+        expect(data.external_source_id).toBe('W123');
+    });
+});
+
+describe('citation type guards', () => {
+    it('lets structured refs take precedence over stale legacy identity fields', () => {
+        const data = citation({
+            library_id: 1,
+            zotero_key: 'ZOTERO',
+            external_source: 'openalex',
+            external_source_id: 'W123',
+            resolved_ref: { kind: 'zotero', library_id: 1, zotero_key: 'ZOTERO' },
+        });
+
+        expect(isZoteroCitation(data)).toBe(true);
+        expect(isExternalCitation(data)).toBe(false);
+    });
+
+    it('does not let stale Zotero fields override a structured external ref', () => {
+        const data = citation({
+            library_id: 1,
+            zotero_key: 'STALE',
+            external_source: 'openalex',
+            external_source_id: 'W123',
+            resolved_ref: { kind: 'external', source: 'openalex', external_id: 'W123' },
+        });
+
+        expect(isExternalCitation(data)).toBe(true);
+        expect(isZoteroCitation(data)).toBe(false);
     });
 });
 

@@ -18,11 +18,10 @@ declare namespace _ZoteroTypes {
       "statefulChat": boolean;
       "addSelectedItemsOnOpen": boolean;
       "addSelectedItemsOnNewThread": boolean;
+      "focusResponseForScreenReaders": boolean;
       "annotationToolEnabled": boolean;
       "maxAddAttachmentToMessage": number;
       "readerExplainPrompt": string;
-      "maxFileSizeMB": number;
-      "maxPageCount": number;
       "accessRemoteFiles": boolean;
       "autoApplyAnnotations": boolean;
       "autoCreateNotes": boolean;

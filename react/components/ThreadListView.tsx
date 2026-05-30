@@ -366,8 +366,21 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
                                     <div
                                         key={thread.id}
                                         className={`thread-list-item ${isEditing ? 'thread-list-item-editing' : ''} ${isHovered ? 'thread-list-item-hovered' : ''}`}
+                                        role={isEditing ? undefined : 'button'}
+                                        tabIndex={isEditing ? undefined : 0}
+                                        aria-label={isEditing ? undefined : `${threadName}, ${formatTimeAgo(thread.updatedAt)}${isCurrent ? ', current chat' : ''}`}
                                         onClick={() => {
                                             if (!isEditing) {
+                                                handleSelectThread(thread.id, thread.name);
+                                            }
+                                        }}
+                                        onKeyDown={isEditing ? undefined : (e) => {
+                                            // Ignore keys bubbling up from nested controls
+                                            // (e.g. the Rename/Delete buttons) so they keep
+                                            // their own keyboard activation.
+                                            if (e.target !== e.currentTarget) return;
+                                            if (e.key === 'Enter' || e.key === ' ') {
+                                                e.preventDefault();
                                                 handleSelectThread(thread.id, thread.name);
                                             }
                                         }}

@@ -14,7 +14,7 @@ import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '
 import { getZoteroTargetContextSync } from '../../../../src/utils/zoteroUtils';
 import { selectItem, selectItemById } from '../../../../src/utils/selectItem';
 import { store } from '../../../store';
-import { preloadPageLabelsForContent } from '../../../utils/pageLabels';
+import { prepareCitationRenderContext } from '../../../utils/citationRenderContext';
 
 interface ThreadMenuButtonProps {
     className?: string;
@@ -65,13 +65,13 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
 
     const handleSaveAsNote = async () => {
         const content = getThreadContent({ includeRunLinks: false, userMessageAsBlockquote: true });
-        const pageLabelsByAttachmentId = await preloadPageLabelsForContent(content);
-        let htmlContent = renderToHTML(preprocessNoteContent(content), "markdown", {
+        const renderContent = preprocessNoteContent(content);
+        const renderContextData = await prepareCitationRenderContext(renderContent, {
             citationDataMap,
             externalMapping: externalReferenceMapping,
             externalReferencesMap,
-            pageLabelsByAttachmentId
         });
+        let htmlContent = renderToHTML(renderContent, "markdown", renderContextData);
         const context = getZoteroTargetContextSync();
         const threadId = store.get(currentThreadIdAtom);
 
@@ -109,13 +109,13 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
 
     const handleSaveAsChildNote = async () => {
         const content = getThreadContent({ includeRunLinks: false, userMessageAsBlockquote: true });
-        const pageLabelsByAttachmentId = await preloadPageLabelsForContent(content);
-        let htmlContent = renderToHTML(preprocessNoteContent(content), "markdown", {
+        const renderContent = preprocessNoteContent(content);
+        const renderContextData = await prepareCitationRenderContext(renderContent, {
             citationDataMap,
             externalMapping: externalReferenceMapping,
             externalReferencesMap,
-            pageLabelsByAttachmentId
         });
+        let htmlContent = renderToHTML(renderContent, "markdown", renderContextData);
         const context = getZoteroTargetContextSync();
         if (!context.parentReference) return;
 

@@ -18,11 +18,17 @@ import { prepareBatchAttachmentData, processAttachmentsWithBatchData, toAttachme
 import { searchableLibraryIdsAtom, syncWithZoteroAtom } from '../../../react/atoms/profile';
 import { userIdAtom } from '../../../react/atoms/auth';
 import { store } from '../../../react/store';
+import { CITATION_TAG_PATTERN } from '../../../react/utils/citationPreprocessing';
+import {
+    normalizeCitationTag,
+    parseRawCitationAttributes,
+    parseZoteroId,
+} from '../../../react/utils/citationGrammar';
 
 /**
  * Extract unique cited item references from simplified note HTML.
- * Parses both single citations (`<citation item_id="LIB-KEY" .../>`)
- * and compound citations (`<citation items="LIB-KEY1, LIB-KEY2" .../>`).
+ * Parses unified and legacy single citations plus compound citations
+ * (`<citation items="LIB-KEY1, LIB-KEY2" .../>`).
  * Returns deduplicated array of { libraryId, itemKey } pairs.
  */
 function extractCitedItemRefs(simplifiedHtml: string): { libraryId: number; itemKey: string }[] {
@@ -30,31 +36,38 @@ function extractCitedItemRefs(simplifiedHtml: string): { libraryId: number; item
     const refs: { libraryId: number; itemKey: string }[] = [];
 
     const addRef = (itemId: string) => {
-        // Strip page locator suffix (e.g., "1-KEY:page=42" → "1-KEY")
+        // Strip compound locator suffix (e.g., "1-KEY:page=42" -> "1-KEY").
         const colonIdx = itemId.indexOf(':');
-        const cleanId = colonIdx !== -1 ? itemId.substring(0, colonIdx) : itemId;
+        const cleanId = (colonIdx !== -1 ? itemId.substring(0, colonIdx) : itemId).trim();
 
-        if (seen.has(cleanId)) return;
-        const parsed = parseNoteId(cleanId);
-        if (parsed) {
-            seen.add(cleanId);
-            refs.push(parsed);
-        }
+        const parsed = parseZoteroId(cleanId);
+        if (!parsed) return;
+
+        const key = `${parsed.library_id}-${parsed.zotero_key}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        refs.push({ libraryId: parsed.library_id, itemKey: parsed.zotero_key });
     };
 
-    // Match single citations: <citation item_id="LIB-KEY" .../>
-    const singleRe = /<citation\s+item_id="([^"]+)"/g;
-    let match;
-    while ((match = singleRe.exec(simplifiedHtml)) !== null) {
-        addRef(match[1]);
-    }
+    CITATION_TAG_PATTERN.lastIndex = 0;
 
-    // Match compound citations: <citation items="LIB-KEY1:page=P1, LIB-KEY2" .../>
-    const compoundRe = /<citation\s+items="([^"]+)"/g;
-    while ((match = compoundRe.exec(simplifiedHtml)) !== null) {
-        const itemsStr = match[1];
-        for (const part of itemsStr.split(',')) {
-            addRef(part.trim());
+    let match: RegExpExecArray | null;
+    while ((match = CITATION_TAG_PATTERN.exec(simplifiedHtml)) !== null) {
+        const rawAttrs = parseRawCitationAttributes(match[1] || '');
+
+        // Attachment-to-parent cited_items resolution is out of v0.20 scope.
+        if (rawAttrs.att_id || rawAttrs.attachment_id) continue;
+
+        const normalized = normalizeCitationTag(rawAttrs);
+        if (normalized.ok && normalized.ref.kind === 'zotero') {
+            addRef(`${normalized.ref.library_id}-${normalized.ref.zotero_key}`);
+            continue;
+        }
+
+        if (rawAttrs.items) {
+            for (const part of rawAttrs.items.split(',')) {
+                addRef(part);
+            }
         }
     }
 
@@ -104,7 +117,11 @@ async function resolveCitedItems(
         try {
             const [itemData, rawAttachments] = await Promise.all([
                 serializeItemSummary(item),
-                processAttachmentsWithBatchData(item, attachmentContext, batchAttachmentData, { skipHash: true, skipWorkerFallback: true }),
+                processAttachmentsWithBatchData(item, attachmentContext, batchAttachmentData, {
+                    skipHash: true,
+                    skipWorkerFallback: true,
+                    includeAnnotationsCount: true,
+                }),
             ]);
             results.push({ ...itemData, attachments: rawAttachments.map(toAttachmentSummary) });
         } catch (error) {

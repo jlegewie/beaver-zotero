@@ -19,6 +19,7 @@
 import { describe, it, expect } from "vitest";
 import {
     makeDocumentApi,
+    sanitizeRune,
     type LibMuPdf,
     type StructuredTextWalker,
 } from "../../../src/beaver-extract/worker/mupdfApi";
@@ -219,5 +220,49 @@ describe("StructuredText.walk rune decoding", () => {
         const { lineFonts } = walkOneLine([0x41, 0x42, 0x43]);
         expect(lineFonts.length).toBe(1);
         expect(lineFonts[0]).toEqual({ fontPtr: FONT_PTR, size: 12 });
+    });
+
+    // `use-cid-for-unknown-unicode` can make MuPDF emit a raw CID that
+    // sits in the surrogate range (e.g. U+D835, shared by the math
+    // alphanumeric block) for an unmappable glyph. The walker must not
+    // pass an unpaired surrogate through — it is invalid Unicode and
+    // breaks strict UTF-8 serialization downstream.
+    it("replaces an unpaired high surrogate (U+D835) with U+FFFD", () => {
+        const { onChar } = walkOneLine([0xd835]);
+        expect(onChar).toEqual(["�"]);
+        // Single UTF-16 unit, so the text/chars lockstep invariant holds.
+        expect(onChar[0].length).toBe(1);
+    });
+
+    it("replaces an unpaired low surrogate (U+DC00) with U+FFFD", () => {
+        const { onChar } = walkOneLine([0xdc00]);
+        expect(onChar).toEqual(["�"]);
+    });
+
+    it("keeps real text intact around a stray surrogate", () => {
+        const { onChar } = walkOneLine([0x48, 0xd835, 0x69]); // "H? i"
+        expect(onChar.join("")).toBe("H�i");
+        expect(onChar.length).toBe(3);
+    });
+});
+
+describe("sanitizeRune", () => {
+    it("maps lone surrogate code points to U+FFFD", () => {
+        expect(sanitizeRune(0xd800)).toBe("�");
+        expect(sanitizeRune(0xd835)).toBe("�");
+        expect(sanitizeRune(0xdc00)).toBe("�");
+        expect(sanitizeRune(0xdfff)).toBe("�");
+    });
+
+    it("passes BMP code points through unchanged", () => {
+        expect(sanitizeRune(0x41)).toBe("A");
+        expect(sanitizeRune(0xd7ff)).toBe("\ud7ff"); // just below the range
+        expect(sanitizeRune(0xe000)).toBe("\ue000"); // just above the range
+    });
+
+    it("preserves valid astral code points as surrogate pairs", () => {
+        expect(sanitizeRune(0x1d400)).toBe("\u{1D400}");
+        expect(sanitizeRune(0x1f600)).toBe("\u{1F600}");
+        expect(sanitizeRune(0x1d400).length).toBe(2);
     });
 });

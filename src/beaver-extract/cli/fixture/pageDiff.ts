@@ -18,6 +18,7 @@ export interface SnapshotDiff {
 
 interface DiffOptions {
     maxDiffs?: number;
+    bboxAbsPt?: number;
 }
 
 interface StructuredDiffOptions extends DiffOptions {
@@ -73,6 +74,8 @@ export function diffMarkdownPages(
         diffScalar(`${basePage(i)}.index`, ep.index, ap.index, diffs);
         diffScalar(`${basePage(i)}.width`, ep.width, ap.width, diffs);
         diffScalar(`${basePage(i)}.height`, ep.height, ap.height, diffs);
+        diffRect(`${basePage(i)}.viewBox`, ep.viewBox, ap.viewBox, opts.bboxAbsPt ?? 0.5, diffs);
+        diffScalar(`${basePage(i)}.rotation`, ep.rotation, ap.rotation, diffs);
         diffScalar(
             `${basePage(i)}.markdown`,
             normalizeWhitespace(ep.markdown),
@@ -95,6 +98,8 @@ function diffStructuredPage(
     diffScalar(`${base}.index`, e.index, a.index, diffs);
     diffScalar(`${base}.width`, e.width, a.width, diffs);
     diffScalar(`${base}.height`, e.height, a.height, diffs);
+    diffRect(`${base}.viewBox`, e.viewBox, a.viewBox, opts.bboxAbsPt, diffs);
+    diffScalar(`${base}.rotation`, e.rotation, a.rotation, diffs);
     diffScalar(`${base}.label`, e.label, a.label, diffs);
     if (diffs.length >= cap) return;
 

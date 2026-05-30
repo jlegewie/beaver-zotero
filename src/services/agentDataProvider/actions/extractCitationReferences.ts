@@ -34,6 +34,7 @@ export interface ExtractedCitationReferences {
  */
 export function extractCitationReferences(content: string): ExtractedCitationReferences {
     const seen = new Set<string>();
+    const seenInvalid = new Set<string>();
     const references: ZoteroItemReference[] = [];
     const invalidKeys: string[] = [];
 
@@ -43,7 +44,14 @@ export function extractCitationReferences(content: string): ExtractedCitationRef
     let match: RegExpExecArray | null;
     while ((match = CITATION_TAG_PATTERN.exec(content)) !== null) {
         const normalized = normalizeCitationTag(parseRawCitationAttributes(match[1] || ''));
-        if (!normalized.ok || normalized.ref.kind !== 'zotero') continue;
+        if (!normalized.ok) {
+            if (normalized.reason === 'invalid_zotero_id' && normalized.rawIdentity && !seenInvalid.has(normalized.rawIdentity)) {
+                seenInvalid.add(normalized.rawIdentity);
+                invalidKeys.push(normalized.rawIdentity);
+            }
+            continue;
+        }
+        if (normalized.ref.kind !== 'zotero') continue;
 
         const key = `${normalized.ref.library_id}-${normalized.ref.zotero_key}`;
         if (seen.has(key)) continue;  // duplicate
@@ -51,7 +59,10 @@ export function extractCitationReferences(content: string): ExtractedCitationRef
 
         // Validate Zotero key format — track invalid keys separately
         if (!Zotero.Utilities.isValidObjectKey(normalized.ref.zotero_key)) {
-            invalidKeys.push(key);
+            if (!seenInvalid.has(key)) {
+                seenInvalid.add(key);
+                invalidKeys.push(key);
+            }
             continue;
         }
 

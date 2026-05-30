@@ -18,6 +18,16 @@ import {
 } from '../types/agentActions/annotations';
 import type { CreateItemProposedData, CreateItemResultData } from '../types/agentActions/items';
 import type { ManageCollectionsProposedData, ManageCollectionsResultData } from '../types/agentActions/base';
+import type {
+    CreatedAnnotationResult,
+    CreateHighlightAnnotationsProposedData,
+    CreateHighlightAnnotationsResultData,
+    CreateNoteAnnotationsProposedData,
+    CreateNoteAnnotationsResultData,
+    FailedAnnotationResult,
+    HighlightAnnotationItem,
+    NoteAnnotationItem,
+} from '../types/agentActions/createAnnotations';
 import type { WSDeferredApprovalRequest, AgentActionType } from '../../src/services/agentProtocol';
 
 // =============================================================================
@@ -71,6 +81,18 @@ export const isNoteAnnotationAgentAction = (action: AgentAction): boolean => {
  */
 export const isAnnotationAgentAction = (action: AgentAction): boolean => {
     return action.action_type === 'highlight_annotation' || action.action_type === 'note_annotation';
+};
+
+export const isCreateHighlightAnnotationsAgentAction = (action: AgentAction): action is CreateHighlightAnnotationsAgentAction => {
+    return action.action_type === 'create_highlight_annotations';
+};
+
+export const isCreateNoteAnnotationsAgentAction = (action: AgentAction): action is CreateNoteAnnotationsAgentAction => {
+    return action.action_type === 'create_note_annotations';
+};
+
+export const isCreateAnnotationsAgentAction = (action: AgentAction): action is CreateHighlightAnnotationsAgentAction | CreateNoteAnnotationsAgentAction => {
+    return isCreateHighlightAnnotationsAgentAction(action) || isCreateNoteAnnotationsAgentAction(action);
 };
 
 /**
@@ -168,6 +190,18 @@ export type ManageCollectionsAgentAction = AgentAction & {
     result_data?: ManageCollectionsResultData;
 };
 
+export type CreateHighlightAnnotationsAgentAction = AgentAction & {
+    action_type: 'create_highlight_annotations';
+    proposed_data: CreateHighlightAnnotationsProposedData;
+    result_data?: CreateHighlightAnnotationsResultData;
+};
+
+export type CreateNoteAnnotationsAgentAction = AgentAction & {
+    action_type: 'create_note_annotations';
+    proposed_data: CreateNoteAnnotationsProposedData;
+    result_data?: CreateNoteAnnotationsResultData;
+};
+
 /**
  * Check if an agent action has been applied and has a Zotero item reference
  */
@@ -175,6 +209,13 @@ export const hasAppliedZoteroItem = (action: AgentAction): boolean => {
     return action.status === 'applied' && 
            !!action.result_data?.zotero_key && 
            !!action.result_data?.library_id;
+};
+
+export const hasAppliedBulkAnnotations = (action: AgentAction): boolean => {
+    return isCreateAnnotationsAgentAction(action) &&
+        action.status === 'applied' &&
+        Array.isArray(action.result_data?.created) &&
+        action.result_data.created.length > 0;
 };
 
 /**
@@ -205,6 +246,16 @@ export const getZoteroItemFromAgentAction = async (action: AgentAction): Promise
  * @returns True if the action is valid, false otherwise
  */
 export const validateAppliedAgentAction = async (action: AgentAction): Promise<boolean> => {
+    if (isCreateAnnotationsAgentAction(action)) {
+        if (!hasAppliedBulkAnnotations(action)) return true;
+        const created = action.result_data?.created ?? [];
+        for (const ref of created) {
+            const item = await Zotero.Items.getByLibraryAndKeyAsync(ref.library_id, ref.zotero_key);
+            if (!item || !item.isAnnotation()) return false;
+        }
+        return true;
+    }
+
     // If action doesn't have an applied Zotero item, it's valid (nothing to check)
     if (!hasAppliedZoteroItem(action)) return true;
 
@@ -221,6 +272,87 @@ export const validateAppliedAgentAction = async (action: AgentAction): Promise<b
 // =============================================================================
 // Deserialization
 // =============================================================================
+
+function normalizeZoteroItemReference(raw: any): ZoteroItemReference {
+    const libraryId = raw?.library_id ?? raw?.libraryId;
+    const zoteroKey = raw?.zotero_key ?? raw?.zoteroKey;
+    return {
+        library_id: typeof libraryId === 'number' ? libraryId : Number(libraryId ?? 0),
+        zotero_key: typeof zoteroKey === 'string' ? zoteroKey : String(zoteroKey ?? ''),
+    };
+}
+
+function normalizeCreateAnnotationBaseItem(item: any) {
+    return {
+        index: typeof item?.index === 'number' ? item.index : Number(item?.index ?? 0),
+        client_item_id: String(item?.client_item_id ?? item?.clientItemId ?? ''),
+        title: String(item?.title ?? ''),
+        loc_raw: String(item?.loc_raw ?? item?.locRaw ?? ''),
+        loc: item?.loc ?? { kind: 'unknown', value: '', raw: '' },
+        page_label: item?.page_label ?? item?.pageLabel ?? null,
+    };
+}
+
+function normalizeHighlightAnnotationItem(item: any): HighlightAnnotationItem {
+    return {
+        ...normalizeCreateAnnotationBaseItem(item),
+        text: String(item?.text ?? ''),
+        color: item?.color ?? 'yellow',
+        comment: item?.comment ?? null,
+        page_locations: normalizePageLocations({ locations: item?.page_locations ?? item?.pageLocations ?? item?.locations }) ?? [],
+    };
+}
+
+function normalizeNoteAnnotationItem(item: any): NoteAnnotationItem {
+    const rawReadingOrder = item?.reading_order_offset ?? item?.readingOrderOffset;
+    const readingOrderOffset =
+        typeof rawReadingOrder === 'number' && Number.isFinite(rawReadingOrder)
+            ? rawReadingOrder
+            : (rawReadingOrder === null ? null : undefined);
+    return {
+        ...normalizeCreateAnnotationBaseItem(item),
+        comment: String(item?.comment ?? ''),
+        note_position: normalizeNotePosition({ note_position: item?.note_position ?? item?.notePosition }) ?? {
+            page_index: 0,
+            side: 'right',
+            x: 0,
+            y: 0,
+        },
+        ...(readingOrderOffset !== undefined ? { reading_order_offset: readingOrderOffset } : {}),
+    };
+}
+
+function normalizeCreatedAnnotation(item: any): CreatedAnnotationResult {
+    return {
+        ...normalizeZoteroItemReference(item),
+        client_item_id: String(item?.client_item_id ?? item?.clientItemId ?? ''),
+        index: typeof item?.index === 'number' ? item.index : Number(item?.index ?? 0),
+        loc_raw: String(item?.loc_raw ?? item?.locRaw ?? ''),
+    };
+}
+
+function normalizeFailedAnnotation(item: any): FailedAnnotationResult {
+    return {
+        client_item_id: String(item?.client_item_id ?? item?.clientItemId ?? ''),
+        index: typeof item?.index === 'number' ? item.index : Number(item?.index ?? 0),
+        loc_raw: String(item?.loc_raw ?? item?.locRaw ?? ''),
+        error: String(item?.error ?? ''),
+        error_code: item?.error_code ?? item?.errorCode ?? null,
+    };
+}
+
+function normalizeCreateAnnotationsResultData(raw: any): Record<string, any> {
+    const created = Array.isArray(raw?.created) ? raw.created.map(normalizeCreatedAnnotation) : [];
+    const failed = Array.isArray(raw?.failed) ? raw.failed.map(normalizeFailedAnnotation) : [];
+    return {
+        requested_ref: normalizeZoteroItemReference(raw?.requested_ref ?? raw?.requestedRef ?? {}),
+        resolved_ref: normalizeZoteroItemReference(raw?.resolved_ref ?? raw?.resolvedRef ?? {}),
+        created,
+        failed,
+        total_created: typeof raw?.total_created === 'number' ? raw.total_created : Number(raw?.totalCreated ?? created.length),
+        total_failed: typeof raw?.total_failed === 'number' ? raw.total_failed : Number(raw?.totalFailed ?? failed.length),
+    };
+}
 
 /**
  * Deserializes and normalizes a raw agent action object from the backend
@@ -255,6 +387,22 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
         }
         
         proposedData = normalizedData;
+    } else if (actionType === 'create_highlight_annotations') {
+        proposedData = {
+            requested_ref: normalizeZoteroItemReference(proposedData.requested_ref ?? proposedData.requestedRef ?? {}),
+            resolved_ref: normalizeZoteroItemReference(proposedData.resolved_ref ?? proposedData.resolvedRef ?? {}),
+            items: Array.isArray(proposedData.items)
+                ? proposedData.items.map(normalizeHighlightAnnotationItem)
+                : [],
+        } as CreateHighlightAnnotationsProposedData;
+    } else if (actionType === 'create_note_annotations') {
+        proposedData = {
+            requested_ref: normalizeZoteroItemReference(proposedData.requested_ref ?? proposedData.requestedRef ?? {}),
+            resolved_ref: normalizeZoteroItemReference(proposedData.resolved_ref ?? proposedData.resolvedRef ?? {}),
+            items: Array.isArray(proposedData.items)
+                ? proposedData.items.map(normalizeNoteAnnotationItem)
+                : [],
+        } as CreateNoteAnnotationsProposedData;
     } else if (actionType === 'zotero_note') {
         const libraryIdRaw = proposedData.library_id ?? proposedData.libraryId;
         const zoteroKeyRaw = proposedData.zotero_key ?? proposedData.zoteroKey;
@@ -366,6 +514,8 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
                 attachment_key: typeof attachmentKey === 'string' ? attachmentKey : String(attachmentKey ?? ''),
             };
         }
+    } else if (resultData && (actionType === 'create_highlight_annotations' || actionType === 'create_note_annotations')) {
+        resultData = normalizeCreateAnnotationsResultData(resultData);
     } else if (resultData && actionType === 'zotero_note') {
         const zoteroKey = resultData.zotero_key ?? resultData.zoteroKey;
         const libraryId = resultData.library_id ?? resultData.libraryId;
@@ -952,4 +1102,3 @@ export async function buildPendingApprovalFromAction(action: AgentAction): Promi
         currentValue,
     };
 }
-

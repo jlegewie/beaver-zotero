@@ -253,3 +253,80 @@ describe('cache-clear-all endpoint', () => {
         expect(after).toBeNull();
     });
 });
+
+describe('document cache persists per-page geometry', () => {
+    beforeEach((ctx) => skipIfNoZotero(ctx, available));
+
+    it('writes a dense PageGeometry array for a successful extraction', async () => {
+        await invalidateCache(SMALL_PDF.library_id, SMALL_PDF.zotero_key);
+        const status = await triggerFileStatus(
+            SMALL_PDF.library_id,
+            SMALL_PDF.zotero_key,
+        );
+        expect(status.status).toBe('available');
+
+        const record = await getCacheMetadata(
+            SMALL_PDF.library_id,
+            SMALL_PDF.zotero_key,
+        );
+        expect(record).not.toBeNull();
+        expect(record?.errorCode).toBeNull();
+        expect(record?.pageCount).toBe(SMALL_PDF_PAGE_COUNT);
+        expect(Array.isArray(record?.pages)).toBe(true);
+        expect(record?.pages).toHaveLength(SMALL_PDF_PAGE_COUNT);
+
+        for (const page of record!.pages!) {
+            expect(page).not.toBeNull();
+            expect(page!.viewBox).toHaveLength(4);
+            expect(page!.viewBox.every((v) => Number.isFinite(v))).toBe(true);
+            expect(page!.width).toBeGreaterThan(0);
+            expect(page!.height).toBeGreaterThan(0);
+            // viewBox derives unrotated width/height: x1-x0 / y1-y0.
+            expect(page!.width).toBeCloseTo(
+                page!.viewBox[2] - page!.viewBox[0],
+                3,
+            );
+            expect(page!.height).toBeCloseTo(
+                page!.viewBox[3] - page!.viewBox[1],
+                3,
+            );
+            expect([0, 90, 180, 270]).toContain(page!.rotation);
+        }
+    });
+
+    it('records null pages on an encrypted PDF', async () => {
+        await invalidateCache(ENCRYPTED_PDF.library_id, ENCRYPTED_PDF.zotero_key);
+        await triggerFileStatus(
+            ENCRYPTED_PDF.library_id,
+            ENCRYPTED_PDF.zotero_key,
+        );
+        const record = await getCacheMetadata(
+            ENCRYPTED_PDF.library_id,
+            ENCRYPTED_PDF.zotero_key,
+        );
+        expect(record?.errorCode).toBe('encrypted');
+        // putErrorMetadata writes `pages: null` for encrypted PDFs — never an
+        // empty array, which would be confused with "we tried and got nothing".
+        expect(record?.pages).toBeNull();
+    });
+
+    it('records pages for a scanned PDF that hits no_text_layer', async () => {
+        await invalidateCache(NO_TEXT_PDF.library_id, NO_TEXT_PDF.zotero_key);
+        await triggerFileStatus(NO_TEXT_PDF.library_id, NO_TEXT_PDF.zotero_key);
+        const record = await getCacheMetadata(
+            NO_TEXT_PDF.library_id,
+            NO_TEXT_PDF.zotero_key,
+        );
+        expect(record?.errorCode).toBe('no_text_layer');
+        // OCR-needed PDFs still get geometry persisted so headless annotations
+        // can land on them; only fully unreadable PDFs get pages = null.
+        if (record?.pages) {
+            expect(record.pages.length).toBeGreaterThan(0);
+            const firstNonNull = record.pages.find((p) => p !== null);
+            if (firstNonNull) {
+                expect(firstNonNull.viewBox).toHaveLength(4);
+                expect([0, 90, 180, 270]).toContain(firstNonNull.rotation);
+            }
+        }
+    });
+});

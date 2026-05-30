@@ -12,7 +12,7 @@ const structuredResult = {
         pageLabels: { '0': '1' },
         bboxOrigin: 'top-left' as const,
         bboxPrecision: 2,
-        pages: [{ index: 0, label: '1', width: 100, height: 200, items: [] }],
+        pages: [{ index: 0, label: '1', width: 100, height: 200, viewBox: [0, 0, 100, 200], rotation: 0, items: [] }],
         citationIndex: {},
     },
 };
@@ -196,5 +196,39 @@ describe('handleZoteroDocumentRequest document cache integration', () => {
         expect(response.result).toEqual(structuredResult);
         expect(abortSignal).toBeInstanceOf(AbortSignal);
         expect(abortSignal?.aborted).toBe(false);
+    });
+
+    it('omits success-only fields when page-count validation returns an error', async () => {
+        const documentCache = {
+            getSourceIdentitySnapshot: vi.fn().mockResolvedValue(null),
+            getMetadata: vi.fn().mockResolvedValue({
+                pageCount: 23,
+                pageLabels: null,
+                errorCode: null,
+                contentType: 'application/pdf',
+            }),
+            getResult: vi.fn(),
+        };
+        (globalThis as any).Zotero.Beaver = { data: { env: 'test' }, documentCache };
+
+        const response = await handleZoteroDocumentRequest({
+            event: 'zotero_document_request',
+            request_id: 'req-too-many-pages',
+            attachment: { library_id: 1, zotero_key: 'ABCD1234' },
+            mode: 'structured',
+            max_pages: 20,
+        });
+
+        expect(response).toEqual({
+            type: 'zotero_document',
+            request_id: 'req-too-many-pages',
+            total_pages: 23,
+            error: 'The PDF file for 1-ABCD1234 has 23 pages, which exceeds the 20-page limit.',
+            error_code: 'too_many_pages',
+        });
+        expect(response).not.toHaveProperty('result');
+        expect(response).not.toHaveProperty('resolved_attachment');
+        expect(response).not.toHaveProperty('content_type');
+        expect(documentCache.getResult).not.toHaveBeenCalled();
     });
 });

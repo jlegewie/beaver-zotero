@@ -1093,7 +1093,7 @@ describe('whitespace_relaxed strategy', () => {
         const mocked = vi.mocked(expandToRawHtml);
         const expand = (s: string) =>
             s.replace(
-                /<citation ref="([^"]+)" item_id="([^"]+)"\/>/g,
+                /<citation ref="([^"]+)" (?:id|item_id)="([^"]+)"\/>/g,
                 '<span class="citation" data-ref="$1" data-item="$2">(…)</span>',
             );
         mocked.mockImplementation(expand);
@@ -1107,7 +1107,7 @@ describe('whitespace_relaxed strategy', () => {
             // whitespace drift, now tolerated even with the <citation>.
             const needleWithDrift =
                 '<p>Anchor   paragraph intro\n\n'
-                + '<citation ref="c_A_0" item_id="1-AAAAAAAA"/>'
+                + '<citation ref="c_A_0" id="1-AAAAAAAA"/>'
                 + '  with enough body text to clear the length gate</p>';
             const result = match(makeInput({
                 oldString: needleWithDrift,

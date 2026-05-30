@@ -10,6 +10,7 @@ import {
 } from '../types/citations';
 import {
     baseCitationKey,
+    type CitationRef,
     externalCompatKey,
     getRequestedRef,
     getResolvedRef,
@@ -242,6 +243,25 @@ function getCitationMarkerBaseKeys(citation: CitationMetadata): string[] {
     return [...new Set(keys.filter(Boolean))];
 }
 
+function getDisplayRef(citation: CitationMetadata): CitationRef | null {
+    return getResolvedRef(citation) ?? getRequestedRef(citation);
+}
+
+function getResolvedMetadataFields(citation: CitationMetadata): Partial<CitationMetadata> {
+    const ref = getDisplayRef(citation);
+    if (!ref) return {};
+    if (ref.kind === 'zotero') {
+        return {
+            library_id: ref.library_id,
+            zotero_key: ref.zotero_key,
+        };
+    }
+    return {
+        external_source: ref.source ?? citation.external_source,
+        external_source_id: ref.external_id,
+    };
+}
+
 /**
  * Citation data mapped by full citation key for lookup.
  * 
@@ -252,6 +272,7 @@ function getCitationMarkerBaseKeys(citation: CitationMetadata): string[] {
  * 
  * Key format:
  * - Zotero citations: "zotero:{library_id}-{zotero_key}" or with location: "zotero:1-ABC:sid=s0-s8"
+ * - Structured-document locators use the raw token, e.g. "zotero:1-ABC:heading3"
  * - External citations: "external:{external_source_id}" or with location
  * - Invalid citations (fallback): "invalid:{raw_id_value}"
  */
@@ -367,7 +388,11 @@ export const updateCitationDataAtom = atom(
 
             // Use existing extended metadata if available
             if (prevCitation) {
-                newCitationDataMap[citation.citation_id] = { ...prevCitation, ...citation };
+                newCitationDataMap[citation.citation_id] = {
+                    ...prevCitation,
+                    ...citation,
+                    ...getResolvedMetadataFields(citation),
+                };
                 continue;
             }
 
@@ -377,6 +402,7 @@ export const updateCitationDataAtom = atom(
             if (citation.invalid) {
                 newCitationDataMap[citation.citation_id] = {
                     ...citation,
+                    ...getResolvedMetadataFields(citation),
                     type: "item",
                     parentKey: null,
                     icon: null,
@@ -393,9 +419,14 @@ export const updateCitationDataAtom = atom(
             if (isExternalCitation(citation)) {
                 maybeTriggerCitationTip(get, set);
 
+                const externalRefForDisplay = getDisplayRef(citation);
+                const externalSourceId = externalRefForDisplay?.kind === 'external'
+                    ? externalRefForDisplay.external_id
+                    : citation.external_source_id;
+
                 // Look up additional data from external reference mapping
-                const externalRef = citation.external_source_id
-                    ? externalReferenceMap[citation.external_source_id]
+                const externalRef = externalSourceId
+                    ? externalReferenceMap[externalSourceId]
                     : undefined;
 
                 // Preview for external references
@@ -404,6 +435,7 @@ export const updateCitationDataAtom = atom(
                 // For external citations, use the metadata directly
                 newCitationDataMap[citation.citation_id] = {
                     ...citation,
+                    ...getResolvedMetadataFields(citation),
                     type: "external",
                     parentKey: null,
                     icon: 'webpage-gray',  // Default icon for external references
@@ -419,7 +451,7 @@ export const updateCitationDataAtom = atom(
 
             // Compute new extended metadata for Zotero citations
             try {
-                if (!citation.library_id || !citation.zotero_key) {
+                if (!resolvedRef || resolvedRef.kind !== 'zotero') {
                     throw new Error(`Missing library_id or zotero_key for citation ${citation.citation_id}`);
                 }
 
@@ -428,20 +460,48 @@ export const updateCitationDataAtom = atom(
                     maybeTriggerCitationTip(get, set);
                 }
 
-                const item = await Zotero.Items.getByLibraryAndKeyAsync(citation.library_id, citation.zotero_key);
+                const item = await Zotero.Items.getByLibraryAndKeyAsync(resolvedRef.library_id, resolvedRef.zotero_key);
                 if (!item) throw new Error(`Item not found for citation ${citation.citation_id}`);
                 await loadFullItemDataWithAllTypes([item]);
 
+                const isAnnotationItem = item.isAnnotation();
                 const parentItem = item.parentItem;
-                const itemToCite = item.isNote() ? item : parentItem || item;
+                // Annotations live two levels deep: regular item -> attachment ->
+                // annotation. Use the grandparent regular item for the
+                // bibliographic citation so an annotation citation shares its
+                // marker with sibling citations of the same paper.
+                const grandparentItem = isAnnotationItem ? parentItem?.parentItem ?? null : null;
+                const itemToCite = item.isNote()
+                    ? item
+                    : isAnnotationItem
+                        ? grandparentItem || parentItem || item
+                        : parentItem || item;
+
+                const baseDisplayName = getDisplayNameFromItem(itemToCite, null, 30);
+                let displayName = getDisplayNameFromItem(itemToCite);
+                if (item.isNote()) {
+                    displayName = `Note: ${baseDisplayName}`;
+                } else if (isAnnotationItem) {
+                    displayName = `Annotation: ${baseDisplayName}`;
+                }
 
                 newCitationDataMap[citation.citation_id] = {
                     ...citation,
-                    type: item.isRegularItem() ? "item" : item.isAttachment() ? "attachment" : item.isNote() ? "note" : item.isAnnotation() ? "annotation" : "external",
+                    library_id: resolvedRef.library_id,
+                    zotero_key: resolvedRef.zotero_key,
+                    type: item.isRegularItem()
+                        ? "item"
+                        : item.isAttachment()
+                            ? "attachment"
+                            : item.isNote()
+                                ? "note"
+                                : isAnnotationItem
+                                    ? "annotation"
+                                    : "external",
                     parentKey: parentItem?.key || null,
                     icon: item.getItemTypeIconName(),
-                    name: item.isNote() ? `Note: ${getDisplayNameFromItem(itemToCite, null, 30)}` : getDisplayNameFromItem(itemToCite),
-                    citation: item.isNote() ? `Note: ${getDisplayNameFromItem(itemToCite, null, 30)}` : getDisplayNameFromItem(itemToCite),
+                    name: displayName,
+                    citation: displayName,
                     formatted_citation: getReferenceFromItem(itemToCite),
                     url: createZoteroURI(item),
                     numericCitation
@@ -450,6 +510,7 @@ export const updateCitationDataAtom = atom(
                 logger(`updateCitationDataAtom: Error processing citation ${citation.citation_id}: ${error instanceof Error ? error.message : String(error)}`);
                 newCitationDataMap[citation.citation_id] = {
                     ...citation,
+                    ...getResolvedMetadataFields(citation),
                     type: "item",
                     parentKey: null,
                     icon: null,
