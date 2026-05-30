@@ -26,6 +26,7 @@ import { useReaderSelectionActionHandler } from './hooks/useReaderSelectionActio
 import { useReaderAnnotationActionHandler } from './hooks/useReaderAnnotationActionHandler';
 import { useReaderVisualizerActionHandler } from './hooks/useReaderVisualizerActionHandler';
 import { useOnboardingPopups } from './hooks/useOnboardingPopups';
+import { useBackgroundWorkerStatus } from './hooks/useBackgroundWorkerStatus';
 import { BeaverTemporaryAnnotations } from './utils/annotationUtils';
 
 // Configure the PDF package (webpack bundle copy). The esbuild bundle
@@ -91,6 +92,9 @@ const GlobalContextInitializer = () => {
 
     // Handle first-install and first-reader onboarding popups
     useOnboardingPopups();
+
+    // Mirror background extraction activity into the shared Jotai store
+    useBackgroundWorkerStatus();
 
     return null; // This component does not render any UI
 };

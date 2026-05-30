@@ -382,6 +382,60 @@ describe('BackgroundExtractor', () => {
         expect(events).toEqual(['start', 'done']);
     });
 
+    it('emits worker status only on processing transitions while auto-draining', async () => {
+        await db.enqueueBackgroundJob({
+            jobType: 'hot_timeout_retry',
+            libraryId: 1,
+            zoteroKey: 'AAAAAAAA',
+            mode: 'structured',
+            payload: payload(),
+            now: 0,
+        });
+        await db.enqueueBackgroundJob({
+            jobType: 'hot_timeout_retry',
+            libraryId: 1,
+            zoteroKey: 'BBBBBBBB',
+            mode: 'structured',
+            payload: payload(),
+            now: 1,
+        });
+        const bus = new EventTarget();
+        const win: any = (Zotero as any).getMainWindow();
+        win.__beaverEventBus = bus;
+        (win as any).CustomEvent = CustomEvent;
+        const events: boolean[] = [];
+        bus.addEventListener('background-worker:status', (event) => {
+            const detail = (event as CustomEvent<{ running: boolean }>).detail;
+            events.push(detail.running);
+        });
+        mockState.nextResult = {
+            kind: 'ok',
+            cached: false,
+            result: { mode: 'structured', document: { pageCount: 1, pages: [] } },
+            totalPages: 1,
+            resolvedAttachment: { libraryId: 1, zoteroKey: 'AAAAAAAA' },
+            contentType: 'application/pdf',
+        };
+
+        const { BackgroundExtractor } = await loadProcessor();
+        const proc = new BackgroundExtractor();
+        try {
+            await (proc as any).tick();
+            expect(proc.getStatus()).toEqual({ running: true });
+            expect(events).toEqual([true]);
+
+            await (proc as any).tick();
+            expect(proc.getStatus()).toEqual({ running: true });
+            expect(events).toEqual([true]);
+
+            await (proc as any).tick();
+            expect(proc.getStatus()).toEqual({ running: false });
+            expect(events).toEqual([true, false]);
+        } finally {
+            await proc.stop();
+        }
+    });
+
     it('event dispatch is window-guarded — no throw when no main window', async () => {
         await db.enqueueBackgroundJob({
             jobType: 'hot_timeout_retry',

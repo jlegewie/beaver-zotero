@@ -144,6 +144,12 @@ export class BackgroundExtractor {
     private prefObserverSymbol: symbol | null = null;
     private syncObserverId: string | null = null;
     private unregisterIdleObserver: (() => void) | null = null;
+    private workerRunning = false;
+
+    /** Return the current background worker activity state for UI subscribers. */
+    getStatus(): { running: boolean } {
+        return { running: this.workerRunning };
+    }
 
     /** Schedule the first tick. Safe to call more than once (idempotent). */
     start(): void {
@@ -282,6 +288,7 @@ export class BackgroundExtractor {
         } catch (e) {
             logger(`BackgroundExtractor.stop: disposeMuPDFWorker failed: ${e}`, 1);
         }
+        this.setWorkerRunning(false);
         this.started = false;
         this.pendingWake = false;
     }
@@ -291,6 +298,7 @@ export class BackgroundExtractor {
      */
     async abortInFlight(): Promise<void> {
         await this.abortAndAwaitInFlight();
+        this.setWorkerRunning(false);
     }
 
     /**
@@ -362,39 +370,52 @@ export class BackgroundExtractor {
         return false;
     }
 
+    private setWorkerRunning(running: boolean): void {
+        if (this.workerRunning === running) return;
+        this.workerRunning = running;
+        dispatchBackgroundEvent('background-worker:status', { running });
+    }
+
     /**
      * Drive a single iteration of the tick loop synchronously and return
      * what happened. Used by tests and the dev `process-once` endpoint.
      * Never schedules a follow-up tick.
      */
-    async processOnce(): Promise<ProcessOnceResult> {
-        if (this.stopRequested) return { processed: false, reason: 'stopped' };
+    async processOnce(
+        options: { keepRunningAfterJob?: boolean } = {},
+    ): Promise<ProcessOnceResult> {
+        const inactive = (reason: ProcessOnceReason): ProcessOnceResult => {
+            this.setWorkerRunning(false);
+            return { processed: false, reason };
+        };
+
+        if (this.stopRequested) return inactive('stopped');
 
         // Global shutdown check BEFORE claim
         if (this.shouldSkipDbWrites()) {
-            return { processed: false, reason: 'shutting_down' };
+            return inactive('shutting_down');
         }
 
         if (!this.prefEnabled) {
-            return { processed: false, reason: 'disabled' };
+            return inactive('disabled');
         }
 
         const win = Zotero.getMainWindow?.() ?? null;
-        if (!win) return { processed: false, reason: 'no_window' };
+        if (!win) return inactive('no_window');
 
         if (this.syncInProgress) {
-            return { processed: false, reason: 'sync_in_progress' };
+            return inactive('sync_in_progress');
         }
 
         if (COOPERATIVE_THROTTLE) {
             const hot = getExistingMuPDFWorkerClient('hot');
             if (hot && hot.getStats().pendingCount > 0) {
-                return { processed: false, reason: 'hot_busy' };
+                return inactive('hot_busy');
             }
         }
 
         const db = Zotero.Beaver?.db;
-        if (!db) return { processed: false, reason: 'empty' };
+        if (!db) return inactive('empty');
 
         // Idle gate: when the user is actively using the OS we still
         // run user-blocking work (priority < LOW_PRIORITY_CEILING, e.g.
@@ -408,13 +429,22 @@ export class BackgroundExtractor {
             VISIBILITY_TIMEOUT_MS,
             maxPriority,
         );
-        if (!record) return { processed: false, reason: 'empty' };
+        if (!record) return inactive('empty');
 
         logger(
             `BackgroundExtractor: claimed job id=${record.id} type=${record.jobType} ${record.libraryId}-${record.zoteroKey} mode=${record.mode} attempt=${record.attemptCount + 1}`,
             3,
         );
-        await this.runJob(record, db);
+        this.setWorkerRunning(true);
+        let completedJob = false;
+        try {
+            await this.runJob(record, db);
+            completedJob = true;
+        } finally {
+            if (!options.keepRunningAfterJob || !completedJob) {
+                this.setWorkerRunning(false);
+            }
+        }
         return { processed: true, reason: 'job_done' };
     }
 
@@ -443,7 +473,7 @@ export class BackgroundExtractor {
         if (this.tickRunning) return;
         this.tickRunning = true;
         try {
-            const result = await this.processOnce();
+            const result = await this.processOnce({ keepRunningAfterJob: true });
 
             if (this.stopRequested) return;
 
