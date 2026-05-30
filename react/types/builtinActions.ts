@@ -83,8 +83,7 @@ export const BUILTIN_ACTIONS: Action[] = [
     {
         id: 'builtin-skim-paper',
         title: 'Skim this paper',
-        text: 'Help me skim this paper. Use highlight annotations to mark the key passages I should read to get the gist: the central argument and contribution, data and methods, main findings, and key conclusions. Aim for 8-12 highlights in the main body of the paper, avoid the introduction. Be selective: together they should be the shortest path to understanding what the paper says. After completing the highlights, provide a summary in the following format:\n\n"### Central argument and contribution\n[1-2 sentence summary]\nRelevant passages: [multiple <citation> tags to highlights]',
-        // text: 'Skim this document and create a structured skim note so I can quickly decide what to read closely. Start with a 2-3 sentence overview stating what the document is about, its central argument or contribution, and the main conclusion. Then provide a section-by-section walkthrough: for each major section or chapter, write one sentence summarizing its key point with a citation <citation ... loc="s..."/>. Finish with 3-5 key takeaways. Save as a Zotero note attached to the parent item.',
+        text: 'Help me skim this paper. Use highlight annotations to mark the key passages I should read to get the gist: the central argument and contribution, data and methods, main findings, and key conclusions. Aim for 6-10 short highlights (2-3 sentences each) in the main body of the paper, avoid the introduction. Be selective: together they should be the shortest path to understanding what the paper says. After completing the highlights, provide a short summary structured in the following format: "**Central argument and contribution**. [1-2 sentence summary] [citations to relevant annotations] etc.',
         targetType: 'attachment',
         sortOrder: 200,
     },
