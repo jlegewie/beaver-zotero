@@ -131,7 +131,7 @@ export class BackgroundExtractor {
      * Mirrors `Zotero.Sync.Runner.syncInProgress`. Maintained via the
      * `['sync']` notifier observer registered in `start()`. While true,
      * the loop returns `sync_in_progress` from `processOnce()` and waits
-     * for the `'stop'` event to drain.
+     * for the `'finish'` event to drain.
      */
     private syncInProgress = false;
     /**
@@ -173,7 +173,10 @@ export class BackgroundExtractor {
                 ) => {
                     if (event === 'start') {
                         this.syncInProgress = true;
-                    } else if (event === 'stop') {
+                    } else if (event === 'finish' || event === 'stop') {
+                        // Zotero's sync runner emits 'finish' on normal
+                        // completion (syncRunner.js); 'stop' is accepted
+                        // defensively but is not part of the sync flow.
                         this.syncInProgress = false;
                         this.notify();
                     }
