@@ -288,7 +288,11 @@ declare namespace Zotero {
             // --- Background job queue ---
             enqueueBackgroundJob(
                 input: import("../src/services/database").BackgroundJobInput,
-            ): Promise<{ enqueued: boolean; id: number }>;
+            ): Promise<import("../src/services/database").BackgroundJobEnqueueResult>;
+
+            enqueueBackgroundJobs(
+                inputs: import("../src/services/database").BackgroundJobInput[],
+            ): Promise<import("../src/services/database").BackgroundJobEnqueueResult[]>;
 
             claimNextBackgroundJob(
                 now: number,

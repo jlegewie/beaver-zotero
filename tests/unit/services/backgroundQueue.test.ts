@@ -76,6 +76,49 @@ describe('BeaverDB background queue', () => {
         expect(modes).toEqual(['markdown', 'structured']);
     });
 
+    it('enqueueBackgroundJobs enqueues a batch in one call and returns results in input order', async () => {
+        const results = await db.enqueueBackgroundJobs([
+            makeInput({ zoteroKey: 'AAAAAAAA', priority: 100, now: 1_000 }),
+            makeInput({ zoteroKey: 'BBBBBBBB', priority: 50, now: 2_000 }),
+            makeInput({ zoteroKey: 'CCCCCCCC', priority: 75, now: 3_000 }),
+        ]);
+
+        expect(results).toHaveLength(3);
+        expect(results.map((r) => r.enqueued)).toEqual([true, true, true]);
+        expect(results.every((r) => r.id > 0)).toBe(true);
+
+        const rows = await db.peekBackgroundJobs();
+        expect(rows).toHaveLength(3);
+        expect(rows.map((r) => r.zoteroKey).sort()).toEqual([
+            'AAAAAAAA',
+            'BBBBBBBB',
+            'CCCCCCCC',
+        ]);
+    });
+
+    it('enqueueBackgroundJobs dedupes repeated jobs with the single-job merge semantics', async () => {
+        const results = await db.enqueueBackgroundJobs([
+            makeInput({ zoteroKey: 'AAAAAAAA', priority: 200, now: 5_000 }),
+            makeInput({ zoteroKey: 'AAAAAAAA', priority: 50, now: 3_000 }),
+            makeInput({ zoteroKey: 'AAAAAAAA', priority: 75, now: 4_000 }),
+        ]);
+
+        expect(results).toHaveLength(3);
+        expect(results.map((r) => r.enqueued)).toEqual([true, false, false]);
+        expect(results[1].id).toBe(results[0].id);
+        expect(results[2].id).toBe(results[0].id);
+
+        const rows = await db.peekBackgroundJobs();
+        expect(rows).toHaveLength(1);
+        expect(rows[0].priority).toBe(50);
+        expect(rows[0].availableAt).toBe(3_000);
+    });
+
+    it('enqueueBackgroundJobs returns an empty result for an empty batch', async () => {
+        await expect(db.enqueueBackgroundJobs([])).resolves.toEqual([]);
+        await expect(db.peekBackgroundJobs()).resolves.toHaveLength(0);
+    });
+
     it('claims jobs in (priority asc, available_at asc) order and bumps availability', async () => {
         await db.enqueueBackgroundJob(
             makeInput({ zoteroKey: 'AAAAAAAA', priority: 100, now: 10_000 }),
