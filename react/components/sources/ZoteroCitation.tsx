@@ -13,8 +13,11 @@ import {
 import { formatNumberRanges, formatPageRangesWithLabels } from '../../utils/stringUtils';
 import { selectItemById } from '../../../src/utils/selectItem';
 import { getCurrentReaderAndWaitForView } from '../../utils/readerUtils';
-import { BeaverTemporaryAnnotations } from '../../utils/annotationUtils';
-import { createBoundingBoxHighlights } from '../../utils/annotationUtils';
+import {
+    BeaverTemporaryAnnotations,
+    createBoundingBoxHighlights,
+    installTemporaryAnnotationDismissOnNextClick,
+} from '../../utils/annotationUtils';
 import { logger } from '../../../src/utils/logger';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../../atoms/externalReferences';
 import { useCitationMarker } from '../../hooks/useCitationMarker';
@@ -400,6 +403,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
     // Click handler for navigating to the cited item/location
     const handleClick = async (e: React.MouseEvent) => {
         e.preventDefault();
+        const ownerDocument = e.currentTarget.ownerDocument;
         logger('ZoteroCitation: Handle citation click');
 
         if (isStreaming) {
@@ -575,6 +579,10 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
                 const annotationIds = annotationReferences.map(reference => reference.zotero_key);
                 // Navigate to the first annotation if created successfully
                 if (annotationIds.length > 0 && reader) {
+                    installTemporaryAnnotationDismissOnNextClick(reader, {
+                        ownerDocument,
+                        logContext: 'ZoteroCitation',
+                    });
                     // Small delay to ensure annotation is rendered
                     setTimeout(() => {
                         reader.navigate({annotationID: annotationIds[0]});

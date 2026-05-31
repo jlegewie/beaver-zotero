@@ -3,7 +3,12 @@ import Tooltip from '../ui/Tooltip';
 import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import { AlertIcon, HighlighterIcon, Icon, NoteIcon, PdfIcon } from '../icons/icons';
 import { navigateToAnnotation, navigateToPage } from '../../utils/readerUtils';
-import { BeaverTemporaryAnnotations, createBoundingBoxHighlights, createTemporaryNoteAnnotation } from '../../utils/annotationUtils';
+import {
+    BeaverTemporaryAnnotations,
+    createBoundingBoxHighlights,
+    createTemporaryNoteAnnotation,
+    installTemporaryAnnotationDismissOnNextClick,
+} from '../../utils/annotationUtils';
 import { logger } from '../../../src/utils/logger';
 import type {
     CreateHighlightAnnotationsProposedData,
@@ -52,8 +57,6 @@ const COLOR_VALUES: Record<string, string> = {
     olive: '#e6e68a',
     teal: '#7fffd4',
 };
-
-let cleanupPreviewClickListeners: Array<() => void> = [];
 
 function pageIndexForItem(kind: 'highlight' | 'note', item: HighlightAnnotationItem | NoteAnnotationItem): number | null {
     const raw = item as any;
@@ -147,50 +150,6 @@ function colorWithPreviewAlpha(colorName: string | undefined): string {
     return `rgba(${r}, ${g}, ${b}, 0.45)`;
 }
 
-function clearPreviewClickListeners(): void {
-    for (const cleanup of cleanupPreviewClickListeners) {
-        cleanup();
-    }
-    cleanupPreviewClickListeners = [];
-}
-
-function installPreviewDismissOnNextClick(reader: any, ownerDocument?: Document, ignoredClickRoot?: Element | null): void {
-    clearPreviewClickListeners();
-
-    const documents = [
-        ownerDocument,
-        Zotero.getMainWindow()?.document,
-        reader?._iframeWindow?.document,
-        reader?._internalReader?._primaryView?._iframeWindow?.document,
-    ].filter(Boolean) as Document[];
-    const seenDocuments = new Set<Document>();
-
-    setTimeout(() => {
-        for (const doc of documents) {
-            if (seenDocuments.has(doc)) continue;
-            seenDocuments.add(doc);
-
-            const dismiss = (event: PointerEvent) => {
-                const target = event.target;
-                const targetNode = target && typeof (target as Node).nodeType === 'number'
-                    ? target as Node
-                    : null;
-                if (ignoredClickRoot && targetNode && ignoredClickRoot.contains(targetNode)) {
-                    return;
-                }
-                clearPreviewClickListeners();
-                BeaverTemporaryAnnotations.cleanupAll(reader).catch(error => {
-                    logger(`CreateAnnotationsPreview: failed to clean up preview annotation: ${error}`, 1);
-                });
-            };
-            doc.addEventListener('pointerdown', dismiss, { capture: true });
-            cleanupPreviewClickListeners.push(() => {
-                doc.removeEventListener('pointerdown', dismiss, true);
-            });
-        }
-    }, 0);
-}
-
 /**
  * Preview for bulk PDF highlight and note annotation actions.
  */
@@ -231,7 +190,6 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
     ) => {
         try {
             await BeaverTemporaryAnnotations.cleanupAll();
-            clearPreviewClickListeners();
 
             const firstCreated = createdEntries[0];
             if (firstCreated) {
@@ -291,7 +249,11 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
 
                 if (annotationReferences.length > 0) {
                     BeaverTemporaryAnnotations.addToTracking(annotationReferences);
-                    installPreviewDismissOnNextClick(reader, ownerDocument, previewRootRef.current);
+                    installTemporaryAnnotationDismissOnNextClick(reader, {
+                        ownerDocument,
+                        ignoredClickRoot: previewRootRef.current,
+                        logContext: 'CreateAnnotationsPreview',
+                    });
                     setTimeout(() => {
                         reader?.navigate?.({ annotationID: annotationReferences[0].zotero_key });
                     }, 100);
@@ -312,7 +274,11 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
 
                 if (annotationReferences.length > 0) {
                     BeaverTemporaryAnnotations.addToTracking(annotationReferences);
-                    installPreviewDismissOnNextClick(reader, ownerDocument, previewRootRef.current);
+                    installTemporaryAnnotationDismissOnNextClick(reader, {
+                        ownerDocument,
+                        ignoredClickRoot: previewRootRef.current,
+                        logContext: 'CreateAnnotationsPreview',
+                    });
                     setTimeout(() => {
                         reader?.navigate?.({ annotationID: annotationReferences[0].zotero_key });
                     }, 100);

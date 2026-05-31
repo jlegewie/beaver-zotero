@@ -300,6 +300,7 @@ export const BeaverTemporaryAnnotations = {
      * @param readerInstance The specific reader instance to clean up annotations from
      */
     async cleanupAll(readerInstance?: ZoteroReader): Promise<void> {
+        clearTemporaryAnnotationDismissListeners();
         if (this._currentAnnotations.length === 0) return;
         logger('BeaverTemporaryAnnotations: Cleaning up temporary annotations');
         
@@ -360,6 +361,71 @@ export const BeaverTemporaryAnnotations = {
         this._currentAnnotations = [];
     }
 };
+
+let cleanupTemporaryAnnotationDismissListeners: Array<() => void> = [];
+let temporaryAnnotationDismissGeneration = 0;
+
+/**
+ * Remove listeners that dismiss currently tracked temporary annotations.
+ */
+export function clearTemporaryAnnotationDismissListeners(): void {
+    temporaryAnnotationDismissGeneration += 1;
+    for (const cleanup of cleanupTemporaryAnnotationDismissListeners) {
+        cleanup();
+    }
+    cleanupTemporaryAnnotationDismissListeners = [];
+}
+
+/**
+ * Dismiss tracked temporary annotations on the next pointer interaction.
+ */
+export function installTemporaryAnnotationDismissOnNextClick(
+    reader?: ZoteroReader | any,
+    options: {
+        ownerDocument?: Document;
+        ignoredClickRoot?: Element | null;
+        logContext?: string;
+    } = {},
+): void {
+    clearTemporaryAnnotationDismissListeners();
+    const generation = temporaryAnnotationDismissGeneration;
+
+    const documents = [
+        options.ownerDocument,
+        Zotero.getMainWindow()?.document,
+        reader?._iframeWindow?.document,
+        reader?._internalReader?._primaryView?._iframeWindow?.document,
+    ].filter(Boolean) as Document[];
+    const seenDocuments = new Set<Document>();
+
+    setTimeout(() => {
+        if (generation !== temporaryAnnotationDismissGeneration) return;
+
+        for (const doc of documents) {
+            if (seenDocuments.has(doc)) continue;
+            seenDocuments.add(doc);
+
+            const dismiss = (event: PointerEvent) => {
+                const target = event.target;
+                const targetNode = target && typeof (target as Node).nodeType === 'number'
+                    ? target as Node
+                    : null;
+                if (options.ignoredClickRoot && targetNode && options.ignoredClickRoot.contains(targetNode)) {
+                    return;
+                }
+                clearTemporaryAnnotationDismissListeners();
+                BeaverTemporaryAnnotations.cleanupAll(reader).catch(error => {
+                    const context = options.logContext ?? 'Temporary annotations';
+                    logger(`${context}: failed to clean up temporary annotations: ${error}`, 1);
+                });
+            };
+            doc.addEventListener('pointerdown', dismiss, { capture: true });
+            cleanupTemporaryAnnotationDismissListeners.push(() => {
+                doc.removeEventListener('pointerdown', dismiss, true);
+            });
+        }
+    }, 0);
+}
 
 /**
  * Example usage
