@@ -141,10 +141,10 @@ async function resolveCitedItems(
     const annotationItems = items.filter(item => isAnnotationItem(item));
 
     if (noteItems.length > 0) {
-        await Zotero.Items.loadDataTypes(noteItems, ["note"]);
+        await Zotero.Items.loadDataTypes(noteItems, ["itemData", "note"]);
     }
     if (annotationItems.length > 0) {
-        await Zotero.Items.loadDataTypes(annotationItems, ["itemData"]);
+        await Zotero.Items.loadDataTypes(annotationItems, ["annotation", "annotationDeferred"]);
     }
 
     const regularSummaries = new Map<Zotero.Item, ItemSummary>();

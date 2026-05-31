@@ -389,8 +389,8 @@ describe('handleReadNoteRequest — cited_items extraction', () => {
                 parent_key: 'ATTACH12',
             }),
         ]);
-        expect((globalThis as any).Zotero.Items.loadDataTypes).toHaveBeenCalledWith([citedNote], ["note"]);
-        expect((globalThis as any).Zotero.Items.loadDataTypes).toHaveBeenCalledWith([annotation], ["itemData"]);
+        expect((globalThis as any).Zotero.Items.loadDataTypes).toHaveBeenCalledWith([citedNote], ["itemData", "note"]);
+        expect((globalThis as any).Zotero.Items.loadDataTypes).toHaveBeenCalledWith([annotation], ["annotation", "annotationDeferred"]);
     });
 });
 
