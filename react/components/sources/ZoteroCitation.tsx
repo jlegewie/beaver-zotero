@@ -14,7 +14,7 @@ import { formatNumberRanges, formatPageRangesWithLabels } from '../../utils/stri
 import { selectItemById } from '../../../src/utils/selectItem';
 import { getCurrentReaderAndWaitForView } from '../../utils/readerUtils';
 import { BeaverTemporaryAnnotations } from '../../utils/annotationUtils';
-import { createBoundingBoxHighlights } from '../../utils/annotationUtils';
+import { flashHighlightBoundingBoxes } from '../../utils/citationNavigation';
 import { logger } from '../../../src/utils/logger';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../../atoms/externalReferences';
 import { useCitationMarker } from '../../hooks/useCitationMarker';
@@ -561,24 +561,15 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
 
             // Handle the three scenarios
             if (boundingBoxData.length > 0) {
-                logger(`ZoteroCitation: Highlighting bounding boxes`);
-                // Scenario 1: With bounding boxes - create temporary highlights
-                const annotationReferences = await createBoundingBoxHighlights(
-                    boundingBoxData.map(({ page, bboxes }) => ({
-                        pageIndex: page - 1,
-                        boxes: bboxes,
-                    })),
-                    previewText,
-                    BEAVER_ANNOTATION_TEXT,
-                );
-                BeaverTemporaryAnnotations.addToTracking(annotationReferences);
-                const annotationIds = annotationReferences.map(reference => reference.zotero_key);
-                // Navigate to the first annotation if created successfully
-                if (annotationIds.length > 0 && reader) {
-                    // Small delay to ensure annotation is rendered
-                    setTimeout(() => {
-                        reader.navigate({annotationID: annotationIds[0]});
-                    }, 100);
+                logger(`ZoteroCitation: Flashing highlight for bounding boxes`);
+                if (reader) {
+                    await flashHighlightBoundingBoxes(
+                        reader,
+                        boundingBoxData.map(({ page, bboxes }) => ({
+                            pageIndex: page - 1,
+                            boxes: bboxes,
+                        })),
+                    );
                 }
             } else if (pages.length > 0) {
                 logger(`ZoteroCitation: Navigating to page ${pages[0]}`);
