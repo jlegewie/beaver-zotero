@@ -14,6 +14,10 @@ export interface HighlightLocation {
 export interface PdfNavPosition {
     pageIndex: number;
     rects: number[][];
+    /**
+     * Rects for the immediately following page (`pageIndex + 1`)
+     */
+    nextPageRects?: number[][];
 }
 
 /**
@@ -48,10 +52,23 @@ export async function flashHighlightBoundingBoxes(
 ): Promise<boolean> {
     if (!reader || !reader._internalReader) return false;
 
-    for (const location of locations) {
+    for (let i = 0; i < locations.length; i++) {
         try {
-            const position = await buildPdfNavPosition(reader, location);
+            const position = await buildPdfNavPosition(reader, locations[i]);
             if (!position) continue;
+
+            // Merge the immediately following page (if cited) so a passage that
+            // wraps across a page break flashes on both pages via nextPageRects.
+            const nextLocation = locations
+                .slice(i + 1)
+                .find((loc) => loc.pageIndex === position.pageIndex + 1);
+            if (nextLocation) {
+                const nextPosition = await buildPdfNavPosition(reader, nextLocation);
+                if (nextPosition) {
+                    position.nextPageRects = nextPosition.rects;
+                }
+            }
+
             (reader as any).navigate({ position });
             return true;
         } catch (error) {
