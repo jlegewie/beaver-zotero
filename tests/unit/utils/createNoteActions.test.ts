@@ -44,6 +44,11 @@ vi.mock('../../../src/services/agentDataProvider/actions/resolveCreateNoteParent
     resolveCreateNoteParent: vi.fn(),
 }));
 
+vi.mock('../../../src/utils/zoteroUtils', () => ({
+    createAnnotationHTML: vi.fn(),
+    createNoteLinkHTML: vi.fn(),
+}));
+
 import { executeCreateNoteAction } from '../../../react/utils/createNoteActions';
 import { resolveCreateNoteParent } from '../../../src/services/agentDataProvider/actions/resolveCreateNoteParent';
 

@@ -4,7 +4,7 @@ import { Provider, createStore } from 'jotai';
 import { store } from '../store';
 import MarkdownRenderer from '../components/messages/MarkdownRenderer';
 import { Citation } from '../../src/services/CitationService';
-import { citationDataMapAtom, citationKeyToMarkerAtom, pageLabelsByAttachmentIdAtom, type PageLabelsByAttachmentId } from '../atoms/citations';
+import { citationDataMapAtom, citationKeyToMarkerAtom, pageLabelsByAttachmentIdAtom, referenceHtmlByCitationKeyAtom, type PageLabelsByAttachmentId, type ReferenceHtmlByCitationKey } from '../atoms/citations';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../atoms/externalReferences';
 import { CitationData } from '../types/citations';
 import { CITATION_TAG_PATTERN } from '../utils/citationPreprocessing';
@@ -197,6 +197,7 @@ export interface RenderContextData {
     externalMapping?: Record<string, ZoteroItemReference | null>;
     externalReferencesMap?: Record<string, ExternalReference>;
     pageLabelsByAttachmentId?: PageLabelsByAttachmentId;
+    referenceHtmlByCitationKey?: ReferenceHtmlByCitationKey;
 }
 
 /**
@@ -272,6 +273,10 @@ export function renderToHTML(
 
         if (contextData.pageLabelsByAttachmentId) {
             renderStore.set(pageLabelsByAttachmentIdAtom, contextData.pageLabelsByAttachmentId);
+        }
+
+        if (contextData.referenceHtmlByCitationKey) {
+            renderStore.set(referenceHtmlByCitationKeyAtom, contextData.referenceHtmlByCitationKey);
         }
     }
 

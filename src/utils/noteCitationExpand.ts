@@ -12,7 +12,7 @@
  * exclusively during expansion.
  */
 
-import { createCitationHTML } from './zoteroUtils';
+import { createCitationHTML, createAnnotationHTML, createNoteLinkHTML } from './zoteroUtils';
 import { getBestPDFAttachment } from './zoteroItemHelpers';
 import { getAttachmentFileStatus } from '../services/agentDataProvider/utils';
 import { logger } from './logger';
@@ -31,6 +31,14 @@ import {
     parseRawCitationAttributes,
 } from '../../react/utils/citationGrammar';
 import type { PageLabels } from '../services/documentCache';
+
+/**
+ * Pre-resolved raw note HTML for note/annotation references, keyed by the
+ * citation identity "LIB-KEY". Annotation embeds are async to build, so they
+ * are resolved up-front (mirroring `PageLabelsByAttachmentId`) and threaded
+ * into the synchronous `expandToRawHtml`.
+ */
+export type ReferenceHtmlByKey = Record<string, string>;
 
 // =============================================================================
 // Page Label Resolution
@@ -123,6 +131,49 @@ export async function preloadPageLabelsForNewCitations(str: string): Promise<Pag
     }
 
     return labelsByAttachmentId;
+}
+
+/**
+ * Pre-resolve raw note HTML for annotation references in a string.
+ *
+ * Annotation embeds are built via `createAnnotationHTML`, which is async (it
+ * loads the parent attachment and grandparent item). Expansion itself is
+ * synchronous, so annotation HTML is resolved up-front here and threaded into
+ * `expandToRawHtml` via `ReferenceHtmlByKey` (keyed by "LIB-KEY").
+ *
+ * Notes are resolved synchronously during expansion and are not included here.
+ * Image/ink annotations (and any annotation that fails to embed) are skipped;
+ * expansion then surfaces a clear error for that reference.
+ */
+export async function preloadReferenceHtmlForNewCitations(str: string): Promise<ReferenceHtmlByKey> {
+    const referenceHtmlByKey: ReferenceHtmlByKey = {};
+    const seen = new Set<string>();
+    const regex = /<citation\s+([^/]*?)\s*\/>/g;
+    let match: RegExpExecArray | null;
+
+    while ((match = regex.exec(str)) !== null) {
+        const attrStr = match[1];
+        const normalized = normalizeCitationTag(parseRawCitationAttributes(attrStr));
+        if (!normalized.ok || normalized.ref.kind !== 'zotero') continue;
+
+        const itemId = `${normalized.ref.library_id}-${normalized.ref.zotero_key}`;
+        if (seen.has(itemId)) continue;
+        seen.add(itemId);
+
+        const item = Zotero.Items.getByLibraryAndKey(normalized.ref.library_id, normalized.ref.zotero_key);
+        if (!item || typeof item === 'boolean') continue;
+        if (typeof item.isAnnotation !== 'function' || !item.isAnnotation()) continue;
+
+        try {
+            referenceHtmlByKey[itemId] = await createAnnotationHTML(item);
+        } catch (e) {
+            // Skip annotations that can't be embedded (e.g. image/ink). Expansion
+            // surfaces a clear error for the reference instead of dropping it.
+            logger(`preloadReferenceHtmlForNewCitations: Skipping annotation ${itemId}: ${e}`, 1);
+        }
+    }
+
+    return referenceHtmlByKey;
 }
 
 /**
@@ -242,11 +293,43 @@ function resolvePageForCitation(
     return resolved;
 }
 
+/**
+ * Resolve a reference item (note/annotation/regular) to its raw note HTML.
+ *
+ * Notes render as `zotero://select` hyperlinks and annotations as native
+ * highlight embeds; both are produced from a Zotero item. Annotation HTML is
+ * async to build, so it is pre-resolved by `preloadReferenceHtmlForNewCitations`
+ * and threaded in via `referenceHtmlByKey` (keyed by "LIB-KEY"). Regular and
+ * attachment items fall through to a normal citation.
+ */
+function buildReferenceHtmlForItem(
+    item: Zotero.Item,
+    itemId: string,
+    page: string | undefined,
+    shouldTranslatePage: boolean,
+    pageLabels?: PageLabelsByAttachmentId,
+    referenceHtmlByKey?: ReferenceHtmlByKey,
+): string {
+    if (typeof item.isNote === 'function' && item.isNote()) {
+        return createNoteLinkHTML(item);
+    }
+    if (typeof item.isAnnotation === 'function' && item.isAnnotation()) {
+        const preresolved = referenceHtmlByKey?.[itemId];
+        if (!preresolved) {
+            throw new Error(`Annotation HTML not pre-resolved for ${itemId}`);
+        }
+        return preresolved;
+    }
+    const resolvedPage = resolvePageForCitation(item, page, shouldTranslatePage, pageLabels);
+    return stripInlineItemDataFromDataCitations(createCitationHTML(item, resolvedPage));
+}
+
 /** Build a new citation from simplified attributes (item_id format: "LIB-KEY") */
 function buildCitationFromSimplifiedAttrs(
     attrs: { item_id: string; page?: string },
     shouldTranslatePage: boolean,
     pageLabels?: PageLabelsByAttachmentId,
+    referenceHtmlByKey?: ReferenceHtmlByKey,
 ): string {
     const dashIdx = attrs.item_id.indexOf('-');
     if (dashIdx === -1) {
@@ -258,8 +341,7 @@ function buildCitationFromSimplifiedAttrs(
     if (!item) {
         throw new Error(`Item not found: ${attrs.item_id}`);
     }
-    const resolvedPage = resolvePageForCitation(item, attrs.page, shouldTranslatePage, pageLabels);
-    return stripInlineItemDataFromDataCitations(createCitationHTML(item, resolvedPage));
+    return buildReferenceHtmlForItem(item, attrs.item_id, attrs.page, shouldTranslatePage, pageLabels, referenceHtmlByKey);
 }
 
 /** Build a new citation from an attachment ID (att_id format: "LIB-KEY") */
@@ -268,6 +350,7 @@ function buildCitationFromAttId(
     page?: string,
     shouldTranslatePage = true,
     pageLabels?: PageLabelsByAttachmentId,
+    referenceHtmlByKey?: ReferenceHtmlByKey,
 ): string {
     const dashIdx = attId.indexOf('-');
     if (dashIdx === -1) {
@@ -279,9 +362,9 @@ function buildCitationFromAttId(
     if (!item) {
         throw new Error(`Attachment not found: ${attId}`);
     }
-    const resolvedPage = resolvePageForCitation(item, page, shouldTranslatePage, pageLabels);
-    // createCitationHTML handles attachment-to-parent resolution internally
-    return stripInlineItemDataFromDataCitations(createCitationHTML(item, resolvedPage));
+    // buildReferenceHtmlForItem routes note/annotation items; createCitationHTML
+    // handles attachment-to-parent resolution internally for regular items.
+    return buildReferenceHtmlForItem(item, attId, page, shouldTranslatePage, pageLabels, referenceHtmlByKey);
 }
 
 // =============================================================================
@@ -404,6 +487,7 @@ export function expandToRawHtml(
     context: 'old' | 'new',
     externalRefContext?: ExternalRefContext,
     pageLabels?: PageLabelsByAttachmentId,
+    referenceHtmlByKey?: ReferenceHtmlByKey,
 ): string {
     // Expand citations (all self-closing: <citation ... />)
     str = str.replace(
@@ -436,7 +520,7 @@ export function expandToRawHtml(
                             // to a label. Translating here corrupts the locator — e.g.,
                             // label "15" gets treated as 1-based index and converted to
                             // the PDF's physical page label at that index (e.g., "352").
-                            return buildCitationFromSimplifiedAttrs(newAttrs, false, pageLabels);
+                            return buildCitationFromSimplifiedAttrs(newAttrs, false, pageLabels, referenceHtmlByKey);
                         }
                     }
                     return stored.rawHtml; // exact original
@@ -490,15 +574,15 @@ export function expandToRawHtml(
             const normalizedCitation = normalizeCitationTag(parseRawCitationAttributes(attrStr));
             if (itemId) {
                 const attrs = parseSimplifiedCitationAttrs(attrStr);
-                return buildCitationFromSimplifiedAttrs(attrs, true, pageLabels);
+                return buildCitationFromSimplifiedAttrs(attrs, true, pageLabels, referenceHtmlByKey);
             }
             if (attId) {
                 const page = normalizedCitation.ok ? getPageLocator(normalizedCitation.ref) : extractAttr(attrStr, 'page');
-                return buildCitationFromAttId(attId, page, true, pageLabels);
+                return buildCitationFromAttId(attId, page, true, pageLabels, referenceHtmlByKey);
             }
             if (normalizedCitation.ok && normalizedCitation.ref.kind === 'zotero') {
                 const attrs = parseSimplifiedCitationAttrs(attrStr);
-                return buildCitationFromSimplifiedAttrs(attrs, true, pageLabels);
+                return buildCitationFromSimplifiedAttrs(attrs, true, pageLabels, referenceHtmlByKey);
             }
             // external_id: chat-side external work ID (e.g. OpenAlex W-id). Two-tier
             // fallback so the model's research effort isn't lost when it tries to
@@ -511,7 +595,7 @@ export function expandToRawHtml(
                 const mappedItemRef = externalRefContext?.externalItemMapping?.[externalId];
                 if (mappedItemRef) {
                     const itemIdStr = `${mappedItemRef.library_id}-${mappedItemRef.zotero_key}`;
-                    return buildCitationFromSimplifiedAttrs({ item_id: itemIdStr, page }, true, pageLabels);
+                    return buildCitationFromSimplifiedAttrs({ item_id: itemIdStr, page }, true, pageLabels, referenceHtmlByKey);
                 }
 
                 // Tier 2: emit an inline hyperlink from the ExternalReference

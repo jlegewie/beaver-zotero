@@ -19,6 +19,7 @@ vi.mock('../../../src/utils/noteHtmlSimplifier', () => ({
     }),
     invalidateSimplificationCache: vi.fn(),
     normalizeNoteHtml: vi.fn((html: string) => html),
+    normalizeNoteHtmlPreservingZoteroLinks: vi.fn((html: string) => html),
 }));
 
 vi.mock('../../../src/utils/editNoteValidation', async () => {
@@ -140,6 +141,7 @@ vi.mock('../../../src/utils/noteEditorIO', () => ({
 vi.mock('../../../src/utils/noteCitationExpand', () => ({
     expandToRawHtml: vi.fn((str: string, _metadata: any, _context: string) => str),
     preloadPageLabelsForNewCitations: vi.fn().mockResolvedValue(undefined),
+    preloadReferenceHtmlForNewCitations: vi.fn().mockResolvedValue({}),
 }));
 
 vi.mock('../../../src/utils/editNoteStrippers', () => ({

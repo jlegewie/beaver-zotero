@@ -44,6 +44,7 @@ import { stripNoteWrapperDiv } from './noteWrapper';
 import {
     expandToRawHtml,
     type ExternalRefContext,
+    type ReferenceHtmlByKey,
 } from './noteCitationExpand';
 import {
     decodeHtmlEntities,
@@ -104,6 +105,11 @@ export interface MatchInput {
      * `preloadPageLabelsForNewCitations` so expansion stays synchronous.
      */
     pageLabels: PageLabelsByAttachmentId;
+    /**
+     * Pre-resolved annotation embed HTML keyed by "libraryID-itemKey". Built
+     * up-front (annotation embeds are async) so expansion stays synchronous.
+     */
+    referenceHtmlByKey?: ReferenceHtmlByKey;
 }
 
 export interface BaseExpansion {
@@ -178,7 +184,7 @@ export function expandBase(input: MatchInput): BaseExpansion {
             input.newString,
             input.metadata,
             'new',
-            input.externalRefContext, input.pageLabels,
+            input.externalRefContext, input.pageLabels, input.referenceHtmlByKey,
         ),
     };
 }
@@ -370,7 +376,7 @@ const quoteNormalizedStrategy: Strategy = {
                     ? input.newString.substring(input.oldString.length)
                     : input.newString;
                 const expandedInjected = expandToRawHtml(
-                    injected, input.metadata, 'new', input.externalRefContext, input.pageLabels,
+                    injected, input.metadata, 'new', input.externalRefContext, input.pageLabels, input.referenceHtmlByKey,
                 );
                 expandedNew = actualRawSlice + expandedInjected;
             } else if (input.operation === 'insert_before') {
@@ -378,7 +384,7 @@ const quoteNormalizedStrategy: Strategy = {
                     ? input.newString.substring(0, input.newString.length - input.oldString.length)
                     : input.newString;
                 const expandedInjected = expandToRawHtml(
-                    injected, input.metadata, 'new', input.externalRefContext, input.pageLabels,
+                    injected, input.metadata, 'new', input.externalRefContext, input.pageLabels, input.referenceHtmlByKey,
                 );
                 expandedNew = expandedInjected + actualRawSlice;
             } else {
@@ -437,7 +443,7 @@ const trimTrailingNewlinesStrategy: Strategy = {
         let expandedNew: string;
         try {
             expandedNew = expandToRawHtml(
-                trimmedNew, input.metadata, 'new', input.externalRefContext, input.pageLabels,
+                trimmedNew, input.metadata, 'new', input.externalRefContext, input.pageLabels, input.referenceHtmlByKey,
             );
         } catch {
             return null;
@@ -487,7 +493,7 @@ const jsonUnescapeStrategy: Strategy = {
         let expandedNew: string;
         try {
             expandedNew = expandToRawHtml(
-                unescapedNew, input.metadata, 'new', input.externalRefContext, input.pageLabels,
+                unescapedNew, input.metadata, 'new', input.externalRefContext, input.pageLabels, input.referenceHtmlByKey,
             );
         } catch {
             return null;
@@ -525,7 +531,7 @@ const partialElementStripStrategy: Strategy = {
         try {
             expandedOld = expandToRawHtml(stripped.strippedOld, input.metadata, 'old');
             expandedNew = expandToRawHtml(
-                stripped.strippedNew, input.metadata, 'new', input.externalRefContext, input.pageLabels,
+                stripped.strippedNew, input.metadata, 'new', input.externalRefContext, input.pageLabels, input.referenceHtmlByKey,
             );
         } catch {
             return null;
@@ -587,7 +593,7 @@ const spuriousWrapStripStrategy: Strategy = {
             try {
                 expandedOld = expandToRawHtml(candidate.strippedOld, input.metadata, 'old');
                 expandedNew = expandToRawHtml(
-                    candidate.strippedNew, input.metadata, 'new', input.externalRefContext, input.pageLabels,
+                    candidate.strippedNew, input.metadata, 'new', input.externalRefContext, input.pageLabels, input.referenceHtmlByKey,
                 );
             } catch {
                 continue;
@@ -670,7 +676,7 @@ const tagAttributeStripStrategy: Strategy = {
                     ? strippedNew.substring(strippedOld.length)
                     : strippedNew;
                 const expandedInjected = expandToRawHtml(
-                    injected, input.metadata, 'new', input.externalRefContext, input.pageLabels,
+                    injected, input.metadata, 'new', input.externalRefContext, input.pageLabels, input.referenceHtmlByKey,
                 );
                 expandedNew = expandedOld + expandedInjected;
             } else if (input.operation === 'insert_before') {
@@ -678,12 +684,12 @@ const tagAttributeStripStrategy: Strategy = {
                     ? strippedNew.substring(0, strippedNew.length - strippedOld.length)
                     : strippedNew;
                 const expandedInjected = expandToRawHtml(
-                    injected, input.metadata, 'new', input.externalRefContext, input.pageLabels,
+                    injected, input.metadata, 'new', input.externalRefContext, input.pageLabels, input.referenceHtmlByKey,
                 );
                 expandedNew = expandedInjected + expandedOld;
             } else {
                 expandedNew = expandToRawHtml(
-                    strippedNew, input.metadata, 'new', input.externalRefContext, input.pageLabels,
+                    strippedNew, input.metadata, 'new', input.externalRefContext, input.pageLabels, input.referenceHtmlByKey,
                 );
             }
         } catch {
@@ -743,7 +749,7 @@ const markdownToHtmlStrategy: Strategy = {
         let expandedNew: string;
         try {
             expandedNew = expandToRawHtml(
-                convertedNew, input.metadata, 'new', input.externalRefContext, input.pageLabels,
+                convertedNew, input.metadata, 'new', input.externalRefContext, input.pageLabels, input.referenceHtmlByKey,
             );
         } catch {
             return null;
@@ -957,7 +963,7 @@ const whitespaceRelaxedStrategy: Strategy = {
                     ? input.newString.substring(input.oldString.length)
                     : input.newString;
                 const expandedInjected = expandToRawHtml(
-                    injected, input.metadata, 'new', input.externalRefContext, input.pageLabels,
+                    injected, input.metadata, 'new', input.externalRefContext, input.pageLabels, input.referenceHtmlByKey,
                 );
                 expandedNew = actualRawSlice + expandedInjected;
             } else if (input.operation === 'insert_before') {
@@ -965,7 +971,7 @@ const whitespaceRelaxedStrategy: Strategy = {
                     ? input.newString.substring(0, input.newString.length - input.oldString.length)
                     : input.newString;
                 const expandedInjected = expandToRawHtml(
-                    injected, input.metadata, 'new', input.externalRefContext, input.pageLabels,
+                    injected, input.metadata, 'new', input.externalRefContext, input.pageLabels, input.referenceHtmlByKey,
                 );
                 expandedNew = expandedInjected + actualRawSlice;
             } else {

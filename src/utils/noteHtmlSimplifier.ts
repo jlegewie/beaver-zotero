@@ -17,6 +17,34 @@ import { normalizeNoteHtml } from '../prosemirror/normalize';
 
 export { normalizeNoteHtml };
 
+/**
+ * Normalize note HTML while preserving `zotero://` anchors verbatim.
+ *
+ * normalizeNoteHtml roundtrips through ProseMirror's chrome HTML parser, which
+ * silently drops href attrs whose scheme is `zotero://` (note links, Beaver
+ * footers). edit_note matches the model's expanded old_string — where note-link
+ * tokens are restored to `<a href="zotero://...">` — against this normalized
+ * HTML, and slices the saved note body from it. The anchors must therefore
+ * survive normalization, or matches fail with old_string_not_found and saved
+ * notes lose their links.
+ *
+ * Each anchor is swapped for a plain-text placeholder that survives the
+ * roundtrip, then restored byte-for-byte afterward. This mirrors how
+ * simplifyNoteHtml preserves the same anchors when building the simplified view.
+ */
+export function normalizeNoteHtmlPreservingZoteroLinks(html: string): string {
+    const anchors: string[] = [];
+    const placeheld = html.replace(
+        /<a\s+[^>]*href="zotero:\/\/[^"]*"[^>]*>[\s\S]*?<\/a>/g,
+        (anchor) => `__BEAVER_HAYSTACK_ZLINK_${anchors.push(anchor) - 1}__`,
+    );
+    const normalized = normalizeNoteHtml(placeheld);
+    return normalized.replace(
+        /__BEAVER_HAYSTACK_ZLINK_(\d+)__/g,
+        (placeholder, idx) => anchors[Number(idx)] ?? placeholder,
+    );
+}
+
 // =============================================================================
 // Types
 // =============================================================================
@@ -149,6 +177,23 @@ export function simplifyNoteHtml(rawHtml: string, libraryID: number): Simplifica
     // its own normalize'd-but-uncached `strippedHtml`, not against `simplified`.
     let simplified = stripBeaverEditFooter(rawHtml);
     simplified = stripBeaverCreatedFooter(simplified);
+
+    // Tokenize zotero:// anchors (e.g. note links) BEFORE normalization, for the
+    // same reason the footer is stripped first: the chrome HTMLDocument used by
+    // normalizeNoteHtml drops href attrs whose scheme is `zotero://`, which would
+    // collapse a note link to bare text and lose the reference. Each anchor is
+    // replaced with a plain-text placeholder that survives normalization, then
+    // converted to a compact <link href="zlink:N"/> token below (after the http
+    // self-link collapse). The raw anchor is stored under the same `link:` key
+    // the expander reads, so it round-trips back to the original <a> verbatim.
+    const zoteroLinkAnchors: string[] = [];
+    simplified = simplified.replace(
+        /<a\s+[^>]*href="(zotero:\/\/[^"]*)"[^>]*>[\s\S]*?<\/a>/g,
+        (anchorMatch) => {
+            const idx = zoteroLinkAnchors.push(anchorMatch) - 1;
+            return `__BEAVER_ZLINK_${idx}__`;
+        }
+    );
 
     // Use regex-based approach to avoid DOMParser re-serialization issues.
     // DOMParser + innerHTML can change attribute order, whitespace, and entity encoding.
@@ -371,6 +416,24 @@ export function simplifyNoteHtml(rawHtml: string, libraryID: number): Simplifica
             (m, idx) => shieldedAnnotations[Number(idx)] ?? m
         );
     }
+
+    // Convert zotero:// anchor placeholders (created pre-normalize) into compact
+    // <link href="zlink:N"/> tokens, consistent with how http self-links appear.
+    // The raw anchor is stored under the `link:` key the expander reads, keyed by
+    // the token href ("zlink:N"), so it restores to the original <a> verbatim.
+    simplified = simplified.replace(
+        /__BEAVER_ZLINK_(\d+)__/g,
+        (m, idx) => {
+            const rawAnchor = zoteroLinkAnchors[Number(idx)];
+            if (rawAnchor === undefined) return m;
+            const tokenHref = `zlink:${idx}`;
+            metadata.elements.set(`link:${tokenHref}`, {
+                rawHtml: rawAnchor,
+                type: 'link',
+            });
+            return `<link href="${tokenHref}"/>`;
+        }
+    );
 
     // 6. Simplify math to dollar notation
     // Strip HTML wrappers from math elements, leaving dollar-delimited content.

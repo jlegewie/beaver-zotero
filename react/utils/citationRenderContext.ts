@@ -13,6 +13,53 @@ import {
 } from './citationGrammar';
 import { getCitationPreloadFilePath, preloadPageLabelsForContent } from './pageLabels';
 import type { CitationIndexEntry, StructuredExtractResult } from '../../src/beaver-extract/schema/schema';
+import { createAnnotationHTML, createNoteLinkHTML } from '../../src/utils/zoteroUtils';
+import type { ReferenceHtmlByCitationKey } from '../atoms/citations';
+
+/**
+ * Pre-resolve raw note HTML for note/annotation references in note-export
+ * content, keyed by "libraryID-itemKey".
+ *
+ * Notes render as `zotero://select` hyperlinks (sync) and annotations as native
+ * highlight embeds (async, since the parent attachment must be loaded). The
+ * export render path (`ZoteroCitation`) is synchronous, so this map is built
+ * up-front here and read synchronously during render. Image/ink annotations and
+ * any reference that fails to resolve are skipped — those fall through to the
+ * normal citation rendering.
+ */
+export async function buildReferenceHtmlForContent(
+    content: string,
+): Promise<ReferenceHtmlByCitationKey> {
+    const referenceHtmlByCitationKey: ReferenceHtmlByCitationKey = {};
+    const seen = new Set<string>();
+    const regex = new RegExp(CITATION_TAG_PATTERN.source, CITATION_TAG_PATTERN.flags);
+    let match: RegExpExecArray | null;
+
+    while ((match = regex.exec(content)) !== null) {
+        const normalized = normalizeCitationTag(parseRawCitationAttributes(match[1] || ''));
+        if (!normalized.ok || normalized.ref.kind !== 'zotero') continue;
+
+        const itemId = `${normalized.ref.library_id}-${normalized.ref.zotero_key}`;
+        if (seen.has(itemId)) continue;
+        seen.add(itemId);
+
+        const item = Zotero.Items.getByLibraryAndKey(normalized.ref.library_id, normalized.ref.zotero_key);
+        if (!item || typeof item === 'boolean') continue;
+
+        try {
+            if (item.isNote()) {
+                referenceHtmlByCitationKey[itemId] = createNoteLinkHTML(item);
+            } else if (item.isAnnotation()) {
+                referenceHtmlByCitationKey[itemId] = await createAnnotationHTML(item);
+            }
+        } catch {
+            // Reference can't be embedded (e.g. image/ink annotation); fall back
+            // to the normal citation rendering path.
+        }
+    }
+
+    return referenceHtmlByCitationKey;
+}
 
 function citationPartsFromEntries(entries: CitationIndexEntry[]): CitationPart[] {
     const byPage = new Map<number, CitationPart>();
@@ -152,14 +199,16 @@ export async function prepareCitationRenderContext(
     content: string,
     contextData?: RenderContextData,
 ): Promise<RenderContextData | undefined> {
-    const [pageLabelsByAttachmentId, localCitationDataMap] = await Promise.all([
+    const [pageLabelsByAttachmentId, localCitationDataMap, referenceHtmlByCitationKey] = await Promise.all([
         preloadPageLabelsForContent(content),
         buildLocalCitationDataMapForContent(content),
+        buildReferenceHtmlForContent(content),
     ]);
 
     const hasPageLabels = Object.keys(pageLabelsByAttachmentId).length > 0;
     const hasLocalCitations = Object.keys(localCitationDataMap).length > 0;
-    if (!contextData && !hasPageLabels && !hasLocalCitations) return undefined;
+    const hasReferenceHtml = Object.keys(referenceHtmlByCitationKey).length > 0;
+    if (!contextData && !hasPageLabels && !hasLocalCitations && !hasReferenceHtml) return undefined;
 
     const baseContext: RenderContextData = contextData ?? {
         citationDataMap: store.get(citationDataMapAtom),
@@ -176,6 +225,10 @@ export async function prepareCitationRenderContext(
         pageLabelsByAttachmentId: {
             ...(baseContext.pageLabelsByAttachmentId ?? {}),
             ...pageLabelsByAttachmentId,
+        },
+        referenceHtmlByCitationKey: {
+            ...(baseContext.referenceHtmlByCitationKey ?? {}),
+            ...referenceHtmlByCitationKey,
         },
     };
 }

@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import Tooltip from '../ui/Tooltip';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { citationDataByCitationKeyAtom, pageLabelsByAttachmentIdAtom, type PageLabelsByAttachmentId } from '../../atoms/citations';
+import { citationDataByCitationKeyAtom, pageLabelsByAttachmentIdAtom, referenceHtmlByCitationKeyAtom, type PageLabelsByAttachmentId } from '../../atoms/citations';
 import { getPref } from '../../../src/utils/prefs';
 import { createZoteroURI } from '../../utils/zoteroURI';
 import {
@@ -160,6 +160,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
     const externalReferenceToZoteroItem = useAtomValue(externalReferenceItemMappingAtom);
     const externalReferenceMap = useAtomValue(externalReferenceMappingAtom);
     const labelsByAttachmentId = useAtomValue(pageLabelsByAttachmentIdAtom);
+    const referenceHtmlByCitationKey = useAtomValue(referenceHtmlByCitationKeyAtom);
     
     // For opening external reference details dialog
     const setIsDetailsVisible = useSetAtom(isExternalReferenceDetailsDialogVisibleAtom);
@@ -639,6 +640,29 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
         
         // For Zotero citations, use proper CSL format
         if (!effectiveLibraryID || !effectiveItemKey) return null;
+
+        // Note and annotation references use pre-resolved raw HTML (a
+        // zotero://select link for notes, a native highlight embed for
+        // annotations) keyed by "libraryID-itemKey". The async resolution
+        // happens in prepareCitationRenderContext; this render is synchronous.
+        const referenceKey = `${effectiveLibraryID}-${effectiveItemKey}`;
+        const preresolvedReferenceHtml = referenceHtmlByCitationKey[referenceKey];
+        if (preresolvedReferenceHtml) {
+            // The citation tag renders inline inside a markdown paragraph, so the
+            // embed must be inline-safe. Annotation embeds come back wrapped in a
+            // block-level <p> (Zotero's highlight note template); strip a single
+            // outer <p> so the inner highlight + citation spans render inline
+            // rather than producing invalid <span><p>...</p></span> nesting.
+            // Note-link embeds are already inline (<a>) and pass through unchanged.
+            const inlineHtml = preresolvedReferenceHtml.replace(
+                /^\s*<p\b[^>]*>([\s\S]*)<\/p>\s*$/i,
+                '$1',
+            );
+            return (
+                <span dangerouslySetInnerHTML={{ __html: inlineHtml }} />
+            );
+        }
+
         try {
             const item = Zotero.Items.getByLibraryAndKey(effectiveLibraryID, effectiveItemKey);
             if (!item) return null;

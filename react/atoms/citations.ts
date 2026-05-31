@@ -115,6 +115,15 @@ export type PageLabelsByAttachmentId = Record<number, Record<number, string>>;
 export const pageLabelsByAttachmentIdAtom = atom<PageLabelsByAttachmentId>({});
 
 /**
+ * Pre-resolved raw note HTML for note/annotation references during Zotero note
+ * export, keyed by "libraryID-itemKey". Annotation embeds are async to build,
+ * so they are resolved up-front (in `prepareCitationRenderContext`) and read
+ * synchronously by `ZoteroCitation`'s export branch.
+ */
+export type ReferenceHtmlByCitationKey = Record<string, string>;
+export const referenceHtmlByCitationKeyAtom = atom<ReferenceHtmlByCitationKey>({});
+
+/**
  * Reset citation markers and thread-scoped page-label render state. Called when
  * creating a new thread or loading an existing one.
  */

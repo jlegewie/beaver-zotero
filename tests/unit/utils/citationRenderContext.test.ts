@@ -20,6 +20,11 @@ vi.mock('../../../react/utils/pageLabels', () => ({
     preloadPageLabelsForContent: vi.fn().mockResolvedValue({}),
 }));
 
+vi.mock('../../../src/utils/zoteroUtils', () => ({
+    createAnnotationHTML: vi.fn(),
+    createNoteLinkHTML: vi.fn(),
+}));
+
 import {
     buildLocalCitationDataMapForContent,
     prepareCitationRenderContext,

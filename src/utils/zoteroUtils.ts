@@ -2,6 +2,7 @@ import { getDisplayNameFromItem } from "../../react/utils/sourceUtils";
 import { ZoteroItemReference } from "../../react/types/zotero";
 import type { CreatorJSON } from "../../react/types/agentActions/base";
 import { logger } from "./logger";
+import { escapeAttr } from "./noteHtmlEntities";
 
 /**
  * Context for determining where to create or insert a new Zotero item
@@ -781,6 +782,119 @@ export function createCitationHTML(itemOrID: Zotero.Item | number | string, page
 
 // Citation with page range
 // const citation3 = createCitationHTML(item, "123-145");
+
+/**
+ * Build a native Zotero highlight embed for a text annotation.
+ *
+ * Produces the same `<span class="highlight" data-annotation=...>` markup (plus
+ * a parent-item `<span class="citation" data-citation=...>`) that Zotero's note
+ * editor creates when an annotation is dragged into a note, by delegating to
+ * `Zotero.EditorInstanceUtilities.serializeAnnotations`.
+ *
+ * Only highlight/underline/note/text annotations are embeddable. Image and ink
+ * annotations are not supported here and throw — callers should fall back to
+ * citing the parent item.
+ *
+ * @param annotationItem - A Zotero annotation item
+ * @returns Promise<string> - HTML for the highlight embed
+ */
+export async function createAnnotationHTML(annotationItem: Zotero.Item): Promise<string> {
+    if (!annotationItem || !annotationItem.isAnnotation()) {
+        throw new Error('Item is not an annotation');
+    }
+
+    // An annotation fetched via getByLibraryAndKey may have only primaryData
+    // loaded. The annotation field getters (annotationType, annotationColor,
+    // annotationText, ...) require the 'annotation' data type, annotationPosition
+    // requires 'annotationDeferred', and Zotero.Annotations.toJSON reads
+    // getTags() which requires 'tags'. Load them before touching any field.
+    await Zotero.Items.loadDataTypes(
+        [annotationItem],
+        ['annotation', 'annotationDeferred', 'tags'],
+    );
+
+    const annType = annotationItem.annotationType;
+    // Image and ink annotations are not embedded inline as highlights.
+    if (annType === 'image' || annType === 'ink') {
+        throw new Error(`Annotation type "${annType}" cannot be embedded as a highlight`);
+    }
+
+    // The parent attachment and its grandparent regular item back the citation
+    // serializeAnnotations builds to the source. parentID is available once the
+    // 'annotation' data is loaded; the grandparent needs itemData for CSL JSON.
+    const attachmentItem = annotationItem.parentItem;
+    if (!attachmentItem || !attachmentItem.isAttachment()) {
+        throw new Error('Annotation has no parent attachment');
+    }
+    if (attachmentItem.parentID) {
+        const parentRegularItem = await Zotero.Items.getAsync(attachmentItem.parentID);
+        if (parentRegularItem) {
+            await parentRegularItem.loadDataType('itemData');
+        }
+    }
+
+    // Map the annotation item to the input shape serializeAnnotations expects.
+    const json = await Zotero.Annotations.toJSON(annotationItem);
+    const annotationInput = {
+        id: annotationItem.key,
+        attachmentItemID: attachmentItem.id,
+        type: json.type,
+        text: json.text,
+        comment: json.comment,
+        color: json.color,
+        pageLabel: json.pageLabel,
+        position: json.position,
+        tags: json.tags,
+    };
+
+    // serializeAnnotations is synchronous and returns { html, citationItems }.
+    const { html } = Zotero.EditorInstanceUtilities.serializeAnnotations([annotationInput]);
+    if (!html) {
+        throw new Error('Annotation produced no embeddable content');
+    }
+    return html;
+}
+
+/**
+ * Build a `zotero://select` hyperlink to a note item.
+ *
+ * Zotero has no native inline note citation, so a note reference is rendered as
+ * an anchor pointing at the note in the app. User-library and group-library
+ * notes use the matching URI form. The visible link text is the note title.
+ *
+ * @param noteItem - A Zotero note item
+ * @returns HTML string with the anchor markup
+ */
+export function createNoteLinkHTML(noteItem: Zotero.Item): string {
+    if (!noteItem || !noteItem.isNote()) {
+        throw new Error('Item is not a note');
+    }
+
+    const libraryID = noteItem.libraryID;
+    const key = noteItem.key;
+    const library = Zotero.Libraries.get(libraryID);
+
+    let href: string;
+    if (library && library.isGroup) {
+        const groupID = Zotero.Groups.getGroupIDFromLibraryID(libraryID);
+        href = `zotero://select/groups/${groupID}/items/${key}`;
+    } else {
+        href = `zotero://select/library/items/${key}`;
+    }
+
+    // Prefer the note title; fall back to the display title.
+    let title = '';
+    try {
+        title = noteItem.getNoteTitle() || '';
+    } catch {
+        title = '';
+    }
+    if (!title) {
+        title = noteItem.getDisplayTitle() || 'Note';
+    }
+
+    return `<a href="${escapeAttr(href)}">${escapeAttr(title)}</a>`;
+}
 
 // `safeIsInTrash` and `getItemDetailsForLogging` live in `./zoteroItemUtils`
 // so they are usable from the esbuild-side bundle.

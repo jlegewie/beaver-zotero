@@ -4,7 +4,7 @@ import { EditNoteProposedData, type EditNoteOperation } from '../../../../react/
 import {
     getOrSimplify,
     invalidateSimplificationCache,
-    normalizeNoteHtml,
+    normalizeNoteHtmlPreservingZoteroLinks,
     type SimplificationMetadata,
 } from '../../../utils/noteHtmlSimplifier';
 import {
@@ -18,7 +18,9 @@ import {
 import {
     expandToRawHtml,
     preloadPageLabelsForNewCitations,
+    preloadReferenceHtmlForNewCitations,
     type ExternalRefContext,
+    type ReferenceHtmlByKey,
 } from '../../../utils/noteCitationExpand';
 import {
     getLatestNoteHtml,
@@ -126,6 +128,7 @@ function precheckNewString(
     newString: string,
     metadata: SimplificationMetadata,
     externalRefContext: ExternalRefContext,
+    referenceHtmlByKey?: ReferenceHtmlByKey,
 ): NewStringPrecheckResult {
     const validationError = validateNewString(newString, metadata);
     if (validationError) {
@@ -158,7 +161,7 @@ function precheckNewString(
     }
 
     try {
-        const expandedNew = expandToRawHtml(newString, metadata, 'new', externalRefContext);
+        const expandedNew = expandToRawHtml(newString, metadata, 'new', externalRefContext, undefined, referenceHtmlByKey);
         return { ok: true, expandedNew };
     } catch (e: any) {
         return {
@@ -404,9 +407,18 @@ async function validateEditNoteAction(
     // below can resolve `<citation external_id="..."/>` consistently.
     const externalRefContext = getExternalRefContext();
 
+    // Pre-resolve annotation embed HTML for note/annotation references in both
+    // strings. Annotation embeds are async to build, so they are resolved here
+    // (before the precheck and the matcher) and threaded through every
+    // synchronous `expandToRawHtml` call below, keyed by "libraryID-itemKey".
+    const referenceHtmlByKey = {
+        ...(await preloadReferenceHtmlForNewCitations(new_string)),
+        ...(await preloadReferenceHtmlForNewCitations(old_string ?? '')),
+    };
+
     // ── rewrite mode: skip old_string matching, validate new_string only ──
     if (operation === 'rewrite') {
-        const pre = precheckNewString(request.request_id, new_string, metadata, externalRefContext);
+        const pre = precheckNewString(request.request_id, new_string, metadata, externalRefContext, referenceHtmlByKey);
         if (!pre.ok) return pre.response;
 
         const noteTitle = item.getNoteTitle() || '(untitled)';
@@ -440,7 +452,7 @@ async function validateEditNoteAction(
             };
         }
 
-        const pre = precheckNewString(request.request_id, new_string, metadata, externalRefContext);
+        const pre = precheckNewString(request.request_id, new_string, metadata, externalRefContext, referenceHtmlByKey);
         if (!pre.ok) return pre.response;
 
         const noteTitle = item.getNoteTitle() || '(untitled)';
@@ -485,7 +497,7 @@ async function validateEditNoteAction(
     }
 
     // 10. Pre-check new_string (tag validity, citation items exist, dry-run expand)
-    const pre = precheckNewString(request.request_id, new_string, metadata, externalRefContext);
+    const pre = precheckNewString(request.request_id, new_string, metadata, externalRefContext, referenceHtmlByKey);
     if (!pre.ok) return pre.response;
     // 10b. Preload page labels for citations in new_string and old_string.
     //      new_string labels feed the matcher's new-citation expansion;
@@ -508,7 +520,7 @@ async function validateEditNoteAction(
     // 11. Normalize raw HTML to match what simplifyNoteHtml exposes to the
     //     model, then strip data-citation-items so matching stays focused on
     //     visible content.
-    const strippedHtml = stripDataCitationItems(normalizeNoteHtml(rawHtml));
+    const strippedHtml = stripDataCitationItems(normalizeNoteHtmlPreservingZoteroLinks(rawHtml));
 
     // 12. Base expansion: convert old_string and new_string to raw-HTML space.
     //     Used by the exact/decode/encode/nfkc strategies; mutation strategies
@@ -523,6 +535,7 @@ async function validateEditNoteAction(
         strippedHtml,
         externalRefContext,
         pageLabels,
+        referenceHtmlByKey,
     };
     let base: BaseExpansion;
     try {
@@ -690,6 +703,13 @@ async function executeEditNoteAction(
     // 3. Pre-load page labels so new citations resolve page indices to labels.
     //    Done before reading the note to avoid async gaps between read and write.
     const newPageLabels = await preloadPageLabelsForNewCitations(new_string);
+    // 3b. Pre-resolve annotation embed HTML for note/annotation references in
+    //     both strings. Annotation embeds are async to build; resolving up-front
+    //     (before reading the note) keeps expansion synchronous and atomic.
+    const referenceHtmlByKey = {
+        ...(await preloadReferenceHtmlForNewCitations(new_string)),
+        ...(await preloadReferenceHtmlForNewCitations(old_string ?? '')),
+    };
 
     // 4. Get current note HTML (kept for rollback on save failure)
     //    Avoid async operations between here and item.setNote() to preserve atomicity.
@@ -707,7 +727,7 @@ async function executeEditNoteAction(
     if (operation === 'rewrite') {
         let expandedNew: string;
         try {
-            expandedNew = expandToRawHtml(new_string, metadata, 'new', externalRefContext, newPageLabels);
+            expandedNew = expandToRawHtml(new_string, metadata, 'new', externalRefContext, newPageLabels, referenceHtmlByKey);
         } catch (e: any) {
             return {
                 type: 'agent_action_execute_response',
@@ -718,7 +738,7 @@ async function executeEditNoteAction(
             };
         }
 
-        const normalizedOldHtml = normalizeNoteHtml(oldHtml);
+        const normalizedOldHtml = normalizeNoteHtmlPreservingZoteroLinks(oldHtml);
         const existingCitationCache = extractDataCitationItems(normalizedOldHtml);
         const strippedHtml = stripDataCitationItems(normalizedOldHtml);
 
@@ -806,7 +826,7 @@ async function executeEditNoteAction(
     if (operation === 'append') {
         let expandedNew: string;
         try {
-            expandedNew = expandToRawHtml(new_string, metadata, 'new', externalRefContext, newPageLabels);
+            expandedNew = expandToRawHtml(new_string, metadata, 'new', externalRefContext, newPageLabels, referenceHtmlByKey);
         } catch (e: any) {
             return {
                 type: 'agent_action_execute_response',
@@ -921,7 +941,7 @@ async function executeEditNoteAction(
     // 6. Normalize + strip data-citation-items from raw HTML for matching.
     //    Snapshot the cache first so rebuild can preserve itemData for URIs
     //    that don't resolve in the current library.
-    const normalizedOldHtml = normalizeNoteHtml(oldHtml);
+    const normalizedOldHtml = normalizeNoteHtmlPreservingZoteroLinks(oldHtml);
     const existingCitationCache = extractDataCitationItems(normalizedOldHtml);
     const strippedHtml = stripDataCitationItems(normalizedOldHtml);
 
