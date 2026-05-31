@@ -24,6 +24,45 @@ import {
     parseRawCitationAttributes,
     parseZoteroId,
 } from '../../../react/utils/citationGrammar';
+import { getNoteContentPreviewText } from '../../../react/utils/noteText';
+
+const CITED_NOTE_PREVIEW_LENGTH = 500;
+
+function isAnnotationItem(item: Zotero.Item): boolean {
+    return String(item.itemType) === 'annotation' || (item as { isAnnotation?: () => boolean }).isAnnotation?.() === true;
+}
+
+function annotationSnippet(item: Zotero.Item): string | null {
+    const annotation = item as any;
+    return annotation.annotationText || annotation.annotationComment || null;
+}
+
+function serializeNoteCitationSummary(item: Zotero.Item): ItemSummary {
+    const noteHtml = item.getNote?.() || '';
+    const title = item.getNoteTitle?.() || 'Untitled Note';
+    return {
+        library_id: item.libraryID,
+        zotero_key: item.key,
+        item_type: 'note',
+        title,
+        preview: getNoteContentPreviewText(noteHtml, title, CITED_NOTE_PREVIEW_LENGTH),
+    };
+}
+
+function serializeAnnotationCitationSummary(item: Zotero.Item): ItemSummary {
+    const annotation = item as any;
+    const snippet = annotationSnippet(item);
+    return {
+        library_id: item.libraryID,
+        zotero_key: item.key,
+        item_type: 'annotation',
+        title: snippet ? `Annotation: ${snippet}` : 'Annotation',
+        annotation_text: annotation.annotationText || null,
+        annotation_comment: annotation.annotationComment || null,
+        page_label: annotation.annotationPageLabel || null,
+        parent_key: annotation.parentKey || annotation.parentItem?.key || null,
+    };
+}
 
 /**
  * Extract unique cited item references from simplified note HTML.
@@ -82,12 +121,12 @@ async function resolveCitedItems(
 ): Promise<ItemSummary[]> {
     if (refs.length === 0) return [];
 
-    // Load all cited items
+    // Load all cited items and keep the final output in citation order.
     const items: Zotero.Item[] = [];
     for (const ref of refs) {
         try {
             const item = await Zotero.Items.getByLibraryAndKeyAsync(ref.libraryId, ref.itemKey);
-            if (item && item.isRegularItem() && !item.deleted) {
+            if (item && !item.deleted && (item.isRegularItem?.() || item.isNote?.() || isAnnotationItem(item))) {
                 items.push(item);
             }
         } catch {
@@ -97,35 +136,59 @@ async function resolveCitedItems(
 
     if (items.length === 0) return [];
 
+    const regularItems = items.filter(item => item.isRegularItem?.() === true);
+    const noteItems = items.filter(item => item.isNote?.() === true);
+    const annotationItems = items.filter(item => isAnnotationItem(item));
+
+    if (noteItems.length > 0) {
+        await Zotero.Items.loadDataTypes(noteItems, ["note"]);
+    }
+    if (annotationItems.length > 0) {
+        await Zotero.Items.loadDataTypes(annotationItems, ["itemData"]);
+    }
+
+    const regularSummaries = new Map<Zotero.Item, ItemSummary>();
     // Load data types needed for serialization
-    await Zotero.Items.loadDataTypes(items, ["primaryData", "itemData", "creators", "tags", "collections", "childItems"]);
+    if (regularItems.length > 0) {
+        await Zotero.Items.loadDataTypes(regularItems, ["primaryData", "itemData", "creators", "tags", "collections", "childItems"]);
 
-    // Build attachment context
-    const searchableLibraryIds = store.get(searchableLibraryIdsAtom);
-    const attachmentContext = {
-        searchableLibraryIds,
-        syncWithZotero: store.get(syncWithZoteroAtom),
-        userId: store.get(userIdAtom),
-    };
+        // Build attachment context
+        const searchableLibraryIds = store.get(searchableLibraryIdsAtom);
+        const attachmentContext = {
+            searchableLibraryIds,
+            syncWithZotero: store.get(syncWithZoteroAtom),
+            userId: store.get(userIdAtom),
+        };
 
-    // Batch-fetch attachment data
-    const batchAttachmentData = await prepareBatchAttachmentData(items, attachmentContext);
+        // Batch-fetch attachment data
+        const batchAttachmentData = await prepareBatchAttachmentData(regularItems, attachmentContext);
 
-    // Serialize items with attachments
+        for (const item of regularItems) {
+            try {
+                const [itemData, rawAttachments] = await Promise.all([
+                    serializeItemSummary(item),
+                    processAttachmentsWithBatchData(item, attachmentContext, batchAttachmentData, {
+                        skipHash: true,
+                        skipWorkerFallback: true,
+                        includeAnnotationsCount: true,
+                    }),
+                ]);
+                regularSummaries.set(item, { ...itemData, attachments: rawAttachments.map(toAttachmentSummary) });
+            } catch (error) {
+                logger(`resolveCitedItems: Failed to serialize item ${item.key}: ${error}`, 1);
+            }
+        }
+    }
+
     const results: ItemSummary[] = [];
     for (const item of items) {
-        try {
-            const [itemData, rawAttachments] = await Promise.all([
-                serializeItemSummary(item),
-                processAttachmentsWithBatchData(item, attachmentContext, batchAttachmentData, {
-                    skipHash: true,
-                    skipWorkerFallback: true,
-                    includeAnnotationsCount: true,
-                }),
-            ]);
-            results.push({ ...itemData, attachments: rawAttachments.map(toAttachmentSummary) });
-        } catch (error) {
-            logger(`resolveCitedItems: Failed to serialize item ${item.key}: ${error}`, 1);
+        if (item.isRegularItem?.() === true) {
+            const summary = regularSummaries.get(item);
+            if (summary) results.push(summary);
+        } else if (item.isNote?.() === true) {
+            results.push(serializeNoteCitationSummary(item));
+        } else if (isAnnotationItem(item)) {
+            results.push(serializeAnnotationCitationSummary(item));
         }
     }
 

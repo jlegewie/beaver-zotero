@@ -184,6 +184,13 @@ beforeEach(() => {
                 getAttachments: vi.fn(() => []),
             })),
         },
+        Libraries: {
+            ...(globalThis as any).Zotero.Libraries,
+            userLibraryID: 1,
+        },
+        Groups: {
+            getLibraryIDFromGroupID: vi.fn((groupID: number) => groupID === 42 ? 7 : null),
+        },
         URI: {
             getURIItem: vi.fn((uri: string) => {
                 const keyMatch = uri.match(/\/items\/([A-Z0-9]+)$/i);
@@ -255,6 +262,36 @@ describe('simplifyNoteHtml', () => {
         const stored = metadata.elements.get('c_KEY1+KEY2_0');
         expect(stored!.type).toBe('compound-citation');
         expect(stored!.isCompound).toBe(true);
+    });
+
+    it('replaces Zotero note and annotation links with citation tags', () => {
+        const noteLink = '<a href="zotero://select/library/items/NOTE1234">Note: Project note</a>';
+        const annotationLink = '<a href="zotero://open-pdf/groups/42/items/ATTACH12?annotation=ANNOT123">Annotation: Highlight</a>';
+        const html = wrap(`<p>${noteLink} ${annotationLink}</p>`);
+
+        const { simplified, metadata } = simplifyNoteHtml(html, 1);
+
+        expect(simplified).toContain('<citation id="1-NOTE1234" label="Note: Project note" ref="c_NOTE1234_0"/>');
+        expect(simplified).toContain('<citation id="7-ANNOT123" label="Annotation: Highlight" ref="c_ANNOT123_0"/>');
+        expect(metadata.elements.get('c_NOTE1234_0')).toMatchObject({
+            type: 'citation',
+            originalAttrs: { item_id: '1-NOTE1234' },
+        });
+        expect(metadata.elements.get('c_ANNOT123_0')).toMatchObject({
+            type: 'citation',
+            originalAttrs: { item_id: '7-ANNOT123' },
+        });
+    });
+
+    it('expands unchanged Zotero link citations back to their normalized anchors', () => {
+        const html = wrap('<p>Before <a href="zotero://select/library/items/NOTE1234">Note: Project note</a> after.</p>');
+        const { simplified, metadata } = simplifyNoteHtml(html, 1);
+
+        const expanded = expandToRawHtml(simplified, metadata, 'old');
+
+        expect(expanded).toContain(
+            '<a href="zotero://select/library/items/NOTE1234" rel="noopener noreferrer nofollow">Note: Project note</a>'
+        );
     });
 
     it('replaces annotation with <annotation> tag', () => {
@@ -531,6 +568,48 @@ describe('expandToRawHtml', () => {
             expect.objectContaining({ key: 'NEW1' }),
             '42'
         );
+    });
+
+    it('creates note and annotation citation links from item_id in new context', () => {
+        const metadata: SimplificationMetadata = { elements: new Map() };
+        const note = {
+            key: 'NOTE1234',
+            libraryID: 1,
+            isNote: vi.fn(() => true),
+            getNoteTitle: vi.fn(() => 'Project note'),
+        };
+        const annotation = {
+            key: 'ANNOT123',
+            libraryID: 1,
+            itemType: 'annotation',
+            isAnnotation: vi.fn(() => true),
+            isNote: vi.fn(() => false),
+            annotationText: 'Highlighted text',
+            parentItem: {
+                key: 'ATTACH12',
+                isFileAttachment: vi.fn(() => true),
+            },
+        };
+        (globalThis as any).Zotero.Items.getByLibraryAndKey = vi.fn((libId: number, key: string) => {
+            if (key === 'NOTE1234') return note;
+            if (key === 'ANNOT123') return annotation;
+            return null;
+        });
+        (globalThis as any).Zotero.Libraries.get = vi.fn(() => ({ isGroup: false }));
+
+        const result = expandToRawHtml(
+            '<citation id="1-NOTE1234"/> <citation id="1-ANNOT123"/>',
+            metadata,
+            'new'
+        );
+
+        expect(result).toContain(
+            '<a href="zotero://select/library/items/NOTE1234" rel="noopener noreferrer">Note: Project note</a>'
+        );
+        expect(result).toContain(
+            '<a href="zotero://open-pdf/library/items/ATTACH12?annotation=ANNOT123" rel="noopener noreferrer">Annotation: Highlighted text</a>'
+        );
+        expect(createCitationHTML).not.toHaveBeenCalled();
     });
 
     it('throws for new citation with item_id in old context', () => {
