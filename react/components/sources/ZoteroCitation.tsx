@@ -14,7 +14,7 @@ import { formatNumberRanges, formatPageRangesWithLabels } from '../../utils/stri
 import { selectItemById } from '../../../src/utils/selectItem';
 import { getCurrentReaderAndWaitForView } from '../../utils/readerUtils';
 import { BeaverTemporaryAnnotations } from '../../utils/annotationUtils';
-import { createBoundingBoxHighlights } from '../../utils/annotationUtils';
+import { computeBoundingBoxPositions } from '../../utils/annotationUtils';
 import { logger } from '../../../src/utils/logger';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../../atoms/externalReferences';
 import { useCitationMarker } from '../../hooks/useCitationMarker';
@@ -561,23 +561,27 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
 
             // Handle the three scenarios
             if (boundingBoxData.length > 0) {
-                logger(`ZoteroCitation: Highlighting bounding boxes`);
-                // Scenario 1: With bounding boxes - create temporary highlights
-                const annotationReferences = await createBoundingBoxHighlights(
+                logger(`ZoteroCitation: Flashing bounding box highlight`);
+                // Scenario 1: With bounding boxes - use the reader's native "flash"
+                // highlight via navigate({ position }). Unlike createBoundingBoxHighlights,
+                // this does not add a (tracked) temporary annotation to the reader: the
+                // highlight is drawn directly from the rects and fades on its own after
+                // ~2s, so there is nothing to track or clean up. cleanupAll() at the top
+                // of this handler still clears any temporary annotations left behind by
+                // other features (extraction preview, agent runs, etc.).
+                const positions = await computeBoundingBoxPositions(
                     boundingBoxData.map(({ page, bboxes }) => ({
                         pageIndex: page - 1,
                         boxes: bboxes,
                     })),
-                    previewText,
-                    BEAVER_ANNOTATION_TEXT,
+                    reader,
                 );
-                BeaverTemporaryAnnotations.addToTracking(annotationReferences);
-                const annotationIds = annotationReferences.map(reference => reference.zotero_key);
-                // Navigate to the first annotation if created successfully
-                if (annotationIds.length > 0 && reader) {
-                    // Small delay to ensure annotation is rendered
+                // navigate({ position }) flashes a single page; show the first page's
+                // combined rects (matches the native "go to quote" behavior).
+                if (positions.length > 0 && reader) {
+                    // Small delay to ensure the target page is rendered before flashing.
                     setTimeout(() => {
-                        reader.navigate({annotationID: annotationIds[0]});
+                        reader.navigate({ position: positions[0] });
                     }, 100);
                 }
             } else if (pages.length > 0) {

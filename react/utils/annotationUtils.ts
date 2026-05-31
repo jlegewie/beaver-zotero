@@ -613,3 +613,73 @@ export const createBoundingBoxHighlights = async (
         return [];
     }
 };
+
+/**
+ * Reader position payload accepted by `reader.navigate({ position })`.
+ */
+export interface BoundingBoxPosition {
+    pageIndex: number;
+    rects: number[][];
+}
+
+/**
+ * Convert source bounding boxes into Zotero reader positions (pageIndex + rects)
+ * WITHOUT creating any annotation.
+ *
+ * This is the lightweight counterpart to {@link createBoundingBoxHighlights}: the
+ * returned positions are meant to be passed to `reader.navigate({ position })`, which
+ * scrolls to the region and draws the reader's native "flash" highlight that fades on
+ * its own after ~2s. Because nothing is added to the reader, there is nothing to track
+ * in {@link BeaverTemporaryAnnotations} and nothing to clean up afterwards.
+ *
+ * @param boundingBoxData Boxes grouped per page (0-based pageIndex).
+ * @param readerInstance  Optional reader to use; defaults to the current reader. Pass
+ *                        the already-resolved reader to stay consistent with a reader
+ *                        the caller just opened/switched to.
+ * @returns One position per page (rects combined), in first-seen page order.
+ */
+export const computeBoundingBoxPositions = async (
+    boundingBoxData: TemporaryHighlightLocation[],
+    readerInstance?: ZoteroReader,
+): Promise<BoundingBoxPosition[]> => {
+    if (boundingBoxData.length === 0) return [];
+
+    try {
+        // Wait for PDF document to be loaded (required for getPageViewportInfo)
+        const reader = readerInstance ?? await getCurrentReaderAndWaitForView(undefined, true);
+        if (!reader || !reader._internalReader) {
+            logger('computeBoundingBoxPositions: No active reader found for computing positions');
+            return [];
+        }
+
+        // Group boxes by page, preserving first-seen page order.
+        const pageGroups = new Map<number, BoundingBox[][]>();
+        for (const { pageIndex, boxes } of boundingBoxData) {
+            if (!pageGroups.has(pageIndex)) {
+                pageGroups.set(pageIndex, []);
+            }
+            pageGroups.get(pageIndex)!.push(boxes);
+        }
+
+        const positions: BoundingBoxPosition[] = [];
+        for (const [pageIndex, allBboxesOnPage] of pageGroups) {
+            const { viewBox, rotation, width, height } = await getPageViewportInfo(reader, pageIndex);
+            const geometry = {
+                viewBox: [viewBox[0], viewBox[1], viewBox[2], viewBox[3]] as [number, number, number, number],
+                width,
+                height,
+                rotation: (((rotation % 360) + 360) % 360) as 0 | 90 | 180 | 270,
+            };
+
+            const rects = sourceBboxesToZoteroRects(allBboxesOnPage.flat(), geometry);
+            if (rects.length === 0) continue;
+
+            positions.push({ pageIndex, rects });
+        }
+
+        return positions;
+    } catch (error) {
+        logger('computeBoundingBoxPositions: Failed to compute bounding box positions: ' + error);
+        return [];
+    }
+};
