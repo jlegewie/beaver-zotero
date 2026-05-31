@@ -41,6 +41,7 @@ const PreferencePage: React.FC = () => {
     // --- State for Preferences ---
     const syncedLibraryIds = useAtomValue(syncedLibraryIdsAtom);
     const [citationFormat, setCitationFormat] = useState(() => getPref('citationFormat') === 'numeric');
+    const [useTemporaryCitationAnnotations, setUseTemporaryCitationAnnotations] = useState(() => getPref('useTemporaryCitationAnnotations') === true);
     const [keyboardShortcut, setKeyboardShortcut] = useState(() => {
         const shortcut = getPref('keyboardShortcut');
         return /^[a-z]$/i.test(shortcut) ? shortcut.toUpperCase() : 'J';
@@ -286,6 +287,12 @@ const PreferencePage: React.FC = () => {
         setPref("citationFormat", newChecked ? "numeric" : "author-year");
         setCitationFormat(newChecked);
     }, [citationFormat]);
+
+    const handleTemporaryCitationAnnotationsToggle = useCallback(() => {
+        const newValue = !useTemporaryCitationAnnotations;
+        setPref("useTemporaryCitationAnnotations", newValue);
+        setUseTemporaryCitationAnnotations(newValue);
+    }, [useTemporaryCitationAnnotations]);
 
     const handleAddSelectedOnNewThreadToggle = useCallback(() => {
         const newValue = !addSelectedOnNewThread;
@@ -587,6 +594,22 @@ const PreferencePage: React.FC = () => {
                                             type="checkbox"
                                             checked={citationFormat}
                                             onChange={handleCitationFormatToggle}
+                                            onClick={(e) => e.stopPropagation()}
+                                            style={{ cursor: 'pointer', margin: 0 }}
+                                        />
+                                    }
+                                />
+                                <SettingsRow
+                                    title="Keep Cited Passages Highlighted"
+                                    description="When enabled, Beaver marks cited passages with temporary Zotero annotations that disappear on your next click. When disabled, Beaver briefly flashes the passage instead."
+                                    onClick={handleTemporaryCitationAnnotationsToggle}
+                                    hasBorder
+                                    tooltip="When disabled, citations use Zotero's transient PDF position highlight instead."
+                                    control={
+                                        <input
+                                            type="checkbox"
+                                            checked={useTemporaryCitationAnnotations}
+                                            onChange={handleTemporaryCitationAnnotationsToggle}
                                             onClick={(e) => e.stopPropagation()}
                                             style={{ cursor: 'pointer', margin: 0 }}
                                         />
