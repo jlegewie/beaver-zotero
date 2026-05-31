@@ -13,7 +13,11 @@ import {
 import { formatNumberRanges, formatPageRangesWithLabels } from '../../utils/stringUtils';
 import { selectItemById } from '../../../src/utils/selectItem';
 import { getCurrentReaderAndWaitForView } from '../../utils/readerUtils';
-import { BeaverTemporaryAnnotations } from '../../utils/annotationUtils';
+import {
+    BeaverTemporaryAnnotations,
+    createBoundingBoxHighlights,
+    installTemporaryAnnotationDismissOnNextClick,
+} from '../../utils/annotationUtils';
 import { flashHighlightBoundingBoxes } from '../../utils/citationNavigation';
 import { logger } from '../../../src/utils/logger';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../../atoms/externalReferences';
@@ -35,9 +39,10 @@ import {
     selectedExternalReferenceAtom
 } from '../../atoms/ui';
 import { Icon, LibraryIcon, PdfIcon, GlobalSearchIcon, NoteIcon, HighlighterIcon } from '../icons/icons';
+import { BEAVER_CITATION_ANNOTATION_AUTHOR } from '../../../src/constants/annotations';
 
 const TOOLTIP_WIDTH = '250px';
-export const BEAVER_ANNOTATION_TEXT = 'Beaver Citation';
+export const BEAVER_ANNOTATION_TEXT = BEAVER_CITATION_ANNOTATION_AUTHOR;
 
 /**
  * Citation display state - explicit FSM for citation lifecycle.
@@ -400,6 +405,8 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
     // Click handler for navigating to the cited item/location
     const handleClick = async (e: React.MouseEvent) => {
         e.preventDefault();
+        const ownerDocument = e.currentTarget.ownerDocument;
+        const useTemporaryCitationAnnotations = getPref("useTemporaryCitationAnnotations") === true;
         logger('ZoteroCitation: Handle citation click');
 
         if (isStreaming) {
@@ -561,15 +568,35 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
 
             // Handle the three scenarios
             if (boundingBoxData.length > 0) {
-                logger(`ZoteroCitation: Flashing highlight for bounding boxes`);
-                if (reader) {
-                    await flashHighlightBoundingBoxes(
-                        reader,
-                        boundingBoxData.map(({ page, bboxes }) => ({
-                            pageIndex: page - 1,
-                            boxes: bboxes,
-                        })),
+                const highlightLocations = boundingBoxData.map(({ page, bboxes }) => ({
+                    pageIndex: page - 1,
+                    boxes: bboxes,
+                }));
+
+                if (useTemporaryCitationAnnotations) {
+                    logger(`ZoteroCitation: Highlighting bounding boxes with temporary annotations`);
+                    const annotationReferences = await createBoundingBoxHighlights(
+                        highlightLocations,
+                        previewText,
+                        BEAVER_ANNOTATION_TEXT,
+                        { authorName: BEAVER_CITATION_ANNOTATION_AUTHOR },
                     );
+                    BeaverTemporaryAnnotations.addToTracking(annotationReferences);
+                    const annotationIds = annotationReferences.map(reference => reference.zotero_key);
+                    if (annotationIds.length > 0 && reader) {
+                        installTemporaryAnnotationDismissOnNextClick(reader, {
+                            ownerDocument,
+                            logContext: 'ZoteroCitation',
+                        });
+                        setTimeout(() => {
+                            reader.navigate({ annotationID: annotationIds[0] });
+                        }, 100);
+                    }
+                } else {
+                    logger(`ZoteroCitation: Flashing highlight for bounding boxes`);
+                    if (reader) {
+                        await flashHighlightBoundingBoxes(reader, highlightLocations);
+                    }
                 }
             } else if (pages.length > 0) {
                 logger(`ZoteroCitation: Navigating to page ${pages[0]}`);

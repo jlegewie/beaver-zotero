@@ -42,6 +42,7 @@ declare namespace _ZoteroTypes {
       "citationFormat": string;
       "citationStyle": string;
       "citationLocale": string;
+      "useTemporaryCitationAnnotations": boolean;
       "usePageLabels": boolean;
       "customPrompts": string;
       "customPromptsLastUsed": string;
