@@ -286,9 +286,6 @@ function buildCitationFromAttId(
     if (!item) {
         throw new Error(`Attachment not found: ${attId}`);
     }
-    if (isLinkCitationItem(item)) {
-        return buildZoteroCitationLinkHTML(item);
-    }
     const resolvedPage = resolvePageForCitation(item, page, shouldTranslatePage, pageLabels);
     // createCitationHTML handles attachment-to-parent resolution internally
     return stripInlineItemDataFromDataCitations(createCitationHTML(item, resolvedPage));

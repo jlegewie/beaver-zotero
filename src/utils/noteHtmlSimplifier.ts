@@ -355,6 +355,8 @@ export function simplifyNoteHtml(rawHtml: string, libraryID: number): Simplifica
                 metadata.elements.set(ref, {
                     rawHtml: match,
                     type: 'citation',
+                    // Link citation labels are derived from the target item and
+                    // preserved from rawHtml while the target id is unchanged.
                     originalAttrs: { item_id: itemId },
                 });
 

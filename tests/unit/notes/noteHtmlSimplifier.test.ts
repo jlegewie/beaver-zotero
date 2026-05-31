@@ -294,6 +294,26 @@ describe('simplifyNoteHtml', () => {
         );
     });
 
+    it('preserves Zotero citation link hrefs during an unrelated str_replace edit', () => {
+        const noteLink = '<a href="zotero://select/library/items/NOTE1234">Note: Project note</a>';
+        const annotationLink = '<a href="zotero://open-pdf/library/items/ATTACH12?annotation=ANNOT123">Annotation: Highlight</a>';
+        const html = wrap(`<p>${noteLink} ${annotationLink}</p><p>Replace this sentence.</p>`);
+        const { simplified, metadata } = simplifyNoteHtml(html, 1);
+        const oldString = '<p>Replace this sentence.</p>';
+        const newString = '<p>Replacement sentence.</p>';
+
+        const strippedHtml = stripDataCitationItems(normalizeNoteHtml(html));
+        const expandedOld = expandToRawHtml(oldString, metadata, 'old');
+        const expandedNew = expandToRawHtml(newString, metadata, 'new');
+        const savedHtml = replaceFirst(strippedHtml, expandedOld, expandedNew);
+
+        expect(savedHtml).toContain('href="zotero://select/library/items/NOTE1234"');
+        expect(savedHtml).toContain('href="zotero://open-pdf/library/items/ATTACH12?annotation=ANNOT123"');
+        expect(savedHtml).toContain('<p>Replacement sentence.</p>');
+        expect(simplified).toContain('<citation id="1-NOTE1234"');
+        expect(simplified).toContain('<citation id="1-ANNOT123"');
+    });
+
     it('replaces annotation with <annotation> tag', () => {
         const html = wrap(`<p>${rawAnnotation('ANN1', 'highlighted text')}</p>`);
         const { simplified, metadata } = simplifyNoteHtml(html, 1);

@@ -48,38 +48,40 @@ function restoreZoteroHrefAttributes(html: string): string {
 export function normalizeNoteHtml(html: string): string {
     const doc = getDocument();
 
-    // 1. Preprocess HTML (extract metadata, transform legacy content)
-    const { html: preprocessedHtml, metadataAttributes } = preprocessHTML(html, doc);
-    const shieldedHtml = shieldZoteroHrefAttributes(preprocessedHtml);
+    // 1. Shield Zotero protocol hrefs before any chrome-document innerHTML parse.
+    const shieldedInput = shieldZoteroHrefAttributes(html);
 
-    // 2. Parse metadata
+    // 2. Preprocess HTML (extract metadata, transform legacy content)
+    const { html: preprocessedHtml, metadataAttributes } = preprocessHTML(shieldedInput, doc);
+
+    // 3. Parse metadata
     const schemaVersion = (schema as any).version as number;
     const metadata = new Metadata(schemaVersion);
     metadata.parseAttributes(metadataAttributes);
 
-    // 3. Wire metadata into schema cache (needed by serializeCitationInnerHTML)
+    // 4. Wire metadata into schema cache (needed by serializeCitationInnerHTML)
     if (!(schema as any).cached) {
         (schema as any).cached = {};
     }
     (schema as any).cached.metadata = metadata;
 
-    // 4. Parse HTML into ProseMirror document
+    // 5. Parse HTML into ProseMirror document
     const container = doc.createElement('div');
-    container.innerHTML = shieldedHtml;
+    container.innerHTML = preprocessedHtml;
     const fragment = doc.createDocumentFragment();
     while (container.firstChild) {
         fragment.appendChild(container.firstChild);
     }
     const pmDoc = ProseMirrorDOMParser.fromSchema(schema).parse(fragment);
 
-    // 5. Apply schema transforms (strip marks from images, etc.)
+    // 6. Apply schema transforms (strip marks from images, etc.)
     let state = EditorState.create({ doc: pmDoc });
     const tr = schemaTransform(state);
     if (tr) {
         state = state.apply(tr);
     }
 
-    // 6. Serialize back to HTML
+    // 7. Serialize back to HTML
     const toHTML = buildToHTML(schema, doc);
     return restoreZoteroHrefAttributes(toHTML(state.doc.content, metadata));
 }
