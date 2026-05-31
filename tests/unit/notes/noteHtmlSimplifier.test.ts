@@ -605,9 +605,14 @@ describe('expandToRawHtml', () => {
             isAnnotation: vi.fn(() => true),
             isNote: vi.fn(() => false),
             annotationText: 'Highlighted text',
+            annotationPageLabel: '12',
             parentItem: {
                 key: 'ATTACH12',
                 isFileAttachment: vi.fn(() => true),
+                parentItem: {
+                    firstCreator: 'Smith',
+                    getField: vi.fn((field: string) => field === 'date' ? '2019-04-01' : ''),
+                },
             },
         };
         (globalThis as any).Zotero.Items.getByLibraryAndKey = vi.fn((libId: number, key: string) => {
@@ -624,10 +629,10 @@ describe('expandToRawHtml', () => {
         );
 
         expect(result).toContain(
-            '<a href="zotero://select/library/items/NOTE1234" rel="noopener noreferrer">Note: Project note</a>'
+            '(<a href="zotero://select/library/items/NOTE1234" rel="noopener noreferrer">Note: Project note</a>)'
         );
         expect(result).toContain(
-            '<a href="zotero://open-pdf/library/items/ATTACH12?annotation=ANNOT123" rel="noopener noreferrer">Annotation: Highlighted text</a>'
+            '(<a href="zotero://open-pdf/library/items/ATTACH12?annotation=ANNOT123" rel="noopener noreferrer">Annotation in Smith 2019, page 12</a>)'
         );
         expect(createCitationHTML).not.toHaveBeenCalled();
     });
