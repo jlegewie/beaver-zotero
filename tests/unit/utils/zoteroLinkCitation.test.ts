@@ -55,6 +55,22 @@ describe('zoteroLinkCitation', () => {
         expect(buildZoteroCitationLinkLabel(note)).toBe('Note in Smith 2019: Project note');
     });
 
+    it('falls back when note title data is not loaded', () => {
+        const note = {
+            libraryID: 1,
+            key: 'NOTE1234',
+            isNote: vi.fn(() => true),
+            getNoteTitle: vi.fn(() => {
+                throw new Error('Item data not loaded');
+            }),
+        };
+
+        expect(buildZoteroCitationLinkLabel(note)).toBe('Note: Note');
+        expect(buildZoteroCitationLinkHTML(note)).toBe(
+            '(<a href="zotero://select/library/items/NOTE1234" rel="noopener noreferrer">Note: Note</a>)'
+        );
+    });
+
     it('builds open-pdf links with compact source labels for annotations in group libraries', () => {
         const annotation = {
             libraryID: 7,
@@ -98,6 +114,33 @@ describe('zoteroLinkCitation', () => {
         };
 
         expect(buildZoteroCitationLinkLabel(annotation)).toBe('Annotation in Standalone PDF, page 3');
+    });
+
+    it('falls back when annotation page label data is not loaded', () => {
+        const annotation: any = {
+            libraryID: 1,
+            key: 'ANNOT123',
+            itemType: 'annotation',
+            isAnnotation: vi.fn(() => true),
+            parentItem: {
+                key: 'ATTACH12',
+                isFileAttachment: vi.fn(() => true),
+                parentItem: {
+                    firstCreator: 'Smith',
+                    getField: vi.fn((field: string) => field === 'date' ? '2019-04-01' : ''),
+                },
+            },
+        };
+        Object.defineProperty(annotation, 'annotationPageLabel', {
+            get: () => {
+                throw new Error('Annotation data not loaded');
+            },
+        });
+
+        expect(buildZoteroCitationLinkLabel(annotation)).toBe('Annotation in Smith 2019');
+        expect(buildZoteroCitationLinkHTML(annotation)).toBe(
+            '(<a href="zotero://open-pdf/library/items/ATTACH12?annotation=ANNOT123" rel="noopener noreferrer">Annotation in Smith 2019</a>)'
+        );
     });
 
     it('parses note and annotation citation hrefs', () => {

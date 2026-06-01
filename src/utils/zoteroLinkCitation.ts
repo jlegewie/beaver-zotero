@@ -31,24 +31,40 @@ function safeGetField(item: any, field: string): string {
     }
 }
 
+function safeGetProperty(item: any, property: string): any {
+    try {
+        return item?.[property];
+    } catch {
+        return undefined;
+    }
+}
+
+function safeGetNoteTitle(item: any): string {
+    try {
+        return String(item?.getNoteTitle?.() || '');
+    } catch {
+        return '';
+    }
+}
+
 function getCompactItemDisplayName(item: any): string {
     if (!item) return '';
     if (item.isNote?.() === true) {
-        return truncateLabel(item.getNoteTitle?.() || 'Note', MAX_NOTE_TITLE_LENGTH);
+        return truncateLabel(safeGetNoteTitle(item) || 'Note', MAX_NOTE_TITLE_LENGTH);
     }
-    if (item.isAttachment?.() === true && !item.parentItem) {
-        const title = safeGetField(item, 'title') || item.attachmentFilename || 'attachment';
+    if (item.isAttachment?.() === true && !safeGetProperty(item, 'parentItem')) {
+        const title = safeGetField(item, 'title') || safeGetProperty(item, 'attachmentFilename') || 'attachment';
         return truncateLabel(title, MAX_ATTACHMENT_TITLE_LENGTH);
     }
 
-    const firstCreator = item.firstCreator || safeGetField(item, 'title') || 'Unknown Author';
+    const firstCreator = safeGetProperty(item, 'firstCreator') || safeGetField(item, 'title') || 'Unknown Author';
     const year = safeGetField(item, 'date').match(/\d{4}/)?.[0] || '';
     return `${firstCreator}${year ? ` ${year}` : ''}`;
 }
 
 function getAnnotationSourceItem(annotation: any): any {
-    const attachment = annotation?.parentItem;
-    return attachment?.parentItem || attachment || null;
+    const attachment = safeGetProperty(annotation, 'parentItem');
+    return safeGetProperty(attachment, 'parentItem') || attachment || null;
 }
 
 function decodeHrefAttrValue(href: string): string {
@@ -87,8 +103,9 @@ export function buildZoteroCitationLinkURI(item: any): string | null {
  */
 export function buildZoteroCitationLinkLabel(item: any): string {
     if (item?.isNote?.() === true) {
-        const noteTitle = truncateLabel(item.getNoteTitle?.() || 'Note', MAX_NOTE_TITLE_LENGTH);
-        const parentLabel = item.parentItem ? getCompactItemDisplayName(item.parentItem) : '';
+        const noteTitle = truncateLabel(safeGetNoteTitle(item) || 'Note', MAX_NOTE_TITLE_LENGTH);
+        const parentItem = safeGetProperty(item, 'parentItem');
+        const parentLabel = parentItem ? getCompactItemDisplayName(parentItem) : '';
         return parentLabel
             ? `Note in ${parentLabel}: ${noteTitle}`
             : `Note: ${noteTitle}`;
@@ -96,7 +113,8 @@ export function buildZoteroCitationLinkLabel(item: any): string {
 
     if (isAnnotationItem(item)) {
         const sourceLabel = getCompactItemDisplayName(getAnnotationSourceItem(item));
-        const page = item.annotationPageLabel ? `, page ${item.annotationPageLabel}` : '';
+        const pageLabel = safeGetProperty(item, 'annotationPageLabel');
+        const page = pageLabel ? `, page ${pageLabel}` : '';
         return sourceLabel
             ? `Annotation in ${sourceLabel}${page}`
             : `Annotation${page}`;
