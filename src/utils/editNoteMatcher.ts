@@ -1099,3 +1099,12 @@ export function findBestMatch(
     }
     return null;
 }
+
+/**
+ * Run only the handler-rendered Markdown fallback. This is used when base
+ * old_string expansion fails before the ranked matcher can run.
+ */
+export function findMarkdownRenderMatch(input: MatchInput): MatchResult | null {
+    const result = markdownRenderStrategy.tryMatch(input, { expandedOld: '', expandedNew: '' });
+    return result && result.matchCount > 0 ? result : null;
+}

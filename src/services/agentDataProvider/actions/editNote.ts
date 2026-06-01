@@ -45,6 +45,7 @@ import {
 import {
     expandBase,
     findBestMatch,
+    findMarkdownRenderMatch,
     type BaseExpansion,
     type MatchInput,
 } from '../../../utils/editNoteMatcher';
@@ -168,6 +169,23 @@ async function buildMarkdownRenderFields(
         logger(`buildMarkdownRenderFields: Failed to render Markdown fallback: ${e?.message || String(e)}`, 1);
         return {};
     }
+}
+
+async function findMarkdownRenderFallbackMatch(
+    matchInput: MatchInput,
+    oldString: string,
+    newString: string,
+    operation: EditNoteOperation,
+    libraryId: number,
+): Promise<ReturnType<typeof findBestMatch>> {
+    const rendered = await buildMarkdownRenderFields(
+        oldString,
+        newString,
+        operation,
+        libraryId,
+    );
+    if (!rendered.renderedOldSimplified) return null;
+    return findMarkdownRenderMatch({ ...matchInput, ...rendered });
 }
 
 /**
@@ -617,32 +635,42 @@ async function validateEditNoteAction(
         pageLabels,
         resolvedLocatorPages,
     };
-    let base: BaseExpansion;
+    let base: BaseExpansion | null = null;
+    let match: ReturnType<typeof findBestMatch> = null;
     try {
         base = expandBase(matchInput);
     } catch (e: any) {
-        return {
-            type: 'agent_action_validate_response',
-            request_id: request.request_id,
-            valid: false,
-            error: e.message || String(e),
-            error_code: 'expansion_failed',
-            preference: 'always_ask',
-        };
-    }
-
-    // 13. Run the ranked matcher. The first strategy that produces a match
-    //     wins. See editNoteMatcher.ts for the full chain.
-    let match = findBestMatch(matchInput, base);
-    if (!match) {
-        const rendered = await buildMarkdownRenderFields(
+        match = await findMarkdownRenderFallbackMatch(
+            matchInput,
             old_string ?? '',
             new_string,
             operation,
             library_id,
         );
-        if (rendered.renderedOldSimplified) {
-            match = findBestMatch({ ...matchInput, ...rendered }, base);
+        if (!match) {
+            return {
+                type: 'agent_action_validate_response',
+                request_id: request.request_id,
+                valid: false,
+                error: e.message || String(e),
+                error_code: 'expansion_failed',
+                preference: 'always_ask',
+            };
+        }
+    }
+
+    // 13. Run the ranked matcher. The first strategy that produces a match
+    //     wins. See editNoteMatcher.ts for the full chain.
+    if (!match && base) {
+        match = findBestMatch(matchInput, base);
+        if (!match) {
+            match = await findMarkdownRenderFallbackMatch(
+                matchInput,
+                old_string ?? '',
+                new_string,
+                operation,
+                library_id,
+            );
         }
     }
     if (!match) {
@@ -675,6 +703,8 @@ async function validateEditNoteAction(
                 : {}),
         };
     }
+
+    logger(`validateEditNoteAction: matched ${noteId} via ${match.strategy} strategy`, 1);
 
     // Propagate any matcher rewrite of old_string through the outer binding so
     // buildNormalizedActionData emits the final form for the executor.
@@ -1050,33 +1080,43 @@ async function executeEditNoteAction(
         pageLabels,
         resolvedLocatorPages,
     };
-    let base: BaseExpansion;
+    let base: BaseExpansion | null = null;
+    let match: ReturnType<typeof findBestMatch> = null;
     try {
         base = expandBase(matchInput);
     } catch (e: any) {
-        return {
-            type: 'agent_action_execute_response',
-            request_id: request.request_id,
-            success: false,
-            error: e.message || String(e),
-            error_code: 'expansion_failed',
-        };
+        match = await findMarkdownRenderFallbackMatch(
+            matchInput,
+            old_string ?? '',
+            new_string,
+            operation,
+            library_id,
+        );
+        if (!match) {
+            return {
+                type: 'agent_action_execute_response',
+                request_id: request.request_id,
+                success: false,
+                error: e.message || String(e),
+                error_code: 'expansion_failed',
+            };
+        }
     }
 
     // 8. Run the ranked matcher. Defense-in-depth: validator normally
     //    normalizes via normalized_action_data, but the note may have drifted
     //    between validation and execution (PM re-normalization, concurrent
     //    edit) so we re-match here against the current HTML.
-    let match = findBestMatch(matchInput, base);
-    if (!match) {
-        const rendered = await buildMarkdownRenderFields(
-            old_string ?? '',
-            new_string,
-            operation,
-            library_id,
-        );
-        if (rendered.renderedOldSimplified) {
-            match = findBestMatch({ ...matchInput, ...rendered }, base);
+    if (!match && base) {
+        match = findBestMatch(matchInput, base);
+        if (!match) {
+            match = await findMarkdownRenderFallbackMatch(
+                matchInput,
+                old_string ?? '',
+                new_string,
+                operation,
+                library_id,
+            );
         }
     }
     if (!match) {
@@ -1104,6 +1144,8 @@ async function executeEditNoteAction(
                 : {}),
         };
     }
+
+    logger(`executeEditNoteAction: matched ${noteId} via ${match.strategy} strategy`, 1);
 
     // 8a. Transform validator-supplied context anchors the same way the
     //     matcher transformed the haystack needle (entity decode/encode, NFKC).
