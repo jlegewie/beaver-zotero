@@ -5,6 +5,7 @@ import {
     getOrSimplify,
     invalidateSimplificationCache,
     normalizeNoteHtml,
+    simplifyNoteHtml,
     type SimplificationMetadata,
 } from '../../../utils/noteHtmlSimplifier';
 import {
@@ -18,7 +19,10 @@ import {
 import {
     expandToRawHtml,
     preloadPageLabelsForNewCitations,
+    preloadStructuralLocatorPages,
+    buildUnresolvedLocatorWarning,
     type ExternalRefContext,
+    type ResolvedLocatorPages,
 } from '../../../utils/noteCitationExpand';
 import {
     getLatestNoteHtml,
@@ -41,16 +45,20 @@ import {
 import {
     expandBase,
     findBestMatch,
+    findMarkdownRenderMatch,
     type BaseExpansion,
     type MatchInput,
 } from '../../../utils/editNoteMatcher';
 import { clearNoteEditorSelection } from '../../../../react/utils/sourceUtils';
 import { store } from '../../../../react/store';
+import { citationDataMapAtom } from '../../../../react/atoms/citations';
 import { currentThreadIdAtom } from '../../../../react/atoms/threads';
 import {
     externalReferenceMappingAtom,
     externalReferenceItemMappingAtom,
 } from '../../../../react/atoms/externalReferences';
+import { renderToHTML, type RenderContextData } from '../../../../react/utils/citationRenderers';
+import { prepareCitationRenderContext } from '../../../../react/utils/citationRenderContext';
 import { addOrUpdateEditFooter, getBeaverFooterAppendPoint } from '../../../utils/noteEditFooter';
 import { assertNoPreviewMarkers } from '../../../utils/notePreviewGuard';
 import {
@@ -82,6 +90,102 @@ function mergeInsertNewString(
         return newString.endsWith(oldString) ? newString : newString + oldString;
     }
     return newString;
+}
+
+/** Combine optional warning strings into a `warnings` array, or undefined when empty. */
+function collectWarnings(...warnings: Array<string | null | undefined>): string[] | undefined {
+    const filtered = warnings.filter((w): w is string => !!w);
+    return filtered.length > 0 ? filtered : undefined;
+}
+
+const MARKDOWN_RENDER_MARKERS = [
+    /^ {0,3}#{1,6}[ \t]/m,
+    /\*\*|__/,
+    /^ {0,3}[-*+] /m,
+    /\$[^$]+\$/,
+    /&(?!#?\w+;)/,
+];
+const CITATION_TAG_RE = /<citation\b[^>]*\/>/i;
+
+function looksLikeMarkdownForRender(oldString: string): boolean {
+    return MARKDOWN_RENDER_MARKERS.some((pattern) => pattern.test(oldString));
+}
+
+function containsCitationTag(...parts: string[]): boolean {
+    return parts.some((part) => CITATION_TAG_RE.test(part));
+}
+
+function renderMarkdownFragment(
+    content: string,
+    libraryId: number,
+    contextData?: RenderContextData,
+): string {
+    return simplifyNoteHtml(renderToHTML(content, 'markdown', contextData), libraryId).simplified;
+}
+
+/**
+ * Render Markdown-shaped edit strings through the same static renderer used by
+ * create_note, then simplify the rendered HTML into the matcher's input format.
+ * The helper is only called after the normal synchronous matcher misses.
+ */
+async function buildMarkdownRenderFields(
+    oldString: string,
+    newString: string,
+    operation: EditNoteOperation,
+    libraryId: number,
+): Promise<Pick<MatchInput, 'renderedOldSimplified' | 'renderedNewSimplified'>> {
+    if (!oldString || !looksLikeMarkdownForRender(oldString)) return {};
+
+    try {
+        const needsCitationContext = containsCitationTag(oldString, newString);
+        const contextData = needsCitationContext
+            ? await prepareCitationRenderContext(`${oldString}\n\n${newString}`, {
+                citationDataMap: store.get(citationDataMapAtom),
+                externalMapping: store.get(externalReferenceItemMappingAtom),
+                externalReferencesMap: store.get(externalReferenceMappingAtom),
+            })
+            : undefined;
+
+        const renderedOldSimplified = renderMarkdownFragment(oldString, libraryId, contextData);
+        let renderedNewSimplified: string;
+        if (operation === 'insert_after') {
+            const injected = newString.startsWith(oldString)
+                ? newString.substring(oldString.length)
+                : newString;
+            renderedNewSimplified = renderedOldSimplified
+                + renderMarkdownFragment(injected, libraryId, contextData);
+        } else if (operation === 'insert_before') {
+            const injected = newString.endsWith(oldString)
+                ? newString.substring(0, newString.length - oldString.length)
+                : newString;
+            renderedNewSimplified = renderMarkdownFragment(injected, libraryId, contextData)
+                + renderedOldSimplified;
+        } else {
+            renderedNewSimplified = renderMarkdownFragment(newString, libraryId, contextData);
+        }
+
+        return { renderedOldSimplified, renderedNewSimplified };
+    } catch (e: any) {
+        logger(`buildMarkdownRenderFields: Failed to render Markdown fallback: ${e?.message || String(e)}`, 1);
+        return {};
+    }
+}
+
+async function findMarkdownRenderFallbackMatch(
+    matchInput: MatchInput,
+    oldString: string,
+    newString: string,
+    operation: EditNoteOperation,
+    libraryId: number,
+): Promise<ReturnType<typeof findBestMatch>> {
+    const rendered = await buildMarkdownRenderFields(
+        oldString,
+        newString,
+        operation,
+        libraryId,
+    );
+    if (!rendered.renderedOldSimplified) return null;
+    return findMarkdownRenderMatch({ ...matchInput, ...rendered });
 }
 
 /**
@@ -496,6 +600,12 @@ async function validateEditNoteAction(
     const newPageLabels = await preloadPageLabelsForNewCitations(new_string);
     const oldPageLabels = await preloadPageLabelsForNewCitations(old_string ?? '');
     const pageLabels = { ...newPageLabels, ...oldPageLabels };
+    // 10b-ii. Resolve structural (non-page) locators in new_string to the page
+    //      they sit on. Note citations only store page locators, so a sentence/
+    //      paragraph/heading locator is mapped to its page here; unresolved ones
+    //      are surfaced as a non-blocking warning on success.
+    const structuralLocators = await preloadStructuralLocatorPages(new_string);
+    const resolvedLocatorPages = structuralLocators.pages;
     // 10c. Enrich no-ref citations in old_string with refs from metadata.
     //      When the model reuses the form it wrote in an earlier edit_note
     //      (citation without ref) as its old_string in a follow-up edit,
@@ -523,24 +633,46 @@ async function validateEditNoteAction(
         strippedHtml,
         externalRefContext,
         pageLabels,
+        resolvedLocatorPages,
     };
-    let base: BaseExpansion;
+    let base: BaseExpansion | null = null;
+    let match: ReturnType<typeof findBestMatch> = null;
     try {
         base = expandBase(matchInput);
     } catch (e: any) {
-        return {
-            type: 'agent_action_validate_response',
-            request_id: request.request_id,
-            valid: false,
-            error: e.message || String(e),
-            error_code: 'expansion_failed',
-            preference: 'always_ask',
-        };
+        match = await findMarkdownRenderFallbackMatch(
+            matchInput,
+            old_string ?? '',
+            new_string,
+            operation,
+            library_id,
+        );
+        if (!match) {
+            return {
+                type: 'agent_action_validate_response',
+                request_id: request.request_id,
+                valid: false,
+                error: e.message || String(e),
+                error_code: 'expansion_failed',
+                preference: 'always_ask',
+            };
+        }
     }
 
     // 13. Run the ranked matcher. The first strategy that produces a match
     //     wins. See editNoteMatcher.ts for the full chain.
-    const match = findBestMatch(matchInput, base);
+    if (!match && base) {
+        match = findBestMatch(matchInput, base);
+        if (!match) {
+            match = await findMarkdownRenderFallbackMatch(
+                matchInput,
+                old_string ?? '',
+                new_string,
+                operation,
+                library_id,
+            );
+        }
+    }
     if (!match) {
         // 13a. Distinct error for partial citation/annotation openers in
         //      old_string. `expandToRawHtml`'s regex requires a complete
@@ -571,6 +703,8 @@ async function validateEditNoteAction(
                 : {}),
         };
     }
+
+    logger(`validateEditNoteAction: matched ${noteId} via ${match.strategy} strategy`, 1);
 
     // Propagate any matcher rewrite of old_string through the outer binding so
     // buildNormalizedActionData emits the final form for the executor.
@@ -614,6 +748,8 @@ async function validateEditNoteAction(
     //     any matcher rewrite. mergeInsertNewString is a no-op for
     //     str_replace / str_replace_all.
     const warnings: string[] = [];
+    const locatorWarning = buildUnresolvedLocatorWarning(structuralLocators.unresolved);
+    if (locatorWarning) warnings.push(locatorWarning);
     if (operation === 'insert_after' || operation === 'insert_before') {
         const dedupWarning = buildInsertDedupWarning(
             operation, match.oldString, match.newString,
@@ -690,6 +826,11 @@ async function executeEditNoteAction(
     // 3. Pre-load page labels so new citations resolve page indices to labels.
     //    Done before reading the note to avoid async gaps between read and write.
     const newPageLabels = await preloadPageLabelsForNewCitations(new_string);
+    // 3b. Resolve structural (non-page) locators in new_string to their page so
+    //     citations keep a page locator instead of dropping it on save.
+    const structuralLocators = await preloadStructuralLocatorPages(new_string);
+    const resolvedLocatorPages = structuralLocators.pages;
+    const locatorWarning = buildUnresolvedLocatorWarning(structuralLocators.unresolved);
 
     // 4. Get current note HTML (kept for rollback on save failure)
     //    Avoid async operations between here and item.setNote() to preserve atomicity.
@@ -707,7 +848,7 @@ async function executeEditNoteAction(
     if (operation === 'rewrite') {
         let expandedNew: string;
         try {
-            expandedNew = expandToRawHtml(new_string, metadata, 'new', externalRefContext, newPageLabels);
+            expandedNew = expandToRawHtml(new_string, metadata, 'new', externalRefContext, newPageLabels, resolvedLocatorPages);
         } catch (e: any) {
             return {
                 type: 'agent_action_execute_response',
@@ -786,7 +927,7 @@ async function executeEditNoteAction(
 
         // Check for duplicate citation warnings
         const duplicateWarning = checkDuplicateCitations(new_string, metadata);
-        const warnings = duplicateWarning ? [duplicateWarning] : undefined;
+        const warnings = collectWarnings(duplicateWarning, locatorWarning);
 
         return {
             type: 'agent_action_execute_response',
@@ -806,7 +947,7 @@ async function executeEditNoteAction(
     if (operation === 'append') {
         let expandedNew: string;
         try {
-            expandedNew = expandToRawHtml(new_string, metadata, 'new', externalRefContext, newPageLabels);
+            expandedNew = expandToRawHtml(new_string, metadata, 'new', externalRefContext, newPageLabels, resolvedLocatorPages);
         } catch (e: any) {
             return {
                 type: 'agent_action_execute_response',
@@ -880,7 +1021,7 @@ async function executeEditNoteAction(
         invalidateSimplificationCache(noteId);
 
         const duplicateWarning = checkDuplicateCitations(new_string, metadata);
-        const warnings = duplicateWarning ? [duplicateWarning] : undefined;
+        const warnings = collectWarnings(duplicateWarning, locatorWarning);
         const undoData = {
             undo_new_html: expandedNew,
             undo_before_context: undoBeforeContext,
@@ -937,25 +1078,47 @@ async function executeEditNoteAction(
         strippedHtml,
         externalRefContext,
         pageLabels,
+        resolvedLocatorPages,
     };
-    let base: BaseExpansion;
+    let base: BaseExpansion | null = null;
+    let match: ReturnType<typeof findBestMatch> = null;
     try {
         base = expandBase(matchInput);
     } catch (e: any) {
-        return {
-            type: 'agent_action_execute_response',
-            request_id: request.request_id,
-            success: false,
-            error: e.message || String(e),
-            error_code: 'expansion_failed',
-        };
+        match = await findMarkdownRenderFallbackMatch(
+            matchInput,
+            old_string ?? '',
+            new_string,
+            operation,
+            library_id,
+        );
+        if (!match) {
+            return {
+                type: 'agent_action_execute_response',
+                request_id: request.request_id,
+                success: false,
+                error: e.message || String(e),
+                error_code: 'expansion_failed',
+            };
+        }
     }
 
     // 8. Run the ranked matcher. Defense-in-depth: validator normally
     //    normalizes via normalized_action_data, but the note may have drifted
     //    between validation and execution (PM re-normalization, concurrent
     //    edit) so we re-match here against the current HTML.
-    const match = findBestMatch(matchInput, base);
+    if (!match && base) {
+        match = findBestMatch(matchInput, base);
+        if (!match) {
+            match = await findMarkdownRenderFallbackMatch(
+                matchInput,
+                old_string ?? '',
+                new_string,
+                operation,
+                library_id,
+            );
+        }
+    }
     if (!match) {
         // Defense-in-depth: same partial-tag check as the validator (step 13a)
         // — the executor may receive un-normalized action_data on stale paths.
@@ -981,6 +1144,8 @@ async function executeEditNoteAction(
                 : {}),
         };
     }
+
+    logger(`executeEditNoteAction: matched ${noteId} via ${match.strategy} strategy`, 1);
 
     // 8a. Transform validator-supplied context anchors the same way the
     //     matcher transformed the haystack needle (entity decode/encode, NFKC).
@@ -1143,7 +1308,7 @@ async function executeEditNoteAction(
 
     // 17. Check for duplicate citation warnings
     const duplicateWarning = checkDuplicateCitations(new_string, metadata);
-    const warnings = duplicateWarning ? [duplicateWarning] : undefined;
+    const warnings = collectWarnings(duplicateWarning, locatorWarning);
 
     // 18. Wait for ProseMirror to normalize the note and update undo data.
     // When the note is open in the editor, PM re-normalizes after saveTx(),

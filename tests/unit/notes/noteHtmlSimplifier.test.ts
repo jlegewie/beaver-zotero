@@ -52,6 +52,7 @@ import {
 import {
     expandToRawHtml,
     translatePageNumberToLabel,
+    buildUnresolvedLocatorWarning,
 } from '../../../src/utils/noteCitationExpand';
 import {
     isNoteInEditor,
@@ -184,6 +185,13 @@ beforeEach(() => {
                 getAttachments: vi.fn(() => []),
             })),
         },
+        Libraries: {
+            ...(globalThis as any).Zotero.Libraries,
+            userLibraryID: 1,
+        },
+        Groups: {
+            getLibraryIDFromGroupID: vi.fn((groupID: number) => groupID === 42 ? 7 : null),
+        },
         URI: {
             getURIItem: vi.fn((uri: string) => {
                 const keyMatch = uri.match(/\/items\/([A-Z0-9]+)$/i);
@@ -255,6 +263,56 @@ describe('simplifyNoteHtml', () => {
         const stored = metadata.elements.get('c_KEY1+KEY2_0');
         expect(stored!.type).toBe('compound-citation');
         expect(stored!.isCompound).toBe(true);
+    });
+
+    it('replaces Zotero note and annotation links with citation tags', () => {
+        const noteLink = '<a href="zotero://select/library/items/NOTE1234">Note: Project note</a>';
+        const annotationLink = '<a href="zotero://open-pdf/groups/42/items/ATTACH12?annotation=ANNOT123">Annotation: Highlight</a>';
+        const html = wrap(`<p>${noteLink} ${annotationLink}</p>`);
+
+        const { simplified, metadata } = simplifyNoteHtml(html, 1);
+
+        expect(simplified).toContain('<citation id="1-NOTE1234" label="Note: Project note" ref="c_NOTE1234_0"/>');
+        expect(simplified).toContain('<citation id="7-ANNOT123" label="Annotation: Highlight" ref="c_ANNOT123_0"/>');
+        expect(metadata.elements.get('c_NOTE1234_0')).toMatchObject({
+            type: 'citation',
+            originalAttrs: { item_id: '1-NOTE1234' },
+        });
+        expect(metadata.elements.get('c_ANNOT123_0')).toMatchObject({
+            type: 'citation',
+            originalAttrs: { item_id: '7-ANNOT123' },
+        });
+    });
+
+    it('expands unchanged Zotero link citations back to their normalized anchors', () => {
+        const html = wrap('<p>Before <a href="zotero://select/library/items/NOTE1234">Note: Project note</a> after.</p>');
+        const { simplified, metadata } = simplifyNoteHtml(html, 1);
+
+        const expanded = expandToRawHtml(simplified, metadata, 'old');
+
+        expect(expanded).toContain(
+            '<a href="zotero://select/library/items/NOTE1234" rel="noopener noreferrer nofollow">Note: Project note</a>'
+        );
+    });
+
+    it('preserves Zotero citation link hrefs during an unrelated str_replace edit', () => {
+        const noteLink = '<a href="zotero://select/library/items/NOTE1234">Note: Project note</a>';
+        const annotationLink = '<a href="zotero://open-pdf/library/items/ATTACH12?annotation=ANNOT123">Annotation: Highlight</a>';
+        const html = wrap(`<p>${noteLink} ${annotationLink}</p><p>Replace this sentence.</p>`);
+        const { simplified, metadata } = simplifyNoteHtml(html, 1);
+        const oldString = '<p>Replace this sentence.</p>';
+        const newString = '<p>Replacement sentence.</p>';
+
+        const strippedHtml = stripDataCitationItems(normalizeNoteHtml(html));
+        const expandedOld = expandToRawHtml(oldString, metadata, 'old');
+        const expandedNew = expandToRawHtml(newString, metadata, 'new');
+        const savedHtml = replaceFirst(strippedHtml, expandedOld, expandedNew);
+
+        expect(savedHtml).toContain('href="zotero://select/library/items/NOTE1234"');
+        expect(savedHtml).toContain('href="zotero://open-pdf/library/items/ATTACH12?annotation=ANNOT123"');
+        expect(savedHtml).toContain('<p>Replacement sentence.</p>');
+        expect(simplified).toContain('<citation id="1-NOTE1234"');
+        expect(simplified).toContain('<citation id="1-ANNOT123"');
     });
 
     it('replaces annotation with <annotation> tag', () => {
@@ -491,6 +549,90 @@ describe('expandToRawHtml', () => {
         expect(createCitationHTML).not.toHaveBeenCalled();
     });
 
+    // ---- Structural (non-page) locator resolution ----
+
+    it('substitutes a resolved page for a new structural locator', () => {
+        const { metadata } = makeMetadata();
+        // Sentence locator s4 was pre-resolved to page "9".
+        const input = '<citation id="1-EX1" loc="s4" label="(Author, 2024)" ref="c_EX1_new"/>';
+        const resolvedLocatorPages = { 'zotero:1-EX1:s4': '9' };
+        expandToRawHtml(input, metadata, 'new', undefined, undefined, resolvedLocatorPages);
+        expect(createCitationHTML).toHaveBeenCalledWith(
+            expect.objectContaining({ key: 'EX1' }),
+            '9'
+        );
+    });
+
+    it('drops the locator for a structural locator with no resolved page', () => {
+        const { metadata } = makeMetadata();
+        // No resolvedLocatorPages entry → structural locator can't be stored.
+        const input = '<citation id="1-EX1" loc="s4" label="(Author, 2024)" ref="c_EX1_new"/>';
+        expandToRawHtml(input, metadata, 'new', undefined, undefined, {});
+        expect(createCitationHTML).toHaveBeenCalledWith(
+            expect.objectContaining({ key: 'EX1' }),
+            undefined
+        );
+    });
+
+    it('does not translate a resolved structural page through the page-label map', () => {
+        const { metadata } = makeMetadata();
+        // pageLabels would map 1-based page 9 → some label, but a structural
+        // page is already a final label and must be stored verbatim.
+        const input = '<citation id="1-EX1" loc="s4" label="(Author, 2024)" ref="c_EX1_new"/>';
+        const pageLabels = { '1-EX1': { 8: 'ix' } };
+        const resolvedLocatorPages = { 'zotero:1-EX1:s4': '9' };
+        expandToRawHtml(input, metadata, 'new', undefined, pageLabels as any, resolvedLocatorPages);
+        expect(createCitationHTML).toHaveBeenCalledWith(
+            expect.objectContaining({ key: 'EX1' }),
+            '9'
+        );
+    });
+
+    it('resolves a structural locator when editing an existing citation', () => {
+        const { metadata } = makeMetadata();
+        // c_EX1_1 originally has page="10"; change its locator to sentence s4.
+        const input = '<citation id="1-EX1" loc="s4" label="(Author, 2024, p. 10)" ref="c_EX1_1"/>';
+        const resolvedLocatorPages = { 'zotero:1-EX1:s4': '3' };
+        expandToRawHtml(input, metadata, 'new', undefined, undefined, resolvedLocatorPages);
+        expect(createCitationHTML).toHaveBeenCalledWith(
+            expect.objectContaining({ key: 'EX1' }),
+            '3'
+        );
+    });
+
+    it('substitutes a resolved page for a legacy att_id structural locator', () => {
+        const { metadata } = makeMetadata();
+        const input = '<citation att_id="1-ATT1" loc="s4" label="(Author, 2024)"/>';
+        const resolvedLocatorPages = { 'zotero:1-ATT1:s4': '9' };
+        expandToRawHtml(input, metadata, 'new', undefined, undefined, resolvedLocatorPages);
+        expect(createCitationHTML).toHaveBeenCalledWith(
+            expect.objectContaining({ key: 'ATT1' }),
+            '9'
+        );
+    });
+
+    it('substitutes a resolved page for a legacy sid structural locator', () => {
+        const { metadata } = makeMetadata();
+        // The `sid` attribute is the legacy alias for a structural locator.
+        const input = '<citation att_id="1-ATT1" sid="s4" label="(Author, 2024)"/>';
+        const resolvedLocatorPages = { 'zotero:1-ATT1:s4': '9' };
+        expandToRawHtml(input, metadata, 'new', undefined, undefined, resolvedLocatorPages);
+        expect(createCitationHTML).toHaveBeenCalledWith(
+            expect.objectContaining({ key: 'ATT1' }),
+            '9'
+        );
+    });
+
+    it('drops the locator for an att_id structural locator with no resolved page', () => {
+        const { metadata } = makeMetadata();
+        const input = '<citation att_id="1-ATT1" loc="s4" label="(Author, 2024)"/>';
+        expandToRawHtml(input, metadata, 'new', undefined, undefined, {});
+        expect(createCitationHTML).toHaveBeenCalledWith(
+            expect.objectContaining({ key: 'ATT1' }),
+            undefined
+        );
+    });
+
     // ---- Compound citation ----
 
     it('restores compound citation (always immutable)', () => {
@@ -531,6 +673,53 @@ describe('expandToRawHtml', () => {
             expect.objectContaining({ key: 'NEW1' }),
             '42'
         );
+    });
+
+    it('creates note and annotation citation links from item_id in new context', () => {
+        const metadata: SimplificationMetadata = { elements: new Map() };
+        const note = {
+            key: 'NOTE1234',
+            libraryID: 1,
+            isNote: vi.fn(() => true),
+            getNoteTitle: vi.fn(() => 'Project note'),
+        };
+        const annotation = {
+            key: 'ANNOT123',
+            libraryID: 1,
+            itemType: 'annotation',
+            isAnnotation: vi.fn(() => true),
+            isNote: vi.fn(() => false),
+            annotationText: 'Highlighted text',
+            annotationPageLabel: '12',
+            parentItem: {
+                key: 'ATTACH12',
+                isFileAttachment: vi.fn(() => true),
+                parentItem: {
+                    firstCreator: 'Smith',
+                    getField: vi.fn((field: string) => field === 'date' ? '2019-04-01' : ''),
+                },
+            },
+        };
+        (globalThis as any).Zotero.Items.getByLibraryAndKey = vi.fn((libId: number, key: string) => {
+            if (key === 'NOTE1234') return note;
+            if (key === 'ANNOT123') return annotation;
+            return null;
+        });
+        (globalThis as any).Zotero.Libraries.get = vi.fn(() => ({ isGroup: false }));
+
+        const result = expandToRawHtml(
+            '<citation id="1-NOTE1234"/> <citation id="1-ANNOT123"/>',
+            metadata,
+            'new'
+        );
+
+        expect(result).toContain(
+            '(<a href="zotero://select/library/items/NOTE1234" rel="noopener noreferrer">Note: Project note</a>)'
+        );
+        expect(result).toContain(
+            '(<a href="zotero://open-pdf/library/items/ATTACH12?annotation=ANNOT123" rel="noopener noreferrer">Annotation in Smith 2019, page 12</a>)'
+        );
+        expect(createCitationHTML).not.toHaveBeenCalled();
     });
 
     it('throws for new citation with item_id in old context', () => {
@@ -2867,6 +3056,10 @@ describe('Math apply-undo-apply cycle', () => {
 // =============================================================================
 
 describe('translatePageNumberToLabel', () => {
+    function pageLabelsFromList(labels: readonly string[]): Record<string, string> {
+        return Object.fromEntries(labels.map((label, index) => [String(index), label]));
+    }
+
     it('returns as-is when labels are null', () => {
         expect(translatePageNumberToLabel(null, '15')).toBe('15');
     });
@@ -2877,21 +3070,21 @@ describe('translatePageNumberToLabel', () => {
 
     it('translates 1-based page number to label with offset labels', () => {
         // Journal article starting at page 338 (28 pages: 338-365)
-        const labels = Array.from({ length: 28 }, (_, i) => String(338 + i));
+        const labels = pageLabelsFromList(Array.from({ length: 28 }, (_, i) => String(338 + i)));
         // Page 15 → pageLabels[14] = "352"
         expect(translatePageNumberToLabel(labels, '15')).toBe('352');
     });
 
     it('translates correctly for sequential labels (identity case)', () => {
         // Sequential labels [1..100]
-        const labels = Array.from({ length: 100 }, (_, i) => String(i + 1));
+        const labels = pageLabelsFromList(Array.from({ length: 100 }, (_, i) => String(i + 1)));
         // Page 15 → pageLabels[14] = "15" (identity mapping)
         expect(translatePageNumberToLabel(labels, '15')).toBe('15');
     });
 
     it('translates correctly for mixed roman/arabic labels', () => {
         // [i, ii, iii, 1, 2, ..., 100]
-        const labels = ['i', 'ii', 'iii', ...Array.from({ length: 100 }, (_, i) => String(i + 1))];
+        const labels = pageLabelsFromList(['i', 'ii', 'iii', ...Array.from({ length: 100 }, (_, i) => String(i + 1))]);
         // Page 2 → pageLabels[1] = "ii" (not label "2")
         expect(translatePageNumberToLabel(labels, '2')).toBe('ii');
         // Page 15 → pageLabels[14] = "12"
@@ -2900,46 +3093,46 @@ describe('translatePageNumberToLabel', () => {
 
     it('falls back for out-of-range offset label values', () => {
         // Labels [338..365] (28 pages)
-        const labels = Array.from({ length: 28 }, (_, i) => String(338 + i));
+        const labels = pageLabelsFromList(Array.from({ length: 28 }, (_, i) => String(338 + i)));
         // "340" as page number → pageLabels[339] = undefined → fallback "340"
         expect(translatePageNumberToLabel(labels, '340')).toBe('340');
     });
 
     it('falls back to original value when page number is out of range', () => {
         // Labels [338..342] (5 pages)
-        const labels = Array.from({ length: 5 }, (_, i) => String(338 + i));
+        const labels = pageLabelsFromList(Array.from({ length: 5 }, (_, i) => String(338 + i)));
         // "100" is not a label, and pageLabels[99] is undefined → fallback
         expect(translatePageNumberToLabel(labels, '100')).toBe('100');
     });
 
     it('handles page ranges', () => {
-        const labels = Array.from({ length: 28 }, (_, i) => String(338 + i));
+        const labels = pageLabelsFromList(Array.from({ length: 28 }, (_, i) => String(338 + i)));
         // "15-17" → "352-354"
         expect(translatePageNumberToLabel(labels, '15-17')).toBe('352-354');
     });
 
     it('handles non-numeric strings gracefully', () => {
-        const labels = ['i', 'ii', 'iii'];
+        const labels = pageLabelsFromList(['i', 'ii', 'iii']);
         expect(translatePageNumberToLabel(labels, 'intro')).toBe('intro');
     });
 
     it('does not translate structured locators like §3.2', () => {
-        const labels = Array.from({ length: 100 }, (_, i) => String(i + 1));
+        const labels = pageLabelsFromList(Array.from({ length: 100 }, (_, i) => String(i + 1)));
         expect(translatePageNumberToLabel(labels, '§3.2')).toBe('§3.2');
     });
 
     it('does not translate footnote locators like fn. 5', () => {
-        const labels = Array.from({ length: 100 }, (_, i) => String(i + 1));
+        const labels = pageLabelsFromList(Array.from({ length: 100 }, (_, i) => String(i + 1)));
         expect(translatePageNumberToLabel(labels, 'fn. 5')).toBe('fn. 5');
     });
 
     it('does not translate roman numeral locators', () => {
-        const labels = Array.from({ length: 100 }, (_, i) => String(i + 1));
+        const labels = pageLabelsFromList(Array.from({ length: 100 }, (_, i) => String(i + 1)));
         expect(translatePageNumberToLabel(labels, 'xii')).toBe('xii');
     });
 
     it('translates comma-separated page lists', () => {
-        const labels = Array.from({ length: 28 }, (_, i) => String(338 + i));
+        const labels = pageLabelsFromList(Array.from({ length: 28 }, (_, i) => String(338 + i)));
         // "3, 5" → "340, 342"
         expect(translatePageNumberToLabel(labels, '3, 5')).toBe('340, 342');
     });
@@ -3267,5 +3460,21 @@ describe('detectPartialSimplifiedTag — <link>', () => {
 
     it('returns null for a complete <link/> tag', () => {
         expect(detectPartialSimplifiedTag('see <link href="https://y.com/p"/> ok')).toBeNull();
+    });
+});
+
+describe('buildUnresolvedLocatorWarning', () => {
+    it('returns null when nothing was dropped', () => {
+        expect(buildUnresolvedLocatorWarning([])).toBeNull();
+    });
+
+    it('lists the unresolved locators in a single warning string', () => {
+        const warning = buildUnresolvedLocatorWarning([
+            'id="1-AAA" loc="s4"',
+            'id="2-BBB" loc="p7"',
+        ]);
+        expect(warning).toContain('id="1-AAA" loc="s4"');
+        expect(warning).toContain('id="2-BBB" loc="p7"');
+        expect(warning).toMatch(/only support page locators/i);
     });
 });

@@ -16,6 +16,28 @@ import { Metadata } from './metadata';
 import { preprocessHTML, schemaTransform } from './transformer';
 import { buildToHTML } from './serializer';
 
+const ZOTERO_HREF_SHIELD_PREFIX = 'https://zotero-cite.invalid/';
+
+function shieldZoteroHrefAttributes(html: string): string {
+    return html.replace(
+        /href="(zotero:\/\/[^"]*)"/g,
+        (_match, href) => `href="${ZOTERO_HREF_SHIELD_PREFIX}${encodeURIComponent(href)}"`
+    );
+}
+
+function restoreZoteroHrefAttributes(html: string): string {
+    return html.replace(
+        new RegExp(`href="${ZOTERO_HREF_SHIELD_PREFIX.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^"]*)"`, 'g'),
+        (match, encodedHref) => {
+            try {
+                return `href="${decodeURIComponent(encodedHref)}"`;
+            } catch {
+                return match;
+            }
+        }
+    );
+}
+
 /**
  * Normalize note HTML by roundtripping through ProseMirror's schema.
  * Produces the exact same canonical HTML that Zotero's note-editor produces.
@@ -26,21 +48,24 @@ import { buildToHTML } from './serializer';
 export function normalizeNoteHtml(html: string): string {
     const doc = getDocument();
 
-    // 1. Preprocess HTML (extract metadata, transform legacy content)
-    const { html: preprocessedHtml, metadataAttributes } = preprocessHTML(html, doc);
+    // 1. Shield Zotero protocol hrefs before any chrome-document innerHTML parse.
+    const shieldedInput = shieldZoteroHrefAttributes(html);
 
-    // 2. Parse metadata
+    // 2. Preprocess HTML (extract metadata, transform legacy content)
+    const { html: preprocessedHtml, metadataAttributes } = preprocessHTML(shieldedInput, doc);
+
+    // 3. Parse metadata
     const schemaVersion = (schema as any).version as number;
     const metadata = new Metadata(schemaVersion);
     metadata.parseAttributes(metadataAttributes);
 
-    // 3. Wire metadata into schema cache (needed by serializeCitationInnerHTML)
+    // 4. Wire metadata into schema cache (needed by serializeCitationInnerHTML)
     if (!(schema as any).cached) {
         (schema as any).cached = {};
     }
     (schema as any).cached.metadata = metadata;
 
-    // 4. Parse HTML into ProseMirror document
+    // 5. Parse HTML into ProseMirror document
     const container = doc.createElement('div');
     container.innerHTML = preprocessedHtml;
     const fragment = doc.createDocumentFragment();
@@ -49,14 +74,14 @@ export function normalizeNoteHtml(html: string): string {
     }
     const pmDoc = ProseMirrorDOMParser.fromSchema(schema).parse(fragment);
 
-    // 5. Apply schema transforms (strip marks from images, etc.)
+    // 6. Apply schema transforms (strip marks from images, etc.)
     let state = EditorState.create({ doc: pmDoc });
     const tr = schemaTransform(state);
     if (tr) {
         state = state.apply(tr);
     }
 
-    // 6. Serialize back to HTML
+    // 7. Serialize back to HTML
     const toHTML = buildToHTML(schema, doc);
-    return toHTML(state.doc.content, metadata);
+    return restoreZoteroHrefAttributes(toHTML(state.doc.content, metadata));
 }

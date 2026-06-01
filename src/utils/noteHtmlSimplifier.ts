@@ -14,6 +14,7 @@ import { stripBeaverEditFooter, stripBeaverCreatedFooter } from './noteEditFoote
 import { escapeAttr, unescapeAttr } from './noteHtmlEntities';
 import { stripDataCitationItems, stripNoteWrapperDiv } from './noteWrapper';
 import { normalizeNoteHtml } from '../prosemirror/normalize';
+import { parseZoteroCitationLinkHref } from './zoteroLinkCitation';
 
 export { normalizeNoteHtml };
 
@@ -135,18 +136,10 @@ export function simplifyNoteHtml(rawHtml: string, libraryID: number): Simplifica
     // Track occurrence counts for content-based IDs
     const citationKeyCounts = new Map<string, number>();
 
-    // Strip Beaver footers FIRST, before any normalization. The footer regexes
-    // require <a href="zotero://beaver/thread/..."> to be present, but Zotero's
-    // chrome HTMLDocument (used by normalizeNoteHtml under getDocument()) silently
-    // drops href attrs whose scheme is `zotero://` when parsing via innerHTML.
-    // Once the href is gone, ProseMirror's link mark (`tag: 'a[href]'`) can't
-    // bind, the <a> is dropped on re-serialization, and the regexes never match —
-    // so the footer would leak into the simplified view that the agent sees and
-    // edits. Stripping pre-normalize keeps the regexes operating on the raw shape
-    // that the writers (`getBeaverNoteFooterHTML`, `buildEditFooterHtml`) actually
-    // emit. Note: this only affects what the agent sees in the simplified view —
-    // the raw HTML on disk is untouched, since edit_note saves changes against
-    // its own normalize'd-but-uncached `strippedHtml`, not against `simplified`.
+    // Strip Beaver footers before normalization so internal Beaver protocol
+    // links never enter the agent-visible note body or citation-link pass.
+    // This only affects the simplified view; the raw note HTML on disk is
+    // untouched until edit_note applies a user-requested change.
     let simplified = stripBeaverEditFooter(rawHtml);
     simplified = stripBeaverCreatedFooter(simplified);
 
@@ -345,6 +338,30 @@ export function simplifyNoteHtml(rawHtml: string, libraryID: number): Simplifica
             (annMatch) => {
                 const idx = shieldedAnnotations.push(annMatch) - 1;
                 return `__BEAVER_LINK_SHIELD_${idx}__`;
+            }
+        );
+        simplified = simplified.replace(
+            /<a\s+[^>]*href="(zotero:\/\/[^"]*)"[^>]*>([\s\S]*?)<\/a>/g,
+            (match, rawHref, innerHtml) => {
+                const parsed = parseZoteroCitationLinkHref(rawHref);
+                if (!parsed) return match;
+
+                const itemId = `${parsed.libraryId}-${parsed.itemKey}`;
+                const occurrence = citationKeyCounts.get(parsed.itemKey) || 0;
+                citationKeyCounts.set(parsed.itemKey, occurrence + 1);
+                const ref = `c_${parsed.itemKey}_${occurrence}`;
+                const label = innerHtml.replace(/<[^>]+>/g, '').trim();
+
+                metadata.elements.set(ref, {
+                    rawHtml: match,
+                    type: 'citation',
+                    // Link citation labels are derived from the target item and
+                    // preserved from rawHtml while the target id is unchanged.
+                    originalAttrs: { item_id: itemId },
+                });
+
+                const labelAttr = label ? ` label="${escapeAttr(label)}"` : '';
+                return `<citation id="${itemId}"${labelAttr} ref="${ref}"/>`;
             }
         );
         simplified = simplified.replace(

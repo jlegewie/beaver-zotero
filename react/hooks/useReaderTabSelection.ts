@@ -7,11 +7,10 @@ import { addSelectionChangeListener, getCurrentReader, getSelectedTextAsTextSele
 import { isValidAnnotationType, TextSelection } from '../types/attachments/apiTypes';
 import { isAuthenticatedAtom } from "../atoms/auth";
 import { hasAuthorizedAccessAtom, isDeviceAuthorizedAtom } from '../atoms/profile';
-import { BEAVER_ANNOTATION_TEXT } from '../components/sources/ZoteroCitation';
 import { BeaverTemporaryAnnotations, ZoteroReader } from '../utils/annotationUtils';
 import { store } from '../store';
 import { threadAgentActionsAtom, getZoteroItemReferenceFromAgentAction, hasAppliedBulkAnnotations, AgentAction } from '../agents/agentActions';
-import { isBeaverAuthoredAnnotation } from '../../src/constants/annotations';
+import { BEAVER_CITATION_ANNOTATION_AUTHOR, isBeaverAuthoredAnnotation } from '../../src/constants/annotations';
 import { getItemValidationAtom } from '../atoms/itemValidation';
 import type { CreatedAnnotationResult } from '../types/agentActions/createAnnotations';
 
@@ -238,7 +237,7 @@ export function useReaderTabSelection() {
                             const item = Zotero.Items.get(ids[0]);
                             if(!item.isAnnotation() || !isValidAnnotationType(item.annotationType)) return;
                             if (isBeaverAuthoredAnnotation(item.annotationAuthorName)) return;
-                            if (item.annotationText === BEAVER_ANNOTATION_TEXT) return;
+                            if (item.annotationText === BEAVER_CITATION_ANNOTATION_AUTHOR) return;
                             // Check if this annotation was created by an agent action
                             const agentActions = store.get(threadAgentActionsAtom);
                             const isFromAgentAction = agentActions.some((action: AgentAction) => {

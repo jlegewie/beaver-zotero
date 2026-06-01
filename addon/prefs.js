@@ -51,6 +51,9 @@ pref("recentItems", "[]");
 pref("citationFormat", "numeric");
 pref("citationStyle", "http://www.zotero.org/styles/chicago-author-date");
 pref("citationLocale", "en-US");
+// When true, citation clicks create temporary PDF highlight annotations
+// instead of using Zotero's native transient position highlight.
+pref("useTemporaryCitationAnnotations", false);
 // When true, in-text citations display PDF page labels (e.g., Roman numerals
 // for front matter) instead of raw 1-based page numbers.
 pref("usePageLabels", true);

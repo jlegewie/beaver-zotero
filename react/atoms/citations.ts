@@ -228,6 +228,11 @@ function addCitationKeys(keys: Set<string>, citation: CitationMetadata) {
                 if (normalized.ref.kind === 'external') {
                     keys.add(externalCompatKey(normalized.ref.external_id, normalized.ref.loc));
                 }
+            } else if (normalized.rawIdentity) {
+                // The written attribute disagrees with the resolved type, e.g. the
+                // model cited an external reference with id="W..." instead of
+                // external_id="W...".
+                keys.add(`invalid:${normalized.rawIdentity}`);
             }
         }
     }

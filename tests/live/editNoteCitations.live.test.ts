@@ -258,6 +258,150 @@ describe('edit_note execute — loc="pageN" locator round-trip', () => {
 });
 
 // =========================================================================
+// execute — structural (non-page) locator resolved to its page
+// =========================================================================
+
+describe('edit_note execute — structural locator resolved to a page', () => {
+    beforeEach((ctx) => skipIfNoZotero(ctx, zoteroAvailable));
+
+    // The cited PDFs need a structured extraction in the cache so a sentence
+    // locator can be mapped to the page it sits on. Warm them once up-front:
+    // NORMAL_PDF is cited directly by key; PARENT_ITEM's PDF backs the
+    // regular-parent-item resolution path.
+    beforeAll(async () => {
+        if (!zoteroAvailable) return;
+        for (const attachment of [
+            { library_id: NORMAL_PDF.library_id, zotero_key: NORMAL_PDF.zotero_key },
+            { library_id: PARENT_ITEM.library_id, zotero_key: PARENT_ITEM.zotero_key },
+        ]) {
+            await post('/beaver/attachment/document', { attachment, mode: 'structured' }, { timeout: 120000 });
+        }
+    }, 200000);
+
+    it('stores a page locator when a sentence locator is edited in', async () => {
+        const ref = await seedNote('<p>Body to edit.</p>');
+
+        // s200 resolves to a page deep in the document; note citations only
+        // store page locators, so the sentence locator is mapped to its page.
+        const res = await executeEditNote({
+            library_id: ref.library_id,
+            zotero_key: ref.zotero_key,
+            operation: 'str_replace',
+            old_string: 'Body to edit.',
+            new_string: `Cited <citation id="${NORMAL_PDF.library_id}-${NORMAL_PDF.zotero_key}" loc="s200" label="(ref)"/>.`,
+        }, { timeout: 20000 });
+        expect(res.success, res.error ?? '').toBe(true);
+        // Resolution succeeded — no "could not be mapped" warning.
+        const warnings = res.result_data?.warnings ?? [];
+        expect(warnings.some((w) => /could not be mapped to a page/i.test(w))).toBe(false);
+
+        const readBack = await post<{ saved_html: string; error?: string }>(
+            '/beaver/test/note-read',
+            { library_id: ref.library_id, zotero_key: ref.zotero_key },
+        );
+        expect(readBack.error).toBeFalsy();
+        const decoded = decodeURIComponent(readBack.saved_html);
+        // A native page locator was stored (not dropped).
+        expect(decoded).toMatch(/"locator":"\d+","label":"page"/);
+    });
+
+    it('re-reads the resolved sentence locator as a loc="pageN" tag', async () => {
+        const ref = await seedNote('<p>Body to edit.</p>');
+
+        const exec = await executeEditNote({
+            library_id: ref.library_id,
+            zotero_key: ref.zotero_key,
+            operation: 'str_replace',
+            old_string: 'Body to edit.',
+            new_string: `Cited <citation id="${NORMAL_PDF.library_id}-${NORMAL_PDF.zotero_key}" loc="s200" label="(ref)"/>.`,
+        }, { timeout: 20000 });
+        expect(exec.success, exec.error ?? '').toBe(true);
+
+        const simplified = await readSimplified(`${ref.library_id}-${ref.zotero_key}`);
+        // The stored locator round-trips as a page locator, never a sentence one.
+        expect(simplified).toMatch(/loc="page\d+"/);
+        expect(simplified).not.toMatch(/loc="s\d+"/);
+    });
+
+    it('resolves a structural locator on a legacy att_id citation', async () => {
+        const ref = await seedNote('<p>Body to edit.</p>');
+
+        // Legacy attachment-keyed citation form must resolve the sentence
+        // locator to its page just like the unified id form.
+        const res = await executeEditNote({
+            library_id: ref.library_id,
+            zotero_key: ref.zotero_key,
+            operation: 'str_replace',
+            old_string: 'Body to edit.',
+            new_string: `Cited <citation att_id="${NORMAL_PDF.library_id}-${NORMAL_PDF.zotero_key}" loc="s200" label="(ref)"/>.`,
+        }, { timeout: 20000 });
+        expect(res.success, res.error ?? '').toBe(true);
+        const warnings = res.result_data?.warnings ?? [];
+        expect(warnings.some((w) => /could not be mapped to a page/i.test(w))).toBe(false);
+
+        const readBack = await post<{ saved_html: string; error?: string }>(
+            '/beaver/test/note-read',
+            { library_id: ref.library_id, zotero_key: ref.zotero_key },
+        );
+        const decoded = decodeURIComponent(readBack.saved_html);
+        expect(decoded).toMatch(/"locator":"\d+","label":"page"/);
+    });
+
+    it('resolves a structural locator on a regular parent item via its child PDF', async () => {
+        const ref = await seedNote('<p>Body to edit.</p>');
+
+        // Citing the regular parent item (not the attachment) must resolve the
+        // structural locator through its child PDF — the resolver loads the
+        // parent's child attachments even when they are lazily unloaded.
+        const res = await executeEditNote({
+            library_id: ref.library_id,
+            zotero_key: ref.zotero_key,
+            operation: 'str_replace',
+            old_string: 'Body to edit.',
+            new_string: `Cited <citation id="${PARENT_ITEM.library_id}-${PARENT_ITEM.zotero_key}" loc="s1" label="(ref)"/>.`,
+        }, { timeout: 20000 });
+        expect(res.success, res.error ?? '').toBe(true);
+        const warnings = res.result_data?.warnings ?? [];
+        expect(warnings.some((w) => /could not be mapped to a page/i.test(w))).toBe(false);
+
+        const readBack = await post<{ saved_html: string; error?: string }>(
+            '/beaver/test/note-read',
+            { library_id: ref.library_id, zotero_key: ref.zotero_key },
+        );
+        const decoded = decodeURIComponent(readBack.saved_html);
+        expect(decoded).toMatch(/"locator":"\d+","label":"page"/);
+    });
+
+    it('warns and drops the locator when a structural locator cannot be resolved', async () => {
+        const ref = await seedNote('<p>Body to edit.</p>');
+
+        // A sentence index far beyond the document is not in the citation
+        // index, so it can't be mapped to a page (option A: drop + warn).
+        const res = await executeEditNote({
+            library_id: ref.library_id,
+            zotero_key: ref.zotero_key,
+            operation: 'str_replace',
+            old_string: 'Body to edit.',
+            new_string: `Cited <citation id="${NORMAL_PDF.library_id}-${NORMAL_PDF.zotero_key}" loc="s999999" label="(ref)"/>.`,
+        }, { timeout: 20000 });
+        expect(res.success, res.error ?? '').toBe(true);
+
+        const warnings = res.result_data?.warnings ?? [];
+        const locatorWarning = warnings.find((w) => /could not be mapped to a page/i.test(w));
+        expect(locatorWarning).toBeTruthy();
+        expect(locatorWarning).toContain('loc="s999999"');
+
+        const readBack = await post<{ saved_html: string; error?: string }>(
+            '/beaver/test/note-read',
+            { library_id: ref.library_id, zotero_key: ref.zotero_key },
+        );
+        const decoded = decodeURIComponent(readBack.saved_html);
+        // The citation was saved without any locator.
+        expect(decoded).not.toContain('"locator"');
+    });
+});
+
+// =========================================================================
 // enrichOldStringCitationRefs — unified id= in old_string
 // =========================================================================
 

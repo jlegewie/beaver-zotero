@@ -173,6 +173,11 @@ export interface ItemSummary extends ZoteroItemReference {
     collections?: CollectionSummary[] | null;
     citation_key?: string | null;
     attachments?: AttachmentSummary[];
+    preview?: string | null;
+    annotation_text?: string | null;
+    annotation_comment?: string | null;
+    page_label?: string | null;
+    parent_key?: string | null;
 }
 
 export interface ItemData extends ZoteroItemBase {
