@@ -34,6 +34,10 @@
  *                                 reproducing mixed-script text. Gated on
  *                                 uniqueness and a non-ws character floor;
  *                                 conservative last resort.
+ *  13. markdown_render          — match a handler-rendered Markdown fragment
+ *                                 against note HTML after first-pass strategies
+ *                                 miss. Rendering stays outside this synchronous
+ *                                 module.
  */
 
 import {
@@ -81,7 +85,8 @@ export type MatchStrategyName =
     | 'spurious_wrap_strip'
     | 'tag_attribute_strip'
     | 'markdown_to_html'
-    | 'whitespace_relaxed';
+    | 'whitespace_relaxed'
+    | 'markdown_render';
 
 export interface MatchInput {
     /** Enriched, simplified-space old_string. */
@@ -112,6 +117,17 @@ export interface MatchInput {
      * the stored citation keeps a page locator instead of dropping it.
      */
     resolvedLocatorPages?: ResolvedLocatorPages;
+    /**
+     * Handler-rendered Markdown old_string, simplified with the same note
+     * simplifier used for stored notes. Populated only after the normal match
+     * pass misses.
+     */
+    renderedOldSimplified?: string;
+    /**
+     * Handler-rendered replacement, already merged for insert operations.
+     * Populated together with renderedOldSimplified.
+     */
+    renderedNewSimplified?: string;
 }
 
 export interface BaseExpansion {
@@ -1002,6 +1018,52 @@ const whitespaceRelaxedStrategy: Strategy = {
     },
 };
 
+const markdownRenderStrategy: Strategy = {
+    name: 'markdown_render',
+    tryMatch(input) {
+        const renderedOld = input.renderedOldSimplified;
+        if (!renderedOld) return null;
+
+        let expandedOld: string;
+        try {
+            expandedOld = expandToRawHtml(renderedOld, input.metadata, 'old');
+        } catch {
+            return null;
+        }
+
+        const matchCount = countOccurrences(input.strippedHtml, expandedOld);
+        if (matchCount === 0) return null;
+
+        const renderedNew = input.renderedNewSimplified ?? renderedOld;
+        let expandedNew: string;
+        try {
+            expandedNew = expandToRawHtml(
+                renderedNew,
+                input.metadata,
+                'new',
+                input.externalRefContext,
+                input.pageLabels,
+                input.resolvedLocatorPages,
+            );
+        } catch {
+            return null;
+        }
+
+        if (input.operation === 'insert_after' && !expandedNew.startsWith(expandedOld)) return null;
+        if (input.operation === 'insert_before' && !expandedNew.endsWith(expandedOld)) return null;
+
+        return {
+            strategy: 'markdown_render',
+            oldString: renderedOld,
+            newString: renderedNew,
+            expandedOld,
+            expandedNew,
+            matchCount,
+            normalizeAnchor: identity,
+        };
+    },
+};
+
 // =============================================================================
 // Public API
 // =============================================================================
@@ -1019,6 +1081,7 @@ const STRATEGIES: Strategy[] = [
     tagAttributeStripStrategy,
     markdownToHtmlStrategy,
     whitespaceRelaxedStrategy,
+    markdownRenderStrategy,
 ];
 
 /**

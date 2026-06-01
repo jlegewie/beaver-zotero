@@ -5,6 +5,7 @@ import {
     getOrSimplify,
     invalidateSimplificationCache,
     normalizeNoteHtml,
+    simplifyNoteHtml,
     type SimplificationMetadata,
 } from '../../../utils/noteHtmlSimplifier';
 import {
@@ -49,11 +50,14 @@ import {
 } from '../../../utils/editNoteMatcher';
 import { clearNoteEditorSelection } from '../../../../react/utils/sourceUtils';
 import { store } from '../../../../react/store';
+import { citationDataMapAtom } from '../../../../react/atoms/citations';
 import { currentThreadIdAtom } from '../../../../react/atoms/threads';
 import {
     externalReferenceMappingAtom,
     externalReferenceItemMappingAtom,
 } from '../../../../react/atoms/externalReferences';
+import { renderToHTML, type RenderContextData } from '../../../../react/utils/citationRenderers';
+import { prepareCitationRenderContext } from '../../../../react/utils/citationRenderContext';
 import { addOrUpdateEditFooter, getBeaverFooterAppendPoint } from '../../../utils/noteEditFooter';
 import { assertNoPreviewMarkers } from '../../../utils/notePreviewGuard';
 import {
@@ -91,6 +95,79 @@ function mergeInsertNewString(
 function collectWarnings(...warnings: Array<string | null | undefined>): string[] | undefined {
     const filtered = warnings.filter((w): w is string => !!w);
     return filtered.length > 0 ? filtered : undefined;
+}
+
+const MARKDOWN_RENDER_MARKERS = [
+    /^ {0,3}#{1,6}[ \t]/m,
+    /\*\*|__/,
+    /^ {0,3}[-*+] /m,
+    /\$[^$]+\$/,
+    /&(?!#?\w+;)/,
+];
+const CITATION_TAG_RE = /<citation\b[^>]*\/>/i;
+
+function looksLikeMarkdownForRender(oldString: string): boolean {
+    return MARKDOWN_RENDER_MARKERS.some((pattern) => pattern.test(oldString));
+}
+
+function containsCitationTag(...parts: string[]): boolean {
+    return parts.some((part) => CITATION_TAG_RE.test(part));
+}
+
+function renderMarkdownFragment(
+    content: string,
+    libraryId: number,
+    contextData?: RenderContextData,
+): string {
+    return simplifyNoteHtml(renderToHTML(content, 'markdown', contextData), libraryId).simplified;
+}
+
+/**
+ * Render Markdown-shaped edit strings through the same static renderer used by
+ * create_note, then simplify the rendered HTML into the matcher's input format.
+ * The helper is only called after the normal synchronous matcher misses.
+ */
+async function buildMarkdownRenderFields(
+    oldString: string,
+    newString: string,
+    operation: EditNoteOperation,
+    libraryId: number,
+): Promise<Pick<MatchInput, 'renderedOldSimplified' | 'renderedNewSimplified'>> {
+    if (!oldString || !looksLikeMarkdownForRender(oldString)) return {};
+
+    try {
+        const needsCitationContext = containsCitationTag(oldString, newString);
+        const contextData = needsCitationContext
+            ? await prepareCitationRenderContext(`${oldString}\n\n${newString}`, {
+                citationDataMap: store.get(citationDataMapAtom),
+                externalMapping: store.get(externalReferenceItemMappingAtom),
+                externalReferencesMap: store.get(externalReferenceMappingAtom),
+            })
+            : undefined;
+
+        const renderedOldSimplified = renderMarkdownFragment(oldString, libraryId, contextData);
+        let renderedNewSimplified: string;
+        if (operation === 'insert_after') {
+            const injected = newString.startsWith(oldString)
+                ? newString.substring(oldString.length)
+                : newString;
+            renderedNewSimplified = renderedOldSimplified
+                + renderMarkdownFragment(injected, libraryId, contextData);
+        } else if (operation === 'insert_before') {
+            const injected = newString.endsWith(oldString)
+                ? newString.substring(0, newString.length - oldString.length)
+                : newString;
+            renderedNewSimplified = renderMarkdownFragment(injected, libraryId, contextData)
+                + renderedOldSimplified;
+        } else {
+            renderedNewSimplified = renderMarkdownFragment(newString, libraryId, contextData);
+        }
+
+        return { renderedOldSimplified, renderedNewSimplified };
+    } catch (e: any) {
+        logger(`buildMarkdownRenderFields: Failed to render Markdown fallback: ${e?.message || String(e)}`, 1);
+        return {};
+    }
 }
 
 /**
@@ -556,7 +633,18 @@ async function validateEditNoteAction(
 
     // 13. Run the ranked matcher. The first strategy that produces a match
     //     wins. See editNoteMatcher.ts for the full chain.
-    const match = findBestMatch(matchInput, base);
+    let match = findBestMatch(matchInput, base);
+    if (!match) {
+        const rendered = await buildMarkdownRenderFields(
+            old_string ?? '',
+            new_string,
+            operation,
+            library_id,
+        );
+        if (rendered.renderedOldSimplified) {
+            match = findBestMatch({ ...matchInput, ...rendered }, base);
+        }
+    }
     if (!match) {
         // 13a. Distinct error for partial citation/annotation openers in
         //      old_string. `expandToRawHtml`'s regex requires a complete
@@ -979,7 +1067,18 @@ async function executeEditNoteAction(
     //    normalizes via normalized_action_data, but the note may have drifted
     //    between validation and execution (PM re-normalization, concurrent
     //    edit) so we re-match here against the current HTML.
-    const match = findBestMatch(matchInput, base);
+    let match = findBestMatch(matchInput, base);
+    if (!match) {
+        const rendered = await buildMarkdownRenderFields(
+            old_string ?? '',
+            new_string,
+            operation,
+            library_id,
+        );
+        if (rendered.renderedOldSimplified) {
+            match = findBestMatch({ ...matchInput, ...rendered }, base);
+        }
+    }
     if (!match) {
         // Defense-in-depth: same partial-tag check as the validator (step 13a)
         // — the executor may receive un-normalized action_data on stale paths.
