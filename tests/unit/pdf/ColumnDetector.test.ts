@@ -774,3 +774,35 @@ describe('detectColumns body-style spare on header/footer clip', () => {
         expect(bottomMost).toBeLessThan(808);
     });
 });
+
+describe('detectColumns recursion-depth guard', () => {
+    // Regression test for the xy-cut "too much recursion" stack overflow.
+    //
+    // xyCut peels at least one block per level, so a "staircase" page whose
+    // blocks each split off one at a time recurses once per block. A diagonal
+    // of N non-overlapping blocks (no x-overlap => the merge phases keep all N
+    // as separate single-column rects) drives the recursion ~N deep. Without
+    // the MAX_XYCUT_DEPTH guard this throws a RangeError ("Maximum call stack
+    // size exceeded" / SpiderMonkey "too much recursion") once N exceeds the
+    // JS stack limit — on Node's default stack that happens around ~5000, and
+    // the extraction worker's stack is smaller still. The guard must bound the
+    // recursion so a pathological page degrades to a plain sort instead of
+    // crashing the whole page extraction.
+    it('handles a deep block staircase without overflowing the stack', () => {
+        const N = 12000; // well past any real JS stack's xy-cut limit
+        const STEP = 16; // > block size => clean >= 8pt gap, no x-overlap
+        const rects: Rect[] = [];
+        for (let i = 0; i < N; i++) {
+            const p = 60 + i * STEP;
+            rects.push({ x: p, y: p, w: 8, h: 8 });
+        }
+
+        // Pre-guard this throws; with the guard it must complete and preserve
+        // every block (only the reading order past the cap is approximate).
+        let result: { columns: Rect[] } | undefined;
+        expect(() => {
+            result = detectColumns(makeColumnPage(rects));
+        }).not.toThrow();
+        expect(result!.columns).toHaveLength(N);
+    });
+});
