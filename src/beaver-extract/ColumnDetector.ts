@@ -1473,7 +1473,7 @@ const MIN_V_CUT_GAP = 8;
 const MIN_H_CUT_GAP = 8;
 
 // Hard ceiling on xy-cut recursion depth.
-const MAX_XYCUT_DEPTH = 400;
+const MAX_XYCUT_DEPTH = 250;
 
 /**
  * Phase 5: Sort blocks for proper reading order (critical for multi-column).
