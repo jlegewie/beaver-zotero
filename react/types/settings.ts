@@ -99,6 +99,122 @@ export const getCustomChatModelsFromPreferences = (): CustomChatModel[] => {
     return [];
 };
 
+/**
+ * Read custom models for the preferences editor.
+ *
+ * Unlike {@link getCustomChatModelsFromPreferences}, this does NOT drop entries
+ * that fail full validation. A provider that is still being filled in (missing
+ * api_key, api_base, etc.) must survive a preferences reopen, so the editor reads
+ * the raw array and only coerces it into a predictable shape. The model selector
+ * keeps using the stricter getter so incomplete providers never appear as usable
+ * models.
+ */
+export const getCustomChatModelsForEditing = (): CustomChatModel[] => {
+    try {
+        const raw = getPref('customChatModels');
+        if (raw && typeof raw === 'string') {
+            const parsed = JSON.parse(raw as string);
+            if (!Array.isArray(parsed)) return [];
+            return parsed.filter(isObject).map((entry) => {
+                const e = entry as Record<string, unknown>;
+                return {
+                    api_base: typeof e.api_base === 'string' ? e.api_base : '',
+                    format: e.format === 'anthropic' ? 'anthropic' : 'openai',
+                    api_key: typeof e.api_key === 'string' ? e.api_key : '',
+                    name: typeof e.name === 'string' ? e.name : '',
+                    snapshot: typeof e.snapshot === 'string' ? e.snapshot : '',
+                    context_window: typeof e.context_window === 'number' ? e.context_window : undefined,
+                    supports_vision: typeof e.supports_vision === 'boolean' ? e.supports_vision : false,
+                } as CustomChatModel;
+            });
+        }
+    } catch (e) {
+        console.error("Error parsing customChatModels:", e);
+    }
+    return [];
+};
+
+/**
+ * Persist the custom models array. Only the known custom-model fields are written
+ * so transient editor state (React keys, etc.) never leaks into the preference.
+ * The `provider` field is intentionally omitted: custom endpoints always default
+ * to "custom" on the backend.
+ */
+export const saveCustomChatModelsToPreferences = (models: CustomChatModel[]): void => {
+    const cleaned = models.map((model) => {
+        const entry: CustomChatModel = {
+            api_base: model.api_base?.trim() || undefined,
+            format: model.format === 'anthropic' ? 'anthropic' : 'openai',
+            api_key: model.api_key?.trim() ?? '',
+            name: model.name?.trim() ?? '',
+            snapshot: model.snapshot?.trim() ?? '',
+            supports_vision: model.supports_vision ?? false,
+        };
+        if (typeof model.context_window === 'number' && Number.isFinite(model.context_window)) {
+            entry.context_window = model.context_window;
+        }
+        return entry;
+    });
+    setPref('customChatModels', JSON.stringify(cleaned));
+};
+
+export interface ApiBaseValidationResult {
+    valid: boolean;
+    error?: string;
+}
+
+/** Returns true when the host is a private, loopback, or link-local address. */
+const isPrivateOrReservedHost = (host: string): boolean => {
+    // IPv6 loopback / link-local / unique-local
+    if (host === '::1' || host.startsWith('fe80:') || host.startsWith('fc') || host.startsWith('fd')) {
+        return true;
+    }
+    // IPv4 dotted-quad ranges
+    const ipv4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+    if (ipv4) {
+        const a = parseInt(ipv4[1], 10);
+        const b = parseInt(ipv4[2], 10);
+        if (a === 10) return true;                        // 10.0.0.0/8
+        if (a === 127) return true;                       // loopback
+        if (a === 0) return true;                         // 0.0.0.0/8
+        if (a === 172 && b >= 16 && b <= 31) return true; // 172.16.0.0/12
+        if (a === 192 && b === 168) return true;          // 192.168.0.0/16
+        if (a === 169 && b === 254) return true;          // link-local / cloud metadata
+    }
+    return false;
+};
+
+/**
+ * Mirror of the backend SSRF protection for custom endpoints. Beaver routes
+ * every request through its own backend, so custom endpoints must be reachable
+ * from the public internet over HTTPS — localhost, private networks, and reserved
+ * IP ranges are rejected. Keeping this check client-side gives users an immediate
+ * error before a request is attempted.
+ */
+export const validateCustomProviderApiBase = (apiBase: string | undefined): ApiBaseValidationResult => {
+    const value = (apiBase ?? '').trim();
+    if (!value) {
+        return { valid: false, error: 'An endpoint URL is required for custom providers.' };
+    }
+    let url: URL;
+    try {
+        url = new URL(value);
+    } catch {
+        return { valid: false, error: 'Enter a valid URL, for example https://api.example.com/v1.' };
+    }
+    if (url.protocol !== 'https:') {
+        return { valid: false, error: 'The endpoint must use HTTPS. Plain HTTP endpoints are blocked.' };
+    }
+    const host = url.hostname.toLowerCase();
+    if (host === 'localhost' || host === 'localhost.localdomain') {
+        return { valid: false, error: 'The endpoint cannot point to localhost. It must be reachable from the public internet.' };
+    }
+    if (isPrivateOrReservedHost(host)) {
+        return { valid: false, error: 'The endpoint cannot use a private, internal, or reserved IP address. It must be reachable from the public internet.' };
+    }
+    return { valid: true };
+};
+
 export interface CustomPrompt {
     id?: string;
     title: string;

@@ -2,15 +2,40 @@ import React, { useState, useCallback } from "react";
 import Button from "../ui/Button";
 import {SettingsGroup, SettingsRow, SectionLabel, DocLink} from "./components/SettingsElements";
 import ApiKeyInput from "./ApiKeyInput";
+import CustomProviderCard from "./CustomProviderCard";
+import PlusSignIcon from "../icons/PlusSignIcon";
 import { getPref, setPref } from "../../../src/utils/prefs";
 import { handlePrefSave } from "./utils";
 import { activePreferencePageTabAtom, requestPlusToolsAtom } from "../../atoms/ui";
 import { remainingBeaverCreditsAtom } from "../../atoms/profile";
+import { refreshCustomModelsAtom } from "../../atoms/models";
+import {
+    CustomChatModel,
+    getCustomChatModelsForEditing,
+    saveCustomChatModelsToPreferences,
+} from "../../types/settings";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 
+/** Editor entry: a custom model plus a stable key for React list rendering. */
+interface CustomProviderEntry {
+    _id: string;
+    model: CustomChatModel;
+}
+
+const createProviderId = (): string => crypto.randomUUID();
+
+const emptyCustomModel = (): CustomChatModel => ({
+    name: '',
+    snapshot: '',
+    api_base: '',
+    format: 'openai',
+    api_key: '',
+    supports_vision: false,
+});
 
 const ApiKeysSection: React.FC = () => {
     const setActiveTab = useSetAtom(activePreferencePageTabAtom);
+    const refreshCustomModels = useSetAtom(refreshCustomModelsAtom);
 
     // --- Atoms: API Keys ---
     const [geminiKey, setGeminiKey] = useState(() => getPref('googleGenerativeAiApiKey'));
@@ -20,6 +45,44 @@ const ApiKeysSection: React.FC = () => {
     // --- Atoms: Request Plus Tools ---
     const [requestPlusTools, setRequestPlusTools] = useAtom(requestPlusToolsAtom);
     const remainingBeaverCredits = useAtomValue(remainingBeaverCreditsAtom);
+
+    // --- State: Custom Providers ---
+    const [customProviders, setCustomProviders] = useState<CustomProviderEntry[]>(() =>
+        getCustomChatModelsForEditing().map((model) => ({ _id: createProviderId(), model }))
+    );
+    const [newProviderId, setNewProviderId] = useState<string | null>(null);
+
+    // Persist the providers list to preferences and refresh the live model selector.
+    const persistProviders = useCallback((entries: CustomProviderEntry[]) => {
+        saveCustomChatModelsToPreferences(entries.map((e) => e.model));
+        refreshCustomModels();
+    }, [refreshCustomModels]);
+
+    const handleAddProvider = useCallback(() => {
+        const id = createProviderId();
+        setCustomProviders((prev) => {
+            const next = [...prev, { _id: id, model: emptyCustomModel() }];
+            persistProviders(next);
+            return next;
+        });
+        setNewProviderId(id);
+    }, [persistProviders]);
+
+    const handleProviderChange = useCallback((id: string, model: CustomChatModel) => {
+        setCustomProviders((prev) => {
+            const next = prev.map((e) => (e._id === id ? { ...e, model } : e));
+            persistProviders(next);
+            return next;
+        });
+    }, [persistProviders]);
+
+    const handleRemoveProvider = useCallback((id: string) => {
+        setCustomProviders((prev) => {
+            const next = prev.filter((e) => e._id !== id);
+            persistProviders(next);
+            return next;
+        });
+    }, [persistProviders]);
 
     // --- Handlers: Toggle Request Plus Tools ---
     const handleRequestPlusToolsToggle = useCallback(() => {
@@ -82,12 +145,6 @@ const ApiKeysSection: React.FC = () => {
                     />
                 </div>
             </SettingsGroup>
-
-            <SectionLabel>Additional Providers</SectionLabel>
-
-            <div className="text-base font-color-secondary mt-1 mb-2" style={{ paddingLeft: '2px' }}>
-                Additional model providers and custom endpoints are supported via <DocLink path="custom-models">custom models</DocLink>.
-            </div>
 
             <div className="display-flex flex-row gap-2">
                 <SectionLabel>Plus Tools</SectionLabel>
@@ -201,7 +258,45 @@ const ApiKeysSection: React.FC = () => {
                     />
                 )}
             </SettingsGroup>
-        
+
+            <div className="display-flex flex-row items-end justify-between">
+                <SectionLabel>Custom Providers</SectionLabel>
+                <Button
+                    variant="outline"
+                    icon={PlusSignIcon}
+                    className="text-base mb-15"
+                    onClick={handleAddProvider}
+                >
+                    Add Provider
+                </Button>
+            </div>
+
+            <div className="text-base font-color-secondary mb-2" style={{ paddingLeft: '2px' }}>
+                Connect OpenRouter, OpenAI-compatible proxies, or self-hosted endpoints as additional models.
+                Requests are routed through Beaver's backend, so each endpoint must be reachable from the public
+                internet over HTTPS — localhost, private networks, and VPN-only hosts will not work.
+                {' '}<DocLink path="custom-models">Learn more</DocLink>.
+            </div>
+
+            {customProviders.length > 0 ? (
+                <SettingsGroup>
+                    {customProviders.map((entry, index) => (
+                        <CustomProviderCard
+                            key={entry._id}
+                            model={entry.model}
+                            onChange={(model) => handleProviderChange(entry._id, model)}
+                            onRemove={() => handleRemoveProvider(entry._id)}
+                            defaultExpanded={entry._id === newProviderId}
+                            hasBorder={index > 0}
+                        />
+                    ))}
+                </SettingsGroup>
+            ) : (
+                <div className="text-base font-color-tertiary" style={{ paddingLeft: '2px' }}>
+                    No custom providers yet. Click <strong>Add Provider</strong> to configure one.
+                </div>
+            )}
+
         </>
     );
 };

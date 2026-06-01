@@ -314,6 +314,22 @@ export const setModelsAtom = atom(
     }
 );
 
+/**
+ * Re-read custom models from preferences and merge them back into the supported
+ * model list. Call after the custom-providers editor changes the
+ * `customChatModels` preference so the model selector reflects edits without a
+ * full backend reload. Existing custom entries are dropped first so removed or
+ * renamed providers don't linger as ghosts.
+ */
+export const refreshCustomModelsAtom = atom(
+    null,
+    (get, set) => {
+        const backendModels = get(supportedModelsAtom).filter((model) => !model.is_custom);
+        set(supportedModelsAtom, withCustomModels(backendModels));
+        set(validateSelectedModelAtom);
+    }
+);
+
 
 // Atom to update selected model
 export const updateSelectedModelAtom = atom(
