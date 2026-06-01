@@ -53,9 +53,11 @@ declare namespace _ZoteroTypes {
       "skippedItems": string;
       "onboardingWelcomeShown": boolean;
       "onboardingReaderTipShown": boolean;
+      "onboardingReaderTipShownV2": boolean;
       "onboardingNoteTipShown": boolean;
       "onboardingCitationTipShown": boolean;
       "onboardingWelcomeShownAt": string;
+      "versionUpdatePopupShownAt": string;
       "onboardingSignInTextShown": boolean;
       "mcpServerEnabled": boolean;
       "backgroundExtractorEnabled": boolean;

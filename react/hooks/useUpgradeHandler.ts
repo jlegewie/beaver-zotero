@@ -197,6 +197,9 @@ export const useUpgradeHandler = () => {
             processedVersionsRef.current.add(latestFloating.version);
             logger(`useUpgradeHandler: Displaying floating release notes popup for version ${latestFloating.version}.`, 3);
 
+            // Record when the version popup is shown so onboarding tips can enforce a gap after it
+            setPref('versionUpdatePopupShownAt', new Date().toISOString());
+
             addFloatingPopupMessage({
                 type: 'version_update',
                 version: latestFloating.version,

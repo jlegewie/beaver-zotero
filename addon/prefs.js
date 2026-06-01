@@ -80,9 +80,11 @@ pref("skippedItems", "[]")
 // Onboarding popups
 pref("onboardingWelcomeShown", false);
 pref("onboardingReaderTipShown", false);
+pref("onboardingReaderTipShownV2", false);
 pref("onboardingNoteTipShown", false);
 pref("onboardingCitationTipShown", false);
 pref("onboardingWelcomeShownAt", "");
+pref("versionUpdatePopupShownAt", "");
 pref("onboardingSignInTextShown", false);
 
 // MCP server
