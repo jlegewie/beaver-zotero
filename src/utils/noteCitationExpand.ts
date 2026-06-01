@@ -13,7 +13,7 @@
  */
 
 import { createCitationHTML } from './zoteroUtils';
-import { getBestPDFAttachment } from './zoteroItemHelpers';
+import { getBestPDFAttachment, getBestPDFAttachmentAsync } from './zoteroItemHelpers';
 import { getAttachmentFileStatus } from '../services/agentDataProvider/utils';
 import { logger } from './logger';
 import {
@@ -30,11 +30,36 @@ import type { ExternalReference } from '../../react/types/externalReferences';
 import type { ZoteroItemReference } from '../../react/types/zotero';
 import type { PageLabelsByAttachmentId } from '../../react/atoms/citations';
 import {
+    citationIndexCandidateIdsForLocator,
     getPageLocator,
     normalizeCitationTag,
     parseRawCitationAttributes,
+    requestedCitationKey,
+    type CitationRef,
+    type Locator,
 } from '../../react/utils/citationGrammar';
 import type { PageLabels } from '../services/documentCache';
+import type { StructuredExtractResult } from '../beaver-extract/schema/schema';
+
+/**
+ * Map of `requestedCitationKey` (e.g. `zotero:1-KEY:s4`) → resolved page string
+ * for citations whose locator is a non-page structural locator (sentence,
+ * paragraph, heading, …). Native Zotero citations only store page locators, so
+ * structural locators are resolved to the page they appear on (via the
+ * structured extraction cache) before being stored. Resolve up-front with
+ * `preloadStructuralLocatorPages`.
+ */
+export type ResolvedLocatorPages = Record<string, string>;
+
+export interface StructuralLocatorPreload {
+    pages: ResolvedLocatorPages;
+    /**
+     * `id="LIB-KEY" loc="..."` descriptions of structural locators that could
+     * not be mapped to a page (no structured extraction cached, or the locator
+     * is not in the document's citation index). Surfaced as a save warning.
+     */
+    unresolved: string[];
+}
 
 // =============================================================================
 // Page Label Resolution
@@ -130,6 +155,114 @@ export async function preloadPageLabelsForNewCitations(str: string): Promise<Pag
 }
 
 /**
+ * Map a non-page (structural) locator to the page it appears on, using the
+ * document's structured citation index. Returns the page's display label when
+ * available, otherwise the 1-based page number; null when the locator is not
+ * indexed.
+ */
+function resolvePageFromStructuredResult(
+    result: StructuredExtractResult,
+    locator: Locator,
+): string | null {
+    const index = result.document.citationIndex ?? {};
+    for (const id of citationIndexCandidateIdsForLocator(locator)) {
+        const entry = index[id];
+        if (!entry || !Number.isInteger(entry.pageIndex) || entry.pageIndex < 0) continue;
+        return entry.pageLabel && entry.pageLabel.trim() !== ''
+            ? entry.pageLabel
+            : String(entry.pageIndex + 1);
+    }
+    return null;
+}
+
+/**
+ * Resolve the page for every structural (non-page) citation locator in a
+ * string, so expansion can store a page locator instead of dropping the
+ * locator. Note citations only support page locators; a `loc="s4"` sentence
+ * locator (and paragraph/heading/figure/… locators) is mapped to the page it
+ * sits on via the structured extraction cache.
+ *
+ * Read-only: on a cache miss the locator is reported as unresolved (and the
+ * citation is saved without a locator) rather than triggering a full
+ * extraction. Callers thread the returned `pages` map into `expandToRawHtml`
+ * and surface `unresolved` as a save warning.
+ */
+export async function preloadStructuralLocatorPages(str: string): Promise<StructuralLocatorPreload> {
+    const pages: ResolvedLocatorPages = {};
+    const unresolved: string[] = [];
+    const cache = Zotero.Beaver?.documentCache;
+    if (!cache) return { pages, unresolved };
+
+    const seen = new Set<string>();
+    const resultsByAttachment = new Map<number, Promise<StructuredExtractResult | null>>();
+    const regex = /<citation\s+([^/]*?)\s*\/>/g;
+    let match: RegExpExecArray | null;
+
+    while ((match = regex.exec(str)) !== null) {
+        const attrStr = match[1];
+        const normalized = normalizeCitationTag(parseRawCitationAttributes(attrStr));
+        if (!normalized.ok || normalized.ref.kind !== 'zotero') continue;
+        const loc = normalized.ref.loc;
+        // Page locators and locator-less citations are handled elsewhere.
+        if (!loc || loc.kind === 'page') continue;
+
+        const citationKey = requestedCitationKey(normalized.ref);
+        if (seen.has(citationKey)) continue;
+        seen.add(citationKey);
+
+        const describe = `id="${normalized.ref.library_id}-${normalized.ref.zotero_key}" loc="${loc.raw}"`;
+        try {
+            const item = Zotero.Items.getByLibraryAndKey(normalized.ref.library_id, normalized.ref.zotero_key);
+            // Use the async helper so a regular parent item's child attachments
+            // are loaded before lookup — the sync variant calls getAttachments()
+            // which throws or returns nothing when childItems is lazily unloaded.
+            const attachmentItem = item && typeof item !== 'boolean'
+                ? (item.isAttachment() ? item : await getBestPDFAttachmentAsync(item))
+                : null;
+            if (!attachmentItem) { unresolved.push(describe); continue; }
+
+            let resultPromise = resultsByAttachment.get(attachmentItem.id);
+            if (!resultPromise) {
+                resultPromise = (async () => {
+                    const filePath = await attachmentItem.getFilePathAsync();
+                    if (!filePath) return null;
+                    const result = await cache.getResult(
+                        { libraryId: attachmentItem.libraryID, zoteroKey: attachmentItem.key },
+                        'structured',
+                        filePath,
+                    );
+                    return result && result.mode === 'structured' ? result : null;
+                })();
+                resultsByAttachment.set(attachmentItem.id, resultPromise);
+            }
+            const result = await resultPromise;
+            if (!result) { unresolved.push(describe); continue; }
+
+            const page = resolvePageFromStructuredResult(result, loc);
+            if (page == null) { unresolved.push(describe); continue; }
+            pages[citationKey] = page;
+        } catch {
+            unresolved.push(describe);
+        }
+    }
+
+    return { pages, unresolved };
+}
+
+/**
+ * Build a non-blocking save warning describing structural locators that could
+ * not be mapped to a page (and were therefore stored without a locator).
+ * Returns null when nothing was dropped.
+ */
+export function buildUnresolvedLocatorWarning(unresolved: string[]): string | null {
+    if (unresolved.length === 0) return null;
+    return `Note citations only support page locators. These structural locators `
+        + `could not be mapped to a page and were saved without a locator: `
+        + `${unresolved.join('; ')}. They map to a page once the cited document's `
+        + `text extraction is available.`;
+}
+
+/**
  * Normalize a page locator to a single page number.
  *
  * LLM-generated citations sometimes contain page ranges ("241-243") or
@@ -199,14 +332,49 @@ export function extractAttr(attrStr: string, name: string): string | undefined {
 }
 
 /** Parse simplified citation attributes into a structured object */
-function parseSimplifiedCitationAttrs(attrStr: string): { item_id: string; page?: string } {
+interface SimplifiedCitationAttrs {
+    item_id: string;
+    page?: string;
+    /**
+     * True when `page` was resolved from a structural locator and is already a
+     * final page label — `buildCitationFromSimplifiedAttrs` must store it
+     * verbatim and skip the 1-based-page-number → label translation.
+     */
+    pageIsResolvedLabel?: boolean;
+}
+
+/**
+ * Resolve the page locator to store for a citation ref. Page locators are used
+ * as-is; non-page structural locators (sentence/paragraph/…) are substituted
+ * with the page pre-resolved from the extraction cache. `pageIsResolvedLabel`
+ * marks a substituted page so callers skip the 1-based-number → label
+ * translation (the resolved value is already a final page label).
+ */
+function resolveLocatorPageAttr(
+    ref: CitationRef,
+    resolvedLocatorPages?: ResolvedLocatorPages,
+): { page?: string; pageIsResolvedLabel?: boolean } {
+    const page = getPageLocator(ref);
+    if (page) return { page };
+
+    if (ref.loc && ref.loc.kind !== 'page' && resolvedLocatorPages) {
+        const resolved = resolvedLocatorPages[requestedCitationKey(ref)];
+        if (resolved) return { page: resolved, pageIsResolvedLabel: true };
+    }
+    return {};
+}
+
+function parseSimplifiedCitationAttrs(
+    attrStr: string,
+    resolvedLocatorPages?: ResolvedLocatorPages,
+): SimplifiedCitationAttrs {
     const normalized = normalizeCitationTag(parseRawCitationAttributes(attrStr));
     if (!normalized.ok || normalized.ref.kind !== 'zotero') {
         throw new Error('Citation must have an "id" attribute. Legacy "item_id" / "att_id" are also accepted.');
     }
     const item_id = `${normalized.ref.library_id}-${normalized.ref.zotero_key}`;
-    const page = getPageLocator(normalized.ref);
-    return { item_id, page: page || undefined };
+    const { page, pageIsResolvedLabel } = resolveLocatorPageAttr(normalized.ref, resolvedLocatorPages);
+    return { item_id, ...(page ? { page, pageIsResolvedLabel } : {}) };
 }
 
 /** Check if citation attributes have changed */
@@ -248,7 +416,7 @@ function resolvePageForCitation(
 
 /** Build a new citation from simplified attributes (item_id format: "LIB-KEY") */
 function buildCitationFromSimplifiedAttrs(
-    attrs: { item_id: string; page?: string },
+    attrs: SimplifiedCitationAttrs,
     shouldTranslatePage: boolean,
     pageLabels?: PageLabelsByAttachmentId,
 ): string {
@@ -265,7 +433,11 @@ function buildCitationFromSimplifiedAttrs(
     if (isLinkCitationItem(item)) {
         return buildZoteroCitationLinkHTML(item);
     }
-    const resolvedPage = resolvePageForCitation(item, attrs.page, shouldTranslatePage, pageLabels);
+    // A page resolved from a structural locator is already a final label;
+    // translating it again would mangle a numeric label into the wrong page.
+    const resolvedPage = attrs.pageIsResolvedLabel
+        ? attrs.page
+        : resolvePageForCitation(item, attrs.page, shouldTranslatePage, pageLabels);
     return stripInlineItemDataFromDataCitations(createCitationHTML(item, resolvedPage));
 }
 
@@ -275,6 +447,7 @@ function buildCitationFromAttId(
     page?: string,
     shouldTranslatePage = true,
     pageLabels?: PageLabelsByAttachmentId,
+    pageIsResolvedLabel = false,
 ): string {
     const dashIdx = attId.indexOf('-');
     if (dashIdx === -1) {
@@ -286,7 +459,11 @@ function buildCitationFromAttId(
     if (!item) {
         throw new Error(`Attachment not found: ${attId}`);
     }
-    const resolvedPage = resolvePageForCitation(item, page, shouldTranslatePage, pageLabels);
+    // A page resolved from a structural locator is already a final label and
+    // must be stored verbatim rather than re-translated.
+    const resolvedPage = pageIsResolvedLabel
+        ? page
+        : resolvePageForCitation(item, page, shouldTranslatePage, pageLabels);
     // createCitationHTML handles attachment-to-parent resolution internally
     return stripInlineItemDataFromDataCitations(createCitationHTML(item, resolvedPage));
 }
@@ -411,6 +588,7 @@ export function expandToRawHtml(
     context: 'old' | 'new',
     externalRefContext?: ExternalRefContext,
     pageLabels?: PageLabelsByAttachmentId,
+    resolvedLocatorPages?: ResolvedLocatorPages,
 ): string {
     // Expand citations (all self-closing: <citation ... />)
     str = str.replace(
@@ -434,7 +612,7 @@ export function expandToRawHtml(
                     }
                     // Single citation — check if attributes changed (e.g., page locator updated)
                     if (itemId) {
-                        const newAttrs = parseSimplifiedCitationAttrs(attrStr);
+                        const newAttrs = parseSimplifiedCitationAttrs(attrStr, resolvedLocatorPages);
                         if (attrsChanged(stored.originalAttrs, newAttrs)) {
                             // For existing citations, never translate the page. The agent
                             // sees and edits page LABELS (from the original locator), not
@@ -496,15 +674,19 @@ export function expandToRawHtml(
             // New citations from the model always use 1-based page numbers → translate
             const normalizedCitation = normalizeCitationTag(parseRawCitationAttributes(attrStr));
             if (itemId) {
-                const attrs = parseSimplifiedCitationAttrs(attrStr);
+                const attrs = parseSimplifiedCitationAttrs(attrStr, resolvedLocatorPages);
                 return buildCitationFromSimplifiedAttrs(attrs, true, pageLabels);
             }
             if (attId) {
-                const page = normalizedCitation.ok ? getPageLocator(normalizedCitation.ref) : extractAttr(attrStr, 'page');
-                return buildCitationFromAttId(attId, page, true, pageLabels);
+                // Resolve structural locators on legacy att_id/attachment_id
+                // citations the same way as the unified id path.
+                const { page, pageIsResolvedLabel } = normalizedCitation.ok
+                    ? resolveLocatorPageAttr(normalizedCitation.ref, resolvedLocatorPages)
+                    : { page: extractAttr(attrStr, 'page'), pageIsResolvedLabel: false };
+                return buildCitationFromAttId(attId, page, true, pageLabels, pageIsResolvedLabel);
             }
             if (normalizedCitation.ok && normalizedCitation.ref.kind === 'zotero') {
-                const attrs = parseSimplifiedCitationAttrs(attrStr);
+                const attrs = parseSimplifiedCitationAttrs(attrStr, resolvedLocatorPages);
                 return buildCitationFromSimplifiedAttrs(attrs, true, pageLabels);
             }
             // external_id: chat-side external work ID (e.g. OpenAlex W-id). Two-tier

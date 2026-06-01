@@ -18,7 +18,10 @@ import {
 import {
     expandToRawHtml,
     preloadPageLabelsForNewCitations,
+    preloadStructuralLocatorPages,
+    buildUnresolvedLocatorWarning,
     type ExternalRefContext,
+    type ResolvedLocatorPages,
 } from '../../../utils/noteCitationExpand';
 import {
     getLatestNoteHtml,
@@ -82,6 +85,12 @@ function mergeInsertNewString(
         return newString.endsWith(oldString) ? newString : newString + oldString;
     }
     return newString;
+}
+
+/** Combine optional warning strings into a `warnings` array, or undefined when empty. */
+function collectWarnings(...warnings: Array<string | null | undefined>): string[] | undefined {
+    const filtered = warnings.filter((w): w is string => !!w);
+    return filtered.length > 0 ? filtered : undefined;
 }
 
 /**
@@ -496,6 +505,12 @@ async function validateEditNoteAction(
     const newPageLabels = await preloadPageLabelsForNewCitations(new_string);
     const oldPageLabels = await preloadPageLabelsForNewCitations(old_string ?? '');
     const pageLabels = { ...newPageLabels, ...oldPageLabels };
+    // 10b-ii. Resolve structural (non-page) locators in new_string to the page
+    //      they sit on. Note citations only store page locators, so a sentence/
+    //      paragraph/heading locator is mapped to its page here; unresolved ones
+    //      are surfaced as a non-blocking warning on success.
+    const structuralLocators = await preloadStructuralLocatorPages(new_string);
+    const resolvedLocatorPages = structuralLocators.pages;
     // 10c. Enrich no-ref citations in old_string with refs from metadata.
     //      When the model reuses the form it wrote in an earlier edit_note
     //      (citation without ref) as its old_string in a follow-up edit,
@@ -523,6 +538,7 @@ async function validateEditNoteAction(
         strippedHtml,
         externalRefContext,
         pageLabels,
+        resolvedLocatorPages,
     };
     let base: BaseExpansion;
     try {
@@ -614,6 +630,8 @@ async function validateEditNoteAction(
     //     any matcher rewrite. mergeInsertNewString is a no-op for
     //     str_replace / str_replace_all.
     const warnings: string[] = [];
+    const locatorWarning = buildUnresolvedLocatorWarning(structuralLocators.unresolved);
+    if (locatorWarning) warnings.push(locatorWarning);
     if (operation === 'insert_after' || operation === 'insert_before') {
         const dedupWarning = buildInsertDedupWarning(
             operation, match.oldString, match.newString,
@@ -690,6 +708,11 @@ async function executeEditNoteAction(
     // 3. Pre-load page labels so new citations resolve page indices to labels.
     //    Done before reading the note to avoid async gaps between read and write.
     const newPageLabels = await preloadPageLabelsForNewCitations(new_string);
+    // 3b. Resolve structural (non-page) locators in new_string to their page so
+    //     citations keep a page locator instead of dropping it on save.
+    const structuralLocators = await preloadStructuralLocatorPages(new_string);
+    const resolvedLocatorPages = structuralLocators.pages;
+    const locatorWarning = buildUnresolvedLocatorWarning(structuralLocators.unresolved);
 
     // 4. Get current note HTML (kept for rollback on save failure)
     //    Avoid async operations between here and item.setNote() to preserve atomicity.
@@ -707,7 +730,7 @@ async function executeEditNoteAction(
     if (operation === 'rewrite') {
         let expandedNew: string;
         try {
-            expandedNew = expandToRawHtml(new_string, metadata, 'new', externalRefContext, newPageLabels);
+            expandedNew = expandToRawHtml(new_string, metadata, 'new', externalRefContext, newPageLabels, resolvedLocatorPages);
         } catch (e: any) {
             return {
                 type: 'agent_action_execute_response',
@@ -786,7 +809,7 @@ async function executeEditNoteAction(
 
         // Check for duplicate citation warnings
         const duplicateWarning = checkDuplicateCitations(new_string, metadata);
-        const warnings = duplicateWarning ? [duplicateWarning] : undefined;
+        const warnings = collectWarnings(duplicateWarning, locatorWarning);
 
         return {
             type: 'agent_action_execute_response',
@@ -806,7 +829,7 @@ async function executeEditNoteAction(
     if (operation === 'append') {
         let expandedNew: string;
         try {
-            expandedNew = expandToRawHtml(new_string, metadata, 'new', externalRefContext, newPageLabels);
+            expandedNew = expandToRawHtml(new_string, metadata, 'new', externalRefContext, newPageLabels, resolvedLocatorPages);
         } catch (e: any) {
             return {
                 type: 'agent_action_execute_response',
@@ -880,7 +903,7 @@ async function executeEditNoteAction(
         invalidateSimplificationCache(noteId);
 
         const duplicateWarning = checkDuplicateCitations(new_string, metadata);
-        const warnings = duplicateWarning ? [duplicateWarning] : undefined;
+        const warnings = collectWarnings(duplicateWarning, locatorWarning);
         const undoData = {
             undo_new_html: expandedNew,
             undo_before_context: undoBeforeContext,
@@ -937,6 +960,7 @@ async function executeEditNoteAction(
         strippedHtml,
         externalRefContext,
         pageLabels,
+        resolvedLocatorPages,
     };
     let base: BaseExpansion;
     try {
@@ -1143,7 +1167,7 @@ async function executeEditNoteAction(
 
     // 17. Check for duplicate citation warnings
     const duplicateWarning = checkDuplicateCitations(new_string, metadata);
-    const warnings = duplicateWarning ? [duplicateWarning] : undefined;
+    const warnings = collectWarnings(duplicateWarning, locatorWarning);
 
     // 18. Wait for ProseMirror to normalize the note and update undo data.
     // When the note is open in the editor, PM re-normalizes after saveTx(),

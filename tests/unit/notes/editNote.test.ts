@@ -140,6 +140,8 @@ vi.mock('../../../src/utils/noteEditorIO', () => ({
 vi.mock('../../../src/utils/noteCitationExpand', () => ({
     expandToRawHtml: vi.fn((str: string, _metadata: any, _context: string) => str),
     preloadPageLabelsForNewCitations: vi.fn().mockResolvedValue(undefined),
+    preloadStructuralLocatorPages: vi.fn().mockResolvedValue({ pages: {}, unresolved: [] }),
+    buildUnresolvedLocatorWarning: vi.fn(() => null),
 }));
 
 vi.mock('../../../src/utils/editNoteStrippers', () => ({
