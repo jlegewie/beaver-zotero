@@ -686,10 +686,39 @@ export async function extractAndCacheDocument(
             }
         }
 
+        // Unexpected/native JS error (not an ExtractionError)
+        const native = error instanceof Error ? error : undefined;
+        const rawMessage = native ? native.message : String(error);
+        const responseDetail = [
+            native ? `${native.name}: ${native.message}` : rawMessage,
+            `(mode=${mode}, worker=${workerName}, pages=${totalPages ?? 'unknown'})`,
+        ]
+            .filter(Boolean)
+            .join('\n');
+        const diagnosticDetail = [
+            responseDetail,
+            native?.stack
+                ? native.stack.split('\n').slice(0, 6).join('\n')
+                : undefined,
+        ]
+            .filter(Boolean)
+            .join('\n');
+        logger(
+            `extractAndCacheDocument[${workerName}]: Unexpected extraction failure for ${errorKey}\n${diagnosticDetail}`,
+            1,
+        );
+
+        // Classify a JS stack overflow so it is greppable/alertable instead of
+        // hiding in the generic `extraction_failed` bucket
+        const isStackOverflow =
+            /too much recursion|maximum call stack|call stack size exceeded/i.test(
+                rawMessage,
+            );
+
         return {
             kind: 'response_error',
-            code: 'extraction_failed',
-            message: `Failed to extract PDF content for ${errorKey}: ${error instanceof Error ? error.message : String(error)}`,
+            code: isStackOverflow ? 'recursion_limit' : 'extraction_failed',
+            message: `Failed to extract PDF content for ${errorKey}: ${responseDetail}`,
             pageCount: totalPages,
             resolvedAttachment,
         };

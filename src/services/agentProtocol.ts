@@ -536,6 +536,7 @@ export type ZoteroDocumentErrorCode =
     | 'download_failed'     // Remote file download failed
     | 'timeout'             // Extraction timed out
     | 'extraction_failed'  // General extraction failure
+    | 'recursion_limit'     // Extraction overflowed the JS stack ("too much recursion" / "Maximum call stack")
     | 'schema_version_mismatch'
     | 'mode_mismatch';
 
