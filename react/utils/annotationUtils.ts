@@ -564,7 +564,7 @@ export const createBoundingBoxHighlights = async (
     boundingBoxData: TemporaryHighlightLocation[],
     previewText: string,
     annotationText: string,
-    options: { color?: string; authorName?: string } = {},
+    options: { color?: string; authorName?: string | null } = {},
 ): Promise<ZoteroItemReference[]> => {
     if (boundingBoxData.length === 0) return [];
     
@@ -594,7 +594,9 @@ export const createBoundingBoxHighlights = async (
         }
 
         const color = options.color ?? '#00bbff';
-        const authorName = options.authorName ?? BEAVER_ANNOTATION_AUTHOR;
+        const authorName = typeof options.authorName === 'string' && options.authorName.trim() !== ''
+            ? options.authorName
+            : BEAVER_ANNOTATION_AUTHOR;
 
         // Create one annotation per page with combined rects
         for (const [pageIndex, allBboxesOnPage] of pageGroups) {

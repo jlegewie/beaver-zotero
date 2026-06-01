@@ -26,6 +26,7 @@ import { ZoteroItemReference } from '../../types/zotero';
 import { revealSource } from '../../utils/sourceUtils';
 import { resolvePageLabelFromLabels, translatePageNumberToLabelFromLabels } from '../../utils/pageLabels';
 import { getBestPDFAttachment, getBestPDFAttachmentAsync } from '../../../src/utils/zoteroItemHelpers';
+import { BEAVER_CITATION_ANNOTATION_AUTHOR } from '../../../src/constants/annotations';
 import {
     baseCitationKey,
     CitationRef,
@@ -39,7 +40,6 @@ import {
     selectedExternalReferenceAtom
 } from '../../atoms/ui';
 import { Icon, LibraryIcon, PdfIcon, GlobalSearchIcon, NoteIcon, HighlighterIcon } from '../icons/icons';
-import { BEAVER_CITATION_ANNOTATION_AUTHOR } from '../../../src/constants/annotations';
 import {
     buildZoteroCitationLinkHTML,
     isLinkCitationItem,
@@ -572,9 +572,11 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
 
             // Handle the three scenarios
             if (boundingBoxData.length > 0) {
-                const highlightLocations = boundingBoxData.map(({ page, bboxes }) => ({
+                const loadedPageLabels = getPageLabelsForItem(pdfItem, labelsByAttachmentId);
+                const highlightLocations = boundingBoxData.map(({ page, bboxes, pageLabel }) => ({
                     pageIndex: page - 1,
                     boxes: bboxes,
+                    pageLabel: pageLabel ?? resolvePageLabelFromLabels(loadedPageLabels, page),
                 }));
 
                 if (useTemporaryCitationAnnotations) {

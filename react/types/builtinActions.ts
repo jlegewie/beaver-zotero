@@ -83,15 +83,15 @@ export const BUILTIN_ACTIONS: Action[] = [
     {
         id: 'builtin-skim-paper',
         title: 'Skim this paper',
-        text: 'Skim this document and create a structured skim note so I can quickly decide what to read closely. Start with a 2-3 sentence overview stating what the document is about, its central argument or contribution, and the main conclusion. Then provide a section-by-section walkthrough: for each major section or chapter, write one sentence summarizing its key point with a citation <citation ... loc="s..."/>. Finish with 3-5 key takeaways. Save as a Zotero note attached to the parent item.',
+        text: 'Help me skim this paper. Use highlight annotations to mark the key passages I should read to get the gist: the central argument and contribution, data and methods, main findings, and key conclusions. Aim for 4-8 short highlights (2-3 sentences each) in the main body of the paper, avoid the introduction. Be extremely selective and only highlight short passages so I can skim it quickly. After completingthe highlights, provide a short summary structured in the following format: **Central argument and contribution**. [1-2 sentence summary] [citations to relevant annotations] etc.',
         targetType: 'attachment',
         sortOrder: 200,
     },
 
     {
         id: 'builtin-key-findings',
-        title: 'Extract key findings',
-        text: 'Read this paper and extract the key findings as a numbered list. For each finding, include a citation with sentence number where it appears. Focus on empirical results and novel contributions, not background or literature review. Save as a Zotero note attached to the parent item.',
+        title: 'Highlight key findings',
+        text: 'Read this paper and identify the key findings. For each one, create a highlight annotation with 1-3 specific sentences that states the finding, with a brief comment explaining its significance. Focus on empirical results and novel contributions, not background or literature review. Aim for 3-6 highlights covering the most important findings. After completing the highlights, provide a short summary with citations to the new annotations.',
         targetType: 'attachment',
         sortOrder: 210,
     },
@@ -123,9 +123,9 @@ export const BUILTIN_ACTIONS: Action[] = [
     // {
     //     id: 'builtin-annotate-methods',
     //     title: 'Annotate the methods section',
-    //     text: 'Find the methods/methodology section of this paper. Create Zotero annotations that highlight and explain: the research design, data sources, sample details, key variables, analytical techniques, and any robustness checks. Each annotation should be a brief explanatory note.',
+    //     text: 'Find the methods/methodology section of this paper and create highlight annotations to mark and explain its key components: research design, data sources, sample details, key variables, analytical techniques, and any robustness checks. For each highlight, add a brief explanatory comment so I can understand the method choices when reviewing later.',
     //     targetType: 'attachment',
-    //     sortOrder: 230,
+    //     sortOrder: 240,
     // },
 
     // ═══════════════════════════════════════════════════════════════════

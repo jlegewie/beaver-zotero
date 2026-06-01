@@ -63,6 +63,12 @@ export interface LibrarySuggestionsRequest {
     ui_view_type?: UiViewType | null;
     ui_filter_tags: string[];
     purpose?: string | null;
+    /**
+     * Reported plugin (frontend) version, e.g. "0.20.0". Optional — the backend
+     * uses it to gate cards whose action this client may not support yet (e.g.
+     * the Skim card needs annotation-creation handlers).
+     */
+    client_version?: string | null;
 }
 
 
@@ -90,6 +96,7 @@ export interface LibraryFacts {
 
 export type CardKind =
     | "reading_assistant"
+    | "skim_paper"
     | "literature_review"
     | "discover_research"
     | "organize_library"

@@ -134,6 +134,11 @@ export class LibrarySuggestionsService extends ApiService {
             ui_view_type: isLibraryTab ? mapTreeRowType(view.treeRowType) : null,
             ui_filter_tags: filterTags,
             purpose: options.purpose ?? null,
+            // Lets the backend gate version-dependent cards (e.g. the Skim card,
+            // which needs frontend annotation-creation handlers). Mirrors the
+            // X-Beaver-Version header but is explicit in the body for the
+            // suggestions endpoint.
+            client_version: Zotero.Beaver?.pluginVersion ?? null,
         };
     }
 

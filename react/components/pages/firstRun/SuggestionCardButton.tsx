@@ -8,6 +8,7 @@ import BrainIcon from '../../icons/BrainIcon';
 import GlobalSearchIcon from '../../icons/GlobalSearchIcon';
 import FolderDetailIcon from '../../icons/FolderDetailIcon';
 import TagIcon from '../../icons/TagIcon';
+import HighlighterIcon from '../../icons/HighlighterIcon';
 import { logger } from '../../../../src/utils/logger';
 
 interface SuggestionCardButtonProps {
@@ -17,6 +18,7 @@ interface SuggestionCardButtonProps {
 
 const ICON_BY_KIND: Record<CardKind, React.ComponentType<React.SVGProps<SVGSVGElement>>> = {
     reading_assistant: BrainIcon,
+    skim_paper: HighlighterIcon,
     literature_review: BookmarkIcon,
     discover_research: GlobalSearchIcon,
     organize_library: FolderDetailIcon,

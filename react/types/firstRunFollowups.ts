@@ -33,6 +33,11 @@ export const EMPTY_LIBRARY_DISCOVER_FOLLOWUPS: FirstRunFollowup[] = [
 export const FIRST_RUN_FOLLOWUPS: Record<CardKind, FirstRunFollowup[]> = {
     reading_assistant: [
         {
+            id: 'skim_with_highlights',
+            title: 'Skim this paper with highlights',
+            prompt: 'Help me skim this paper. Use highlight annotations to mark the key passages I should read to get the gist: the central argument and contribution, data and methods, main findings, and key conclusions. Aim for 6-10 short highlights in the main body of the paper. Be selective: together they should be the shortest path to understanding what the paper says.',
+        },
+        {
             id: 'related_in_library',
             title: 'Find related papers in my library',
             prompt: 'Find papers in my library related to this one. Briefly compare their findings and methodology.',
@@ -41,7 +46,19 @@ export const FIRST_RUN_FOLLOWUPS: Record<CardKind, FirstRunFollowup[]> = {
             id: 'find_recent_external',
             title: 'Find related papers online',
             prompt: 'Use external search to find recent papers on the topic of this paper. Prefer the last 5 years and highly-cited work. Return up to 8 results, each with title, first author, year, citation count, and a brief description of how it relates to this paper.',
-            
+
+        },
+    ],
+    skim_paper: [
+        {
+            id: 'save_summary_note',
+            title: 'Save this summary as a note',
+            prompt: 'Slightly extend the summary above and save it as a Zotero note attached to this paper.',
+        },
+        {
+            id: 'related_in_library',
+            title: 'Find related papers in my library',
+            prompt: 'Find papers in my library related to this one. Briefly compare their findings and methodology.',
         },
     ],
     literature_review: [
