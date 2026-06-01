@@ -21,6 +21,10 @@ import {
     normalizeWS,
     unescapeAttr,
 } from './noteHtmlEntities';
+import {
+    buildZoteroCitationLinkHTML,
+    isLinkCitationItem,
+} from './zoteroLinkCitation';
 import type { SimplificationMetadata } from './noteHtmlSimplifier';
 import type { ExternalReference } from '../../react/types/externalReferences';
 import type { ZoteroItemReference } from '../../react/types/zotero';
@@ -257,6 +261,9 @@ function buildCitationFromSimplifiedAttrs(
     const item = Zotero.Items.getByLibraryAndKey(libId, key);
     if (!item) {
         throw new Error(`Item not found: ${attrs.item_id}`);
+    }
+    if (isLinkCitationItem(item)) {
+        return buildZoteroCitationLinkHTML(item);
     }
     const resolvedPage = resolvePageForCitation(item, attrs.page, shouldTranslatePage, pageLabels);
     return stripInlineItemDataFromDataCitations(createCitationHTML(item, resolvedPage));

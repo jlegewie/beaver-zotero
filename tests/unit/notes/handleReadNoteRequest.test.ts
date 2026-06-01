@@ -109,6 +109,39 @@ function makeMockRegularItem(key: string, overrides: any = {}) {
     };
 }
 
+function makeMockCitedNote(key: string, overrides: any = {}) {
+    return {
+        libraryID: 1,
+        key,
+        deleted: false,
+        itemType: 'note',
+        isRegularItem: vi.fn(() => false),
+        isNote: vi.fn(() => true),
+        isAnnotation: vi.fn(() => false),
+        loadDataType: vi.fn().mockResolvedValue(undefined),
+        getNote: vi.fn(() => '<p>Project note body</p>'),
+        getNoteTitle: vi.fn(() => 'Project note'),
+        ...overrides,
+    };
+}
+
+function makeMockAnnotation(key: string, overrides: any = {}) {
+    return {
+        libraryID: 1,
+        key,
+        deleted: false,
+        itemType: 'annotation',
+        isRegularItem: vi.fn(() => false),
+        isNote: vi.fn(() => false),
+        isAnnotation: vi.fn(() => true),
+        annotationText: 'Highlighted text',
+        annotationComment: 'Annotation comment',
+        annotationPageLabel: '12',
+        parentKey: 'ATTACH12',
+        ...overrides,
+    };
+}
+
 
 // =============================================================================
 // Setup
@@ -312,6 +345,52 @@ describe('handleReadNoteRequest — cited_items extraction', () => {
         expect(response.success).toBe(true);
         expect(response.cited_items).toBeUndefined();
         expect(getByLibraryAndKeyAsync).not.toHaveBeenCalledWith(1, 'ATTACH1');
+    });
+
+    it('populates cited_items for note and annotation link citations', async () => {
+        vi.mocked(getOrSimplify).mockReturnValueOnce({
+            simplified: [
+                '<p><citation id="1-NOTE9999" ref="c_NOTE9999_0"/></p>',
+                '<p><citation id="1-ANNOT999" ref="c_ANNOT999_0"/></p>',
+            ].join('\n'),
+            metadata: { elements: new Map() },
+            isStale: false,
+        });
+
+        const note = makeMockItem();
+        const citedNote = makeMockCitedNote('NOTE9999');
+        const annotation = makeMockAnnotation('ANNOT999');
+        const getByLibraryAndKeyAsync = vi.fn(async (_libraryId: number, key: string) => {
+            if (key === 'ABCD1234') return note;
+            if (key === 'NOTE9999') return citedNote;
+            if (key === 'ANNOT999') return annotation;
+            return null;
+        });
+        (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = getByLibraryAndKeyAsync;
+
+        const response = await handleReadNoteRequest(makeRequest());
+
+        expect(response.success).toBe(true);
+        expect(response.cited_items).toEqual([
+            expect.objectContaining({
+                library_id: 1,
+                zotero_key: 'NOTE9999',
+                item_type: 'note',
+                title: 'Project note',
+                preview: 'body',
+            }),
+            expect.objectContaining({
+                library_id: 1,
+                zotero_key: 'ANNOT999',
+                item_type: 'annotation',
+                annotation_text: 'Highlighted text',
+                annotation_comment: 'Annotation comment',
+                page_label: '12',
+                parent_key: 'ATTACH12',
+            }),
+        ]);
+        expect((globalThis as any).Zotero.Items.loadDataTypes).toHaveBeenCalledWith([citedNote], ["itemData", "note"]);
+        expect((globalThis as any).Zotero.Items.loadDataTypes).toHaveBeenCalledWith([annotation], ["annotation", "annotationDeferred"]);
     });
 });
 

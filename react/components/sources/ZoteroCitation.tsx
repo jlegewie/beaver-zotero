@@ -40,6 +40,10 @@ import {
 } from '../../atoms/ui';
 import { Icon, LibraryIcon, PdfIcon, GlobalSearchIcon, NoteIcon, HighlighterIcon } from '../icons/icons';
 import { BEAVER_CITATION_ANNOTATION_AUTHOR } from '../../../src/constants/annotations';
+import {
+    buildZoteroCitationLinkHTML,
+    isLinkCitationItem,
+} from '../../../src/utils/zoteroLinkCitation';
 
 const TOOLTIP_WIDTH = '250px';
 export const BEAVER_ANNOTATION_TEXT = BEAVER_CITATION_ANNOTATION_AUTHOR;
@@ -660,6 +664,10 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
         try {
             const item = Zotero.Items.getByLibraryAndKey(effectiveLibraryID, effectiveItemKey);
             if (!item) return null;
+            if (isLinkCitationItem(item)) {
+                const html = buildZoteroCitationLinkHTML(item);
+                return <span dangerouslySetInnerHTML={{ __html: html }} />;
+            }
             const itemData = Zotero.Utilities.Item.itemToCSLJSON(item.parentItem || item);
             const startPage = pages.length > 0 ? pages[0] : undefined;
             // Fallback: use page prop directly when metadata doesn't provide pages
