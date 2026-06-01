@@ -51,14 +51,14 @@ export const FIRST_RUN_FOLLOWUPS: Record<CardKind, FirstRunFollowup[]> = {
     ],
     skim_paper: [
         {
-            id: 'summarize_from_highlights',
-            title: 'Summarize using these highlights',
-            prompt: 'Write a concise summary of this paper covering the research question, methodology, key findings, and main conclusions. Build on the highlights you just created and cite them to support each claim. Save the summary as a Zotero note attached to the item.',
+            id: 'save_summary_note',
+            title: 'Save this summary as a note',
+            prompt: 'Slightly extend the summary above and save it as a Zotero note attached to this paper.',
         },
         {
-            id: 'note_annotate_methods',
-            title: 'Add sticky notes with section summaries',
-            prompt: 'Add a note annotation to each main section of this paper with a short summary. Each note should use simple language to clearly summarize the section so I can understand the section when reviewing later.',
+            id: 'related_in_library',
+            title: 'Find related papers in my library',
+            prompt: 'Find papers in my library related to this one. Briefly compare their findings and methodology.',
         },
     ],
     literature_review: [
