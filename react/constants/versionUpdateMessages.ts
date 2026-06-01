@@ -303,13 +303,13 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
     },
     {
         version: "0.13.2",
-        title: "Free Credits Update",
+        title: "Version 0.13.2: Free Credits Update",
         text: "In an effort to make Beaver more sustainable as a service, free credits are now a one-time allocation rather than a monthly renewal. You can always use your own API key for unlimited usage.",
         inPanel: true,
     },
     {
         version: "0.13.3",
-        title: "Redesigned chat history",
+        title: "Version 0.13.3: Redesigned chat history",
         inPanel: true,
         featureList: [
             {
@@ -358,7 +358,7 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
     },
     {
         version: "0.16.0",
-        title: "Right-click Actions and longer documents",
+        title: "Version 0.16: Right-click Actions and longer documents",
         featureList: [
             {
                 title: "Beaver Actions from the right-click menu (Zotero 8+ only)",
@@ -421,7 +421,7 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
     },
     {
         version: "0.19.0",
-        title: "Performance and maintenance",
+        title: "Version 0.19: Performance and maintenance",
         inPanel: true,
         featureList: [
             {
