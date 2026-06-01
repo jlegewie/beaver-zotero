@@ -145,6 +145,30 @@ describe('citationDataByCitationKeyAtom', () => {
 
         expect(store.get(citationDataByCitationKeyAtom)['invalid:bad']).toBe(data);
     });
+
+    it('indexes a valid external reference cited with id= under its raw-identity fallback key', () => {
+        // The model sometimes writes <citation id="W..."/> instead of
+        // external_id="W...". The backend reclassifies it to a valid external
+        // reference, but the rendered DOM tag still parses as an invalid Zotero
+        // id ("invalid:W..."). The metadata must be reachable under that key.
+        const store = createStore();
+        const data = citation({
+            citation_id: 'c1',
+            external_source: 'openalex',
+            external_source_id: 'W158378843',
+            citation_type: 'external_reference',
+            invalid: false,
+            raw_tag: '<citation id="W158378843"/>',
+            requested_ref: { kind: 'external', external_id: 'W158378843' },
+            resolved_ref: { kind: 'external', source: 'openalex', external_id: 'W158378843' },
+        });
+        store.set(citationDataMapAtom, { c1: data });
+
+        const byKey = store.get(citationDataByCitationKeyAtom);
+        // Reachable both as a normal external reference and via the raw id= tag.
+        expect(byKey['external:W158378843']).toBe(data);
+        expect(byKey['invalid:W158378843']).toBe(data);
+    });
 });
 
 describe('updateCitationDataAtom', () => {
