@@ -13,6 +13,7 @@ import {
     CustomChatModel,
     getCustomChatModelsForEditing,
     saveCustomChatModelsToPreferences,
+    OPENROUTER_API_BASE,
 } from "../../types/settings";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 
@@ -24,10 +25,11 @@ interface CustomProviderEntry {
 
 const createProviderId = (): string => crypto.randomUUID();
 
+// New providers default to OpenRouter's endpoint, the most common custom setup.
 const emptyCustomModel = (): CustomChatModel => ({
     name: '',
     snapshot: '',
-    api_base: '',
+    api_base: OPENROUTER_API_BASE,
     format: 'openai',
     api_key: '',
     supports_vision: false,
@@ -50,7 +52,8 @@ const ApiKeysSection: React.FC = () => {
     const [customProviders, setCustomProviders] = useState<CustomProviderEntry[]>(() =>
         getCustomChatModelsForEditing().map((model) => ({ _id: createProviderId(), model }))
     );
-    const [newProviderId, setNewProviderId] = useState<string | null>(null);
+    // Only one provider card is expanded at a time.
+    const [expandedProviderId, setExpandedProviderId] = useState<string | null>(null);
 
     // Persist the providers list to preferences and refresh the live model selector.
     const persistProviders = useCallback((entries: CustomProviderEntry[]) => {
@@ -65,7 +68,7 @@ const ApiKeysSection: React.FC = () => {
             persistProviders(next);
             return next;
         });
-        setNewProviderId(id);
+        setExpandedProviderId(id);
     }, [persistProviders]);
 
     const handleProviderChange = useCallback((id: string, model: CustomChatModel) => {
@@ -82,7 +85,31 @@ const ApiKeysSection: React.FC = () => {
             persistProviders(next);
             return next;
         });
+        setExpandedProviderId((current) => (current === id ? null : current));
     }, [persistProviders]);
+
+    // Insert a copy named "{name} (copy)" directly below the source and expand it.
+    const handleDuplicateProvider = useCallback((id: string) => {
+        const copyId = createProviderId();
+        setCustomProviders((prev) => {
+            const index = prev.findIndex((e) => e._id === id);
+            if (index === -1) return prev;
+            const source = prev[index].model;
+            const copy: CustomChatModel = {
+                ...source,
+                name: `${source.name?.trim() || 'Untitled provider'} (copy)`,
+            };
+            const next = [...prev];
+            next.splice(index + 1, 0, { _id: copyId, model: copy });
+            persistProviders(next);
+            return next;
+        });
+        setExpandedProviderId(copyId);
+    }, [persistProviders]);
+
+    const handleToggleExpand = useCallback((id: string) => {
+        setExpandedProviderId((current) => (current === id ? null : id));
+    }, []);
 
     // --- Handlers: Toggle Request Plus Tools ---
     const handleRequestPlusToolsToggle = useCallback(() => {
@@ -286,7 +313,9 @@ const ApiKeysSection: React.FC = () => {
                             model={entry.model}
                             onChange={(model) => handleProviderChange(entry._id, model)}
                             onRemove={() => handleRemoveProvider(entry._id)}
-                            defaultExpanded={entry._id === newProviderId}
+                            onDuplicate={() => handleDuplicateProvider(entry._id)}
+                            isExpanded={entry._id === expandedProviderId}
+                            onToggleExpand={() => handleToggleExpand(entry._id)}
                             hasBorder={index > 0}
                         />
                     ))}

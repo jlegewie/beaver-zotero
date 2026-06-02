@@ -9,6 +9,7 @@ import {
     TickIcon,
     AlertIcon,
     DeleteIcon,
+    CopyIcon,
     RockIcon,
     TissuePaperIcon,
     ScissorIcon,
@@ -25,7 +26,9 @@ interface CustomProviderCardProps {
     model: CustomChatModel;
     onChange: (updated: CustomChatModel) => void;
     onRemove: () => void;
-    defaultExpanded?: boolean;
+    onDuplicate: () => void;
+    isExpanded: boolean;
+    onToggleExpand: () => void;
     hasBorder?: boolean;
 }
 
@@ -45,8 +48,6 @@ const MOVE_LABELS: Record<RockPaperScissorsMove, string> = {
     scissors: 'Scissors',
 };
 
-const pickRandomMove = (): RockPaperScissorsMove => MOVES[Math.floor(Math.random() * MOVES.length)];
-
 const outcomeText = (result: RockPaperScissorsTestResult): string => {
     switch (result.result) {
         case 'user': return 'You win!';
@@ -60,27 +61,36 @@ const CustomProviderCard: React.FC<CustomProviderCardProps> = ({
     model,
     onChange,
     onRemove,
-    defaultExpanded = false,
+    onDuplicate,
+    isExpanded,
+    onToggleExpand,
     hasBorder = false,
 }) => {
-    const [isExpanded, setIsExpanded] = useState(defaultExpanded);
     const [testStatus, setTestStatus] = useState<TestStatus>('idle');
     const [testResult, setTestResult] = useState<RockPaperScissorsTestResult | null>(null);
     const [testError, setTestError] = useState<string | null>(null);
+    const [contextWindowText, setContextWindowText] = useState<string>(
+        model.context_window != null ? String(model.context_window) : ''
+    );
 
     // --- Field updates (controlled by parent) ---
     const update = useCallback((patch: Partial<CustomChatModel>) => {
         onChange({ ...model, ...patch });
     }, [model, onChange]);
 
+    // Context window is free text so it can be cleared/typed; only digits are valid.
+    const contextWindowError = contextWindowText.trim() !== '' && !/^\d+$/.test(contextWindowText.trim());
     const handleContextWindowChange = useCallback((raw: string) => {
+        setContextWindowText(raw);
         const trimmed = raw.trim();
         if (trimmed === '') {
             update({ context_window: undefined });
-            return;
+        } else if (/^\d+$/.test(trimmed)) {
+            update({ context_window: parseInt(trimmed, 10) });
+        } else {
+            // Invalid input: keep the text visible for correction, but don't persist a bad value.
+            update({ context_window: undefined });
         }
-        const parsed = parseInt(trimmed, 10);
-        update({ context_window: Number.isFinite(parsed) ? parsed : undefined });
     }, [update]);
 
     // --- Validation (mirrors the backend security checks) ---
@@ -91,12 +101,11 @@ const CustomProviderCard: React.FC<CustomProviderCardProps> = ({
     const isComplete = hasName && hasSnapshot && hasApiKey && apiBaseValidation.valid;
 
     // --- Test endpoint ---
-    const runTest = useCallback(async () => {
+    const runTest = useCallback(async (userMove: RockPaperScissorsMove) => {
         setTestStatus('loading');
         setTestResult(null);
         setTestError(null);
         try {
-            const userMove = pickRandomMove();
             const result = await chatService.testCustomProviderRockPaperScissors(
                 {
                     api_base: model.api_base?.trim() || undefined,
@@ -122,27 +131,20 @@ const CustomProviderCard: React.FC<CustomProviderCardProps> = ({
         }
     }, [model]);
 
-    const testMenuItems: MenuItem[] = useMemo(() => [
-        {
-            label: 'Rock Paper Scissors',
-            onClick: runTest,
-            disabled: !isComplete || testStatus === 'loading',
-            customContent: (
-                <div className="display-flex flex-col">
-                    <span className="text-base font-color-primary">Rock Paper Scissors</span>
-                    <span className="text-sm font-color-tertiary">
-                        Play one round to verify streaming and tool calling.
-                    </span>
-                </div>
-            ),
-        },
-    ], [runTest, isComplete, testStatus]);
+    // The dropdown picks the user's move, which is sent to the model.
+    const testMenuItems: MenuItem[] = useMemo(() => MOVES.map((move) => ({
+        label: MOVE_LABELS[move],
+        icon: MOVE_ICONS[move],
+        onClick: () => runTest(move),
+        disabled: !isComplete || testStatus === 'loading',
+    })), [runTest, isComplete, testStatus]);
 
     const testButtonCustomContent = (
         <span className="display-flex flex-row items-center gap-2">
-            {testStatus === 'loading' && <Spinner />}
-            {testStatus === 'success' && <Icon icon={TickIcon} className="font-color-green" />}
-            <span>Test</span>
+            {testStatus === 'loading' ? <Spinner /> : testStatus === 'success' ? (
+                <Icon icon={TickIcon} className="font-color-green" />
+            ) : null}
+            <span>Test Endpoint</span>
             <Icon icon={ArrowDownIcon} />
         </span>
     );
@@ -157,8 +159,8 @@ const CustomProviderCard: React.FC<CustomProviderCardProps> = ({
     if (!isExpanded) {
         return (
             <div
-                className={`action-card ${hasBorder ? 'border-top-quinary' : ''}`}
-                onClick={() => setIsExpanded(true)}
+                className={`action-card display-flex flex-row items-center gap-3 ${hasBorder ? 'border-top-quinary' : ''}`}
+                onClick={onToggleExpand}
             >
                 <div className="display-flex flex-col flex-1 min-w-0" style={{ gap: '3px' }}>
                     <div className="display-flex flex-row items-center gap-3">
@@ -188,9 +190,9 @@ const CustomProviderCard: React.FC<CustomProviderCardProps> = ({
     // --- Expanded view ---
     return (
         <div className={`action-card action-card-editing ${hasBorder ? 'border-top-quinary' : ''}`}>
-            <div className="display-flex flex-col gap-3">
+            <div className="display-flex flex-col" style={{ gap: '14px' }}>
                 {/* Name */}
-                <label className="display-flex flex-col gap-1">
+                <label className="display-flex flex-col" style={{ gap: '5px' }}>
                     <span className="text-sm font-color-secondary">Name</span>
                     <input
                         type="text"
@@ -203,26 +205,26 @@ const CustomProviderCard: React.FC<CustomProviderCardProps> = ({
                 </label>
 
                 {/* Snapshot */}
-                <label className="display-flex flex-col gap-1">
+                <label className="display-flex flex-col" style={{ gap: '5px' }}>
                     <span className="text-sm font-color-secondary">Model (snapshot)</span>
                     <input
                         type="text"
                         value={model.snapshot}
                         onChange={(e) => update({ snapshot: e.target.value })}
-                        placeholder="gpt-4o or claude-3-5-sonnet-20241022"
+                        placeholder="openai/gpt-4o or claude-3-5-sonnet-20241022"
                         aria-label="Model snapshot"
                         className="chat-input text-base font-color-primary"
                     />
                 </label>
 
                 {/* API base */}
-                <label className="display-flex flex-col gap-1">
+                <label className="display-flex flex-col" style={{ gap: '5px' }}>
                     <span className="text-sm font-color-secondary">Endpoint URL (api_base)</span>
                     <input
                         type="text"
                         value={model.api_base ?? ''}
                         onChange={(e) => update({ api_base: e.target.value })}
-                        placeholder="https://api.example.com/v1"
+                        placeholder="https://openrouter.ai/api/v1"
                         aria-label="Endpoint URL"
                         className="chat-input text-base font-color-primary"
                     />
@@ -238,8 +240,8 @@ const CustomProviderCard: React.FC<CustomProviderCardProps> = ({
                 </label>
 
                 {/* Format + Context window row */}
-                <div className="display-flex flex-row gap-3">
-                    <label className="display-flex flex-col gap-1 flex-1">
+                <div className="display-flex flex-row gap-4">
+                    <label className="display-flex flex-col items-start" style={{ gap: '5px' }}>
                         <span className="text-sm font-color-secondary">Format</span>
                         <MenuButton
                             menuItems={formatMenuItems}
@@ -251,21 +253,27 @@ const CustomProviderCard: React.FC<CustomProviderCardProps> = ({
                             ariaLabel="API format"
                         />
                     </label>
-                    <label className="display-flex flex-col gap-1 flex-1">
+                    <label className="display-flex flex-col flex-1" style={{ gap: '5px' }}>
                         <span className="text-sm font-color-secondary">Context window</span>
                         <input
-                            type="number"
-                            value={model.context_window ?? ''}
+                            type="text"
+                            inputMode="numeric"
+                            value={contextWindowText}
                             onChange={(e) => handleContextWindowChange(e.target.value)}
                             placeholder="128000"
                             aria-label="Context window"
                             className="chat-input text-base font-color-primary"
                         />
+                        {contextWindowError && (
+                            <span className="text-sm" style={{ color: 'var(--tag-red-secondary)' }}>
+                                Enter a number (e.g. 128000).
+                            </span>
+                        )}
                     </label>
                 </div>
 
                 {/* API key */}
-                <label className="display-flex flex-col gap-1">
+                <label className="display-flex flex-col" style={{ gap: '5px' }}>
                     <span className="text-sm font-color-secondary">API key</span>
                     <input
                         type="password"
@@ -288,7 +296,46 @@ const CustomProviderCard: React.FC<CustomProviderCardProps> = ({
                     <span className="text-base font-color-primary">Supports vision (image input)</span>
                 </label>
 
-                {/* Test result */}
+                {/* Footer actions */}
+                <div className="display-flex flex-row items-center justify-between mt-1">
+                    <MenuButton
+                        menuItems={testMenuItems}
+                        customContent={testButtonCustomContent}
+                        variant="outline"
+                        width="180px"
+                        className="text-base"
+                        ariaLabel="Test endpoint"
+                        disabled={!isComplete && testStatus !== 'loading'}
+                        tooltipContent={!isComplete ? 'Fill in all required fields to test the endpoint.' : undefined}
+                    />
+                    <div className="display-flex flex-row items-center gap-3">
+                        <Button
+                            variant="ghost-secondary"
+                            icon={CopyIcon}
+                            style={{ padding: "2px 8px" }}
+                            onClick={onDuplicate}
+                        >
+                            <span className="text-xs">Duplicate</span>
+                        </Button>
+                        <Button
+                            variant="ghost-secondary"
+                            icon={DeleteIcon}
+                            style={{ padding: "2px 8px" }}
+                            onClick={onRemove}
+                        >
+                            <span className="text-xs">Delete</span>
+                        </Button>
+                        <Button
+                            variant="solid"
+                            style={{ padding: "2px 8px" }}
+                            onClick={onToggleExpand}
+                        >
+                            Done
+                        </Button>
+                    </div>
+                </div>
+
+                {/* Test result (shown below the Test button) */}
                 {testStatus === 'success' && testResult && (
                     <div
                         className="display-flex flex-col gap-1 rounded-md px-2 py-15 text-sm"
@@ -296,7 +343,7 @@ const CustomProviderCard: React.FC<CustomProviderCardProps> = ({
                     >
                         <div className="display-flex flex-row items-center gap-2 font-color-primary">
                             <Icon icon={TickIcon} className="font-color-green" />
-                            <span className="font-medium">Provider works</span>
+                            <span className="font-medium">Endpoint works</span>
                             {testResult.user_move && testResult.agent_move && (
                                 <span className="display-flex flex-row items-center gap-1 font-color-secondary">
                                     <span title={`You: ${MOVE_LABELS[testResult.user_move]}`}>
@@ -326,39 +373,6 @@ const CustomProviderCard: React.FC<CustomProviderCardProps> = ({
                         <span>{testError}</span>
                     </div>
                 )}
-
-                {/* Footer actions */}
-                <div className="display-flex flex-row items-center justify-between mt-2">
-                    <div className="display-flex flex-row items-center gap-3">
-                        <MenuButton
-                            menuItems={testMenuItems}
-                            customContent={testButtonCustomContent}
-                            variant="outline"
-                            width="240px"
-                            className="text-base"
-                            ariaLabel="Test provider"
-                            disabled={!isComplete && testStatus !== 'loading'}
-                            tooltipContent={!isComplete ? 'Fill in all required fields to test the provider.' : undefined}
-                        />
-                    </div>
-                    <div className="display-flex flex-row items-center gap-3">
-                        <Button
-                            variant="ghost-secondary"
-                            icon={DeleteIcon}
-                            style={{ padding: "2px 8px" }}
-                            onClick={onRemove}
-                        >
-                            <span className="text-xs">Delete</span>
-                        </Button>
-                        <Button
-                            variant="solid"
-                            style={{ padding: "2px 8px" }}
-                            onClick={() => setIsExpanded(false)}
-                        >
-                            Done
-                        </Button>
-                    </div>
-                </div>
             </div>
         </div>
     );

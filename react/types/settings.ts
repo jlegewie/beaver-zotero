@@ -99,6 +99,9 @@ export const getCustomChatModelsFromPreferences = (): CustomChatModel[] => {
     return [];
 };
 
+/** Default endpoint used for OpenRouter providers in the custom-providers editor. */
+export const OPENROUTER_API_BASE = 'https://openrouter.ai/api/v1';
+
 /**
  * Read custom models for the preferences editor.
  *
@@ -108,6 +111,10 @@ export const getCustomChatModelsFromPreferences = (): CustomChatModel[] => {
  * the raw array and only coerces it into a predictable shape. The model selector
  * keeps using the stricter getter so incomplete providers never appear as usable
  * models.
+ *
+ * Legacy entries that used `provider: "openrouter"` without an explicit endpoint
+ * are migrated to the equivalent custom endpoint so the editor treats them as
+ * complete custom providers.
  */
 export const getCustomChatModelsForEditing = (): CustomChatModel[] => {
     try {
@@ -117,8 +124,15 @@ export const getCustomChatModelsForEditing = (): CustomChatModel[] => {
             if (!Array.isArray(parsed)) return [];
             return parsed.filter(isObject).map((entry) => {
                 const e = entry as Record<string, unknown>;
+                const provider = typeof e.provider === 'string' ? e.provider.toLowerCase() : 'custom';
+                let api_base = typeof e.api_base === 'string' ? e.api_base : '';
+                // OpenRouter providers route through a fixed endpoint; populate it so
+                // the entry validates as a complete custom provider.
+                if (!api_base.trim() && provider === 'openrouter') {
+                    api_base = OPENROUTER_API_BASE;
+                }
                 return {
-                    api_base: typeof e.api_base === 'string' ? e.api_base : '',
+                    api_base,
                     format: e.format === 'anthropic' ? 'anthropic' : 'openai',
                     api_key: typeof e.api_key === 'string' ? e.api_key : '',
                     name: typeof e.name === 'string' ? e.name : '',
