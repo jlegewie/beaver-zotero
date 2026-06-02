@@ -4,6 +4,7 @@ import { CSSIcon } from '../icons/icons';
 import { removeTagIdAtom } from '../../atoms/messageComposition';
 import { truncateText } from '../../utils/stringUtils';
 import { ZoteroTag } from '../../types/zotero';
+import { useRemoveContextMenu } from '../../hooks/useRemoveContextMenu';
 
 const MAX_TAGBUTTON_TEXT_LENGTH = 20;
 
@@ -11,6 +12,8 @@ interface TagButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
     tag: ZoteroTag;
     canEdit?: boolean;
     disabled?: boolean;
+    /** Long-press the remove "x" to clear every editable context item at once. */
+    onRemoveAll?: () => void;
 }
 
 export const TagButton: React.FC<TagButtonProps> = ({
@@ -18,15 +21,18 @@ export const TagButton: React.FC<TagButtonProps> = ({
     className,
     disabled = false,
     canEdit = true,
+    onRemoveAll,
     ...rest
 }) => {
     const [isHovered, setIsHovered] = useState(false);
     const removeTagId = useSetAtom(removeTagIdAtom);
 
-    const handleRemove = (e: React.MouseEvent<HTMLSpanElement>) => {
-        e.stopPropagation();
-        removeTagId(tag.id);
-    };
+    const { isRemoveMenuOpen, contextMenuHandlers, removeHandlers, removeMenu } = useRemoveContextMenu({
+        onRemove: () => removeTagId(tag.id),
+        onRemoveAll,
+        canEdit,
+        disabled,
+    });
 
     const handleButtonClick = (e: React.MouseEvent<HTMLButtonElement>) => {
         e.stopPropagation();
@@ -35,9 +41,9 @@ export const TagButton: React.FC<TagButtonProps> = ({
     };
 
     const getIconElement = () => {
-        if (isHovered && canEdit) {
+        if ((isHovered || isRemoveMenuOpen) && canEdit) {
             return (
-                <span role="button" className="source-remove" onClick={handleRemove}>
+                <span role="button" className="source-remove" {...removeHandlers}>
                     <CSSIcon name="x-8" className="icon-16" />
                 </span>
             );
@@ -64,11 +70,13 @@ export const TagButton: React.FC<TagButtonProps> = ({
     const displayName = truncateText(tag.tag, MAX_TAGBUTTON_TEXT_LENGTH);
 
     return (
+        <>
         <button
             style={{ height: '22px' }}
             title={getTooltipTitle()}
             onMouseEnter={() => setIsHovered(true)}
             onMouseLeave={() => setIsHovered(false)}
+            {...contextMenuHandlers}
             className={getButtonClasses()}
             disabled={disabled}
             onClick={handleButtonClick}
@@ -80,6 +88,8 @@ export const TagButton: React.FC<TagButtonProps> = ({
             </span>
             <CSSIcon name="filter" className="icon-16 scale-60 mt-015 -ml-1" style={{ fill: 'var(--fill-tertiary)' }} />
         </button>
+        {removeMenu}
+        </>
     );
 };
 

@@ -1,6 +1,7 @@
 import React, { forwardRef } from 'react';
 import { CSSItemTypeIcon, CSSIcon, Spinner, Icon, ArrowUpRightIcon } from "../icons/icons";
 import { useAtomValue } from 'jotai';
+import { useRemoveContextMenu } from '../../hooks/useRemoveContextMenu';
 import { getItemValidationAtom } from '../../atoms/itemValidation';
 import { usePreviewHover } from '../../hooks/usePreviewHover';
 import { getDisplayNameFromItem } from '../../utils/sourceUtils';
@@ -34,6 +35,12 @@ interface MessageItemButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLBut
     canEdit?: boolean;
     disabled?: boolean;
     onRemove?: (item: Zotero.Item) => void;
+    /**
+     * Optional callback to remove all editable context items at once.
+     * When provided (and the button is editable), long-pressing the remove "x"
+     * opens a small menu offering "Remove" and "Remove all".
+     */
+    onRemoveAll?: () => void;
     tabContextType?: 'reader' | 'note';
     showInvalid?: boolean;
     /** Optional collection key to reveal the item within when clicked */
@@ -53,6 +60,7 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
             disabled = false,
             canEdit = true,
             onRemove,
+            onRemoveAll,
             tabContextType,
             showInvalid = true,
             revealInCollectionKey,
@@ -85,14 +93,19 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
                 ? item.isRegularItem() ? truncateText(getDisplayNameFromItem(item), MAX_ITEM_TEXT_LENGTH) : getDisplayNameFromItem(item)
                 : truncateText(item.getDisplayTitle(), MAX_ITEM_TEXT_LENGTH);
 
-        // Handle remove
-        const handleRemove = (e: React.MouseEvent<HTMLSpanElement>) => {
-            e.stopPropagation();
-            cancelTimers();
-            if (onRemove) {
-                onRemove(item);
-            }
-        };
+        // Right-click "remove" menu for this button. A left-click on the "x"
+        // removes just this item; right-clicking the button opens a menu with
+        // "Remove" (and "Remove all" when more than one removable item is attached).
+        const { isRemoveMenuOpen, contextMenuHandlers, removeHandlers, removeMenu } = useRemoveContextMenu({
+            onRemove: () => {
+                cancelTimers();
+                if (onRemove) onRemove(item);
+            },
+            onRemoveAll,
+            canEdit,
+            disabled,
+            onMenuOpen: cancelTimers,
+        });
 
         // Handle button click
         const handleButtonClick = (e: React.MouseEvent<HTMLButtonElement>) => {
@@ -138,10 +151,15 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
                 );
             }
 
-            // Show remove icon on hover (if editable)
-            if (isHovered && canEdit && !disabled) {
+            // Show remove icon on hover (if editable). Keep it visible while the
+            // long-press menu is open so the trigger doesn't disappear.
+            if ((isHovered || isRemoveMenuOpen) && canEdit && !disabled) {
                 return (
-                    <span role="button" className={`source-remove ${isAnnotation ? '-ml-015' : ''}`} onClick={handleRemove}>
+                    <span
+                        role="button"
+                        className={`source-remove ${isAnnotation ? '-ml-015' : ''}`}
+                        {...removeHandlers}
+                    >
                         <CSSIcon name="x-8" className="icon-16" />
                     </span>
                 );
@@ -196,11 +214,13 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
         };
 
         return (
+            <>
             <button
                 ref={ref}
                 style={{ height: '22px' }}
                 title={getTooltipTitle()}
                 {...hoverEventHandlers}
+                {...contextMenuHandlers}
                 className={getButtonClasses()}
                 disabled={disabled}
                 onClick={handleButtonClick}
@@ -231,6 +251,8 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
                     </span>
                 )}
             </button>
+            {removeMenu}
+            </>
         );
     }
 );

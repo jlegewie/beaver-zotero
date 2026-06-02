@@ -206,6 +206,30 @@ export const removeItemFromMessageAtom = atom(
 );
 
 /**
+* Remove all editable context from the current message at once.
+* Clears attached items (and their popup messages), message collections, and
+* library/collection/tag filters as well as the reader text selection.
+*
+* Non-editable context (current reader attachment, current note tab) is left
+* untouched since it is derived from the active Zotero state rather than the
+* user's manual selection.
+*/
+export const clearMessageContextAtom = atom(
+    null,
+    (get, set) => {
+        // Remove popup messages tied to attached items
+        const items = get(currentMessageItemsAtom);
+        for (const item of items) {
+            set(removePopupMessageAtom, item.key);
+        }
+        set(currentMessageItemsAtom, []);
+        set(currentMessageCollectionsAtom, []);
+        set(currentMessageFiltersAtom, createDefaultMessageFilters());
+        set(readerTextSelectionAtom, null);
+    }
+);
+
+/**
 * Add single item to currentMessageItemsAtom
 * Validates in background and removes if invalid
 */

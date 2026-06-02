@@ -4,6 +4,7 @@ import { useSetAtom } from 'jotai'
 import { readerTextSelectionAtom } from '../../atoms/messageComposition'
 import { navigateToPageInCurrentReader } from '../../utils/readerUtils'
 import { usePreviewHover } from '../../hooks/usePreviewHover'
+import { useRemoveContextMenu } from '../../hooks/useRemoveContextMenu'
 import { activePreviewAtom } from '../../atoms/ui'
 import { TextSelection } from '../../types/attachments/apiTypes'
 
@@ -12,6 +13,8 @@ interface TextSelectionButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLB
     selection: TextSelection
     canEdit?: boolean
     disabled?: boolean
+    /** Long-press the remove "x" to clear every editable context item at once. */
+    onRemoveAll?: () => void
 }
 
 export const TextSelectionButton = forwardRef<HTMLButtonElement, TextSelectionButtonProps>(
@@ -21,6 +24,7 @@ export const TextSelectionButton = forwardRef<HTMLButtonElement, TextSelectionBu
             className,
             disabled = false,
             canEdit = true,
+            onRemoveAll,
             ...rest
         } = props
 
@@ -34,24 +38,26 @@ export const TextSelectionButton = forwardRef<HTMLButtonElement, TextSelectionBu
             { isEnabled: !disabled && canEdit } // Options: Disable if button disabled or not editable
         )
 
-        // Update handleRemove to use cancelTimers from the hook
-        const handleRemove = () => {
-            cancelTimers() // Cancel preview timers
-            setActivePreview(null) // Ensure preview is explicitly closed
-            setReaderTextSelection(null) // Remove the selection itself
-        }
+        const { isRemoveMenuOpen, contextMenuHandlers, removeHandlers, removeMenu } = useRemoveContextMenu({
+            onRemove: () => {
+                cancelTimers() // Cancel preview timers
+                setActivePreview(null) // Ensure preview is explicitly closed
+                setReaderTextSelection(null) // Remove the selection itself
+            },
+            onRemoveAll,
+            canEdit,
+            disabled,
+            onMenuOpen: cancelTimers,
+        })
 
         // Update getIconElement to use isHovered from the hook
         const getIconElement = () => {
             // Use isHovered from the hook
-            if (isHovered && canEdit) {
+            if ((isHovered || isRemoveMenuOpen) && canEdit) {
                 return (<span
                     role="button"
                     className="source-remove -ml-020 -mr-015"
-                    onClick={(e) => {
-                        e.stopPropagation()
-                        handleRemove()
-                    }}
+                    {...removeHandlers}
                 >
                     <CSSIcon name="x-8" className="icon-16" />
                 </span>)
@@ -62,10 +68,12 @@ export const TextSelectionButton = forwardRef<HTMLButtonElement, TextSelectionBu
         }
 
         return (
+            <>
             <button
                 ref={ref}
                 // Spread the event handlers from the hook
                 {...hoverEventHandlers}
+                {...contextMenuHandlers}
                 className={
                     `variant-outline source-button
                     ${className || ''}
@@ -83,6 +91,8 @@ export const TextSelectionButton = forwardRef<HTMLButtonElement, TextSelectionBu
                     Text Selection
                 </span>
             </button>
+            {removeMenu}
+            </>
         )
     }
 )

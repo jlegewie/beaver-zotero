@@ -1,7 +1,8 @@
 import React from 'react'
 import { useAtomValue, useSetAtom } from 'jotai';
-import { currentReaderAttachmentAtom, readerTextSelectionAtom, currentMessageFiltersAtom, removeItemFromMessageAtom, currentMessageItemsAtom, currentMessageCollectionsAtom } from '../../atoms/messageComposition';
+import { currentReaderAttachmentAtom, readerTextSelectionAtom, currentMessageFiltersAtom, removeItemFromMessageAtom, currentMessageItemsAtom, currentMessageCollectionsAtom, clearMessageContextAtom } from '../../atoms/messageComposition';
 import { currentNoteItemAtom } from '../../atoms/zoteroContext';
+import { removePopupMessagesByTypeAtom } from '../../atoms/ui';
 import { TextSelectionButton } from '../input/TextSelectionButton';
 // import { ZoteroIcon, ZOTERO_ICONS } from './icons/ZoteroIcon';
 import AddSourcesMenu from '../ui/menus/AddSourcesMenu';
@@ -41,6 +42,8 @@ const MessageAttachmentDisplay = ({
     const currentMessageItems = useAtomValue(currentMessageItemsAtom);
     const currentMessageCollections = useAtomValue(currentMessageCollectionsAtom);
     const removeItemFromMessage = useSetAtom(removeItemFromMessageAtom);
+    const clearMessageContext = useSetAtom(clearMessageContextAtom);
+    const removePopupMessagesByType = useSetAtom(removePopupMessagesByTypeAtom);
     const setActivePreview = useSetAtom(activePreviewAtom);
 
     const selectedLibraries = currentLibraryIds
@@ -64,6 +67,25 @@ const MessageAttachmentDisplay = ({
     const displayedMessageItems = filteredMessageItems.slice(0, MAX_ATTACHMENTS);
     const overflowMessageItems = filteredMessageItems.slice(MAX_ATTACHMENTS);
     const overflowCount = overflowMessageItems.length;
+
+    // Count of editable (removable) context items currently attached. Excludes
+    // the non-removable reader attachment and note tab item.
+    const removableContextCount =
+        filteredMessageItems.length +
+        selectedLibraries.length +
+        selectedCollections.length +
+        currentTagSelections.length +
+        currentMessageCollections.length +
+        (readerTextSelection ? 1 : 0);
+
+    // Offer "Remove all" only when there is more than one removable item
+    const handleRemoveAll = removableContextCount > 1
+        ? () => {
+            clearMessageContext();
+            removePopupMessagesByType(['items_summary']);
+            setActivePreview(null);
+        }
+        : undefined;
 
     const { hoverEventHandlers: overflowHoverHandlers } = usePreviewHover(
         overflowCount > 0 ? { type: 'itemsSummary', content: overflowMessageItems } : null,
@@ -89,22 +111,22 @@ const MessageAttachmentDisplay = ({
 
             {/* Selected Libraries */}
             {selectedLibraries.map(library => (
-                <LibraryButton key={library.libraryID} library={library} />
+                <LibraryButton key={library.libraryID} library={library} onRemoveAll={handleRemoveAll} />
             ))}
 
             {/* Selected Collections */}
             {selectedCollections.map(collection => (
-                <CollectionButton key={collection.id} collection={collection} />
+                <CollectionButton key={collection.id} collection={collection} onRemoveAll={handleRemoveAll} />
             ))}
 
             {/* Selected Tags */}
             {currentTagSelections.map(tag => (
-                <TagButton key={tag.id} tag={tag} />
+                <TagButton key={tag.id} tag={tag} onRemoveAll={handleRemoveAll} />
             ))}
 
             {/* Current message collections */}
             {currentMessageCollections.map(col => (
-                <MessageCollectionButton key={collectionReferenceKey(col)} collection={col} />
+                <MessageCollectionButton key={collectionReferenceKey(col)} collection={col} onRemoveAll={handleRemoveAll} />
             ))}
 
             {/* Current reader attachment */}
@@ -131,6 +153,7 @@ const MessageAttachmentDisplay = ({
                             return prev;
                         });
                     }}
+                    onRemoveAll={handleRemoveAll}
                 />
             ))}
 
@@ -148,7 +171,7 @@ const MessageAttachmentDisplay = ({
 
             {/* Current text selection */}
             {readerTextSelection && (
-                <TextSelectionButton selection={readerTextSelection} />
+                <TextSelectionButton selection={readerTextSelection} onRemoveAll={handleRemoveAll} />
             )}
             
         </div>
