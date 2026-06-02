@@ -1,6 +1,7 @@
-import React, { forwardRef } from 'react';
-import { CSSItemTypeIcon, CSSIcon, Spinner, Icon, ArrowUpRightIcon } from "../icons/icons";
+import React, { forwardRef, useRef, useState } from 'react';
+import { CSSItemTypeIcon, CSSIcon, Spinner, Icon, ArrowUpRightIcon, CancelIcon, DeleteIcon } from "../icons/icons";
 import { useAtomValue } from 'jotai';
+import ContextMenu, { MenuItem, MenuPosition } from '../ui/menu/ContextMenu';
 import { getItemValidationAtom } from '../../atoms/itemValidation';
 import { usePreviewHover } from '../../hooks/usePreviewHover';
 import { getDisplayNameFromItem } from '../../utils/sourceUtils';
@@ -34,6 +35,12 @@ interface MessageItemButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLBut
     canEdit?: boolean;
     disabled?: boolean;
     onRemove?: (item: Zotero.Item) => void;
+    /**
+     * Optional callback to remove all editable context items at once.
+     * When provided (and the button is editable), long-pressing the remove "x"
+     * opens a small menu offering "Remove" and "Remove all".
+     */
+    onRemoveAll?: () => void;
     tabContextType?: 'reader' | 'note';
     showInvalid?: boolean;
     /** Optional collection key to reveal the item within when clicked */
@@ -53,6 +60,7 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
             disabled = false,
             canEdit = true,
             onRemove,
+            onRemoveAll,
             tabContextType,
             showInvalid = true,
             revealInCollectionKey,
@@ -85,14 +93,70 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
                 ? item.isRegularItem() ? truncateText(getDisplayNameFromItem(item), MAX_ITEM_TEXT_LENGTH) : getDisplayNameFromItem(item)
                 : truncateText(item.getDisplayTitle(), MAX_ITEM_TEXT_LENGTH);
 
+        // Whether the long-press "remove" menu is available for this button
+        const canShowRemoveMenu = Boolean(onRemoveAll) && canEdit && !disabled;
+
+        // Long-press state for the remove "x" menu
+        const [isRemoveMenuOpen, setIsRemoveMenuOpen] = useState(false);
+        const [removeMenuPosition, setRemoveMenuPosition] = useState<MenuPosition>({ x: 0, y: 0 });
+        const longPressTimerRef = useRef<number | null>(null);
+        // Set when a long-press fires so the subsequent click doesn't also remove the item
+        const suppressClickRef = useRef(false);
+
+        const clearLongPressTimer = () => {
+            if (longPressTimerRef.current !== null) {
+                Zotero.getMainWindow().clearTimeout(longPressTimerRef.current);
+                longPressTimerRef.current = null;
+            }
+        };
+
+        const handleRemoveMouseDown = (e: React.MouseEvent<HTMLSpanElement>) => {
+            // Only react to the primary (left) button and when the menu is available
+            if (!canShowRemoveMenu || e.button !== 0) return;
+            e.stopPropagation();
+            const { clientX, clientY } = e;
+            suppressClickRef.current = false;
+            clearLongPressTimer();
+            longPressTimerRef.current = Zotero.getMainWindow().setTimeout(() => {
+                suppressClickRef.current = true;
+                longPressTimerRef.current = null;
+                cancelTimers();
+                setRemoveMenuPosition({ x: clientX, y: clientY });
+                setIsRemoveMenuOpen(true);
+            }, 400);
+        };
+
         // Handle remove
         const handleRemove = (e: React.MouseEvent<HTMLSpanElement>) => {
             e.stopPropagation();
+            clearLongPressTimer();
+            // Skip the click that ends a long-press (the menu handles the action)
+            if (suppressClickRef.current) {
+                suppressClickRef.current = false;
+                return;
+            }
             cancelTimers();
             if (onRemove) {
                 onRemove(item);
             }
         };
+
+        const removeMenuItems: MenuItem[] = [
+            {
+                label: 'Remove',
+                icon: CancelIcon,
+                onClick: () => {
+                    if (onRemove) onRemove(item);
+                }
+            },
+            {
+                label: 'Remove all',
+                icon: DeleteIcon,
+                onClick: () => {
+                    if (onRemoveAll) onRemoveAll();
+                }
+            }
+        ];
 
         // Handle button click
         const handleButtonClick = (e: React.MouseEvent<HTMLButtonElement>) => {
@@ -138,10 +202,19 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
                 );
             }
 
-            // Show remove icon on hover (if editable)
-            if (isHovered && canEdit && !disabled) {
+            // Show remove icon on hover (if editable). Keep it visible while the
+            // long-press menu is open so the trigger doesn't disappear.
+            if ((isHovered || isRemoveMenuOpen) && canEdit && !disabled) {
                 return (
-                    <span role="button" className={`source-remove ${isAnnotation ? '-ml-015' : ''}`} onClick={handleRemove}>
+                    <span
+                        role="button"
+                        className={`source-remove ${isAnnotation ? '-ml-015' : ''}`}
+                        onClick={handleRemove}
+                        onMouseDown={handleRemoveMouseDown}
+                        onMouseUp={clearLongPressTimer}
+                        onMouseLeave={clearLongPressTimer}
+                        title={canShowRemoveMenu ? 'Remove (long-press for more)' : undefined}
+                    >
                         <CSSIcon name="x-8" className="icon-16" />
                     </span>
                 );
@@ -196,6 +269,7 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
         };
 
         return (
+            <>
             <button
                 ref={ref}
                 style={{ height: '22px' }}
@@ -231,6 +305,18 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
                     </span>
                 )}
             </button>
+            {canShowRemoveMenu && (
+                <ContextMenu
+                    menuItems={removeMenuItems}
+                    isOpen={isRemoveMenuOpen}
+                    onClose={() => setIsRemoveMenuOpen(false)}
+                    position={removeMenuPosition}
+                    useFixedPosition={true}
+                    usePortal={true}
+                    width="160px"
+                />
+            )}
+            </>
         );
     }
 );
