@@ -192,7 +192,7 @@ const CustomProviderCard: React.FC<CustomProviderCardProps> = ({
         <div className={`action-card action-card-editing ${hasBorder ? 'border-top-quinary' : ''}`}>
             <div className="display-flex flex-col" style={{ gap: '14px' }}>
                 {/* Name */}
-                <label className="display-flex flex-col" style={{ gap: '5px' }}>
+                <label className="display-flex flex-col">
                     <span className="text-sm font-color-secondary">Name</span>
                     <input
                         type="text"
@@ -205,7 +205,7 @@ const CustomProviderCard: React.FC<CustomProviderCardProps> = ({
                 </label>
 
                 {/* Snapshot */}
-                <label className="display-flex flex-col" style={{ gap: '5px' }}>
+                <label className="display-flex flex-col">
                     <span className="text-sm font-color-secondary">Model (snapshot)</span>
                     <input
                         type="text"
@@ -218,7 +218,7 @@ const CustomProviderCard: React.FC<CustomProviderCardProps> = ({
                 </label>
 
                 {/* API base */}
-                <label className="display-flex flex-col" style={{ gap: '5px' }}>
+                <label className="display-flex flex-col">
                     <span className="text-sm font-color-secondary">Endpoint URL (api_base)</span>
                     <input
                         type="text"
@@ -229,7 +229,7 @@ const CustomProviderCard: React.FC<CustomProviderCardProps> = ({
                         className="chat-input text-base font-color-primary"
                     />
                     {model.api_base?.trim() && !apiBaseValidation.valid && (
-                        <span className="display-flex flex-row items-start gap-1 text-sm" style={{ color: 'var(--tag-red-secondary)' }}>
+                        <span className="display-flex flex-row items-start text-sm font-color-error">
                             <Icon icon={AlertIcon} className="flex-shrink-0 mt-020" />
                             <span>
                                 {apiBaseValidation.error}{' '}
@@ -241,7 +241,7 @@ const CustomProviderCard: React.FC<CustomProviderCardProps> = ({
 
                 {/* Format + Context window row */}
                 <div className="display-flex flex-row gap-4">
-                    <label className="display-flex flex-col items-start" style={{ gap: '5px' }}>
+                    <label className="display-flex flex-col items-start">
                         <span className="text-sm font-color-secondary">Format</span>
                         <MenuButton
                             menuItems={formatMenuItems}
@@ -253,7 +253,7 @@ const CustomProviderCard: React.FC<CustomProviderCardProps> = ({
                             ariaLabel="API format"
                         />
                     </label>
-                    <label className="display-flex flex-col flex-1" style={{ gap: '5px' }}>
+                    <label className="display-flex flex-col flex-1">
                         <span className="text-sm font-color-secondary">Context window</span>
                         <input
                             type="text"
@@ -273,7 +273,7 @@ const CustomProviderCard: React.FC<CustomProviderCardProps> = ({
                 </div>
 
                 {/* API key */}
-                <label className="display-flex flex-col" style={{ gap: '5px' }}>
+                <label className="display-flex flex-col">
                     <span className="text-sm font-color-secondary">API key</span>
                     <input
                         type="password"
@@ -286,7 +286,7 @@ const CustomProviderCard: React.FC<CustomProviderCardProps> = ({
                 </label>
 
                 {/* Supports vision */}
-                <label className="display-flex flex-row items-center gap-2 cursor-pointer">
+                <label className="display-flex flex-row items-center gap-1 cursor-pointer">
                     <input
                         type="checkbox"
                         checked={!!model.supports_vision}
@@ -310,24 +310,21 @@ const CustomProviderCard: React.FC<CustomProviderCardProps> = ({
                     />
                     <div className="display-flex flex-row items-center gap-3">
                         <Button
-                            variant="ghost-secondary"
+                            variant="outline"
                             icon={CopyIcon}
-                            style={{ padding: "2px 8px" }}
                             onClick={onDuplicate}
                         >
-                            <span className="text-xs">Duplicate</span>
+                            Duplicate
                         </Button>
                         <Button
-                            variant="ghost-secondary"
+                            variant="outline"
                             icon={DeleteIcon}
-                            style={{ padding: "2px 8px" }}
                             onClick={onRemove}
                         >
-                            <span className="text-xs">Delete</span>
+                            Delete
                         </Button>
                         <Button
                             variant="solid"
-                            style={{ padding: "2px 8px" }}
                             onClick={onToggleExpand}
                         >
                             Done
