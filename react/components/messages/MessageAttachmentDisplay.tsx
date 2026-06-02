@@ -111,22 +111,22 @@ const MessageAttachmentDisplay = ({
 
             {/* Selected Libraries */}
             {selectedLibraries.map(library => (
-                <LibraryButton key={library.libraryID} library={library} />
+                <LibraryButton key={library.libraryID} library={library} onRemoveAll={handleRemoveAll} />
             ))}
 
             {/* Selected Collections */}
             {selectedCollections.map(collection => (
-                <CollectionButton key={collection.id} collection={collection} />
+                <CollectionButton key={collection.id} collection={collection} onRemoveAll={handleRemoveAll} />
             ))}
 
             {/* Selected Tags */}
             {currentTagSelections.map(tag => (
-                <TagButton key={tag.id} tag={tag} />
+                <TagButton key={tag.id} tag={tag} onRemoveAll={handleRemoveAll} />
             ))}
 
             {/* Current message collections */}
             {currentMessageCollections.map(col => (
-                <MessageCollectionButton key={collectionReferenceKey(col)} collection={col} />
+                <MessageCollectionButton key={collectionReferenceKey(col)} collection={col} onRemoveAll={handleRemoveAll} />
             ))}
 
             {/* Current reader attachment */}
@@ -171,7 +171,7 @@ const MessageAttachmentDisplay = ({
 
             {/* Current text selection */}
             {readerTextSelection && (
-                <TextSelectionButton selection={readerTextSelection} />
+                <TextSelectionButton selection={readerTextSelection} onRemoveAll={handleRemoveAll} />
             )}
             
         </div>

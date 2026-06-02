@@ -552,7 +552,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
             doc.body
         );
     }
-    
+
     return menuElement;
 };
 

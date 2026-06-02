@@ -4,6 +4,7 @@ import { CSSIcon } from '../icons/icons';
 import { removeCollectionIdAtom } from '../../atoms/messageComposition';
 import { truncateText } from '../../utils/stringUtils';
 import { selectCollection } from '../../../src/utils/selectItem';
+import { useRemoveContextMenu } from '../../hooks/useRemoveContextMenu';
 
 const MAX_COLLECTIONBUTTON_TEXT_LENGTH = 20;
 
@@ -11,6 +12,8 @@ interface CollectionButtonProps extends React.ButtonHTMLAttributes<HTMLButtonEle
     collection: Zotero.Collection;
     canEdit?: boolean;
     disabled?: boolean;
+    /** Long-press the remove "x" to clear every editable context item at once. */
+    onRemoveAll?: () => void;
 }
 
 export const CollectionButton: React.FC<CollectionButtonProps> = ({
@@ -18,15 +21,18 @@ export const CollectionButton: React.FC<CollectionButtonProps> = ({
     className,
     disabled = false,
     canEdit = true,
+    onRemoveAll,
     ...rest
 }) => {
     const [isHovered, setIsHovered] = useState(false);
     const removeCollectionId = useSetAtom(removeCollectionIdAtom);
 
-    const handleRemove = (e: React.MouseEvent<HTMLSpanElement>) => {
-        e.stopPropagation();
-        removeCollectionId(collection.id);
-    };
+    const { isRemoveMenuOpen, contextMenuHandlers, removeHandlers, removeMenu } = useRemoveContextMenu({
+        onRemove: () => removeCollectionId(collection.id),
+        onRemoveAll,
+        canEdit,
+        disabled,
+    });
 
     const handleButtonClick = (e: React.MouseEvent<HTMLButtonElement>) => {
         e.stopPropagation();
@@ -36,9 +42,9 @@ export const CollectionButton: React.FC<CollectionButtonProps> = ({
     };
 
     const getIconElement = () => {
-        if (isHovered && canEdit) {
+        if ((isHovered || isRemoveMenuOpen) && canEdit) {
             return (
-                <span role="button" className="source-remove" onClick={handleRemove}>
+                <span role="button" className="source-remove" {...removeHandlers}>
                     <CSSIcon name="x-8" className="icon-16" />
                 </span>
             );
@@ -63,11 +69,13 @@ export const CollectionButton: React.FC<CollectionButtonProps> = ({
     const displayName = truncateText(collection.name, MAX_COLLECTIONBUTTON_TEXT_LENGTH);
 
     return (
+        <>
         <button
             style={{ height: '22px' }}
             title={getTooltipTitle()}
             onMouseEnter={() => setIsHovered(true)}
             onMouseLeave={() => setIsHovered(false)}
+            {...contextMenuHandlers}
             className={getButtonClasses()}
             disabled={disabled}
             onClick={handleButtonClick}
@@ -79,5 +87,7 @@ export const CollectionButton: React.FC<CollectionButtonProps> = ({
             </span>
             <CSSIcon name="filter" className="icon-16 scale-60 mt-015 -ml-1" style={{ fill: 'var(--fill-tertiary)' }} />
         </button>
+        {removeMenu}
+        </>
     );
 };
