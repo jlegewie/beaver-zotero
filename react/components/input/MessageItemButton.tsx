@@ -1,13 +1,14 @@
 import React, { forwardRef } from 'react';
-import { CSSItemTypeIcon, CSSIcon, Spinner, Icon, ArrowUpRightIcon } from "../icons/icons";
+import { CSSItemTypeIcon, CSSIcon, Spinner, Icon, ArrowUpRightIcon, LibraryIcon, PdfIcon, NoteIcon, FileViewIcon } from "../icons/icons";
 import { useAtomValue } from 'jotai';
 import { useRemoveContextMenu } from '../../hooks/useRemoveContextMenu';
+import { MenuItem } from '../ui/menu/ContextMenu';
 import { getItemValidationAtom } from '../../atoms/itemValidation';
 import { usePreviewHover } from '../../hooks/usePreviewHover';
 import { getDisplayNameFromItem } from '../../utils/sourceUtils';
 import { truncateText } from '../../utils/stringUtils';
 import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
-import { navigateToAnnotation } from '../../utils/readerUtils';
+import { navigateToAnnotation, isItemActiveTab } from '../../utils/readerUtils';
 import { currentReaderAttachmentKeyAtom } from '../../atoms/messageComposition';
 import { toAnnotation } from '../../types/attachments/converters';
 import { selectItemById } from '../../../src/utils/selectItem';
@@ -93,37 +94,12 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
                 ? item.isRegularItem() ? truncateText(getDisplayNameFromItem(item), MAX_ITEM_TEXT_LENGTH) : getDisplayNameFromItem(item)
                 : truncateText(item.getDisplayTitle(), MAX_ITEM_TEXT_LENGTH);
 
-        // Right-click "remove" menu for this button. A left-click on the "x"
-        // removes just this item; right-clicking the button opens a menu with
-        // "Remove" (and "Remove all" when more than one removable item is attached).
-        const { isRemoveMenuOpen, contextMenuHandlers, removeHandlers, removeMenu } = useRemoveContextMenu({
-            onRemove: () => {
-                cancelTimers();
-                if (onRemove) onRemove(item);
-            },
-            onRemoveAll,
-            canEdit,
-            disabled,
-            onMenuOpen: cancelTimers,
-        });
+        const isFileAttachment = item.isAttachment() && item.isFileAttachment();
 
-        // Handle button click
-        const handleButtonClick = (e: React.MouseEvent<HTMLButtonElement>) => {
-            e.stopPropagation();
-            
-            // For annotations, navigate to the annotation in the reader
-            if (isAnnotation) {
-                navigateToAnnotation(item);
-                return;
-            }
-
-            // For notes, open the note in editor (tab or window per user preference)
-            if (item.isNote()) {
-                openNoteById(item.id);
-                return;
-            }
-
-            // For regular items, select in Zotero
+        // Reveal the item in the Zotero library pane. Works for notes,
+        // attachments, and regular items — `selectItem` highlights whichever row
+        // the item occupies.
+        const revealInLibrary = () => {
             try {
                 // If a collection key is provided, reveal in that collection
                 if (revealInCollectionKey) {
@@ -138,6 +114,68 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
             } catch (error) {
                 console.error('Failed to select item:', error);
             }
+        };
+
+        // Open the attachment file in the reader (or its external app).
+        const openAttachment = () => {
+            Zotero.getActiveZoteroPane()?.viewAttachment(item.id);
+        };
+
+        // Primary action for a left-click on the button. Annotations jump to the
+        // reader, notes open in the editor, and everything else is revealed in
+        // the Zotero library.
+        const revealItem = () => {
+            if (isAnnotation) {
+                navigateToAnnotation(item);
+                return;
+            }
+            if (item.isNote()) {
+                openNoteById(item.id);
+                return;
+            }
+            revealInLibrary();
+        };
+
+        // Context-menu reveal/open actions, depending on the item type. Types
+        // that support more than one action (notes, file attachments) show both:
+        // one to reveal the item in the library and one to open it. The "open"
+        // action is disabled only when the item's tab is the one currently in
+        // view — when it is open in a background tab, opening it switches to that
+        // tab.
+        const revealMenuItems: MenuItem[] = isAnnotation
+            ? [{ label: 'Reveal in PDF', icon: PdfIcon, onClick: () => navigateToAnnotation(item) }]
+            : item.isNote()
+                ? [
+                    { label: 'Reveal in Library', icon: LibraryIcon, onClick: revealInLibrary },
+                    { label: 'Open Note', icon: NoteIcon, onClick: () => openNoteById(item.id), disabled: isItemActiveTab(item.id) },
+                ]
+                : isFileAttachment
+                    ? [
+                        { label: 'Reveal in Library', icon: LibraryIcon, onClick: revealInLibrary },
+                        { label: 'Open Attachment', icon: FileViewIcon, onClick: openAttachment, disabled: isItemActiveTab(item.id) },
+                    ]
+                    : [{ label: 'Reveal in Library', icon: LibraryIcon, onClick: revealInLibrary }];
+
+        // Right-click "remove" menu for this button. A left-click on the "x"
+        // removes just this item; right-clicking the button opens a menu with
+        // the reveal/open actions plus "Remove" (and "Remove all" when more than
+        // one removable item is attached).
+        const { isRemoveMenuOpen, contextMenuHandlers, removeHandlers, removeMenu } = useRemoveContextMenu({
+            onRemove: () => {
+                cancelTimers();
+                if (onRemove) onRemove(item);
+            },
+            onRemoveAll,
+            canEdit,
+            disabled,
+            onMenuOpen: cancelTimers,
+            extraMenuItems: revealMenuItems,
+        });
+
+        // Handle button click
+        const handleButtonClick = (e: React.MouseEvent<HTMLButtonElement>) => {
+            e.stopPropagation();
+            revealItem();
         };
 
         // Get icon element based on validation state

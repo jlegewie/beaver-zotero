@@ -431,8 +431,8 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
                     role={item.isGroupHeader || item.isDivider ? 'presentation' : item.role ?? 'menuitem'}
                     tabIndex={focusedIndex === index && isFocusableItem(item) ? 0 : -1}
                     className={`
-                        ${item.isDivider ? 'border-t border-quinary my-1' : ''}
-                        ${item.isGroupHeader ? 'px-2 py-1 font-color-tertiary text-xs font-medium mt-1 first:mt-0' : 
+                        ${item.isDivider ? 'border-t border-top-quinary my-1' :
+                          item.isGroupHeader ? 'px-2 py-1 font-color-tertiary text-xs font-medium mt-1 first:mt-0' :
                           `display-flex items-center gap-2 px-2 py-15 rounded-md transition user-select-none
                           ${item.disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
                           ${(focusedIndex === index || hoveredIndex === index) && !item.disabled ? 'bg-quinary' : ''}`

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useSetAtom } from 'jotai';
-import { CSSIcon } from '../icons/icons';
+import { CSSIcon, LibraryIcon } from '../icons/icons';
 import { removeCollectionIdAtom } from '../../atoms/messageComposition';
 import { truncateText } from '../../utils/stringUtils';
 import { selectCollection } from '../../../src/utils/selectItem';
@@ -32,6 +32,12 @@ export const CollectionButton: React.FC<CollectionButtonProps> = ({
         onRemoveAll,
         canEdit,
         disabled,
+        // Mirror the button click: select (reveal) the collection in the library.
+        extraMenuItems: [{
+            label: 'Reveal Collection',
+            icon: LibraryIcon,
+            onClick: () => selectCollection(collection),
+        }],
     });
 
     const handleButtonClick = (e: React.MouseEvent<HTMLButtonElement>) => {

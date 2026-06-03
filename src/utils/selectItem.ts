@@ -160,6 +160,9 @@ export async function selectLibrary(library: Zotero.Library) {
     if (!zoteroPane || !zoteroPane.collectionsView || !zoteroPane.itemsView) return false;
 
     try {
+        // Switch to the library tab so the selection is visible when the user is
+        // currently viewing a reader or note tab.
+        Zotero.getMainWindow()?.Zotero_Tabs?.select('zotero-pane');
         const success = await zoteroPane.collectionsView.selectLibrary(library.libraryID);
         if (success) {
             await zoteroPane.itemsView.waitForLoad();
@@ -183,6 +186,9 @@ export async function selectCollection(collection: Zotero.Collection) {
     if (!zoteroPane || !zoteroPane.collectionsView || !zoteroPane.itemsView) return false;
 
     try {
+        // Switch to the library tab so the selection is visible when the user is
+        // currently viewing a reader or note tab.
+        Zotero.getMainWindow()?.Zotero_Tabs?.select('zotero-pane');
         const success = await zoteroPane.collectionsView.selectCollection(collection.id);
         if (success) {
             await zoteroPane.itemsView.waitForLoad();
