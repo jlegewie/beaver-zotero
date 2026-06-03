@@ -90,6 +90,10 @@ export interface ContextMenuProps {
     position: MenuPosition;
     /** Optional CSS class name */
     className?: string;
+    /** Optional class names for default menu item labels (icon + text rows) */
+    itemLabelClassName?: string;
+    /** Optional class names for default menu item icons */
+    itemIconClassName?: string;
     /** Whether to use fixed positioning instead of absolute */
     useFixedPosition?: boolean;
     /** Whether to use portal for rendering (prevents containment issues) */
@@ -137,6 +141,8 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
     maxWidth = undefined,
     maxHeight = undefined,
     className = '',
+    itemLabelClassName = 'flex-1 text-base font-color-secondary truncate',
+    itemIconClassName = 'font-color-secondary flex-shrink-0',
     useFixedPosition = false,
     usePortal = false,
     positionAdjustment = { x: 0, y: 0 },
@@ -510,9 +516,9 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
                         // Otherwise render default icon + label layout
                         <span className="display-flex items-center gap-2 w-full min-w-0">
                             {item.icon && (
-                                <Icon icon={item.icon} size={14} className="font-color-secondary flex-shrink-0"/>
+                                <Icon icon={item.icon} size={14} className={itemIconClassName}/>
                             )}
-                            <span className="flex-1 text-base font-color-secondary truncate">{item.label}</span>
+                            <span className={itemLabelClassName}>{item.label}</span>
                         </span>
                     )}
                 </div>
