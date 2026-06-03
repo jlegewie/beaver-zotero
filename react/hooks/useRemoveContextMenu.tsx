@@ -76,7 +76,7 @@ export function useRemoveContextMenu({
     const canShowRemoveMenu = !disabled && (canEdit || hasExtraItems);
     // Extra items use longer labels (e.g. "Filter Library by Tag"), so widen the
     // menu when present unless the caller overrides it explicitly.
-    const resolvedMenuWidth = menuWidth ?? (hasExtraItems ? '180px' : '110px');
+    const resolvedMenuWidth = menuWidth ?? (hasExtraItems ? '160px' : '110px');
 
     const [isRemoveMenuOpen, setIsRemoveMenuOpen] = useState(false);
     const [menuPosition, setMenuPosition] = useState<MenuPosition>({ x: 0, y: 0 });
