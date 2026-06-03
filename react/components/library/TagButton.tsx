@@ -34,6 +34,9 @@ export const TagButton: React.FC<TagButtonProps> = ({
         const zoteroPane = Zotero.getActiveZoteroPane();
         if (!zoteroPane) return;
         try {
+            // Switch to the library tab so the filter is visible when the user is
+            // currently viewing a reader or note tab.
+            Zotero.getMainWindow()?.Zotero_Tabs?.select('zotero-pane');
             if (zoteroPane.collectionsView) {
                 await zoteroPane.collectionsView.selectLibrary(tag.libraryId);
             }

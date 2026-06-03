@@ -146,15 +146,15 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
             ? [{ label: 'Reveal in PDF', icon: PdfIcon, onClick: () => navigateToAnnotation(item) }]
             : item.isNote()
                 ? [
-                    { label: 'Show in Library', icon: LibraryIcon, onClick: revealInLibrary },
+                    { label: 'Reveal in Library', icon: LibraryIcon, onClick: revealInLibrary },
                     { label: 'Open Note', icon: NoteIcon, onClick: () => openNoteById(item.id), disabled: isItemActiveTab(item.id) },
                 ]
                 : isFileAttachment
                     ? [
-                        { label: 'Show in Library', icon: LibraryIcon, onClick: revealInLibrary },
+                        { label: 'Reveal in Library', icon: LibraryIcon, onClick: revealInLibrary },
                         { label: 'Open Attachment', icon: FileViewIcon, onClick: openAttachment, disabled: isItemActiveTab(item.id) },
                     ]
-                    : [{ label: 'Show in Library', icon: LibraryIcon, onClick: revealInLibrary }];
+                    : [{ label: 'Reveal in Library', icon: LibraryIcon, onClick: revealInLibrary }];
 
         // Right-click "remove" menu for this button. A left-click on the "x"
         // removes just this item; right-clicking the button opens a menu with

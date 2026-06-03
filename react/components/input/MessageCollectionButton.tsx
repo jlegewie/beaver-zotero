@@ -47,7 +47,7 @@ export const MessageCollectionButton: React.FC<MessageCollectionButtonProps> = (
         canEdit,
         disabled,
         extraMenuItems: [{
-            label: 'Show in Library',
+            label: 'Reveal Collection',
             icon: LibraryIcon,
             onClick: revealCollection,
         }],

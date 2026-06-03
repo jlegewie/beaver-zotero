@@ -34,7 +34,7 @@ export const CollectionButton: React.FC<CollectionButtonProps> = ({
         disabled,
         // Mirror the button click: select (reveal) the collection in the library.
         extraMenuItems: [{
-            label: 'Show in Library',
+            label: 'Reveal Collection',
             icon: LibraryIcon,
             onClick: () => selectCollection(collection),
         }],
