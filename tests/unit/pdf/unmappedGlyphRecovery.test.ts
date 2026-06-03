@@ -3,8 +3,8 @@ import {
     isUnmappedTextLayer,
     recoveredTextIsAcceptable,
     collectPageText,
-    GLYPH_NAME_RECOVERY,
-} from "../../../src/beaver-extract/glyphNameRecovery";
+    UNMAPPED_GLYPH_RECOVERY,
+} from "../../../src/beaver-extract/unmappedGlyphRecovery";
 import type { RawBlock } from "../../../src/beaver-extract/types";
 
 // Minimal page builder — the recovery helpers only read block.type,
@@ -28,7 +28,7 @@ function page(lines: string[], type: "text" | "image" = "text") {
 const FFFD = "�";
 const rep = (n: number) => FFFD.repeat(n);
 
-describe("glyphNameRecovery", () => {
+describe("unmappedGlyphRecovery", () => {
     describe("collectPageText", () => {
         it("concatenates text-block line text and skips image blocks", () => {
             const p = { blocks: [...page(["ab", "cd"]).blocks, ...page([], "image").blocks] };
@@ -47,9 +47,16 @@ describe("glyphNameRecovery", () => {
             expect(isUnmappedTextLayer(page([body + FFFD + "40"]))).toBe(false);
         });
 
-        it("does NOT flag a blank / image-only page (too few glyphs)", () => {
-            expect(isUnmappedTextLayer(page([rep(10)]))).toBe(false);
+        it("flags a SPARSE fully-unmapped page (short title/divider)", () => {
+            // A short title page from a CID-fallback font is all U+FFFD. It
+            // must still recover — the glyph floor only excludes no-text pages.
+            expect(isUnmappedTextLayer(page([rep(8)]))).toBe(true);
+        });
+
+        it("does NOT flag a page with no text layer (blank / image-only)", () => {
+            expect(isUnmappedTextLayer(page([]))).toBe(false);
             expect(isUnmappedTextLayer(page([], "image"))).toBe(false);
+            expect(isUnmappedTextLayer(page(["   \n  "]))).toBe(false);
         });
 
         it("ignores whitespace when measuring volume and ratio", () => {
@@ -58,12 +65,14 @@ describe("glyphNameRecovery", () => {
             expect(isUnmappedTextLayer(page([spaced]))).toBe(true);
         });
 
-        it("respects the configured thresholds at the boundary", () => {
-            // Exactly at minGlyphs with ratio exactly at threshold.
-            const total = GLYPH_NAME_RECOVERY.minGlyphs;
-            const replCount = Math.ceil(total * GLYPH_NAME_RECOVERY.replacementRatioToRetry);
-            const text = rep(replCount) + "a".repeat(total - replCount);
-            expect(isUnmappedTextLayer(page([text]))).toBe(true);
+        it("respects the replacement-ratio threshold at the boundary", () => {
+            // 10 chars, exactly at the ratio threshold → flagged.
+            const replCount = Math.ceil(10 * UNMAPPED_GLYPH_RECOVERY.replacementRatioToRetry);
+            const atThreshold = rep(replCount) + "a".repeat(10 - replCount);
+            expect(isUnmappedTextLayer(page([atThreshold]))).toBe(true);
+            // Just under the ratio threshold → not flagged.
+            const underThreshold = rep(replCount - 1) + "a".repeat(10 - replCount + 1);
+            expect(isUnmappedTextLayer(page([underThreshold]))).toBe(false);
         });
     });
 

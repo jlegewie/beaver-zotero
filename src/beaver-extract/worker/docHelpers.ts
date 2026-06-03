@@ -16,7 +16,6 @@ import type {
     RawChar,
     PageGeometry,
     PDFPageSearchResult,
-    PageImageOptions,
     PageImageResult,
 } from "../types";
 import { bboxFromXYWH } from "../types";
@@ -34,6 +33,7 @@ import type {
 } from "./mupdfApi";
 import { ERROR_CODES, postLog, workerError } from "./errors";
 import { isRecoverablePageError } from "../wasmFatal";
+import { isUnmappedTextLayer, recoveredTextIsAcceptable } from "../unmappedGlyphRecovery";
 import { ensureApi } from "./wasmInit";
 import {
     aspectRatioRotation,
@@ -41,18 +41,6 @@ import {
     type RotationAngle,
 } from "../PageRotationNormalizer";
 
-// `use-cid-for-unknown-unicode`: when MuPDF cannot resolve a glyph to a Unicode
-// codepoint it normally emits U+FFFD. Some born-digital PDFs (e.g. GNU
-// Ghostscript output) embed Type 1C font subsets whose builtin encoding maps
-// ordinary character codes to opaque glyph names with no ToUnicode CMap — the
-// whole text layer then extracts as U+FFFD and the document is wrongly rejected
-// as needing OCR. With this option MuPDF falls back to the character code,
-// which for these fonts is the correct Latin-1 codepoint, recovering the text.
-// The fallback only ever replaces characters that were already U+FFFD, so it
-// cannot corrupt correctly-decoded text; genuine symbol/math glyphs that stay
-// unmappable become a wrong-but-plausible character instead of U+FFFD (the same
-// best-effort behavior as Poppler and PyMuPDF).
-//
 // Duplicate-redraw collapsing: some PDFs — notably OCR tools that stamp the
 // invisible text layer many times per page — draw their whole text content
 // dozens of times at identical coordinates. MuPDF's `collect-styles` option
@@ -61,23 +49,29 @@ import {
 // documents ~7x slower to walk. `dedupOverlappingLines` (below) does the same
 // collapse as a cheap O(n) post-pass instead, so `collect-styles` is
 // intentionally NOT set here.
-const STRUCTURED_TEXT_OPTIONS = "preserve-whitespace,use-cid-for-unknown-unicode";
-const STRUCTURED_TEXT_OPTIONS_WITH_IMAGES =
-    "preserve-whitespace,preserve-images,use-cid-for-unknown-unicode";
-const STRUCTURED_TEXT_OPTIONS_DETAILED =
-    "preserve-whitespace,preserve-ligatures,use-cid-for-unknown-unicode";
+const STRUCTURED_TEXT_OPTIONS = "preserve-whitespace";
+const STRUCTURED_TEXT_OPTIONS_WITH_IMAGES = "preserve-whitespace,preserve-images";
+const STRUCTURED_TEXT_OPTIONS_DETAILED = "preserve-whitespace,preserve-ligatures";
 const STRUCTURED_TEXT_OPTIONS_DETAILED_WITH_IMAGES =
-    "preserve-whitespace,preserve-ligatures,preserve-images,use-cid-for-unknown-unicode";
+    "preserve-whitespace,preserve-ligatures,preserve-images";
 
-// `use-glyph-name-for-unknown-unicode`: fork-local stext option that decodes
-// numeric "C<n>" glyph names (decimal Unicode codepoint) when a glyph's
-// normal unicode lookup has already failed. It is a heuristic guess and is
-// therefore NEVER enabled on the default extraction path — only on the
-// targeted re-extraction of pages detected as unmapped text layers (see
-// `glyphNameRecovery.ts`), so ordinary pages keep their detectable U+FFFD.
-const GLYPH_NAME_RECOVERY_OPTION = "use-glyph-name-for-unknown-unicode";
-function withGlyphNameRecovery(options: string): string {
-    return `${options},${GLYPH_NAME_RECOVERY_OPTION}`;
+// Recovery flags for unmapped glyphs. When MuPDF cannot resolve a glyph to a
+// Unicode codepoint it emits U+FFFD. These two stext options recover such
+// glyphs heuristically — but both can produce wrong-but-plausible characters
+// (a CID/code or a misread "C<n>" name that is not actually the codepoint), so
+// the default extraction path leaves them OFF and keeps the detectable U+FFFD.
+// They are applied ONLY on the targeted re-extraction of pages detected as
+// unmapped text layers (see `unmappedGlyphRecovery.ts`), so ordinary pages —
+// including ones with a few unmappable symbol/math glyphs — never have their
+// U+FFFD silently rewritten.
+//   - use-cid-for-unknown-unicode: falls back to the character code. Recovers
+//     e.g. GNU Ghostscript Type 1C subsets whose builtin code IS the Latin-1
+//     codepoint, where the whole text layer would otherwise be U+FFFD.
+//   - use-glyph-name-for-unknown-unicode (fork-local): decodes numeric "C<n>"
+//     glyph names (decimal Unicode codepoint), e.g. Acrobat Distiller 3.x.
+const RECOVERY_OPTIONS = "use-cid-for-unknown-unicode,use-glyph-name-for-unknown-unicode";
+function withRecoveryFlags(options: string): string {
+    return `${options},${RECOVERY_OPTIONS}`;
 }
 
 export interface RenderOptionsResolved {
@@ -286,10 +280,12 @@ export const openDocUncached = openDocSafe;
  * coverage. Without this branch the worker-side OCR detection silently
  * over-counts text density and misses the scanned-page case.
  */
-export function extractRawPageFromDoc(
+// Single structured-text walk. Private: callers use `extractRawPageFromDoc`,
+// which adds the unmapped-glyph recovery retry on top of this.
+function extractRawPageOnce(
     doc: DocumentLike,
     pageIndex: number,
-    opts?: { includeImages?: boolean; recoverGlyphNames?: boolean },
+    opts?: { includeImages?: boolean; recoverUnmappedGlyphs?: boolean },
 ): RawPageData {
     const page = doc.loadPage(pageIndex);
     try {
@@ -309,7 +305,7 @@ export function extractRawPageFromDoc(
         let stextOptions = opts?.includeImages
             ? STRUCTURED_TEXT_OPTIONS_WITH_IMAGES
             : STRUCTURED_TEXT_OPTIONS;
-        if (opts?.recoverGlyphNames) stextOptions = withGlyphNameRecovery(stextOptions);
+        if (opts?.recoverUnmappedGlyphs) stextOptions = withRecoveryFlags(stextOptions);
         const stext = page.toStructuredText(stextOptions);
         try {
             const json = JSON.parse(stext.asJSON());
@@ -611,12 +607,14 @@ function deriveFontFamily(name: string): string {
  * style-based heading detection downstream. The structured extract
  * passes the live API; debug paths must do the same.
  */
-export function extractRawPageDetailedFromDoc(
+// Single detailed (per-char) walk. Private: callers use
+// `extractRawPageDetailedFromDoc`, which adds the unmapped-glyph recovery retry.
+function extractRawPageDetailedOnce(
     doc: DocumentLike,
     pageIndex: number,
     includeImages: boolean,
     fontApi?: FontApi,
-    recoverGlyphNames?: boolean,
+    recoverUnmappedGlyphs?: boolean,
 ): RawPageDataDetailed {
     const page = doc.loadPage(pageIndex);
     try {
@@ -636,7 +634,7 @@ export function extractRawPageDetailedFromDoc(
         let stextOptions = includeImages
             ? STRUCTURED_TEXT_OPTIONS_DETAILED_WITH_IMAGES
             : STRUCTURED_TEXT_OPTIONS_DETAILED;
-        if (recoverGlyphNames) stextOptions = withGlyphNameRecovery(stextOptions);
+        if (recoverUnmappedGlyphs) stextOptions = withRecoveryFlags(stextOptions);
         const stext = page.toStructuredText(stextOptions);
 
         const blocks: RawBlock[] = [];
@@ -1171,6 +1169,53 @@ export function resolveTruePageCount(doc: DocumentLike): number {
  * pages in `/Root/Pages/Count` than its page tree can resolve, and
  * `DocumentAnalyzer` samples page indices across that count.
  */
+// Unmapped-glyph recovery, applied by DEFAULT on every page walk.
+//
+// After removing `use-cid-for-unknown-unicode` from the default stext options,
+// a page from a CID/glyph-name-fallback PDF would otherwise extract as runs of
+// U+FFFD. These two public extractors transparently recover such pages so EVERY
+// caller (extraction pipeline, layout analysis, OCR gate, sentence extraction,
+// search) gets consistent text — there is no "forgot to route through recovery"
+// path. A page is walked once (honest U+FFFD); only when its text layer is
+// present but overwhelmingly unmapped is it re-walked with the recovery options
+// on, and that result is kept only when it resolved the unknown glyphs and reads
+// like natural language. Otherwise the original is kept so the OCR gate still
+// sees the unmapped layer. The retry is rare (normal pages never cross the
+// threshold), so the common-case cost is one walk plus a cheap string scan. See
+// `unmappedGlyphRecovery.ts`.
+
+/** Extract a page's JSON-walk data, recovering an unmapped text layer when present. */
+export function extractRawPageFromDoc(
+    doc: DocumentLike,
+    pageIndex: number,
+    opts?: { includeImages?: boolean },
+): RawPageData {
+    const page = extractRawPageOnce(doc, pageIndex, opts);
+    if (!isUnmappedTextLayer(page)) return page;
+    const recovered = extractRawPageOnce(doc, pageIndex, {
+        ...opts,
+        recoverUnmappedGlyphs: true,
+    });
+    if (!recoveredTextIsAcceptable(recovered)) return page;
+    postLog("info", `Recovered unmapped text layer on page ${pageIndex}`);
+    return recovered;
+}
+
+/** Extract a page's detailed-walk data, recovering an unmapped text layer when present. */
+export function extractRawPageDetailedFromDoc(
+    doc: DocumentLike,
+    pageIndex: number,
+    includeImages: boolean,
+    fontApi?: FontApi,
+): RawPageDataDetailed {
+    const page = extractRawPageDetailedOnce(doc, pageIndex, includeImages, fontApi);
+    if (!isUnmappedTextLayer(page)) return page;
+    const recovered = extractRawPageDetailedOnce(doc, pageIndex, includeImages, fontApi, true);
+    if (!recoveredTextIsAcceptable(recovered)) return page;
+    postLog("info", `Recovered unmapped text layer on page ${pageIndex}`);
+    return recovered;
+}
+
 export function rawPageProviderFromDoc(doc: DocumentLike): RawPageProvider {
     const pageCount = resolveTruePageCount(doc);
     return {

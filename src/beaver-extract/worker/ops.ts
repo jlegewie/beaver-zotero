@@ -119,7 +119,6 @@ import {
     resolveTruePageCount,
     searchPageInDoc,
 } from "./docHelpers";
-import { isUnmappedTextLayer, recoveredTextIsAcceptable } from "../glyphNameRecovery";
 import type { DocumentLike, FontApi } from "./mupdfApi";
 
 export interface OpReply<T = unknown> {
@@ -292,16 +291,6 @@ class PageWalkCache {
         let page = this.plain.get(pageIndex);
         if (!page) {
             page = extractRawPageFromDoc(this.doc, pageIndex, { includeImages });
-            if (isUnmappedTextLayer(page)) {
-                const recovered = extractRawPageFromDoc(this.doc, pageIndex, {
-                    includeImages,
-                    recoverGlyphNames: true,
-                });
-                if (recoveredTextIsAcceptable(recovered)) {
-                    logGlyphNameRecovery(pageIndex);
-                    page = recovered;
-                }
-            }
             this.plain.set(pageIndex, page);
         }
         return page;
@@ -316,32 +305,10 @@ class PageWalkCache {
                 includeImages,
                 this.fontApi,
             );
-            if (isUnmappedTextLayer(page)) {
-                const recovered = extractRawPageDetailedFromDoc(
-                    this.doc,
-                    pageIndex,
-                    includeImages,
-                    this.fontApi,
-                    true,
-                );
-                if (recoveredTextIsAcceptable(recovered)) {
-                    logGlyphNameRecovery(pageIndex);
-                    page = recovered;
-                }
-            }
             this.detailed.set(pageIndex, page);
         }
         return page;
     }
-}
-
-// A page whose text layer is present but overwhelmingly U+FFFD is re-extracted
-// once with glyph-name recovery enabled (decodes numeric "C<n>" glyph names).
-// The recovered text replaces the original only when it resolved the unknown
-// glyphs and reads like natural language; otherwise the original is kept so the
-// OCR gate still sees the unmapped layer. See `glyphNameRecovery.ts`.
-function logGlyphNameRecovery(pageIndex: number): void {
-    postLog("info", `Recovered glyph-name text layer on page ${pageIndex}`);
 }
 
 /**

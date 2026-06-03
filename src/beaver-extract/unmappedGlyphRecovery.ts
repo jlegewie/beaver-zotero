@@ -1,28 +1,30 @@
 /**
- * Glyph-name recovery for unmapped text layers.
+ * Recovery for unmapped text layers.
  *
- * Some legacy producers (notably Acrobat Distiller 3.x CFF subsets) name
- * glyphs "C<n>" where <n> is the Unicode codepoint in decimal, with no
- * ToUnicode CMap. MuPDF cannot map these by default, so the page extracts as
- * runs of U+FFFD. The fork-local stext option
- * `use-glyph-name-for-unknown-unicode` decodes such names — but only as a
- * heuristic guess: other producers use "C<n>" as an arbitrary glyph-index
- * name, where the decode yields wrong-but-plausible text that is impossible
- * to detect downstream.
+ * When MuPDF cannot resolve a glyph to a Unicode codepoint it emits U+FFFD.
+ * Two heuristic stext options can recover such glyphs:
+ *   - `use-cid-for-unknown-unicode` — falls back to the character code
+ *     (recovers e.g. GNU Ghostscript Type 1C subsets whose code IS the
+ *     Latin-1 codepoint).
+ *   - `use-glyph-name-for-unknown-unicode` (fork-local) — decodes numeric
+ *     "C<n>" glyph names (decimal Unicode codepoint), e.g. Acrobat Distiller
+ *     3.x CFF subsets with no ToUnicode CMap.
  *
- * Rather than enable the guess unconditionally (which would silently corrupt
- * those files and destroy the U+FFFD signal the OCR gate relies on), the
- * worker extracts with the option OFF, then re-extracts ONLY the pages whose
- * text layer is present but overwhelmingly unmapped — the Distiller
- * signature. A normal page with a handful of unmappable symbol glyphs (e.g.
- * a stray "±") sits far below the retry threshold, so its honest U+FFFD
- * survives and is never silently rewritten.
+ * Both are guesses: a CID or a "C<n>" name is not always the real codepoint,
+ * so either can yield wrong-but-plausible text that is impossible to detect
+ * downstream. Rather than enable them unconditionally (which would silently
+ * corrupt such files and destroy the U+FFFD signal the OCR gate relies on),
+ * the worker extracts with both options OFF, then re-extracts ONLY the pages
+ * whose text layer is present but overwhelmingly unmapped — the signature of
+ * a wholly-unmapped font. A normal page with a handful of unmappable symbol
+ * glyphs (e.g. a stray "±" or "β") sits far below the retry threshold, so its
+ * honest U+FFFD survives and is never silently rewritten.
  *
  * After a retry the recovered text is accepted only if it actually resolved
- * the unknown glyphs AND reads like natural language; a glyph-index
- * misdecode produces digit/punctuation soup that fails the check, so the
- * page falls back to its detectable-U+FFFD form and routes to OCR instead of
- * being accepted as wrong text.
+ * the unknown glyphs AND reads like natural language; a misdecode produces
+ * digit/punctuation/control-char soup that fails the check, so the page falls
+ * back to its detectable-U+FFFD form and routes to OCR instead of being
+ * accepted as wrong text.
  *
  * Pure and React/Zotero-free so it can be unit tested and used from the
  * worker without pulling in bundle-specific code.
@@ -33,18 +35,21 @@ const REPLACEMENT_CHAR_RE = /�/g;
 const LETTER_RE = /\p{L}/gu;
 const WHITESPACE_RE = /\s+/g;
 
-/** Tunables for the glyph-name recovery retry. */
-export const GLYPH_NAME_RECOVERY = {
+/** Tunables for the unmapped-glyph recovery retry. */
+export const UNMAPPED_GLYPH_RECOVERY = {
     /**
-     * Minimum number of non-whitespace characters on a page before a retry
-     * is considered. Keeps blank and image-only (scanned) pages — which
-     * carry no recoverable text layer — out of the retry path.
+     * Minimum non-whitespace characters before a retry is considered. The
+     * only goal is to skip pages with NO text layer (blank or image-only/
+     * scanned — nothing to recover, left for the OCR gate). It must stay
+     * low so genuinely-sparse text pages — short title/divider pages, a lone
+     * heading — still recover; the replacement-ratio and acceptance checks,
+     * not this floor, are what prevent false recovery.
      */
-    minGlyphs: 50,
+    minGlyphs: 1,
     /**
      * A page is treated as an unmapped text layer worth retrying only when
      * at least this fraction of its non-whitespace characters are U+FFFD.
-     * The Distiller signature is ~all-U+FFFD; a normal page with a few
+     * A wholly-unmapped font is ~all-U+FFFD; a normal page with a few
      * unmappable symbols sits far below this and is never retried.
      */
     replacementRatioToRetry: 0.5,
@@ -57,7 +62,7 @@ export const GLYPH_NAME_RECOVERY = {
     /**
      * ...and only if the recovered text reads like natural language: at
      * least this fraction of non-whitespace characters are letters. A
-     * glyph-index misdecode produces digit/punctuation soup that fails this
+     * misdecode produces digit/punctuation/control-char soup that fails this
      * check, so the page keeps its detectable-U+FFFD form.
      */
     minRecoveredLetterRatio: 0.5,
@@ -90,27 +95,27 @@ function countMatches(text: string, re: RegExp): number {
 
 /**
  * True when a page's text layer is present but overwhelmingly unmapped, so
- * it is worth re-extracting with glyph-name recovery enabled. Cheap: a few
+ * it is worth re-extracting with the recovery options enabled. Cheap: a few
  * native string passes, safe to call for every page.
  */
 export function isUnmappedTextLayer(page: PageLike): boolean {
     const text = collectPageText(page);
     const nonWs = countNonWhitespace(text);
-    if (nonWs < GLYPH_NAME_RECOVERY.minGlyphs) return false;
-    return countMatches(text, REPLACEMENT_CHAR_RE) / nonWs >= GLYPH_NAME_RECOVERY.replacementRatioToRetry;
+    if (nonWs < UNMAPPED_GLYPH_RECOVERY.minGlyphs) return false;
+    return countMatches(text, REPLACEMENT_CHAR_RE) / nonWs >= UNMAPPED_GLYPH_RECOVERY.replacementRatioToRetry;
 }
 
 /**
- * True when a glyph-name-recovered page should replace the original: the
- * unknown glyphs were resolved AND the result reads like natural language.
- * When false, the caller keeps the original (detectable-U+FFFD) page.
+ * True when a recovered page should replace the original: the unknown glyphs
+ * were resolved AND the result reads like natural language. When false, the
+ * caller keeps the original (detectable-U+FFFD) page.
  */
 export function recoveredTextIsAcceptable(recoveredPage: PageLike): boolean {
     const text = collectPageText(recoveredPage);
     const nonWs = countNonWhitespace(text);
     if (nonWs === 0) return false;
-    if (countMatches(text, REPLACEMENT_CHAR_RE) / nonWs > GLYPH_NAME_RECOVERY.maxRecoveredReplacementRatio) {
+    if (countMatches(text, REPLACEMENT_CHAR_RE) / nonWs > UNMAPPED_GLYPH_RECOVERY.maxRecoveredReplacementRatio) {
         return false;
     }
-    return countMatches(text, LETTER_RE) / nonWs >= GLYPH_NAME_RECOVERY.minRecoveredLetterRatio;
+    return countMatches(text, LETTER_RE) / nonWs >= UNMAPPED_GLYPH_RECOVERY.minRecoveredLetterRatio;
 }
