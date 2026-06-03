@@ -563,6 +563,30 @@ function isTextHangingIndentLeader(line: PageLine): boolean {
 }
 
 /**
+ * Inline footnote / endnote / affiliation marker glued to the body text — the
+ * shape MuPDF commonly emits with NO separating space, which the
+ * hanging-indent leader regexes above deliberately reject (they require a
+ * space/period after the marker). Three forms, anchored at line start:
+ *   - footnote symbol: `* † ‡ § ¶ #`, the asterisk-operator `∗` / low asterisk
+ *     `⁎`, or a superscript digit (`¹²³…`);
+ *   - 1-3 leading digits not part of a longer number, optionally glued to the
+ *     body ("12Body", "1Wellcome", "3 For example"). The `(?!\d)` guard keeps
+ *     4-digit years / quantities ("2020 was…") out;
+ *   - a single lowercase letter immediately followed by a capital — a
+ *     superscript letter marker glued to a capitalised word ("aHere").
+ *
+ * Used only to gate the marker-artifact font-size-break suppression in
+ * `startNewItem`, so it fires for marker-led lines and not for the rare
+ * non-marker small line that happens to trip the same geometry.
+ */
+const INLINE_MARKER_LEAD_RE =
+    /^\s*(?:[*†‡§¶#∗⁎⁰¹²³⁴⁵⁶⁷⁸⁹]|\d{1,3}(?!\d)|\p{Ll}(?=\p{Lu}))/u;
+
+function startsWithInlineMarker(line: PageLine): boolean {
+    return INLINE_MARKER_LEAD_RE.test(line.text.replace(/\p{Cc}/gu, " "));
+}
+
+/**
  * Decide whether the body text on this page is itself all-caps. Sampled from
  * lines that match a known body style. Used to gate the all-caps header
  * rule — without this, an all-caps document would promote every line.
@@ -620,6 +644,21 @@ function joinLines(lines: string[], removeHyphenation: boolean = true): string {
 // (italic), `XXX.BI` / `.IB` (bold-italic). Match these explicitly.
 const BOLD_SUFFIX_RE = /\.(B|Bd|Bld|Bold|Black|Heavy|BI|IB)$/i;
 const ITALIC_SUFFIX_RE = /\.(I|It|Italic|Obl|Oblique|BI|IB)$/i;
+
+// Heavier-than-regular weight tokens that PostScript / OpenType names carry as
+// a trailing `-Token` or `.Token` (e.g. `HelveticaNeueLTStd-Md`,
+// `MyriadPro-Semibold`, `Futura-Demi`).
+const HEAVY_WEIGHT_SUFFIX_RE =
+    /[-.](?:Medium|Med|Md|SemiBold|Semibold|SemiBd|Semi|Sb|DemiBold|Demibold|Demi|Db|Black|Blk|Heavy|Hv)(?:Italic|It|Obl|Oblique)?$/i;
+
+/**
+ * True when a font name carries a Medium / Semibold / Demibold (or heavier)
+ * weight token that MuPDF does not surface as the Bold style flag. Used as a
+ * heading-weight cue for display-font section titles.
+ */
+function hasHeavyWeightToken(font: string | undefined | null): boolean {
+    return !!font && HEAVY_WEIGHT_SUFFIX_RE.test(font);
+}
 
 function extractSpanStyle(
     fontName: string,
@@ -989,6 +1028,25 @@ function isHeaderStyle(
         Math.abs(lineStyle.size - primaryBodyStyle.size) < 0.5 &&
         lineStyle.bold &&
         !primaryBodyStyle.bold &&
+        lineStyle.font !== primaryBodyStyle.font
+    ) {
+        isPotentialHeader = true;
+    }
+
+    // Rule 2b: Same size, different font, heading-weight token (requires gap).
+    // Section titles set in a Medium / Semibold / Demibold display weight that
+    // MuPDF reports as `weight: "normal"` (so Rule 2's bold flag never fires)
+    // — e.g. a sans "Variables" subheading in `HelveticaNeueLTStd-Md` over a
+    // serif Regular body. Gated exactly like Rule 2 (different font, same
+    // size, gap), with the weight token replacing the bold flag. The body
+    // must not itself carry the heading weight, so a document whose body is a
+    // Medium face does not promote every line.
+    if (
+        !isPotentialHeader &&
+        gapCheckPasses &&
+        Math.abs(lineStyle.size - primaryBodyStyle.size) < 0.5 &&
+        hasHeavyWeightToken(lineStyle.font) &&
+        !hasHeavyWeightToken(primaryBodyStyle.font) &&
         lineStyle.font !== primaryBodyStyle.font
     ) {
         isPotentialHeader = true;
@@ -1461,6 +1519,46 @@ function startNewItem(
         fontSizeBreak =
             fontSizeDiff > settings.fontSizeTolerance &&
             lineHeightDiff > settings.fontSizeTolerance;
+
+        // Superscript-marker artifact suppression. MuPDF's JSON walk reports
+        // a single font/size per line, taken from the line's LEADING glyph.
+        // A footnote/endnote line that begins with a superscript marker
+        // ("12Body text…", "∗Body text…") therefore reports the small marker
+        // size for the entire line, while its bbox height still tracks the
+        // taller body glyphs. The result: the first line of a footnote reads
+        // as *smaller font but taller* than its wrapped continuation, so the
+        // raw font-size break splits the marker line off from the body it
+        // introduces.
+        //
+        // Three constraints keep this targeted at the marker artifact:
+        //   1. Marker shape. The previous line must actually open with an
+        //      inline footnote/endnote/affiliation marker. The geometry below
+        //      is the leading-small-glyph signature, but it is also tripped by
+        //      the rare non-marker line made tall by brackets / sub- or
+        //      superscripts / accents; without this gate the suppression could
+        //      merge a small standalone caption / callout / display line into
+        //      the following paragraph.
+        //   2. Direction. Only the *previous* line may be the artifact (marker
+        //      line → its larger continuation merges, keeping the footnote
+        //      whole). A *current* line that opens with a fresh marker starts
+        //      the next footnote and must still break — `prevReportsSmaller`
+        //      enforces this asymmetry, so consecutive footnotes stay apart.
+        //   3. Comparable height. The marker line is not shorter than its
+        //      continuation (a genuinely smaller-font line is also shorter)
+        //      and taller by no more than one body em (a superscript raises
+        //      the top only a fraction of an em; a dramatically taller line is
+        //      a different element, e.g. a misread heading, not a marker).
+        if (fontSizeBreak && startsWithInlineMarker(prevLine)) {
+            const prevReportsSmaller = prevLine.fontSize < line.fontSize;
+            const heightExcess =
+                bboxHeight(prevLine.bbox) - bboxHeight(line.bbox);
+            const prevHeightComparable =
+                heightExcess + settings.fontSizeTolerance >= 0 &&
+                heightExcess <= line.fontSize;
+            if (prevReportsSmaller && prevHeightComparable) {
+                fontSizeBreak = false;
+            }
+        }
     }
 
     // Drop-cap wraparound: when the previous line's bbox extends well below

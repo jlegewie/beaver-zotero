@@ -1066,6 +1066,124 @@ describe('hanging-indent leader suppression', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Superscript-marker font-size break
+//
+// MuPDF's JSON walk reports a single font/size per line, taken from the
+// line's leading glyph. A footnote line that opens with a superscript marker
+// ("12Body text…") reports the small marker size for the whole line while its
+// bbox height still tracks the taller body glyphs — so the marker line reads
+// as *smaller font but taller* than its wrapped continuation. The naive
+// font-size break splits every footnote's first line into its own paragraph.
+// The suppression is directional: a marker line merges with the continuation
+// it introduces, but a fresh marker line still breaks from the previous note.
+// ---------------------------------------------------------------------------
+describe('superscript-marker font-size break', () => {
+    // Model production output: the marker line carries a smaller reported
+    // `fontSize` (the superscript size) but a TALLER bbox than its body-sized
+    // continuation. Shared `r` keeps every line at the same right edge so no
+    // early-end/indent break interferes. Markers are glued to the body text
+    // ("11In…"), so they are not recognized as hanging-indent leaders.
+    const MARKER_H = 8.7;
+    const BODY_H = 7.25;
+
+    function footnoteLine(text: string, isMarker: boolean): LeaderLineSpec {
+        return {
+            text,
+            l: 0,
+            r: 300,
+            size: isMarker ? 5 : 7,
+            bboxHeight: isMarker ? MARKER_H : BODY_H,
+            font: 'Minion-Regular',
+        };
+    }
+
+    it('keeps a footnote marker line merged with its wrapped continuation', () => {
+        const result = makeColumnPageResult([
+            ...FILLERS,
+            footnoteLine('11In a given year the dataset included five values for the', true),
+            footnoteLine('variable country of birth across the pooled survey waves used', false),
+        ]);
+        const paragraphs = paragraphTexts(result, [BODY, FOOTNOTE_BODY]);
+        const note = paragraphs.find(p => p.includes('11In a given year'));
+        expect(note).toBeDefined();
+        // Marker line and its continuation are one paragraph.
+        expect(note).toContain('variable country of birth');
+    });
+
+    it('still breaks between one footnote and the next note\'s marker line', () => {
+        const result = makeColumnPageResult([
+            ...FILLERS,
+            footnoteLine('11In a given year the dataset included five values for the', true),
+            footnoteLine('variable country of birth across the pooled survey waves used', false),
+            footnoteLine('12I am not able to control for years since immigration for the', true),
+            footnoteLine('immigrant population since both models must be analyzed alike', false),
+        ]);
+        const paragraphs = paragraphTexts(result, [BODY, FOOTNOTE_BODY]);
+        const note11 = paragraphs.find(p => p.includes('11In a given year'));
+        const note12 = paragraphs.find(p => p.includes('12I am not able'));
+        expect(note11).toBeDefined();
+        expect(note12).toBeDefined();
+        // The two notes are distinct paragraphs, not fused.
+        expect(note11).not.toBe(note12);
+        expect(note11).not.toContain('12I am not able');
+        expect(note12).not.toContain('11In a given year');
+        // Each note still includes its own continuation line.
+        expect(note11).toContain('variable country of birth');
+        expect(note12).toContain('immigrant population');
+    });
+
+    it('still breaks a non-marker small line that is taller than the following body', () => {
+        // The geometry (smaller reported size, comparable-or-taller bbox) is
+        // also tripped by a small line made tall by brackets / sub- or
+        // superscripts — but that line carries NO footnote/endnote/affiliation
+        // marker at its start. Such a standalone small line (a caption /
+        // callout / display fragment) must not be merged into the next
+        // paragraph; the marker-shape gate keeps its break.
+        const result = makeColumnPageResult([
+            ...FILLERS,
+            { text: 'small display fragment rendered tall by tall bracket glyphs', l: 0, r: 300, size: 5, bboxHeight: 8.7, font: 'Minion-Regular' },
+            { text: 'ordinary body continuation line at the normal body size', l: 0, r: 300, size: 7, bboxHeight: 7.25, font: 'Minion-Regular' },
+        ]);
+        const paragraphs = paragraphTexts(result, [BODY, FOOTNOTE_BODY]);
+        const frag = paragraphs.find(p => p.includes('small display fragment'));
+        expect(frag).toBeDefined();
+        // No leading marker → suppression must not fire → break preserved.
+        expect(frag).not.toContain('ordinary body continuation');
+    });
+
+    it('still breaks when the smaller-reported line is dramatically taller (not a marker)', () => {
+        // Upper bound: a superscript marker raises the top only a fraction of
+        // an em. A line that reports a smaller size yet is far TALLER than the
+        // next line is a different element (a misread heading / tall inline
+        // glyph), not a marker artifact — the break must survive.
+        const result = makeColumnPageResult([
+            ...FILLERS,
+            { text: 'Oversized leading element reported at a small font size', l: 0, r: 300, size: 5, bboxHeight: 20, font: 'Minion-Regular' },
+            { text: 'ordinary body continuation line at the normal body size', l: 0, r: 300, size: 7, bboxHeight: 7.25, font: 'Minion-Regular' },
+        ]);
+        const paragraphs = paragraphTexts(result, [BODY, FOOTNOTE_BODY]);
+        const tall = paragraphs.find(p => p.includes('Oversized leading element'));
+        expect(tall).toBeDefined();
+        expect(tall).not.toContain('ordinary body continuation');
+    });
+
+    it('still breaks to a genuinely smaller-and-shorter band (real size change)', () => {
+        // Control: a real font-size drop (smaller size AND shorter bbox, no
+        // marker artifact) must still split. Here the second line is both
+        // smaller-size and shorter, so size and height agree — break stays.
+        const result = makeColumnPageResult([
+            ...FILLERS,
+            { text: 'A full-measure body line that runs to the column right edge here', l: 0, r: 300, size: 10, bboxHeight: 12, font: 'Minion-Regular' },
+            { text: 'tiny print disclaimer set distinctly smaller than the body text', l: 0, r: 300, size: 6, bboxHeight: 7, font: 'Minion-Regular' },
+        ]);
+        const paragraphs = paragraphTexts(result, [BODY]);
+        const body = paragraphs.find(p => p.includes('A full-measure body line'));
+        expect(body).toBeDefined();
+        expect(body).not.toContain('tiny print disclaimer');
+    });
+});
+
+// ---------------------------------------------------------------------------
 // Header detection
 //
 // Two layout rules exercised here:
@@ -1198,6 +1316,57 @@ describe('header detection', () => {
             expect(heading).toBeDefined();
             expect(heading!.type).toBe('header');
             expect(heading!.text).toContain('project management');
+        });
+    });
+
+    describe('Medium / Semibold weight headings', () => {
+        // PostScript / OpenType faces in a Medium / Semibold / Demibold weight
+        // carry the weight as a trailing `-Md` / `-Semibold` / `-Demi` token,
+        // but MuPDF reports them with `weight: "normal"` (only the Bold style
+        // flag counts). A subsection title set in such a display weight, same
+        // size as a Regular body in a different family, must still promote via
+        // the bold-different-font rule.
+        it('promotes a heading set in a Medium-weight (-Md) font of a different family', () => {
+            const all = items(
+                [
+                    ...FILLERS_BEFORE_HEADING,
+                    { text: 'Variables', l: 0, size: 10, font: 'HelveticaNeueLTStd-Md' },
+                ],
+                [BODY],
+            );
+            const heading = all.find(it => it.text.includes('Variables'));
+            expect(heading).toBeDefined();
+            expect(heading!.type).toBe('header');
+        });
+
+        it('promotes a heading set in a Semibold (-Semibold) font', () => {
+            const all = items(
+                [
+                    ...FILLERS_BEFORE_HEADING,
+                    { text: 'Measures and Methods', l: 0, size: 10, font: 'MyriadPro-Semibold' },
+                ],
+                [BODY],
+            );
+            const heading = all.find(it => it.text.includes('Measures and Methods'));
+            expect(heading).toBeDefined();
+            expect(heading!.type).toBe('header');
+        });
+
+        it('does NOT promote a Regular-weight line in a different family with no other cue', () => {
+            // Control: a same-size, different-family line carrying no weight,
+            // italic, all-caps, or section-number cue stays body. This is what
+            // keeps the Medium/Semibold extension from promoting every
+            // font-different line (inline code, emphasis fragments).
+            const all = items(
+                [
+                    ...FILLERS_BEFORE_HEADING,
+                    { text: 'Variables', l: 0, size: 10, font: 'HelveticaNeueLTStd-Roman' },
+                ],
+                [BODY],
+            );
+            const item = all.find(it => it.text.includes('Variables'));
+            expect(item).toBeDefined();
+            expect(item!.type).toBe('paragraph');
         });
     });
 });
