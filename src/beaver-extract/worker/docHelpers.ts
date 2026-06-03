@@ -69,6 +69,17 @@ const STRUCTURED_TEXT_OPTIONS_DETAILED =
 const STRUCTURED_TEXT_OPTIONS_DETAILED_WITH_IMAGES =
     "preserve-whitespace,preserve-ligatures,preserve-images,use-cid-for-unknown-unicode";
 
+// `use-glyph-name-for-unknown-unicode`: fork-local stext option that decodes
+// numeric "C<n>" glyph names (decimal Unicode codepoint) when a glyph's
+// normal unicode lookup has already failed. It is a heuristic guess and is
+// therefore NEVER enabled on the default extraction path — only on the
+// targeted re-extraction of pages detected as unmapped text layers (see
+// `glyphNameRecovery.ts`), so ordinary pages keep their detectable U+FFFD.
+const GLYPH_NAME_RECOVERY_OPTION = "use-glyph-name-for-unknown-unicode";
+function withGlyphNameRecovery(options: string): string {
+    return `${options},${GLYPH_NAME_RECOVERY_OPTION}`;
+}
+
 export interface RenderOptionsResolved {
     scale: number;
     dpi: number;
@@ -278,7 +289,7 @@ export const openDocUncached = openDocSafe;
 export function extractRawPageFromDoc(
     doc: DocumentLike,
     pageIndex: number,
-    opts?: { includeImages?: boolean },
+    opts?: { includeImages?: boolean; recoverGlyphNames?: boolean },
 ): RawPageData {
     const page = doc.loadPage(pageIndex);
     try {
@@ -295,9 +306,10 @@ export function extractRawPageFromDoc(
             // label not available
         }
 
-        const stextOptions = opts?.includeImages
+        let stextOptions = opts?.includeImages
             ? STRUCTURED_TEXT_OPTIONS_WITH_IMAGES
             : STRUCTURED_TEXT_OPTIONS;
+        if (opts?.recoverGlyphNames) stextOptions = withGlyphNameRecovery(stextOptions);
         const stext = page.toStructuredText(stextOptions);
         try {
             const json = JSON.parse(stext.asJSON());
@@ -604,6 +616,7 @@ export function extractRawPageDetailedFromDoc(
     pageIndex: number,
     includeImages: boolean,
     fontApi?: FontApi,
+    recoverGlyphNames?: boolean,
 ): RawPageDataDetailed {
     const page = doc.loadPage(pageIndex);
     try {
@@ -620,9 +633,10 @@ export function extractRawPageDetailedFromDoc(
             // label not available
         }
 
-        const stextOptions = includeImages
+        let stextOptions = includeImages
             ? STRUCTURED_TEXT_OPTIONS_DETAILED_WITH_IMAGES
             : STRUCTURED_TEXT_OPTIONS_DETAILED;
+        if (recoverGlyphNames) stextOptions = withGlyphNameRecovery(stextOptions);
         const stext = page.toStructuredText(stextOptions);
 
         const blocks: RawBlock[] = [];
