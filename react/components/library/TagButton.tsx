@@ -40,9 +40,21 @@ export const TagButton: React.FC<TagButtonProps> = ({
             if (zoteroPane.collectionsView) {
                 await zoteroPane.collectionsView.selectLibrary(tag.libraryId);
             }
+            // Zotero tears down the tag selector (sets it to null) while its pane
+            // is collapsed, so reveal it first. Otherwise the filter would never
+            // be applied for users who keep the tag selector hidden.
+            if (!zoteroPane.tagSelectorShown?.() && typeof zoteroPane.toggleTagSelector === 'function') {
+                await zoteroPane.toggleTagSelector();
+            }
             if (zoteroPane.tagSelector) {
+                // Applying via the selector mirrors the selection in its UI and
+                // triggers the items-view filter through its onSelection handler.
                 zoteroPane.tagSelector.clearTagSelection();
                 zoteroPane.tagSelector.handleTagSelected(tag.tag);
+            } else if (zoteroPane.itemsView) {
+                // Fallback if the selector still isn't available: filter the items
+                // view directly so the action is never a silent no-op.
+                await zoteroPane.itemsView.setFilter('tags', new Set([tag.tag]));
             }
         } catch {
             // Silently fail - tag filtering is a convenience feature
