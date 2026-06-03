@@ -22,11 +22,15 @@ import type {
     DetectedSpan,
     PageLineResult,
 } from '../../../src/beaver-extract/LineDetector';
-import type { TextStyle } from '../../../src/beaver-extract/types';
+import { bboxHeight, type BoundingBox, type TextStyle } from '../../../src/beaver-extract/types';
 
 // ---------------------------------------------------------------------------
 // Factories
 // ---------------------------------------------------------------------------
+
+function bbox(l: number, t: number, r: number, b: number): BoundingBox {
+    return { l, t, r, b, origin: 'top-left' };
+}
 
 function makePageLine(
     text: string,
@@ -34,8 +38,8 @@ function makePageLine(
 ): PageLine {
     const span: DetectedSpan = {
         text,
-        bbox: { x: 0, y: 0, w: text.length * 10, h: 12 },
-        lineBBox: { l: 0, t: 0, r: text.length * 10, b: 12, width: text.length * 10, height: 12 },
+        bbox: bbox(0, 0, text.length * 10, 12),
+        lineBBox: bbox(0, 0, text.length * 10, 12),
         size: style.size,
         fontName: style.font,
         fontWeight: style.bold ? 'bold' : 'normal',
@@ -305,15 +309,8 @@ function makeMultiSpanLine(spec: LeaderLineSpec, top: number): PageLine {
         const mWidth = spec.marker.text.length * (spec.marker.size * 0.5);
         const markerSpan: DetectedSpan = {
             text: spec.marker.text,
-            bbox: { x: cursor, y: top, w: mWidth, h: spec.marker.size },
-            lineBBox: {
-                l: cursor,
-                t: top,
-                r: cursor + mWidth,
-                b: top + spec.marker.size,
-                width: mWidth,
-                height: spec.marker.size,
-            },
+            bbox: bbox(cursor, top, cursor + mWidth, top + spec.marker.size),
+            lineBBox: bbox(cursor, top, cursor + mWidth, top + spec.marker.size),
             size: spec.marker.size,
             fontName: spec.marker.font ?? font,
             fontWeight: spec.marker.bold ? 'bold' : 'normal',
@@ -327,15 +324,8 @@ function makeMultiSpanLine(spec: LeaderLineSpec, top: number): PageLine {
     const mainWidth = mainText.length * charWidth;
     const mainSpan: DetectedSpan = {
         text: mainText,
-        bbox: { x: cursor, y: top, w: mainWidth, h: size },
-        lineBBox: {
-            l: cursor,
-            t: top,
-            r: cursor + mainWidth,
-            b: top + size,
-            width: mainWidth,
-            height: size,
-        },
+        bbox: bbox(cursor, top, cursor + mainWidth, top + size),
+        lineBBox: bbox(cursor, top, cursor + mainWidth, top + size),
         size,
         fontName: font,
         fontWeight: bold ? 'bold' : 'normal',
@@ -348,14 +338,7 @@ function makeMultiSpanLine(spec: LeaderLineSpec, top: number): PageLine {
     return {
         spans,
         bboxes: spans.map(s => s.lineBBox),
-        bbox: {
-            l: spec.l,
-            t: top,
-            r,
-            b: top + lineHeight,
-            width: r - spec.l,
-            height: lineHeight,
-        },
+        bbox: bbox(spec.l, top, r, top + lineHeight),
         text: fullText,
         fontSize: size,
     };
@@ -366,7 +349,7 @@ function makeColumnPageResult(specs: LeaderLineSpec[]): PageLineResult {
     const lines: PageLine[] = specs.map(s => {
         const line = makeMultiSpanLine(s, cursorTop);
         // Standard leading: line height + small inter-line gap.
-        cursorTop += line.bbox.height + (s.gapAfter ?? 2);
+        cursorTop += bboxHeight(line.bbox) + (s.gapAfter ?? 2);
         return line;
     });
     const allLeft = Math.min(...lines.map(l => l.bbox.l));
