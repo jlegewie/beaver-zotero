@@ -1,7 +1,54 @@
 import React from 'react';
 import { CSSItemTypeIcon, CSSIcon, Icon, TickIcon } from '../../icons/icons';
+import { ZoteroIcon, ZOTERO_ICONS } from '../../icons/ZoteroIcon';
+import { ANNOTATION_ICON_BY_TYPE } from '../../input/MessageItemButton';
+import { toAnnotation } from '../../../types/attachments/converters';
 import { getDisplayNameFromItem } from '../../../utils/sourceUtils';
 import { truncateText } from '../../../utils/stringUtils';
+
+const ANNOTATION_TEXT_BY_TYPE: Record<string, string> = {
+    highlight: 'Highlight',
+    underline: 'Underline',
+    note: 'Sticky Note',
+    image: 'Area',
+};
+
+/**
+ * Icon for a row in the overflow items summary preview.
+ */
+function ItemSummaryIcon({ item }: { item: Zotero.Item }) {
+    if (item.isAnnotation()) {
+        const annotation = toAnnotation(item);
+        const icon = annotation?.annotation_type
+            ? ANNOTATION_ICON_BY_TYPE[annotation.annotation_type] || ZOTERO_ICONS.ANNOTATION
+            : ZOTERO_ICONS.ANNOTATION;
+        return <ZoteroIcon icon={icon} size={14} className="mt-1"/>;
+    }
+
+    const itemType = item.getItemTypeIconName();
+    return (
+        <span className="scale-80">
+            <CSSItemTypeIcon itemType={itemType} />
+        </span>
+    );
+}
+
+/**
+ * Display label for a row in the overflow items summary preview.
+ */
+function getItemSummaryDisplayName(item: Zotero.Item): string {
+    if (item.isAnnotation()) {
+        const annotation = toAnnotation(item);
+        if (annotation?.annotation_type) {
+            return ANNOTATION_TEXT_BY_TYPE[annotation.annotation_type] || 'Annotation';
+        }
+        return 'Annotation';
+    }
+    if (item.isRegularItem()) {
+        return truncateText(getDisplayNameFromItem(item), 50);
+    }
+    return item.getDisplayTitle();
+}
 
 interface RegularItemSummary {
     item: Zotero.Item;
@@ -20,17 +67,14 @@ export const RegularItemsSummaryContent: React.FC<RegularItemsSummaryContentProp
     return (
         <div className="display-flex flex-col gap-15">
             {items.map((itemSummary) => {
-                const displayName = itemSummary.item.isRegularItem()
-                    ? truncateText(getDisplayNameFromItem(itemSummary.item), 50)
-                    : itemSummary.item.getDisplayTitle();
-                const itemType = itemSummary.item.getItemTypeIconName();
+                const displayName = getItemSummaryDisplayName(itemSummary.item);
                 const validCount = Math.max(itemSummary.totalAttachments - itemSummary.invalidAttachments, 0);
                 
                 return (
                     <div key={itemSummary.item.key} className="display-flex flex-col gap-2">
                         <div className="display-flex items-start gap-1">
-                            <div className="flex-shrink-0 -mt-010 scale-80">
-                                <CSSItemTypeIcon itemType={itemType} />
+                            <div className="flex-shrink-0 -mt-010">
+                                <ItemSummaryIcon item={itemSummary.item} />
                             </div>
                             <div className="display-flex flex-col gap-1">
                                 <div className="font-color-secondary truncate">
