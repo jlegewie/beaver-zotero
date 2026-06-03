@@ -1,5 +1,5 @@
 import React, { forwardRef } from 'react'
-import { CSSIcon, Icon, TextAlignLeftIcon } from "../icons/icons"
+import { CSSIcon, Icon, TextAlignLeftIcon, PdfIcon } from "../icons/icons"
 import { useSetAtom } from 'jotai'
 import { readerTextSelectionAtom } from '../../atoms/messageComposition'
 import { navigateToPageInCurrentReader } from '../../utils/readerUtils'
@@ -48,6 +48,12 @@ export const TextSelectionButton = forwardRef<HTMLButtonElement, TextSelectionBu
             canEdit,
             disabled,
             onMenuOpen: cancelTimers,
+            // Mirror the button click: scroll the reader to the selection's page.
+            extraMenuItems: [{
+                label: 'Reveal in PDF',
+                icon: PdfIcon,
+                onClick: () => navigateToPageInCurrentReader(selection.page),
+            }],
         })
 
         // Update getIconElement to use isHovered from the hook

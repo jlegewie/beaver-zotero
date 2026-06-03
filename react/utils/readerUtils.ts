@@ -359,8 +359,28 @@ function addSelectionChangeListener(reader: any, callback: (selection: TextSelec
 }
 
 /**
+ * Whether the given item is open as the *currently selected* tab in the main
+ * window. Works for both reader tabs (attachments) and note tabs, since both
+ * store the item ID on their tab data.
+ *
+ * Used to disable an "Open Attachment"/"Open Note" action only when the user is
+ * already looking at that item. An item open in a background tab returns false
+ * (re-opening it just switches to that tab).
+ */
+function isItemActiveTab(itemId: number): boolean {
+    try {
+        const tabs = Zotero.getMainWindow()?.Zotero_Tabs;
+        if (!tabs) return false;
+        const tabID = tabs.getTabIDByItemID?.(itemId);
+        return !!tabID && tabID === tabs.selectedID;
+    } catch {
+        return false;
+    }
+}
+
+/**
  * Ensures the reader is initialized.
- * 
+ *
  * @param reader - The reader instance.
  */
 async function ensureReaderInitialized(reader: ZoteroReader, waitForView: boolean = true): Promise<void> {
@@ -388,5 +408,6 @@ export {
     addSelectionChangeListener,
     getSelectedTextAsTextSelection,
     navigateToPageInCurrentReader,
-    navigateToAnnotation
+    navigateToAnnotation,
+    isItemActiveTab
 };
