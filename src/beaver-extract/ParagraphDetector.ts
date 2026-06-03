@@ -295,6 +295,27 @@ function looksLikeAuthorList(text: string): boolean {
 }
 
 /**
+ * Author-byline detector for the all-caps heading rule. Cover/title pages and
+ * reference lists set author names in the same face used for section titles, so
+ * an all-caps author list ("STOLLE, D., S. SOROKA, & R. JOHNSTON") matches the
+ * all-caps heading signal but is not a heading.
+ *
+ * The signal is **two or more** standalone single-letter initials. A single
+ * initial-shaped token is deliberately NOT enough: section headings routinely
+ * carry one ("APPENDIX A. METHODS", "PART B. RESULTS"), and treating that lone
+ * enumerator as an author initial would demote a legitimate heading to body.
+ * Author lists, by contrast, almost always stack multiple initials.
+ *
+ * A standalone initial is an uppercase letter + period bounded by a separator
+ * (start / space / comma) before and (space / comma / close-paren / end) after,
+ * so a glued abbreviation ("U.S.") does not count.
+ */
+function looksLikeByline(text: string): boolean {
+    const initials = text.match(/(?:^|[\s,])\p{Lu}\.(?=[\s,)]|$)/gu);
+    return !!initials && initials.length >= 2;
+}
+
+/**
  * Reference-list citation-tail detector. Reference lists routinely italicize
  * the journal name (and trailing volume/pages/year) in a different italic face
  * from the body, which fits Rule 3 of header detection ("same size, italic,
@@ -563,6 +584,36 @@ function isTextHangingIndentLeader(line: PageLine): boolean {
 }
 
 /**
+ * Inline footnote / endnote / affiliation marker glued to the body text — the
+ * shape MuPDF commonly emits with NO separating space, which the
+ * hanging-indent leader regexes above deliberately reject (they require a
+ * space/period after the marker). Three forms, anchored at line start:
+ *   - footnote symbol: `* † ‡ § ¶ #`, the asterisk-operator `∗` / low asterisk
+ *     `⁎`, or a superscript digit (`¹²³…`);
+ *   - 1-3 leading digits glued DIRECTLY to a letter ("12Body", "1Wellcome",
+ *     "10Traditional"). The trailing `\p{L}` is what makes this a glued marker
+ *     rather than "any 1-3 digit prefix": it excludes numbered section
+ *     headings and list items ("1. Background", "2) Methods", "1 Introduction")
+ *     and 4-digit years ("2020 was…"), whose digit is followed by a separator,
+ *     space, or further digit — not by body text. This matters because the
+ *     suppression below clears the font-size break, so matching a numbered
+ *     heading here would merge it into the following body line and demote the
+ *     heading to a paragraph;
+ *   - a single lowercase letter immediately followed by a capital — a
+ *     superscript letter marker glued to a capitalised word ("aHere").
+ *
+ * Used only to gate the marker-artifact font-size-break suppression in
+ * `startNewItem`, so it fires for marker-led lines and not for the rare
+ * non-marker small line that happens to trip the same geometry.
+ */
+const INLINE_MARKER_LEAD_RE =
+    /^\s*(?:[*†‡§¶#∗⁎⁰¹²³⁴⁵⁶⁷⁸⁹]|\d{1,3}\p{L}|\p{Ll}(?=\p{Lu}))/u;
+
+function startsWithInlineMarker(line: PageLine): boolean {
+    return INLINE_MARKER_LEAD_RE.test(line.text.replace(/\p{Cc}/gu, " "));
+}
+
+/**
  * Decide whether the body text on this page is itself all-caps. Sampled from
  * lines that match a known body style. Used to gate the all-caps header
  * rule — without this, an all-caps document would promote every line.
@@ -620,6 +671,21 @@ function joinLines(lines: string[], removeHyphenation: boolean = true): string {
 // (italic), `XXX.BI` / `.IB` (bold-italic). Match these explicitly.
 const BOLD_SUFFIX_RE = /\.(B|Bd|Bld|Bold|Black|Heavy|BI|IB)$/i;
 const ITALIC_SUFFIX_RE = /\.(I|It|Italic|Obl|Oblique|BI|IB)$/i;
+
+// Heavier-than-regular weight tokens that PostScript / OpenType names carry as
+// a trailing `-Token` or `.Token` (e.g. `HelveticaNeueLTStd-Md`,
+// `MyriadPro-Semibold`, `Futura-Demi`).
+const HEAVY_WEIGHT_SUFFIX_RE =
+    /[-.](?:Medium|Med|Md|SemiBold|Semibold|SemiBd|Semi|Sb|DemiBold|Demibold|Demi|Db|Black|Blk|Heavy|Hv)(?:Italic|It|Obl|Oblique)?$/i;
+
+/**
+ * True when a font name carries a Medium / Semibold / Demibold (or heavier)
+ * weight token that MuPDF does not surface as the Bold style flag. Used as a
+ * heading-weight cue for display-font section titles.
+ */
+function hasHeavyWeightToken(font: string | undefined | null): boolean {
+    return !!font && HEAVY_WEIGHT_SUFFIX_RE.test(font);
+}
 
 function extractSpanStyle(
     fontName: string,
@@ -715,9 +781,31 @@ function matchesBodyStyle(line: TextStyle, bodyStyles: TextStyle[]): boolean {
         if (bs.bold !== line.bold) return false;
         if (bs.italic !== line.italic) return false;
         if (bs.font === line.font) return true;
-        return !line.font || line.font === "unknown" ||
-               !bs.font || bs.font === "unknown";
+        if (!line.font || line.font === "unknown" ||
+            !bs.font || bs.font === "unknown") {
+            return true;
+        }
+        // Subset-tag-insensitive match. A PDF producer routinely splits one
+        // logical font into several embedded subsets, each with its own random
+        // 6-letter tag (`WHFMUD+CMR12`, `FSAPEC+CMR12`). Appendix / proof /
+        // figure regions frequently get a different subset than the body even
+        // though it is the same visual face — without this the body font's
+        // alternate subset reads as "non-body" and the bare-font-difference
+        // heading rule promotes ordinary body lines. Comparing base names
+        // (tag stripped) treats those as body. Genuine heading faces carry a
+        // different base name, so they stay distinguishable.
+        const a = baseFontName(line.font);
+        const b = baseFontName(bs.font);
+        return a !== "" && a === b;
     });
+}
+
+// PDF font subset tag: exactly six uppercase letters followed by '+'
+// (e.g. `WHFMUD+CMR12`). Stripped to compare the underlying face.
+const SUBSET_TAG_RE = /^[A-Z]{6}\+/;
+function baseFontName(font: string | undefined | null): string {
+    if (!font) return "";
+    return font.replace(SUBSET_TAG_RE, "");
 }
 
 /**
@@ -949,8 +1037,51 @@ function isHeaderStyle(
         return false;
     }
 
-    // Not a header if it's a known body style
-    if (matchesBodyStyle(lineStyle, bodyStyles)) {
+    const primaryBodyStyle = bodyStyles[0];
+    const gapCheckPasses = precededByGap === null || precededByGap;
+    const text = line.text.trim();
+    // `phraseTextOverride` lets the multi-line item evaluator pass the joined
+    // item text so Rules 5/6 (and the all-caps body-style bypass below) see
+    // the full heading even when it wraps across lines; per-line evaluation in
+    // `startNewItem` leaves it null so the first line is tested on its own.
+    const phraseText = phraseTextOverride ?? text;
+
+    // All-caps heading with no usable font cue. When the heading's font is
+    // unresolved ("unknown"/"") or identical to the body font, the
+    // font-difference heading rules (2-6) can never fire: an all-caps line in
+    // an indistinct font reports the same style class as body and is treated
+    // as body text by `matchesBodyStyle` below. This is the dominant shape on
+    // PDFs whose embedded fonts MuPDF cannot resolve (every line reports font
+    // "unknown"), where section titles are visually bold/caps yet carry no
+    // size/weight/font signal. The all-caps multi-word phrase is the
+    // independent heading cue; the body must not itself be all-caps (whole-
+    // document caps rendering is not a heading signal), the line must be
+    // same-or-smaller size, non-italic, and preceded by a gap. Resolved,
+    // distinct-font docs keep using Rule 5 (this bypass requires an indistinct
+    // font, so it never changes their behavior).
+    const fontIndistinctFromBody =
+        !lineStyle.font ||
+        lineStyle.font === "unknown" ||
+        lineStyle.font === primaryBodyStyle.font ||
+        baseFontName(lineStyle.font) === baseFontName(primaryBodyStyle.font);
+    const capsWithoutFontCue =
+        gapCheckPasses &&
+        !bodyAllCaps &&
+        fontIndistinctFromBody &&
+        !lineStyle.italic &&
+        lineStyle.size <= primaryBodyStyle.size + 0.5 &&
+        isAllCapsHeaderPhrase(phraseText) &&
+        // All-caps reference-list entries (uppercased author names + year)
+        // share the body face and would otherwise be promoted; the byline /
+        // citation shapes separate them from genuine all-caps section titles.
+        !looksLikeByline(phraseText) &&
+        !looksLikeJournalCitation(phraseText);
+
+    // Not a header if it's a known body style. The all-caps-without-font-cue
+    // candidate is exempt: under an indistinct font it matches body style by
+    // construction, so the all-caps cue is the only thing separating it from
+    // body text.
+    if (matchesBodyStyle(lineStyle, bodyStyles) && !capsWithoutFontCue) {
         return false;
     }
 
@@ -968,9 +1099,7 @@ function isHeaderStyle(
         return false;
     }
 
-    const primaryBodyStyle = bodyStyles[0];
     let isPotentialHeader = false;
-    const gapCheckPasses = precededByGap === null || precededByGap;
     // True when the candidate carries an independent size cue (Rule 1).
     // Used to exempt size-cued headings from the heading-capitalization
     // guard below — a larger line is a heading regardless of its leading
@@ -989,6 +1118,25 @@ function isHeaderStyle(
         Math.abs(lineStyle.size - primaryBodyStyle.size) < 0.5 &&
         lineStyle.bold &&
         !primaryBodyStyle.bold &&
+        lineStyle.font !== primaryBodyStyle.font
+    ) {
+        isPotentialHeader = true;
+    }
+
+    // Rule 2b: Same size, different font, heading-weight token (requires gap).
+    // Section titles set in a Medium / Semibold / Demibold display weight that
+    // MuPDF reports as `weight: "normal"` (so Rule 2's bold flag never fires)
+    // — e.g. a sans "Variables" subheading in `HelveticaNeueLTStd-Md` over a
+    // serif Regular body. Gated exactly like Rule 2 (different font, same
+    // size, gap), with the weight token replacing the bold flag. The body
+    // must not itself carry the heading weight, so a document whose body is a
+    // Medium face does not promote every line.
+    if (
+        !isPotentialHeader &&
+        gapCheckPasses &&
+        Math.abs(lineStyle.size - primaryBodyStyle.size) < 0.5 &&
+        hasHeavyWeightToken(lineStyle.font) &&
+        !hasHeavyWeightToken(primaryBodyStyle.font) &&
         lineStyle.font !== primaryBodyStyle.font
     ) {
         isPotentialHeader = true;
@@ -1018,8 +1166,6 @@ function isHeaderStyle(
         isPotentialHeader = true;
     }
 
-    const text = line.text.trim();
-
     // Rule 5: Same-or-smaller size, all-caps phrase, different font (requires
     // gap). Catches all-caps headers in display fonts that report
     // `weight: 'normal'` — e.g. "THE MALIGNANCY OF SOCIAL FRONTIERS" set in a
@@ -1033,7 +1179,6 @@ function isHeaderStyle(
     // the second line ("FRONTIERS") on its own would fail the multi-word phrase
     // test. Per-line evaluation in `startNewItem` leaves this null, so the
     // first line still triggers the header break correctly.
-    const phraseText = phraseTextOverride ?? text;
     if (
         !isPotentialHeader &&
         gapCheckPasses &&
@@ -1067,6 +1212,20 @@ function isHeaderStyle(
         lineStyle.font !== primaryBodyStyle.font &&
         SECTION_PREFIX_RE.test(phraseText)
     ) {
+        isPotentialHeader = true;
+    }
+
+    // All-caps promotion with no usable font cue (see `capsWithoutFontCue`
+    // above). Kept last so the font-based rules win when they apply.
+    //
+    // A bare font-difference rule (same size, distinct font, heading-cased,
+    // gap — no bold/italic/all-caps/section-number cue) was evaluated and
+    // deliberately rejected: the signal is too weak. Across real documents it
+    // fires throughout figure axis labels, equation lead-ins, table headers,
+    // and author bylines (all set in a distinct face at body size), with no
+    // text-only guard that separates them from genuine title-case subheadings.
+    // Missing a heading is preferred to mislabelling body/figure/table text.
+    if (!isPotentialHeader && capsWithoutFontCue) {
         isPotentialHeader = true;
     }
 
@@ -1461,6 +1620,46 @@ function startNewItem(
         fontSizeBreak =
             fontSizeDiff > settings.fontSizeTolerance &&
             lineHeightDiff > settings.fontSizeTolerance;
+
+        // Superscript-marker artifact suppression. MuPDF's JSON walk reports
+        // a single font/size per line, taken from the line's LEADING glyph.
+        // A footnote/endnote line that begins with a superscript marker
+        // ("12Body text…", "∗Body text…") therefore reports the small marker
+        // size for the entire line, while its bbox height still tracks the
+        // taller body glyphs. The result: the first line of a footnote reads
+        // as *smaller font but taller* than its wrapped continuation, so the
+        // raw font-size break splits the marker line off from the body it
+        // introduces.
+        //
+        // Three constraints keep this targeted at the marker artifact:
+        //   1. Marker shape. The previous line must actually open with an
+        //      inline footnote/endnote/affiliation marker. The geometry below
+        //      is the leading-small-glyph signature, but it is also tripped by
+        //      the rare non-marker line made tall by brackets / sub- or
+        //      superscripts / accents; without this gate the suppression could
+        //      merge a small standalone caption / callout / display line into
+        //      the following paragraph.
+        //   2. Direction. Only the *previous* line may be the artifact (marker
+        //      line → its larger continuation merges, keeping the footnote
+        //      whole). A *current* line that opens with a fresh marker starts
+        //      the next footnote and must still break — `prevReportsSmaller`
+        //      enforces this asymmetry, so consecutive footnotes stay apart.
+        //   3. Comparable height. The marker line is not shorter than its
+        //      continuation (a genuinely smaller-font line is also shorter)
+        //      and taller by no more than one body em (a superscript raises
+        //      the top only a fraction of an em; a dramatically taller line is
+        //      a different element, e.g. a misread heading, not a marker).
+        if (fontSizeBreak && startsWithInlineMarker(prevLine)) {
+            const prevReportsSmaller = prevLine.fontSize < line.fontSize;
+            const heightExcess =
+                bboxHeight(prevLine.bbox) - bboxHeight(line.bbox);
+            const prevHeightComparable =
+                heightExcess + settings.fontSizeTolerance >= 0 &&
+                heightExcess <= line.fontSize;
+            if (prevReportsSmaller && prevHeightComparable) {
+                fontSizeBreak = false;
+            }
+        }
     }
 
     // Drop-cap wraparound: when the previous line's bbox extends well below
