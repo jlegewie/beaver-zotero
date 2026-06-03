@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useSetAtom } from 'jotai';
-import { CSSIcon } from '../icons/icons';
+import { CSSIcon, TagIcon } from '../icons/icons';
 import { removeTagIdAtom } from '../../atoms/messageComposition';
 import { truncateText } from '../../utils/stringUtils';
 import { ZoteroTag } from '../../types/zotero';
@@ -27,11 +27,35 @@ export const TagButton: React.FC<TagButtonProps> = ({
     const [isHovered, setIsHovered] = useState(false);
     const removeTagId = useSetAtom(removeTagIdAtom);
 
+    // Filter the Zotero library by this tag using the tag selector. Tags have no
+    // direct "select" mechanism like collections, so we switch to the tag's
+    // library and apply it as a tag filter.
+    const filterByTag = async () => {
+        const zoteroPane = Zotero.getActiveZoteroPane();
+        if (!zoteroPane) return;
+        try {
+            if (zoteroPane.collectionsView) {
+                await zoteroPane.collectionsView.selectLibrary(tag.libraryId);
+            }
+            if (zoteroPane.tagSelector) {
+                zoteroPane.tagSelector.clearTagSelection();
+                zoteroPane.tagSelector.handleTagClick(tag.tag);
+            }
+        } catch {
+            // Silently fail - tag filtering is a convenience feature
+        }
+    };
+
     const { isRemoveMenuOpen, contextMenuHandlers, removeHandlers, removeMenu } = useRemoveContextMenu({
         onRemove: () => removeTagId(tag.id),
         onRemoveAll,
         canEdit,
         disabled,
+        extraMenuItems: [{
+            label: 'Filter Library by Tag',
+            icon: TagIcon,
+            onClick: filterByTag,
+        }],
     });
 
     const handleButtonClick = (e: React.MouseEvent<HTMLButtonElement>) => {

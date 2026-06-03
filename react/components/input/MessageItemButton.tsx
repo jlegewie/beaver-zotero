@@ -1,5 +1,5 @@
 import React, { forwardRef } from 'react';
-import { CSSItemTypeIcon, CSSIcon, Spinner, Icon, ArrowUpRightIcon } from "../icons/icons";
+import { CSSItemTypeIcon, CSSIcon, Spinner, Icon, ArrowUpRightIcon, LibraryIcon, PdfIcon, NoteIcon } from "../icons/icons";
 import { useAtomValue } from 'jotai';
 import { useRemoveContextMenu } from '../../hooks/useRemoveContextMenu';
 import { getItemValidationAtom } from '../../atoms/itemValidation';
@@ -93,24 +93,11 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
                 ? item.isRegularItem() ? truncateText(getDisplayNameFromItem(item), MAX_ITEM_TEXT_LENGTH) : getDisplayNameFromItem(item)
                 : truncateText(item.getDisplayTitle(), MAX_ITEM_TEXT_LENGTH);
 
-        // Right-click "remove" menu for this button. A left-click on the "x"
-        // removes just this item; right-clicking the button opens a menu with
-        // "Remove" (and "Remove all" when more than one removable item is attached).
-        const { isRemoveMenuOpen, contextMenuHandlers, removeHandlers, removeMenu } = useRemoveContextMenu({
-            onRemove: () => {
-                cancelTimers();
-                if (onRemove) onRemove(item);
-            },
-            onRemoveAll,
-            canEdit,
-            disabled,
-            onMenuOpen: cancelTimers,
-        });
-
-        // Handle button click
-        const handleButtonClick = (e: React.MouseEvent<HTMLButtonElement>) => {
-            e.stopPropagation();
-            
+        // Reveal/navigate to this item. Annotations jump to the reader, notes
+        // open in the editor, and regular items are revealed in the Zotero
+        // library. Shared by the button click and the "Show in Library" /
+        // "Reveal in PDF" / "Open Note" context-menu entry below.
+        const revealItem = () => {
             // For annotations, navigate to the annotation in the reader
             if (isAnnotation) {
                 navigateToAnnotation(item);
@@ -138,6 +125,36 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
             } catch (error) {
                 console.error('Failed to select item:', error);
             }
+        };
+
+        // Label/icon for the reveal action depend on the item type so the menu
+        // entry mirrors what a left-click does.
+        const revealMenuItem = isAnnotation
+            ? { label: 'Reveal in PDF', icon: PdfIcon, onClick: revealItem }
+            : item.isNote()
+                ? { label: 'Open Note', icon: NoteIcon, onClick: revealItem }
+                : { label: 'Show in Library', icon: LibraryIcon, onClick: revealItem };
+
+        // Right-click "remove" menu for this button. A left-click on the "x"
+        // removes just this item; right-clicking the button opens a menu with
+        // the reveal action plus "Remove" (and "Remove all" when more than one
+        // removable item is attached).
+        const { isRemoveMenuOpen, contextMenuHandlers, removeHandlers, removeMenu } = useRemoveContextMenu({
+            onRemove: () => {
+                cancelTimers();
+                if (onRemove) onRemove(item);
+            },
+            onRemoveAll,
+            canEdit,
+            disabled,
+            onMenuOpen: cancelTimers,
+            extraMenuItems: [revealMenuItem],
+        });
+
+        // Handle button click
+        const handleButtonClick = (e: React.MouseEvent<HTMLButtonElement>) => {
+            e.stopPropagation();
+            revealItem();
         };
 
         // Get icon element based on validation state

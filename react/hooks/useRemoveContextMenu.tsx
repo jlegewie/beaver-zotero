@@ -22,6 +22,14 @@ interface UseRemoveContextMenuOptions {
     onMenuOpen?: () => void;
     /** Optional width override for the menu. */
     menuWidth?: string;
+    /**
+     * Additional menu items shown above the "Remove" entries. Use these for a
+     * button-specific action such as "Show in Library", "Reveal in PDF" or
+     * "Filter Library by Tag". A divider separates them from the destructive
+     * remove actions. These remain available even when the item is not
+     * editable, since revealing/navigating is non-destructive.
+     */
+    extraMenuItems?: MenuItem[];
 }
 
 interface UseRemoveContextMenuResult {
@@ -46,8 +54,11 @@ interface UseRemoveContextMenuResult {
  * A left-click on the remove "x" removes just that item. Right-clicking anywhere
  * on the button (including the "x") opens a small menu: it always offers
  * "Remove", and additionally "Remove all" when {@link onRemoveAll} is provided.
- * The menu renders inline with fixed positioning (no portal) so it inherits the
- * popup styling and stays clickable.
+ * Callers can prepend button-specific actions via {@link extraMenuItems} (e.g.
+ * "Show in Library", "Reveal in PDF", "Filter Library by Tag"), which appear
+ * above a divider separating them from the destructive remove actions. The menu
+ * renders inline with fixed positioning (no portal) so it inherits the popup
+ * styling and stays clickable.
  */
 export function useRemoveContextMenu({
     onRemove,
@@ -55,11 +66,17 @@ export function useRemoveContextMenu({
     canEdit = true,
     disabled = false,
     onMenuOpen,
-    menuWidth = '110px',
+    menuWidth,
+    extraMenuItems,
 }: UseRemoveContextMenuOptions): UseRemoveContextMenuResult {
-    // The menu is available whenever the item is editable, regardless of whether
-    // "Remove all" applies, so the interaction is consistent across buttons.
-    const canShowRemoveMenu = canEdit && !disabled;
+    const hasExtraItems = !!extraMenuItems && extraMenuItems.length > 0;
+    // The menu is available whenever the item is editable (so it can offer the
+    // "Remove" actions) or whenever there are extra, non-destructive actions to
+    // show, regardless of whether "Remove all" applies.
+    const canShowRemoveMenu = !disabled && (canEdit || hasExtraItems);
+    // Extra items use longer labels (e.g. "Filter Library by Tag"), so widen the
+    // menu when present unless the caller overrides it explicitly.
+    const resolvedMenuWidth = menuWidth ?? (hasExtraItems ? '180px' : '110px');
 
     const [isRemoveMenuOpen, setIsRemoveMenuOpen] = useState(false);
     const [menuPosition, setMenuPosition] = useState<MenuPosition>({ x: 0, y: 0 });
@@ -79,19 +96,29 @@ export function useRemoveContextMenu({
         onRemove();
     };
 
+    const removeItems: MenuItem[] = canEdit
+        ? [
+            ...(hasExtraItems
+                ? [{ label: 'divider', isDivider: true, onClick: () => {} }]
+                : []),
+            {
+                label: 'Remove',
+                icon: CancelIcon,
+                onClick: () => onRemove(),
+            },
+            ...(onRemoveAll
+                ? [{
+                    label: 'Remove all',
+                    icon: DeleteIcon,
+                    onClick: () => onRemoveAll(),
+                }]
+                : []),
+        ]
+        : [];
+
     const menuItems: MenuItem[] = [
-        {
-            label: 'Remove',
-            icon: CancelIcon,
-            onClick: () => onRemove(),
-        },
-        ...(onRemoveAll
-            ? [{
-                label: 'Remove all',
-                icon: DeleteIcon,
-                onClick: () => onRemoveAll(),
-            }]
-            : []),
+        ...(extraMenuItems ?? []),
+        ...removeItems,
     ];
 
     const removeMenu = canShowRemoveMenu ? (
@@ -101,7 +128,7 @@ export function useRemoveContextMenu({
             onClose={() => setIsRemoveMenuOpen(false)}
             position={menuPosition}
             useFixedPosition={true}
-            width={menuWidth}
+            width={resolvedMenuWidth}
         />
     ) : null;
 

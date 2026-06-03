@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useSetAtom, useAtomValue } from 'jotai';
-import { CSSIcon } from '../icons/icons';
+import { CSSIcon, LibraryIcon } from '../icons/icons';
 import { currentMessageCollectionsAtom } from '../../atoms/messageComposition';
 import { CollectionReference, collectionReferenceKey } from '../../types/zotero';
 import { truncateText } from '../../utils/stringUtils';
@@ -29,6 +29,15 @@ export const MessageCollectionButton: React.FC<MessageCollectionButtonProps> = (
     const setCollections = useSetAtom(currentMessageCollectionsAtom);
     const collections = useAtomValue(currentMessageCollectionsAtom);
 
+    // Select (reveal) the referenced collection in the library. Shared by the
+    // button click and the "Show in Library" context-menu entry.
+    const revealCollection = () => {
+        try {
+            const col = Zotero.Collections.getByLibraryAndKey(collection.library_id, collection.zotero_key);
+            if (col) selectCollection(col);
+        } catch { /* ignore */ }
+    };
+
     const { isRemoveMenuOpen, contextMenuHandlers, removeHandlers, removeMenu } = useRemoveContextMenu({
         onRemove: () => {
             const removedKey = collectionReferenceKey(collection);
@@ -37,15 +46,17 @@ export const MessageCollectionButton: React.FC<MessageCollectionButtonProps> = (
         onRemoveAll,
         canEdit,
         disabled,
+        extraMenuItems: [{
+            label: 'Show in Library',
+            icon: LibraryIcon,
+            onClick: revealCollection,
+        }],
     });
 
     const handleButtonClick = (e: React.MouseEvent<HTMLButtonElement>) => {
         e.stopPropagation();
         if (!disabled) {
-            try {
-                const col = Zotero.Collections.getByLibraryAndKey(collection.library_id, collection.zotero_key);
-                if (col) selectCollection(col);
-            } catch { /* ignore */ }
+            revealCollection();
         }
     };
 
