@@ -73,6 +73,8 @@ export interface CreateHighlightInput {
     pageLabel?: string | null;
     /** Backend-supplied per-page cumulative character offset in reading order. */
     readingOrderOffset?: number | null;
+    /** Tags applied to the created annotation. */
+    tags?: string[];
 }
 
 export interface CreateNoteInput {
@@ -82,6 +84,8 @@ export interface CreateNoteInput {
     pageLabel?: string | null;
     /** See CreateHighlightInput.readingOrderOffset. */
     readingOrderOffset?: number | null;
+    /** Tags applied to the created annotation. */
+    tags?: string[];
 }
 
 function resolveHighlightColor(color?: string | null): string {
@@ -370,6 +374,10 @@ export async function createHighlightAnnotation(
         rects,
     });
     item.annotationAuthorName = BEAVER_ANNOTATION_AUTHOR;
+    // addTag calls setTags internally, so tags persist in the same saveTx write.
+    if (input.tags?.length) {
+        for (const tag of input.tags) item.addTag(tag);
+    }
     await item.saveTx();
 
     return { library_id: attachment.libraryID, zotero_key: item.key };
@@ -410,6 +418,10 @@ export async function createNoteAnnotation(
     Object.assign(item, sortIndexField);
     item.annotationPosition = JSON.stringify({ pageIndex, rects: [rect] });
     item.annotationAuthorName = BEAVER_ANNOTATION_AUTHOR;
+    // addTag calls setTags internally, so tags persist in the same saveTx write.
+    if (input.tags?.length) {
+        for (const tag of input.tags) item.addTag(tag);
+    }
     await item.saveTx();
 
     return { library_id: attachment.libraryID, zotero_key: item.key };

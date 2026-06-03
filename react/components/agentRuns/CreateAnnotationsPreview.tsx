@@ -10,6 +10,7 @@ import {
     installTemporaryAnnotationDismissOnNextClick,
 } from '../../utils/annotationUtils';
 import { logger } from '../../../src/utils/logger';
+import { TagPill } from './TagPill';
 import type {
     CreateHighlightAnnotationsProposedData,
     CreateHighlightAnnotationsResultData,
@@ -163,6 +164,10 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
     const previewRootRef = useRef<HTMLDivElement | null>(null);
     const items = Array.isArray(actionData.items)
         ? actionData.items as Array<HighlightAnnotationItem | NoteAnnotationItem>
+        : [];
+    // Call-level tags applied to every created annotation (shared across the batch).
+    const tags = Array.isArray(actionData.tags)
+        ? actionData.tags.filter((tag): tag is string => typeof tag === 'string' && tag.trim() !== '')
         : [];
     const created = Array.isArray(resultData?.created) ? resultData.created : [];
     const failed = Array.isArray(resultData?.failed) ? resultData.failed as FailedAnnotationResult[] : [];
@@ -406,6 +411,14 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
                         );
                     })}
                 </div>
+
+                {tags.length > 0 && (
+                    <div className="display-flex flex-row items-center gap-1 flex-wrap">
+                        {tags.map((tag, index) => (
+                            <TagPill key={`${tag}-${index}`} name={tag} />
+                        ))}
+                    </div>
+                )}
             </div>
         </div>
     );
