@@ -414,7 +414,9 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
 
                 {tags.length > 0 && (
                     <div className="display-flex flex-row items-center gap-2 flex-wrap">
-                        <span className="font-color-primary shrink-0 mb-1">Tags</span>
+                        <span className="font-color-primary shrink-0 mb-1">
+                            {tags.length > 1 ? `${tags.length} Tags` : `${tags.length} Tag`}
+                        </span>
                         {tags.map((tag, index) => (
                             <TagPill key={`${tag}-${index}`} name={tag} />
                         ))}
