@@ -39,7 +39,7 @@ export const TagButton: React.FC<TagButtonProps> = ({
             }
             if (zoteroPane.tagSelector) {
                 zoteroPane.tagSelector.clearTagSelection();
-                zoteroPane.tagSelector.handleTagClick(tag.tag);
+                zoteroPane.tagSelector.handleTagSelected(tag.tag);
             }
         } catch {
             // Silently fail - tag filtering is a convenience feature
