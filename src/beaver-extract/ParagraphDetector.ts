@@ -569,9 +569,15 @@ function isTextHangingIndentLeader(line: PageLine): boolean {
  * space/period after the marker). Three forms, anchored at line start:
  *   - footnote symbol: `* † ‡ § ¶ #`, the asterisk-operator `∗` / low asterisk
  *     `⁎`, or a superscript digit (`¹²³…`);
- *   - 1-3 leading digits not part of a longer number, optionally glued to the
- *     body ("12Body", "1Wellcome", "3 For example"). The `(?!\d)` guard keeps
- *     4-digit years / quantities ("2020 was…") out;
+ *   - 1-3 leading digits glued DIRECTLY to a letter ("12Body", "1Wellcome",
+ *     "10Traditional"). The trailing `\p{L}` is what makes this a glued marker
+ *     rather than "any 1-3 digit prefix": it excludes numbered section
+ *     headings and list items ("1. Background", "2) Methods", "1 Introduction")
+ *     and 4-digit years ("2020 was…"), whose digit is followed by a separator,
+ *     space, or further digit — not by body text. This matters because the
+ *     suppression below clears the font-size break, so matching a numbered
+ *     heading here would merge it into the following body line and demote the
+ *     heading to a paragraph;
  *   - a single lowercase letter immediately followed by a capital — a
  *     superscript letter marker glued to a capitalised word ("aHere").
  *
@@ -580,7 +586,7 @@ function isTextHangingIndentLeader(line: PageLine): boolean {
  * non-marker small line that happens to trip the same geometry.
  */
 const INLINE_MARKER_LEAD_RE =
-    /^\s*(?:[*†‡§¶#∗⁎⁰¹²³⁴⁵⁶⁷⁸⁹]|\d{1,3}(?!\d)|\p{Ll}(?=\p{Lu}))/u;
+    /^\s*(?:[*†‡§¶#∗⁎⁰¹²³⁴⁵⁶⁷⁸⁹]|\d{1,3}\p{L}|\p{Ll}(?=\p{Lu}))/u;
 
 function startsWithInlineMarker(line: PageLine): boolean {
     return INLINE_MARKER_LEAD_RE.test(line.text.replace(/\p{Cc}/gu, " "));

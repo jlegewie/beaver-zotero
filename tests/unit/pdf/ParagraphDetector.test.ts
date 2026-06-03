@@ -1181,6 +1181,31 @@ describe('superscript-marker font-size break', () => {
         expect(body).toBeDefined();
         expect(body).not.toContain('tiny print disclaimer');
     });
+
+    it('does not merge a numbered heading (1. Background) into the following body', () => {
+        // A numbered section heading whose leading digit is reported at a
+        // smaller size trips the marker-artifact GEOMETRY (smaller reported
+        // size, comparable-or-taller bbox) just like a footnote marker — but
+        // "1." is a section-number prefix, not a glued inline marker. The
+        // marker gate must reject it (digit followed by a period, not a
+        // letter); otherwise the suppression clears the font-size break and
+        // swallows the heading into the first body line, demoting it.
+        const detection = detectParagraphs(
+            makeColumnPageResult([
+                ...FILLERS,
+                { text: '1. Background', l: 0, r: 300, size: 5, bboxHeight: 8.7, font: 'Heading-Sans' },
+                { text: 'ordinary body text that follows the heading on the next line', l: 0, r: 300, size: 7, bboxHeight: 7.25, font: 'Minion-Regular' },
+            ]),
+            [BODY, FOOTNOTE_BODY],
+        );
+        const heading = detection.items.find(it => it.text.includes('1. Background'));
+        const body = detection.items.find(it => it.text.includes('ordinary body text'));
+        expect(heading).toBeDefined();
+        expect(body).toBeDefined();
+        // Heading is its own item, not fused with the body line.
+        expect(heading!.id).not.toBe(body!.id);
+        expect(heading!.text).not.toContain('ordinary body text');
+    });
 });
 
 // ---------------------------------------------------------------------------
