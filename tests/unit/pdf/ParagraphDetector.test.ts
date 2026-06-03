@@ -1377,11 +1377,17 @@ describe('header detection', () => {
             expect(heading!.type).toBe('header');
         });
 
-        it('does NOT promote a Regular-weight line in a different family with no other cue', () => {
-            // Control: a same-size, different-family line carrying no weight,
-            // italic, all-caps, or section-number cue stays body. This is what
-            // keeps the Medium/Semibold extension from promoting every
-            // font-different line (inline code, emphasis fragments).
+    });
+
+    // Bare font-difference is deliberately NOT a heading signal. A same-size,
+    // different-font, heading-cased line with no bold / italic / all-caps /
+    // section-number cue is promoted by Rules 1-6 only with that extra cue. On
+    // real documents the bare difference fires throughout figure axis labels,
+    // equation lead-ins, table headers, and author bylines (all set in a
+    // distinct face at body size), so it is left as body text. Missing such a
+    // heading is preferred to mislabelling body/figure/table text.
+    describe('bare font-difference is not a heading signal', () => {
+        it('does NOT promote a Regular-weight, different-family line with no other cue', () => {
             const all = items(
                 [
                     ...FILLERS_BEFORE_HEADING,
@@ -1390,6 +1396,116 @@ describe('header detection', () => {
                 [BODY],
             );
             const item = all.find(it => it.text.includes('Variables'));
+            expect(item).toBeDefined();
+            expect(item!.type).toBe('paragraph');
+        });
+    });
+
+    // Subset-tag-insensitive body matching. PDF producers split one logical
+    // font into several embedded subsets, each with a random six-letter tag
+    // (`WHFMUD+CMR12`, `FSAPEC+CMR12`). A body-font subset used in an appendix
+    // or figure must be treated as body, not as a heading candidate.
+    describe('subset-tag-insensitive body matching', () => {
+        it('treats a body-font alternate subset as body text', () => {
+            const SUBSET_BODY = bodyStyle(10, 'WHFMUD+CMR12');
+            const all = items(
+                [
+                    ...FILLERS_BEFORE_HEADING.map(f => ({ ...f, font: 'WHFMUD+CMR12' })),
+                    { text: 'Consider an establishment that allocates tasks', l: 0, size: 10, font: 'FSAPEC+CMR12' },
+                ],
+                [SUBSET_BODY],
+            );
+            const item = all.find(it => it.text.includes('Consider an establishment'));
+            expect(item).toBeDefined();
+            expect(item!.type).toBe('paragraph');
+        });
+
+        it('still promotes an all-caps title in a genuinely different base font', () => {
+            // A real heading face has a different base name (tag stripped), so
+            // subset-insensitive matching does not swallow it: the all-caps
+            // title in a distinct face is still a heading (Rule 5).
+            const SUBSET_BODY = bodyStyle(10, 'WHFMUD+CMR12');
+            const all = items(
+                [
+                    ...FILLERS_BEFORE_HEADING.map(f => ({ ...f, font: 'WHFMUD+CMR12' })),
+                    { text: 'RESEARCH APPROACH', l: 0, size: 10, font: 'AABBCC+Helvetica' },
+                ],
+                [SUBSET_BODY],
+            );
+            const heading = all.find(it => it.text.includes('RESEARCH APPROACH'));
+            expect(heading).toBeDefined();
+            expect(heading!.type).toBe('header');
+        });
+    });
+
+    // All-caps headings with no usable font cue (Tier 1). On PDFs whose
+    // embedded fonts MuPDF cannot resolve, every line reports the same font
+    // (e.g. "unknown") at the same size with no bold flag, so the
+    // font-difference rules can never fire. The all-caps multi-word phrase is
+    // then the only heading signal.
+    describe('all-caps headings without a font cue', () => {
+        it('promotes an all-caps title sharing the body font and size', () => {
+            // Heading and body are the same (unresolved) font, same size, no
+            // bold flag — only the all-caps shape distinguishes the title.
+            const UNKNOWN_BODY = bodyStyle(10, 'unknown');
+            const all = items(
+                [
+                    ...FILLERS_BEFORE_HEADING.map(f => ({ ...f, font: 'unknown' })),
+                    { text: 'RESEARCH APPROACH', l: 0, size: 10, font: 'unknown' },
+                ],
+                [UNKNOWN_BODY],
+            );
+            const heading = all.find(it => it.text.includes('RESEARCH APPROACH'));
+            expect(heading).toBeDefined();
+            expect(heading!.type).toBe('header');
+        });
+
+        it('does NOT promote a title-cased line sharing the body font', () => {
+            // Without the all-caps cue and without a font difference there is
+            // no signal, so a title-cased subheading in an unresolved font
+            // stays body — the limit of what is recoverable here.
+            const UNKNOWN_BODY = bodyStyle(10, 'unknown');
+            const all = items(
+                [
+                    ...FILLERS_BEFORE_HEADING.map(f => ({ ...f, font: 'unknown' })),
+                    { text: 'Time Perception', l: 0, size: 10, font: 'unknown' },
+                ],
+                [UNKNOWN_BODY],
+            );
+            const item = all.find(it => it.text.includes('Time Perception'));
+            expect(item).toBeDefined();
+            expect(item!.type).toBe('paragraph');
+        });
+
+        it('promotes an all-caps section-letter heading (single enumerator)', () => {
+            // A lone section letter ("APPENDIX A. METHODS") must not be mistaken
+            // for an author initial — it is a legitimate all-caps heading even
+            // though its font is indistinct from body.
+            const UNKNOWN_BODY = bodyStyle(10, 'unknown');
+            const all = items(
+                [
+                    ...FILLERS_BEFORE_HEADING.map(f => ({ ...f, font: 'unknown' })),
+                    { text: 'APPENDIX A. METHODS', l: 0, size: 10, font: 'unknown' },
+                ],
+                [UNKNOWN_BODY],
+            );
+            const heading = all.find(it => it.text.includes('APPENDIX A. METHODS'));
+            expect(heading).toBeDefined();
+            expect(heading!.type).toBe('header');
+        });
+
+        it('does NOT promote an all-caps author list (two or more initials)', () => {
+            // Multiple stacked initials mark an author byline / reference entry,
+            // not a section title.
+            const UNKNOWN_BODY = bodyStyle(10, 'unknown');
+            const all = items(
+                [
+                    ...FILLERS_BEFORE_HEADING.map(f => ({ ...f, font: 'unknown' })),
+                    { text: 'STOLLE, D., S. SOROKA, AND R. JOHNSTON', l: 0, size: 10, font: 'unknown' },
+                ],
+                [UNKNOWN_BODY],
+            );
+            const item = all.find(it => it.text.includes('STOLLE'));
             expect(item).toBeDefined();
             expect(item!.type).toBe('paragraph');
         });

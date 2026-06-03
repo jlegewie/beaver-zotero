@@ -295,6 +295,27 @@ function looksLikeAuthorList(text: string): boolean {
 }
 
 /**
+ * Author-byline detector for the all-caps heading rule. Cover/title pages and
+ * reference lists set author names in the same face used for section titles, so
+ * an all-caps author list ("STOLLE, D., S. SOROKA, & R. JOHNSTON") matches the
+ * all-caps heading signal but is not a heading.
+ *
+ * The signal is **two or more** standalone single-letter initials. A single
+ * initial-shaped token is deliberately NOT enough: section headings routinely
+ * carry one ("APPENDIX A. METHODS", "PART B. RESULTS"), and treating that lone
+ * enumerator as an author initial would demote a legitimate heading to body.
+ * Author lists, by contrast, almost always stack multiple initials.
+ *
+ * A standalone initial is an uppercase letter + period bounded by a separator
+ * (start / space / comma) before and (space / comma / close-paren / end) after,
+ * so a glued abbreviation ("U.S.") does not count.
+ */
+function looksLikeByline(text: string): boolean {
+    const initials = text.match(/(?:^|[\s,])\p{Lu}\.(?=[\s,)]|$)/gu);
+    return !!initials && initials.length >= 2;
+}
+
+/**
  * Reference-list citation-tail detector. Reference lists routinely italicize
  * the journal name (and trailing volume/pages/year) in a different italic face
  * from the body, which fits Rule 3 of header detection ("same size, italic,
@@ -760,9 +781,31 @@ function matchesBodyStyle(line: TextStyle, bodyStyles: TextStyle[]): boolean {
         if (bs.bold !== line.bold) return false;
         if (bs.italic !== line.italic) return false;
         if (bs.font === line.font) return true;
-        return !line.font || line.font === "unknown" ||
-               !bs.font || bs.font === "unknown";
+        if (!line.font || line.font === "unknown" ||
+            !bs.font || bs.font === "unknown") {
+            return true;
+        }
+        // Subset-tag-insensitive match. A PDF producer routinely splits one
+        // logical font into several embedded subsets, each with its own random
+        // 6-letter tag (`WHFMUD+CMR12`, `FSAPEC+CMR12`). Appendix / proof /
+        // figure regions frequently get a different subset than the body even
+        // though it is the same visual face — without this the body font's
+        // alternate subset reads as "non-body" and the bare-font-difference
+        // heading rule promotes ordinary body lines. Comparing base names
+        // (tag stripped) treats those as body. Genuine heading faces carry a
+        // different base name, so they stay distinguishable.
+        const a = baseFontName(line.font);
+        const b = baseFontName(bs.font);
+        return a !== "" && a === b;
     });
+}
+
+// PDF font subset tag: exactly six uppercase letters followed by '+'
+// (e.g. `WHFMUD+CMR12`). Stripped to compare the underlying face.
+const SUBSET_TAG_RE = /^[A-Z]{6}\+/;
+function baseFontName(font: string | undefined | null): string {
+    if (!font) return "";
+    return font.replace(SUBSET_TAG_RE, "");
 }
 
 /**
@@ -994,8 +1037,51 @@ function isHeaderStyle(
         return false;
     }
 
-    // Not a header if it's a known body style
-    if (matchesBodyStyle(lineStyle, bodyStyles)) {
+    const primaryBodyStyle = bodyStyles[0];
+    const gapCheckPasses = precededByGap === null || precededByGap;
+    const text = line.text.trim();
+    // `phraseTextOverride` lets the multi-line item evaluator pass the joined
+    // item text so Rules 5/6 (and the all-caps body-style bypass below) see
+    // the full heading even when it wraps across lines; per-line evaluation in
+    // `startNewItem` leaves it null so the first line is tested on its own.
+    const phraseText = phraseTextOverride ?? text;
+
+    // All-caps heading with no usable font cue. When the heading's font is
+    // unresolved ("unknown"/"") or identical to the body font, the
+    // font-difference heading rules (2-6) can never fire: an all-caps line in
+    // an indistinct font reports the same style class as body and is treated
+    // as body text by `matchesBodyStyle` below. This is the dominant shape on
+    // PDFs whose embedded fonts MuPDF cannot resolve (every line reports font
+    // "unknown"), where section titles are visually bold/caps yet carry no
+    // size/weight/font signal. The all-caps multi-word phrase is the
+    // independent heading cue; the body must not itself be all-caps (whole-
+    // document caps rendering is not a heading signal), the line must be
+    // same-or-smaller size, non-italic, and preceded by a gap. Resolved,
+    // distinct-font docs keep using Rule 5 (this bypass requires an indistinct
+    // font, so it never changes their behavior).
+    const fontIndistinctFromBody =
+        !lineStyle.font ||
+        lineStyle.font === "unknown" ||
+        lineStyle.font === primaryBodyStyle.font ||
+        baseFontName(lineStyle.font) === baseFontName(primaryBodyStyle.font);
+    const capsWithoutFontCue =
+        gapCheckPasses &&
+        !bodyAllCaps &&
+        fontIndistinctFromBody &&
+        !lineStyle.italic &&
+        lineStyle.size <= primaryBodyStyle.size + 0.5 &&
+        isAllCapsHeaderPhrase(phraseText) &&
+        // All-caps reference-list entries (uppercased author names + year)
+        // share the body face and would otherwise be promoted; the byline /
+        // citation shapes separate them from genuine all-caps section titles.
+        !looksLikeByline(phraseText) &&
+        !looksLikeJournalCitation(phraseText);
+
+    // Not a header if it's a known body style. The all-caps-without-font-cue
+    // candidate is exempt: under an indistinct font it matches body style by
+    // construction, so the all-caps cue is the only thing separating it from
+    // body text.
+    if (matchesBodyStyle(lineStyle, bodyStyles) && !capsWithoutFontCue) {
         return false;
     }
 
@@ -1013,9 +1099,7 @@ function isHeaderStyle(
         return false;
     }
 
-    const primaryBodyStyle = bodyStyles[0];
     let isPotentialHeader = false;
-    const gapCheckPasses = precededByGap === null || precededByGap;
     // True when the candidate carries an independent size cue (Rule 1).
     // Used to exempt size-cued headings from the heading-capitalization
     // guard below — a larger line is a heading regardless of its leading
@@ -1082,8 +1166,6 @@ function isHeaderStyle(
         isPotentialHeader = true;
     }
 
-    const text = line.text.trim();
-
     // Rule 5: Same-or-smaller size, all-caps phrase, different font (requires
     // gap). Catches all-caps headers in display fonts that report
     // `weight: 'normal'` — e.g. "THE MALIGNANCY OF SOCIAL FRONTIERS" set in a
@@ -1097,7 +1179,6 @@ function isHeaderStyle(
     // the second line ("FRONTIERS") on its own would fail the multi-word phrase
     // test. Per-line evaluation in `startNewItem` leaves this null, so the
     // first line still triggers the header break correctly.
-    const phraseText = phraseTextOverride ?? text;
     if (
         !isPotentialHeader &&
         gapCheckPasses &&
@@ -1131,6 +1212,20 @@ function isHeaderStyle(
         lineStyle.font !== primaryBodyStyle.font &&
         SECTION_PREFIX_RE.test(phraseText)
     ) {
+        isPotentialHeader = true;
+    }
+
+    // All-caps promotion with no usable font cue (see `capsWithoutFontCue`
+    // above). Kept last so the font-based rules win when they apply.
+    //
+    // A bare font-difference rule (same size, distinct font, heading-cased,
+    // gap — no bold/italic/all-caps/section-number cue) was evaluated and
+    // deliberately rejected: the signal is too weak. Across real documents it
+    // fires throughout figure axis labels, equation lead-ins, table headers,
+    // and author bylines (all set in a distinct face at body size), with no
+    // text-only guard that separates them from genuine title-case subheadings.
+    // Missing a heading is preferred to mislabelling body/figure/table text.
+    if (!isPotentialHeader && capsWithoutFontCue) {
         isPotentialHeader = true;
     }
 
