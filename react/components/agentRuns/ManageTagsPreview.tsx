@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { Icon, TagIcon, ArrowRightIcon } from '../icons/icons';
+import { Icon, ArrowRightIcon } from '../icons/icons';
 import type { ManageTagsResultData } from '../../types/agentActions/base';
 import { shortenActionError } from './agentActionViewHelpers';
+import { TagPill } from './TagPill';
 
 type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error' | 'awaiting';
 
@@ -39,18 +40,6 @@ function buildTagErrorText(
     }
     return `${base}. ${shortenActionError(errorMessage)}.`;
 }
-
-const TagPill: React.FC<{ name: string; strike?: boolean }> = ({ name, strike }) => (
-    <span
-        className="inline-flex items-center gap-1 text-xs px-2 py-05 rounded-md bg-quaternary font-color-secondary border-quinary"
-        style={strike ? { textDecoration: 'line-through' } : undefined}
-    >
-        <span className="display-flex">
-            <Icon icon={TagIcon} />
-        </span>
-        {name}
-    </span>
-);
 
 /**
  * Preview component for manage_tags actions.

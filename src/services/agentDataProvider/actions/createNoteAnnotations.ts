@@ -15,6 +15,7 @@ import type {
 } from '../../../../react/types/agentActions/createAnnotations';
 import type { ZoteroItemReference } from '../../../../react/types/zotero';
 import { normalizeNotePosition } from '../../../../react/types/agentActions/annotations';
+import { normalizeAnnotationTags } from '../../../../react/types/agentActions/createAnnotations';
 import { shortItemTitle } from '../../../utils/zoteroUtils';
 import { logger } from '../../../utils/logger';
 
@@ -40,6 +41,7 @@ function getActionData(request: WSAgentActionValidateRequest | WSAgentActionExec
         requested_ref: normalizeRef(raw.requested_ref ?? raw.requestedRef ?? {}),
         resolved_ref: normalizeRef(raw.resolved_ref ?? raw.resolvedRef ?? {}),
         items: Array.isArray(raw.items) ? raw.items.map(normalizeItem) : [],
+        tags: normalizeAnnotationTags(raw.tags),
     } as CreateNoteAnnotationsProposedData;
 }
 
@@ -200,7 +202,7 @@ export async function executeCreateNoteAnnotationsAction(
     ctx: TimeoutContext,
 ): Promise<WSAgentActionExecuteResponse> {
     const data = getActionData(request);
-    const { requested_ref, resolved_ref, items } = data;
+    const { requested_ref, resolved_ref, items, tags } = data;
 
     const attachment = await resolveAttachment(resolved_ref);
     if (!attachment || !attachment.isPDFAttachment()) {
@@ -229,6 +231,7 @@ export async function executeCreateNoteAnnotationsAction(
                     color: 'yellow',
                     pageLabel: item.page_label ?? null,
                     readingOrderOffset: item.reading_order_offset ?? null,
+                    tags,
                 });
                 created.push({
                     client_item_id: item.client_item_id,

@@ -2,6 +2,20 @@ import type { PageLocation } from '../citations';
 import type { ZoteroItemReference } from '../zotero';
 import type { NotePosition, ToolAnnotationColor } from './annotations';
 
+/**
+ * Normalize raw call-level annotation tags: trim, drop empty/non-string
+ * entries, and return `undefined` when nothing remains. Shared by the
+ * action normalizer and the WS execute handlers so all paths agree.
+ */
+export function normalizeAnnotationTags(raw: unknown): string[] | undefined {
+    if (!Array.isArray(raw)) return undefined;
+    const tags = raw
+        .filter((tag): tag is string => typeof tag === 'string')
+        .map((tag) => tag.trim())
+        .filter((tag) => tag.length > 0);
+    return tags.length > 0 ? tags : undefined;
+}
+
 export interface BackendLocator {
     kind:
         | 'sentence'
@@ -69,12 +83,16 @@ export interface CreateHighlightAnnotationsProposedData {
     requested_ref: ZoteroItemReference;
     resolved_ref: ZoteroItemReference;
     items: HighlightAnnotationItem[];
+    /** Tags applied to every created annotation (call-level, not per item). */
+    tags?: string[];
 }
 
 export interface CreateNoteAnnotationsProposedData {
     requested_ref: ZoteroItemReference;
     resolved_ref: ZoteroItemReference;
     items: NoteAnnotationItem[];
+    /** Tags applied to every created annotation (call-level, not per item). */
+    tags?: string[];
 }
 
 export interface CreateHighlightAnnotationsResultData {

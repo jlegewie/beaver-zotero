@@ -151,14 +151,14 @@ export async function validateOrganizeItemsAction(
             };
         }
 
-        // Tags: allowed on regular items, attachments, and notes (mainly excludes annotations)
-        if (hasTagChanges && !item.isRegularItem() && !item.isAttachment() && !item.isNote()) {
+        // Tags: allowed on regular items, attachments, notes, and annotations
+        if (hasTagChanges && !item.isRegularItem() && !item.isAttachment() && !item.isNote() && !item.isAnnotation()) {
             const itemType = Zotero.ItemTypes.getName(item.itemTypeID);
             return {
                 type: 'agent_action_validate_response',
                 request_id: request.request_id,
                 valid: false,
-                error: `Item '${itemId}' is an ${itemType}. Tags can only be added to or removed from regular items, attachments, and notes. Use the parent attachment or top-level item instead.`,
+                error: `Item '${itemId}' is an ${itemType}. Tags can only be added to or removed from regular items, attachments, notes, and annotations.`,
                 error_code: 'item_type_not_supported',
                 preference: 'always_ask',
             };
@@ -440,12 +440,9 @@ export async function executeOrganizeItemsAction(
                     continue;
                 }
 
-                // Skip annotations — they don't support tags or collections
-                if (item.isAnnotation()) {
-                    skippedItems.push(itemId);
-                    continue;
-                }
-
+                // Annotations support tags but not collections. Tag changes below
+                // are item-type-agnostic; collection ops are guarded by isTopLevel,
+                // so they remain no-ops for annotations (which are never top-level).
                 const isTopLevel = item.isTopLevelItem();
                 let modified = false;
 
@@ -464,7 +461,7 @@ export async function executeOrganizeItemsAction(
                     : new Set<string>();
 
                 // Add tags (only if not already present)
-                // Tags work on regular items, attachments, and notes
+                // Tags work on regular items, attachments, notes, and annotations
                 if (tags?.add && tags.add.length > 0) {
                     for (const tagName of tags.add) {
                         if (!existingTags.has(tagName)) {

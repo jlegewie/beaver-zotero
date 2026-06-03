@@ -40,7 +40,7 @@ export async function executeCreateHighlightAnnotationsAction(
     action: AgentAction,
 ): Promise<CreateHighlightAnnotationsResultData> {
     const data = action.proposed_data as CreateHighlightAnnotationsProposedData;
-    const { requested_ref, resolved_ref, items } = data;
+    const { requested_ref, resolved_ref, items, tags } = data;
     const attachment = await getPdfAttachment(resolved_ref.library_id, resolved_ref.zotero_key);
 
     await getAttachmentFileStatus(attachment, false);
@@ -78,6 +78,7 @@ export async function executeCreateHighlightAnnotationsAction(
                     comment: item.comment ?? item.title,
                     pageLabel: loc.page_label ?? itemPageLabelFallback,
                     readingOrderOffset: loc.reading_order_offset ?? null,
+                    tags,
                 });
                 created.push({
                     client_item_id: item.client_item_id,
@@ -115,7 +116,7 @@ export async function executeCreateNoteAnnotationsAction(
     action: AgentAction,
 ): Promise<CreateNoteAnnotationsResultData> {
     const data = action.proposed_data as CreateNoteAnnotationsProposedData;
-    const { requested_ref, resolved_ref, items } = data;
+    const { requested_ref, resolved_ref, items, tags } = data;
     const attachment = await getPdfAttachment(resolved_ref.library_id, resolved_ref.zotero_key);
 
     await getAttachmentFileStatus(attachment, false);
@@ -131,6 +132,7 @@ export async function executeCreateNoteAnnotationsAction(
                 color: 'yellow',
                 pageLabel: item.page_label ?? null,
                 readingOrderOffset: item.reading_order_offset ?? null,
+                tags,
             });
             created.push({
                 client_item_id: item.client_item_id,

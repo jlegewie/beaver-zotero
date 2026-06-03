@@ -28,6 +28,7 @@ import type {
     HighlightAnnotationItem,
     NoteAnnotationItem,
 } from '../types/agentActions/createAnnotations';
+import { normalizeAnnotationTags } from '../types/agentActions/createAnnotations';
 import type { WSDeferredApprovalRequest, AgentActionType } from '../../src/services/agentProtocol';
 
 // =============================================================================
@@ -394,6 +395,7 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
             items: Array.isArray(proposedData.items)
                 ? proposedData.items.map(normalizeHighlightAnnotationItem)
                 : [],
+            tags: normalizeAnnotationTags(proposedData.tags),
         } as CreateHighlightAnnotationsProposedData;
     } else if (actionType === 'create_note_annotations') {
         proposedData = {
@@ -402,6 +404,7 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
             items: Array.isArray(proposedData.items)
                 ? proposedData.items.map(normalizeNoteAnnotationItem)
                 : [],
+            tags: normalizeAnnotationTags(proposedData.tags),
         } as CreateNoteAnnotationsProposedData;
     } else if (actionType === 'zotero_note') {
         const libraryIdRaw = proposedData.library_id ?? proposedData.libraryId;
