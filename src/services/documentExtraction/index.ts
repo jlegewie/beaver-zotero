@@ -1,8 +1,10 @@
 export {
     resolveToPdfAttachment,
+    resolveToReadableAttachment,
 } from './attachmentResolution';
 export type {
     PdfAttachmentResolveResult,
+    ReadableAttachmentResolveResult,
 } from './attachmentResolution';
 
 export {
@@ -26,3 +28,11 @@ export {
 export type {
     ZoteroItemReferenceInput,
 } from './referenceValidation';
+
+export {
+    extractTextDocument,
+    TEXT_SCHEMA_VERSION,
+} from './text/extractTextDocument';
+export type {
+    ExtractTextResult,
+} from './text/extractTextDocument';

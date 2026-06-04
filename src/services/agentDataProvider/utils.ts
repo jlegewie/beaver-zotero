@@ -27,6 +27,7 @@ import {
     loadPdfData as loadPdfDataPrimitive,
     isRemoteAccessAvailable,
 } from '../documentExtraction';
+import { getReadableContentKind } from '../documentExtraction/readableAttachments';
 export {
     isRemoteAccessAvailable,
     validateZoteroItemReference,
@@ -183,8 +184,8 @@ type AttachmentAvailabilityResult =
     | { available: true; filePath: string; contentType: string };
 
 /**
- * Check attachment availability before PDF processing.
- * Validates: PDF type, file path, file existence, and size limits.
+ * Check attachment availability before document processing.
+ * Validates: readable type, file path, file existence, and size limits.
  * 
  * @param attachment - Zotero attachment item
  * @param isPrimary - Whether this is the primary attachment for the parent item
@@ -195,9 +196,9 @@ async function checkAttachmentAvailability(
     isPrimary: boolean
 ): Promise<AttachmentAvailabilityResult> {
     const contentType = attachment.attachmentContentType;
+    const contentKind = getReadableContentKind(attachment);
 
-    // Non-PDF attachments are not currently supported for content extraction
-    if (!attachment.isPDFAttachment()) {
+    if (!attachment.isPDFAttachment() && contentKind !== 'text') {
         return {
             available: false,
             status: {
@@ -303,13 +304,21 @@ function fileStatusFromCache(record: DocumentCacheMetadata, isPrimary: boolean):
  * @returns File status information
  */
 export async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary: boolean): Promise<FrontendFileStatus> {
-    // Check basic availability (PDF type, file exists, size limits)
+    // Check basic availability (readable type, file exists, size limits)
     const availabilityCheck = await checkAttachmentAvailability(attachment, isPrimary);
     if (!availabilityCheck.available) {
         return availabilityCheck.status;
     }
 
     const { filePath, contentType } = availabilityCheck;
+    if (getReadableContentKind(attachment) === 'text') {
+        return {
+            is_primary: isPrimary,
+            mime_type: contentType,
+            page_count: null,
+            status: "available",
+        };
+    }
 
     // Cache-first: all writers produce complete records, so any hit is usable.
     const cache = Zotero.Beaver?.documentCache;
@@ -480,7 +489,7 @@ export async function getAttachmentFileStatusLightweight(
     isPrimary: boolean,
     options?: { skipWorkerFallback?: boolean }
 ): Promise<{ fileStatus: FrontendFileStatus; fileExistsLocally: boolean | undefined }> {
-    // Check basic availability (PDF type, file exists, size limits)
+    // Check basic availability (readable type, file exists, size limits)
     const availabilityCheck = await checkAttachmentAvailability(attachment, isPrimary);
     if (!availabilityCheck.available) {
         // fileExistsLocally is set by checkAttachmentAvailability:
@@ -492,6 +501,17 @@ export async function getAttachmentFileStatusLightweight(
 
     // File is available — locally or on the Zotero server
     const fileExistsLocally = !isRemoteFilePath(filePath);
+    if (getReadableContentKind(attachment) === 'text') {
+        return {
+            fileStatus: {
+                is_primary: isPrimary,
+                mime_type: contentType,
+                page_count: null,
+                status: "available",
+            },
+            fileExistsLocally,
+        };
+    }
 
     // Cache-first: all writers produce complete records, so any hit is usable.
     const cache = Zotero.Beaver?.documentCache;

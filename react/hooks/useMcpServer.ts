@@ -266,12 +266,13 @@ const SEARCH_BY_METADATA_TOOL = {
 const READ_ATTACHMENT_TOOL = {
     name: 'read_attachment',
     description:
-        "Read the text content of a PDF attachment from the user's Zotero library. " +
-        'Extracts and returns the text from specified pages (or the first 30 pages if no page range is given). ' +
+        "Read the text content of a PDF, plain-text, or Markdown attachment from the user's Zotero library. " +
+        'For PDFs, extracts and returns the text from specified pages (or the first 30 pages if no page range is given). ' +
+        'For plain-text and Markdown attachments, start_page/end_page are interpreted as line numbers. ' +
         'The `attachment_id` must be obtained from another tool: use `search_by_topic` or `search_by_metadata` ' +
         '(which include attachment IDs in results), or call `get_item_details` with `include_attachments: true`. ' +
-        'For long documents, read progressively by specifying page ranges. ' +
-        'Only PDF attachments with `status: "available"` are supported.',
+        'For long documents, read progressively by specifying page or line ranges. ' +
+        'Only available readable attachments are supported.',
     inputSchema: {
         type: 'object' as const,
         properties: {
@@ -300,7 +301,7 @@ const GET_ITEM_DETAILS_TOOL = {
         'Returns all Zotero fields for each item (title, authors, abstract, DOI, journal, volume, issue, pages, date, etc.), ' +
         'along with tags and collection memberships. Use this to get detailed metadata after finding items via search, ' +
         'or to look up specific fields like DOI or abstract. ' +
-        'Set `include_attachments` to true to also see which files (PDFs) are attached and their availability status.',
+        'Set `include_attachments` to true to also see which readable files are attached and their availability status.',
     inputSchema: {
         type: 'object' as const,
         properties: {
@@ -407,7 +408,7 @@ const LIST_ITEMS_TOOL = {
         'or get an overview of items with a particular tag. ' +
         'Filters are cumulative: specifying both collection and tag returns only items matching both criteria. ' +
         'Note: this tool returns lightweight item metadata without attachment IDs. ' +
-        'To read an item\'s PDF, first call `get_item_details` with `include_attachments: true` to obtain the attachment ID, ' +
+        'To read an item\'s attachment, first call `get_item_details` with `include_attachments: true` to obtain the attachment ID, ' +
         'then call `read_attachment`.',
     inputSchema: {
         type: 'object' as const,
@@ -686,6 +687,26 @@ export async function handleReadAttachment(args: any): Promise<any> {
 
     if (response.error || !response.result) {
         return mcpError(response.error ?? 'Failed to read attachment');
+    }
+    if (response.result.content_kind === 'text') {
+        const lines = response.result.text === ''
+            ? []
+            : response.result.text.split('\n');
+        const totalLines = response.result.lineCount;
+        if (startPage > totalLines) {
+            return mcpError(`Requested start_page ${startPage} is out of range; attachment has ${totalLines} lines.`);
+        }
+        const actualEnd = Math.min(endPage, totalLines);
+        const selectedLines = lines.slice(startPage - 1, actualEnd);
+        if (selectedLines.length === 0) {
+            return mcpError(`Requested line window ${startPage}-${endPage} is out of range or contains no text lines.`);
+        }
+        const header = `Attachment: ${args.attachment_id} | Total lines: ${totalLines} | Showing lines ${startPage}-${actualEnd}`;
+        const lineTexts = selectedLines.map((line, index) => {
+            const lineNo = startPage + index;
+            return `<l${lineNo}>${line}</l${lineNo}>`;
+        });
+        return [header, '', ...lineTexts].join('\n');
     }
     if (response.result.content_kind !== 'pdf') {
         return mcpError('Reading this attachment type is not supported yet.');

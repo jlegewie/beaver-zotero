@@ -7,6 +7,7 @@ import { createZoteroURI } from '../../utils/zoteroURI';
 import {
     getCitationPages,
     getCitationBoundingBoxes,
+    getContentKind,
     isExternalCitation,
     isZoteroCitation,
 } from '../../types/citations';
@@ -44,6 +45,7 @@ import {
     buildZoteroCitationLinkHTML,
     isLinkCitationItem,
 } from '../../../src/utils/zoteroLinkCitation';
+import { getReadableContentKind } from '../../../src/services/documentExtraction/readableAttachments';
 
 const TOOLTIP_WIDTH = '250px';
 export const BEAVER_ANNOTATION_TEXT = BEAVER_CITATION_ANNOTATION_AUTHOR;
@@ -158,6 +160,28 @@ function getPageLabelsForItem(
         : getBestPDFAttachment(item);
     if (!attachment) return null;
     return labelsByAttachmentId[attachment.id] ?? null;
+}
+
+async function getBestReadableTextAttachmentAsync(item: Zotero.Item): Promise<Zotero.Item | null> {
+    if (!item.isRegularItem()) return null;
+    await Zotero.Items.loadDataTypes([item], ['childItems']);
+    const ids = item.getAttachments();
+    if (!ids?.length) return null;
+    const attachments = await Zotero.Items.getAsync(ids);
+    const fetched = attachments.filter((attachment): attachment is Zotero.Item => !!attachment && !attachment.deleted);
+    if (fetched.length > 0) {
+        await Zotero.Items.loadDataTypes(fetched, ['itemData']);
+    }
+
+    const bestAttachment = await item.getBestAttachment();
+    if (bestAttachment && !bestAttachment.deleted) {
+        await Zotero.Items.loadDataTypes([bestAttachment], ['itemData']);
+        if (getReadableContentKind(bestAttachment) === 'text') {
+            return bestAttachment;
+        }
+    }
+
+    return fetched.find((attachment) => getReadableContentKind(attachment) === 'text') ?? null;
 }
 
 const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
@@ -452,6 +476,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
             logger(`ZoteroCitation: Failed to get Zotero item (${libraryID}, ${itemKey})`);
             return;
         }
+        await item.loadAllData();
 
         // Handle note links using Zotero.Notes.open()
         if (item.isNote()) {
@@ -486,6 +511,23 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
                 }
             } catch (error) {
                 logger('ZoteroCitation: Failed to open annotation: ' + error);
+            }
+            return;
+        }
+
+        if (getContentKind(citationMetadata) === 'text') {
+            const target = item.isAttachment()
+                ? item
+                : await getBestReadableTextAttachmentAsync(item);
+            if (!target) {
+                revealSource({ library_id: item.libraryID, zotero_key: item.key } as ZoteroItemReference);
+                return;
+            }
+            const filePath = await target.getFilePathAsync();
+            if (filePath) {
+                Zotero.launchFile(filePath);
+            } else {
+                await selectItemById(target.id);
             }
             return;
         }

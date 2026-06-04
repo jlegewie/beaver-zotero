@@ -523,6 +523,8 @@ export type ZoteroDocumentErrorCode =
     | 'not_found'           // Attachment not found in Zotero
     | 'not_attachment'      // Item is not an attachment
     | 'not_pdf'             // Attachment is not a PDF
+    | 'not_readable'        // Attachment is not a readable document
+    | 'not_implemented'     // Readable document type is not implemented yet
     | 'is_linked_url'       // Attachment is a linked URL, not a stored file
     | 'file_missing'        // PDF file not available locally
     | 'file_too_large'      // PDF file exceeds size limit
