@@ -114,7 +114,65 @@ describe('DocumentCache payloads', () => {
             'structured',
             sourcePath,
         )).resolves.toEqual(structuredResult);
+
+        const metadata = await db.getDocumentCacheMetadataByKey(1, 'ABCD1234');
+        expect(metadata?.contentKind).toBe('pdf');
+        expect(metadata?.documentMetadata).toMatchObject({
+            content_kind: 'pdf',
+            pageCount: 1,
+        });
+        const payload = await db.getDocumentCachePayload(1, 'ABCD1234', 'structured');
+        expect(payload?.contentKind).toBe('pdf');
     });
+
+    it('does not write payload files for EPUB metadata in this phase', async () => {
+        const item = createCacheAttachment();
+
+        await cache.putResult({
+            item,
+            filePath: sourcePath,
+            mode: 'structured',
+            sourceSizeBytes: 3,
+            contentType: 'application/epub+zip',
+            result: structuredResult,
+            metadata: {
+                contentKind: 'epub',
+                pageCount: 1,
+                pageLabels: { '0': '1' },
+                pages: onePageGeometry,
+            },
+        });
+
+        expect(mockIOUtils.write).not.toHaveBeenCalled();
+        expect(await db.getDocumentCacheMetadataByKey(1, 'ABCD1234')).toBeNull();
+        expect(await db.getDocumentCachePayloadCount()).toBe(0);
+    });
+
+    it.each(['text', 'snapshot'] as const)(
+        'does not write payload files for uncacheable %s metadata',
+        async (contentKind) => {
+            const item = createCacheAttachment();
+
+            await cache.putResult({
+                item,
+                filePath: sourcePath,
+                mode: 'structured',
+                sourceSizeBytes: 3,
+                contentType: 'text/plain',
+                result: structuredResult,
+                metadata: {
+                    contentKind,
+                    pageCount: 1,
+                    pageLabels: { '0': '1' },
+                    pages: onePageGeometry,
+                },
+            });
+
+            expect(mockIOUtils.write).not.toHaveBeenCalled();
+            expect(await db.getDocumentCacheMetadataByKey(1, 'ABCD1234')).toBeNull();
+            expect(await db.getDocumentCachePayloadCount()).toBe(0);
+        },
+    );
 
     it('coalesces concurrent cold result creation for the same source identity', async () => {
         const item = createCacheAttachment();
@@ -342,6 +400,134 @@ describe('DocumentCache payloads', () => {
         expect(await db.getDocumentCacheMetadataByKey(1, 'ABCD1234')).not.toBeNull();
     });
 
+    it('corrupt metadata JSON is stale and deletes payload before parsing it', async () => {
+        const raw = conn.getRawDB();
+        const payloadPath = '/cache/corrupt-metadata.gz';
+        files.set(payloadPath, gzipString(JSON.stringify(structuredResult)));
+        raw.prepare(`
+            INSERT INTO document_cache_metadata (
+                item_id, library_id, zotero_key, content_kind, file_path,
+                file_mtime_ms, file_size_bytes, source_size_bytes, content_type,
+                document_metadata_json, extraction_schema_version, metadata_format_version
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+            100,
+            1,
+            'ABCD1234',
+            'pdf',
+            sourcePath,
+            10,
+            3,
+            3,
+            'application/pdf',
+            '{not json',
+            '4',
+            1,
+        );
+        const metadataId = (raw.prepare(`
+            SELECT id FROM document_cache_metadata
+            WHERE library_id = 1 AND zotero_key = 'ABCD1234'
+        `).get() as { id: number }).id;
+        raw.prepare(`
+            INSERT INTO document_cache_payloads (
+                metadata_id, item_id, library_id, zotero_key, mode, content_kind,
+                source_file_path, source_file_mtime_ms, source_file_size_bytes,
+                source_size_bytes, payload_path, payload_size_bytes, payload_sha256,
+                extraction_schema_version, cache_format_version
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+            metadataId,
+            100,
+            1,
+            'ABCD1234',
+            'structured',
+            'pdf',
+            sourcePath,
+            10,
+            3,
+            3,
+            payloadPath,
+            files.get(payloadPath)!.byteLength,
+            null,
+            '4',
+            1,
+        );
+
+        await expect(cache.getResult(
+            { libraryId: 1, zoteroKey: 'ABCD1234' },
+            'structured',
+            sourcePath,
+        )).resolves.toBeNull();
+
+        expect(await db.getDocumentCacheMetadataByKey(1, 'ABCD1234')).toBeNull();
+        expect(await db.getDocumentCachePayloadCount()).toBe(0);
+        expect(files.has(payloadPath)).toBe(false);
+    });
+
+    it('metadata discriminator mismatch is stale and deletes payload', async () => {
+        const raw = conn.getRawDB();
+        const payloadPath = '/cache/mismatch-metadata.gz';
+        files.set(payloadPath, gzipString(JSON.stringify(structuredResult)));
+        raw.prepare(`
+            INSERT INTO document_cache_metadata (
+                item_id, library_id, zotero_key, content_kind, file_path,
+                file_mtime_ms, file_size_bytes, source_size_bytes, content_type,
+                document_metadata_json, extraction_schema_version, metadata_format_version
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+            100,
+            1,
+            'ABCD1234',
+            'pdf',
+            sourcePath,
+            10,
+            3,
+            3,
+            'application/pdf',
+            JSON.stringify({ content_kind: 'epub', sectionCount: 1, sections: [] }),
+            '4',
+            1,
+        );
+        const metadataId = (raw.prepare(`
+            SELECT id FROM document_cache_metadata
+            WHERE library_id = 1 AND zotero_key = 'ABCD1234'
+        `).get() as { id: number }).id;
+        raw.prepare(`
+            INSERT INTO document_cache_payloads (
+                metadata_id, item_id, library_id, zotero_key, mode, content_kind,
+                source_file_path, source_file_mtime_ms, source_file_size_bytes,
+                source_size_bytes, payload_path, payload_size_bytes, payload_sha256,
+                extraction_schema_version, cache_format_version
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+            metadataId,
+            100,
+            1,
+            'ABCD1234',
+            'structured',
+            'pdf',
+            sourcePath,
+            10,
+            3,
+            3,
+            payloadPath,
+            files.get(payloadPath)!.byteLength,
+            null,
+            '4',
+            1,
+        );
+
+        await expect(cache.getResult(
+            { libraryId: 1, zoteroKey: 'ABCD1234' },
+            'structured',
+            sourcePath,
+        )).resolves.toBeNull();
+
+        expect(await db.getDocumentCacheMetadataByKey(1, 'ABCD1234')).toBeNull();
+        expect(await db.getDocumentCachePayloadCount()).toBe(0);
+        expect(files.has(payloadPath)).toBe(false);
+    });
+
     it('overwrites a corrupt orphan at the content-addressed payload path', async () => {
         const item = createCacheAttachment();
         await cache.putResult({
@@ -475,6 +661,39 @@ describe('DocumentCache payloads', () => {
         expect(files.has(secondPayload!.payloadPath)).toBe(true);
     });
 
+    it('payload freshness treats metadata and payload content-kind mismatch as stale', async () => {
+        const item = createCacheAttachment();
+        await cache.putResult({
+            item,
+            filePath: sourcePath,
+            mode: 'structured',
+            sourceSizeBytes: 3,
+            contentType: 'application/pdf',
+            result: structuredResult,
+            metadata: {
+                pageCount: 1,
+                pageLabels: { '0': '1' },
+                pages: onePageGeometry,
+            },
+        });
+        const payload = await db.getDocumentCachePayload(1, 'ABCD1234', 'structured');
+        const raw = conn.getRawDB();
+        raw.prepare(`
+            UPDATE document_cache_payloads
+            SET content_kind = 'epub', extraction_schema_version = '1'
+            WHERE id = ?
+        `).run(payload!.id);
+
+        await expect(cache.getResult(
+            { libraryId: 1, zoteroKey: 'ABCD1234' },
+            'structured',
+            sourcePath,
+        )).resolves.toBeNull();
+
+        expect(await db.getDocumentCachePayloadCount()).toBe(0);
+        expect(files.has(payload!.payloadPath)).toBe(false);
+    });
+
     it('startup GC removes cache entries for attachments missing from Zotero', async () => {
         const item = createCacheAttachment();
         await cache.putResult({
@@ -547,5 +766,31 @@ describe('DocumentCache payloads', () => {
 
         expect(await db.getDocumentCacheMetadataByKey(1, 'ABCD1234')).not.toBeNull();
         expect(await db.getDocumentCachePayloadCount()).toBe(1);
+    });
+
+    it('startup GC removes cache rows whose schema version mismatches the content kind', async () => {
+        const item = createCacheAttachment();
+        await cache.putResult({
+            item,
+            filePath: sourcePath,
+            mode: 'structured',
+            sourceSizeBytes: 3,
+            contentType: 'application/pdf',
+            result: structuredResult,
+            metadata: {
+                pageCount: 1,
+                pageLabels: { '0': '1' },
+                pages: onePageGeometry,
+            },
+        });
+        const payload = await db.getDocumentCachePayload(1, 'ABCD1234', 'structured');
+        const raw = conn.getRawDB();
+        raw.exec(`UPDATE document_cache_metadata SET extraction_schema_version = '3'`);
+
+        await cache.runStartupGC();
+
+        expect(await db.getDocumentCacheMetadataByKey(1, 'ABCD1234')).toBeNull();
+        expect(await db.getDocumentCachePayloadCount()).toBe(0);
+        expect(files.has(payload!.payloadPath)).toBe(false);
     });
 });

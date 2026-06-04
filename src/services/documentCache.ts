@@ -11,13 +11,17 @@ import { getFileSignature, isRemoteFilePath, type FileSignature } from './docume
 import { logger } from '../utils/logger';
 import { gzipString, gunzipToString } from '../utils/gzip';
 import { createAbortController } from '../utils/abortController';
-import { SCHEMA_VERSION } from '../beaver-extract/schema/schema';
 import type { BeaverExtractResult } from '../beaver-extract/schema/schema';
 import {
     validateMarkdownExtractResult,
     validateStructuredExtractResult,
 } from '../beaver-extract/schema/validators';
 import type { PageGeometry } from '../beaver-extract/types';
+import { buildPdfCachedMetadata } from './documentExtraction/shared/contentKinds';
+import {
+    expectedExtractionSchemaVersion,
+    type ExtractContentKind,
+} from './documentExtraction/shared/extractionSchemaVersions';
 
 export const DOCUMENT_METADATA_FORMAT_VERSION = 1;
 export const DOCUMENT_PAYLOAD_FORMAT_VERSION = 1;
@@ -50,6 +54,7 @@ export interface DocumentCacheSourceIdentity {
 }
 
 interface CacheMetadataInput {
+    contentKind?: ExtractContentKind;
     pageCount: number | null;
     pageLabels: PageLabels | Record<number, string> | null;
     pages: (PageGeometry | null)[] | null;
@@ -131,6 +136,13 @@ export class DocumentCache {
             if (options?.maxSourceSizeBytes != null && metadata.sourceSizeBytes > options.maxSourceSizeBytes) {
                 return null;
             }
+            if (metadata.contentKind !== 'pdf') {
+                const deletedPayloads = await this.db.deleteDocumentCacheMetadataIfUnchanged(metadata);
+                if (deletedPayloads) {
+                    await this.removePayloadFiles(deletedPayloads);
+                }
+                return null;
+            }
 
             const payload = await this.db.getDocumentCachePayload(ref.libraryId, ref.zoteroKey, mode);
             if (!payload) return null;
@@ -165,7 +177,7 @@ export class DocumentCache {
 
             let result: BeaverExtractResult;
             try {
-                result = mode === 'structured'
+                result = metadata.contentKind === 'pdf' && mode === 'structured'
                     ? validateStructuredExtractResult(parsed)
                     : validateMarkdownExtractResult(parsed);
             } catch {
@@ -177,7 +189,11 @@ export class DocumentCache {
                 await this.deletePayload(payload);
                 return null;
             }
-            if (metadata.pageCount != null && result.document.pageCount !== metadata.pageCount) {
+            if (
+                metadata.contentKind === 'pdf'
+                && metadata.pageCount != null
+                && result.document.pageCount !== metadata.pageCount
+            ) {
                 await this.deletePayload(payload);
                 return null;
             }
@@ -477,8 +493,12 @@ export class DocumentCache {
             const metadataRows = await this.db.getAllDocumentCacheMetadata();
             const missingOrTrashed = await this.getMissingOrTrashedKeys(metadataRows);
             for (const metadata of metadataRows) {
+                const expectedSchemaVersion = metadata.documentMetadata === null
+                    ? null
+                    : expectedExtractionSchemaVersion(metadata.contentKind);
                 let stale = metadata.metadataFormatVersion !== DOCUMENT_METADATA_FORMAT_VERSION
-                    || metadata.extractionSchemaVersion !== SCHEMA_VERSION
+                    || expectedSchemaVersion === null
+                    || metadata.extractionSchemaVersion !== expectedSchemaVersion
                     || missingOrTrashed.has(DocumentCache.itemKey(metadata.libraryId, metadata.zoteroKey));
                 if (!stale && !isRemoteFilePath(metadata.filePath)) {
                     stale = !(await IOUtils.exists(metadata.filePath).catch(() => false));
@@ -495,8 +515,10 @@ export class DocumentCache {
             const referencedPaths = new Set<string>();
             for (const payload of payloads) {
                 referencedPaths.add(payload.payloadPath);
+                const expectedSchemaVersion = expectedExtractionSchemaVersion(payload.contentKind);
                 const invalid = payload.cacheFormatVersion !== DOCUMENT_PAYLOAD_FORMAT_VERSION
-                    || payload.extractionSchemaVersion !== SCHEMA_VERSION
+                    || expectedSchemaVersion === null
+                    || payload.extractionSchemaVersion !== expectedSchemaVersion
                     || !(await IOUtils.exists(payload.payloadPath).catch(() => false));
                 if (invalid) {
                     const deleted = await this.db.deleteDocumentCachePayload(payload.libraryId, payload.zoteroKey, payload.mode);
@@ -537,22 +559,22 @@ export class DocumentCache {
         expectedSourceIdentity?: DocumentCacheSourceIdentity | null;
     }): Promise<void> {
         if (Zotero.__beaverShuttingDown) return;
-        if (input.result.mode !== input.mode || input.result.schemaVersion !== SCHEMA_VERSION) {
-            return;
-        }
         const source = await this.getSourceIdentity(input.filePath, input.sourceSizeBytes);
         if (input.expectedSourceIdentity && !this.sourceIdentityMatches(source, input.expectedSourceIdentity)) {
             return;
         }
         if (Zotero.__beaverShuttingDown) return;
 
+        const metadataInput = this.buildMetadataInput(input.item, source, input.contentType, input.metadata);
+        if (input.result.mode !== input.mode || input.result.schemaVersion !== metadataInput.extractionSchemaVersion) {
+            return;
+        }
         const payloadWrite = await this.writePayloadFile(
             input.item.libraryID,
             input.item.key,
             input.mode,
             input.result,
         );
-        const metadataInput = this.buildMetadataInput(input.item, source, input.contentType, input.metadata);
         const { metadata, deletedPayloads } = await this.db.upsertDocumentCacheMetadata(metadataInput);
         const oldPayload = await this.db.getDocumentCachePayload(input.item.libraryID, input.item.key, input.mode);
         await this.db.upsertDocumentCachePayload({
@@ -561,13 +583,14 @@ export class DocumentCache {
             libraryId: input.item.libraryID,
             zoteroKey: input.item.key,
             mode: input.mode,
+            contentKind: metadataInput.contentKind,
             sourceFilePath: source.filePath,
             sourceFileSignature: source.fileSignature,
             sourceSizeBytes: source.sourceSizeBytes,
             payloadPath: payloadWrite.path,
             payloadSizeBytes: payloadWrite.size,
             payloadSha256: payloadWrite.sha256,
-            extractionSchemaVersion: SCHEMA_VERSION,
+            extractionSchemaVersion: metadataInput.extractionSchemaVersion,
             cacheFormatVersion: DOCUMENT_PAYLOAD_FORMAT_VERSION,
         });
         const cleanup = oldPayload && oldPayload.payloadPath !== payloadWrite.path
@@ -579,8 +602,10 @@ export class DocumentCache {
     }
 
     private async isMetadataStale(record: DocumentCacheMetadataRecord, filePath: string): Promise<boolean> {
+        if (record.documentMetadata === null) return true;
         if (record.metadataFormatVersion !== DOCUMENT_METADATA_FORMAT_VERSION) return true;
-        if (record.extractionSchemaVersion !== SCHEMA_VERSION) return true;
+        const expectedSchemaVersion = expectedExtractionSchemaVersion(record.contentKind);
+        if (expectedSchemaVersion === null || record.extractionSchemaVersion !== expectedSchemaVersion) return true;
         if (record.filePath !== filePath) return true;
         if (isRemoteFilePath(filePath)) return false;
         const exists = await IOUtils.exists(filePath).catch(() => false);
@@ -659,9 +684,13 @@ export class DocumentCache {
         metadata: DocumentCacheMetadataRecord,
         mode: ExtractionMode,
     ): boolean {
+        const expectedSchemaVersion = expectedExtractionSchemaVersion(metadata.contentKind);
         return payload.mode === mode
             && payload.cacheFormatVersion === DOCUMENT_PAYLOAD_FORMAT_VERSION
-            && payload.extractionSchemaVersion === SCHEMA_VERSION
+            && metadata.documentMetadata !== null
+            && expectedSchemaVersion !== null
+            && payload.extractionSchemaVersion === expectedSchemaVersion
+            && payload.contentKind === metadata.contentKind
             && payload.metadataId === metadata.id
             && payload.sourceFilePath === metadata.filePath
             && payload.sourceFileSignature.mtime_ms === metadata.fileSignature.mtime_ms
@@ -703,19 +732,28 @@ export class DocumentCache {
         contentType: string,
         metadata: CacheMetadataInput,
     ): DocumentCacheMetadataInput {
+        const contentKind = metadata.contentKind ?? 'pdf';
+        const extractionSchemaVersion = expectedExtractionSchemaVersion(contentKind);
+        if (extractionSchemaVersion === null) {
+            throw new Error(`Document cache does not support ${contentKind} writes yet`);
+        }
+        if (contentKind !== 'pdf') {
+            throw new Error(`Document cache writes are currently limited to PDF content`);
+        }
+        const pageLabels = this.normalizePageLabels(metadata.pageLabels);
+        const pages = metadata.pages ?? null;
         return {
             itemId: item.id,
             libraryId: item.libraryID,
             zoteroKey: item.key,
+            contentKind,
             filePath: source.filePath,
             fileSignature: source.fileSignature,
             sourceSizeBytes: source.sourceSizeBytes,
             contentType,
-            pageCount: metadata.pageCount,
-            pageLabels: this.normalizePageLabels(metadata.pageLabels),
-            pages: metadata.pages ?? null,
+            documentMetadata: buildPdfCachedMetadata(metadata.pageCount, pageLabels, pages),
             errorCode: metadata.errorCode ?? null,
-            extractionSchemaVersion: SCHEMA_VERSION,
+            extractionSchemaVersion,
             metadataFormatVersion: DOCUMENT_METADATA_FORMAT_VERSION,
         };
     }
