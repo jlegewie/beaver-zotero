@@ -57,7 +57,7 @@ function makePayload(overrides: Partial<DocumentCachePayloadInput> = {}): Docume
         itemId: 100,
         libraryId: 1,
         zoteroKey: 'ABCD1234',
-        mode: 'structured',
+        payloadKind: 'structured',
         contentKind: 'pdf',
         sourceFilePath: '/tmp/a.pdf',
         sourceFileSignature: { mtime_ms: 10, size_bytes: 20 },
@@ -104,6 +104,44 @@ function recreateLegacyPayloadWithoutContentKind(conn: MockDBConnection): void {
             source_size_bytes, payload_path, payload_size_bytes,
             extraction_schema_version, cache_format_version
         ) VALUES (1, 100, 1, 'STALE003', 'structured', '/tmp/a.pdf',
+            10, 20, 20, '/cache/old.gz', 10, '4', 1)
+    `);
+}
+
+function recreateLegacyPayloadWithModeColumn(conn: MockDBConnection): void {
+    const raw = conn.getRawDB();
+    raw.exec('DROP TABLE IF EXISTS document_cache_payloads');
+    raw.exec(`
+        CREATE TABLE document_cache_payloads (
+            id INTEGER PRIMARY KEY,
+            metadata_id INTEGER NOT NULL,
+            item_id INTEGER NOT NULL,
+            library_id INTEGER NOT NULL,
+            zotero_key TEXT NOT NULL,
+            mode TEXT NOT NULL,
+            content_kind TEXT NOT NULL,
+            source_file_path TEXT NOT NULL,
+            source_file_mtime_ms INTEGER NOT NULL,
+            source_file_size_bytes INTEGER NOT NULL,
+            source_size_bytes INTEGER NOT NULL,
+            payload_path TEXT NOT NULL,
+            payload_size_bytes INTEGER NOT NULL,
+            payload_sha256 TEXT,
+            extraction_schema_version TEXT NOT NULL,
+            cache_format_version INTEGER NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            last_accessed_at TEXT,
+            UNIQUE(library_id, zotero_key, mode)
+        )
+    `);
+    raw.exec(`
+        INSERT INTO document_cache_payloads (
+            metadata_id, item_id, library_id, zotero_key, mode, content_kind,
+            source_file_path, source_file_mtime_ms, source_file_size_bytes,
+            source_size_bytes, payload_path, payload_size_bytes,
+            extraction_schema_version, cache_format_version
+        ) VALUES (1, 100, 1, 'STALE004', 'structured', 'pdf', '/tmp/a.pdf',
             10, 20, 20, '/cache/old.gz', 10, '4', 1)
     `);
 }
@@ -276,9 +314,23 @@ describe('BeaverDB document cache methods', () => {
         expect(row?.documentMetadata).toEqual(makeMetadata().documentMetadata);
     });
 
-    it('rebuilds document cache payloads when content_kind is missing', async () => {
+    it('rebuilds document cache payloads when durable payload columns are missing', async () => {
         await db.upsertDocumentCacheMetadata(makeMetadata());
         recreateLegacyPayloadWithoutContentKind(conn);
+
+        const rebuilt = new BeaverDB(conn);
+        await rebuilt.initDatabase('0.99.0');
+
+        expect(await rebuilt.getDocumentCacheMetadataCount()).toBe(0);
+        expect(await rebuilt.getDocumentCachePayloadCount()).toBe(0);
+        await rebuilt.upsertDocumentCacheMetadata(makeMetadata());
+        const row = await rebuilt.getDocumentCacheMetadataByKey(1, 'ABCD1234');
+        expect(row?.contentKind).toBe('pdf');
+    });
+
+    it('rebuilds document cache payloads when the legacy mode column is present', async () => {
+        await db.upsertDocumentCacheMetadata(makeMetadata());
+        recreateLegacyPayloadWithModeColumn(conn);
 
         const rebuilt = new BeaverDB(conn);
         await rebuilt.initDatabase('0.99.0');
@@ -329,7 +381,7 @@ describe('BeaverDB document cache methods', () => {
             });
     });
 
-    it('upserts and replaces payload rows by library/key/mode', async () => {
+    it('upserts and replaces payload rows by metadata/payload kind', async () => {
         const { metadata } = await db.upsertDocumentCacheMetadata(makeMetadata());
         await db.upsertDocumentCachePayload(makePayload({ metadataId: metadata.id, payloadPath: '/cache/old.gz' }));
         await db.upsertDocumentCachePayload(makePayload({ metadataId: metadata.id, payloadPath: '/cache/new.gz' }));
@@ -338,6 +390,24 @@ describe('BeaverDB document cache methods', () => {
         expect(row?.contentKind).toBe('pdf');
         expect(row?.payloadPath).toBe('/cache/new.gz');
         expect(await db.getDocumentCachePayloadCount()).toBe(1);
+    });
+
+    it('keeps a composite index for payload lookup by library/key/payload kind', async () => {
+        const raw = conn.getRawDB();
+        const indexes = raw.prepare(`
+            SELECT name FROM pragma_index_list('document_cache_payloads')
+        `).all() as { name: string }[];
+        expect(indexes.map((row) => row.name)).toContain('idx_dcp_library_key_payload_kind');
+
+        const columns = raw.prepare(`
+            SELECT name FROM pragma_index_info('idx_dcp_library_key_payload_kind')
+            ORDER BY seqno
+        `).all() as { name: string }[];
+        expect(columns.map((row) => row.name)).toEqual([
+            'library_id',
+            'zotero_key',
+            'payload_kind',
+        ]);
     });
 
     it('conditional payload deletion does not delete a refreshed row', async () => {

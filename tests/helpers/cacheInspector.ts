@@ -67,7 +67,7 @@ export interface CachePayloadRecord {
     itemId: number;
     libraryId: number;
     zoteroKey: string;
-    mode: 'structured' | 'markdown';
+    payloadKind: 'structured' | 'markdown';
     contentKind: ExtractContentKind;
     sourceFilePath: string;
     payloadPath: string;
@@ -430,11 +430,11 @@ export async function getCacheMetadata(
 export async function getCachePayload(
     libraryId: number,
     key: string,
-    mode: 'structured' | 'markdown' = 'markdown',
+    payloadKind: 'structured' | 'markdown' = 'markdown',
 ): Promise<CachePayloadRecord | null> {
     const res = await post<{ record: CachePayloadRecord | null; error?: string }>(
         '/beaver/test/cache-payload',
-        { library_id: libraryId, zotero_key: key, mode },
+        { library_id: libraryId, zotero_key: key, payload_kind: payloadKind },
     );
     if (res.error) throw new Error(res.error);
     return res.record;

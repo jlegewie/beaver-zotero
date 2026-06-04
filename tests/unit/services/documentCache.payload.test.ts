@@ -430,7 +430,7 @@ describe('DocumentCache payloads', () => {
         `).get() as { id: number }).id;
         raw.prepare(`
             INSERT INTO document_cache_payloads (
-                metadata_id, item_id, library_id, zotero_key, mode, content_kind,
+                metadata_id, item_id, library_id, zotero_key, payload_kind, content_kind,
                 source_file_path, source_file_mtime_ms, source_file_size_bytes,
                 source_size_bytes, payload_path, payload_size_bytes, payload_sha256,
                 extraction_schema_version, cache_format_version
@@ -494,7 +494,7 @@ describe('DocumentCache payloads', () => {
         `).get() as { id: number }).id;
         raw.prepare(`
             INSERT INTO document_cache_payloads (
-                metadata_id, item_id, library_id, zotero_key, mode, content_kind,
+                metadata_id, item_id, library_id, zotero_key, payload_kind, content_kind,
                 source_file_path, source_file_mtime_ms, source_file_size_bytes,
                 source_size_bytes, payload_path, payload_size_bytes, payload_sha256,
                 extraction_schema_version, cache_format_version

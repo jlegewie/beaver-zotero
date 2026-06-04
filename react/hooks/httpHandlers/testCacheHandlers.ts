@@ -35,14 +35,15 @@ export async function handleTestCacheMetadataHttpRequest(request: any) {
 }
 
 /**
- * Dev-only: return a document-cache payload row by key + mode.
+ * Dev-only: return a document-cache payload row by key + payload kind.
  *
- * Lets tests assert on the payload table's persisted columns — notably
- * `contentKind`, which mirrors the metadata row — without exposing the
- * gzipped payload file. Returns `{ record: null }` when no payload exists.
+ * Lets tests assert on the payload table's persisted discriminator columns
+ * without exposing the gzipped payload file. Returns `{ record: null }` when
+ * no payload exists.
  */
 export async function handleTestCachePayloadHttpRequest(request: any) {
-    const { library_id, zotero_key, mode } = request;
+    const { library_id, zotero_key } = request;
+    const payloadKind = request.payload_kind ?? request.mode;
     const db = Zotero.Beaver?.db;
     if (!db) return { error: 'db not available' };
     if (library_id == null || zotero_key == null) {
@@ -51,7 +52,7 @@ export async function handleTestCachePayloadHttpRequest(request: any) {
     const record = await db.getDocumentCachePayload(
         library_id,
         zotero_key,
-        mode === 'structured' || mode === 'markdown' ? mode : 'markdown',
+        payloadKind === 'structured' || payloadKind === 'markdown' ? payloadKind : 'markdown',
     );
     return { record: record ?? null };
 }

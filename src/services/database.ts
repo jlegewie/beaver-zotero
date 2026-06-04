@@ -66,6 +66,7 @@ export interface FailedEmbeddingRecord {
 }
 
 export type DocumentCacheExtractionMode = 'structured' | 'markdown';
+export type DocumentCachePayloadKind = 'structured' | 'markdown';
 
 /** Authoritative error reason for a cached document; `null` marks a successful extraction. */
 export type DocumentCacheErrorCode = 'encrypted' | 'invalid_pdf' | 'no_text_layer';
@@ -103,7 +104,7 @@ export interface DocumentCachePayloadRecord {
     itemId: number;
     libraryId: number;
     zoteroKey: string;
-    mode: DocumentCacheExtractionMode;
+    payloadKind: DocumentCachePayloadKind;
     contentKind: ExtractContentKind;
     sourceFilePath: string;
     sourceFileSignature: DocumentCacheFileSignature;
@@ -483,7 +484,7 @@ export class BeaverDB {
                 item_id                    INTEGER NOT NULL,
                 library_id                 INTEGER NOT NULL,
                 zotero_key                 TEXT NOT NULL,
-                mode                       TEXT NOT NULL,
+                payload_kind               TEXT NOT NULL,
                 content_kind               TEXT NOT NULL,
                 source_file_path           TEXT NOT NULL,
                 source_file_mtime_ms       INTEGER NOT NULL,
@@ -500,7 +501,7 @@ export class BeaverDB {
                 FOREIGN KEY (metadata_id)
                     REFERENCES document_cache_metadata(id)
                     ON DELETE CASCADE,
-                UNIQUE(library_id, zotero_key, mode)
+                UNIQUE(metadata_id, payload_kind)
             );
         `);
 
@@ -517,6 +518,11 @@ export class BeaverDB {
         await this.conn.queryAsync(`
             CREATE INDEX IF NOT EXISTS idx_dcp_library
             ON document_cache_payloads(library_id);
+        `);
+
+        await this.conn.queryAsync(`
+            CREATE INDEX IF NOT EXISTS idx_dcp_library_key_payload_kind
+            ON document_cache_payloads(library_id, zotero_key, payload_kind);
         `);
 
         // Background job queue: one row per (library_id, zotero_key, mode).
@@ -1696,7 +1702,7 @@ export class BeaverDB {
             itemId: row.item_id,
             libraryId: row.library_id,
             zoteroKey: row.zotero_key,
-            mode: row.mode,
+            payloadKind: row.payload_kind,
             contentKind: BeaverDB.normalizeDocumentCacheContentKind(row.content_kind),
             sourceFilePath: row.source_file_path,
             sourceFileSignature: {
@@ -1747,8 +1753,10 @@ export class BeaverDB {
             [],
             { onRow: (row: any) => payloadColumns.add(row.getResultByIndex(0)) },
         );
-        if (payloadColumns.size > 0 && !payloadColumns.has('content_kind')) {
-            return true;
+        if (payloadColumns.size > 0) {
+            if (!payloadColumns.has('content_kind')) return true;
+            if (!payloadColumns.has('payload_kind')) return true;
+            if (payloadColumns.has('mode')) return true;
         }
 
         return false;
@@ -1794,7 +1802,7 @@ export class BeaverDB {
                     item_id: row.getResultByIndex(2),
                     library_id: row.getResultByIndex(3),
                     zotero_key: row.getResultByIndex(4),
-                    mode: row.getResultByIndex(5),
+                    payload_kind: row.getResultByIndex(5),
                     content_kind: row.getResultByIndex(6),
                     source_file_path: row.getResultByIndex(7),
                     source_file_mtime_ms: row.getResultByIndex(8),
@@ -1824,7 +1832,7 @@ export class BeaverDB {
     }
 
     private static documentCachePayloadSelect(): string {
-        return `SELECT id, metadata_id, item_id, library_id, zotero_key, mode,
+        return `SELECT id, metadata_id, item_id, library_id, zotero_key, payload_kind,
                        content_kind, source_file_path, source_file_mtime_ms, source_file_size_bytes,
                        source_size_bytes, payload_path, payload_size_bytes,
                        payload_sha256, extraction_schema_version, cache_format_version,
@@ -1999,18 +2007,20 @@ export class BeaverDB {
         return payloads;
     }
 
-    /** Insert or update a document-cache payload by library/key/mode. */
+    /** Insert or update a document-cache payload by metadata/payload kind. */
     public async upsertDocumentCachePayload(record: DocumentCachePayloadInput): Promise<DocumentCachePayloadRecord> {
         await this.conn.queryAsync(
             `INSERT INTO document_cache_payloads
-                (metadata_id, item_id, library_id, zotero_key, mode, content_kind,
+                (metadata_id, item_id, library_id, zotero_key, payload_kind, content_kind,
                  source_file_path, source_file_mtime_ms, source_file_size_bytes,
                  source_size_bytes, payload_path, payload_size_bytes, payload_sha256,
                  extraction_schema_version, cache_format_version, updated_at)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-             ON CONFLICT(library_id, zotero_key, mode) DO UPDATE SET
+             ON CONFLICT(metadata_id, payload_kind) DO UPDATE SET
                 metadata_id = excluded.metadata_id,
                 item_id = excluded.item_id,
+                library_id = excluded.library_id,
+                zotero_key = excluded.zotero_key,
                 content_kind = excluded.content_kind,
                 source_file_path = excluded.source_file_path,
                 source_file_mtime_ms = excluded.source_file_mtime_ms,
@@ -2027,7 +2037,7 @@ export class BeaverDB {
                 record.itemId,
                 record.libraryId,
                 record.zoteroKey,
-                record.mode,
+                record.payloadKind,
                 record.contentKind,
                 record.sourceFilePath,
                 record.sourceFileSignature.mtime_ms,
@@ -2040,22 +2050,22 @@ export class BeaverDB {
                 record.cacheFormatVersion,
             ],
         );
-        const payload = await this.getDocumentCachePayload(record.libraryId, record.zoteroKey, record.mode);
+        const payload = await this.getDocumentCachePayload(record.libraryId, record.zoteroKey, record.payloadKind);
         if (!payload) {
             throw new Error('Document cache payload upsert failed');
         }
         return payload;
     }
 
-    /** Get a payload row by library/key/mode. */
+    /** Get a payload row by library/key/payload kind. */
     public async getDocumentCachePayload(
         libraryId: number,
         zoteroKey: string,
-        mode: DocumentCacheExtractionMode,
+        payloadKind: DocumentCachePayloadKind,
     ): Promise<DocumentCachePayloadRecord | null> {
         const rows = await this.selectDocumentCachePayloads(
-            `${BeaverDB.documentCachePayloadSelect()} WHERE library_id = ? AND zotero_key = ? AND mode = ?`,
-            [libraryId, zoteroKey, mode],
+            `${BeaverDB.documentCachePayloadSelect()} WHERE library_id = ? AND zotero_key = ? AND payload_kind = ?`,
+            [libraryId, zoteroKey, payloadKind],
         );
         return rows[0] ?? null;
     }
@@ -2080,7 +2090,7 @@ export class BeaverDB {
     /** Get all payload rows. */
     public async getAllDocumentCachePayloads(): Promise<DocumentCachePayloadRecord[]> {
         return this.selectDocumentCachePayloads(
-            `${BeaverDB.documentCachePayloadSelect()} ORDER BY library_id, zotero_key, mode`,
+            `${BeaverDB.documentCachePayloadSelect()} ORDER BY library_id, zotero_key, payload_kind`,
         );
     }
 
@@ -2095,9 +2105,9 @@ export class BeaverDB {
     public async deleteDocumentCachePayload(
         libraryId: number,
         zoteroKey: string,
-        mode: DocumentCacheExtractionMode,
+        payloadKind: DocumentCachePayloadKind,
     ): Promise<DocumentCachePayloadRecord | null> {
-        const payload = await this.getDocumentCachePayload(libraryId, zoteroKey, mode);
+        const payload = await this.getDocumentCachePayload(libraryId, zoteroKey, payloadKind);
         if (!payload) return null;
         await this.conn.queryAsync(
             `DELETE FROM document_cache_payloads WHERE id = ?`,
@@ -2117,7 +2127,7 @@ export class BeaverDB {
                AND item_id = ?
                AND library_id = ?
                AND zotero_key = ?
-               AND mode = ?
+               AND payload_kind = ?
                AND content_kind = ?
                AND source_file_path = ?
                AND source_file_mtime_ms = ?
@@ -2134,7 +2144,7 @@ export class BeaverDB {
                 payload.itemId,
                 payload.libraryId,
                 payload.zoteroKey,
-                payload.mode,
+                payload.payloadKind,
                 payload.contentKind,
                 payload.sourceFilePath,
                 payload.sourceFileSignature.mtime_ms,
@@ -2154,7 +2164,7 @@ export class BeaverDB {
             || current.itemId !== payload.itemId
             || current.libraryId !== payload.libraryId
             || current.zoteroKey !== payload.zoteroKey
-            || current.mode !== payload.mode
+            || current.payloadKind !== payload.payloadKind
             || current.contentKind !== payload.contentKind
             || current.sourceFilePath !== payload.sourceFilePath
             || current.sourceFileSignature.mtime_ms !== payload.sourceFileSignature.mtime_ms

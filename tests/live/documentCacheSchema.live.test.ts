@@ -5,7 +5,8 @@
  * content-kind discriminator: the `page_count` / `page_labels_json` /
  * `pages_json` columns were replaced by a single `content_kind` +
  * `document_metadata_json` pair on `document_cache_metadata`, and a
- * `content_kind` column was added to `document_cache_payloads`.
+ * `payload_kind` and `content_kind` columns were added to
+ * `document_cache_payloads`.
  *
  * These tests run against the real Zotero SQLite database (not the unit-test
  * better-sqlite3 mock), so they are the regression net for:
@@ -42,6 +43,7 @@ import {
     triggerFileStatus,
     type CacheMetadataRecord,
 } from '../helpers/cacheInspector';
+import { fetchDocument } from '../helpers/zoteroHttpClient';
 import {
     SMALL_PDF,
     NORMAL_PDF,
@@ -156,7 +158,7 @@ describe('document_cache_metadata: content_kind + document_metadata_json', () =>
     });
 });
 
-describe('document_cache_payloads: content_kind column', () => {
+describe('document_cache_payloads: payload_kind + content_kind columns', () => {
     beforeEach((ctx) => skipIfNoZotero(ctx, available));
 
     it('persists content_kind on the payload row that mirrors the metadata row', async () => {
@@ -174,7 +176,7 @@ describe('document_cache_payloads: content_kind column', () => {
 
         expect(metadata).not.toBeNull();
         expect(payload).not.toBeNull();
-        expect(payload?.mode).toBe('markdown');
+        expect(payload?.payloadKind).toBe('markdown');
         // The payload's content_kind, schema version, and FK must agree with
         // the metadata row — the freshness check in `isPayloadRowFresh` now
         // compares content_kind, so a drift here would silently drop the cache.
@@ -184,6 +186,38 @@ describe('document_cache_payloads: content_kind column', () => {
         expect(payload?.extractionSchemaVersion).toBe(metadata?.extractionSchemaVersion);
         expect(payload?.metadataId).toBe(metadata?.id);
         expect(payload?.cacheFormatVersion).toBe(1);
+    });
+
+    it('keeps markdown and structured payloads as distinct rows for one metadata row', async () => {
+        // The payload table is now keyed on UNIQUE(metadata_id, payload_kind),
+        // so both extraction kinds coexist for the same item. Warm markdown
+        // (read_attachment) and structured (whole-document request) and assert
+        // they land on separate rows sharing the metadata FK.
+        await ensureExtracted(SMALL_PDF);
+        await readAttachment({
+            attachment_id: attachmentId(SMALL_PDF),
+            start_page: 1,
+            end_page: SMALL_PDF_PAGE_COUNT,
+        });
+        const doc = await fetchDocument(SMALL_PDF, { mode: 'structured' });
+        expect(doc.error_code ?? null).toBeNull();
+        expect(doc.result).toBeTruthy();
+
+        const metadata = await getCacheMetadata(SMALL_PDF.library_id, SMALL_PDF.zotero_key);
+        const markdown = await getCachePayload(SMALL_PDF.library_id, SMALL_PDF.zotero_key, 'markdown');
+        const structured = await getCachePayload(SMALL_PDF.library_id, SMALL_PDF.zotero_key, 'structured');
+
+        expect(markdown).not.toBeNull();
+        expect(structured).not.toBeNull();
+        expect(markdown?.payloadKind).toBe('markdown');
+        expect(structured?.payloadKind).toBe('structured');
+        // Distinct rows and distinct payload files, both pinned to the same
+        // metadata row.
+        expect(markdown?.id).not.toBe(structured?.id);
+        expect(markdown?.payloadPath).not.toBe(structured?.payloadPath);
+        expect(markdown?.metadataId).toBe(metadata?.id);
+        expect(structured?.metadataId).toBe(metadata?.id);
+        expect(structured?.contentKind).toBe('pdf');
     });
 
     it('serves a warm cached read after the payload is persisted', async () => {

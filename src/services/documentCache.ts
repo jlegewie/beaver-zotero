@@ -5,6 +5,7 @@ import type {
     DocumentCacheMetadataInput,
     DocumentCacheMetadataRecord,
     DocumentCachePageLabels,
+    DocumentCachePayloadKind,
     DocumentCachePayloadRecord,
 } from './database';
 import { getFileSignature, isRemoteFilePath, type FileSignature } from './documentFileIdentity';
@@ -27,6 +28,7 @@ export const DOCUMENT_METADATA_FORMAT_VERSION = 1;
 export const DOCUMENT_PAYLOAD_FORMAT_VERSION = 1;
 
 export type ExtractionMode = DocumentCacheExtractionMode;
+export type PayloadKind = DocumentCachePayloadKind;
 export type PageLabels = DocumentCachePageLabels;
 export type { PageGeometry } from '../beaver-extract/types';
 export type DocumentCacheMetadata = DocumentCacheMetadataRecord;
@@ -131,6 +133,7 @@ export class DocumentCache {
         options?: { maxSourceSizeBytes?: number },
     ): Promise<BeaverExtractResult | null> {
         try {
+            const payloadKind = DocumentCache.payloadKindForMode(mode);
             const metadata = await this.getMetadata(ref, filePath);
             if (!metadata) return null;
             if (options?.maxSourceSizeBytes != null && metadata.sourceSizeBytes > options.maxSourceSizeBytes) {
@@ -144,10 +147,10 @@ export class DocumentCache {
                 return null;
             }
 
-            const payload = await this.db.getDocumentCachePayload(ref.libraryId, ref.zoteroKey, mode);
+            const payload = await this.db.getDocumentCachePayload(ref.libraryId, ref.zoteroKey, payloadKind);
             if (!payload) return null;
 
-            if (!this.isPayloadRowFresh(payload, metadata, mode)) {
+            if (!this.isPayloadRowFresh(payload, metadata, payloadKind)) {
                 await this.deletePayload(payload);
                 return null;
             }
@@ -244,7 +247,8 @@ export class DocumentCache {
         if (input.maxSourceSizeBytes != null && source.sourceSizeBytes > input.maxSourceSizeBytes) {
             return null;
         }
-        const lockKey = `${ref.libraryId}/${ref.zoteroKey}/${input.mode}/${this.sourceIdentityKey(source)}`;
+        const payloadKind = DocumentCache.payloadKindForMode(input.mode);
+        const lockKey = `${ref.libraryId}/${ref.zoteroKey}/${payloadKind}/${this.sourceIdentityKey(source)}`;
         const existing = this.extractionLocks.get(lockKey);
         if (existing) return this.waitForSharedExtraction(existing, input.abortSignal);
 
@@ -387,7 +391,8 @@ export class DocumentCache {
         expectedSourceIdentity?: DocumentCacheSourceIdentity | null;
     }): Promise<void> {
         if (Zotero.__beaverShuttingDown) return;
-        const lockKey = `${input.item.libraryID}/${input.item.key}/${input.mode}`;
+        const payloadKind = DocumentCache.payloadKindForMode(input.mode);
+        const lockKey = `${input.item.libraryID}/${input.item.key}/${payloadKind}`;
         const previous = this.writeLocks.get(lockKey) ?? Promise.resolve();
         const next = previous
             .catch(() => undefined)
@@ -521,7 +526,7 @@ export class DocumentCache {
                     || payload.extractionSchemaVersion !== expectedSchemaVersion
                     || !(await IOUtils.exists(payload.payloadPath).catch(() => false));
                 if (invalid) {
-                    const deleted = await this.db.deleteDocumentCachePayload(payload.libraryId, payload.zoteroKey, payload.mode);
+                    const deleted = await this.db.deleteDocumentCachePayload(payload.libraryId, payload.zoteroKey, payload.payloadKind);
                     if (deleted) {
                         await this.removePayloadFiles([deleted]);
                         removedPayloads++;
@@ -565,6 +570,7 @@ export class DocumentCache {
         }
         if (Zotero.__beaverShuttingDown) return;
 
+        const payloadKind = DocumentCache.payloadKindForMode(input.mode);
         const metadataInput = this.buildMetadataInput(input.item, source, input.contentType, input.metadata);
         if (input.result.mode !== input.mode || input.result.schemaVersion !== metadataInput.extractionSchemaVersion) {
             return;
@@ -572,17 +578,17 @@ export class DocumentCache {
         const payloadWrite = await this.writePayloadFile(
             input.item.libraryID,
             input.item.key,
-            input.mode,
+            payloadKind,
             input.result,
         );
         const { metadata, deletedPayloads } = await this.db.upsertDocumentCacheMetadata(metadataInput);
-        const oldPayload = await this.db.getDocumentCachePayload(input.item.libraryID, input.item.key, input.mode);
+        const oldPayload = await this.db.getDocumentCachePayload(input.item.libraryID, input.item.key, payloadKind);
         await this.db.upsertDocumentCachePayload({
             metadataId: metadata.id,
             itemId: input.item.id,
             libraryId: input.item.libraryID,
             zoteroKey: input.item.key,
-            mode: input.mode,
+            payloadKind,
             contentKind: metadataInput.contentKind,
             sourceFilePath: source.filePath,
             sourceFileSignature: source.fileSignature,
@@ -617,6 +623,10 @@ export class DocumentCache {
 
     private static itemKey(libraryId: number, zoteroKey: string): string {
         return `${libraryId}/${zoteroKey}`;
+    }
+
+    private static payloadKindForMode(mode: ExtractionMode): PayloadKind {
+        return mode;
     }
 
     /**
@@ -682,10 +692,10 @@ export class DocumentCache {
     private isPayloadRowFresh(
         payload: DocumentCachePayloadRecord,
         metadata: DocumentCacheMetadataRecord,
-        mode: ExtractionMode,
+        payloadKind: PayloadKind,
     ): boolean {
         const expectedSchemaVersion = expectedExtractionSchemaVersion(metadata.contentKind);
-        return payload.mode === mode
+        return payload.payloadKind === payloadKind
             && payload.cacheFormatVersion === DOCUMENT_PAYLOAD_FORMAT_VERSION
             && metadata.documentMetadata !== null
             && expectedSchemaVersion !== null
@@ -770,7 +780,7 @@ export class DocumentCache {
     private async writePayloadFile(
         libraryId: number,
         zoteroKey: string,
-        mode: ExtractionMode,
+        payloadKind: PayloadKind,
         result: BeaverExtractResult,
     ): Promise<{ path: string; size: number; sha256: string }> {
         const json = JSON.stringify(result);
@@ -779,9 +789,9 @@ export class DocumentCache {
         const dir = this.libraryDir(libraryId);
         await (IOUtils as any).makeDirectory(dir, { createAncestors: true }).catch(() => undefined);
 
-        const finalPath = PathUtils.join(dir, `${zoteroKey}.${mode}.${sha256}.json.gz`);
+        const finalPath = PathUtils.join(dir, `${zoteroKey}.${payloadKind}.${sha256}.json.gz`);
         const nonce = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-        const tempPath = PathUtils.join(dir, `${zoteroKey}.${mode}.${sha256}.${nonce}.tmp`);
+        const tempPath = PathUtils.join(dir, `${zoteroKey}.${payloadKind}.${sha256}.${nonce}.tmp`);
 
         const exists = await IOUtils.exists(finalPath).catch(() => false);
         if (exists && !(await this.payloadFileMatches(finalPath, bytes, sha256))) {
@@ -815,7 +825,7 @@ export class DocumentCache {
             const current = await this.db.getDocumentCachePayload(
                 payload.libraryId,
                 payload.zoteroKey,
-                payload.mode,
+                payload.payloadKind,
             );
             if (current?.payloadPath === payload.payloadPath) return;
             await this.removePayloadFiles([deleted]);
