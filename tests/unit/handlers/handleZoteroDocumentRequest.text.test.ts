@@ -36,7 +36,7 @@ function request(key = 'TEXT0001') {
     };
 }
 
-describe('handleZoteroDocumentRequest text fallback dispatch', () => {
+describe('handleZoteroDocumentRequest content kind dispatch', () => {
     const itemsById = new Map<number, MockItem>();
     const itemsByKey = new Map<string, MockItem>();
 
@@ -53,16 +53,13 @@ describe('handleZoteroDocumentRequest text fallback dispatch', () => {
                 itemsByKey.get(`${libraryID}-${key}`) ?? false,
             ),
         };
+        (globalThis as any).Zotero.Utilities = {
+            isValidObjectKey: vi.fn((key: string) => /^[A-Z0-9]{8}$/.test(key)),
+        };
         (globalThis as any).Zotero.Beaver = {
             db: { enqueueBackgroundJob: vi.fn() },
             backgroundExtractor: { notify: vi.fn() },
         };
-        mockExtractAndCacheDocument.mockResolvedValue({
-            kind: 'response_error',
-            code: 'not_pdf',
-            message: 'Attachment 1-TEXT0001 is not a PDF (type: text/plain)',
-            pageCount: null,
-        });
         mockExtractTextDocument.mockResolvedValue({
             kind: 'ok',
             result: {
@@ -77,7 +74,7 @@ describe('handleZoteroDocumentRequest text fallback dispatch', () => {
         });
     });
 
-    it('extracts a direct text attachment after the PDF path rejects it as not_pdf', async () => {
+    it('extracts a direct text attachment without calling the PDF pipeline', async () => {
         const text = createMockAttachment({
             id: 10,
             key: 'TEXT0001',
@@ -88,7 +85,7 @@ describe('handleZoteroDocumentRequest text fallback dispatch', () => {
 
         const response = await handleZoteroDocumentRequest(request());
 
-        expect(mockExtractAndCacheDocument).toHaveBeenCalledOnce();
+        expect(mockExtractAndCacheDocument).not.toHaveBeenCalled();
         expect(mockExtractTextDocument).toHaveBeenCalledWith(expect.objectContaining({
             item: text,
             requestKey: '1-TEXT0001',
@@ -117,15 +114,10 @@ describe('handleZoteroDocumentRequest text fallback dispatch', () => {
             filename: 'book.epub',
         });
         itemsByKey.set('1-EPUB0001', epub);
-        mockExtractAndCacheDocument.mockResolvedValue({
-            kind: 'response_error',
-            code: 'not_pdf',
-            message: 'Attachment 1-EPUB0001 is not a PDF (type: application/epub+zip)',
-            pageCount: null,
-        });
 
         const response = await handleZoteroDocumentRequest(request('EPUB0001'));
 
+        expect(mockExtractAndCacheDocument).not.toHaveBeenCalled();
         expect(mockExtractTextDocument).not.toHaveBeenCalled();
         expect(response).toMatchObject({
             type: 'zotero_document',
@@ -142,15 +134,10 @@ describe('handleZoteroDocumentRequest text fallback dispatch', () => {
             filename: 'archive.zip',
         });
         itemsByKey.set('1-ZIP00001', zip);
-        mockExtractAndCacheDocument.mockResolvedValue({
-            kind: 'response_error',
-            code: 'not_pdf',
-            message: 'Attachment 1-ZIP00001 is not a PDF (type: application/zip)',
-            pageCount: null,
-        });
 
         const response = await handleZoteroDocumentRequest(request('ZIP00001'));
 
+        expect(mockExtractAndCacheDocument).not.toHaveBeenCalled();
         expect(mockExtractTextDocument).not.toHaveBeenCalled();
         expect(response).toMatchObject({
             type: 'zotero_document',
@@ -159,7 +146,7 @@ describe('handleZoteroDocumentRequest text fallback dispatch', () => {
         });
     });
 
-    it('does not divert a regular item with any PDF child to text fallback', async () => {
+    it('extracts PDF for a parent item when the best attachment is a PDF', async () => {
         const pdf = createMockAttachment({
             id: 20,
             key: 'PDF00001',
@@ -175,28 +162,26 @@ describe('handleZoteroDocumentRequest text fallback dispatch', () => {
         const regular = createMockItem({
             key: 'REG00001',
             attachmentIDs: [20, 21],
-            bestAttachment: text,
+            bestAttachment: pdf,
         });
         itemsById.set(20, pdf);
         itemsById.set(21, text);
         itemsByKey.set('1-REG00001', regular);
+        itemsByKey.set('1-PDF00001', pdf);
         mockExtractAndCacheDocument.mockResolvedValue({
-            kind: 'response_error',
-            code: 'not_attachment',
-            message: "The id '1-REG00001' is a regular item, not an attachment.",
-            pageCount: null,
+            kind: 'ok',
+            result: { schemaVersion: '4', mode: 'markdown', document: {} },
+            resolvedAttachment: { libraryId: 1, zoteroKey: 'PDF00001' },
+            contentType: 'application/pdf',
         });
 
-        const response = await handleZoteroDocumentRequest(request('REG00001'));
+        await handleZoteroDocumentRequest(request('REG00001'));
 
         expect(mockExtractTextDocument).not.toHaveBeenCalled();
-        expect(response).toEqual({
-            type: 'zotero_document',
-            request_id: 'req-text',
-            total_pages: null,
-            error: "The id '1-REG00001' is a regular item, not an attachment.",
-            error_code: 'not_attachment',
-        });
+        expect(mockExtractAndCacheDocument).toHaveBeenCalledWith(expect.objectContaining({
+            libraryId: 1,
+            zoteroKey: 'PDF00001',
+        }));
     });
 
     it('extracts a regular item with a single text child and no PDF children', async () => {
@@ -214,15 +199,10 @@ describe('handleZoteroDocumentRequest text fallback dispatch', () => {
         itemsById.set(21, text);
         itemsByKey.set('1-REG00001', regular);
         itemsByKey.set('1-TEXT0001', text);
-        mockExtractAndCacheDocument.mockResolvedValue({
-            kind: 'response_error',
-            code: 'not_attachment',
-            message: "The id '1-REG00001' is a regular item, not an attachment.",
-            pageCount: null,
-        });
 
         const response = await handleZoteroDocumentRequest(request('REG00001'));
 
+        expect(mockExtractAndCacheDocument).not.toHaveBeenCalled();
         expect(mockExtractTextDocument).toHaveBeenCalledWith(expect.objectContaining({
             item: text,
             requestKey: '1-TEXT0001',

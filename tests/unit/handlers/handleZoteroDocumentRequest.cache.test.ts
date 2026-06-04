@@ -104,6 +104,7 @@ vi.mock('../../../src/services/documentExtraction', async () => {
     );
     return {
         ...actual,
+        resolveToReadableAttachment: vi.fn(),
         resolveToPdfAttachment: vi.fn(),
         validateZoteroItemReference: vi.fn(() => null),
         loadPdfData: vi.fn(async () => new Uint8Array([1, 2, 3])),
@@ -113,7 +114,11 @@ vi.mock('../../../src/services/documentExtraction', async () => {
 });
 
 import { handleZoteroDocumentRequest } from '../../../src/services/agentDataProvider/handleZoteroDocumentRequest';
-import { resolveToPdfAttachment, loadPdfData } from '../../../src/services/documentExtraction';
+import {
+    resolveToReadableAttachment,
+    resolveToPdfAttachment,
+    loadPdfData,
+} from '../../../src/services/documentExtraction';
 
 describe('handleZoteroDocumentRequest document cache integration', () => {
     const resolvedPdfItem = {
@@ -136,6 +141,13 @@ describe('handleZoteroDocumentRequest document cache integration', () => {
         (globalThis as any).Zotero.Attachments = {
             getTotalFileSize: vi.fn().mockResolvedValue(1024),
         };
+        vi.mocked(resolveToReadableAttachment).mockResolvedValue({
+            resolved: true,
+            item: resolvedPdfItem,
+            key: '1-ABCD1234',
+            contentKind: 'pdf',
+            contentType: 'application/pdf',
+        } as any);
         vi.mocked(resolveToPdfAttachment).mockResolvedValue({
             resolved: true,
             item: resolvedPdfItem,
