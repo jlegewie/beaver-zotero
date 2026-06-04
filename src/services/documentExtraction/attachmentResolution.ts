@@ -1,3 +1,36 @@
+import type { ExtractContentKind } from './shared/contentKinds';
+
+/**
+ * Return the extractor content kind represented by the current Zotero item.
+ */
+export function liveAttachmentContentKind(item: Zotero.Item): ExtractContentKind | null {
+    if (!item.isAttachment()) {
+        return null;
+    }
+    if (item.isPDFAttachment()) {
+        return 'pdf';
+    }
+
+    const maybeIsEPUB = (item as unknown as { isEPUBAttachment?: () => boolean })
+        .isEPUBAttachment;
+    if (typeof maybeIsEPUB === 'function' && maybeIsEPUB.call(item)) {
+        return 'epub';
+    }
+
+    const contentType = (item.attachmentContentType || '').toLowerCase();
+    if (contentType === 'application/epub+zip') {
+        return 'epub';
+    }
+    if (contentType === 'text/html' || contentType === 'application/xhtml+xml') {
+        return 'snapshot';
+    }
+    if (contentType.startsWith('text/')) {
+        return 'text';
+    }
+
+    return null;
+}
+
 /**
  * Result of resolving a Zotero item to a PDF attachment.
  */

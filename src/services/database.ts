@@ -6,6 +6,10 @@ import {
     isExtractContentKind,
     parseCachedDocumentMetadata,
 } from './documentExtraction/shared/contentKinds';
+import {
+    parseBackgroundJobPayload,
+    type BackgroundJobPayload,
+} from './documentExtraction/shared/backgroundJobPayloads';
 import type {
     CachedDocumentMetadata,
     DocumentCachePageLabels,
@@ -138,23 +142,10 @@ export type DocumentCachePayloadInput = Omit<
     'id' | 'createdAt' | 'updatedAt' | 'lastAccessedAt'
 >;
 
-/**
- * Background extraction job kinds. v1 only ships `hot_timeout_retry` —
- * future kinds (manual attachment add, library-wide indexing, mtime
- * change) will reuse the same row shape.
- */
-export type BackgroundJobType = 'hot_timeout_retry';
+export type { BackgroundJobPayload } from './documentExtraction/shared/backgroundJobPayloads';
 
-/**
- * Payload carried alongside a background job. Shaped for the v1
- * timeout-retry extraction; future job types may extend this with
- * discriminated unions.
- */
-export interface BackgroundJobPayload {
-    maxPages: number | null;
-    maxFileSizeMB: number;
-    timeoutSeconds: number;
-}
+/** Background extraction job kinds. */
+export type BackgroundJobType = 'document_timeout_retry';
 
 /**
  * Single row in `background_jobs`. Timestamps are epoch milliseconds so
@@ -166,7 +157,8 @@ export interface BackgroundJobRecord {
     libraryId: number;
     itemId: number | null;
     zoteroKey: string;
-    mode: DocumentCacheExtractionMode;
+    contentKind: ExtractContentKind;
+    payloadKind: DocumentCachePayloadKind;
     priority: number;
     payload: BackgroundJobPayload | null;
     enqueuedAt: number;
@@ -180,7 +172,8 @@ export interface BackgroundJobInput {
     libraryId: number;
     itemId?: number | null;
     zoteroKey: string;
-    mode: DocumentCacheExtractionMode;
+    contentKind: ExtractContentKind;
+    payloadKind: DocumentCachePayloadKind;
     priority?: number;
     payload?: BackgroundJobPayload | null;
     /** Epoch ms. Used for both `enqueued_at` and `available_at`. */
@@ -199,6 +192,12 @@ export interface BackgroundQueueStats {
     dead: number;
     byJobType: Record<string, number>;
 }
+
+const BACKGROUND_JOB_COLUMNS = `
+    id, job_type, library_id, item_id, zotero_key,
+    content_kind, payload_kind, priority, payload_json,
+    enqueued_at, available_at, attempt_count, last_error
+`;
 
 /**
  * Maximum number of failures before an item is considered permanently failed.
@@ -525,7 +524,13 @@ export class BeaverDB {
             ON document_cache_payloads(library_id, zotero_key, payload_kind);
         `);
 
-        // Background job queue: one row per (library_id, zotero_key, mode).
+        // Drop and recreate the ephemeral queue if the schema or unique key is stale.
+        if (await this.backgroundJobsSchemaIsStale()) {
+            await this.conn.queryAsync(`DROP TABLE IF EXISTS background_jobs_dead`);
+            await this.conn.queryAsync(`DROP TABLE IF EXISTS background_jobs`);
+        }
+
+        // Background job queue: one row per logical document extraction request.
         // Uses epoch-ms timestamps throughout so visibility-bump UPSERTs can
         // compare via MIN(available_at, ?) without string-vs-number drift.
         await this.conn.queryAsync(`
@@ -535,14 +540,15 @@ export class BeaverDB {
                 library_id      INTEGER NOT NULL,
                 item_id         INTEGER,
                 zotero_key      TEXT NOT NULL,
-                mode            TEXT NOT NULL,
+                content_kind    TEXT NOT NULL,
+                payload_kind    TEXT NOT NULL,
                 priority        INTEGER NOT NULL DEFAULT 100,
                 payload_json    TEXT,
                 enqueued_at     INTEGER NOT NULL,
                 available_at    INTEGER NOT NULL,
                 attempt_count   INTEGER NOT NULL DEFAULT 0,
                 last_error      TEXT,
-                UNIQUE(library_id, zotero_key, mode)
+                UNIQUE(job_type, library_id, zotero_key, payload_kind)
             );
         `);
 
@@ -559,7 +565,8 @@ export class BeaverDB {
                 job_type        TEXT NOT NULL,
                 library_id      INTEGER NOT NULL,
                 zotero_key      TEXT NOT NULL,
-                mode            TEXT NOT NULL,
+                content_kind    TEXT NOT NULL,
+                payload_kind    TEXT NOT NULL,
                 payload_json    TEXT,
                 enqueued_at     INTEGER NOT NULL,
                 died_at         INTEGER NOT NULL,
@@ -1762,6 +1769,71 @@ export class BeaverDB {
         return false;
     }
 
+    /** Detect background queue tables whose ephemeral schema should be rebuilt. */
+    private async backgroundJobsSchemaIsStale(): Promise<boolean> {
+        const liveColumns = new Set<string>();
+        await this.conn.queryAsync(
+            `SELECT name FROM pragma_table_info('background_jobs')`,
+            [],
+            { onRow: (row: any) => liveColumns.add(row.getResultByIndex(0)) },
+        );
+        if (liveColumns.size > 0) {
+            if (!liveColumns.has('content_kind')) return true;
+            if (!liveColumns.has('payload_kind')) return true;
+            if (liveColumns.has('mode')) return true;
+            if (!(await this.backgroundJobsUniqueKeyIsCurrent())) return true;
+        }
+
+        const deadColumns = new Set<string>();
+        await this.conn.queryAsync(
+            `SELECT name FROM pragma_table_info('background_jobs_dead')`,
+            [],
+            { onRow: (row: any) => deadColumns.add(row.getResultByIndex(0)) },
+        );
+        if (deadColumns.size > 0) {
+            if (!deadColumns.has('content_kind')) return true;
+            if (!deadColumns.has('payload_kind')) return true;
+            if (deadColumns.has('mode')) return true;
+        }
+
+        return false;
+    }
+
+    /** Verify the live queue has the exact current dedupe key. */
+    private async backgroundJobsUniqueKeyIsCurrent(): Promise<boolean> {
+        const uniqueIndexNames: string[] = [];
+        await this.conn.queryAsync(
+            `SELECT name, [unique] FROM pragma_index_list('background_jobs')`,
+            [],
+            {
+                onRow: (row: any) => {
+                    if (row.getResultByIndex(1) === 1) {
+                        uniqueIndexNames.push(row.getResultByIndex(0));
+                    }
+                },
+            },
+        );
+
+        const expected = ['job_type', 'library_id', 'zotero_key', 'payload_kind'];
+        for (const indexName of uniqueIndexNames) {
+            const escapedName = indexName.replace(/'/g, `''`);
+            const columns: string[] = [];
+            await this.conn.queryAsync(
+                `SELECT name FROM pragma_index_info('${escapedName}') ORDER BY seqno`,
+                [],
+                { onRow: (row: any) => columns.push(row.getResultByIndex(0)) },
+            );
+            if (
+                columns.length === expected.length
+                && columns.every((column, index) => column === expected[index])
+            ) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private async selectDocumentCacheMetadata(sql: string, params: any[] = []): Promise<DocumentCacheMetadataRecord[]> {
         const rows: any[] = [];
         await this.conn.queryAsync(sql, params, {
@@ -2255,16 +2327,16 @@ export class BeaverDB {
 
     /**
      * Insert a new background job, or merge with the existing row that
-     * already covers `(library_id, zotero_key, mode)`. Returns the job id
+     * already covers the queue identity. Returns the job id
      * and whether the row was newly inserted.
      *
      * Merge semantics:
      *  - `priority` lowers to `MIN(existing, input)`.
      *  - `available_at` lowers to `MIN(existing, input.now)` so an urgent
      *    re-enqueue overrides a deferred prior visibility window.
-     *  - `payload_json` and `job_type` only overwrite when the incoming
-     *    job has a strictly higher (lower-numbered) priority, otherwise
-     *    they stay untouched.
+     *  - `content_kind` follows the incoming attachment state.
+     *  - `payload_json` overwrites when the content kind changes or the
+     *    incoming job has a strictly higher (lower-numbered) priority.
      */
     public async enqueueBackgroundJob(
         input: BackgroundJobInput,
@@ -2312,16 +2384,18 @@ export class BeaverDB {
 
         await this.conn.queryAsync(
             `INSERT OR IGNORE INTO background_jobs (
-                job_type, library_id, item_id, zotero_key, mode,
+                job_type, library_id, item_id, zotero_key, content_kind,
+                payload_kind,
                 priority, payload_json, enqueued_at, available_at,
                 attempt_count, last_error
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL)`,
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL)`,
             [
                 input.jobType,
                 input.libraryId,
                 itemId,
                 input.zoteroKey,
-                input.mode,
+                input.contentKind,
+                input.payloadKind,
                 priority,
                 payloadJson,
                 input.now,
@@ -2340,17 +2414,28 @@ export class BeaverDB {
         if (!enqueued) {
             await this.conn.queryAsync(
                 `UPDATE background_jobs SET
-                    priority = MIN(priority, ?),
-                    available_at = MIN(available_at, ?),
-                    job_type = CASE WHEN ? < priority THEN ? ELSE job_type END,
-                    payload_json = CASE WHEN ? < priority THEN ? ELSE payload_json END
-                 WHERE library_id = ? AND zotero_key = ? AND mode = ?`,
+                    priority      = MIN(priority, ?),
+                    available_at  = MIN(available_at, ?),
+                    content_kind  = ?,
+                    payload_json  = CASE WHEN content_kind != ? OR ? < priority
+                                         THEN ? ELSE payload_json END,
+                    attempt_count = CASE WHEN content_kind != ? OR ? < priority
+                                         THEN 0 ELSE attempt_count END,
+                    last_error    = CASE WHEN content_kind != ? OR ? < priority
+                                         THEN NULL ELSE last_error END
+                 WHERE job_type = ? AND library_id = ? AND zotero_key = ? AND payload_kind = ?`,
                 [
                     priority,
                     input.now,
-                    priority, input.jobType,
-                    priority, payloadJson,
-                    input.libraryId, input.zoteroKey, input.mode,
+                    input.contentKind,
+                    input.contentKind, priority,
+                    payloadJson,
+                    input.contentKind, priority,
+                    input.contentKind, priority,
+                    input.jobType,
+                    input.libraryId,
+                    input.zoteroKey,
+                    input.payloadKind,
                 ],
             );
         }
@@ -2358,8 +2443,8 @@ export class BeaverDB {
         const idRows: number[] = [];
         await this.conn.queryAsync(
             `SELECT id FROM background_jobs
-             WHERE library_id = ? AND zotero_key = ? AND mode = ?`,
-            [input.libraryId, input.zoteroKey, input.mode],
+             WHERE job_type = ? AND library_id = ? AND zotero_key = ? AND payload_kind = ?`,
+            [input.jobType, input.libraryId, input.zoteroKey, input.payloadKind],
             {
                 onRow: (row: any) => {
                     idRows.push(row.getResultByIndex(0));
@@ -2397,9 +2482,7 @@ export class BeaverDB {
             params.push(maxPriority);
         }
         const candidates = await this.selectBackgroundJobs(
-            `SELECT id, job_type, library_id, item_id, zotero_key, mode,
-                    priority, payload_json, enqueued_at, available_at,
-                    attempt_count, last_error
+            `SELECT ${BACKGROUND_JOB_COLUMNS}
              FROM background_jobs
              WHERE available_at <= ?${priorityClause}
              ORDER BY priority ASC, available_at ASC
@@ -2432,9 +2515,7 @@ export class BeaverDB {
     /** Read up to `limit` jobs (default 100) without claiming. */
     public async peekBackgroundJobs(limit = 100): Promise<BackgroundJobRecord[]> {
         return this.selectBackgroundJobs(
-            `SELECT id, job_type, library_id, item_id, zotero_key, mode,
-                    priority, payload_json, enqueued_at, available_at,
-                    attempt_count, last_error
+            `SELECT ${BACKGROUND_JOB_COLUMNS}
              FROM background_jobs
              ORDER BY priority ASC, available_at ASC
              LIMIT ?`,
@@ -2465,9 +2546,7 @@ export class BeaverDB {
         },
     ): Promise<{ dead: boolean }> {
         const rows = await this.selectBackgroundJobs(
-            `SELECT id, job_type, library_id, item_id, zotero_key, mode,
-                    priority, payload_json, enqueued_at, available_at,
-                    attempt_count, last_error
+            `SELECT ${BACKGROUND_JOB_COLUMNS}
              FROM background_jobs
              WHERE id = ?`,
             [id],
@@ -2480,14 +2559,16 @@ export class BeaverDB {
             await this.conn.executeTransaction(async () => {
                 await this.conn.queryAsync(
                     `INSERT INTO background_jobs_dead (
-                        job_type, library_id, zotero_key, mode, payload_json,
-                        enqueued_at, died_at, attempt_count, last_error
-                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                        job_type, library_id, zotero_key, content_kind,
+                        payload_kind, payload_json, enqueued_at, died_at,
+                        attempt_count, last_error
+                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                     [
                         current.jobType,
                         current.libraryId,
                         current.zoteroKey,
-                        current.mode,
+                        current.contentKind,
+                        current.payloadKind,
                         current.payload ? JSON.stringify(current.payload) : null,
                         current.enqueuedAt,
                         opts.now,
@@ -2580,28 +2661,23 @@ export class BeaverDB {
         const rows: BackgroundJobRecord[] = [];
         await this.conn.queryAsync(sql, params, {
             onRow: (row: any) => {
-                const payloadJson = row.getResultByIndex(7);
-                let payload: BackgroundJobPayload | null = null;
-                if (payloadJson) {
-                    try {
-                        payload = JSON.parse(payloadJson) as BackgroundJobPayload;
-                    } catch (_e) {
-                        payload = null;
-                    }
-                }
+                const contentKind = row.getResultByIndex(5);
+                const payloadJson = row.getResultByIndex(8);
+                const payload = parseBackgroundJobPayload(contentKind, payloadJson);
                 rows.push({
                     id: row.getResultByIndex(0),
                     jobType: row.getResultByIndex(1) as BackgroundJobType,
                     libraryId: row.getResultByIndex(2),
                     itemId: row.getResultByIndex(3) ?? null,
                     zoteroKey: row.getResultByIndex(4),
-                    mode: row.getResultByIndex(5) as DocumentCacheExtractionMode,
-                    priority: row.getResultByIndex(6),
+                    contentKind: contentKind as ExtractContentKind,
+                    payloadKind: row.getResultByIndex(6) as DocumentCachePayloadKind,
+                    priority: row.getResultByIndex(7),
                     payload,
-                    enqueuedAt: row.getResultByIndex(8),
-                    availableAt: row.getResultByIndex(9),
-                    attemptCount: row.getResultByIndex(10),
-                    lastError: row.getResultByIndex(11) ?? null,
+                    enqueuedAt: row.getResultByIndex(9),
+                    availableAt: row.getResultByIndex(10),
+                    attemptCount: row.getResultByIndex(11),
+                    lastError: row.getResultByIndex(12) ?? null,
                 });
             },
         });

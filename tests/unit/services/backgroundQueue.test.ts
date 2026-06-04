@@ -8,10 +8,11 @@ import { MockDBConnection } from '../../mocks/mockDBConnection';
 
 function makeInput(overrides: Partial<BackgroundJobInput> = {}): BackgroundJobInput {
     const base: BackgroundJobInput = {
-        jobType: 'hot_timeout_retry',
+        jobType: 'document_timeout_retry',
         libraryId: 1,
         zoteroKey: 'ABCD1234',
-        mode: 'structured',
+        contentKind: 'pdf',
+        payloadKind: 'structured',
         priority: 100,
         payload: makePayload(),
         now: 1_000_000,
@@ -21,6 +22,7 @@ function makeInput(overrides: Partial<BackgroundJobInput> = {}): BackgroundJobIn
 
 function makePayload(overrides: Partial<BackgroundJobPayload> = {}): BackgroundJobPayload {
     return {
+        content_kind: 'pdf',
         maxPages: 200,
         maxFileSizeMB: 50,
         timeoutSeconds: 120,
@@ -42,7 +44,7 @@ describe('BeaverDB background queue', () => {
         await conn.closeDatabase();
     });
 
-    it('dedupes a second enqueue for the same (library, key, mode) and lowers priority/availability', async () => {
+    it('dedupes a second enqueue for the same job identity and lowers priority/availability', async () => {
         const first = await db.enqueueBackgroundJob(
             makeInput({ priority: 200, now: 5_000 }),
         );
@@ -62,18 +64,127 @@ describe('BeaverDB background queue', () => {
         expect(rows[0].availableAt).toBe(3_000);
     });
 
-    it('keeps separate rows for different modes on the same attachment', async () => {
+    it('keeps separate rows for different payload kinds on the same attachment', async () => {
         await db.enqueueBackgroundJob(
-            makeInput({ mode: 'structured', priority: 100 }),
+            makeInput({ payloadKind: 'structured', priority: 100 }),
         );
         await db.enqueueBackgroundJob(
-            makeInput({ mode: 'markdown', priority: 100 }),
+            makeInput({ payloadKind: 'markdown', priority: 100 }),
         );
 
         const rows = await db.peekBackgroundJobs();
         expect(rows).toHaveLength(2);
-        const modes = rows.map((r) => r.mode).sort();
-        expect(modes).toEqual(['markdown', 'structured']);
+        const payloadKinds = rows.map((r) => r.payloadKind).sort();
+        expect(payloadKinds).toEqual(['markdown', 'structured']);
+    });
+
+    it('keeps separate rows for different payload kinds and merges the same identity', async () => {
+        await db.enqueueBackgroundJob(makeInput({ payloadKind: 'structured' }));
+        await db.enqueueBackgroundJob(makeInput({ payloadKind: 'markdown' }));
+
+        const sameIdentity = await db.enqueueBackgroundJob(
+            makeInput({ payloadKind: 'structured', priority: 10, now: 500 }),
+        );
+
+        expect(sameIdentity.enqueued).toBe(false);
+        const rows = await db.peekBackgroundJobs();
+        expect(rows).toHaveLength(2);
+        expect(rows.find((row) => row.payloadKind === 'structured')?.priority).toBe(10);
+    });
+
+    it('updates content kind and payload together when a merged row changes kind', async () => {
+        const first = await db.enqueueBackgroundJob(
+            makeInput({
+                contentKind: 'epub',
+                payloadKind: 'structured',
+                payload: null,
+                priority: 50,
+                now: 1_000,
+            }),
+        );
+        await db.failBackgroundJob(first.id, 'old failure', {
+            maxAttempts: 5,
+            backoffMs: () => 60_000,
+            now: 2_000,
+        });
+
+        const second = await db.enqueueBackgroundJob(
+            makeInput({
+                contentKind: 'pdf',
+                payloadKind: 'structured',
+                payload: makePayload({ timeoutSeconds: 999 }),
+                priority: 50,
+                now: 3_000,
+            }),
+        );
+
+        expect(second.enqueued).toBe(false);
+        expect(second.id).toBe(first.id);
+        const rows = await db.peekBackgroundJobs();
+        expect(rows).toHaveLength(1);
+        expect(rows[0].contentKind).toBe('pdf');
+        expect(rows[0].payload).toMatchObject({
+            content_kind: 'pdf',
+            timeoutSeconds: 999,
+        });
+        expect(rows[0].attemptCount).toBe(0);
+        expect(rows[0].lastError).toBeNull();
+    });
+
+    it('rebuilds columns-correct background tables when the unique key is stale', async () => {
+        await conn.closeDatabase();
+        conn = new MockDBConnection();
+        const raw = conn.getRawDB();
+        raw.exec(`
+            CREATE TABLE background_jobs (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_type        TEXT NOT NULL,
+                library_id      INTEGER NOT NULL,
+                item_id         INTEGER,
+                zotero_key      TEXT NOT NULL,
+                content_kind    TEXT NOT NULL,
+                payload_kind    TEXT NOT NULL,
+                priority        INTEGER NOT NULL DEFAULT 100,
+                payload_json    TEXT,
+                enqueued_at     INTEGER NOT NULL,
+                available_at    INTEGER NOT NULL,
+                attempt_count   INTEGER NOT NULL DEFAULT 0,
+                last_error      TEXT,
+                UNIQUE(library_id, zotero_key, payload_kind)
+            );
+            CREATE TABLE background_jobs_dead (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_type        TEXT NOT NULL,
+                library_id      INTEGER NOT NULL,
+                zotero_key      TEXT NOT NULL,
+                content_kind    TEXT NOT NULL,
+                payload_kind    TEXT NOT NULL,
+                payload_json    TEXT,
+                enqueued_at     INTEGER NOT NULL,
+                died_at         INTEGER NOT NULL,
+                attempt_count   INTEGER NOT NULL,
+                last_error      TEXT
+            );
+        `);
+        db = new BeaverDB(conn);
+
+        await db.initDatabase('0.99.0');
+
+        const uniqueIndexes = raw
+            .prepare(`SELECT name FROM pragma_index_list('background_jobs') WHERE [unique] = 1`)
+            .all() as Array<{ name: string }>;
+        const keys = uniqueIndexes.map((index) =>
+            (raw
+                .prepare(`SELECT name FROM pragma_index_info('${index.name.replace(/'/g, "''")}') ORDER BY seqno`)
+                .all() as Array<{ name: string }>)
+                .map((column) => column.name),
+        );
+        expect(keys).toContainEqual([
+            'job_type',
+            'library_id',
+            'zotero_key',
+            'payload_kind',
+        ]);
     });
 
     it('enqueueBackgroundJobs enqueues a batch in one call and returns results in input order', async () => {
@@ -329,7 +440,7 @@ describe('BeaverDB background queue', () => {
         const stats = await db.getBackgroundQueueStats(500);
         expect(stats.pending).toBe(2);
         expect(stats.available + stats.deferred).toBe(stats.pending);
-        expect(stats.byJobType['hot_timeout_retry']).toBe(2);
+        expect(stats.byJobType['document_timeout_retry']).toBe(2);
         expect(stats.dead).toBe(0);
     });
 
