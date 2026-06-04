@@ -19,7 +19,7 @@ import {
     getOrAssignCitationMarkerAtom,
     updateCitationDataAtom,
 } from '../../../react/atoms/citations';
-import { getCitationBoundingBoxes, getCitationPages, isExternalCitation, isZoteroCitation, type CitationData } from '../../../react/types/citations';
+import { getCitationBoundingBoxes, getCitationPages, getContentKind, isExternalCitation, isZoteroCitation, type CitationData } from '../../../react/types/citations';
 
 function citation(overrides: Partial<CitationData>): CitationData {
     return {
@@ -293,6 +293,17 @@ describe('getCitationPages', () => {
         });
 
         expect(getCitationPages(data)).toEqual([3, 5]);
+    });
+});
+
+describe('getContentKind', () => {
+    it('defaults absent citations and metadata to pdf', () => {
+        expect(getContentKind(undefined)).toBe('pdf');
+        expect(getContentKind(citation({}))).toBe('pdf');
+    });
+
+    it('returns the metadata content kind when present', () => {
+        expect(getContentKind(citation({ content_kind: 'epub' }))).toBe('epub');
     });
 });
 

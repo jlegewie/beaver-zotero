@@ -109,6 +109,8 @@ export interface CitationPart {
     locations?: PageLocation[];
 }
 
+export type ContentKind = "pdf" | "epub" | "snapshot" | "text";
+
 export interface CitationMetadata {
     /** A unique ID for this specific citation instance. */
     citation_id: string;
@@ -124,6 +126,8 @@ export interface CitationMetadata {
     // Common fields for all citation types
     /** Citation type discriminator */
     citation_type?: "item" | "attachment" | "external_reference" | "note" | "annotation";
+    /** Content model of the cited attachment. Absent defaults to "pdf". */
+    content_kind?: ContentKind;
     /** The display marker, e.g., '1', '2'.. */
     marker?: string;
     /** The author-year of the citation. */
@@ -406,6 +410,10 @@ export const getCitationPages = (citation: CitationData | CitationMetadata | nul
     const allPages = [...new Set([...pagesFromParts, ...directPages])];
     return allPages.sort((a, b) => a - b);
 }
+
+export const getContentKind = (
+    citation: CitationData | CitationMetadata | null | undefined,
+): ContentKind => citation?.content_kind ?? "pdf";
 
 export interface CitationBoundingBoxData {
     page: number;
