@@ -83,6 +83,13 @@ export interface ResolveItemResponse {
     is_attachment?: boolean;
     parent_id?: number | null;
     attachment_content_type?: string | null;
+    /**
+     * `<libraryId>-<zoteroKey>` of the PDF attachment the production resolver
+     * would extract for this item (the item itself when it is already a PDF
+     * attachment, or the single child PDF of a regular item). `null` when the
+     * item does not resolve to a PDF.
+     */
+    resolved_pdf_key?: string | null;
     error?: string;
 }
 
@@ -590,13 +597,21 @@ export async function workerMarkStale(
 // `useHttpEndpoints.ts` from `react/hooks/httpHandlers/testBackgroundHandlers.ts`.
 // ---------------------------------------------------------------------------
 
-export type BackgroundJobType = 'hot_timeout_retry';
+export type BackgroundJobType = 'document_timeout_retry';
+export type BackgroundJobPayloadKind = 'structured' | 'markdown';
 
-export interface BackgroundJobPayload {
+export interface PdfBackgroundJobPayload {
+    content_kind: 'pdf';
     maxPages: number | null;
     maxFileSizeMB: number;
     timeoutSeconds: number;
 }
+
+export type BackgroundJobPayload =
+    | PdfBackgroundJobPayload
+    | { content_kind: 'epub' }
+    | { content_kind: 'text' }
+    | { content_kind: 'snapshot' };
 
 export interface BackgroundJobRecord {
     id: number;
@@ -604,7 +619,8 @@ export interface BackgroundJobRecord {
     libraryId: number;
     itemId: number | null;
     zoteroKey: string;
-    mode: 'structured' | 'markdown';
+    contentKind: ExtractContentKind;
+    payloadKind: BackgroundJobPayloadKind;
     priority: number;
     payload: BackgroundJobPayload | null;
     enqueuedAt: number;
@@ -624,7 +640,8 @@ export interface BackgroundQueueStats {
 export interface BackgroundEnqueueRequest {
     library_id: number;
     zotero_key: string;
-    mode: 'structured' | 'markdown';
+    content_kind: ExtractContentKind;
+    payload_kind: BackgroundJobPayloadKind;
     job_type: BackgroundJobType;
     priority?: number;
     payload?: BackgroundJobPayload | null;

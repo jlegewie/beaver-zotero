@@ -11,12 +11,15 @@ import type {
     BackgroundJobPayload,
     BackgroundJobType,
     BackgroundJobRecord,
+    DocumentCachePayloadKind,
 } from '../../../src/services/database';
+import type { ExtractContentKind } from '../../../src/services/documentExtraction/shared/contentKinds';
 
 interface EnqueueRequest {
     library_id?: number;
     zotero_key?: string;
-    mode?: 'structured' | 'markdown';
+    content_kind?: ExtractContentKind;
+    payload_kind?: DocumentCachePayloadKind;
     job_type?: BackgroundJobType;
     priority?: number;
     payload?: BackgroundJobPayload | null;
@@ -39,17 +42,18 @@ export async function handleTestBackgroundEnqueueHttpRequest(
     const {
         library_id,
         zotero_key,
-        mode,
+        content_kind,
+        payload_kind,
         job_type,
         priority,
         payload,
         item_id,
         notify,
     } = request;
-    if (library_id == null || !zotero_key || !mode || !job_type) {
+    if (library_id == null || !zotero_key || !content_kind || !payload_kind || !job_type) {
         return {
             ok: false,
-            error: 'Provide library_id, zotero_key, mode, job_type',
+            error: 'Provide library_id, zotero_key, content_kind, payload_kind, job_type',
         };
     }
     const input: BackgroundJobInput = {
@@ -57,7 +61,8 @@ export async function handleTestBackgroundEnqueueHttpRequest(
         libraryId: library_id,
         itemId: item_id ?? null,
         zoteroKey: zotero_key,
-        mode,
+        contentKind: content_kind,
+        payloadKind: payload_kind,
         priority,
         payload: payload ?? null,
         now: Date.now(),

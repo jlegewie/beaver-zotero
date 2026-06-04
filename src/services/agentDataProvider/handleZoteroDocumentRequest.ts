@@ -3,7 +3,7 @@
  *
  * Thin wrapper around the shared extraction core
  * (`src/services/documentExtractionCore.ts`). On a v1 hot-path timeout it
- * enqueues a `hot_timeout_retry` background job so the background
+ * enqueues a `document_timeout_retry` background job so the background
  * processor can retry with a longer budget on its own worker.
  */
 
@@ -80,12 +80,14 @@ export async function handleZoteroDocumentRequest(
         };
         try {
             await Zotero.Beaver?.db?.enqueueBackgroundJob({
-                jobType: 'hot_timeout_retry',
+                jobType: 'document_timeout_retry',
                 libraryId: target.libraryId,
                 zoteroKey: target.zoteroKey,
-                mode,
+                contentKind: 'pdf',
+                payloadKind: mode,
                 priority: 50,
                 payload: {
+                    content_kind: 'pdf',
                     maxPages: max_pages ?? null,
                     maxFileSizeMB: max_file_size_mb ?? 0,
                     timeoutSeconds: MAX_PDF_TIMEOUT_SECONDS,

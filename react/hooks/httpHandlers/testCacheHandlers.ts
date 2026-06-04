@@ -193,11 +193,25 @@ export async function handleTestResolveItemHttpRequest(request: any) {
     }
     const item = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);
     if (!item) return { item_id: null, item_type: null };
+
+    // Surface the PDF attachment the production resolver would extract for
+    // this item (direct attachment, or the single child PDF of a regular
+    // item). Lets tests assert parent → child resolution without exposing
+    // extraction internals. Reuses the real resolver code path.
+    const { resolveToPdfAttachment } = await import(
+        '../../../src/services/documentExtraction/attachmentResolution'
+    );
+    const resolved = await resolveToPdfAttachment(
+        item,
+        `${library_id}-${zotero_key}`,
+    );
+
     return {
         item_id: item.id,
         item_type: item.itemType,
         is_attachment: item.isAttachment(),
         parent_id: item.parentID || null,
         attachment_content_type: item.isAttachment() ? item.attachmentContentType : null,
+        resolved_pdf_key: resolved.resolved ? resolved.key : null,
     };
 }
