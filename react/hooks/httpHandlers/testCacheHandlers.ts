@@ -34,6 +34,28 @@ export async function handleTestCacheMetadataHttpRequest(request: any) {
     return { record: record ?? null };
 }
 
+/**
+ * Dev-only: return a document-cache payload row by key + mode.
+ *
+ * Lets tests assert on the payload table's persisted columns — notably
+ * `contentKind`, which mirrors the metadata row — without exposing the
+ * gzipped payload file. Returns `{ record: null }` when no payload exists.
+ */
+export async function handleTestCachePayloadHttpRequest(request: any) {
+    const { library_id, zotero_key, mode } = request;
+    const db = Zotero.Beaver?.db;
+    if (!db) return { error: 'db not available' };
+    if (library_id == null || zotero_key == null) {
+        return { error: 'Provide library_id + zotero_key' };
+    }
+    const record = await db.getDocumentCachePayload(
+        library_id,
+        zotero_key,
+        mode === 'structured' || mode === 'markdown' ? mode : 'markdown',
+    );
+    return { record: record ?? null };
+}
+
 export async function handleTestCacheInvalidateHttpRequest(request: any) {
     const { library_id, zotero_key, item_id } = request;
     const cache = Zotero.Beaver?.documentCache;

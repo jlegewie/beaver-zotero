@@ -285,6 +285,12 @@ declare namespace Zotero {
 
             getAllDocumentCacheMetadata(): Promise<import("../src/services/database").DocumentCacheMetadataRecord[]>;
 
+            getDocumentCachePayload(
+                libraryId: number,
+                zoteroKey: string,
+                mode: import("../src/services/database").DocumentCacheExtractionMode,
+            ): Promise<import("../src/services/database").DocumentCachePayloadRecord | null>;
+
             // --- Background job queue ---
             enqueueBackgroundJob(
                 input: import("../src/services/database").BackgroundJobInput,
