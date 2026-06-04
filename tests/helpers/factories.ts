@@ -24,10 +24,15 @@ export interface MockItemOptions {
     parentID?: number | null;
     isAttachment?: boolean;
     isNote?: boolean;
+    isAnnotation?: boolean;
     isRegularItem?: boolean;
     noteHTML?: string;
     attachmentContentType?: string;
+    attachmentFilename?: string;
+    attachmentLinkMode?: number;
     attachmentPath?: string;
+    deleted?: boolean;
+    bestAttachment?: Zotero.Item | false | null;
 }
 
 /**
@@ -52,11 +57,19 @@ export function createMockItem(opts: MockItemOptions = {}) {
         parentID = null,
         isAttachment = false,
         isNote = false,
-        isRegularItem = !isAttachment && !isNote,
+        isAnnotation = false,
+        isRegularItem = !isAttachment && !isNote && !isAnnotation,
         noteHTML = '',
         attachmentContentType = '',
+        attachmentFilename = '',
+        attachmentLinkMode = (globalThis as any).Zotero?.Attachments?.LINK_MODE_IMPORTED_FILE ?? 0,
         attachmentPath = '',
+        deleted = false,
+        bestAttachment = null,
     } = opts;
+
+    const linkedUrlMode = (globalThis as any).Zotero?.Attachments?.LINK_MODE_LINKED_URL ?? 3;
+    const importedUrlMode = (globalThis as any).Zotero?.Attachments?.LINK_MODE_IMPORTED_URL ?? 1;
 
     return {
         id,
@@ -65,22 +78,33 @@ export function createMockItem(opts: MockItemOptions = {}) {
         itemType,
         parentID,
         attachmentContentType,
+        attachmentFilename,
+        attachmentLinkMode,
         attachmentPath,
+        deleted,
         getField: vi.fn((field: string) => fields[field] ?? ''),
         setField: vi.fn(),
         getCreators: vi.fn(() => creators),
         getTags: vi.fn(() => tags),
         getNotes: vi.fn(() => noteIDs),
         getAttachments: vi.fn(() => attachmentIDs),
+        getBestAttachment: vi.fn(async () => bestAttachment),
         getCollections: vi.fn(() => []),
         isAttachment: vi.fn(() => isAttachment),
         isNote: vi.fn(() => isNote),
+        isAnnotation: vi.fn(() => isAnnotation),
         isRegularItem: vi.fn(() => isRegularItem),
+        isFileAttachment: vi.fn(() => isAttachment && attachmentLinkMode !== linkedUrlMode),
+        isPDFAttachment: vi.fn(() => isAttachment && attachmentLinkMode !== linkedUrlMode && attachmentContentType === 'application/pdf'),
+        isEPUBAttachment: vi.fn(() => isAttachment && attachmentLinkMode !== linkedUrlMode && attachmentContentType === 'application/epub+zip'),
+        isSnapshotAttachment: vi.fn(() => attachmentLinkMode === importedUrlMode && attachmentContentType === 'text/html'),
+        isImageAttachment: vi.fn(() => isAttachment && attachmentLinkMode !== linkedUrlMode && attachmentContentType.startsWith('image/')),
         getNote: vi.fn(() => noteHTML),
         setNote: vi.fn(),
         saveTx: vi.fn(),
         save: vi.fn(),
         loadDataType: vi.fn(),
+        loadAllData: vi.fn(),
         _loaded: { itemData: true },
     };
 }
@@ -119,19 +143,30 @@ export interface MockAttachmentOptions {
     libraryID?: number;
     parentID?: number | null;
     contentType?: string;
+    filename?: string;
+    linkMode?: number;
     path?: string;
+    deleted?: boolean;
 }
 
 /**
  * Create a mock Zotero attachment item.
  */
 export function createMockAttachment(opts: MockAttachmentOptions = {}) {
-    const { contentType = 'application/pdf', path = '/mock/path/file.pdf', ...rest } = opts;
+    const {
+        contentType = 'application/pdf',
+        filename = 'file.pdf',
+        linkMode = (globalThis as any).Zotero?.Attachments?.LINK_MODE_IMPORTED_FILE ?? 0,
+        path = '/mock/path/file.pdf',
+        ...rest
+    } = opts;
     return createMockItem({
         itemType: 'attachment',
         isAttachment: true,
         isRegularItem: false,
         attachmentContentType: contentType,
+        attachmentFilename: filename,
+        attachmentLinkMode: linkMode,
         attachmentPath: path,
         ...rest,
     });

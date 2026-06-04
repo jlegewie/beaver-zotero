@@ -79,7 +79,11 @@ describe('resolveToPdfAttachment', () => {
         itemsByLibraryAndKey = new Map();
 
         (globalThis as any).Zotero.Attachments = {
-            LINK_MODE_LINKED_URL: 2,
+            LINK_MODE_IMPORTED_FILE: 0,
+            LINK_MODE_IMPORTED_URL: 1,
+            LINK_MODE_LINKED_FILE: 2,
+            LINK_MODE_LINKED_URL: 3,
+            LINK_MODE_EMBEDDED_IMAGE: 4,
         };
         (globalThis as any).Zotero.Items = {
             loadDataTypes: vi.fn(async () => undefined),
@@ -107,7 +111,7 @@ describe('resolveToPdfAttachment', () => {
             key: 'LINK0001',
             isPdf: false,
             contentType: 'text/html',
-            linkMode: 2,
+            linkMode: 3,
         });
 
         const result = await resolveToPdfAttachment(linkedUrl, '1-LINK0001');
