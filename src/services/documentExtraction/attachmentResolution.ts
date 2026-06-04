@@ -1,3 +1,4 @@
+import { getItemKey } from '../../utils/zoteroItemUtils';
 import {
     getReadableContentKind,
     isReadableAttachment,
@@ -73,12 +74,12 @@ export async function resolveToPdfAttachment(
 
         const bestAttachment = await item.getBestAttachment();
         const bestAttachmentKey = bestAttachment
-            ? `${bestAttachment.libraryID}-${bestAttachment.key}`
+            ? getItemKey(bestAttachment)
             : null;
 
         if (pdfAttachments.length === 1) {
             const only = pdfAttachments[0];
-            const onlyKey = `${only.libraryID}-${only.key}`;
+            const onlyKey = getItemKey(only);
             const resolved = await Zotero.Items.getByLibraryAndKeyAsync(
                 only.libraryID,
                 only.key,
@@ -99,7 +100,7 @@ export async function resolveToPdfAttachment(
 
         const text = pdfAttachments
             .map((a) => {
-                const k = `${a.libraryID}-${a.key}`;
+                const k = getItemKey(a);
                 return k === bestAttachmentKey
                     ? `'${a.attachmentFilename}' (${k}, primary)`
                     : `'${a.attachmentFilename}' (${k})`;
@@ -120,13 +121,6 @@ export async function resolveToPdfAttachment(
 }
 
 /**
- * Build Beaver's stable library-key identifier for an attachment.
- */
-function attachmentKey(item: Zotero.Item): string {
-    return `${item.libraryID}-${item.key}`;
-}
-
-/**
  * Format a readable attachment for regular-item resolution errors.
  */
 function labelReadableAttachment(
@@ -134,7 +128,7 @@ function labelReadableAttachment(
     contentKind: ReadableContentKind,
     bestAttachmentKey: string | null,
 ): string {
-    const key = attachmentKey(item);
+    const key = getItemKey(item);
     const primary = key === bestAttachmentKey ? ', primary' : '';
     return `'${item.attachmentFilename}' (${key}${primary}, ${contentKind})`;
 }
@@ -227,12 +221,12 @@ export async function resolveToReadableAttachment(
             await Zotero.Items.loadDataTypes([bestAttachment], ['itemData']);
         }
         const bestAttachmentKey = bestAttachment
-            ? attachmentKey(bestAttachment)
+            ? getItemKey(bestAttachment)
             : null;
 
         if (readable.length === 1) {
             const only = readable[0];
-            const onlyKey = attachmentKey(only.attachment);
+            const onlyKey = getItemKey(only.attachment);
             const label = labelReadableAttachment(
                 only.attachment,
                 only.contentKind,
@@ -246,7 +240,7 @@ export async function resolveToReadableAttachment(
             if (bestKind) {
                 return resolveReadableChildAttachment(
                     bestAttachment,
-                    attachmentKey(bestAttachment),
+                    getItemKey(bestAttachment),
                     uniqueKey,
                     labelReadableAttachment(bestAttachment, bestKind, bestAttachmentKey),
                 );

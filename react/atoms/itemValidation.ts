@@ -6,15 +6,9 @@ import {
     ItemValidationOptions 
 } from '../../src/services/itemValidationManager';
 import { logger } from '../../src/utils/logger';
+import { getItemKey } from '../../src/utils/zoteroItemUtils';
 import { processingModeAtom } from './profile';
 import { ProcessingMode } from '../types/profile';
-
-/**
- * Generate unique key for a Zotero item
- */
-function getItemKey(item: Zotero.Item): string {
-    return `${item.libraryID}-${item.key}`;
-}
 
 /**
  * Get the appropriate validation type based on processing mode

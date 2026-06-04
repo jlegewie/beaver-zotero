@@ -1,6 +1,7 @@
 import { logger } from '../../utils/logger';
 import { ZoteroItemReference } from '../../../react/types/zotero';
 import { ZoteroItemStatus, FrontendFileStatus, AttachmentDataWithStatus, AttachmentSummary, FileStatusCode } from '../../../react/types/zotero';
+import { getItemKey } from '../../utils/zoteroItemUtils';
 import { safeIsInTrash, safeFileExists, isLinkedUrlAttachment } from '../../utils/zoteroUtils';
 import { syncingItemFilter, syncingItemFilterAsync } from '../../utils/sync';
 import { getPref } from '../../utils/prefs';
@@ -1389,13 +1390,13 @@ export async function getAttachmentInfo(item: Zotero.Item): Promise<{ count: num
     await Zotero.Items.loadDataTypes([item], ["childItems"]);
     const attachmentIDs = item.getAttachments();
     const bestAttachment = await item.getBestAttachment();
-    const bestAttachmentKey = bestAttachment ? `${bestAttachment.libraryID}-${bestAttachment.key}` : null;
+    const bestAttachmentKey = bestAttachment ? getItemKey(bestAttachment) : null;
 
     const pdfAttachmentKeys = attachmentIDs
         .map(id => Zotero.Items.get(id))
         .filter(attachment => attachment && isSupportedItem(attachment))
         .map(attachment => {
-            const key = `${attachment.libraryID}-${attachment.key}`;
+            const key = getItemKey(attachment);
             const isPrimary = bestAttachmentKey && key === bestAttachmentKey;
             // return isPrimary ? `${key} (primary)` : key;
             return isPrimary
