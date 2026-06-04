@@ -21,9 +21,12 @@ describe('citationGrammar', () => {
         expect(parseLoc('pageiv')).toEqual({ kind: 'page', value: 'iv', raw: 'pageiv' });
         expect(parseLoc('s343')).toEqual({ kind: 'sentence', value: '343', raw: 's343' });
         expect(parseLoc('s0-s8')).toEqual({ kind: 'sentence', value: '0-8', raw: 's0-s8' });
+        expect(parseLoc('l34')).toEqual({ kind: 'line', value: '34', raw: 'l34' });
+        expect(parseLoc('l34-l38')).toEqual({ kind: 'line', value: '34-38', raw: 'l34-l38' });
         expect(parseLoc('paragraph12')).toEqual({ kind: 'paragraph', value: '12', raw: 'paragraph12' });
         expect(parseLoc('heading3')).toEqual({ kind: 'heading', value: '3', raw: 'heading3' });
         expect(parseLoc('list8')).toEqual({ kind: 'list', value: '8', raw: 'list8' });
+        expect(parseLoc('list5')).toEqual({ kind: 'list', value: '5', raw: 'list5' });
         expect(parseLoc('caption12')).toEqual({ kind: 'caption', value: '12', raw: 'caption12' });
         expect(parseLoc('footnote4')).toEqual({ kind: 'footnote', value: '4', raw: 'footnote4' });
         expect(parseLoc('margin6')).toEqual({ kind: 'margin', value: '6', raw: 'margin6' });
@@ -36,6 +39,7 @@ describe('citationGrammar', () => {
 
     it('maps accepted locator aliases to structured citation index ids', () => {
         expect(citationIndexCandidateIdsForLocator(parseLoc('paragraph12')!)).toEqual(['p12']);
+        expect(citationIndexCandidateIdsForLocator(parseLoc('l34-l38')!)).toEqual(['l34', 'l38']);
         expect(citationIndexCandidateIdsForLocator(parseLoc('tab3')!)).toEqual(['table3']);
         expect(citationIndexCandidateIdsForLocator(parseLoc('p10-p12')!)).toEqual(['p10', 'p12']);
         expect(citationIndexCandidateIdsForLocator(parseLoc('heading3')!)).toEqual(['heading3']);

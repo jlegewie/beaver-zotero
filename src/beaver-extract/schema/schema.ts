@@ -103,6 +103,7 @@ export type DocumentItemKind =
 
 export const ID_PREFIXES = {
     sentence: "s",
+    line: "l",
     text: "p",
     section_header: "heading",
     list_item: "list",
@@ -112,7 +113,7 @@ export const ID_PREFIXES = {
     table: "table",
     picture: "fig",
     margin: "margin",
-} as const satisfies Record<DocumentItemKind | "sentence", string>;
+} as const satisfies Record<DocumentItemKind | "sentence" | "line", string>;
 
 export interface DocumentItemBase {
     id: string;

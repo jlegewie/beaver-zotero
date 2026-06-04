@@ -454,6 +454,7 @@ export class AgentService {
                             this.send({
                                 type: 'zotero_document',
                                 request_id: event.request_id,
+                                content_kind: null,
                                 total_pages: null,
                                 error: String(err),
                                 error_code: 'extraction_failed',

@@ -7,6 +7,8 @@ import { createZoteroURI } from '../../utils/zoteroURI';
 import {
     getCitationPages,
     getCitationBoundingBoxes,
+    getContentKind,
+    getSymbolicLocation,
     isExternalCitation,
     isZoteroCitation,
 } from '../../types/citations';
@@ -453,6 +455,9 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
             return;
         }
 
+        const contentKind = getContentKind(citationMetadata);
+        const symbolicLocation = getSymbolicLocation(citationMetadata);
+
         // Handle note links using Zotero.Notes.open()
         if (item.isNote()) {
             logger(`ZoteroCitation: Note Link (${item.id})`);
@@ -487,6 +492,28 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
             } catch (error) {
                 logger('ZoteroCitation: Failed to open annotation: ' + error);
             }
+            return;
+        }
+
+        if (contentKind !== 'pdf') {
+            logger(`ZoteroCitation: Non-PDF citation (${contentKind})`);
+            if (item.isRegularItem()) {
+                revealSource({ library_id: item.libraryID, zotero_key: item.key } as ZoteroItemReference);
+                return;
+            }
+            if (item.isAttachment()) {
+                try {
+                    await Zotero.Reader.open(item.id);
+                    if (contentKind === 'text' && symbolicLocation?.content_kind === 'text') {
+                        logger(`ZoteroCitation: Opened text citation at line ${symbolicLocation.line}`);
+                    }
+                } catch (error) {
+                    logger(`ZoteroCitation: Failed to open non-PDF attachment: ${error}`);
+                    await selectItemById(item.id);
+                }
+                return;
+            }
+            revealSource({ library_id: item.libraryID, zotero_key: item.key } as ZoteroItemReference);
             return;
         }
 

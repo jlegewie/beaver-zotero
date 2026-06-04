@@ -1,4 +1,5 @@
 import { ZoteroItemReference } from "./zotero";
+import type { ExtractContentKind } from "../../src/services/documentExtraction/shared/contentKinds";
 import {
     baseCitationKey,
     type CitationRef,
@@ -98,6 +99,13 @@ export interface PageLocation {
     reading_order_offset?: number | null;
 }
 
+export type ContentKind = ExtractContentKind;
+
+export type SymbolicLocation =
+    | { content_kind: 'epub'; section_href: string; anchor_id?: string; text?: string }
+    | { content_kind: 'snapshot'; selector?: string; anchor_id?: string; text?: string }
+    | { content_kind: 'text'; line: number; line_end?: number; text?: string };
+
 export interface CitationPart {
     /**
      * Represents a single chunk or block of text that is being cited.
@@ -107,6 +115,8 @@ export interface CitationPart {
     part_id: string;
     /** Physical location of the part in the document. */
     locations?: PageLocation[];
+    /** Symbolic location for non-PDF attachments. */
+    symbolic_location?: SymbolicLocation;
 }
 
 export interface CitationMetadata {
@@ -124,6 +134,7 @@ export interface CitationMetadata {
     // Common fields for all citation types
     /** Citation type discriminator */
     citation_type?: "item" | "attachment" | "external_reference" | "note" | "annotation";
+    content_kind?: ContentKind;
     /** The display marker, e.g., '1', '2'.. */
     marker?: string;
     /** The author-year of the citation. */
@@ -376,6 +387,16 @@ export function getCitationIdentityKey(attrs: NormalizedCitationAttrs): string {
 }
 
 export { getRequestedRef, getResolvedRef };
+
+export const getContentKind = (citation: CitationData | CitationMetadata | null | undefined): ContentKind => {
+    return citation?.content_kind ?? 'pdf';
+};
+
+export const getSymbolicLocation = (
+    citation: CitationData | CitationMetadata | null | undefined,
+): SymbolicLocation | undefined => {
+    return citation?.parts?.find((part) => part.symbolic_location)?.symbolic_location;
+};
 
 export interface CitationData extends CitationMetadata {
     type: "item" | "attachment" | "note" | "annotation" | "external";

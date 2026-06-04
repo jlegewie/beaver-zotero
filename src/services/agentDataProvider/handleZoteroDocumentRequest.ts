@@ -14,6 +14,8 @@ import {
 } from '../agentProtocol';
 import type { ZoteroDocumentErrorCode } from '../agentProtocol';
 import { extractAndCacheDocument } from '../documentExtractionCore';
+import { liveAttachmentContentKind } from '../documentExtraction/attachmentResolution';
+import { readableToExtractKind, type ExtractContentKind } from '../documentExtraction/shared/contentKinds';
 import { MAX_PDF_TIMEOUT_SECONDS } from './timeout';
 // Hot-path handler keeps the remote-download-failed popup behavior by
 // passing the popup notifier through `onRemoteDownloadFailure`. The
@@ -33,13 +35,27 @@ export async function handleZoteroDocumentRequest(
         error: string,
         error_code: ZoteroDocumentErrorCode,
         total_pages: number | null = null,
+        content_kind?: ExtractContentKind,
     ): WSZoteroDocumentResponse => ({
         type: 'zotero_document',
         request_id,
+        ...(content_kind ? { content_kind } : {}),
         total_pages,
         error,
         error_code,
     });
+
+    const requestContentKind = async (): Promise<ExtractContentKind | undefined> => {
+        try {
+            const item = await Zotero.Items.getByLibraryAndKeyAsync(
+                attachment.library_id,
+                attachment.zotero_key,
+            );
+            return item ? readableToExtractKind(liveAttachmentContentKind(item)) : undefined;
+        } catch {
+            return undefined;
+        }
+    };
 
     const result = await extractAndCacheDocument({
         libraryId: attachment.library_id,
@@ -65,7 +81,8 @@ export async function handleZoteroDocumentRequest(
                 zotero_key: result.resolvedAttachment.zoteroKey,
             },
             content_type: result.contentType,
-            result: result.result,
+            content_kind: 'pdf',
+            result: { ...result.result, content_kind: 'pdf' as const },
         };
     }
 
@@ -104,6 +121,7 @@ export async function handleZoteroDocumentRequest(
             `PDF extraction timed out after ${result.timeoutSeconds} seconds`,
             'timeout',
             result.pageCount,
+            result.resolvedAttachment ? 'pdf' : undefined,
         );
     }
 
@@ -114,9 +132,15 @@ export async function handleZoteroDocumentRequest(
             `PDF extraction interrupted`,
             'timeout',
             result.pageCount,
+            result.resolvedAttachment ? 'pdf' : undefined,
         );
     }
 
     // cached_error / response_error — return the existing message shape.
-    return errorResponse(result.message, result.code, result.pageCount);
+    const contentKind = result.resolvedAttachment
+        ? 'pdf'
+        : result.code === 'not_pdf'
+            ? await requestContentKind()
+            : undefined;
+    return errorResponse(result.message, result.code, result.pageCount, contentKind);
 }

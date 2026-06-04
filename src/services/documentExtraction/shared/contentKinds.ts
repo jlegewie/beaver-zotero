@@ -50,6 +50,14 @@ export function isExtractContentKind(value: string): value is ExtractContentKind
     return EXTRACT_CONTENT_KINDS.has(value);
 }
 
+export type ReadableContentKind = ExtractContentKind | 'image';
+
+export function readableToExtractKind(
+    kind: ReadableContentKind | null | undefined,
+): ExtractContentKind | undefined {
+    return kind === 'image' || kind == null ? undefined : kind;
+}
+
 /**
  * Parse durable document metadata and reject rows whose column kind and JSON
  * discriminator disagree.

@@ -129,6 +129,7 @@ export interface DocumentPage {
 
 /** `BeaverExtractResult` as returned over HTTP (markdown or structured). */
 export interface DocumentExtractResult {
+    content_kind?: 'pdf' | 'text';
     mode: 'markdown' | 'structured';
     schemaVersion: string;
     document: {
@@ -141,6 +142,7 @@ export interface DocumentExtractResult {
 export interface DocumentResponse {
     resolved_attachment?: { library_id: number; zotero_key: string } | null;
     content_type?: string | null;
+    content_kind?: 'pdf' | 'epub' | 'snapshot' | 'text' | null;
     result?: DocumentExtractResult | null;
     total_pages?: number | null;
     error?: string | null;

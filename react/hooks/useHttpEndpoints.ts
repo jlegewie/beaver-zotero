@@ -352,6 +352,7 @@ async function handleAttachmentDocumentHttpRequest(request: any) {
     return {
         resolved_attachment: response.resolved_attachment,
         content_type: response.content_type,
+        content_kind: response.content_kind,
         result: response.result,
         total_pages: response.total_pages,
         error: response.error,

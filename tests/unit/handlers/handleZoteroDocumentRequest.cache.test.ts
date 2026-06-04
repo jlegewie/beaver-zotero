@@ -163,7 +163,8 @@ describe('handleZoteroDocumentRequest document cache integration', () => {
             mode: 'structured',
         });
 
-        expect(response.result).toEqual(structuredResult);
+        expect(response.content_kind).toBe('pdf');
+        expect(response.result).toEqual({ ...structuredResult, content_kind: 'pdf' });
         expect(loadPdfData).not.toHaveBeenCalled();
         expect(mockState.extractCalls).toHaveLength(0);
     });
@@ -193,7 +194,8 @@ describe('handleZoteroDocumentRequest document cache integration', () => {
             mode: 'structured',
         });
 
-        expect(response.result).toEqual(structuredResult);
+        expect(response.content_kind).toBe('pdf');
+        expect(response.result).toEqual({ ...structuredResult, content_kind: 'pdf' });
         expect(abortSignal).toBeInstanceOf(AbortSignal);
         expect(abortSignal?.aborted).toBe(false);
     });
@@ -222,6 +224,7 @@ describe('handleZoteroDocumentRequest document cache integration', () => {
         expect(response).toEqual({
             type: 'zotero_document',
             request_id: 'req-too-many-pages',
+            content_kind: 'pdf',
             total_pages: 23,
             error: 'The PDF file for 1-ABCD1234 has 23 pages, which exceeds the 20-page limit.',
             error_code: 'too_many_pages',
@@ -230,5 +233,35 @@ describe('handleZoteroDocumentRequest document cache integration', () => {
         expect(response).not.toHaveProperty('resolved_attachment');
         expect(response).not.toHaveProperty('content_type');
         expect(documentCache.getResult).not.toHaveBeenCalled();
+    });
+
+    it('marks non-PDF text attachment errors with the resolved extract kind', async () => {
+        const textItem = {
+            loadAllData: vi.fn().mockResolvedValue(undefined),
+            isAttachment: vi.fn(() => true),
+            isPDFAttachment: vi.fn(() => false),
+            attachmentContentType: 'text/plain',
+        };
+        (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(textItem);
+        vi.mocked(resolveToPdfAttachment).mockResolvedValue({
+            resolved: false,
+            error: 'Attachment 1-TEXT1234 is not a PDF (type: text/plain)',
+            error_code: 'not_pdf',
+        } as any);
+
+        const response = await handleZoteroDocumentRequest({
+            event: 'zotero_document_request',
+            request_id: 'req-text',
+            attachment: { library_id: 1, zotero_key: 'TEXT1234' },
+            mode: 'structured',
+        });
+
+        expect(response).toMatchObject({
+            type: 'zotero_document',
+            request_id: 'req-text',
+            content_kind: 'text',
+            error_code: 'not_pdf',
+        });
+        expect(response.result).toBeUndefined();
     });
 });

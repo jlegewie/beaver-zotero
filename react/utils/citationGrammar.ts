@@ -4,6 +4,7 @@ import type { ZoteroItemReference } from '../types/zotero';
 export type LocatorKind =
     | 'page'
     | 'sentence'
+    | 'line'
     | 'paragraph'
     | 'heading'
     | 'list'
@@ -70,6 +71,7 @@ const LOC_PREFIXES: Array<{ prefix: string; kind: LocatorKind; numericOnly?: boo
     { prefix: 'table', kind: 'table', numericOnly: true },
     { prefix: 'page', kind: 'page' },
     { prefix: 'list', kind: 'list', numericOnly: true },
+    { prefix: 'l', kind: 'line', numericOnly: true },
     { prefix: 'fig', kind: 'figure', numericOnly: true },
     { prefix: 'tab', kind: 'table', numericOnly: true },
     { prefix: 'eq', kind: 'equation', numericOnly: true },
@@ -79,6 +81,7 @@ const LOC_PREFIXES: Array<{ prefix: string; kind: LocatorKind; numericOnly?: boo
 
 const CITATION_INDEX_PREFIXES: Partial<Record<LocatorKind, string>> = {
     sentence: ID_PREFIXES.sentence,
+    line: ID_PREFIXES.line,
     paragraph: ID_PREFIXES.text,
     heading: ID_PREFIXES.section_header,
     list: ID_PREFIXES.list_item,
