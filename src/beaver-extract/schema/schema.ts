@@ -112,7 +112,8 @@ export const ID_PREFIXES = {
     table: "table",
     picture: "fig",
     margin: "margin",
-} as const satisfies Record<DocumentItemKind | "sentence", string>;
+    line: "l",
+} as const satisfies Record<DocumentItemKind | "sentence" | "line", string>;
 
 export interface DocumentItemBase {
     id: string;

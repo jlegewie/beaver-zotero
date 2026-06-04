@@ -7,6 +7,7 @@ import { BeaverAgentPrompt } from '../../react/agents/types';
 import { CustomChatModel } from '../../react/types/settings';
 import { AttachmentData, ItemData } from '../../react/types/zotero';
 import type { BeaverExtractResult } from '../beaver-extract/schema/schema';
+import type { DocumentExtractResult } from './documentExtraction/shared/documentExtractResult';
 
 // =============================================================================
 // WebSocket Event Types (matching backend ws_events.py)
@@ -546,7 +547,7 @@ export interface WSZoteroDocumentResponse {
     request_id: string;
     resolved_attachment?: ZoteroItemReference | null;
     content_type?: string | null;
-    result?: BeaverExtractResult | null;
+    result?: DocumentExtractResult | null;
     /** Page count on error responses when available. */
     total_pages?: number | null;
     error?: string | null;

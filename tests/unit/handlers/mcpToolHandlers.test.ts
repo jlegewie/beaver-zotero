@@ -783,6 +783,7 @@ describe('MCP Tool Handlers (via useMcpServer)', () => {
         ) => ({
             type: 'zotero_document',
             result: error ? null : {
+                content_kind: 'pdf',
                 mode: 'markdown',
                 document: {
                     pageCount,

@@ -61,7 +61,7 @@ export async function handleZoteroDocumentRequest(
                 zotero_key: result.resolvedAttachment.zoteroKey,
             },
             content_type: result.contentType,
-            result: result.result,
+            result: { ...result.result, content_kind: 'pdf' as const },
         };
     }
 

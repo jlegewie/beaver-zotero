@@ -129,6 +129,7 @@ export interface DocumentPage {
 
 /** `BeaverExtractResult` as returned over HTTP (markdown or structured). */
 export interface DocumentExtractResult {
+    content_kind: 'pdf' | 'epub' | 'snapshot' | 'text';
     mode: 'markdown' | 'structured';
     schemaVersion: string;
     document: {

@@ -69,6 +69,7 @@ describe('document request — extraction happy paths', () => {
         const res = await fetchDocument(SMALL_PDF, { mode: 'markdown' }, EXTRACT_OPTS);
         const result = expectResult(res);
 
+        expect(result.content_kind).toBe('pdf');
         expect(result.mode).toBe('markdown');
         expect(result.document.pageCount).toBe(SMALL_PDF_PAGE_COUNT);
         expect(result.document.pages).toHaveLength(SMALL_PDF_PAGE_COUNT);
@@ -84,6 +85,7 @@ describe('document request — extraction happy paths', () => {
         const res = await fetchDocument(SMALL_PDF, { mode: 'structured' }, EXTRACT_OPTS);
         const result = expectResult(res);
 
+        expect(result.content_kind).toBe('pdf');
         expect(result.mode).toBe('structured');
         expect(result.document.pageCount).toBe(SMALL_PDF_PAGE_COUNT);
         expect(result.document.pages).toHaveLength(SMALL_PDF_PAGE_COUNT);
@@ -93,6 +95,7 @@ describe('document request — extraction happy paths', () => {
     it('defaults to structured mode when mode is omitted', async () => {
         const res = await fetchDocument(SMALL_PDF, {}, EXTRACT_OPTS);
         const result = expectResult(res);
+        expect(result.content_kind).toBe('pdf');
         expect(result.mode).toBe('structured');
     });
 });

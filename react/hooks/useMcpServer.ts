@@ -687,6 +687,9 @@ export async function handleReadAttachment(args: any): Promise<any> {
     if (response.error || !response.result) {
         return mcpError(response.error ?? 'Failed to read attachment');
     }
+    if (response.result.content_kind !== 'pdf') {
+        return mcpError('Reading this attachment type is not supported yet.');
+    }
     if (response.result.mode !== 'markdown') {
         return mcpError('Attachment read returned an unexpected document mode.');
     }

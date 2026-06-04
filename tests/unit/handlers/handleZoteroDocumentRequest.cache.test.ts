@@ -163,7 +163,7 @@ describe('handleZoteroDocumentRequest document cache integration', () => {
             mode: 'structured',
         });
 
-        expect(response.result).toEqual(structuredResult);
+        expect(response.result).toEqual({ ...structuredResult, content_kind: 'pdf' });
         expect(loadPdfData).not.toHaveBeenCalled();
         expect(mockState.extractCalls).toHaveLength(0);
     });
@@ -193,7 +193,7 @@ describe('handleZoteroDocumentRequest document cache integration', () => {
             mode: 'structured',
         });
 
-        expect(response.result).toEqual(structuredResult);
+        expect(response.result).toEqual({ ...structuredResult, content_kind: 'pdf' });
         expect(abortSignal).toBeInstanceOf(AbortSignal);
         expect(abortSignal?.aborted).toBe(false);
     });

@@ -4,6 +4,7 @@ import type { ZoteroItemReference } from '../types/zotero';
 export type LocatorKind =
     | 'page'
     | 'sentence'
+    | 'line'
     | 'paragraph'
     | 'heading'
     | 'list'
@@ -75,6 +76,7 @@ const LOC_PREFIXES: Array<{ prefix: string; kind: LocatorKind; numericOnly?: boo
     { prefix: 'eq', kind: 'equation', numericOnly: true },
     { prefix: 'p', kind: 'paragraph', numericOnly: true },
     { prefix: 's', kind: 'sentence', numericOnly: true },
+    { prefix: 'l', kind: 'line', numericOnly: true },
 ];
 
 const CITATION_INDEX_PREFIXES: Partial<Record<LocatorKind, string>> = {
@@ -153,6 +155,8 @@ function rawRangeCandidateIds(raw: string): string[] {
  * Return structured extraction citation-index ids addressed by a locator.
  */
 export function citationIndexCandidateIdsForLocator(locator: Locator): string[] {
+    if (locator.kind === 'line') return [];
+
     const prefix = CITATION_INDEX_PREFIXES[locator.kind];
     if (!prefix) return rawRangeCandidateIds(locator.raw);
 
