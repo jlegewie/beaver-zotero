@@ -33,17 +33,48 @@ export interface CachedPageGeometry {
     rotation: 0 | 90 | 180 | 270;
 }
 
+export type ExtractContentKind = 'pdf' | 'epub' | 'text' | 'snapshot';
+
+/** Durable per-kind metadata blob persisted in `document_metadata_json`. */
+export interface PdfCachedDocumentMetadata {
+    content_kind: 'pdf';
+    pageCount: number | null;
+    pageLabels: Record<string, string> | null;
+    pages: (CachedPageGeometry | null)[] | null;
+}
+
 export interface CacheMetadataRecord {
+    id: number;
     itemId: number;
     libraryId: number;
     zoteroKey: string;
+    contentKind: ExtractContentKind;
     filePath: string;
     sourceSizeBytes: number;
     contentType: string;
+    documentMetadata: PdfCachedDocumentMetadata | null;
     pageCount: number | null;
     pageLabels: Record<string, string> | null;
     pages: (CachedPageGeometry | null)[] | null;
     errorCode: 'encrypted' | 'invalid_pdf' | 'no_text_layer' | null;
+    extractionSchemaVersion: string;
+    metadataFormatVersion: number;
+}
+
+export interface CachePayloadRecord {
+    id: number;
+    metadataId: number;
+    itemId: number;
+    libraryId: number;
+    zoteroKey: string;
+    payloadKind: 'structured' | 'markdown';
+    contentKind: ExtractContentKind;
+    sourceFilePath: string;
+    payloadPath: string;
+    payloadSizeBytes: number;
+    payloadSha256: string;
+    extractionSchemaVersion: string;
+    cacheFormatVersion: number;
 }
 
 export interface ResolveItemResponse {
@@ -391,6 +422,19 @@ export async function getCacheMetadata(
     const res = await post<{ record: CacheMetadataRecord | null; error?: string }>(
         '/beaver/test/cache-metadata',
         { library_id: libraryId, zotero_key: key },
+    );
+    if (res.error) throw new Error(res.error);
+    return res.record;
+}
+
+export async function getCachePayload(
+    libraryId: number,
+    key: string,
+    payloadKind: 'structured' | 'markdown' = 'markdown',
+): Promise<CachePayloadRecord | null> {
+    const res = await post<{ record: CachePayloadRecord | null; error?: string }>(
+        '/beaver/test/cache-payload',
+        { library_id: libraryId, zotero_key: key, payload_kind: payloadKind },
     );
     if (res.error) throw new Error(res.error);
     return res.record;

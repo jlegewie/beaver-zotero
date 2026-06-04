@@ -49,6 +49,7 @@ import {
 import {
     handleTestPingHttpRequest,
     handleTestCacheMetadataHttpRequest,
+    handleTestCachePayloadHttpRequest,
     handleTestCacheInvalidateHttpRequest,
     handleTestCacheClearAllHttpRequest,
     handleTestReadAttachmentHttpRequest,
@@ -160,6 +161,7 @@ const ENDPOINT_PATHS = [
     // Test-only endpoints (cache inspection/manipulation)
     '/beaver/test/ping',
     '/beaver/test/cache-metadata',
+    '/beaver/test/cache-payload',
     '/beaver/test/cache-invalidate',
     '/beaver/test/cache-clear-all',
     '/beaver/test/read-attachment',
@@ -687,6 +689,9 @@ function registerEndpoints(): boolean {
 
         Zotero.Server.Endpoints['/beaver/test/cache-metadata'] =
             createEndpoint(handleTestCacheMetadataHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/cache-payload'] =
+            createEndpoint(handleTestCachePayloadHttpRequest);
 
         Zotero.Server.Endpoints['/beaver/test/cache-invalidate'] =
             createEndpoint(handleTestCacheInvalidateHttpRequest);

@@ -53,6 +53,10 @@ export async function handleZoteroDocumentRequest(
     });
 
     if (result.kind === 'ok') {
+        if (result.cached) {
+            const { libraryId, zoteroKey } = result.resolvedAttachment;
+            logger(`handleZoteroDocumentRequest: document cache hit for ${libraryId}-${zoteroKey} mode=${mode}`, 3);
+        }
         return {
             type: 'zotero_document',
             request_id,
