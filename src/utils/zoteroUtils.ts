@@ -782,42 +782,10 @@ export function createCitationHTML(itemOrID: Zotero.Item | number | string, page
 // Citation with page range
 // const citation3 = createCitationHTML(item, "123-145");
 
-// `safeIsInTrash` and `getItemDetailsForLogging` live in `./zoteroItemUtils`
-// so they are usable from the esbuild-side bundle.
+// These helpers live in React-free modules so they are usable from the
+// esbuild-side bundle.
 export { safeIsInTrash, getItemDetailsForLogging } from "./zoteroItemUtils";
-
-/**
- * Safely check if an attachment file exists.
- * 
- * Unlike item.fileExists(), this handles linked URL attachments which have no
- * associated file. Calling fileExists() on a linked URL throws an error.
- * 
- * @param item - Zotero item to check
- * @returns Promise<boolean> - true if file exists, false otherwise (including for linked URLs and non-attachments)
- */
-export async function safeFileExists(item: Zotero.Item): Promise<boolean> {
-    if (!item.isAttachment()) return false;
-    
-    // Linked URLs are web links with no associated file - fileExists() throws on them
-    if (item.attachmentLinkMode === Zotero.Attachments.LINK_MODE_LINKED_URL) {
-        return false;
-    }
-    
-    return item.fileExists();
-}
-
-/**
- * Check if an attachment is a linked URL (web link with no file).
- * 
- * Linked URL attachments don't have an associated file and calling fileExists()
- * on them throws an error.
- * 
- * @param item - Zotero item to check
- * @returns true if the item is a linked URL attachment
- */
-export function isLinkedUrlAttachment(item: Zotero.Item): boolean {
-    return item.isAttachment() && item.attachmentLinkMode === Zotero.Attachments.LINK_MODE_LINKED_URL;
-}
+export { safeFileExists, isLinkedUrlAttachment } from "./attachmentFiles";
 
 /**
  * Check if two Zotero items are duplicates based on metadata similarity.
