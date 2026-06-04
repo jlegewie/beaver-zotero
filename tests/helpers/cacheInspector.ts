@@ -83,6 +83,13 @@ export interface ResolveItemResponse {
     is_attachment?: boolean;
     parent_id?: number | null;
     attachment_content_type?: string | null;
+    /**
+     * `<libraryId>-<zoteroKey>` of the PDF attachment the production resolver
+     * would extract for this item (the item itself when it is already a PDF
+     * attachment, or the single child PDF of a regular item). `null` when the
+     * item does not resolve to a PDF.
+     */
+    resolved_pdf_key?: string | null;
     error?: string;
 }
 
