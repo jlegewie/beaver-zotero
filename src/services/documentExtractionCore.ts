@@ -34,16 +34,13 @@ import {
 import type { ZoteroDocumentErrorCode } from './agentProtocol';
 import type { DocumentCacheExtractionMode } from './database';
 import type { DocumentCacheSourceIdentity } from './documentCache';
-import { makeRemoteFilePath } from './documentFileIdentity';
 import { logger } from '../utils/logger';
-import { isAttachmentAvailableRemotely } from '../utils/webAPI';
 import { effectiveMaxFileSizeMB, effectiveMaxPageCount } from './attachmentLimits';
 import {
+    loadAttachmentData,
+    resolveAttachmentFileSource,
     resolveToReadableAttachment,
     validateZoteroItemReference,
-    loadPdfData,
-    checkRemotePdfSize,
-    isRemoteAccessAvailable,
     preflightCachedPdfMeta,
 } from './documentExtraction';
 import { readableToExtractKind, type ExtractContentKind } from './documentExtraction/shared/contentKinds';
@@ -79,6 +76,13 @@ export interface ExtractAndCacheArgs {
      * internally)
      */
     onRemoteDownloadFailure?: (error: unknown) => void;
+}
+
+export interface ExtractAndCacheResolvedPdfArgs
+    extends Omit<ExtractAndCacheArgs, 'libraryId' | 'zoteroKey'> {
+    item: Zotero.Item;
+    resolvedKey: string;
+    contentType: string;
 }
 
 export function buildExtractedDocumentCacheMetadata(extracted: BeaverExtractResult): {
@@ -149,26 +153,14 @@ export type ExtractAndCacheResult =
           resolvedAttachment: ResolvedAttachment | null;
       };
 
-/**
- * Run the whole-document extraction pipeline, populate the document cache,
- * and return a tagged-union result. Never throws for expected outcomes —
- * callers branch on `result.kind`.
- */
 export async function extractAndCacheDocument(
     args: ExtractAndCacheArgs,
 ): Promise<ExtractAndCacheResult> {
-    const {
-        libraryId,
-        zoteroKey,
-        mode,
-        externalAbortSignal,
-    } = args;
-    const workerName: PDFWorkerSlotName = args.workerName ?? 'hot';
-    const requestKey = `${libraryId}-${zoteroKey}`;
+    const requestKey = `${args.libraryId}-${args.zoteroKey}`;
 
     const formatError = validateZoteroItemReference({
-        library_id: libraryId,
-        zotero_key: zoteroKey,
+        library_id: args.libraryId,
+        zotero_key: args.zoteroKey,
     });
     if (formatError) {
         return {
@@ -179,6 +171,76 @@ export async function extractAndCacheDocument(
             resolvedAttachment: null,
         };
     }
+
+    const zoteroItem = await Zotero.Items.getByLibraryAndKeyAsync(
+        args.libraryId,
+        args.zoteroKey,
+    );
+    if (!zoteroItem) {
+        return {
+            kind: 'response_error',
+            code: 'not_found',
+            message: `Attachment does not exist in user's library: ${requestKey}`,
+            pageCount: null,
+            resolvedAttachment: null,
+        };
+    }
+
+    await zoteroItem.loadAllData();
+
+    const resolveResult = await resolveToReadableAttachment(zoteroItem, requestKey);
+    if (!resolveResult.resolved) {
+        const code = resolveResult.error_code === 'not_readable'
+            ? 'unsupported_type'
+            : resolveResult.error_code;
+        return {
+            kind: 'response_error',
+            code,
+            message: resolveResult.error,
+            pageCount: null,
+            resolvedAttachment: null,
+        };
+    }
+
+    const { item: resolvedItem, contentKind } = resolveResult;
+    const resolvedAttachment = {
+        libraryId: resolvedItem.libraryID,
+        zoteroKey: resolvedItem.key,
+    };
+
+    if (contentKind !== 'pdf') {
+        const extractKind = readableToExtractKind(contentKind);
+        return {
+            kind: 'response_error',
+            code: 'unsupported_type',
+            message: `Attachment ${resolveResult.key} is a ${contentKind} document, but document extraction currently supports PDF only.`,
+            pageCount: null,
+            resolvedAttachment,
+            ...(extractKind ? { contentKind: extractKind } : {}),
+        };
+    }
+
+    return extractAndCacheResolvedPdfDocument({
+        ...args,
+        item: resolvedItem,
+        resolvedKey: resolveResult.key,
+        contentType: resolveResult.contentType,
+    });
+}
+
+/**
+ * Run the PDF extraction pipeline for an already-resolved PDF attachment.
+ * Expected outcomes are returned as a tagged union for caller-side mapping.
+ */
+export async function extractAndCacheResolvedPdfDocument(
+    args: ExtractAndCacheResolvedPdfArgs,
+): Promise<ExtractAndCacheResult> {
+    const {
+        mode,
+        externalAbortSignal,
+    } = args;
+    const workerName: PDFWorkerSlotName = args.workerName ?? 'hot';
+    const requestKey = args.resolvedKey;
 
     const maxFileSizeMB = effectiveMaxFileSizeMB(args.maxFileSizeMB);
     const maxPages = effectiveMaxPageCount(args.maxPages);
@@ -211,107 +273,45 @@ export async function extractAndCacheDocument(
     };
 
     try {
-        const zoteroItem = await Zotero.Items.getByLibraryAndKeyAsync(
-            libraryId,
-            zoteroKey,
-        );
-        throwIfTimedOut('zotero_item_lookup');
-
-        if (!zoteroItem) {
-            throwIfTimedOut('not_found_response');
-            return {
-                kind: 'response_error',
-                code: 'not_found',
-                message: `Attachment does not exist in user's library: ${requestKey}`,
-                pageCount: null,
-                resolvedAttachment: null,
-            };
-        }
-
-        await zoteroItem.loadAllData();
-        throwIfTimedOut('zotero_item_load');
-
-        const resolveResult = await resolveToReadableAttachment(zoteroItem, requestKey);
-        throwIfTimedOut('readable_attachment_resolution');
-        if (!resolveResult.resolved) {
-            const code = resolveResult.error_code === 'not_readable'
-                ? 'unsupported_type'
-                : resolveResult.error_code;
-            return {
-                kind: 'response_error',
-                code,
-                message: resolveResult.error,
-                pageCount: null,
-                resolvedAttachment: null,
-            };
-        }
-
-        const { item: resolvedItem, contentKind } = resolveResult;
+        const pdfItem = args.item;
+        resolvedPdfItem = pdfItem;
         resolvedAttachment = {
-            libraryId: resolvedItem.libraryID,
-            zoteroKey: resolvedItem.key,
+            libraryId: pdfItem.libraryID,
+            zoteroKey: pdfItem.key,
         };
-        const resolvedKeyStr = resolveResult.key;
+        const resolvedKeyStr = args.resolvedKey;
 
-        switch (contentKind) {
-            case 'pdf':
-                break;
-            case 'epub':
-            case 'text':
-            case 'snapshot':
-            case 'image': {
-                const extractKind = readableToExtractKind(contentKind);
+        const source = await resolveAttachmentFileSource({
+            item: pdfItem,
+            maxFileSizeMB: args.maxFileSizeMB,
+            localSizeStrategy: 'zotero-total',
+            signal,
+            throwIfTimedOut,
+        });
+        if (source.kind === 'error') {
+            throwIfTimedOut('file_missing_response');
+            if (source.code === 'file_too_large') {
                 return {
                     kind: 'response_error',
-                    code: 'unsupported_type',
-                    message: `Attachment ${resolvedKeyStr} is a ${contentKind} document, but document extraction currently supports PDF only.`,
+                    code: 'file_too_large',
+                    message: `The PDF file for ${resolvedKeyStr} has a file size of ${(source.sizeMB ?? 0).toFixed(1)}MB, which exceeds the ${source.maxMB}MB limit.`,
                     pageCount: null,
                     resolvedAttachment,
-                    ...(extractKind ? { contentKind: extractKind } : {}),
                 };
             }
-        }
-
-        const pdfItem = resolvedItem;
-        resolvedPdfItem = pdfItem;
-
-        const rawFilePath = await pdfItem.getFilePathAsync();
-        throwIfTimedOut('file_path_lookup');
-        const filePath = rawFilePath || null;
-        const isRemoteOnly = !filePath && isRemoteAccessAvailable(pdfItem);
-        const effectiveFilePath = filePath || (isRemoteOnly ? makeRemoteFilePath(pdfItem) : null);
-        resolvedFilePath = effectiveFilePath;
-
-        if (!effectiveFilePath) {
-            const onServer = isAttachmentAvailableRemotely(pdfItem);
-            throwIfTimedOut('file_missing_response');
             return {
                 kind: 'response_error',
                 code: 'file_missing',
-                message: onServer
+                message: source.remoteAvailable
                     ? `The PDF file for ${resolvedKeyStr} is not available locally and remote file access is disabled in settings.`
                     : `The PDF file for ${resolvedKeyStr} is not available locally.`,
                 pageCount: null,
                 resolvedAttachment,
             };
         }
-
-        if (!isRemoteOnly) {
-            const fileSize = await Zotero.Attachments.getTotalFileSize(pdfItem);
-            throwIfTimedOut('file_size_check');
-            if (fileSize) {
-                const fileSizeInMB = fileSize / 1024 / 1024;
-                if (fileSizeInMB > maxFileSizeMB) {
-                    return {
-                        kind: 'response_error',
-                        code: 'file_too_large',
-                        message: `The PDF file for ${resolvedKeyStr} has a file size of ${fileSizeInMB.toFixed(1)}MB, which exceeds the ${maxFileSizeMB}MB limit.`,
-                        pageCount: null,
-                        resolvedAttachment,
-                    };
-                }
-            }
-        }
+        const effectiveFilePath = source.source.filePath;
+        const isRemoteOnly = source.source.isRemoteOnly;
+        resolvedFilePath = effectiveFilePath;
 
         const cache = Zotero.Beaver?.documentCache;
         if (!cache) {
@@ -409,34 +409,46 @@ export async function extractAndCacheDocument(
         }
 
         if (totalPages == null) {
-            try {
-                pdfData = await loadPdfData(pdfItem, effectiveFilePath, isRemoteOnly, args.onRemoteDownloadFailure);
-                throwIfTimedOut('pdf_data_load_for_page_count');
-            } catch (error) {
+            const loaded = await loadAttachmentData({
+                item: pdfItem,
+                source: source.source,
+                maxFileSizeMB,
+                onRemoteDownloadFailure: args.onRemoteDownloadFailure,
+                signal,
+                throwIfTimedOut,
+            });
+            if (loaded.kind === 'error') {
                 if (aborted()) return aborted()!;
-                if (!isRemoteOnly) throw error;
-                logger(`extractAndCacheDocument: Remote download failed: ${error}`, 1);
-                return {
-                    kind: 'response_error',
-                    code: 'download_failed',
-                    message: `Failed to download PDF for ${resolvedKeyStr} from remote storage: ${error instanceof Error ? error.message : String(error)}`,
-                    pageCount: null,
-                    resolvedAttachment,
-                };
-            }
-            loadedPdfData = pdfData;
-            if (isRemoteOnly) {
-                const exceeded = checkRemotePdfSize(pdfData, false, maxFileSizeMB);
-                if (exceeded) {
+                if (loaded.code === 'file_too_large') {
                     return {
                         kind: 'response_error',
                         code: 'file_too_large',
-                        message: `The PDF file for ${resolvedKeyStr} has a file size of ${exceeded.sizeMB.toFixed(1)}MB, which exceeds the ${exceeded.maxMB}MB limit.`,
+                        message: `The PDF file for ${resolvedKeyStr} has a file size of ${(loaded.sizeMB ?? 0).toFixed(1)}MB, which exceeds the ${loaded.maxMB}MB limit.`,
                         pageCount: null,
                         resolvedAttachment,
                     };
                 }
+                if (loaded.code === 'read_failed') {
+                    return {
+                        kind: 'response_error',
+                        code: 'extraction_failed',
+                        message: `Failed to read PDF file for ${resolvedKeyStr}: ${loaded.error instanceof Error ? loaded.error.message : String(loaded.error)}`,
+                        pageCount: null,
+                        resolvedAttachment,
+                    };
+                }
+                logger(`extractAndCacheDocument: Remote download failed: ${loaded.error}`, 1);
+                return {
+                    kind: 'response_error',
+                    code: 'download_failed',
+                    message: `Failed to download PDF for ${resolvedKeyStr} from remote storage: ${loaded.error instanceof Error ? loaded.error.message : String(loaded.error)}`,
+                    pageCount: null,
+                    resolvedAttachment,
+                };
             }
+            pdfData = loaded.data;
+            throwIfTimedOut('pdf_data_load_for_page_count');
+            loadedPdfData = pdfData;
             totalPages = await client.getPageCount(pdfData, signal);
             throwIfTimedOut('page_count_extraction');
         }
@@ -462,34 +474,46 @@ export async function extractAndCacheDocument(
         }
 
         if (!pdfData) {
-            try {
-                pdfData = await loadPdfData(pdfItem, effectiveFilePath, isRemoteOnly, args.onRemoteDownloadFailure);
-                throwIfTimedOut('pdf_data_load');
-            } catch (error) {
+            const loaded = await loadAttachmentData({
+                item: pdfItem,
+                source: source.source,
+                maxFileSizeMB,
+                onRemoteDownloadFailure: args.onRemoteDownloadFailure,
+                signal,
+                throwIfTimedOut,
+            });
+            if (loaded.kind === 'error') {
                 if (aborted()) return aborted()!;
-                if (!isRemoteOnly) throw error;
-                logger(`extractAndCacheDocument: Remote download failed: ${error}`, 1);
-                return {
-                    kind: 'response_error',
-                    code: 'download_failed',
-                    message: `Failed to download PDF for ${resolvedKeyStr} from remote storage: ${error instanceof Error ? error.message : String(error)}`,
-                    pageCount: totalPages,
-                    resolvedAttachment,
-                };
-            }
-            loadedPdfData = pdfData;
-            if (isRemoteOnly) {
-                const exceeded = checkRemotePdfSize(pdfData, false, maxFileSizeMB);
-                if (exceeded) {
+                if (loaded.code === 'file_too_large') {
                     return {
                         kind: 'response_error',
                         code: 'file_too_large',
-                        message: `The PDF file for ${resolvedKeyStr} has a file size of ${exceeded.sizeMB.toFixed(1)}MB, which exceeds the ${exceeded.maxMB}MB limit.`,
+                        message: `The PDF file for ${resolvedKeyStr} has a file size of ${(loaded.sizeMB ?? 0).toFixed(1)}MB, which exceeds the ${loaded.maxMB}MB limit.`,
                         pageCount: totalPages,
                         resolvedAttachment,
                     };
                 }
+                if (loaded.code === 'read_failed') {
+                    return {
+                        kind: 'response_error',
+                        code: 'extraction_failed',
+                        message: `Failed to read PDF file for ${resolvedKeyStr}: ${loaded.error instanceof Error ? loaded.error.message : String(loaded.error)}`,
+                        pageCount: totalPages,
+                        resolvedAttachment,
+                    };
+                }
+                logger(`extractAndCacheDocument: Remote download failed: ${loaded.error}`, 1);
+                return {
+                    kind: 'response_error',
+                    code: 'download_failed',
+                    message: `Failed to download PDF for ${resolvedKeyStr} from remote storage: ${loaded.error instanceof Error ? loaded.error.message : String(loaded.error)}`,
+                    pageCount: totalPages,
+                    resolvedAttachment,
+                };
             }
+            pdfData = loaded.data;
+            throwIfTimedOut('pdf_data_load');
+            loadedPdfData = pdfData;
         }
 
         logger(
