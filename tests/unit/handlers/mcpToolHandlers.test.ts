@@ -103,12 +103,14 @@ function setupMcpEndpoint(): Endpoint {
     // Call the hook — this triggers our mock useEffect, capturing the callback
     useMcpServer();
 
-    if (!capturedEffect) {
+    // Mock assignment is invisible to TS; read via local to avoid `never` after null reset.
+    const effect = capturedEffect as (() => (() => void) | void) | null;
+    if (!effect) {
         throw new Error('useEffect callback was not captured');
     }
 
     // Execute the effect — registers the MCP endpoint on Zotero.Server.Endpoints
-    capturedEffect();
+    effect();
 
     const EndpointCtor = zotero.Server.Endpoints['/beaver/mcp'];
     if (!EndpointCtor) {
