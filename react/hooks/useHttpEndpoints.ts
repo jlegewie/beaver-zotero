@@ -53,6 +53,8 @@ import {
     handleTestCacheInvalidateHttpRequest,
     handleTestCacheClearAllHttpRequest,
     handleTestReadAttachmentHttpRequest,
+    handleTestMcpReadNoteHttpRequest,
+    handleTestMcpCreateNoteHttpRequest,
     handleTestWorkerStatsHttpRequest,
     handleTestWorkerMarkStaleHttpRequest,
     handleTestWorkerCacheClearHttpRequest,
@@ -166,6 +168,8 @@ const ENDPOINT_PATHS = [
     '/beaver/test/cache-invalidate',
     '/beaver/test/cache-clear-all',
     '/beaver/test/read-attachment',
+    '/beaver/test/mcp-read-note',
+    '/beaver/test/mcp-create-note',
     '/beaver/test/resolve-item',
     '/beaver/test/resolve-readable',
     // Test-only endpoints (note seeding/teardown/inspection)
@@ -704,6 +708,12 @@ function registerEndpoints(): boolean {
 
         Zotero.Server.Endpoints['/beaver/test/read-attachment'] =
             createEndpoint(handleTestReadAttachmentHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/mcp-read-note'] =
+            createEndpoint(handleTestMcpReadNoteHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/mcp-create-note'] =
+            createEndpoint(handleTestMcpCreateNoteHttpRequest);
 
         Zotero.Server.Endpoints['/beaver/test/resolve-item'] =
             createEndpoint(handleTestResolveItemHttpRequest);

@@ -33,6 +33,13 @@ interface McpToolDefinition {
     name: string;
     description: string;
     inputSchema: Record<string, any>;
+    annotations?: {
+        title?: string;
+        readOnlyHint?: boolean;
+        destructiveHint?: boolean;
+        idempotentHint?: boolean;
+        openWorldHint?: boolean;
+    };
 }
 
 interface McpToolEntry {
@@ -226,6 +233,7 @@ export class MCPService {
             name: definition.name,
             description: definition.description,
             inputSchema: definition.inputSchema,
+            ...(definition.annotations ? { annotations: definition.annotations } : {}),
         }));
         return { tools };
     }
