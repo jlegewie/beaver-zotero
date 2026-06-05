@@ -10,6 +10,7 @@ import {
     installTemporaryAnnotationDismissOnNextClick,
 } from '../../utils/annotationUtils';
 import { logger } from '../../../src/utils/logger';
+import { BEAVER_ANNOTATION_COLORS } from '../../../src/constants/annotations';
 import { TagPill } from './TagPill';
 import type {
     CreateHighlightAnnotationsProposedData,
@@ -40,24 +41,7 @@ interface CreateAnnotationsPreviewProps {
     isStreaming?: boolean;
 }
 
-const COLOR_VALUES: Record<string, string> = {
-    red: '#ff6666',
-    orange: '#ff9f43',
-    yellow: '#ffd400',
-    green: '#90ee90',
-    blue: '#5ac8fa',
-    purple: '#d4a5ff',
-    gray: '#838383',
-    pink: '#ff66c4',
-    brown: '#e6a86e',
-    cyan: '#7fdbff',
-    lime: '#b4ff69',
-    mint: '#b2f7d3',
-    coral: '#ff9999',
-    navy: '#6495ed',
-    olive: '#e6e68a',
-    teal: '#7fffd4',
-};
+const COLOR_VALUES = BEAVER_ANNOTATION_COLORS;
 
 function pageIndexForItem(kind: 'highlight' | 'note', item: HighlightAnnotationItem | NoteAnnotationItem): number | null {
     const raw = item as any;

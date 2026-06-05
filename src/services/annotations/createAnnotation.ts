@@ -7,34 +7,17 @@ import { NotePosition } from "../../../react/types/agentActions/annotations";
 import { PageGeometry } from "../../beaver-extract/types";
 import { getAttachmentFileStatus } from "../agentDataProvider/utils";
 import { isRemoteFilePath } from "../documentFileIdentity";
-import { BEAVER_ANNOTATION_AUTHOR } from "../../constants/annotations";
+import {
+    BEAVER_ANNOTATION_AUTHOR,
+    resolveBeaverAnnotationColor,
+} from "../../constants/annotations";
 import {
     displayBoxToZoteroRect,
     sourceBboxesToZoteroRects,
 } from "./annotationGeometry";
 
-const HIGHLIGHT_COLORS: Record<string, string> = {
-    red: "#ff6666",
-    orange: "#ff9f43",
-    yellow: "#ffd400",
-    green: "#90ee90",
-    blue: "#5ac8fa",
-    purple: "#d4a5ff",
-    magenta: "#eb52f7",
-    gray: "#838383",
-    pink: "#ff66c4",
-    brown: "#e6a86e",
-    cyan: "#7fdbff",
-    lime: "#b4ff69",
-    mint: "#b2f7d3",
-    coral: "#ff9999",
-    navy: "#6495ed",
-    olive: "#e6e68a",
-    teal: "#7fffd4",
-};
 const NOTE_RECT_SIZE = 18;
 const NOTE_SIDE_MARGIN = 12;
-const DEFAULT_HIGHLIGHT_COLOR = "#ffd400";
 
 export type MissingPageGeometryReason = "unavailable" | "extraction_failed";
 
@@ -86,11 +69,6 @@ export interface CreateNoteInput {
     readingOrderOffset?: number | null;
     /** Tags applied to the created annotation. */
     tags?: string[];
-}
-
-function resolveHighlightColor(color?: string | null): string {
-    if (!color) return DEFAULT_HIGHLIGHT_COLOR;
-    return HIGHLIGHT_COLORS[color] ?? DEFAULT_HIGHLIGHT_COLOR;
 }
 
 /**
@@ -362,7 +340,7 @@ export async function createHighlightAnnotation(
     item.annotationType = "highlight";
     item.annotationText = input.text ?? "";
     item.annotationComment = input.comment ?? "";
-    item.annotationColor = resolveHighlightColor(input.color);
+    item.annotationColor = resolveBeaverAnnotationColor(input.color);
     item.annotationPageLabel =
         firstNonBlankPageLabel(input.pageLabel) ?? String(input.pageIndex + 1);
     const sortIndexField: Pick<ZoteroAnnotationItem, "annotationSortIndex"> = {
@@ -409,7 +387,7 @@ export async function createNoteAnnotation(
     item.parentID = attachment.id;
     item.annotationType = "note";
     item.annotationComment = input.comment;
-    item.annotationColor = resolveHighlightColor(input.color);
+    item.annotationColor = resolveBeaverAnnotationColor(input.color);
     item.annotationPageLabel =
         firstNonBlankPageLabel(input.pageLabel) ?? String(pageIndex + 1);
     const sortIndexField: Pick<ZoteroAnnotationItem, "annotationSortIndex"> = {
