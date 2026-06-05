@@ -14,6 +14,19 @@ export {
 } from './pdfData';
 
 export {
+    checkAttachmentDataSize,
+    loadAttachmentData,
+    resolveAttachmentFileSource,
+} from './attachmentSource';
+export type {
+    AttachmentDataResult,
+    AttachmentFileSource,
+    AttachmentSourceFailureCode,
+    AttachmentSourceResult,
+    LocalSizeStrategy,
+} from './attachmentSource';
+
+export {
     preflightCachedPdfMeta,
 } from './preflight';
 export type {
@@ -25,6 +38,8 @@ export type {
 export {
     validateZoteroItemReference,
 } from './referenceValidation';
+
+export { extractTextDocument, TEXT_SCHEMA_VERSION } from './text/extractTextDocument';
 export type {
     ZoteroItemReferenceInput,
 } from './referenceValidation';

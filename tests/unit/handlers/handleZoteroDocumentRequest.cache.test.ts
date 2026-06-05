@@ -98,6 +98,20 @@ vi.mock('../../../react/atoms/profile', () => ({
 // `documentExtractionCore` imports these helpers directly from
 // `documentExtraction`. `utils.ts` only re-exports them — mocking it would
 // not intercept the call, so mock the shared module instead.
+const mockLoadPdfData = vi.fn(async () => new Uint8Array([1, 2, 3]));
+
+vi.mock('../../../src/services/documentExtraction/pdfData', async () => {
+    const actual = await vi.importActual<typeof import('../../../src/services/documentExtraction/pdfData')>(
+        '../../../src/services/documentExtraction/pdfData',
+    );
+    return {
+        ...actual,
+        loadPdfData: (...args: unknown[]) => mockLoadPdfData(...args),
+        checkRemotePdfSize: vi.fn(() => null),
+        isRemoteAccessAvailable: vi.fn(() => false),
+    };
+});
+
 vi.mock('../../../src/services/documentExtraction', async () => {
     const actual = await vi.importActual<typeof import('../../../src/services/documentExtraction')>(
         '../../../src/services/documentExtraction',
@@ -106,14 +120,11 @@ vi.mock('../../../src/services/documentExtraction', async () => {
         ...actual,
         resolveToReadableAttachment: vi.fn(),
         validateZoteroItemReference: vi.fn(() => null),
-        loadPdfData: vi.fn(async () => new Uint8Array([1, 2, 3])),
-        checkRemotePdfSize: vi.fn(() => null),
-        isRemoteAccessAvailable: vi.fn(() => false),
     };
 });
 
 import { handleZoteroDocumentRequest } from '../../../src/services/agentDataProvider/handleZoteroDocumentRequest';
-import { resolveToReadableAttachment, loadPdfData } from '../../../src/services/documentExtraction';
+import { resolveToReadableAttachment } from '../../../src/services/documentExtraction';
 
 describe('handleZoteroDocumentRequest document cache integration', () => {
     const resolvedPdfItem = {
@@ -130,6 +141,9 @@ describe('handleZoteroDocumentRequest document cache integration', () => {
     beforeEach(() => {
         vi.clearAllMocks();
         mockState.extractCalls = [];
+        mockLoadPdfData.mockResolvedValue(new Uint8Array([1, 2, 3]));
+        (globalThis as any).IOUtils.stat.mockResolvedValue({ lastModified: 0, size: 0 });
+        (globalThis as any).IOUtils.read.mockResolvedValue(new Uint8Array([1, 2, 3]));
         (globalThis as any).Zotero.Items = {
             getByLibraryAndKeyAsync: vi.fn().mockResolvedValue(requestItem),
         };
@@ -143,6 +157,92 @@ describe('handleZoteroDocumentRequest document cache integration', () => {
             contentKind: 'pdf',
             contentType: 'application/pdf',
         } as any);
+    });
+
+    it('returns timeout when Zotero item lookup exceeds timeout_seconds', async () => {
+        vi.useFakeTimers();
+        try {
+            (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn(() => new Promise(() => {}));
+
+            const responsePromise = handleZoteroDocumentRequest({
+                event: 'zotero_document_request',
+                request_id: 'req-lookup-timeout',
+                attachment: { library_id: 1, zotero_key: 'ABCD1234' },
+                mode: 'structured',
+                timeout_seconds: 2,
+            });
+
+            await vi.advanceTimersByTimeAsync(2000);
+            const response = await responsePromise;
+
+            expect(response).toMatchObject({
+                type: 'zotero_document',
+                request_id: 'req-lookup-timeout',
+                error_code: 'timeout',
+            });
+            expect(response).not.toHaveProperty('content_kind');
+            expect(response.error).toContain('timed out after 2 seconds');
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('returns timeout when Zotero item loading exceeds timeout_seconds', async () => {
+        vi.useFakeTimers();
+        try {
+            (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue({
+                loadAllData: vi.fn(() => new Promise(() => {})),
+            });
+
+            const responsePromise = handleZoteroDocumentRequest({
+                event: 'zotero_document_request',
+                request_id: 'req-load-timeout',
+                attachment: { library_id: 1, zotero_key: 'ABCD1234' },
+                mode: 'structured',
+                timeout_seconds: 2,
+            });
+
+            await vi.advanceTimersByTimeAsync(2000);
+            const response = await responsePromise;
+
+            expect(response).toMatchObject({
+                type: 'zotero_document',
+                request_id: 'req-load-timeout',
+                error_code: 'timeout',
+            });
+            expect(response).not.toHaveProperty('content_kind');
+            expect(response.error).toContain('timed out after 2 seconds');
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('returns timeout when readable attachment resolution exceeds timeout_seconds', async () => {
+        vi.useFakeTimers();
+        try {
+            vi.mocked(resolveToReadableAttachment).mockImplementation(() => new Promise(() => {}));
+
+            const responsePromise = handleZoteroDocumentRequest({
+                event: 'zotero_document_request',
+                request_id: 'req-resolution-timeout',
+                attachment: { library_id: 1, zotero_key: 'ABCD1234' },
+                mode: 'structured',
+                timeout_seconds: 2,
+            });
+
+            await vi.advanceTimersByTimeAsync(2000);
+            const response = await responsePromise;
+
+            expect(response).toMatchObject({
+                type: 'zotero_document',
+                request_id: 'req-resolution-timeout',
+                error_code: 'timeout',
+            });
+            expect(response).not.toHaveProperty('content_kind');
+            expect(response.error).toContain('timed out after 2 seconds');
+        } finally {
+            vi.useRealTimers();
+        }
     });
 
     it('returns a cached payload without loading or extracting the PDF', async () => {
@@ -167,8 +267,9 @@ describe('handleZoteroDocumentRequest document cache integration', () => {
 
         expect(response.content_kind).toBe('pdf');
         expect(response.result).toEqual({ ...structuredResult, content_kind: 'pdf' });
-        expect(loadPdfData).not.toHaveBeenCalled();
+        expect(mockLoadPdfData).not.toHaveBeenCalled();
         expect(mockState.extractCalls).toHaveLength(0);
+        expect((globalThis as any).Zotero.Items.getByLibraryAndKeyAsync).toHaveBeenCalledTimes(1);
     });
 
     it('passes the request abort signal into cache-backed cold extraction', async () => {
@@ -200,6 +301,7 @@ describe('handleZoteroDocumentRequest document cache integration', () => {
         expect(response.result).toEqual({ ...structuredResult, content_kind: 'pdf' });
         expect(abortSignal).toBeInstanceOf(AbortSignal);
         expect(abortSignal?.aborted).toBe(false);
+        expect((globalThis as any).Zotero.Items.getByLibraryAndKeyAsync).toHaveBeenCalledTimes(1);
     });
 
     it('omits success-only fields when page-count validation returns an error', async () => {
@@ -237,12 +339,16 @@ describe('handleZoteroDocumentRequest document cache integration', () => {
         expect(documentCache.getResult).not.toHaveBeenCalled();
     });
 
-    it('routes non-PDF text attachments to unsupported_type with the resolved extract kind', async () => {
+    it('extracts plain-text attachments without using the PDF cache', async () => {
         const textItem = {
+            libraryID: 1,
+            key: 'TEXT1234',
             loadAllData: vi.fn().mockResolvedValue(undefined),
             isAttachment: vi.fn(() => true),
             isPDFAttachment: vi.fn(() => false),
             attachmentContentType: 'text/plain',
+            attachmentLinkMode: 0,
+            getFilePathAsync: vi.fn().mockResolvedValue('/storage/TEXT1234/notes.txt'),
         };
         (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(textItem);
         vi.mocked(resolveToReadableAttachment).mockResolvedValue({
@@ -252,6 +358,7 @@ describe('handleZoteroDocumentRequest document cache integration', () => {
             contentKind: 'text',
             contentType: 'text/plain',
         } as any);
+        (globalThis as any).IOUtils.read.mockResolvedValue(new TextEncoder().encode('Line one\nLine two'));
 
         const response = await handleZoteroDocumentRequest({
             event: 'zotero_document_request',
@@ -264,10 +371,197 @@ describe('handleZoteroDocumentRequest document cache integration', () => {
             type: 'zotero_document',
             request_id: 'req-text',
             content_kind: 'text',
-            error_code: 'unsupported_type',
+            content_type: 'text/plain',
+            resolved_attachment: { library_id: 1, zotero_key: 'TEXT1234' },
         });
-        expect(response.error).toContain('currently supports PDF only');
-        expect(response.result).toBeUndefined();
+        expect(response.result).toMatchObject({
+            content_kind: 'text',
+            mode: 'text',
+            document: {
+                lineCount: 2,
+                sourceContentType: 'text/plain',
+                lines: [
+                    { id: 'l1', line: 1, text: 'Line one' },
+                    { id: 'l2', line: 2, text: 'Line two' },
+                ],
+            },
+        });
+        expect(mockState.extractCalls).toHaveLength(0);
+    });
+
+    it('returns timeout when text file path resolution exceeds timeout_seconds', async () => {
+        vi.useFakeTimers();
+        try {
+            const textItem = {
+                libraryID: 1,
+                key: 'TEXT1234',
+                loadAllData: vi.fn().mockResolvedValue(undefined),
+                isAttachment: vi.fn(() => true),
+                isPDFAttachment: vi.fn(() => false),
+                attachmentContentType: 'text/plain',
+                attachmentLinkMode: 0,
+                getFilePathAsync: vi.fn(() => new Promise<string>(() => {})),
+            };
+            (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(textItem);
+            vi.mocked(resolveToReadableAttachment).mockResolvedValue({
+                resolved: true,
+                item: textItem,
+                key: '1-TEXT1234',
+                contentKind: 'text',
+                contentType: 'text/plain',
+            } as any);
+
+            const responsePromise = handleZoteroDocumentRequest({
+                event: 'zotero_document_request',
+                request_id: 'req-text-timeout',
+                attachment: { library_id: 1, zotero_key: 'TEXT1234' },
+                mode: 'structured',
+                timeout_seconds: 2,
+            });
+
+            await vi.advanceTimersByTimeAsync(2000);
+            const response = await responsePromise;
+
+            expect(response).toMatchObject({
+                type: 'zotero_document',
+                request_id: 'req-text-timeout',
+                content_kind: 'text',
+                error_code: 'timeout',
+            });
+            expect(response.error).toContain('timed out after 2 seconds');
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('returns timeout when text file stat exceeds timeout_seconds', async () => {
+        vi.useFakeTimers();
+        try {
+            const textItem = {
+                libraryID: 1,
+                key: 'TEXT1234',
+                loadAllData: vi.fn().mockResolvedValue(undefined),
+                isAttachment: vi.fn(() => true),
+                isPDFAttachment: vi.fn(() => false),
+                attachmentContentType: 'text/plain',
+                attachmentLinkMode: 0,
+                getFilePathAsync: vi.fn().mockResolvedValue('/storage/TEXT1234/notes.txt'),
+            };
+            (globalThis as any).IOUtils.stat.mockImplementation(() => new Promise(() => {}));
+            (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(textItem);
+            vi.mocked(resolveToReadableAttachment).mockResolvedValue({
+                resolved: true,
+                item: textItem,
+                key: '1-TEXT1234',
+                contentKind: 'text',
+                contentType: 'text/plain',
+            } as any);
+
+            const responsePromise = handleZoteroDocumentRequest({
+                event: 'zotero_document_request',
+                request_id: 'req-text-stat-timeout',
+                attachment: { library_id: 1, zotero_key: 'TEXT1234' },
+                mode: 'structured',
+                timeout_seconds: 2,
+            });
+
+            await vi.advanceTimersByTimeAsync(2000);
+            const response = await responsePromise;
+
+            expect(response).toMatchObject({
+                type: 'zotero_document',
+                request_id: 'req-text-stat-timeout',
+                content_kind: 'text',
+                error_code: 'timeout',
+            });
+            expect(response.error).toContain('timed out after 2 seconds');
+            expect(mockLoadPdfData).not.toHaveBeenCalled();
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('returns timeout when text file read exceeds timeout_seconds', async () => {
+        vi.useFakeTimers();
+        try {
+            const textItem = {
+                libraryID: 1,
+                key: 'TEXT1234',
+                loadAllData: vi.fn().mockResolvedValue(undefined),
+                isAttachment: vi.fn(() => true),
+                isPDFAttachment: vi.fn(() => false),
+                attachmentContentType: 'text/plain',
+                attachmentLinkMode: 0,
+                getFilePathAsync: vi.fn().mockResolvedValue('/storage/TEXT1234/notes.txt'),
+            };
+            (globalThis as any).IOUtils.read.mockImplementation(() => new Promise(() => {}));
+            (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(textItem);
+            vi.mocked(resolveToReadableAttachment).mockResolvedValue({
+                resolved: true,
+                item: textItem,
+                key: '1-TEXT1234',
+                contentKind: 'text',
+                contentType: 'text/plain',
+            } as any);
+
+            const responsePromise = handleZoteroDocumentRequest({
+                event: 'zotero_document_request',
+                request_id: 'req-text-read-timeout',
+                attachment: { library_id: 1, zotero_key: 'TEXT1234' },
+                mode: 'structured',
+                timeout_seconds: 2,
+            });
+
+            await vi.advanceTimersByTimeAsync(2000);
+            const response = await responsePromise;
+
+            expect(response).toMatchObject({
+                type: 'zotero_document',
+                request_id: 'req-text-read-timeout',
+                content_kind: 'text',
+                error_code: 'timeout',
+            });
+            expect(response.error).toContain('timed out after 2 seconds');
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('returns extraction_failed when text file read fails', async () => {
+        const textItem = {
+            libraryID: 1,
+            key: 'TEXT1234',
+            loadAllData: vi.fn().mockResolvedValue(undefined),
+            isAttachment: vi.fn(() => true),
+            isPDFAttachment: vi.fn(() => false),
+            attachmentContentType: 'text/plain',
+            attachmentLinkMode: 0,
+            getFilePathAsync: vi.fn().mockResolvedValue('/storage/TEXT1234/notes.txt'),
+        };
+        (globalThis as any).IOUtils.read.mockRejectedValue(new Error('disk read failed'));
+        (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(textItem);
+        vi.mocked(resolveToReadableAttachment).mockResolvedValue({
+            resolved: true,
+            item: textItem,
+            key: '1-TEXT1234',
+            contentKind: 'text',
+            contentType: 'text/plain',
+        } as any);
+
+        const response = await handleZoteroDocumentRequest({
+            event: 'zotero_document_request',
+            request_id: 'req-text-read-failed',
+            attachment: { library_id: 1, zotero_key: 'TEXT1234' },
+            mode: 'structured',
+        });
+
+        expect(response).toMatchObject({
+            type: 'zotero_document',
+            request_id: 'req-text-read-failed',
+            content_kind: 'text',
+            error_code: 'extraction_failed',
+        });
+        expect(response.error).toContain('Failed to read text attachment');
     });
 
     it('does not report unsupported image attachments as PDF', async () => {
@@ -299,6 +593,7 @@ describe('handleZoteroDocumentRequest document cache integration', () => {
             error_code: 'unsupported_type',
         });
         expect(response).not.toHaveProperty('content_kind');
+        expect(response.error).toContain('PDF and plain text only');
         expect(response.result).toBeUndefined();
     });
 });
