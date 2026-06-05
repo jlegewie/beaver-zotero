@@ -28,6 +28,7 @@ import {
     ExternalAbortError,
     MAX_PDF_TIMEOUT_SECONDS,
     TimeoutError,
+    type TimeoutControllerContext,
     awaitWithRequestAbort,
     createTimeoutController,
 } from './agentDataProvider/timeout';
@@ -83,6 +84,8 @@ export interface ExtractAndCacheResolvedPdfArgs
     item: Zotero.Item;
     resolvedKey: string;
     contentType: string;
+    /** Reuse the caller's timeout when item resolution and PDF extraction share one deadline. */
+    timeoutContext?: TimeoutControllerContext;
 }
 
 export function buildExtractedDocumentCacheMetadata(extracted: BeaverExtractResult): {
@@ -172,60 +175,103 @@ export async function extractAndCacheDocument(
         };
     }
 
-    const zoteroItem = await Zotero.Items.getByLibraryAndKeyAsync(
-        args.libraryId,
-        args.zoteroKey,
+    const timeout = createTimeoutController(
+        args.timeoutSeconds,
+        DEFAULT_PAGES_TIMEOUT_SECONDS,
+        args.externalAbortSignal,
     );
-    if (!zoteroItem) {
-        return {
-            kind: 'response_error',
-            code: 'not_found',
-            message: `Attachment does not exist in user's library: ${requestKey}`,
-            pageCount: null,
-            resolvedAttachment: null,
+    const { signal, timeoutSeconds, throwIfTimedOut, dispose } = timeout;
+
+    try {
+        const zoteroItem = await awaitWithRequestAbort(
+            Zotero.Items.getByLibraryAndKeyAsync(args.libraryId, args.zoteroKey),
+            signal,
+            throwIfTimedOut,
+            'zotero_item_lookup',
+        );
+        if (!zoteroItem) {
+            return {
+                kind: 'response_error',
+                code: 'not_found',
+                message: `Attachment does not exist in user's library: ${requestKey}`,
+                pageCount: null,
+                resolvedAttachment: null,
+            };
+        }
+
+        await awaitWithRequestAbort(
+            zoteroItem.loadAllData(),
+            signal,
+            throwIfTimedOut,
+            'zotero_item_load',
+        );
+
+        const resolveResult = await awaitWithRequestAbort(
+            resolveToReadableAttachment(zoteroItem, requestKey),
+            signal,
+            throwIfTimedOut,
+            'readable_attachment_resolution',
+        );
+        if (!resolveResult.resolved) {
+            const code = resolveResult.error_code === 'not_readable'
+                ? 'unsupported_type'
+                : resolveResult.error_code;
+            return {
+                kind: 'response_error',
+                code,
+                message: resolveResult.error,
+                pageCount: null,
+                resolvedAttachment: null,
+            };
+        }
+
+        const { item: resolvedItem, contentKind } = resolveResult;
+        const resolvedAttachment = {
+            libraryId: resolvedItem.libraryID,
+            zoteroKey: resolvedItem.key,
         };
+
+        if (contentKind !== 'pdf') {
+            const extractKind = readableToExtractKind(contentKind);
+            return {
+                kind: 'response_error',
+                code: 'unsupported_type',
+                message: `Attachment ${resolveResult.key} is a ${contentKind} document, but document extraction currently supports PDF only.`,
+                pageCount: null,
+                resolvedAttachment,
+                ...(extractKind ? { contentKind: extractKind } : {}),
+            };
+        }
+
+        return await extractAndCacheResolvedPdfDocument({
+            ...args,
+            item: resolvedItem,
+            resolvedKey: resolveResult.key,
+            contentType: resolveResult.contentType,
+            timeoutContext: timeout,
+        });
+    } catch (error) {
+        if (error instanceof ExternalAbortError) {
+            return {
+                kind: 'external_abort',
+                phase: error.phase,
+                pageCount: null,
+                resolvedAttachment: null,
+            };
+        }
+        if (error instanceof TimeoutError || signal.aborted) {
+            return {
+                kind: 'timeout',
+                phase: error instanceof TimeoutError ? error.phase : 'unknown',
+                timeoutSeconds,
+                pageCount: null,
+                resolvedAttachment: null,
+            };
+        }
+        throw error;
+    } finally {
+        dispose();
     }
-
-    await zoteroItem.loadAllData();
-
-    const resolveResult = await resolveToReadableAttachment(zoteroItem, requestKey);
-    if (!resolveResult.resolved) {
-        const code = resolveResult.error_code === 'not_readable'
-            ? 'unsupported_type'
-            : resolveResult.error_code;
-        return {
-            kind: 'response_error',
-            code,
-            message: resolveResult.error,
-            pageCount: null,
-            resolvedAttachment: null,
-        };
-    }
-
-    const { item: resolvedItem, contentKind } = resolveResult;
-    const resolvedAttachment = {
-        libraryId: resolvedItem.libraryID,
-        zoteroKey: resolvedItem.key,
-    };
-
-    if (contentKind !== 'pdf') {
-        const extractKind = readableToExtractKind(contentKind);
-        return {
-            kind: 'response_error',
-            code: 'unsupported_type',
-            message: `Attachment ${resolveResult.key} is a ${contentKind} document, but document extraction currently supports PDF only.`,
-            pageCount: null,
-            resolvedAttachment,
-            ...(extractKind ? { contentKind: extractKind } : {}),
-        };
-    }
-
-    return extractAndCacheResolvedPdfDocument({
-        ...args,
-        item: resolvedItem,
-        resolvedKey: resolveResult.key,
-        contentType: resolveResult.contentType,
-    });
 }
 
 /**
@@ -245,7 +291,8 @@ export async function extractAndCacheResolvedPdfDocument(
     const maxFileSizeMB = effectiveMaxFileSizeMB(args.maxFileSizeMB);
     const maxPages = effectiveMaxPageCount(args.maxPages);
 
-    const timeout = createTimeoutController(
+    const ownsTimeout = !args.timeoutContext;
+    const timeout = args.timeoutContext ?? createTimeoutController(
         args.timeoutSeconds,
         DEFAULT_PAGES_TIMEOUT_SECONDS,
         externalAbortSignal,
@@ -774,6 +821,8 @@ export async function extractAndCacheResolvedPdfDocument(
             resolvedAttachment,
         };
     } finally {
-        dispose();
+        if (ownsTimeout) {
+            dispose();
+        }
     }
 }
