@@ -416,7 +416,7 @@ const LIST_ITEMS_TOOL = {
         'or get an overview of items with a particular tag. ' +
         'Filters are cumulative: specifying both collection and tag returns only items matching both criteria. ' +
         'By default only regular bibliographic items are returned; use `item_category` to list notes, attachments, ' +
-        'annotations, or all item types instead. ' +
+        'or all supported item types instead. ' +
         'Note: for regular items this tool returns lightweight metadata without attachment IDs. ' +
         'To read an item\'s PDF, first call `get_item_details` with `include_attachments: true` to obtain the attachment ID, ' +
         'then call `read_attachment`.',
@@ -437,9 +437,9 @@ const LIST_ITEMS_TOOL = {
             },
             item_category: {
                 type: 'string',
-                enum: ['regular', 'note', 'attachment', 'annotation', 'all'],
+                enum: ['regular', 'note', 'attachment', 'all'],
                 description:
-                    'Item type to return: "regular" (bibliographic items), "note", "attachment", "annotation", or "all". Default: "regular".',
+                    'Item type to return: "regular" (bibliographic items), "note", "attachment", or "all" (regular items, notes, and attachments). Default: "regular".',
                 default: 'regular',
             },
             recursive: {
@@ -911,7 +911,7 @@ async function handleListItems(args: any): Promise<any> {
     const sortBy = validSortFields.includes(args.sort_by) ? args.sort_by : 'dateModified';
     const sortOrder = args.sort_order === 'asc' ? 'asc' : 'desc';
 
-    const validCategories: ZoteroItemCategory[] = ['regular', 'note', 'attachment', 'annotation', 'all'];
+    const validCategories: ZoteroItemCategory[] = ['regular', 'note', 'attachment', 'all'];
     const itemCategory: ZoteroItemCategory = validCategories.includes(args.item_category)
         ? args.item_category
         : 'regular';

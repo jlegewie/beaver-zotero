@@ -227,6 +227,19 @@ describe('MCP Tool Handlers (via useMcpServer)', () => {
                 expect(tool.inputSchema.type).toBe('object');
             }
         });
+
+        it('does not advertise annotations for list_items item_category', async () => {
+            const result = await listTools(endpoint);
+            const listItemsTool = result.tools.find((tool: any) => tool.name === 'list_items');
+
+            expect(listItemsTool?.inputSchema.properties.item_category.enum).toEqual([
+                'regular',
+                'note',
+                'attachment',
+                'all',
+            ]);
+            expect(listItemsTool?.description).not.toContain('annotations');
+        });
     });
 
     // =====================================================================
@@ -1629,6 +1642,19 @@ describe('MCP Tool Handlers (via useMcpServer)', () => {
 
             const req = mockHandleListItemsRequest.mock.calls[0][0];
             expect(req.recursive).toBe(false);
+        });
+
+        it('falls back to regular for unsupported annotation category', async () => {
+            mockHandleListItemsRequest.mockResolvedValue({
+                type: 'list_items',
+                items: [],
+                total_count: 0,
+            });
+
+            await callTool(endpoint, 'list_items', { item_category: 'annotation' });
+
+            const req = mockHandleListItemsRequest.mock.calls[0][0];
+            expect(req.item_category).toBe('regular');
         });
 
         it('accepts all valid sort_by values', async () => {
