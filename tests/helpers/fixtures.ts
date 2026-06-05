@@ -124,10 +124,10 @@ export const NON_PDF: AttachmentFixture = {
     description: 'EPUB attachment',
 };
 
-// Linked URL attachment
+// Genuine linked-URL attachment (LINK_MODE_LINKED_URL) — no stored file.
 export const LINKED_URL: AttachmentFixture = {
     library_id: 1,
-    zotero_key: '8Q98MFN2',
+    zotero_key: 'LRHNLZ6Z',
     description: 'Linked URL attachment',
 };
 
@@ -136,6 +136,55 @@ export const IMAGE: AttachmentFixture = {
     library_id: 1,
     zotero_key: 'MBWJYPPI',
     description: 'PNG image attachment',
+};
+
+// Plain-text attachment (text/plain) — readable kind 'text'.
+export const TEXT_ATTACHMENT: AttachmentFixture = {
+    library_id: 1,
+    zotero_key: 'ATNC86U2',
+    description: 'text/plain attachment',
+};
+
+// Web-snapshot attachment (text/html) — readable kind 'snapshot' (group library).
+export const SNAPSHOT_ATTACHMENT: AttachmentFixture = {
+    library_id: 3,
+    zotero_key: '46GA3WJK',
+    description: 'HTML snapshot attachment (group library)',
+};
+
+// Unreadable attachment (application/octet-stream) — no readable kind.
+export const UNREADABLE_ATTACHMENT: AttachmentFixture = {
+    library_id: 1,
+    zotero_key: 'H8HK5HFR',
+    description: 'Unreadable octet-stream attachment',
+};
+
+// Regular item: one text child + one PDF child — resolver prefers the PDF.
+export const PARENT_PDF_AND_TEXT: AttachmentFixture = {
+    library_id: 1,
+    zotero_key: 'RXWQK2UC',
+    description: 'Regular item with a PDF and a text child (PDF preferred)',
+};
+
+// Regular item whose only readable child is an HTML snapshot (group library).
+export const PARENT_SNAPSHOT_ONLY: AttachmentFixture = {
+    library_id: 3,
+    zotero_key: '3HQUPSES',
+    description: 'Regular item with a single snapshot child (group library)',
+};
+
+// Regular item with many readable children whose best attachment is a PDF.
+export const PARENT_MANY_READABLE: AttachmentFixture = {
+    library_id: 1,
+    zotero_key: '5P7G8HSC',
+    description: 'Regular item with many readable children (best is a PDF)',
+};
+
+// Regular item whose only child is a linked-URL attachment (not readable).
+export const PARENT_LINKED_URL_ONLY: AttachmentFixture = {
+    library_id: 1,
+    zotero_key: '47I39QFV',
+    description: 'Regular item with only a linked-URL child',
 };
 
 // Invalid/corrupted PDF fixture. Override with env var if needed:

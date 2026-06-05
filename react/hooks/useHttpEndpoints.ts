@@ -58,6 +58,7 @@ import {
     handleTestWorkerCacheClearHttpRequest,
     handleTestFileStatusHttpRequest,
     handleTestResolveItemHttpRequest,
+    handleTestResolveReadableHttpRequest,
 } from './httpHandlers/testCacheHandlers';
 import {
     handleTestNoteCreateHttpRequest,
@@ -166,6 +167,7 @@ const ENDPOINT_PATHS = [
     '/beaver/test/cache-clear-all',
     '/beaver/test/read-attachment',
     '/beaver/test/resolve-item',
+    '/beaver/test/resolve-readable',
     // Test-only endpoints (note seeding/teardown/inspection)
     '/beaver/test/note-create',
     '/beaver/test/note-delete',
@@ -705,6 +707,8 @@ function registerEndpoints(): boolean {
 
         Zotero.Server.Endpoints['/beaver/test/resolve-item'] =
             createEndpoint(handleTestResolveItemHttpRequest);
+        Zotero.Server.Endpoints['/beaver/test/resolve-readable'] =
+            createEndpoint(handleTestResolveReadableHttpRequest);
 
         // MuPDF worker singleton stats / lifecycle (dev-only)
         Zotero.Server.Endpoints['/beaver/test/worker-stats'] =
