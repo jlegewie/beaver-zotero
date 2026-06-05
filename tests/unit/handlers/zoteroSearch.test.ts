@@ -95,6 +95,20 @@ describe('handleZoteroSearchRequest', () => {
             }),
             loadDataTypes: vi.fn(async () => undefined),
         };
+        (globalThis as any).Zotero.ItemTypes = {
+            getID: vi.fn((itemType: string) => itemType === 'annotation' ? 1 : 0),
+        };
+        (globalThis as any).Zotero.DB = {
+            queryAsync: vi.fn(async (_sql: string, params: any[], options: { onRow: (row: any) => void }) => {
+                const annotationItemTypeID = params[params.length - 1];
+                for (const id of params.slice(0, -1)) {
+                    const item = itemsById.get(id);
+                    if (item && item.itemType !== 'annotation' && annotationItemTypeID === 1) {
+                        options.onRow({ getResultByIndex: () => id });
+                    }
+                }
+            }),
+        };
     });
 
     it('preserves native search order when filtering annotations before pagination', async () => {
@@ -138,5 +152,44 @@ describe('handleZoteroSearchRequest', () => {
         expect(response.error).toBeUndefined();
         expect(response.total_count).toBe(3);
         expect(response.items.map(item => item.item_id)).toEqual(['1-FIRST', '1-THIRD']);
+    });
+
+    it('filters annotations before pagination for any-mode regular searches', async () => {
+        itemsById.set(1, makeItem({
+            id: 1,
+            key: 'FIRST',
+            getField: vi.fn((field: string) => field === 'title' ? 'First' : ''),
+            getDisplayTitle: vi.fn(() => 'First'),
+        }));
+        itemsById.set(2, makeItem({
+            id: 2,
+            key: 'ANNOT',
+            itemType: 'annotation',
+            isAnnotation: vi.fn(() => true),
+        } as Partial<MockItem>));
+        itemsById.set(3, makeItem({
+            id: 3,
+            key: 'THIRD',
+            getField: vi.fn((field: string) => field === 'title' ? 'Third' : ''),
+            getDisplayTitle: vi.fn(() => 'Third'),
+        }));
+
+        const response = await handleZoteroSearchRequest({
+            event: 'zotero_search_request',
+            request_id: 'req-2',
+            conditions: [{ field: 'title', operator: 'contains', value: 'search term' }],
+            join_mode: 'any',
+            item_category: 'regular',
+            include_children: true,
+            recursive: false,
+            limit: 2,
+            offset: 0,
+        });
+
+        expect(response.error).toBeUndefined();
+        expect(response.total_count).toBe(2);
+        expect(response.items.map(item => item.item_id)).toEqual(['1-FIRST', '1-THIRD']);
+        expect((globalThis as any).Zotero.DB.queryAsync).toHaveBeenCalledOnce();
+        expect((globalThis as any).Zotero.Items.getAsync).not.toHaveBeenCalledWith([1, 2, 3]);
     });
 });
