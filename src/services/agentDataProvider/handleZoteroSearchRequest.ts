@@ -20,6 +20,11 @@ import { serializeNote } from '../../utils/zoteroSerializers';
 import { validateLibraryAccess, extractYear, formatCreatorsString } from './utils';
 
 
+function isAnnotationItem(item: Zotero.Item): boolean {
+    return String(item.itemType) === 'annotation' || (item as { isAnnotation?: () => boolean }).isAnnotation?.() === true;
+}
+
+
 /**
  * Handle zotero_search request from backend.
  * Uses Zotero's native search API.
@@ -140,14 +145,39 @@ export async function handleZoteroSearchRequest(
             if (validForFilter.length > 0) {
                 await Zotero.Items.loadDataTypes(validForFilter, ['childItems']);
             }
-            itemIds = validForFilter
-                .filter(item => {
-                    // Only apply attachment filter to regular items
-                    if (!item.isRegularItem()) return true;
+            const matchingItemIds = new Set<number>();
+            for (const item of validForFilter) {
+                // Only apply attachment filter to regular items
+                let matches = true;
+                if (item.isRegularItem()) {
                     const hasAtt = item.numAttachments() > 0;
-                    return request.has_attachments ? hasAtt : !hasAtt;
-                })
-                .map(item => item.id);
+                    matches = request.has_attachments ? hasAtt : !hasAtt;
+                }
+                if (matches) {
+                    matchingItemIds.add(item.id);
+                }
+            }
+            itemIds = itemIds.filter(id => matchingItemIds.has(id));
+        }
+
+        // zotero_search has no annotation result shape. When the search could
+        // include annotation items — item_category 'all'/'annotation', or an
+        // explicit itemType condition — drop them from the full result set BEFORE
+        // counting and paginating, so total_count and page boundaries reflect only
+        // returnable items. The 'regular'/'note'/'attachment' categories already
+        // exclude annotations at the search level, so no extra fetch is needed there.
+        const itemCategory = request.item_category ?? 'regular';
+        const mayContainAnnotations =
+            anyItemTypeCondition || itemCategory === 'all' || itemCategory === 'annotation';
+        if (mayContainAnnotations) {
+            const fetchedForAnnotationFilter = await Zotero.Items.getAsync(itemIds);
+            const returnableItemIds = new Set<number>();
+            for (const item of fetchedForAnnotationFilter) {
+                if (item !== null && !isAnnotationItem(item)) {
+                    returnableItemIds.add(item.id);
+                }
+            }
+            itemIds = itemIds.filter(id => returnableItemIds.has(id));
         }
 
         const totalCount = itemIds.length;
@@ -232,7 +262,15 @@ export async function handleZoteroSearchRequest(
             // No sorting — paginate on IDs first, then fetch only the page
             const paginatedIds = itemIds.slice(offset, offset + limit);
             const fetchedItems = await Zotero.Items.getAsync(paginatedIds);
-            paginatedZoteroItems = fetchedItems.filter((item): item is Zotero.Item => item !== null);
+            const fetchedItemsById = new Map<number, Zotero.Item>();
+            for (const item of fetchedItems) {
+                if (item !== null) {
+                    fetchedItemsById.set(item.id, item);
+                }
+            }
+            paginatedZoteroItems = paginatedIds
+                .map(id => fetchedItemsById.get(id))
+                .filter((item): item is Zotero.Item => item != null);
 
             if (paginatedZoteroItems.length > 0) {
                 await Zotero.Items.loadDataTypes(paginatedZoteroItems, ['primaryData', 'creators', 'itemData']);
