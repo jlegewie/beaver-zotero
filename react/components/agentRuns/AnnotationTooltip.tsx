@@ -45,19 +45,21 @@ export const AnnotationTooltip: React.FC<AnnotationTooltipProps> = ({
                 )}
             </span>
             {tooltipBody && (
-                <span
-                    className="font-color-secondary text-sm px-3 py-15 block"
-                    style={{
-                        wordBreak: 'break-word',
-                        overflowWrap: 'anywhere',
-                        whiteSpace: 'pre-wrap',
-                        display: '-webkit-box',
-                        WebkitLineClamp: 5,
-                        WebkitBoxOrient: 'vertical',
-                        overflow: 'hidden',
-                    }}
-                >
-                    {tooltipBody}
+                <span className="px-3 py-15 block">
+                    <span
+                        className="font-color-secondary text-sm block"
+                        style={{
+                            wordBreak: 'break-word',
+                            overflowWrap: 'anywhere',
+                            whiteSpace: 'pre-wrap',
+                            display: '-webkit-box',
+                            WebkitLineClamp: 5,
+                            WebkitBoxOrient: 'vertical',
+                            overflow: 'hidden',
+                        }}
+                    >
+                        {tooltipBody}
+                    </span>
                 </span>
             )}
             <span className="px-3 py-15 border-top-quinary block">
