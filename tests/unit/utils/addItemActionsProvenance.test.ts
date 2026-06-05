@@ -31,7 +31,10 @@ vi.mock("../../../react/utils/noteActions", () => ({
   createProvenanceNote: vi.fn(),
 }));
 
-import { stampBeaverProvenanceExtra } from "../../../react/utils/addItemActions";
+import {
+  createZoteroItem,
+  stampBeaverProvenanceExtra,
+} from "../../../react/utils/addItemActions";
 
 class MockItem {
   private extra: string;
@@ -75,5 +78,52 @@ describe("stampBeaverProvenanceExtra", () => {
 
     expect(changed).toBe(false);
     expect(item.setField).not.toHaveBeenCalled();
+  });
+});
+
+describe("createZoteroItem import target", () => {
+  it("adds imports to the selected collection even when an item is selected", async () => {
+    const addItem = vi.fn();
+    const collection = { id: 42, libraryID: 7, addItem };
+    const createdItem = {
+      id: 99,
+      key: "NEWITEM1",
+      libraryID: 0,
+      itemTypeID: 4,
+      setField: vi.fn(),
+      setCreators: vi.fn(),
+      saveTx: vi.fn(async () => 99),
+      getAttachments: vi.fn(() => []),
+    };
+
+    (globalThis as any).Zotero.getMainWindow = vi.fn(() => ({
+      Zotero_Tabs: { selectedType: "library" },
+    }));
+    (globalThis as any).Zotero.getActiveZoteroPane = vi.fn(() => ({
+      getSelectedLibraryID: vi.fn(() => 7),
+      getSelectedCollection: vi.fn(() => collection),
+      getSelectedItems: vi.fn(() => [{ libraryID: 7, isRegularItem: () => true }]),
+    }));
+    (globalThis as any).Zotero.Libraries.userLibraryID = 1;
+    (globalThis as any).Zotero.Libraries.get = vi.fn(() => ({ editable: true }));
+    (globalThis as any).Zotero.ItemTypes.getID = vi.fn(() => 4);
+    (globalThis as any).Zotero.ItemTypes.getName = vi.fn(() => "journalArticle");
+    (globalThis as any).Zotero.ItemFields.isValidForType = vi.fn(() => true);
+    (globalThis as any).Zotero.Item = vi.fn(() => createdItem);
+    (globalThis as any).Zotero.Collections = {
+      get: vi.fn(() => collection),
+    };
+    (globalThis as any).Zotero.DB = {
+      executeTransaction: vi.fn(async (fn: () => Promise<void>) => fn()),
+    };
+
+    await createZoteroItem({
+      title: "Imported paper",
+      publication_types: ["journal_article"],
+      is_open_access: false,
+    } as any);
+
+    expect(createdItem.libraryID).toBe(7);
+    expect(addItem).toHaveBeenCalledWith(99);
   });
 });

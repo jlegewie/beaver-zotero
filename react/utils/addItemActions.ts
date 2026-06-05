@@ -62,12 +62,26 @@ async function resolveImportTarget(options?: ImportItemOptions): Promise<{
     
     // If no library specified, get from current context
     if (libraryId === undefined) {
-        const context = await getZoteroTargetContext();
-        libraryId = context.targetLibraryId ?? Zotero.Libraries.userLibraryID;
-        
-        // Get collection from context if not specified
-        if (collectionId === null && context.collectionToAddTo) {
-            collectionId = context.collectionToAddTo.id;
+        const selectedTabType = Zotero.getMainWindow().Zotero_Tabs?.selectedType;
+
+        if (selectedTabType === 'reader') {
+            const context = await getZoteroTargetContext();
+            libraryId = context.targetLibraryId ?? Zotero.Libraries.userLibraryID;
+        } else {
+            const zp = Zotero.getActiveZoteroPane();
+            const selectedLibraryId = zp?.getSelectedLibraryID?.();
+            libraryId = typeof selectedLibraryId === 'number'
+                ? selectedLibraryId
+                : Zotero.Libraries.userLibraryID;
+
+            // Match Zotero's own identifier lookup behavior: imports go into
+            // the current collection even if an item row is selected.
+            if (collectionId === null) {
+                const collection = zp?.getSelectedCollection?.();
+                if (collection) {
+                    collectionId = collection.id;
+                }
+            }
         }
     }
     
