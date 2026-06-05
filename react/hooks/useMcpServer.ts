@@ -6,8 +6,8 @@
  * The endpoint speaks JSON-RPC 2.0 (MCP Streamable HTTP transport), so any MCP
  * client (Claude Code, Claude Desktop via mcp-remote, Cursor) can call the tools.
  *
- * Tools: search_by_topic, search_by_metadata, read_attachment, get_item_details,
- *        list_collections, list_tags, list_items
+ * Tools: search_by_topic, search_by_metadata, read_attachment, read_note,
+ *        create_note, get_item_details, list_collections, list_tags, list_items
  */
 
 import { useEffect } from 'react';
@@ -21,7 +21,11 @@ import {
     handleListCollectionsRequest,
     handleListTagsRequest,
     handleListItemsRequest,
+    handleReadNoteRequest,
+    validateCreateNoteAction,
+    executeCreateNoteAction,
 } from '../../src/services/agentDataProvider';
+import type { TimeoutContext } from '../../src/services/agentDataProvider/timeout';
 import { getCitationKeyFromItem, getZoteroSelectURI } from '../../src/utils/zoteroUtils';
 import { logger } from '../../src/utils/logger';
 import { isAuthenticatedAtom } from '../atoms/auth';
@@ -42,6 +46,11 @@ import type {
     WSListTagsResponse,
     WSListItemsRequest,
     WSListItemsResponse,
+    WSReadNoteRequest,
+    WSReadNoteResponse,
+    WSAgentActionValidateRequest,
+    WSAgentActionExecuteRequest,
+    WSAgentActionExecuteResponse,
     RegularListResultItem,
     NoteResultItem,
     AttachmentResultItem,
@@ -146,6 +155,13 @@ export async function ensureMcpBridgeScript(): Promise<string> {
 
 const SEARCH_BY_TOPIC_TOOL = {
     name: 'search_by_topic',
+    annotations: {
+        title: 'Search Library by Topic',
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+    },
     description:
         "Search the user's Zotero reference library by research topic using semantic similarity. " +
         'Returns papers whose content is conceptually related to the query, ranked by relevance. ' +
@@ -206,6 +222,13 @@ const SEARCH_BY_TOPIC_TOOL = {
 
 const SEARCH_BY_METADATA_TOOL = {
     name: 'search_by_metadata',
+    annotations: {
+        title: 'Search Library by Metadata',
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+    },
     description:
         "Search the user's Zotero reference library by bibliographic metadata: author name, title keywords, " +
         'or publication/journal name. At least one search field must be provided. Use this when you know specific ' +
@@ -268,6 +291,13 @@ const SEARCH_BY_METADATA_TOOL = {
 
 const READ_ATTACHMENT_TOOL = {
     name: 'read_attachment',
+    annotations: {
+        title: 'Read Attachment',
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+    },
     description:
         "Read the text content of a PDF attachment from the user's Zotero library. " +
         'Extracts and returns the text from specified pages (or the first 30 pages if no page range is given). ' +
@@ -296,8 +326,97 @@ const READ_ATTACHMENT_TOOL = {
     },
 };
 
+const READ_NOTE_TOOL = {
+    name: 'read_note',
+    annotations: {
+        title: 'Read Note',
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+    },
+    description:
+        "Read a Zotero note's content from the user's library as simplified HTML. " +
+        'Use note IDs returned by `get_item_details` with `include_notes: true`, or by search/list tools. ' +
+        'The simplified format represents citations, annotations, and images as self-closing tags. ' +
+        'Use `offset` and `limit` to page through long notes by line.',
+    inputSchema: {
+        type: 'object' as const,
+        properties: {
+            note_id: {
+                type: 'string',
+                description:
+                    'The note ID in format `<library_id>-<zotero_key>` (e.g., "1-ABC12345"). Obtain this from tool results.',
+            },
+            offset: {
+                type: 'integer',
+                description: 'Optional 1-indexed start line. Defaults to the beginning of the note.',
+            },
+            limit: {
+                type: 'integer',
+                description: 'Optional maximum number of lines to return.',
+            },
+        },
+        required: ['note_id'],
+    },
+};
+
+const CREATE_NOTE_TOOL = {
+    name: 'create_note',
+    annotations: {
+        title: 'Create Zotero Note',
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+    },
+    description:
+        "Create a Zotero note from markdown in the user's library. " +
+        'Content supports `<citation>` tags: use `<citation id="libraryID-zoteroKey"/>`, optionally with page locators such as `loc="page5"` or `loc="page5-page6"`. ' +
+        'Use the 1-based page numbers from `read_attachment` `<pageN>` tags (physical page index, not printed labels). ' +
+        'Only use citation IDs returned by this session\'s tool results; never construct or guess IDs. ' +
+        'Copy page locators verbatim from `read_note` when editing existing notes; omit `loc` for metadata-only citations. ' +
+        'Do not use legacy citation attributes such as `item_id`, `att_id`, `page`, or `sid`.',
+    inputSchema: {
+        type: 'object' as const,
+        properties: {
+            title: {
+                type: 'string',
+                description: 'Concise note title. Prefer short titles, roughly 35 characters or fewer.',
+            },
+            content: {
+                type: 'string',
+                description:
+                    'Markdown content with `<citation>` tags, e.g. `<citation id="1-ABC12345" loc="page5"/>`. Use IDs and locators from tool results only.',
+            },
+            parent_id: {
+                type: 'string',
+                description:
+                    'Optional parent item ID in `<library_id>-<zotero_key>` format. Creates the note as a child of that item.',
+            },
+            library: {
+                type: 'string',
+                description: 'Optional target library name or ID. Omit to use the default user library.',
+            },
+            collection: {
+                type: 'string',
+                description:
+                    'Optional collection name or key for standalone notes. Ignored when `parent_id` is set because child notes inherit the parent item location.',
+            },
+        },
+        required: ['title', 'content'],
+    },
+};
+
 const GET_ITEM_DETAILS_TOOL = {
     name: 'get_item_details',
+    annotations: {
+        title: 'Get Item Details',
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+    },
     description:
         "Get complete bibliographic metadata for specific items in the user's Zotero library. " +
         'Returns all Zotero fields for each item (title, authors, abstract, DOI, journal, volume, issue, pages, date, etc.), ' +
@@ -331,6 +450,13 @@ const GET_ITEM_DETAILS_TOOL = {
 
 const LIST_COLLECTIONS_TOOL = {
     name: 'list_collections',
+    annotations: {
+        title: 'List Collections',
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+    },
     description:
         "List collections (folders) in the user's Zotero library to understand how their references are organized. " +
         'Returns collection names, keys, item counts, and subcollection counts. ' +
@@ -370,6 +496,13 @@ const LIST_COLLECTIONS_TOOL = {
 
 const LIST_TAGS_TOOL = {
     name: 'list_tags',
+    annotations: {
+        title: 'List Tags',
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+    },
     description:
         "List tags in the user's Zotero library. " +
         'Tags are user-defined labels attached to references (e.g., "to-read", "methods", "key-paper"). ' +
@@ -409,6 +542,13 @@ const LIST_TAGS_TOOL = {
 
 const LIST_ITEMS_TOOL = {
     name: 'list_items',
+    annotations: {
+        title: 'List Items',
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+    },
     description:
         "Browse items in the user's Zotero library, optionally filtered by collection and/or tag. " +
         'Unlike the search tools, this does not require a query — it simply lists items matching the given filters, ' +
@@ -733,6 +873,137 @@ export async function handleReadAttachment(args: any): Promise<any> {
     return [header, '', ...pageTexts].join('\n');
 }
 
+/**
+ * Handler for the MCP `read_note` tool.
+ *
+ * Exported so dev-only endpoints can exercise the same MCP adapter used by
+ * external clients.
+ */
+export async function handleReadNote(args: any): Promise<any> {
+    args = args ?? {};
+    if (!args.note_id || typeof args.note_id !== 'string') {
+        return mcpError('note_id is required and must be a string.');
+    }
+
+    const wsRequest: WSReadNoteRequest = {
+        event: 'read_note_request',
+        request_id: generateRequestId(),
+        note_id: args.note_id,
+        offset: args.offset,
+        limit: args.limit,
+    };
+
+    const response: WSReadNoteResponse = await handleReadNoteRequest(wsRequest);
+
+    if (!response.success) {
+        return mcpError(response.error ?? 'Failed to read note');
+    }
+
+    return {
+        note_id: response.note_id,
+        title: response.title ?? null,
+        parent_item_id: response.parent_item_id ?? null,
+        parent_title: response.parent_title ?? null,
+        total_lines: response.total_lines ?? null,
+        lines_returned: response.lines_returned ?? null,
+        has_more: response.has_more ?? false,
+        next_offset: response.next_offset ?? null,
+        content: response.content ?? '',
+        cited_items: (response.cited_items ?? []).map((item) => ({
+            item_id: `${item.library_id}-${item.zotero_key}`,
+            item_type: item.item_type,
+            title: item.title ?? null,
+        })),
+    };
+}
+
+function buildNoopTimeoutContext(): TimeoutContext {
+    return {
+        signal: new AbortController().signal,
+        timeoutSeconds: 120,
+        startTime: Date.now(),
+    };
+}
+
+/**
+ * Handler for the MCP `create_note` tool.
+ *
+ * The host MCP client owns approval UX, so this adapter validates and then
+ * executes directly instead of entering Beaver's deferred-action queue.
+ */
+export async function handleCreateNote(args: any): Promise<any> {
+    args = args ?? {};
+    const title = typeof args.title === 'string' ? args.title.trim() : '';
+    const content = typeof args.content === 'string' ? args.content : '';
+
+    if (!title) {
+        return mcpError('title is required and cannot be empty.');
+    }
+    if (!content.trim()) {
+        return mcpError('content is required and cannot be empty.');
+    }
+
+    const effectiveCollection = args.parent_id ? undefined : args.collection;
+    const actionData = {
+        title,
+        content,
+        parent_item_id: args.parent_id,
+        library: args.library,
+        collection: effectiveCollection,
+    };
+
+    const validateRequest: WSAgentActionValidateRequest = {
+        event: 'agent_action_validate',
+        request_id: generateRequestId(),
+        action_type: 'create_note',
+        action_data: actionData,
+    };
+
+    const validation = await validateCreateNoteAction(validateRequest);
+    if (!validation.valid) {
+        return mcpError(validation.error ?? 'Create note validation failed');
+    }
+
+    const mergedActionData = {
+        ...actionData,
+        ...(validation.normalized_action_data ?? {}),
+    };
+
+    const executeRequest: WSAgentActionExecuteRequest = {
+        event: 'agent_action_execute',
+        request_id: generateRequestId(),
+        action_type: 'create_note',
+        action_data: mergedActionData,
+    };
+
+    const response: WSAgentActionExecuteResponse = await executeCreateNoteAction(
+        executeRequest,
+        buildNoopTimeoutContext(),
+    );
+
+    if (!response.success) {
+        return mcpError(response.error ?? 'Failed to create note');
+    }
+
+    const result = response.result_data ?? {};
+    const libraryId = result.library_id;
+    const noteKey = result.zotero_key;
+    const citedItemsData = result.cited_items_data ?? {};
+
+    return {
+        note_id: libraryId != null && noteKey ? `${libraryId}-${noteKey}` : null,
+        parent_item_id: libraryId != null && result.parent_key ? `${libraryId}-${result.parent_key}` : null,
+        related_item_id: libraryId != null && result.related_item_key ? `${libraryId}-${result.related_item_key}` : null,
+        collection_key: result.collection_key ?? null,
+        note_content: result.note_content ?? null,
+        warning: result.warning ?? null,
+        citation_issues: {
+            invalid_keys: citedItemsData.invalid_keys ?? [],
+            errors: citedItemsData.errors ?? [],
+        },
+    };
+}
+
 async function handleGetItemDetails(args: any): Promise<any> {
     const itemIds: string[] = args.item_ids;
     if (!itemIds || itemIds.length === 0) {
@@ -1019,6 +1290,8 @@ export function useMcpServer() {
             { def: SEARCH_BY_TOPIC_TOOL, handler: handleSearchByTopic },
             { def: SEARCH_BY_METADATA_TOOL, handler: handleSearchByMetadata },
             { def: READ_ATTACHMENT_TOOL, handler: handleReadAttachment },
+            { def: READ_NOTE_TOOL, handler: handleReadNote },
+            { def: CREATE_NOTE_TOOL, handler: handleCreateNote },
             { def: GET_ITEM_DETAILS_TOOL, handler: handleGetItemDetails },
             { def: LIST_COLLECTIONS_TOOL, handler: handleListCollections },
             { def: LIST_TAGS_TOOL, handler: handleListTags },

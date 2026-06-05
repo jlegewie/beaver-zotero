@@ -101,6 +101,29 @@ export async function handleTestReadAttachmentHttpRequest(request: any) {
 }
 
 /**
+ * Dev-only: invoke the MCP `read_note` tool handler directly.
+ *
+ * Returns the tool's raw result: a compact note object on success, or an MCP
+ * error object (`{ content, isError: true }`) on failure.
+ */
+export async function handleTestMcpReadNoteHttpRequest(request: any) {
+    const { handleReadNote } = await import('../useMcpServer');
+    const result = await handleReadNote(request || {});
+    return { result };
+}
+
+/**
+ * Dev-only: invoke the MCP `create_note` tool handler directly.
+ *
+ * Exercises the MCP validation → execute path without registering a client.
+ */
+export async function handleTestMcpCreateNoteHttpRequest(request: any) {
+    const { handleCreateNote } = await import('../useMcpServer');
+    const result = await handleCreateNote(request || {});
+    return { result };
+}
+
+/**
  * Dev-only: snapshot of MuPDFWorkerClient dispatch / spawn counters and
  * the worker-side document cache.
  *

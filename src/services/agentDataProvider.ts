@@ -26,3 +26,4 @@ export { handleAgentActionValidateRequest } from './agentDataProvider/handleAgen
 export { handleAgentActionExecuteRequest } from './agentDataProvider/handleAgentActionExecuteRequest';
 export { handleDeleteItemsRequest } from './agentDataProvider/handleDeleteItemsRequest';
 export { handleReadNoteRequest } from './agentDataProvider/handleReadNoteRequest';
+export { validateCreateNoteAction, executeCreateNoteAction } from './agentDataProvider/actions/createNote';
