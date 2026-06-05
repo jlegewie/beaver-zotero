@@ -55,7 +55,7 @@ export async function getBestReadableTextAttachmentAsync(item: any): Promise<any
         if (item.isAttachment?.()) return item;
         if (!item.isRegularItem?.()) return null;
 
-        await Zotero.Items.loadDataTypes([item], ['childItems']);
+        await Zotero.Items.loadDataTypes([item], ['childItems', 'itemData']);
         const attachmentIDs = item.getAttachments();
         if (!attachmentIDs?.length) return null;
 
@@ -66,12 +66,17 @@ export async function getBestReadableTextAttachmentAsync(item: any): Promise<any
             await Zotero.Items.loadDataTypes(attachments, ['itemData']);
         }
 
-        const bestAttachment = await item.getBestAttachment();
-        if (bestAttachment && !bestAttachment.deleted) {
-            await Zotero.Items.loadDataTypes([bestAttachment], ['itemData']);
-            if (getReadableContentKind(bestAttachment) === 'text') {
-                return bestAttachment;
+        try {
+            const bestAttachment = await item.getBestAttachment();
+            if (bestAttachment && !bestAttachment.deleted) {
+                await Zotero.Items.loadDataTypes([bestAttachment], ['itemData']);
+                if (getReadableContentKind(bestAttachment) === 'text') {
+                    return bestAttachment;
+                }
             }
+        } catch {
+            // Fall back to the loaded child attachments if Zotero's ranking
+            // helper cannot inspect the parent item.
         }
 
         return attachments.find((attachment: any) =>

@@ -501,6 +501,8 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
         }
 
         if (contentKind === 'text') {
+            // Resolved text citations should normally point at the attachment;
+            // this keeps older or incomplete regular-item metadata navigable.
             const target = item.isAttachment()
                 ? item
                 : await getBestReadableTextAttachmentAsync(item);
