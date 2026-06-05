@@ -7,7 +7,7 @@ import { isWSChatPendingAtom } from '../atoms/agentRunAtoms';
 import { actionsAtom, actionContextAtom, markActionUsedAtom, sendResolvedActionAtom, stageActionInInputAtom } from '../atoms/actions';
 import { resolvePromptVariables, EMPTY_VARIABLE_HINTS } from '../utils/promptVariables';
 import { hasUserInputVariables } from '../utils/userInputVariables';
-import { computeActionGroups, GroupIconInfo } from '../utils/actionVisibility';
+import { computeActionGroups } from '../utils/actionVisibility';
 import { addPopupMessageAtom } from '../utils/popupMessageUtils';
 import { openPreferencesWindow } from '../../src/ui/openPreferencesWindow';
 import { Action, ActionTargetType } from '../types/actions';
