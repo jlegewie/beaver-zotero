@@ -104,7 +104,7 @@ vi.mock('../../../src/services/documentExtraction', async () => {
     );
     return {
         ...actual,
-        resolveToPdfAttachment: vi.fn(),
+        resolveToReadableAttachment: vi.fn(),
         validateZoteroItemReference: vi.fn(() => null),
         loadPdfData: vi.fn(async () => new Uint8Array([1, 2, 3])),
         checkRemotePdfSize: vi.fn(() => null),
@@ -113,7 +113,7 @@ vi.mock('../../../src/services/documentExtraction', async () => {
 });
 
 import { handleZoteroDocumentRequest } from '../../../src/services/agentDataProvider/handleZoteroDocumentRequest';
-import { resolveToPdfAttachment, loadPdfData } from '../../../src/services/documentExtraction';
+import { resolveToReadableAttachment, loadPdfData } from '../../../src/services/documentExtraction';
 
 describe('handleZoteroDocumentRequest document cache integration', () => {
     const resolvedPdfItem = {
@@ -136,10 +136,12 @@ describe('handleZoteroDocumentRequest document cache integration', () => {
         (globalThis as any).Zotero.Attachments = {
             getTotalFileSize: vi.fn().mockResolvedValue(1024),
         };
-        vi.mocked(resolveToPdfAttachment).mockResolvedValue({
+        vi.mocked(resolveToReadableAttachment).mockResolvedValue({
             resolved: true,
             item: resolvedPdfItem,
             key: '1-ABCD1234',
+            contentKind: 'pdf',
+            contentType: 'application/pdf',
         } as any);
     });
 
@@ -235,7 +237,7 @@ describe('handleZoteroDocumentRequest document cache integration', () => {
         expect(documentCache.getResult).not.toHaveBeenCalled();
     });
 
-    it('marks non-PDF text attachment errors with the resolved extract kind', async () => {
+    it('routes non-PDF text attachments to unsupported_type with the resolved extract kind', async () => {
         const textItem = {
             loadAllData: vi.fn().mockResolvedValue(undefined),
             isAttachment: vi.fn(() => true),
@@ -243,10 +245,12 @@ describe('handleZoteroDocumentRequest document cache integration', () => {
             attachmentContentType: 'text/plain',
         };
         (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(textItem);
-        vi.mocked(resolveToPdfAttachment).mockResolvedValue({
-            resolved: false,
-            error: 'Attachment 1-TEXT1234 is not a PDF (type: text/plain)',
-            error_code: 'not_pdf',
+        vi.mocked(resolveToReadableAttachment).mockResolvedValue({
+            resolved: true,
+            item: textItem,
+            key: '1-TEXT1234',
+            contentKind: 'text',
+            contentType: 'text/plain',
         } as any);
 
         const response = await handleZoteroDocumentRequest({
@@ -260,8 +264,41 @@ describe('handleZoteroDocumentRequest document cache integration', () => {
             type: 'zotero_document',
             request_id: 'req-text',
             content_kind: 'text',
-            error_code: 'not_pdf',
+            error_code: 'unsupported_type',
         });
+        expect(response.error).toContain('currently supports PDF only');
+        expect(response.result).toBeUndefined();
+    });
+
+    it('does not report unsupported image attachments as PDF', async () => {
+        const imageItem = {
+            loadAllData: vi.fn().mockResolvedValue(undefined),
+            isAttachment: vi.fn(() => true),
+            isPDFAttachment: vi.fn(() => false),
+            attachmentContentType: 'image/png',
+        };
+        (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(imageItem);
+        vi.mocked(resolveToReadableAttachment).mockResolvedValue({
+            resolved: true,
+            item: imageItem,
+            key: '1-IMG12345',
+            contentKind: 'image',
+            contentType: 'image/png',
+        } as any);
+
+        const response = await handleZoteroDocumentRequest({
+            event: 'zotero_document_request',
+            request_id: 'req-image',
+            attachment: { library_id: 1, zotero_key: 'IMG12345' },
+            mode: 'structured',
+        });
+
+        expect(response).toMatchObject({
+            type: 'zotero_document',
+            request_id: 'req-image',
+            error_code: 'unsupported_type',
+        });
+        expect(response).not.toHaveProperty('content_kind');
         expect(response.result).toBeUndefined();
     });
 });

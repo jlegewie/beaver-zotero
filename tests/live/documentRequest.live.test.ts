@@ -251,7 +251,7 @@ describe('document request — attachment-type rejections', () => {
 
     it('rejects a non-PDF (EPUB) attachment', async () => {
         const res = await fetchDocument(NON_PDF, { mode: 'markdown' });
-        expect(res.error_code).toBe('not_pdf');
+        expect(res.error_code).toBe('unsupported_type');
         expect(res.result ?? null).toBeNull();
     });
 

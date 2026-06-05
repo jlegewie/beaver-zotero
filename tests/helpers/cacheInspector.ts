@@ -468,6 +468,42 @@ export async function resolveItem(
     });
 }
 
+/** Readable content kinds the resolver can classify (extractor + image). */
+export type ReadableContentKind = ExtractContentKind | 'image';
+
+export interface ResolveReadableResponse {
+    item_id: number | null;
+    item_type: string | null;
+    is_attachment?: boolean;
+    is_regular_item?: boolean;
+    /** Whether the item resolved to a readable attachment. */
+    resolved?: boolean;
+    /** `<libraryId>-<zoteroKey>` of the resolved readable attachment, or null. */
+    resolved_key?: string | null;
+    /** Readable content kind of the resolved attachment, or null on failure. */
+    content_kind?: ReadableContentKind | null;
+    content_type?: string | null;
+    /** Resolver failure code (`not_attachment` | `is_linked_url` | `not_readable`). */
+    error_code?: 'not_attachment' | 'is_linked_url' | 'not_readable' | null;
+    error?: string | null;
+}
+
+/**
+ * `/beaver/test/resolve-readable` — runs the production
+ * `resolveToReadableAttachment` resolver and returns its result verbatim
+ * (including the chosen attachment key and content kind for non-PDF kinds),
+ * without triggering extraction.
+ */
+export async function resolveReadable(
+    libraryId: number,
+    key: string,
+): Promise<ResolveReadableResponse> {
+    return post('/beaver/test/resolve-readable', {
+        library_id: libraryId,
+        zotero_key: key,
+    });
+}
+
 /** Completely wipe the document cache (metadata rows, payload rows, files). */
 export async function clearAllCache(): Promise<{
     metadataRows: number;

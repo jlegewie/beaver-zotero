@@ -215,3 +215,40 @@ export async function handleTestResolveItemHttpRequest(request: any) {
         resolved_pdf_key: resolved.resolved ? resolved.key : null,
     };
 }
+
+export async function handleTestResolveReadableHttpRequest(request: any) {
+    const { library_id, zotero_key } = request;
+    if (library_id == null || zotero_key == null) {
+        return { error: 'Provide library_id + zotero_key' };
+    }
+    const item = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);
+    if (!item) return { item_id: null, item_type: null };
+    await item.loadAllData();
+
+    // Exercises the production readable-attachment resolver used by the
+    // document-extraction core (`resolveToReadableAttachment`). Unlike the
+    // document endpoint, this returns the resolver result verbatim — including
+    // the chosen attachment key and content kind for non-PDF kinds that the
+    // extractor rejects — so resolution behavior can be asserted without
+    // triggering extraction.
+    const { resolveToReadableAttachment } = await import(
+        '../../../src/services/documentExtraction/attachmentResolution'
+    );
+    const resolved = await resolveToReadableAttachment(
+        item,
+        `${library_id}-${zotero_key}`,
+    );
+
+    return {
+        item_id: item.id,
+        item_type: item.itemType,
+        is_attachment: item.isAttachment(),
+        is_regular_item: item.isRegularItem(),
+        resolved: resolved.resolved,
+        resolved_key: resolved.resolved ? resolved.key : null,
+        content_kind: resolved.resolved ? resolved.contentKind : null,
+        content_type: resolved.resolved ? resolved.contentType : null,
+        error_code: resolved.resolved ? null : resolved.error_code,
+        error: resolved.resolved ? null : resolved.error,
+    };
+}

@@ -1,7 +1,9 @@
 export {
+    resolveToReadableAttachment,
     resolveToPdfAttachment,
 } from './attachmentResolution';
 export type {
+    ReadableAttachmentResolveResult,
     PdfAttachmentResolveResult,
 } from './attachmentResolution';
 

@@ -14,8 +14,7 @@ import {
 } from '../agentProtocol';
 import type { ZoteroDocumentErrorCode } from '../agentProtocol';
 import { extractAndCacheDocument } from '../documentExtractionCore';
-import { liveAttachmentContentKind } from '../documentExtraction/attachmentResolution';
-import { readableToExtractKind, type ExtractContentKind } from '../documentExtraction/shared/contentKinds';
+import type { ExtractContentKind } from '../documentExtraction/shared/contentKinds';
 import { MAX_PDF_TIMEOUT_SECONDS } from './timeout';
 // Hot-path handler keeps the remote-download-failed popup behavior by
 // passing the popup notifier through `onRemoteDownloadFailure`. The
@@ -44,18 +43,6 @@ export async function handleZoteroDocumentRequest(
         error,
         error_code,
     });
-
-    const requestContentKind = async (): Promise<ExtractContentKind | undefined> => {
-        try {
-            const item = await Zotero.Items.getByLibraryAndKeyAsync(
-                attachment.library_id,
-                attachment.zotero_key,
-            );
-            return item ? readableToExtractKind(liveAttachmentContentKind(item)) : undefined;
-        } catch {
-            return undefined;
-        }
-    };
 
     const result = await extractAndCacheDocument({
         libraryId: attachment.library_id,
@@ -137,10 +124,7 @@ export async function handleZoteroDocumentRequest(
     }
 
     // cached_error / response_error — return the existing message shape.
-    const contentKind = result.resolvedAttachment
-        ? 'pdf'
-        : result.code === 'not_pdf'
-            ? await requestContentKind()
-            : undefined;
+    const contentKind = result.contentKind
+        ?? (result.resolvedAttachment && result.code !== 'unsupported_type' ? 'pdf' : undefined);
     return errorResponse(result.message, result.code, result.pageCount, contentKind);
 }
