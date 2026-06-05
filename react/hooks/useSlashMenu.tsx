@@ -190,6 +190,9 @@ export function useSlashMenu(inputRef: React.RefObject<HTMLTextAreaElement | nul
 
         // Create Action at end of array (top after reverse for "above", bottom for "below")
         if (!query || items.length === 0) {
+            if (items.length > 0) {
+                items.push({ label: '', isDivider: true, onClick: () => {} });
+            }
             items.push(createActionItem);
         }
 
