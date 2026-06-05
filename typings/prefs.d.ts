@@ -18,6 +18,7 @@ declare namespace _ZoteroTypes {
       "statefulChat": boolean;
       "addSelectedItemsOnOpen": boolean;
       "addSelectedItemsOnNewThread": boolean;
+      "addBeaverProvenanceNote": boolean;
       "focusResponseForScreenReaders": boolean;
       "annotationToolEnabled": boolean;
       "maxAddAttachmentToMessage": number;

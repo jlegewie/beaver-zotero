@@ -48,6 +48,7 @@ const PreferencePage: React.FC = () => {
     });
     const [addSelectedOnNewThread, setAddSelectedOnNewThread] = useState(() => getPref('addSelectedItemsOnNewThread'));
     const [addSelectedOnOpen, setAddSelectedOnOpen] = useState(() => getPref('addSelectedItemsOnOpen'));
+    const [addProvenanceNote, setAddProvenanceNote] = useState(() => getPref('addBeaverProvenanceNote'));
     const [focusResponseForScreenReaders, setFocusResponseForScreenReaders] = useState(() => getPref('focusResponseForScreenReaders'));
     const [showDiffPreview, setShowDiffPreview] = useState(() => getPref('showDiffPreviewInNoteEditor') !== false);
     const diffPreviewSupported = isDiffPreviewSupported();
@@ -305,6 +306,12 @@ const PreferencePage: React.FC = () => {
         setPref("addSelectedItemsOnOpen", newValue);
         setAddSelectedOnOpen(newValue);
     }, [addSelectedOnOpen]);
+
+    const handleAddProvenanceNoteToggle = useCallback(() => {
+        const newValue = !addProvenanceNote;
+        setPref("addBeaverProvenanceNote", newValue);
+        setAddProvenanceNote(newValue);
+    }, [addProvenanceNote]);
 
     const handleFocusResponseForScreenReadersToggle = useCallback(() => {
         const newValue = !focusResponseForScreenReaders;
@@ -642,6 +649,21 @@ const PreferencePage: React.FC = () => {
                                             type="checkbox"
                                             checked={addSelectedOnOpen}
                                             onChange={handleAddSelectedOnOpenToggle}
+                                            onClick={(e) => e.stopPropagation()}
+                                            style={{ cursor: 'pointer', margin: 0 }}
+                                        />
+                                    }
+                                />
+                                <SettingsRow
+                                    title="Add Provenance Note to Imported Items"
+                                    description="Add a child note with a conversation link to Beaver conversation"
+                                    onClick={handleAddProvenanceNoteToggle}
+                                    hasBorder
+                                    control={
+                                        <input
+                                            type="checkbox"
+                                            checked={addProvenanceNote}
+                                            onChange={handleAddProvenanceNoteToggle}
                                             onClick={(e) => e.stopPropagation()}
                                             style={{ cursor: 'pointer', margin: 0 }}
                                         />

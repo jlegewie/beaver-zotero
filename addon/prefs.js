@@ -14,6 +14,7 @@ pref("keyboardShortcut", "j");
 pref("statefulChat", true);
 pref("addSelectedItemsOnOpen", true);
 pref("addSelectedItemsOnNewThread", true);
+pref("addBeaverProvenanceNote", false);
 pref("focusResponseForScreenReaders", false);
 pref("annotationToolEnabled", true);
 pref("maxAddAttachmentToMessage", 10);

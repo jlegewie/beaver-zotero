@@ -82,6 +82,7 @@ import {
     PreviewData,
 } from './agentActionViewHelpers';
 import { ActionPreview } from './ActionPreview';
+import { currentThreadIdAtom } from '../../atoms/threads';
 
 export { STATUS_CONFIGS, getOverallStatus } from './agentActionViewHelpers';
 export type { ActionStatus } from './agentActionViewHelpers';
@@ -173,6 +174,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
 
     const [isProcessingApproval, setIsProcessingApproval] = useState(false);
     const [isProcessingAction, setIsProcessingAction] = useState(false);
+    const threadId = useAtomValue(currentThreadIdAtom);
     const [isUndoError, setIsUndoError] = useState(false);
     const [isExternallyProcessing, setIsExternallyProcessing] = useState(false);
     const [clickedButton, setClickedButton] = useState<'approve' | 'reject' | 'undo' | null>(null);
@@ -368,7 +370,10 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                 const actionsToApply = actions.filter((candidate) => candidate.status !== 'applied');
                 if (actionsToApply.length === 0) return;
 
-                const batchResult = await executeCreateItemActions(actionsToApply);
+                const batchResult = await executeCreateItemActions(actionsToApply, {
+                    runId,
+                    threadId: threadId ?? undefined,
+                });
                 if (batchResult.successes.length > 0) {
                     await ackAgentActions(runId, batchResult.successes.map((success) => ({
                         action_id: success.action.id,
@@ -412,6 +417,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         isProcessing,
         toolName,
         runId,
+        threadId,
         ackAgentActions,
         setAgentActionsToError,
         markExternalReferenceImported,

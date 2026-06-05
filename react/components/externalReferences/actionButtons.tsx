@@ -25,9 +25,11 @@ import {
     markExternalReferenceImportedAtom,
 } from '../../atoms/externalReferences';
 import { ButtonVariant } from '../ui/Button';
-import { createZoteroItem } from '../../utils/addItemActions';
+import { createZoteroItem, stampBeaverProvenanceExtra } from '../../utils/addItemActions';
 import { logger } from '../../../src/utils/logger';
 import { ensureItemSynced } from '../../../src/utils/sync';
+import { getPref } from '../../../src/utils/prefs';
+import { createProvenanceNote } from '../../utils/noteActions';
 import { 
     getPendingCreateItemActionBySourceIdAtom,
     ackAgentActionsAtom,
@@ -132,6 +134,21 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
                 library_id: libraryId,
                 zotero_key: newItem.key
             };
+
+            const provenanceReason = matchingAction?.proposed_data?.reason;
+            if (stampBeaverProvenanceExtra(newItem, { reason: provenanceReason })) {
+                await newItem.saveTx();
+            }
+            if (getPref('addBeaverProvenanceNote') === true) {
+                await createProvenanceNote(
+                    { library_id: libraryId, zotero_key: newItem.key },
+                    {
+                        reason: provenanceReason,
+                        threadId: threadId ?? undefined,
+                        runId: matchingAction?.run_id,
+                    },
+                );
+            }
 
             // Compute initial attachment_status by inspecting what
             // createZoteroItem actually did. Mirror applyCreateItemData's logic:
