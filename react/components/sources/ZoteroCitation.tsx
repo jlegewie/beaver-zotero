@@ -27,7 +27,11 @@ import { useCitationMarker } from '../../hooks/useCitationMarker';
 import { ZoteroItemReference } from '../../types/zotero';
 import { revealSource } from '../../utils/sourceUtils';
 import { resolvePageLabelFromLabels, translatePageNumberToLabelFromLabels } from '../../utils/pageLabels';
-import { getBestPDFAttachment, getBestPDFAttachmentAsync } from '../../../src/utils/zoteroItemHelpers';
+import {
+    getBestPDFAttachment,
+    getBestPDFAttachmentAsync,
+    getBestReadableTextAttachmentAsync,
+} from '../../../src/utils/zoteroItemHelpers';
 import { BEAVER_CITATION_ANNOTATION_AUTHOR } from '../../../src/constants/annotations';
 import {
     baseCitationKey,
@@ -46,7 +50,6 @@ import {
     buildZoteroCitationLinkHTML,
     isLinkCitationItem,
 } from '../../../src/utils/zoteroLinkCitation';
-
 const TOOLTIP_WIDTH = '250px';
 export const BEAVER_ANNOTATION_TEXT = BEAVER_CITATION_ANNOTATION_AUTHOR;
 
@@ -455,6 +458,8 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
             return;
         }
 
+        await item.loadAllData();
+
         const contentKind = getContentKind(citationMetadata);
         const symbolicLocation = getSymbolicLocation(citationMetadata);
 
@@ -495,6 +500,31 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
             return;
         }
 
+        if (contentKind === 'text') {
+            const target = item.isAttachment()
+                ? item
+                : await getBestReadableTextAttachmentAsync(item);
+            if (!target) {
+                revealSource({ library_id: item.libraryID, zotero_key: item.key } as ZoteroItemReference);
+                return;
+            }
+            const filePath = await target.getFilePathAsync();
+            if (filePath) {
+                if (symbolicLocation?.content_kind === 'text') {
+                    const lineEnd = symbolicLocation.line_end ?? symbolicLocation.line;
+                    logger(
+                        `ZoteroCitation: Opening text file at lines ${symbolicLocation.line}-${lineEnd}: ${filePath}`,
+                    );
+                } else {
+                    logger(`ZoteroCitation: Opening text file: ${filePath}`);
+                }
+                Zotero.launchFile(filePath);
+            } else {
+                await selectItemById(target.id);
+            }
+            return;
+        }
+
         if (contentKind !== 'pdf') {
             logger(`ZoteroCitation: Non-PDF citation (${contentKind})`);
             if (item.isRegularItem()) {
@@ -504,9 +534,6 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
             if (item.isAttachment()) {
                 try {
                     await Zotero.Reader.open(item.id);
-                    if (contentKind === 'text' && symbolicLocation?.content_kind === 'text') {
-                        logger(`ZoteroCitation: Opened text citation at line ${symbolicLocation.line}`);
-                    }
                 } catch (error) {
                     logger(`ZoteroCitation: Failed to open non-PDF attachment: ${error}`);
                     await selectItemById(item.id);
