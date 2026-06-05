@@ -60,7 +60,7 @@ const AdvancedSection: React.FC = () => {
         const config = JSON.stringify({
             mcpServers: {
                 "beaver-zotero": {
-                    type: "streamable-http",
+                    type: "http",
                     url: mcpEndpointUrl
                 }
             }

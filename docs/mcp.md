@@ -8,6 +8,8 @@ Beaver exposes an [MCP (Model Context Protocol)](https://modelcontextprotocol.io
 
 The MCP server uses **Streamable HTTP** transport: a single `POST` endpoint at `/beaver/mcp` speaking JSON-RPC 2.0. This runs on Zotero's existing HTTP server (default port 23119, but check `extensions.zotero.httpServer.port` in your Zotero config).
 
+This is a **stateless POST-only subset** of Streamable HTTP. Each request gets a plain `application/json` JSON-RPC response; the server never opens a Server-Sent Events (SSE) stream. The optional server→client SSE channel (a `GET` on the same endpoint) is not offered — a `GET` returns `405 Method Not Allowed`, which spec-compliant clients treat as "no stream available". Tool calls are unaffected since they ride on `POST` request/response.
+
 **Why not stdio?** Zotero's gecko runtime can't use `@modelcontextprotocol/sdk` (Node.js APIs). Spawning a child Node.js process adds complexity and requires Node.js on the user's system. The MCP JSON-RPC 2.0 protocol is simple enough to implement manually.
 
 **Why not reuse the REST endpoints in `useHttpEndpoints.ts`?** Those are REST endpoints. MCP clients need JSON-RPC 2.0 with `initialize`, `tools/list`, `tools/call` methods.
@@ -52,7 +54,7 @@ Add to your project's `.mcp.json` or `~/.claude.json`:
 {
   "mcpServers": {
     "beaver-zotero": {
-      "type": "streamable-http",
+      "type": "http",
       "url": "http://localhost:PORT/beaver/mcp"
     }
   }
@@ -60,6 +62,8 @@ Add to your project's `.mcp.json` or `~/.claude.json`:
 ```
 
 Replace `PORT` with your Zotero HTTP server port (check `extensions.zotero.httpServer.port` in Zotero's Config Editor, default is `23119`).
+
+> **`http` vs `streamable-http`**: Both name the same MCP Streamable HTTP transport. `http` is the value VS Code, Claude Code, and recent Cursor all accept; `streamable-http` is the spec's longer name and works as an alias on clients that recognize it (e.g. Claude Code). Prefer `http`. Some clients can also infer the transport from `url` alone and let you omit `type`.
 
 ### Cursor
 
@@ -69,12 +73,14 @@ Add to `.cursor/mcp.json`:
 {
   "mcpServers": {
     "beaver-zotero": {
-      "type": "streamable-http",
+      "type": "http",
       "url": "http://localhost:PORT/beaver/mcp"
     }
   }
 }
 ```
+
+> Some clients log a one-time `Failed to open SSE stream` warning on connect. This is expected — Beaver doesn't offer the optional SSE stream and returns `405` for it. Tool discovery and tool calls still work over `POST`, so the warning is safe to ignore.
 
 ### Claude Desktop / Other stdio-only clients
 
