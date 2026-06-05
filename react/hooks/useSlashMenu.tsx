@@ -7,7 +7,7 @@ import { isWSChatPendingAtom } from '../atoms/agentRunAtoms';
 import { actionsAtom, actionContextAtom, markActionUsedAtom, sendResolvedActionAtom, stageActionInInputAtom } from '../atoms/actions';
 import { resolvePromptVariables, EMPTY_VARIABLE_HINTS } from '../utils/promptVariables';
 import { hasUserInputVariables } from '../utils/userInputVariables';
-import { computeActionGroups, GroupIconInfo } from '../utils/actionVisibility';
+import { computeActionGroups } from '../utils/actionVisibility';
 import { addPopupMessageAtom } from '../utils/popupMessageUtils';
 import { openPreferencesWindow } from '../../src/ui/openPreferencesWindow';
 import { Action, ActionTargetType } from '../types/actions';
@@ -137,7 +137,7 @@ export function useSlashMenu(inputRef: React.RefObject<HTMLTextAreaElement | nul
             if (group.iconInfo) {
                 headerItem.customContent = (
                     <span className="display-flex items-center gap-1 truncate">
-                        <span className="scale-80 flex-shrink-0 opacity-50" style={{ filter: 'grayscale(1)' }}>
+                        <span className="scale-80 flex-shrink-0" style={{ filter: 'grayscale(1)' }}>
                             {group.iconInfo.type === 'item-type'
                                 ? <CSSItemTypeIcon itemType={group.iconInfo.name} className="icon-16" />
                                 : <CSSIcon name={group.iconInfo.name} className="icon-16" />}
@@ -190,6 +190,9 @@ export function useSlashMenu(inputRef: React.RefObject<HTMLTextAreaElement | nul
 
         // Create Action at end of array (top after reverse for "above", bottom for "below")
         if (!query || items.length === 0) {
+            if (items.length > 0) {
+                items.push({ label: '', isDivider: true, onClick: () => {} });
+            }
             items.push(createActionItem);
         }
 

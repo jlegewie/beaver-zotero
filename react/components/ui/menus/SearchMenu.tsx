@@ -16,9 +16,14 @@ export interface SearchMenuItem {
     customContent?: ReactNode;
     /** Whether this item is a group header */
     isGroupHeader?: boolean;
+    /** Whether this item is a divider */
+    isDivider?: boolean;
     /** Whether this item is disabled */
     disabled?: boolean;
 }
+
+const isFocusableItem = (item: SearchMenuItem) =>
+    !item.disabled && !item.isGroupHeader && !item.isDivider;
 
 /**
 * Position interface for menu placement
@@ -266,8 +271,8 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
                         if (displayOrderMenuItems.length === 0) return -1;
                         let next = (prev + 1) % displayOrderMenuItems.length;
                         const initialNext = next;
-                        // Skip group headers and disabled items
-                        while (displayOrderMenuItems[next].isGroupHeader || displayOrderMenuItems[next].disabled) {
+                        // Skip group headers, dividers, and disabled items
+                        while (!isFocusableItem(displayOrderMenuItems[next])) {
                             next = (next + 1) % displayOrderMenuItems.length;
                             if (next === initialNext) return prev; // Avoid infinite loop
                         }
@@ -280,8 +285,8 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
                         if (displayOrderMenuItems.length === 0) return -1;
                         let next = (prev - 1 + displayOrderMenuItems.length) % displayOrderMenuItems.length;
                         const initialNext = next;
-                        // Skip group headers and disabled items
-                        while (displayOrderMenuItems[next].isGroupHeader || displayOrderMenuItems[next].disabled) {
+                        // Skip group headers, dividers, and disabled items
+                        while (!isFocusableItem(displayOrderMenuItems[next])) {
                             next = (next - 1 + displayOrderMenuItems.length) % displayOrderMenuItems.length;
                             if (next === initialNext) return prev; // Avoid infinite loop
                         }
@@ -292,8 +297,7 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
                     e.preventDefault();
                     if (focusedIndex >= 0 && 
                         focusedIndex < displayOrderMenuItems.length && 
-                        !displayOrderMenuItems[focusedIndex].isGroupHeader &&
-                        !displayOrderMenuItems[focusedIndex].disabled
+                        isFocusableItem(displayOrderMenuItems[focusedIndex])
                     ) {
                         displayOrderMenuItems[focusedIndex].onClick();
                         if(closeOnSelect) onClose();
@@ -333,13 +337,13 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
                 if (verticalPosition === 'above') {
                     // For 'above', we want the bottom-most item, which is the last in the displayed list.
                     initialIndex = displayOrderMenuItems.length - 1;
-                    while (initialIndex >= 0 && (displayOrderMenuItems[initialIndex].isGroupHeader || displayOrderMenuItems[initialIndex].disabled)) {
+                    while (initialIndex >= 0 && !isFocusableItem(displayOrderMenuItems[initialIndex])) {
                         initialIndex--;
                     }
                 } else {
                     // For 'below', we want the top-most item, which is the first in the displayed list.
                     initialIndex = 0;
-                    while (initialIndex < displayOrderMenuItems.length && (displayOrderMenuItems[initialIndex].isGroupHeader || displayOrderMenuItems[initialIndex].disabled)) {
+                    while (initialIndex < displayOrderMenuItems.length && !isFocusableItem(displayOrderMenuItems[initialIndex])) {
                         initialIndex++;
                     }
                 }
@@ -395,13 +399,23 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
 
     // Helper function to render menu item
     const renderMenuItem = (item: SearchMenuItem, index: number) => {
+        if (item.isDivider) {
+            return (
+                <div
+                    key={index}
+                    role="presentation"
+                    className="border-t border-top-quinary"
+                />
+            );
+        }
+
         if (item.isGroupHeader) {
             // Render group header
             return (
                 <div
                     key={index}
                     role="presentation"
-                    className="px-2 py-1 font-color-tertiary text-sm font-semibold mt-1 first:mt-0"
+                    className="px-2 py-1 font-color-secondary text-sm font-semibold mt-1 first:mt-0"
                 >
                     {item.customContent ?? <span className="truncate">{item.label}</span>}
                 </div>
@@ -427,7 +441,7 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
                     if(closeOnSelect) onClose();
                 }}
                 onMouseEnter={() => {
-                    if (!item.isGroupHeader && !item.disabled) {
+                    if (isFocusableItem(item)) {
                         setHoveredIndex(index);
                         setFocusedIndex(index);
                     }
@@ -436,7 +450,7 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
                     setHoveredIndex(-1);
                 }}
                 onFocus={() => {
-                    if (!item.isGroupHeader) {
+                    if (isFocusableItem(item)) {
                         setFocusedIndex(index);
                     }
                 }}
