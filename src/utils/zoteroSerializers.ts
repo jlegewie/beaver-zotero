@@ -612,6 +612,7 @@ export function serializeAnnotation(
         annotationText?: string;
         annotationComment?: string;
         annotationColor?: string;
+        annotationAuthorName?: string;
         annotationPosition?: string;
     };
 
@@ -643,9 +644,11 @@ export function serializeAnnotation(
         color: ann.annotationColor ?? null,
         page,
         tags,
+        author: ann.annotationAuthorName || null,
         attachment_id: attachmentInfo?.item_id ?? null,
         item_id: itemInfo?.item_id ?? null,
         item_title: itemInfo?.title ?? null,
+        date_added: annotation.dateAdded,
         date_modified: annotation.dateModified,
     };
 }

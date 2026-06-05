@@ -20,8 +20,28 @@ import { serializeNote } from '../../utils/zoteroSerializers';
 import { validateLibraryAccess, extractYear, formatCreatorsString } from './utils';
 
 
-function isAnnotationItem(item: Zotero.Item): boolean {
-    return String(item.itemType) === 'annotation' || (item as { isAnnotation?: () => boolean }).isAnnotation?.() === true;
+async function filterOutAnnotationItemIds(itemIds: number[]): Promise<number[]> {
+    if (itemIds.length === 0) return itemIds;
+
+    const annotationItemTypeID = Zotero.ItemTypes.getID('annotation');
+    const returnableItemIds = new Set<number>();
+    const chunkSize = 500;
+
+    for (let i = 0; i < itemIds.length; i += chunkSize) {
+        const chunk = itemIds.slice(i, i + chunkSize);
+        const placeholders = chunk.map(() => '?').join(', ');
+        await Zotero.DB.queryAsync(
+            `SELECT itemID FROM items WHERE itemID IN (${placeholders}) AND itemTypeID != ?`,
+            [...chunk, annotationItemTypeID],
+            {
+                onRow: (row: any) => {
+                    returnableItemIds.add(row.getResultByIndex(0));
+                },
+            },
+        );
+    }
+
+    return itemIds.filter(id => returnableItemIds.has(id));
 }
 
 
@@ -170,14 +190,7 @@ export async function handleZoteroSearchRequest(
             || itemCategory === 'all'
             || itemCategory === 'annotation';
         if (mayContainAnnotations) {
-            const fetchedForAnnotationFilter = await Zotero.Items.getAsync(itemIds);
-            const returnableItemIds = new Set<number>();
-            for (const item of fetchedForAnnotationFilter) {
-                if (item !== null && !isAnnotationItem(item)) {
-                    returnableItemIds.add(item.id);
-                }
-            }
-            itemIds = itemIds.filter(id => returnableItemIds.has(id));
+            itemIds = await filterOutAnnotationItemIds(itemIds);
         }
 
         const totalCount = itemIds.length;

@@ -1975,12 +1975,13 @@ export function extractAnnotationAttachmentId(args: string | Record<string, any>
 }
 
 // ============================================================================
-// Get Annotations Tool Results
+// Annotation List Tool Results
 // ============================================================================
 
-/** Valid tool names for get_annotations results */
+/** Valid tool names for annotation-list results */
 const GET_ANNOTATIONS_TOOL_NAMES: readonly string[] = [
     'get_annotations',
+    'find_annotations',
 ] as const;
 
 /**
@@ -1993,8 +1994,7 @@ const GET_ANNOTATIONS_TOOL_NAMES: readonly string[] = [
  * pattern.
  */
 export interface GetAnnotationsResultSummary {
-    tool_name: 'get_annotations';
-    attachment_id: string;
+    tool_name: 'get_annotations' | 'find_annotations';
     result_count: number;
     total_count: number;
     has_more: boolean;
@@ -2014,6 +2014,7 @@ export function isGetAnnotationsResult(
     if (!GET_ANNOTATIONS_TOOL_NAMES.includes(toolName)) return false;
     if (!metadata?.summary || typeof metadata.summary !== 'object') return false;
     const summary = metadata.summary as Record<string, unknown>;
+    if (summary.tool_name !== toolName) return false;
     if (!Array.isArray(summary.annotations)) return false;
     return summary.annotations.every((a: unknown) => {
         if (!a || typeof a !== 'object') return false;
@@ -2028,7 +2029,7 @@ export function isGetAnnotationsResult(
 export interface GetAnnotationsViewData {
     annotations: ZoteroItemReference[];
     totalCount: number;
-    attachmentId?: string | null;
+    toolName: 'get_annotations' | 'find_annotations';
 }
 
 /**
@@ -2048,6 +2049,6 @@ export function extractGetAnnotationsData(
             zotero_key: ref.zotero_key,
         })),
         totalCount: typeof summary.total_count === 'number' ? summary.total_count : summary.annotations.length,
-        attachmentId: summary.attachment_id ?? null,
+        toolName: summary.tool_name,
     };
 }

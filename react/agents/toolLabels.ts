@@ -122,6 +122,7 @@ const TOOL_BASE_LABELS: Record<string, string> = {
 
     // Annotation tools
     get_annotations: 'Get annotations',
+    find_annotations: 'Find annotations',
 
     // Note tools
     read_note: 'Reading note',
@@ -527,6 +528,42 @@ export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): st
             return baseLabel;
         }
 
+        case 'find_annotations': {
+            const attachmentId = args.attachment_id as string | undefined;
+            if (attachmentId) {
+                const item = getItemFromAttachmentId(attachmentId);
+                if (item) {
+                    return `${baseLabel}: ${getItemDisplayName(item)}`;
+                }
+            }
+
+            const color = args.color as string | undefined;
+            const annotationType = args.annotation_type as string | undefined;
+            if (color || annotationType) {
+                const label = [color, annotationType ? `${annotationType}s` : 'annotations']
+                    .filter(Boolean)
+                    .join(' ');
+                return `${baseLabel}: ${truncate(label, 40)}`;
+            }
+
+            const tag = args.tag as string | undefined;
+            if (tag) {
+                return `${baseLabel}: tagged "${truncate(tag, 30)}"`;
+            }
+
+            const text = args.text_contains as string | undefined;
+            if (text) {
+                return `${baseLabel}: "${truncate(text, 40)}"`;
+            }
+
+            const collection = args.collection as string | undefined;
+            if (collection) {
+                return `${baseLabel}: ${truncate(collection, 40)}`;
+            }
+
+            return baseLabel;
+        }
+
         // === Extract tool ===
         case 'extract': {
             const attachmentIds = args.attachment_ids as string[] | undefined;
@@ -732,4 +769,3 @@ export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): st
             return baseLabel;
     }
 }
-

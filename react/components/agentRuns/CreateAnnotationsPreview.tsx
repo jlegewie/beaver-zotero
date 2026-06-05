@@ -1,7 +1,6 @@
 import React, { useCallback, useRef } from 'react';
-import Tooltip from '../ui/Tooltip';
 import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
-import { AlertIcon, HighlighterIcon, Icon, NoteIcon, PdfIcon } from '../icons/icons';
+import { AlertIcon, Icon } from '../icons/icons';
 import { navigateToAnnotation, navigateToPage } from '../../utils/readerUtils';
 import {
     BeaverTemporaryAnnotations,
@@ -12,6 +11,7 @@ import {
 import { logger } from '../../../src/utils/logger';
 import { BEAVER_ANNOTATION_COLORS } from '../../../src/constants/annotations';
 import { TagPill } from './TagPill';
+import { AnnotationTooltip, getAnnotationTooltipIcon } from './AnnotationTooltip';
 import type {
     CreateHighlightAnnotationsProposedData,
     CreateHighlightAnnotationsResultData,
@@ -24,8 +24,6 @@ import type {
 } from '../../types/agentActions/createAnnotations';
 
 type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error' | 'awaiting';
-
-const TOOLTIP_WIDTH = '250px';
 
 interface CreateAnnotationsPreviewProps {
     kind: 'highlight' | 'note';
@@ -309,46 +307,7 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
                             : isCreated
                                 ? `Click to view in PDF`
                                 : `Click to preview in PDF`;
-                        const footerIcon = isFailed ? AlertIcon : PdfIcon;
                         const footerClass = isFailed ? 'font-color-red' : 'font-color-tertiary';
-
-                        const tooltipCustomContent = (
-                            <span className="block" style={{ overflow: 'hidden' }}>
-                                <span className="px-3 py-15 display-flex flex-row border-bottom-quinary gap-1">
-                                    <Icon icon={kind === 'highlight' ? HighlighterIcon : NoteIcon} size={12} className="mt-015" />
-                                    <span className="font-color-primary text-sm">
-                                        {kindLabel}
-                                    </span>
-                                    <span className="flex-1" />
-                                    {pageDisplay !== null && (
-                                        <span className="font-color-secondary text-sm">{`Page ${pageDisplay}`}</span>
-                                    )}
-                                </span>
-                                {tooltipContent && (
-                                    <span
-                                        className="font-color-secondary text-sm px-3 py-15 block"
-                                        style={{
-                                            wordBreak: 'break-word',
-                                            overflowWrap: 'anywhere',
-                                            whiteSpace: 'pre-wrap',
-                                            display: '-webkit-box',
-                                            WebkitLineClamp: 5,
-                                            WebkitBoxOrient: 'vertical',
-                                            overflow: 'hidden',
-                                        }}
-                                    >
-                                        {tooltipContent}
-                                    </span>
-                                )}
-                                <span className="px-3 py-15 border-top-quinary block">
-                                    <span className="display-flex flex-row items-center gap-15">
-                                        <span className={`text-sm ${footerClass}`}>
-                                            {footerLabel}
-                                        </span>
-                                    </span>
-                                </span>
-                            </span>
-                        );
 
                         const isDimmed = status === 'rejected' || status === 'undone';
                         const row = (
@@ -382,16 +341,18 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
                         );
 
                         return (
-                            <Tooltip
+                            <AnnotationTooltip
                                 key={`${clientItemId}-${rawItem.index}`}
-                                content={tooltipContent || kindLabel}
-                                customContent={tooltipCustomContent}
-                                width={TOOLTIP_WIDTH}
-                                padding={false}
+                                typeLabel={kindLabel}
+                                pageDisplay={pageDisplay}
+                                body={tooltipContent}
+                                footerLabel={footerLabel}
+                                footerClassName={footerClass}
+                                typeIcon={getAnnotationTooltipIcon(kind === 'highlight' ? 'highlight' : 'note')}
                                 stayOpenOnAnchorClick
                             >
                                 {row}
-                            </Tooltip>
+                            </AnnotationTooltip>
                         );
                     })}
                 </div>

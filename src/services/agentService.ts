@@ -28,6 +28,7 @@ import {
     handleListLibrariesRequest,
     handleGetMetadataRequest,
     handleGetAnnotationsRequest,
+    handleFindAnnotationsRequest,
     handleAgentActionValidateRequest,
     handleAgentActionExecuteRequest,
     handleReadNoteRequest,
@@ -632,6 +633,23 @@ export class AgentService {
                             logger(`AgentService: get_annotations_request failed: ${err}`, 1);
                             this.send({
                                 type: 'get_annotations',
+                                request_id: event.request_id,
+                                annotations: [],
+                                total_count: 0,
+                                error: String(err),
+                                error_code: 'internal_error',
+                            });
+                        });
+                    break;
+
+                case 'find_annotations_request':
+                    logger("AgentService: Received find_annotations_request", event, 1);
+                    handleFindAnnotationsRequest(event)
+                        .then(res => this.send(res))
+                        .catch(err => {
+                            logger(`AgentService: find_annotations_request failed: ${err}`, 1);
+                            this.send({
+                                type: 'find_annotations',
                                 request_id: event.request_id,
                                 annotations: [],
                                 total_count: 0,

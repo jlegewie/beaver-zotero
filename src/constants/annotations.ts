@@ -4,6 +4,26 @@ export const BEAVER_VISUALIZER_ANNOTATION_AUTHOR = 'Beaver Visualizer';
 
 export const DEFAULT_BEAVER_ANNOTATION_COLOR = '#ffd400';
 
+export const ZOTERO_ANNOTATION_PALETTE_COLORS: Record<string, string> = {
+    yellow: '#ffd400',
+    red: '#ff6666',
+    green: '#5fb236',
+    blue: '#2ea8e5',
+    purple: '#a28ae5',
+    magenta: '#e56eee',
+    orange: '#f19837',
+    gray: '#aaaaaa',
+};
+
+export const ANNOTATION_TYPE_DB_IDS: Record<string, number> = {
+    highlight: 1,
+    note: 2,
+    image: 3,
+    ink: 4,
+    underline: 5,
+    text: 6,
+};
+
 /**
  * Maps annotation color names to hex values. The eight standard names map to
  * Zotero's native annotation palette (the same values used by Zotero's reader
@@ -16,14 +36,7 @@ export const DEFAULT_BEAVER_ANNOTATION_COLOR = '#ffd400';
  * tolerated fallbacks for names without a Zotero palette equivalent.
  */
 export const BEAVER_ANNOTATION_COLORS: Record<string, string> = {
-    yellow: '#ffd400',
-    red: '#ff6666',
-    green: '#5fb236',
-    blue: '#2ea8e5',
-    purple: '#a28ae5',
-    magenta: '#e56eee',
-    orange: '#f19837',
-    gray: '#aaaaaa',
+    ...ZOTERO_ANNOTATION_PALETTE_COLORS,
     // Non-palette names retained for forward compatibility; not emitted by the backend.
     pink: '#ff66c4',
     brown: '#e6a86e',

@@ -35,6 +35,7 @@ import {
     extractReadNoteData,
     isGetAnnotationsResult,
     extractGetAnnotationsData,
+    extractAnnotationAttachmentId,
 } from '../../agents/toolResultTypes';
 import { ItemSearchResultView } from './ItemSearchResultView';
 import { FulltextSearchResultView } from './FulltextSearchResultView';
@@ -200,7 +201,7 @@ export const ToolResultView: React.FC<ToolResultViewProps> = ({ toolcall, result
         }
     }
 
-    // Get annotations results (get_annotations)
+    // Annotation list results (get_annotations, find_annotations)
     if (isGetAnnotationsResult(toolName, content, metadata)) {
         const data = extractGetAnnotationsData(content, metadata);
         if (data) {
@@ -208,6 +209,8 @@ export const ToolResultView: React.FC<ToolResultViewProps> = ({ toolcall, result
                 <GetAnnotationsResultView
                     annotations={data.annotations}
                     totalCount={data.totalCount}
+                    toolName={data.toolName}
+                    attachmentId={extractAnnotationAttachmentId(toolcall.args)}
                 />
             );
         }
