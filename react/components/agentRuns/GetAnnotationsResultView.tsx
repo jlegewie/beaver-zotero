@@ -127,10 +127,14 @@ const AnnotationRow: React.FC<AnnotationRowProps> = ({
  * parent when available and the attachment itself for standalone attachments.
  */
 async function getAnnotationSourceDisplayName(annotation: Zotero.Item): Promise<string> {
-    const attachment = annotation.parentItem;
+    const attachment = annotation.parentID
+        ? await Zotero.Items.getAsync(annotation.parentID)
+        : null;
     if (!attachment) return '';
 
-    const sourceItem = attachment.parentItem ?? attachment;
+    const sourceItem = attachment.parentID
+        ? await Zotero.Items.getAsync(attachment.parentID) ?? attachment
+        : attachment;
 
     try {
         await sourceItem.loadDataType('itemData');

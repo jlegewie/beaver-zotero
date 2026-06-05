@@ -12,8 +12,9 @@
  * Prerequisites:
  *   - Dev build running against Zotero (npm start) with the dev-only
  *     /beaver/test/annotation-create endpoint registered.
- *   - Authenticated, with user library (1) synced.
- *   - Fixture NORMAL_PDF (1-2YWA8DTZ) seeded with cached page-0 geometry.
+ *   - Authenticated, with a synced user library.
+ *   - The configured PDF attachment fixture is present and has cached page
+ *     geometry for headless annotation creation.
  *
  * Run: npm run test:live -- zoteroSearchExcludesAnnotations
  */
