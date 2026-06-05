@@ -137,7 +137,7 @@ export function useSlashMenu(inputRef: React.RefObject<HTMLTextAreaElement | nul
             if (group.iconInfo) {
                 headerItem.customContent = (
                     <span className="display-flex items-center gap-1 truncate">
-                        <span className="scale-80 flex-shrink-0 opacity-50" style={{ filter: 'grayscale(1)' }}>
+                        <span className="scale-80 flex-shrink-0" style={{ filter: 'grayscale(1)' }}>
                             {group.iconInfo.type === 'item-type'
                                 ? <CSSItemTypeIcon itemType={group.iconInfo.name} className="icon-16" />
                                 : <CSSIcon name={group.iconInfo.name} className="icon-16" />}

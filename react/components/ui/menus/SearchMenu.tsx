@@ -401,7 +401,7 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
                 <div
                     key={index}
                     role="presentation"
-                    className="px-2 py-1 font-color-tertiary text-sm font-semibold mt-1 first:mt-0"
+                    className="px-2 py-1 font-color-secondary text-sm font-semibold mt-1 first:mt-0"
                 >
                     {item.customContent ?? <span className="truncate">{item.label}</span>}
                 </div>
