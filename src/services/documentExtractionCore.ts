@@ -39,13 +39,14 @@ import { logger } from '../utils/logger';
 import { isAttachmentAvailableRemotely } from '../utils/webAPI';
 import { effectiveMaxFileSizeMB, effectiveMaxPageCount } from './attachmentLimits';
 import {
-    resolveToPdfAttachment,
+    resolveToReadableAttachment,
     validateZoteroItemReference,
     loadPdfData,
     checkRemotePdfSize,
     isRemoteAccessAvailable,
     preflightCachedPdfMeta,
 } from './documentExtraction';
+import { readableToExtractKind, type ExtractContentKind } from './documentExtraction/shared/contentKinds';
 
 export interface ResolvedAttachment {
     libraryId: number;
@@ -124,6 +125,7 @@ export type ExtractAndCacheResult =
           message: string;
           pageCount: number | null;
           resolvedAttachment: ResolvedAttachment | null;
+          contentKind?: ExtractContentKind;
       }
     | {
           kind: 'response_error';
@@ -131,6 +133,7 @@ export type ExtractAndCacheResult =
           message: string;
           pageCount: number | null;
           resolvedAttachment: ResolvedAttachment | null;
+          contentKind?: ExtractContentKind;
       }
     | {
           kind: 'timeout';
@@ -228,25 +231,49 @@ export async function extractAndCacheDocument(
         await zoteroItem.loadAllData();
         throwIfTimedOut('zotero_item_load');
 
-        const resolveResult = await resolveToPdfAttachment(zoteroItem, requestKey);
-        throwIfTimedOut('pdf_attachment_resolution');
+        const resolveResult = await resolveToReadableAttachment(zoteroItem, requestKey);
+        throwIfTimedOut('readable_attachment_resolution');
         if (!resolveResult.resolved) {
+            const code = resolveResult.error_code === 'not_readable'
+                ? 'unsupported_type'
+                : resolveResult.error_code;
             return {
                 kind: 'response_error',
-                code: resolveResult.error_code,
+                code,
                 message: resolveResult.error,
                 pageCount: null,
                 resolvedAttachment: null,
             };
         }
 
-        const { item: pdfItem } = resolveResult;
-        resolvedPdfItem = pdfItem;
+        const { item: resolvedItem, contentKind } = resolveResult;
         resolvedAttachment = {
-            libraryId: pdfItem.libraryID,
-            zoteroKey: pdfItem.key,
+            libraryId: resolvedItem.libraryID,
+            zoteroKey: resolvedItem.key,
         };
-        const resolvedKeyStr = `${pdfItem.libraryID}-${pdfItem.key}`;
+        const resolvedKeyStr = resolveResult.key;
+
+        switch (contentKind) {
+            case 'pdf':
+                break;
+            case 'epub':
+            case 'text':
+            case 'snapshot':
+            case 'image': {
+                const extractKind = readableToExtractKind(contentKind);
+                return {
+                    kind: 'response_error',
+                    code: 'unsupported_type',
+                    message: `Attachment ${resolvedKeyStr} is a ${contentKind} document, but document extraction currently supports PDF only.`,
+                    pageCount: null,
+                    resolvedAttachment,
+                    ...(extractKind ? { contentKind: extractKind } : {}),
+                };
+            }
+        }
+
+        const pdfItem = resolvedItem;
+        resolvedPdfItem = pdfItem;
 
         const rawFilePath = await pdfItem.getFilePathAsync();
         throwIfTimedOut('file_path_lookup');

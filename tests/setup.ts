@@ -192,6 +192,13 @@ function testRemoveDiacritics(s: string): string {
     Libraries: {
         getAll: vi.fn(() => [{ libraryID: 1 }]),
     },
+    Attachments: {
+        LINK_MODE_IMPORTED_FILE: 0,
+        LINK_MODE_IMPORTED_URL: 1,
+        LINK_MODE_LINKED_FILE: 2,
+        LINK_MODE_LINKED_URL: 3,
+        LINK_MODE_EMBEDDED_IMAGE: 4,
+    },
 };
 
 // Expose the test field/type IDs so tests can reuse them when seeding rows.

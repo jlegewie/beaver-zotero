@@ -28,6 +28,11 @@ export interface MockItemOptions {
     noteHTML?: string;
     attachmentContentType?: string;
     attachmentPath?: string;
+    attachmentLinkMode?: number;
+    fileExists?: boolean;
+    isPDFAttachment?: boolean;
+    isImageAttachment?: boolean;
+    isEPUBAttachment?: boolean;
 }
 
 /**
@@ -56,6 +61,11 @@ export function createMockItem(opts: MockItemOptions = {}) {
         noteHTML = '',
         attachmentContentType = '',
         attachmentPath = '',
+        attachmentLinkMode = (globalThis as any).Zotero?.Attachments?.LINK_MODE_IMPORTED_FILE ?? 0,
+        fileExists = true,
+        isPDFAttachment = isAttachment && attachmentContentType === 'application/pdf',
+        isImageAttachment = isAttachment && attachmentContentType.startsWith('image/'),
+        isEPUBAttachment = isAttachment && attachmentContentType === 'application/epub+zip',
     } = opts;
 
     return {
@@ -66,6 +76,7 @@ export function createMockItem(opts: MockItemOptions = {}) {
         parentID,
         attachmentContentType,
         attachmentPath,
+        attachmentLinkMode,
         getField: vi.fn((field: string) => fields[field] ?? ''),
         setField: vi.fn(),
         getCreators: vi.fn(() => creators),
@@ -76,10 +87,15 @@ export function createMockItem(opts: MockItemOptions = {}) {
         isAttachment: vi.fn(() => isAttachment),
         isNote: vi.fn(() => isNote),
         isRegularItem: vi.fn(() => isRegularItem),
+        isPDFAttachment: vi.fn(() => isPDFAttachment),
+        isImageAttachment: vi.fn(() => isImageAttachment),
+        isEPUBAttachment: vi.fn(() => isEPUBAttachment),
+        fileExists: vi.fn().mockResolvedValue(fileExists),
         getNote: vi.fn(() => noteHTML),
         setNote: vi.fn(),
         saveTx: vi.fn(),
         save: vi.fn(),
+        loadAllData: vi.fn(),
         loadDataType: vi.fn(),
         _loaded: { itemData: true },
     };
@@ -120,6 +136,11 @@ export interface MockAttachmentOptions {
     parentID?: number | null;
     contentType?: string;
     path?: string;
+    linkMode?: number;
+    fileExists?: boolean;
+    isPDF?: boolean;
+    isImage?: boolean;
+    isEPUB?: boolean;
 }
 
 /**
@@ -133,6 +154,11 @@ export function createMockAttachment(opts: MockAttachmentOptions = {}) {
         isRegularItem: false,
         attachmentContentType: contentType,
         attachmentPath: path,
+        attachmentLinkMode: opts.linkMode,
+        fileExists: opts.fileExists,
+        isPDFAttachment: opts.isPDF,
+        isImageAttachment: opts.isImage,
+        isEPUBAttachment: opts.isEPUB,
         ...rest,
     });
 }
