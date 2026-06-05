@@ -160,15 +160,15 @@ export async function handleZoteroSearchRequest(
             itemIds = itemIds.filter(id => matchingItemIds.has(id));
         }
 
-        // zotero_search has no annotation result shape. When the search could
-        // include annotation items — item_category 'all'/'annotation', or an
-        // explicit itemType condition — drop them from the full result set BEFORE
-        // counting and paginating, so total_count and page boundaries reflect only
-        // returnable items. The 'regular'/'note'/'attachment' categories already
-        // exclude annotations at the search level, so no extra fetch is needed there.
+        // zotero_search has no annotation result shape. When annotations can
+        // reach the result set, drop them BEFORE counting and paginating, so
+        // total_count and page boundaries reflect only returnable items.
         const itemCategory = request.item_category ?? 'regular';
         const mayContainAnnotations =
-            anyItemTypeCondition || itemCategory === 'all' || itemCategory === 'annotation';
+            request.join_mode === 'any'
+            || anyItemTypeCondition
+            || itemCategory === 'all'
+            || itemCategory === 'annotation';
         if (mayContainAnnotations) {
             const fetchedForAnnotationFilter = await Zotero.Items.getAsync(itemIds);
             const returnableItemIds = new Set<number>();
