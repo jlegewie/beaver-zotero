@@ -228,8 +228,9 @@ Retrieve full Zotero metadata for one or more items.
 |-----------|------|----------|-------------|
 | `item_ids` | `string[]` | Yes | Item IDs in `<library_id>-<zotero_key>` format. Maximum 25 items. |
 | `include_attachments` | `boolean` | No | Include attachment metadata. Default: false. |
+| `include_notes` | `boolean` | No | Include child notes. Default: false. |
 
-**Response**: JSON with `items[]` (full Zotero metadata per item) and `not_found[]` (IDs that couldn't be found). When `include_attachments` is true, each item includes `attachments[]` with `attachment_id`, `filename`, `content_type`, `page_count`, and `status`.
+**Response**: JSON with `items[]` (full Zotero metadata per item) and `not_found[]` (IDs that couldn't be found). When `include_attachments` is true, each item includes `attachments[]` with `attachment_id`, `filename`, `content_type`, `page_count`, and `status`. When `include_notes` is true, each item includes `notes[]` with `item_id`, `title`, `parent_item_id`, `parent_title`, and `date_modified`.
 
 **Underlying handler**: `handleGetMetadataRequest` from `src/services/agentDataProvider/`.
 
@@ -280,13 +281,14 @@ Browse items in the library, optionally filtered by collection or tag.
 | `library` | `string` | No | Library name or ID. Default: user's library. |
 | `collection` | `string` | No | Collection name or key. |
 | `tag` | `string` | No | Tag to filter by. |
+| `item_category` | `string` | No | Item type to return: "regular", "note", "attachment", "annotation", or "all". Default: "regular". |
 | `recursive` | `boolean` | No | Include subcollection items. Default: true. |
 | `sort_by` | `string` | No | Sort field: "dateAdded", "dateModified", "title", "creator", "year". Default: "dateModified". |
 | `sort_order` | `string` | No | "asc" or "desc". Default: "desc". |
 | `limit` | `integer` | No | Max results per page (default 20, max 100). |
 | `offset` | `integer` | No | Results to skip for pagination (default 0). |
 
-**Response**: JSON with `total_count`, `has_more`, `next_offset`, and `items[]`. Each item has `item_id`, `item_type`, `title`, `authors`, `year`, `date_added`, `date_modified`. Note: does not include attachment IDs — use `get_item_details` to get those.
+**Response**: JSON with `total_count`, `has_more`, `next_offset`, and `items[]`. Item shape depends on `item_category`: regular items have `item_id`, `item_type`, `title`, `authors`, `year`, `date_added`, `date_modified` (no attachment IDs — use `get_item_details` to get those); notes have `parent_item_id`, `parent_title`, `date_modified`; attachments have `filename`, `content_type`, `parent_item_id`, `parent_title`, `annotations_count`, `date_modified`.
 
 **Underlying handler**: `handleListItemsRequest` from `src/services/agentDataProvider/`.
 

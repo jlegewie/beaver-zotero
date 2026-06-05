@@ -43,6 +43,9 @@ import type {
     WSListItemsRequest,
     WSListItemsResponse,
     RegularListResultItem,
+    NoteResultItem,
+    AttachmentResultItem,
+    ZoteroItemCategory,
     ItemSearchFrontendResultItem,
 } from '../../src/services/agentProtocol';
 
@@ -300,7 +303,8 @@ const GET_ITEM_DETAILS_TOOL = {
         'Returns all Zotero fields for each item (title, authors, abstract, DOI, journal, volume, issue, pages, date, etc.), ' +
         'along with tags and collection memberships. Use this to get detailed metadata after finding items via search, ' +
         'or to look up specific fields like DOI or abstract. ' +
-        'Set `include_attachments` to true to also see which files (PDFs) are attached and their availability status.',
+        'Set `include_attachments` to true to also see which files (PDFs) are attached and their availability status. ' +
+        'Set `include_notes` to true to also fetch the child notes attached to each item.',
     inputSchema: {
         type: 'object' as const,
         properties: {
@@ -313,6 +317,11 @@ const GET_ITEM_DETAILS_TOOL = {
             include_attachments: {
                 type: 'boolean',
                 description: 'Whether to include attachment metadata (filenames, types, availability). Default: false.',
+                default: false,
+            },
+            include_notes: {
+                type: 'boolean',
+                description: 'Whether to include child notes (title, parent item, last modified) for each item. Default: false.',
                 default: false,
             },
         },
@@ -406,7 +415,9 @@ const LIST_ITEMS_TOOL = {
         'sorted by the specified field. Use this to enumerate what\'s in a specific collection, find recently added items, ' +
         'or get an overview of items with a particular tag. ' +
         'Filters are cumulative: specifying both collection and tag returns only items matching both criteria. ' +
-        'Note: this tool returns lightweight item metadata without attachment IDs. ' +
+        'By default only regular bibliographic items are returned; use `item_category` to list notes, attachments, ' +
+        'annotations, or all item types instead. ' +
+        'Note: for regular items this tool returns lightweight metadata without attachment IDs. ' +
         'To read an item\'s PDF, first call `get_item_details` with `include_attachments: true` to obtain the attachment ID, ' +
         'then call `read_attachment`.',
     inputSchema: {
@@ -423,6 +434,13 @@ const LIST_ITEMS_TOOL = {
             tag: {
                 type: 'string',
                 description: 'Tag to filter items by.',
+            },
+            item_category: {
+                type: 'string',
+                enum: ['regular', 'note', 'attachment', 'annotation', 'all'],
+                description:
+                    'Item type to return: "regular" (bibliographic items), "note", "attachment", "annotation", or "all". Default: "regular".',
+                default: 'regular',
             },
             recursive: {
                 type: 'boolean',
@@ -729,7 +747,7 @@ async function handleGetItemDetails(args: any): Promise<any> {
         request_id: generateRequestId(),
         item_ids: itemIds,
         include_attachments: args.include_attachments ?? false,
-        include_notes: false,
+        include_notes: args.include_notes ?? false,
     };
 
     const response: WSGetMetadataResponse = await handleGetMetadataRequest(wsRequest);
@@ -767,6 +785,15 @@ async function handleGetItemDetails(args: any): Promise<any> {
                 page_count: null,
                 annotations_count: a.annotations_count,
                 status: a.path ? 'available' : 'unavailable',
+            }));
+        }
+        if (item.notes && Array.isArray(item.notes)) {
+            item.notes = item.notes.map((n: any) => ({
+                item_id: n.item_id,
+                title: n.title || null,
+                parent_item_id: n.parent_item_id ?? null,
+                parent_title: n.parent_title ?? null,
+                date_modified: n.date_modified ?? null,
             }));
         }
         // Remove internal fields not useful for MCP consumers
@@ -884,13 +911,18 @@ async function handleListItems(args: any): Promise<any> {
     const sortBy = validSortFields.includes(args.sort_by) ? args.sort_by : 'dateModified';
     const sortOrder = args.sort_order === 'asc' ? 'asc' : 'desc';
 
+    const validCategories: ZoteroItemCategory[] = ['regular', 'note', 'attachment', 'annotation', 'all'];
+    const itemCategory: ZoteroItemCategory = validCategories.includes(args.item_category)
+        ? args.item_category
+        : 'regular';
+
     const wsRequest: WSListItemsRequest = {
         event: 'list_items_request',
         request_id: generateRequestId(),
         library_id: libraryId,
         collection_key: args.collection ?? null,
         tag: args.tag ?? null,
-        item_category: 'regular',
+        item_category: itemCategory,
         recursive: args.recursive ?? true,
         sort_by: sortBy,
         sort_order: sortOrder,
@@ -910,20 +942,52 @@ async function handleListItems(args: any): Promise<any> {
         total_count: response.total_count,
         has_more: hasMore,
         next_offset: hasMore ? offset + limit : null,
+        // With item_category other than 'regular', results can be notes or attachments,
+        // so format each item according to its result_type rather than assuming regular.
         items: response.items.map((item) => {
             const parsed = parseItemId(item.item_id);
             const zoteroUri = parsed ? getZoteroSelectURI(parsed.libraryId, parsed.key) : null;
-            // We always request item_category='regular', so items are RegularListResultItem
+            const uriField = zoteroUri ? { zotero_uri: zoteroUri } : {};
+
+            if (item.result_type === 'note') {
+                const note = item as NoteResultItem;
+                return {
+                    item_id: note.item_id,
+                    item_type: 'note',
+                    title: note.title ?? null,
+                    parent_item_id: note.parent_item_id ?? null,
+                    parent_title: note.parent_title ?? null,
+                    date_modified: note.date_modified ?? null,
+                    ...uriField,
+                };
+            }
+
+            if (item.result_type === 'attachment') {
+                const attachment = item as AttachmentResultItem;
+                return {
+                    item_id: attachment.item_id,
+                    item_type: 'attachment',
+                    title: attachment.title ?? null,
+                    filename: attachment.filename ?? null,
+                    content_type: attachment.content_type ?? null,
+                    parent_item_id: attachment.parent_item_id ?? null,
+                    parent_title: attachment.parent_title ?? null,
+                    annotations_count: attachment.annotations_count ?? null,
+                    date_modified: attachment.date_modified ?? null,
+                    ...uriField,
+                };
+            }
+
             const regular = item as RegularListResultItem;
             return {
-                item_id: item.item_id,
+                item_id: regular.item_id,
                 item_type: regular.item_type,
-                title: item.title ?? null,
+                title: regular.title ?? null,
                 authors: regular.creators ?? null,
                 year: regular.year ?? null,
                 date_added: regular.date_added ?? null,
                 date_modified: regular.date_modified ?? null,
-                ...(zoteroUri && { zotero_uri: zoteroUri }),
+                ...uriField,
             };
         }),
     };
