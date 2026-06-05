@@ -4,6 +4,7 @@ import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import { navigateToAnnotation } from '../../utils/readerUtils';
 import { getDisplayNameFromItem } from '../../utils/sourceUtils';
 import { logger } from '../../../src/utils/logger';
+import { AnnotationTooltip, getAnnotationTooltipIcon, getAnnotationTypeLabel } from './AnnotationTooltip';
 
 interface GetAnnotationsResultViewProps {
     annotations: ZoteroItemReference[];
@@ -71,8 +72,9 @@ const AnnotationRow: React.FC<AnnotationRowProps> = ({
     const hasText = Boolean(annotation.text);
     const pageText = annotation.pageLabel ? `Page ${annotation.pageLabel}` : '';
     const sourceLine = [annotation.sourceDisplayName, pageText].filter(Boolean).join(', ');
+    const tooltipBody = [annotation.text, annotation.comment].filter(Boolean).join('\n\n');
 
-    return (
+    const row = (
         <div
             className={`display-flex flex-row items-start gap-2 px-25 py-2 cursor-pointer rounded-sm transition user-select-none ${isHovered ? 'bg-quinary' : ''}`}
             onClick={onClick}
@@ -119,6 +121,19 @@ const AnnotationRow: React.FC<AnnotationRowProps> = ({
                 )}
             </div>
         </div>
+    );
+
+    return (
+        <AnnotationTooltip
+            typeLabel={getAnnotationTypeLabel(annotation.type)}
+            pageDisplay={annotation.pageLabel}
+            body={tooltipBody || primary}
+            footerLabel="Click to view in PDF"
+            typeIcon={getAnnotationTooltipIcon(annotation.type)}
+            stayOpenOnAnchorClick
+        >
+            {row}
+        </AnnotationTooltip>
     );
 };
 
