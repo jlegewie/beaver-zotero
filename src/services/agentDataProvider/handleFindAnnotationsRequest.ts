@@ -21,6 +21,13 @@ import {
 } from './utils';
 
 const MAX_ANNOTATION_SCAN = 5000;
+const FIND_ANNOTATIONS_TYPE_DB_IDS: Record<string, number> = {
+    highlight: ANNOTATION_TYPE_DB_IDS.highlight,
+    underline: ANNOTATION_TYPE_DB_IDS.underline,
+    note: ANNOTATION_TYPE_DB_IDS.note,
+};
+const FIND_ANNOTATIONS_TYPES = new Set(Object.keys(FIND_ANNOTATIONS_TYPE_DB_IDS));
+
 type AnnotationItem = Zotero.Item & {
     annotationType?: string;
     annotationText?: string;
@@ -332,12 +339,15 @@ async function queryAnnotationIDsFromDB(options: {
     }
 
     if (options.annotationType) {
-        const typeID = ANNOTATION_TYPE_DB_IDS[options.annotationType];
+        const typeID = FIND_ANNOTATIONS_TYPE_DB_IDS[options.annotationType];
         if (!typeID) {
             return { ids: [], totalCount: 0, note: null, invalidAnnotationType: true };
         }
         where.push('IA.type = ?');
         params.push(typeID);
+    } else {
+        where.push(`IA.type IN (${Object.values(FIND_ANNOTATIONS_TYPE_DB_IDS).map(() => '?').join(', ')})`);
+        params.push(...Object.values(FIND_ANNOTATIONS_TYPE_DB_IDS));
     }
 
     if (options.author) {
@@ -491,6 +501,13 @@ export async function handleFindAnnotationsRequest(
         }
 
         const annotationType = cleanString(request.annotation_type);
+        if (annotationType && !FIND_ANNOTATIONS_TYPES.has(annotationType)) {
+            return invalidResponse(
+                request,
+                `Unsupported annotation type for find_annotations: ${annotationType}. Supported types are: highlight, underline, note.`,
+                'invalid_annotation_type',
+            );
+        }
         const author = cleanString(request.author)?.toLowerCase() ?? null;
         const sortBy = request.sort_by || 'date_modified';
         const sortOrder = request.sort_order === 'asc' ? 'asc' : 'desc';
@@ -553,6 +570,8 @@ export async function handleFindAnnotationsRequest(
         }
         if (annotationType) {
             candidates = candidates.filter(annotation => annotation.annotationType === annotationType);
+        } else {
+            candidates = candidates.filter(annotation => FIND_ANNOTATIONS_TYPES.has(annotation.annotationType || ''));
         }
         if (author) {
             candidates = candidates.filter(annotation => (annotation.annotationAuthorName || '').toLowerCase().includes(author));
