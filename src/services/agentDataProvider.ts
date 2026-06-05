@@ -19,6 +19,7 @@ export { handleZoteroSearchRequest } from './agentDataProvider/handleZoteroSearc
 export { handleListItemsRequest } from './agentDataProvider/handleListItemsRequest';
 export { handleGetMetadataRequest } from './agentDataProvider/handleGetMetadataRequest';
 export { handleGetAnnotationsRequest } from './agentDataProvider/handleGetAnnotationsRequest';
+export { handleFindAnnotationsRequest } from './agentDataProvider/handleFindAnnotationsRequest';
 export { handleListCollectionsRequest } from './agentDataProvider/handleListCollectionsRequest';
 export { handleListTagsRequest } from './agentDataProvider/handleListTagsRequest';
 export { handleListLibrariesRequest } from './agentDataProvider/handleListLibrariesRequest';

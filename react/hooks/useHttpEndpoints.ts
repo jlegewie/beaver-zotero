@@ -35,6 +35,7 @@ import {
     handleZoteroSearchRequest,
     handleListItemsRequest,
     handleGetMetadataRequest,
+    handleFindAnnotationsRequest,
     handleListLibrariesRequest,
     handleListCollectionsRequest,
     handleListTagsRequest,
@@ -108,6 +109,7 @@ import type {
     WSZoteroSearchRequest,
     WSListItemsRequest,
     WSGetMetadataRequest,
+    WSFindAnnotationsRequest,
     WSListLibrariesRequest,
     WSListCollectionsRequest,
     WSListTagsRequest,
@@ -150,6 +152,7 @@ const ENDPOINT_PATHS = [
     '/beaver/library/search',
     '/beaver/library/list',
     '/beaver/library/metadata',
+    '/beaver/library/find-annotations',
     '/beaver/library/libraries',
     '/beaver/library/collections',
     '/beaver/library/tags',
@@ -495,6 +498,39 @@ async function handleLibraryMetadataHttpRequest(request: any) {
     };
 }
 
+async function handleFindAnnotationsHttpRequest(request: any) {
+    const wsRequest: WSFindAnnotationsRequest = {
+        event: 'find_annotations_request',
+        request_id: generateRequestId(),
+        text_contains: request.text_contains,
+        comment_contains: request.comment_contains,
+        tag: request.tag,
+        color: request.color,
+        annotation_type: request.annotation_type,
+        author: request.author,
+        attachment_id: request.attachment_id,
+        collection: request.collection,
+        recursive: request.recursive ?? true,
+        library_id: request.library_id,
+        modified_in_last: request.modified_in_last,
+        sort_by: request.sort_by ?? 'date_modified',
+        sort_order: request.sort_order ?? 'desc',
+        limit: request.limit ?? 25,
+        offset: request.offset ?? 0,
+    };
+
+    const response = await handleFindAnnotationsRequest(wsRequest);
+
+    return {
+        annotations: response.annotations,
+        total_count: response.total_count,
+        note: response.note,
+        error: response.error,
+        error_code: response.error_code,
+        available_libraries: response.available_libraries,
+    };
+}
+
 async function handleListLibrariesHttpRequest(_request: any) {
     const wsRequest: WSListLibrariesRequest = {
         event: 'list_libraries_request',
@@ -661,6 +697,9 @@ function registerEndpoints(): boolean {
     
     Zotero.Server.Endpoints['/beaver/library/metadata'] =
         createEndpoint(handleLibraryMetadataHttpRequest);
+
+    Zotero.Server.Endpoints['/beaver/library/find-annotations'] =
+        createEndpoint(handleFindAnnotationsHttpRequest);
 
     Zotero.Server.Endpoints['/beaver/library/libraries'] =
         createEndpoint(handleListLibrariesHttpRequest);

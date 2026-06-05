@@ -813,12 +813,15 @@ export interface AnnotationResultItem {
     page?: number | null;
     /** Tag names attached to the annotation. */
     tags?: string[];
+    /** Annotation author, when Zotero stores one. */
+    author?: string | null;
     /** Parent attachment id ("library_id-zotero_key"). */
     attachment_id?: string | null;
     /** Bibliographic regular item id ("library_id-zotero_key"). */
     item_id?: string | null;
     /** Title of the bibliographic regular item. */
     item_title?: string | null;
+    date_added?: string | null;
     date_modified?: string | null;
 }
 
@@ -927,6 +930,39 @@ export interface WSGetAnnotationsResponse {
     total_count: number;
     error?: string | null;
     error_code?: string | null;
+}
+
+/** Request from backend for library-wide annotation search */
+export interface WSFindAnnotationsRequest extends WSBaseEvent {
+    event: 'find_annotations_request';
+    request_id: string;
+    text_contains?: string | null;
+    comment_contains?: string | null;
+    tag?: string | null;
+    color?: string | null;
+    annotation_type?: string | null;
+    author?: string | null;
+    attachment_id?: string | null;
+    collection?: string | null;
+    recursive: boolean;
+    library_id?: number | string | null;
+    modified_in_last?: string | null;
+    sort_by: 'date_modified' | 'date_added' | 'reading_order';
+    sort_order: 'asc' | 'desc';
+    limit: number;
+    offset: number;
+}
+
+/** Response to find_annotations request */
+export interface WSFindAnnotationsResponse {
+    type: 'find_annotations';
+    request_id: string;
+    annotations: AnnotationResultItem[];
+    total_count: number;
+    note?: string | null;
+    error?: string | null;
+    error_code?: string | null;
+    available_libraries?: AvailableLibraryInfo[] | null;
 }
 
 // =============================================================================
@@ -1200,6 +1236,7 @@ export type WSEvent =
     | WSListTagsRequest
     | WSGetMetadataRequest
     | WSGetAnnotationsRequest
+    | WSFindAnnotationsRequest
     | WSListLibrariesRequest
     // Note tools
     | WSReadNoteRequest
