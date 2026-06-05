@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+    extractAnnotationAttachmentId,
     extractGetAnnotationsData,
     extractListCollectionsData,
     isGetAnnotationsResult,
@@ -237,7 +238,23 @@ describe('find_annotations dehydrated summary', () => {
         expect(extractGetAnnotationsData(undefined, metadata)).toEqual({
             annotations: [{ library_id: 1, zotero_key: 'ANN12345' }],
             totalCount: 3,
-            attachmentId: null,
+            toolName: 'find_annotations',
         });
+    });
+});
+
+describe('extractAnnotationAttachmentId', () => {
+    it('reads attachment_id from object args', () => {
+        expect(extractAnnotationAttachmentId({ attachment_id: '1-ABCDEFGH' })).toBe('1-ABCDEFGH');
+    });
+
+    it('reads attachment_id from JSON string args', () => {
+        expect(extractAnnotationAttachmentId('{"attachment_id":"1-ABCDEFGH"}')).toBe('1-ABCDEFGH');
+    });
+
+    it('returns null when args are unparseable or unscoped', () => {
+        expect(extractAnnotationAttachmentId('{')).toBeNull();
+        expect(extractAnnotationAttachmentId({ text_contains: 'foo' })).toBeNull();
+        expect(extractAnnotationAttachmentId(null)).toBeNull();
     });
 });
