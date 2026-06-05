@@ -21,6 +21,9 @@ const mockHandleGetMetadataRequest = vi.fn();
 const mockHandleListCollectionsRequest = vi.fn();
 const mockHandleListTagsRequest = vi.fn();
 const mockHandleListItemsRequest = vi.fn();
+const mockHandleReadNoteRequest = vi.fn();
+const mockValidateCreateNoteAction = vi.fn();
+const mockExecuteCreateNoteAction = vi.fn();
 
 vi.mock('../../../src/services/agentDataProvider', () => ({
     handleItemSearchByTopicRequest: (...args: any[]) => mockHandleItemSearchByTopicRequest(...args),
@@ -30,6 +33,9 @@ vi.mock('../../../src/services/agentDataProvider', () => ({
     handleListCollectionsRequest: (...args: any[]) => mockHandleListCollectionsRequest(...args),
     handleListTagsRequest: (...args: any[]) => mockHandleListTagsRequest(...args),
     handleListItemsRequest: (...args: any[]) => mockHandleListItemsRequest(...args),
+    handleReadNoteRequest: (...args: any[]) => mockHandleReadNoteRequest(...args),
+    validateCreateNoteAction: (...args: any[]) => mockValidateCreateNoteAction(...args),
+    executeCreateNoteAction: (...args: any[]) => mockExecuteCreateNoteAction(...args),
 }));
 
 vi.mock('../../../src/utils/zoteroUtils', () => ({
@@ -202,18 +208,20 @@ describe('MCP Tool Handlers (via useMcpServer)', () => {
     // =====================================================================
 
     describe('tool registration', () => {
-        it('registers all 7 tools', async () => {
+        it('registers all 9 tools', async () => {
             const result = await listTools(endpoint);
             const names = result.tools.map((t: any) => t.name);
 
             expect(names).toContain('search_by_topic');
             expect(names).toContain('search_by_metadata');
             expect(names).toContain('read_attachment');
+            expect(names).toContain('read_note');
+            expect(names).toContain('create_note');
             expect(names).toContain('get_item_details');
             expect(names).toContain('list_collections');
             expect(names).toContain('list_tags');
             expect(names).toContain('list_items');
-            expect(result.tools).toHaveLength(7);
+            expect(result.tools).toHaveLength(9);
         });
 
         it('each tool has name, description, and inputSchema', async () => {
@@ -226,6 +234,25 @@ describe('MCP Tool Handlers (via useMcpServer)', () => {
                 expect(tool.inputSchema).toBeDefined();
                 expect(tool.inputSchema.type).toBe('object');
             }
+        });
+
+        it('advertises MCP tool annotations', async () => {
+            const result = await listTools(endpoint);
+            const readNoteTool = result.tools.find((tool: any) => tool.name === 'read_note');
+            const createNoteTool = result.tools.find((tool: any) => tool.name === 'create_note');
+
+            expect(readNoteTool?.annotations).toMatchObject({
+                readOnlyHint: true,
+                destructiveHint: false,
+                idempotentHint: true,
+                openWorldHint: false,
+            });
+            expect(createNoteTool?.annotations).toMatchObject({
+                readOnlyHint: false,
+                destructiveHint: false,
+                idempotentHint: false,
+                openWorldHint: false,
+            });
         });
 
         it('does not advertise annotations for list_items item_category', async () => {
@@ -962,6 +989,217 @@ describe('MCP Tool Handlers (via useMcpServer)', () => {
     });
 
     // =====================================================================
+    // read_note
+    // =====================================================================
+
+    describe('read_note', () => {
+        it('passes note_id and pagination arguments to handler', async () => {
+            mockHandleReadNoteRequest.mockResolvedValue({
+                success: true,
+                note_id: '1-NOTEKEY1',
+                content: '<p>Note text</p>',
+            });
+
+            await callTool(endpoint, 'read_note', {
+                note_id: '1-NOTEKEY1',
+                offset: 5,
+                limit: 10,
+            });
+
+            const req = mockHandleReadNoteRequest.mock.calls[0][0];
+            expect(req.event).toBe('read_note_request');
+            expect(req.note_id).toBe('1-NOTEKEY1');
+            expect(req.offset).toBe(5);
+            expect(req.limit).toBe(10);
+        });
+
+        it('returns error when note_id is missing', async () => {
+            const result = await callTool(endpoint, 'read_note', {});
+
+            expect(result.isError).toBe(true);
+            expect(result.content[0].text).toContain('note_id is required');
+            expect(mockHandleReadNoteRequest).not.toHaveBeenCalled();
+        });
+
+        it('formats read note response with cited items', async () => {
+            mockHandleReadNoteRequest.mockResolvedValue({
+                success: true,
+                note_id: '1-NOTEKEY1',
+                title: 'Synthesis note',
+                parent_item_id: '1-PARENT1',
+                parent_title: 'Parent Paper',
+                total_lines: 20,
+                lines_returned: 5,
+                has_more: true,
+                next_offset: 6,
+                content: '<p>Note text</p>',
+                cited_items: [{
+                    library_id: 1,
+                    zotero_key: 'ITEMKEY1',
+                    item_type: 'journalArticle',
+                    title: 'Cited Paper',
+                }],
+            });
+
+            const result = await callTool(endpoint, 'read_note', { note_id: '1-NOTEKEY1' });
+            const data = JSON.parse(result.content[0].text);
+
+            expect(data).toMatchObject({
+                note_id: '1-NOTEKEY1',
+                title: 'Synthesis note',
+                parent_item_id: '1-PARENT1',
+                parent_title: 'Parent Paper',
+                total_lines: 20,
+                lines_returned: 5,
+                has_more: true,
+                next_offset: 6,
+                content: '<p>Note text</p>',
+            });
+            expect(data.cited_items).toEqual([{
+                item_id: '1-ITEMKEY1',
+                item_type: 'journalArticle',
+                title: 'Cited Paper',
+            }]);
+        });
+
+        it('returns error on backend failure', async () => {
+            mockHandleReadNoteRequest.mockResolvedValue({
+                success: false,
+                error: 'Note not found',
+            });
+
+            const result = await callTool(endpoint, 'read_note', { note_id: '1-MISSING' });
+
+            expect(result.isError).toBe(true);
+            expect(result.content[0].text).toContain('Note not found');
+        });
+    });
+
+    // =====================================================================
+    // create_note
+    // =====================================================================
+
+    describe('create_note', () => {
+        it('validates and executes create_note action', async () => {
+            mockValidateCreateNoteAction.mockResolvedValue({
+                valid: true,
+                normalized_action_data: {
+                    library: '1',
+                    collection: 'COL1',
+                },
+            });
+            mockExecuteCreateNoteAction.mockResolvedValue({
+                success: true,
+                result_data: {
+                    library_id: 1,
+                    zotero_key: 'NOTEKEY1',
+                    collection_key: 'COL1',
+                    note_content: '<h1>Summary</h1>',
+                    cited_items_data: {
+                        invalid_keys: [],
+                        errors: [],
+                    },
+                },
+            });
+
+            const result = await callTool(endpoint, 'create_note', {
+                title: ' Summary ',
+                content: 'Body with <citation id="1-ITEMKEY1"/>',
+                library: 'My Library',
+                collection: 'COL1',
+            });
+            const data = JSON.parse(result.content[0].text);
+
+            const validateReq = mockValidateCreateNoteAction.mock.calls[0][0];
+            expect(validateReq.event).toBe('agent_action_validate');
+            expect(validateReq.action_type).toBe('create_note');
+            expect(validateReq.action_data).toEqual({
+                title: 'Summary',
+                content: 'Body with <citation id="1-ITEMKEY1"/>',
+                parent_item_id: undefined,
+                library: 'My Library',
+                collection: 'COL1',
+            });
+
+            const executeReq = mockExecuteCreateNoteAction.mock.calls[0][0];
+            expect(executeReq.event).toBe('agent_action_execute');
+            expect(executeReq.action_data).toMatchObject({
+                title: 'Summary',
+                library: '1',
+                collection: 'COL1',
+            });
+            expect(mockExecuteCreateNoteAction.mock.calls[0][1]).toMatchObject({
+                timeoutSeconds: 120,
+            });
+            expect(data).toMatchObject({
+                note_id: '1-NOTEKEY1',
+                collection_key: 'COL1',
+                note_content: '<h1>Summary</h1>',
+                citation_issues: {
+                    invalid_keys: [],
+                    errors: [],
+                },
+            });
+        });
+
+        it('omits collection when creating a child note', async () => {
+            mockValidateCreateNoteAction.mockResolvedValue({ valid: true });
+            mockExecuteCreateNoteAction.mockResolvedValue({
+                success: true,
+                result_data: {
+                    library_id: 1,
+                    zotero_key: 'NOTEKEY1',
+                    parent_key: 'PARENT1',
+                },
+            });
+
+            const result = await callTool(endpoint, 'create_note', {
+                title: 'Child note',
+                content: 'Body',
+                parent_id: '1-PARENT1',
+                collection: 'COL1',
+            });
+            const data = JSON.parse(result.content[0].text);
+
+            expect(mockValidateCreateNoteAction.mock.calls[0][0].action_data.collection).toBeUndefined();
+            expect(data.parent_item_id).toBe('1-PARENT1');
+        });
+
+        it('returns error when validation fails', async () => {
+            mockValidateCreateNoteAction.mockResolvedValue({
+                valid: false,
+                error: 'Invalid citation',
+            });
+
+            const result = await callTool(endpoint, 'create_note', {
+                title: 'Bad note',
+                content: '<citation id="bad"/>',
+            });
+
+            expect(result.isError).toBe(true);
+            expect(result.content[0].text).toContain('Invalid citation');
+            expect(mockExecuteCreateNoteAction).not.toHaveBeenCalled();
+        });
+
+        it('returns error for blank title or content', async () => {
+            const missingTitle = await callTool(endpoint, 'create_note', {
+                title: '   ',
+                content: 'Body',
+            });
+            const missingContent = await callTool(endpoint, 'create_note', {
+                title: 'Title',
+                content: '   ',
+            });
+
+            expect(missingTitle.isError).toBe(true);
+            expect(missingTitle.content[0].text).toContain('title is required');
+            expect(missingContent.isError).toBe(true);
+            expect(missingContent.content[0].text).toContain('content is required');
+            expect(mockValidateCreateNoteAction).not.toHaveBeenCalled();
+        });
+    });
+
+    // =====================================================================
     // get_item_details
     // =====================================================================
 
@@ -1010,7 +1248,7 @@ describe('MCP Tool Handlers (via useMcpServer)', () => {
             expect(req.include_attachments).toBe(true);
         });
 
-        it('always sets include_notes to false', async () => {
+        it('defaults include_notes to false', async () => {
             mockHandleGetMetadataRequest.mockResolvedValue({
                 type: 'get_metadata',
                 items: [],
@@ -1021,6 +1259,22 @@ describe('MCP Tool Handlers (via useMcpServer)', () => {
 
             const req = mockHandleGetMetadataRequest.mock.calls[0][0];
             expect(req.include_notes).toBe(false);
+        });
+
+        it('passes include_notes=true', async () => {
+            mockHandleGetMetadataRequest.mockResolvedValue({
+                type: 'get_metadata',
+                items: [],
+                not_found: [],
+            });
+
+            await callTool(endpoint, 'get_item_details', {
+                item_ids: ['1-KEY'],
+                include_notes: true,
+            });
+
+            const req = mockHandleGetMetadataRequest.mock.calls[0][0];
+            expect(req.include_notes).toBe(true);
         });
 
         it('returns error for empty item_ids', async () => {
@@ -1128,6 +1382,37 @@ describe('MCP Tool Handlers (via useMcpServer)', () => {
             const data = JSON.parse(result.content[0].text);
 
             expect(data.items[0].attachments[0].status).toBe('unavailable');
+        });
+
+        it('transforms child notes when requested', async () => {
+            mockHandleGetMetadataRequest.mockResolvedValue({
+                type: 'get_metadata',
+                items: [{
+                    item_id: '1-KEY1',
+                    notes: [{
+                        item_id: '1-NOTE1',
+                        title: '',
+                        parent_item_id: '1-KEY1',
+                        parent_title: 'Parent Paper',
+                        date_modified: '2026-06-05T10:00:00Z',
+                    }],
+                }],
+                not_found: [],
+            });
+
+            const result = await callTool(endpoint, 'get_item_details', {
+                item_ids: ['1-KEY1'],
+                include_notes: true,
+            });
+            const data = JSON.parse(result.content[0].text);
+
+            expect(data.items[0].notes).toEqual([{
+                item_id: '1-NOTE1',
+                title: null,
+                parent_item_id: '1-KEY1',
+                parent_title: 'Parent Paper',
+                date_modified: '2026-06-05T10:00:00Z',
+            }]);
         });
 
         it('includes not_found in response', async () => {
@@ -1657,6 +1942,25 @@ describe('MCP Tool Handlers (via useMcpServer)', () => {
             expect(req.item_category).toBe('regular');
         });
 
+        it('passes valid item_category values', async () => {
+            for (const itemCategory of ['regular', 'note', 'attachment', 'all']) {
+                vi.clearAllMocks();
+                zotero.Server = { Endpoints: {} };
+                endpoint = setupMcpEndpoint();
+
+                mockHandleListItemsRequest.mockResolvedValue({
+                    type: 'list_items',
+                    items: [],
+                    total_count: 0,
+                });
+
+                await callTool(endpoint, 'list_items', { item_category: itemCategory });
+
+                const req = mockHandleListItemsRequest.mock.calls[0][0];
+                expect(req.item_category).toBe(itemCategory);
+            }
+        });
+
         it('accepts all valid sort_by values', async () => {
             for (const sortBy of ['dateAdded', 'dateModified', 'title', 'creator', 'year']) {
                 vi.clearAllMocks();
@@ -1715,7 +2019,7 @@ describe('MCP Tool Handlers (via useMcpServer)', () => {
             expect(req.sort_order).toBe('desc');
         });
 
-        it('always sets item_category to regular', async () => {
+        it('defaults item_category to regular', async () => {
             mockHandleListItemsRequest.mockResolvedValue({
                 type: 'list_items',
                 items: [],
@@ -1756,6 +2060,68 @@ describe('MCP Tool Handlers (via useMcpServer)', () => {
             expect(data.items[0].date_added).toBe('2022-01-15');
             expect(data.items[0].date_modified).toBe('2022-06-20');
             expect(data.items[0].zotero_uri).toContain('KEY1');
+        });
+
+        it('formats note items', async () => {
+            mockHandleListItemsRequest.mockResolvedValue({
+                type: 'list_items',
+                items: [{
+                    item_id: '1-NOTE1',
+                    result_type: 'note',
+                    title: 'Reading note',
+                    parent_item_id: '1-PARENT1',
+                    parent_title: 'Parent Paper',
+                    date_modified: '2026-06-05T10:00:00Z',
+                }],
+                total_count: 1,
+            });
+
+            const result = await callTool(endpoint, 'list_items', { item_category: 'note' });
+            const data = JSON.parse(result.content[0].text);
+
+            expect(data.items[0]).toMatchObject({
+                item_id: '1-NOTE1',
+                item_type: 'note',
+                title: 'Reading note',
+                parent_item_id: '1-PARENT1',
+                parent_title: 'Parent Paper',
+                date_modified: '2026-06-05T10:00:00Z',
+            });
+            expect(data.items[0].zotero_uri).toContain('NOTE1');
+        });
+
+        it('formats attachment items', async () => {
+            mockHandleListItemsRequest.mockResolvedValue({
+                type: 'list_items',
+                items: [{
+                    item_id: '1-ATT1',
+                    result_type: 'attachment',
+                    title: 'Supplement',
+                    filename: 'supplement.pdf',
+                    content_type: 'application/pdf',
+                    parent_item_id: '1-PARENT1',
+                    parent_title: 'Parent Paper',
+                    annotations_count: 3,
+                    date_modified: '2026-06-05T11:00:00Z',
+                }],
+                total_count: 1,
+            });
+
+            const result = await callTool(endpoint, 'list_items', { item_category: 'attachment' });
+            const data = JSON.parse(result.content[0].text);
+
+            expect(data.items[0]).toMatchObject({
+                item_id: '1-ATT1',
+                item_type: 'attachment',
+                title: 'Supplement',
+                filename: 'supplement.pdf',
+                content_type: 'application/pdf',
+                parent_item_id: '1-PARENT1',
+                parent_title: 'Parent Paper',
+                annotations_count: 3,
+                date_modified: '2026-06-05T11:00:00Z',
+            });
+            expect(data.items[0].zotero_uri).toContain('ATT1');
         });
 
         it('calculates pagination', async () => {
