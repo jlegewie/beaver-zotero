@@ -58,6 +58,7 @@ const TOOL_ICONS: Record<string, IconComponent> = {
 
     // Annotation tools
     get_annotations: HighlighterIcon,
+    find_annotations: HighlighterIcon,
 
     // Reading tools
     search_in_documents: TextAlignLeftIcon,

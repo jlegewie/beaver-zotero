@@ -2,7 +2,10 @@
  * Handle find_annotations requests from the backend.
  */
 
-import { BEAVER_ANNOTATION_COLORS } from '../../constants/annotations';
+import {
+    ANNOTATION_TYPE_DB_IDS,
+    ZOTERO_ANNOTATION_PALETTE_COLORS,
+} from '../../constants/annotations';
 import { logger } from '../../utils/logger';
 import { serializeAnnotation } from '../../utils/zoteroSerializers';
 import {
@@ -18,15 +21,6 @@ import {
 } from './utils';
 
 const MAX_ANNOTATION_SCAN = 5000;
-const ANNOTATION_TYPE_DB_IDS: Record<string, number> = {
-    highlight: 1,
-    note: 2,
-    image: 3,
-    ink: 4,
-    underline: 5,
-    text: 6,
-};
-
 type AnnotationItem = Zotero.Item & {
     annotationType?: string;
     annotationText?: string;
@@ -483,7 +477,7 @@ export async function handleFindAnnotationsRequest(
         }
 
         const colorName = cleanString(request.color);
-        const colorHex = colorName ? BEAVER_ANNOTATION_COLORS[colorName] : null;
+        const colorHex = colorName ? ZOTERO_ANNOTATION_PALETTE_COLORS[colorName] : null;
         if (colorName && !colorHex) {
             return invalidResponse(request, `Unknown annotation color: ${colorName}`, 'invalid_color');
         }
@@ -566,12 +560,7 @@ export async function handleFindAnnotationsRequest(
 
         candidates = sortAnnotations(candidates, sortBy, sortOrder);
 
-        let note: string | null = null;
-        if (!hasNarrowingFilter(request) && candidates.length > MAX_ANNOTATION_SCAN) {
-            candidates = candidates.slice(0, MAX_ANNOTATION_SCAN);
-            note = `Result set was truncated to the most relevant ${MAX_ANNOTATION_SCAN} annotations before pagination. Add a filter to scan the full matching set.`;
-        }
-
+        const note: string | null = null;
         const totalCount = candidates.length;
         const page = candidates.slice(offset, offset + limit);
         return serializeAnnotationPage(request, page, totalCount, note);

@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { extractListCollectionsData } from '../../../react/agents/toolResultTypes';
+import {
+    extractGetAnnotationsData,
+    extractListCollectionsData,
+    isGetAnnotationsResult,
+} from '../../../react/agents/toolResultTypes';
 
 /**
  * extractListCollectionsData is the boundary that normalizes backend
@@ -210,6 +214,30 @@ describe('extractListCollectionsData', () => {
 
             expect(result).not.toBeNull();
             expect(result?.collections).toEqual([]);
+        });
+    });
+});
+
+describe('find_annotations dehydrated summary', () => {
+    const metadata = {
+        summary: {
+            tool_name: 'find_annotations',
+            result_count: 1,
+            total_count: 3,
+            has_more: true,
+            annotations: [{ library_id: 1, zotero_key: 'ANN12345' }],
+        },
+    };
+
+    it('routes find_annotations through the annotation result guard', () => {
+        expect(isGetAnnotationsResult('find_annotations', undefined, metadata)).toBe(true);
+    });
+
+    it('extracts annotation references without requiring attachment scope', () => {
+        expect(extractGetAnnotationsData(undefined, metadata)).toEqual({
+            annotations: [{ library_id: 1, zotero_key: 'ANN12345' }],
+            totalCount: 3,
+            attachmentId: null,
         });
     });
 });
