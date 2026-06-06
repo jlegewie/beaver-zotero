@@ -45,7 +45,9 @@ export type {
 // ---------------------------------------------------------------------------
 
 const REMOTE_FAILURE_NOTIFY_INTERVAL_MS = 8 * 60 * 60 * 1000;
+const REMOTE_NOT_SYNCED_NOTIFY_INTERVAL_MS = 8 * 60 * 60 * 1000;
 let _remoteDownloadFailureLastNotifiedAt = 0;
+let _remoteNotSyncedLastNotifiedAt = 0;
 
 const DISABLE_HINT = 'You can disable Beaver\'s remote file access in Settings \u203A Permissions.';
 
@@ -148,6 +150,25 @@ export function notifyRemoteDownloadFailure(error: unknown): void {
         });
     } catch (error) {
         logger(`notifyRemoteDownloadFailure: failed to surface popup: ${error}`, 2);
+    }
+}
+
+export function notifyRemoteFileNotSynced(): void {
+    const now = Date.now();
+    if (now - _remoteNotSyncedLastNotifiedAt < REMOTE_NOT_SYNCED_NOTIFY_INTERVAL_MS) return;
+    _remoteNotSyncedLastNotifiedAt = now;
+
+    try {
+        store.set(addPopupMessageAtom, {
+            id: 'remote-file-not-synced',
+            type: 'warning',
+            title: 'File Not Synced Locally',
+            text: 'This file is available remotely, but Beaver can only read it after Zotero syncs it locally. Sync the file in Zotero and try again. '
+                + DISABLE_HINT,
+            expire: false,
+        });
+    } catch (error) {
+        logger(`notifyRemoteFileNotSynced: failed to surface popup: ${error}`, 2);
     }
 }
 

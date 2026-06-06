@@ -8,13 +8,38 @@ import {
     EPUB_CONTENT_KIND,
     EPUB_SCHEMA_VERSION,
     type EpubDocument,
+    type ExtractEpubResult,
 } from "./schema";
+import { effectiveMaxFileSizeMB } from "../../attachmentLimits";
+import { isRemoteAccessAvailable } from "../attachmentSource";
 
 interface ZoteroEpubModule {
     EPUB: new (filePath: string) => {
         getSectionDocuments(): AsyncIterable<{ href: string; doc: XMLDocument | Document }>;
         close(): void;
     };
+}
+
+export interface ExtractEpubDocumentOptions {
+    maxFileSizeMB?: number | null;
+    onFileNotSyncedLocally?: () => void;
+}
+
+type EpubResponseError = Extract<ExtractEpubResult, { kind: "response_error" }>;
+
+function responseError(
+    code: EpubResponseError["code"],
+    message: string,
+): ExtractEpubResult {
+    return { kind: "response_error", code, message };
+}
+
+function getErrorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error ?? "Unknown error");
+}
+
+function formatMB(value: number): string {
+    return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }
 
 /** Extract a local Zotero EPUB attachment into Beaver's section-based schema. */
@@ -58,6 +83,85 @@ export async function extractEpubDocument(item: Zotero.Item): Promise<EpubDocume
         sections,
         citationIndex: buildDomCitationIndex(sections),
     };
+}
+
+/** Extract an EPUB attachment with request-safe preflight and error responses. */
+export async function extractEpubDocumentSafe(
+    item: Zotero.Item,
+    options?: ExtractEpubDocumentOptions,
+): Promise<ExtractEpubResult> {
+    let isEpub = false;
+    try {
+        isEpub = isEpubAttachment(item);
+    } catch (error) {
+        return responseError(
+            "unsupported_type",
+            `Unable to determine whether the attachment is an EPUB: ${getErrorMessage(error)}`,
+        );
+    }
+
+    if (!isEpub) {
+        return responseError("unsupported_type", "Attachment is not an EPUB file.");
+    }
+
+    let filePath: string | null = null;
+    try {
+        filePath = await item.getFilePathAsync() || null;
+    } catch (error) {
+        return responseError(
+            "extraction_failed",
+            `Failed to resolve the EPUB attachment file path: ${getErrorMessage(error)}`,
+        );
+    }
+
+    if (!filePath) {
+        let remoteAvailable = false;
+        try {
+            remoteAvailable = isRemoteAccessAvailable(item);
+        } catch {
+            remoteAvailable = false;
+        }
+
+        if (remoteAvailable) {
+            try {
+                options?.onFileNotSyncedLocally?.();
+            } catch {
+                // Notification callbacks must never change extraction results.
+            }
+            return responseError(
+                "file_missing",
+                "The EPUB file is available remotely but is not synced locally. Sync it in Zotero so Beaver can read it.",
+            );
+        }
+
+        return responseError("file_missing", "The EPUB file is not available locally.");
+    }
+
+    const maxFileSizeMB = effectiveMaxFileSizeMB(options?.maxFileSizeMB);
+    try {
+        const stat = await IOUtils.stat(filePath);
+        const sizeMB = typeof stat.size === "number" ? stat.size / 1024 / 1024 : null;
+        if (sizeMB != null && sizeMB > maxFileSizeMB) {
+            return responseError(
+                "file_too_large",
+                `The EPUB file is ${formatMB(sizeMB)} MB, which exceeds the ${formatMB(maxFileSizeMB)} MB limit.`,
+            );
+        }
+    } catch (error) {
+        if ((error as { name?: string } | null)?.name === "NotFoundError") {
+            return responseError("file_missing", "The EPUB file is no longer available locally.");
+        }
+        return responseError(
+            "extraction_failed",
+            `Failed to inspect the EPUB file: ${getErrorMessage(error)}`,
+        );
+    }
+
+    try {
+        return { kind: "ok", document: await extractEpubDocument(item) };
+    } catch (error) {
+        return responseError("extraction_failed", `Failed to extract EPUB content: ${getErrorMessage(error)}`);
+    }
 }
 
 function isEpubAttachment(item: Zotero.Item): boolean {
