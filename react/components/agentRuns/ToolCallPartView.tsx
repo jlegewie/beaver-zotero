@@ -92,7 +92,14 @@ const TOOL_ICONS: Record<string, IconComponent> = {
 
     // Read tool result
     read_file: TextAlignLeftIcon,
+
+    // Progressive disclosure tools
+    load_capability: PuzzleIcon,
+    search_tools: PuzzleIcon,
 };
+
+/** Progressive disclosure tools whose returns are framework-internal and shouldn't be expandable. */
+const NON_EXPANDABLE_TOOLS = new Set(['read_file', 'load_capability', 'search_tools']);
 
 /** Tools that return pages */
 const UNIT_PAGES_TOOLS = new Set(['read_pages', 'read_attachment', 'view_page_images', 'view_pages']);
@@ -278,7 +285,7 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
         result?.part_kind === 'tool-return' &&
         // If we can compute a count (search-like tools), block expansion for 0 results.
         (resultCount === null || resultCount > 0) &&
-        part.tool_name !== 'read_file' &&
+        !NON_EXPANDABLE_TOOLS.has(part.tool_name) &&
         !isExtractionRejected &&
         !isExternalSearchRejected &&
         !showAgentActionView; // Don't allow expand toggle for agent action tools
