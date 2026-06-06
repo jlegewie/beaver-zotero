@@ -1,13 +1,13 @@
-import { buildEpubCitationIndex } from "./citationIndex";
 import {
-    createEpubExtractionCounters,
-    parseEpubSection,
-} from "./EpubSectionParser";
+    buildDomCitationIndex,
+    createDomCounters,
+    parseDomSection,
+    type DomSection,
+} from "../dom";
 import {
     EPUB_CONTENT_KIND,
     EPUB_SCHEMA_VERSION,
     type EpubDocument,
-    type EpubSection,
 } from "./schema";
 
 interface ZoteroEpubModule {
@@ -32,13 +32,13 @@ export async function extractEpubDocument(item: Zotero.Item): Promise<EpubDocume
         "chrome://zotero/content/EPUB.mjs",
     ) as ZoteroEpubModule;
     const epub = new EPUB(filePath);
-    const counters = createEpubExtractionCounters();
-    const sections: EpubSection[] = [];
+    const counters = createDomCounters();
+    const sections: DomSection[] = [];
 
     try {
         let sectionIndex = 0;
         for await (const { href, doc } of epub.getSectionDocuments()) {
-            sections.push(parseEpubSection({
+            sections.push(parseDomSection({
                 doc,
                 sectionIndex,
                 rawHref: href,
@@ -56,7 +56,7 @@ export async function extractEpubDocument(item: Zotero.Item): Promise<EpubDocume
         schemaVersion: EPUB_SCHEMA_VERSION,
         sectionCount: sections.length,
         sections,
-        citationIndex: buildEpubCitationIndex(sections),
+        citationIndex: buildDomCitationIndex(sections),
     };
 }
 

@@ -1,20 +1,21 @@
-import type { EpubItemKind } from "./schema";
+import type { DomItemKind } from "./schema";
 
+// EPUB-originated namespace support is harmless for plain HTML documents.
 const EPUB_TYPE_NS = "http://www.idpf.org/2007/ops";
 
-export interface EpubElementMapping {
-    kind: EpubItemKind;
+export interface DomElementMapping {
+    kind: DomItemKind;
     level?: number;
 }
 
-export interface EpubDomItemCandidate extends EpubElementMapping {
+export interface DomItemCandidate extends DomElementMapping {
     element: Element;
     text: string;
     anchorId?: string;
 }
 
 /** Normalize DOM text into a compact single-line string. */
-export function normalizeEpubText(text: string | null | undefined): string {
+export function normalizeText(text: string | null | undefined): string {
     return (text ?? "").replace(/\s+/g, " ").trim();
 }
 
@@ -29,8 +30,8 @@ export function findNearestAnchorId(element: Element): string | undefined {
     return undefined;
 }
 
-/** Detect EPUB footnote semantics without namespace-prefixed CSS selectors. */
-export function isEpubFootnoteElement(element: Element): boolean {
+/** Detect footnote semantics without namespace-prefixed CSS selectors. */
+export function isFootnoteElement(element: Element): boolean {
     const epubType = element.getAttributeNS(EPUB_TYPE_NS, "type");
     const plainType = element.getAttribute("type");
     const className = element.getAttribute("class");
@@ -39,9 +40,9 @@ export function isEpubFootnoteElement(element: Element): boolean {
         || hasToken(className, "footnote");
 }
 
-/** Map an EPUB DOM element to the geometry-free item kind Beaver stores. */
-export function mapEpubElement(element: Element): EpubElementMapping | undefined {
-    if (isEpubFootnoteElement(element)) {
+/** Map a DOM element to the geometry-free item kind Beaver stores. */
+export function mapElement(element: Element): DomElementMapping | undefined {
+    if (isFootnoteElement(element)) {
         return { kind: "footnote" };
     }
 
@@ -57,12 +58,12 @@ export function mapEpubElement(element: Element): EpubElementMapping | undefined
     return undefined;
 }
 
-/** Walk an EPUB section body and emit owned, non-duplicated item candidates. */
-export function collectEpubDomItems(body: Element): EpubDomItemCandidate[] {
-    const candidates: EpubDomItemCandidate[] = [];
+/** Walk a DOM section body and emit owned, non-duplicated item candidates. */
+export function collectDomItems(body: Element): DomItemCandidate[] {
+    const candidates: DomItemCandidate[] = [];
 
     const visit = (element: Element): void => {
-        const mapping = mapEpubElement(element);
+        const mapping = mapElement(element);
         if (mapping) {
             const candidate = buildCandidate(element, mapping);
             if (candidate) {
@@ -85,8 +86,8 @@ export function collectEpubDomItems(body: Element): EpubDomItemCandidate[] {
 
 function buildCandidate(
     element: Element,
-    mapping: EpubElementMapping,
-): EpubDomItemCandidate | undefined {
+    mapping: DomElementMapping,
+): DomItemCandidate | undefined {
     const text = textForMappedElement(element, mapping.kind);
     if (!text) return undefined;
     return {
@@ -98,17 +99,17 @@ function buildCandidate(
     };
 }
 
-function textForMappedElement(element: Element, kind: EpubItemKind): string {
+function textForMappedElement(element: Element, kind: DomItemKind): string {
     if (kind === "picture") {
-        return normalizeEpubText(
+        return normalizeText(
             element.getAttribute("alt")
             || element.getAttribute("title"),
         );
     }
-    return normalizeEpubText(element.textContent);
+    return normalizeText(element.textContent);
 }
 
-function ownsSubtree(element: Element, kind: EpubItemKind): boolean {
+function ownsSubtree(element: Element, kind: DomItemKind): boolean {
     if (kind === "text") {
         const name = element.localName.toLowerCase();
         return name === "blockquote" || name === "p";

@@ -1,12 +1,12 @@
 import type {
-    EpubCitationIndex,
-    EpubCitationIndexEntry,
-    EpubSection,
+    DomCitationIndex,
+    DomCitationIndexEntry,
+    DomSection,
 } from "./schema";
 
-/** Build raw-id citation lookup entries for EPUB items and sentences. */
-export function buildEpubCitationIndex(sections: EpubSection[]): EpubCitationIndex {
-    const index: EpubCitationIndex = {};
+/** Build raw-id citation lookup entries for DOM items and sentences. */
+export function buildDomCitationIndex(sections: DomSection[]): DomCitationIndex {
+    const index: DomCitationIndex = {};
 
     for (const section of sections) {
         for (const item of section.items) {
@@ -34,10 +34,10 @@ export function buildEpubCitationIndex(sections: EpubSection[]): EpubCitationInd
     return index;
 }
 
-/** Resolve a raw EPUB item or sentence id from a citation index. */
-export function resolveEpubCitationId(
-    index: EpubCitationIndex,
+/** Resolve a raw DOM item or sentence id from a citation index. */
+export function resolveDomCitationId(
+    index: DomCitationIndex,
     id: string,
-): EpubCitationIndexEntry | undefined {
+): DomCitationIndexEntry | undefined {
     return index[id];
 }

@@ -2,15 +2,17 @@
 
 import { describe, expect, it } from "vitest";
 import {
+    buildDomCitationIndex,
+    collectDomItems,
+    createDomCounters,
+    isFootnoteElement,
+    mapElement,
+    parseDomSection,
+    resolveDomCitationId,
+} from "../../../src/services/documentExtraction/dom";
+import {
     EPUB_CONTENT_KIND,
     EPUB_SCHEMA_VERSION,
-    buildEpubCitationIndex,
-    collectEpubDomItems,
-    createEpubExtractionCounters,
-    isEpubFootnoteElement,
-    mapEpubElement,
-    parseEpubSection,
-    resolveEpubCitationId,
 } from "../../../src/services/documentExtraction/epub";
 
 function parseXhtml(markup: string): Document {
@@ -24,15 +26,15 @@ function bodyOf(doc: Document): Element {
     return doc.body ?? doc.querySelector("body")!;
 }
 
-describe("EPUB extraction schema", () => {
+describe("EPUB document constants", () => {
     it("exposes the EPUB content discriminator and schema version", () => {
         expect(EPUB_CONTENT_KIND).toBe("epub");
         expect(EPUB_SCHEMA_VERSION).toBe("1");
     });
 });
 
-describe("EPUB DOM mapping", () => {
-    it("maps supported element names to EPUB item kinds", () => {
+describe("DOM mapping", () => {
+    it("maps supported element names to DOM item kinds", () => {
         const doc = parseXhtml(`
             <p id="p">Body</p>
             <h2 id="h">Heading</h2>
@@ -42,24 +44,24 @@ describe("EPUB DOM mapping", () => {
             <img id="img" alt="Alt text" />
         `);
 
-        expect(mapEpubElement(doc.querySelector("#p")!)).toEqual({ kind: "text" });
-        expect(mapEpubElement(doc.querySelector("#h")!)).toEqual({ kind: "section_header", level: 2 });
-        expect(mapEpubElement(doc.querySelector("#li")!)).toEqual({ kind: "list_item" });
-        expect(mapEpubElement(doc.querySelector("#cap")!)).toEqual({ kind: "caption" });
-        expect(mapEpubElement(doc.querySelector("#table")!)).toEqual({ kind: "table" });
-        expect(mapEpubElement(doc.querySelector("#img")!)).toEqual({ kind: "picture" });
+        expect(mapElement(doc.querySelector("#p")!)).toEqual({ kind: "text" });
+        expect(mapElement(doc.querySelector("#h")!)).toEqual({ kind: "section_header", level: 2 });
+        expect(mapElement(doc.querySelector("#li")!)).toEqual({ kind: "list_item" });
+        expect(mapElement(doc.querySelector("#cap")!)).toEqual({ kind: "caption" });
+        expect(mapElement(doc.querySelector("#table")!)).toEqual({ kind: "table" });
+        expect(mapElement(doc.querySelector("#img")!)).toEqual({ kind: "picture" });
     });
 
-    it("detects EPUB footnotes without namespace-prefixed selectors", () => {
+    it("detects footnotes without namespace-prefixed selectors", () => {
         const doc = parseXhtml(`
             <aside id="ns" epub:type="footnote" xmlns:epub="http://www.idpf.org/2007/ops">Namespaced</aside>
             <aside id="plain" type="footnote">Plain</aside>
             <aside id="classed" class="note footnote">Classed</aside>
         `);
 
-        expect(isEpubFootnoteElement(doc.querySelector("#ns")!)).toBe(true);
-        expect(isEpubFootnoteElement(doc.querySelector("#plain")!)).toBe(true);
-        expect(isEpubFootnoteElement(doc.querySelector("#classed")!)).toBe(true);
+        expect(isFootnoteElement(doc.querySelector("#ns")!)).toBe(true);
+        expect(isFootnoteElement(doc.querySelector("#plain")!)).toBe(true);
+        expect(isFootnoteElement(doc.querySelector("#classed")!)).toBe(true);
     });
 
     it("uses textContent, normalizes whitespace, and skips empty items", () => {
@@ -70,7 +72,7 @@ describe("EPUB DOM mapping", () => {
             <p id="empty">   </p>
         `);
 
-        const items = collectEpubDomItems(bodyOf(doc));
+        const items = collectDomItems(bodyOf(doc));
         expect(items).toHaveLength(1);
         expect(items[0]).toMatchObject({
             kind: "text",
@@ -86,7 +88,7 @@ describe("EPUB DOM mapping", () => {
             <figure id="figure"><img src="cover.jpg" /><figcaption id="caption">Figure caption.</figcaption></figure>
         `);
 
-        const items = collectEpubDomItems(bodyOf(doc));
+        const items = collectDomItems(bodyOf(doc));
         expect(items.map((item) => [item.kind, item.text])).toEqual([
             ["text", "Quoted paragraph."],
             ["list_item", "Nested list paragraph."],
@@ -97,21 +99,21 @@ describe("EPUB DOM mapping", () => {
     it("inherits the nearest ancestor anchor id", () => {
         const doc = parseXhtml(`<section id="chapter"><p>Anchored text.</p></section>`);
 
-        const [item] = collectEpubDomItems(bodyOf(doc));
+        const [item] = collectDomItems(bodyOf(doc));
         expect(item.anchorId).toBe("chapter");
     });
 });
 
-describe("EPUB section parser", () => {
+describe("DOM section parser", () => {
     it("assigns document-global item ids, sentence ids, and item order across sections", () => {
-        const counters = createEpubExtractionCounters();
-        const first = parseEpubSection({
+        const counters = createDomCounters();
+        const first = parseDomSection({
             doc: parseXhtml(`<p>First sentence. Second sentence.</p><h1>Heading</h1>`),
             sectionIndex: 0,
             rawHref: "EPUB/first.xhtml",
             counters,
         });
-        const second = parseEpubSection({
+        const second = parseDomSection({
             doc: parseXhtml(`<p>Third sentence.</p><ul><li>List sentence.</li></ul>`),
             sectionIndex: 1,
             rawHref: "EPUB/second.xhtml",
@@ -130,35 +132,35 @@ describe("EPUB section parser", () => {
     it("returns an empty section when the document has no body", () => {
         const doc = new DOMParser().parseFromString("<package />", "application/xml");
 
-        const section = parseEpubSection({
+        const section = parseDomSection({
             doc,
             sectionIndex: 3,
             rawHref: "EPUB/nav.xml",
-            counters: createEpubExtractionCounters(),
+            counters: createDomCounters(),
         });
 
         expect(section).toEqual({ index: 3, rawHref: "EPUB/nav.xml", items: [] });
     });
 });
 
-describe("EPUB citation index", () => {
+describe("DOM citation index", () => {
     it("indexes item ids and raw sentence ids", () => {
-        const section = parseEpubSection({
+        const section = parseDomSection({
             doc: parseXhtml(`<section id="anchor"><p>First sentence. Second sentence.</p></section>`),
             sectionIndex: 0,
             rawHref: "EPUB/first.xhtml",
-            counters: createEpubExtractionCounters(),
+            counters: createDomCounters(),
         });
 
-        const index = buildEpubCitationIndex([section]);
-        expect(resolveEpubCitationId(index, "p1")).toEqual({
+        const index = buildDomCitationIndex([section]);
+        expect(resolveDomCitationId(index, "p1")).toEqual({
             id: "p1",
             kind: "item",
             sectionIndex: 0,
             itemId: "p1",
             anchorId: "anchor",
         });
-        expect(resolveEpubCitationId(index, "s2")).toEqual({
+        expect(resolveDomCitationId(index, "s2")).toEqual({
             id: "s2",
             kind: "sentence",
             sectionIndex: 0,
@@ -166,6 +168,6 @@ describe("EPUB citation index", () => {
             sentenceId: "s2",
             anchorId: "anchor",
         });
-        expect(resolveEpubCitationId(index, "sentence:2")).toBeUndefined();
+        expect(resolveDomCitationId(index, "sentence:2")).toBeUndefined();
     });
 });

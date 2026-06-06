@@ -1,25 +1,24 @@
 import { ID_PREFIXES } from "../../../beaver-extract/schema/schema";
 import {
-    collectEpubDomItems,
-    normalizeEpubText,
+    collectDomItems,
+    normalizeText,
 } from "./domWalk";
 import type {
-    EpubItem,
-    EpubSection,
-    EpubSentence,
+    DomItem,
+    DomSection,
 } from "./schema";
 
-export interface EpubExtractionCounters {
+export interface DomExtractionCounters {
     itemCounters: Map<string, number>;
     sentenceCounter: number;
     itemOrder: number;
 }
 
-export interface ParseEpubSectionInput {
+export interface ParseDomSectionInput {
     doc: XMLDocument | Document;
     sectionIndex: number;
     rawHref: string;
-    counters: EpubExtractionCounters;
+    counters: DomExtractionCounters;
 }
 
 const SENTENCE_BEARING_KINDS = new Set([
@@ -29,16 +28,16 @@ const SENTENCE_BEARING_KINDS = new Set([
     "footnote",
 ]);
 
-/** Parse one EPUB section document into ordered, document-global items. */
-export function parseEpubSection(input: ParseEpubSectionInput): EpubSection {
+/** Parse one DOM section document into ordered, document-global items. */
+export function parseDomSection(input: ParseDomSectionInput): DomSection {
     const body = findSectionBody(input.doc);
     if (!body) {
         return { index: input.sectionIndex, rawHref: input.rawHref, items: [] };
     }
 
-    const items: EpubItem[] = [];
-    for (const candidate of collectEpubDomItems(body)) {
-        const item: EpubItem = {
+    const items: DomItem[] = [];
+    for (const candidate of collectDomItems(body)) {
+        const item: DomItem = {
             id: nextItemId(input.counters, candidate.kind),
             kind: candidate.kind,
             sectionIndex: input.sectionIndex,
@@ -50,7 +49,7 @@ export function parseEpubSection(input: ParseEpubSectionInput): EpubSection {
             item.level = candidate.level;
         }
         if (SENTENCE_BEARING_KINDS.has(candidate.kind)) {
-            item.sentences = splitEpubSentences(candidate.text).map((sentenceText) => ({
+            item.sentences = splitSentences(candidate.text).map((sentenceText) => ({
                 id: nextSentenceId(input.counters),
                 text: sentenceText,
             }));
@@ -66,19 +65,19 @@ export function parseEpubSection(input: ParseEpubSectionInput): EpubSection {
     };
 }
 
-/** Split EPUB prose into sentence-sized strings with a replaceable local splitter. */
-export function splitEpubSentences(text: string): string[] {
-    const normalized = normalizeEpubText(text);
+/** Split DOM prose into sentence-sized strings with a replaceable local splitter. */
+export function splitSentences(text: string): string[] {
+    const normalized = normalizeText(text);
     if (!normalized) return [];
 
     const matches = normalized.match(/[^.!?]+(?:[.!?]+(?=\s|$)|$)/g);
     return (matches ?? [normalized])
-        .map((part) => normalizeEpubText(part))
+        .map((part) => normalizeText(part))
         .filter((part) => part.length > 0);
 }
 
 /** Create mutable counters shared across section parsing for document-global ids. */
-export function createEpubExtractionCounters(): EpubExtractionCounters {
+export function createDomCounters(): DomExtractionCounters {
     return {
         itemCounters: new Map(),
         sentenceCounter: 0,
@@ -86,21 +85,21 @@ export function createEpubExtractionCounters(): EpubExtractionCounters {
     };
 }
 
-function nextItemId(counters: EpubExtractionCounters, kind: EpubItem["kind"]): string {
+function nextItemId(counters: DomExtractionCounters, kind: DomItem["kind"]): string {
     const prefix = ID_PREFIXES[kind];
     const next = (counters.itemCounters.get(prefix) ?? 0) + 1;
     counters.itemCounters.set(prefix, next);
     return `${prefix}${next}`;
 }
 
-function nextSentenceId(counters: EpubExtractionCounters): string {
+function nextSentenceId(counters: DomExtractionCounters): string {
     counters.sentenceCounter += 1;
     return `${ID_PREFIXES.sentence}${counters.sentenceCounter}`;
 }
 
 function sectionLabel(doc: XMLDocument | Document): string | undefined {
     const title = doc.querySelector("title");
-    const text = normalizeEpubText(title?.textContent);
+    const text = normalizeText(title?.textContent);
     return text || undefined;
 }
 

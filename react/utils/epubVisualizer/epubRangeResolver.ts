@@ -1,9 +1,11 @@
 import { logger } from "../../../src/utils/logger";
 import {
-    collectEpubDomItems,
-    normalizeEpubText,
+    collectDomItems,
+    normalizeText,
+    type DomItem,
+} from "../../../src/services/documentExtraction/dom";
+import {
     type EpubDocument,
-    type EpubItem,
 } from "../../../src/services/documentExtraction/epub";
 import {
     getSectionBody,
@@ -50,7 +52,7 @@ export function resolveEpubRanges(
         const section = document.sections.find((entry) => entry.index === extractedSectionIndex);
         if (!section) continue;
 
-        const candidates = collectEpubDomItems(body);
+        const candidates = collectDomItems(body);
         const itemMap = alignSectionItems(section.items, candidates);
 
         for (const descriptor of sectionDescriptors) {
@@ -138,23 +140,23 @@ function groupDescriptorsBySection(
 }
 
 function alignSectionItems(
-    extractedItems: EpubItem[],
-    candidates: ReturnType<typeof collectEpubDomItems>,
-): Map<string, ReturnType<typeof collectEpubDomItems>[number]> {
-    const result = new Map<string, ReturnType<typeof collectEpubDomItems>[number]>();
+    extractedItems: DomItem[],
+    candidates: ReturnType<typeof collectDomItems>,
+): Map<string, ReturnType<typeof collectDomItems>[number]> {
+    const result = new Map<string, ReturnType<typeof collectDomItems>[number]>();
     let candidateIndex = 0;
 
     for (const item of extractedItems) {
         if (item.kind === "picture") continue;
 
-        const targetText = normalizeEpubText(item.text);
+        const targetText = normalizeText(item.text);
         if (!targetText) continue;
 
         let matchedIndex = -1;
         for (let i = candidateIndex; i < candidates.length; i++) {
             const candidate = candidates[i];
             if (candidate.kind !== item.kind) continue;
-            if (textsMatch(targetText, normalizeEpubText(candidate.text))) {
+            if (textsMatch(targetText, normalizeText(candidate.text))) {
                 matchedIndex = i;
                 break;
             }
@@ -182,7 +184,7 @@ function createElementContentsRange(element: Element): Range | undefined {
     const range = doc.createRange();
     try {
         range.selectNodeContents(element);
-        if (normalizeEpubText(range.toString())) return range;
+        if (normalizeText(range.toString())) return range;
     } catch (error) {
         logger(`[EpubVisualizer] Failed to create EPUB item range: ${error}`, 1);
     }
@@ -191,7 +193,7 @@ function createElementContentsRange(element: Element): Range | undefined {
 }
 
 function createSentenceRange(element: Element, sentenceText: string): Range | undefined {
-    const normalizedSentence = normalizeEpubText(sentenceText);
+    const normalizedSentence = normalizeText(sentenceText);
     if (!normalizedSentence) return undefined;
 
     const textNodes = collectTextNodes(element);

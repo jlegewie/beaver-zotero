@@ -1,10 +1,10 @@
 import { ITEM_KIND_STYLE, OVERLAY_COLORS } from "../../../src/beaver-extract/debug/overlayBuilders";
+import type { EpubDocument } from "../../../src/services/documentExtraction/epub";
 import type {
-    EpubDocument,
-    EpubItem,
-    EpubItemKind,
-    EpubSentence,
-} from "../../../src/services/documentExtraction/epub";
+    DomItem,
+    DomItemKind,
+    DomSentence,
+} from "../../../src/services/documentExtraction/dom";
 
 export type EpubDescriptorKind = "item" | "sentence";
 
@@ -21,7 +21,7 @@ export interface EpubDrawDescriptor {
     itemIndexInSection: number;
     itemId: string;
     kind: EpubDescriptorKind;
-    itemKind: EpubItemKind;
+    itemKind: DomItemKind;
     color: string;
     label: string;
     annotationComment: string;
@@ -139,19 +139,19 @@ export function buildEpubSentenceOverlay(document: EpubDocument): EpubOverlayRes
     };
 }
 
-export function colorForItemKind(kind: EpubItemKind): string {
+export function colorForItemKind(kind: DomItemKind): string {
     return ITEM_KIND_STYLE[kind].color;
 }
 
-function itemLabel(item: EpubItem): string {
+function itemLabel(item: DomItem): string {
     const style = ITEM_KIND_STYLE[item.kind];
     return `${style.prefix}${item.order + 1}`;
 }
 
 function sentenceDescriptor(
     sectionIndex: number,
-    item: EpubItem,
-    sentence: EpubSentence,
+    item: DomItem,
+    sentence: DomSentence,
     color: string,
     label: string,
 ): EpubSentenceDescriptor {
@@ -166,7 +166,7 @@ function sentenceDescriptor(
     };
 }
 
-function itemAnnotationComment(sectionIndex: number, item: EpubItem): string {
+function itemAnnotationComment(sectionIndex: number, item: DomItem): string {
     const text = item.text ?? item.kind;
     return `section ${sectionIndex + 1}, item ${item.id}, ${item.kind}\n${text}`;
 }
