@@ -14,10 +14,10 @@ import {
     WSZoteroSearchResponse,
     ZoteroSearchResultItem,
     RegularSearchResultItem,
-    AttachmentResultItem,
+    AttachmentRowResult,
 } from '../agentProtocol';
 import { serializeNote } from '../../utils/zoteroSerializers';
-import { validateLibraryAccess, extractYear, formatCreatorsString } from './utils';
+import { validateLibraryAccess, extractYear, formatCreatorsString, getAttachmentInfoForItem } from './utils';
 
 
 async function filterOutAnnotationItemIds(itemIds: number[]): Promise<number[]> {
@@ -326,16 +326,17 @@ export async function handleZoteroSearchRequest(
                 items.push(serializeNote(item, parentInfo));
             } else if (item.isAttachment()) {
                 const parentInfo = item.parentItemID ? parentMap.get(item.parentItemID) : null;
-                const attachmentItem: AttachmentResultItem = {
+                const attachmentInfo = await getAttachmentInfoForItem(item, {
+                    parentItemId: parentInfo?.item_id ?? null,
+                    isPrimary: false,
+                    includeAnnotationsCount: true,
+                    skipWorkerFallback: true,
+                });
+                const attachmentItem: AttachmentRowResult = {
+                    ...attachmentInfo,
                     result_type: 'attachment',
-                    item_id: `${item.libraryID}-${item.key}`,
-                    title: item.getDisplayTitle?.() || '',
-                    filename: item.attachmentFilename || null,
-                    content_type: item.attachmentContentType || null,
-                    parent_item_id: parentInfo?.item_id ?? null,
                     parent_title: parentInfo?.title ?? null,
                     date_modified: item.dateModified,
-                    annotations_count: item.isFileAttachment?.() ? item.getAnnotations().length : 0,
                 };
                 items.push(attachmentItem);
             } else {

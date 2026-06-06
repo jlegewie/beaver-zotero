@@ -31,10 +31,11 @@ vi.mock('../../../src/services/agentDataProvider/utils', () => ({
     getSearchableLibraries: vi.fn(() => []),
     extractYear: vi.fn(() => null),
     formatCreatorsString: vi.fn(() => ''),
+    getAttachmentInfoForItem: vi.fn(),
 }));
 
 import { handleListItemsRequest } from '../../../src/services/agentDataProvider/handleListItemsRequest';
-import { getCollectionByIdOrName, validateLibraryAccess } from '../../../src/services/agentDataProvider/utils';
+import { getAttachmentInfoForItem, getCollectionByIdOrName, validateLibraryAccess } from '../../../src/services/agentDataProvider/utils';
 
 type MockItem = Partial<Zotero.Item> & {
     id: number;
@@ -89,6 +90,18 @@ describe('handleListItemsRequest', () => {
             libraryID: 1,
             collection: { id: 10, name: 'Collection' },
         });
+        vi.mocked(getAttachmentInfoForItem).mockImplementation(async (item: any, options: any = {}) => ({
+            attachment_id: `${item.libraryID}-${item.key}`,
+            parent_item_id: options.parentItemId ?? null,
+            title: item.getDisplayTitle?.() || item.key,
+            filename: item.attachmentFilename ?? null,
+            content_kind: item.attachmentContentType === 'application/pdf' ? 'pdf' : 'linked_url',
+            status: item.attachmentContentType === 'application/pdf' ? 'readable' : 'unreadable',
+            page_count: item.attachmentContentType === 'application/pdf' ? 12 : null,
+            line_count: null,
+            is_primary: Boolean(options.isPrimary),
+            annotations_count: item.isFileAttachment?.() ? item.getAnnotations?.().length ?? 0 : 0,
+        } as any));
 
         class MockSearch {
             libraryID = 1;
@@ -195,7 +208,7 @@ describe('handleListItemsRequest', () => {
         expect(response.items).toEqual(expect.arrayContaining([
             expect.objectContaining({ item_id: '1-PARENT', result_type: 'regular' }),
             expect.objectContaining({ item_id: '1-NOTE', result_type: 'note' }),
-            expect.objectContaining({ item_id: '1-ATTACH', result_type: 'attachment', annotations_count: 1 }),
+            expect.objectContaining({ attachment_id: '1-ATTACH', result_type: 'attachment', annotations_count: 1 }),
         ]));
         expect(response.items).not.toContainEqual(expect.objectContaining({ item_id: '1-ANN1' }));
         expect(attachment.getAnnotations).toHaveBeenCalledOnce();
@@ -230,7 +243,7 @@ describe('handleListItemsRequest', () => {
         });
 
         expect(response.items[0]).toEqual(expect.objectContaining({
-            item_id: '1-ATTACH',
+            attachment_id: '1-ATTACH',
             result_type: 'attachment',
             annotations_count: 0,
         }));
@@ -268,7 +281,7 @@ describe('handleListItemsRequest', () => {
         });
 
         expect(response.items[0]).toEqual(expect.objectContaining({
-            item_id: '1-LINK',
+            attachment_id: '1-LINK',
             result_type: 'attachment',
             annotations_count: 0,
         }));

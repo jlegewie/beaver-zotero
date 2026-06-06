@@ -140,24 +140,6 @@ export interface DeleteData extends ZoteroItemReference {
     date_modified: string | null;
 }
 
-/** Whether the model can read an attachment's content */
-export type AttachmentReadability = "available" | "unavailable";
-
-/** Lightweight attachment data nested in search results */
-export interface AttachmentSummary {
-    library_id: number;
-    zotero_key: string;
-    parent_key: string | null;
-    title?: string | null;
-    mime_type: string;
-    is_primary: boolean;
-    page_count?: number | null;
-    annotations_count?: number | null;
-    status: AttachmentReadability;
-    status_code?: FileStatusCodeValue | null;
-    status_reason?: string | null;
-}
-
 /** Lightweight item data for search results. Omits formatted_citation, item_json, hashes, sync fields. */
 export interface ItemSummary extends ZoteroItemReference {
     item_type: string;
@@ -172,7 +154,7 @@ export interface ItemSummary extends ZoteroItemReference {
     tags?: string[] | null;
     collections?: CollectionSummary[] | null;
     citation_key?: string | null;
-    attachments?: AttachmentSummary[];
+    attachments?: AttachmentInfo[];
     preview?: string | null;
     annotation_text?: string | null;
     annotation_comment?: string | null;
@@ -320,11 +302,15 @@ export interface FrontendFileStatus {
     /** Is this the primary attachment for the parent item? */
     is_primary: boolean;
     /** MIME type (e.g., "application/pdf") */
-    mime_type: string;
+    mime_type?: string | null;
+    /** Beaver content kind for this attachment. */
+    content_kind?: ContentKind | null;
     /** Number of pages (null if unknown or not applicable) */
     page_count?: number | null;
+    /** Number of lines for text attachments (null if unknown or not applicable) */
+    line_count?: number | null;
     /** Full text availability status */
-    status: "available" | "processing" | "unavailable";
+    status: ContentInfoStatus | "available" | "unavailable";
     /** Machine-readable reason code; backend maps it to model-facing text. */
     status_code?: FileStatusCodeValue | null;
     /** Free-form reason. Only set for cases that carry dynamic values (e.g., file too large). */
@@ -356,3 +342,13 @@ export interface AttachmentDataWithStatus {
     /** File availability status (optional but recommended) */
     file_status?: FrontendFileStatus;
 }
+import type {
+    AttachmentInfo,
+    ContentInfoStatus,
+    ContentKind,
+} from "../../src/services/documentExtraction/shared/contentKinds";
+export type {
+    AttachmentInfo,
+    ContentInfoStatus,
+    ContentKind,
+} from "../../src/services/documentExtraction/shared/contentKinds";

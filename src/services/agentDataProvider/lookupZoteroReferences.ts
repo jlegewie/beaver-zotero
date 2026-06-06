@@ -10,7 +10,7 @@ import { ItemDataWithStatus, AttachmentDataWithStatus, ZoteroItemReference } fro
 import { searchableLibraryIdsAtom, syncWithZoteroAtom } from '../../../react/atoms/profile';
 import { userIdAtom } from '../../../react/atoms/auth';
 import { store } from '../../../react/store';
-import { serializeAttachment, serializeAnnotation, serializeItem, serializeNote } from '../../utils/zoteroSerializers';
+import { serializeAnnotation, serializeAttachment, serializeItem, serializeNote } from '../../utils/zoteroSerializers';
 import { computeItemStatus, prefetchSyncDates, getAttachmentFileStatus, getAttachmentFileStatusLightweight, getBestAttachmentBatch } from './utils';
 import {
     WSDataError,
@@ -397,7 +397,7 @@ export async function lookupZoteroReferences(
                     errors.push({
                         reference: { library_id: attachment.libraryID, zotero_key: attachment.key },
                         error: 'Attachment not available locally',
-                        error_code: 'not_available'
+                        error_code: 'not_available',
                     });
                     return null;
                 }
@@ -408,7 +408,6 @@ export async function lookupZoteroReferences(
                     isPrimary = bestAttachmentId !== undefined && attachment.id === bestAttachmentId;
                 }
 
-                // Get file status based on requested level
                 let fileStatus = undefined;
                 let fileExistsLocally: boolean | undefined;
                 if (fileStatusLevel === 'lightweight') {
@@ -419,7 +418,13 @@ export async function lookupZoteroReferences(
                     fileStatus = await getAttachmentFileStatus(attachment, isPrimary);
                 }
 
-                const status = await computeItemStatus(attachment, searchableLibraryIds, syncWithZotero, userId, { syncDateCache, fileExistsLocally });
+                const status = await computeItemStatus(
+                    attachment,
+                    searchableLibraryIds,
+                    syncWithZotero,
+                    userId,
+                    { syncDateCache, fileExistsLocally },
+                );
 
                 return { attachment: serialized, status, file_status: fileStatus };
             } catch (error: any) {

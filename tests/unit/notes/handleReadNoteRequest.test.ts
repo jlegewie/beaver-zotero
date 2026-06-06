@@ -27,8 +27,8 @@ vi.mock('../../../src/utils/zoteroSerializers', () => ({
 }));
 
 vi.mock('../../../src/services/agentDataProvider/utils', () => ({
-    prepareBatchAttachmentData: vi.fn(async () => new Map()),
-    processAttachmentsWithBatchData: vi.fn(async () => []),
+    prepareAttachmentInfoBatchData: vi.fn(async () => ({ bestAttachmentMap: new Map() })),
+    processAttachmentInfoBatch: vi.fn(async () => []),
     toAttachmentSummary: vi.fn((attachment: any) => attachment),
 }));
 

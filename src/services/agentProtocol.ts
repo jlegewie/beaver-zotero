@@ -1,7 +1,7 @@
 import { SubscriptionStatus, ProcessingMode, ChargeType } from '../../react/types/profile';
 import { TextPart, ThinkingPart, ToolCallPart, ToolReturnPart, RetryPromptPart, RunUsage } from '../../react/agents/types';
 import { ZoteroItemReference } from '../../react/types/zotero';
-import { ItemDataWithStatus, AttachmentDataWithStatus, ItemSummary } from '../../react/types/zotero';
+import { ItemDataWithStatus, AttachmentDataWithStatus, ItemSummary, AttachmentInfo } from '../../react/types/zotero';
 import { ReaderState, NoteState } from '../../react/types/attachments/apiTypes';
 import { BeaverAgentPrompt } from '../../react/agents/types';
 import { CustomChatModel } from '../../react/types/settings';
@@ -290,7 +290,7 @@ export interface WSExternalReferenceCheckResponse {
 /** Item search result with attachments (unified format) */
 export interface ItemSearchFrontendResultItem {
     item: ItemData;
-    attachments: AttachmentDataWithStatus[];
+    attachments: AttachmentInfo[];
     /** Semantic similarity score (0-1) for topic searches, undefined for metadata searches */
     similarity?: number;
 }
@@ -774,17 +774,11 @@ export interface NoteResultItem {
 }
 
 /** Attachment result item from search/list results */
-export interface AttachmentResultItem {
+export type AttachmentRowResult = AttachmentInfo & {
     result_type: 'attachment';
-    item_id: string;
-    title?: string | null;
-    filename?: string | null;
-    content_type?: string | null;
-    parent_item_id?: string | null;
     parent_title?: string | null;
     date_modified?: string | null;
-    annotations_count?: number | null;
-}
+};
 
 /**
  * Annotation result item.
@@ -826,10 +820,10 @@ export interface AnnotationResultItem {
 }
 
 /** Result item from zotero_search (regular, note, or attachment) */
-export type ZoteroSearchResultItem = RegularSearchResultItem | NoteResultItem | AttachmentResultItem;
+export type ZoteroSearchResultItem = RegularSearchResultItem | NoteResultItem | AttachmentRowResult;
 
 /** Result item from list_items (regular, note, or attachment) */
-export type ListItemsResultItem = RegularListResultItem | NoteResultItem | AttachmentResultItem;
+export type ListItemsResultItem = RegularListResultItem | NoteResultItem | AttachmentRowResult;
 
 /** Brief library info for error responses */
 export interface AvailableLibraryInfo {

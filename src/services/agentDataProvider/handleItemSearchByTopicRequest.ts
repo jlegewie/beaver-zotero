@@ -10,8 +10,7 @@
 import { logger } from '../../utils/logger';
 import { deduplicateItems } from '../../utils/zoteroUtils';
 import { syncingItemFilter } from '../../utils/sync';
-import { searchableLibraryIdsAtom, syncWithZoteroAtom } from '../../../react/atoms/profile';
-import { userIdAtom } from '../../../react/atoms/auth';
+import { searchableLibraryIdsAtom } from '../../../react/atoms/profile';
 
 import { store } from '../../../react/store';
 import { serializeItem } from '../../utils/zoteroSerializers';
@@ -23,7 +22,7 @@ import {
 } from '../agentProtocol';
 import { semanticSearchService, SearchResult } from '../semanticSearchService';
 import { BeaverDB } from '../database';
-import { getCollectionByIdOrName, prepareBatchAttachmentData, processAttachmentsWithBatchData } from '../agentDataProvider/utils';
+import { getCollectionByIdOrName, prepareAttachmentInfoBatchData, processAttachmentInfoBatch } from '../agentDataProvider/utils';
 import { TimingAccumulator } from '../../utils/timing';
 
 
@@ -238,15 +237,6 @@ export async function handleItemSearchByTopicRequest(
         similarityByItemId.set(result.itemId, result.similarity);
     }
 
-    // Get sync configuration from store for status computation
-    const syncWithZotero = store.get(syncWithZoteroAtom);
-    const userId = store.get(userIdAtom);
-    const attachmentContext = {
-        searchableLibraryIds,
-        syncWithZotero,
-        userId,
-    };
-
     // Apply filters first (before serialization)
     const filteredItems: { item: Zotero.Item; similarity: number }[] = [];
 
@@ -317,7 +307,7 @@ export async function handleItemSearchByTopicRequest(
 
     // Batch-fetch best attachments and sync dates for all candidate items
     const candidateItems = candidates.map(c => c.item);
-    const batchAttachmentData = await prepareBatchAttachmentData(candidateItems, attachmentContext, ta);
+    const batchAttachmentData = await prepareAttachmentInfoBatchData(candidateItems, ta);
 
     const resultItems: ItemSearchFrontendResultItem[] = [];
     for (let batchStart = 0; batchStart < candidates.length && resultItems.length < targetLimit; batchStart += BATCH_SIZE) {
@@ -328,12 +318,10 @@ export async function handleItemSearchByTopicRequest(
                 try {
                     const [itemData, attachments] = await Promise.all([
                         ta.track('item_serialization_ms', () => serializeItem(item, undefined, { skipHash: true })),
-                        ta.track('attachment_processing_ms', () => processAttachmentsWithBatchData(
+                        ta.track('attachment_processing_ms', () => processAttachmentInfoBatch(
                             item,
-                            attachmentContext,
                             batchAttachmentData,
                             {
-                                skipHash: true,
                                 skipWorkerFallback: true,
                                 timing: ta,
                                 includeAnnotationsCount: true,

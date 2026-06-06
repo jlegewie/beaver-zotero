@@ -172,16 +172,12 @@ function makeSearchResultItem(overrides: any = {}) {
             ...overrides.item,
         },
         attachments: overrides.attachments ?? [{
-            attachment: {
-                library_id: 1,
-                zotero_key: 'ATT00001',
-                filename: 'paper.pdf',
-                annotations_count: 2,
-            },
-            file_status: {
-                status: 'available',
-                page_count: 25,
-            },
+            attachment_id: '1-ATT00001',
+            filename: 'paper.pdf',
+            content_kind: 'pdf',
+            page_count: 25,
+            annotations_count: 2,
+            status: 'readable',
         }],
         similarity: overrides.similarity ?? 0.95,
     };
@@ -476,6 +472,35 @@ describe('MCP Tool Handlers (via useMcpServer)', () => {
             expect(att.filename).toBe('paper.pdf');
             expect(att.page_count).toBe(25);
             expect(att.annotations_count).toBe(2);
+            expect(att.status).toBe('available');
+        });
+
+        it('accepts legacy nested attachment info in results', async () => {
+            mockHandleItemSearchByTopicRequest.mockResolvedValue({
+                type: 'item_search_by_topic',
+                items: [makeSearchResultItem({
+                    attachments: [{
+                        attachment: {
+                            library_id: 1,
+                            zotero_key: 'ATT00001',
+                            filename: 'paper.pdf',
+                            annotations_count: 2,
+                        },
+                        file_status: {
+                            status: 'available',
+                            page_count: 25,
+                        },
+                    }],
+                })],
+            });
+
+            const result = await callTool(endpoint, 'search_by_topic', { topic_query: 'test' });
+            const data = JSON.parse(result.content[0].text);
+            const att = data.results[0].attachments[0];
+
+            expect(att.attachment_id).toBe('1-ATT00001');
+            expect(att.filename).toBe('paper.pdf');
+            expect(att.page_count).toBe(25);
             expect(att.status).toBe('available');
         });
 
@@ -1363,6 +1388,31 @@ describe('MCP Tool Handlers (via useMcpServer)', () => {
             expect(att.status).toBe('available');
             expect(att.page_count).toBeNull();
             expect(att.annotations_count).toBe(4);
+        });
+
+        it('maps readable attachment status to available without requiring path', async () => {
+            mockHandleGetMetadataRequest.mockResolvedValue({
+                type: 'get_metadata',
+                items: [{
+                    item_id: '1-KEY1',
+                    attachments: [{
+                        attachment_id: '1-ATT1',
+                        filename: 'paper.pdf',
+                        content_kind: 'pdf',
+                        status: 'readable',
+                        page_count: 12,
+                    }],
+                }],
+                not_found: [],
+            });
+
+            const result = await callTool(endpoint, 'get_item_details', { item_ids: ['1-KEY1'] });
+            const data = JSON.parse(result.content[0].text);
+            const att = data.items[0].attachments[0];
+
+            expect(att.attachment_id).toBe('1-ATT1');
+            expect(att.status).toBe('available');
+            expect(att.page_count).toBe(12);
         });
 
         it('marks attachment as unavailable when path is missing', async () => {
