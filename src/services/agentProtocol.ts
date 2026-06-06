@@ -819,8 +819,14 @@ export interface AnnotationResultItem {
     attachment_id?: string | null;
     /** Bibliographic regular item id ("library_id-zotero_key"). */
     item_id?: string | null;
+    /** Zotero item type of the bibliographic regular item. */
+    item_type?: string | null;
     /** Title of the bibliographic regular item. */
     item_title?: string | null;
+    /** Formatted creators of the bibliographic regular item. */
+    item_creators?: string | null;
+    /** Publication year of the bibliographic regular item. */
+    item_year?: number | null;
     date_added?: string | null;
     date_modified?: string | null;
 }

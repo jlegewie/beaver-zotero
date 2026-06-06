@@ -7,7 +7,12 @@ import {
     ZOTERO_ANNOTATION_PALETTE_COLORS,
 } from '../../constants/annotations';
 import { logger } from '../../utils/logger';
-import { serializeAnnotation } from '../../utils/zoteroSerializers';
+import {
+    formatZoteroCreatorsString,
+    getCreatorsFromItem,
+    getYearFromItem,
+    serializeAnnotation,
+} from '../../utils/zoteroSerializers';
 import {
     AvailableLibraryInfo,
     WSFindAnnotationsRequest,
@@ -216,11 +221,23 @@ async function buildParentInfo(
     annotations: AnnotationItem[],
 ): Promise<{
     attachmentInfoByID: Map<number, { item_id: string }>;
-    itemInfoByAttachmentID: Map<number, { item_id: string; title: string } | null>;
+    itemInfoByAttachmentID: Map<number, {
+        item_id: string;
+        item_type?: string | null;
+        title: string;
+        creators?: string | null;
+        year?: number | null;
+    } | null>;
 }> {
     const attachmentIDs = Array.from(new Set(annotations.map(a => a.parentID).filter((id): id is number => Boolean(id))));
     const attachmentInfoByID = new Map<number, { item_id: string }>();
-    const itemInfoByAttachmentID = new Map<number, { item_id: string; title: string } | null>();
+    const itemInfoByAttachmentID = new Map<number, {
+        item_id: string;
+        item_type?: string | null;
+        title: string;
+        creators?: string | null;
+        year?: number | null;
+    } | null>();
 
     if (attachmentIDs.length === 0) {
         return { attachmentInfoByID, itemInfoByAttachmentID };
@@ -237,7 +254,7 @@ async function buildParentInfo(
         ? (await Zotero.Items.getAsync(regularParentIDs)).filter((item: Zotero.Item | false): item is Zotero.Item => Boolean(item))
         : [];
     if (regularParents.length > 0) {
-        await Zotero.Items.loadDataTypes(regularParents, ['primaryData', 'itemData']);
+        await Zotero.Items.loadDataTypes(regularParents, ['primaryData', 'itemData', 'creators']);
     }
     const regularByID = new Map<number, Zotero.Item>();
     for (const parent of regularParents) {
@@ -263,7 +280,10 @@ async function buildParentInfo(
         }
         itemInfoByAttachmentID.set(itemID(attachment), {
             item_id: `${parent.libraryID}-${parent.key}`,
+            item_type: parent.itemType ?? null,
             title,
+            creators: formatZoteroCreatorsString(getCreatorsFromItem(parent)),
+            year: getYearFromItem(parent) ?? null,
         });
     }
 
