@@ -42,6 +42,8 @@ type AnnotationItem = Zotero.Item & {
     annotationSortIndex?: string;
 };
 
+type RGBColor = { r: number; g: number; b: number };
+
 function itemID(item: Zotero.Item): number {
     return item.id;
 }
@@ -98,6 +100,112 @@ function isValidModifiedInLast(value: string): boolean {
 
 function escapeLike(value: string): string {
     return value.replace(/[\\%_]/g, match => `\\${match}`);
+}
+
+function parseHexColor(value: string | null | undefined): RGBColor | null {
+    if (!value) return null;
+    const normalized = value.trim().toLowerCase();
+    const shortHex = /^#?([0-9a-f]{3})$/.exec(normalized);
+    if (shortHex) {
+        const [r, g, b] = shortHex[1].split('').map(component => parseInt(component + component, 16));
+        return { r, g, b };
+    }
+    const longHex = /^#?([0-9a-f]{6})$/.exec(normalized);
+    if (!longHex) return null;
+    return {
+        r: parseInt(longHex[1].slice(0, 2), 16),
+        g: parseInt(longHex[1].slice(2, 4), 16),
+        b: parseInt(longHex[1].slice(4, 6), 16),
+    };
+}
+
+function colorDistanceSquared(a: RGBColor, b: RGBColor): number {
+    return ((a.r - b.r) ** 2) + ((a.g - b.g) ** 2) + ((a.b - b.b) ** 2);
+}
+
+function nearestZoteroPaletteColorName(color: RGBColor): string {
+    let nearestName = 'yellow';
+    let nearestDistance = Number.POSITIVE_INFINITY;
+    for (const [name, hex] of Object.entries(ZOTERO_ANNOTATION_PALETTE_COLORS)) {
+        const paletteColor = parseHexColor(hex);
+        if (!paletteColor) continue;
+        const distance = colorDistanceSquared(color, paletteColor);
+        if (distance < nearestDistance) {
+            nearestName = name;
+            nearestDistance = distance;
+        }
+    }
+    return nearestName;
+}
+
+function resolveColorFilter(value: string | null): { paletteName: string } | null {
+    if (!value) return null;
+    const normalized = value.trim().toLowerCase();
+    if (ZOTERO_ANNOTATION_PALETTE_COLORS[normalized]) {
+        return { paletteName: normalized };
+    }
+    const rgb = parseHexColor(normalized);
+    if (!rgb) return null;
+    return { paletteName: nearestZoteroPaletteColorName(rgb) };
+}
+
+function annotationColorMatchesFilter(annotationColor: string | null | undefined, paletteName: string): boolean {
+    const rgb = parseHexColor(annotationColor);
+    return rgb ? nearestZoteroPaletteColorName(rgb) === paletteName : false;
+}
+
+/**
+ * Build a SQLite expression that converts a two-character hex component to an integer.
+ */
+function buildSqlRgbExpression(colorColumn: string, componentOffset: number): string {
+    const hexDigits = "'0123456789abcdef'";
+    return `((instr(${hexDigits}, substr(lower(${colorColumn}), ${componentOffset}, 1)) - 1) * 16 + `
+        + `(instr(${hexDigits}, substr(lower(${colorColumn}), ${componentOffset + 1}, 1)) - 1))`;
+}
+
+/**
+ * Build a SQLite expression for squared RGB distance from an annotation color column.
+ */
+function buildSqlColorDistanceExpression(colorColumn: string, paletteColor: RGBColor): string {
+    const r = buildSqlRgbExpression(colorColumn, 2);
+    const g = buildSqlRgbExpression(colorColumn, 4);
+    const b = buildSqlRgbExpression(colorColumn, 6);
+    return `((${r} - ${paletteColor.r}) * (${r} - ${paletteColor.r}) + `
+        + `(${g} - ${paletteColor.g}) * (${g} - ${paletteColor.g}) + `
+        + `(${b} - ${paletteColor.b}) * (${b} - ${paletteColor.b}))`;
+}
+
+/**
+ * Build a SQLite predicate that matches colors assigned to the nearest Zotero palette swatch.
+ */
+function buildSqlNearestPaletteColorCondition(colorColumn: string, paletteName: string): string {
+    const paletteEntries = Object.entries(ZOTERO_ANNOTATION_PALETTE_COLORS)
+        .map(([name, hex]) => {
+            const color = parseHexColor(hex);
+            if (!color) {
+                throw new Error(`Invalid Zotero annotation palette color: ${name}`);
+            }
+            return { name, color };
+        });
+    const targetIndex = paletteEntries.findIndex(entry => entry.name === paletteName);
+    if (targetIndex === -1) {
+        throw new Error(`Invalid Zotero annotation palette name: ${paletteName}`);
+    }
+
+    const targetDistance = buildSqlColorDistanceExpression(colorColumn, paletteEntries[targetIndex].color);
+    const nearestChecks = paletteEntries
+        .map((entry, index) => {
+            if (index === targetIndex) return null;
+            const otherDistance = buildSqlColorDistanceExpression(colorColumn, entry.color);
+            const operator = index < targetIndex ? '<' : '<=';
+            return `${targetDistance} ${operator} ${otherDistance}`;
+        })
+        .filter((check): check is string => Boolean(check));
+
+    return `(
+        lower(${colorColumn}) GLOB '#[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]'
+        AND ${nearestChecks.join(' AND ')}
+    )`;
 }
 
 function parseAttachmentId(attachmentId: string | null): { libraryId: number; key: string } | null {
@@ -327,7 +435,7 @@ async function serializeAnnotationPage(
 
 async function queryAnnotationIDsFromDB(options: {
     libraryID: number;
-    colorHex: string | null;
+    colorPaletteName: string | null;
     annotationType: string | null;
     author: string | null;
     attachmentScopeItemID: number | null;
@@ -352,12 +460,6 @@ async function queryAnnotationIDsFromDB(options: {
     ];
     const params: any[] = [options.libraryID];
 
-    if (options.colorHex) {
-        // Color names intentionally map to exact Beaver/Zotero palette hexes.
-        where.push('LOWER(IA.color) = ?');
-        params.push(options.colorHex.toLowerCase());
-    }
-
     if (options.annotationType) {
         const typeID = FIND_ANNOTATIONS_TYPE_DB_IDS[options.annotationType];
         if (!typeID) {
@@ -378,6 +480,10 @@ async function queryAnnotationIDsFromDB(options: {
     if (options.attachmentScopeItemID !== null) {
         where.push('IA.parentItemID = ?');
         params.push(options.attachmentScopeItemID);
+    }
+
+    if (options.colorPaletteName) {
+        where.push(buildSqlNearestPaletteColorCondition('IA.color', options.colorPaletteName));
     }
 
     let totalCount = 0;
@@ -507,8 +613,8 @@ export async function handleFindAnnotationsRequest(
         }
 
         const colorName = cleanString(request.color);
-        const colorHex = colorName ? ZOTERO_ANNOTATION_PALETTE_COLORS[colorName] : null;
-        if (colorName && !colorHex) {
+        const colorFilter = resolveColorFilter(colorName);
+        if (colorName && !colorFilter) {
             return invalidResponse(request, `Unknown annotation color: ${colorName}`, 'invalid_color');
         }
         const modifiedInLast = cleanString(request.modified_in_last);
@@ -537,7 +643,7 @@ export async function handleFindAnnotationsRequest(
         if (!collection && !hasNativeSearchFilter(request)) {
             const dbResult = await queryAnnotationIDsFromDB({
                 libraryID: library.libraryID,
-                colorHex,
+                colorPaletteName: colorFilter?.paletteName ?? null,
                 annotationType,
                 author,
                 attachmentScopeItemID,
@@ -584,9 +690,8 @@ export async function handleFindAnnotationsRequest(
 
         let candidates = await loadAnnotationItems(annotationIDs);
 
-        if (colorHex) {
-            const expected = colorHex.toLowerCase();
-            candidates = candidates.filter(annotation => (annotation.annotationColor || '').toLowerCase() === expected);
+        if (colorFilter) {
+            candidates = candidates.filter(annotation => annotationColorMatchesFilter(annotation.annotationColor, colorFilter.paletteName));
         }
         if (annotationType) {
             candidates = candidates.filter(annotation => annotation.annotationType === annotationType);
