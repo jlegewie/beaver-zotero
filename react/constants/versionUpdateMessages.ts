@@ -440,7 +440,7 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
         footer: `<a href="https://github.com/jlegewie/beaver-zotero/releases/tag/v0.19.0" target='_blank'>Full changelog</a>`,
     },
     {
-        version: "0.20.0-beta.1",
+        version: "0.20.0",
         title: "Sentence-level citations and PDF annotations",
         inPanel: false,
         featureList: [
@@ -454,7 +454,7 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
                 
             },
         ],
-        footer: `<a href="https://github.com/jlegewie/beaver-zotero/releases/tag/v0.20.0-beta.1" target='_blank'>Full changelog</a>`,
+        footer: `<a href="https://github.com/jlegewie/beaver-zotero/releases/tag/v0.20.0" target='_blank'>Full changelog</a>`,
     },
 ];
 
