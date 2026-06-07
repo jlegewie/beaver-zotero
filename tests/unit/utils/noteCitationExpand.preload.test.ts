@@ -42,6 +42,13 @@ function makeAttachment(id: number, key: string) {
     };
 }
 
+function makeRemoteOnlyAttachment(id: number, key: string) {
+    return {
+        ...makeAttachment(id, key),
+        getFilePathAsync: vi.fn().mockResolvedValue(null),
+    };
+}
+
 function makeParent(id: number, key: string, attachmentID: number) {
     return {
         id,
@@ -112,6 +119,60 @@ describe('preloadNotePageLabels', () => {
         expect(mockGetAttachmentFileStatus).toHaveBeenCalledWith(attachment, false);
         expect(cache.getMetadata).toHaveBeenCalledTimes(2);
         expect(labels).toEqual({ '1-IJKL9012': { 0: '341' } });
+    });
+
+    it('uses cached remote-only labels without downloading by default', async () => {
+        const attachment = makeRemoteOnlyAttachment(47, 'REMOTE01');
+        const cache = {
+            getMetadata: vi.fn().mockResolvedValue({ pageLabels: { 0: 'i' } }),
+        };
+        (globalThis as any).Zotero.Items.getByLibraryAndKey = vi.fn(() => attachment);
+        (globalThis as any).Zotero.Beaver = { documentCache: cache };
+
+        const labels = await preloadNotePageLabels(makeRawCitation('REMOTE01'), 1, { extractOnCacheMiss: true });
+
+        expect(labels).toEqual({ '1-REMOTE01': { 0: 'i' } });
+        expect(cache.getMetadata).toHaveBeenCalledWith(
+            { libraryId: 1, zoteroKey: 'REMOTE01' },
+            'remote:k:1-REMOTE01-v0',
+        );
+        expect(mockGetAttachmentFileStatus).not.toHaveBeenCalled();
+    });
+
+    it('does not download remote-only attachments on a cold miss by default', async () => {
+        const attachment = makeRemoteOnlyAttachment(48, 'REMOTE02');
+        const cache = {
+            getMetadata: vi.fn().mockResolvedValue(null),
+        };
+        (globalThis as any).Zotero.Items.getByLibraryAndKey = vi.fn(() => attachment);
+        (globalThis as any).Zotero.Beaver = { documentCache: cache };
+
+        const labels = await preloadNotePageLabels(makeRawCitation('REMOTE02'), 1, { extractOnCacheMiss: true });
+
+        expect(labels).toEqual({});
+        expect(cache.getMetadata).toHaveBeenCalledTimes(1);
+        expect(mockGetAttachmentFileStatus).not.toHaveBeenCalled();
+    });
+
+    it('downloads remote-only attachments on a cold miss when explicitly allowed', async () => {
+        const attachment = makeRemoteOnlyAttachment(49, 'REMOTE03');
+        const cache = {
+            getMetadata: vi.fn()
+                .mockResolvedValueOnce(null)
+                .mockResolvedValueOnce({ pageLabels: { 0: 'iii' } }),
+        };
+        (globalThis as any).Zotero.Items.getByLibraryAndKey = vi.fn(() => attachment);
+        (globalThis as any).Zotero.Beaver = { documentCache: cache };
+
+        const labels = await preloadNotePageLabels(
+            makeRawCitation('REMOTE03'),
+            1,
+            { extractOnCacheMiss: true, allowRemoteDownloads: true },
+        );
+
+        expect(mockGetAttachmentFileStatus).toHaveBeenCalledWith(attachment, false);
+        expect(cache.getMetadata).toHaveBeenCalledTimes(2);
+        expect(labels).toEqual({ '1-REMOTE03': { 0: 'iii' } });
     });
 
     it('skips citations without page locators before cache lookup or extraction', async () => {

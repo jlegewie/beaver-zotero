@@ -15,6 +15,7 @@
 import { createCitationHTML } from './zoteroUtils';
 import { getBestPDFAttachment, getBestPDFAttachmentAsync } from './zoteroItemHelpers';
 import { getAttachmentFileStatus } from '../services/agentDataProvider/utils';
+import { isRemoteFilePath, makeRemoteFilePath } from '../services/documentFileIdentity';
 import { logger } from './logger';
 import {
     escapeAttr,
@@ -133,15 +134,19 @@ export async function preloadPageLabelsForNewCitations(str: string): Promise<Pag
  * Load cached page labels for citations already stored in a raw Zotero note.
  *
  * This path is cache-first. Warm-cache reads only consult `documentCache`
- * metadata; callers can opt into extraction on a cache miss when agent-facing
- * note simplification needs read/edit views to resolve page locators
- * consistently.
+ * metadata; callers can opt into local metadata seeding on a cache miss when
+ * agent-facing note simplification needs read/edit views to resolve page
+ * locators consistently. Remote-only attachments stay cache-only unless
+ * `allowRemoteDownloads` is explicitly enabled.
  * The returned map is keyed by the simplifier's `LIBRARYID-ITEMKEY` item id.
  */
 export async function preloadNotePageLabels(
     rawHtml: string,
     libraryID: number,
-    { extractOnCacheMiss = false }: { extractOnCacheMiss?: boolean } = {},
+    {
+        extractOnCacheMiss = false,
+        allowRemoteDownloads = false,
+    }: { extractOnCacheMiss?: boolean; allowRemoteDownloads?: boolean } = {},
 ): Promise<Record<string, PageLabels>> {
     const labelsByItemId: Record<string, PageLabels> = {};
     const cache = Zotero.Beaver?.documentCache;
@@ -172,13 +177,14 @@ export async function preloadNotePageLabels(
                     : null;
                 if (!attachmentItem) continue;
 
-                const filePath = await attachmentItem.getFilePathAsync();
-                if (!filePath) continue;
+                const localFilePath = await attachmentItem.getFilePathAsync();
+                const filePath = localFilePath || makeRemoteFilePath(attachmentItem);
+                const isRemoteOnly = !localFilePath || isRemoteFilePath(filePath);
                 let record = await cache.getMetadata({
                     libraryId: attachmentItem.libraryID,
                     zoteroKey: attachmentItem.key,
                 }, filePath);
-                if (!record && extractOnCacheMiss) {
+                if (!record && extractOnCacheMiss && (!isRemoteOnly || allowRemoteDownloads)) {
                     await getAttachmentFileStatus(attachmentItem, false);
                     record = await cache.getMetadata({
                         libraryId: attachmentItem.libraryID,
