@@ -155,6 +155,26 @@ function annotationColorMatchesFilter(annotationColor: string | null | undefined
 }
 
 /**
+ * Build a SQLite expression that normalizes accepted hex color forms to #rrggbb.
+ */
+function buildSqlNormalizedHexColorExpression(colorColumn: string): string {
+    const lowerColor = `lower(${colorColumn})`;
+    return `(CASE
+        WHEN ${lowerColor} GLOB '#[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]' THEN ${lowerColor}
+        WHEN ${lowerColor} GLOB '[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]' THEN '#' || ${lowerColor}
+        WHEN ${lowerColor} GLOB '#[0-9a-f][0-9a-f][0-9a-f]' THEN '#' ||
+            substr(${lowerColor}, 2, 1) || substr(${lowerColor}, 2, 1) ||
+            substr(${lowerColor}, 3, 1) || substr(${lowerColor}, 3, 1) ||
+            substr(${lowerColor}, 4, 1) || substr(${lowerColor}, 4, 1)
+        WHEN ${lowerColor} GLOB '[0-9a-f][0-9a-f][0-9a-f]' THEN '#' ||
+            substr(${lowerColor}, 1, 1) || substr(${lowerColor}, 1, 1) ||
+            substr(${lowerColor}, 2, 1) || substr(${lowerColor}, 2, 1) ||
+            substr(${lowerColor}, 3, 1) || substr(${lowerColor}, 3, 1)
+        ELSE NULL
+    END)`;
+}
+
+/**
  * Build a SQLite expression that converts a two-character hex component to an integer.
  */
 function buildSqlRgbExpression(colorColumn: string, componentOffset: number): string {
@@ -179,6 +199,7 @@ function buildSqlColorDistanceExpression(colorColumn: string, paletteColor: RGBC
  * Build a SQLite predicate that matches colors assigned to the nearest Zotero palette swatch.
  */
 function buildSqlNearestPaletteColorCondition(colorColumn: string, paletteName: string): string {
+    const normalizedColor = buildSqlNormalizedHexColorExpression(colorColumn);
     const paletteEntries = Object.entries(ZOTERO_ANNOTATION_PALETTE_COLORS)
         .map(([name, hex]) => {
             const color = parseHexColor(hex);
@@ -192,18 +213,18 @@ function buildSqlNearestPaletteColorCondition(colorColumn: string, paletteName: 
         throw new Error(`Invalid Zotero annotation palette name: ${paletteName}`);
     }
 
-    const targetDistance = buildSqlColorDistanceExpression(colorColumn, paletteEntries[targetIndex].color);
+    const targetDistance = buildSqlColorDistanceExpression(normalizedColor, paletteEntries[targetIndex].color);
     const nearestChecks = paletteEntries
         .map((entry, index) => {
             if (index === targetIndex) return null;
-            const otherDistance = buildSqlColorDistanceExpression(colorColumn, entry.color);
+            const otherDistance = buildSqlColorDistanceExpression(normalizedColor, entry.color);
             const operator = index < targetIndex ? '<' : '<=';
             return `${targetDistance} ${operator} ${otherDistance}`;
         })
         .filter((check): check is string => Boolean(check));
 
     return `(
-        lower(${colorColumn}) GLOB '#[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]'
+        ${normalizedColor} IS NOT NULL
         AND ${nearestChecks.join(' AND ')}
     )`;
 }

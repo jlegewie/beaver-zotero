@@ -120,6 +120,18 @@ const annotations = [
         author: 'Alice Smith',
         dateModified: '2026-06-06T00:00:00Z',
     }),
+    annotation(107, 'ANN107AA', {
+        color: '#f77',
+        type: 'highlight',
+        author: 'Alice Smith',
+        dateModified: '2026-06-07T00:00:00Z',
+    }),
+    annotation(108, 'ANN108AA', {
+        color: 'ff6666',
+        type: 'highlight',
+        author: 'Alice Smith',
+        dateModified: '2026-06-08T00:00:00Z',
+    }),
 ] as MockAnnotation[];
 
 const itemByID = new Map<number, Zotero.Item>([
@@ -141,7 +153,7 @@ const baseRequest: WSFindAnnotationsRequest = {
 function matchingAnnotations() {
     return annotations
         .filter(item =>
-            ['#ff6666', '#ff7777'].includes(item.annotationColor.toLowerCase())
+            ['#ff6666', '#ff7777', '#f77', 'ff6666'].includes(item.annotationColor.toLowerCase())
             && item.annotationType === 'highlight'
             && item.annotationAuthorName.toLowerCase().includes('alice')
         )
@@ -224,9 +236,11 @@ describe('handleFindAnnotationsRequest', () => {
 
         expect(dbPath.error).toBeUndefined();
         expect(searchPath.error).toBeUndefined();
-        expect(dbPath.total_count).toBe(3);
-        expect(searchPath.total_count).toBe(3);
+        expect(dbPath.total_count).toBe(5);
+        expect(searchPath.total_count).toBe(5);
         expect(dbPath.annotations.map(a => a.annotation_id)).toEqual([
+            '1-ANN108AA',
+            '1-ANN107AA',
             '1-ANN106AA',
             '1-ANN103AA',
             '1-ANN101AA',
