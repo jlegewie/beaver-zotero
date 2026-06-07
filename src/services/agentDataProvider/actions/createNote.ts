@@ -9,6 +9,7 @@ import { renderToHTML } from '../../../../react/utils/citationRenderers';
 import { prepareCitationRenderContext } from '../../../../react/utils/citationRenderContext';
 import { wrapWithSchemaVersion, getBeaverNoteFooterHTML } from '../../../../react/utils/noteActions';
 import { getOrSimplify } from '../../../utils/noteHtmlSimplifier';
+import { preloadNotePageLabels } from '../../../utils/noteCitationExpand';
 import { getLatestNoteHtml } from '../../../utils/noteEditorIO';
 import {
     WSAgentActionValidateRequest,
@@ -556,7 +557,8 @@ async function executeCreateNoteAction(
             const rawHtml = getLatestNoteHtml(zoteroNote);
             if (rawHtml) {
                 const simplifyStart = Date.now();
-                const { simplified } = getOrSimplify(noteId, rawHtml, zoteroNote.libraryID);
+                const pageLabelsByItemId = await preloadNotePageLabels(rawHtml, zoteroNote.libraryID, { extractOnCacheMiss: true });
+                const { simplified } = getOrSimplify(noteId, rawHtml, zoteroNote.libraryID, pageLabelsByItemId);
                 ta.record('simplify_ms', Date.now() - simplifyStart);
                 noteContent = simplified;
             }

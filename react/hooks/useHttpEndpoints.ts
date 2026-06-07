@@ -52,6 +52,7 @@ import {
     handleTestCacheMetadataHttpRequest,
     handleTestCachePayloadHttpRequest,
     handleTestCacheInvalidateHttpRequest,
+    handleTestCacheSeedPageLabelsHttpRequest,
     handleTestCacheClearAllHttpRequest,
     handleTestReadAttachmentHttpRequest,
     handleTestMcpReadNoteHttpRequest,
@@ -169,6 +170,7 @@ const ENDPOINT_PATHS = [
     '/beaver/test/cache-metadata',
     '/beaver/test/cache-payload',
     '/beaver/test/cache-invalidate',
+    '/beaver/test/cache-seed-page-labels',
     '/beaver/test/cache-clear-all',
     '/beaver/test/read-attachment',
     '/beaver/test/mcp-read-note',
@@ -741,6 +743,9 @@ function registerEndpoints(): boolean {
 
         Zotero.Server.Endpoints['/beaver/test/cache-invalidate'] =
             createEndpoint(handleTestCacheInvalidateHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/cache-seed-page-labels'] =
+            createEndpoint(handleTestCacheSeedPageLabelsHttpRequest);
 
         Zotero.Server.Endpoints['/beaver/test/cache-clear-all'] =
             createEndpoint(handleTestCacheClearAllHttpRequest);

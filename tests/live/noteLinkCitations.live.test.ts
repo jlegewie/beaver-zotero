@@ -207,7 +207,8 @@ describe('/beaver/note/read — note link citations', () => {
         // The zotero:// href survived the real chrome-document normalize
         // round-trip (shield/restore) and the simplifier rewrote it.
         expect(res.content).toContain(`<citation id="${LIBRARY_ID}-${target.zotero_key}"`);
-        expect(res.content).toMatch(/<citation [^>]*\blabel="Note: Migration Notes"/);
+        expect(res.content).toContain(`ref="c_${target.zotero_key}_0"`);
+        expect(res.content).not.toMatch(/<citation [^>]*\blabel="/);
         // The raw anchor must NOT leak into the agent-visible content.
         expect(res.content).not.toContain('zotero://select');
     });

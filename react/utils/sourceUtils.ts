@@ -833,6 +833,66 @@ function normalizeSearchFragment(html: string | undefined): string {
     return stripEllipsis(stripHtmlTags(html).replace(/\s+/g, ' ').trim());
 }
 
+function formatCitationTextForSearch(citationItems: any[]): string | null {
+    if (citationItems.length === 0) return null;
+    try {
+        const citation = { citationItems, properties: {} };
+        const formatted = Zotero.EditorInstanceUtilities.formatCitation(citation);
+        return formatted?.replace(/<[^>]+>/g, '').trim() || null;
+    } catch {
+        return null;
+    }
+}
+
+function lookupCitationItemForSearch(itemId: string, locator?: string): any | null {
+    const dashIdx = itemId.indexOf('-');
+    if (dashIdx === -1) return null;
+    const libraryID = parseInt(itemId.substring(0, dashIdx), 10);
+    const key = itemId.substring(dashIdx + 1);
+    const item = Zotero.Items.getByLibraryAndKey(libraryID, key);
+    if (!item || typeof item === 'boolean') return null;
+    const citeItem = item.isAttachment?.() && item.parentItemID
+        ? Zotero.Items.get(item.parentItemID)
+        : item;
+    if (!citeItem || typeof citeItem === 'boolean') return null;
+    return {
+        uris: [Zotero.URI.getItemURI(citeItem)],
+        itemData: Zotero.Utilities.Item.itemToCSLJSON(citeItem),
+        ...(locator ? { locator, label: 'page' } : {}),
+    };
+}
+
+function parseCompoundCitationItemForSearch(entry: string): { itemId: string; page?: string } {
+    const trimmed = entry.trim();
+    const pageMarker = ':page=';
+    const pageIdx = trimmed.indexOf(pageMarker);
+    if (pageIdx === -1) return { itemId: trimmed };
+    return {
+        itemId: trimmed.substring(0, pageIdx).trim(),
+        page: trimmed.substring(pageIdx + pageMarker.length).trim() || undefined,
+    };
+}
+
+function recoverCitationLabelForSearch(tag: string): string | null {
+    const openTag = tag.match(/^<citation\b([^>]*)\/>/i);
+    const attrs = parseRawCitationAttributes(openTag?.[1] || '');
+    const normalized = normalizeCitationTag(attrs);
+    if (normalized.ok && normalized.ref.kind === 'zotero') {
+        const ci = lookupCitationItemForSearch(`${normalized.ref.library_id}-${normalized.ref.zotero_key}`);
+        return ci ? formatCitationTextForSearch([ci]) : null;
+    }
+    if (attrs.items) {
+        const citationItems = attrs.items.split(',')
+            .map((entry) => {
+                const { itemId, page } = parseCompoundCitationItemForSearch(entry);
+                return lookupCitationItemForSearch(itemId, page);
+            })
+            .filter(Boolean);
+        return formatCitationTextForSearch(citationItems);
+    }
+    return null;
+}
+
 function appendCitationPageWithStyle(tag: string, label: string, style: 'short' | 'word'): string {
     const attrMatch = tag.match(/^<citation\b([^>]*)\/>/i);
     const attrs = parseRawCitationAttributes(attrMatch?.[1] || '');
@@ -861,7 +921,10 @@ function normalizeTargetSearchVariant(html: string, style: 'short' | 'word'): st
             /<citation\b(?:[^>"']|"[^"]*"|'[^']*')*\blabel="([^"]*)"(?:[^>"']|"[^"]*"|'[^']*')*\/>/gi,
             (match, label) => appendCitationPageWithStyle(match, label || '[citation]', style)
         )
-        .replace(/<citation\b(?:[^>"']|"[^"]*"|'[^']*')*\/>/gi, '[citation]');
+        .replace(/<citation\b(?:[^>"']|"[^"]*"|'[^']*')*\/>/gi, (match) => {
+            const label = recoverCitationLabelForSearch(match) || '[citation]';
+            return appendCitationPageWithStyle(match, label, style);
+        });
     return stripEllipsis(stripHtmlTags(expandedCitations).replace(/\s+/g, ' ').trim());
 }
 
