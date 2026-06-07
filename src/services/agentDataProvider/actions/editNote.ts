@@ -503,7 +503,7 @@ async function validateEditNoteAction(
 
     // 8. Simplify note (needed for both modes)
     const noteId = `${library_id}-${zotero_key}`;
-    const pageLabelsByItemId = await preloadNotePageLabels(rawHtml, library_id);
+    const pageLabelsByItemId = await preloadNotePageLabels(rawHtml, library_id, { extractOnCacheMiss: true });
     const { simplified, metadata } = getOrSimplify(noteId, rawHtml, library_id, pageLabelsByItemId);
 
     // Snapshot external-reference state once so every expandToRawHtml('new', ...)
@@ -834,11 +834,16 @@ async function executeEditNoteAction(
     const resolvedLocatorPages = structuralLocators.pages;
     const locatorWarning = buildUnresolvedLocatorWarning(structuralLocators.unresolved);
 
-    // 4. Get current note HTML (kept for rollback on save failure)
+    // 4. Pre-seed page labels before the final note snapshot. The final
+    //    cache-only preload below keeps extraction out of the read/write window.
+    const preSeedHtml = item.getNote();
+    await preloadNotePageLabels(preSeedHtml, library_id, { extractOnCacheMiss: true });
+
+    // 5. Get current note HTML (kept for rollback on save failure)
     //    Avoid async operations between here and item.setNote() to preserve atomicity.
     const oldHtml: string = item.getNote();
 
-    // 5. Get metadata from cache or re-simplify
+    // 6. Get metadata from cache or re-simplify
     const noteId = `${library_id}-${zotero_key}`;
     const pageLabelsByItemId = await preloadNotePageLabels(oldHtml, library_id);
     const { simplified, metadata } = getOrSimplify(noteId, oldHtml, library_id, pageLabelsByItemId);

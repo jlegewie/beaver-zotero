@@ -277,7 +277,7 @@ export async function handleReadNoteRequest(
         // Pass raw HTML so the cache key matches edit_note's getOrSimplify
         // calls — simplifyNoteHtml normalizes internally, so the cached
         // simplified output is identical either way.
-        const pageLabelsByItemId = await preloadNotePageLabels(rawHtml, item.libraryID);
+        const pageLabelsByItemId = await preloadNotePageLabels(rawHtml, item.libraryID, { extractOnCacheMiss: true });
         const { simplified } = getOrSimplify(note_id, rawHtml, item.libraryID, pageLabelsByItemId);
 
         // 7. Apply offset/limit pagination

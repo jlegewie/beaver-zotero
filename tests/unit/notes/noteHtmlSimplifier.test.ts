@@ -436,6 +436,20 @@ describe('simplifyNoteHtml', () => {
         });
     });
 
+    it('re-simplifies the same note when page labels are seeded', () => {
+        const noteId = 'test-note-page-label-seed';
+        const html = wrap(`<p>${rawCitation('LABELPG1', 1, '341')}</p>`);
+        invalidateSimplificationCache(noteId);
+
+        const cold = getOrSimplify(noteId, html, 1);
+        const seeded = getOrSimplify(noteId, html, 1, {
+            '1-LABELPG1': { 0: '341' },
+        });
+
+        expect(cold.simplified).toContain('loc="page341"');
+        expect(seeded.simplified).toContain('loc="page1"');
+    });
+
     it('does not translate non-page CSL locators', () => {
         const html = wrap(`<p>${rawCitationWithCSLLabel('CHAPTER1', 1, 'xiv', 'chapter')}</p>`);
         const { simplified, metadata } = simplifyNoteHtml(html, 1, {

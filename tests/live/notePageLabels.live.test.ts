@@ -4,8 +4,8 @@
  *
  * The branch makes Beaver show the agent *physical* page numbers for citation
  * locators (read path) and store the document's Zotero page *label* back when a
- * locator changes (write path). Translation is driven by page labels cached in
- * `documentCache`, read best-effort via `preloadNotePageLabels`.
+ * locator changes (write path). Agent-facing reads seed page labels on a
+ * cache miss via `preloadNotePageLabels`, then simplify against the cache.
  *
  * Covers:
  *   1. read_note simplifier translates a stored page-label locator to its
@@ -14,13 +14,14 @@
  *   2. Numeric-looking labels are reverse-mapped to their physical page (the
  *      core bug: label "5" must resolve to its physical page, not be treated
  *      as a 1-based index).
- *   3. Locators with no matching label, and items with no cached labels (cold
- *      cache), pass through unchanged.
+ *   3. Locators with no matching label pass through unchanged.
  *   4. The simplification cache is keyed by a page-labels fingerprint, so the
  *      same note re-simplifies (does not serve a stale result) after the cached
  *      labels change.
  *   5. edit_note write path: changing an existing citation's physical page
  *      stores the corresponding Zotero page label in the saved note.
+ *   6. Cold-cache read_note → edit_note matching succeeds after read_note
+ *      seeds page labels on first touch.
  *
  * Seeding: page labels are placed in `documentCache` via the dev-only
  * `/beaver/test/cache-seed-page-labels` endpoint, which wraps the real
@@ -173,16 +174,26 @@ describe('/beaver/note/read — page-label translation', () => {
         expect(content).toContain('loc="page99"');
     });
 
-    it('does not translate when the cited attachment has no cached page labels', async () => {
-        // Cold cache: no seeded labels. The stored locator passes through
-        // verbatim (prefixed with "page"), the common production path.
+    it('keeps read_note and edit_note matching on a cold page-label cache', async () => {
         await invalidateCache(SMALL_PDF.library_id, SMALL_PDF.zotero_key);
 
-        const citation = rawCitation({ key: SMALL_PDF.zotero_key, locator: '2', label: '(Author, 2024, p. 2)' });
-        const ref = await seedNote(`<p>Cited ${citation}.</p>`);
+        const citation = rawCitation({ key: SMALL_PDF.zotero_key, locator: 'iv', label: '(Author, 2024, p. iv)' });
+        const ref = await seedNote(`<p>Cited cold ${citation}.</p>`);
+        const noteId = `${ref.library_id}-${ref.zotero_key}`;
 
-        const content = await readSimplified(`${ref.library_id}-${ref.zotero_key}`);
-        expect(content).toContain('loc="page2"');
+        const content = await readSimplified(noteId);
+        expect(content).toContain(`id="${LIBRARY_ID}-${SMALL_PDF.zotero_key}"`);
+
+        const exec = await executeEditNote({
+            library_id: ref.library_id,
+            zotero_key: ref.zotero_key,
+            operation: 'str_replace',
+            old_string: content,
+            new_string: content.replace('Cited cold', 'Cold-cache edit applied'),
+        }, { timeout: 30000 });
+
+        expect(exec.success, exec.error ?? '').toBe(true);
+        expect(exec.error_code).not.toBe('old_string_not_found');
     });
 });
 
@@ -205,13 +216,15 @@ describe('/beaver/note/read — page-labels fingerprint busts the simplification
         const withLabels = await readSimplified(noteId);
         expect(withLabels).toContain('loc="page2"');
 
-        // Drop the cached labels and read again. If the simplification cache
+        // Replace the cached labels and read again. If the simplification cache
         // ignored the page-labels fingerprint, this would wrongly return the
-        // cached "page2"; with the fingerprint it re-simplifies untranslated.
-        await invalidateCache(SMALL_PDF.library_id, SMALL_PDF.zotero_key);
-        const withoutLabels = await readSimplified(noteId);
-        expect(withoutLabels).toContain('loc="pageiv"');
-        expect(withoutLabels).not.toContain('loc="page2"');
+        // cached "page2"; with the fingerprint it re-simplifies against the
+        // current labels.
+        const changedSeed = await seedPageLabels(SMALL_PDF.library_id, SMALL_PDF.zotero_key, { 0: 'x', 1: 'y' });
+        expect(changedSeed.seeded, JSON.stringify(changedSeed)).toBe(true);
+        const changedLabels = await readSimplified(noteId);
+        expect(changedLabels).toContain('loc="pageiv"');
+        expect(changedLabels).not.toContain('loc="page2"');
     });
 });
 

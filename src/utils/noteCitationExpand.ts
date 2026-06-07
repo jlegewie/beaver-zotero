@@ -132,13 +132,16 @@ export async function preloadPageLabelsForNewCitations(str: string): Promise<Pag
 /**
  * Load cached page labels for citations already stored in a raw Zotero note.
  *
- * This read path is best-effort: it only consults `documentCache` metadata and
- * never triggers extraction. The returned map is keyed by the simplifier's
- * `LIBRARYID-ITEMKEY` item id.
+ * This path is cache-first. Warm-cache reads only consult `documentCache`
+ * metadata; callers can opt into extraction on a cache miss when agent-facing
+ * note simplification needs read/edit views to resolve page locators
+ * consistently.
+ * The returned map is keyed by the simplifier's `LIBRARYID-ITEMKEY` item id.
  */
 export async function preloadNotePageLabels(
     rawHtml: string,
     libraryID: number,
+    { extractOnCacheMiss = false }: { extractOnCacheMiss?: boolean } = {},
 ): Promise<Record<string, PageLabels>> {
     const labelsByItemId: Record<string, PageLabels> = {};
     const cache = Zotero.Beaver?.documentCache;
@@ -153,6 +156,9 @@ export async function preloadNotePageLabels(
             const citationData = JSON.parse(decodeURIComponent(match[1]));
             const citationItems = citationData.citationItems || [];
             for (const ci of citationItems) {
+                const locator = ci?.locator != null ? String(ci.locator) : '';
+                if (!locator || (ci?.label != null && ci.label !== 'page')) continue;
+
                 const uri = ci?.uris?.[0] || '';
                 const itemKey = extractItemKeyFromUri(uri);
                 if (!itemKey) continue;
@@ -168,10 +174,17 @@ export async function preloadNotePageLabels(
 
                 const filePath = await attachmentItem.getFilePathAsync();
                 if (!filePath) continue;
-                const record = await cache.getMetadata({
+                let record = await cache.getMetadata({
                     libraryId: attachmentItem.libraryID,
                     zoteroKey: attachmentItem.key,
                 }, filePath);
+                if (!record && extractOnCacheMiss) {
+                    await getAttachmentFileStatus(attachmentItem, false);
+                    record = await cache.getMetadata({
+                        libraryId: attachmentItem.libraryID,
+                        zoteroKey: attachmentItem.key,
+                    }, filePath);
+                }
                 if (record?.pageLabels && Object.keys(record.pageLabels).length > 0) {
                     labelsByItemId[itemId] = { ...record.pageLabels };
                 }
