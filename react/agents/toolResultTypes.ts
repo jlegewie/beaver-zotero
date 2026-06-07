@@ -50,6 +50,17 @@ export interface PageImageReference {
 }
 
 /**
+ * Read note result summary.
+ * Matches ReadNoteToolResultSummary from backend.
+ */
+export interface ReadNoteResultSummary {
+    tool_name: string;
+    result_count: number;
+    note_item: ZoteroItemReference;
+    parent_item?: ZoteroItemReference | null;
+}
+
+/**
  * Item search result summary.
  * Matches ItemSearchResultSummary from backend.
  */
@@ -970,21 +981,48 @@ const READ_NOTE_TOOL_NAMES: readonly string[] = [
 export interface ReadNoteViewData {
     noteReference: { library_id: number; zotero_key: string };
     parentReference?: { library_id: number; zotero_key: string };
-    title?: string;
     totalLines?: number;
     linesReturned?: string;
 }
 
+function isZoteroItemReference(value: unknown): value is ZoteroItemReference {
+    if (!value || typeof value !== 'object') return false;
+    const obj = value as Record<string, unknown>;
+    return typeof obj.library_id === 'number' && typeof obj.zotero_key === 'string';
+}
+
+function parseZoteroUniqueKey(uniqueKey: string): ZoteroItemReference | null {
+    const [libraryIdStr, ...keyParts] = uniqueKey.split('-');
+    const libraryId = parseInt(libraryIdStr, 10);
+    const zoteroKey = keyParts.join('-');
+    if (isNaN(libraryId) || !zoteroKey) return null;
+    return { library_id: libraryId, zotero_key: zoteroKey };
+}
+
 /**
  * Type guard for read_note results.
- * Checks content for note_id field (content-based, not metadata.summary).
+ * Uses metadata.summary for dehydrated results and content for older hydrated results.
  */
 export function isReadNoteResult(
     toolName: string,
     content: unknown,
-    _metadata?: Record<string, unknown>
+    metadata?: Record<string, unknown>
 ): boolean {
     if (!READ_NOTE_TOOL_NAMES.includes(toolName)) return false;
+
+    if (metadata?.summary && typeof metadata.summary === 'object') {
+        const summary = metadata.summary as Record<string, unknown>;
+        return (
+            summary.tool_name === 'read_note' &&
+            typeof summary.result_count === 'number' &&
+            isZoteroItemReference(summary.note_item) &&
+            (
+                summary.parent_item === undefined ||
+                summary.parent_item === null ||
+                isZoteroItemReference(summary.parent_item)
+            )
+        );
+    }
 
     if (!content || typeof content !== 'object') return false;
     const obj = content as Record<string, unknown>;
@@ -992,43 +1030,47 @@ export function isReadNoteResult(
 }
 
 /**
- * Extract read note data from content.
- * Parses note_id and parent_item_id to extract references.
+ * Extract read note data from metadata.summary or legacy content.
  */
 export function extractReadNoteData(
     content: unknown,
-    _metadata?: Record<string, unknown>
+    metadata?: Record<string, unknown>
 ): ReadNoteViewData | null {
+    if (metadata?.summary && typeof metadata.summary === 'object') {
+        const summary = metadata.summary as ReadNoteResultSummary;
+        if (!isZoteroItemReference(summary.note_item)) return null;
+        if (
+            summary.parent_item !== undefined &&
+            summary.parent_item !== null &&
+            !isZoteroItemReference(summary.parent_item)
+        ) {
+            return null;
+        }
+        return {
+            noteReference: summary.note_item,
+            parentReference: summary.parent_item ?? undefined,
+        };
+    }
+
     if (!content || typeof content !== 'object') return null;
     const obj = content as Record<string, unknown>;
 
     const noteId = obj.note_id as string | undefined;
     if (!noteId) return null;
 
-    // Parse note_id: "<library_id>-<zotero_key>"
-    const [libraryIdStr, ...keyParts] = noteId.split('-');
-    const libraryId = parseInt(libraryIdStr, 10);
-    const zoteroKey = keyParts.join('-');
-    if (isNaN(libraryId) || !zoteroKey) return null;
-
-    const noteReference = { library_id: libraryId, zotero_key: zoteroKey };
+    const noteReference = parseZoteroUniqueKey(noteId);
+    if (!noteReference) return null;
 
     // Parse parent_item_id if present
     let parentReference: { library_id: number; zotero_key: string } | undefined;
     const parentItemId = obj.parent_item_id as string | undefined;
     if (parentItemId) {
-        const [pLibStr, ...pKeyParts] = parentItemId.split('-');
-        const pLib = parseInt(pLibStr, 10);
-        const pKey = pKeyParts.join('-');
-        if (!isNaN(pLib) && pKey) {
-            parentReference = { library_id: pLib, zotero_key: pKey };
-        }
+        parentReference = parseZoteroUniqueKey(parentItemId) ?? undefined;
     }
 
     return {
         noteReference,
         parentReference,
-        title: obj.title as string | undefined,
         totalLines: typeof obj.total_lines === 'number' ? obj.total_lines : undefined,
         linesReturned: obj.lines_returned as string | undefined,
     };
@@ -1096,6 +1138,12 @@ export function extractZoteroReferences(part: ToolReturnPart): ZoteroItemReferen
             library_id: item.library_id,
             zotero_key: item.zotero_key,
         })) ?? [];
+    }
+
+    // Read note results
+    if (isReadNoteResult(tool_name, content, metadata)) {
+        const data = extractReadNoteData(content, metadata);
+        return data?.noteReference ? [data.noteReference] : [];
     }
 
     return [];
