@@ -7,15 +7,6 @@ interface ReadNoteResultViewProps {
         library_id: number;
         zotero_key: string;
     };
-    /** The parent item reference (if child note) */
-    parentReference?: {
-        library_id: number;
-        zotero_key: string;
-    };
-    /** Total lines in the note */
-    totalLines?: number;
-    /** Lines range returned */
-    linesReturned?: string;
 }
 
 /**
@@ -24,21 +15,10 @@ interface ReadNoteResultViewProps {
  */
 export const ReadNoteResultView: React.FC<ReadNoteResultViewProps> = ({
     noteReference,
-    totalLines,
-    linesReturned,
 }) => {
-    const displayRef = noteReference;
-    // Show "Line x-x" if a subset was returned; omit if entire note
-    const isFullNote = !linesReturned || linesReturned === `1-${totalLines}`;
-    const label = isFullNote ? undefined : `Line ${linesReturned}`;
-
-    const attachments = label
-        ? [{ ...displayRef, label }]
-        : [displayRef];
-
     return (
         <div className="display-flex flex-col">
-            <ZoteroItemsList messageAttachments={attachments} />
+            <ZoteroItemsList messageAttachments={[noteReference]} showParentItem={false} />
         </div>
     );
 };

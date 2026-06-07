@@ -223,9 +223,6 @@ export const ToolResultView: React.FC<ToolResultViewProps> = ({ toolcall, result
             return (
                 <ReadNoteResultView
                     noteReference={data.noteReference}
-                    parentReference={data.parentReference}
-                    totalLines={data.totalLines}
-                    linesReturned={data.linesReturned}
                 />
             );
         }
