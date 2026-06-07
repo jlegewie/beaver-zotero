@@ -2176,13 +2176,11 @@ describe('Page label translation during citation expansion', () => {
         expect(expanded).toContain('ORIG1');
     });
 
-    it('does not translate unchanged page when only item_id changes on existing citation', () => {
-        // Roman front matter + arabic: page label "2" is at index 4
+    it('translates page numbers when an existing citation target changes', () => {
         const labels = ['i', 'ii', 'iii', '1', '2', '3'];
         setupPageLabels(labels);
 
-        // Original citation has loc="page2" (a display label, not a page number)
-        const citHtml = rawCitation('ITEMKEY', 1, '2', '(Author, 2024, p. 2)');
+        const citHtml = rawCitation('ITEMKEY', 1, 'ii', '(Author, 2024, p. ii)');
         const noteHtml = wrap(`<p>Text ${citHtml} more text</p>`);
 
         const mockItem = {
@@ -2190,34 +2188,63 @@ describe('Page label translation during citation expansion', () => {
             key: 'NEWKEY',
             libraryID: 1,
             getField: vi.fn(() => 'New Paper'),
-            isAttachment: vi.fn(() => false),
-            isRegularItem: vi.fn(() => true),
+            isAttachment: vi.fn(() => true),
+            isRegularItem: vi.fn(() => false),
             getAttachments: vi.fn(() => []),
         };
         (globalThis as any).Zotero.Items.getByLibraryAndKey = vi.fn(() => mockItem);
 
-        invalidateSimplificationCache('test');
-        const { simplified, metadata } = simplifyNoteHtml(noteHtml, 1);
+        const { simplified, metadata } = simplifyNoteHtml(noteHtml, 1, {
+            '1-ITEMKEY': { ...labels },
+        });
 
-        // Model changes id but keeps the same loc="page2"
+        expect(simplified).toContain('loc="page2"');
         const editedSimplified = simplified.replace(/id="1-ITEMKEY"/, 'id="1-NEWKEY"');
         expandToRawHtml(editedSimplified, metadata, 'new', undefined, pageLabels);
 
-        // Page "2" should NOT be translated to "ii" — it's an existing display label
-        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '2');
+        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, 'ii');
     });
 
-    it('does NOT translate page when model edits the page on an existing citation', () => {
-        // For existing citations, the page attribute is already a label (from the
-        // original locator). Translation should NOT apply — the agent modifies
-        // labels, not 1-based page indices.
+    it('does not translate unchanged cold-cache label when only the citation target changes', () => {
+        const labels = Array.from({ length: 120 }, (_, i) => String(i + 1));
+        labels[99] = '352';
+        setupPageLabels(labels);
+
+        const citHtml = rawCitation('ITEMKEY', 1, '100', '(Author, 2024, p. 100)');
+        const noteHtml = wrap(`<p>Text ${citHtml} more text</p>`);
+
+        const mockItem = {
+            id: 99,
+            key: 'NEWKEY',
+            libraryID: 1,
+            getField: vi.fn(() => 'New Paper'),
+            isAttachment: vi.fn(() => true),
+            isRegularItem: vi.fn(() => false),
+            getAttachments: vi.fn(() => []),
+        };
+        (globalThis as any).Zotero.Items.getByLibraryAndKey = vi.fn(() => mockItem);
+
+        const { simplified, metadata } = simplifyNoteHtml(noteHtml, 1);
+        const editedSimplified = simplified.replace(/id="1-ITEMKEY"/, 'id="1-NEWKEY"');
+        expandToRawHtml(editedSimplified, metadata, 'new', undefined, pageLabels);
+
+        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '100');
+    });
+
+    it('does not translate numeric non-page locators on edited existing citations', () => {
         const labels = ['i', 'ii', 'iii', '1', '2', '3'];
         setupPageLabels(labels);
 
-        const citHtml = rawCitation('ITEMKEY', 1, '2', '(Author, 2024, p. 2)');
+        const citationItem: any = {
+            uris: ['http://zotero.org/users/1/items/ITEMKEY'],
+            locator: '3',
+            label: 'chapter',
+        };
+        const citHtml = `<span class="citation" data-citation="${encodeURIComponent(JSON.stringify({
+            citationItems: [citationItem],
+        }))}"><span class="citation-item">(Author, ch. 3)</span></span>`;
         const noteHtml = wrap(`<p>Text ${citHtml} more text</p>`);
 
-        // Use an attachment item so translation would be applied if shouldTranslate=true
         const mockItem = {
             id: 99,
             key: 'ITEMKEY',
@@ -2230,14 +2257,61 @@ describe('Page label translation during citation expansion', () => {
         };
         (globalThis as any).Zotero.Items.getByLibraryAndKey = vi.fn(() => mockItem);
 
-        invalidateSimplificationCache('test');
-        const { simplified, metadata } = simplifyNoteHtml(noteHtml, 1);
-
-        // Model changes page from "2" to "5" — this is a label, not a page index
-        const editedSimplified = simplified.replace(/loc="page2"/, 'loc="page5"');
+        const { simplified, metadata } = simplifyNoteHtml(noteHtml, 1, {
+            '1-ITEMKEY': { 1: 'ii', 2: 'iii' },
+        });
+        const editedSimplified = simplified.replace(/loc="page3"/, 'loc="page4"');
         expandToRawHtml(editedSimplified, metadata, 'new', undefined, pageLabels);
 
-        // Page "5" should pass through unchanged (no translation for existing citations)
-        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '5');
+        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '4');
+    });
+
+    it('restores unchanged label-backed citations verbatim when labels are supplied', () => {
+        const labels = Array.from({ length: 20 }, (_, i) => String(i + 1));
+        labels[13] = 'xiv';
+        setupPageLabels(labels);
+
+        const citHtml = rawCitation('ITEMKEY', 1, 'xiv', '(Author, 2024, p. xiv)');
+        const noteHtml = wrap(`<p>Text ${citHtml} more text</p>`);
+
+        const { simplified, metadata } = simplifyNoteHtml(noteHtml, 1, {
+            '1-ITEMKEY': { 13: 'xiv' },
+        });
+
+        expect(simplified).toContain('loc="page14"');
+        const expanded = expandToRawHtml(simplified, metadata, 'old', undefined, pageLabels);
+
+        expect(expanded).toBe(roundtripExpected(noteHtml));
+    });
+
+    it('translates edited existing citation page numbers to stored labels', () => {
+        const labels = Array.from({ length: 20 }, (_, i) => String(i + 1));
+        labels[13] = 'xiv';
+        labels[14] = 'xv';
+        setupPageLabels(labels);
+
+        const citHtml = rawCitation('ITEMKEY', 1, 'xiv', '(Author, 2024, p. xiv)');
+        const noteHtml = wrap(`<p>Text ${citHtml} more text</p>`);
+
+        const mockItem = {
+            id: 99,
+            key: 'ITEMKEY',
+            libraryID: 1,
+            getField: vi.fn(() => 'Paper'),
+            isAttachment: vi.fn(() => true),
+            isRegularItem: vi.fn(() => false),
+            parentItem: null,
+            getAttachments: vi.fn(() => []),
+        };
+        (globalThis as any).Zotero.Items.getByLibraryAndKey = vi.fn(() => mockItem);
+
+        const { simplified, metadata } = simplifyNoteHtml(noteHtml, 1, {
+            '1-ITEMKEY': { 13: 'xiv', 14: 'xv' },
+        });
+
+        const editedSimplified = simplified.replace(/loc="page14"/, 'loc="page15"');
+        expandToRawHtml(editedSimplified, metadata, 'new', undefined, pageLabels);
+
+        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, 'xv');
     });
 });

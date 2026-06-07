@@ -54,6 +54,7 @@ import {
     translatePageNumberToLabel,
     buildUnresolvedLocatorWarning,
 } from '../../../src/utils/noteCitationExpand';
+import { translatePageLabelToNumber } from '../../../src/utils/pageLabelTranslation';
 import {
     isNoteInEditor,
     getLatestNoteHtml,
@@ -84,6 +85,23 @@ function rawCitation(key: string, libraryID = 1, page = '', label = 'Author, 202
             locator: page,
         }],
     };
+    return `<span class="citation" data-citation="${encodeURIComponent(JSON.stringify(citationData))}">`
+        + `<span class="citation-item">${label}</span></span>`;
+}
+
+function rawCitationWithCSLLabel(
+    key: string,
+    libraryID = 1,
+    page = '',
+    cslLabel: string | undefined = undefined,
+    label = 'Author, 2024',
+): string {
+    const citationItem: any = {
+        uris: [`http://zotero.org/users/${libraryID}/items/${key}`],
+        locator: page,
+    };
+    if (cslLabel !== undefined) citationItem.label = cslLabel;
+    const citationData = { citationItems: [citationItem] };
     return `<span class="citation" data-citation="${encodeURIComponent(JSON.stringify(citationData))}">`
         + `<span class="citation-item">${label}</span></span>`;
 }
@@ -402,6 +420,35 @@ describe('simplifyNoteHtml', () => {
         const html = wrap(`<p>${rawCitation('PG1', 1, '42')}</p>`);
         const { simplified } = simplifyNoteHtml(html, 1);
         expect(simplified).toContain('loc="page42"');
+    });
+
+    it('translates cached page labels to physical page numbers for page citations', () => {
+        const html = wrap(`<p>${rawCitation('ROMANPG1', 1, 'xiv')}</p>`);
+        const { simplified, metadata } = simplifyNoteHtml(html, 1, {
+            '1-ROMANPG1': { 13: 'xiv' },
+        });
+
+        expect(simplified).toContain('loc="page14"');
+        expect(metadata.elements.get('c_ROMANPG1_0')!.originalAttrs).toEqual({
+            item_id: '1-ROMANPG1',
+            page: '14',
+            pageConvention: 'number',
+        });
+    });
+
+    it('does not translate non-page CSL locators', () => {
+        const html = wrap(`<p>${rawCitationWithCSLLabel('CHAPTER1', 1, 'xiv', 'chapter')}</p>`);
+        const { simplified, metadata } = simplifyNoteHtml(html, 1, {
+            '1-CHAPTER1': { 13: 'xiv' },
+        });
+
+        expect(simplified).toContain('loc="pagexiv"');
+        expect(metadata.elements.get('c_CHAPTER1_0')!.originalAttrs).toEqual({
+            item_id: '1-CHAPTER1',
+            page: 'xiv',
+            pageConvention: 'label',
+            cslLabel: 'chapter',
+        });
     });
 
     it('prefixes roman page locators with page in citation loc', () => {
@@ -1488,6 +1535,32 @@ describe('getOrSimplify', () => {
         getOrSimplify('test-note', html, 1);
         const result2 = getOrSimplify('test-note', html, 1);
         expect(result2.isStale).toBe(false);
+    });
+
+    it('keeps labeled and unlabeled simplifications separate in cache', () => {
+        const html = wrap(rawCitation('ABC12345', 1, 'xiv'));
+        const labels = { '1-ABC12345': { 13: 'xiv' } };
+
+        const labeled = getOrSimplify('label-cache-note', html, 1, labels);
+        const unlabeled = getOrSimplify('label-cache-note', html, 1);
+        const labeledAgain = getOrSimplify('label-cache-note', html, 1, labels);
+
+        expect(labeled.simplified).toContain('loc="page14"');
+        expect(unlabeled.simplified).toContain('loc="pagexiv"');
+        expect(labeledAgain.simplified).toContain('loc="page14"');
+    });
+
+    it('keeps unlabeled and labeled simplifications separate in cache', () => {
+        const html = wrap(rawCitation('DEF12345', 1, 'xiv'));
+        const labels = { '1-DEF12345': { 13: 'xiv' } };
+
+        const unlabeled = getOrSimplify('label-cache-note-reverse', html, 1);
+        const labeled = getOrSimplify('label-cache-note-reverse', html, 1, labels);
+        const unlabeledAgain = getOrSimplify('label-cache-note-reverse', html, 1);
+
+        expect(unlabeled.simplified).toContain('loc="pagexiv"');
+        expect(labeled.simplified).toContain('loc="page14"');
+        expect(unlabeledAgain.simplified).toContain('loc="pagexiv"');
     });
 
     it('cache stale: re-simplifies when content changes, isStale: true', () => {
@@ -3135,6 +3208,39 @@ describe('translatePageNumberToLabel', () => {
         const labels = pageLabelsFromList(Array.from({ length: 28 }, (_, i) => String(338 + i)));
         // "3, 5" → "340, 342"
         expect(translatePageNumberToLabel(labels, '3, 5')).toBe('340, 342');
+    });
+});
+
+describe('translatePageLabelToNumber', () => {
+    function pageLabelsFromList(labels: readonly string[]): Record<string, string> {
+        return Object.fromEntries(labels.map((label, index) => [String(index), label]));
+    }
+
+    it('returns as-is when labels are null or empty', () => {
+        expect(translatePageLabelToNumber(null, 'xiv')).toBe('xiv');
+        expect(translatePageLabelToNumber({}, 'xiv')).toBe('xiv');
+    });
+
+    it('translates a whole page label to a 1-based page number', () => {
+        const labels = pageLabelsFromList(['i', 'ii', 'iii', 'xiv']);
+        expect(translatePageLabelToNumber(labels, 'xiv')).toBe('4');
+    });
+
+    it('translates ranges and comma-separated lists token by token', () => {
+        const labels = pageLabelsFromList(['xiii', 'xiv', 'xv', 'xvi', 'S5']);
+        expect(translatePageLabelToNumber(labels, 'xiv-xvi, S5')).toBe('2-4, 5');
+    });
+
+    it('leaves unknown labels and free-text locators unchanged', () => {
+        const labels = pageLabelsFromList(['i', 'ii', 'iii']);
+        expect(translatePageLabelToNumber(labels, '§3.2')).toBe('§3.2');
+        expect(translatePageLabelToNumber(labels, 'xiv')).toBe('xiv');
+        expect(translatePageLabelToNumber(labels, 'ii-xiv')).toBe('ii-xiv');
+    });
+
+    it('uses the first physical page for duplicate labels', () => {
+        const labels = pageLabelsFromList(['1', '2', '2', '3']);
+        expect(translatePageLabelToNumber(labels, '2')).toBe('2');
     });
 });
 

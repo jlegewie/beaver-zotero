@@ -19,6 +19,7 @@ import {
 import {
     expandToRawHtml,
     preloadPageLabelsForNewCitations,
+    preloadNotePageLabels,
     preloadStructuralLocatorPages,
     buildUnresolvedLocatorWarning,
     type ExternalRefContext,
@@ -502,7 +503,8 @@ async function validateEditNoteAction(
 
     // 8. Simplify note (needed for both modes)
     const noteId = `${library_id}-${zotero_key}`;
-    const { simplified, metadata } = getOrSimplify(noteId, rawHtml, library_id);
+    const pageLabelsByItemId = await preloadNotePageLabels(rawHtml, library_id);
+    const { simplified, metadata } = getOrSimplify(noteId, rawHtml, library_id, pageLabelsByItemId);
 
     // Snapshot external-reference state once so every expandToRawHtml('new', ...)
     // below can resolve `<citation external_id="..."/>` consistently.
@@ -838,7 +840,8 @@ async function executeEditNoteAction(
 
     // 5. Get metadata from cache or re-simplify
     const noteId = `${library_id}-${zotero_key}`;
-    const { simplified, metadata } = getOrSimplify(noteId, oldHtml, library_id);
+    const pageLabelsByItemId = await preloadNotePageLabels(oldHtml, library_id);
+    const { simplified, metadata } = getOrSimplify(noteId, oldHtml, library_id, pageLabelsByItemId);
 
     // Snapshot external-reference state once so every expandToRawHtml('new', ...)
     // below can resolve `<citation external_id="..."/>` consistently.
