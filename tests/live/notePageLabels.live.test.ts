@@ -22,6 +22,10 @@
  *      stores the corresponding Zotero page label in the saved note.
  *   6. Cold-cache read_note → edit_note matching succeeds after read_note
  *      seeds page labels on first touch.
+ *   7. Regression guard: agent-facing read_note extracts and seeds
+ *      `documentCache` on a cold miss when a citation has a page locator (so
+ *      read/edit converge), and the guard skips extraction for citations with
+ *      no page locator or a non-"page" locator label.
  *
  * Seeding: page labels are placed in `documentCache` via the dev-only
  * `/beaver/test/cache-seed-page-labels` endpoint, which wraps the real
@@ -39,7 +43,7 @@
 import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest';
 import { isZoteroAvailable, skipIfNoZotero } from '../helpers/zoteroAvailability';
 import { post } from '../helpers/zoteroHttpClient';
-import { seedPageLabels, invalidateCache } from '../helpers/cacheInspector';
+import { seedPageLabels, invalidateCache, getCacheMetadata } from '../helpers/cacheInspector';
 import { createNote, deleteNote, executeEditNote } from './helpers/noteTestClient';
 import { SMALL_PDF, PARENT_ITEM } from '../helpers/fixtures';
 
@@ -92,15 +96,20 @@ async function seedNote(html: string): Promise<{ library_id: number; zotero_key:
     return ref;
 }
 
-/** Build a native Zotero `<span class="citation" data-citation="...">` span. */
-function rawCitation(opts: { key: string; locator?: string; label?: string }): string {
-    const data = {
-        citationItems: [{
-            uris: [`http://zotero.org/users/1/items/${opts.key}`],
-            locator: opts.locator ?? '',
-        }],
-        properties: {},
+/**
+ * Build a native Zotero `<span class="citation" data-citation="...">` span.
+ *
+ * `cslLabel` sets the citation item's CSL locator `label` field (e.g. "page",
+ * "chapter"). Page-label translation/seeding only applies to page locators, so
+ * a non-"page" label must be ignored by `preloadNotePageLabels`.
+ */
+function rawCitation(opts: { key: string; locator?: string; label?: string; cslLabel?: string }): string {
+    const citationItem: Record<string, unknown> = {
+        uris: [`http://zotero.org/users/1/items/${opts.key}`],
+        locator: opts.locator ?? '',
     };
+    if (opts.cslLabel !== undefined) citationItem.label = opts.cslLabel;
+    const data = { citationItems: [citationItem], properties: {} };
     const encoded = encodeURIComponent(JSON.stringify(data));
     const inner = opts.label ?? '(Author, 2024)';
     return `<span class="citation" data-citation="${encoded}"><span class="citation-item">${inner}</span></span>`;
@@ -194,6 +203,85 @@ describe('/beaver/note/read — page-label translation', () => {
 
         expect(exec.success, exec.error ?? '').toBe(true);
         expect(exec.error_code).not.toBe('old_string_not_found');
+    });
+});
+
+// ===========================================================================
+// read_note seeds documentCache on a cold cache (extractOnCacheMiss)
+//
+// Regression guard for the read/edit page-label asymmetry: read_note used to
+// be cache-only, so a cold read showed the raw page *label* while a later
+// edit_note (which extracts) showed the physical page *number*. The verbatim
+// old_string copied from read_note then failed to match (old_string_not_found).
+// The fix makes agent-facing read_note extract on a cache miss, so the cache
+// converges on first touch and every later read/edit simplifies identically.
+//
+// These tests assert the *mechanism* directly (does read_note populate the
+// cache?), which distinguishes fixed from broken regardless of whether the
+// fixture PDF carries embedded page labels.
+// ===========================================================================
+
+describe('/beaver/note/read — seeds documentCache on a cold cache', () => {
+    beforeEach((ctx) => skipIfNoZotero(ctx, zoteroAvailable));
+
+    it('extracts and seeds the cited PDF when the citation has a page locator', async () => {
+        await invalidateCache(SMALL_PDF.library_id, SMALL_PDF.zotero_key);
+        expect(await getCacheMetadata(SMALL_PDF.library_id, SMALL_PDF.zotero_key)).toBeNull();
+
+        const citation = rawCitation({ key: SMALL_PDF.zotero_key, locator: '2', label: '(Author, 2024, p. 2)' });
+        const ref = await seedNote(`<p>Cited ${citation}.</p>`);
+
+        await readSimplified(`${ref.library_id}-${ref.zotero_key}`);
+
+        // read_note must have run extraction on the cold miss, leaving a
+        // document-cache record behind. Before the fix this stayed null.
+        const record = await getCacheMetadata(SMALL_PDF.library_id, SMALL_PDF.zotero_key);
+        expect(record, 'read_note did not seed documentCache on a cold cache').not.toBeNull();
+    });
+
+    it('seeds the child PDF when the citation targets the regular parent item', async () => {
+        await invalidateCache(SMALL_PDF.library_id, SMALL_PDF.zotero_key);
+        expect(await getCacheMetadata(SMALL_PDF.library_id, SMALL_PDF.zotero_key)).toBeNull();
+
+        // PARENT_ITEM resolves to its child PDF (SMALL_PDF) before the lookup;
+        // the extraction-on-miss must seed that child attachment.
+        const citation = rawCitation({ key: PARENT_ITEM.zotero_key, locator: '1', label: '(Author, 2024, p. 1)' });
+        const ref = await seedNote(`<p>Cited ${citation}.</p>`);
+
+        await readSimplified(`${ref.library_id}-${ref.zotero_key}`);
+
+        const record = await getCacheMetadata(SMALL_PDF.library_id, SMALL_PDF.zotero_key);
+        expect(record, 'parent-item read_note did not seed the child PDF cache').not.toBeNull();
+    });
+
+    it('does NOT extract for a citation with no page locator', async () => {
+        await invalidateCache(SMALL_PDF.library_id, SMALL_PDF.zotero_key);
+        expect(await getCacheMetadata(SMALL_PDF.library_id, SMALL_PDF.zotero_key)).toBeNull();
+
+        // No locator → nothing to translate → the guard must skip extraction so
+        // citations without page references don't pay an extraction cost.
+        const citation = rawCitation({ key: SMALL_PDF.zotero_key });
+        const ref = await seedNote(`<p>Cited ${citation}.</p>`);
+
+        await readSimplified(`${ref.library_id}-${ref.zotero_key}`);
+
+        const record = await getCacheMetadata(SMALL_PDF.library_id, SMALL_PDF.zotero_key);
+        expect(record, 'read_note extracted for a citation without a page locator').toBeNull();
+    });
+
+    it('does NOT extract for a non-page locator label', async () => {
+        await invalidateCache(SMALL_PDF.library_id, SMALL_PDF.zotero_key);
+        expect(await getCacheMetadata(SMALL_PDF.library_id, SMALL_PDF.zotero_key)).toBeNull();
+
+        // A "chapter" locator is not a page reference; page-label translation
+        // does not apply, so the guard must skip extraction.
+        const citation = rawCitation({ key: SMALL_PDF.zotero_key, locator: '2', cslLabel: 'chapter', label: '(Author, 2024, ch. 2)' });
+        const ref = await seedNote(`<p>Cited ${citation}.</p>`);
+
+        await readSimplified(`${ref.library_id}-${ref.zotero_key}`);
+
+        const record = await getCacheMetadata(SMALL_PDF.library_id, SMALL_PDF.zotero_key);
+        expect(record, 'read_note extracted for a non-page locator label').toBeNull();
     });
 });
 
