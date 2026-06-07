@@ -327,7 +327,6 @@ export function simplifyNoteHtml(
 
                     let tag = `<citation id="${itemId}"`;
                     if (page) tag += ` loc="${escapeAttr(`page${page}`)}"`;
-                    tag += ` label="${escapeAttr(label)}"`;
                     tag += ` ref="${ref}"/>`;
                     return tag;
                 } else {
@@ -362,7 +361,6 @@ export function simplifyNoteHtml(
                     });
 
                     let tag = `<citation items="${escapeAttr(itemsAttr)}"`;
-                    tag += ` label="${escapeAttr(label)}"`;
                     tag += ` ref="${ref}"/>`;
                     return tag;
                 }
@@ -411,8 +409,7 @@ export function simplifyNoteHtml(
                     originalAttrs: { item_id: itemId },
                 });
 
-                const labelAttr = label ? ` label="${escapeAttr(label)}"` : '';
-                return `<citation id="${itemId}"${labelAttr} ref="${ref}"/>`;
+                return `<citation id="${itemId}" ref="${ref}"/>`;
             }
         );
         simplified = simplified.replace(

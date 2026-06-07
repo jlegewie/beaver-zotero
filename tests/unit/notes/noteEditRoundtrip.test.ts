@@ -1735,17 +1735,15 @@ describe('edge cases', () => {
         expect(expanded).toBe(roundtripExpected(html));
     });
 
-    it('citation label with quotes and ampersands: attribute escaping roundtrips', () => {
+    it('citation visible label with quotes and ampersands is not emitted in simplified tag', () => {
         const label = 'Smith &amp; Jones, 2024';
         const cit = rawCitation('ESCLBL', 1, '', label);
         const html = wrap(`<p>${cit}</p>`);
 
         const { simplified, metadata } = simplifyNoteHtml(html, 1);
 
-        // PM regenerates citation inner text from data-citation attrs.
-        // Without itemData in the per-citation data, generateCitationLabel
-        // produces a label from the mocked Zotero utilities: (Author, 2024).
-        expect(simplified).toContain('label="(Author, 2024)"');
+        expect(simplified).toContain('id="1-ESCLBL"');
+        expect(simplified).not.toContain('label=');
 
         // Full roundtrip
         const expanded = expandToRawHtml(simplified, metadata, 'old');

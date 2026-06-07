@@ -266,7 +266,7 @@ describe('simplifyNoteHtml', () => {
         const { simplified, metadata } = simplifyNoteHtml(html, 1);
         expect(simplified).toContain('ref="c_ABCD1234_0"');
         expect(simplified).toContain('id="1-ABCD1234"');
-        expect(simplified).toContain('label="(Author, 2024)"');
+        expect(simplified).not.toContain('label=');
         expect(simplified).toContain('/>');
         expect(metadata.elements.has('c_ABCD1234_0')).toBe(true);
         expect(metadata.elements.get('c_ABCD1234_0')!.type).toBe('citation');
@@ -277,7 +277,7 @@ describe('simplifyNoteHtml', () => {
         const { simplified, metadata } = simplifyNoteHtml(html, 1);
         expect(simplified).toContain('ref="c_KEY1+KEY2_0"');
         expect(simplified).toContain('items="1-KEY1, 1-KEY2"');
-        expect(simplified).toContain('label="(Author, 2024; Author, 2024)"');
+        expect(simplified).not.toContain('label=');
         const stored = metadata.elements.get('c_KEY1+KEY2_0');
         expect(stored!.type).toBe('compound-citation');
         expect(stored!.isCompound).toBe(true);
@@ -290,8 +290,8 @@ describe('simplifyNoteHtml', () => {
 
         const { simplified, metadata } = simplifyNoteHtml(html, 1);
 
-        expect(simplified).toContain('<citation id="1-NOTE1234" label="Note: Project note" ref="c_NOTE1234_0"/>');
-        expect(simplified).toContain('<citation id="7-ANNOT123" label="Annotation: Highlight" ref="c_ANNOT123_0"/>');
+        expect(simplified).toContain('<citation id="1-NOTE1234" ref="c_NOTE1234_0"/>');
+        expect(simplified).toContain('<citation id="7-ANNOT123" ref="c_ANNOT123_0"/>');
         expect(metadata.elements.get('c_NOTE1234_0')).toMatchObject({
             type: 'citation',
             originalAttrs: { item_id: '1-NOTE1234' },
@@ -463,7 +463,7 @@ describe('simplifyNoteHtml', () => {
         expect(simplified).toContain('loc="page5&quot; &amp; &lt;x&gt;"');
     });
 
-    it('recovers label when visible text is empty parentheses "()"', () => {
+    it('omits label when visible text is empty parentheses "()"', () => {
         // Simulates ProseMirror round-trip: atom nodes regenerate visible text
         // from data-citation attrs, producing "()" when itemData is missing
         const citationData = {
@@ -474,9 +474,9 @@ describe('simplifyNoteHtml', () => {
         const emptyCitation = `<span class="citation" data-citation="${encodeURIComponent(JSON.stringify(citationData))}">()</span>`;
         const html = wrap(`<p>${emptyCitation}</p>`);
         const { simplified } = simplifyNoteHtml(html, 1);
-        // Should recover a meaningful label via generateCitationLabel
-        expect(simplified).toContain('label="(Author, 2024)"');
+        expect(simplified).toContain('id="1-ABCD1234"');
         expect(simplified).not.toContain('label="()"');
+        expect(simplified).not.toContain('label=');
     });
 
     it('leaves malformed citation JSON unchanged (PM normalizes to empty citation)', () => {
@@ -497,13 +497,12 @@ describe('simplifyNoteHtml', () => {
         expect(simplified).toContain('()</span>');
     });
 
-    it('escapes quotes and ampersands in label attribute', () => {
+    it('does not emit a label attribute from citation visible text', () => {
         const label = 'Author "2024" & co.';
         const html = wrap(`<p>${rawCitation('ESC1', 1, '', label)}</p>`);
         const { simplified } = simplifyNoteHtml(html, 1);
-        // PM regenerates label from citation data (original label text is discarded)
-        // The recovered label comes from formatCitation mock: "(Author, 2024)"
-        expect(simplified).toContain('label="(Author, 2024)"');
+        expect(simplified).toContain('id="1-ESC1"');
+        expect(simplified).not.toContain('label=');
     });
 });
 
@@ -1294,13 +1293,13 @@ describe('citation round-trips', () => {
 
         // All expand to identical raw HTML
         const expandedOld = expandToRawHtml(
-            '<citation id="1-DUP" label="(Author, 2024)" ref="c_DUP_0"/>', metadata, 'old'
+            '<citation id="1-DUP" ref="c_DUP_0"/>', metadata, 'old'
         );
         expect(countOccurrences(contentHtml, expandedOld)).toBe(12);
 
         // Each ref is unique in simplified HTML, so expand-before gives the correct raw position
         for (let i = 0; i < 12; i++) {
-            const oldStr = `<citation id="1-DUP" label="(Author, 2024)" ref="c_DUP_${i}"/>`;
+            const oldStr = `<citation id="1-DUP" ref="c_DUP_${i}"/>`;
             const pos = simplified.indexOf(oldStr);
             expect(pos).toBeGreaterThanOrEqual(0); // unique match
 
@@ -1324,7 +1323,7 @@ describe('citation round-trips', () => {
         const { simplified, metadata } = simplifyNoteHtml(html, 1);
         const strippedHtml = stripDataCitationItems(normalizeNoteHtml(html));
         for (const ref of ['c_DUP_5', 'c_DUP_10'] as const) {
-            const oldStr = `<citation id="1-DUP" label="(Author, 2024)" ref="${ref}"/>`;
+            const oldStr = `<citation id="1-DUP" ref="${ref}"/>`;
             const expandedOld = expandToRawHtml(oldStr, metadata, 'old');
 
             expect(findUniqueRawMatchPosition(
@@ -1343,7 +1342,7 @@ describe('citation round-trips', () => {
         const { simplified, metadata } = simplifyNoteHtml(html, 1);
         const strippedHtml = stripDataCitationItems(normalizeNoteHtml(html));
         const expandedOld = expandToRawHtml(
-            '<citation id="1-AMB" label="(Author, 2024)" ref="c_AMB_0"/>', metadata, 'old'
+            '<citation id="1-AMB" ref="c_AMB_0"/>', metadata, 'old'
         );
 
         expect(findUniqueRawMatchPosition(
@@ -1360,7 +1359,7 @@ describe('citation round-trips', () => {
         const originalHtml = wrap(`<p>alpha</p><p>${raw}</p><p>${raw}</p><p>omega</p>`);
         const { simplified, metadata } = simplifyNoteHtml(originalHtml, 1);
         const strippedOriginal = stripDataCitationItems(normalizeNoteHtml(originalHtml));
-        const oldStr = '<citation id="1-DUP" label="(Author, 2024)" ref="c_DUP_1"/>';
+        const oldStr = '<citation id="1-DUP" ref="c_DUP_1"/>';
         const expandedOriginal = expandToRawHtml(oldStr, metadata, 'old');
 
         const targetContext = captureValidatedEditTargetContext(
@@ -1430,7 +1429,7 @@ describe('citation round-trips', () => {
         const contentHtml = stripNoteWrapperDiv(stripDataCitationItems(normalizeNoteHtml(html)));
 
         const expandedRaw = expandToRawHtml(
-            '<citation id="1-CTX" label="(Author, 2024)" ref="c_CTX_0"/>', metadata, 'old'
+            '<citation id="1-CTX" ref="c_CTX_0"/>', metadata, 'old'
         );
         const expandedFooBar = `foo ${expandedRaw} bar`;
 
@@ -1438,7 +1437,7 @@ describe('citation round-trips', () => {
         expect(countOccurrences(contentHtml, expandedFooBar)).toBe(2);
 
         // old_string for c_CTX_2 with surrounding text — unique in simplified
-        const oldStr = 'foo <citation id="1-CTX" label="(Author, 2024)" ref="c_CTX_2"/> bar';
+        const oldStr = 'foo <citation id="1-CTX" ref="c_CTX_2"/> bar';
         const pos = simplified.indexOf(oldStr);
         expect(pos).toBeGreaterThanOrEqual(0);
 

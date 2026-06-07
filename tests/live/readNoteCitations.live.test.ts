@@ -135,10 +135,9 @@ describe('/beaver/note/read — single citation simplified output', () => {
         // Legacy attrs must not appear in the new simplified format.
         expect(res.content).not.toMatch(/\bitem_id="/);
         expect(res.content).not.toMatch(/\bpage="\d/);
-        // The simplified tag carries a `label="..."` attr — its content is
-        // regenerated from the citation's itemData by ProseMirror so we
-        // only check that the attribute exists rather than its exact value.
-        expect(res.content).toMatch(/<citation [^>]*\blabel="[^"]+"/);
+        // The simplified tag matches Beaver's citation syntax plus the edit
+        // handle; rendered citation text is not exposed as a label attribute.
+        expect(res.content).not.toMatch(/<citation [^>]*\blabel="/);
     });
 
     it('emits loc="pageNNN" when the underlying citation has a page locator', async () => {

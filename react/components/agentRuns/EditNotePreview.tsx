@@ -865,7 +865,7 @@ function appendCitationPage(tag: string, label: string): string {
 
 /**
  * Strip HTML tags for display, converting special elements to readable text.
- * - Citations (simplified): <citation ... label="(Author, 2020)"/> → (Author, 2020)
+ * - Citations (simplified): <citation id="..."/> → recovered citation text
  * - Citations (raw Zotero): <span class="citation" ...>(<span class="citation-item">Author, 2024</span>)</span> → (Author, 2024)
  * - When a citation label is empty or "()", recovers a meaningful label by
  *   looking up the cited item in the Zotero library.
@@ -887,8 +887,8 @@ export function stripHtmlTags(html: string): string {
                 return recoverRawCitationLabel(encodedCitation) || text || '[citation]';
             }
         )
-        // Convert simplified self-closing citation tags to their label text.
-        // When label is empty or "()", recover by looking up the item.
+        // Convert simplified self-closing citation tags to readable text.
+        // Older tags may carry label="..."; newer tags recover it by item id.
         // Also appends page info from loc/page attributes when present.
         .replace(/<citation\b(?:[^>"']|"[^"]*"|'[^']*')*\blabel="([^"]*)"(?:[^>"']|"[^"]*"|'[^']*')*\/>/gi,
             (match, label) => {
