@@ -876,7 +876,9 @@ const EXTRACT_TOOL_NAMES: readonly string[] = [
 export interface ItemExtractionReference {
     library_id: number;
     zotero_key: string;
-    status: "relevant" | "not_relevant" | "error";
+    // "success" | "error" is the current backend vocabulary. "relevant" /
+    // "not_relevant" are legacy values still present in older thread history.
+    status: "success" | "error" | "relevant" | "not_relevant";
     title?: string | null;
     authors?: string | null;
     year?: number | null;
@@ -890,7 +892,9 @@ export interface ExtractToolResultSummary {
     tool_name: string;
     total_items: number;
     items_processed: number;
-    items_relevant: number;
+    // Legacy field; the backend no longer requires it. Kept optional so older
+    // history still type-checks and newer payloads that omit it are accepted.
+    items_relevant?: number;
     items_failed: number;
     total_pages_processed: number;
     items: ItemExtractionReference[];
@@ -919,7 +923,8 @@ export function isExtractResult(
         typeof summary.tool_name === 'string' &&
         typeof summary.total_items === 'number' &&
         typeof summary.items_processed === 'number' &&
-        typeof summary.items_relevant === 'number' &&
+        // items_relevant is legacy/optional — don't require it so the guard
+        // still matches once the backend stops sending it.
         typeof summary.items_failed === 'number' &&
         Array.isArray(summary.items) &&
         summary.items.every((item: unknown) => {
@@ -960,7 +965,9 @@ export function extractExtractData(
     return {
         items: summary.items,
         totalItems: summary.total_items,
-        itemsRelevant: summary.items_relevant,
+        // Fall back to items_processed for newer payloads that omit the
+        // legacy items_relevant field.
+        itemsRelevant: summary.items_relevant ?? summary.items_processed,
         itemsProcessed: summary.items_processed,
         itemsFailed: summary.items_failed,
     };
