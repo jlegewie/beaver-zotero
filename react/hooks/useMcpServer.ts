@@ -7,7 +7,8 @@
  * client (Claude Code, Claude Desktop via mcp-remote, Cursor) can call the tools.
  *
  * Tools: search_by_topic, search_by_metadata, read_attachment, read_note,
- *        create_note, get_item_details, list_collections, list_tags, list_items
+ *        get_item_details, list_collections, list_tags, list_items
+ * Optional tool: create_note
  */
 
 import { useEffect } from 'react';
@@ -29,7 +30,7 @@ import type { TimeoutContext } from '../../src/services/agentDataProvider/timeou
 import { getCitationKeyFromItem, getZoteroSelectURI } from '../../src/utils/zoteroUtils';
 import { logger } from '../../src/utils/logger';
 import { isAuthenticatedAtom } from '../atoms/auth';
-import { mcpServerEnabledAtom } from '../atoms/ui';
+import { mcpCreateNoteToolEnabledAtom, mcpServerEnabledAtom } from '../atoms/ui';
 import { store } from '../store';
 import type {
     WSItemSearchByTopicRequest,
@@ -639,6 +640,16 @@ function mcpError(message: string) {
         isError: true,
     };
 }
+
+type McpToolRegistration = {
+    def: {
+        name: string;
+        description: string;
+        inputSchema: Record<string, any>;
+        annotations?: Record<string, any>;
+    };
+    handler: (args: any) => Promise<any>;
+};
 
 // =============================================================================
 // Response formatting: search results
@@ -1270,6 +1281,7 @@ async function handleListItems(args: any): Promise<any> {
 
 export function useMcpServer() {
     const enabled = useAtomValue(mcpServerEnabledAtom);
+    const createNoteToolEnabled = useAtomValue(mcpCreateNoteToolEnabledAtom);
 
     useEffect(() => {
         if (!enabled) {
@@ -1286,17 +1298,19 @@ export function useMcpServer() {
         const service = new MCPService();
         service.setAuthCheck(() => store.get(isAuthenticatedAtom));
 
-        const tools = [
+        const tools: McpToolRegistration[] = [
             { def: SEARCH_BY_TOPIC_TOOL, handler: handleSearchByTopic },
             { def: SEARCH_BY_METADATA_TOOL, handler: handleSearchByMetadata },
             { def: READ_ATTACHMENT_TOOL, handler: handleReadAttachment },
             { def: READ_NOTE_TOOL, handler: handleReadNote },
-            { def: CREATE_NOTE_TOOL, handler: handleCreateNote },
             { def: GET_ITEM_DETAILS_TOOL, handler: handleGetItemDetails },
             { def: LIST_COLLECTIONS_TOOL, handler: handleListCollections },
             { def: LIST_TAGS_TOOL, handler: handleListTags },
             { def: LIST_ITEMS_TOOL, handler: handleListItems },
         ];
+        if (createNoteToolEnabled) {
+            tools.push({ def: CREATE_NOTE_TOOL, handler: handleCreateNote });
+        }
 
         for (const { def, handler } of tools) {
             service.registerTool(def.name, def, handler);
@@ -1310,5 +1324,5 @@ export function useMcpServer() {
                 service.unregister();
             }
         };
-    }, [enabled]);
+    }, [enabled, createNoteToolEnabled]);
 }
