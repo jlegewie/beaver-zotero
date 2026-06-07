@@ -458,6 +458,34 @@ export async function invalidateCache(
     if (res.error) throw new Error(res.error);
 }
 
+export interface SeedPageLabelsResponse {
+    ok?: boolean;
+    seeded?: boolean;
+    page_labels?: Record<string, string> | null;
+    error?: string;
+}
+
+/**
+ * `/beaver/test/cache-seed-page-labels` — seed document-cache page labels for
+ * an attachment via the real `DocumentCache.putMetadata` write path. `labels`
+ * is a 0-based index → display-label map (e.g. `{ 0: 'iii', 1: 'iv' }`).
+ */
+export async function seedPageLabels(
+    libraryId: number,
+    key: string,
+    labels: Record<number, string>,
+    pageCount?: number,
+): Promise<SeedPageLabelsResponse> {
+    const res = await post<SeedPageLabelsResponse>('/beaver/test/cache-seed-page-labels', {
+        library_id: libraryId,
+        zotero_key: key,
+        page_labels: labels,
+        page_count: pageCount,
+    });
+    if (res.error) throw new Error(res.error);
+    return res;
+}
+
 export async function resolveItem(
     libraryId: number,
     key: string,

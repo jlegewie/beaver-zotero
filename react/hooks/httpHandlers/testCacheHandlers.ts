@@ -73,6 +73,68 @@ export async function handleTestCacheInvalidateHttpRequest(request: any) {
 }
 
 /**
+ * Dev-only: seed document-cache page-label metadata for an attachment.
+ *
+ * Thin wrapper over the real `DocumentCache.putMetadata` write path so tests
+ * can deterministically place page labels in the cache without running a full
+ * PDF extraction. The source identity (mtime/size) is derived from the real
+ * attachment file, so the seeded record is treated as fresh by `getMetadata`.
+ *
+ * Request: `{ library_id, zotero_key, page_labels: { "0": "iii", ... }, page_count? }`.
+ */
+export async function handleTestCacheSeedPageLabelsHttpRequest(request: any) {
+    const { library_id, zotero_key, page_labels, page_count } = request as {
+        library_id?: number;
+        zotero_key?: string;
+        page_labels?: Record<string, string>;
+        page_count?: number;
+    };
+    const cache = Zotero.Beaver?.documentCache;
+    if (!cache) return { error: 'cache not available' };
+    if (library_id == null || zotero_key == null || page_labels == null) {
+        return { error: 'Provide library_id, zotero_key, and page_labels' };
+    }
+
+    const item = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);
+    if (!item || typeof item === 'boolean') return { error: 'not_found' };
+    if (!item.isAttachment()) return { error: 'not_an_attachment' };
+
+    const filePath = await item.getFilePathAsync();
+    if (!filePath) return { error: 'no_file' };
+
+    // Normalize incoming JSON keys ("0", "1", ...) to a 0-based index map.
+    const pageLabels: Record<number, string> = {};
+    for (const [k, v] of Object.entries(page_labels)) {
+        const idx = Number(k);
+        if (Number.isInteger(idx) && idx >= 0) pageLabels[idx] = String(v);
+    }
+
+    await cache.putMetadata({
+        item,
+        filePath,
+        // sourceSizeBytes is recomputed from the real file for local paths.
+        sourceSizeBytes: 0,
+        contentType: 'application/pdf',
+        metadata: {
+            contentKind: 'pdf',
+            pageCount: typeof page_count === 'number' ? page_count : Object.keys(pageLabels).length,
+            pageLabels,
+            pages: null,
+        },
+    });
+
+    const record = await cache.getMetadata(
+        { libraryId: item.libraryID, zoteroKey: item.key },
+        filePath,
+    );
+    return {
+        ok: true,
+        seeded: !!(record?.pageLabels && Object.keys(record.pageLabels).length > 0),
+        page_labels: record?.pageLabels ?? null,
+    };
+}
+
+/**
  * Dev-only: completely clear the document cache (metadata rows, payload
  * rows, and payload files on disk). Mirrors the DevTools "Clear Document
  * Cache" menu item, exposed over HTTP so tests can reset to a cold cache.
