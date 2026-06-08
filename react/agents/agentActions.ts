@@ -313,6 +313,7 @@ function normalizeNoteAnnotationItem(item: any): NoteAnnotationItem {
     return {
         ...normalizeCreateAnnotationBaseItem(item),
         comment: String(item?.comment ?? ''),
+        color: item?.color ?? 'yellow',
         note_position: normalizeNotePosition({ note_position: item?.note_position ?? item?.notePosition }) ?? {
             page_index: 0,
             side: 'right',

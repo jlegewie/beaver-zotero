@@ -446,11 +446,11 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
         featureList: [
             {
                 title: "Sentence-level citations",
-                description: "Citations now pinpoint the exact sentences, not just the page. Hover to preview the source text, or click to open the PDF with those sentences highlighted.",
+                description: "Citations now pinpoint exact sentences. Hover to preview the source, or click to open the highlighted PDF."
             },
             {
                 title: "AI-powered PDF annotations",
-                description: 'Just ask Beaver to "highlight key findings" or "everything relevant to my project" and it annotates the PDF for you. <a href="https://www.beaverapp.ai/docs/annotations">Learn more</a>',
+                description: 'Ask Beaver to "highlight key findings" or "everything relevant to my project" and it annotates the PDF for you. Color-coded and ready to review. <a href="https://www.beaverapp.ai/docs/annotations">Learn more</a>',
                 
             },
         ],

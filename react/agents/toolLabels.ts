@@ -144,6 +144,7 @@ const TOOL_BASE_LABELS: Record<string, string> = {
     search_in_attachment: 'Search in attachment',
     search_in_attachments: 'Search in attachments',
     read_file: 'Retrieving data',
+    load_tool_results: 'Loading tool results',
     view_pages: 'Viewing pages',
     view_page_images: 'Viewing pages',
 
@@ -760,6 +761,11 @@ export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): st
                     return `${baseLabel}: Unknown note`;
                 }
             }
+            return baseLabel;
+        }
+
+        // === Tool results ===
+        case 'load_tool_results': {
             return baseLabel;
         }
 

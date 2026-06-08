@@ -92,14 +92,15 @@ const TOOL_ICONS: Record<string, IconComponent> = {
 
     // Read tool result
     read_file: TextAlignLeftIcon,
-
+    load_tool_results: PuzzleIcon,
+    
     // Progressive disclosure tools
     load_capability: PuzzleIcon,
     search_tools: PuzzleIcon,
 };
 
 /** Progressive disclosure tools whose returns are framework-internal and shouldn't be expandable. */
-const NON_EXPANDABLE_TOOLS = new Set(['read_file', 'load_capability', 'search_tools']);
+const NON_EXPANDABLE_TOOLS = new Set(['read_file', 'load_capability', 'search_tools', 'load_tool_results']);
 
 /** Tools that return pages */
 const UNIT_PAGES_TOOLS = new Set(['read_pages', 'read_attachment', 'view_page_images', 'view_pages']);
