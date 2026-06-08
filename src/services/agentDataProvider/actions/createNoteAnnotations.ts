@@ -58,6 +58,7 @@ function normalizeItem(raw: any): NoteAnnotationItem {
         loc_raw: String(raw?.loc_raw ?? raw?.locRaw ?? raw?.loc?.raw ?? ''),
         loc: raw?.loc ?? { kind: 'unknown', value: '', raw: '' },
         comment: String(raw?.comment ?? ''),
+        color: raw?.color ?? 'yellow',
         note_position: normalizeNotePosition({ note_position: raw?.note_position ?? raw?.notePosition }) ?? {
             page_index: 0,
             side: 'right',
@@ -228,7 +229,7 @@ export async function executeCreateNoteAnnotationsAction(
                 const ref = await createNoteAnnotation(attachment, {
                     notePosition: item.note_position,
                     comment: item.comment,
-                    color: 'yellow',
+                    color: item.color,
                     pageLabel: item.page_label ?? null,
                     readingOrderOffset: item.reading_order_offset ?? null,
                     tags,

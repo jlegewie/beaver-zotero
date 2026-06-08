@@ -11,6 +11,9 @@ vi.mock('../../../src/services/agentDataProvider/utils.ts', () => ({
 }));
 
 vi.mock('../../../src/utils/zoteroSerializers', () => ({
+    formatZoteroCreatorsString: vi.fn(() => 'Parent Creator'),
+    getCreatorsFromItem: vi.fn(() => []),
+    getYearFromItem: vi.fn(() => 2026),
     serializeAnnotation: vi.fn((annotation: any, attachmentInfo: any, itemInfo: any) => ({
         result_type: 'annotation',
         annotation_id: `${annotation.libraryID}-${annotation.key}`,
@@ -111,6 +114,24 @@ const annotations = [
         author: 'Bob Jones',
         dateModified: '2026-06-05T00:00:00Z',
     }),
+    annotation(106, 'ANN106AA', {
+        color: '#ff7777',
+        type: 'highlight',
+        author: 'Alice Smith',
+        dateModified: '2026-06-06T00:00:00Z',
+    }),
+    annotation(107, 'ANN107AA', {
+        color: '#f77',
+        type: 'highlight',
+        author: 'Alice Smith',
+        dateModified: '2026-06-07T00:00:00Z',
+    }),
+    annotation(108, 'ANN108AA', {
+        color: 'ff6666',
+        type: 'highlight',
+        author: 'Alice Smith',
+        dateModified: '2026-06-08T00:00:00Z',
+    }),
 ] as MockAnnotation[];
 
 const itemByID = new Map<number, Zotero.Item>([
@@ -132,8 +153,17 @@ const baseRequest: WSFindAnnotationsRequest = {
 function matchingAnnotations() {
     return annotations
         .filter(item =>
-            item.annotationColor.toLowerCase() === '#ff6666'
+            ['#ff6666', '#ff7777', '#f77', 'ff6666'].includes(item.annotationColor.toLowerCase())
             && item.annotationType === 'highlight'
+            && item.annotationAuthorName.toLowerCase().includes('alice')
+        )
+        .sort((a, b) => b.dateModified.localeCompare(a.dateModified) || b.id - a.id);
+}
+
+function matchingAnnotationsBeforeColorFilter() {
+    return annotations
+        .filter(item =>
+            item.annotationType === 'highlight'
             && item.annotationAuthorName.toLowerCase().includes('alice')
         )
         .sort((a, b) => b.dateModified.localeCompare(a.dateModified) || b.id - a.id);
@@ -156,11 +186,16 @@ function installZoteroMocks(searchIDs: number[]) {
     });
     Zotero.DB = {
         queryAsync: vi.fn(async (sql: string, params: unknown[], options: any) => {
-            const matches = matchingAnnotations();
+            const hasColorFilter = sql.includes('IA.color');
             if (sql.includes('COUNT(*)')) {
-                options.onRow({ getResultByIndex: () => matches.length });
+                options.onRow({
+                    getResultByIndex: () => hasColorFilter
+                        ? matchingAnnotations().length
+                        : matchingAnnotationsBeforeColorFilter().length,
+                });
                 return;
             }
+            const matches = hasColorFilter ? matchingAnnotations() : matchingAnnotationsBeforeColorFilter();
             const limit = params[params.length - 2] as number;
             const offset = params[params.length - 1] as number;
             for (const item of matches.slice(offset, offset + limit)) {
@@ -201,15 +236,24 @@ describe('handleFindAnnotationsRequest', () => {
 
         expect(dbPath.error).toBeUndefined();
         expect(searchPath.error).toBeUndefined();
-        expect(dbPath.total_count).toBe(2);
-        expect(searchPath.total_count).toBe(2);
+        expect(dbPath.total_count).toBe(5);
+        expect(searchPath.total_count).toBe(5);
         expect(dbPath.annotations.map(a => a.annotation_id)).toEqual([
+            '1-ANN108AA',
+            '1-ANN107AA',
+            '1-ANN106AA',
             '1-ANN103AA',
             '1-ANN101AA',
         ]);
         expect(searchPath.annotations.map(a => a.annotation_id)).toEqual(
             dbPath.annotations.map(a => a.annotation_id),
         );
+
+        const dbQueries = ((globalThis as any).Zotero.DB.queryAsync as any).mock.calls
+            .map(([sql]: [string]) => sql);
+        const colorSelects = dbQueries.filter((sql: string) => sql.includes('IA.color') && !sql.includes('COUNT(*)'));
+        expect(colorSelects).toHaveLength(1);
+        expect(colorSelects[0]).toContain('LIMIT ? OFFSET ?');
     });
 
     it('rejects non-palette color names instead of falling back to yellow', async () => {

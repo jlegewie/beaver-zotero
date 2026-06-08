@@ -24,6 +24,7 @@ const mockHandleListItemsRequest = vi.fn();
 const mockHandleReadNoteRequest = vi.fn();
 const mockValidateCreateNoteAction = vi.fn();
 const mockExecuteCreateNoteAction = vi.fn();
+const mockMcpCreateNoteToolEnabled = vi.hoisted(() => ({ value: false }));
 
 vi.mock('../../../src/services/agentDataProvider', () => ({
     handleItemSearchByTopicRequest: (...args: any[]) => mockHandleItemSearchByTopicRequest(...args),
@@ -53,6 +54,7 @@ vi.mock('../../../react/atoms/auth', () => ({
 
 vi.mock('../../../react/atoms/ui', () => ({
     mcpServerEnabledAtom: { toString: () => 'mcpServerEnabledAtom' },
+    mcpCreateNoteToolEnabledAtom: { toString: () => 'mcpCreateNoteToolEnabledAtom' },
 }));
 
 vi.mock('../../../react/store', () => ({
@@ -68,7 +70,12 @@ vi.mock('react', () => ({
 }));
 
 vi.mock('jotai', () => ({
-    useAtomValue: vi.fn(() => true), // MCP enabled
+    useAtomValue: vi.fn((atom: any) => {
+        if (atom?.toString?.() === 'mcpCreateNoteToolEnabledAtom') {
+            return mockMcpCreateNoteToolEnabled.value;
+        }
+        return true; // MCP server enabled and authenticated by default
+    }),
 }));
 
 // ---------------------------------------------------------------------------
@@ -78,6 +85,7 @@ vi.mock('jotai', () => ({
 const zotero = (globalThis as any).Zotero;
 
 beforeEach(() => {
+    mockMcpCreateNoteToolEnabled.value = false;
     zotero.Utilities = { randomString: vi.fn(() => 'test-request-id') };
     zotero.DataDirectory = { dir: '/mock/data' };
     zotero.Server = { Endpoints: {} };
@@ -206,7 +214,7 @@ describe('MCP Tool Handlers (via useMcpServer)', () => {
     // =====================================================================
 
     describe('tool registration', () => {
-        it('registers all 9 tools', async () => {
+        it('registers all default tools without create_note', async () => {
             const result = await listTools(endpoint);
             const names = result.tools.map((t: any) => t.name);
 
@@ -214,11 +222,22 @@ describe('MCP Tool Handlers (via useMcpServer)', () => {
             expect(names).toContain('search_by_metadata');
             expect(names).toContain('read_attachment');
             expect(names).toContain('read_note');
-            expect(names).toContain('create_note');
+            expect(names).not.toContain('create_note');
             expect(names).toContain('get_item_details');
             expect(names).toContain('list_collections');
             expect(names).toContain('list_tags');
             expect(names).toContain('list_items');
+            expect(result.tools).toHaveLength(8);
+        });
+
+        it('registers create_note when enabled by preference', async () => {
+            mockMcpCreateNoteToolEnabled.value = true;
+            endpoint = setupMcpEndpoint();
+
+            const result = await listTools(endpoint);
+            const names = result.tools.map((t: any) => t.name);
+
+            expect(names).toContain('create_note');
             expect(result.tools).toHaveLength(9);
         });
 
@@ -235,6 +254,9 @@ describe('MCP Tool Handlers (via useMcpServer)', () => {
         });
 
         it('advertises MCP tool annotations', async () => {
+            mockMcpCreateNoteToolEnabled.value = true;
+            endpoint = setupMcpEndpoint();
+
             const result = await listTools(endpoint);
             const readNoteTool = result.tools.find((tool: any) => tool.name === 'read_note');
             const createNoteTool = result.tools.find((tool: any) => tool.name === 'create_note');
@@ -1107,6 +1129,11 @@ describe('MCP Tool Handlers (via useMcpServer)', () => {
     // =====================================================================
 
     describe('create_note', () => {
+        beforeEach(() => {
+            mockMcpCreateNoteToolEnabled.value = true;
+            endpoint = setupMcpEndpoint();
+        });
+
         it('validates and executes create_note action', async () => {
             mockValidateCreateNoteAction.mockResolvedValue({
                 valid: true,

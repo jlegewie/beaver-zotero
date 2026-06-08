@@ -1273,6 +1273,56 @@ describe('openNoteAndSearchEdit', () => {
         );
     });
 
+    it('preserves compound citation page locators in no-label search variants', async () => {
+        vi.mocked(computeDiff).mockReturnValue([]);
+
+        const fullText = 'Target (Smith, 2020, page 5; Jones, 2021) area.';
+        const { view, TextSelectionClass } = createMockEditorView(fullText);
+        installMockEditorInstance(1, view);
+        (globalThis as any).Zotero.Notes.open = vi.fn().mockResolvedValue(undefined);
+
+        const itemsByKey: Record<string, any> = {
+            KEY1: { key: 'KEY1', isAttachment: () => false, getField: () => 'Smith Paper' },
+            KEY2: { key: 'KEY2', isAttachment: () => false, getField: () => 'Jones Paper' },
+        };
+        (globalThis as any).Zotero.Items.getByLibraryAndKey = vi.fn((_libraryID: number, key: string) => itemsByKey[key] || false);
+        (globalThis as any).Zotero.URI = {
+            getItemURI: vi.fn((item: any) => `http://zotero.org/users/1/items/${item.key}`),
+        };
+        (globalThis as any).Zotero.Utilities = {
+            Item: {
+                itemToCSLJSON: vi.fn((item: any) => ({ id: item.key, title: item.getField() })),
+            },
+        };
+        (globalThis as any).Zotero.EditorInstanceUtilities = {
+            formatCitation: vi.fn((citation: any) => {
+                return '(' + citation.citationItems.map((ci: any) => {
+                    const author = ci.itemData.id === 'KEY1' ? 'Smith, 2020' : 'Jones, 2021';
+                    return ci.locator ? `${author}, page ${ci.locator}` : author;
+                }).join('; ') + ')';
+            }),
+        };
+
+        await openNoteAndSearchEdit(
+            1,
+            'NOTE0001',
+            '<citation items="1-KEY1:page=5, 1-KEY2" ref="c_KEY1+KEY2_0"/>',
+            '<citation items="1-KEY1:page=5, 1-KEY2" ref="c_KEY1+KEY2_0"/>',
+            true,
+            undefined,
+            undefined,
+            'Target ',
+            ' area.',
+        );
+
+        const targetStart = fullText.indexOf('(Smith, 2020, page 5; Jones, 2021)');
+        expect(TextSelectionClass.create).toHaveBeenCalledWith(
+            expect.anything(),
+            targetStart,
+            targetStart + '(Smith, 2020, page 5; Jones, 2021)'.length
+        );
+    });
+
     it('does not fall back to newString when the action is not applied', async () => {
         vi.mocked(computeDiff).mockReturnValue([]);
 

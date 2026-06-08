@@ -15,6 +15,7 @@
 import { createCitationHTML } from './zoteroUtils';
 import { getBestPDFAttachment, getBestPDFAttachmentAsync } from './zoteroItemHelpers';
 import { getAttachmentFileStatus } from '../services/agentDataProvider/utils';
+import { isRemoteFilePath, makeRemoteFilePath } from '../services/documentFileIdentity';
 import { logger } from './logger';
 import {
     escapeAttr,
@@ -40,6 +41,10 @@ import {
 } from '../../react/utils/citationGrammar';
 import type { PageLabels } from '../services/documentCache';
 import type { StructuredExtractResult } from '../beaver-extract/schema/schema';
+import { translatePageNumberToLabel } from './pageLabelTranslation';
+import { extractItemKeyFromUri } from './zoteroUri';
+
+export { translatePageNumberToLabel } from './pageLabelTranslation';
 
 /**
  * Map of `requestedCitationKey` (e.g. `zotero:1-KEY:s4`) → resolved page string
@@ -64,35 +69,6 @@ export interface StructuralLocatorPreload {
 // =============================================================================
 // Page Label Resolution
 // =============================================================================
-
-/**
- * Translate a page number string (1-based, as humans see it) to its display
- * label against an explicit page-label map (0-based index → label string).
- *
- * Only translates strings that are purely numeric page references (digits with
- * optional whitespace/range separators like "-", "–", ","). Non-page locators
- * such as "§3.2", "fn. 5", or "xii" are returned unchanged.
- *
- * Labels are passed in explicitly (resolved up-front via
- * `preloadPageLabelsForNewCitations`) so expansion stays synchronous and does
- * not read mutable cache state directly.
- */
-export function translatePageNumberToLabel(
-    pageLabels: PageLabels | null | undefined,
-    pageStr: string,
-): string {
-    if (!pageLabels || Object.keys(pageLabels).length === 0) return pageStr;
-    // Only translate strings that look like pure numeric page references
-    // (digits, whitespace, range/list separators). Anything else (letters,
-    // "§", ".", etc.) means a structured locator — return unchanged.
-    if (!/^\s*\d[\d\s,\-–]*$/.test(pageStr)) return pageStr;
-    return pageStr.replace(/\d+/g, (numStr) => {
-        // Interpret as 1-based page number → 0-based index
-        const pageIndex = parseInt(numStr, 10) - 1;
-        if (isNaN(pageIndex) || pageIndex < 0) return numStr;
-        return pageLabels[pageIndex] ?? numStr;
-    });
-}
 
 /**
  * Resolve page labels for citations in a string that carry page locators.
@@ -152,6 +128,79 @@ export async function preloadPageLabelsForNewCitations(str: string): Promise<Pag
     }
 
     return labelsByAttachmentId;
+}
+
+/**
+ * Load cached page labels for citations already stored in a raw Zotero note.
+ *
+ * This path is cache-first. Warm-cache reads only consult `documentCache`
+ * metadata; callers can opt into local metadata seeding on a cache miss when
+ * agent-facing note simplification needs read/edit views to resolve page
+ * locators consistently. Remote-only attachments stay cache-only unless
+ * `allowRemoteDownloads` is explicitly enabled.
+ * The returned map is keyed by the simplifier's `LIBRARYID-ITEMKEY` item id.
+ */
+export async function preloadNotePageLabels(
+    rawHtml: string,
+    libraryID: number,
+    {
+        extractOnCacheMiss = false,
+        allowRemoteDownloads = false,
+    }: { extractOnCacheMiss?: boolean; allowRemoteDownloads?: boolean } = {},
+): Promise<Record<string, PageLabels>> {
+    const labelsByItemId: Record<string, PageLabels> = {};
+    const cache = Zotero.Beaver?.documentCache;
+    if (!cache) return labelsByItemId;
+
+    const seen = new Set<string>();
+    const regex = /data-citation="([^"]*)"/g;
+    let match: RegExpExecArray | null;
+
+    while ((match = regex.exec(rawHtml)) !== null) {
+        try {
+            const citationData = JSON.parse(decodeURIComponent(match[1]));
+            const citationItems = citationData.citationItems || [];
+            for (const ci of citationItems) {
+                const locator = ci?.locator != null ? String(ci.locator) : '';
+                if (!locator || (ci?.label != null && ci.label !== 'page')) continue;
+
+                const uri = ci?.uris?.[0] || '';
+                const itemKey = extractItemKeyFromUri(uri);
+                if (!itemKey) continue;
+                const itemId = `${libraryID}-${itemKey}`;
+                if (seen.has(itemId)) continue;
+                seen.add(itemId);
+
+                const item = Zotero.Items.getByLibraryAndKey(libraryID, itemKey);
+                const attachmentItem = item && typeof item !== 'boolean'
+                    ? (item.isAttachment() ? item : await getBestPDFAttachmentAsync(item))
+                    : null;
+                if (!attachmentItem) continue;
+
+                const localFilePath = await attachmentItem.getFilePathAsync();
+                const filePath = localFilePath || makeRemoteFilePath(attachmentItem);
+                const isRemoteOnly = !localFilePath || isRemoteFilePath(filePath);
+                let record = await cache.getMetadata({
+                    libraryId: attachmentItem.libraryID,
+                    zoteroKey: attachmentItem.key,
+                }, filePath);
+                if (!record && extractOnCacheMiss && (!isRemoteOnly || allowRemoteDownloads)) {
+                    await getAttachmentFileStatus(attachmentItem, false);
+                    record = await cache.getMetadata({
+                        libraryId: attachmentItem.libraryID,
+                        zoteroKey: attachmentItem.key,
+                    }, filePath);
+                }
+                if (record?.pageLabels && Object.keys(record.pageLabels).length > 0) {
+                    labelsByItemId[itemId] = { ...record.pageLabels };
+                }
+            }
+        } catch {
+            // Skip malformed citation metadata or attachments that can't load.
+        }
+    }
+
+    return labelsByItemId;
 }
 
 /**
@@ -335,6 +384,8 @@ export function extractAttr(attrStr: string, name: string): string | undefined {
 interface SimplifiedCitationAttrs {
     item_id: string;
     page?: string;
+    pageConvention?: 'number' | 'label';
+    cslLabel?: string;
     /**
      * True when `page` was resolved from a structural locator and is already a
      * final page label — `buildCitationFromSimplifiedAttrs` must store it
@@ -614,14 +665,17 @@ export function expandToRawHtml(
                     if (itemId) {
                         const newAttrs = parseSimplifiedCitationAttrs(attrStr, resolvedLocatorPages);
                         if (attrsChanged(stored.originalAttrs, newAttrs)) {
-                            // For existing citations, never translate the page. The agent
-                            // sees and edits page LABELS (from the original locator), not
-                            // 1-based page indices. Translation is only for NEW citations
-                            // where the agent provides a page index that needs conversion
-                            // to a label. Translating here corrupts the locator — e.g.,
-                            // label "15" gets treated as 1-based index and converted to
-                            // the PDF's physical page label at that index (e.g., "352").
-                            return buildCitationFromSimplifiedAttrs(newAttrs, false, pageLabels);
+                            // Existing page citations are shown to the agent as
+                            // physical page numbers. When the page changes,
+                            // store the corresponding Zotero page label just
+                            // like a newly inserted citation.
+                            const shouldTranslatePage = stored.originalAttrs?.pageConvention === 'number'
+                                && (stored.originalAttrs.cslLabel == null || stored.originalAttrs.cslLabel === 'page');
+                            return buildCitationFromSimplifiedAttrs(
+                                newAttrs,
+                                shouldTranslatePage,
+                                pageLabels,
+                            );
                         }
                     }
                     return stored.rawHtml; // exact original

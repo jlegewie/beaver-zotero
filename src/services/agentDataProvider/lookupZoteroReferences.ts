@@ -10,7 +10,15 @@ import { ItemDataWithStatus, AttachmentDataWithStatus, ZoteroItemReference } fro
 import { searchableLibraryIdsAtom, syncWithZoteroAtom } from '../../../react/atoms/profile';
 import { userIdAtom } from '../../../react/atoms/auth';
 import { store } from '../../../react/store';
-import { serializeAnnotation, serializeAttachment, serializeItem, serializeNote } from '../../utils/zoteroSerializers';
+import {
+    formatZoteroCreatorsString,
+    getCreatorsFromItem,
+    getYearFromItem,
+    serializeAttachment,
+    serializeAnnotation,
+    serializeItem,
+    serializeNote,
+} from '../../utils/zoteroSerializers';
 import { computeItemStatus, prefetchSyncDates, getAttachmentFileStatus, getAttachmentFileStatusLightweight, getBestAttachmentBatch } from './utils';
 import {
     WSDataError,
@@ -334,7 +342,7 @@ export async function lookupZoteroReferences(
                 if (grandparentIds.length > 0) {
                     const grandparentItems = await Zotero.Items.getAsync(grandparentIds);
                     if (grandparentItems.length > 0) {
-                        await Zotero.Items.loadDataTypes(grandparentItems, ["primaryData", "itemData"]);
+                        await Zotero.Items.loadDataTypes(grandparentItems, ["primaryData", "itemData", "creators"]);
                         for (const grandparent of grandparentItems) {
                             parentItemsById.set(grandparent.id, grandparent);
                         }
@@ -485,14 +493,23 @@ export async function lookupZoteroReferences(
             const regularItem = parentAttachment?.parentID
                 ? parentItemsById.get(parentAttachment.parentID)
                 : null;
-            let itemInfo: { item_id: string; title: string } | null = null;
+            let itemInfo: {
+                item_id: string;
+                item_type?: string | null;
+                title: string;
+                creators?: string | null;
+                year?: number | null;
+            } | null = null;
             if (regularItem) {
                 let itemTitle = '';
                 try { itemTitle = (regularItem.getField('title', false, true) as string) || ''; }
                 catch { itemTitle = regularItem.getDisplayTitle?.() || ''; }
                 itemInfo = {
                     item_id: `${regularItem.libraryID}-${regularItem.key}`,
+                    item_type: regularItem.itemType ?? null,
                     title: itemTitle,
+                    creators: formatZoteroCreatorsString(getCreatorsFromItem(regularItem)),
+                    year: getYearFromItem(regularItem) ?? null,
                 };
             }
 

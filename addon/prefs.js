@@ -90,6 +90,7 @@ pref("onboardingSignInTextShown", false);
 
 // MCP server
 pref("mcpServerEnabled", false);
+pref("mcpCreateNoteToolEnabled", false);
 
 // Background extractor kill-switch (drains the background_jobs queue)
 pref("backgroundExtractorEnabled", true);
