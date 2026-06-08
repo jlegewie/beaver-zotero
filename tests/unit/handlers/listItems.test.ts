@@ -37,14 +37,24 @@ vi.mock('../../../src/services/agentDataProvider/utils', () => ({
 import { handleListItemsRequest } from '../../../src/services/agentDataProvider/handleListItemsRequest';
 import { getAttachmentInfoForItem, getCollectionByIdOrName, validateLibraryAccess } from '../../../src/services/agentDataProvider/utils';
 
-type MockItem = Partial<Zotero.Item> & {
+type MockItem = Omit<
+    Partial<Zotero.Item>,
+    'itemType' | 'getAnnotations' | 'getField' | 'parentItemID' | 'attachmentFilename'
+> & {
     id: number;
     key: string;
     libraryID: number;
     itemType: string;
+    parentItemID?: number | false | null;
+    attachmentFilename?: string | null;
+    attachmentContentType?: string | null;
     isNote: ReturnType<typeof vi.fn>;
     isAttachment: ReturnType<typeof vi.fn>;
     isRegularItem: ReturnType<typeof vi.fn>;
+    isFileAttachment?: ReturnType<typeof vi.fn>;
+    isAnnotation?: ReturnType<typeof vi.fn>;
+    getField?: ReturnType<typeof vi.fn>;
+    getAnnotations?: ReturnType<typeof vi.fn>;
 };
 
 function makeItem(overrides: Partial<MockItem> = {}): MockItem {
@@ -128,7 +138,7 @@ describe('handleListItemsRequest', () => {
             key: 'ANN1',
             itemType: 'annotation',
             isAnnotation: vi.fn(() => true),
-        } as Partial<MockItem>);
+        });
         itemsById.set(annotation.id, annotation);
         searchResults.push([annotation.id]);
 
@@ -178,13 +188,13 @@ describe('handleListItemsRequest', () => {
             attachmentContentType: 'application/pdf',
             isFileAttachment: vi.fn(() => true),
             getAnnotations: vi.fn(() => [{ id: 4 }]),
-        } as Partial<MockItem>);
+        });
         const annotation = makeItem({
             id: 4,
             key: 'ANN1',
             itemType: 'annotation',
             isAnnotation: vi.fn(() => true),
-        } as Partial<MockItem>);
+        });
 
         for (const item of [parent, note, attachment, annotation]) {
             itemsById.set(item.id, item);
@@ -226,7 +236,7 @@ describe('handleListItemsRequest', () => {
             attachmentContentType: 'application/pdf',
             isFileAttachment: vi.fn(() => true),
             getAnnotations: vi.fn(() => []),
-        } as Partial<MockItem>);
+        });
 
         itemsById.set(attachment.id, attachment);
         searchResults.push([attachment.id]);
@@ -264,7 +274,7 @@ describe('handleListItemsRequest', () => {
             getAnnotations: vi.fn(() => {
                 throw new Error('getAnnotations should not be called');
             }),
-        } as Partial<MockItem>);
+        });
 
         itemsById.set(attachment.id, attachment);
         searchResults.push([attachment.id]);
