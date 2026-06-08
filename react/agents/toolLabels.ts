@@ -164,6 +164,10 @@ const TOOL_BASE_LABELS: Record<string, string> = {
     create_zotero_item: 'Add item',
     external_search: 'Web search',
     lookup_work: 'Lookup work',
+
+    // Framework tools
+    load_capability: 'Loading capability',
+    search_tools: 'Finding tools',
 };
 
 
@@ -755,6 +759,28 @@ export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): st
                 } else {
                     return `${baseLabel}: Unknown note`;
                 }
+            }
+            return baseLabel;
+        }
+
+        // Progressive disclosure tools
+        case 'load_capability': {
+            // args.id is the capability id (e.g. "library-management").
+            const id = args.id as string | undefined;
+            if (id) {
+                const pretty = SKILL_NAME_LABELS[id]
+                    || id.replace(/-/g, ' ').split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+                return `${baseLabel}: ${truncate(pretty, 30)}`;
+            }
+            return baseLabel;
+        }
+
+        case 'search_tools': {
+            // args.queries is a list of strings (older builds used args.keywords).
+            const queries = normalizeListParam(args.queries)
+                ?? (typeof args.keywords === 'string' ? [args.keywords] : null);
+            if (queries && queries[0]) {
+                return `${baseLabel}: "${truncate(queries[0], 40)}"`;
             }
             return baseLabel;
         }

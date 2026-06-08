@@ -61,6 +61,7 @@ declare namespace _ZoteroTypes {
       "versionUpdatePopupShownAt": string;
       "onboardingSignInTextShown": boolean;
       "mcpServerEnabled": boolean;
+      "mcpCreateNoteToolEnabled": boolean;
       "backgroundExtractorEnabled": boolean;
       "runConsistencyCheck": boolean;
       "runCollectionSync": boolean;

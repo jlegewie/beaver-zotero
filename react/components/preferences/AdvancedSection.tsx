@@ -1,7 +1,7 @@
 import React, { useCallback, useMemo, useState } from "react";
 import Button from "../ui/Button";
 import {SettingsGroup, SettingsRow, DocLink} from "./components/SettingsElements";
-import { mcpServerEnabledAtom } from "../../atoms/ui";
+import { mcpCreateNoteToolEnabledAtom, mcpServerEnabledAtom } from "../../atoms/ui";
 import { isMcpServerSupportedAtom } from "../../atoms/profile";
 import { useAtom, useAtomValue } from "jotai";
 import { ensureMcpBridgeScript } from "../../hooks/useMcpServer";
@@ -16,6 +16,7 @@ const AdvancedSection: React.FC = () => {
 
     // --- Atoms: MCP Server enabled ---
     const [mcpServerEnabled, setMcpServerEnabled] = useAtom(mcpServerEnabledAtom);
+    const [mcpCreateNoteToolEnabled, setMcpCreateNoteToolEnabled] = useAtom(mcpCreateNoteToolEnabledAtom);
     const [mcpCopied, setMcpCopied] = useState(false);
     const [mcpHttpCopied, setMcpHttpCopied] = useState(false);
     const isMcpServerSupported = useAtomValue(isMcpServerSupportedAtom);
@@ -78,6 +79,13 @@ const AdvancedSection: React.FC = () => {
         setMcpServerEnabled(newValue);
     }, [mcpServerEnabled, isMcpServerSupported, setMcpServerEnabled]);
 
+    const handleMcpCreateNoteToolToggle = useCallback(() => {
+        if (!isMcpServerSupported) return;
+        const newValue = !mcpCreateNoteToolEnabled;
+        setPref('mcpCreateNoteToolEnabled', newValue);
+        setMcpCreateNoteToolEnabled(newValue);
+    }, [mcpCreateNoteToolEnabled, isMcpServerSupported, setMcpCreateNoteToolEnabled]);
+
     return (
         <>
             {/* ===== CUSTOM INSTRUCTIONS ===== */}
@@ -108,6 +116,29 @@ const AdvancedSection: React.FC = () => {
                                 aria-label="Enable MCP Server"
                                 checked={mcpServerEnabled}
                                 onChange={handleMcpServerToggle}
+                                onClick={(e) => e.stopPropagation()}
+                                disabled={!isMcpServerSupported}
+                                style={{ cursor: isMcpServerSupported ? 'pointer' : 'not-allowed', margin: 0 }}
+                            />
+                        </div>
+                    }
+                />
+                <SettingsRow
+                    title="Enable Create Note Tool"
+                    description="Allow MCP clients to create Zotero notes. Changing setting requires reloading of the MCP server."
+                    onClick={handleMcpCreateNoteToolToggle}
+                    hasBorder
+                    disabled={!isMcpServerSupported}
+                    tooltip={isMcpServerSupported
+                        ? 'Advertise and allow the create_note MCP tool'
+                        : 'Only available with Beaver Pro'}
+                    control={
+                        <div className="display-flex flex-row items-center gap-2">
+                            <input
+                                type="checkbox"
+                                aria-label="Enable Create Note Tool"
+                                checked={mcpCreateNoteToolEnabled}
+                                onChange={handleMcpCreateNoteToolToggle}
                                 onClick={(e) => e.stopPropagation()}
                                 disabled={!isMcpServerSupported}
                                 style={{ cursor: isMcpServerSupported ? 'pointer' : 'not-allowed', margin: 0 }}

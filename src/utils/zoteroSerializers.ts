@@ -76,6 +76,21 @@ export function getCreatorsFromItem(item: Zotero.Item): ZoteroCreator[] | null {
     return creators.length > 0 ? creators : null;
 }
 
+export function formatZoteroCreatorsString(creators: ZoteroCreator[] | null | undefined): string | null {
+    if (!creators || creators.length === 0) return null;
+
+    const names = creators.map(c => {
+        if (c.last_name) return c.last_name;
+        if (c.first_name) return c.first_name;
+        return null;
+    }).filter((name): name is string => Boolean(name));
+
+    if (names.length === 0) return null;
+    if (names.length === 1) return names[0];
+    if (names.length === 2) return `${names[0]} & ${names[1]}`;
+    return `${names[0]} et al.`;
+}
+
 /**
  * Get collections from Zotero item
  * @param item Zotero item
@@ -605,7 +620,13 @@ export function serializeNote(
 export function serializeAnnotation(
     annotation: Zotero.Item,
     attachmentInfo?: { item_id: string } | null,
-    itemInfo?: { item_id: string; title: string } | null,
+    itemInfo?: {
+        item_id: string;
+        item_type?: string | null;
+        title: string;
+        creators?: string | null;
+        year?: number | null;
+    } | null,
 ): AnnotationResultItem {
     const ann = annotation as Zotero.Item & {
         annotationType?: string;
@@ -647,7 +668,10 @@ export function serializeAnnotation(
         author: ann.annotationAuthorName || null,
         attachment_id: attachmentInfo?.item_id ?? null,
         item_id: itemInfo?.item_id ?? null,
+        item_type: itemInfo?.item_type ?? null,
         item_title: itemInfo?.title ?? null,
+        item_creators: itemInfo?.creators ?? null,
+        item_year: itemInfo?.year ?? null,
         date_added: annotation.dateAdded,
         date_modified: annotation.dateModified,
     };

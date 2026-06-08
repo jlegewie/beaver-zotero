@@ -48,7 +48,7 @@ export const ZoteroSearchResultView: React.FC<ZoteroSearchResultViewProps> = ({
 
     return (
         <div className="display-flex flex-col">
-            <ZoteroItemsList messageAttachments={itemReferences} />
+            <ZoteroItemsList messageAttachments={itemReferences} showParentItem={false} />
             {totalCount > items.length && (
                 <div className="px-15 py-2 text-xs font-color-tertiary border-t border-primary">
                     Showing {items.length} of {totalCount} items

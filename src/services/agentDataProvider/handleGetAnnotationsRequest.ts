@@ -3,7 +3,12 @@
  */
 
 import { logger } from '../../utils/logger';
-import { serializeAnnotation } from '../../utils/zoteroSerializers';
+import {
+    formatZoteroCreatorsString,
+    getCreatorsFromItem,
+    getYearFromItem,
+    serializeAnnotation,
+} from '../../utils/zoteroSerializers';
 import {
     WSGetAnnotationsRequest,
     WSGetAnnotationsResponse,
@@ -67,11 +72,17 @@ export async function handleGetAnnotationsRequest(
             await Zotero.Items.loadDataTypes(annotationItems, ['primaryData', 'itemData', 'tags']);
         }
 
-        let itemInfo: { item_id: string; title: string } | null = null;
+        let itemInfo: {
+            item_id: string;
+            item_type?: string | null;
+            title: string;
+            creators?: string | null;
+            year?: number | null;
+        } | null = null;
         if (attachment.parentID) {
             const parent = await Zotero.Items.getAsync(attachment.parentID);
             if (parent) {
-                await parent.loadDataType('itemData');
+                await Zotero.Items.loadDataTypes([parent], ['primaryData', 'itemData', 'creators']);
                 let title = '';
                 try {
                     title = (parent.getField('title') as string) || '';
@@ -80,7 +91,10 @@ export async function handleGetAnnotationsRequest(
                 }
                 itemInfo = {
                     item_id: `${parent.libraryID}-${parent.key}`,
+                    item_type: parent.itemType ?? null,
                     title,
+                    creators: formatZoteroCreatorsString(getCreatorsFromItem(parent)),
+                    year: getYearFromItem(parent) ?? null,
                 };
             }
         }

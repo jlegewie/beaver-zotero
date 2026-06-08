@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { diffWords, diffLines, diffChars } from 'diff';
 import { getOrSimplify } from '../../../src/utils/noteHtmlSimplifier';
+import { preloadNotePageLabels } from '../../../src/utils/noteCitationExpand';
 import { getLatestNoteHtml } from '../../../src/utils/noteEditorIO';
 import type { EditNoteOperation } from '../../types/agentActions/editNote';
 import { getPageLocator, normalizeCitationTag, parseRawCitationAttributes } from '../../utils/citationGrammar';
@@ -174,7 +175,8 @@ export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
                 await item.loadDataType('note');
                 const rawHtml = getLatestNoteHtml(item);
                 const noteId = `${libraryId}-${zoteroKey}`;
-                const { simplified } = getOrSimplify(noteId, rawHtml, libraryId!);
+                const pageLabelsByItemId = await preloadNotePageLabels(rawHtml, libraryId!);
+                const { simplified } = getOrSimplify(noteId, rawHtml, libraryId!, pageLabelsByItemId);
                 if (!cancelled) setFetchedOldContent(simplified);
             } catch {
                 // Fall back to no old content
@@ -218,7 +220,8 @@ export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
                 await item.loadDataType('note');
                 const rawHtml = getLatestNoteHtml(item);
                 const noteId = `${libraryId}-${zoteroKey}`;
-                const { simplified } = getOrSimplify(noteId, rawHtml, libraryId);
+                const pageLabelsByItemId = await preloadNotePageLabels(rawHtml, libraryId);
+                const { simplified } = getOrSimplify(noteId, rawHtml, libraryId, pageLabelsByItemId);
 
                 // After the edit is applied, the note contains newString instead
                 // of oldString. Search for the appropriate string so we get
@@ -862,7 +865,7 @@ function appendCitationPage(tag: string, label: string): string {
 
 /**
  * Strip HTML tags for display, converting special elements to readable text.
- * - Citations (simplified): <citation ... label="(Author, 2020)"/> → (Author, 2020)
+ * - Citations (simplified): <citation id="..."/> → recovered citation text
  * - Citations (raw Zotero): <span class="citation" ...>(<span class="citation-item">Author, 2024</span>)</span> → (Author, 2024)
  * - When a citation label is empty or "()", recovers a meaningful label by
  *   looking up the cited item in the Zotero library.
@@ -884,8 +887,8 @@ export function stripHtmlTags(html: string): string {
                 return recoverRawCitationLabel(encodedCitation) || text || '[citation]';
             }
         )
-        // Convert simplified self-closing citation tags to their label text.
-        // When label is empty or "()", recover by looking up the item.
+        // Convert simplified self-closing citation tags to readable text.
+        // Older tags may carry label="..."; newer tags recover it by item id.
         // Also appends page info from loc/page attributes when present.
         .replace(/<citation\b(?:[^>"']|"[^"]*"|'[^']*')*\blabel="([^"]*)"(?:[^>"']|"[^"]*"|'[^']*')*\/>/gi,
             (match, label) => {
