@@ -13,6 +13,7 @@ import {
     WSGetMetadataResponse,
 } from '../agentProtocol';
 import { serializeNote } from '../../utils/zoteroSerializers';
+import { getAttachmentInfoForItem } from './utils';
 
 
 /**
@@ -91,19 +92,21 @@ export async function handleGetMetadataRequest(
                     await Zotero.Items.loadDataTypes(attachmentItems, ['primaryData', 'itemData', 'tags', 'collections', 'childItems']);
                     
                     const attachments: any[] = [];
+                    const bestAttachment = await item.getBestAttachment();
                     
                     for (const attachment of attachmentItems) {
                         if (!attachment) continue;
                         
                         try {
+                            const attachmentInfo = await getAttachmentInfoForItem(attachment, {
+                                parentItemId: itemId,
+                                isPrimary: bestAttachment ? attachment.id === bestAttachment.id : false,
+                                includeAnnotationsCount: true,
+                                skipWorkerFallback: true,
+                            });
                             attachments.push({
-                                attachment_id: `${libraryId}-${attachment.key}`,
-                                title: attachment.getField('title') || null,
-                                filename: attachment.attachmentFilename || null,
-                                contentType: attachment.attachmentContentType || null,
-                                path: await attachment.getFilePath() || null,
+                                ...attachmentInfo,
                                 url: attachment.getField('url') || null,
-                                annotations_count: attachment.isFileAttachment?.() ? attachment.getAnnotations().length : 0,
                             });
                         } catch (error) {
                             logger(`handleGetMetadataRequest: Error processing attachment ${attachment.key}: ${error}`, 2);

@@ -14,7 +14,8 @@ interface ZoteroSearchResultViewProps {
 /**
  * Parse item_id format '<library_id>-<zotero_key>' to ZoteroItemReference.
  */
-function parseItemId(itemId: string): ZoteroItemReference | null {
+function parseItemId(itemId: string | null): ZoteroItemReference | null {
+    if (!itemId) return null;
     const [libraryIdStr, zoteroKey] = itemId.split('-');
     if (!libraryIdStr || !zoteroKey) return null;
     
@@ -22,6 +23,10 @@ function parseItemId(itemId: string): ZoteroItemReference | null {
     if (isNaN(libraryId)) return null;
     
     return { library_id: libraryId, zotero_key: zoteroKey };
+}
+
+function getDisplayItemId(item: DisplayItem): string | null {
+    return item.result_type === 'attachment' ? (item.attachment_id ?? item.item_id ?? null) : item.item_id;
 }
 
 /**
@@ -34,7 +39,7 @@ export const ZoteroSearchResultView: React.FC<ZoteroSearchResultViewProps> = ({
 }) => {
     const itemReferences = useMemo(() => {
         return items
-            .map(item => parseItemId(item.item_id))
+            .map(item => parseItemId(getDisplayItemId(item)))
             .filter((ref): ref is ZoteroItemReference => ref !== null);
     }, [items]);
 

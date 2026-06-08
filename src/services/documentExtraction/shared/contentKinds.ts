@@ -3,6 +3,36 @@ import type { PageGeometry } from '../../../beaver-extract/types';
 export type ExtractContentKind = 'pdf' | 'epub' | 'text' | 'snapshot';
 export type DocumentCachePageLabels = Record<string, string>;
 
+export type ReadableContentKind = ExtractContentKind | 'image';
+
+export type ContentKind =
+    | ReadableContentKind
+    | 'word'
+    | 'spreadsheet'
+    | 'presentation'
+    | 'audio'
+    | 'video'
+    | 'archive'
+    | 'linked_url'
+    | 'other';
+
+export type ContentInfoStatus = 'readable' | 'unreadable' | 'processing';
+
+export interface AttachmentInfo {
+    attachment_id: string;
+    parent_item_id?: string | null;
+    title?: string | null;
+    filename?: string | null;
+    content_kind: ContentKind;
+    status: ContentInfoStatus;
+    status_code?: string | null;
+    status_reason?: string | null;
+    page_count?: number | null;
+    line_count?: number | null;
+    is_primary: boolean;
+    annotations_count?: number | null;
+}
+
 export interface EpubSectionSummary {
     index: number;
     rawHref: string;
@@ -50,7 +80,14 @@ export function isExtractContentKind(value: string): value is ExtractContentKind
     return EXTRACT_CONTENT_KINDS.has(value);
 }
 
-export type ReadableContentKind = ExtractContentKind | 'image';
+const READABLE_CONTENT_KINDS: ReadonlySet<string> = new Set([
+    ...EXTRACT_CONTENT_KINDS,
+    'image',
+]);
+
+export function isReadableContentKind(value: string): value is ReadableContentKind {
+    return READABLE_CONTENT_KINDS.has(value);
+}
 
 export function readableToExtractKind(
     kind: ReadableContentKind | null | undefined,

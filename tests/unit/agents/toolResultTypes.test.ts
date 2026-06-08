@@ -4,6 +4,8 @@ import {
     extractAnnotationAttachmentId,
     extractGetAnnotationsData,
     extractListCollectionsData,
+    extractListItemsData,
+    extractZoteroSearchData,
     isGetAnnotationsResult,
 } from '../../../react/agents/toolResultTypes';
 
@@ -216,6 +218,47 @@ describe('extractListCollectionsData', () => {
             expect(result).not.toBeNull();
             expect(result?.collections).toEqual([]);
         });
+    });
+});
+
+describe('attachment result references', () => {
+    it('uses attachment_id for current zotero_search attachment rows', () => {
+        const result = extractZoteroSearchData({
+            items: [{
+                result_type: 'attachment',
+                attachment_id: '1-ATTACH1',
+                title: 'Attachment',
+            }],
+            total_count: 1,
+        });
+
+        expect(result?.items).toEqual([{ library_id: 1, zotero_key: 'ATTACH1' }]);
+    });
+
+    it('falls back to legacy item_id for stored zotero_search attachment rows', () => {
+        const result = extractZoteroSearchData({
+            items: [{
+                result_type: 'attachment',
+                item_id: '1-LEGACY1',
+                title: 'Attachment',
+            }],
+            total_count: 1,
+        });
+
+        expect(result?.items).toEqual([{ library_id: 1, zotero_key: 'LEGACY1' }]);
+    });
+
+    it('falls back to legacy item_id for stored list_items attachment rows', () => {
+        const result = extractListItemsData({
+            items: [{
+                result_type: 'attachment',
+                item_id: '1-LEGACY2',
+                title: 'Attachment',
+            }],
+            total_count: 1,
+        });
+
+        expect(result?.items).toEqual([{ library_id: 1, zotero_key: 'LEGACY2' }]);
     });
 });
 

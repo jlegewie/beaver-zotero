@@ -28,10 +28,11 @@ vi.mock('../../../src/services/agentDataProvider/utils', () => ({
     validateLibraryAccess: vi.fn(),
     extractYear: vi.fn(() => null),
     formatCreatorsString: vi.fn(() => ''),
+    getAttachmentInfoForItem: vi.fn(),
 }));
 
 import { handleZoteroSearchRequest } from '../../../src/services/agentDataProvider/handleZoteroSearchRequest';
-import { validateLibraryAccess } from '../../../src/services/agentDataProvider/utils';
+import { getAttachmentInfoForItem, validateLibraryAccess } from '../../../src/services/agentDataProvider/utils';
 
 type MockItem = Partial<Zotero.Item> & {
     id: number;
@@ -76,6 +77,18 @@ describe('handleZoteroSearchRequest', () => {
             valid: true,
             library: { libraryID: 1, name: 'My Library' },
         } as any);
+        vi.mocked(getAttachmentInfoForItem).mockImplementation(async (item: any, options: any = {}) => ({
+            attachment_id: `${item.libraryID}-${item.key}`,
+            parent_item_id: options.parentItemId ?? null,
+            title: item.getDisplayTitle?.() || item.key,
+            filename: item.attachmentFilename ?? null,
+            content_kind: 'pdf',
+            status: 'readable',
+            page_count: 9,
+            line_count: null,
+            is_primary: Boolean(options.isPrimary),
+            annotations_count: item.isFileAttachment?.() ? item.getAnnotations?.().length ?? 0 : 0,
+        } as any));
 
         class MockSearch {
             libraryID = 1;
@@ -191,5 +204,61 @@ describe('handleZoteroSearchRequest', () => {
         expect(response.items.map(item => item.item_id)).toEqual(['1-FIRST', '1-THIRD']);
         expect((globalThis as any).Zotero.DB.queryAsync).toHaveBeenCalledOnce();
         expect((globalThis as any).Zotero.Items.getAsync).not.toHaveBeenCalledWith([1, 2, 3]);
+    });
+
+    it('returns attachment rows with attachment_id and resolver metadata', async () => {
+        const parent = makeItem({
+            id: 10,
+            key: 'PARENT',
+            getField: vi.fn((field: string) => field === 'title' ? 'Parent Article' : ''),
+            getDisplayTitle: vi.fn(() => 'Parent Article'),
+        });
+        const attachment = makeItem({
+            id: 1,
+            key: 'ATTACH',
+            itemType: 'attachment',
+            parentItemID: parent.id,
+            isAttachment: vi.fn(() => true),
+            isRegularItem: vi.fn(() => false),
+            getDisplayTitle: vi.fn(() => 'Attachment PDF'),
+            attachmentFilename: 'paper.pdf',
+            attachmentContentType: 'application/pdf',
+            isFileAttachment: vi.fn(() => true),
+            getAnnotations: vi.fn(() => [{ id: 2 }, { id: 3 }]),
+        } as Partial<MockItem>);
+        itemsById.set(parent.id, parent);
+        itemsById.set(attachment.id, attachment);
+
+        const response = await handleZoteroSearchRequest({
+            event: 'zotero_search_request',
+            request_id: 'req-3',
+            conditions: [],
+            join_mode: 'all',
+            item_category: 'attachment',
+            include_children: true,
+            recursive: false,
+            limit: 1,
+            offset: 0,
+        });
+
+        expect(response.error).toBeUndefined();
+        expect(response.items).toEqual([
+            expect.objectContaining({
+                result_type: 'attachment',
+                attachment_id: '1-ATTACH',
+                parent_item_id: '1-PARENT',
+                parent_title: 'Parent Article',
+                annotations_count: 2,
+            }),
+        ]);
+        expect(response.items[0]).not.toHaveProperty('item_id');
+        expect(getAttachmentInfoForItem).toHaveBeenCalledWith(
+            attachment,
+            expect.objectContaining({
+                parentItemId: '1-PARENT',
+                includeAnnotationsCount: true,
+                skipWorkerFallback: true,
+            }),
+        );
     });
 });

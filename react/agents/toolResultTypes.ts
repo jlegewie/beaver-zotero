@@ -7,7 +7,7 @@
  */
 
 import { ExternalReference } from "../types/externalReferences";
-import { ZoteroItemReference, CollectionReference } from "../types/zotero";
+import { ZoteroItemReference, CollectionReference, AttachmentInfo } from "../types/zotero";
 import { ToolReturnPart } from "./types";
 import { logger } from "../../src/utils/logger";
 
@@ -1309,17 +1309,12 @@ export interface NoteResultItem {
 }
 
 /** Attachment result item from search/list results */
-export interface AttachmentResultItem {
+export type AttachmentResultItem = AttachmentInfo & {
     result_type: 'attachment';
-    item_id: string;
-    title?: string | null;
-    filename?: string | null;
-    content_type?: string | null;
-    parent_item_id?: string | null;
+    item_id?: string | null;
     parent_title?: string | null;
     date_modified?: string | null;
-    annotations_count?: number | null;
-}
+};
 
 /** Result item from zotero_search (regular, note, or attachment) */
 export type ZoteroSearchResultItem = RegularSearchResultItem | NoteResultItem | AttachmentResultItem;
@@ -1617,7 +1612,11 @@ export function extractZoteroSearchData(
             // Convert item_ids to ZoteroItemReference
             const items: ZoteroItemReference[] = obj.items
                 .map(item => {
-                    const parts = item.item_id.split('-');
+                    const itemId = item.result_type === 'attachment'
+                        ? (item.attachment_id ?? item.item_id)
+                        : item.item_id;
+                    if (!itemId) return null;
+                    const parts = itemId.split('-');
                     if (parts.length < 2) return null;
                     const libraryId = parseInt(parts[0], 10);
                     const zoteroKey = parts.slice(1).join('-');
@@ -1674,7 +1673,11 @@ export function extractListItemsData(
             // Convert item_ids to ZoteroItemReference
             const items: ZoteroItemReference[] = obj.items
                 .map(item => {
-                    const parts = item.item_id.split('-');
+                    const itemId = item.result_type === 'attachment'
+                        ? (item.attachment_id ?? item.item_id)
+                        : item.item_id;
+                    if (!itemId) return null;
+                    const parts = itemId.split('-');
                     if (parts.length < 2) return null;
                     const libraryId = parseInt(parts[0], 10);
                     const zoteroKey = parts.slice(1).join('-');

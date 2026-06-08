@@ -13,10 +13,10 @@ import {
     WSListItemsResponse,
     ListItemsResultItem,
     RegularListResultItem,
-    AttachmentResultItem,
+    AttachmentRowResult,
 } from '../agentProtocol';
 import { serializeNote } from '../../utils/zoteroSerializers';
-import { getCollectionByIdOrName, validateLibraryAccess, isLibrarySearchable, getSearchableLibraries, extractYear, formatCreatorsString } from './utils';
+import { getCollectionByIdOrName, validateLibraryAccess, isLibrarySearchable, getSearchableLibraries, extractYear, formatCreatorsString, getAttachmentInfoForItem } from './utils';
 
 function isAnnotationItem(item: Zotero.Item): boolean {
     return String(item.itemType) === 'annotation' || (item as { isAnnotation?: () => boolean }).isAnnotation?.() === true;
@@ -331,16 +331,17 @@ export async function handleListItemsRequest(
                 items.push(serializeNote(item, parentInfo));
             } else if (item.isAttachment()) {
                 const parentInfo = item.parentItemID ? parentMap.get(item.parentItemID) : null;
-                const attachmentItem: AttachmentResultItem = {
+                const attachmentInfo = await getAttachmentInfoForItem(item, {
+                    parentItemId: parentInfo?.item_id ?? null,
+                    isPrimary: false,
+                    includeAnnotationsCount: true,
+                    skipWorkerFallback: true,
+                });
+                const attachmentItem: AttachmentRowResult = {
+                    ...attachmentInfo,
                     result_type: 'attachment',
-                    item_id: `${library.libraryID}-${item.key}`,
-                    title: item.getDisplayTitle?.() || '',
-                    filename: item.attachmentFilename || null,
-                    content_type: item.attachmentContentType || null,
-                    parent_item_id: parentInfo?.item_id ?? null,
                     parent_title: parentInfo?.title ?? null,
                     date_modified: item.dateModified,
-                    annotations_count: item.isFileAttachment?.() ? item.getAnnotations().length : 0,
                 };
                 items.push(attachmentItem);
             } else {

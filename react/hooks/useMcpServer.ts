@@ -54,7 +54,7 @@ import type {
     WSAgentActionExecuteResponse,
     RegularListResultItem,
     NoteResultItem,
-    AttachmentResultItem,
+    AttachmentRowResult,
     ZoteroItemCategory,
     ItemSearchFrontendResultItem,
 } from '../../src/services/agentProtocol';
@@ -625,13 +625,31 @@ function generateRequestId(): string {
     return `${Date.now()}-${Math.random().toString(36).substring(2, 10)}`;
 }
 
-function parseItemId(itemId: string): { libraryId: number; key: string } | null {
+function parseItemId(itemId: string | null | undefined): { libraryId: number; key: string } | null {
+    if (!itemId) return null;
     const dashIndex = itemId.indexOf('-');
     if (dashIndex === -1) return null;
     const libraryId = parseInt(itemId.substring(0, dashIndex), 10);
     const key = itemId.substring(dashIndex + 1);
     if (isNaN(libraryId) || !key) return null;
     return { libraryId, key };
+}
+
+function getMcpAttachmentId(attachment: any): string | null {
+    if (attachment.attachment_id) return attachment.attachment_id;
+    if (attachment.item_id) return attachment.item_id;
+    if (attachment.attachment?.library_id != null && attachment.attachment?.zotero_key) {
+        return `${attachment.attachment.library_id}-${attachment.attachment.zotero_key}`;
+    }
+    return null;
+}
+
+function getMcpAttachmentStatus(attachment: any): string {
+    const status = attachment.status ?? attachment.file_status?.status;
+    if (status === 'readable') return 'available';
+    if (status === 'unreadable') return 'unavailable';
+    if (status) return status;
+    return attachment.path ? 'available' : 'unavailable';
 }
 
 function mcpError(message: string) {
@@ -718,12 +736,15 @@ function formatSearchResultItem(entry: ItemSearchFrontendResultItem, includeSimi
 
     // Compact attachment format
     if (entry.attachments && entry.attachments.length > 0) {
-        result.attachments = entry.attachments.map((a) => ({
-            attachment_id: `${a.attachment.library_id}-${a.attachment.zotero_key}`,
-            filename: a.attachment.filename || null,
-            page_count: a.file_status?.page_count ?? null,
-            annotations_count: a.attachment.annotations_count,
-            status: a.file_status?.status ?? 'unavailable',
+        result.attachments = entry.attachments.map((a: any) => ({
+            attachment_id: getMcpAttachmentId(a),
+            filename: a.filename ?? a.attachment?.filename ?? null,
+            content_kind: a.content_kind ?? null,
+            page_count: a.page_count ?? a.file_status?.page_count ?? null,
+            line_count: a.line_count ?? null,
+            annotations_count: a.annotations_count ?? a.attachment?.annotations_count ?? null,
+            status: getMcpAttachmentStatus(a),
+            status_reason: a.status_reason ?? a.file_status?.status_reason ?? null,
         }));
     }
 
@@ -1060,14 +1081,17 @@ async function handleGetItemDetails(args: any): Promise<any> {
         }
 
         if (item.attachments && Array.isArray(item.attachments)) {
-            item.attachments = item.attachments.map((a: any) => ({
-                attachment_id: a.attachment_id,
-                filename: a.filename || null,
-                content_type: a.contentType || null,
-                page_count: null,
-                annotations_count: a.annotations_count,
-                status: a.path ? 'available' : 'unavailable',
-            }));
+            item.attachments = item.attachments.map((a: any) => {
+                return {
+                    attachment_id: getMcpAttachmentId(a),
+                    filename: a.filename || null,
+                    content_type: a.content_type ?? a.contentType ?? null,
+                    content_kind: a.content_kind ?? null,
+                    page_count: a.page_count ?? null,
+                    annotations_count: a.annotations_count,
+                    status: getMcpAttachmentStatus(a),
+                };
+            });
         }
         if (item.notes && Array.isArray(item.notes)) {
             item.notes = item.notes.map((n: any) => ({
@@ -1227,7 +1251,10 @@ async function handleListItems(args: any): Promise<any> {
         // With item_category other than 'regular', results can be notes or attachments,
         // so format each item according to its result_type rather than assuming regular.
         items: response.items.map((item) => {
-            const parsed = parseItemId(item.item_id);
+            const rowItemId = item.result_type === 'attachment'
+                ? (item.attachment_id ?? (item as any).item_id)
+                : item.item_id;
+            const parsed = parseItemId(rowItemId);
             const zoteroUri = parsed ? getZoteroSelectURI(parsed.libraryId, parsed.key) : null;
             const uriField = zoteroUri ? { zotero_uri: zoteroUri } : {};
 
@@ -1245,13 +1272,18 @@ async function handleListItems(args: any): Promise<any> {
             }
 
             if (item.result_type === 'attachment') {
-                const attachment = item as AttachmentResultItem;
+                const attachment = item as AttachmentRowResult;
+                const attachmentId = getMcpAttachmentId(attachment);
                 return {
-                    item_id: attachment.item_id,
+                    attachment_id: attachmentId,
+                    item_id: attachmentId,
                     item_type: 'attachment',
                     title: attachment.title ?? null,
                     filename: attachment.filename ?? null,
-                    content_type: attachment.content_type ?? null,
+                    content_kind: attachment.content_kind,
+                    content_type: (attachment as any).content_type ?? null,
+                    status: getMcpAttachmentStatus(attachment),
+                    status_reason: attachment.status_reason ?? null,
                     parent_item_id: attachment.parent_item_id ?? null,
                     parent_title: attachment.parent_title ?? null,
                     annotations_count: attachment.annotations_count ?? null,

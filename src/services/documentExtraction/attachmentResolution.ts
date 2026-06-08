@@ -1,5 +1,7 @@
 import {
     readableToExtractKind,
+    isReadableContentKind,
+    type ContentKind,
     type ExtractContentKind,
     type ReadableContentKind,
 } from './shared/contentKinds';
@@ -47,6 +49,64 @@ export function getReadableContentKind(item: Zotero.Item): ReadableContentKind |
     }
 
     return null;
+}
+
+function mimeToBroadKind(mimeType: string): ContentKind {
+    const mime = mimeType.toLowerCase();
+    if (!mime) return 'other';
+    if (
+        mime.includes('word')
+        || mime.includes('msword')
+        || mime.includes('officedocument.wordprocessingml')
+        || mime === 'application/rtf'
+    ) {
+        return 'word';
+    }
+    if (
+        mime.includes('excel')
+        || mime.includes('spreadsheet')
+        || mime.includes('officedocument.spreadsheetml')
+        || mime === 'text/csv'
+    ) {
+        return 'spreadsheet';
+    }
+    if (
+        mime.includes('powerpoint')
+        || mime.includes('presentation')
+        || mime.includes('officedocument.presentationml')
+    ) {
+        return 'presentation';
+    }
+    if (mime.startsWith('audio/')) return 'audio';
+    if (mime.startsWith('video/')) return 'video';
+    if (
+        mime.includes('zip')
+        || mime.includes('tar')
+        || mime.includes('gzip')
+        || mime.includes('rar')
+        || mime.includes('7z')
+        || mime.includes('archive')
+    ) {
+        return 'archive';
+    }
+    return 'other';
+}
+
+/**
+ * Return Beaver's full attachment content-kind taxonomy for a Zotero item.
+ */
+export function getContentKind(item: Zotero.Item): ContentKind {
+    if (!item.isAttachment()) {
+        return 'other';
+    }
+    if (isLinkedUrlAttachment(item)) {
+        return 'linked_url';
+    }
+    const readable = getReadableContentKind(item);
+    if (readable && isReadableContentKind(readable)) {
+        return readable;
+    }
+    return mimeToBroadKind(item.attachmentContentType || '');
 }
 
 /**

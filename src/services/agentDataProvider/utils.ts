@@ -1,6 +1,6 @@
 import { logger } from '../../utils/logger';
 import { ZoteroItemReference } from '../../../react/types/zotero';
-import { ZoteroItemStatus, FrontendFileStatus, AttachmentDataWithStatus, AttachmentSummary, FileStatusCode } from '../../../react/types/zotero';
+import { ZoteroItemStatus, FrontendFileStatus, AttachmentDataWithStatus, AttachmentInfo, FileStatusCode } from '../../../react/types/zotero';
 import { safeIsInTrash, safeFileExists, isLinkedUrlAttachment } from '../../utils/zoteroUtils';
 import { syncingItemFilter, syncingItemFilterAsync } from '../../utils/sync';
 import { getPref } from '../../utils/prefs';
@@ -20,6 +20,7 @@ import { searchableLibraryIdsAtom } from '../../../react/atoms/profile';
 import { serializeAttachment } from '../../utils/zoteroSerializers';
 import { getPDFPageCountFromFulltext, getPDFPageCountFromWorker } from '../../../react/utils/pdfUtils';
 import { TimingAccumulator } from '../../utils/timing';
+import { getAttachmentInfo as resolveAttachmentInfo, type AttachmentInfoOptions } from '../documentExtraction/attachmentInfo';
 // Re-export shared document-extraction helpers so existing agent-data-provider
 // callers keep importing them from `./utils`.
 import {
@@ -789,151 +790,86 @@ export async function getBestAttachmentBatch(
     return result;
 }
 
-/**
- * Pre-fetched batch data for attachment processing.
- */
-export interface BatchAttachmentData {
+export interface AttachmentInfoBatchData {
     bestAttachmentMap: Map<number, number>;
-    syncDateCache: Map<number, string | null>;
 }
 
 /**
- * Prepare batch attachment data for a set of parent items.
- * Runs getBestAttachmentBatch + prefetchSyncDates in parallel.
+ * Prepare batch data needed for AttachmentInfo resolution.
  */
-export async function prepareBatchAttachmentData(
+export async function prepareAttachmentInfoBatchData(
     parentItems: Zotero.Item[],
-    context: AttachmentProcessingContext,
-    timing?: TimingAccumulator
-): Promise<BatchAttachmentData> {
+    timing?: TimingAccumulator,
+): Promise<AttachmentInfoBatchData> {
     const parentItemIds = parentItems.map(item => item.id);
-    const libraryIds = [...new Set(parentItems.map(item => item.libraryID))];
-
-    const fn = () => Promise.all([
-        getBestAttachmentBatch(parentItemIds),
-        prefetchSyncDates(libraryIds, context.syncWithZotero, context.userId),
-    ]);
-
-    const [bestAttachmentMap, syncDateCache] = timing
+    const fn = () => getBestAttachmentBatch(parentItemIds);
+    const bestAttachmentMap = timing
         ? await timing.track('batch_prefetch_ms', fn)
         : await fn();
-
-    return { bestAttachmentMap, syncDateCache };
+    return { bestAttachmentMap };
 }
 
 /**
- * Process attachments for an item using pre-fetched batch data.
- * Variant of processAttachmentsParallel that avoids per-item DB queries
- * for getBestAttachment and prefetchSyncDates.
- *
- * @param item - Parent Zotero item
- * @param context - Sync configuration context
- * @param batchData - Pre-fetched attachment data from prepareBatchAttachmentData
- * @param options.skipHash - If true, skip SHA-256 hash computation
- * @param options.timing - Optional timing accumulator
- * @returns Array of processed attachments with status
+ * Resolve one attachment to the unified AttachmentInfo shape.
  */
-export async function processAttachmentsWithBatchData(
+export async function getAttachmentInfoForItem(
     item: Zotero.Item,
-    context: AttachmentProcessingContext,
-    batchData: BatchAttachmentData,
+    options?: AttachmentInfoOptions,
+): Promise<AttachmentInfo> {
+    return resolveAttachmentInfo(item, {
+        ...options,
+        nonPdfReadableEnabled: options?.nonPdfReadableEnabled ?? false,
+    });
+}
+
+/**
+ * Process a regular item's child attachments into AttachmentInfo results.
+ */
+export async function processAttachmentInfoBatch(
+    item: Zotero.Item,
+    batchData: AttachmentInfoBatchData,
     options?: {
-        skipHash?: boolean;
         skipWorkerFallback?: boolean;
         timing?: TimingAccumulator;
         includeAnnotationsCount?: boolean;
-    }
-): Promise<AttachmentDataWithStatus[]> {
-    const skipHash = options?.skipHash ?? false;
-    const skipWorkerFallback = options?.skipWorkerFallback ?? false;
-    const includeAnnotationsCount = options?.includeAnnotationsCount ?? false;
+    },
+): Promise<AttachmentInfo[]> {
     const ta = options?.timing;
     const attachmentIds = item.getAttachments();
     if (attachmentIds.length === 0) {
         return [];
     }
 
-    // Fetch attachment items (mostly cache hits in Zotero's item cache)
     const fetchFn = () => Zotero.Items.getAsync(attachmentIds);
     const attachmentItems = ta
         ? await ta.track('att_fetch_ms', fetchFn)
         : await fetchFn();
 
-    // Load data types for all attachments
-    const loadFn = () => Zotero.Items.loadDataTypes(attachmentItems, ["primaryData", "itemData", "tags", "collections", "relations", "childItems"]);
+    const loadFn = () => Zotero.Items.loadDataTypes(
+        attachmentItems,
+        ["primaryData", "itemData", "tags", "collections", "relations", "childItems"],
+    );
     await (ta ? ta.track('att_load_data_ms', loadFn) : loadFn());
 
-    // Use batch data for primary attachment lookup
     const bestAttachmentId = batchData.bestAttachmentMap.get(item.id);
-
-    // Process all attachments in parallel
-    const attachmentPromises = attachmentItems.map(async (attachment): Promise<AttachmentDataWithStatus | null> => {
-        // Validate attachment
-        const isValidAttachment = syncingItemFilter(attachment);
-        if (!isValidAttachment) {
+    const parentItemId = `${item.libraryID}-${item.key}`;
+    const attachmentPromises = attachmentItems.map(async (attachment): Promise<AttachmentInfo | null> => {
+        if (!attachment || attachment.deleted || safeIsInTrash(attachment)) {
             return null;
         }
-
-        // Serialize attachment
-        const serializeFn = () => serializeAttachment(attachment, undefined, {
-            skipFileHash: true,
-            skipSyncingFilter: true,
-            skipHash,
-            includeAnnotationsCount,
-        });
-        const attachmentData = ta
-            ? await ta.track('att_serialize_ms', serializeFn)
-            : await serializeFn();
-        if (!attachmentData) {
-            return null;
-        }
-
-        // Use batch data for isPrimary and syncDateCache
         const isPrimary = bestAttachmentId !== undefined && attachment.id === bestAttachmentId;
-
-        // Run file status first to determine file existence, then pass the hint
-        // to computeItemStatus to avoid redundant filesystem I/O
-        const fileStatusFn = () => getAttachmentFileStatusLightweight(attachment, isPrimary, { skipWorkerFallback });
-        const { fileStatus, fileExistsLocally } = ta
-            ? await ta.track('att_file_status_ms', fileStatusFn)
-            : await fileStatusFn();
-
-        const statusFn = () => computeItemStatus(attachment, context.searchableLibraryIds, context.syncWithZotero, context.userId, { syncDateCache: batchData.syncDateCache, fileExistsLocally });
-        const status = ta
-            ? await ta.track('att_status_ms', statusFn)
-            : await statusFn();
-
-        return {
-            attachment: attachmentData,
-            status,
-            file_status: fileStatus,
-        };
+        const infoFn = () => getAttachmentInfoForItem(attachment, {
+            parentItemId,
+            isPrimary,
+            includeAnnotationsCount: options?.includeAnnotationsCount,
+            skipWorkerFallback: options?.skipWorkerFallback,
+            timing: ta,
+        });
+        return ta ? ta.track('att_file_status_ms', infoFn) : infoFn();
     });
 
     const results = await Promise.all(attachmentPromises);
-
-    // Filter out null results (invalid attachments)
-    return results.filter((result): result is AttachmentDataWithStatus => result !== null);
-}
-
-/**
- * Convert AttachmentDataWithStatus to the lightweight AttachmentSummary format
- * used in ItemSummary search results.
- */
-export function toAttachmentSummary(a: AttachmentDataWithStatus): AttachmentSummary {
-    return {
-        library_id: a.attachment.library_id,
-        zotero_key: a.attachment.zotero_key,
-        parent_key: a.attachment.parent_key ?? null,
-        title: a.attachment.title,
-        mime_type: a.attachment.mime_type,
-        is_primary: a.file_status?.is_primary ?? false,
-        page_count: a.file_status?.page_count ?? null,
-        annotations_count: a.attachment.annotations_count,
-        status: a.file_status?.status === 'available' ? 'available' : 'unavailable',
-        status_code: a.file_status?.status_code,
-        status_reason: a.file_status?.status_reason,
-    };
+    return results.filter((result): result is AttachmentInfo => result !== null);
 }
 
 /**

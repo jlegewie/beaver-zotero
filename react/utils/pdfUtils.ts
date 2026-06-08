@@ -1,6 +1,10 @@
 import { logger } from "../../src/utils/logger";
 import { ZoteroReader } from "./annotationUtils";
 import { BoundingBox } from "../types/citations";
+export {
+    getPDFPageCountFromFulltext,
+    getPDFPageCountFromWorker,
+} from "../../src/services/documentExtraction/shared/pageCount";
 
 /**
  * Get the total number of pages for a PDF attachment
@@ -219,43 +223,5 @@ export async function getPDFPageCountFromData(pdfData: Uint8Array | ArrayBuffer)
             logger("getPDFPageCountFromData: Error getting PDF page count from data: " + e2);
             return null;
         }
-    }
-}
-
-/**
- * Get the total number of pages for a PDF attachment
- * @param {Zotero.Item} item - The PDF attachment item
- * @returns {Promise<Number|null>} - A promise that resolves with the page count or null if unavailable
- */
-export async function getPDFPageCountFromFulltext(item: Zotero.Item): Promise<number | null> {
-    if (!item.isPDFAttachment()) {
-        return null;
-    }
-
-    // @ts-ignore Fulltext exists
-    const pagesInfo = await Zotero.Fulltext.getPages(item.id);
-    if (pagesInfo && pagesInfo.total) {
-        return pagesInfo.total;
-    }
-
-    return null;
-
-}
-
-/**
- * Get the total number of pages for a PDF attachment
- * @param {Zotero.Item} item - The PDF attachment item
- * @returns {Promise<Number|null>} - A promise that resolves with the page count or null if unavailable
- */
-export async function getPDFPageCountFromWorker(item: Zotero.Item): Promise<number | null> {
-    if (!item.isPDFAttachment()) {
-        return null;
-    }
-    try {
-        const { totalPages } = await Zotero.PDFWorker.getFullText(item.id, 1);
-        return totalPages;
-    } catch (e) {
-        Zotero.debug('Error getting PDF page count: ' + e);
-        return null;
     }
 }

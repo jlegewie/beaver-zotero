@@ -15,10 +15,7 @@ import {
 } from '../agentProtocol';
 import { ItemSummary } from '../../../react/types/zotero';
 import { serializeItemSummary } from '../../utils/zoteroSerializers';
-import { prepareBatchAttachmentData, processAttachmentsWithBatchData, toAttachmentSummary } from './utils';
-import { searchableLibraryIdsAtom, syncWithZoteroAtom } from '../../../react/atoms/profile';
-import { userIdAtom } from '../../../react/atoms/auth';
-import { store } from '../../../react/store';
+import { prepareAttachmentInfoBatchData, processAttachmentInfoBatch } from './utils';
 import { CITATION_TAG_PATTERN } from '../../../react/utils/citationPreprocessing';
 import {
     normalizeCitationTag,
@@ -153,28 +150,19 @@ async function resolveCitedItems(
     if (regularItems.length > 0) {
         await Zotero.Items.loadDataTypes(regularItems, ["primaryData", "itemData", "creators", "tags", "collections", "childItems"]);
 
-        // Build attachment context
-        const searchableLibraryIds = store.get(searchableLibraryIdsAtom);
-        const attachmentContext = {
-            searchableLibraryIds,
-            syncWithZotero: store.get(syncWithZoteroAtom),
-            userId: store.get(userIdAtom),
-        };
-
         // Batch-fetch attachment data
-        const batchAttachmentData = await prepareBatchAttachmentData(regularItems, attachmentContext);
+        const batchAttachmentData = await prepareAttachmentInfoBatchData(regularItems);
 
         for (const item of regularItems) {
             try {
-                const [itemData, rawAttachments] = await Promise.all([
+                const [itemData, attachments] = await Promise.all([
                     serializeItemSummary(item),
-                    processAttachmentsWithBatchData(item, attachmentContext, batchAttachmentData, {
-                        skipHash: true,
+                    processAttachmentInfoBatch(item, batchAttachmentData, {
                         skipWorkerFallback: true,
                         includeAnnotationsCount: true,
                     }),
                 ]);
-                regularSummaries.set(item, { ...itemData, attachments: rawAttachments.map(toAttachmentSummary) });
+                regularSummaries.set(item, { ...itemData, attachments });
             } catch (error) {
                 logger(`resolveCitedItems: Failed to serialize item ${item.key}: ${error}`, 1);
             }
