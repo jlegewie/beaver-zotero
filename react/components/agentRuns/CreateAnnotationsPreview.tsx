@@ -254,7 +254,7 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
                     notePosition,
                     rawItem.comment ?? rawItem.title ?? '',
                     {
-                        color: colorWithPreviewAlpha('yellow'),
+                        color: colorWithPreviewAlpha(rawItem.color),
                         pageLabel: rawItem.page_label ?? rawItem.pageLabel ?? null,
                     },
                 );
@@ -290,7 +290,7 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
                         const text = kind === 'highlight'
                             ? (rawItem.text ?? '')
                             : (rawItem.comment ?? '');
-                        const color = kind === 'highlight' ? rawItem.color : 'yellow';
+                        const color = rawItem.color;
                         const isFailed = itemStatus === 'failed';
                         const isPartial = itemStatus === 'partial';
                         const isCreated = itemStatus === 'created' || itemStatus === 'partial';

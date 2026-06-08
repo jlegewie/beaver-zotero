@@ -129,7 +129,7 @@ export async function executeCreateNoteAnnotationsAction(
             const ref = await createNoteAnnotation(attachment, {
                 notePosition: item.note_position,
                 comment: item.comment,
-                color: 'yellow',
+                color: item.color,
                 pageLabel: item.page_label ?? null,
                 readingOrderOffset: item.reading_order_offset ?? null,
                 tags,

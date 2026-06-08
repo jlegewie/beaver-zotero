@@ -159,6 +159,33 @@ describe('toAgentAction reading_order_offset plumbing', () => {
         expect(data.items[0].reading_order_offset).toBe(11);
     });
 
+    it('preserves color on bulk note items', () => {
+        const action = toAgentAction({
+            id: 'a',
+            run_id: 'r',
+            action_type: 'create_note_annotations',
+            status: 'pending',
+            proposed_data: {
+                requested_ref: { library_id: 1, zotero_key: 'P' },
+                resolved_ref: { library_id: 1, zotero_key: 'P' },
+                items: [
+                    {
+                        index: 0,
+                        client_item_id: 'c1',
+                        title: '',
+                        loc_raw: 's4',
+                        loc: { kind: 'sentence', value: '4', raw: 's4' },
+                        comment: 'hi',
+                        color: 'blue',
+                        note_position: { page_index: 6, side: 'right', x: 400, y: 200 },
+                    },
+                ],
+            },
+        });
+        const data = action.proposed_data as CreateNoteAnnotationsProposedData;
+        expect(data.items[0].color).toBe('blue');
+    });
+
     it('accepts camelCase readingOrderOffset on the wire for notes', () => {
         const action = toAgentAction({
             action_type: 'create_note_annotations',

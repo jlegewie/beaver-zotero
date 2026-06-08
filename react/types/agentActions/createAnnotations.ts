@@ -59,6 +59,7 @@ export interface NoteAnnotationItem {
     loc_raw: string;
     loc: BackendLocator;
     comment: string;
+    color: ToolAnnotationColor;
     note_position: NotePosition;
     page_label?: string | null;
     /** Per-page cumulative character offset in reading order (Zotero sortIndex offset). */

@@ -8,6 +8,7 @@ export type ToolAnnotationColor =
     | 'green'
     | 'blue'
     | 'purple'
+    | 'magenta'
     | 'gray'
     | 'pink'
     | 'brown'
