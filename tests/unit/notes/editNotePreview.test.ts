@@ -8,6 +8,10 @@ vi.mock('../../../src/utils/noteEditorIO', () => ({
     getLatestNoteHtml: vi.fn(),
 }));
 
+vi.mock('../../../src/utils/noteCitationExpand', () => ({
+    preloadNotePageLabels: vi.fn().mockResolvedValue({}),
+}));
+
 import {
     recoverSimplifiedCitationLabel,
     shouldFetchNoteContext,

@@ -19,6 +19,10 @@ vi.mock('../../../src/utils/noteHtmlSimplifier', () => ({
     }),
     invalidateSimplificationCache: vi.fn(),
     normalizeNoteHtml: vi.fn((html: string) => html),
+    simplifyNoteHtml: vi.fn((rawHtml: string) => ({
+        simplified: rawHtml,
+        metadata: { elements: new Map() },
+    })),
 }));
 
 vi.mock('../../../src/utils/editNoteValidation', async () => {
@@ -140,6 +144,9 @@ vi.mock('../../../src/utils/noteEditorIO', () => ({
 vi.mock('../../../src/utils/noteCitationExpand', () => ({
     expandToRawHtml: vi.fn((str: string, _metadata: any, _context: string) => str),
     preloadPageLabelsForNewCitations: vi.fn().mockResolvedValue(undefined),
+    preloadNotePageLabels: vi.fn().mockResolvedValue({}),
+    preloadStructuralLocatorPages: vi.fn().mockResolvedValue({ pages: {}, unresolved: [] }),
+    buildUnresolvedLocatorWarning: vi.fn(() => null),
 }));
 
 vi.mock('../../../src/utils/editNoteStrippers', () => ({
@@ -180,8 +187,20 @@ vi.mock('../../../react/utils/sourceUtils', () => ({
     clearNoteEditorSelection: vi.fn(),
 }));
 
+vi.mock('../../../react/utils/citationRenderers', () => ({
+    renderToHTML: vi.fn((content: string) => content),
+}));
+
+vi.mock('../../../react/utils/citationRenderContext', () => ({
+    prepareCitationRenderContext: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock('../../../react/store', () => ({
     store: { get: vi.fn(() => [1, 2]) },
+}));
+
+vi.mock('../../../react/atoms/citations', () => ({
+    citationDataMapAtom: Symbol('citationDataMapAtom'),
 }));
 
 vi.mock('../../../react/atoms/profile', () => ({
@@ -231,10 +250,12 @@ vi.mock('../../../react/utils/addItemActions', () => ({
 
 import { handleAgentActionValidateRequest } from '../../../src/services/agentDataProvider/handleAgentActionValidateRequest';
 import { handleAgentActionExecuteRequest } from '../../../src/services/agentDataProvider/handleAgentActionExecuteRequest';
+import { logger } from '../../../src/utils/logger';
 import {
     getOrSimplify,
     countOccurrences,
     invalidateSimplificationCache,
+    simplifyNoteHtml,
 } from '../../../src/utils/noteHtmlSimplifier';
 import {
     validateNewString,
@@ -262,6 +283,8 @@ import {
 } from '../../../src/utils/noteCitationExpand';
 import { getDeferredToolPreference } from '../../../src/services/agentDataProvider/utils';
 import { store } from '../../../react/store';
+import { renderToHTML } from '../../../react/utils/citationRenderers';
+import { prepareCitationRenderContext } from '../../../react/utils/citationRenderContext';
 import type {
     WSAgentActionValidateRequest,
     WSAgentActionExecuteRequest,
@@ -372,6 +395,12 @@ beforeEach(() => {
         while ((pos = haystack.indexOf(needle, pos)) !== -1) { count++; pos += needle.length; }
         return count;
     });
+    vi.mocked(simplifyNoteHtml).mockImplementation((rawHtml: string) => ({
+        simplified: rawHtml,
+        metadata: { elements: new Map() },
+    }));
+    vi.mocked(renderToHTML).mockImplementation((content: string) => content);
+    vi.mocked(prepareCitationRenderContext).mockResolvedValue(undefined);
     vi.mocked(getLatestNoteHtml).mockImplementation((item: any) => item.getNote());
     vi.mocked(validateNewString).mockReturnValue(null);
     vi.mocked(findCandidateSnippets).mockReturnValue([]);
@@ -438,6 +467,142 @@ describe('validateEditNoteAction — success', () => {
             total_lines: 1,
             match_count: 1,
         });
+    });
+
+    it('renders Markdown old_string after the normal matcher misses', async () => {
+        const renderedOld = '<h3>Rendered Title</h3><p><strong>bold</strong></p>';
+        const renderedNew = '<h3>Rendered Title</h3><p><strong>updated</strong></p>';
+        const mockItem = makeMockItem({
+            getNote: vi.fn(() => `<div data-schema-version="9">${renderedOld}</div>`),
+        });
+        vi.mocked((globalThis as any).Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
+        vi.mocked(getOrSimplify).mockReturnValue({
+            simplified: renderedOld,
+            metadata: { elements: new Map() },
+            isStale: false,
+        });
+        vi.mocked(renderToHTML).mockImplementation((content: string) => {
+            if (content.includes('updated')) return renderedNew;
+            return renderedOld;
+        });
+
+        const response = await handleAgentActionValidateRequest(makeValidateRequest({
+            action_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                old_string: '### Rendered Title\n\n**bold**',
+                new_string: '### Rendered Title\n\n**updated**',
+                operation: 'str_replace',
+            },
+        }));
+
+        expect(response.valid).toBe(true);
+        expect(renderToHTML).toHaveBeenCalledTimes(2);
+        expect(prepareCitationRenderContext).not.toHaveBeenCalled();
+        expect(response.normalized_action_data).toMatchObject({
+            old_string: renderedOld,
+            new_string: renderedNew,
+        });
+    });
+
+    it('logs the winning strategy when a Markdown render match resolves', async () => {
+        const renderedOld = '<h3>Rendered Title</h3><p><strong>bold</strong></p>';
+        const renderedNew = '<h3>Rendered Title</h3><p><strong>updated</strong></p>';
+        const mockItem = makeMockItem({
+            getNote: vi.fn(() => `<div data-schema-version="9">${renderedOld}</div>`),
+        });
+        vi.mocked((globalThis as any).Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
+        vi.mocked(getOrSimplify).mockReturnValue({
+            simplified: renderedOld,
+            metadata: { elements: new Map() },
+            isStale: false,
+        });
+        vi.mocked(renderToHTML).mockImplementation((content: string) => {
+            if (content.includes('updated')) return renderedNew;
+            return renderedOld;
+        });
+
+        const response = await handleAgentActionValidateRequest(makeValidateRequest({
+            action_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                old_string: '### Rendered Title\n\n**bold**',
+                new_string: '### Rendered Title\n\n**updated**',
+                operation: 'str_replace',
+            },
+        }));
+
+        expect(response.valid).toBe(true);
+        const loggedStrategy = vi.mocked(logger).mock.calls.some(
+            ([msg]) => typeof msg === 'string' && msg.includes('via markdown_render strategy'),
+        );
+        expect(loggedStrategy).toBe(true);
+    });
+
+    it('renders citation-bearing Markdown when base old_string expansion fails', async () => {
+        const renderedOld = '<h3>Rendered Title</h3><p><citation external_id="ext-1"/> <strong>bold</strong></p>';
+        const renderedNew = '<h3>Rendered Title</h3><p><citation external_id="ext-1"/> <strong>updated</strong></p>';
+        const mockItem = makeMockItem({
+            getNote: vi.fn(() => `<div data-schema-version="9">${renderedOld}</div>`),
+        });
+        vi.mocked((globalThis as any).Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
+        vi.mocked(getOrSimplify).mockReturnValue({
+            simplified: renderedOld,
+            metadata: { elements: new Map() },
+            isStale: false,
+        });
+        vi.mocked(expandToRawHtml)
+            .mockImplementationOnce((str: string) => str)
+            .mockImplementationOnce(() => { throw new Error('New citations cannot appear in old_string'); })
+            .mockImplementation((str: string) => str);
+        vi.mocked(renderToHTML).mockImplementation((content: string) => {
+            if (content.includes('updated')) return renderedNew;
+            return renderedOld;
+        });
+
+        const response = await handleAgentActionValidateRequest(makeValidateRequest({
+            action_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                old_string: '### Rendered Title\n\n<citation external_id="ext-1"/> **bold**',
+                new_string: '### Rendered Title\n\n<citation external_id="ext-1"/> **updated**',
+                operation: 'str_replace',
+            },
+        }));
+
+        expect(response.valid).toBe(true);
+        expect(prepareCitationRenderContext).toHaveBeenCalledTimes(1);
+        expect(response.normalized_action_data).toMatchObject({
+            old_string: renderedOld,
+            new_string: renderedNew,
+        });
+    });
+
+    it('does not render Markdown when the normal matcher succeeds', async () => {
+        const renderedOld = '<p>Hello world</p>';
+        const mockItem = makeMockItem({
+            getNote: vi.fn(() => `<div data-schema-version="9">${renderedOld}</div>`),
+        });
+        vi.mocked((globalThis as any).Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(mockItem);
+        vi.mocked(getOrSimplify).mockReturnValue({
+            simplified: renderedOld,
+            metadata: { elements: new Map() },
+            isStale: false,
+        });
+
+        const response = await handleAgentActionValidateRequest(makeValidateRequest({
+            action_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                old_string: renderedOld,
+                new_string: '<p>Goodbye world</p>',
+                operation: 'str_replace',
+            },
+        }));
+
+        expect(response.valid).toBe(true);
+        expect(renderToHTML).not.toHaveBeenCalled();
+        expect(prepareCitationRenderContext).not.toHaveBeenCalled();
     });
 });
 
@@ -680,6 +845,42 @@ describe('executeEditNoteAction — success', () => {
         const item = await (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync(1, 'NOTE0001');
         expect(item.setNote).toHaveBeenCalled();
         expect(item.saveTx).toHaveBeenCalled();
+    });
+
+    it('executes citation-bearing Markdown when base old_string expansion fails', async () => {
+        const renderedOld = '<h3>Rendered Title</h3><p><citation external_id="ext-1"/> <strong>bold</strong></p>';
+        const renderedNew = '<h3>Rendered Title</h3><p><citation external_id="ext-1"/> <strong>updated</strong></p>';
+        const item = makeMockItem({
+            getNote: vi.fn(() => `<div data-schema-version="9">${renderedOld}</div>`),
+        });
+        vi.mocked((globalThis as any).Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(item);
+        vi.mocked(getOrSimplify).mockReturnValue({
+            simplified: renderedOld,
+            metadata: { elements: new Map() },
+            isStale: false,
+        });
+        vi.mocked(expandToRawHtml)
+            .mockImplementationOnce(() => { throw new Error('New citations cannot appear in old_string'); })
+            .mockImplementation((str: string) => str);
+        vi.mocked(renderToHTML).mockImplementation((content: string) => {
+            if (content.includes('updated')) return renderedNew;
+            return renderedOld;
+        });
+
+        const response = await handleAgentActionExecuteRequest(makeExecuteRequest({
+            action_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                old_string: '### Rendered Title\n\n<citation external_id="ext-1"/> **bold**',
+                new_string: '### Rendered Title\n\n<citation external_id="ext-1"/> **updated**',
+                operation: 'str_replace',
+            },
+        }));
+
+        expect(response.success).toBe(true);
+        expect(prepareCitationRenderContext).toHaveBeenCalledTimes(1);
+        expect(item.setNote).toHaveBeenCalled();
+        expect(item.setNote.mock.calls[0][0]).toContain(renderedNew);
     });
 
     it('str_replace_all replaces multiple occurrences', async () => {
@@ -1035,7 +1236,7 @@ describe('unsupported action type', () => {
 
 describe('validateEditNoteAction — partial element fallback', () => {
     const CITATION_RAW = '<span class="citation" data-citation="...">(Legewie, 2018)</span>';
-    const CITATION_SIMPLIFIED = '<citation item_id="1-KEY" ref="c_KEY_0"/>';
+    const CITATION_SIMPLIFIED = '<citation id="1-KEY" ref="c_KEY_0"/>';
     const RAW_HTML = `<div data-schema-version="9">${CITATION_RAW}—ein theoretisch bildungsfördernder Effekt</div>`;
     const SIMPLIFIED = `${CITATION_SIMPLIFIED}—ein theoretisch bildungsfördernder Effekt`;
 
@@ -1141,7 +1342,7 @@ describe('validateEditNoteAction — partial element fallback', () => {
         // twice in rawHtml — disambiguation uses prefix expansion to locate the
         // correct occurrence and attach context anchors.
         const oldString = '/>—ein theoretisch';
-        const simplifiedWithTag = `BEFORE <citation item_id="1-KEY" ref="c_KEY_0"/>${simplified.substring('BEFORE '.length)}`;
+        const simplifiedWithTag = `BEFORE <citation id="1-KEY" ref="c_KEY_0"/>${simplified.substring('BEFORE '.length)}`;
         vi.mocked(getOrSimplify).mockReturnValue({
             simplified: simplifiedWithTag,
             metadata: { elements: new Map() },
@@ -1181,7 +1382,7 @@ describe('validateEditNoteAction — partial element fallback', () => {
         // (citation tag) gets expanded to the raw citation text, and the
         // resulting raw position correctly locates the first occurrence.
         const RAWCIT = '<span class="citation" data-citation="x">(Cite)</span>';
-        const CIT_TAG = '<citation item_id="1-KEY" ref="c_KEY_0"/>';
+        const CIT_TAG = '<citation id="1-KEY" ref="c_KEY_0"/>';
         const rawHtml = `<div data-schema-version="9">${RAWCIT}—ein theoretisch BBB—ein theoretisch CCC</div>`;
         const simplified = `${CIT_TAG}—ein theoretisch BBB—ein theoretisch CCC`;
 

@@ -71,14 +71,16 @@ export function setupZoteroMainWindowWithMockWorker(): any {
     (globalThis as any).Zotero = (globalThis as any).Zotero ?? {};
     // The package no longer reads Zotero.getMainWindow directly — it goes
     // through getConfig().getWorkerHost. The configure-for-tests helper
-    // wires both `getWorkerHost` and the singleton slot to this Zotero
-    // global so existing assertions (`Zotero.__beaverMuPDFWorkerClient`)
+    // wires both `getWorkerHost` and the singleton slots to this Zotero
+    // global so existing assertions (`Zotero.__beaverMuPDFWorkerClient_*`)
     // continue to inspect the same storage.
     (globalThis as any).Zotero.getMainWindow = vi.fn(() => win);
-    (globalThis as any).Zotero.__beaverMuPDFWorkerClient = undefined;
+    (globalThis as any).Zotero.__beaverMuPDFWorkerClient_hot = undefined;
+    (globalThis as any).Zotero.__beaverMuPDFWorkerClient_background = undefined;
     configurePDFForTests({
         slotHost: (globalThis as any).Zotero,
-        slotKey: "__beaverMuPDFWorkerClient",
+        slotKey: "__beaverMuPDFWorkerClient_hot",
+        backgroundSlotKey: "__beaverMuPDFWorkerClient_background",
         getWorkerHost: () => win,
     });
     return win;

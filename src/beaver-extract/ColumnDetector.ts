@@ -7,7 +7,7 @@
 
 import type { BoundingBox, RawPageData, RawBlock, RawLine, TextStyle } from "./types";
 import { bboxHeight, bboxWidth } from "./types";
-import { pdfLog } from "./logging";
+import { pdfLog, isAnalyzerLoggingEnabled } from "./logging";
 import { StyleAnalyzer } from "./StyleAnalyzer";
 
 // ============================================================================
@@ -74,7 +74,7 @@ export interface ColumnDetectionOptions {
         end: number;
         thickness: number;
     }>;
-    /** Enable debug logging for column detection */
+    /** Enable verbose column-detection phase logging (default false). */
     debug?: boolean;
 }
 
@@ -1472,6 +1472,9 @@ const MIN_V_CUT_GAP = 8;
 // Cuts smaller than this within a merged column are paragraph-spacing noise.
 const MIN_H_CUT_GAP = 8;
 
+// Hard ceiling on xy-cut recursion depth.
+const MAX_XYCUT_DEPTH = 250;
+
 /**
  * Phase 5: Sort blocks for proper reading order (critical for multi-column).
  *
@@ -1489,27 +1492,44 @@ function sortForReadingOrder(
     return xyCut(blocks, opts);
 }
 
-function xyCut(blocks: Rect[], opts?: Required<ColumnDetectionOptions>): Rect[] {
+function xyCut(
+    blocks: Rect[],
+    opts?: Required<ColumnDetectionOptions>,
+    depth = 0,
+): Rect[] {
     if (blocks.length <= 1) return blocks.slice();
+
+    // Depth guard: a pathological page can recurse O(n) deep and blow the
+    // worker JS stack ("too much recursion"). Past the ceiling, give up on
+    // further partitioning and fall back to a plain reading-order sort.
+    if (depth >= MAX_XYCUT_DEPTH) {
+        return [...blocks].sort((a, b) => a.y - b.y || a.x - b.x);
+    }
 
     if (opts && opts.dividerLines.length > 0) {
         const dividerCut = findDividerCut(blocks, opts);
         if (dividerCut) {
             return [
-                ...xyCut(dividerCut.first, opts),
-                ...xyCut(dividerCut.second, opts),
+                ...xyCut(dividerCut.first, opts, depth + 1),
+                ...xyCut(dividerCut.second, opts, depth + 1),
             ];
         }
     }
 
     const vCut = findCleanCut(blocks, "x", MIN_V_CUT_GAP);
     if (vCut) {
-        return [...xyCut(vCut.first, opts), ...xyCut(vCut.second, opts)];
+        return [
+            ...xyCut(vCut.first, opts, depth + 1),
+            ...xyCut(vCut.second, opts, depth + 1),
+        ];
     }
 
     const hCut = findCleanCut(blocks, "y", MIN_H_CUT_GAP);
     if (hCut) {
-        return [...xyCut(hCut.first, opts), ...xyCut(hCut.second, opts)];
+        return [
+            ...xyCut(hCut.first, opts, depth + 1),
+            ...xyCut(hCut.second, opts, depth + 1),
+        ];
     }
 
     return [...blocks].sort((a, b) => a.y - b.y || a.x - b.x);
@@ -1747,13 +1767,13 @@ function findCleanCut(
 
 /**
  * Log column detection results for debugging.
- * Only logs in development mode.
+ * Only logs when {@link ExtractionSettings.analyzerLogging} is enabled.
  */
 export function logColumnDetection(
     pageIndex: number,
     result: ColumnDetectionResult
 ): void {
-    if (process.env.NODE_ENV !== "development") return;
+    if (!isAnalyzerLoggingEnabled()) return;
 
     pdfLog(
         `[ColumnDetector] Page ${pageIndex}: ${result.columnCount} column(s) detected` +

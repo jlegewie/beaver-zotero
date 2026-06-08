@@ -40,6 +40,8 @@ describe("canonical extraction schema helpers", () => {
                 index: 0,
                 width: 100,
                 height: 100,
+                viewBox: [0, 0, 100, 100],
+                rotation: 0,
                 items: [
                     {
                         id: "old",
@@ -92,6 +94,8 @@ describe("canonical extraction schema helpers", () => {
             index: 0,
             width: 100,
             height: 100,
+            viewBox: [0, 0, 100, 100],
+            rotation: 0,
             items: [
                 {
                     id: "p0:i0",

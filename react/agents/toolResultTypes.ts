@@ -50,6 +50,17 @@ export interface PageImageReference {
 }
 
 /**
+ * Read note result summary.
+ * Matches ReadNoteToolResultSummary from backend.
+ */
+export interface ReadNoteResultSummary {
+    tool_name: string;
+    result_count: number;
+    note_item: ZoteroItemReference;
+    parent_item?: ZoteroItemReference | null;
+}
+
+/**
  * Item search result summary.
  * Matches ItemSearchResultSummary from backend.
  */
@@ -865,7 +876,9 @@ const EXTRACT_TOOL_NAMES: readonly string[] = [
 export interface ItemExtractionReference {
     library_id: number;
     zotero_key: string;
-    status: "relevant" | "not_relevant" | "error";
+    // "success" | "error" is the current backend vocabulary. "relevant" /
+    // "not_relevant" are legacy values still present in older thread history.
+    status: "success" | "error" | "relevant" | "not_relevant";
     title?: string | null;
     authors?: string | null;
     year?: number | null;
@@ -879,7 +892,9 @@ export interface ExtractToolResultSummary {
     tool_name: string;
     total_items: number;
     items_processed: number;
-    items_relevant: number;
+    // Legacy field; the backend no longer requires it. Kept optional so older
+    // history still type-checks and newer payloads that omit it are accepted.
+    items_relevant?: number;
     items_failed: number;
     total_pages_processed: number;
     items: ItemExtractionReference[];
@@ -908,7 +923,8 @@ export function isExtractResult(
         typeof summary.tool_name === 'string' &&
         typeof summary.total_items === 'number' &&
         typeof summary.items_processed === 'number' &&
-        typeof summary.items_relevant === 'number' &&
+        // items_relevant is legacy/optional — don't require it so the guard
+        // still matches once the backend stops sending it.
         typeof summary.items_failed === 'number' &&
         Array.isArray(summary.items) &&
         summary.items.every((item: unknown) => {
@@ -949,7 +965,9 @@ export function extractExtractData(
     return {
         items: summary.items,
         totalItems: summary.total_items,
-        itemsRelevant: summary.items_relevant,
+        // Fall back to items_processed for newer payloads that omit the
+        // legacy items_relevant field.
+        itemsRelevant: summary.items_relevant ?? summary.items_processed,
         itemsProcessed: summary.items_processed,
         itemsFailed: summary.items_failed,
     };
@@ -970,21 +988,48 @@ const READ_NOTE_TOOL_NAMES: readonly string[] = [
 export interface ReadNoteViewData {
     noteReference: { library_id: number; zotero_key: string };
     parentReference?: { library_id: number; zotero_key: string };
-    title?: string;
     totalLines?: number;
     linesReturned?: string;
 }
 
+function isZoteroItemReference(value: unknown): value is ZoteroItemReference {
+    if (!value || typeof value !== 'object') return false;
+    const obj = value as Record<string, unknown>;
+    return typeof obj.library_id === 'number' && typeof obj.zotero_key === 'string';
+}
+
+function parseZoteroUniqueKey(uniqueKey: string): ZoteroItemReference | null {
+    const [libraryIdStr, ...keyParts] = uniqueKey.split('-');
+    const libraryId = parseInt(libraryIdStr, 10);
+    const zoteroKey = keyParts.join('-');
+    if (isNaN(libraryId) || !zoteroKey) return null;
+    return { library_id: libraryId, zotero_key: zoteroKey };
+}
+
 /**
  * Type guard for read_note results.
- * Checks content for note_id field (content-based, not metadata.summary).
+ * Uses metadata.summary for dehydrated results and content for older hydrated results.
  */
 export function isReadNoteResult(
     toolName: string,
     content: unknown,
-    _metadata?: Record<string, unknown>
+    metadata?: Record<string, unknown>
 ): boolean {
     if (!READ_NOTE_TOOL_NAMES.includes(toolName)) return false;
+
+    if (metadata?.summary && typeof metadata.summary === 'object') {
+        const summary = metadata.summary as Record<string, unknown>;
+        return (
+            summary.tool_name === 'read_note' &&
+            typeof summary.result_count === 'number' &&
+            isZoteroItemReference(summary.note_item) &&
+            (
+                summary.parent_item === undefined ||
+                summary.parent_item === null ||
+                isZoteroItemReference(summary.parent_item)
+            )
+        );
+    }
 
     if (!content || typeof content !== 'object') return false;
     const obj = content as Record<string, unknown>;
@@ -992,43 +1037,47 @@ export function isReadNoteResult(
 }
 
 /**
- * Extract read note data from content.
- * Parses note_id and parent_item_id to extract references.
+ * Extract read note data from metadata.summary or legacy content.
  */
 export function extractReadNoteData(
     content: unknown,
-    _metadata?: Record<string, unknown>
+    metadata?: Record<string, unknown>
 ): ReadNoteViewData | null {
+    if (metadata?.summary && typeof metadata.summary === 'object') {
+        const summary = metadata.summary as ReadNoteResultSummary;
+        if (!isZoteroItemReference(summary.note_item)) return null;
+        if (
+            summary.parent_item !== undefined &&
+            summary.parent_item !== null &&
+            !isZoteroItemReference(summary.parent_item)
+        ) {
+            return null;
+        }
+        return {
+            noteReference: summary.note_item,
+            parentReference: summary.parent_item ?? undefined,
+        };
+    }
+
     if (!content || typeof content !== 'object') return null;
     const obj = content as Record<string, unknown>;
 
     const noteId = obj.note_id as string | undefined;
     if (!noteId) return null;
 
-    // Parse note_id: "<library_id>-<zotero_key>"
-    const [libraryIdStr, ...keyParts] = noteId.split('-');
-    const libraryId = parseInt(libraryIdStr, 10);
-    const zoteroKey = keyParts.join('-');
-    if (isNaN(libraryId) || !zoteroKey) return null;
-
-    const noteReference = { library_id: libraryId, zotero_key: zoteroKey };
+    const noteReference = parseZoteroUniqueKey(noteId);
+    if (!noteReference) return null;
 
     // Parse parent_item_id if present
     let parentReference: { library_id: number; zotero_key: string } | undefined;
     const parentItemId = obj.parent_item_id as string | undefined;
     if (parentItemId) {
-        const [pLibStr, ...pKeyParts] = parentItemId.split('-');
-        const pLib = parseInt(pLibStr, 10);
-        const pKey = pKeyParts.join('-');
-        if (!isNaN(pLib) && pKey) {
-            parentReference = { library_id: pLib, zotero_key: pKey };
-        }
+        parentReference = parseZoteroUniqueKey(parentItemId) ?? undefined;
     }
 
     return {
         noteReference,
         parentReference,
-        title: obj.title as string | undefined,
         totalLines: typeof obj.total_lines === 'number' ? obj.total_lines : undefined,
         linesReturned: obj.lines_returned as string | undefined,
     };
@@ -1096,6 +1145,12 @@ export function extractZoteroReferences(part: ToolReturnPart): ZoteroItemReferen
             library_id: item.library_id,
             zotero_key: item.zotero_key,
         })) ?? [];
+    }
+
+    // Read note results
+    if (isReadNoteResult(tool_name, content, metadata)) {
+        const data = extractReadNoteData(content, metadata);
+        return data?.noteReference ? [data.noteReference] : [];
     }
 
     return [];
@@ -1263,6 +1318,7 @@ export interface AttachmentResultItem {
     parent_item_id?: string | null;
     parent_title?: string | null;
     date_modified?: string | null;
+    annotations_count?: number | null;
 }
 
 /** Result item from zotero_search (regular, note, or attachment) */
@@ -1964,11 +2020,90 @@ export function isNoteAnnotationToolResult(toolName: string): boolean {
  */
 export function extractAnnotationAttachmentId(args: string | Record<string, any> | null): string | null {
     if (!args) return null;
-    
+
     try {
         const parsedArgs = typeof args === 'string' ? JSON.parse(args) : args;
         return parsedArgs?.attachment_id ?? null;
     } catch {
         return null;
     }
+}
+
+// ============================================================================
+// Annotation List Tool Results
+// ============================================================================
+
+/** Valid tool names for annotation-list results */
+const GET_ANNOTATIONS_TOOL_NAMES: readonly string[] = [
+    'get_annotations',
+    'find_annotations',
+] as const;
+
+/**
+ * Dehydrated summary for the get_annotations tool. The backend stores the
+ * full tool result in GCS and ships only this summary inline, so the UI
+ * renders directly from `metadata.summary` (the result `content` is replaced
+ * by a storage_ref placeholder). Annotations are slim ZoteroItemReference
+ * entries — the frontend resolves each one locally to read type, color,
+ * text, comment, page label, and tags, matching the ItemSearchResultSummary
+ * pattern.
+ */
+export interface GetAnnotationsResultSummary {
+    tool_name: 'get_annotations' | 'find_annotations';
+    result_count: number;
+    total_count: number;
+    has_more: boolean;
+    annotations: ZoteroItemReference[];
+}
+
+/**
+ * Type guard for get_annotations tool results. Reads from `metadata.summary`
+ * because get_annotations is dehydrated — see `DEHYDRATABLE_TOOLS` on the
+ * backend.
+ */
+export function isGetAnnotationsResult(
+    toolName: string,
+    _content: unknown,
+    metadata?: Record<string, unknown>
+): metadata is { summary: GetAnnotationsResultSummary } {
+    if (!GET_ANNOTATIONS_TOOL_NAMES.includes(toolName)) return false;
+    if (!metadata?.summary || typeof metadata.summary !== 'object') return false;
+    const summary = metadata.summary as Record<string, unknown>;
+    if (summary.tool_name !== toolName) return false;
+    if (!Array.isArray(summary.annotations)) return false;
+    return summary.annotations.every((a: unknown) => {
+        if (!a || typeof a !== 'object') return false;
+        const ref = a as Record<string, unknown>;
+        return typeof ref.library_id === 'number' && typeof ref.zotero_key === 'string';
+    });
+}
+
+/**
+ * Normalized view data for the get_annotations result view.
+ */
+export interface GetAnnotationsViewData {
+    annotations: ZoteroItemReference[];
+    totalCount: number;
+    toolName: 'get_annotations' | 'find_annotations';
+}
+
+/**
+ * Extract annotation references from metadata.summary.
+ */
+export function extractGetAnnotationsData(
+    _content: unknown,
+    metadata?: Record<string, unknown>
+): GetAnnotationsViewData | null {
+    if (!metadata?.summary || typeof metadata.summary !== 'object') return null;
+    const summary = metadata.summary as GetAnnotationsResultSummary;
+    if (!Array.isArray(summary.annotations)) return null;
+
+    return {
+        annotations: summary.annotations.map(ref => ({
+            library_id: ref.library_id,
+            zotero_key: ref.zotero_key,
+        })),
+        totalCount: typeof summary.total_count === 'number' ? summary.total_count : summary.annotations.length,
+        toolName: summary.tool_name,
+    };
 }

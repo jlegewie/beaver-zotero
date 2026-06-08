@@ -16,7 +16,7 @@ import { ApiService } from './apiService';
 import {
     handleZoteroDataRequest,
     handleExternalReferenceCheckRequest,
-    handleZoteroAttachmentPagesRequest,
+    handleZoteroDocumentRequest,
     handleZoteroAttachmentPageImagesRequest,
     handleZoteroAttachmentSearchRequest,
     handleItemSearchByMetadataRequest,
@@ -27,6 +27,8 @@ import {
     handleListTagsRequest,
     handleListLibrariesRequest,
     handleGetMetadataRequest,
+    handleGetAnnotationsRequest,
+    handleFindAnnotationsRequest,
     handleAgentActionValidateRequest,
     handleAgentActionExecuteRequest,
     handleReadNoteRequest,
@@ -208,6 +210,10 @@ export class AgentService {
 
                 this.ws.onopen = () => {
                     logger('AgentService: Connection established, sending auth message', 1);
+                    logger(
+                        `AgentService: WebSocket negotiated extensions="${wsInstance.extensions || '(none)'}" protocol="${wsInstance.protocol || '(none)'}"`,
+                        1,
+                    );
                     // Small delay to ensure server has completed accept() before we send
                     // This prevents a race condition where messages sent immediately in onopen
                     // may be dropped if the server hasn't finished accepting the connection
@@ -294,7 +300,16 @@ export class AgentService {
                 api_key: sanitizedData.custom_model.api_key ? '[REDACTED]' : undefined
             };
         }
-        const sanitizedMessage = JSON.stringify(sanitizedData);
+        // Strip large payloads from the LOG copy only. The wire payload at
+        // line :311 uses the original `data`
+        if ('type' in sanitizedData && sanitizedData.type === 'zotero_attachment_page_images' && 'pages' in sanitizedData) {
+            const n = Array.isArray((sanitizedData as any).pages) ? (sanitizedData as any).pages.length : 0;
+            sanitizedData.pages = `[stripped ${n} page image(s) for log]`;
+        }
+        if ('type' in sanitizedData && sanitizedData.type === 'zotero_document' && 'result' in sanitizedData) {
+            sanitizedData.result = '[stripped document result for log]';
+        }
+        // Log the sanitized and stripped data
         logger(`AgentService: Sending "${sanitizedData.type}"`, sanitizedData, 1);
         
         this.ws.send(message);
@@ -431,18 +446,16 @@ export class AgentService {
                     this.callbacks.onMissingZoteroData?.(event);
                     break;
 
-                case 'zotero_attachment_pages_request':
-                    logger("AgentService: Received zotero_attachment_pages_request", event, 1);
-                    handleZoteroAttachmentPagesRequest(event)
+                case 'zotero_document_request':
+                    logger("AgentService: Received zotero_document_request", event, 1);
+                    handleZoteroDocumentRequest(event)
                         .then(res => this.send(res))
                         .catch(err => {
-                            logger(`AgentService: zotero_attachment_pages_request failed: ${err}`, 1);
-                            // Send error response to backend so it doesn't timeout
+                            logger(`AgentService: zotero_document_request failed: ${err}`, 1);
                             this.send({
-                                type: 'zotero_attachment_pages',
+                                type: 'zotero_document',
                                 request_id: event.request_id,
-                                attachment: event.attachment,
-                                pages: [],
+                                content_kind: null,
                                 total_pages: null,
                                 error: String(err),
                                 error_code: 'extraction_failed',
@@ -606,6 +619,40 @@ export class AgentService {
                                 request_id: event.request_id,
                                 items: [],
                                 not_found: event.item_ids,
+                                error: String(err),
+                                error_code: 'internal_error',
+                            });
+                        });
+                    break;
+
+                case 'get_annotations_request':
+                    logger("AgentService: Received get_annotations_request", event, 1);
+                    handleGetAnnotationsRequest(event)
+                        .then(res => this.send(res))
+                        .catch(err => {
+                            logger(`AgentService: get_annotations_request failed: ${err}`, 1);
+                            this.send({
+                                type: 'get_annotations',
+                                request_id: event.request_id,
+                                annotations: [],
+                                total_count: 0,
+                                error: String(err),
+                                error_code: 'internal_error',
+                            });
+                        });
+                    break;
+
+                case 'find_annotations_request':
+                    logger("AgentService: Received find_annotations_request", event, 1);
+                    handleFindAnnotationsRequest(event)
+                        .then(res => this.send(res))
+                        .catch(err => {
+                            logger(`AgentService: find_annotations_request failed: ${err}`, 1);
+                            this.send({
+                                type: 'find_annotations',
+                                request_id: event.request_id,
+                                annotations: [],
+                                total_count: 0,
                                 error: String(err),
                                 error_code: 'internal_error',
                             });

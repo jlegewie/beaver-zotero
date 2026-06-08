@@ -24,6 +24,7 @@ import {
     normalizeCitationTag,
     parseRawCitationAttributes,
 } from '../../react/utils/citationGrammar';
+import type { PageLabelsByAttachmentId } from '../../react/atoms/citations';
 
 // =============================================================================
 // New-string validation
@@ -71,7 +72,7 @@ export function validateNewString(
     const compoundRegex = /<citation\s+(?!.*ref=)([^/]*items="[^"]*"[^/]*)\/>/g;
     let compMatch;
     while ((compMatch = compoundRegex.exec(newString)) !== null) {
-        return 'Error: Cannot create new compound citations. Insert individual <citation item_id="..." /> tags instead.';
+        return 'Error: Cannot create new compound citations. Insert individual <citation id="..." /> tags instead.';
     }
 
     return null;
@@ -215,12 +216,13 @@ function resolveAttIdToParent(
 function translateAttIdPageLocator(
     attachmentItem: any,
     page: string | undefined,
+    pageLabels?: PageLabelsByAttachmentId,
 ): string | undefined {
     if (!page) return undefined;
     const normalized = normalizePageLocator(page);
     try {
         if (attachmentItem?.id != null) {
-            return translatePageNumberToLabel(attachmentItem.id, normalized);
+            return translatePageNumberToLabel(pageLabels?.[attachmentItem.id] ?? null, normalized);
         }
     } catch {
         /* best-effort */
@@ -248,6 +250,7 @@ function addParentCitationRefReplacement(
     attrStr: string,
     attId: string,
     page: string | undefined,
+    pageLabels?: PageLabelsByAttachmentId,
 ): boolean {
     const resolved = resolveAttIdToParent(attId);
     if (!resolved) return false;
@@ -255,7 +258,7 @@ function addParentCitationRefReplacement(
 
     // Attachment citations are stored as parent-item citations after expansion,
     // so compare both translated and raw page locators before giving up.
-    const translatedPage = translateAttIdPageLocator(attachmentItem, page);
+    const translatedPage = translateAttIdPageLocator(attachmentItem, page, pageLabels);
     let matchedPage = translatedPage;
     let candidateRef = findUniqueCitationRef(metadata, parentItemId, translatedPage);
     if (candidateRef === null && translatedPage !== page) {
@@ -294,6 +297,7 @@ function addParentCitationRefReplacement(
 export function enrichOldStringCitationRefs(
     oldString: string,
     metadata: SimplificationMetadata,
+    pageLabels?: PageLabelsByAttachmentId,
 ): string | null {
     if (!oldString) return null;
 
@@ -308,10 +312,9 @@ export function enrichOldStringCitationRefs(
         if (extractAttr(attrStr, 'ref') !== undefined) continue;
 
         const normalized = normalizeCitationTag(parseRawCitationAttributes(attrStr));
-        const rawLoc = extractAttr(attrStr, 'loc');
+        if (normalized.ok && normalized.ref.loc && !getPageLocator(normalized.ref)) continue;
         const page = normalized.ok
-            ? (getPageLocator(normalized.ref) ??
-                (rawLoc && /^p\d+$/.test(rawLoc) ? rawLoc.slice(1) : undefined))
+            ? getPageLocator(normalized.ref)
             : extractAttr(attrStr, 'page') || undefined;
 
         const explicitItemId = extractAttr(attrStr, 'item_id');
@@ -338,7 +341,7 @@ export function enrichOldStringCitationRefs(
 
         const attId = extractAttr(attrStr, 'att_id') || extractAttr(attrStr, 'attachment_id') || unifiedAttId;
         if (attId) {
-            addParentCitationRefReplacement(replacements, metadata, m, attrStr, attId, page);
+            addParentCitationRefReplacement(replacements, metadata, m, attrStr, attId, page, pageLabels);
             continue;
         }
     }
@@ -361,9 +364,10 @@ export function enrichOldStringCitationRefs(
 export function applyOldStringEnrichment(
     oldString: string | undefined,
     metadata: SimplificationMetadata,
+    pageLabels?: PageLabelsByAttachmentId,
 ): string | undefined {
     if (!oldString) return oldString;
-    const enriched = enrichOldStringCitationRefs(oldString, metadata);
+    const enriched = enrichOldStringCitationRefs(oldString, metadata, pageLabels);
     return enriched ?? oldString;
 }
 
@@ -456,7 +460,7 @@ export function buildPartialSimplifiedTagMessage(partial: PartialSimplifiedTag):
         + 'To rename across all citations, use `str_replace_all` on the FULL '
         + '`<citation .../>` tag from `read_note` (including `ref`), not on a prefix.\n'
         + 'To replace a citation, copy the full tag (including `ref`) as old_string '
-        + 'and write a new `<citation item_id="..." page="..."/>` (without `ref`) as '
+        + 'and write a new `<citation id="..." loc="page..."/>` (without `ref`) as '
         + 'new_string. The `ref` attribute is read-only.'
     );
 }

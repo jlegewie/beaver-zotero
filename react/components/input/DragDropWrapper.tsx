@@ -68,7 +68,7 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
             case 'underline':
                 return ZOTERO_ICONS.ANNOTATE_UNDERLINE;
             case 'note':
-                return ZOTERO_ICONS.ANNOTATE_NOTE;
+                return ZOTERO_ICONS.ANNOTATION;
             case 'text':
                 return ZOTERO_ICONS.ANNOTATE_TEXT;
             case 'image':

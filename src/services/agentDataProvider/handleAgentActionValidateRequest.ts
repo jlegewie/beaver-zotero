@@ -11,6 +11,8 @@ import { validateManageTagsAction } from './actions/manageTags';
 import { validateManageCollectionsAction } from './actions/manageCollections';
 import { validateCreateCollectionAction } from './actions/createCollection';
 import { validateCreateItemAction } from './actions/createItems';
+import { validateCreateHighlightAnnotationsAction } from './actions/createHighlightAnnotations';
+import { validateCreateNoteAnnotationsAction } from './actions/createNoteAnnotations';
 
 
 /**
@@ -46,6 +48,14 @@ export async function handleAgentActionValidateRequest(
 
         if (request.action_type === 'create_note') {
             return await validateCreateNoteAction(request);
+        }
+
+        if (request.action_type === 'create_highlight_annotations') {
+            return await validateCreateHighlightAnnotationsAction(request);
+        }
+
+        if (request.action_type === 'create_note_annotations') {
+            return await validateCreateNoteAnnotationsAction(request);
         }
 
         if (request.action_type === 'manage_tags') {

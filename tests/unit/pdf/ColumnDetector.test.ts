@@ -774,3 +774,24 @@ describe('detectColumns body-style spare on header/footer clip', () => {
         expect(bottomMost).toBeLessThan(808);
     });
 });
+
+describe('detectColumns recursion-depth guard', () => {
+    it('handles a deep block staircase without overflowing the stack', () => {
+        const N = 1000;
+        const STEP = 16; // > block size => clean >= 8pt gap, no x-overlap
+        const rects: Rect[] = [];
+        for (let i = 0; i < N; i++) {
+            const p = 60 + i * STEP;
+            rects.push({ x: p, y: p, w: 8, h: 8 });
+        }
+
+        // A staircase layout can recurse one xy-cut level per block. The
+        // detector must degrade to a plain sort past its depth ceiling and
+        // preserve every block.
+        let result: { columns: Rect[] } | undefined;
+        expect(() => {
+            result = detectColumns(makeColumnPage(rects));
+        }).not.toThrow();
+        expect(result!.columns).toHaveLength(N);
+    });
+});

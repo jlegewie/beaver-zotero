@@ -8,6 +8,8 @@ Beaver exposes an [MCP (Model Context Protocol)](https://modelcontextprotocol.io
 
 The MCP server uses **Streamable HTTP** transport: a single `POST` endpoint at `/beaver/mcp` speaking JSON-RPC 2.0. This runs on Zotero's existing HTTP server (default port 23119, but check `extensions.zotero.httpServer.port` in your Zotero config).
 
+This is a **stateless POST-only subset** of Streamable HTTP. Each request gets a plain `application/json` JSON-RPC response; the server never opens a Server-Sent Events (SSE) stream. The optional server→client SSE channel (a `GET` on the same endpoint) is not offered — a `GET` returns `405 Method Not Allowed`, which spec-compliant clients treat as "no stream available". Tool calls are unaffected since they ride on `POST` request/response.
+
 **Why not stdio?** Zotero's gecko runtime can't use `@modelcontextprotocol/sdk` (Node.js APIs). Spawning a child Node.js process adds complexity and requires Node.js on the user's system. The MCP JSON-RPC 2.0 protocol is simple enough to implement manually.
 
 **Why not reuse the REST endpoints in `useHttpEndpoints.ts`?** Those are REST endpoints. MCP clients need JSON-RPC 2.0 with `initialize`, `tools/list`, `tools/call` methods.
@@ -52,7 +54,7 @@ Add to your project's `.mcp.json` or `~/.claude.json`:
 {
   "mcpServers": {
     "beaver-zotero": {
-      "type": "streamable-http",
+      "type": "http",
       "url": "http://localhost:PORT/beaver/mcp"
     }
   }
@@ -60,6 +62,8 @@ Add to your project's `.mcp.json` or `~/.claude.json`:
 ```
 
 Replace `PORT` with your Zotero HTTP server port (check `extensions.zotero.httpServer.port` in Zotero's Config Editor, default is `23119`).
+
+> **`http` vs `streamable-http`**: Both name the same MCP Streamable HTTP transport. `http` is the value VS Code, Claude Code, and recent Cursor all accept; `streamable-http` is the spec's longer name and works as an alias on clients that recognize it (e.g. Claude Code). Prefer `http`. Some clients can also infer the transport from `url` alone and let you omit `type`.
 
 ### Cursor
 
@@ -69,12 +73,14 @@ Add to `.cursor/mcp.json`:
 {
   "mcpServers": {
     "beaver-zotero": {
-      "type": "streamable-http",
+      "type": "http",
       "url": "http://localhost:PORT/beaver/mcp"
     }
   }
 }
 ```
+
+> Some clients log a one-time `Failed to open SSE stream` warning on connect. This is expected — Beaver doesn't offer the optional SSE stream and returns `405` for it. Tool discovery and tool calls still work over `POST`, so the warning is safe to ignore.
 
 ### Claude Desktop / Other stdio-only clients
 
@@ -128,25 +134,35 @@ curl -X POST http://localhost:PORT/beaver/mcp \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"read_attachment","arguments":{"attachment_id":"1-ABC12345","start_page":1,"end_page":5}},"id":5}'
 
+# Read note
+curl -X POST http://localhost:PORT/beaver/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"read_note","arguments":{"note_id":"1-ABC12345","offset":1,"limit":50}},"id":6}'
+
+# Create note
+curl -X POST http://localhost:PORT/beaver/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"create_note","arguments":{"title":"Short note","content":"A claim. <citation id=\"1-ABC12345\" loc=\"page5\"/>","parent_id":"1-DEF67890"}},"id":7}'
+
 # Get item details
 curl -X POST http://localhost:PORT/beaver/mcp \
   -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"get_item_details","arguments":{"item_ids":["1-ABC12345"],"include_attachments":true}},"id":6}'
+  -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"get_item_details","arguments":{"item_ids":["1-ABC12345"],"include_attachments":true}},"id":8}'
 
 # List collections
 curl -X POST http://localhost:PORT/beaver/mcp \
   -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"list_collections","arguments":{}},"id":7}'
+  -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"list_collections","arguments":{}},"id":9}'
 
 # List tags
 curl -X POST http://localhost:PORT/beaver/mcp \
   -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"list_tags","arguments":{"min_item_count":3}},"id":8}'
+  -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"list_tags","arguments":{"min_item_count":3}},"id":10}'
 
 # List items in a collection
 curl -X POST http://localhost:PORT/beaver/mcp \
   -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"list_items","arguments":{"collection":"DEF456","sort_by":"year","sort_order":"desc"}},"id":9}'
+  -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"list_items","arguments":{"collection":"DEF456","sort_by":"year","sort_order":"desc"}},"id":11}'
 ```
 
 ## Available Tools
@@ -210,7 +226,43 @@ Read the text content of a PDF attachment from the user's Zotero library. Maximu
 
 **Response**: Plain text with page content wrapped in `<pageN>...</pageN>` XML tags. Includes a header with attachment ID, total page count, and the page range shown.
 
-**Underlying handler**: `handleZoteroAttachmentPagesRequest` from `src/services/agentDataProvider/`.
+**Underlying handler**: `handleZoteroDocumentRequest` from `src/services/agentDataProvider/`, sliced to the requested page window.
+
+---
+
+### `read_note`
+
+Read a Zotero note as simplified HTML. Citation, annotation, and image nodes are represented as compact self-closing tags.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `note_id` | `string` | Yes | Note ID in `<library_id>-<zotero_key>` format. Get this from `get_item_details` with `include_notes: true`, search, or `list_items` with note categories. |
+| `offset` | `integer` | No | 1-indexed start line for paging through long notes. |
+| `limit` | `integer` | No | Maximum number of lines to return. |
+
+**Response**: JSON with `note_id`, `title`, `parent_item_id`, `parent_title`, `total_lines`, `lines_returned`, `has_more`, `next_offset`, `content` (simplified HTML), and `cited_items[]` with `item_id`, `item_type`, and `title`.
+
+**Underlying handler**: `handleReadNoteRequest` from `src/services/agentDataProvider/`.
+
+---
+
+### `create_note`
+
+Create a Zotero note from markdown. This is a mutating tool: MCP clients should apply their own approval policy before calling it.
+
+Citation tags use the unified format `<citation id="libraryID-zoteroKey"/>`. Add page locators with `loc`, for example `loc="page5"` or `loc="page5-page6"`. Use the 1-based page numbers from `read_attachment` `<pageN>` tags (physical page index, not printed labels). Use only IDs returned by tool results in the current session, copy page locators verbatim from `read_note` when editing existing notes, omit `loc` for metadata-only citations, and do not use legacy attributes such as `item_id`, `att_id`, `page`, or `sid`.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `title` | `string` | Yes | Concise note title. |
+| `content` | `string` | Yes | Markdown content with `<citation>` tags. |
+| `parent_id` | `string` | No | Parent item ID in `<library_id>-<zotero_key>` format. Creates a child note. |
+| `library` | `string` | No | Target library name or ID. Omit to use the default user library. |
+| `collection` | `string` | No | Collection name or key for standalone notes. Ignored when `parent_id` is set. |
+
+**Response**: JSON with `note_id`, `parent_item_id`, `related_item_id`, `collection_key`, `note_content` (rendered simplified HTML), `warning`, and `citation_issues` containing `invalid_keys[]` and `errors[]`.
+
+**Underlying handlers**: `validateCreateNoteAction` and `executeCreateNoteAction` from `src/services/agentDataProvider/actions/createNote.ts`.
 
 ---
 
@@ -222,8 +274,9 @@ Retrieve full Zotero metadata for one or more items.
 |-----------|------|----------|-------------|
 | `item_ids` | `string[]` | Yes | Item IDs in `<library_id>-<zotero_key>` format. Maximum 25 items. |
 | `include_attachments` | `boolean` | No | Include attachment metadata. Default: false. |
+| `include_notes` | `boolean` | No | Include child notes. Default: false. |
 
-**Response**: JSON with `items[]` (full Zotero metadata per item) and `not_found[]` (IDs that couldn't be found). When `include_attachments` is true, each item includes `attachments[]` with `attachment_id`, `filename`, `content_type`, `page_count`, and `status`.
+**Response**: JSON with `items[]` (full Zotero metadata per item) and `not_found[]` (IDs that couldn't be found). When `include_attachments` is true, each item includes `attachments[]` with `attachment_id`, `filename`, `content_type`, `page_count`, and `status`. When `include_notes` is true, each item includes `notes[]` with `item_id`, `title`, `parent_item_id`, `parent_title`, and `date_modified`.
 
 **Underlying handler**: `handleGetMetadataRequest` from `src/services/agentDataProvider/`.
 
@@ -274,13 +327,14 @@ Browse items in the library, optionally filtered by collection or tag.
 | `library` | `string` | No | Library name or ID. Default: user's library. |
 | `collection` | `string` | No | Collection name or key. |
 | `tag` | `string` | No | Tag to filter by. |
+| `item_category` | `string` | No | Item type to return: "regular", "note", "attachment", "annotation", or "all". Default: "regular". |
 | `recursive` | `boolean` | No | Include subcollection items. Default: true. |
 | `sort_by` | `string` | No | Sort field: "dateAdded", "dateModified", "title", "creator", "year". Default: "dateModified". |
 | `sort_order` | `string` | No | "asc" or "desc". Default: "desc". |
 | `limit` | `integer` | No | Max results per page (default 20, max 100). |
 | `offset` | `integer` | No | Results to skip for pagination (default 0). |
 
-**Response**: JSON with `total_count`, `has_more`, `next_offset`, and `items[]`. Each item has `item_id`, `item_type`, `title`, `authors`, `year`, `date_added`, `date_modified`. Note: does not include attachment IDs — use `get_item_details` to get those.
+**Response**: JSON with `total_count`, `has_more`, `next_offset`, and `items[]`. Item shape depends on `item_category`: regular items have `item_id`, `item_type`, `title`, `authors`, `year`, `date_added`, `date_modified` (no attachment IDs — use `get_item_details` to get those); notes have `parent_item_id`, `parent_title`, `date_modified`; attachments have `filename`, `content_type`, `parent_item_id`, `parent_title`, `annotations_count`, `date_modified`.
 
 **Underlying handler**: `handleListItemsRequest` from `src/services/agentDataProvider/`.
 

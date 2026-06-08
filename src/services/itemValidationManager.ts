@@ -10,6 +10,8 @@ import { getPref } from '../utils/prefs';
 import { BeaverExtractor, ExtractionError, ExtractionErrorCode } from '../beaver-extract';
 import { safeFileExists } from '../utils/zoteroUtils';
 import { isRemoteAccessAvailable } from './agentDataProvider/utils';
+import type { DocumentCacheMetadata } from './documentCache';
+import { effectiveMaxFileSizeMB, effectiveMaxPageCount } from './attachmentLimits';
 
 /**
  * Types of item validation
@@ -264,6 +266,52 @@ class ItemValidationManager {
     }
 
     /**
+     * Convert fresh document-cache metadata into a frontend validation result.
+     * Returns null when the metadata is not decisive enough to skip parser work.
+     */
+    private frontendValidationFromCachedMetadata(
+        metadata: DocumentCacheMetadata | null
+    ): { isValid: boolean; reason?: string } | null {
+        if (!metadata) return null;
+
+        if (metadata.errorCode === 'encrypted') {
+            return { isValid: false, reason: 'PDF is password-protected' };
+        }
+        if (metadata.errorCode === 'invalid_pdf') {
+            return { isValid: false, reason: 'PDF file is invalid or corrupted' };
+        }
+        if (metadata.errorCode === 'no_text_layer') {
+            if (this.canHandleOCRLocally()) {
+                return { isValid: true };
+            }
+            return {
+                isValid: false,
+                reason: 'PDF requires OCR (no text layer). Use a model with vision support or enable plus tools under Settings > API Keys.'
+            };
+        }
+
+        if (metadata.pageCount === 0) {
+            return { isValid: false, reason: 'PDF has no readable pages' };
+        }
+        if (metadata.pageCount != null) {
+            const maxPageCount = effectiveMaxPageCount();
+            if (metadata.pageCount > maxPageCount) {
+                return {
+                    isValid: false,
+                    reason: `PDF has ${metadata.pageCount} pages, which exceeds the ${maxPageCount}-page limit.`,
+                };
+            }
+        }
+
+        // Successful extraction metadata proves page readability and text-layer status.
+        if (metadata.errorCode === null && metadata.pageCount != null) {
+            return { isValid: true };
+        }
+
+        return null;
+    }
+
+    /**
      * Perform backend validation
      * Checks if the item has been processed on the backend
      */
@@ -373,7 +421,7 @@ class ItemValidationManager {
         }
 
         // 5. Check file size limits
-        const maxFileSizeMB = getPref('maxFileSizeMB');
+        const maxFileSizeMB = effectiveMaxFileSizeMB();
         try {
             const fileSize = await Zotero.Attachments.getTotalFileSize(attachment);
             if (fileSize) {
@@ -388,6 +436,16 @@ class ItemValidationManager {
         } catch (error: any) {
             logger(`ItemValidationManager: Error checking file size: ${error.message}`, 2);
             return { isValid: false, reason: 'Unable to check file size' };
+        }
+
+        const cachedMetadata = await Zotero.Beaver?.documentCache?.getMetadata(
+            { libraryId: attachment.libraryID, zoteroKey: attachment.key },
+            filePath,
+        );
+        const cachedValidation = this.frontendValidationFromCachedMetadata(cachedMetadata ?? null);
+        if (cachedValidation) {
+            logger(`ItemValidationManager: Using document-cache metadata for frontend validation of ${attachment.libraryID}-${attachment.key}`, 4);
+            return cachedValidation;
         }
 
         // 6. Analyze PDF (page count, encryption, OCR needs)
@@ -412,6 +470,14 @@ class ItemValidationManager {
                     }
                 }
                 throw error;
+            }
+
+            const maxPageCount = effectiveMaxPageCount();
+            if (pageCount > maxPageCount) {
+                return {
+                    isValid: false,
+                    reason: `PDF has ${pageCount} pages, which exceeds the ${maxPageCount}-page limit.`,
+                };
             }
 
             // Check if PDF needs OCR

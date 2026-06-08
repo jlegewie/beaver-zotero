@@ -18,6 +18,24 @@ export interface CreateNoteResult {
     error?: string;
 }
 
+export interface ExecuteCreateNoteActionData {
+    title: string;
+    content: string;
+    library_id?: number;
+    parent_key?: string;
+}
+
+export interface ExecuteCreateNoteResponse {
+    success: boolean;
+    error?: string | null;
+    error_code?: string | null;
+    result_data?: {
+        library_id: number;
+        zotero_key: string;
+        note_content?: string;
+    };
+}
+
 export interface ReadNoteResult {
     library_id: number;
     zotero_key: string;
@@ -36,6 +54,21 @@ export async function createNote(opts: {
     wrap_schema?: boolean;
 }): Promise<CreateNoteResult> {
     return post<CreateNoteResult>('/beaver/test/note-create', opts);
+}
+
+export async function executeCreateNote(
+    actionData: ExecuteCreateNoteActionData,
+    opts?: { timeout?: number; timeoutSeconds?: number },
+): Promise<ExecuteCreateNoteResponse> {
+    return post<ExecuteCreateNoteResponse>(
+        '/beaver/agent-action/execute',
+        {
+            action_type: 'create_note',
+            action_data: actionData,
+            timeout_seconds: opts?.timeoutSeconds,
+        },
+        { timeout: opts?.timeout },
+    );
 }
 
 export async function deleteNote(libraryId: number, zoteroKey: string): Promise<void> {

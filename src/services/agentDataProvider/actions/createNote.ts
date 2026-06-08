@@ -6,9 +6,10 @@ import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '
 import { currentThreadIdAtom } from '../../../../react/atoms/threads';
 import { activeRunAtom } from '../../../../react/agents/atoms';
 import { renderToHTML } from '../../../../react/utils/citationRenderers';
-import { preloadPageLabelsForContent } from '../../../../react/utils/pageLabels';
+import { prepareCitationRenderContext } from '../../../../react/utils/citationRenderContext';
 import { wrapWithSchemaVersion, getBeaverNoteFooterHTML } from '../../../../react/utils/noteActions';
 import { getOrSimplify } from '../../../utils/noteHtmlSimplifier';
+import { preloadNotePageLabels } from '../../../utils/noteCitationExpand';
 import { getLatestNoteHtml } from '../../../utils/noteEditorIO';
 import {
     WSAgentActionValidateRequest,
@@ -461,9 +462,14 @@ async function executeCreateNoteAction(
         // Build markdown content with title heading
         const markdownContent = `<h1>${title}</h1>\n\n${content}`;
 
-        // Preload page labels for any citation references in content
-        await ta.track('preload_page_labels_ms', () =>
-            preloadPageLabelsForContent(markdownContent)
+        // Build citation context for note export, including local page
+        // metadata for structured locators in tool-call content.
+        const renderContextData = await ta.track('prepare_render_context_ms', () =>
+            prepareCitationRenderContext(markdownContent, {
+                citationDataMap,
+                externalMapping,
+                externalReferencesMap,
+            })
         );
 
         // Convert markdown to HTML with citation context
@@ -471,7 +477,7 @@ async function executeCreateNoteAction(
         let htmlContent = renderToHTML(
             markdownContent.trim(),
             "markdown",
-            { citationDataMap, externalMapping, externalReferencesMap },
+            renderContextData,
         );
         ta.record('render_html_ms', Date.now() - renderStart);
 
@@ -551,7 +557,8 @@ async function executeCreateNoteAction(
             const rawHtml = getLatestNoteHtml(zoteroNote);
             if (rawHtml) {
                 const simplifyStart = Date.now();
-                const { simplified } = getOrSimplify(noteId, rawHtml, zoteroNote.libraryID);
+                const pageLabelsByItemId = await preloadNotePageLabels(rawHtml, zoteroNote.libraryID, { extractOnCacheMiss: true });
+                const { simplified } = getOrSimplify(noteId, rawHtml, zoteroNote.libraryID, pageLabelsByItemId);
                 ta.record('simplify_ms', Date.now() - simplifyStart);
                 noteContent = simplified;
             }

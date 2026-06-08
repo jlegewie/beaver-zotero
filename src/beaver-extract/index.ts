@@ -31,12 +31,15 @@ export type {
     PDFConfig,
     PDFLogSink,
     PDFWorkerClientSlot,
+    PDFWorkerClientSlots,
+    PDFWorkerSlotName,
     PDFWorkerUrls,
 } from "./config";
 export {
     MuPDFWorkerClient,
     WorkerAbortError,
     getMuPDFWorkerClient,
+    getExistingMuPDFWorkerClient,
     disposeMuPDFWorker,
 } from "./MuPDFWorkerClient";
 export { prewarmMuPDFWorker } from "./prewarm";

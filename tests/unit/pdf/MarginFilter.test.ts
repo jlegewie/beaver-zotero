@@ -423,6 +423,61 @@ describe("templating gate — negatives (no over-removal)", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Side-margin substance gate: body edge words vs. real side marginalia
+//
+// In justified multi-column layouts the trailing/leading word of a body
+// column pokes into the wide left/right margin zone. Common function words
+// recur across pages, so the cross-page repeat detector would delete real
+// body text unless single short words are gated out of side-margin repeats.
+// ---------------------------------------------------------------------------
+
+describe("side-margin substance gate (left/right repeats)", () => {
+    it("does NOT remove a common short word recurring in the right zone", () => {
+        const analysis = oneTextPerPage(["the", "the", "the", "the"], "right");
+        const out = MarginFilter.identifyElementsToRemove(analysis, 3, true);
+        expect(out.candidates.some((c) => c.reason === "repeat")).toBe(false);
+        expect(out.textsToRemove.has("the")).toBe(false);
+    });
+
+    it("does NOT remove a short two-letter word recurring in the right zone", () => {
+        const analysis = oneTextPerPage(["of", "of", "of", "of"], "right");
+        const out = MarginFilter.identifyElementsToRemove(analysis, 3, true);
+        expect(out.candidates.some((c) => c.reason === "repeat")).toBe(false);
+    });
+
+    it("does NOT remove a short word recurring in the left zone", () => {
+        const analysis = oneTextPerPage(["age", "age", "age", "age"], "left");
+        const out = MarginFilter.identifyElementsToRemove(analysis, 3, true);
+        expect(out.candidates.some((c) => c.reason === "repeat")).toBe(false);
+    });
+
+    it("STILL removes a genuine multi-word side watermark", () => {
+        const analysis = oneTextPerPage(
+            ["Downloaded from journal", "Downloaded from journal", "Downloaded from journal"],
+            "right",
+        );
+        const out = MarginFilter.identifyElementsToRemove(analysis, 3, true);
+        expect(out.candidates.some((c) => c.reason === "repeat")).toBe(true);
+        expect(out.textsToRemove.has("downloaded from journal")).toBe(true);
+    });
+
+    it("STILL removes a long single-token side watermark (≥8 alnum chars)", () => {
+        const analysis = oneTextPerPage(
+            ["PREPRINTv2", "PREPRINTv2", "PREPRINTv2"],
+            "left",
+        );
+        const out = MarginFilter.identifyElementsToRemove(analysis, 3, true);
+        expect(out.candidates.some((c) => c.reason === "repeat")).toBe(true);
+    });
+
+    it("does NOT gate top/bottom running headers (short surnames stay removable)", () => {
+        const analysis = oneTextPerPage(["Lee", "Lee", "Lee"], "top");
+        const out = MarginFilter.identifyElementsToRemove(analysis, 3, true);
+        expect(out.candidates.some((c) => c.reason === "repeat")).toBe(true);
+    });
+});
+
+// ---------------------------------------------------------------------------
 // Repeat-vs-sequence behavior split (renamed from the misleading "42" test)
 // ---------------------------------------------------------------------------
 

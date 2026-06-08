@@ -8,7 +8,7 @@
 
 
 export async function handleTestPingHttpRequest(_request: any) {
-    const cache = Zotero.Beaver?.attachmentFileCache;
+    const cache = Zotero.Beaver?.documentCache;
     const db = Zotero.Beaver?.db;
     return {
         ok: true,
@@ -24,54 +24,165 @@ export async function handleTestCacheMetadataHttpRequest(request: any) {
 
     let record;
     if (item_id != null) {
-        record = await db.getAttachmentFileCache(item_id);
+        const allRecords = await db.getAllDocumentCacheMetadata();
+        record = allRecords.find((row: any) => row.itemId === item_id) ?? null;
     } else if (library_id != null && zotero_key != null) {
-        record = await db.getAttachmentFileCacheByKey(library_id, zotero_key);
+        record = await db.getDocumentCacheMetadataByKey(library_id, zotero_key);
     } else {
         return { error: 'Provide item_id or library_id + zotero_key' };
     }
     return { record: record ?? null };
 }
 
+/**
+ * Dev-only: return a document-cache payload row by key + payload kind.
+ *
+ * Lets tests assert on the payload table's persisted discriminator columns
+ * without exposing the gzipped payload file. Returns `{ record: null }` when
+ * no payload exists.
+ */
+export async function handleTestCachePayloadHttpRequest(request: any) {
+    const { library_id, zotero_key } = request;
+    const payloadKind = request.payload_kind ?? request.mode;
+    const db = Zotero.Beaver?.db;
+    if (!db) return { error: 'db not available' };
+    if (library_id == null || zotero_key == null) {
+        return { error: 'Provide library_id + zotero_key' };
+    }
+    const record = await db.getDocumentCachePayload(
+        library_id,
+        zotero_key,
+        payloadKind === 'structured' || payloadKind === 'markdown' ? payloadKind : 'markdown',
+    );
+    return { record: record ?? null };
+}
+
 export async function handleTestCacheInvalidateHttpRequest(request: any) {
     const { library_id, zotero_key, item_id } = request;
-    const cache = Zotero.Beaver?.attachmentFileCache;
+    const cache = Zotero.Beaver?.documentCache;
     if (!cache) return { error: 'cache not available' };
 
     if (item_id != null && library_id != null && zotero_key != null) {
-        await cache.invalidate(item_id, library_id, zotero_key);
+        await cache.invalidate(library_id, zotero_key);
     } else if (library_id != null && zotero_key != null) {
-        // Resolve item_id from DB
-        const db = Zotero.Beaver?.db;
-        if (!db) return { error: 'db not available' };
-        const record = await db.getAttachmentFileCacheByKey(library_id, zotero_key);
-        if (record) {
-            await cache.invalidate(record.item_id, library_id, zotero_key);
-        } else {
-            // No cache entry, nothing to invalidate
-        }
+        await cache.invalidate(library_id, zotero_key);
     } else {
         return { error: 'Provide library_id + zotero_key (and optionally item_id)' };
     }
     return { ok: true };
 }
 
-export async function handleTestCacheClearMemoryHttpRequest(_request: any) {
-    const cache = Zotero.Beaver?.attachmentFileCache;
+/**
+ * Dev-only: seed document-cache page-label metadata for an attachment.
+ *
+ * Thin wrapper over the real `DocumentCache.putMetadata` write path so tests
+ * can deterministically place page labels in the cache without running a full
+ * PDF extraction. The source identity (mtime/size) is derived from the real
+ * attachment file, so the seeded record is treated as fresh by `getMetadata`.
+ *
+ * Request: `{ library_id, zotero_key, page_labels: { "0": "iii", ... }, page_count? }`.
+ */
+export async function handleTestCacheSeedPageLabelsHttpRequest(request: any) {
+    const { library_id, zotero_key, page_labels, page_count } = request as {
+        library_id?: number;
+        zotero_key?: string;
+        page_labels?: Record<string, string>;
+        page_count?: number;
+    };
+    const cache = Zotero.Beaver?.documentCache;
     if (!cache) return { error: 'cache not available' };
-    cache.clearMemoryCache();
-    return { ok: true };
+    if (library_id == null || zotero_key == null || page_labels == null) {
+        return { error: 'Provide library_id, zotero_key, and page_labels' };
+    }
+
+    const item = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);
+    if (!item || typeof item === 'boolean') return { error: 'not_found' };
+    if (!item.isAttachment()) return { error: 'not_an_attachment' };
+
+    const filePath = await item.getFilePathAsync();
+    if (!filePath) return { error: 'no_file' };
+
+    // Normalize incoming JSON keys ("0", "1", ...) to a 0-based index map.
+    const pageLabels: Record<number, string> = {};
+    for (const [k, v] of Object.entries(page_labels)) {
+        const idx = Number(k);
+        if (Number.isInteger(idx) && idx >= 0) pageLabels[idx] = String(v);
+    }
+
+    await cache.putMetadata({
+        item,
+        filePath,
+        // sourceSizeBytes is recomputed from the real file for local paths.
+        sourceSizeBytes: 0,
+        contentType: 'application/pdf',
+        metadata: {
+            contentKind: 'pdf',
+            pageCount: typeof page_count === 'number' ? page_count : Object.keys(pageLabels).length,
+            pageLabels,
+            pages: null,
+        },
+    });
+
+    const record = await cache.getMetadata(
+        { libraryId: item.libraryID, zoteroKey: item.key },
+        filePath,
+    );
+    return {
+        ok: true,
+        seeded: !!(record?.pageLabels && Object.keys(record.pageLabels).length > 0),
+        page_labels: record?.pageLabels ?? null,
+    };
 }
 
-export async function handleTestCacheDeleteContentHttpRequest(request: any) {
-    const { library_id, zotero_key } = request;
-    const cache = Zotero.Beaver?.attachmentFileCache;
+/**
+ * Dev-only: completely clear the document cache (metadata rows, payload
+ * rows, and payload files on disk). Mirrors the DevTools "Clear Document
+ * Cache" menu item, exposed over HTTP so tests can reset to a cold cache.
+ */
+export async function handleTestCacheClearAllHttpRequest(_request: any) {
+    const cache = Zotero.Beaver?.documentCache;
     if (!cache) return { error: 'cache not available' };
-    if (library_id == null || zotero_key == null) {
-        return { error: 'Provide library_id + zotero_key' };
-    }
-    await cache.deleteContent(library_id, zotero_key);
-    return { ok: true };
+    const { metadataRows, payloadRows } = await cache.clearAll();
+    return { ok: true, metadataRows, payloadRows };
+}
+
+/**
+ * Dev-only: invoke the MCP `read_attachment` tool handler directly.
+ *
+ * Exercises the exact tool code path — `start_page` / `end_page` integer
+ * validation, the `zotero_document_request` round-trip, and page-window
+ * slicing — so tests can assert on it without a live MCP client.
+ *
+ * Returns the tool's raw result: a plain string on success, or an MCP
+ * error object (`{ content, isError: true }`) on failure.
+ */
+export async function handleTestReadAttachmentHttpRequest(request: any) {
+    const { handleReadAttachment } = await import('../useMcpServer');
+    const result = await handleReadAttachment(request || {});
+    return { result };
+}
+
+/**
+ * Dev-only: invoke the MCP `read_note` tool handler directly.
+ *
+ * Returns the tool's raw result: a compact note object on success, or an MCP
+ * error object (`{ content, isError: true }`) on failure.
+ */
+export async function handleTestMcpReadNoteHttpRequest(request: any) {
+    const { handleReadNote } = await import('../useMcpServer');
+    const result = await handleReadNote(request || {});
+    return { result };
+}
+
+/**
+ * Dev-only: invoke the MCP `create_note` tool handler directly.
+ *
+ * Exercises the MCP validation → execute path without registering a client.
+ */
+export async function handleTestMcpCreateNoteHttpRequest(request: any) {
+    const { handleCreateNote } = await import('../useMcpServer');
+    const result = await handleCreateNote(request || {});
+    return { result };
 }
 
 /**
@@ -167,11 +278,62 @@ export async function handleTestResolveItemHttpRequest(request: any) {
     }
     const item = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);
     if (!item) return { item_id: null, item_type: null };
+
+    // Surface the PDF attachment the production resolver would extract for
+    // this item (direct attachment, or the single child PDF of a regular
+    // item). Lets tests assert parent → child resolution without exposing
+    // extraction internals. Reuses the real resolver code path.
+    const { resolveToPdfAttachment } = await import(
+        '../../../src/services/documentExtraction/attachmentResolution'
+    );
+    const resolved = await resolveToPdfAttachment(
+        item,
+        `${library_id}-${zotero_key}`,
+    );
+
     return {
         item_id: item.id,
         item_type: item.itemType,
         is_attachment: item.isAttachment(),
         parent_id: item.parentID || null,
         attachment_content_type: item.isAttachment() ? item.attachmentContentType : null,
+        resolved_pdf_key: resolved.resolved ? resolved.key : null,
+    };
+}
+
+export async function handleTestResolveReadableHttpRequest(request: any) {
+    const { library_id, zotero_key } = request;
+    if (library_id == null || zotero_key == null) {
+        return { error: 'Provide library_id + zotero_key' };
+    }
+    const item = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);
+    if (!item) return { item_id: null, item_type: null };
+    await item.loadAllData();
+
+    // Exercises the production readable-attachment resolver used by the
+    // document-extraction core (`resolveToReadableAttachment`). Unlike the
+    // document endpoint, this returns the resolver result verbatim — including
+    // the chosen attachment key and content kind for non-PDF kinds that the
+    // extractor rejects — so resolution behavior can be asserted without
+    // triggering extraction.
+    const { resolveToReadableAttachment } = await import(
+        '../../../src/services/documentExtraction/attachmentResolution'
+    );
+    const resolved = await resolveToReadableAttachment(
+        item,
+        `${library_id}-${zotero_key}`,
+    );
+
+    return {
+        item_id: item.id,
+        item_type: item.itemType,
+        is_attachment: item.isAttachment(),
+        is_regular_item: item.isRegularItem(),
+        resolved: resolved.resolved,
+        resolved_key: resolved.resolved ? resolved.key : null,
+        content_kind: resolved.resolved ? resolved.contentKind : null,
+        content_type: resolved.resolved ? resolved.contentType : null,
+        error_code: resolved.resolved ? null : resolved.error_code,
+        error: resolved.resolved ? null : resolved.error,
     };
 }

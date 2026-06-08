@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { getPref, setPref } from '../../src/utils/prefs';
 import { isSidebarVisibleAtom, isLibraryTabAtom } from '../atoms/ui';
-import { addFloatingPopupMessageAtom } from '../atoms/floatingPopup';
+import { addFloatingPopupMessageAtom, floatingPopupMessagesAtom } from '../atoms/floatingPopup';
 import { currentNoteItemAtom } from '../atoms/zoteroContext';
 import { getCurrentReader } from '../utils/readerUtils';
 import { logger } from '../../src/utils/logger';
@@ -17,13 +17,15 @@ const NOTE_TIP_DELAY_MS = 500;
 /**
  * Manages onboarding popups for first-time user engagement:
  * 1. Welcome popup on first install (not shown to upgrading users)
- * 2. Reader tip popup on first PDF reader open (shown to all users once)
+ * 2. Reader tip popup on first PDF reader open (shown to all users once; re-shown
+ *    once after the tip was revised, and suppressed while a version-update popup is up)
  * 3. Note tip popup on first note tab open (shown to all users once)
  */
 export function useOnboardingPopups() {
     const isSidebarVisible = useAtomValue(isSidebarVisibleAtom);
     const isLibraryTab = useAtomValue(isLibraryTabAtom);
     const noteItem = useAtomValue(currentNoteItemAtom);
+    const floatingPopupMessages = useAtomValue(floatingPopupMessagesAtom);
     const addFloatingPopupMessage = useSetAtom(addFloatingPopupMessageAtom);
     const welcomeShownThisSessionRef = useRef(false);
     const readerTipShownThisSessionRef = useRef(false);
@@ -59,11 +61,28 @@ export function useOnboardingPopups() {
         // Only trigger when user is on a reader tab (not library)
         if (isLibraryTab) return;
 
-        const alreadyShown = getPref('onboardingReaderTipShown');
+        // Versioned pref: the reader tip was substantially revised, so re-show it
+        // once to existing users who only saw the previous version.
+        const alreadyShown = getPref('onboardingReaderTipShownV2');
         if (alreadyShown) return;
 
         // Don't show if Beaver sidebar is already open
         if (isSidebarVisible) return;
+
+        // Don't compete with the version-update popup: skip while one is showing, and
+        // enforce a gap after it was last shown so the tip doesn't appear right after it.
+        if (floatingPopupMessages.some((msg) => msg.type === 'version_update')) {
+            logger('useOnboardingPopups: Skipping reader tip (version update popup is showing)');
+            return;
+        }
+        const versionPopupShownAt = getPref('versionUpdatePopupShownAt');
+        if (versionPopupShownAt) {
+            const elapsed = Date.now() - new Date(versionPopupShownAt).getTime();
+            if (elapsed < ONE_HOUR_MS) {
+                logger('useOnboardingPopups: Skipping reader tip (within 1-hour gap from version update popup)');
+                return;
+            }
+        }
 
         // Verify it's a PDF (not EPUB, HTML snapshot, etc.)
         const reader = getCurrentReader(Zotero.getMainWindow());
@@ -85,11 +104,11 @@ export function useOnboardingPopups() {
             }
         }
 
-        readerTipShownThisSessionRef.current = true;
-        setPref('onboardingReaderTipShown', true);
-        logger('useOnboardingPopups: Showing reader tip popup (after delay)');
-
+        // Only mark the tip as shown once it is actually displayed
         const timerId = setTimeout(() => {
+            readerTipShownThisSessionRef.current = true;
+            setPref('onboardingReaderTipShownV2', true);
+            logger('useOnboardingPopups: Showing reader tip popup');
             addFloatingPopupMessage({
                 id: READER_TIP_POPUP_ID,
                 type: 'reader_tip',
@@ -99,7 +118,7 @@ export function useOnboardingPopups() {
         }, READER_TIP_DELAY_MS);
 
         return () => clearTimeout(timerId);
-    }, [isLibraryTab, isSidebarVisible, addFloatingPopupMessage]);
+    }, [isLibraryTab, isSidebarVisible, floatingPopupMessages, addFloatingPopupMessage]);
 
     // === Popup 3: Note tip on first note tab ===
     useEffect(() => {

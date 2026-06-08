@@ -79,6 +79,12 @@ export interface ExtractionSettings {
      * use tinted display containers.
      */
     graphicsLayerMode?: GraphicsLayerMode;
+    /**
+     * Emit verbose analyzer-module log lines (ColumnDetector, StyleAnalyzer,
+     * MarginFilter, LineDetector, ParagraphDetector). Default false — even
+     * in dev builds. Prefer the CLI `trace` command for structured debugging.
+     */
+    analyzerLogging?: boolean;
 }
 
 /** Default extraction settings */
@@ -90,6 +96,7 @@ export const DEFAULT_EXTRACTION_SETTINGS: Required<ExtractionSettings> = {
     repeatThreshold: 3,
     detectPageSequences: true,
     graphicsLayerMode: "off",
+    analyzerLogging: false,
 };
 
 /**
@@ -215,8 +222,8 @@ function normalizeRotation(rotation: number): 0 | 90 | 180 | 270 {
 }
 
 /**
- * Convert a public source-MuPDF/top-left bbox to Zotero reader annotation
- * coordinates. The returned bottom-left bbox keeps semantic edges:
+ * Convert a public extraction/display-frame top-left bbox to Zotero reader
+ * annotation coordinates. The returned bottom-left bbox keeps semantic edges:
  * `t` is the visual top edge and `b` the visual bottom edge.
  */
 export function bboxToReaderFrame(
@@ -243,14 +250,14 @@ export function bboxToReaderFrame(
         case 180:
             l = ctx.pageWidth - bbox.r + dx;
             r = ctx.pageWidth - bbox.l + dx;
-            bottom = ctx.pageHeight - bbox.b + dy;
-            top = ctx.pageHeight - bbox.t + dy;
+            bottom = bbox.t + dy;
+            top = bbox.b + dy;
             break;
         case 270:
-            l = ctx.pageHeight - bbox.b + dx;
-            r = ctx.pageHeight - bbox.t + dx;
-            bottom = ctx.pageWidth - bbox.r + dy;
-            top = ctx.pageWidth - bbox.l + dy;
+            l = ctx.pageWidth - bbox.b + dx;
+            r = ctx.pageWidth - bbox.t + dx;
+            bottom = ctx.pageHeight - bbox.r + dy;
+            top = ctx.pageHeight - bbox.l + dy;
             break;
         case 0:
         default:
@@ -367,10 +374,14 @@ export interface RawPageData {
     pageIndex: number;
     /** 1-based page number */
     pageNumber: number;
-    /** Page width in points */
+    /** Page width in points after MuPDF page-bound transforms. */
     width: number;
-    /** Page height in points */
+    /** Page height in points after MuPDF page-bound transforms. */
     height: number;
+    /** Effective CropBox∩MediaBox in PDF user-space before /Rotate. */
+    viewBox: [number, number, number, number];
+    /** Raw PDF /Rotate value normalized with PDF.js semantics. */
+    rotation: 0 | 90 | 180 | 270;
     /** Page label (e.g., "iv", "220") */
     label?: string;
     /**
@@ -654,9 +665,13 @@ export interface InternalProcessedPage {
     index: number;
     /** Page label (e.g., "iv", "220") if available */
     label?: string;
-    /** Page dimensions */
+    /** Page dimensions after MuPDF page-bound transforms. */
     width: number;
     height: number;
+    /** Effective CropBox∩MediaBox in PDF user-space before /Rotate. */
+    viewBox: [number, number, number, number];
+    /** Raw PDF /Rotate value normalized with PDF.js semantics. */
+    rotation: 0 | 90 | 180 | 270;
     /** Plain text content (in reading order) */
     content: string;
     /** Detected columns in reading order. Empty when no columns are detected. */
@@ -962,6 +977,7 @@ export interface OCRDetectionOptions {
 /** Reasons why a page might need OCR */
 export type OCRIssueReason =
     | "no_text_blocks"
+    | "no_body_text"
     | "insufficient_text"
     | "high_whitespace_ratio"
     | "high_newline_ratio"
@@ -990,8 +1006,6 @@ export interface PageOCRAnalysis {
 export interface OCRDetectionResult {
     /** Whether the document likely needs OCR */
     needsOCR: boolean;
-    /** Primary reason for the decision */
-    primaryReason: string;
     /** Ratio of pages with issues (0-1) */
     issueRatio: number;
     /** Breakdown by issue type */
@@ -1290,18 +1304,42 @@ export interface PageImageResult {
 // ============================================================================
 
 /**
+ * Geometry used by annotation/cache consumers.
+ * `viewBox` is the effective view box (CropBox intersected with MediaBox,
+ * with MediaBox defaulting to US Letter when absent) in PDF user-space before
+ * `/Rotate` is applied. `width` and `height` are unrotated `viewBox`
+ * derivations, not public extraction bbox-frame dimensions.
+ */
+export interface PageGeometry {
+    /** Effective view box [x0, y0, x1, y1] in PDF user-space, unrotated. */
+    viewBox: [number, number, number, number];
+    /** viewBox[2] - viewBox[0]. */
+    width: number;
+    /** viewBox[3] - viewBox[1]. */
+    height: number;
+    /** PDF /Rotate normalized to one of 0, 90, 180, 270 with PDF.js semantics. */
+    rotation: 0 | 90 | 180 | 270;
+}
+
+/**
  * Document-level PDF metadata returned by `BeaverExtractor.getMetadata`.
  *
  * Cheap to collect: pulls the info dictionary and PDF format string via
  * `doc.getMetadata(...)` (string lookups in the trailer/info dict). Page
- * labels require a per-page load and are the only field with non-trivial
- * cost. Info-dict fields are omitted when not present in the document.
+ * labels and page geometry require one per-page load. Info-dict fields are
+ * omitted when not present in the document.
  */
 export interface PDFMetadata {
     /** Total number of pages */
     pageCount: number;
     /** Custom page labels (0-indexed → label). Empty record if no labels. */
     pageLabels: Record<number, string>;
+    /**
+     * Per-page geometry, dense and indexed by 0-based page index.
+     * Real `BeaverExtractor.getMetadata` responses always populate this; it is
+     * optional so existing lightweight fixtures can keep specifying only labels.
+     */
+    pages?: (PageGeometry | null)[];
     /** PDF format string (e.g., "PDF 1.7") */
     format?: string;
     /** info:Title */

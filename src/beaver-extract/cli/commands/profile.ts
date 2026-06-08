@@ -303,6 +303,10 @@ export function buildProfileCommand(deps: CliDeps): Command {
                 const input: ExtractInput = {
                     pdfData: bytes,
                     mode,
+                    // The profiler reads per-phase worker timings off the
+                    // result, so it opts into the diagnostics payload that the
+                    // production extraction path omits.
+                    includeDiagnostics: true,
                 };
                 effective.mode = mode;
                 if (mode === "markdown") {

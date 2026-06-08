@@ -11,6 +11,7 @@
  */
 
 import { logger } from "../../src/utils/logger";
+import { BEAVER_VISUALIZER_ANNOTATION_AUTHOR } from "../../src/constants/annotations";
 import {
     BeaverExtractor,
     bboxToReaderFrame,
@@ -59,10 +60,10 @@ import {
  *   /Rotate 90:  PDF (Px, Py_BL) = (My,                  Mx)
  *                                  swapped: PDF rect spans My..My+h in x,
  *                                  Mx..Mx+w in y
- *   /Rotate 180: PDF (Px, Py_BL) = (pdfWidth - Mx - w,   pdfHeight - My - h)
- *                                  rect dims unchanged, mirrored both axes
- *   /Rotate 270: PDF (Px, Py_BL) = (pdfHeight - My - h,  pdfWidth - Mx - w)
- *                                  swapped + mirrored
+ *   /Rotate 180: PDF (Px, Py_BL) = (pdfWidth - Mx - w,   My)
+ *                                  mirrored horizontally
+ *   /Rotate 270: PDF (Px, Py_BL) = (pdfWidth - My - h,   pdfHeight - Mx - w)
+ *                                  swapped + mirrored against display axes
  *
  * `viewBoxLL` is added back to the PDF coord after the rotation so
  * pages with non-zero CropBox offsets still align.
@@ -203,7 +204,7 @@ async function pushOverlayToReader(
             lastModifiedByUser: "",
             dateModified: new Date().toISOString(),
             annotationType: "highlight",
-            annotationAuthorName: "Beaver Visualizer",
+            annotationAuthorName: BEAVER_VISUALIZER_ANNOTATION_AUTHOR,
             annotationText: label,
             annotationComment: comment,
             annotationColor: head.color,

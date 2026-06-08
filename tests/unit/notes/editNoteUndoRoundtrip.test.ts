@@ -291,7 +291,7 @@ beforeEach(() => {
             _editorInstances: [],
         },
         Beaver: {
-            attachmentFileCache: null,
+            documentCache: null,
         },
     };
 
@@ -1022,7 +1022,7 @@ describe('citation-related undo edge cases', () => {
         expect(refMatch).toBeTruthy();
 
         const oldStr = 'the results are significant';
-        const newStr = 'the results are significant <citation item_id="1-NEWCITE" label="NewRef, 2025"/>';
+        const newStr = 'the results are significant <citation id="1-NEWCITE" label="NewRef, 2025"/>';
 
         const { item, action } = await applyEdit({
             noteHtml: NOTE_WITH_CITATION,
@@ -1400,7 +1400,7 @@ describe('page locator normalization in apply-undo cycle', () => {
         const { item, action } = await applyEdit({
             noteHtml: NOTE_WITH_CITATION,
             oldString: 'the results are significant',
-            newString: 'the results are significant <citation item_id="1-RANGECIT" page="50-55"/>',
+            newString: 'the results are significant <citation id="1-RANGECIT" loc="page50-55"/>',
         });
 
         // The citation should have been created with normalized page "50"
@@ -1421,7 +1421,7 @@ describe('page locator normalization in apply-undo cycle', () => {
         const { item, action } = await applyEdit({
             noteHtml: NOTE_WITH_CITATION,
             oldString: 'Further analysis reveals important patterns',
-            newString: 'Further analysis reveals important patterns <citation item_id="1-COMMACIT" page="222, 237-238"/>',
+            newString: 'Further analysis reveals important patterns <citation id="1-COMMACIT" loc="page222, 237-238"/>',
         });
 
         const { createCitationHTML } = await import('../../../src/utils/zoteroUtils');
@@ -1437,7 +1437,7 @@ describe('page locator normalization in apply-undo cycle', () => {
     it('full apply-undo-apply-undo cycle with page-range citation', async () => {
         const original = NOTE_WITH_CITATION;
         const oldStr = 'the results are significant';
-        const newStr = 'the results are significant <citation item_id="1-CYCLEREF" page="241-243"/>';
+        const newStr = 'the results are significant <citation id="1-CYCLEREF" loc="page241-243"/>';
 
         // Apply
         const { item, action: action1 } = await applyEdit({
@@ -1470,14 +1470,14 @@ describe('page locator normalization in apply-undo cycle', () => {
         // internally (normalizeNoteHtml is called inside simplifyNoteHtml).
         const pmNote = normalizeNoteHtml(NOTE_WITH_CITATION);
 
-        // Note has a citation with page="42"
+        // Note has a citation with loc="page42"
         const { simplified } = simplifyNoteHtml(pmNote, 1);
         const citTag = simplified.match(/<citation [^/]*ref="c_CITE1_0"[^/]*\/>/)?.[0];
         expect(citTag).toBeTruthy();
-        expect(citTag).toContain('page="42"');
+        expect(citTag).toContain('loc="page42"');
 
         // LLM changes page to a range
-        const modifiedTag = citTag!.replace('page="42"', 'page="42-48"');
+        const modifiedTag = citTag!.replace('loc="page42"', 'loc="page42-48"');
         const oldStr = citTag!;
         const newStr = modifiedTag;
 

@@ -1,12 +1,14 @@
 import React, { forwardRef } from 'react';
-import { CSSItemTypeIcon, CSSIcon, Spinner, Icon, ArrowUpRightIcon } from "../icons/icons";
+import { CSSItemTypeIcon, CSSIcon, Spinner, Icon, ArrowUpRightIcon, LibraryIcon, PdfIcon, NoteIcon, FileViewIcon } from "../icons/icons";
 import { useAtomValue } from 'jotai';
+import { useRemoveContextMenu } from '../../hooks/useRemoveContextMenu';
+import { MenuItem } from '../ui/menu/ContextMenu';
 import { getItemValidationAtom } from '../../atoms/itemValidation';
 import { usePreviewHover } from '../../hooks/usePreviewHover';
 import { getDisplayNameFromItem } from '../../utils/sourceUtils';
 import { truncateText } from '../../utils/stringUtils';
 import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
-import { navigateToAnnotation } from '../../utils/readerUtils';
+import { navigateToAnnotation, isItemActiveTab } from '../../utils/readerUtils';
 import { currentReaderAttachmentKeyAtom } from '../../atoms/messageComposition';
 import { toAnnotation } from '../../types/attachments/converters';
 import { selectItemById } from '../../../src/utils/selectItem';
@@ -17,14 +19,14 @@ const MAX_ITEM_TEXT_LENGTH = 30;
 const ANNOTATION_TEXT_BY_TYPE = {
     highlight: 'Highlight',
     underline: 'Underline',
-    note: 'Note',
+    note: 'Sticky Note',
     image: 'Area',
 }
 
 export const ANNOTATION_ICON_BY_TYPE = {
     highlight: ZOTERO_ICONS.ANNOTATE_HIGHLIGHT,
     underline: ZOTERO_ICONS.ANNOTATE_UNDERLINE,
-    note: ZOTERO_ICONS.ANNOTATE_NOTE,
+    note: ZOTERO_ICONS.ANNOTATION,
     text: ZOTERO_ICONS.ANNOTATE_TEXT,
     image: ZOTERO_ICONS.ANNOTATE_AREA,
 }
@@ -34,6 +36,12 @@ interface MessageItemButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLBut
     canEdit?: boolean;
     disabled?: boolean;
     onRemove?: (item: Zotero.Item) => void;
+    /**
+     * Optional callback to remove all editable context items at once.
+     * When provided (and the button is editable), long-pressing the remove "x"
+     * opens a small menu offering "Remove" and "Remove all".
+     */
+    onRemoveAll?: () => void;
     tabContextType?: 'reader' | 'note';
     showInvalid?: boolean;
     /** Optional collection key to reveal the item within when clicked */
@@ -53,6 +61,7 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
             disabled = false,
             canEdit = true,
             onRemove,
+            onRemoveAll,
             tabContextType,
             showInvalid = true,
             revealInCollectionKey,
@@ -85,32 +94,12 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
                 ? item.isRegularItem() ? truncateText(getDisplayNameFromItem(item), MAX_ITEM_TEXT_LENGTH) : getDisplayNameFromItem(item)
                 : truncateText(item.getDisplayTitle(), MAX_ITEM_TEXT_LENGTH);
 
-        // Handle remove
-        const handleRemove = (e: React.MouseEvent<HTMLSpanElement>) => {
-            e.stopPropagation();
-            cancelTimers();
-            if (onRemove) {
-                onRemove(item);
-            }
-        };
+        const isFileAttachment = item.isAttachment() && item.isFileAttachment();
 
-        // Handle button click
-        const handleButtonClick = (e: React.MouseEvent<HTMLButtonElement>) => {
-            e.stopPropagation();
-            
-            // For annotations, navigate to the annotation in the reader
-            if (isAnnotation) {
-                navigateToAnnotation(item);
-                return;
-            }
-
-            // For notes, open the note in editor (tab or window per user preference)
-            if (item.isNote()) {
-                openNoteById(item.id);
-                return;
-            }
-
-            // For regular items, select in Zotero
+        // Reveal the item in the Zotero library pane. Works for notes,
+        // attachments, and regular items — `selectItem` highlights whichever row
+        // the item occupies.
+        const revealInLibrary = () => {
             try {
                 // If a collection key is provided, reveal in that collection
                 if (revealInCollectionKey) {
@@ -127,6 +116,68 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
             }
         };
 
+        // Open the attachment file in the reader (or its external app).
+        const openAttachment = () => {
+            Zotero.getActiveZoteroPane()?.viewAttachment(item.id);
+        };
+
+        // Primary action for a left-click on the button. Annotations jump to the
+        // reader, notes open in the editor, and everything else is revealed in
+        // the Zotero library.
+        const revealItem = () => {
+            if (isAnnotation) {
+                navigateToAnnotation(item);
+                return;
+            }
+            if (item.isNote()) {
+                openNoteById(item.id);
+                return;
+            }
+            revealInLibrary();
+        };
+
+        // Context-menu reveal/open actions, depending on the item type. Types
+        // that support more than one action (notes, file attachments) show both:
+        // one to reveal the item in the library and one to open it. The "open"
+        // action is disabled only when the item's tab is the one currently in
+        // view — when it is open in a background tab, opening it switches to that
+        // tab.
+        const revealMenuItems: MenuItem[] = isAnnotation
+            ? [{ label: 'Reveal in PDF', icon: PdfIcon, onClick: () => navigateToAnnotation(item) }]
+            : item.isNote()
+                ? [
+                    { label: 'Reveal in Library', icon: LibraryIcon, onClick: revealInLibrary },
+                    { label: 'Open Note', icon: NoteIcon, onClick: () => openNoteById(item.id), disabled: isItemActiveTab(item.id) },
+                ]
+                : isFileAttachment
+                    ? [
+                        { label: 'Reveal in Library', icon: LibraryIcon, onClick: revealInLibrary },
+                        { label: 'Open Attachment', icon: FileViewIcon, onClick: openAttachment, disabled: isItemActiveTab(item.id) },
+                    ]
+                    : [{ label: 'Reveal in Library', icon: LibraryIcon, onClick: revealInLibrary }];
+
+        // Right-click "remove" menu for this button. A left-click on the "x"
+        // removes just this item; right-clicking the button opens a menu with
+        // the reveal/open actions plus "Remove" (and "Remove all" when more than
+        // one removable item is attached).
+        const { isRemoveMenuOpen, contextMenuHandlers, removeHandlers, removeMenu } = useRemoveContextMenu({
+            onRemove: () => {
+                cancelTimers();
+                if (onRemove) onRemove(item);
+            },
+            onRemoveAll,
+            canEdit,
+            disabled,
+            onMenuOpen: cancelTimers,
+            extraMenuItems: revealMenuItems,
+        });
+
+        // Handle button click
+        const handleButtonClick = (e: React.MouseEvent<HTMLButtonElement>) => {
+            e.stopPropagation();
+            revealItem();
+        };
+
         // Get icon element based on validation state
         const getIconElement = () => {
             // Show spinner during validation
@@ -138,10 +189,15 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
                 );
             }
 
-            // Show remove icon on hover (if editable)
-            if (isHovered && canEdit && !disabled) {
+            // Show remove icon on hover (if editable). Keep it visible while the
+            // long-press menu is open so the trigger doesn't disappear.
+            if ((isHovered || isRemoveMenuOpen) && canEdit && !disabled) {
                 return (
-                    <span role="button" className={`source-remove ${isAnnotation ? '-ml-015' : ''}`} onClick={handleRemove}>
+                    <span
+                        role="button"
+                        className={`source-remove ${isAnnotation ? '-ml-015' : ''}`}
+                        {...removeHandlers}
+                    >
                         <CSSIcon name="x-8" className="icon-16" />
                     </span>
                 );
@@ -196,11 +252,13 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
         };
 
         return (
+            <>
             <button
                 ref={ref}
                 style={{ height: '22px' }}
                 title={getTooltipTitle()}
                 {...hoverEventHandlers}
+                {...contextMenuHandlers}
                 className={getButtonClasses()}
                 disabled={disabled}
                 onClick={handleButtonClick}
@@ -231,6 +289,8 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
                     </span>
                 )}
             </button>
+            {removeMenu}
+            </>
         );
     }
 );

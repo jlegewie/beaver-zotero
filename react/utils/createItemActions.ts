@@ -15,12 +15,20 @@ import { scheduleBackgroundTask, generateTaskId, cancelTasksForItem, deduplicate
 /** Maximum concurrent item creations in batch operations */
 const BATCH_CONCURRENCY_LIMIT = 3;
 
+interface ExecuteCreateItemActionOptions {
+    runId?: string;
+    threadId?: string;
+}
+
 /**
  * Execute a create_item agent action.
  * Creates the item in Zotero and returns the result data.
  * Sync is scheduled as a background task (non-blocking).
  */
-export async function executeCreateItemAction(action: AgentAction): Promise<CreateItemResultData> {
+export async function executeCreateItemAction(
+    action: AgentAction,
+    opts?: ExecuteCreateItemActionOptions,
+): Promise<CreateItemResultData> {
     const proposedData = action.proposed_data as CreateItemProposedData;
     
     if (!proposedData || !proposedData.item) {
@@ -55,6 +63,8 @@ export async function executeCreateItemAction(action: AgentAction): Promise<Crea
     // Pass resolved library to target the correct library
     const result = await applyCreateItemData(proposedData, {
         libraryId,
+        runId: opts?.runId,
+        threadId: opts?.threadId,
     });
 
     logger(`executeCreateItemAction: Successfully created item ${result.library_id}-${result.zotero_key}`, 1);
@@ -143,7 +153,10 @@ export interface BatchExecuteResult {
  * Uses a concurrency limit to avoid overwhelming Zotero's database
  * while still being faster than sequential execution.
  */
-export async function executeCreateItemActions(actions: AgentAction[]): Promise<BatchExecuteResult> {
+export async function executeCreateItemActions(
+    actions: AgentAction[],
+    opts?: ExecuteCreateItemActionOptions,
+): Promise<BatchExecuteResult> {
     const result: BatchExecuteResult = {
         successes: [],
         failures: [],
@@ -160,7 +173,7 @@ export async function executeCreateItemActions(actions: AgentAction[]): Promise<
         actions,
         async (action) => {
             try {
-                const itemResult = await executeCreateItemAction(action);
+                const itemResult = await executeCreateItemAction(action, opts);
                 return { success: true as const, action, result: itemResult };
             } catch (error: any) {
                 const errorMessage = error?.message || 'Failed to create item';

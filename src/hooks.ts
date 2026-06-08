@@ -5,10 +5,12 @@ import { BeaverUIFactory } from "./ui/ui";
 import eventBus from "../react/eventBus";
 import { CitationService } from "./services/CitationService";
 import { BeaverDB } from "./services/database";
-import { AttachmentFileCache } from "./services/attachmentFileCache";
+import { DocumentCache } from "./services/documentCache";
+import { BackgroundExtractor } from "./services/backgroundExtractor";
 import { uiManager } from "../react/ui/UIManager";
 import { getPref, setPref } from "./utils/prefs";
 import { addPendingVersionNotification } from "./utils/versionNotificationPrefs";
+import { compareVersions } from "./utils/compareVersions";
 import { getAllVersionUpdateMessageVersions } from "../react/constants/versionUpdateMessages";
 import { disposeMuPDFWorker } from "./beaver-extract";
 import { configurePDFForBeaver } from "./utils/configurePDFForBeaver";
@@ -123,26 +125,6 @@ function unregisterQuitObserver(): void {
 }
 
 /**
- * Compares two semantic version strings.
- * @param v1 Version string 1
- * @param v2 Version string 2
- * @returns 1 if v1 > v2, -1 if v1 < v2, 0 if v1 === v2
- */
-function compareVersions(v1: string, v2: string): number {
-    const parts1 = v1.split('.').map(Number);
-    const parts2 = v2.split('.').map(Number);
-    const len = Math.max(parts1.length, parts2.length);
-
-    for (let i = 0; i < len; i++) {
-        const p1 = parts1[i] || 0;
-        const p2 = parts2[i] || 0;
-        if (p1 > p2) return 1;
-        if (p1 < p2) return -1;
-    }
-    return 0;
-}
-
-/**
  * Handles upgrade tasks between plugin versions.
  * @param lastVersion The previously installed version
  * @param currentVersion The current plugin version
@@ -238,12 +220,27 @@ async function onStartup() {
         await dbConnection.test();
         await beaverDB.initDatabase(version);
 
-        // -------- Initialize Attachment File Cache --------
-        const attachmentFileCache = new AttachmentFileCache(beaverDB);
-        await attachmentFileCache.init();
-        await attachmentFileCache.runStartupGC();
-        addon.attachmentFileCache = attachmentFileCache;
-        ztoolkit.log("AttachmentFileCache initialized successfully");
+        // -------- Initialize Document Cache --------
+        const documentCache = new DocumentCache(beaverDB);
+        await documentCache.init();
+        await documentCache.runStartupGC();
+        addon.documentCache = documentCache;
+        ztoolkit.log("DocumentCache initialized successfully");
+
+        // -------- Initialize background extraction processor --------
+        const backgroundExtractor = new BackgroundExtractor();
+        addon.backgroundExtractor = backgroundExtractor;
+        backgroundExtractor.start();
+        ztoolkit.log("BackgroundExtractor started");
+
+        try {
+            const legacyContentCache = PathUtils.join(Zotero.Profile.dir, "beaver", "content-cache");
+            if (await IOUtils.exists(legacyContentCache)) {
+                await IOUtils.remove(legacyContentCache, { recursive: true });
+            }
+        } catch (error) {
+            ztoolkit.log(`Legacy content-cache cleanup failed: ${error}`);
+        }
 
         // -------- Initialize Citation Service with caching --------
         const citationService = new CitationService(ztoolkit);
@@ -301,6 +298,15 @@ async function onStartup() {
         // If startup fails after opening the DB, close it immediately
         // to prevent AsyncShutdown timeout → FATAL ERROR crash.
         ztoolkit.log(`Startup failed, closing database: ${error}`);
+        // Stop the background extractor
+        try {
+            if (addon.backgroundExtractor) {
+                await addon.backgroundExtractor.stop();
+                addon.backgroundExtractor = undefined;
+            }
+        } catch (stopError) {
+            ztoolkit.log(`Failed to stop backgroundExtractor during startup error recovery: ${stopError}`);
+        }
         try {
             if (addon.db) {
                 await addon.db.closeDatabase();
@@ -365,20 +371,42 @@ async function onMainWindowUnload(win: Window): Promise<void> {
     ztoolkit.log("onMainWindowUnload: Starting cleanup");
 
     try {
-        // Worker-window hygiene: the MuPDF worker is owned by the realm that
-        // spawned it. If the closing window is that realm, terminate the
-        // worker now — even on early-return paths — otherwise the singleton
-        // on Zotero outlives its parent window and the next postMessage
-        // throws. The next caller will lazily respawn against the new window.
+        // Worker-window hygiene: the MuPDF workers are owned by the realm
+        // that spawned them. If the closing window is that realm for either
+        // slot, terminate the corresponding worker now — even on early-return
+        // paths — otherwise the singleton on Zotero outlives its parent
+        // window and the next postMessage throws. The next caller will
+        // lazily respawn the slot against the new window.
         try {
-            const client = (Zotero as any).__beaverMuPDFWorkerClient as
+            const hotClient = (Zotero as any).__beaverMuPDFWorkerClient_hot as
                 | { spawnedFromWindow: Window | null }
                 | undefined;
-            if (client?.spawnedFromWindow === win) {
-                await withShutdownTimeout(
-                    disposeMuPDFWorker(),
-                    "disposeMuPDFWorker",
-                );
+            const backgroundClient = (Zotero as any).__beaverMuPDFWorkerClient_background as
+                | { spawnedFromWindow: Window | null }
+                | undefined;
+            const slots: Array<["hot" | "background", typeof hotClient]> = [
+                ["hot", hotClient],
+                ["background", backgroundClient],
+            ];
+            for (const [name, client] of slots) {
+                if (client?.spawnedFromWindow === win) {
+                    // For the background slot, abort the processor's
+                    // in-flight job FIRST.
+                    if (name === "background" && addon.backgroundExtractor) {
+                        try {
+                            await withShutdownTimeout(
+                                addon.backgroundExtractor.abortInFlight(),
+                                "backgroundExtractor.abortInFlight",
+                            );
+                        } catch (_e) {
+                            // best-effort
+                        }
+                    }
+                    await withShutdownTimeout(
+                        disposeMuPDFWorker(name),
+                        `disposeMuPDFWorker(${name})`,
+                    );
+                }
             }
         } catch (_e) {
             // best-effort
@@ -451,15 +479,26 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         // stale held-lock cannot block authentication on the next load.
         await cleanupSupabaseWindowState(win);
 
-        // 2. Terminate the MuPDF worker. Sentencex lives inside the worker
-        //    and dies with `worker.terminate()`.
+        // 2. Stop the background extraction processor. It owns the
+        //    background MuPDFWorkerClient and an in-flight extraction may
+        //    still be running; the stop() call aborts it cooperatively and
+        //    disposes the worker.
+        if (addon.backgroundExtractor) {
+            await withShutdownTimeout(
+                addon.backgroundExtractor.stop(),
+                "backgroundExtractor.stop",
+            );
+            addon.backgroundExtractor = undefined;
+        }
+
+        // 3. Terminate the remaining MuPDF worker(s). Sentencex lives
+        //    inside the worker and dies with `worker.terminate()`. With
+        //    `name` omitted, disposes any slot still alive (the hot one
+        //    in the steady state; the background slot was already
+        //    disposed by step 2).
         await withShutdownTimeout(disposeMuPDFWorker(), "disposeMuPDFWorker");
 
-        // 3. Clear attachment file cache
-        if (addon.attachmentFileCache) {
-            addon.attachmentFileCache.clearMemoryCache();
-            addon.attachmentFileCache = undefined;
-        }
+        addon.documentCache = undefined;
 
         // 4. Close database connection
         if (addon.db) {
@@ -467,42 +506,42 @@ async function onMainWindowUnload(win: Window): Promise<void> {
             addon.db = undefined;
         }
 
-        // 5. Dispose CitationService
+        // 4. Dispose CitationService
         if (addon.citationService) {
             addon.citationService.dispose();
             addon.citationService = undefined;
         }
 
-        // 6. Unregister keyboard shortcuts (clears interval, unregisters Zotero.Reader listeners)
+        // 5. Unregister keyboard shortcuts (clears interval, unregisters Zotero.Reader listeners)
         BeaverUIFactory.unregisterShortcuts();
 
-        // 7. Clean up UIManager (restores Zotero.Reader.onChangeSidebarWidth)
+        // 6. Clean up UIManager (restores Zotero.Reader.onChangeSidebarWidth)
         if (uiManager) {
             uiManager.cleanup();
         }
 
-        // 8. Unload stylesheets
+        // 7. Unload stylesheets
         unloadKatexStylesheet(win);
         unloadStylesheet();
 
-        // 9. Unregister ztoolkit
+        // 8. Unregister ztoolkit
         ztoolkit.unregisterAll();
         addon.data.dialog?.window?.close();
 
-        // 10. Close separate Beaver and preferences windows if open
+        // 9. Close separate Beaver and preferences windows if open
         BeaverUIFactory.closeBeaverWindow();
         BeaverUIFactory.closePreferencesWindow();
 
-        // 11. Unregister quit observer
+        // 10. Unregister quit observer
         unregisterQuitObserver();
 
-        // 12. Unregister context menus
+        // 11. Unregister context menus
         cleanupContextMenus();
 
-        // 13. Unregister reader integration listeners
+        // 12. Unregister reader integration listeners
         cleanupReaderIntegration();
 
-        // 13b. Unregister reader toolbar menu
+        // 13. Unregister reader toolbar menu
         cleanupReaderToolbarMenu();
 
         // 14. Unregister protocol handler
@@ -628,13 +667,17 @@ async function onShutdown(): Promise<void> {
         try {
             await cleanupSupabaseWindowState(Zotero.getMainWindow());
         } catch (_e) { /* may not be available during shutdown */ }
-    
+
+        if (addon.backgroundExtractor) {
+            try {
+                await addon.backgroundExtractor.stop();
+            } catch (_e) { /* best-effort */ }
+            addon.backgroundExtractor = undefined;
+        }
+
         await disposeMuPDFWorker();
 
-        if (addon.attachmentFileCache) {
-            addon.attachmentFileCache.clearMemoryCache();
-            addon.attachmentFileCache = undefined;
-        }
+        addon.documentCache = undefined;
 
         if (addon.db) {
             await addon.db.closeDatabase();

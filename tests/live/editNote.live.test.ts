@@ -32,6 +32,7 @@ import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest';
 import { isZoteroAvailable, skipIfNoZotero } from '../helpers/zoteroAvailability';
 import {
     createNote,
+    executeCreateNote,
     deleteNote,
     readNote,
     openNoteEditor,
@@ -85,6 +86,63 @@ function normalizeWhitespace(html: string): string {
 
 describe('edit_note concurrent edits', () => {
     beforeEach((ctx) => skipIfNoZotero(ctx, zoteroAvailable));
+
+    it('edits a create_note-rendered Markdown section via markdown_render normalization', async () => {
+        const oldMarkdown = [
+            '### 1. Batch Normalization (BN) — Ioffe & Szegedy, 2015',
+            '',
+            'Batch Normalization stabilizes **training** and supports $x_i$.',
+            '- normalizes activations',
+            '- permits higher learning rates',
+        ].join('\n');
+        const newMarkdown = [
+            '### 1. Batch Normalization (BN) — Ioffe & Szegedy, 2015',
+            '',
+            'Batch Normalization standardizes **mini-batch activations** and supports $x_i$.',
+            '- normalizes activations',
+            '- permits higher learning rates',
+        ].join('\n');
+
+        const created = await executeCreateNote({
+            library_id: LIBRARY_ID,
+            title: 'Markdown render edit live test',
+            content: [
+                oldMarkdown,
+                '',
+                'Closing paragraph.',
+            ].join('\n'),
+        }, { timeout: 20000 });
+        expect(created.success, created.error ?? undefined).toBe(true);
+        expect(created.result_data?.zotero_key).toBeTruthy();
+        const ref = {
+            library_id: created.result_data!.library_id,
+            zotero_key: created.result_data!.zotero_key,
+        };
+        createdNotes.push(ref);
+
+        const actionData: EditNoteActionData = {
+            library_id: ref.library_id,
+            zotero_key: ref.zotero_key,
+            operation: 'str_replace',
+            old_string: oldMarkdown,
+            new_string: newMarkdown,
+        };
+        const validation = await validateEditNote(actionData);
+        expect(validation.valid, validation.error ?? undefined).toBe(true);
+        expect(validation.normalized_action_data?.old_string).toContain('<h3>');
+        expect(validation.normalized_action_data?.old_string).toContain('&amp;');
+        expect(validation.normalized_action_data?.old_string).toContain('<ul>');
+
+        const edit = await executeEditNote(
+            (validation.normalized_action_data ?? actionData) as EditNoteActionData,
+            { timeout: 20000 },
+        );
+        expect(edit.success, edit.error ?? undefined).toBe(true);
+
+        const after = await readNote(ref.library_id, ref.zotero_key);
+        expect(after.saved_html).toContain('mini-batch activations');
+        expect(after.saved_html).not.toContain('stabilizes');
+    });
 
     it('two str_replace edits fired in parallel both apply and final HTML contains both replacements', async () => {
         const ref = await seedNote('<p>Alpha Bravo Charlie Delta</p>');

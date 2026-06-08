@@ -6,6 +6,9 @@ import { ReaderState, NoteState } from '../../react/types/attachments/apiTypes';
 import { BeaverAgentPrompt } from '../../react/agents/types';
 import { CustomChatModel } from '../../react/types/settings';
 import { AttachmentData, ItemData } from '../../react/types/zotero';
+import type { BeaverExtractResult } from '../beaver-extract/schema/schema';
+import type { ExtractContentKind } from './documentExtraction/shared/contentKinds';
+import type { DocumentExtractResult } from './documentExtraction/shared/documentExtractResult';
 
 // =============================================================================
 // WebSocket Event Types (matching backend ws_events.py)
@@ -176,19 +179,6 @@ export interface WSDataError {
     details?: string;
 }
 
-export interface WSPageContent {
-    /** 1-indexed physical page number */
-    page_number: number;
-    /**
-     * PDF page label for this physical page (e.g. "iv", "38", "A-3"),
-     * when the document declares one. Populated whenever labels exist,
-     * independent of whether prefer_page_labels was set on the request.
-     */
-    page_label?: string;
-    /** Text content of the page */
-    content: string;
-}
-
 export interface WSPageImage {
     /** 1-indexed physical page number */
     page_number: number;
@@ -204,34 +194,17 @@ export interface WSPageImage {
     height: number;
 }
 
-/** Request from backend to fetch attachment page content */
-export interface WSZoteroAttachmentPagesRequest extends WSBaseEvent {
-    event: 'zotero_attachment_pages_request';
+/** Request from backend to fetch a whole-document Beaver Extract result */
+export interface WSZoteroDocumentRequest extends WSBaseEvent {
+    event: 'zotero_document_request';
     request_id: string;
+    /** May be a parent item; frontend resolves it to a PDF attachment. */
     attachment: ZoteroItemReference;
-    /**
-     * Start page, inclusive. Defaults to 1. Accepts either a 1-based
-     * physical index (number) or a PDF page label string (e.g. "iv", "A-3").
-     * String values are resolved against page labels when prefer_page_labels
-     * is true; string values that parse as integers are also accepted when
-     * prefer_page_labels is false.
-     */
-    start_page?: number | string;
-    /** End page, inclusive. Same type semantics as start_page. */
-    end_page?: number | string;
-    /** Skip local file size and page count limits. Default: false */
-    skip_local_limits?: boolean;
-    /**
-     * When true, resolve start_page/end_page against PDF page labels first,
-     * falling back to 1-based document index when no label matches.
-     */
-    prefer_page_labels?: boolean;
-    /**
-     * Maximum number of pages to return in a single response. When set, the
-     * frontend clamps the resolved [startPage, endPage] range to at most
-     * max_pages.
-     */
-    max_pages?: number;
+    mode: BeaverExtractResult['mode'];
+    /** Reject threshold for total document page count; not a page clamp. */
+    max_pages?: number | null;
+    /** Backend-requested file size cap; frontend also applies its hard cap. */
+    max_file_size_mb?: number | null;
     /** Frontend-side extraction deadline in seconds. */
     timeout_seconds?: number;
 }
@@ -255,7 +228,7 @@ export interface WSZoteroAttachmentPageImagesRequest extends WSBaseEvent {
     format?: 'png' | 'jpeg';
     /** JPEG quality (1-100), only used for format="jpeg". Default: 85 */
     jpeg_quality?: number;
-    /** Skip local file size and page count limits. Default: false */
+    /** Skip caller-specific soft limits. Beaver's hard caps still apply. Default: false */
     skip_local_limits?: boolean;
     /**
      * When true, resolve `pages` entries against PDF page labels first,
@@ -539,16 +512,19 @@ export interface WSZoteroDataResponse {
     attachments: AttachmentDataWithStatus[];
     /** Note metadata for successfully retrieved notes */
     notes?: NoteResultItem[];
+    /** Annotation metadata for successfully retrieved annotations */
+    annotations?: AnnotationResultItem[];
     /** Optional errors for references that couldn't be retrieved */
     errors?: WSDataError[];
 }
 
-/** Error codes for attachment page extraction failures */
-export type AttachmentPagesErrorCode =
+/** Error codes for document extraction failures */
+export type ZoteroDocumentErrorCode =
     | 'invalid_format'      // Invalid library_id or zotero_key format
     | 'not_found'           // Attachment not found in Zotero
     | 'not_attachment'      // Item is not an attachment
     | 'not_pdf'             // Attachment is not a PDF
+    | 'unsupported_type'    // Attachment kind not supported for reading
     | 'is_linked_url'       // Attachment is a linked URL, not a stored file
     | 'file_missing'        // PDF file not available locally
     | 'file_too_large'      // PDF file exceeds size limit
@@ -561,23 +537,24 @@ export type AttachmentPagesErrorCode =
     | 'too_many_pages'      // PDF exceeds page count limit
     | 'page_out_of_range'   // Requested pages are out of range
     | 'download_failed'     // Remote file download failed
-    | 'invalid_page_value'  // Non-parseable string or unresolved label
     | 'timeout'             // Extraction timed out
-    | 'extraction_failed';  // General extraction failure
+    | 'extraction_failed'  // General extraction failure
+    | 'recursion_limit'     // Extraction overflowed the JS stack ("too much recursion" / "Maximum call stack")
+    | 'schema_version_mismatch'
+    | 'mode_mismatch';
 
-/** Response to zotero attachment pages request */
-export interface WSZoteroAttachmentPagesResponse {
-    type: 'zotero_attachment_pages';
+/** Response to whole-document extraction request */
+export interface WSZoteroDocumentResponse {
+    type: 'zotero_document';
     request_id: string;
-    attachment: ZoteroItemReference;
-    /** Extracted page content (empty array if error) */
-    pages: WSPageContent[];
-    /** Total number of pages in the document */
-    total_pages: number | null;
-    /** Error message if extraction failed */
+    resolved_attachment?: ZoteroItemReference | null;
+    content_type?: string | null;
+    content_kind?: ExtractContentKind | null;
+    result?: DocumentExtractResult | null;
+    /** Page count on error responses when available. */
+    total_pages?: number | null;
     error?: string | null;
-    /** Error code for programmatic handling */
-    error_code?: AttachmentPagesErrorCode | null;
+    error_code?: ZoteroDocumentErrorCode | null;
 }
 
 /** Error codes for attachment page image rendering failures */
@@ -642,7 +619,7 @@ export interface WSZoteroAttachmentSearchRequest extends WSBaseEvent {
     query: string;
     /** Maximum hits to return per page. Default: 100 */
     max_hits_per_page?: number;
-    /** Skip local file size and page count limits. Default: false */
+    /** Skip caller-specific soft limits. Beaver's hard caps still apply. Default: false */
     skip_local_limits?: boolean;
     /** Frontend-side search deadline in seconds. */
     timeout_seconds?: number;
@@ -806,6 +783,52 @@ export interface AttachmentResultItem {
     parent_item_id?: string | null;
     parent_title?: string | null;
     date_modified?: string | null;
+    annotations_count?: number | null;
+}
+
+/**
+ * Annotation result item.
+ *
+ * Annotations are children of attachments, which are children of regular
+ * items. The result surfaces both the parent attachment and the bibliographic
+ * regular item so callers can:
+ *  - render an annotation citation against the bibliographic parent.
+ *  - power an LLM-facing tool (e.g. get_annotations) with clear identity
+ *    names: `annotation_id` for the annotation itself, `attachment_id` for
+ *    the PDF, `item_id` for the paper/book/record.
+ */
+export interface AnnotationResultItem {
+    result_type: 'annotation';
+    /** Annotation id, format "library_id-zotero_key". */
+    annotation_id: string;
+    /** "highlight" | "underline" | "note" | "image" | "ink" | "text" */
+    annotation_type?: string | null;
+    /** Highlighted/selected text, when present. */
+    text?: string | null;
+    /** Comment attached to the annotation, when present. */
+    comment?: string | null;
+    /** Color hex (e.g. "#ffd400"). */
+    color?: string | null;
+    /** 1-based page number of the annotation's location. */
+    page?: number | null;
+    /** Tag names attached to the annotation. */
+    tags?: string[];
+    /** Annotation author, when Zotero stores one. */
+    author?: string | null;
+    /** Parent attachment id ("library_id-zotero_key"). */
+    attachment_id?: string | null;
+    /** Bibliographic regular item id ("library_id-zotero_key"). */
+    item_id?: string | null;
+    /** Zotero item type of the bibliographic regular item. */
+    item_type?: string | null;
+    /** Title of the bibliographic regular item. */
+    item_title?: string | null;
+    /** Formatted creators of the bibliographic regular item. */
+    item_creators?: string | null;
+    /** Publication year of the bibliographic regular item. */
+    item_year?: number | null;
+    date_added?: string | null;
+    date_modified?: string | null;
 }
 
 /** Result item from zotero_search (regular, note, or attachment) */
@@ -896,6 +919,58 @@ export interface WSGetMetadataResponse {
     error_code?: string | null;
 }
 
+/** Request from backend for get_annotations */
+export interface WSGetAnnotationsRequest extends WSBaseEvent {
+    event: 'get_annotations_request';
+    request_id: string;
+    attachment_id: string;
+    limit: number;
+    offset: number;
+}
+
+/** Response to get_annotations request */
+export interface WSGetAnnotationsResponse {
+    type: 'get_annotations';
+    request_id: string;
+    annotations: AnnotationResultItem[];
+    total_count: number;
+    error?: string | null;
+    error_code?: string | null;
+}
+
+/** Request from backend for library-wide annotation search */
+export interface WSFindAnnotationsRequest extends WSBaseEvent {
+    event: 'find_annotations_request';
+    request_id: string;
+    text_contains?: string | null;
+    comment_contains?: string | null;
+    tag?: string | null;
+    color?: string | null;
+    annotation_type?: string | null;
+    author?: string | null;
+    attachment_id?: string | null;
+    collection?: string | null;
+    recursive: boolean;
+    library_id?: number | string | null;
+    modified_in_last?: string | null;
+    sort_by: 'date_modified' | 'date_added' | 'reading_order';
+    sort_order: 'asc' | 'desc';
+    limit: number;
+    offset: number;
+}
+
+/** Response to find_annotations request */
+export interface WSFindAnnotationsResponse {
+    type: 'find_annotations';
+    request_id: string;
+    annotations: AnnotationResultItem[];
+    total_count: number;
+    note?: string | null;
+    error?: string | null;
+    error_code?: string | null;
+    available_libraries?: AvailableLibraryInfo[] | null;
+}
+
 // =============================================================================
 // Library Management: List Collections
 // =============================================================================
@@ -981,13 +1056,14 @@ export interface WSListLibrariesRequest extends WSBaseEvent {
     request_id: string;
 }
 
-/** Library information */
-export interface LibraryInfo {
+/** Per-library count snapshot */
+export interface LibrarySummary {
     library_id: number;
     name: string;
     is_group: boolean;
     read_only: boolean;
     item_count: number;
+    note_count: number;
     collection_count: number;
     tag_count: number;
 }
@@ -996,7 +1072,7 @@ export interface LibraryInfo {
 export interface WSListLibrariesResponse {
     type: 'list_libraries';
     request_id: string;
-    libraries: LibraryInfo[];
+    libraries: LibrarySummary[];
     total_count: number;
     error?: string | null;
     error_code?: string | null;
@@ -1010,7 +1086,7 @@ export interface WSListLibrariesResponse {
 export type DeferredToolPreference = 'always_ask' | 'always_apply' | 'continue_without_applying';
 
 /** Agent action type for deferred tools */
-export type AgentActionType = 'highlight_annotation' | 'note_annotation' | 'zotero_note' | 'create_item' | 'edit_metadata' | 'create_collection' | 'organize_items' | 'manage_tags' | 'manage_collections' | 'confirm_extraction' | 'confirm_external_search' | 'edit_note' | 'create_note';
+export type AgentActionType = 'highlight_annotation' | 'note_annotation' | 'create_highlight_annotations' | 'create_note_annotations' | 'zotero_note' | 'create_item' | 'edit_metadata' | 'create_collection' | 'organize_items' | 'manage_tags' | 'manage_collections' | 'confirm_extraction' | 'confirm_external_search' | 'edit_note' | 'create_note';
 
 /** Request from backend to validate an agent action */
 export interface WSAgentActionValidateRequest extends WSBaseEvent {
@@ -1152,7 +1228,7 @@ export type WSEvent =
     | WSRetryEvent
     | WSAgentActionsEvent
     | WSMissingZoteroDataEvent
-    | WSZoteroAttachmentPagesRequest
+    | WSZoteroDocumentRequest
     | WSZoteroAttachmentPageImagesRequest
     | WSZoteroAttachmentSearchRequest
     | WSExternalReferenceCheckRequest
@@ -1165,6 +1241,8 @@ export type WSEvent =
     | WSListCollectionsRequest
     | WSListTagsRequest
     | WSGetMetadataRequest
+    | WSGetAnnotationsRequest
+    | WSFindAnnotationsRequest
     | WSListLibrariesRequest
     // Note tools
     | WSReadNoteRequest
@@ -1235,6 +1313,8 @@ export interface ApplicationStateInput {
     library_selection?: ZoteroItemReference[];
     /** Frontend embedding index status */
     indexing_status?: IndexingStatus;
+    /** Per-library summary stats (counts) for searchable libraries. */
+    libraries?: LibrarySummary[];
 }
 
 /** Frontend embedding index status reported with each agent run. */

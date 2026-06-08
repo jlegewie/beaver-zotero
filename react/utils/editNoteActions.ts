@@ -18,6 +18,9 @@ import {
 import { findRangeByContexts } from '../../src/utils/editNoteRawPosition';
 import {
     preloadPageLabelsForNewCitations,
+    preloadNotePageLabels,
+    preloadStructuralLocatorPages,
+    buildUnresolvedLocatorWarning,
     expandToRawHtml,
     type ExternalRefContext,
 } from '../../src/utils/noteCitationExpand';
@@ -134,6 +137,12 @@ function isAlreadyUndone(
 
 const UNDO_CONTEXT_LENGTH = 200;
 
+/** Combine optional warning strings into a `warnings` array, or undefined when empty. */
+function collectWarnings(...warnings: Array<string | null | undefined>): string[] | undefined {
+    const filtered = warnings.filter((w): w is string => !!w);
+    return filtered.length > 0 ? filtered : undefined;
+}
+
 /**
  * Execute an edit_note agent action by applying string replacement on the note.
  * @param action The agent action to execute
@@ -189,10 +198,18 @@ export async function executeEditNoteAction(
 
     // 4. Get metadata from cache or re-simplify
     const noteId = `${library_id}-${zotero_key}`;
-    const { simplified, metadata } = getOrSimplify(noteId, oldHtml, library_id);
+    const pageLabelsByItemId = await preloadNotePageLabels(oldHtml, library_id);
+    const { simplified, metadata } = getOrSimplify(noteId, oldHtml, library_id, pageLabelsByItemId);
 
-    // 5. Pre-load page labels so new citations resolve page indices to labels
-    await preloadPageLabelsForNewCitations(new_string);
+    // 5. Pre-load page labels so new citations resolve page indices to labels.
+    //    The resolved map is threaded explicitly into every expandToRawHtml
+    //    call below so expansion stays synchronous.
+    const newPageLabels = await preloadPageLabelsForNewCitations(new_string);
+    // 5b. Resolve structural (non-page) locators in new_string to their page so
+    //     citations keep a page locator instead of dropping it on save.
+    const structuralLocators = await preloadStructuralLocatorPages(new_string);
+    const resolvedLocatorPages = structuralLocators.pages;
+    const locatorWarning = buildUnresolvedLocatorWarning(structuralLocators.unresolved);
 
     // Snapshot external-reference state once so every expandToRawHtml('new', ...)
     // below can resolve `<citation external_id="..."/>` consistently.
@@ -202,7 +219,7 @@ export async function executeEditNoteAction(
     if (operation === 'rewrite') {
         let expandedNew: string;
         try {
-            expandedNew = expandToRawHtml(new_string, metadata, 'new', externalRefContext);
+            expandedNew = expandToRawHtml(new_string, metadata, 'new', externalRefContext, newPageLabels, resolvedLocatorPages);
         } catch (e: any) {
             throw new Error(e.message || String(e));
         }
@@ -254,7 +271,7 @@ export async function executeEditNoteAction(
         invalidateSimplificationCache(noteId);
 
         const duplicateWarning = checkDuplicateCitations(new_string, metadata);
-        const warnings = duplicateWarning ? [duplicateWarning] : undefined;
+        const warnings = collectWarnings(duplicateWarning, locatorWarning);
 
         return {
             library_id,
@@ -269,7 +286,7 @@ export async function executeEditNoteAction(
     if (operation === 'append') {
         let expandedNew: string;
         try {
-            expandedNew = expandToRawHtml(new_string, metadata, 'new', externalRefContext);
+            expandedNew = expandToRawHtml(new_string, metadata, 'new', externalRefContext, newPageLabels, resolvedLocatorPages);
         } catch (e: any) {
             throw new Error(e.message || String(e));
         }
@@ -322,7 +339,7 @@ export async function executeEditNoteAction(
         invalidateSimplificationCache(noteId);
 
         const duplicateWarning = checkDuplicateCitations(new_string, metadata);
-        const warnings = duplicateWarning ? [duplicateWarning] : undefined;
+        const warnings = collectWarnings(duplicateWarning, locatorWarning);
 
         const result: EditNoteResultData = {
             library_id,
@@ -362,6 +379,8 @@ export async function executeEditNoteAction(
         simplified,
         strippedHtml,
         externalRefContext,
+        pageLabels: newPageLabels,
+        resolvedLocatorPages,
     };
     let base: BaseExpansion;
     try {
@@ -523,7 +542,7 @@ export async function executeEditNoteAction(
 
     // 15. Check for duplicate citation warnings
     const duplicateWarning = checkDuplicateCitations(new_string, metadata);
-    const warnings = duplicateWarning ? [duplicateWarning] : undefined;
+    const warnings = collectWarnings(duplicateWarning, locatorWarning);
 
     const result: EditNoteResultData = {
         library_id,
@@ -632,15 +651,22 @@ export async function undoEditNoteAction(
     let expandedNew = storedUndoNewHtml;
 
     if (expandedOld === undefined || (!isDeletion && expandedNew === undefined)) {
-        const { metadata } = getOrSimplify(noteId, currentHtml, library_id);
+        const pageLabelsByItemId = await preloadNotePageLabels(currentHtml, library_id);
+        const { metadata } = getOrSimplify(noteId, currentHtml, library_id, pageLabelsByItemId);
         const externalRefContext = getExternalRefContext();
+        // Resolve page labels for new_string citations so the fallback
+        // expansion translates 1-based page numbers the same way the
+        // original execute did.
+        const undoPageLabels = isDeletion
+            ? {}
+            : await preloadPageLabelsForNewCitations(new_string);
 
         try {
             if (expandedOld === undefined) {
                 expandedOld = expandToRawHtml(old_string ?? '', metadata, 'old');
             }
             if (!isDeletion && expandedNew === undefined) {
-                expandedNew = expandToRawHtml(new_string, metadata, 'new', externalRefContext);
+                expandedNew = expandToRawHtml(new_string, metadata, 'new', externalRefContext, undoPageLabels);
             }
         } catch (e: any) {
             throw new Error(`Failed to expand strings for undo: ${e.message || String(e)}`);

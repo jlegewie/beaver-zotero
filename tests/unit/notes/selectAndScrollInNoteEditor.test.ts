@@ -27,9 +27,11 @@ vi.mock('../../../react/components/agentRuns/EditNotePreview', () => ({
         .replace(
             /<citation\b(?:[^>"']|"[^"]*"|'[^']*')*\blabel="([^"]*)"(?:[^>"']|"[^"]*"|'[^']*')*\/>/gi,
             (match: string, label: string) => {
+                const locMatch = match.match(/\bloc="page([^"]*)"/);
                 const pageMatch = match.match(/\bpage="([^"]*)"/);
-                if (!pageMatch || !pageMatch[1]) return label;
-                const suffix = `, page ${pageMatch[1]}`;
+                const page = locMatch?.[1] || pageMatch?.[1];
+                if (!page) return label;
+                const suffix = `, page ${page}`;
                 const locatorWithParen = /^(.*?)(,\s*(?:p{1,2}\.|page)\s+[^)]*)(\))$/i;
                 if (locatorWithParen.test(label)) {
                     return label.replace(locatorWithParen, `$1${suffix}$3`);
@@ -1198,6 +1200,34 @@ describe('openNoteAndSearchEdit', () => {
         await openNoteAndSearchEdit(
             1,
             'NOTE0001',
+            '<citation id="1-F8E4GHHW" label="(Hommel et al., 2022)" ref="c_F8E4GHHW_0"/>',
+            '<citation id="1-F8E4GHHW" label="(Hommel et al., 2022)" ref="c_F8E4GHHW_0" loc="page1"/>',
+            true,
+            undefined,
+            undefined,
+            'Target ',
+            ' area.',
+        );
+
+        const targetStart = fullText.indexOf('(Hommel et al., 2022, page 1)');
+        expect(TextSelectionClass.create).toHaveBeenCalledWith(
+            expect.anything(),
+            targetStart,
+            targetStart + '(Hommel et al., 2022, page 1)'.length
+        );
+    });
+
+    it('keeps legacy page attributes in citation search variants', async () => {
+        vi.mocked(computeDiff).mockReturnValue([]);
+
+        const fullText = 'Target (Hommel et al., 2022, page 1) area.';
+        const { view, TextSelectionClass } = createMockEditorView(fullText);
+        installMockEditorInstance(1, view);
+        (globalThis as any).Zotero.Notes.open = vi.fn().mockResolvedValue(undefined);
+
+        await openNoteAndSearchEdit(
+            1,
+            'NOTE0001',
             '<citation item_id="1-F8E4GHHW" label="(Hommel et al., 2022)" ref="c_F8E4GHHW_0"/>',
             '<citation item_id="1-F8E4GHHW" label="(Hommel et al., 2022)" ref="c_F8E4GHHW_0" page="1"/>',
             true,
@@ -1226,8 +1256,8 @@ describe('openNoteAndSearchEdit', () => {
         await openNoteAndSearchEdit(
             1,
             'NOTE0001',
-            '<citation item_id="1-F8E4GHHW" label="(Hommel et al., 2022, p. 10)" ref="c_F8E4GHHW_0"/>',
-            '<citation item_id="1-F8E4GHHW" label="(Hommel et al., 2022, p. 10)" ref="c_F8E4GHHW_0" page="25"/>',
+            '<citation id="1-F8E4GHHW" label="(Hommel et al., 2022, p. 10)" ref="c_F8E4GHHW_0"/>',
+            '<citation id="1-F8E4GHHW" label="(Hommel et al., 2022, p. 10)" ref="c_F8E4GHHW_0" loc="page25"/>',
             true,
             undefined,
             undefined,
@@ -1240,6 +1270,56 @@ describe('openNoteAndSearchEdit', () => {
             expect.anything(),
             targetStart,
             targetStart + '(Hommel et al., 2022, page 25)'.length
+        );
+    });
+
+    it('preserves compound citation page locators in no-label search variants', async () => {
+        vi.mocked(computeDiff).mockReturnValue([]);
+
+        const fullText = 'Target (Smith, 2020, page 5; Jones, 2021) area.';
+        const { view, TextSelectionClass } = createMockEditorView(fullText);
+        installMockEditorInstance(1, view);
+        (globalThis as any).Zotero.Notes.open = vi.fn().mockResolvedValue(undefined);
+
+        const itemsByKey: Record<string, any> = {
+            KEY1: { key: 'KEY1', isAttachment: () => false, getField: () => 'Smith Paper' },
+            KEY2: { key: 'KEY2', isAttachment: () => false, getField: () => 'Jones Paper' },
+        };
+        (globalThis as any).Zotero.Items.getByLibraryAndKey = vi.fn((_libraryID: number, key: string) => itemsByKey[key] || false);
+        (globalThis as any).Zotero.URI = {
+            getItemURI: vi.fn((item: any) => `http://zotero.org/users/1/items/${item.key}`),
+        };
+        (globalThis as any).Zotero.Utilities = {
+            Item: {
+                itemToCSLJSON: vi.fn((item: any) => ({ id: item.key, title: item.getField() })),
+            },
+        };
+        (globalThis as any).Zotero.EditorInstanceUtilities = {
+            formatCitation: vi.fn((citation: any) => {
+                return '(' + citation.citationItems.map((ci: any) => {
+                    const author = ci.itemData.id === 'KEY1' ? 'Smith, 2020' : 'Jones, 2021';
+                    return ci.locator ? `${author}, page ${ci.locator}` : author;
+                }).join('; ') + ')';
+            }),
+        };
+
+        await openNoteAndSearchEdit(
+            1,
+            'NOTE0001',
+            '<citation items="1-KEY1:page=5, 1-KEY2" ref="c_KEY1+KEY2_0"/>',
+            '<citation items="1-KEY1:page=5, 1-KEY2" ref="c_KEY1+KEY2_0"/>',
+            true,
+            undefined,
+            undefined,
+            'Target ',
+            ' area.',
+        );
+
+        const targetStart = fullText.indexOf('(Smith, 2020, page 5; Jones, 2021)');
+        expect(TextSelectionClass.create).toHaveBeenCalledWith(
+            expect.anything(),
+            targetStart,
+            targetStart + '(Smith, 2020, page 5; Jones, 2021)'.length
         );
     });
 

@@ -145,7 +145,7 @@ export function preprocessCitationMatch(
 
 /**
  * Unwrap backtick-wrapped citation tags (common LLM mistake).
- * Matches: `<citation att_id="...">` → <citation att_id="...">
+ * Matches: `<citation id="...">` → <citation id="...">
  *
  * Handles every citation form supported by CITATION_TAG_PATTERN (self-closing,
  * opening-only, and full pair), and multiple adjacent tags sharing one pair of
@@ -156,9 +156,9 @@ const UNWRAP_BACKTICK_PATTERN = /`(<citation[^>]*>(?:<\/citation>)?(?:\s*<citati
 
 /**
  * Regex pattern for matching citation tags in all formats:
- * - Self-closing: <citation att_id="..."/>
- * - Opening only (missing /): <citation att_id="...">
- * - Full pair: <citation att_id="..."></citation>
+ * - Self-closing: <citation id="..."/>
+ * - Opening only (missing /): <citation id="...">
+ * - Full pair: <citation id="..."></citation>
  */
 export const CITATION_TAG_PATTERN = /<citation(?:\s+([^>]*?))?\s*(?:\/>|>(?:<\/citation>)?)/g;
 
@@ -166,9 +166,9 @@ export const CITATION_TAG_PATTERN = /<citation(?:\s+([^>]*?))?\s*(?:\/>|>(?:<\/c
  * Preprocess citations in markdown content.
  * 
  * Handles various LLM output formats gracefully:
- * - Self-closing: <citation att_id="..."/>
- * - Opening only (missing /): <citation att_id="...">
- * - Full pair: <citation att_id="..."></citation>
+ * - Self-closing: <citation id="..."/>
+ * - Opening only (missing /): <citation id="...">
+ * - Full pair: <citation id="..."></citation>
  * - Attribute variations: attachment_id → att_id
  * 
  * Injects data-requested-citation-key for metadata lookup.

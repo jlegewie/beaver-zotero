@@ -9,7 +9,7 @@
 
 
 export { handleZoteroDataRequest } from './agentDataProvider/handleZoteroDataRequest';
-export { handleZoteroAttachmentPagesRequest } from './agentDataProvider/handleZoteroAttachmentPagesRequest';
+export { handleZoteroDocumentRequest } from './agentDataProvider/handleZoteroDocumentRequest';
 export { handleZoteroAttachmentPageImagesRequest } from './agentDataProvider/handleZoteroAttachmentPageImagesRequest';
 export { handleZoteroAttachmentSearchRequest } from './agentDataProvider/handleZoteroAttachmentSearchRequest';
 export { handleExternalReferenceCheckRequest } from './agentDataProvider/handleExternalReferenceCheckRequest';
@@ -18,6 +18,8 @@ export { handleItemSearchByTopicRequest } from './agentDataProvider/handleItemSe
 export { handleZoteroSearchRequest } from './agentDataProvider/handleZoteroSearchRequest';
 export { handleListItemsRequest } from './agentDataProvider/handleListItemsRequest';
 export { handleGetMetadataRequest } from './agentDataProvider/handleGetMetadataRequest';
+export { handleGetAnnotationsRequest } from './agentDataProvider/handleGetAnnotationsRequest';
+export { handleFindAnnotationsRequest } from './agentDataProvider/handleFindAnnotationsRequest';
 export { handleListCollectionsRequest } from './agentDataProvider/handleListCollectionsRequest';
 export { handleListTagsRequest } from './agentDataProvider/handleListTagsRequest';
 export { handleListLibrariesRequest } from './agentDataProvider/handleListLibrariesRequest';
@@ -25,3 +27,4 @@ export { handleAgentActionValidateRequest } from './agentDataProvider/handleAgen
 export { handleAgentActionExecuteRequest } from './agentDataProvider/handleAgentActionExecuteRequest';
 export { handleDeleteItemsRequest } from './agentDataProvider/handleDeleteItemsRequest';
 export { handleReadNoteRequest } from './agentDataProvider/handleReadNoteRequest';
+export { validateCreateNoteAction, executeCreateNoteAction } from './agentDataProvider/actions/createNote';

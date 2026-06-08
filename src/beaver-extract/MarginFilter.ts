@@ -18,7 +18,7 @@ import type {
     MarginRemovalResult,
     TextStyle,
 } from "./types";
-import { pdfLog } from "./logging";
+import { pdfLog, isAnalyzerLoggingEnabled } from "./logging";
 import { StyleAnalyzer } from "./StyleAnalyzer";
 
 // ============================================================================
@@ -328,6 +328,35 @@ function isStandaloneExternalIdentifier(text: string): boolean {
     );
 }
 
+/**
+ * Substance gate for left/right repeating-margin candidates.
+ *
+ * A line is "substantial enough" to be genuine side marginalia when it has
+ * ≥ 2 word tokens OR ≥ 8 alphanumeric characters. Single short words fail.
+ *
+ * In justified multi-column layouts MuPDF often emits each word as its own
+ * line. The trailing/leading words of a body column poke into the wide
+ * margin *zone*, and because common function words ("the", "of", "and", …)
+ * recur on most pages, the cross-page repeat detector would otherwise flag
+ * them as repeating side-margin elements and delete real body text. Genuine
+ * repeating left/right marginalia (vertical journal watermarks, "Downloaded
+ * from …" stripes, side identifiers) are essentially always multi-word or a
+ * long token, so this bar lets them through while sparing body edge words.
+ *
+ * Scoped to left/right only — top/bottom running headers are legitimately
+ * short (e.g. an author surname), and page numbers / standalone identifiers
+ * are handled by their own classification paths, not the repeat path.
+ */
+function isSubstantialSideMarginText(text: string): boolean {
+    const trimmed = text.trim();
+    const alnumMatches = trimmed.match(/[\p{L}\p{N}]/gu);
+    if (alnumMatches && alnumMatches.length >= 8) return true;
+    const tokens = trimmed
+        .split(/\s+/)
+        .filter((t) => /[\p{L}\p{N}]/u.test(t));
+    return tokens.length >= 2;
+}
+
 // ============================================================================
 // Effective repeat-threshold helper
 // ============================================================================
@@ -600,6 +629,19 @@ export class MarginFilter {
 
             for (const bucket of buckets.values()) {
                 if (bucket.pageIndices.size < requiredForPosition) continue;
+
+                // Left/right repeats must clear a substance bar so common
+                // body edge words (the, of, and, …) that recur in the wide
+                // side-margin zone of justified multi-column layouts are not
+                // mistaken for repeating side marginalia. See
+                // `isSubstantialSideMarginText`.
+                if (
+                    (position === "left" || position === "right")
+                    && !isSubstantialSideMarginText(bucket.firstNormalized)
+                ) {
+                    continue;
+                }
+
                 const pages = Array.from(bucket.pageIndices).sort((a, b) => a - b);
 
                 // candidate.text stays as exact normalized text — external
@@ -781,8 +823,7 @@ export class MarginFilter {
                         removalsByPage.get(el.pageIndex)!.add(normalized);
                     }
 
-                    // Log the page number sequence detection (development only)
-                    if (process.env.NODE_ENV === "development") {
+                    if (isAnalyzerLoggingEnabled()) {
                         pdfLog(`[MarginFilter] Detected page number sequence in ${position} zone: ${values.slice(0, 5).join(", ")}...`, 3);
                     }
                 }
@@ -900,11 +941,10 @@ export class MarginFilter {
     }
 
     /**
-     * Log what elements will be removed.
-     * Only logs in development mode.
+     * Log removal candidates when {@link ExtractionSettings.analyzerLogging} is enabled.
      */
     static logRemovalCandidates(result: MarginRemovalResult): void {
-        if (process.env.NODE_ENV !== "development") return;
+        if (!isAnalyzerLoggingEnabled()) return;
 
         if (result.candidates.length === 0) {
             pdfLog("[MarginFilter] No margin elements identified for removal", 3);

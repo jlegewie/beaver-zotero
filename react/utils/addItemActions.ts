@@ -6,8 +6,11 @@ import { scheduleBackgroundTask, generateTaskId, isPdfFetchInProgress, deduplica
 import { ensureItemSynced } from '../../src/utils/sync';
 import { TimingAccumulator } from '../../src/utils/timing';
 import { emitAttachmentResolved } from './attachmentResolvedEvent';
+import { getPref } from '../../src/utils/prefs';
+import { createProvenanceNote } from './noteActions';
 
 const SAVE_ATTACHMENTS_WITH_TRANSLATORS = false;
+const BEAVER_PROVENANCE_MARKER = 'Added by Beaver';
 
 
 /** Options for importing items */
@@ -59,12 +62,26 @@ async function resolveImportTarget(options?: ImportItemOptions): Promise<{
     
     // If no library specified, get from current context
     if (libraryId === undefined) {
-        const context = await getZoteroTargetContext();
-        libraryId = context.targetLibraryId ?? Zotero.Libraries.userLibraryID;
-        
-        // Get collection from context if not specified
-        if (collectionId === null && context.collectionToAddTo) {
-            collectionId = context.collectionToAddTo.id;
+        const selectedTabType = Zotero.getMainWindow().Zotero_Tabs?.selectedType;
+
+        if (selectedTabType === 'reader') {
+            const context = await getZoteroTargetContext();
+            libraryId = context.targetLibraryId ?? Zotero.Libraries.userLibraryID;
+        } else {
+            const zp = Zotero.getActiveZoteroPane();
+            const selectedLibraryId = zp?.getSelectedLibraryID?.();
+            libraryId = typeof selectedLibraryId === 'number'
+                ? selectedLibraryId
+                : Zotero.Libraries.userLibraryID;
+
+            // Match Zotero's own identifier lookup behavior: imports go into
+            // the current collection even if an item row is selected.
+            if (collectionId === null) {
+                const collection = zp?.getSelectedCollection?.();
+                if (collection) {
+                    collectionId = collection.id;
+                }
+            }
         }
     }
     
@@ -306,6 +323,28 @@ async function createItemManually(itemData: ExternalReference, libraryId: number
 }
 
 /**
+ * Stamp Beaver provenance into an item's Extra field without saving it.
+ */
+export function stampBeaverProvenanceExtra(
+    item: Zotero.Item,
+    options: { reason?: string } = {},
+): boolean {
+    const currentExtra = (item.getField('extra') as string) || '';
+    if (currentExtra.includes(BEAVER_PROVENANCE_MARKER)) {
+        return false;
+    }
+
+    const addedDate = new Date().toISOString().slice(0, 10);
+    const extraLines = [`${BEAVER_PROVENANCE_MARKER}: ${addedDate}`];
+    if (options.reason && !currentExtra.includes(`Beaver Reason: ${options.reason}`)) {
+        extraLines.push(`Beaver Reason: ${options.reason}`);
+    }
+
+    item.setField('extra', currentExtra ? `${currentExtra}\n${extraLines.join('\n')}` : extraLines.join('\n'));
+    return true;
+}
+
+/**
  * Wraps a promise with a timeout that rejects if the promise takes too long
  * Only use this for operations that are safe to timeout (e.g., non-item-creating operations)
  */
@@ -448,7 +487,7 @@ export async function applyCreateItemData(
     
     // Post-processing (Things that apply regardless of how item was created)
     
-    // 1. Add Extra fields (Identifiers that aren't standard fields, Beaver Reason)
+    // 1. Add Extra fields (Identifiers that aren't standard fields, Beaver provenance)
     const extraLines: string[] = [];
     const identifiers = itemData.identifiers;
     
@@ -465,15 +504,13 @@ export async function applyCreateItemData(
         }
     }
 
-    if (proposedData.reason) {
-        extraLines.push(`Beaver Reason: ${proposedData.reason}`);
-    }
-
     if (extraLines.length > 0) {
         const currentExtra = item.getField('extra') as string;
         item.setField('extra', currentExtra ? `${currentExtra}\n${extraLines.join('\n')}` : extraLines.join('\n'));
         needsSave = true;
     }
+
+    needsSave = stampBeaverProvenanceExtra(item, { reason: proposedData.reason }) || needsSave;
 
     // 2. Collections (from proposed data, in addition to context collection)
     if (proposedData.collection_keys && proposedData.collection_keys.length > 0) {
@@ -503,6 +540,17 @@ export async function applyCreateItemData(
     if (needsSave) {
         await track('post_save_ms', () => item.saveTx());
         logger(`applyCreateItemData: Saved item with extra fields, collections, and tags`, 2);
+    }
+
+    if (getPref('addBeaverProvenanceNote') === true) {
+        await createProvenanceNote(
+            { library_id: libraryId, zotero_key: itemKey },
+            {
+                reason: proposedData.reason,
+                threadId: options?.threadId,
+                runId: options?.runId,
+            },
+        );
     }
 
     // Check for existing PDF attachments (may have been added by translation)

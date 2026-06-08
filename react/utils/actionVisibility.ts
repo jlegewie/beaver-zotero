@@ -147,17 +147,9 @@ export function computeActionGroups(allActions: Action[], ctx: ActionContext): A
 
     // --- 1. Reader group ---
     if (isReader) {
-        const readerParent = readerAtt!.parentItem;
         const label = truncateText(readerAtt!.getDisplayTitle(), MAX_LABEL_ITEM_LENGTH);
 
-        // Reader supports both attachment and items actions (parent is a regular item)
-        const readerActions = allActions.filter(a => {
-            if (a.targetType === 'attachment') return true;
-            if (a.targetType === 'items' && readerParent?.isRegularItem()) {
-                return (a.minItems ?? 1) <= 1;
-            }
-            return false;
-        });
+        const readerActions = allActions.filter(a => a.targetType === 'attachment');
 
         if (readerActions.length > 0) {
             const iconInfo = getIconInfoForItem(readerAtt!);

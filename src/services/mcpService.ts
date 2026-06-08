@@ -33,6 +33,13 @@ interface McpToolDefinition {
     name: string;
     description: string;
     inputSchema: Record<string, any>;
+    annotations?: {
+        title?: string;
+        readOnlyHint?: boolean;
+        destructiveHint?: boolean;
+        idempotentHint?: boolean;
+        openWorldHint?: boolean;
+    };
 }
 
 interface McpToolEntry {
@@ -90,12 +97,23 @@ export class MCPService {
         }
 
         // Zotero endpoint constructor pattern (same as useHttpEndpoints)
+        //
+        // GET is declared alongside POST so the optional Streamable HTTP
+        // server->client SSE stream gets a proper 405 instead of Zotero's
+        // generic 400. Beaver implements a stateless POST-only subset of
+        // Streamable HTTP (no SSE), and the spec prescribes 405 Method Not
+        // Allowed when the server does not offer a GET stream. Spec-compliant
+        // clients (e.g. Cursor) treat 405 as "no stream available" and stop
+        // retrying, rather than surfacing a "Failed to open SSE stream" error.
         const Endpoint = function (this: any) {} as any;
         Endpoint.prototype = {
-            supportedMethods: ['POST'],
+            supportedMethods: ['POST', 'GET'],
             supportedDataTypes: ['application/json'],
 
             init: async (requestData: ZoteroRequestData): Promise<[number, string, string]> => {
+                if (requestData.method === 'GET') {
+                    return [405, 'text/plain', 'Method Not Allowed'];
+                }
                 return this.handleRequest(requestData);
             },
         };
@@ -215,6 +233,7 @@ export class MCPService {
             name: definition.name,
             description: definition.description,
             inputSchema: definition.inputSchema,
+            ...(definition.annotations ? { annotations: definition.annotations } : {}),
         }));
         return { tools };
     }

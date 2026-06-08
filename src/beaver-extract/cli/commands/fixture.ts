@@ -196,7 +196,7 @@ function buildCaptureCommand(deps: CliDeps): Command {
                     const ocr = await deps.api.analyzeOCRNeeds(bytes);
                     if (ocr.needsOCR) {
                         throw new Error(
-                            `PDF needs OCR (${ocr.primaryReason}); use \`ocr-fixture capture\` for OCR-detection fixtures, or pass --allow-ocr to capture anyway`,
+                            `PDF needs OCR; use \`ocr-fixture capture\` for OCR-detection fixtures, or pass --allow-ocr to capture anyway`,
                         );
                     }
                 }
@@ -806,6 +806,8 @@ function internalPageFromStructuredPage(page: StructuredPage): InternalProcessed
         label: page.label,
         width: page.width,
         height: page.height,
+        viewBox: page.viewBox,
+        rotation: page.rotation,
         content: page.items
             .map((item) => ("text" in item ? item.text : ""))
             .filter(Boolean)

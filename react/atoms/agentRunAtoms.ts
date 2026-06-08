@@ -71,7 +71,7 @@ import {
     resetRunMessages,
 } from '../agents/atoms';
 import { userIdAtom } from './auth';
-import { citationMetadataAtom, updateCitationDataAtom, resetCitationMarkersAtom, bumpPageLabelsVersionAtom } from './citations';
+import { citationMetadataAtom, updateCitationDataAtom, resetCitationMarkersAtom, mergePageLabelsByAttachmentIdAtom } from './citations';
 import { preloadPageLabelsForCitations } from '../utils/pageLabels';
 import {
     addAgentActionsAtom,
@@ -90,6 +90,8 @@ import {
     isEditNoteAgentAction,
     isCreateNoteAgentAction,
     hasAppliedZoteroItem,
+    hasAppliedBulkAnnotations,
+    isCreateAnnotationsAgentAction,
     AgentAction,
     addPendingApprovalAtom,
     removePendingApprovalAtom,
@@ -97,6 +99,7 @@ import {
     buildPendingApprovalFromAction,
     clearAllPendingApprovalsAtom,
 } from '../agents/agentActions';
+import { getAppliedPdfAnnotationCount } from '../agents/agentActionCounts';
 import { undoEditMetadataAction } from '../utils/editMetadataActions';
 import { undoCreateItemAction } from '../utils/createItemActions';
 import { undoCreateCollectionAction } from '../utils/createCollectionActions';
@@ -105,6 +108,7 @@ import { undoManageTagsAction } from '../utils/manageTagsActions';
 import { undoManageCollectionsAction } from '../utils/manageCollectionsActions';
 import { undoEditNoteAction } from '../utils/editNoteActions';
 import { undoCreateNoteAction } from '../utils/createNoteActions';
+import { undoCreateAnnotationsAction } from '../utils/createAnnotationsActions';
 import { processToolReturnResults } from '../agents/toolResultProcessing';
 import { addWarningAtom, clearWarningsAtom } from './warnings';
 import { backendHighTokenUsageRunsAtom, softCapTriggeredRunsAtom } from './messageUIState';
@@ -131,6 +135,8 @@ import { markExternalReferenceImportedAtom } from './externalReferences';
 import type { CreateItemProposedData, CreateItemResultData } from '../types/agentActions/items';
 import { appendRunIfMissing, findResumeChainRoot, findRunForResume, hasOnlyThinkingParts, resolveErrorRunId, toRunError } from '../agents/runResumeHelpers';
 import { prewarmMuPDFWorker } from '../../src/beaver-extract';
+import { BeaverTemporaryAnnotations } from '../utils/annotationUtils';
+import { getLibrarySummaries } from '../../src/services/agentDataProvider/libraryCounts';
 
 // =============================================================================
 // Helper Functions
@@ -270,6 +276,17 @@ function buildModelSelectionOptions(model: ModelConfig | null): ModelSelectionOp
     }
 
     return options;
+}
+
+/**
+ * Clear reader-only citation highlights before removing the runs that created them.
+ */
+async function cleanupTemporaryAnnotationsForRunReplacement(logPrefix: string): Promise<void> {
+    try {
+        await BeaverTemporaryAnnotations.cleanupAll();
+    } catch (error) {
+        logger(`${logPrefix}: Error cleaning up temporary annotations: ${error}`);
+    }
 }
 
 /**
@@ -528,6 +545,8 @@ async function startAutoRetryRun(
         // reflects what the backend will delete via retry_run_id.
         const rootIndex = threadRuns.findIndex(r => r.id === rootRun.id);
         if (rootIndex >= 0) {
+            await cleanupTemporaryAnnotationsForRunReplacement(logPrefix);
+
             const runIdsToRemove = threadRuns.slice(rootIndex).map(r => r.id);
             set(threadRunsAtom, threadRuns.slice(0, rootIndex));
             set(threadAgentActionsAtom, prev => prev.filter(a => !runIdsToRemove.includes(a.run_id)));
@@ -585,6 +604,9 @@ async function undoAppliedActionsInReverse(actions: AgentAction[]): Promise<void
     const indexed = actions
         .map((action, index) => ({ action, index }))
         .filter(({ action }) => {
+            if (isCreateAnnotationsAgentAction(action)) {
+                return hasAppliedBulkAnnotations(action);
+            }
             if (isAnnotationAgentAction(action) || isZoteroNoteAgentAction(action)) {
                 return hasAppliedZoteroItem(action);
             }
@@ -602,7 +624,9 @@ async function undoAppliedActionsInReverse(actions: AgentAction[]): Promise<void
 
     for (const { action } of indexed) {
         try {
-            if (isAnnotationAgentAction(action) || isZoteroNoteAgentAction(action)) {
+            if (isCreateAnnotationsAgentAction(action)) {
+                await undoCreateAnnotationsAction(action);
+            } else if (isAnnotationAgentAction(action) || isZoteroNoteAgentAction(action)) {
                 const item = await Zotero.Items.getByLibraryAndKeyAsync(
                     action.result_data!.library_id,
                     action.result_data!.zotero_key
@@ -667,7 +691,11 @@ function confirmUndoAppliedActions(actions: ActionsToUndo): UndoConfirmResult {
     // Build a list of changes
     const changeLines: string[] = [];
     if (annotations.length > 0) {
-        changeLines.push(`• ${annotations.length} PDF annotation${annotations.length === 1 ? '' : 's'}`);
+        const annotationCount = annotations.reduce(
+            (sum, action) => sum + getAppliedPdfAnnotationCount(action),
+            0,
+        );
+        changeLines.push(`• ${annotationCount} PDF annotation${annotationCount === 1 ? '' : 's'}`);
     }
     if (zoteroNotes.length > 0) {
         changeLines.push(`• ${zoteroNotes.length} Zotero note${zoteroNotes.length === 1 ? '' : 's'}`);
@@ -1045,13 +1073,13 @@ function createWSCallbacks(set: Setter): WSCallbacks {
         },
 
         onPart: async (event: WSPartEvent) => {
-            logger(`WS onPart (${event.part.part_kind}):`, {
-                runId: event.run_id,
-                messageIndex: event.message_index,
-                part: event.part,
-            });
             // Load item data for tool call
             if (event.part.part_kind === "tool-call") {
+                logger(`WS onPart (${event.part.part_kind}):`, {
+                    runId: event.run_id,
+                    messageIndex: event.message_index,
+                    part: event.part,
+                });
                 const itemReferences = extractZoteroReferencesFromToolCall(event.part);
                 if (itemReferences.length > 0) {
                     logger(`WS onPart: Loading ${itemReferences.length} item data for tool call`, 1);
@@ -1151,12 +1179,12 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                 await set(updateCitationDataAtom);
 
                 // Preload PDF page labels for cited attachments so the rendering
-                // path can resolve page numbers to display labels synchronously.
+                // path can resolve page numbers from explicit render state.
                 // Runs after metadata is exposed to avoid blocking the UI on PDF
-                // extraction; citation components re-render via the version atom.
+                // extraction.
                 preloadPageLabelsForCitations(event.citations)
-                    .then((loaded) => {
-                        if (loaded) set(bumpPageLabelsVersionAtom);
+                    .then((labelsByAttachmentId) => {
+                        set(mergePageLabelsByAttachmentIdAtom, labelsByAttachmentId);
                     })
                     .catch((err) =>
                         logger(`WS onRunComplete: Failed to preload page labels: ${err}`, 1)
@@ -1790,6 +1818,10 @@ export const sendWSMessageAtom = atom(
             };
         }
 
+        const libraries = searchableLibraryIds.length > 0
+            ? await getLibrarySummaries(searchableLibraryIds)
+            : undefined;
+
         // Application state
         const applicationState = {
             current_view: currentView,
@@ -1798,6 +1830,7 @@ export const sendWSMessageAtom = atom(
             ...(currentLibrary ? { current_library: currentLibrary } : {}),
             ...(currentCollection ? { current_collection: currentCollection } : {}),
             ...(indexingStatus ? { indexing_status: indexingStatus } : {}),
+            ...(libraries ? { libraries } : {}),
         };
 
         // Build the message
@@ -1963,8 +1996,10 @@ export const regenerateFromRunAtom = atom(
             
             // Categorize by type - only include applied actions
             const annotationsToDelete = actionsInRemovedRuns
-                .filter(isAnnotationAgentAction)
-                .filter(hasAppliedZoteroItem);
+                .filter((action) =>
+                    (isAnnotationAgentAction(action) && hasAppliedZoteroItem(action)) ||
+                    (isCreateAnnotationsAgentAction(action) && hasAppliedBulkAnnotations(action))
+                );
             const zoteroNotesToDelete = actionsInRemovedRuns
                 .filter(isZoteroNoteAgentAction)
                 .filter(hasAppliedZoteroItem);
@@ -2025,6 +2060,8 @@ export const regenerateFromRunAtom = atom(
                     await undoAppliedActionsInReverse(actionsInRemovedRuns);
                 }
             }
+
+            await cleanupTemporaryAnnotationsForRunReplacement('regenerateFromRunAtom');
 
             // Truncate runs - keep only runs before the target
             const truncatedRuns = threadRuns.slice(0, runIndex);
@@ -2146,8 +2183,10 @@ export const regenerateWithEditedPromptAtom = atom(
             
             // Categorize by type - only include applied actions
             const annotationsToDelete = actionsInRemovedRuns
-                .filter(isAnnotationAgentAction)
-                .filter(hasAppliedZoteroItem);
+                .filter((action) =>
+                    (isAnnotationAgentAction(action) && hasAppliedZoteroItem(action)) ||
+                    (isCreateAnnotationsAgentAction(action) && hasAppliedBulkAnnotations(action))
+                );
             const zoteroNotesToDelete = actionsInRemovedRuns
                 .filter(isZoteroNoteAgentAction)
                 .filter(hasAppliedZoteroItem);
@@ -2206,6 +2245,8 @@ export const regenerateWithEditedPromptAtom = atom(
                     await undoAppliedActionsInReverse(actionsInRemovedRuns);
                 }
             }
+
+            await cleanupTemporaryAnnotationsForRunReplacement('regenerateWithEditedPromptAtom');
 
             // Truncate runs - keep only runs before the target
             const truncatedRuns = threadRuns.slice(0, runIndex);

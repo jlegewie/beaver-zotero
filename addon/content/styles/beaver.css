@@ -513,6 +513,20 @@
     background-color: var(--material-mix-quarternary);
 }
 
+/* Create Annotations Preview — clickable row hover */
+[id^="beaver-pane-"] .create-annotations-preview-row {
+    border-radius: 4px;
+    padding-left: 6px;
+    padding-right: 6px;
+    margin-left: -6px;
+    margin-right: -6px;
+    transition: background-color 0.15s ease;
+}
+
+[id^="beaver-pane-"] .create-annotations-preview-row:hover {
+    background-color: var(--material-mix-quarternary);
+}
+
 /* Preview text: 2-line clamp */
 [id^="beaver-pane-"] .action-card-preview {
     display: -webkit-box;
@@ -929,6 +943,15 @@
 [id^="beaver-pane-"] .border-popup { border: 1px solid var(--fill-quarternary); }
 [id^="beaver-pane-"] .border-transparent { border: 1px solid transparent; }
 [id^="beaver-pane-"] .border-error { border: 1px solid var(--tag-red-tertiary); }
+
+/* Menu items use roving focus, so replace the browser outline with Beaver's menu highlight. */
+[id^="beaver-pane-"] .beaver-menu-item:focus {
+    outline: none;
+}
+
+[id^="beaver-pane-"] .beaver-menu-item:focus-visible {
+    box-shadow: inset 0 0 0 1px var(--fill-tertiary);
+}
 
 /* Shadows */
 [id^="beaver-pane-"] .shadow-sm { box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.1); }

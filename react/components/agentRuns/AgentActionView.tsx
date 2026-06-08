@@ -1,7 +1,9 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
+import { navigateToAnnotation } from '../../utils/readerUtils';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { AgentRunStatus } from '../../agents/types';
 import {
+    AgentAction,
     PendingApproval,
     getAgentActionsByToolcallAtom,
     removePendingApprovalAtom,
@@ -9,6 +11,7 @@ import {
     ackAgentActionsAtom,
     rejectAgentActionAtom,
     setAgentActionsToErrorAtom,
+    isCreateAnnotationsAgentAction,
 } from '../../agents/agentActions';
 import {
     approvalResponseIntentsAtom,
@@ -29,6 +32,11 @@ import { executeCreateItemActions, undoCreateItemActions } from '../../utils/cre
 import { executeCreateNoteAction, undoCreateNoteAction } from '../../utils/createNoteActions';
 import { executeManageTagsAction, undoManageTagsAction } from '../../utils/manageTagsActions';
 import { executeManageCollectionsAction, undoManageCollectionsAction } from '../../utils/manageCollectionsActions';
+import {
+    executeCreateHighlightAnnotationsAction,
+    executeCreateNoteAnnotationsAction,
+    undoCreateAnnotationsAction,
+} from '../../utils/createAnnotationsActions';
 import type { CreateItemProposedData } from '../../types/agentActions/items';
 import { shortItemTitle } from '../../../src/utils/zoteroUtils';
 import { logger } from '../../../src/utils/logger';
@@ -48,11 +56,11 @@ import {
     FolderDetailIcon,
     TaskDoneIcon,
     TagIcon,
-    DeleteIcon,
+    HighlighterIcon,
     DocumentValidationIcon,
     DollarCircleIcon,
     GlobalSearchIcon,
-    FileDiffIcon,
+    NoteIcon,
 } from '../icons/icons';
 import { revealSource, openNoteByKey, getCurrentCollectionKeyForItem } from '../../utils/sourceUtils';
 import Button from '../ui/Button';
@@ -74,6 +82,7 @@ import {
     PreviewData,
 } from './agentActionViewHelpers';
 import { ActionPreview } from './ActionPreview';
+import { currentThreadIdAtom } from '../../atoms/threads';
 
 export { STATUS_CONFIGS, getOverallStatus } from './agentActionViewHelpers';
 export type { ActionStatus } from './agentActionViewHelpers';
@@ -87,6 +96,26 @@ interface AgentActionViewProps {
     hasToolReturn?: boolean;
     streamingArgs?: Record<string, any> | null;
     runStatus?: AgentRunStatus;
+}
+
+type HeaderLinkAction = {
+    tooltip: string;
+    onClick: () => void | Promise<void>;
+};
+
+type HeaderLinkActionRule = HeaderLinkAction & {
+    matches: () => boolean;
+};
+
+function getCreateAnnotationsDisplayStatus(action: AgentAction): ActionStatus | null {
+    if (!isCreateAnnotationsAgentAction(action) || action.status !== 'applied') return null;
+    const createdCount = Array.isArray(action.result_data?.created)
+        ? action.result_data.created.length
+        : 0;
+    const failedCount = Array.isArray(action.result_data?.failed)
+        ? action.result_data.failed.length
+        : 0;
+    return createdCount === 0 && failedCount > 0 ? 'error' : null;
 }
 
 export const AgentActionView: React.FC<AgentActionViewProps> = ({
@@ -145,6 +174,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
 
     const [isProcessingApproval, setIsProcessingApproval] = useState(false);
     const [isProcessingAction, setIsProcessingAction] = useState(false);
+    const threadId = useAtomValue(currentThreadIdAtom);
     const [isUndoError, setIsUndoError] = useState(false);
     const [isExternallyProcessing, setIsExternallyProcessing] = useState(false);
     const [clickedButton, setClickedButton] = useState<'approve' | 'reject' | 'undo' | null>(null);
@@ -171,19 +201,25 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
 
     const hasAssociatedItem =
         toolName === 'edit_metadata' ||
-        toolName === 'edit_item';
+        toolName === 'edit_item' ||
+        toolName === 'create_highlight_annotations' ||
+        toolName === 'create_note_annotations';
 
     useEffect(() => {
         if (!hasAssociatedItem || itemTitle) return;
 
         const fetchTitle = async () => {
             const libraryId: number | undefined =
-                action?.proposed_data?.library_id ?? pendingApproval?.actionData?.library_id;
+                action?.proposed_data?.resolved_ref?.library_id ??
+                action?.proposed_data?.library_id ??
+                pendingApproval?.actionData?.library_id;
             const zoteroKey: string | undefined =
-                action?.proposed_data?.zotero_key ?? pendingApproval?.actionData?.zotero_key;
-
+                action?.proposed_data?.resolved_ref?.zotero_key ??
+                action?.proposed_data?.zotero_key ??
+                pendingApproval?.actionData?.zotero_key;
+            
             if (!libraryId || !zoteroKey) return;
-
+            
             const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryId, zoteroKey);
             if (item) {
                 const title = await shortItemTitle(item);
@@ -236,11 +272,12 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     }, [isProcessingApproval, isExternallyProcessing, action?.status, hasToolReturn, isRunPending, action]);
 
     const isProcessing = isProcessingApproval || isProcessingAction || isExternallyProcessing;
+    const actionDisplayStatus = action ? getCreateAnnotationsDisplayStatus(action) : null;
     const status: ActionStatus | 'awaiting' = (isAwaitingApproval || isProcessing)
         ? 'awaiting'
         : isMultiAction
             ? getOverallStatus(actions)
-            : (action?.status ?? 'pending');
+            : (actionDisplayStatus ?? action?.status ?? 'pending');
     const isConfirmExtraction = toolName === 'confirm_extraction';
     const isConfirmExternalSearch = toolName === 'confirm_external_search';
     const isConfirmAction = isConfirmExtraction || isConfirmExternalSearch;
@@ -315,11 +352,28 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                     result_data: result,
                 }]);
                 logger(`AgentActionView: Applied create_note action ${action!.id}`, 1);
+            } else if (toolName === 'create_highlight_annotations') {
+                const result = await executeCreateHighlightAnnotationsAction(action!);
+                await ackAgentActions(runId, [{
+                    action_id: action!.id,
+                    result_data: result,
+                }]);
+                logger(`AgentActionView: Applied create_highlight_annotations action ${action!.id}`, 1);
+            } else if (toolName === 'create_note_annotations') {
+                const result = await executeCreateNoteAnnotationsAction(action!);
+                await ackAgentActions(runId, [{
+                    action_id: action!.id,
+                    result_data: result,
+                }]);
+                logger(`AgentActionView: Applied create_note_annotations action ${action!.id}`, 1);
             } else if (toolName === 'create_items' || toolName === 'create_item') {
                 const actionsToApply = actions.filter((candidate) => candidate.status !== 'applied');
                 if (actionsToApply.length === 0) return;
 
-                const batchResult = await executeCreateItemActions(actionsToApply);
+                const batchResult = await executeCreateItemActions(actionsToApply, {
+                    runId,
+                    threadId: threadId ?? undefined,
+                });
                 if (batchResult.successes.length > 0) {
                     await ackAgentActions(runId, batchResult.successes.map((success) => ({
                         action_id: success.action.id,
@@ -363,6 +417,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         isProcessing,
         toolName,
         runId,
+        threadId,
         ackAgentActions,
         setAgentActionsToError,
         markExternalReferenceImported,
@@ -425,6 +480,10 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                 await undoCreateNoteAction(action);
                 undoAgentAction(action.id);
                 logger(`AgentActionView: Undone create_note action ${action.id}`, 1);
+            } else if (toolName === 'create_highlight_annotations' || toolName === 'create_note_annotations') {
+                await undoCreateAnnotationsAction(action);
+                undoAgentAction(action.id);
+                logger(`AgentActionView: Undone ${toolName} action ${action.id}`, 1);
             } else if (toolName === 'create_items' || toolName === 'create_item') {
                 const actionsToUndo = actions.filter((candidate) => candidate.status === 'applied');
                 if (actionsToUndo.length === 0) return;
@@ -500,7 +559,9 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const getHeaderIcon = () => {
         const getToolIcon = () => {
             if (toolName === 'edit_metadata' || toolName === 'edit_item') return PropertyEditIcon;
-            if (toolName === 'create_note') return FileDiffIcon;
+            if (toolName === 'create_note') return NoteIcon;
+            if (toolName === 'create_highlight_annotations') return HighlighterIcon;
+            if (toolName === 'create_note_annotations') return NoteIcon;
             if (toolName === 'create_collection') return FolderAddIcon;
             if (toolName === 'organize_items') return TaskDoneIcon;
             if (toolName === 'manage_tags') return TagIcon;
@@ -523,6 +584,58 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     };
 
     const actionTitle = getActionTitle(toolName, action?.proposed_data, itemTitle, actions);
+    const bulkAnnotationRevealRef = action && isCreateAnnotationsAgentAction(action)
+        ? action.proposed_data.resolved_ref
+        : null;
+    const headerLinkActionRules: HeaderLinkActionRule[] = [
+        {
+            matches: () => (
+                toolName === 'create_note' &&
+                action?.status === 'applied' &&
+                !!action?.result_data?.library_id &&
+                !!action?.result_data?.zotero_key
+            ),
+            tooltip: 'Open note',
+            onClick: () => openNoteByKey(action!.result_data!.library_id, action!.result_data!.zotero_key),
+        },
+        {
+            matches: () => (
+                (toolName === 'create_highlight_annotations' || toolName === 'create_note_annotations')&&
+                action?.status === 'applied' &&
+                action?.result_data?.created?.length > 0
+            ),
+            tooltip: 'Open annotation',
+            onClick: async () => {
+                const firstCreated = action!.result_data!.created[0];
+                const annotationItem = await Zotero.Items.getByLibraryAndKeyAsync(
+                    firstCreated.library_id,
+                    firstCreated.zotero_key,
+                );
+                if (annotationItem) {
+                    await navigateToAnnotation(annotationItem as Zotero.Item);
+                }
+            },
+        },
+    ];
+
+    const defaultHeaderLinkAction: HeaderLinkAction | null = (() => {
+        const revealRef = bulkAnnotationRevealRef ?? {
+            library_id: action?.proposed_data?.library_id,
+            zotero_key: action?.proposed_data?.zotero_key,
+        };
+        if (!revealRef.library_id || !revealRef.zotero_key) return null;
+
+        return {
+            tooltip: 'Reveal in Zotero',
+            onClick: () => {
+                revealSource({
+                    library_id: revealRef.library_id,
+                    zotero_key: revealRef.zotero_key,
+                });
+            },
+        };
+    })();
+    const headerLinkAction = headerLinkActionRules.find((rule) => rule.matches()) ?? defaultHeaderLinkAction;
 
     if (isStreaming) {
         const effectiveArgs = streamingArgs ?? {};
@@ -586,27 +699,20 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                             <Icon icon={getHeaderIcon()} className={shouldShowStatusIcon() ? config.iconClassName : undefined} />
                         </div>
                         <div className="two-line-header">
-                            <span className="font-color-primary font-medium">{getActionLabel(toolName)}</span>
+                            <span className="font-color-primary font-medium">{getActionLabel(toolName, action?.proposed_data)}</span>
                             {actionTitle && <span className="font-color-secondary ml-15">{actionTitle}</span>}
-                            {((action?.proposed_data?.library_id && action?.proposed_data?.zotero_key) || (toolName === 'create_note' && action?.status === 'applied' && action?.result_data?.library_id && action?.result_data?.zotero_key)) && (
+                            {headerLinkAction && (
                                 <>
                                     {'\u00A0'}
-                                    <Tooltip content={toolName === 'create_note' ? 'Open note' : 'Reveal in Zotero'} singleLine>
+                                    <Tooltip content={headerLinkAction.tooltip} singleLine>
                                         <span
                                             className="font-color-secondary scale-10"
                                             style={{ display: 'inline-flex', verticalAlign: 'middle', cursor: 'pointer' }}
                                             role="button"
-                                            onClick={(e) => {
+                                            onClick={async (e) => {
                                                 e.stopPropagation();
                                                 e.preventDefault();
-                                                if (toolName === 'create_note' && action?.status === 'applied' && action?.result_data?.library_id && action?.result_data?.zotero_key) {
-                                                    openNoteByKey(action.result_data.library_id, action.result_data.zotero_key);
-                                                } else {
-                                                    revealSource({
-                                                        library_id: action?.proposed_data?.library_id,
-                                                        zotero_key: action?.proposed_data?.zotero_key,
-                                                    });
-                                                }
+                                                await headerLinkAction.onClick();
                                             }}
                                         >
                                             <Icon icon={ArrowUpRightIcon} />

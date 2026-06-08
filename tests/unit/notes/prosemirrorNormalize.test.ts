@@ -203,6 +203,17 @@ describe('normalizeNoteHtml (ProseMirror roundtrip)', () => {
             const result = normalizeNoteHtml(html);
             expect(result).toContain('rel="noopener noreferrer nofollow"');
         });
+
+        it('preserves zotero select and open-pdf hrefs', () => {
+            const html = '<div data-schema-version="9"><p>'
+                + '<a href="zotero://select/library/items/NOTEKEY1">Note link</a> '
+                + '<a href="zotero://open-pdf/library/items/ATTACH1?annotation=ANNOT1">Annotation link</a>'
+                + '</p></div>';
+            const result = normalizeNoteHtml(html);
+            expect(result).toContain('href="zotero://select/library/items/NOTEKEY1"');
+            expect(result).toContain('href="zotero://open-pdf/library/items/ATTACH1?annotation=ANNOT1"');
+            expect(result).not.toContain('zotero-cite.invalid');
+        });
     });
 
     // -------------------------------------------------------------------------

@@ -27,6 +27,7 @@ const ioUtils = {
     exists: vi.fn().mockResolvedValue(false),
     stat: vi.fn().mockResolvedValue({ lastModified: 0, size: 0 }),
     read: vi.fn().mockResolvedValue(new Uint8Array()),
+    write: vi.fn().mockResolvedValue(undefined),
     readUTF8: vi.fn().mockResolvedValue(''),
     writeUTF8: vi.fn().mockResolvedValue(undefined),
     remove: vi.fn().mockResolvedValue(undefined),
@@ -151,6 +152,17 @@ function testRemoveDiacritics(s: string): string {
         get: vi.fn().mockReturnValue(undefined),
         set: vi.fn(),
         clear: vi.fn(),
+        registerObserver: vi.fn(() => Symbol('pref-obs')),
+        unregisterObserver: vi.fn(),
+    },
+    Notifier: {
+        registerObserver: vi.fn(() => 'beaver-bg-extractor'),
+        unregisterObserver: vi.fn(),
+    },
+    Sync: {
+        Runner: {
+            syncInProgress: false,
+        },
     },
     debug: vi.fn(),
     getMainWindow: vi.fn(() => getTestWindow()),
@@ -179,6 +191,13 @@ function testRemoveDiacritics(s: string): string {
     },
     Libraries: {
         getAll: vi.fn(() => [{ libraryID: 1 }]),
+    },
+    Attachments: {
+        LINK_MODE_IMPORTED_FILE: 0,
+        LINK_MODE_IMPORTED_URL: 1,
+        LINK_MODE_LINKED_FILE: 2,
+        LINK_MODE_LINKED_URL: 3,
+        LINK_MODE_EMBEDDED_IMAGE: 4,
     },
 };
 

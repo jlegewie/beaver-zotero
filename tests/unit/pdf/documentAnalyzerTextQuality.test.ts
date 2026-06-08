@@ -98,7 +98,6 @@ describe("DocumentAnalyzer low_alphanumeric_ratio false-positive defenses", () =
 
         expect(result.issueBreakdown.low_alphanumeric_ratio).toBe(0);
         expect(result.needsOCR).toBe(false);
-        expect(result.primaryReason).toBe("text_extraction_acceptable");
     });
 
     it("does not flag symbol-dense pages that carry substantial real text", () => {
@@ -125,7 +124,6 @@ describe("DocumentAnalyzer low_alphanumeric_ratio false-positive defenses", () =
 
         expect(result.issueBreakdown.low_alphanumeric_ratio).toBe(2);
         expect(result.needsOCR).toBe(true);
-        expect(result.primaryReason).toBe("poor_text_quality");
     });
 
     it("re-flags symbol-dense pages once the volume guard is raised above their real-text count", () => {

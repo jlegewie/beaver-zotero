@@ -33,7 +33,6 @@ const ALL_REASONS_ZERO = (): Record<OCRIssueReason, number> => ({
 function syntheticResult(overrides: Partial<OCRDetectionResult> = {}): OCRDetectionResult {
     return {
         needsOCR: false,
-        primaryReason: "text_extraction_acceptable",
         issueRatio: 0,
         issueBreakdown: ALL_REASONS_ZERO(),
         sampledPages: 6,

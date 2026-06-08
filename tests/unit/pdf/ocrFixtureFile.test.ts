@@ -56,10 +56,10 @@ function syntheticFixture(): CapturedOcrFixture {
         tolerance: { issueRatioAbs: 0.02, textLengthAbs: 5 },
         expected: {
             needsOCR: false,
-            primaryReason: "text_extraction_acceptable",
             issueRatio: 0,
             issueBreakdown: {
                 no_text_blocks: 0,
+                no_body_text: 0,
                 insufficient_text: 0,
                 high_whitespace_ratio: 0,
                 high_newline_ratio: 0,

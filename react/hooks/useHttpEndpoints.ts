@@ -26,7 +26,7 @@ import { getZoteroUserIdentifier } from '../../src/utils/zoteroUtils';
 import {
     handleZoteroDataRequest,
     handleExternalReferenceCheckRequest,
-    handleZoteroAttachmentPagesRequest,
+    handleZoteroDocumentRequest,
     handleZoteroAttachmentPageImagesRequest,
     handleZoteroAttachmentSearchRequest,
     handleItemSearchByMetadataRequest,
@@ -35,6 +35,7 @@ import {
     handleZoteroSearchRequest,
     handleListItemsRequest,
     handleGetMetadataRequest,
+    handleFindAnnotationsRequest,
     handleListLibrariesRequest,
     handleListCollectionsRequest,
     handleListTagsRequest,
@@ -49,14 +50,19 @@ import {
 import {
     handleTestPingHttpRequest,
     handleTestCacheMetadataHttpRequest,
+    handleTestCachePayloadHttpRequest,
     handleTestCacheInvalidateHttpRequest,
-    handleTestCacheClearMemoryHttpRequest,
-    handleTestCacheDeleteContentHttpRequest,
+    handleTestCacheSeedPageLabelsHttpRequest,
+    handleTestCacheClearAllHttpRequest,
+    handleTestReadAttachmentHttpRequest,
+    handleTestMcpReadNoteHttpRequest,
+    handleTestMcpCreateNoteHttpRequest,
     handleTestWorkerStatsHttpRequest,
     handleTestWorkerMarkStaleHttpRequest,
     handleTestWorkerCacheClearHttpRequest,
     handleTestFileStatusHttpRequest,
     handleTestResolveItemHttpRequest,
+    handleTestResolveReadableHttpRequest,
 } from './httpHandlers/testCacheHandlers';
 import {
     handleTestNoteCreateHttpRequest,
@@ -66,6 +72,9 @@ import {
     handleTestNoteCloseEditorHttpRequest,
     handleTestNoteUndoHttpRequest,
 } from './httpHandlers/testNoteHandlers';
+import {
+    handleTestAnnotationCreateHttpRequest,
+} from './httpHandlers/testAnnotationHandlers';
 import {
     handleTestPdfPageCountHttpRequest,
     handleTestPdfPageLabelsHttpRequest,
@@ -82,10 +91,17 @@ import {
     handleTestPdfExtractTraceHttpRequest,
     handleTestPdfAnalyzeLayoutHttpRequest,
 } from './httpHandlers/testPdfHandlers';
+import {
+    handleTestBackgroundEnqueueHttpRequest,
+    handleTestBackgroundStatsHttpRequest,
+    handleTestBackgroundPeekHttpRequest,
+    handleTestBackgroundProcessOnceHttpRequest,
+    handleTestBackgroundClearHttpRequest,
+} from './httpHandlers/testBackgroundHandlers';
 import type {
     WSZoteroDataRequest,
     WSExternalReferenceCheckRequest,
-    WSZoteroAttachmentPagesRequest,
+    WSZoteroDocumentRequest,
     WSZoteroAttachmentPageImagesRequest,
     WSZoteroAttachmentSearchRequest,
     WSItemSearchByMetadataRequest,
@@ -94,6 +110,7 @@ import type {
     WSZoteroSearchRequest,
     WSListItemsRequest,
     WSGetMetadataRequest,
+    WSFindAnnotationsRequest,
     WSListLibrariesRequest,
     WSListCollectionsRequest,
     WSListTagsRequest,
@@ -129,13 +146,14 @@ const ENDPOINT_PATHS = [
     '/beaver/external-reference-check',
     '/beaver/search/metadata',
     '/beaver/search/topic',
-    '/beaver/attachment/pages',
+    '/beaver/attachment/document',
     '/beaver/attachment/page-images',
     '/beaver/attachment/search',
     // Library management tools
     '/beaver/library/search',
     '/beaver/library/list',
     '/beaver/library/metadata',
+    '/beaver/library/find-annotations',
     '/beaver/library/libraries',
     '/beaver/library/collections',
     '/beaver/library/tags',
@@ -150,10 +168,15 @@ const ENDPOINT_PATHS = [
     // Test-only endpoints (cache inspection/manipulation)
     '/beaver/test/ping',
     '/beaver/test/cache-metadata',
+    '/beaver/test/cache-payload',
     '/beaver/test/cache-invalidate',
-    '/beaver/test/cache-clear-memory',
-    '/beaver/test/cache-delete-content',
+    '/beaver/test/cache-seed-page-labels',
+    '/beaver/test/cache-clear-all',
+    '/beaver/test/read-attachment',
+    '/beaver/test/mcp-read-note',
+    '/beaver/test/mcp-create-note',
     '/beaver/test/resolve-item',
+    '/beaver/test/resolve-readable',
     // Test-only endpoints (note seeding/teardown/inspection)
     '/beaver/test/note-create',
     '/beaver/test/note-delete',
@@ -161,6 +184,8 @@ const ENDPOINT_PATHS = [
     '/beaver/test/note-open-editor',
     '/beaver/test/note-close-editor',
     '/beaver/test/note-undo',
+    // Test-only endpoints (headless PDF annotations)
+    '/beaver/test/annotation-create',
     // Test-only endpoints (MuPDF worker singleton stats / lifecycle)
     '/beaver/test/worker-stats',
     '/beaver/test/worker-mark-stale',
@@ -187,6 +212,12 @@ const ENDPOINT_PATHS = [
     // Document-wide style + margin analysis context (mirrors what
     // `extract({ mode: "structured" })` builds before per-page processing)
     '/beaver/test/pdf-analyze-layout',
+    // Background queue inspection / driving (dev-only)
+    '/beaver/test/background-enqueue',
+    '/beaver/test/background-stats',
+    '/beaver/test/background-peek',
+    '/beaver/test/background-process-once',
+    '/beaver/test/background-clear',
 ] as const;
 
 /**
@@ -250,6 +281,7 @@ async function handleZoteroDataHttpRequest(request: any) {
         items: response.items,
         attachments: response.attachments,
         notes: response.notes,
+        annotations: response.annotations,
         errors: response.errors,
     };
 }
@@ -315,24 +347,24 @@ async function handleTopicSearchHttpRequest(request: any) {
     };
 }
 
-async function handleAttachmentPagesHttpRequest(request: any) {
-    const wsRequest: WSZoteroAttachmentPagesRequest = {
-        event: 'zotero_attachment_pages_request',
+async function handleAttachmentDocumentHttpRequest(request: any) {
+    const wsRequest: WSZoteroDocumentRequest = {
+        event: 'zotero_document_request',
         request_id: generateRequestId(),
         attachment: request.attachment,
-        start_page: request.start_page,
-        end_page: request.end_page,
-        skip_local_limits: request.skip_local_limits,
-        prefer_page_labels: request.prefer_page_labels,
+        mode: request.mode ?? 'structured',
         max_pages: request.max_pages,
+        max_file_size_mb: request.max_file_size_mb,
         timeout_seconds: request.timeout_seconds,
     };
 
-    const response = await handleZoteroAttachmentPagesRequest(wsRequest);
-    
+    const response = await handleZoteroDocumentRequest(wsRequest);
+
     return {
-        attachment: response.attachment,
-        pages: response.pages,
+        resolved_attachment: response.resolved_attachment,
+        content_type: response.content_type,
+        content_kind: response.content_kind,
+        result: response.result,
         total_pages: response.total_pages,
         error: response.error,
         error_code: response.error_code,
@@ -465,6 +497,39 @@ async function handleLibraryMetadataHttpRequest(request: any) {
         not_found: response.not_found,
         error: response.error,
         error_code: response.error_code,
+    };
+}
+
+async function handleFindAnnotationsHttpRequest(request: any) {
+    const wsRequest: WSFindAnnotationsRequest = {
+        event: 'find_annotations_request',
+        request_id: generateRequestId(),
+        text_contains: request.text_contains,
+        comment_contains: request.comment_contains,
+        tag: request.tag,
+        color: request.color,
+        annotation_type: request.annotation_type,
+        author: request.author,
+        attachment_id: request.attachment_id,
+        collection: request.collection,
+        recursive: request.recursive ?? true,
+        library_id: request.library_id,
+        modified_in_last: request.modified_in_last,
+        sort_by: request.sort_by ?? 'date_modified',
+        sort_order: request.sort_order ?? 'desc',
+        limit: request.limit ?? 25,
+        offset: request.offset ?? 0,
+    };
+
+    const response = await handleFindAnnotationsRequest(wsRequest);
+
+    return {
+        annotations: response.annotations,
+        total_count: response.total_count,
+        note: response.note,
+        error: response.error,
+        error_code: response.error_code,
+        available_libraries: response.available_libraries,
     };
 }
 
@@ -616,8 +681,8 @@ function registerEndpoints(): boolean {
     Zotero.Server.Endpoints['/beaver/search/topic'] = 
         createEndpoint(handleTopicSearchHttpRequest);
     
-    Zotero.Server.Endpoints['/beaver/attachment/pages'] = 
-        createEndpoint(handleAttachmentPagesHttpRequest);
+    Zotero.Server.Endpoints['/beaver/attachment/document'] =
+        createEndpoint(handleAttachmentDocumentHttpRequest);
     
     Zotero.Server.Endpoints['/beaver/attachment/page-images'] = 
         createEndpoint(handleAttachmentPageImagesHttpRequest);
@@ -634,6 +699,9 @@ function registerEndpoints(): boolean {
     
     Zotero.Server.Endpoints['/beaver/library/metadata'] =
         createEndpoint(handleLibraryMetadataHttpRequest);
+
+    Zotero.Server.Endpoints['/beaver/library/find-annotations'] =
+        createEndpoint(handleFindAnnotationsHttpRequest);
 
     Zotero.Server.Endpoints['/beaver/library/libraries'] =
         createEndpoint(handleListLibrariesHttpRequest);
@@ -670,17 +738,31 @@ function registerEndpoints(): boolean {
         Zotero.Server.Endpoints['/beaver/test/cache-metadata'] =
             createEndpoint(handleTestCacheMetadataHttpRequest);
 
+        Zotero.Server.Endpoints['/beaver/test/cache-payload'] =
+            createEndpoint(handleTestCachePayloadHttpRequest);
+
         Zotero.Server.Endpoints['/beaver/test/cache-invalidate'] =
             createEndpoint(handleTestCacheInvalidateHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/cache-clear-memory'] =
-            createEndpoint(handleTestCacheClearMemoryHttpRequest);
+        Zotero.Server.Endpoints['/beaver/test/cache-seed-page-labels'] =
+            createEndpoint(handleTestCacheSeedPageLabelsHttpRequest);
 
-        Zotero.Server.Endpoints['/beaver/test/cache-delete-content'] =
-            createEndpoint(handleTestCacheDeleteContentHttpRequest);
+        Zotero.Server.Endpoints['/beaver/test/cache-clear-all'] =
+            createEndpoint(handleTestCacheClearAllHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/read-attachment'] =
+            createEndpoint(handleTestReadAttachmentHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/mcp-read-note'] =
+            createEndpoint(handleTestMcpReadNoteHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/mcp-create-note'] =
+            createEndpoint(handleTestMcpCreateNoteHttpRequest);
 
         Zotero.Server.Endpoints['/beaver/test/resolve-item'] =
             createEndpoint(handleTestResolveItemHttpRequest);
+        Zotero.Server.Endpoints['/beaver/test/resolve-readable'] =
+            createEndpoint(handleTestResolveReadableHttpRequest);
 
         // MuPDF worker singleton stats / lifecycle (dev-only)
         Zotero.Server.Endpoints['/beaver/test/worker-stats'] =
@@ -714,6 +796,10 @@ function registerEndpoints(): boolean {
 
         Zotero.Server.Endpoints['/beaver/test/note-undo'] =
             createEndpoint(handleTestNoteUndoHttpRequest);
+
+        // Headless PDF annotation primitives (dev-only)
+        Zotero.Server.Endpoints['/beaver/test/annotation-create'] =
+            createEndpoint(handleTestAnnotationCreateHttpRequest);
 
         // MuPDF worker plumbing (dev-only)
         Zotero.Server.Endpoints['/beaver/test/pdf-page-count'] =
@@ -768,6 +854,22 @@ function registerEndpoints(): boolean {
         // debugging.
         Zotero.Server.Endpoints['/beaver/test/pdf-analyze-layout'] =
             createEndpoint(handleTestPdfAnalyzeLayoutHttpRequest);
+
+        // Background queue (dev-only)
+        Zotero.Server.Endpoints['/beaver/test/background-enqueue'] =
+            createEndpoint(handleTestBackgroundEnqueueHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/background-stats'] =
+            createEndpoint(handleTestBackgroundStatsHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/background-peek'] =
+            createEndpoint(handleTestBackgroundPeekHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/background-process-once'] =
+            createEndpoint(handleTestBackgroundProcessOnceHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/background-clear'] =
+            createEndpoint(handleTestBackgroundClearHttpRequest);
     }
 
     logger(`useHttpEndpoints: Registered ${ENDPOINT_PATHS.length} HTTP endpoints`, 3);

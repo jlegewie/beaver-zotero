@@ -39,6 +39,8 @@ const DEFAULT_TOOL_GROUPS: Record<string, string> = {
     'organize_items': 'library_modifications',
     'manage_tags': 'library_structure',
     'manage_collections': 'library_structure',
+    'create_highlight_annotations': 'annotations',
+    'create_note_annotations': 'annotations',
     'create_item': 'create_items',
     'create_items': 'create_items',
 };
@@ -50,6 +52,7 @@ const DEFAULT_GROUP_PREFERENCES: Record<string, DeferredToolPreference> = {
     'note_creation': 'always_apply',
     'library_modifications': 'always_ask',
     'library_structure': 'always_ask',
+    'annotations': 'always_ask',
     'create_items': 'always_ask',
 };
 

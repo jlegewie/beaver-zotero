@@ -58,9 +58,12 @@ vi.mock('../../../src/beaver-extract', () => {
         }
     }
 
+    class MockWorkerAbortError extends Error {}
+
     return {
         BeaverExtractor: MockPDFExtractor,
         ExtractionError: MockExtractionError,
+        WorkerAbortError: MockWorkerAbortError,
         ExtractionErrorCode: {
             ENCRYPTED: 'encrypted',
             INVALID_PDF: 'invalid_pdf',
@@ -70,8 +73,8 @@ vi.mock('../../../src/beaver-extract', () => {
 });
 
 // Mock heavy transitive deps so we can `importActual` utils.ts and use the
-// real `preflightCachedPdfMeta` + `persistMetadataToCache` (the handler now
-// delegates to those — pure logic, exercising them is preferable to stubbing).
+// real `preflightCachedPdfMeta` (the handler delegates to it — pure logic,
+// exercising it is preferable to stubbing).
 vi.mock('../../../src/services/supabaseClient', () => ({
     supabase: { auth: { getSession: vi.fn() } },
 }));
@@ -121,8 +124,8 @@ describe('handleZoteroAttachmentPageImagesRequest page labels', () => {
         return setupRequestScenarioWithFullCache({
             cachedPageCount: opts.cachedPageCount,
             cachedPageLabels: opts.cachedPageLabels,
-            // Default to needs_ocr=false so the render-path metadata write
-            // is allowed in tests that don't care about the gate.
+            // Default to a complete, non-OCR record for tests that just need
+            // a plausible cache hit and don't exercise OCR-state branches.
             needs_ocr: false,
             has_text_layer: true,
         });
@@ -139,15 +142,13 @@ describe('handleZoteroAttachmentPageImagesRequest page labels', () => {
                 opts.cachedPageCount == null && opts.needs_ocr === undefined
                     ? null
                     : {
-                          is_encrypted: false,
-                          is_invalid: false,
-                          page_count: opts.cachedPageCount,
-                          page_labels: opts.cachedPageLabels ?? null,
-                          needs_ocr: opts.needs_ocr,
-                          has_text_layer: opts.has_text_layer,
+                          pageCount: opts.cachedPageCount,
+                          pageLabels: opts.cachedPageLabels ?? null,
+                          errorCode: opts.needs_ocr ? 'no_text_layer' : null,
                       },
             ),
-            setMetadata: vi.fn().mockResolvedValue(undefined),
+            putMetadata: vi.fn().mockResolvedValue(undefined),
+            putErrorMetadata: vi.fn().mockResolvedValue(undefined),
         };
 
         const resolvedPdfItem = {
@@ -164,9 +165,12 @@ describe('handleZoteroAttachmentPageImagesRequest page labels', () => {
         (globalThis as any).Zotero.Items = {
             getByLibraryAndKeyAsync: vi.fn().mockResolvedValue(requestItem),
         };
+        (globalThis as any).Zotero.Attachments = {
+            getTotalFileSize: vi.fn().mockResolvedValue(1024),
+        };
         (globalThis as any).Zotero.Beaver = {
             data: { env: 'test' },
-            attachmentFileCache: cache,
+            documentCache: cache,
         };
 
         vi.mocked(resolveToPdfAttachment).mockResolvedValue({
@@ -192,7 +196,7 @@ describe('handleZoteroAttachmentPageImagesRequest page labels', () => {
             attachment: { library_id: 1, zotero_key: 'ABCD1234' },
             pages: [1],
             skip_local_limits: true,
-            prefer_page_labels: false,
+            prefer_pageLabels: false,
         });
 
         expect(response.pages).toEqual([
@@ -205,10 +209,11 @@ describe('handleZoteroAttachmentPageImagesRequest page labels', () => {
         expect(mockState.renderCalls).toHaveLength(1);
     });
 
-    it('refreshes metadata after a successful render only when needs_ocr is already known false', async () => {
-        // Prior writer (e.g. getAttachmentFileStatus) confirmed text-layer OK.
-        // Render-path may safely refresh page_count + page_labels without
-        // disturbing OCR state.
+    it('does NOT write metadata after a successful render even when a prior writer confirmed text-layer status', async () => {
+        // The image-render path never writes metadata. Rendering proves the
+        // PDF opens but never inspects the text layer, so metadata is owned
+        // exclusively by writers that run an authoritative text-layer check
+        // (file status, text extraction) — even when a prior record exists.
         const { cache } = setupRequestScenarioWithFullCache({
             cachedPageCount: 3,
             cachedPageLabels: null,
@@ -224,16 +229,8 @@ describe('handleZoteroAttachmentPageImagesRequest page labels', () => {
             skip_local_limits: true,
         });
 
-        expect(cache.setMetadata).toHaveBeenCalledTimes(1);
-        expect(cache.setMetadata).toHaveBeenCalledWith(expect.objectContaining({
-            item_id: 42,
-            page_count: 3,
-            page_labels: { 0: 'i', 1: '1', 2: '2' },
-            has_text_layer: true,
-            needs_ocr: false,
-            is_encrypted: false,
-            is_invalid: false,
-        }));
+        expect(cache.putMetadata).not.toHaveBeenCalled();
+        expect(cache.putErrorMetadata).not.toHaveBeenCalled();
     });
 
     it('does NOT seed cache from image render when no prior writer (regression)', async () => {
@@ -255,7 +252,8 @@ describe('handleZoteroAttachmentPageImagesRequest page labels', () => {
             skip_local_limits: true,
         });
 
-        expect(cache.setMetadata).not.toHaveBeenCalled();
+        expect(cache.putMetadata).not.toHaveBeenCalled();
+        expect(cache.putErrorMetadata).not.toHaveBeenCalled();
     });
 
     it('does NOT overwrite cache from image render when needs_ocr is unknown (null)', async () => {
@@ -276,7 +274,8 @@ describe('handleZoteroAttachmentPageImagesRequest page labels', () => {
             skip_local_limits: true,
         });
 
-        expect(cache.setMetadata).not.toHaveBeenCalled();
+        expect(cache.putMetadata).not.toHaveBeenCalled();
+        expect(cache.putErrorMetadata).not.toHaveBeenCalled();
     });
 
     it('passes pageIndices: undefined for all-pages requests', async () => {
@@ -314,6 +313,7 @@ describe('handleZoteroAttachmentPageImagesRequest page labels', () => {
             skip_local_limits: true,
         });
 
-        expect(cache.setMetadata).not.toHaveBeenCalled();
+        expect(cache.putMetadata).not.toHaveBeenCalled();
+        expect(cache.putErrorMetadata).not.toHaveBeenCalled();
     });
 });

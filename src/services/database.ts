@@ -2,6 +2,23 @@ import { v4 as uuidv4 } from 'uuid';
 import { ThreadData } from '../../react/atoms/threads';
 import { getPref } from '../utils/prefs';
 import { SyncMethod, SyncType } from '../../react/atoms/sync';
+import {
+    isExtractContentKind,
+    parseCachedDocumentMetadata,
+} from './documentExtraction/shared/contentKinds';
+import {
+    parseBackgroundJobPayload,
+    type BackgroundJobPayload,
+} from './documentExtraction/shared/backgroundJobPayloads';
+import type {
+    CachedDocumentMetadata,
+    DocumentCachePageLabels,
+    ExtractContentKind,
+} from './documentExtraction/shared/contentKinds';
+
+export type { DocumentCachePageLabels } from './documentExtraction/shared/contentKinds';
+
+type PdfCachedDocumentMetadata = Extract<CachedDocumentMetadata, { content_kind: 'pdf' }>;
 
 
 /* 
@@ -52,30 +69,135 @@ export interface FailedEmbeddingRecord {
     next_retry_after: string;            // Don't retry before this time (ISO string)
 }
 
-/**
- * Interface for the 'attachment_file_cache' table row
- *
- * Table stores cached metadata and content-cache flags for PDF attachments.
- * Metadata is keyed by item_id. Content (page text) is stored on disk as JSON
- * under <profileDir>/beaver/content-cache/<libraryId>/<zoteroKey>.json.
- */
-export interface AttachmentFileCacheRecord {
-    item_id: number;
-    library_id: number;
-    zotero_key: string;
-    file_path: string;
-    file_mtime_ms: number;
-    file_size_bytes: number;
-    content_type: string;
-    page_count: number | null;
-    page_labels: Record<number, string> | null;
-    has_text_layer: boolean | null;
-    needs_ocr: boolean | null;
-    is_encrypted: boolean;
-    is_invalid: boolean;
-    extraction_version: string;
-    cached_at: string;
+export type DocumentCacheExtractionMode = 'structured' | 'markdown';
+export type DocumentCachePayloadKind = 'structured' | 'markdown';
+
+/** Authoritative error reason for a cached document; `null` marks a successful extraction. */
+export type DocumentCacheErrorCode = 'encrypted' | 'invalid_pdf' | 'no_text_layer';
+
+export interface DocumentCacheFileSignature {
+    mtime_ms: number;
+    size_bytes: number;
 }
+
+export interface DocumentCacheMetadataRecord {
+    id: number;
+    itemId: number;
+    libraryId: number;
+    zoteroKey: string;
+    contentKind: ExtractContentKind;
+    filePath: string;
+    fileSignature: DocumentCacheFileSignature;
+    sourceSizeBytes: number;
+    contentType: string;
+    documentMetadata: CachedDocumentMetadata | null;
+    pageCount: number | null;
+    pageLabels: DocumentCachePageLabels | null;
+    pages: PdfCachedDocumentMetadata['pages'];
+    errorCode: DocumentCacheErrorCode | null;
+    extractionSchemaVersion: string;
+    metadataFormatVersion: number;
+    createdAt: string;
+    updatedAt: string;
+    lastAccessedAt: string | null;
+}
+
+export interface DocumentCachePayloadRecord {
+    id: number;
+    metadataId: number;
+    itemId: number;
+    libraryId: number;
+    zoteroKey: string;
+    payloadKind: DocumentCachePayloadKind;
+    contentKind: ExtractContentKind;
+    sourceFilePath: string;
+    sourceFileSignature: DocumentCacheFileSignature;
+    sourceSizeBytes: number;
+    payloadPath: string;
+    payloadSizeBytes: number;
+    payloadSha256: string | null;
+    extractionSchemaVersion: string;
+    cacheFormatVersion: number;
+    createdAt: string;
+    updatedAt: string;
+    lastAccessedAt: string | null;
+}
+
+export type DocumentCacheMetadataInput = Omit<
+    DocumentCacheMetadataRecord,
+    | 'id'
+    | 'createdAt'
+    | 'updatedAt'
+    | 'lastAccessedAt'
+    | 'documentMetadata'
+    | 'pageCount'
+    | 'pageLabels'
+    | 'pages'
+> & {
+    documentMetadata: CachedDocumentMetadata;
+};
+
+export type DocumentCachePayloadInput = Omit<
+    DocumentCachePayloadRecord,
+    'id' | 'createdAt' | 'updatedAt' | 'lastAccessedAt'
+>;
+
+export type { BackgroundJobPayload } from './documentExtraction/shared/backgroundJobPayloads';
+
+/** Background extraction job kinds. */
+export type BackgroundJobType = 'document_timeout_retry';
+
+/**
+ * Single row in `background_jobs`. Timestamps are epoch milliseconds so
+ * `MIN(available_at, ?)` UPSERTs compare arithmetically.
+ */
+export interface BackgroundJobRecord {
+    id: number;
+    jobType: BackgroundJobType;
+    libraryId: number;
+    itemId: number | null;
+    zoteroKey: string;
+    contentKind: ExtractContentKind;
+    payloadKind: DocumentCachePayloadKind;
+    priority: number;
+    payload: BackgroundJobPayload | null;
+    enqueuedAt: number;
+    availableAt: number;
+    attemptCount: number;
+    lastError: string | null;
+}
+
+export interface BackgroundJobInput {
+    jobType: BackgroundJobType;
+    libraryId: number;
+    itemId?: number | null;
+    zoteroKey: string;
+    contentKind: ExtractContentKind;
+    payloadKind: DocumentCachePayloadKind;
+    priority?: number;
+    payload?: BackgroundJobPayload | null;
+    /** Epoch ms. Used for both `enqueued_at` and `available_at`. */
+    now: number;
+}
+
+export interface BackgroundJobEnqueueResult {
+    enqueued: boolean;
+    id: number;
+}
+
+export interface BackgroundQueueStats {
+    pending: number;
+    available: number;
+    deferred: number;
+    dead: number;
+    byJobType: Record<string, number>;
+}
+
+const BACKGROUND_JOB_COLUMNS = `
+    id, job_type, library_id, item_id, zotero_key,
+    content_kind, payload_kind, priority, payload_json,
+    enqueued_at, available_at, attempt_count, last_error
+`;
 
 /**
  * Maximum number of failures before an item is considered permanently failed.
@@ -149,6 +271,8 @@ export class BeaverDB {
      */
     public async initDatabase(pluginVersion: string): Promise<void> {
         const previousVersion = getPref('installedVersion') || '0.1';
+
+        await this.conn.queryAsync(`PRAGMA foreign_keys = ON`);
 
         // Delete all tables in test versions
         if (previousVersion.startsWith('0.1') || previousVersion == '0.2.4') {
@@ -311,35 +435,144 @@ export class BeaverDB {
             ON failed_embeddings(next_retry_after);
         `);
 
-        // Attachment file cache table - stores metadata for PDF attachments
+        await this.conn.queryAsync(`DROP TABLE IF EXISTS attachment_file_cache`);
+
+        // Drop and recreate the document cache tables if the schema is stale
+        if (await this.documentCacheSchemaIsStale()) {
+            await this.conn.queryAsync(`DROP TABLE IF EXISTS document_cache_payloads`);
+            await this.conn.queryAsync(`DROP TABLE IF EXISTS document_cache_metadata`);
+        }
+
         await this.conn.queryAsync(`
-            CREATE TABLE IF NOT EXISTS attachment_file_cache (
-                item_id              INTEGER PRIMARY KEY,
-                library_id           INTEGER NOT NULL,
-                zotero_key           TEXT NOT NULL,
-                file_path            TEXT NOT NULL,
-                file_mtime_ms        INTEGER NOT NULL,
-                file_size_bytes      INTEGER NOT NULL,
-                content_type         TEXT NOT NULL,
-                page_count           INTEGER,
-                page_labels_json     TEXT,
-                has_text_layer       INTEGER,
-                needs_ocr            INTEGER,
-                is_encrypted         INTEGER NOT NULL DEFAULT 0,
-                is_invalid           INTEGER NOT NULL DEFAULT 0,
-                extraction_version   TEXT NOT NULL,
-                cached_at            TEXT NOT NULL DEFAULT (datetime('now'))
+            CREATE TABLE IF NOT EXISTS document_cache_metadata (
+                id                         INTEGER PRIMARY KEY,
+                item_id                    INTEGER NOT NULL,
+                library_id                 INTEGER NOT NULL,
+                zotero_key                 TEXT NOT NULL,
+                content_kind               TEXT NOT NULL,
+                file_path                  TEXT NOT NULL,
+                file_mtime_ms              INTEGER NOT NULL,
+                file_size_bytes            INTEGER NOT NULL,
+                source_size_bytes          INTEGER NOT NULL,
+                content_type               TEXT NOT NULL,
+                document_metadata_json     TEXT NOT NULL,
+                error_code                 TEXT,
+                extraction_schema_version  TEXT NOT NULL,
+                metadata_format_version    INTEGER NOT NULL,
+                created_at                 TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at                 TEXT NOT NULL DEFAULT (datetime('now')),
+                last_accessed_at           TEXT,
+                UNIQUE(library_id, zotero_key)
             );
         `);
 
         await this.conn.queryAsync(`
-            CREATE INDEX IF NOT EXISTS idx_afc_library
-            ON attachment_file_cache(library_id);
+            CREATE INDEX IF NOT EXISTS idx_dcm_item_id
+            ON document_cache_metadata(item_id);
         `);
 
         await this.conn.queryAsync(`
-            CREATE INDEX IF NOT EXISTS idx_afc_library_key
-            ON attachment_file_cache(library_id, zotero_key);
+            CREATE INDEX IF NOT EXISTS idx_dcm_library
+            ON document_cache_metadata(library_id);
+        `);
+
+        await this.conn.queryAsync(`
+            CREATE TABLE IF NOT EXISTS document_cache_payloads (
+                id                         INTEGER PRIMARY KEY,
+                metadata_id                INTEGER NOT NULL,
+                item_id                    INTEGER NOT NULL,
+                library_id                 INTEGER NOT NULL,
+                zotero_key                 TEXT NOT NULL,
+                payload_kind               TEXT NOT NULL,
+                content_kind               TEXT NOT NULL,
+                source_file_path           TEXT NOT NULL,
+                source_file_mtime_ms       INTEGER NOT NULL,
+                source_file_size_bytes     INTEGER NOT NULL,
+                source_size_bytes          INTEGER NOT NULL,
+                payload_path               TEXT NOT NULL,
+                payload_size_bytes         INTEGER NOT NULL,
+                payload_sha256             TEXT,
+                extraction_schema_version  TEXT NOT NULL,
+                cache_format_version       INTEGER NOT NULL,
+                created_at                 TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at                 TEXT NOT NULL DEFAULT (datetime('now')),
+                last_accessed_at           TEXT,
+                FOREIGN KEY (metadata_id)
+                    REFERENCES document_cache_metadata(id)
+                    ON DELETE CASCADE,
+                UNIQUE(metadata_id, payload_kind)
+            );
+        `);
+
+        await this.conn.queryAsync(`
+            CREATE INDEX IF NOT EXISTS idx_dcp_metadata_id
+            ON document_cache_payloads(metadata_id);
+        `);
+
+        await this.conn.queryAsync(`
+            CREATE INDEX IF NOT EXISTS idx_dcp_item_id
+            ON document_cache_payloads(item_id);
+        `);
+
+        await this.conn.queryAsync(`
+            CREATE INDEX IF NOT EXISTS idx_dcp_library
+            ON document_cache_payloads(library_id);
+        `);
+
+        await this.conn.queryAsync(`
+            CREATE INDEX IF NOT EXISTS idx_dcp_library_key_payload_kind
+            ON document_cache_payloads(library_id, zotero_key, payload_kind);
+        `);
+
+        // Drop and recreate the ephemeral queue if the schema or unique key is stale.
+        if (await this.backgroundJobsSchemaIsStale()) {
+            await this.conn.queryAsync(`DROP TABLE IF EXISTS background_jobs_dead`);
+            await this.conn.queryAsync(`DROP TABLE IF EXISTS background_jobs`);
+        }
+
+        // Background job queue: one row per logical document extraction request.
+        // Uses epoch-ms timestamps throughout so visibility-bump UPSERTs can
+        // compare via MIN(available_at, ?) without string-vs-number drift.
+        await this.conn.queryAsync(`
+            CREATE TABLE IF NOT EXISTS background_jobs (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_type        TEXT NOT NULL,
+                library_id      INTEGER NOT NULL,
+                item_id         INTEGER,
+                zotero_key      TEXT NOT NULL,
+                content_kind    TEXT NOT NULL,
+                payload_kind    TEXT NOT NULL,
+                priority        INTEGER NOT NULL DEFAULT 100,
+                payload_json    TEXT,
+                enqueued_at     INTEGER NOT NULL,
+                available_at    INTEGER NOT NULL,
+                attempt_count   INTEGER NOT NULL DEFAULT 0,
+                last_error      TEXT,
+                UNIQUE(job_type, library_id, zotero_key, payload_kind)
+            );
+        `);
+
+        await this.conn.queryAsync(`
+            CREATE INDEX IF NOT EXISTS idx_background_jobs_visible
+            ON background_jobs (available_at, priority);
+        `);
+
+        // Dead-letter table for jobs that exceeded MAX_ATTEMPTS. Surfaced
+        // through the dev queue-stats endpoint; no automatic retry.
+        await this.conn.queryAsync(`
+            CREATE TABLE IF NOT EXISTS background_jobs_dead (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_type        TEXT NOT NULL,
+                library_id      INTEGER NOT NULL,
+                zotero_key      TEXT NOT NULL,
+                content_kind    TEXT NOT NULL,
+                payload_kind    TEXT NOT NULL,
+                payload_json    TEXT,
+                enqueued_at     INTEGER NOT NULL,
+                died_at         INTEGER NOT NULL,
+                attempt_count   INTEGER NOT NULL,
+                last_error      TEXT
+            );
         `);
     }
 
@@ -1425,236 +1658,1029 @@ export class BeaverDB {
     }
 
     // =============================================
-    // Attachment File Cache Methods
+    // Document Cache Methods
     // =============================================
 
-    /**
-     * Parse a database row into an AttachmentFileCacheRecord.
-     * Converts SQLite integer booleans and JSON strings.
-     */
-    private static rowToAttachmentFileCacheRecord(row: any): AttachmentFileCacheRecord {
-        let pageLabels: Record<number, string> | null = null;
-        if (row.page_labels_json) {
-            try {
-                pageLabels = JSON.parse(row.page_labels_json);
-            } catch {
-                pageLabels = null;
-            }
-        }
+    private static normalizeDocumentCacheContentKind(value: unknown): ExtractContentKind {
+        return typeof value === 'string' && isExtractContentKind(value)
+            ? value
+            : 'snapshot';
+    }
+
+    private static rowToDocumentCacheMetadataRecord(row: any): DocumentCacheMetadataRecord {
+        const contentKind = BeaverDB.normalizeDocumentCacheContentKind(row.content_kind);
+        const documentMetadata = parseCachedDocumentMetadata(
+            row.content_kind,
+            row.document_metadata_json,
+        );
+        const pdfMetadata = documentMetadata?.content_kind === 'pdf'
+            ? documentMetadata
+            : null;
         return {
-            item_id: row.item_id,
-            library_id: row.library_id,
-            zotero_key: row.zotero_key,
-            file_path: row.file_path,
-            file_mtime_ms: row.file_mtime_ms,
-            file_size_bytes: row.file_size_bytes,
-            content_type: row.content_type,
-            page_count: row.page_count ?? null,
-            page_labels: pageLabels,
-            has_text_layer: row.has_text_layer == null ? null : Boolean(row.has_text_layer),
-            needs_ocr: row.needs_ocr == null ? null : Boolean(row.needs_ocr),
-            is_encrypted: Boolean(row.is_encrypted),
-            is_invalid: Boolean(row.is_invalid),
-            extraction_version: row.extraction_version,
-            cached_at: row.cached_at,
+            id: row.id,
+            itemId: row.item_id,
+            libraryId: row.library_id,
+            zoteroKey: row.zotero_key,
+            contentKind,
+            filePath: row.file_path,
+            fileSignature: {
+                mtime_ms: row.file_mtime_ms,
+                size_bytes: row.file_size_bytes,
+            },
+            sourceSizeBytes: row.source_size_bytes,
+            contentType: row.content_type,
+            documentMetadata,
+            pageCount: pdfMetadata?.pageCount ?? null,
+            pageLabels: pdfMetadata?.pageLabels ?? null,
+            pages: pdfMetadata?.pages ?? null,
+            errorCode: row.error_code ?? null,
+            extractionSchemaVersion: row.extraction_schema_version,
+            metadataFormatVersion: row.metadata_format_version,
+            createdAt: row.created_at,
+            updatedAt: row.updated_at,
+            lastAccessedAt: row.last_accessed_at ?? null,
         };
     }
 
-    /**
-     * Insert or update an attachment file cache record.
-     * Uses INSERT ON CONFLICT to avoid accidental field resets.
-     */
-    public async upsertAttachmentFileCache(record: Omit<AttachmentFileCacheRecord, 'cached_at'>): Promise<void> {
-        const now = new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
-        const pageLabelsJson = record.page_labels ? JSON.stringify(record.page_labels) : null;
+    private static rowToDocumentCachePayloadRecord(row: any): DocumentCachePayloadRecord {
+        return {
+            id: row.id,
+            metadataId: row.metadata_id,
+            itemId: row.item_id,
+            libraryId: row.library_id,
+            zoteroKey: row.zotero_key,
+            payloadKind: row.payload_kind,
+            contentKind: BeaverDB.normalizeDocumentCacheContentKind(row.content_kind),
+            sourceFilePath: row.source_file_path,
+            sourceFileSignature: {
+                mtime_ms: row.source_file_mtime_ms,
+                size_bytes: row.source_file_size_bytes,
+            },
+            sourceSizeBytes: row.source_size_bytes,
+            payloadPath: row.payload_path,
+            payloadSizeBytes: row.payload_size_bytes,
+            payloadSha256: row.payload_sha256 ?? null,
+            extractionSchemaVersion: row.extraction_schema_version,
+            cacheFormatVersion: row.cache_format_version,
+            createdAt: row.created_at,
+            updatedAt: row.updated_at,
+            lastAccessedAt: row.last_accessed_at ?? null,
+        };
+    }
 
+    /** Detect document-cache tables whose schema does not match the current shape. */
+    private async documentCacheSchemaIsStale(): Promise<boolean> {
+        const metadataColumns = new Set<string>();
         await this.conn.queryAsync(
-            `INSERT INTO attachment_file_cache
-                (item_id, library_id, zotero_key, file_path, file_mtime_ms, file_size_bytes,
-                 content_type, page_count, page_labels_json, has_text_layer, needs_ocr,
-                 is_encrypted, is_invalid, extraction_version, cached_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-             ON CONFLICT(item_id) DO UPDATE SET
-                library_id = excluded.library_id,
-                zotero_key = excluded.zotero_key,
-                file_path = excluded.file_path,
-                file_mtime_ms = excluded.file_mtime_ms,
-                file_size_bytes = excluded.file_size_bytes,
-                content_type = excluded.content_type,
-                page_count = excluded.page_count,
-                page_labels_json = excluded.page_labels_json,
-                has_text_layer = excluded.has_text_layer,
-                needs_ocr = excluded.needs_ocr,
-                is_encrypted = excluded.is_encrypted,
-                is_invalid = excluded.is_invalid,
-                extraction_version = excluded.extraction_version,
-                cached_at = excluded.cached_at`,
-            [
-                record.item_id,
-                record.library_id,
-                record.zotero_key,
-                record.file_path,
-                record.file_mtime_ms,
-                record.file_size_bytes,
-                record.content_type,
-                record.page_count,
-                pageLabelsJson,
-                record.has_text_layer == null ? null : (record.has_text_layer ? 1 : 0),
-                record.needs_ocr == null ? null : (record.needs_ocr ? 1 : 0),
-                record.is_encrypted ? 1 : 0,
-                record.is_invalid ? 1 : 0,
-                record.extraction_version,
-                now,
-            ]
+            `SELECT name FROM pragma_table_info('document_cache_metadata')`,
+            [],
+            { onRow: (row: any) => metadataColumns.add(row.getResultByIndex(0)) },
         );
-    }
-
-    /**
-     * Insert or update multiple attachment file cache records in a batch.
-     */
-    public async upsertAttachmentFileCacheBatch(records: Array<Omit<AttachmentFileCacheRecord, 'cached_at'>>): Promise<void> {
-        if (records.length === 0) return;
-
-        const now = new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
-
-        await this.conn.executeTransaction(async () => {
-            for (const record of records) {
-                const pageLabelsJson = record.page_labels ? JSON.stringify(record.page_labels) : null;
-                await this.conn.queryAsync(
-                    `INSERT INTO attachment_file_cache
-                        (item_id, library_id, zotero_key, file_path, file_mtime_ms, file_size_bytes,
-                         content_type, page_count, page_labels_json, has_text_layer, needs_ocr,
-                         is_encrypted, is_invalid, extraction_version, cached_at)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                     ON CONFLICT(item_id) DO UPDATE SET
-                        library_id = excluded.library_id,
-                        zotero_key = excluded.zotero_key,
-                        file_path = excluded.file_path,
-                        file_mtime_ms = excluded.file_mtime_ms,
-                        file_size_bytes = excluded.file_size_bytes,
-                        content_type = excluded.content_type,
-                        page_count = excluded.page_count,
-                        page_labels_json = excluded.page_labels_json,
-                        has_text_layer = excluded.has_text_layer,
-                        needs_ocr = excluded.needs_ocr,
-                        is_encrypted = excluded.is_encrypted,
-                        is_invalid = excluded.is_invalid,
-                        extraction_version = excluded.extraction_version,
-                        cached_at = excluded.cached_at`,
-                    [
-                        record.item_id,
-                        record.library_id,
-                        record.zotero_key,
-                        record.file_path,
-                        record.file_mtime_ms,
-                        record.file_size_bytes,
-                        record.content_type,
-                        record.page_count,
-                        pageLabelsJson,
-                        record.has_text_layer == null ? null : (record.has_text_layer ? 1 : 0),
-                        record.needs_ocr == null ? null : (record.needs_ocr ? 1 : 0),
-                        record.is_encrypted ? 1 : 0,
-                        record.is_invalid ? 1 : 0,
-                        record.extraction_version,
-                        now,
-                    ]
-                );
-            }
-        });
-    }
-
-    /**
-     * Get an attachment file cache record by item ID.
-     */
-    public async getAttachmentFileCache(itemId: number): Promise<AttachmentFileCacheRecord | null> {
-        const rows = await this.conn.queryAsync(
-            `SELECT * FROM attachment_file_cache WHERE item_id = ?`,
-            [itemId]
-        );
-        if (rows.length === 0) return null;
-        return BeaverDB.rowToAttachmentFileCacheRecord(rows[0]);
-    }
-
-    /**
-     * Get an attachment file cache record by library ID and Zotero key.
-     */
-    public async getAttachmentFileCacheByKey(libraryId: number, zoteroKey: string): Promise<AttachmentFileCacheRecord | null> {
-        const rows = await this.conn.queryAsync(
-            `SELECT * FROM attachment_file_cache WHERE library_id = ? AND zotero_key = ?`,
-            [libraryId, zoteroKey]
-        );
-        if (rows.length === 0) return null;
-        return BeaverDB.rowToAttachmentFileCacheRecord(rows[0]);
-    }
-
-    /**
-     * Get attachment file cache records for multiple item IDs.
-     */
-    public async getAttachmentFileCacheBatch(itemIds: number[]): Promise<Map<number, AttachmentFileCacheRecord>> {
-        if (itemIds.length === 0) return new Map();
-
-        const result = new Map<number, AttachmentFileCacheRecord>();
-        const chunkSize = 500;
-
-        for (let i = 0; i < itemIds.length; i += chunkSize) {
-            const chunk = itemIds.slice(i, i + chunkSize);
-            const placeholders = chunk.map(() => '?').join(',');
-            const rows = await this.conn.queryAsync(
-                `SELECT * FROM attachment_file_cache WHERE item_id IN (${placeholders})`,
-                chunk
-            );
-            for (const row of rows) {
-                result.set(row.item_id, BeaverDB.rowToAttachmentFileCacheRecord(row));
+        if (metadataColumns.size > 0) {
+            if (!metadataColumns.has('content_kind')) return true;
+            if (!metadataColumns.has('document_metadata_json')) return true;
+            const legacyMetadataColumns = [
+                'page_count',
+                'page_labels_json',
+                'pages_json',
+                'status',
+                'has_text_layer',
+                'needs_ocr',
+                'is_encrypted',
+                'is_invalid',
+            ];
+            if (legacyMetadataColumns.some((col) => metadataColumns.has(col))) {
+                return true;
             }
         }
 
+        const payloadColumns = new Set<string>();
+        await this.conn.queryAsync(
+            `SELECT name FROM pragma_table_info('document_cache_payloads')`,
+            [],
+            { onRow: (row: any) => payloadColumns.add(row.getResultByIndex(0)) },
+        );
+        if (payloadColumns.size > 0) {
+            if (!payloadColumns.has('content_kind')) return true;
+            if (!payloadColumns.has('payload_kind')) return true;
+            if (payloadColumns.has('mode')) return true;
+        }
+
+        return false;
+    }
+
+    /** Detect background queue tables whose ephemeral schema should be rebuilt. */
+    private async backgroundJobsSchemaIsStale(): Promise<boolean> {
+        const liveColumns = new Set<string>();
+        await this.conn.queryAsync(
+            `SELECT name FROM pragma_table_info('background_jobs')`,
+            [],
+            { onRow: (row: any) => liveColumns.add(row.getResultByIndex(0)) },
+        );
+        if (liveColumns.size > 0) {
+            if (!liveColumns.has('content_kind')) return true;
+            if (!liveColumns.has('payload_kind')) return true;
+            if (liveColumns.has('mode')) return true;
+            if (!(await this.backgroundJobsUniqueKeyIsCurrent())) return true;
+        }
+
+        const deadColumns = new Set<string>();
+        await this.conn.queryAsync(
+            `SELECT name FROM pragma_table_info('background_jobs_dead')`,
+            [],
+            { onRow: (row: any) => deadColumns.add(row.getResultByIndex(0)) },
+        );
+        if (deadColumns.size > 0) {
+            if (!deadColumns.has('content_kind')) return true;
+            if (!deadColumns.has('payload_kind')) return true;
+            if (deadColumns.has('mode')) return true;
+        }
+
+        return false;
+    }
+
+    /** Verify the live queue has the exact current dedupe key. */
+    private async backgroundJobsUniqueKeyIsCurrent(): Promise<boolean> {
+        const uniqueIndexNames: string[] = [];
+        await this.conn.queryAsync(
+            `SELECT name, [unique] FROM pragma_index_list('background_jobs')`,
+            [],
+            {
+                onRow: (row: any) => {
+                    if (row.getResultByIndex(1) === 1) {
+                        uniqueIndexNames.push(row.getResultByIndex(0));
+                    }
+                },
+            },
+        );
+
+        const expected = ['job_type', 'library_id', 'zotero_key', 'payload_kind'];
+        for (const indexName of uniqueIndexNames) {
+            const escapedName = indexName.replace(/'/g, `''`);
+            const columns: string[] = [];
+            await this.conn.queryAsync(
+                `SELECT name FROM pragma_index_info('${escapedName}') ORDER BY seqno`,
+                [],
+                { onRow: (row: any) => columns.push(row.getResultByIndex(0)) },
+            );
+            if (
+                columns.length === expected.length
+                && columns.every((column, index) => column === expected[index])
+            ) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private async selectDocumentCacheMetadata(sql: string, params: any[] = []): Promise<DocumentCacheMetadataRecord[]> {
+        const rows: any[] = [];
+        await this.conn.queryAsync(sql, params, {
+            onRow: (row: any) => {
+                // These indices must match the SELECT column order above.
+                rows.push({
+                    id: row.getResultByIndex(0),
+                    item_id: row.getResultByIndex(1),
+                    library_id: row.getResultByIndex(2),
+                    zotero_key: row.getResultByIndex(3),
+                    content_kind: row.getResultByIndex(4),
+                    file_path: row.getResultByIndex(5),
+                    file_mtime_ms: row.getResultByIndex(6),
+                    file_size_bytes: row.getResultByIndex(7),
+                    source_size_bytes: row.getResultByIndex(8),
+                    content_type: row.getResultByIndex(9),
+                    document_metadata_json: row.getResultByIndex(10),
+                    error_code: row.getResultByIndex(11),
+                    extraction_schema_version: row.getResultByIndex(12),
+                    metadata_format_version: row.getResultByIndex(13),
+                    created_at: row.getResultByIndex(14),
+                    updated_at: row.getResultByIndex(15),
+                    last_accessed_at: row.getResultByIndex(16),
+                });
+            },
+        });
+        return rows.map((row) => BeaverDB.rowToDocumentCacheMetadataRecord(row));
+    }
+
+    private async selectDocumentCachePayloads(sql: string, params: any[] = []): Promise<DocumentCachePayloadRecord[]> {
+        const rows: any[] = [];
+        await this.conn.queryAsync(sql, params, {
+            onRow: (row: any) => {
+                // These indices must match the SELECT column order above.
+                rows.push({
+                    id: row.getResultByIndex(0),
+                    metadata_id: row.getResultByIndex(1),
+                    item_id: row.getResultByIndex(2),
+                    library_id: row.getResultByIndex(3),
+                    zotero_key: row.getResultByIndex(4),
+                    payload_kind: row.getResultByIndex(5),
+                    content_kind: row.getResultByIndex(6),
+                    source_file_path: row.getResultByIndex(7),
+                    source_file_mtime_ms: row.getResultByIndex(8),
+                    source_file_size_bytes: row.getResultByIndex(9),
+                    source_size_bytes: row.getResultByIndex(10),
+                    payload_path: row.getResultByIndex(11),
+                    payload_size_bytes: row.getResultByIndex(12),
+                    payload_sha256: row.getResultByIndex(13),
+                    extraction_schema_version: row.getResultByIndex(14),
+                    cache_format_version: row.getResultByIndex(15),
+                    created_at: row.getResultByIndex(16),
+                    updated_at: row.getResultByIndex(17),
+                    last_accessed_at: row.getResultByIndex(18),
+                });
+            },
+        });
+        return rows.map((row) => BeaverDB.rowToDocumentCachePayloadRecord(row));
+    }
+
+    private static documentCacheMetadataSelect(): string {
+        return `SELECT id, item_id, library_id, zotero_key, content_kind,
+                       file_path, file_mtime_ms, file_size_bytes,
+                       source_size_bytes, content_type, document_metadata_json, error_code,
+                       extraction_schema_version, metadata_format_version,
+                       created_at, updated_at, last_accessed_at
+                FROM document_cache_metadata`;
+    }
+
+    private static documentCachePayloadSelect(): string {
+        return `SELECT id, metadata_id, item_id, library_id, zotero_key, payload_kind,
+                       content_kind, source_file_path, source_file_mtime_ms, source_file_size_bytes,
+                       source_size_bytes, payload_path, payload_size_bytes,
+                       payload_sha256, extraction_schema_version, cache_format_version,
+                       created_at, updated_at, last_accessed_at
+                FROM document_cache_payloads`;
+    }
+
+    private static documentMetadataSourceChanged(
+        existing: DocumentCacheMetadataRecord,
+        incoming: DocumentCacheMetadataInput,
+    ): boolean {
+        return existing.filePath !== incoming.filePath
+            || existing.fileSignature.mtime_ms !== incoming.fileSignature.mtime_ms
+            || existing.fileSignature.size_bytes !== incoming.fileSignature.size_bytes
+            || existing.sourceSizeBytes !== incoming.sourceSizeBytes
+            || existing.extractionSchemaVersion !== incoming.extractionSchemaVersion
+            || existing.metadataFormatVersion !== incoming.metadataFormatVersion;
+    }
+
+    private static documentCacheMetadataMatches(
+        current: DocumentCacheMetadataRecord,
+        inspected: DocumentCacheMetadataRecord,
+    ): boolean {
+        return current.id === inspected.id
+            && current.itemId === inspected.itemId
+            && current.libraryId === inspected.libraryId
+            && current.zoteroKey === inspected.zoteroKey
+            && current.filePath === inspected.filePath
+            && current.fileSignature.mtime_ms === inspected.fileSignature.mtime_ms
+            && current.fileSignature.size_bytes === inspected.fileSignature.size_bytes
+            && current.sourceSizeBytes === inspected.sourceSizeBytes
+            && current.contentType === inspected.contentType
+            && current.contentKind === inspected.contentKind
+            && JSON.stringify(current.documentMetadata) === JSON.stringify(inspected.documentMetadata)
+            && current.errorCode === inspected.errorCode
+            && current.extractionSchemaVersion === inspected.extractionSchemaVersion
+            && current.metadataFormatVersion === inspected.metadataFormatVersion;
+    }
+
+    /** Insert or update document-cache metadata by library/key. */
+    public async upsertDocumentCacheMetadata(
+        record: DocumentCacheMetadataInput,
+    ): Promise<{ metadata: DocumentCacheMetadataRecord; deletedPayloads: DocumentCachePayloadRecord[] }> {
+        let deletedPayloads: DocumentCachePayloadRecord[] = [];
+        await this.conn.executeTransaction(async () => {
+            const existing = await this.getDocumentCacheMetadataByKey(record.libraryId, record.zoteroKey);
+            if (existing && BeaverDB.documentMetadataSourceChanged(existing, record)) {
+                deletedPayloads = await this.getDocumentCachePayloadsForMetadata(existing.id);
+                await this.deleteDocumentCachePayloadRowsForMetadata(existing.id);
+            }
+            await this.conn.queryAsync(
+                `INSERT INTO document_cache_metadata
+                    (item_id, library_id, zotero_key, content_kind, file_path, file_mtime_ms,
+                     file_size_bytes, source_size_bytes, content_type, document_metadata_json, error_code,
+                     extraction_schema_version, metadata_format_version, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                 ON CONFLICT(library_id, zotero_key) DO UPDATE SET
+                    item_id = excluded.item_id,
+                    content_kind = excluded.content_kind,
+                    file_path = excluded.file_path,
+                    file_mtime_ms = excluded.file_mtime_ms,
+                    file_size_bytes = excluded.file_size_bytes,
+                    source_size_bytes = excluded.source_size_bytes,
+                    content_type = excluded.content_type,
+                    document_metadata_json = excluded.document_metadata_json,
+                    error_code = excluded.error_code,
+                    extraction_schema_version = excluded.extraction_schema_version,
+                    metadata_format_version = excluded.metadata_format_version,
+                    updated_at = datetime('now')`,
+                [
+                    record.itemId,
+                    record.libraryId,
+                    record.zoteroKey,
+                    record.contentKind,
+                    record.filePath,
+                    record.fileSignature.mtime_ms,
+                    record.fileSignature.size_bytes,
+                    record.sourceSizeBytes,
+                    record.contentType,
+                    JSON.stringify(record.documentMetadata),
+                    record.errorCode,
+                    record.extractionSchemaVersion,
+                    record.metadataFormatVersion,
+                ],
+            );
+        });
+        const metadata = await this.getDocumentCacheMetadataByKey(record.libraryId, record.zoteroKey);
+        if (!metadata) {
+            throw new Error('Document cache metadata upsert failed');
+        }
+        return { metadata, deletedPayloads };
+    }
+
+    /** Get document-cache metadata by library/key. */
+    public async getDocumentCacheMetadataByKey(
+        libraryId: number,
+        zoteroKey: string,
+    ): Promise<DocumentCacheMetadataRecord | null> {
+        const rows = await this.selectDocumentCacheMetadata(
+            `${BeaverDB.documentCacheMetadataSelect()} WHERE library_id = ? AND zotero_key = ?`,
+            [libraryId, zoteroKey],
+        );
+        return rows[0] ?? null;
+    }
+
+    /** Get document-cache metadata by primary key. */
+    public async getDocumentCacheMetadataById(id: number): Promise<DocumentCacheMetadataRecord | null> {
+        const rows = await this.selectDocumentCacheMetadata(
+            `${BeaverDB.documentCacheMetadataSelect()} WHERE id = ?`,
+            [id],
+        );
+        return rows[0] ?? null;
+    }
+
+    /** Get all document-cache metadata rows. */
+    public async getAllDocumentCacheMetadata(): Promise<DocumentCacheMetadataRecord[]> {
+        return this.selectDocumentCacheMetadata(
+            `${BeaverDB.documentCacheMetadataSelect()} ORDER BY library_id, zotero_key`,
+        );
+    }
+
+    /** Delete one metadata row and return its payload rows for file cleanup. */
+    public async deleteDocumentCacheMetadata(
+        libraryId: number,
+        zoteroKey: string,
+    ): Promise<DocumentCachePayloadRecord[]> {
+        const metadata = await this.getDocumentCacheMetadataByKey(libraryId, zoteroKey);
+        if (!metadata) return [];
+        const payloads = await this.getDocumentCachePayloadsForMetadata(metadata.id);
+        await this.conn.queryAsync(
+            `DELETE FROM document_cache_metadata WHERE library_id = ? AND zotero_key = ?`,
+            [libraryId, zoteroKey],
+        );
+        return payloads;
+    }
+
+    /** Delete a metadata row only if it still matches the inspected record. */
+    public async deleteDocumentCacheMetadataIfUnchanged(
+        metadata: DocumentCacheMetadataRecord,
+    ): Promise<DocumentCachePayloadRecord[] | null> {
+        let deletedPayloads: DocumentCachePayloadRecord[] | null = null;
+        await this.conn.executeTransaction(async () => {
+            const current = await this.getDocumentCacheMetadataById(metadata.id);
+            if (!current) {
+                deletedPayloads = [];
+                return;
+            }
+            if (!BeaverDB.documentCacheMetadataMatches(current, metadata)) {
+                deletedPayloads = null;
+                return;
+            }
+
+            deletedPayloads = await this.getDocumentCachePayloadsForMetadata(metadata.id);
+            await this.conn.queryAsync(
+                `DELETE FROM document_cache_metadata WHERE id = ?`,
+                [metadata.id],
+            );
+        });
+        return deletedPayloads;
+    }
+
+    /** Delete metadata rows for a library and return payload rows for file cleanup. */
+    public async deleteDocumentCacheMetadataByLibrary(libraryId: number): Promise<DocumentCachePayloadRecord[]> {
+        const payloads = await this.selectDocumentCachePayloads(
+            `${BeaverDB.documentCachePayloadSelect()} WHERE library_id = ?`,
+            [libraryId],
+        );
+        await this.conn.queryAsync(
+            `DELETE FROM document_cache_metadata WHERE library_id = ?`,
+            [libraryId],
+        );
+        return payloads;
+    }
+
+    /** Insert or update a document-cache payload by metadata/payload kind. */
+    public async upsertDocumentCachePayload(record: DocumentCachePayloadInput): Promise<DocumentCachePayloadRecord> {
+        await this.conn.queryAsync(
+            `INSERT INTO document_cache_payloads
+                (metadata_id, item_id, library_id, zotero_key, payload_kind, content_kind,
+                 source_file_path, source_file_mtime_ms, source_file_size_bytes,
+                 source_size_bytes, payload_path, payload_size_bytes, payload_sha256,
+                 extraction_schema_version, cache_format_version, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+             ON CONFLICT(metadata_id, payload_kind) DO UPDATE SET
+                metadata_id = excluded.metadata_id,
+                item_id = excluded.item_id,
+                library_id = excluded.library_id,
+                zotero_key = excluded.zotero_key,
+                content_kind = excluded.content_kind,
+                source_file_path = excluded.source_file_path,
+                source_file_mtime_ms = excluded.source_file_mtime_ms,
+                source_file_size_bytes = excluded.source_file_size_bytes,
+                source_size_bytes = excluded.source_size_bytes,
+                payload_path = excluded.payload_path,
+                payload_size_bytes = excluded.payload_size_bytes,
+                payload_sha256 = excluded.payload_sha256,
+                extraction_schema_version = excluded.extraction_schema_version,
+                cache_format_version = excluded.cache_format_version,
+                updated_at = datetime('now')`,
+            [
+                record.metadataId,
+                record.itemId,
+                record.libraryId,
+                record.zoteroKey,
+                record.payloadKind,
+                record.contentKind,
+                record.sourceFilePath,
+                record.sourceFileSignature.mtime_ms,
+                record.sourceFileSignature.size_bytes,
+                record.sourceSizeBytes,
+                record.payloadPath,
+                record.payloadSizeBytes,
+                record.payloadSha256,
+                record.extractionSchemaVersion,
+                record.cacheFormatVersion,
+            ],
+        );
+        const payload = await this.getDocumentCachePayload(record.libraryId, record.zoteroKey, record.payloadKind);
+        if (!payload) {
+            throw new Error('Document cache payload upsert failed');
+        }
+        return payload;
+    }
+
+    /** Get a payload row by library/key/payload kind. */
+    public async getDocumentCachePayload(
+        libraryId: number,
+        zoteroKey: string,
+        payloadKind: DocumentCachePayloadKind,
+    ): Promise<DocumentCachePayloadRecord | null> {
+        const rows = await this.selectDocumentCachePayloads(
+            `${BeaverDB.documentCachePayloadSelect()} WHERE library_id = ? AND zotero_key = ? AND payload_kind = ?`,
+            [libraryId, zoteroKey, payloadKind],
+        );
+        return rows[0] ?? null;
+    }
+
+    /** Get a payload row by primary key. */
+    public async getDocumentCachePayloadById(id: number): Promise<DocumentCachePayloadRecord | null> {
+        const rows = await this.selectDocumentCachePayloads(
+            `${BeaverDB.documentCachePayloadSelect()} WHERE id = ?`,
+            [id],
+        );
+        return rows[0] ?? null;
+    }
+
+    /** Get payload rows for one metadata row. */
+    public async getDocumentCachePayloadsForMetadata(metadataId: number): Promise<DocumentCachePayloadRecord[]> {
+        return this.selectDocumentCachePayloads(
+            `${BeaverDB.documentCachePayloadSelect()} WHERE metadata_id = ?`,
+            [metadataId],
+        );
+    }
+
+    /** Get all payload rows. */
+    public async getAllDocumentCachePayloads(): Promise<DocumentCachePayloadRecord[]> {
+        return this.selectDocumentCachePayloads(
+            `${BeaverDB.documentCachePayloadSelect()} ORDER BY library_id, zotero_key, payload_kind`,
+        );
+    }
+
+    private async deleteDocumentCachePayloadRowsForMetadata(metadataId: number): Promise<void> {
+        await this.conn.queryAsync(
+            `DELETE FROM document_cache_payloads WHERE metadata_id = ?`,
+            [metadataId],
+        );
+    }
+
+    /** Delete a payload row and return it for file cleanup. */
+    public async deleteDocumentCachePayload(
+        libraryId: number,
+        zoteroKey: string,
+        payloadKind: DocumentCachePayloadKind,
+    ): Promise<DocumentCachePayloadRecord | null> {
+        const payload = await this.getDocumentCachePayload(libraryId, zoteroKey, payloadKind);
+        if (!payload) return null;
+        await this.conn.queryAsync(
+            `DELETE FROM document_cache_payloads WHERE id = ?`,
+            [payload.id],
+        );
+        return payload;
+    }
+
+    /** Delete a payload row only if it still matches the inspected record. */
+    public async deleteDocumentCachePayloadIfUnchanged(
+        payload: DocumentCachePayloadRecord,
+    ): Promise<DocumentCachePayloadRecord | null> {
+        await this.conn.queryAsync(
+            `DELETE FROM document_cache_payloads
+             WHERE id = ?
+               AND metadata_id = ?
+               AND item_id = ?
+               AND library_id = ?
+               AND zotero_key = ?
+               AND payload_kind = ?
+               AND content_kind = ?
+               AND source_file_path = ?
+               AND source_file_mtime_ms = ?
+               AND source_file_size_bytes = ?
+               AND source_size_bytes = ?
+               AND payload_path = ?
+               AND payload_size_bytes = ?
+               AND COALESCE(payload_sha256, '') = COALESCE(?, '')
+               AND extraction_schema_version = ?
+               AND cache_format_version = ?`,
+            [
+                payload.id,
+                payload.metadataId,
+                payload.itemId,
+                payload.libraryId,
+                payload.zoteroKey,
+                payload.payloadKind,
+                payload.contentKind,
+                payload.sourceFilePath,
+                payload.sourceFileSignature.mtime_ms,
+                payload.sourceFileSignature.size_bytes,
+                payload.sourceSizeBytes,
+                payload.payloadPath,
+                payload.payloadSizeBytes,
+                payload.payloadSha256,
+                payload.extractionSchemaVersion,
+                payload.cacheFormatVersion,
+            ],
+        );
+
+        const current = await this.getDocumentCachePayloadById(payload.id);
+        if (current && (
+            current.metadataId !== payload.metadataId
+            || current.itemId !== payload.itemId
+            || current.libraryId !== payload.libraryId
+            || current.zoteroKey !== payload.zoteroKey
+            || current.payloadKind !== payload.payloadKind
+            || current.contentKind !== payload.contentKind
+            || current.sourceFilePath !== payload.sourceFilePath
+            || current.sourceFileSignature.mtime_ms !== payload.sourceFileSignature.mtime_ms
+            || current.sourceFileSignature.size_bytes !== payload.sourceFileSignature.size_bytes
+            || current.sourceSizeBytes !== payload.sourceSizeBytes
+            || current.payloadPath !== payload.payloadPath
+            || current.payloadSizeBytes !== payload.payloadSizeBytes
+            || current.payloadSha256 !== payload.payloadSha256
+            || current.extractionSchemaVersion !== payload.extractionSchemaVersion
+            || current.cacheFormatVersion !== payload.cacheFormatVersion
+        )) {
+            return null;
+        }
+        return current ? null : payload;
+    }
+
+    /** Delete payload rows for one metadata row and return them for file cleanup. */
+    public async deleteDocumentCachePayloadsForMetadata(metadataId: number): Promise<DocumentCachePayloadRecord[]> {
+        const payloads = await this.getDocumentCachePayloadsForMetadata(metadataId);
+        await this.deleteDocumentCachePayloadRowsForMetadata(metadataId);
+        return payloads;
+    }
+
+    /** Delete all payload rows for a library and return them for file cleanup. */
+    public async deleteDocumentCachePayloadsByLibrary(libraryId: number): Promise<DocumentCachePayloadRecord[]> {
+        const payloads = await this.selectDocumentCachePayloads(
+            `${BeaverDB.documentCachePayloadSelect()} WHERE library_id = ?`,
+            [libraryId],
+        );
+        await this.conn.queryAsync(
+            `DELETE FROM document_cache_payloads WHERE library_id = ?`,
+            [libraryId],
+        );
+        return payloads;
+    }
+
+    /** Mark a metadata row as accessed. */
+    public async touchDocumentCacheMetadata(id: number): Promise<void> {
+        await this.conn.queryAsync(
+            `UPDATE document_cache_metadata SET last_accessed_at = datetime('now') WHERE id = ?`,
+            [id],
+        );
+    }
+
+    /** Mark a payload row as accessed. */
+    public async touchDocumentCachePayload(id: number): Promise<void> {
+        await this.conn.queryAsync(
+            `UPDATE document_cache_payloads SET last_accessed_at = datetime('now') WHERE id = ?`,
+            [id],
+        );
+    }
+
+    /** Count document-cache metadata rows. */
+    public async getDocumentCacheMetadataCount(libraryId?: number): Promise<number> {
+        const rows: Array<{ count: number }> = [];
+        const sql = libraryId == null
+            ? `SELECT COUNT(*) FROM document_cache_metadata`
+            : `SELECT COUNT(*) FROM document_cache_metadata WHERE library_id = ?`;
+        await this.conn.queryAsync(sql, libraryId == null ? [] : [libraryId], {
+            onRow: (row: any) => rows.push({ count: row.getResultByIndex(0) }),
+        });
+        return rows[0]?.count ?? 0;
+    }
+
+    /** Count document-cache payload rows. */
+    public async getDocumentCachePayloadCount(libraryId?: number): Promise<number> {
+        const rows: Array<{ count: number }> = [];
+        const sql = libraryId == null
+            ? `SELECT COUNT(*) FROM document_cache_payloads`
+            : `SELECT COUNT(*) FROM document_cache_payloads WHERE library_id = ?`;
+        await this.conn.queryAsync(sql, libraryId == null ? [] : [libraryId], {
+            onRow: (row: any) => rows.push({ count: row.getResultByIndex(0) }),
+        });
+        return rows[0]?.count ?? 0;
+    }
+
+    /** Delete every document-cache metadata and payload row. */
+    public async deleteAllDocumentCache(): Promise<void> {
+        await this.conn.executeTransaction(async () => {
+            await this.conn.queryAsync(`DELETE FROM document_cache_payloads`);
+            await this.conn.queryAsync(`DELETE FROM document_cache_metadata`);
+        });
+    }
+
+    // =====================================================================
+    // Background job queue
+    // =====================================================================
+
+    /**
+     * Insert a new background job, or merge with the existing row that
+     * already covers the queue identity. Returns the job id
+     * and whether the row was newly inserted.
+     *
+     * Merge semantics:
+     *  - `priority` lowers to `MIN(existing, input)`.
+     *  - `available_at` lowers to `MIN(existing, input.now)` so an urgent
+     *    re-enqueue overrides a deferred prior visibility window.
+     *  - `content_kind` follows the incoming attachment state.
+     *  - `payload_json` overwrites when the content kind changes or the
+     *    incoming job has a strictly higher (lower-numbered) priority.
+     */
+    public async enqueueBackgroundJob(
+        input: BackgroundJobInput,
+    ): Promise<BackgroundJobEnqueueResult> {
+        const [result] = await this.enqueueBackgroundJobs([input]);
         return result;
     }
 
     /**
-     * Delete an attachment file cache record by item ID.
+     * Enqueue a batch of background jobs in one transaction.
+     *
+     * Results are returned in input order. Duplicate jobs within the batch
+     * or already present in the queue use the same merge semantics as
+     * `enqueueBackgroundJob`.
      */
-    public async deleteAttachmentFileCache(itemId: number): Promise<void> {
-        await this.conn.queryAsync(
-            `DELETE FROM attachment_file_cache WHERE item_id = ?`,
-            [itemId]
-        );
+    public async enqueueBackgroundJobs(
+        inputs: BackgroundJobInput[],
+    ): Promise<BackgroundJobEnqueueResult[]> {
+        if (inputs.length === 0) return [];
+
+        const results: BackgroundJobEnqueueResult[] = [];
+
+        await this.conn.executeTransaction(async () => {
+            for (const input of inputs) {
+                results.push(await this.enqueueBackgroundJobInTransaction(input));
+            }
+        });
+
+        return results;
     }
 
     /**
-     * Delete all attachment file cache records for a library.
+     * Insert or merge one background job. Must be called inside an active
+     * transaction so callers can choose single-job or batch atomicity.
      */
-    public async deleteAttachmentFileCacheByLibrary(libraryId: number): Promise<void> {
+    private async enqueueBackgroundJobInTransaction(
+        input: BackgroundJobInput,
+    ): Promise<BackgroundJobEnqueueResult> {
+        const priority = input.priority ?? 100;
+        const payloadJson = input.payload ? JSON.stringify(input.payload) : null;
+        const itemId = input.itemId ?? null;
+
+        let enqueued = false;
+        let id = 0;
+
         await this.conn.queryAsync(
-            `DELETE FROM attachment_file_cache WHERE library_id = ?`,
-            [libraryId]
+            `INSERT OR IGNORE INTO background_jobs (
+                job_type, library_id, item_id, zotero_key, content_kind,
+                payload_kind,
+                priority, payload_json, enqueued_at, available_at,
+                attempt_count, last_error
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL)`,
+            [
+                input.jobType,
+                input.libraryId,
+                itemId,
+                input.zoteroKey,
+                input.contentKind,
+                input.payloadKind,
+                priority,
+                payloadJson,
+                input.now,
+                input.now,
+            ],
         );
-    }
 
-    /**
-     * Get count of attachment file cache records.
-     */
-    public async getAttachmentFileCacheCount(libraryId?: number): Promise<number> {
-        let sql = 'SELECT COUNT(*) as count FROM attachment_file_cache';
-        const params: any[] = [];
+        const changesRows: number[] = [];
+        await this.conn.queryAsync(`SELECT changes()`, [], {
+            onRow: (row: any) => {
+                changesRows.push(row.getResultByIndex(0));
+            },
+        });
+        enqueued = (changesRows[0] ?? 0) === 1;
 
-        if (libraryId !== undefined) {
-            sql += ' WHERE library_id = ?';
-            params.push(libraryId);
+        if (!enqueued) {
+            await this.conn.queryAsync(
+                `UPDATE background_jobs SET
+                    priority      = MIN(priority, ?),
+                    available_at  = MIN(available_at, ?),
+                    content_kind  = ?,
+                    payload_json  = CASE WHEN content_kind != ? OR ? < priority
+                                         THEN ? ELSE payload_json END,
+                    attempt_count = CASE WHEN content_kind != ? OR ? < priority
+                                         THEN 0 ELSE attempt_count END,
+                    last_error    = CASE WHEN content_kind != ? OR ? < priority
+                                         THEN NULL ELSE last_error END
+                 WHERE job_type = ? AND library_id = ? AND zotero_key = ? AND payload_kind = ?`,
+                [
+                    priority,
+                    input.now,
+                    input.contentKind,
+                    input.contentKind, priority,
+                    payloadJson,
+                    input.contentKind, priority,
+                    input.contentKind, priority,
+                    input.jobType,
+                    input.libraryId,
+                    input.zoteroKey,
+                    input.payloadKind,
+                ],
+            );
         }
 
-        const rows = await this.conn.queryAsync(sql, params);
-        return rows[0]?.count || 0;
+        const idRows: number[] = [];
+        await this.conn.queryAsync(
+            `SELECT id FROM background_jobs
+             WHERE job_type = ? AND library_id = ? AND zotero_key = ? AND payload_kind = ?`,
+            [input.jobType, input.libraryId, input.zoteroKey, input.payloadKind],
+            {
+                onRow: (row: any) => {
+                    idRows.push(row.getResultByIndex(0));
+                },
+            },
+        );
+        id = idRows[0] ?? 0;
+
+        return { enqueued, id };
     }
 
     /**
-     * Get all attachment file cache records (for GC operations).
+     * Claim the next visible job (pgmq-style): pick lowest-priority, then
+     * oldest-available row whose `available_at <= now`, then bump its
+     * `available_at` forward by `visibilityTimeoutMs` so a crash/abort
+     * leaves the row safe to re-pick later.
+     *
+     * `maxPriority` is an exclusive upper bound — when provided, only rows
+     * with `priority < maxPriority` are eligible. Used by the background
+     * extractor to gate library-scale work (priority >= 100) behind user
+     * idleness while still letting hot-path retries (priority < 100) run.
+     *
+     * Returns `null` when no row is visible, or when an optimistic-claim
+     * race lost (currently impossible with one consumer; cheap insurance).
      */
-    public async getAllAttachmentFileCache(): Promise<AttachmentFileCacheRecord[]> {
-        const rows = await this.conn.queryAsync(
-            `SELECT * FROM attachment_file_cache ORDER BY library_id, item_id`
+    public async claimNextBackgroundJob(
+        now: number,
+        visibilityTimeoutMs: number,
+        maxPriority?: number,
+    ): Promise<BackgroundJobRecord | null> {
+        const params: unknown[] = [now];
+        let priorityClause = '';
+        if (maxPriority !== undefined) {
+            priorityClause = ' AND priority < ?';
+            params.push(maxPriority);
+        }
+        const candidates = await this.selectBackgroundJobs(
+            `SELECT ${BACKGROUND_JOB_COLUMNS}
+             FROM background_jobs
+             WHERE available_at <= ?${priorityClause}
+             ORDER BY priority ASC, available_at ASC
+             LIMIT 1`,
+            params,
         );
-        return rows.map((row: any) => BeaverDB.rowToAttachmentFileCacheRecord(row));
+        if (candidates.length === 0) return null;
+        const candidate = candidates[0];
+
+        const newAvailableAt = now + visibilityTimeoutMs;
+        const changesRows: number[] = [];
+        await this.conn.executeTransaction(async () => {
+            await this.conn.queryAsync(
+                `UPDATE background_jobs
+                 SET available_at = ?
+                 WHERE id = ? AND available_at <= ?`,
+                [newAvailableAt, candidate.id, now],
+            );
+            await this.conn.queryAsync(`SELECT changes()`, [], {
+                onRow: (row: any) => {
+                    changesRows.push(row.getResultByIndex(0));
+                },
+            });
+        });
+
+        if ((changesRows[0] ?? 0) !== 1) return null;
+        return { ...candidate, availableAt: newAvailableAt };
     }
 
+    /** Read up to `limit` jobs (default 100) without claiming. */
+    public async peekBackgroundJobs(limit = 100): Promise<BackgroundJobRecord[]> {
+        return this.selectBackgroundJobs(
+            `SELECT ${BACKGROUND_JOB_COLUMNS}
+             FROM background_jobs
+             ORDER BY priority ASC, available_at ASC
+             LIMIT ?`,
+            [limit],
+        );
+    }
+
+    /** Mark a claimed job as completed by removing its row. */
+    public async completeBackgroundJob(id: number): Promise<void> {
+        await this.conn.queryAsync(
+            `DELETE FROM background_jobs WHERE id = ?`,
+            [id],
+        );
+    }
+
+    /**
+     * Record a failed attempt. After `maxAttempts` total attempts the row
+     * moves to `background_jobs_dead`. Otherwise the attempt counter
+     * bumps and `available_at` slides forward by `backoffMs(attempt)`.
+     */
+    public async failBackgroundJob(
+        id: number,
+        error: string,
+        opts: {
+            maxAttempts: number;
+            backoffMs: (attempt: number) => number;
+            now: number;
+        },
+    ): Promise<{ dead: boolean }> {
+        const rows = await this.selectBackgroundJobs(
+            `SELECT ${BACKGROUND_JOB_COLUMNS}
+             FROM background_jobs
+             WHERE id = ?`,
+            [id],
+        );
+        if (rows.length === 0) return { dead: false };
+        const current = rows[0];
+        const nextAttempt = current.attemptCount + 1;
+
+        if (nextAttempt >= opts.maxAttempts) {
+            await this.conn.executeTransaction(async () => {
+                await this.conn.queryAsync(
+                    `INSERT INTO background_jobs_dead (
+                        job_type, library_id, zotero_key, content_kind,
+                        payload_kind, payload_json, enqueued_at, died_at,
+                        attempt_count, last_error
+                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    [
+                        current.jobType,
+                        current.libraryId,
+                        current.zoteroKey,
+                        current.contentKind,
+                        current.payloadKind,
+                        current.payload ? JSON.stringify(current.payload) : null,
+                        current.enqueuedAt,
+                        opts.now,
+                        nextAttempt,
+                        error,
+                    ],
+                );
+                await this.conn.queryAsync(
+                    `DELETE FROM background_jobs WHERE id = ?`,
+                    [id],
+                );
+            });
+            return { dead: true };
+        }
+
+        const nextAvailableAt = opts.now + opts.backoffMs(nextAttempt);
+        await this.conn.queryAsync(
+            `UPDATE background_jobs
+             SET attempt_count = attempt_count + 1,
+                 last_error = ?,
+                 available_at = ?
+             WHERE id = ?`,
+            [error, nextAvailableAt, id],
+        );
+        return { dead: false };
+    }
+
+    /**
+     * Release a claimed job without counting it as a failed attempt. Used
+     * when the processor itself aborts an in-flight job (e.g. shutdown),
+     * so the row can be picked again on the next start without burning an
+     * attempt or recording a misleading error.
+     */
+    public async releaseBackgroundJob(id: number, now: number): Promise<void> {
+        await this.conn.queryAsync(
+            `UPDATE background_jobs SET available_at = ? WHERE id = ?`,
+            [now, id],
+        );
+    }
+
+    /** Counts surfaced through the dev queue-stats endpoint. */
+    public async getBackgroundQueueStats(
+        now: number,
+    ): Promise<BackgroundQueueStats> {
+        const totalsRows: number[] = [];
+        await this.conn.queryAsync(
+            `SELECT COUNT(*) FROM background_jobs`,
+            [],
+            { onRow: (row: any) => totalsRows.push(row.getResultByIndex(0)) },
+        );
+        const pending = totalsRows[0] ?? 0;
+
+        const availableRows: number[] = [];
+        await this.conn.queryAsync(
+            `SELECT COUNT(*) FROM background_jobs WHERE available_at <= ?`,
+            [now],
+            { onRow: (row: any) => availableRows.push(row.getResultByIndex(0)) },
+        );
+        const available = availableRows[0] ?? 0;
+        const deferred = pending - available;
+
+        const deadRows: number[] = [];
+        await this.conn.queryAsync(
+            `SELECT COUNT(*) FROM background_jobs_dead`,
+            [],
+            { onRow: (row: any) => deadRows.push(row.getResultByIndex(0)) },
+        );
+        const dead = deadRows[0] ?? 0;
+
+        const byJobType: Record<string, number> = {};
+        await this.conn.queryAsync(
+            `SELECT job_type, COUNT(*) FROM background_jobs GROUP BY job_type`,
+            [],
+            {
+                onRow: (row: any) => {
+                    const jobType: string = row.getResultByIndex(0);
+                    const count: number = row.getResultByIndex(1);
+                    byJobType[jobType] = count;
+                },
+            },
+        );
+
+        return { pending, available, deferred, dead, byJobType };
+    }
+
+    private async selectBackgroundJobs(
+        sql: string,
+        params: any[] = [],
+    ): Promise<BackgroundJobRecord[]> {
+        const rows: BackgroundJobRecord[] = [];
+        await this.conn.queryAsync(sql, params, {
+            onRow: (row: any) => {
+                const contentKind = row.getResultByIndex(5);
+                const payloadJson = row.getResultByIndex(8);
+                const payload = parseBackgroundJobPayload(contentKind, payloadJson);
+                rows.push({
+                    id: row.getResultByIndex(0),
+                    jobType: row.getResultByIndex(1) as BackgroundJobType,
+                    libraryId: row.getResultByIndex(2),
+                    itemId: row.getResultByIndex(3) ?? null,
+                    zoteroKey: row.getResultByIndex(4),
+                    contentKind: contentKind as ExtractContentKind,
+                    payloadKind: row.getResultByIndex(6) as DocumentCachePayloadKind,
+                    priority: row.getResultByIndex(7),
+                    payload,
+                    enqueuedAt: row.getResultByIndex(9),
+                    availableAt: row.getResultByIndex(10),
+                    attemptCount: row.getResultByIndex(11),
+                    lastError: row.getResultByIndex(12) ?? null,
+                });
+            },
+        });
+        return rows;
+    }
 }

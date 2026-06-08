@@ -77,8 +77,12 @@ vi.mock('../../src/services/database', () => ({
     BeaverDB: class MockBeaverDB {},
 }));
 
-vi.mock('../../src/services/attachmentFileCache', () => ({
-    AttachmentFileCache: class MockAttachmentFileCache {},
+vi.mock('../../src/services/backgroundExtractor', () => ({
+    BackgroundExtractor: class MockBackgroundExtractor {
+        start = vi.fn();
+        stop = vi.fn().mockResolvedValue(undefined);
+        processOnce = vi.fn().mockResolvedValue({ processed: false });
+    },
 }));
 
 vi.mock('../../react/eventBus', () => ({

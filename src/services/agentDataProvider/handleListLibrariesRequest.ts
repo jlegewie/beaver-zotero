@@ -11,9 +11,9 @@ import { logger } from '../../utils/logger';
 import {
     WSListLibrariesRequest,
     WSListLibrariesResponse,
-    LibraryInfo,
 } from '../agentProtocol';
 import { getSearchableLibraryIds } from './utils';
+import { getLibrarySummaries } from './libraryCounts';
 
 
 /**
@@ -30,74 +30,7 @@ export async function handleListLibrariesRequest(
     try {
         // Get only searchable libraries (Pro: synced, Free: all local)
         const searchableLibraryIds = getSearchableLibraryIds();
-        const allLibraries = Zotero.Libraries.getAll()
-            .filter((lib: any) => searchableLibraryIds.includes(lib.libraryID));
-        const libraries: LibraryInfo[] = [];
-
-        for (const library of allLibraries) {
-            // Get top-level regular item count (excluding attachments, notes, annotations, and deleted)
-            let itemCount = 0;
-            try {
-                const sql = `
-                    SELECT COUNT(*) as cnt
-                    FROM items A
-                    LEFT JOIN itemNotes B USING (itemID)
-                    LEFT JOIN itemAttachments C USING (itemID)
-                    LEFT JOIN itemAnnotations D USING (itemID)
-                    WHERE A.libraryID = ?
-                    AND B.itemID IS NULL
-                    AND C.itemID IS NULL
-                    AND D.itemID IS NULL
-                    AND A.itemID NOT IN (SELECT itemID FROM deletedItems)
-                `;
-                await Zotero.DB.queryAsync(sql, [library.libraryID], {
-                    onRow: (row: any) => {
-                        itemCount = row.getResultByIndex(0) as number;
-                    }
-                });
-            } catch (error) {
-                logger(`handleListLibrariesRequest: Error counting items for library ${library.libraryID}: ${error}`, 2);
-            }
-
-            // Get collection count (excluding deleted)
-            let collectionCount = 0;
-            try {
-                const sql = `
-                    SELECT COUNT(*) as cnt
-                    FROM collections 
-                    WHERE libraryID = ?
-                    AND collectionID NOT IN (SELECT collectionID FROM deletedCollections)
-                `;
-                await Zotero.DB.queryAsync(sql, [library.libraryID], {
-                    onRow: (row: any) => {
-                        collectionCount = row.getResultByIndex(0) as number;
-                    }
-                });
-            } catch (error) {
-                logger(`handleListLibrariesRequest: Error counting collections for library ${library.libraryID}: ${error}`, 2);
-            }
-
-            // Get tag count
-            let tagCount = 0;
-            try {
-                const tags = await Zotero.Tags.getAll(library.libraryID);
-                tagCount = (tags as any[]).length;
-            } catch (error) {
-                logger(`handleListLibrariesRequest: Error counting tags for library ${library.libraryID}: ${error}`, 2);
-            }
-
-            libraries.push({
-                library_id: library.libraryID,
-                name: library.name,
-                is_group: library.isGroup,
-                read_only: !library.editable || !library.filesEditable,
-                item_count: itemCount,
-                collection_count: collectionCount,
-                tag_count: tagCount,
-            });
-        }
-
-        libraries.sort((a, b) => a.library_id - b.library_id);
+        const libraries = await getLibrarySummaries(searchableLibraryIds);
 
         logger(`handleListLibrariesRequest: Returning ${libraries.length} libraries`, 1);
 

@@ -10,10 +10,19 @@ import { ItemDataWithStatus, AttachmentDataWithStatus, ZoteroItemReference } fro
 import { searchableLibraryIdsAtom, syncWithZoteroAtom } from '../../../react/atoms/profile';
 import { userIdAtom } from '../../../react/atoms/auth';
 import { store } from '../../../react/store';
-import { serializeAttachment, serializeItem, serializeNote } from '../../utils/zoteroSerializers';
+import {
+    formatZoteroCreatorsString,
+    getCreatorsFromItem,
+    getYearFromItem,
+    serializeAttachment,
+    serializeAnnotation,
+    serializeItem,
+    serializeNote,
+} from '../../utils/zoteroSerializers';
 import { computeItemStatus, prefetchSyncDates, getAttachmentFileStatus, getAttachmentFileStatusLightweight, getBestAttachmentBatch } from './utils';
 import {
     WSDataError,
+    AnnotationResultItem,
     NoteResultItem,
     FileStatusLevel,
 } from '../agentProtocol';
@@ -34,6 +43,7 @@ export interface LookupZoteroReferencesResult {
     items: ItemDataWithStatus[];
     attachments: AttachmentDataWithStatus[];
     notes: NoteResultItem[];
+    annotations: AnnotationResultItem[];
     errors: WSDataError[];
 }
 
@@ -63,11 +73,13 @@ export async function lookupZoteroReferences(
     const itemKeys = new Set<string>();
     const attachmentKeys = new Set<string>();
     const noteKeys = new Set<string>();
+    const annotationKeys = new Set<string>();
 
     // Collect Zotero items to serialize
     const itemsToSerialize: Zotero.Item[] = [];
     const attachmentsToSerialize: Zotero.Item[] = [];
     const notesToSerialize: Zotero.Item[] = [];
+    const annotationsToSerialize: Zotero.Item[] = [];
 
     const makeKey = (libraryId: number, zoteroKey: string) => `${libraryId}-${zoteroKey}`;
 
@@ -165,10 +177,22 @@ export async function lookupZoteroReferences(
                 if (options.include_parents && zoteroItem.parentID) {
                     parentIdsToLoad.add(zoteroItem.parentID);
                 }
+            } else if (zoteroItem.isAnnotation()) {
+                const key = makeKey(zoteroItem.libraryID, zoteroItem.key);
+                if (!annotationKeys.has(key)) {
+                    annotationKeys.add(key);
+                    annotationsToSerialize.push(zoteroItem);
+                }
+                // Annotations live two levels deep: regular item -> attachment ->
+                // annotation. Collect the parent attachment for serialization
+                // and rely on Phase 4 to load the grandparent regular item.
+                if (options.include_parents && zoteroItem.parentID) {
+                    attachmentIdsToLoad.add(zoteroItem.parentID);
+                }
             } else {
                 errors.push({
                     reference,
-                    error: 'Item is not a regular item, attachment, or note',
+                    error: 'Item is not a regular item, attachment, note, or annotation',
                     error_code: 'filtered_from_sync'
                 });
             }
@@ -260,6 +284,20 @@ export async function lookupZoteroReferences(
                         }
                     }
                 }
+            } else if (zoteroItem.isAnnotation()) {
+                // Add parent attachment and grandparent regular item when
+                // requested, so consumers can render an annotation citation
+                // against the bibliographic parent.
+                if (options.include_parents && zoteroItem.parentID) {
+                    const parentAttachment = attachmentItemsById.get(zoteroItem.parentID);
+                    if (parentAttachment) {
+                        const attKey = makeKey(parentAttachment.libraryID, parentAttachment.key);
+                        if (!attachmentKeys.has(attKey)) {
+                            attachmentKeys.add(attKey);
+                            attachmentsToSerialize.push(parentAttachment);
+                        }
+                    }
+                }
             }
         } catch (error: any) {
             logger(`lookupZoteroReferences: Failed to expand zotero data ${reference.library_id}-${reference.zotero_key}: ${error}`, 1);
@@ -274,7 +312,7 @@ export async function lookupZoteroReferences(
     }
 
     // Phase 4: Load data for all items (including newly discovered parents and children)
-    const allItems = [...itemsToSerialize, ...attachmentsToSerialize, ...notesToSerialize];
+    const allItems = [...itemsToSerialize, ...attachmentsToSerialize, ...notesToSerialize, ...annotationsToSerialize];
     if (allItems.length > 0) {
         // Load all item data in bulk
         await Zotero.Items.loadDataTypes(allItems, ["primaryData", "creators", "itemData", "childItems", "tags", "collections", "relations"]);
@@ -289,6 +327,27 @@ export async function lookupZoteroReferences(
             const parentItems = await Zotero.Items.getAsync(parentIds);
             if (parentItems.length > 0) {
                 await Zotero.Items.loadDataTypes(parentItems, ["primaryData"]);
+                // Index parent attachments for annotations and capture
+                // grandparents so annotations can render bibliographic context.
+                for (const parentItem of parentItems) {
+                    if (parentItem.isAttachment?.() && !attachmentItemsById.has(parentItem.id)) {
+                        attachmentItemsById.set(parentItem.id, parentItem);
+                    }
+                }
+                const grandparentIds = [...new Set(
+                    parentItems
+                        .filter(p => p.isAttachment?.() && p.parentID)
+                        .map(p => p.parentID as number)
+                )];
+                if (grandparentIds.length > 0) {
+                    const grandparentItems = await Zotero.Items.getAsync(grandparentIds);
+                    if (grandparentItems.length > 0) {
+                        await Zotero.Items.loadDataTypes(grandparentItems, ["primaryData", "itemData", "creators"]);
+                        for (const grandparent of grandparentItems) {
+                            parentItemsById.set(grandparent.id, grandparent);
+                        }
+                    }
+                }
             }
         }
     }
@@ -336,7 +395,12 @@ export async function lookupZoteroReferences(
         })),
         Promise.all(attachmentsToSerialize.map(async (attachment): Promise<AttachmentDataWithStatus | null> => {
             try {
-                const serialized = await serializeAttachment(attachment, undefined, { skipFileHash: true, skipSyncingFilter: true, skipHash: true });
+                const serialized = await serializeAttachment(attachment, undefined, {
+                    skipFileHash: true,
+                    skipSyncingFilter: true,
+                    skipHash: true,
+                    includeAnnotationsCount: true,
+                });
                 if (!serialized) {
                     errors.push({
                         reference: { library_id: attachment.libraryID, zotero_key: attachment.key },
@@ -408,10 +472,59 @@ export async function lookupZoteroReferences(
         }
     }
 
+    // Serialize annotations. Annotations live under attachments, which live
+    // under regular items. We surface both the parent attachment (the PDF)
+    // and the bibliographic regular item (the paper) so the citation system
+    // can render against the bibliographic parent and an LLM-facing tool can
+    // name what each id refers to.
+    const annotationResults: AnnotationResultItem[] = [];
+    for (const annotation of annotationsToSerialize) {
+        try {
+            const parentAttachment = annotation.parentID ? attachmentItemsById.get(annotation.parentID) : null;
+            const attachmentInfo = parentAttachment
+                ? { item_id: `${parentAttachment.libraryID}-${parentAttachment.key}` }
+                : null;
+
+            const regularItem = parentAttachment?.parentID
+                ? parentItemsById.get(parentAttachment.parentID)
+                : null;
+            let itemInfo: {
+                item_id: string;
+                item_type?: string | null;
+                title: string;
+                creators?: string | null;
+                year?: number | null;
+            } | null = null;
+            if (regularItem) {
+                let itemTitle = '';
+                try { itemTitle = (regularItem.getField('title', false, true) as string) || ''; }
+                catch { itemTitle = regularItem.getDisplayTitle?.() || ''; }
+                itemInfo = {
+                    item_id: `${regularItem.libraryID}-${regularItem.key}`,
+                    item_type: regularItem.itemType ?? null,
+                    title: itemTitle,
+                    creators: formatZoteroCreatorsString(getCreatorsFromItem(regularItem)),
+                    year: getYearFromItem(regularItem) ?? null,
+                };
+            }
+
+            annotationResults.push(serializeAnnotation(annotation, attachmentInfo, itemInfo));
+        } catch (error: any) {
+            logger(`lookupZoteroReferences: Failed to serialize annotation ${annotation.libraryID}/${annotation.key}: ${error}`, 1);
+            errors.push({
+                reference: { library_id: annotation.libraryID, zotero_key: annotation.key },
+                error: 'Failed to serialize annotation',
+                error_code: 'load_failed',
+                details: error instanceof Error ? `${error.message}\n${error.stack || ''}` : String(error),
+            });
+        }
+    }
+
     return {
         items,
         attachments,
         notes: noteResults,
+        annotations: annotationResults,
         errors,
     };
 }

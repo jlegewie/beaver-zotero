@@ -56,7 +56,7 @@ declare namespace Zotero {
             env: "development" | "production";
         };
 
-        const attachmentFileCache: import("../src/services/attachmentFileCache").AttachmentFileCache | undefined;
+        const documentCache: import("../src/services/documentCache").DocumentCache | undefined;
 
         const db: {
             /**
@@ -278,68 +278,60 @@ declare namespace Zotero {
              */
             getEmbeddedItemIds(libraryId?: number): Promise<number[]>;
 
-            // --- Attachment File Cache Methods ---
+            getDocumentCacheMetadataByKey(
+                libraryId: number,
+                zoteroKey: string,
+            ): Promise<import("../src/services/database").DocumentCacheMetadataRecord | null>;
 
-            /**
-             * Insert or update an attachment file cache record.
-             * @param record The attachment file cache data to store
-             */
-            upsertAttachmentFileCache(record: Omit<import("../src/services/database").AttachmentFileCacheRecord, 'cached_at'>): Promise<void>;
+            getAllDocumentCacheMetadata(): Promise<import("../src/services/database").DocumentCacheMetadataRecord[]>;
 
-            /**
-             * Insert or update multiple attachment file cache records in a batch.
-             * @param records Array of attachment file cache data to store
-             */
-            upsertAttachmentFileCacheBatch(records: Array<Omit<import("../src/services/database").AttachmentFileCacheRecord, 'cached_at'>>): Promise<void>;
+            getDocumentCachePayload(
+                libraryId: number,
+                zoteroKey: string,
+                payloadKind: import("../src/services/database").DocumentCachePayloadKind,
+            ): Promise<import("../src/services/database").DocumentCachePayloadRecord | null>;
 
-            /**
-             * Get an attachment file cache record by item ID.
-             * @param itemId The Zotero item ID
-             * @returns The record or null if not found
-             */
-            getAttachmentFileCache(itemId: number): Promise<import("../src/services/database").AttachmentFileCacheRecord | null>;
+            // --- Background job queue ---
+            enqueueBackgroundJob(
+                input: import("../src/services/database").BackgroundJobInput,
+            ): Promise<import("../src/services/database").BackgroundJobEnqueueResult>;
 
-            /**
-             * Get an attachment file cache record by library ID and Zotero key.
-             * @param libraryId The Zotero library ID
-             * @param zoteroKey The Zotero item key
-             * @returns The record or null if not found
-             */
-            getAttachmentFileCacheByKey(libraryId: number, zoteroKey: string): Promise<import("../src/services/database").AttachmentFileCacheRecord | null>;
+            enqueueBackgroundJobs(
+                inputs: import("../src/services/database").BackgroundJobInput[],
+            ): Promise<import("../src/services/database").BackgroundJobEnqueueResult[]>;
 
-            /**
-             * Get attachment file cache records for multiple item IDs.
-             * @param itemIds Array of Zotero item IDs
-             * @returns Map of item ID to attachment file cache record
-             */
-            getAttachmentFileCacheBatch(itemIds: number[]): Promise<Map<number, import("../src/services/database").AttachmentFileCacheRecord>>;
+            claimNextBackgroundJob(
+                now: number,
+                visibilityTimeoutMs: number,
+                maxPriority?: number,
+            ): Promise<import("../src/services/database").BackgroundJobRecord | null>;
 
-            /**
-             * Delete an attachment file cache record by item ID.
-             * @param itemId The Zotero item ID
-             */
-            deleteAttachmentFileCache(itemId: number): Promise<void>;
+            peekBackgroundJobs(
+                limit?: number,
+            ): Promise<import("../src/services/database").BackgroundJobRecord[]>;
 
-            /**
-             * Delete all attachment file cache records for a library.
-             * @param libraryId The Zotero library ID
-             */
-            deleteAttachmentFileCacheByLibrary(libraryId: number): Promise<void>;
+            completeBackgroundJob(id: number): Promise<void>;
 
-            /**
-             * Get count of attachment file cache records.
-             * @param libraryId Optional library ID to filter by
-             * @returns Number of records
-             */
-            getAttachmentFileCacheCount(libraryId?: number): Promise<number>;
+            failBackgroundJob(
+                id: number,
+                error: string,
+                opts: {
+                    maxAttempts: number;
+                    backoffMs: (attempt: number) => number;
+                    now: number;
+                },
+            ): Promise<{ dead: boolean }>;
 
-            /**
-             * Get all attachment file cache records (for GC operations).
-             * @returns Array of all attachment file cache records
-             */
-            getAllAttachmentFileCache(): Promise<import("../src/services/database").AttachmentFileCacheRecord[]>;
+            releaseBackgroundJob(id: number, now: number): Promise<void>;
 
+            getBackgroundQueueStats(
+                now: number,
+            ): Promise<import("../src/services/database").BackgroundQueueStats>;
         }
+
+        const backgroundExtractor:
+            | import("../src/services/backgroundExtractor").BackgroundExtractor
+            | undefined;
 
         /**
          * Citation object for CSL formatting
@@ -510,10 +502,15 @@ declare namespace _ZoteroTypes {
         /** Set to true at the start of shutdown to signal all in-flight operations to bail out */
         __beaverShuttingDown?: boolean;
         /**
-         * Cross-bundle singleton MuPDFWorkerClient. Typed as `unknown` to avoid
-         * pulling the implementation file into the global typings (which would
-         * risk circular references). Callers cast at the boundary.
+         * Cross-bundle MuPDFWorkerClient singletons, one per slot name.
+         * Typed as `unknown` to avoid pulling the implementation file into
+         * the global typings (which would risk circular references).
+         * Callers cast at the boundary.
+         *
+         *  - `_hot`: user-facing agent extraction (low-latency).
+         *  - `_background`: background/queue extraction (independent heap).
          */
-        __beaverMuPDFWorkerClient?: unknown;
+        __beaverMuPDFWorkerClient_hot?: unknown;
+        __beaverMuPDFWorkerClient_background?: unknown;
     }
 }

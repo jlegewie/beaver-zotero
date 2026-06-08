@@ -29,6 +29,8 @@ function basePage(): InternalProcessedPage {
         index: 0,
         width: 600,
         height: 800,
+        viewBox: [0, 0, 600, 800],
+        rotation: 0,
         content: '',
         columns: [],
         items: [],

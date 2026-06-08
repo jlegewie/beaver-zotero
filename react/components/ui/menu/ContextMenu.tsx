@@ -90,6 +90,10 @@ export interface ContextMenuProps {
     position: MenuPosition;
     /** Optional CSS class name */
     className?: string;
+    /** Optional class names for default menu item labels (icon + text rows) */
+    itemLabelClassName?: string;
+    /** Optional class names for default menu item icons */
+    itemIconClassName?: string;
     /** Whether to use fixed positioning instead of absolute */
     useFixedPosition?: boolean;
     /** Whether to use portal for rendering (prevents containment issues) */
@@ -137,6 +141,8 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
     maxWidth = undefined,
     maxHeight = undefined,
     className = '',
+    itemLabelClassName = 'flex-1 text-base font-color-secondary truncate',
+    itemIconClassName = 'font-color-secondary flex-shrink-0',
     useFixedPosition = false,
     usePortal = false,
     positionAdjustment = { x: 0, y: 0 },
@@ -431,9 +437,9 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
                     role={item.isGroupHeader || item.isDivider ? 'presentation' : item.role ?? 'menuitem'}
                     tabIndex={focusedIndex === index && isFocusableItem(item) ? 0 : -1}
                     className={`
-                        ${item.isDivider ? 'border-t border-quinary my-1' : ''}
-                        ${item.isGroupHeader ? 'px-2 py-1 font-color-tertiary text-xs font-medium mt-1 first:mt-0' : 
-                          `display-flex items-center gap-2 px-2 py-15 rounded-md transition user-select-none
+                        ${item.isDivider ? 'border-t border-top-quinary my-1' :
+                          item.isGroupHeader ? 'px-2 py-1 font-color-tertiary text-xs font-medium mt-1 first:mt-0' :
+                          `beaver-menu-item display-flex items-center gap-2 px-2 py-15 rounded-md transition user-select-none
                           ${item.disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
                           ${(focusedIndex === index || hoveredIndex === index) && !item.disabled ? 'bg-quinary' : ''}`
                         }
@@ -510,9 +516,9 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
                         // Otherwise render default icon + label layout
                         <span className="display-flex items-center gap-2 w-full min-w-0">
                             {item.icon && (
-                                <Icon icon={item.icon} size={14} className="font-color-secondary flex-shrink-0"/>
+                                <Icon icon={item.icon} size={14} className={itemIconClassName}/>
                             )}
-                            <span className="flex-1 text-base font-color-secondary truncate">{item.label}</span>
+                            <span className={itemLabelClassName}>{item.label}</span>
                         </span>
                     )}
                 </div>
@@ -552,7 +558,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
             doc.body
         );
     }
-    
+
     return menuElement;
 };
 

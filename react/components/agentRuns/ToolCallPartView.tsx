@@ -27,6 +27,7 @@ import {
     TaskDailyIcon,
     TagIcon,
     PropertyEditIcon,
+    HighlighterIcon,
 } from '../icons/icons';
 import { toolExpandedAtom, toggleToolExpandedAtom, setToolExpandedAtom } from '../../atoms/messageUIState';
 
@@ -54,6 +55,10 @@ const TOOL_ICONS: Record<string, IconComponent> = {
     get_metadata: FileViewIcon,
     edit_metadata: PropertyEditIcon,
     edit_item: PropertyEditIcon,
+
+    // Annotation tools
+    get_annotations: HighlighterIcon,
+    find_annotations: HighlighterIcon,
 
     // Reading tools
     search_in_documents: TextAlignLeftIcon,
@@ -87,7 +92,15 @@ const TOOL_ICONS: Record<string, IconComponent> = {
 
     // Read tool result
     read_file: TextAlignLeftIcon,
+    load_tool_results: PuzzleIcon,
+    
+    // Progressive disclosure tools
+    load_capability: PuzzleIcon,
+    search_tools: PuzzleIcon,
 };
+
+/** Progressive disclosure tools whose returns are framework-internal and shouldn't be expandable. */
+const NON_EXPANDABLE_TOOLS = new Set(['read_file', 'load_capability', 'search_tools', 'load_tool_results']);
 
 /** Tools that return pages */
 const UNIT_PAGES_TOOLS = new Set(['read_pages', 'read_attachment', 'view_page_images', 'view_pages']);
@@ -197,6 +210,8 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
     const isStandardAgentActionTool =
         part.tool_name === 'edit_metadata' ||
         part.tool_name === 'create_collection' ||
+        part.tool_name === 'create_highlight_annotations' ||
+        part.tool_name === 'create_note_annotations' ||
         part.tool_name === 'organize_items' ||
         part.tool_name === 'manage_tags' ||
         part.tool_name === 'manage_collections' ||
@@ -271,7 +286,7 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
         result?.part_kind === 'tool-return' &&
         // If we can compute a count (search-like tools), block expansion for 0 results.
         (resultCount === null || resultCount > 0) &&
-        part.tool_name !== 'read_file' &&
+        !NON_EXPANDABLE_TOOLS.has(part.tool_name) &&
         !isExtractionRejected &&
         !isExternalSearchRejected &&
         !showAgentActionView; // Don't allow expand toggle for agent action tools

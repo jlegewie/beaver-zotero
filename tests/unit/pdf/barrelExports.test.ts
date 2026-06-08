@@ -103,6 +103,7 @@ describe("pdf barrel exports", () => {
             "extractPageSentences",
             "flipOrigin",
             "getEffectiveRepeatThreshold",
+            "getExistingMuPDFWorkerClient",
             "getMuPDFWorkerClient",
             "isConfigured",
             "logColumnDetection",

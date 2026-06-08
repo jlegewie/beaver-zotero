@@ -63,6 +63,7 @@ function makeInput(overrides: Partial<MatchInput>): MatchInput {
         simplified,
         strippedHtml: overrides.strippedHtml ?? simplified,
         externalRefContext: { externalRefs: new Map(), externalItemMapping: new Map() } as any,
+        pageLabels: {},
         ...overrides,
     };
 }
@@ -400,6 +401,110 @@ describe('findBestMatch strategies', () => {
         // Replacement must start with the transformed anchor so the merged
         // form still "inserts after" the anchor in raw HTML space.
         expect(result?.newString.startsWith(result!.oldString)).toBe(true);
+    });
+
+    it('markdown_render: matches composed Markdown rendered by the handler', () => {
+        const renderedOld = [
+            '<h3>1. Batch Normalization — A &amp; B</h3>',
+            '<p>核心 <strong>bold</strong> and $x_i$.</p>',
+            '<ul><li>first item</li><li>second item</li></ul>',
+        ].join('\n');
+        const renderedNew = [
+            '<h3>1. Batch Normalization — A &amp; B</h3>',
+            '<p>核心 <strong>updated</strong> and $x_i$.</p>',
+            '<ul><li>first item</li><li>second item</li></ul>',
+        ].join('\n');
+
+        const result = match(makeInput({
+            oldString: [
+                '### 1. Batch Normalization — A & B',
+                '',
+                '核心 **bold** and $x_i$.',
+                '- first item',
+                '- second item',
+            ].join('\n'),
+            newString: [
+                '### 1. Batch Normalization — A & B',
+                '',
+                '核心 **updated** and $x_i$.',
+                '- first item',
+                '- second item',
+            ].join('\n'),
+            strippedHtml: `<section>${renderedOld}</section>`,
+            renderedOldSimplified: renderedOld,
+            renderedNewSimplified: renderedNew,
+        }));
+
+        expect(result?.strategy).toBe('markdown_render');
+        expect(result?.oldString).toBe(renderedOld);
+        expect(result?.newString).toBe(renderedNew);
+        expect(result?.expandedNew).toBe(renderedNew);
+    });
+
+    it('markdown_render: preserves rendered citation tags in new_string', () => {
+        const renderedOld = '<h3>A &amp; B</h3><p><strong>anchor</strong></p><ul><li>x</li></ul>';
+        const renderedNew = '<p>See <citation id="1-ABCDEFGH"/></p>';
+
+        const result = match(makeInput({
+            oldString: '### A & B\n\n**anchor**\n- x',
+            newString: 'See <citation id="1-ABCDEFGH"/>',
+            strippedHtml: renderedOld,
+            renderedOldSimplified: renderedOld,
+            renderedNewSimplified: renderedNew,
+        }));
+
+        expect(result?.strategy).toBe('markdown_render');
+        expect(result?.expandedNew).toBe(renderedNew);
+    });
+
+    it('markdown_render: preserves rendered raw HTML in new_string', () => {
+        const renderedOld = '<h3>A &amp; B</h3><p><strong>anchor</strong></p><ul><li>x</li></ul>';
+        const renderedNew = '<blockquote><p>Replacement <em>HTML</em></p></blockquote>';
+
+        const result = match(makeInput({
+            oldString: '### A & B\n\n**anchor**\n- x',
+            newString: '<blockquote><p>Replacement <em>HTML</em></p></blockquote>',
+            strippedHtml: renderedOld,
+            renderedOldSimplified: renderedOld,
+            renderedNewSimplified: renderedNew,
+        }));
+
+        expect(result?.strategy).toBe('markdown_render');
+        expect(result?.expandedNew).toBe(renderedNew);
+    });
+
+    it('markdown_render: supports insert_after with a rendered merged replacement', () => {
+        const renderedOld = '<h3>A &amp; B</h3><p><strong>anchor</strong></p><ul><li>x</li></ul>';
+        const renderedNew = `${renderedOld}<p>inserted</p>`;
+
+        const result = match(makeInput({
+            operation: 'insert_after' as EditNoteOperation,
+            oldString: '### A & B\n\n**anchor**\n- x',
+            newString: '\n\ninserted',
+            strippedHtml: renderedOld,
+            renderedOldSimplified: renderedOld,
+            renderedNewSimplified: renderedNew,
+        }));
+
+        expect(result?.strategy).toBe('markdown_render');
+        expect(result?.expandedNew.startsWith(result!.expandedOld)).toBe(true);
+    });
+
+    it('markdown_render: supports insert_before with a rendered merged replacement', () => {
+        const renderedOld = '<h3>A &amp; B</h3><p><strong>anchor</strong></p><ul><li>x</li></ul>';
+        const renderedNew = `<p>inserted</p>${renderedOld}`;
+
+        const result = match(makeInput({
+            operation: 'insert_before' as EditNoteOperation,
+            oldString: '### A & B\n\n**anchor**\n- x',
+            newString: 'inserted\n\n',
+            strippedHtml: renderedOld,
+            renderedOldSimplified: renderedOld,
+            renderedNewSimplified: renderedNew,
+        }));
+
+        expect(result?.strategy).toBe('markdown_render');
+        expect(result?.expandedNew.endsWith(result!.expandedOld)).toBe(true);
     });
 });
 
@@ -1093,7 +1198,7 @@ describe('whitespace_relaxed strategy', () => {
         const mocked = vi.mocked(expandToRawHtml);
         const expand = (s: string) =>
             s.replace(
-                /<citation ref="([^"]+)" item_id="([^"]+)"\/>/g,
+                /<citation ref="([^"]+)" (?:id|item_id)="([^"]+)"\/>/g,
                 '<span class="citation" data-ref="$1" data-item="$2">(…)</span>',
             );
         mocked.mockImplementation(expand);
@@ -1107,7 +1212,7 @@ describe('whitespace_relaxed strategy', () => {
             // whitespace drift, now tolerated even with the <citation>.
             const needleWithDrift =
                 '<p>Anchor   paragraph intro\n\n'
-                + '<citation ref="c_A_0" item_id="1-AAAAAAAA"/>'
+                + '<citation ref="c_A_0" id="1-AAAAAAAA"/>'
                 + '  with enough body text to clear the length gate</p>';
             const result = match(makeInput({
                 oldString: needleWithDrift,

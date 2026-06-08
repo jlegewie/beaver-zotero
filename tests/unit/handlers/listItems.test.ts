@@ -163,6 +163,7 @@ describe('handleListItemsRequest', () => {
             getDisplayTitle: vi.fn(() => 'Attachment'),
             attachmentFilename: 'paper.pdf',
             attachmentContentType: 'application/pdf',
+            isFileAttachment: vi.fn(() => true),
             getAnnotations: vi.fn(() => [{ id: 4 }]),
         } as Partial<MockItem>);
         const annotation = makeItem({
@@ -194,9 +195,83 @@ describe('handleListItemsRequest', () => {
         expect(response.items).toEqual(expect.arrayContaining([
             expect.objectContaining({ item_id: '1-PARENT', result_type: 'regular' }),
             expect.objectContaining({ item_id: '1-NOTE', result_type: 'note' }),
-            expect.objectContaining({ item_id: '1-ATTACH', result_type: 'attachment' }),
+            expect.objectContaining({ item_id: '1-ATTACH', result_type: 'attachment', annotations_count: 1 }),
         ]));
         expect(response.items).not.toContainEqual(expect.objectContaining({ item_id: '1-ANN1' }));
+        expect(attachment.getAnnotations).toHaveBeenCalledOnce();
+    });
+
+    it('returns zero annotations_count for file attachments with no annotations', async () => {
+        const attachment = makeItem({
+            id: 1,
+            key: 'ATTACH',
+            itemType: 'attachment',
+            isAttachment: vi.fn(() => true),
+            isRegularItem: vi.fn(() => false),
+            getDisplayTitle: vi.fn(() => 'Attachment'),
+            attachmentFilename: 'paper.pdf',
+            attachmentContentType: 'application/pdf',
+            isFileAttachment: vi.fn(() => true),
+            getAnnotations: vi.fn(() => []),
+        } as Partial<MockItem>);
+
+        itemsById.set(attachment.id, attachment);
+        searchResults.push([attachment.id]);
+
+        const response = await handleListItemsRequest({
+            event: 'list_items_request',
+            request_id: 'req-3',
+            item_category: 'attachment',
+            recursive: true,
+            sort_by: 'dateModified',
+            sort_order: 'desc',
+            limit: 20,
+            offset: 0,
+        });
+
+        expect(response.items[0]).toEqual(expect.objectContaining({
+            item_id: '1-ATTACH',
+            result_type: 'attachment',
+            annotations_count: 0,
+        }));
+        expect(attachment.getAnnotations).toHaveBeenCalledOnce();
+    });
+
+    it('returns zero annotations_count for non-file attachments without reading annotations', async () => {
+        const attachment = makeItem({
+            id: 1,
+            key: 'LINK',
+            itemType: 'attachment',
+            isAttachment: vi.fn(() => true),
+            isRegularItem: vi.fn(() => false),
+            getDisplayTitle: vi.fn(() => 'Linked URL'),
+            attachmentFilename: null,
+            attachmentContentType: 'text/html',
+            isFileAttachment: vi.fn(() => false),
+            getAnnotations: vi.fn(() => {
+                throw new Error('getAnnotations should not be called');
+            }),
+        } as Partial<MockItem>);
+
+        itemsById.set(attachment.id, attachment);
+        searchResults.push([attachment.id]);
+
+        const response = await handleListItemsRequest({
+            event: 'list_items_request',
+            request_id: 'req-4',
+            item_category: 'attachment',
+            recursive: true,
+            sort_by: 'dateModified',
+            sort_order: 'desc',
+            limit: 20,
+            offset: 0,
+        });
+
+        expect(response.items[0]).toEqual(expect.objectContaining({
+            item_id: '1-LINK',
+            result_type: 'attachment',
+            annotations_count: 0,
+        }));
         expect(attachment.getAnnotations).not.toHaveBeenCalled();
     });
 });

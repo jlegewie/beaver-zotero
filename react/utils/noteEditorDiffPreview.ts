@@ -24,8 +24,11 @@ import {
 } from '../../src/utils/noteHtmlSimplifier';
 import {
     expandToRawHtml,
+    preloadPageLabelsForNewCitations,
+    preloadNotePageLabels,
     type ExternalRefContext,
 } from '../../src/utils/noteCitationExpand';
+import type { PageLabelsByAttachmentId } from '../atoms/citations';
 import { getLatestNoteHtml } from '../../src/utils/noteEditorIO';
 import {
     stripDataCitationItems,
@@ -327,8 +330,19 @@ export async function showDiffPreview(
         // src/services/agentDataProvider/actions/editNote.ts (lines 309, 914).
         const normalizedHtml = normalizeNoteHtml(rawHtml);
         const noteId = `${libraryId}-${zoteroKey}`;
-        const { metadata } = getOrSimplify(noteId, rawHtml, libraryId);
+        const pageLabelsByItemId = await preloadNotePageLabels(rawHtml, libraryId);
+        const { metadata } = getOrSimplify(noteId, rawHtml, libraryId, pageLabelsByItemId);
         const externalRefContext = getExternalRefContext();
+
+        // Resolve page labels for new-citation translation across every edit
+        // up-front so the synchronous expansion below can translate 1-based
+        // page numbers to display labels.
+        const pageLabels: PageLabelsByAttachmentId = {};
+        for (const edit of edits) {
+            if (edit.newString) {
+                Object.assign(pageLabels, await preloadPageLabelsForNewCitations(edit.newString));
+            }
+        }
 
         // Expand all edits
         const expandedEdits: Array<{ expandedOld: string; expandedNew: string; operation: EditNoteOperation }> = [];
@@ -336,7 +350,7 @@ export async function showDiffPreview(
             const op = edit.operation ?? 'str_replace';
             try {
                 if (op === 'rewrite' || op === 'append') {
-                    const expandedNew = edit.newString ? expandToRawHtml(edit.newString, metadata, 'new', externalRefContext) : '';
+                    const expandedNew = edit.newString ? expandToRawHtml(edit.newString, metadata, 'new', externalRefContext, pageLabels) : '';
                     expandedEdits.push({ expandedOld: '', expandedNew, operation: op });
                 } else {
                     const expandedOld = edit.oldString ? expandToRawHtml(edit.oldString, metadata, 'old') : '';
@@ -347,7 +361,7 @@ export async function showDiffPreview(
                     //   - insert_before: new_string = new_string + old_string
                     // so computeHtmlDiff will naturally show the anchor as
                     // context and the insertion as addition.
-                    const expandedNew = edit.newString ? expandToRawHtml(edit.newString, metadata, 'new', externalRefContext) : '';
+                    const expandedNew = edit.newString ? expandToRawHtml(edit.newString, metadata, 'new', externalRefContext, pageLabels) : '';
                     if (expandedOld) {
                         expandedEdits.push({ expandedOld, expandedNew, operation: op });
                     } else {

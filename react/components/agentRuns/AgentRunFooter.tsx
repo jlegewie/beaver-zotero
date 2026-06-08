@@ -24,7 +24,7 @@ import { currentThreadIdAtom } from '../../atoms/threads';
 import { store } from '../../store';
 import Tooltip from '../ui/Tooltip';
 import Spinner from '../icons/Spinner';
-import { preloadPageLabelsForContent } from '../../utils/pageLabels';
+import { prepareCitationRenderContext } from '../../utils/citationRenderContext';
 
 interface AgentRunFooterProps {
     run: AgentRun;
@@ -176,12 +176,13 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
         sections.push(`## Beaver\n\n${combinedContent}`);
         const noteMarkdown = sections.join('\n\n---\n\n');
 
-        await preloadPageLabelsForContent(noteMarkdown);
-        let formattedContent = renderToHTML(preprocessNoteContent(noteMarkdown), "markdown", {
+        const renderContent = preprocessNoteContent(noteMarkdown);
+        const renderContextData = await prepareCitationRenderContext(renderContent, {
             citationDataMap,
             externalMapping: externalReferenceMapping,
-            externalReferencesMap
+            externalReferencesMap,
         });
+        let formattedContent = renderToHTML(renderContent, "markdown", renderContextData);
         const context = getZoteroTargetContextSync();
         const threadId = store.get(currentThreadIdAtom);
 
@@ -226,12 +227,13 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
         sections.push(`## Beaver\n\n${combinedContent}`);
         const noteMarkdown = sections.join('\n\n---\n\n');
 
-        await preloadPageLabelsForContent(noteMarkdown);
-        let formattedContent = renderToHTML(preprocessNoteContent(noteMarkdown), "markdown", {
+        const renderContent = preprocessNoteContent(noteMarkdown);
+        const renderContextData = await prepareCitationRenderContext(renderContent, {
             citationDataMap,
             externalMapping: externalReferenceMapping,
-            externalReferencesMap
+            externalReferencesMap,
         });
+        let formattedContent = renderToHTML(renderContent, "markdown", renderContextData);
         const context = getZoteroTargetContextSync();
 
         if (!context.parentReference) return;
@@ -367,4 +369,3 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
 };
 
 export default AgentRunFooter;
-

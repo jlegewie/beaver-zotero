@@ -120,6 +120,10 @@ const TOOL_BASE_LABELS: Record<string, string> = {
     get_metadata: 'Get metadata',
     edit_metadata: 'Edit metadata',
 
+    // Annotation tools
+    get_annotations: 'Get annotations',
+    find_annotations: 'Find annotations',
+
     // Note tools
     read_note: 'Reading note',
     edit_note: 'Edit note',
@@ -140,6 +144,7 @@ const TOOL_BASE_LABELS: Record<string, string> = {
     search_in_attachment: 'Search in attachment',
     search_in_attachments: 'Search in attachments',
     read_file: 'Retrieving data',
+    load_tool_results: 'Loading tool results',
     view_pages: 'Viewing pages',
     view_page_images: 'Viewing pages',
 
@@ -149,6 +154,8 @@ const TOOL_BASE_LABELS: Record<string, string> = {
     // Annotations
     add_highlight_annotations: 'Highlight annotations',
     add_note_annotations: 'Note annotations',
+    create_highlight_annotations: 'Creating highlight annotations',
+    create_note_annotations: 'Creating sticky notes',
 
     // Suggestions
     return_suggestions: 'Suggestions',
@@ -158,6 +165,10 @@ const TOOL_BASE_LABELS: Record<string, string> = {
     create_zotero_item: 'Add item',
     external_search: 'Web search',
     lookup_work: 'Lookup work',
+
+    // Framework tools
+    load_capability: 'Loading capability',
+    search_tools: 'Finding tools',
 };
 
 
@@ -510,6 +521,54 @@ export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): st
             return baseLabel;
         }
 
+        // === Annotation tools ===
+        case 'get_annotations': {
+            const attachmentId = args.attachment_id as string | undefined;
+            if (attachmentId) {
+                const item = getItemFromAttachmentId(attachmentId);
+                if (item) {
+                    return `${baseLabel}: ${getItemDisplayName(item)}`;
+                }
+            }
+            return baseLabel;
+        }
+
+        case 'find_annotations': {
+            const attachmentId = args.attachment_id as string | undefined;
+            if (attachmentId) {
+                const item = getItemFromAttachmentId(attachmentId);
+                if (item) {
+                    return `${baseLabel}: ${getItemDisplayName(item)}`;
+                }
+            }
+
+            const color = args.color as string | undefined;
+            const annotationType = args.annotation_type as string | undefined;
+            if (color || annotationType) {
+                const label = [color, annotationType ? `${annotationType}s` : 'annotations']
+                    .filter(Boolean)
+                    .join(' ');
+                return `${baseLabel}: ${truncate(label, 40)}`;
+            }
+
+            const tag = args.tag as string | undefined;
+            if (tag) {
+                return `${baseLabel}: tagged "${truncate(tag, 30)}"`;
+            }
+
+            const text = args.text_contains as string | undefined;
+            if (text) {
+                return `${baseLabel}: "${truncate(text, 40)}"`;
+            }
+
+            const collection = args.collection as string | undefined;
+            if (collection) {
+                return `${baseLabel}: ${truncate(collection, 40)}`;
+            }
+
+            return baseLabel;
+        }
+
         // === Extract tool ===
         case 'extract': {
             const attachmentIds = args.attachment_ids as string[] | undefined;
@@ -705,6 +764,33 @@ export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): st
             return baseLabel;
         }
 
+        // === Tool results ===
+        case 'load_tool_results': {
+            return baseLabel;
+        }
+
+        // Progressive disclosure tools
+        case 'load_capability': {
+            // args.id is the capability id (e.g. "library-management").
+            const id = args.id as string | undefined;
+            if (id) {
+                const pretty = SKILL_NAME_LABELS[id]
+                    || id.replace(/-/g, ' ').split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+                return `${baseLabel}: ${truncate(pretty, 30)}`;
+            }
+            return baseLabel;
+        }
+
+        case 'search_tools': {
+            // args.queries is a list of strings (older builds used args.keywords).
+            const queries = normalizeListParam(args.queries)
+                ?? (typeof args.keywords === 'string' ? [args.keywords] : null);
+            if (queries && queries[0]) {
+                return `${baseLabel}: "${truncate(queries[0], 40)}"`;
+            }
+            return baseLabel;
+        }
+
         // === Tools without dynamic labels ===
         case 'view_page_images':
         case 'add_highlight_annotations':
@@ -715,4 +801,3 @@ export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): st
             return baseLabel;
     }
 }
-

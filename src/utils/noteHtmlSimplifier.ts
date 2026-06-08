@@ -14,6 +14,10 @@ import { stripBeaverEditFooter, stripBeaverCreatedFooter } from './noteEditFoote
 import { escapeAttr, unescapeAttr } from './noteHtmlEntities';
 import { stripDataCitationItems, stripNoteWrapperDiv } from './noteWrapper';
 import { normalizeNoteHtml } from '../prosemirror/normalize';
+import { parseZoteroCitationLinkHref } from './zoteroLinkCitation';
+import { translatePageLabelToNumber } from './pageLabelTranslation';
+import { extractItemKeyFromUri } from './zoteroUri';
+import type { PageLabels } from '../services/documentCache';
 
 export { normalizeNoteHtml };
 
@@ -33,13 +37,19 @@ export interface SimplificationMetadata {
 export interface StoredElement {
     rawHtml: string;
     type: 'citation' | 'compound-citation' | 'annotation' | 'annotation-image' | 'image' | 'link';
-    originalAttrs?: { item_id: string; page?: string };
+    originalAttrs?: {
+        item_id: string;
+        page?: string;
+        pageConvention?: 'number' | 'label';
+        cslLabel?: string;
+    };
     isCompound?: boolean;
     originalText?: string;
 }
 
 interface CachedSimplification {
     contentHash: string;
+    pageLabelsFingerprint: string;
     simplified: string;
     metadata: SimplificationMetadata;
 }
@@ -50,6 +60,10 @@ interface CachedSimplification {
 
 const MAX_CACHE_SIZE = 50;
 const simplificationCache = new Map<string, CachedSimplification>();
+
+function simplificationCacheKey(noteId: string, pageLabelsFingerprint: string): string {
+    return `${noteId}\u0000${pageLabelsFingerprint}`;
+}
 
 function quickHash(str: string): string {
     // Simple hash for content comparison (not cryptographic)
@@ -62,23 +76,43 @@ function quickHash(str: string): string {
     return String(hash) + ':' + str.length;
 }
 
+function fingerprintPageLabels(pageLabelsByItemId?: Record<string, PageLabels>): string {
+    if (!pageLabelsByItemId || Object.keys(pageLabelsByItemId).length === 0) return '';
+    return JSON.stringify(
+        Object.keys(pageLabelsByItemId)
+            .sort()
+            .map((itemId) => [
+                itemId,
+                Object.entries(pageLabelsByItemId[itemId] ?? {})
+                    .sort(([a], [b]) => Number(a) - Number(b)),
+            ])
+    );
+}
+
 /**
  * Get a cached simplification or re-simplify if cache is stale/missing.
  */
 export function getOrSimplify(
     noteId: string,
     rawHtml: string,
-    libraryID: number
+    libraryID: number,
+    pageLabelsByItemId?: Record<string, PageLabels>,
 ): { simplified: string; metadata: SimplificationMetadata; isStale: boolean } {
     const contentHash = quickHash(rawHtml);
-    const cached = simplificationCache.get(noteId);
+    const pageLabelsFingerprint = fingerprintPageLabels(pageLabelsByItemId);
+    const cacheKey = simplificationCacheKey(noteId, pageLabelsFingerprint);
+    const cached = simplificationCache.get(cacheKey);
 
-    if (cached && cached.contentHash === contentHash) {
+    if (
+        cached
+        && cached.contentHash === contentHash
+        && cached.pageLabelsFingerprint === pageLabelsFingerprint
+    ) {
         return { simplified: cached.simplified, metadata: cached.metadata, isStale: false };
     }
 
     // Cache miss or stale — re-simplify
-    const result = simplifyNoteHtml(rawHtml, libraryID);
+    const result = simplifyNoteHtml(rawHtml, libraryID, pageLabelsByItemId);
 
     // Evict oldest entries if cache is full
     if (simplificationCache.size >= MAX_CACHE_SIZE) {
@@ -88,8 +122,9 @@ export function getOrSimplify(
         }
     }
 
-    simplificationCache.set(noteId, {
+    simplificationCache.set(cacheKey, {
         contentHash,
+        pageLabelsFingerprint,
         simplified: result.simplified,
         metadata: result.metadata,
     });
@@ -105,21 +140,15 @@ export function getOrSimplify(
  * Invalidate cache entry for a note.
  */
 export function invalidateSimplificationCache(noteId: string): void {
-    simplificationCache.delete(noteId);
+    const prefix = `${noteId}\u0000`;
+    for (const key of [...simplificationCache.keys()]) {
+        if (key.startsWith(prefix)) simplificationCache.delete(key);
+    }
 }
 
 // =============================================================================
 // Simplification: Raw HTML → Simplified + Metadata
 // =============================================================================
-
-/**
- * Extract the item key from a Zotero URI.
- * e.g., "http://zotero.org/users/17517181/items/FQSW6YKU" → "FQSW6YKU"
- */
-function extractItemKeyFromUri(uri: string): string | null {
-    const match = uri.match(/\/items\/([A-Z0-9]+)$/i);
-    return match ? match[1] : null;
-}
 
 /**
  * Simplify Zotero note HTML to a clean format for LLM editing.
@@ -129,24 +158,20 @@ function extractItemKeyFromUri(uri: string): string | null {
  * data-citation-items from the wrapper div.
  * Stores original raw HTML in the metadata map for expansion back.
  */
-export function simplifyNoteHtml(rawHtml: string, libraryID: number): SimplificationResult {
+export function simplifyNoteHtml(
+    rawHtml: string,
+    libraryID: number,
+    pageLabelsByItemId?: Record<string, PageLabels>,
+): SimplificationResult {
     const metadata: SimplificationMetadata = { elements: new Map() };
 
     // Track occurrence counts for content-based IDs
     const citationKeyCounts = new Map<string, number>();
 
-    // Strip Beaver footers FIRST, before any normalization. The footer regexes
-    // require <a href="zotero://beaver/thread/..."> to be present, but Zotero's
-    // chrome HTMLDocument (used by normalizeNoteHtml under getDocument()) silently
-    // drops href attrs whose scheme is `zotero://` when parsing via innerHTML.
-    // Once the href is gone, ProseMirror's link mark (`tag: 'a[href]'`) can't
-    // bind, the <a> is dropped on re-serialization, and the regexes never match —
-    // so the footer would leak into the simplified view that the agent sees and
-    // edits. Stripping pre-normalize keeps the regexes operating on the raw shape
-    // that the writers (`getBeaverNoteFooterHTML`, `buildEditFooterHtml`) actually
-    // emit. Note: this only affects what the agent sees in the simplified view —
-    // the raw HTML on disk is untouched, since edit_note saves changes against
-    // its own normalize'd-but-uncached `strippedHtml`, not against `simplified`.
+    // Strip Beaver footers before normalization so internal Beaver protocol
+    // links never enter the agent-visible note body or citation-link pass.
+    // This only affects the simplified view; the raw note HTML on disk is
+    // untouched until edit_note applies a user-requested change.
     let simplified = stripBeaverEditFooter(rawHtml);
     simplified = stripBeaverCreatedFooter(simplified);
 
@@ -271,7 +296,17 @@ export function simplifyNoteHtml(rawHtml: string, libraryID: number): Simplifica
                     const uri = ci.uris?.[0] || '';
                     const itemKey = extractItemKeyFromUri(uri) || 'unknown';
                     const itemId = `${libraryID}-${itemKey}`;
-                    const page = ci.locator != null ? String(ci.locator) : '';
+                    const rawPage = ci.locator != null ? String(ci.locator) : '';
+                    let page = rawPage;
+                    let pageConvention: 'number' | 'label' | undefined = page ? 'label' : undefined;
+                    const pageLabels = pageLabelsByItemId?.[itemId];
+                    if (page && pageLabels && (ci.label == null || ci.label === 'page')) {
+                        const translated = translatePageLabelToNumber(pageLabels, page);
+                        if (translated !== rawPage) {
+                            page = translated;
+                            pageConvention = 'number';
+                        }
+                    }
 
                     // Content-based ref with occurrence counter
                     const keyForCount = itemKey;
@@ -282,12 +317,16 @@ export function simplifyNoteHtml(rawHtml: string, libraryID: number): Simplifica
                     metadata.elements.set(ref, {
                         rawHtml: match,
                         type: 'citation',
-                        originalAttrs: { item_id: itemId, page: page || undefined },
+                        originalAttrs: {
+                            item_id: itemId,
+                            ...(page ? { page } : {}),
+                            ...(pageConvention ? { pageConvention } : {}),
+                            ...(ci.label !== undefined ? { cslLabel: ci.label } : {}),
+                        },
                     });
 
-                    let tag = `<citation item_id="${itemId}"`;
-                    if (page) tag += ` page="${escapeAttr(page)}"`;
-                    tag += ` label="${escapeAttr(label)}"`;
+                    let tag = `<citation id="${itemId}"`;
+                    if (page) tag += ` loc="${escapeAttr(`page${page}`)}"`;
                     tag += ` ref="${ref}"/>`;
                     return tag;
                 } else {
@@ -307,7 +346,11 @@ export function simplifyNoteHtml(rawHtml: string, libraryID: number): Simplifica
                         const uri = ci.uris?.[0] || '';
                         const key = extractItemKeyFromUri(uri) || 'unknown';
                         const itemId = `${libraryID}-${key}`;
-                        const page = ci.locator != null ? String(ci.locator) : '';
+                        let page = ci.locator != null ? String(ci.locator) : '';
+                        const pageLabels = pageLabelsByItemId?.[itemId];
+                        if (page && pageLabels && (ci.label == null || ci.label === 'page')) {
+                            page = translatePageLabelToNumber(pageLabels, page);
+                        }
                         return page ? `${itemId}:page=${page}` : itemId;
                     }).join(', ');
 
@@ -318,7 +361,6 @@ export function simplifyNoteHtml(rawHtml: string, libraryID: number): Simplifica
                     });
 
                     let tag = `<citation items="${escapeAttr(itemsAttr)}"`;
-                    tag += ` label="${escapeAttr(label)}"`;
                     tag += ` ref="${ref}"/>`;
                     return tag;
                 }
@@ -345,6 +387,29 @@ export function simplifyNoteHtml(rawHtml: string, libraryID: number): Simplifica
             (annMatch) => {
                 const idx = shieldedAnnotations.push(annMatch) - 1;
                 return `__BEAVER_LINK_SHIELD_${idx}__`;
+            }
+        );
+        simplified = simplified.replace(
+            /<a\s+[^>]*href="(zotero:\/\/[^"]*)"[^>]*>([\s\S]*?)<\/a>/g,
+            (match, rawHref, innerHtml) => {
+                const parsed = parseZoteroCitationLinkHref(rawHref);
+                if (!parsed) return match;
+
+                const itemId = `${parsed.libraryId}-${parsed.itemKey}`;
+                const occurrence = citationKeyCounts.get(parsed.itemKey) || 0;
+                citationKeyCounts.set(parsed.itemKey, occurrence + 1);
+                const ref = `c_${parsed.itemKey}_${occurrence}`;
+                const label = innerHtml.replace(/<[^>]+>/g, '').trim();
+
+                metadata.elements.set(ref, {
+                    rawHtml: match,
+                    type: 'citation',
+                    // Link citation labels are derived from the target item and
+                    // preserved from rawHtml while the target id is unchanged.
+                    originalAttrs: { item_id: itemId },
+                });
+
+                return `<citation id="${itemId}" ref="${ref}"/>`;
             }
         );
         simplified = simplified.replace(

@@ -1,35 +1,17 @@
-import { BoundingBox, CoordOrigin, PageLocation, toZoteroRectFromBBox } from '../types/citations';
+import { BoundingBox, CoordOrigin, PageLocation, convertBoundingBoxToBottomLeft, toZoteroRectFromBBox } from '../types/citations';
 import { getCurrentReader, getCurrentReaderAndWaitForView } from './readerUtils';
 import { ZoteroReader } from './annotationUtils';
 import { logger } from '../../src/utils/logger';
 import { getPageViewportInfo, isPDFDocumentAvailable, waitForPDFDocument, applyRotationToBoundingBox } from './pdfUtils';
 import { isLibraryEditable } from '../../src/utils/zoteroUtils';
+import { BEAVER_ANNOTATION_AUTHOR, resolveBeaverAnnotationColor } from '../../src/constants/annotations';
 import { AnnotationProposedAction, isHighlightAnnotationAction, isNoteAnnotationAction, AnnotationResultData } from '../types/agentActions/base';
 
 
-const HIGHLIGHT_COLORS: Record<string, string> = {
-    red: '#ff6666',
-    orange: '#ff9f43',
-    yellow: '#ffd400',
-    green: '#90ee90',
-    blue: '#5ac8fa',
-    purple: '#d4a5ff',
-    gray: '#d3d3d3',
-    pink: '#ff66c4',
-    brown: '#e6a86e',
-    cyan: '#7fdbff',
-    lime: '#b4ff69',
-    mint: '#b2f7d3',
-    coral: '#ff9999',
-    navy: '#6495ed',
-    olive: '#e6e68a',
-    teal: '#7fffd4',
-};
 const NOTE_RECT_SIZE = 18;
 
 function resolveHighlightColor(color?: string | null): string {
-    if (!color) return '#ffd400';
-    return HIGHLIGHT_COLORS[color] || '#ffd400';
+    return resolveBeaverAnnotationColor(color);
 }
 
 async function getAttachmentItem(
@@ -51,35 +33,13 @@ function isReaderForAttachmentKey(reader: ZoteroReader | null, attachmentKey: st
     return (reader as any)._item === undefined || (reader as any)._item?.key === attachmentKey;
 }
 
-function convertBoundingBoxToBottomLeft(
-    bbox: BoundingBox,
-    viewport: any
-): BoundingBox {
-    if (bbox.coord_origin === CoordOrigin.BOTTOMLEFT) {
-        return bbox;
-    }
-
-    const height = viewport?.height ?? 0;
-    const converted: BoundingBox = {
-        l: bbox.l,
-        r: bbox.r,
-        coord_origin: CoordOrigin.BOTTOMLEFT,
-        b: height - bbox.t,
-        t: height - bbox.b,
-    };
-    return converted;
-}
-
 async function convertLocationToRects(
     reader: ZoteroReader,
     location: PageLocation
-): Promise<number[][]> {
+): Promise<{ rects: number[][]; viewBox: number[] }> {
     // Get viewport info directly from PDF document (no need for rendered page)
     const { viewBox, height, width, rotation } = await getPageViewportInfo(reader, location.page_idx);
     const viewBoxLL: [number, number] = [viewBox[0], viewBox[1]];
-
-    // Create viewport object for coordinate conversion
-    const viewport = { height };
 
     if (!location.boxes) {
         throw new Error('Location boxes missing');
@@ -88,7 +48,7 @@ async function convertLocationToRects(
     // Only apply rotation transformation if page is actually rotated
     const rects = rotation !== 0
         ? location.boxes
-            .map((box) => convertBoundingBoxToBottomLeft(box, viewport))
+            .map((box) => convertBoundingBoxToBottomLeft(box, height))
             .map((box) => {
                 logger(`Applying rotation ${rotation}° to box: l=${box.l}, b=${box.b}, r=${box.r}, t=${box.t}, rotated dims: w=${width}, h=${height}`, 2);
                 const rotated = applyRotationToBoundingBox(box, rotation, width, height);
@@ -98,19 +58,43 @@ async function convertLocationToRects(
             .map((box) => toZoteroRectFromBBox(box, viewBoxLL))
             .filter((rect) => Array.isArray(rect) && rect.length === 4)
         : location.boxes
-            .map((box) => convertBoundingBoxToBottomLeft(box, viewport))
+            .map((box) => convertBoundingBoxToBottomLeft(box, height))
             .map((box) => toZoteroRectFromBBox(box, viewBoxLL))
             .filter((rect) => Array.isArray(rect) && rect.length === 4);
 
-    return rects;
+    return { rects, viewBox };
 }
 
-function generateSortIndex(pageIndex: number, rect: number[]): string {
-    const yPos = Math.round(rect?.[1] ?? 0);
-    const xPos = Math.round(rect?.[0] ?? 0);
-    return `${pageIndex.toString().padStart(5, '0')}|${yPos.toString().padStart(6, '0')}|${xPos
-        .toString()
-        .padStart(5, '0')}`;
+/**
+ * Build a Zotero PDF sort-index string in canonical `page|offset|top` format.
+ *
+ * Legacy single-action path: no backend reading-order offset is available
+ * here, so the offset field falls back to display-top. Matches Zotero's
+ * reader formula (Math.floor(viewBox[3] - rect[3])) at
+ * /reader/src/pdf/selection.js:399.
+ *
+ * The bulk path in src/services/annotations/createAnnotation.ts uses the
+ * backend-supplied reading_order_offset as the offset and is preferred for
+ * any new code; this helper exists backward compatibility.
+ */
+function generateSortIndex(pageIndex: number, rect: number[], viewBox: number[]): string {
+    const clamp = (v: unknown, max: number): number => {
+        if (typeof v !== 'number' || !Number.isFinite(v)) return 0;
+        const floored = Math.floor(v);
+        if (floored <= 0) return 0;
+        return floored > max ? max : floored;
+    };
+    const viewBoxTop = viewBox?.[3];
+    const rectTop = rect?.[3];
+    const displayTopRaw =
+        typeof viewBoxTop === 'number' && Number.isFinite(viewBoxTop)
+        && typeof rectTop === 'number' && Number.isFinite(rectTop)
+            ? Math.floor(viewBoxTop - rectTop)
+            : 0;
+    const page = clamp(pageIndex, 99999).toString().padStart(5, '0');
+    const offset = clamp(displayTopRaw, 999999).toString().padStart(6, '0');
+    const top = clamp(displayTopRaw, 99999).toString().padStart(5, '0');
+    return `${page}|${offset}|${top}`;
 }
 
 async function createHighlightAnnotation(
@@ -133,19 +117,21 @@ async function createHighlightAnnotation(
         logger('Highlight annotation spans multiple pages; applying first page only for now', 2);
     }
 
-    const rects = allSamePage
-        ? (await Promise.all(
+    const conversions = allSamePage
+        ? await Promise.all(
             annotation.proposed_data.highlight_locations.map((loc: PageLocation) =>
-            convertLocationToRects(reader, loc)
+                convertLocationToRects(reader, loc)
             )
-        )).flat()
-        : await convertLocationToRects(reader, primaryLocation);
+        )
+        : [await convertLocationToRects(reader, primaryLocation)];
+    const rects = conversions.flatMap((c) => c.rects);
     if (rects.length === 0) {
         throw new Error('Highlight annotation failed to compute rectangles');
     }
+    const primaryViewBox = conversions[0].viewBox;
 
     const now = (new Date()).toISOString();
-    const sortIndex = generateSortIndex(primaryLocation.page_idx, rects[0]);
+    const sortIndex = generateSortIndex(primaryLocation.page_idx, rects[0], primaryViewBox);
     const data = {
         type: 'highlight',
         color: resolveHighlightColor(annotation.proposed_data.color),
@@ -162,8 +148,8 @@ async function createHighlightAnnotation(
         temporary: false,
         dateCreated: now,
         dateModified: now,
-        authorName: 'Beaver',
-        annotationAuthorName: 'Beaver'
+        authorName: BEAVER_ANNOTATION_AUTHOR,
+        annotationAuthorName: BEAVER_ANNOTATION_AUTHOR
     };
 
     const iframeWindow = (reader as any)?._internalReader?._primaryView?._iframeWindow;
@@ -185,12 +171,12 @@ async function createHighlightAnnotation(
 async function convertNotePositionToRect(
     reader: ZoteroReader,
     annotation: AnnotationProposedAction
-): Promise<{ pageIndex: number; rect: number[] }> {
+): Promise<{ pageIndex: number; rect: number[]; viewBox: number[] }> {
     if (!annotation.proposed_data.note_position) {
         throw new Error('Note annotation missing position');
     }
 
-    const { page_index, side, y } = annotation.proposed_data.note_position;
+    const { page_index, side, y, coord_origin } = annotation.proposed_data.note_position;
     
     // Get viewport info directly from PDF document (no need for rendered page)
     const { viewBox, height, width, rotation } = await getPageViewportInfo(reader, page_index);
@@ -207,18 +193,20 @@ async function convertNotePositionToRect(
         x = 12;
     }
 
-    // Create viewport object for coordinate conversion
-    const viewport = { height };
+    const yCenter = coord_origin === CoordOrigin.BOTTOMLEFT
+        ? y
+        : height - y;
+    const yBottom = yCenter - NOTE_RECT_SIZE / 2;
 
     let converted: BoundingBox = convertBoundingBoxToBottomLeft(
         {
             l: x,
-            b: y,
+            b: yBottom,
             r: x + NOTE_RECT_SIZE,
-            t: y + NOTE_RECT_SIZE,
+            t: yBottom + NOTE_RECT_SIZE,
             coord_origin: CoordOrigin.BOTTOMLEFT,
         },
-        viewport
+        height
     );
     
     // Apply rotation transformation only if page is rotated
@@ -230,6 +218,7 @@ async function convertNotePositionToRect(
     return {
         pageIndex: page_index,
         rect: toZoteroRectFromBBox(converted, viewBoxLL),
+        viewBox,
     };
 }
 
@@ -237,8 +226,8 @@ async function createNoteAnnotation(
     reader: ZoteroReader,
     annotation: AnnotationProposedAction
 ): Promise<string> {
-    const { pageIndex, rect } = await convertNotePositionToRect(reader, annotation);
-    const sortIndex = generateSortIndex(pageIndex, rect);
+    const { pageIndex, rect, viewBox } = await convertNotePositionToRect(reader, annotation);
+    const sortIndex = generateSortIndex(pageIndex, rect, viewBox);
 
     const now = (new Date()).toISOString();
     const data = {
@@ -256,8 +245,8 @@ async function createNoteAnnotation(
         notePosition: annotation.proposed_data.note_position,
         dateCreated: now,
         dateModified: now,
-        authorName: 'Beaver',
-        annotationAuthorName: 'Beaver'
+        authorName: BEAVER_ANNOTATION_AUTHOR,
+        annotationAuthorName: BEAVER_ANNOTATION_AUTHOR
     };
 
     const iframeWindow = (reader as any)?._internalReader?._primaryView?._iframeWindow;

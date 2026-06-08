@@ -36,14 +36,6 @@ export async function post<T>(path: string, body: unknown, opts?: RequestOptions
 // Attachment handlers
 // -------------------------------------------------------------------------
 
-export interface PagesResponse {
-    attachment: { library_id: number; zotero_key: string };
-    pages: Array<{ page_number: number; content: string }>;
-    total_pages: number | null;
-    error?: string | null;
-    error_code?: string | null;
-}
-
 export interface PageImagesResponse {
     attachment: { library_id: number; zotero_key: string };
     pages: Array<{
@@ -79,24 +71,6 @@ export interface SearchResponse {
     }>;
     error?: string | null;
     error_code?: string | null;
-}
-
-export function fetchPages(
-    attachment: AttachmentFixture,
-    extra?: {
-        start_page?: number;
-        end_page?: number;
-        skip_local_limits?: boolean;
-    },
-    opts?: RequestOptions,
-): Promise<PagesResponse> {
-    return post('/beaver/attachment/pages', {
-        attachment: {
-            library_id: attachment.library_id,
-            zotero_key: attachment.zotero_key,
-        },
-        ...extra,
-    }, opts);
 }
 
 export function fetchPageImages(
@@ -135,6 +109,65 @@ export function searchAttachment(
             zotero_key: attachment.zotero_key,
         },
         query,
+        ...extra,
+    }, opts);
+}
+
+// -------------------------------------------------------------------------
+// Whole-document extraction handler (/beaver/attachment/document)
+// -------------------------------------------------------------------------
+
+/** A single extracted page — markdown mode carries `markdown`, structured `items`. */
+export interface DocumentPage {
+    index: number;
+    label?: string;
+    width: number;
+    height: number;
+    markdown?: string;
+    items?: unknown[];
+}
+
+/** `BeaverExtractResult` as returned over HTTP (markdown or structured). */
+export interface DocumentExtractResult {
+    content_kind?: 'pdf' | 'text';
+    mode: 'markdown' | 'structured';
+    schemaVersion: string;
+    document: {
+        pageCount: number;
+        pageLabels?: Record<string, string>;
+        pages: DocumentPage[];
+    };
+}
+
+export interface DocumentResponse {
+    resolved_attachment?: { library_id: number; zotero_key: string } | null;
+    content_type?: string | null;
+    content_kind?: 'pdf' | 'epub' | 'snapshot' | 'text' | null;
+    result?: DocumentExtractResult | null;
+    total_pages?: number | null;
+    error?: string | null;
+    error_code?: string | null;
+}
+
+/**
+ * POST `/beaver/attachment/document` — whole-document extraction routed
+ * through `DocumentCache`. `mode` defaults to `structured` server-side.
+ */
+export function fetchDocument(
+    attachment: AttachmentFixture,
+    extra?: {
+        mode?: 'markdown' | 'structured';
+        max_pages?: number | null;
+        max_file_size_mb?: number | null;
+        timeout_seconds?: number;
+    },
+    opts?: RequestOptions,
+): Promise<DocumentResponse> {
+    return post('/beaver/attachment/document', {
+        attachment: {
+            library_id: attachment.library_id,
+            zotero_key: attachment.zotero_key,
+        },
         ...extra,
     }, opts);
 }

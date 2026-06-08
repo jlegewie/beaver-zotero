@@ -33,6 +33,9 @@ import {
     extractExtractData,
     isReadNoteResult,
     extractReadNoteData,
+    isGetAnnotationsResult,
+    extractGetAnnotationsData,
+    extractAnnotationAttachmentId,
 } from '../../agents/toolResultTypes';
 import { ItemSearchResultView } from './ItemSearchResultView';
 import { FulltextSearchResultView } from './FulltextSearchResultView';
@@ -43,6 +46,7 @@ import { ListCollectionsResultView } from './ListCollectionsResultView';
 import { ListTagsResultView } from './ListTagsResultView';
 import { ExtractResultView } from './ExtractResultView';
 import { ReadNoteResultView } from './ReadNoteResultView';
+import { GetAnnotationsResultView } from './GetAnnotationsResultView';
 
 interface ToolResultViewProps {
     toolcall: ToolCallPart;
@@ -197,6 +201,21 @@ export const ToolResultView: React.FC<ToolResultViewProps> = ({ toolcall, result
         }
     }
 
+    // Annotation list results (get_annotations, find_annotations)
+    if (isGetAnnotationsResult(toolName, content, metadata)) {
+        const data = extractGetAnnotationsData(content, metadata);
+        if (data) {
+            return (
+                <GetAnnotationsResultView
+                    annotations={data.annotations}
+                    totalCount={data.totalCount}
+                    toolName={data.toolName}
+                    attachmentId={extractAnnotationAttachmentId(toolcall.args)}
+                />
+            );
+        }
+    }
+
     // Read note results (read_note)
     if (isReadNoteResult(toolName, content, metadata)) {
         const data = extractReadNoteData(content, metadata);
@@ -204,10 +223,6 @@ export const ToolResultView: React.FC<ToolResultViewProps> = ({ toolcall, result
             return (
                 <ReadNoteResultView
                     noteReference={data.noteReference}
-                    parentReference={data.parentReference}
-                    title={data.title}
-                    totalLines={data.totalLines}
-                    linesReturned={data.linesReturned}
                 />
             );
         }

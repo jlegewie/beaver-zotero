@@ -34,6 +34,7 @@ export interface OcrFingerprints {
 
 const OCR_ISSUE_REASONS: readonly OCRIssueReason[] = [
     "no_text_blocks",
+    "no_body_text",
     "insufficient_text",
     "high_whitespace_ratio",
     "high_newline_ratio",
@@ -53,6 +54,7 @@ const OCR_ISSUE_REASONS: readonly OCRIssueReason[] = [
  */
 const OPTIONAL_OCR_ISSUE_REASONS: ReadonlySet<OCRIssueReason> = new Set([
     "fragmented_text_lines",
+    "no_body_text",
 ]);
 
 export interface SnapshotPageOcr {
@@ -65,7 +67,6 @@ export interface SnapshotPageOcr {
 
 export interface OcrSnapshot {
     needsOCR: boolean;
-    primaryReason: string;
     issueRatio: number;
     issueBreakdown: Record<OCRIssueReason, number>;
     sampledPages: number;
@@ -277,7 +278,6 @@ function validateTolerance(
 function validateSnapshot(value: unknown, source: string): OcrSnapshot {
     const v = expectObject(value, source);
     const needsOCR = expectBool(v.needsOCR, `${source}.needsOCR`);
-    const primaryReason = expectString(v.primaryReason, `${source}.primaryReason`);
     const issueRatio = expectFiniteNumber(v.issueRatio, `${source}.issueRatio`);
     const issueBreakdown = validateIssueBreakdown(
         v.issueBreakdown,
@@ -291,7 +291,6 @@ function validateSnapshot(value: unknown, source: string): OcrSnapshot {
     );
     return {
         needsOCR,
-        primaryReason,
         issueRatio,
         issueBreakdown,
         sampledPages,

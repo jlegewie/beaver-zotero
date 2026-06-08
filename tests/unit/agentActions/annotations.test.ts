@@ -1,0 +1,117 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  normalizeBoundingBox,
+  normalizePageLocations,
+} from "../../../react/types/agentActions/annotations";
+import { CoordOrigin } from "../../../react/types/citations";
+
+describe("annotation action normalization", () => {
+  describe("normalizeBoundingBox", () => {
+    it("normalizes tuple rects as top-left extraction bboxes", () => {
+      expect(normalizeBoundingBox([1, 2, 3, 4])).toEqual({
+        l: 1,
+        t: 2,
+        r: 3,
+        b: 4,
+        coord_origin: CoordOrigin.TOPLEFT,
+      });
+    });
+
+    it("defaults object bboxes without an origin to top-left", () => {
+      expect(normalizeBoundingBox({ l: 1, t: 2, r: 3, b: 4 })).toEqual({
+        l: 1,
+        t: 2,
+        r: 3,
+        b: 4,
+        coord_origin: CoordOrigin.TOPLEFT,
+      });
+    });
+
+    it("preserves explicit bottom-left legacy input", () => {
+      expect(
+        normalizeBoundingBox({
+          l: 1,
+          t: 2,
+          r: 3,
+          b: 4,
+          coord_origin: CoordOrigin.BOTTOMLEFT,
+        }),
+      ).toEqual({
+        l: 1,
+        t: 2,
+        r: 3,
+        b: 4,
+        coord_origin: CoordOrigin.BOTTOMLEFT,
+      });
+    });
+  });
+
+  describe("normalizePageLocations", () => {
+    it("normalizes tuple rects inside page locations", () => {
+      expect(
+        normalizePageLocations({
+          locations: [{ page_idx: 2, bboxes: [[10, 20, 30, 40]] }],
+        }),
+      ).toEqual([
+        {
+          page_idx: 2,
+          page_label: null,
+          boxes: [
+            {
+              l: 10,
+              t: 20,
+              r: 30,
+              b: 40,
+              coord_origin: CoordOrigin.TOPLEFT,
+            },
+          ],
+        },
+      ]);
+    });
+
+    it("preserves reading_order_offset (snake_case)", () => {
+      const out = normalizePageLocations({
+        locations: [
+          { page_idx: 3, boxes: [], reading_order_offset: 5 },
+        ],
+      });
+      expect(out?.[0]).toMatchObject({ page_idx: 3, reading_order_offset: 5 });
+    });
+
+    it("accepts camelCase readingOrderOffset from the wire", () => {
+      const out = normalizePageLocations({
+        locations: [
+          { page_idx: 3, boxes: [], readingOrderOffset: 9 },
+        ],
+      });
+      expect(out?.[0]).toMatchObject({ page_idx: 3, reading_order_offset: 9 });
+    });
+
+    it("omits reading_order_offset when neither field is present", () => {
+      const out = normalizePageLocations({
+        locations: [{ page_idx: 1, boxes: [] }],
+      });
+      expect(out?.[0].reading_order_offset).toBeUndefined();
+    });
+
+    it("carries the per-page page_label through (snake_case and camelCase)", () => {
+      const snake = normalizePageLocations({
+        locations: [{ page_idx: 1, boxes: [], page_label: "226" }],
+      });
+      expect(snake?.[0].page_label).toBe("226");
+
+      const camel = normalizePageLocations({
+        locations: [{ page_idx: 1, boxes: [], pageLabel: "iv" }],
+      });
+      expect(camel?.[0].page_label).toBe("iv");
+    });
+
+    it("sets page_label to null when absent", () => {
+      const out = normalizePageLocations({
+        locations: [{ page_idx: 1, boxes: [] }],
+      });
+      expect(out?.[0].page_label).toBeNull();
+    });
+  });
+});

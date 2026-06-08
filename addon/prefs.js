@@ -14,14 +14,12 @@ pref("keyboardShortcut", "j");
 pref("statefulChat", true);
 pref("addSelectedItemsOnOpen", true);
 pref("addSelectedItemsOnNewThread", true);
+pref("addBeaverProvenanceNote", false);
 pref("focusResponseForScreenReaders", false);
 pref("annotationToolEnabled", true);
 pref("maxAddAttachmentToMessage", 10);
 pref("readerExplainPrompt", "Explain the selected passage or annotation(s) from this paper in plain language. Provide context for any technical terms, statistical methods, or domain-specific concepts. If it references other work, briefly explain that context too.");
 
-// Beaver Free file limits
-pref("maxFileSizeMB", 70);
-pref("maxPageCount", 300);
 pref("accessRemoteFiles", true);
 
 // Agent actions
@@ -54,6 +52,9 @@ pref("recentItems", "[]");
 pref("citationFormat", "numeric");
 pref("citationStyle", "http://www.zotero.org/styles/chicago-author-date");
 pref("citationLocale", "en-US");
+// When true, citation clicks create temporary PDF highlight annotations
+// instead of using Zotero's native transient position highlight.
+pref("useTemporaryCitationAnnotations", false);
 // When true, in-text citations display PDF page labels (e.g., Roman numerals
 // for front matter) instead of raw 1-based page numbers.
 pref("usePageLabels", true);
@@ -80,13 +81,19 @@ pref("skippedItems", "[]")
 // Onboarding popups
 pref("onboardingWelcomeShown", false);
 pref("onboardingReaderTipShown", false);
+pref("onboardingReaderTipShownV2", false);
 pref("onboardingNoteTipShown", false);
 pref("onboardingCitationTipShown", false);
 pref("onboardingWelcomeShownAt", "");
+pref("versionUpdatePopupShownAt", "");
 pref("onboardingSignInTextShown", false);
 
 // MCP server
 pref("mcpServerEnabled", false);
+pref("mcpCreateNoteToolEnabled", false);
+
+// Background extractor kill-switch (drains the background_jobs queue)
+pref("backgroundExtractorEnabled", true);
 
 // Flags to show notifications, run consistency check and collection sync on upgrade
 pref("runConsistencyCheck", false);

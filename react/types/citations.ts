@@ -1,6 +1,9 @@
 import { ZoteroItemReference } from "./zotero";
+import type { ExtractContentKind } from "../../src/services/documentExtraction/shared/contentKinds";
 import {
     baseCitationKey,
+    type CitationRef,
+    type ExternalCitationSource,
     getRequestedRef,
     getResolvedRef,
     normalizeCitationTag,
@@ -47,14 +50,42 @@ export function bboxesToZoteroRects(bboxes: BoundingBox[]): number[][] {
     return bboxes.map(bbox => bboxToZoteroRect(bbox));
 }
 
-// Adjust bboxes from page/MediaBox origin to viewport (CropBox) origin
+// Adjust bboxes from page/MediaBox origin to viewport (CropBox) origin.
+// Expects bottom-left origin; convert with convertBoundingBoxToBottomLeft first
+// when the input is top-left (e.g. from the structured-extraction pipeline).
 export function toZoteroRectFromBBox(
 	bbox: BoundingBox,
 	viewBoxLL: [number, number]
 ): number[] {
+	if (bbox.coord_origin !== CoordOrigin.BOTTOMLEFT) {
+		throw new Error(`Expected BOTTOMLEFT coordinates, got ${bbox.coord_origin}`);
+	}
 	const [vx, vy] = viewBoxLL; // CropBox lower-left
 	// bbox has bottom-left origin: l, b, r, t
 	return [bbox.l + vx, bbox.b + vy, bbox.r + vx, bbox.t + vy];
+}
+
+// Convert a top-left-origin bbox to bottom-left using the page height. Returns
+// the input unchanged when it is already bottom-left so callers can apply this
+// unconditionally to citation bboxes regardless of their producer.
+//
+// Edge semantics are preserved: `t` is the visual top edge (larger y in BL),
+// `b` the visual bottom edge (smaller y in BL). Mirrors `bboxToReaderFrame`
+// and `flipOrigin` in src/beaver-extract/types.ts -- do not swap the edges.
+export function convertBoundingBoxToBottomLeft(
+	bbox: BoundingBox,
+	pageHeight: number
+): BoundingBox {
+	if (bbox.coord_origin === CoordOrigin.BOTTOMLEFT) {
+		return bbox;
+	}
+	return {
+		l: bbox.l,
+		r: bbox.r,
+		t: pageHeight - bbox.t,
+		b: pageHeight - bbox.b,
+		coord_origin: CoordOrigin.BOTTOMLEFT,
+	};
 }
 
 
@@ -62,7 +93,18 @@ export interface PageLocation {
     /** Physical or logical location inside an attachment. */
     page_idx: number; // 0-based page index
     boxes?: BoundingBox[];
+    /** PDF /PageLabels label for this page, or null when none is defined. */
+    page_label?: string | null;
+    /** Per-page cumulative character offset in reading order (Zotero sortIndex offset). */
+    reading_order_offset?: number | null;
 }
+
+export type ContentKind = ExtractContentKind;
+
+export type SymbolicLocation =
+    | { content_kind: 'epub'; section_href: string; anchor_id?: string; text?: string }
+    | { content_kind: 'snapshot'; selector?: string; anchor_id?: string; text?: string }
+    | { content_kind: 'text'; line: number; line_end?: number; text?: string };
 
 export interface CitationPart {
     /**
@@ -73,6 +115,8 @@ export interface CitationPart {
     part_id: string;
     /** Physical location of the part in the document. */
     locations?: PageLocation[];
+    /** Symbolic location for non-PDF attachments. */
+    symbolic_location?: SymbolicLocation;
 }
 
 export interface CitationMetadata {
@@ -84,12 +128,13 @@ export interface CitationMetadata {
     zotero_key?: string;
     
     // External reference fields (for external references)
-    external_source?: "semantic_scholar" | "openalex";
+    external_source?: ExternalCitationSource;
     external_source_id?: string;
     
     // Common fields for all citation types
     /** Citation type discriminator */
-    citation_type?: "item" | "attachment" | "external_reference" | "note";
+    citation_type?: "item" | "attachment" | "external_reference" | "note" | "annotation";
+    content_kind?: ContentKind;
     /** The display marker, e.g., '1', '2'.. */
     marker?: string;
     /** The author-year of the citation. */
@@ -100,6 +145,10 @@ export interface CitationMetadata {
     parts: CitationPart[];
     /** Page numbers cited directly (e.g., [10] or [10, 11, 12] for ranges). */
     pages?: number[];
+    requested_ref?: CitationRef;
+    resolved_ref?: CitationRef;
+    invalid_reason?: string;
+    page_labels?: Record<number, string>;
     
     /** The agent run ID of the citation. */
     run_id: string;
@@ -113,10 +162,18 @@ export interface CitationMetadata {
  * Helper functions for CitationMetadata
  */
 export const isExternalCitation = (citation: CitationMetadata): boolean => {
+    const ref = getCitationIdentityRef(citation);
+    if (ref) {
+        return ref.kind === 'external';
+    }
     return !!(citation.external_source && citation.external_source_id);
 };
 
 export const isZoteroCitation = (citation: CitationMetadata): boolean => {
+    const ref = getCitationIdentityRef(citation);
+    if (ref) {
+        return ref.kind === 'zotero';
+    }
     return !!(citation.library_id && citation.zotero_key);
 };
 
@@ -129,7 +186,11 @@ export interface CitationKeyParams {
     library_id?: number;
     zotero_key?: string;
     // External reference
+    external_source?: ExternalCitationSource;
     external_source_id?: string;
+    requested_ref?: CitationRef;
+    resolved_ref?: CitationRef;
+    raw_tag?: string;
 }
 
 /**
@@ -141,20 +202,52 @@ export interface CitationKeyParams {
  * 
  * Key format:
  * - Zotero citations: "zotero:{library_id}-{zotero_key}"
- * - External citations: "external:{external_source_id}"
+ * - Structured external citations: "external:{source}:{external_id}"
+ * - Legacy external citations: "external:{external_source_id}"
  * - Unknown: "" (empty string)
  * 
  * @param params Citation key parameters
  * @returns Base citation key string
  */
 export function getCitationKey(params: CitationKeyParams): string {
+    const ref = getCitationIdentityRef(params);
+    if (ref) {
+        return baseCitationKey(ref);
+    }
     if (params.library_id && params.zotero_key) {
         return `zotero:${params.library_id}-${params.zotero_key}`;
     }
     if (params.external_source_id) {
         return `external:${params.external_source_id}`;
     }
+    const rawRef = getRequestedRef({ external_source: params.external_source, raw_tag: params.raw_tag });
+    if (rawRef) {
+        return baseCitationKey(rawRef);
+    }
     return '';
+}
+
+function getStructuredCitationRef(params: CitationKeyParams): CitationRef | null {
+    if (params.resolved_ref) {
+        return getResolvedRef({
+            resolved_ref: params.resolved_ref,
+            requested_ref: params.requested_ref,
+            external_source: params.external_source,
+            raw_tag: params.raw_tag,
+        });
+    }
+    if (params.requested_ref) {
+        return getRequestedRef({
+            requested_ref: params.requested_ref,
+            external_source: params.external_source,
+            raw_tag: params.raw_tag,
+        });
+    }
+    return null;
+}
+
+function getCitationIdentityRef(params: CitationKeyParams): CitationRef | null {
+    return getStructuredCitationRef(params);
 }
 
 /**
@@ -295,6 +388,16 @@ export function getCitationIdentityKey(attrs: NormalizedCitationAttrs): string {
 
 export { getRequestedRef, getResolvedRef };
 
+export const getContentKind = (citation: CitationData | CitationMetadata | null | undefined): ContentKind => {
+    return citation?.content_kind ?? 'pdf';
+};
+
+export const getSymbolicLocation = (
+    citation: CitationData | CitationMetadata | null | undefined,
+): SymbolicLocation | undefined => {
+    return citation?.parts?.find((part) => part.symbolic_location)?.symbolic_location;
+};
+
 export interface CitationData extends CitationMetadata {
     type: "item" | "attachment" | "note" | "annotation" | "external";
     parentKey: string | null;    // Key of the parent item
@@ -312,11 +415,13 @@ export const getCitationPages = (citation: CitationData | CitationMetadata | nul
     // Collect pages from parts (sentence-level citations with locations)
     const pagesFromParts = (citation.parts || [])
         .flatMap(p => p.locations || [])  
-        .map(l => l.page_idx + 1)
-        .filter((page): page is number => page !== undefined);
+        .map(l => Number(l.page_idx) + 1)
+        .filter((page): page is number => Number.isFinite(page) && page > 0);
     
     // Collect pages from direct pages field (page-level citations)
-    const directPages = citation.pages || [];
+    const directPages = (citation.pages || [])
+        .map(page => Number(page))
+        .filter((page): page is number => Number.isFinite(page) && page > 0);
     
     // Combine both sources, removing duplicates
     const allPages = [...new Set([...pagesFromParts, ...directPages])];
@@ -326,6 +431,8 @@ export const getCitationPages = (citation: CitationData | CitationMetadata | nul
 export interface CitationBoundingBoxData {
     page: number;
     bboxes: BoundingBox[];
+    /** PDF /PageLabels label for this page, when available. */
+    pageLabel?: string | null;
 }
 
 export const getCitationBoundingBoxes = (citation: CitationData | CitationMetadata | null | undefined): CitationBoundingBoxData[] => {
@@ -339,9 +446,12 @@ export const getCitationBoundingBoxes = (citation: CitationData | CitationMetada
         
         for (const locator of part.locations) {
             if (locator.page_idx !== undefined && locator.boxes && locator.boxes.length > 0) {
+                const pageIndex = Number(locator.page_idx);
+                if (!Number.isFinite(pageIndex) || pageIndex < 0) continue;
                 result.push({
-                    page: locator.page_idx + 1,
-                    bboxes: locator.boxes
+                    page: pageIndex + 1,
+                    bboxes: locator.boxes,
+                    pageLabel: locator.page_label ?? citation.page_labels?.[pageIndex] ?? null,
                 });
             }
         }

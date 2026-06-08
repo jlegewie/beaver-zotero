@@ -10,5 +10,9 @@ export default defineConfig({
         sequence: {
             concurrent: false,
         },
+        // Live tests share one Zotero instance and mutate global state
+        // (document cache, MuPDF worker). Running files in parallel races
+        // those endpoints, so execute every file sequentially.
+        fileParallelism: false,
     },
 });

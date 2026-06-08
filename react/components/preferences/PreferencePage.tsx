@@ -41,12 +41,14 @@ const PreferencePage: React.FC = () => {
     // --- State for Preferences ---
     const syncedLibraryIds = useAtomValue(syncedLibraryIdsAtom);
     const [citationFormat, setCitationFormat] = useState(() => getPref('citationFormat') === 'numeric');
+    const [useTemporaryCitationAnnotations, setUseTemporaryCitationAnnotations] = useState(() => getPref('useTemporaryCitationAnnotations') === true);
     const [keyboardShortcut, setKeyboardShortcut] = useState(() => {
         const shortcut = getPref('keyboardShortcut');
         return /^[a-z]$/i.test(shortcut) ? shortcut.toUpperCase() : 'J';
     });
     const [addSelectedOnNewThread, setAddSelectedOnNewThread] = useState(() => getPref('addSelectedItemsOnNewThread'));
     const [addSelectedOnOpen, setAddSelectedOnOpen] = useState(() => getPref('addSelectedItemsOnOpen'));
+    const [addProvenanceNote, setAddProvenanceNote] = useState(() => getPref('addBeaverProvenanceNote'));
     const [focusResponseForScreenReaders, setFocusResponseForScreenReaders] = useState(() => getPref('focusResponseForScreenReaders'));
     const [showDiffPreview, setShowDiffPreview] = useState(() => getPref('showDiffPreviewInNoteEditor') !== false);
     const diffPreviewSupported = isDiffPreviewSupported();
@@ -287,6 +289,12 @@ const PreferencePage: React.FC = () => {
         setCitationFormat(newChecked);
     }, [citationFormat]);
 
+    const handleTemporaryCitationAnnotationsToggle = useCallback(() => {
+        const newValue = !useTemporaryCitationAnnotations;
+        setPref("useTemporaryCitationAnnotations", newValue);
+        setUseTemporaryCitationAnnotations(newValue);
+    }, [useTemporaryCitationAnnotations]);
+
     const handleAddSelectedOnNewThreadToggle = useCallback(() => {
         const newValue = !addSelectedOnNewThread;
         setPref("addSelectedItemsOnNewThread", newValue);
@@ -298,6 +306,12 @@ const PreferencePage: React.FC = () => {
         setPref("addSelectedItemsOnOpen", newValue);
         setAddSelectedOnOpen(newValue);
     }, [addSelectedOnOpen]);
+
+    const handleAddProvenanceNoteToggle = useCallback(() => {
+        const newValue = !addProvenanceNote;
+        setPref("addBeaverProvenanceNote", newValue);
+        setAddProvenanceNote(newValue);
+    }, [addProvenanceNote]);
 
     const handleFocusResponseForScreenReadersToggle = useCallback(() => {
         const newValue = !focusResponseForScreenReaders;
@@ -593,6 +607,22 @@ const PreferencePage: React.FC = () => {
                                     }
                                 />
                                 <SettingsRow
+                                    title="Keep Cited Passages Highlighted"
+                                    description="When enabled, Beaver marks cited passages with temporary Zotero annotations that disappear on your next click. When disabled, Beaver briefly flashes the passage instead."
+                                    onClick={handleTemporaryCitationAnnotationsToggle}
+                                    hasBorder
+                                    tooltip="When disabled, citations use Zotero's transient PDF position highlight instead."
+                                    control={
+                                        <input
+                                            type="checkbox"
+                                            checked={useTemporaryCitationAnnotations}
+                                            onChange={handleTemporaryCitationAnnotationsToggle}
+                                            onClick={(e) => e.stopPropagation()}
+                                            style={{ cursor: 'pointer', margin: 0 }}
+                                        />
+                                    }
+                                />
+                                <SettingsRow
                                     title="Add Selected Items to New Threads"
                                     description="Automatically attach selected items to new thread"
                                     onClick={handleAddSelectedOnNewThreadToggle}
@@ -619,6 +649,21 @@ const PreferencePage: React.FC = () => {
                                             type="checkbox"
                                             checked={addSelectedOnOpen}
                                             onChange={handleAddSelectedOnOpenToggle}
+                                            onClick={(e) => e.stopPropagation()}
+                                            style={{ cursor: 'pointer', margin: 0 }}
+                                        />
+                                    }
+                                />
+                                <SettingsRow
+                                    title="Add Provenance Note to Imported Items"
+                                    description="Add a child note with a conversation link to Beaver conversation"
+                                    onClick={handleAddProvenanceNoteToggle}
+                                    hasBorder
+                                    control={
+                                        <input
+                                            type="checkbox"
+                                            checked={addProvenanceNote}
+                                            onChange={handleAddProvenanceNoteToggle}
                                             onClick={(e) => e.stopPropagation()}
                                             style={{ cursor: 'pointer', margin: 0 }}
                                         />
