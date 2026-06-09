@@ -36,11 +36,25 @@ export interface ExtractEpubDocumentOptions {
 }
 
 type EpubResponseError = Extract<ExtractEpubResult, { kind: "response_error" }>;
+export type EpubPreflightResult =
+    | { kind: "ok"; filePath: string }
+    | {
+          kind: "response_error";
+          code: EpubResponseError["code"];
+          message: string;
+      };
 
 function responseError(
     code: EpubResponseError["code"],
     message: string,
 ): ExtractEpubResult {
+    return { kind: "response_error", code, message };
+}
+
+function preflightResponseError(
+    code: EpubResponseError["code"],
+    message: string,
+): EpubPreflightResult {
     return { kind: "response_error", code, message };
 }
 
@@ -69,6 +83,14 @@ export async function extractEpubDocument(item: Zotero.Item): Promise<EpubDocume
 export interface ExtractEpubFromFileOptions {
     /** Language code for sentence splitting; defaults to the EPUB's own `<html lang>`. */
     language?: string | null;
+    /** Cooperative cancellation signal checked between EPUB section operations. */
+    abortSignal?: AbortSignal;
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+    if (signal?.aborted) {
+        throw new Error("Operation aborted");
+    }
 }
 
 /**
@@ -82,6 +104,7 @@ export async function extractEpubDocumentFromFile(
     filePath: string,
     options?: ExtractEpubFromFileOptions,
 ): Promise<EpubDocument> {
+    throwIfAborted(options?.abortSignal);
     const { EPUB } = (globalThis as any).ChromeUtils.importESModule(
         "chrome://zotero/content/EPUB.mjs",
     ) as ZoteroEpubModule;
@@ -98,6 +121,7 @@ export async function extractEpubDocumentFromFile(
     try {
         let sectionIndex = 0;
         for await (const { href, doc } of epub.getSectionDocuments()) {
+            throwIfAborted(options?.abortSignal);
             if (!languageApplied) {
                 // Prefer an explicit language; otherwise use the EPUB's own
                 // declared language from the first section's <html lang>.
@@ -115,11 +139,13 @@ export async function extractEpubDocumentFromFile(
             }));
             sectionIndex += 1;
             await Zotero.Promise.delay(0);
+            throwIfAborted(options?.abortSignal);
         }
     } finally {
         epub.close();
     }
 
+    throwIfAborted(options?.abortSignal);
     const diagnostics = buildDomDiagnostics(sections, sourceTextChars);
     if (diagnostics.textCoverage !== null && diagnostics.textCoverage < LOW_COVERAGE_WARN_THRESHOLD) {
         logger(
@@ -145,25 +171,42 @@ export async function extractEpubDocumentSafe(
     item: Zotero.Item,
     options?: ExtractEpubDocumentOptions,
 ): Promise<ExtractEpubResult> {
+    const preflight = await preflightEpubFile(item, options);
+    if (preflight.kind === "response_error") {
+        return responseError(preflight.code, preflight.message);
+    }
+
+    try {
+        return { kind: "ok", document: await extractEpubDocumentFromFile(preflight.filePath) };
+    } catch (error) {
+        return responseError("extraction_failed", `Failed to extract EPUB content: ${getErrorMessage(error)}`);
+    }
+}
+
+/** Resolve and validate a local EPUB attachment path before extraction. */
+export async function preflightEpubFile(
+    item: Zotero.Item,
+    options?: ExtractEpubDocumentOptions,
+): Promise<EpubPreflightResult> {
     let isEpub = false;
     try {
         isEpub = isEpubAttachment(item);
     } catch (error) {
-        return responseError(
+        return preflightResponseError(
             "unsupported_type",
             `Unable to determine whether the attachment is an EPUB: ${getErrorMessage(error)}`,
         );
     }
 
     if (!isEpub) {
-        return responseError("unsupported_type", "Attachment is not an EPUB file.");
+        return preflightResponseError("unsupported_type", "Attachment is not an EPUB file.");
     }
 
     let filePath: string | null = null;
     try {
         filePath = await item.getFilePathAsync() || null;
     } catch (error) {
-        return responseError(
+        return preflightResponseError(
             "extraction_failed",
             `Failed to resolve the EPUB attachment file path: ${getErrorMessage(error)}`,
         );
@@ -183,13 +226,13 @@ export async function extractEpubDocumentSafe(
             } catch {
                 // Notification callbacks must never change extraction results.
             }
-            return responseError(
+            return preflightResponseError(
                 "file_missing",
                 "The EPUB file is available remotely but is not synced locally. Sync it in Zotero so Beaver can read it.",
             );
         }
 
-        return responseError("file_missing", "The EPUB file is not available locally.");
+        return preflightResponseError("file_missing", "The EPUB file is not available locally.");
     }
 
     const maxFileSizeMB = effectiveMaxFileSizeMB(options?.maxFileSizeMB);
@@ -197,26 +240,22 @@ export async function extractEpubDocumentSafe(
         const stat = await IOUtils.stat(filePath);
         const sizeMB = typeof stat.size === "number" ? stat.size / 1024 / 1024 : null;
         if (sizeMB != null && sizeMB > maxFileSizeMB) {
-            return responseError(
+            return preflightResponseError(
                 "file_too_large",
                 `The EPUB file is ${formatMB(sizeMB)} MB, which exceeds the ${formatMB(maxFileSizeMB)} MB limit.`,
             );
         }
     } catch (error) {
         if ((error as { name?: string } | null)?.name === "NotFoundError") {
-            return responseError("file_missing", "The EPUB file is no longer available locally.");
+            return preflightResponseError("file_missing", "The EPUB file is no longer available locally.");
         }
-        return responseError(
+        return preflightResponseError(
             "extraction_failed",
             `Failed to inspect the EPUB file: ${getErrorMessage(error)}`,
         );
     }
 
-    try {
-        return { kind: "ok", document: await extractEpubDocument(item) };
-    } catch (error) {
-        return responseError("extraction_failed", `Failed to extract EPUB content: ${getErrorMessage(error)}`);
-    }
+    return { kind: "ok", filePath };
 }
 
 function isEpubAttachment(item: Zotero.Item): boolean {

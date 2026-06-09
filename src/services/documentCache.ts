@@ -18,11 +18,16 @@ import {
     validateStructuredExtractResult,
 } from '../beaver-extract/schema/validators';
 import type { PageGeometry } from '../beaver-extract/types';
-import { buildPdfCachedMetadata } from './documentExtraction/shared/contentKinds';
+import {
+    buildEpubCachedMetadata,
+    buildPdfCachedMetadata,
+    type EpubSectionSummary,
+} from './documentExtraction/shared/contentKinds';
 import {
     expectedExtractionSchemaVersion,
     type ExtractContentKind,
 } from './documentExtraction/shared/extractionSchemaVersions';
+import { validateEpubDocument, type EpubDocument } from './documentExtraction/epub';
 
 export const DOCUMENT_METADATA_FORMAT_VERSION = 1;
 export const DOCUMENT_PAYLOAD_FORMAT_VERSION = 1;
@@ -60,12 +65,17 @@ interface CacheMetadataInput {
     pageCount: number | null;
     pageLabels: PageLabels | Record<number, string> | null;
     pages: (PageGeometry | null)[] | null;
+    epubSections?: EpubSectionSummary[];
     /** Authoritative error reason; omitted or `null` marks a successful extraction. */
     errorCode?: DocumentCacheErrorCode | null;
 }
 
-interface ExtractionLockEntry {
-    promise: Promise<BeaverExtractResult | null>;
+interface CacheablePayload {
+    schemaVersion: string;
+}
+
+interface ExtractionLockEntry<T extends CacheablePayload = BeaverExtractResult> {
+    promise: Promise<T | null>;
     controller: AbortController;
     waiters: Set<symbol>;
     settled: boolean;
@@ -76,7 +86,7 @@ export class DocumentCache {
     private db: BeaverDB;
     private payloadCacheDir = '';
     private writeLocks = new Map<string, Promise<void>>();
-    private extractionLocks = new Map<string, ExtractionLockEntry>();
+    private extractionLocks = new Map<string, ExtractionLockEntry<CacheablePayload>>();
 
     constructor(db: BeaverDB) {
         this.db = db;
@@ -140,9 +150,11 @@ export class DocumentCache {
                 return null;
             }
             if (metadata.contentKind !== 'pdf') {
-                const deletedPayloads = await this.db.deleteDocumentCacheMetadataIfUnchanged(metadata);
-                if (deletedPayloads) {
-                    await this.removePayloadFiles(deletedPayloads);
+                if (metadata.contentKind === 'text' || metadata.contentKind === 'snapshot') {
+                    const deletedPayloads = await this.db.deleteDocumentCacheMetadataIfUnchanged(metadata);
+                    if (deletedPayloads) {
+                        await this.removePayloadFiles(deletedPayloads);
+                    }
                 }
                 return null;
             }
@@ -209,6 +221,84 @@ export class DocumentCache {
         }
     }
 
+    /** Get a cached EPUB extraction result for the current source identity. */
+    async getEpubResult(
+        ref: { libraryId: number; zoteroKey: string },
+        filePath: string,
+        options?: { maxSourceSizeBytes?: number },
+    ): Promise<EpubDocument | null> {
+        try {
+            const payloadKind: PayloadKind = 'structured';
+            const metadata = await this.getMetadata(ref, filePath);
+            if (!metadata) return null;
+            if (options?.maxSourceSizeBytes != null && metadata.sourceSizeBytes > options.maxSourceSizeBytes) {
+                return null;
+            }
+            if (metadata.contentKind !== 'epub') {
+                if (metadata.contentKind === 'text' || metadata.contentKind === 'snapshot') {
+                    const deletedPayloads = await this.db.deleteDocumentCacheMetadataIfUnchanged(metadata);
+                    if (deletedPayloads) {
+                        await this.removePayloadFiles(deletedPayloads);
+                    }
+                }
+                return null;
+            }
+
+            const payload = await this.db.getDocumentCachePayload(ref.libraryId, ref.zoteroKey, payloadKind);
+            if (!payload) return null;
+
+            if (!this.isPayloadRowFresh(payload, metadata, payloadKind)) {
+                await this.deletePayload(payload);
+                return null;
+            }
+
+            const exists = await IOUtils.exists(payload.payloadPath);
+            if (!exists) {
+                await this.deletePayload(payload, false);
+                return null;
+            }
+
+            const bytes = await IOUtils.read(payload.payloadPath);
+            if (payload.payloadSha256) {
+                const sha256 = await this.sha256Hex(bytes);
+                if (sha256 !== payload.payloadSha256) {
+                    await this.deletePayload(payload);
+                    return null;
+                }
+            }
+
+            let parsed: unknown;
+            try {
+                parsed = JSON.parse(gunzipToString(bytes));
+            } catch {
+                await this.deletePayload(payload);
+                return null;
+            }
+
+            let result: EpubDocument;
+            try {
+                result = validateEpubDocument(parsed);
+            } catch {
+                await this.deletePayload(payload);
+                return null;
+            }
+
+            if (
+                metadata.documentMetadata?.content_kind === 'epub'
+                && metadata.documentMetadata.sectionCount !== result.sectionCount
+            ) {
+                await this.deletePayload(payload);
+                return null;
+            }
+
+            await this.db.touchDocumentCachePayload(payload.id).catch(() => undefined);
+            return result;
+        } catch (error) {
+            logger(`DocumentCache.getEpubResult error: ${error}`, 1);
+            return null;
+        }
+    }
+
     /** Snapshot the current source identity used for cache freshness checks. */
     async getSourceIdentitySnapshot(
         filePath: string,
@@ -225,9 +315,10 @@ export class DocumentCache {
      * extraction while still validating the cache again after acquiring the
      * in-flight slot.
      */
-    async getOrCreateResult(input: {
+    async getOrCreateResult<T extends CacheablePayload = BeaverExtractResult>(input: {
         item: Zotero.Item;
         filePath: string;
+        contentKind?: ExtractContentKind;
         mode: ExtractionMode;
         sourceSizeBytes: number;
         contentType: string;
@@ -235,33 +326,38 @@ export class DocumentCache {
         sharedTimeoutMs?: number;
         abortSignal?: AbortSignal;
         expectedSourceIdentity?: DocumentCacheSourceIdentity | null;
-        create: (signal: AbortSignal) => Promise<BeaverExtractResult>;
-        metadata: (result: BeaverExtractResult) => CacheMetadataInput;
-    }): Promise<BeaverExtractResult | null> {
+        readCached?: (ref: DocumentRef) => Promise<T | null>;
+        create: (signal: AbortSignal) => Promise<T>;
+        metadata: (result: T) => CacheMetadataInput;
+    }): Promise<T | null> {
         const ref = {
             libraryId: input.item.libraryID,
             zoteroKey: input.item.key,
         };
+        const readCached = input.readCached
+            ?? ((cacheRef: DocumentRef) => this.getResult(cacheRef, input.mode, input.filePath, {
+                maxSourceSizeBytes: input.maxSourceSizeBytes,
+            }) as Promise<T | null>);
         const source = input.expectedSourceIdentity
             ?? await this.getSourceIdentity(input.filePath, input.sourceSizeBytes);
         if (input.maxSourceSizeBytes != null && source.sourceSizeBytes > input.maxSourceSizeBytes) {
             return null;
         }
         const payloadKind = DocumentCache.payloadKindForMode(input.mode);
-        const lockKey = `${ref.libraryId}/${ref.zoteroKey}/${payloadKind}/${this.sourceIdentityKey(source)}`;
-        const existing = this.extractionLocks.get(lockKey);
+        const contentKind = input.contentKind ?? 'pdf';
+        const suffix = contentKind === 'pdf' ? '' : `/${contentKind}`;
+        const lockKey = `${ref.libraryId}/${ref.zoteroKey}/${payloadKind}/${this.sourceIdentityKey(source)}${suffix}`;
+        const existing = this.extractionLocks.get(lockKey) as ExtractionLockEntry<T> | undefined;
         if (existing) return this.waitForSharedExtraction(existing, input.abortSignal);
 
-        const cached = await this.getResult(ref, input.mode, input.filePath, {
-            maxSourceSizeBytes: input.maxSourceSizeBytes,
-        });
+        const cached = await readCached(ref);
         if (cached) return cached;
 
-        const refreshedExisting = this.extractionLocks.get(lockKey);
+        const refreshedExisting = this.extractionLocks.get(lockKey) as ExtractionLockEntry<T> | undefined;
         if (refreshedExisting) return this.waitForSharedExtraction(refreshedExisting, input.abortSignal);
 
         const controller = createAbortController();
-        const entry: ExtractionLockEntry = {
+        const entry: ExtractionLockEntry<T> = {
             controller,
             waiters: new Set(),
             settled: false,
@@ -271,12 +367,10 @@ export class DocumentCache {
             ? setTimeout(() => controller.abort(), input.sharedTimeoutMs)
             : null;
         entry.promise = (async () => {
-            const refreshed = await this.getResult(ref, input.mode, input.filePath, {
-                maxSourceSizeBytes: input.maxSourceSizeBytes,
-            });
+            const refreshed = await readCached(ref);
             if (refreshed) return refreshed;
 
-            let result: BeaverExtractResult;
+            let result: T;
             try {
                 result = await input.create(controller.signal);
             } finally {
@@ -309,10 +403,10 @@ export class DocumentCache {
         return this.waitForSharedExtraction(entry, input.abortSignal);
     }
 
-    private waitForSharedExtraction(
-        entry: ExtractionLockEntry,
+    private waitForSharedExtraction<T extends CacheablePayload>(
+        entry: ExtractionLockEntry<T>,
         abortSignal?: AbortSignal,
-    ): Promise<BeaverExtractResult | null> {
+    ): Promise<T | null> {
         const waiter = Symbol('document-cache-waiter');
         entry.waiters.add(waiter);
 
@@ -380,13 +474,13 @@ export class DocumentCache {
     }
 
     /** Store fresh source-level metadata and a compressed full-document payload. */
-    async putResult(input: {
+    async putResult<T extends CacheablePayload = BeaverExtractResult>(input: {
         item: Zotero.Item;
         filePath: string;
         mode: ExtractionMode;
         sourceSizeBytes: number;
         contentType: string;
-        result: BeaverExtractResult;
+        result: T;
         metadata: CacheMetadataInput;
         expectedSourceIdentity?: DocumentCacheSourceIdentity | null;
     }): Promise<void> {
@@ -553,13 +647,13 @@ export class DocumentCache {
         };
     }
 
-    private async putResultUnlocked(input: {
+    private async putResultUnlocked<T extends CacheablePayload>(input: {
         item: Zotero.Item;
         filePath: string;
         mode: ExtractionMode;
         sourceSizeBytes: number;
         contentType: string;
-        result: BeaverExtractResult;
+        result: T;
         metadata: CacheMetadataInput;
         expectedSourceIdentity?: DocumentCacheSourceIdentity | null;
     }): Promise<void> {
@@ -572,7 +666,11 @@ export class DocumentCache {
 
         const payloadKind = DocumentCache.payloadKindForMode(input.mode);
         const metadataInput = this.buildMetadataInput(input.item, source, input.contentType, input.metadata);
-        if (input.result.mode !== input.mode || input.result.schemaVersion !== metadataInput.extractionSchemaVersion) {
+        const result = input.result as { mode?: string; schemaVersion: string };
+        if (
+            (result.mode !== undefined && result.mode !== input.mode)
+            || result.schemaVersion !== metadataInput.extractionSchemaVersion
+        ) {
             return;
         }
         const payloadWrite = await this.writePayloadFile(
@@ -747,9 +845,6 @@ export class DocumentCache {
         if (extractionSchemaVersion === null) {
             throw new Error(`Document cache does not support ${contentKind} writes yet`);
         }
-        if (contentKind !== 'pdf') {
-            throw new Error(`Document cache writes are currently limited to PDF content`);
-        }
         const pageLabels = this.normalizePageLabels(metadata.pageLabels);
         const pages = metadata.pages ?? null;
         return {
@@ -761,7 +856,9 @@ export class DocumentCache {
             fileSignature: source.fileSignature,
             sourceSizeBytes: source.sourceSizeBytes,
             contentType,
-            documentMetadata: buildPdfCachedMetadata(metadata.pageCount, pageLabels, pages),
+            documentMetadata: contentKind === 'epub'
+                ? buildEpubCachedMetadata(metadata.epubSections ?? [])
+                : buildPdfCachedMetadata(metadata.pageCount, pageLabels, pages),
             errorCode: metadata.errorCode ?? null,
             extractionSchemaVersion,
             metadataFormatVersion: DOCUMENT_METADATA_FORMAT_VERSION,
@@ -777,11 +874,11 @@ export class DocumentCache {
         return normalized;
     }
 
-    private async writePayloadFile(
+    private async writePayloadFile<T extends CacheablePayload>(
         libraryId: number,
         zoteroKey: string,
         payloadKind: PayloadKind,
-        result: BeaverExtractResult,
+        result: T,
     ): Promise<{ path: string; size: number; sha256: string }> {
         const json = JSON.stringify(result);
         const bytes = gzipString(json);

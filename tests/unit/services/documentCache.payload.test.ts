@@ -6,6 +6,7 @@ import { MockDBConnection } from '../../mocks/mockDBConnection';
 import { createMockAttachment } from '../../helpers/factories';
 import type { BeaverExtractResult } from '../../../src/beaver-extract/schema/schema';
 import type { PageGeometry } from '../../../src/services/documentCache';
+import type { EpubDocument } from '../../../src/services/documentExtraction/epub';
 
 const mockIOUtils = (globalThis as any).IOUtils as {
     exists: ReturnType<typeof vi.fn>;
@@ -35,6 +36,43 @@ const structuredResult: BeaverExtractResult = {
         bboxPrecision: 2,
         pages: [{ index: 0, label: '1', width: 100, height: 200, viewBox: [0, 0, 100, 200], rotation: 0, items: [] }],
         citationIndex: {},
+    },
+};
+
+const epubDocument: EpubDocument = {
+    content_kind: 'epub',
+    schemaVersion: '1',
+    sectionCount: 1,
+    sections: [
+        {
+            index: 0,
+            rawHref: 'EPUB/chapter.xhtml',
+            label: 'Chapter 1',
+            items: [
+                {
+                    id: 'p1',
+                    kind: 'text',
+                    sectionIndex: 0,
+                    order: 0,
+                    text: 'First sentence.',
+                    sentences: [{ id: 's1', text: 'First sentence.' }],
+                },
+            ],
+        },
+    ],
+    citationIndex: {
+        s1: {
+            id: 's1',
+            kind: 'sentence',
+            sectionIndex: 0,
+            itemId: 'p1',
+            sentenceId: 's1',
+        },
+    },
+    diagnostics: {
+        extractedTextChars: 15,
+        sourceTextChars: 15,
+        textCoverage: 1,
     },
 };
 
@@ -125,27 +163,71 @@ describe('DocumentCache payloads', () => {
         expect(payload?.contentKind).toBe('pdf');
     });
 
-    it('does not write payload files for EPUB metadata in this phase', async () => {
+    it('putResult then getEpubResult returns the cached EPUB document', async () => {
         const item = createCacheAttachment();
 
-        await cache.putResult({
+        await cache.putResult<EpubDocument>({
             item,
             filePath: sourcePath,
             mode: 'structured',
             sourceSizeBytes: 3,
             contentType: 'application/epub+zip',
-            result: structuredResult,
+            result: epubDocument,
             metadata: {
                 contentKind: 'epub',
-                pageCount: 1,
-                pageLabels: { '0': '1' },
-                pages: onePageGeometry,
+                pageCount: null,
+                pageLabels: null,
+                pages: null,
+                epubSections: [{ index: 0, rawHref: 'EPUB/chapter.xhtml', label: 'Chapter 1', itemCount: 1 }],
             },
         });
 
-        expect(mockIOUtils.write).not.toHaveBeenCalled();
-        expect(await db.getDocumentCacheMetadataByKey(1, 'ABCD1234')).toBeNull();
-        expect(await db.getDocumentCachePayloadCount()).toBe(0);
+        await expect(cache.getEpubResult(
+            { libraryId: 1, zoteroKey: 'ABCD1234' },
+            sourcePath,
+        )).resolves.toEqual(epubDocument);
+
+        const metadata = await db.getDocumentCacheMetadataByKey(1, 'ABCD1234');
+        expect(metadata?.contentKind).toBe('epub');
+        expect(metadata?.documentMetadata).toEqual({
+            content_kind: 'epub',
+            sectionCount: 1,
+            sections: [{ index: 0, rawHref: 'EPUB/chapter.xhtml', label: 'Chapter 1', itemCount: 1 }],
+        });
+        const payload = await db.getDocumentCachePayload(1, 'ABCD1234', 'structured');
+        expect(payload?.contentKind).toBe('epub');
+    });
+
+    it('PDF getResult misses an EPUB row without deleting it', async () => {
+        const item = createCacheAttachment();
+        await cache.putResult<EpubDocument>({
+            item,
+            filePath: sourcePath,
+            mode: 'structured',
+            sourceSizeBytes: 3,
+            contentType: 'application/epub+zip',
+            result: epubDocument,
+            metadata: {
+                contentKind: 'epub',
+                pageCount: null,
+                pageLabels: null,
+                pages: null,
+                epubSections: [{ index: 0, rawHref: 'EPUB/chapter.xhtml', itemCount: 1 }],
+            },
+        });
+
+        await expect(cache.getResult(
+            { libraryId: 1, zoteroKey: 'ABCD1234' },
+            'structured',
+            sourcePath,
+        )).resolves.toBeNull();
+
+        expect(await db.getDocumentCacheMetadataByKey(1, 'ABCD1234')).not.toBeNull();
+        expect(await db.getDocumentCachePayloadCount()).toBe(1);
+        await expect(cache.getEpubResult(
+            { libraryId: 1, zoteroKey: 'ABCD1234' },
+            sourcePath,
+        )).resolves.toEqual(epubDocument);
     });
 
     it.each(['text', 'snapshot'] as const)(
@@ -765,6 +847,32 @@ describe('DocumentCache payloads', () => {
         await cache.runStartupGC();
 
         expect(await db.getDocumentCacheMetadataByKey(1, 'ABCD1234')).not.toBeNull();
+        expect(await db.getDocumentCachePayloadCount()).toBe(1);
+    });
+
+    it('startup GC keeps valid EPUB cache entries', async () => {
+        const item = createCacheAttachment();
+        await cache.putResult<EpubDocument>({
+            item,
+            filePath: sourcePath,
+            mode: 'structured',
+            sourceSizeBytes: 3,
+            contentType: 'application/epub+zip',
+            result: epubDocument,
+            metadata: {
+                contentKind: 'epub',
+                pageCount: null,
+                pageLabels: null,
+                pages: null,
+                epubSections: [{ index: 0, rawHref: 'EPUB/chapter.xhtml', itemCount: 1 }],
+            },
+        });
+
+        await cache.runStartupGC();
+
+        const metadata = await db.getDocumentCacheMetadataByKey(1, 'ABCD1234');
+        expect(metadata?.contentKind).toBe('epub');
+        expect(metadata?.extractionSchemaVersion).toBe('1');
         expect(await db.getDocumentCachePayloadCount()).toBe(1);
     });
 

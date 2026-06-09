@@ -17,6 +17,42 @@ const structuredResult = {
     },
 };
 
+const epubDocument = {
+    content_kind: 'epub' as const,
+    schemaVersion: '1',
+    sectionCount: 1,
+    sections: [
+        {
+            index: 0,
+            rawHref: 'EPUB/chapter.xhtml',
+            items: [
+                {
+                    id: 'p1',
+                    kind: 'text' as const,
+                    sectionIndex: 0,
+                    order: 0,
+                    text: 'First.',
+                    sentences: [{ id: 's1', text: 'First.' }],
+                },
+            ],
+        },
+    ],
+    citationIndex: {
+        s1: {
+            id: 's1',
+            kind: 'sentence' as const,
+            sectionIndex: 0,
+            itemId: 'p1',
+            sentenceId: 's1',
+        },
+    },
+    diagnostics: {
+        extractedTextChars: 6,
+        sourceTextChars: 6,
+        textCoverage: 1,
+    },
+};
+
 vi.mock('../../../src/utils/prefs', () => ({
     getPref: vi.fn(() => 100),
 }));
@@ -389,6 +425,152 @@ describe('handleZoteroDocumentRequest document cache integration', () => {
         expect(mockState.extractCalls).toHaveLength(0);
     });
 
+    it('returns cached EPUB documents through the document request handler', async () => {
+        const epubItem = {
+            id: 43,
+            libraryID: 1,
+            key: 'EPUB1234',
+            loadAllData: vi.fn().mockResolvedValue(undefined),
+            isAttachment: vi.fn(() => true),
+            isEPUBAttachment: vi.fn(() => true),
+            attachmentContentType: 'application/epub+zip',
+            attachmentLinkMode: 0,
+            getFilePathAsync: vi.fn().mockResolvedValue('/storage/EPUB1234/book.epub'),
+        };
+        const documentCache = {
+            getEpubResult: vi.fn().mockResolvedValue(epubDocument),
+        };
+        (globalThis as any).Zotero.Beaver = { data: { env: 'test' }, documentCache };
+        (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(epubItem);
+        vi.mocked(resolveToReadableAttachment).mockResolvedValue({
+            resolved: true,
+            item: epubItem,
+            key: '1-EPUB1234',
+            contentKind: 'epub',
+            contentType: 'application/epub+zip',
+        } as any);
+
+        const response = await handleZoteroDocumentRequest({
+            event: 'zotero_document_request',
+            request_id: 'req-epub',
+            attachment: { library_id: 1, zotero_key: 'EPUB1234' },
+            mode: 'structured',
+        });
+
+        expect(response).toEqual({
+            type: 'zotero_document',
+            request_id: 'req-epub',
+            resolved_attachment: { library_id: 1, zotero_key: 'EPUB1234' },
+            content_type: 'application/epub+zip',
+            content_kind: 'epub',
+            result: epubDocument,
+        });
+        expect(documentCache.getEpubResult).toHaveBeenCalledWith(
+            { libraryId: 1, zoteroKey: 'EPUB1234' },
+            '/storage/EPUB1234/book.epub',
+            expect.objectContaining({ maxSourceSizeBytes: expect.any(Number) }),
+        );
+        expect(mockState.extractCalls).toHaveLength(0);
+    });
+
+    it('passes the cache cold-create abort signal into EPUB extraction', async () => {
+        const epubItem = {
+            id: 45,
+            libraryID: 1,
+            key: 'COLDEPB1',
+            loadAllData: vi.fn().mockResolvedValue(undefined),
+            isAttachment: vi.fn(() => true),
+            isEPUBAttachment: vi.fn(() => true),
+            attachmentContentType: 'application/epub+zip',
+            attachmentLinkMode: 0,
+            getFilePathAsync: vi.fn().mockResolvedValue('/storage/COLDEPB1/book.epub'),
+        };
+        let capturedCreate: ((signal: AbortSignal) => Promise<unknown>) | null = null;
+        const documentCache = {
+            getEpubResult: vi.fn().mockResolvedValue(null),
+            getOrCreateResult: vi.fn(async (input: any) => {
+                capturedCreate = input.create;
+                return epubDocument;
+            }),
+        };
+        (globalThis as any).Zotero.Beaver = { data: { env: 'test' }, documentCache };
+        (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(epubItem);
+        vi.mocked(resolveToReadableAttachment).mockResolvedValue({
+            resolved: true,
+            item: epubItem,
+            key: '1-COLDEPB1',
+            contentKind: 'epub',
+            contentType: 'application/epub+zip',
+        } as any);
+
+        const response = await handleZoteroDocumentRequest({
+            event: 'zotero_document_request',
+            request_id: 'req-cold-epub',
+            attachment: { library_id: 1, zotero_key: 'COLDEPB1' },
+            mode: 'structured',
+        });
+
+        expect(response.content_kind).toBe('epub');
+        expect(capturedCreate).toBeTypeOf('function');
+        const importESModule = vi.fn();
+        (globalThis as any).ChromeUtils = { importESModule };
+        const controller = new AbortController();
+        controller.abort();
+        await expect(capturedCreate!(controller.signal)).rejects.toThrow('Operation aborted');
+        expect(importESModule).not.toHaveBeenCalled();
+    });
+
+    it('derives no_text_layer for cached EPUB documents with no extracted text', async () => {
+        const epubItem = {
+            id: 44,
+            libraryID: 1,
+            key: 'EMPTYEPB',
+            loadAllData: vi.fn().mockResolvedValue(undefined),
+            isAttachment: vi.fn(() => true),
+            isEPUBAttachment: vi.fn(() => true),
+            attachmentContentType: 'application/epub+zip',
+            attachmentLinkMode: 0,
+            getFilePathAsync: vi.fn().mockResolvedValue('/storage/EMPTYEPB/book.epub'),
+        };
+        const emptyDocument = {
+            ...epubDocument,
+            diagnostics: {
+                extractedTextChars: 0,
+                sourceTextChars: 0,
+                textCoverage: null,
+            },
+        };
+        (globalThis as any).Zotero.Beaver = {
+            data: { env: 'test' },
+            documentCache: {
+                getEpubResult: vi.fn().mockResolvedValue(emptyDocument),
+            },
+        };
+        (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(epubItem);
+        vi.mocked(resolveToReadableAttachment).mockResolvedValue({
+            resolved: true,
+            item: epubItem,
+            key: '1-EMPTYEPB',
+            contentKind: 'epub',
+            contentType: 'application/epub+zip',
+        } as any);
+
+        const response = await handleZoteroDocumentRequest({
+            event: 'zotero_document_request',
+            request_id: 'req-empty-epub',
+            attachment: { library_id: 1, zotero_key: 'EMPTYEPB' },
+            mode: 'structured',
+        });
+
+        expect(response).toMatchObject({
+            type: 'zotero_document',
+            request_id: 'req-empty-epub',
+            content_kind: 'epub',
+            error_code: 'no_text_layer',
+        });
+        expect(response.result).toBeUndefined();
+    });
+
     it('returns timeout when text file path resolution exceeds timeout_seconds', async () => {
         vi.useFakeTimers();
         try {
@@ -593,7 +775,7 @@ describe('handleZoteroDocumentRequest document cache integration', () => {
             error_code: 'unsupported_type',
         });
         expect(response).not.toHaveProperty('content_kind');
-        expect(response.error).toContain('PDF and plain text only');
+        expect(response.error).toContain('PDF, EPUB, and plain text only');
         expect(response.result).toBeUndefined();
     });
 });

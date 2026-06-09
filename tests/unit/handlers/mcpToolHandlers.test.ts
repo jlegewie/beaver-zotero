@@ -994,6 +994,31 @@ describe('MCP Tool Handlers (via useMcpServer)', () => {
             expect(result.content[0].text).toContain('File not found');
         });
 
+        it('reports EPUB attachments as unsupported by the page-based MCP reader', async () => {
+            mockHandleZoteroDocumentRequest.mockResolvedValue({
+                type: 'zotero_document',
+                request_id: 'req-epub',
+                content_kind: 'epub',
+                result: {
+                    content_kind: 'epub',
+                    schemaVersion: '1',
+                    sectionCount: 1,
+                    sections: [{ index: 0, rawHref: 'EPUB/chapter.xhtml', items: [] }],
+                    citationIndex: {},
+                    diagnostics: {
+                        extractedTextChars: 0,
+                        sourceTextChars: 0,
+                        textCoverage: null,
+                    },
+                },
+            } as any);
+
+            const result = await callTool(endpoint, 'read_attachment', { attachment_id: '1-KEY' });
+
+            expect(result.isError).toBe(true);
+            expect(result.content[0].text).toContain('does not support epub attachments');
+        });
+
         it('handles unknown total_pages', async () => {
             mockHandleZoteroDocumentRequest.mockResolvedValue(mockDocumentResponse([{ index: 0, markdown: 'text' }], null));
 

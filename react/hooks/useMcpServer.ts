@@ -877,16 +877,20 @@ export async function handleReadAttachment(args: any): Promise<any> {
     if (response.error || !response.result) {
         return mcpError(response.error ?? 'Failed to read attachment');
     }
-    if (response.result.mode !== 'markdown') {
+    const result = response.result;
+    if (result.content_kind === 'epub' || result.content_kind === 'text') {
+        return mcpError(`read_attachment does not support ${result.content_kind} attachments.`);
+    }
+    if (result.mode !== 'markdown') {
         return mcpError('Attachment read returned an unexpected document mode.');
     }
 
-    const totalPages = response.result.document.pageCount;
+    const totalPages = result.document.pageCount;
     if (Number.isInteger(totalPages) && totalPages >= 0 && startPage > totalPages) {
         return mcpError(`Requested start_page ${startPage} is out of range; attachment has ${totalPages} pages.`);
     }
 
-    const requestedPages = response.result.document.pages.filter(
+    const requestedPages = result.document.pages.filter(
         (page) => page.index + 1 >= startPage && page.index + 1 <= endPage,
     );
     if (requestedPages.length === 0) {
@@ -897,7 +901,7 @@ export async function handleReadAttachment(args: any): Promise<any> {
     const actualEnd = requestedPages.length > 0
         ? requestedPages[requestedPages.length - 1].index + 1
         : startPage;
-    const header = `Attachment: ${args.attachment_id} | Total pages: ${response.result.document.pageCount ?? 'unknown'} | Showing pages ${startPage}-${actualEnd}`;
+    const header = `Attachment: ${args.attachment_id} | Total pages: ${result.document.pageCount ?? 'unknown'} | Showing pages ${startPage}-${actualEnd}`;
     const pageTexts = requestedPages.map(
         (p) => `<page${p.index + 1}>\n${p.markdown}\n</page${p.index + 1}>`,
     );

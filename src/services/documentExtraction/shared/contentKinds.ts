@@ -141,3 +141,13 @@ export function buildPdfCachedMetadata(
         pages,
     };
 }
+
+export function buildEpubCachedMetadata(
+    sections: EpubSectionSummary[],
+): CachedDocumentMetadata {
+    return {
+        content_kind: 'epub',
+        sectionCount: sections.length,
+        sections,
+    };
+}
