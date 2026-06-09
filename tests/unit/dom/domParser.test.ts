@@ -3,10 +3,12 @@
 import { describe, expect, it } from "vitest";
 import {
     buildDomCitationIndex,
+    buildDomDiagnostics,
     collectDomItems,
     createDomCounters,
     isFootnoteElement,
     mapElement,
+    measureSectionSourceText,
     parseDomSection,
     resolveDomCitationId,
     splitSentences,
@@ -275,5 +277,57 @@ describe("DOM citation index", () => {
             anchorId: "anchor",
         });
         expect(resolveDomCitationId(index, "sentence:2")).toBeUndefined();
+    });
+});
+
+describe("DOM extraction diagnostics", () => {
+    it("reports full coverage when all body text is extracted", () => {
+        const doc = parseXhtml(`<p>First paragraph.</p><p>Second paragraph.</p>`);
+        const section = parseDomSection({
+            doc,
+            sectionIndex: 0,
+            rawHref: "EPUB/first.xhtml",
+            counters: createDomCounters(),
+        });
+
+        const sourceChars = measureSectionSourceText(doc);
+        const diagnostics = buildDomDiagnostics([section], sourceChars);
+        expect(diagnostics.textCoverage).toBe(1);
+        expect(diagnostics.extractedTextChars).toBe(sourceChars);
+    });
+
+    it("reports low coverage when body text is dropped (unsupported container)", () => {
+        // Definition-list text is not in the allowlist or the leaf-container set,
+        // so it is dropped — coverage must fall below 1 to flag the loss.
+        const doc = parseXhtml(`
+            <p>Visible paragraph of prose that the walk captures in full.</p>
+            <dl>
+                <dt>Term</dt>
+                <dd>A definition with a substantial amount of text that is dropped.</dd>
+            </dl>
+        `);
+        const section = parseDomSection({
+            doc,
+            sectionIndex: 0,
+            rawHref: "EPUB/first.xhtml",
+            counters: createDomCounters(),
+        });
+
+        const diagnostics = buildDomDiagnostics([section], measureSectionSourceText(doc));
+        expect(diagnostics.textCoverage).not.toBeNull();
+        expect(diagnostics.textCoverage!).toBeLessThan(1);
+    });
+
+    it("returns null coverage for a source with no visible text", () => {
+        const doc = parseXhtml(`<img src="scan.png" />`);
+        const section = parseDomSection({
+            doc,
+            sectionIndex: 0,
+            rawHref: "EPUB/first.xhtml",
+            counters: createDomCounters(),
+        });
+
+        const diagnostics = buildDomDiagnostics([section], measureSectionSourceText(doc));
+        expect(diagnostics.textCoverage).toBeNull();
     });
 });

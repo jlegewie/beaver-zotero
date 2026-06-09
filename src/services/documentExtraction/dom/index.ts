@@ -18,6 +18,11 @@ export {
     parseDomSection,
     splitSentences,
 } from "./sectionParser";
+export {
+    buildDomDiagnostics,
+    measureSectionSourceText,
+    sumExtractedTextChars,
+} from "./diagnostics";
 export type {
     DomExtractionCounters,
     ParseDomSectionInput,
@@ -26,6 +31,7 @@ export type {
     DomCitationIndex,
     DomCitationIndexEntry,
     DomDocument,
+    DomExtractionDiagnostics,
     DomItem,
     DomItemKind,
     DomSection,

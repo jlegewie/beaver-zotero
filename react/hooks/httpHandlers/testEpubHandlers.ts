@@ -39,8 +39,6 @@ interface EpubExtractStats {
     maxSentenceChars: number;
     avgItemsPerSection: number;
     maxItemsInSection: number;
-    /** Total characters across all extracted item text (for coverage vs. source). */
-    extractedTextChars: number;
 }
 
 interface EpubExtractSample {
@@ -83,7 +81,6 @@ function computeStats(
     let totalSentenceChars = 0;
     let maxSentenceChars = 0;
     let maxItemsInSection = 0;
-    let extractedTextChars = 0;
 
     const sectionLabels: string[] = [];
     const firstItems: EpubExtractSample['firstItems'] = [];
@@ -101,7 +98,6 @@ function computeStats(
         for (const item of section.items as DomItem[]) {
             itemCount += 1;
             itemsByKind[item.kind] += 1;
-            extractedTextChars += (item.text ?? '').length;
             if (!item.text || item.text.trim().length === 0) emptyTextItems += 1;
             if (firstItems.length < 25) {
                 firstItems.push({
@@ -162,7 +158,6 @@ function computeStats(
             ? Math.round((itemCount / sectionCount) * 10) / 10
             : 0,
         maxItemsInSection,
-        extractedTextChars,
     };
 
     return {
@@ -252,6 +247,9 @@ export async function handleTestEpubExtractHttpRequest(request: any): Promise<an
         source,
         timing: { extractMs },
         thresholds: { shortChars, longChars },
+        // Authoritative text-coverage signal, computed inside the extractor and
+        // carried on the document model.
+        diagnostics: document.diagnostics,
         stats,
         sample,
         ...(includeDocument ? { document } : {}),

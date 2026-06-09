@@ -1,6 +1,8 @@
 import {
     buildDomCitationIndex,
+    buildDomDiagnostics,
     createDomCounters,
+    measureSectionSourceText,
     parseDomSection,
     type DomSection,
 } from "../dom";
@@ -12,6 +14,12 @@ import {
 } from "./schema";
 import { effectiveMaxFileSizeMB } from "../../attachmentLimits";
 import { isRemoteAccessAvailable } from "../attachmentSource";
+import { logger } from "../../../utils/logger";
+
+// Coverage below this fraction means the walk dropped a meaningful share of the
+// book's visible text (an unrecognized container/table structure) and warrants a
+// warning so low-quality EPUB extractions are surfaced rather than silent.
+const LOW_COVERAGE_WARN_THRESHOLD = 0.85;
 
 interface ZoteroEpubModule {
     EPUB: new (filePath: string) => {
@@ -70,10 +78,12 @@ export async function extractEpubDocumentFromFile(filePath: string): Promise<Epu
     const epub = new EPUB(filePath);
     const counters = createDomCounters();
     const sections: DomSection[] = [];
+    let sourceTextChars = 0;
 
     try {
         let sectionIndex = 0;
         for await (const { href, doc } of epub.getSectionDocuments()) {
+            sourceTextChars += measureSectionSourceText(doc);
             sections.push(parseDomSection({
                 doc,
                 sectionIndex,
@@ -87,12 +97,23 @@ export async function extractEpubDocumentFromFile(filePath: string): Promise<Epu
         epub.close();
     }
 
+    const diagnostics = buildDomDiagnostics(sections, sourceTextChars);
+    if (diagnostics.textCoverage !== null && diagnostics.textCoverage < LOW_COVERAGE_WARN_THRESHOLD) {
+        logger(
+            `extractEpubDocument: low text coverage ${diagnostics.textCoverage} `
+            + `(${diagnostics.extractedTextChars}/${diagnostics.sourceTextChars} chars) for ${filePath} `
+            + `— body text may be in an unsupported structure (e.g. data tables)`,
+            2,
+        );
+    }
+
     return {
         content_kind: EPUB_CONTENT_KIND,
         schemaVersion: EPUB_SCHEMA_VERSION,
         sectionCount: sections.length,
         sections,
         citationIndex: buildDomCitationIndex(sections),
+        diagnostics,
     };
 }
 
