@@ -92,6 +92,9 @@ import {
     handleTestPdfAnalyzeLayoutHttpRequest,
 } from './httpHandlers/testPdfHandlers';
 import {
+    handleTestEpubExtractHttpRequest,
+} from './httpHandlers/testEpubHandlers';
+import {
     handleTestBackgroundEnqueueHttpRequest,
     handleTestBackgroundStatsHttpRequest,
     handleTestBackgroundPeekHttpRequest,
@@ -212,6 +215,8 @@ const ENDPOINT_PATHS = [
     // Document-wide style + margin analysis context (mirrors what
     // `extract({ mode: "structured" })` builds before per-page processing)
     '/beaver/test/pdf-analyze-layout',
+    // EPUB extraction over a raw file path or attachment (corpus triage)
+    '/beaver/test/epub-extract',
     // Background queue inspection / driving (dev-only)
     '/beaver/test/background-enqueue',
     '/beaver/test/background-stats',
@@ -854,6 +859,10 @@ function registerEndpoints(): boolean {
         // debugging.
         Zotero.Server.Endpoints['/beaver/test/pdf-analyze-layout'] =
             createEndpoint(handleTestPdfAnalyzeLayoutHttpRequest);
+
+        // EPUB extraction over a raw file path / attachment (corpus triage)
+        Zotero.Server.Endpoints['/beaver/test/epub-extract'] =
+            createEndpoint(handleTestEpubExtractHttpRequest);
 
         // Background queue (dev-only)
         Zotero.Server.Endpoints['/beaver/test/background-enqueue'] =
