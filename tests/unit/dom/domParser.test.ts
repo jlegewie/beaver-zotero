@@ -160,7 +160,7 @@ describe("DOM mapping", () => {
         ]);
     });
 
-    it("keeps a genuine data table as one opaque table item", () => {
+    it("keeps a genuine data table as a single table item", () => {
         const doc = parseXhtml(`
             <table id="data">
                 <tr><th>Year</th><th>Count</th></tr>
@@ -170,6 +170,22 @@ describe("DOM mapping", () => {
 
         const items = collectDomItems(bodyOf(doc));
         expect(items.map((item) => item.kind)).toEqual(["table"]);
+    });
+
+    it("linearizes a data table into one citable row per <tr>", () => {
+        const doc = parseXhtml(`
+            <table id="data">
+                <tr><th>Year</th><th>Count</th></tr>
+                <tr><td>1995</td><td>42</td></tr>
+                <tr><td>1996</td><td>43</td></tr>
+                <tr><td></td><td></td></tr>
+            </table>
+        `);
+
+        const [item] = collectDomItems(bodyOf(doc));
+        // Cells joined by " | "; rows joined by newline; fully empty row dropped.
+        expect(item.rows).toEqual(["Year | Count", "1995 | 42", "1996 | 43"]);
+        expect(item.text).toBe("Year | Count\n1995 | 42\n1996 | 43");
     });
 
     it("walks a layout table that wraps real headings and paragraphs", () => {
@@ -277,6 +293,35 @@ describe("DOM section parser", () => {
         });
 
         expect(section).toEqual({ index: 3, rawHref: "EPUB/nav.xml", items: [] });
+    });
+
+    it("makes each data-table row a citable sentence", () => {
+        const section = parseDomSection({
+            doc: parseXhtml(`
+                <table>
+                    <tr><th>Manuscript</th><th>Reading</th></tr>
+                    <tr><td>Codex A</td><td>alpha</td></tr>
+                    <tr><td>Codex B</td><td>beta</td></tr>
+                </table>
+            `),
+            sectionIndex: 0,
+            rawHref: "EPUB/first.xhtml",
+            counters: createDomCounters(),
+        });
+
+        const [table] = section.items;
+        expect(table.kind).toBe("table");
+        expect(table.sentences?.map((s) => s.text)).toEqual([
+            "Manuscript | Reading",
+            "Codex A | alpha",
+            "Codex B | beta",
+        ]);
+        // Row sentences are document-global ids, so they join the citation index.
+        const index = buildDomCitationIndex([section]);
+        expect(resolveDomCitationId(index, table.sentences![1].id)).toMatchObject({
+            kind: "sentence",
+            itemId: table.id,
+        });
     });
 });
 

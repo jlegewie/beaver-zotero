@@ -49,7 +49,14 @@ export function parseDomSection(input: ParseDomSectionInput): DomSection {
         if (candidate.level !== undefined) {
             item.level = candidate.level;
         }
-        if (SENTENCE_BEARING_KINDS.has(candidate.kind)) {
+        if (candidate.kind === "table" && candidate.rows && candidate.rows.length > 0) {
+            // A data table is linearized row-by-row: each row is a citable
+            // sentence rather than the whole table being one opaque blob.
+            item.sentences = candidate.rows.map((rowText) => ({
+                id: nextSentenceId(input.counters),
+                text: rowText,
+            }));
+        } else if (SENTENCE_BEARING_KINDS.has(candidate.kind)) {
             item.sentences = splitSentences(candidate.text).map((sentenceText) => ({
                 id: nextSentenceId(input.counters),
                 text: sentenceText,

@@ -12,6 +12,8 @@ export interface DomItemCandidate extends DomElementMapping {
     element: Element;
     text: string;
     anchorId?: string;
+    /** For a data table: one linearized string per row, so rows are citable. */
+    rows?: string[];
 }
 
 /** Normalize DOM text into a compact single-line string. */
@@ -194,6 +196,21 @@ function buildCandidate(
     element: Element,
     mapping: DomElementMapping,
 ): DomItemCandidate | undefined {
+    if (mapping.kind === "table") {
+        const rows = linearizeTableRows(element);
+        // Linearized row text reads as a TSV-ish table and keeps row boundaries;
+        // empty/degenerate tables fall back to the flat text content.
+        const text = rows.length > 0 ? rows.join("\n") : normalizeText(element.textContent);
+        if (!text) return undefined;
+        return {
+            element,
+            kind: "table",
+            text,
+            ...(rows.length > 0 ? { rows } : {}),
+            anchorId: findNearestAnchorId(element),
+        };
+    }
+
     const text = textForMappedElement(element, mapping.kind);
     if (!text) return undefined;
     return {
@@ -213,6 +230,33 @@ function textForMappedElement(element: Element, kind: DomItemKind): string {
         );
     }
     return normalizeText(element.textContent);
+}
+
+/**
+ * Linearize a data table into one string per row, cells joined by " | ".
+ *
+ * Each row becomes a citable unit (a sentence) instead of the whole table being
+ * one opaque blob. Only direct `td`/`th` cells of each row are used; rows whose
+ * cells are all empty are dropped. Data tables never nest (a table containing a
+ * nested table is classified as layout and walked instead), so a flat
+ * `tr`/`td` scan is safe.
+ */
+export function linearizeTableRows(table: Element): string[] {
+    const rows: string[] = [];
+    for (const tr of Array.from(table.querySelectorAll("tr")) as Element[]) {
+        const cells: string[] = [];
+        for (const cell of Array.from(tr.children) as Element[]) {
+            const name = cell.localName.toLowerCase();
+            if (name !== "td" && name !== "th") continue;
+            cells.push(normalizeText(cell.textContent));
+        }
+        // Drop fully empty rows (spacer/separator rows) but keep internal empty
+        // cells so column alignment survives.
+        if (cells.some((cell) => cell.length > 0)) {
+            rows.push(cells.join(" | "));
+        }
+    }
+    return rows;
 }
 
 function hasToken(value: string | null, token: string): boolean {
