@@ -300,12 +300,12 @@ const READ_ATTACHMENT_TOOL = {
         openWorldHint: false,
     },
     description:
-        "Read the text content of a PDF attachment from the user's Zotero library. " +
-        'Extracts and returns the text from specified pages (or the first 30 pages if no page range is given). ' +
+        "Read the text content of a PDF or EPUB attachment from the user's Zotero library. " +
+        'Extracts and returns text from specified PDF pages or EPUB sections (or the first 30 if no range is given). ' +
         'The `attachment_id` must be obtained from another tool: use `search_by_topic` or `search_by_metadata` ' +
         '(which include attachment IDs in results), or call `get_item_details` with `include_attachments: true`. ' +
-        'For long documents, read progressively by specifying page ranges. ' +
-        'Only PDF attachments with `status: "available"` are supported.',
+        'For long documents, read progressively by specifying page ranges. For EPUBs, page numbers mean 1-based section ordinals. ' +
+        'Only PDF and EPUB attachments with `status: "available"` are supported.',
     inputSchema: {
         type: 'object' as const,
         properties: {
@@ -316,11 +316,11 @@ const READ_ATTACHMENT_TOOL = {
             },
             start_page: {
                 type: 'integer',
-                description: 'Starting page number (1-indexed). Defaults to page 1.',
+                description: 'Starting page number (1-indexed). For EPUBs, this is the section ordinal. Defaults to page 1.',
             },
             end_page: {
                 type: 'integer',
-                description: 'Ending page number (inclusive). Defaults to the last page. Maximum 30 pages per request.',
+                description: 'Ending page number (inclusive). For EPUBs, this is the section ordinal. Defaults to the last page. Maximum 30 pages per request.',
             },
         },
         required: ['attachment_id'],
@@ -423,7 +423,7 @@ const GET_ITEM_DETAILS_TOOL = {
         'Returns all Zotero fields for each item (title, authors, abstract, DOI, journal, volume, issue, pages, date, etc.), ' +
         'along with tags and collection memberships. Use this to get detailed metadata after finding items via search, ' +
         'or to look up specific fields like DOI or abstract. ' +
-        'Set `include_attachments` to true to also see which files (PDFs) are attached and their availability status. ' +
+        'Set `include_attachments` to true to also see which files are attached and their availability status. ' +
         'Set `include_notes` to true to also fetch the child notes attached to each item.',
     inputSchema: {
         type: 'object' as const,
@@ -559,7 +559,7 @@ const LIST_ITEMS_TOOL = {
         'By default only regular bibliographic items are returned; use `item_category` to list notes, attachments, ' +
         'or all supported item types instead. ' +
         'Note: for regular items this tool returns lightweight metadata without attachment IDs. ' +
-        'To read an item\'s PDF, first call `get_item_details` with `include_attachments: true` to obtain the attachment ID, ' +
+        'To read an item\'s PDF or EPUB, first call `get_item_details` with `include_attachments: true` to obtain the attachment ID, ' +
         'then call `read_attachment`.',
     inputSchema: {
         type: 'object' as const,
@@ -878,19 +878,29 @@ export async function handleReadAttachment(args: any): Promise<any> {
         return mcpError(response.error ?? 'Failed to read attachment');
     }
     const result = response.result;
-    if (result.content_kind === 'epub' || result.content_kind === 'text') {
-        return mcpError(`read_attachment does not support ${result.content_kind} attachments.`);
-    }
-    if (result.mode !== 'markdown') {
-        return mcpError('Attachment read returned an unexpected document mode.');
+    const markdownDocument = result.content_kind === 'epub'
+        ? epubDocumentToMarkdownPages(result)
+        : result.content_kind === 'text'
+            ? null
+            : result.mode === 'markdown'
+                ? {
+                    pageCount: result.document.pageCount,
+                    pages: result.document.pages.map((page) => ({
+                        index: page.index,
+                        markdown: page.markdown ?? '',
+                    })),
+                }
+                : null;
+    if (!markdownDocument) {
+        return mcpError('Attachment read returned an unsupported document format.');
     }
 
-    const totalPages = result.document.pageCount;
+    const totalPages = markdownDocument.pageCount;
     if (Number.isInteger(totalPages) && totalPages >= 0 && startPage > totalPages) {
         return mcpError(`Requested start_page ${startPage} is out of range; attachment has ${totalPages} pages.`);
     }
 
-    const requestedPages = result.document.pages.filter(
+    const requestedPages = markdownDocument.pages.filter(
         (page) => page.index + 1 >= startPage && page.index + 1 <= endPage,
     );
     if (requestedPages.length === 0) {
@@ -901,12 +911,58 @@ export async function handleReadAttachment(args: any): Promise<any> {
     const actualEnd = requestedPages.length > 0
         ? requestedPages[requestedPages.length - 1].index + 1
         : startPage;
-    const header = `Attachment: ${args.attachment_id} | Total pages: ${result.document.pageCount ?? 'unknown'} | Showing pages ${startPage}-${actualEnd}`;
+    const header = `Attachment: ${args.attachment_id} | Total pages: ${markdownDocument.pageCount ?? 'unknown'} | Showing pages ${startPage}-${actualEnd}`;
     const pageTexts = requestedPages.map(
         (p) => `<page${p.index + 1}>\n${p.markdown}\n</page${p.index + 1}>`,
     );
 
     return [header, '', ...pageTexts].join('\n');
+}
+
+interface AttachmentMarkdownPage {
+    index: number;
+    markdown: string;
+}
+
+function epubDocumentToMarkdownPages(
+    document: Extract<NonNullable<WSZoteroDocumentResponse['result']>, { content_kind: 'epub' }>,
+): { pageCount: number; pages: AttachmentMarkdownPage[] } {
+    return {
+        pageCount: document.sectionCount,
+        pages: document.sections.map((section) => ({
+            index: section.index,
+            markdown: section.items
+                .map(epubItemToMarkdown)
+                .filter((text) => text.length > 0)
+                .join('\n\n'),
+        })),
+    };
+}
+
+function epubItemToMarkdown(item: { kind: string; text?: string; level?: number; sentences?: Array<{ text: string }> }): string {
+    const text = normalizeMarkdownText(
+        item.text ?? item.sentences?.map((sentence) => sentence.text).join(' ') ?? '',
+    );
+    if (!text) return '';
+
+    switch (item.kind) {
+        case 'section_header': {
+            const level = Math.min(Math.max(item.level ?? 2, 1), 6);
+            return `${'#'.repeat(level)} ${text}`;
+        }
+        case 'list_item':
+            return `- ${text}`;
+        case 'caption':
+            return `_${text}_`;
+        case 'footnote':
+            return `[^] ${text}`;
+        default:
+            return text;
+    }
+}
+
+function normalizeMarkdownText(text: string): string {
+    return text.replace(/\s+/g, ' ').trim();
 }
 
 /**
