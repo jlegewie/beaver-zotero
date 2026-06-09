@@ -131,6 +131,35 @@ describe("DOM mapping", () => {
         ]);
     });
 
+    it("captures loose text mixed with block children in document order", () => {
+        const doc = parseXhtml(`<div>Intro text <p>A paragraph.</p> Outro text</div>`);
+
+        const items = collectDomItems(bodyOf(doc));
+        expect(items.map((item) => [item.kind, item.text])).toEqual([
+            ["text", "Intro text"],
+            ["text", "A paragraph."],
+            ["text", "Outro text"],
+        ]);
+    });
+
+    it("captures text in unrecognized containers instead of dropping it", () => {
+        // Definition lists and other non-allowlisted containers must not vanish.
+        const doc = parseXhtml(`
+            <dl>
+                <dt>Term</dt>
+                <dd>The definition text.</dd>
+            </dl>
+            <pre>preformatted line</pre>
+        `);
+
+        const items = collectDomItems(bodyOf(doc));
+        expect(items.map((item) => item.text)).toEqual([
+            "Term",
+            "The definition text.",
+            "preformatted line",
+        ]);
+    });
+
     it("keeps a genuine data table as one opaque table item", () => {
         const doc = parseXhtml(`
             <table id="data">

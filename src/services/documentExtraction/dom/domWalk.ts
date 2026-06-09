@@ -40,46 +40,32 @@ export function isFootnoteElement(element: Element): boolean {
         || hasToken(className, "footnote");
 }
 
-// Block-level container names. A leaf-text container counts as a paragraph only
-// when it has none of these as children — i.e. it is a leaf text block, not a
-// wrapper around other blocks.
+// Element names that break the inline text flow during the walk: each marks a
+// boundary where accumulated prose is flushed and the element is visited on its
+// own (a block container, or an image/figure that becomes its own item).
+// Everything not listed here is treated as inline and folded into the
+// surrounding text. The list is deliberately broad so unanticipated containers
+// (e.g. `<dd>`, `<pre>`) keep their text instead of dropping it.
 const BLOCK_LEVEL_NAMES = new Set([
-    "div", "section", "article", "p", "blockquote",
+    "div", "section", "article", "p", "blockquote", "pre", "address",
     "h1", "h2", "h3", "h4", "h5", "h6",
-    "ul", "ol", "li", "dl", "table", "figure", "figcaption",
-    "nav", "header", "footer", "aside", "main",
+    "ul", "ol", "li", "dl", "dt", "dd",
+    "table", "caption", "figure", "figcaption",
+    "nav", "header", "footer", "aside", "main", "details", "summary",
     "tr", "td", "th", "tbody", "thead", "tfoot",
+    "img", "svg",
 ]);
 
-// Containers that behave like a paragraph when they hold text directly (only
-// inline children). `div`/`section`/`article` cover PDF/Word→EPUB conversions
-// that use `<div>` for body text; `td`/`th` cover prose laid out in the cells of
-// a layout table (only reached once a layout table is walked transparently).
-const LEAF_TEXT_CONTAINER_NAMES = new Set([
-    "div", "section", "article", "td", "th",
-]);
+function isBlockBoundary(element: Element): boolean {
+    return BLOCK_LEVEL_NAMES.has(element.localName.toLowerCase());
+}
+
+const TEXT_NODE = 3;
+const ELEMENT_NODE = 1;
 
 // A cell holding at least this many characters of prose marks a layout table
 // (body text positioned in a table) rather than tabular data.
 const LAYOUT_TABLE_PROSE_CHARS = 200;
-
-function hasBlockLevelChild(element: Element): boolean {
-    for (const child of Array.from(element.children)) {
-        if (BLOCK_LEVEL_NAMES.has(child.localName.toLowerCase())) return true;
-    }
-    return false;
-}
-
-/**
- * A leaf-text container holds text directly (only inline children) and is
- * treated as a paragraph. Without this, `<div>`-based bodies and prose laid out
- * in table cells extract to nothing.
- */
-function isLeafTextBlock(element: Element): boolean {
-    if (!LEAF_TEXT_CONTAINER_NAMES.has(element.localName.toLowerCase())) return false;
-    if (hasBlockLevelChild(element)) return false;
-    return normalizeText(element.textContent).length > 0;
-}
 
 /**
  * Distinguish a layout table (body text positioned in a table — common in
@@ -108,7 +94,16 @@ function isLayoutTable(table: Element): boolean {
     return false;
 }
 
-/** Map a DOM element to the geometry-free item kind Beaver stores. */
+/**
+ * Classify a DOM element into a special item kind, or return `undefined` for a
+ * generic element whose text is captured by the walk.
+ *
+ * This is the allowlist as an *override*: it names only the elements that carry
+ * a distinct kind (heading, list item, caption, footnote, data table, picture).
+ * Everything else — `div`, `td`, `dd`, `pre`, prose laid out in unrecognized
+ * containers — falls through to `undefined` and is captured as generic text, so
+ * the walk never drops body text just because a tag is unanticipated.
+ */
 export function mapElement(element: Element): DomElementMapping | undefined {
     if (isFootnoteElement(element)) {
         return { kind: "footnote" };
@@ -125,33 +120,73 @@ export function mapElement(element: Element): DomElementMapping | undefined {
     // genuine data tables become an opaque `table` item.
     if (name === "table") return isLayoutTable(element) ? undefined : { kind: "table" };
     if (name === "img" || name === "svg") return { kind: "picture" };
-    if (isLeafTextBlock(element)) return { kind: "text" };
     return undefined;
 }
 
-/** Walk a DOM section body and emit owned, non-duplicated item candidates. */
+/**
+ * Walk a DOM section body and emit ordered, non-duplicated item candidates.
+ *
+ * Modeled on the reader's Read Aloud DOM walk (the Mozilla Narrator algorithm):
+ * text capture is the default and is tag-agnostic, so body text is never dropped
+ * just because it sits in an unrecognized container. A {@link mapElement}
+ * classification is an *override* — a special element (heading, list item,
+ * caption, footnote, data table, picture) owns its whole subtree as one item and
+ * is not descended into. Generic elements contribute their own inline text (in
+ * document order) and the walk descends into their block-level children.
+ */
 export function collectDomItems(body: Element): DomItemCandidate[] {
     const candidates: DomItemCandidate[] = [];
 
+    // Visit one element: a classified special element becomes its own item;
+    // a generic element is opened up so its inline text and block children are
+    // processed in order.
     const visit = (element: Element): void => {
         const mapping = mapElement(element);
         if (mapping) {
             const candidate = buildCandidate(element, mapping);
-            if (candidate) {
-                candidates.push(candidate);
-            }
-            if (ownsSubtree(element, mapping.kind)) return;
+            if (candidate) candidates.push(candidate);
+            return;
         }
-
-        for (const child of Array.from(element.children)) {
-            visit(child);
-        }
+        walkChildren(element);
     };
 
-    for (const child of Array.from(body.children)) {
-        visit(child);
-    }
+    // Process an element's children in document order, accumulating inline text
+    // (text nodes + inline elements) and flushing it as a text item at each
+    // block boundary before descending into that block child.
+    const walkChildren = (parent: Element): void => {
+        let buffer = "";
+        const flush = (): void => {
+            const text = normalizeText(buffer);
+            buffer = "";
+            if (text) {
+                candidates.push({
+                    element: parent,
+                    kind: "text",
+                    text,
+                    anchorId: findNearestAnchorId(parent),
+                });
+            }
+        };
 
+        for (const node of Array.from(parent.childNodes)) {
+            if (!node) continue;
+            if (node.nodeType === TEXT_NODE) {
+                buffer += ` ${node.nodeValue ?? ""} `;
+            } else if (node.nodeType === ELEMENT_NODE) {
+                const child = node as Element;
+                if (isBlockBoundary(child)) {
+                    flush();
+                    visit(child);
+                } else {
+                    // Inline element: fold its text into the surrounding prose.
+                    buffer += ` ${child.textContent ?? ""} `;
+                }
+            }
+        }
+        flush();
+    };
+
+    walkChildren(body);
     return candidates;
 }
 
@@ -178,16 +213,6 @@ function textForMappedElement(element: Element, kind: DomItemKind): string {
         );
     }
     return normalizeText(element.textContent);
-}
-
-function ownsSubtree(element: Element, kind: DomItemKind): boolean {
-    if (kind === "text") {
-        const name = element.localName.toLowerCase();
-        return name === "blockquote"
-            || name === "p"
-            || LEAF_TEXT_CONTAINER_NAMES.has(name);
-    }
-    return kind !== "picture";
 }
 
 function hasToken(value: string | null, token: string): boolean {
