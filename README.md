@@ -34,6 +34,8 @@ The citation system is tuned with dedicated evaluations focused on open‑ended 
 
 ### Reading assistant
 
+<img src="https://www.beaverapp.ai/_next/image?url=%2Fassets%2Freading-assistant.png&w=640&q=75" align="right" width="320" alt="Reading assistant features" />
+
 Beaver is integrated directly inside your PDF reader. Select complex equations or highlight text to get explanations. Need more context? Ask how a claim compares to the rest of your library without ever leaving the page. [Learn more](https://www.beaverapp.ai/docs/zotero-reader)
 
 ### AI‑powered PDF annotations
@@ -79,15 +81,17 @@ Beaver ships an [MCP server](https://www.beaverapp.ai/docs/mcp-server) that expo
 
 ---
 
-## Evaluations
+## Accuracy and Reliability through Evaluations
 
-We regularly run evaluations to track progress and guide development. One recent test used a modified version of the LitQA2 benchmark with 197 multiple‑choice questions from Future House's [LAB‑Bench](https://github.com/Future-House/LAB-Bench). This benchmark emphasizes literature retrieval: answers are located in the main text of a single paper rather than abstracts or general knowledge.
+We continuously evaluate Beaver's accuracy and performance on tasks that matter most for researchers including factual correctness (whether claims are accurate based on research findings), citation support (whether claims are supported by the correct citation down to the exact passage in the source document), retrieval (finding the right information) and more. As Beaver evolves, we will share more benchmarks and evaluation results.
+
+As an example, here is one early test based on a modified version of the LitQA2 benchmark with 197 multiple‑choice questions from Future House's [LAB‑Bench](https://github.com/Future-House/LAB-Bench). This benchmark emphasizes literature retrieval: answers are located in the main text of a single paper rather than abstracts or general knowledge.
 
 ![Figure: Performance comparison for Beaver Preview](/docs/litqa2-accuracy-preview.png)
 
 On this task, Beaver's retrieval from a pre‑defined document set performed strongly. For context, we also compared against large models with general internet search tools. These are _not directly comparable_, but the contrast gives a sense of how retrieval on a pre‑defined library (such as your Zotero library) performs compared to general internet search.
 
-This is only one dimension of evaluation (and not the hardest). We also track citation accuracy, handling of long documents, and integration into Zotero. More benchmarks and updates will follow as Beaver continues to develop.
+This is only one dimension of evaluation (and not the hardest). We will share more benchmarks and evaluation results over time.
 
 ## Getting started
 
