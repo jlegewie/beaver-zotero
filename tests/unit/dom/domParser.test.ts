@@ -183,9 +183,20 @@ describe("sentence splitting", () => {
         ]);
     });
 
-    it("does not split bare list-number markers", () => {
-        expect(splitSentences("Topics: 1. Hebrew 2. Aramaic")).toEqual([
-            "Topics: 1. Hebrew 2. Aramaic",
+    it("splits a sentence that ends with a number", () => {
+        // A sentence-final number must not be mistaken for a list marker.
+        expect(splitSentences("The sample size was 42. Results were stable.")).toEqual([
+            "The sample size was 42.",
+            "Results were stable.",
+        ]);
+    });
+
+    it("keeps a leading list/section number attached to its item", () => {
+        expect(splitSentences("1. Hebrew is the older language.")).toEqual([
+            "1. Hebrew is the older language.",
+        ]);
+        expect(splitSentences("3.1. The morphology of the verb is complex.")).toEqual([
+            "3.1. The morphology of the verb is complex.",
         ]);
     });
 

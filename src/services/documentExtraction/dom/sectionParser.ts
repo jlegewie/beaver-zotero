@@ -85,8 +85,10 @@ const NON_TERMINAL_ABBREVIATIONS = new Set([
  *
  * Boundaries are terminal punctuation (`.`/`!`/`?`) followed by whitespace or
  * end of text. A `.` boundary is suppressed when the preceding token is a single
- * capital letter (author initial), a known abbreviation, or a bare number (list
- * marker), so "Marvin A. Sweeney", "p. 45", and "vol. 2" stay intact.
+ * capital letter (author initial) or a known abbreviation, so "Marvin A. Sweeney"
+ * and "vol. 2" stay intact. A number is only treated as a list marker when it
+ * *begins* the current sentence ("1. First point"), so a normal sentence-final
+ * number ("the sample size was 42.") still splits.
  */
 export function splitSentences(text: string): string[] {
     const normalized = normalizeText(text);
@@ -98,7 +100,7 @@ export function splitSentences(text: string): string[] {
     let match: RegExpExecArray | null;
     while ((match = boundary.exec(normalized)) !== null) {
         const isDotOnly = /^\.+$/.test(match[0]);
-        if (isDotOnly && isNonTerminalDot(normalized, match.index)) {
+        if (isDotOnly && isNonTerminalDot(normalized, match.index, start)) {
             continue;
         }
         const end = match.index + match[0].length;
@@ -112,15 +114,20 @@ export function splitSentences(text: string): string[] {
 }
 
 /** Decide whether a `.` at `dotIndex` is an abbreviation/initial rather than a sentence end. */
-function isNonTerminalDot(text: string, dotIndex: number): boolean {
+function isNonTerminalDot(text: string, dotIndex: number, segmentStart: number): boolean {
     // The whitespace-delimited token ending immediately before the period.
     const precedingWhitespace = text.lastIndexOf(" ", dotIndex - 1);
-    const token = text.slice(precedingWhitespace + 1, dotIndex);
+    const tokenStart = precedingWhitespace + 1;
+    const token = text.slice(tokenStart, dotIndex);
     if (!token) return false;
     // Single capital letter — an author initial (e.g. "Marvin A.").
     if (/^[A-Z]$/.test(token)) return true;
-    // Bare or multi-level number — a list/section marker (e.g. "1." "182." "3.1.").
-    if (/^\d+(\.\d+)*$/.test(token)) return true;
+    // Number — only a list/section marker when it begins the current sentence
+    // ("1. First point"). A sentence-final number ("...was 42.") must still split,
+    // so a number preceded by prose in this segment is a real boundary.
+    if (/^\d+(\.\d+)*$/.test(token)) {
+        return text.slice(segmentStart, tokenStart).trim().length === 0;
+    }
     // Known abbreviation (period already consumed by the boundary match).
     return NON_TERMINAL_ABBREVIATIONS.has(token.toLowerCase());
 }
