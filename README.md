@@ -34,9 +34,16 @@ The citation system is tuned with dedicated evaluations focused on open‑ended 
 
 ### Reading assistant
 
-<img src="https://www.beaverapp.ai/_next/image?url=%2Fassets%2Freading-assistant.png&w=640&q=75" align="right" width="320" alt="Reading assistant features" />
+<!-- <img src="https://www.beaverapp.ai/_next/image?url=%2Fassets%2Freading-assistant.png&w=640&q=75" align="right" width="320" alt="Reading assistant features" /> -->
 
-Beaver is integrated directly inside your PDF reader. Select complex equations or highlight text to get explanations. Need more context? Ask how a claim compares to the rest of your library without ever leaving the page. [Learn more](https://www.beaverapp.ai/docs/zotero-reader)
+Beaver is integrated directly inside your PDF reader, so you can work without ever leaving the page:
+
+- **Ask about this paper.** Answers grounded in the open PDF, with sentence‑level citations.
+- **Understand text, figures & tables.** Select a passage, or attach a figure with an area annotation, for an instant explanation.
+- **Annotate the PDF.** Ask Beaver to highlight key findings or anything relevant to your work.
+- **Connect it to your library.** Ask whether the rest of your library confirms, contradicts, or extends this paper's claims.
+
+[Learn more](https://www.beaverapp.ai/docs/zotero-reader)
 
 ### AI‑powered PDF annotations
 
