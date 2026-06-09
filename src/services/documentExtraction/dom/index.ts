@@ -16,8 +16,13 @@ export type {
 export {
     createDomCounters,
     parseDomSection,
-    splitSentences,
 } from "./sectionParser";
+export {
+    ensureSentencexLoaded,
+    regexSplitSentences,
+    setSentenceLanguage,
+    splitSentences,
+} from "./sentenceSplitter";
 export {
     buildDomDiagnostics,
     measureSectionSourceText,

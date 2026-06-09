@@ -3,6 +3,7 @@ import {
     collectDomItems,
     normalizeText,
 } from "./domWalk";
+import { splitSentences } from "./sentenceSplitter";
 import type {
     DomItem,
     DomSection,
@@ -63,73 +64,6 @@ export function parseDomSection(input: ParseDomSectionInput): DomSection {
         label: sectionLabel(input.doc),
         items,
     };
-}
-
-// Lowercased tokens (trailing period stripped) that commonly precede a period
-// without ending a sentence. Keeps author initials, scholarly abbreviations,
-// and units from fragmenting prose at every dot.
-const NON_TERMINAL_ABBREVIATIONS = new Set([
-    // Titles / names
-    "mr", "mrs", "ms", "dr", "prof", "st", "rev", "fr", "sr", "jr", "hon",
-    // Scholarly / bibliographic
-    "vol", "vols", "ed", "eds", "trans", "ch", "chs", "p", "pp", "no", "nos",
-    "v", "vv", "n", "nn", "col", "cols", "fig", "figs", "cf", "viz", "vs",
-    "al", "ibid", "op", "cit", "etc", "ca", "approx", "esp", "cap", "sec",
-    "i.e", "e.g", "i.e.", "e.g.", "c", "ad", "bc", "ce", "bce",
-    // Units / misc
-    "cm", "mm", "km", "kg", "lit",
-]);
-
-/**
- * Split DOM prose into sentence-sized strings with a replaceable local splitter.
- *
- * Boundaries are terminal punctuation (`.`/`!`/`?`) followed by whitespace or
- * end of text. A `.` boundary is suppressed when the preceding token is a single
- * capital letter (author initial) or a known abbreviation, so "Marvin A. Sweeney"
- * and "vol. 2" stay intact. A number is only treated as a list marker when it
- * *begins* the current sentence ("1. First point"), so a normal sentence-final
- * number ("the sample size was 42.") still splits.
- */
-export function splitSentences(text: string): string[] {
-    const normalized = normalizeText(text);
-    if (!normalized) return [];
-
-    const sentences: string[] = [];
-    const boundary = /[.!?]+(?=\s|$)/g;
-    let start = 0;
-    let match: RegExpExecArray | null;
-    while ((match = boundary.exec(normalized)) !== null) {
-        const isDotOnly = /^\.+$/.test(match[0]);
-        if (isDotOnly && isNonTerminalDot(normalized, match.index, start)) {
-            continue;
-        }
-        const end = match.index + match[0].length;
-        const sentence = normalizeText(normalized.slice(start, end));
-        if (sentence) sentences.push(sentence);
-        start = end;
-    }
-    const tail = normalizeText(normalized.slice(start));
-    if (tail) sentences.push(tail);
-    return sentences.length > 0 ? sentences : [normalized];
-}
-
-/** Decide whether a `.` at `dotIndex` is an abbreviation/initial rather than a sentence end. */
-function isNonTerminalDot(text: string, dotIndex: number, segmentStart: number): boolean {
-    // The whitespace-delimited token ending immediately before the period.
-    const precedingWhitespace = text.lastIndexOf(" ", dotIndex - 1);
-    const tokenStart = precedingWhitespace + 1;
-    const token = text.slice(tokenStart, dotIndex);
-    if (!token) return false;
-    // Single capital letter — an author initial (e.g. "Marvin A.").
-    if (/^[A-Z]$/.test(token)) return true;
-    // Number — only a list/section marker when it begins the current sentence
-    // ("1. First point"). A sentence-final number ("...was 42.") must still split,
-    // so a number preceded by prose in this segment is a real boundary.
-    if (/^\d+(\.\d+)*$/.test(token)) {
-        return text.slice(segmentStart, tokenStart).trim().length === 0;
-    }
-    // Known abbreviation (period already consumed by the boundary match).
-    return NON_TERMINAL_ABBREVIATIONS.has(token.toLowerCase());
 }
 
 /** Create mutable counters shared across section parsing for document-global ids. */

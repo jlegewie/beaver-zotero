@@ -202,7 +202,9 @@ export async function handleTestEpubExtractHttpRequest(request: any): Promise<an
                 };
             }
             source = { kind: 'file_path', file_path: filePath };
-            document = await extractEpubDocumentFromFile(filePath);
+            document = await extractEpubDocumentFromFile(filePath, {
+                language: typeof request?.language === 'string' ? request.language : undefined,
+            });
         } else if (request?.library_id != null && request?.zotero_key != null) {
             const item = await Zotero.Items.getByLibraryAndKeyAsync(
                 request.library_id,

@@ -2,8 +2,10 @@ import {
     buildDomCitationIndex,
     buildDomDiagnostics,
     createDomCounters,
+    ensureSentencexLoaded,
     measureSectionSourceText,
     parseDomSection,
+    setSentenceLanguage,
     type DomSection,
 } from "../dom";
 import {
@@ -64,6 +66,11 @@ export async function extractEpubDocument(item: Zotero.Item): Promise<EpubDocume
     return extractEpubDocumentFromFile(filePath);
 }
 
+export interface ExtractEpubFromFileOptions {
+    /** Language code for sentence splitting; defaults to the EPUB's own `<html lang>`. */
+    language?: string | null;
+}
+
 /**
  * Extract an EPUB into Beaver's section-based schema directly from a file path.
  *
@@ -71,7 +78,10 @@ export async function extractEpubDocument(item: Zotero.Item): Promise<EpubDocume
  * over corpus files that are not Zotero attachments. Throws raw errors; callers
  * that need request-safe error shapes use {@link extractEpubDocumentSafe}.
  */
-export async function extractEpubDocumentFromFile(filePath: string): Promise<EpubDocument> {
+export async function extractEpubDocumentFromFile(
+    filePath: string,
+    options?: ExtractEpubFromFileOptions,
+): Promise<EpubDocument> {
     const { EPUB } = (globalThis as any).ChromeUtils.importESModule(
         "chrome://zotero/content/EPUB.mjs",
     ) as ZoteroEpubModule;
@@ -80,9 +90,22 @@ export async function extractEpubDocumentFromFile(filePath: string): Promise<Epu
     const sections: DomSection[] = [];
     let sourceTextChars = 0;
 
+    // Load the sentencex WASM once (best-effort; sentence splitting degrades to
+    // a regex fallback if unavailable).
+    await ensureSentencexLoaded();
+    let languageApplied = false;
+
     try {
         let sectionIndex = 0;
         for await (const { href, doc } of epub.getSectionDocuments()) {
+            if (!languageApplied) {
+                // Prefer an explicit language; otherwise use the EPUB's own
+                // declared language from the first section's <html lang>.
+                setSentenceLanguage(
+                    options?.language ?? doc.documentElement?.getAttribute("lang"),
+                );
+                languageApplied = true;
+            }
             sourceTextChars += measureSectionSourceText(doc);
             sections.push(parseDomSection({
                 doc,
