@@ -53,6 +53,17 @@ export async function extractEpubDocument(item: Zotero.Item): Promise<EpubDocume
         throw new Error("EPUB attachment has no local file");
     }
 
+    return extractEpubDocumentFromFile(filePath);
+}
+
+/**
+ * Extract an EPUB into Beaver's section-based schema directly from a file path.
+ *
+ * Path-based core shared by the item-based extractor and dev tooling that runs
+ * over corpus files that are not Zotero attachments. Throws raw errors; callers
+ * that need request-safe error shapes use {@link extractEpubDocumentSafe}.
+ */
+export async function extractEpubDocumentFromFile(filePath: string): Promise<EpubDocument> {
     const { EPUB } = (globalThis as any).ChromeUtils.importESModule(
         "chrome://zotero/content/EPUB.mjs",
     ) as ZoteroEpubModule;

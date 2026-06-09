@@ -9,6 +9,7 @@ import {
     mapElement,
     parseDomSection,
     resolveDomCitationId,
+    splitSentences,
 } from "../../../src/services/documentExtraction/dom";
 import {
     EPUB_CONTENT_KIND,
@@ -40,7 +41,7 @@ describe("DOM mapping", () => {
             <h2 id="h">Heading</h2>
             <li id="li">Item</li>
             <figcaption id="cap">Caption</figcaption>
-            <table id="table"><tr><td>Cell</td></tr></table>
+            <table id="table"><tr><th>Header</th></tr><tr><td>Cell</td></tr></table>
             <img id="img" alt="Alt text" />
         `);
 
@@ -102,6 +103,99 @@ describe("DOM mapping", () => {
         const [item] = collectDomItems(bodyOf(doc));
         expect(item.anchorId).toBe("chapter");
     });
+
+    it("treats leaf <div> blocks as text but not their block-level wrappers", () => {
+        // EPUBs converted from PDF/Word use <div> for body text instead of <p>.
+        const doc = parseXhtml(`
+            <div id="chapter">
+                <div id="para1">First div paragraph.</div>
+                <div id="para2">Second div paragraph.</div>
+            </div>
+        `);
+
+        const items = collectDomItems(bodyOf(doc));
+        expect(items.map((item) => [item.kind, item.text])).toEqual([
+            ["text", "First div paragraph."],
+            ["text", "Second div paragraph."],
+        ]);
+    });
+
+    it("does not map a <div> that only wraps other block elements", () => {
+        const doc = parseXhtml(`<div id="wrap"><p>Real paragraph.</p></div>`);
+
+        const items = collectDomItems(bodyOf(doc));
+        expect(items.map((item) => [item.kind, item.text])).toEqual([
+            ["text", "Real paragraph."],
+        ]);
+    });
+
+    it("keeps a genuine data table as one opaque table item", () => {
+        const doc = parseXhtml(`
+            <table id="data">
+                <tr><th>Year</th><th>Count</th></tr>
+                <tr><td>1995</td><td>42</td></tr>
+            </table>
+        `);
+
+        const items = collectDomItems(bodyOf(doc));
+        expect(items.map((item) => item.kind)).toEqual(["table"]);
+    });
+
+    it("walks a layout table that wraps real headings and paragraphs", () => {
+        // A single positioning table around otherwise-normal content.
+        const doc = parseXhtml(`
+            <table><tr><td>
+                <h2>Chapter 7</h2>
+                <p>First paragraph of the chapter.</p>
+                <p>Second paragraph.</p>
+            </td></tr></table>
+        `);
+
+        const items = collectDomItems(bodyOf(doc));
+        expect(items.map((item) => [item.kind, item.text])).toEqual([
+            ["section_header", "Chapter 7"],
+            ["text", "First paragraph of the chapter."],
+            ["text", "Second paragraph."],
+        ]);
+    });
+
+    it("recovers prose held directly in layout-table cells", () => {
+        const prose = "This is a long run of body text that a PDF conversion placed "
+            + "directly inside a positioning table cell with no paragraph tag, so it "
+            + "must be recovered as a text item rather than dropped.";
+        const doc = parseXhtml(`
+            <table border="0"><tr><td><font>${prose}</font></td></tr></table>
+        `);
+
+        const items = collectDomItems(bodyOf(doc));
+        expect(items.map((item) => item.kind)).toEqual(["text"]);
+        expect(items[0].text).toBe(prose);
+    });
+});
+
+describe("sentence splitting", () => {
+    it("keeps author initials and abbreviations attached", () => {
+        expect(splitSentences("Edited by Marvin A. Sweeney and Eric D. Reymond.")).toEqual([
+            "Edited by Marvin A. Sweeney and Eric D. Reymond.",
+        ]);
+        expect(splitSentences("See p. 45 and vol. 2 for details.")).toEqual([
+            "See p. 45 and vol. 2 for details.",
+        ]);
+    });
+
+    it("does not split bare list-number markers", () => {
+        expect(splitSentences("Topics: 1. Hebrew 2. Aramaic")).toEqual([
+            "Topics: 1. Hebrew 2. Aramaic",
+        ]);
+    });
+
+    it("still splits genuine sentence boundaries", () => {
+        expect(splitSentences("First sentence. Second sentence! Third?")).toEqual([
+            "First sentence.",
+            "Second sentence!",
+            "Third?",
+        ]);
+    });
 });
 
 describe("DOM section parser", () => {
@@ -126,7 +220,8 @@ describe("DOM section parser", () => {
         expect(first.items[0].sentences?.map((sentence) => sentence.id)).toEqual(["s1", "s2"]);
         expect(second.items[0].sentences?.map((sentence) => sentence.id)).toEqual(["s3"]);
         expect(second.items[1].sentences?.map((sentence) => sentence.id)).toEqual(["s4"]);
-        expect(first).toMatchObject({ index: 0, rawHref: "EPUB/first.xhtml", label: "Section title" });
+        // The section label prefers the in-body heading over the <head><title>.
+        expect(first).toMatchObject({ index: 0, rawHref: "EPUB/first.xhtml", label: "Heading" });
     });
 
     it("returns an empty section when the document has no body", () => {

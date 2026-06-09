@@ -1,5 +1,6 @@
 export {
     extractEpubDocument,
+    extractEpubDocumentFromFile,
     extractEpubDocumentSafe,
 } from "./EpubExtractor";
 export type {

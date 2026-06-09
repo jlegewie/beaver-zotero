@@ -40,6 +40,74 @@ export function isFootnoteElement(element: Element): boolean {
         || hasToken(className, "footnote");
 }
 
+// Block-level container names. A leaf-text container counts as a paragraph only
+// when it has none of these as children — i.e. it is a leaf text block, not a
+// wrapper around other blocks.
+const BLOCK_LEVEL_NAMES = new Set([
+    "div", "section", "article", "p", "blockquote",
+    "h1", "h2", "h3", "h4", "h5", "h6",
+    "ul", "ol", "li", "dl", "table", "figure", "figcaption",
+    "nav", "header", "footer", "aside", "main",
+    "tr", "td", "th", "tbody", "thead", "tfoot",
+]);
+
+// Containers that behave like a paragraph when they hold text directly (only
+// inline children). `div`/`section`/`article` cover PDF/Word→EPUB conversions
+// that use `<div>` for body text; `td`/`th` cover prose laid out in the cells of
+// a layout table (only reached once a layout table is walked transparently).
+const LEAF_TEXT_CONTAINER_NAMES = new Set([
+    "div", "section", "article", "td", "th",
+]);
+
+// A cell holding at least this many characters of prose marks a layout table
+// (body text positioned in a table) rather than tabular data.
+const LAYOUT_TABLE_PROSE_CHARS = 200;
+
+function hasBlockLevelChild(element: Element): boolean {
+    for (const child of Array.from(element.children)) {
+        if (BLOCK_LEVEL_NAMES.has(child.localName.toLowerCase())) return true;
+    }
+    return false;
+}
+
+/**
+ * A leaf-text container holds text directly (only inline children) and is
+ * treated as a paragraph. Without this, `<div>`-based bodies and prose laid out
+ * in table cells extract to nothing.
+ */
+function isLeafTextBlock(element: Element): boolean {
+    if (!LEAF_TEXT_CONTAINER_NAMES.has(element.localName.toLowerCase())) return false;
+    if (hasBlockLevelChild(element)) return false;
+    return normalizeText(element.textContent).length > 0;
+}
+
+/**
+ * Distinguish a layout table (body text positioned in a table — common in
+ * PDF/Word→EPUB conversions) from a genuine data table.
+ *
+ * Data tables are emitted as one opaque `table` item; layout tables are walked
+ * transparently so their headings, paragraphs, and prose cells are recovered.
+ */
+function isLayoutTable(table: Element): boolean {
+    // Header cells signal tabular data — keep those opaque.
+    if (table.querySelector("th")) return false;
+    // Block-flow content or nested tables inside cells are not tabular data.
+    if (table.querySelector("table, p, div, h1, h2, h3, h4, h5, h6, blockquote, ul, ol")) {
+        return true;
+    }
+    // No nested tables remain past this point, so cell counting is flat.
+    const cells = Array.from(table.querySelectorAll("td"));
+    // A single-cell table is a positioning wrapper, not a data grid.
+    if (cells.length === 1) return true;
+    // A cell carrying a long run of prose is body text laid out in a table.
+    for (const cell of cells) {
+        if (cell && normalizeText(cell.textContent).length >= LAYOUT_TABLE_PROSE_CHARS) {
+            return true;
+        }
+    }
+    return false;
+}
+
 /** Map a DOM element to the geometry-free item kind Beaver stores. */
 export function mapElement(element: Element): DomElementMapping | undefined {
     if (isFootnoteElement(element)) {
@@ -53,8 +121,11 @@ export function mapElement(element: Element): DomElementMapping | undefined {
     }
     if (name === "li") return { kind: "list_item" };
     if (name === "figcaption") return { kind: "caption" };
-    if (name === "table") return { kind: "table" };
+    // Layout tables map to nothing so the walk descends into their cells; only
+    // genuine data tables become an opaque `table` item.
+    if (name === "table") return isLayoutTable(element) ? undefined : { kind: "table" };
     if (name === "img" || name === "svg") return { kind: "picture" };
+    if (isLeafTextBlock(element)) return { kind: "text" };
     return undefined;
 }
 
@@ -112,7 +183,9 @@ function textForMappedElement(element: Element, kind: DomItemKind): string {
 function ownsSubtree(element: Element, kind: DomItemKind): boolean {
     if (kind === "text") {
         const name = element.localName.toLowerCase();
-        return name === "blockquote" || name === "p";
+        return name === "blockquote"
+            || name === "p"
+            || LEAF_TEXT_CONTAINER_NAMES.has(name);
     }
     return kind !== "picture";
 }
