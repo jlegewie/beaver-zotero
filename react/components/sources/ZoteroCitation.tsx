@@ -28,7 +28,7 @@ import { logger } from '../../../src/utils/logger';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../../atoms/externalReferences';
 import { useCitationMarker } from '../../hooks/useCitationMarker';
 import { ZoteroItemReference } from '../../types/zotero';
-import { revealSource } from '../../utils/sourceUtils';
+import { getCitationActions } from '../../utils/citationActions';
 import { resolvePageLabelFromLabels, translatePageNumberToLabelFromLabels } from '../../utils/pageLabels';
 import {
     getBestPDFAttachment,
@@ -510,7 +510,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
                 ? item
                 : await getBestReadableTextAttachmentAsync(item);
             if (!target) {
-                revealSource({ library_id: item.libraryID, zotero_key: item.key } as ZoteroItemReference);
+                getCitationActions().revealInLibrary({ library_id: item.libraryID, zotero_key: item.key } as ZoteroItemReference);
                 return;
             }
             const filePath = await target.getFilePathAsync();
@@ -523,7 +523,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
                 } else {
                     logger(`ZoteroCitation: Opening text file: ${filePath}`);
                 }
-                Zotero.launchFile(filePath);
+                getCitationActions().launchFile(filePath);
             } else {
                 await selectItemById(target.id);
             }
@@ -542,7 +542,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
             logger(`ZoteroCitation: EPUB citation (symbolic: ${!!epubSymbolicLocation}, sections: ${sectionOrdinals.length})`);
 
             if (item.isRegularItem() && !hasEpubLocator) {
-                revealSource({ library_id: item.libraryID, zotero_key: item.key } as ZoteroItemReference);
+                getCitationActions().revealInLibrary({ library_id: item.libraryID, zotero_key: item.key } as ZoteroItemReference);
                 return;
             }
 
@@ -557,7 +557,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
             });
             logger(`ZoteroCitation: EPUB navigation outcome: ${outcome}`);
             if (outcome === 'failed') {
-                revealSource({ library_id: item.libraryID, zotero_key: item.key } as ZoteroItemReference);
+                getCitationActions().revealInLibrary({ library_id: item.libraryID, zotero_key: item.key } as ZoteroItemReference);
             }
             return;
         }
@@ -565,7 +565,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
         if (contentKind !== 'pdf') {
             logger(`ZoteroCitation: Non-PDF citation (${contentKind})`);
             if (item.isRegularItem()) {
-                revealSource({ library_id: item.libraryID, zotero_key: item.key } as ZoteroItemReference);
+                getCitationActions().revealInLibrary({ library_id: item.libraryID, zotero_key: item.key } as ZoteroItemReference);
                 return;
             }
             if (item.isAttachment()) {
@@ -577,7 +577,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
                 }
                 return;
             }
-            revealSource({ library_id: item.libraryID, zotero_key: item.key } as ZoteroItemReference);
+            getCitationActions().revealInLibrary({ library_id: item.libraryID, zotero_key: item.key } as ZoteroItemReference);
             return;
         }
 
@@ -602,13 +602,13 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
                     pdfItem = attachment;
                 } else {
                     logger(`ZoteroCitation: Regular item has locator but no PDF attachment (${item.id})`);
-                    revealSource({ library_id: item.libraryID, zotero_key: item.key } as ZoteroItemReference);
+                    getCitationActions().revealInLibrary({ library_id: item.libraryID, zotero_key: item.key } as ZoteroItemReference);
                     return;
                 }
             } else {
                 logger(`ZoteroCitation: Selecting regular item (${item.id})`);
                 // await selectItemById(item.id);
-                revealSource({ library_id: item.libraryID, zotero_key: item.key } as ZoteroItemReference);
+                getCitationActions().revealInLibrary({ library_id: item.libraryID, zotero_key: item.key } as ZoteroItemReference);
                 return;
             }
         }
@@ -617,7 +617,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
         if (url.startsWith('file:///')) {
             const filePath = url.replace('file:///', '');
             logger(`ZoteroCitation: File Link (${filePath})`);
-            Zotero.launchFile(filePath);
+            getCitationActions().launchFile(filePath);
             return;
         }
 
@@ -708,7 +708,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
             
             // Fallback: try to use the original URL-based approach
             if (url.includes('zotero://')) {
-                Zotero.getMainWindow().location.href = url;
+                getCitationActions().openExternalUrl(url);
             }
         }
     };
