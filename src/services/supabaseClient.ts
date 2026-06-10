@@ -13,11 +13,42 @@ if (currentWindow?.__beaverDisposeSupabase) {
     logger('Stopped previous Supabase client auto-refresh timer');
 }
 
-// Create encrypted storage instance
-const encryptedStorage = new EncryptedStorage();
+/**
+ * Storage backend Supabase persists the auth session into. Matches the subset of
+ * the Web Storage / Supabase storage interface the auth client uses.
+ *
+ * Injectable so a non-Zotero host can supply its own
+ * implementation (web `localStorage`, Office settings, …) via
+ * `setSupabaseStorageAdapter` instead of the Zotero EncryptedStorage default.
+ */
+export interface SupabaseStorageAdapter {
+    getItem: (key: string) => Promise<string | null> | string | null;
+    setItem: (key: string, value: string) => Promise<void> | void;
+    removeItem: (key: string) => Promise<void> | void;
+}
 
-// Adapter to make EncryptedStorage compatible with Supabase's expected storage interface
-const zoteroStorage = {
+// Optional host-supplied storage adapter. Must be set (via setSupabaseStorageAdapter)
+// before this module is first imported to take effect, since the client below is
+// constructed at module load. When unset (the Zotero plugin), the EncryptedStorage
+// default is used and behavior is unchanged.
+let injectedStorageAdapter: SupabaseStorageAdapter | null = null;
+
+/** Inject a storage adapter for the Supabase auth session (non-Zotero hosts). */
+export function setSupabaseStorageAdapter(adapter: SupabaseStorageAdapter): void {
+    injectedStorageAdapter = adapter;
+}
+
+/**
+ * The Zotero plugin's storage adapter: an AES-encrypted, profile-bound store
+ * (see EncryptedStorage). Constructed lazily so non-Zotero hosts that inject
+ * their own adapter never instantiate the Zotero-specific store.
+ */
+function createEncryptedStorageAdapter(): SupabaseStorageAdapter {
+    // Create encrypted storage instance
+    const encryptedStorage = new EncryptedStorage();
+
+    // Adapter to make EncryptedStorage compatible with Supabase's expected storage interface
+    return {
     getItem: async (key: string) => {
         try {
             const data = await encryptedStorage.getItem(key);
@@ -67,7 +98,12 @@ const zoteroStorage = {
             logger(`zoteroStorage: Error removing auth from encrypted storage: ${error}`, 2);
         }
     }
-};
+    };
+}
+
+// Storage the auth client persists into: a host-injected adapter if provided,
+// otherwise the Zotero EncryptedStorage default.
+const sessionStorage: SupabaseStorageAdapter = injectedStorageAdapter ?? createEncryptedStorageAdapter();
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
@@ -278,7 +314,7 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
         persistSession: true,
         autoRefreshToken: true,
         detectSessionInUrl: false,
-        storage: zoteroStorage,
+        storage: sessionStorage,
         // Mutex-based lock to prevent concurrent token refresh operations
         lock: acquireAuthLock
     }
