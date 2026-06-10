@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest';
 
 import {
     extractAnnotationAttachmentId,
+    extractFindInAttachmentsData,
     extractGetAnnotationsData,
     extractListCollectionsData,
     extractListItemsData,
     extractZoteroSearchData,
+    isFindInAttachmentsResult,
     isGetAnnotationsResult,
 } from '../../../react/agents/toolResultTypes';
 
@@ -283,6 +285,109 @@ describe('find_annotations dehydrated summary', () => {
             totalCount: 3,
             toolName: 'find_annotations',
         });
+    });
+});
+
+/**
+ * find_in_attachments summaries omit absent optional fields entirely (the
+ * backend strips None values), so the guard validates only the discriminating
+ * shape and the extractor fills in defaults.
+ */
+describe('find_in_attachments summary', () => {
+    const fullMetadata = {
+        summary: {
+            tool_name: 'find_in_attachments',
+            query: 'social capital',
+            total_matches: 23,
+            attachment_count: 2,
+            attachments: [
+                {
+                    library_id: 1,
+                    zotero_key: 'ABCD2345',
+                    status: 'ok',
+                    match_count: 23,
+                    pages: [3, 12],
+                    content_kind: 'pdf',
+                    matches: [
+                        {
+                            snippet: 'Social capital refers to networks.',
+                            page_number: 12,
+                            page_label: 'iv',
+                            target: { part_id: 's33', page_idx: 11, boxes: [[72, 701, 540, 713]] },
+                        },
+                    ],
+                },
+                {
+                    library_id: 1,
+                    zotero_key: 'FAIL2345',
+                    status: 'error',
+                    match_count: 0,
+                    pages: [],
+                    content_kind: 'pdf',
+                    matches: [],
+                },
+            ],
+        },
+    };
+
+    it('routes by tool name', () => {
+        expect(isFindInAttachmentsResult('find_in_attachments', undefined, fullMetadata)).toBe(true);
+    });
+
+    it('falls back to summary.tool_name for hydrated history', () => {
+        expect(isFindInAttachmentsResult('unknown_tool', undefined, fullMetadata)).toBe(true);
+    });
+
+    it('rejects search_in_attachment summaries (page-shaped, no attachments array)', () => {
+        const metadata = {
+            summary: {
+                tool_name: 'search_in_attachment',
+                query: 'q',
+                total_matches: 1,
+                pages_with_matches: 1,
+                pages: [{ library_id: 1, zotero_key: 'ABCD2345', page_number: 3, match_count: 1, score: 1 }],
+            },
+        };
+        expect(isFindInAttachmentsResult('search_in_attachment', undefined, metadata)).toBe(false);
+        expect(isFindInAttachmentsResult('find_in_attachments', undefined, metadata)).toBe(false);
+    });
+
+    it('extracts full payloads verbatim', () => {
+        const result = extractFindInAttachmentsData(undefined, fullMetadata);
+        expect(result).not.toBeNull();
+        expect(result?.query).toBe('social capital');
+        expect(result?.totalMatches).toBe(23);
+        expect(result?.attachmentCount).toBe(2);
+        expect(result?.attachments[0].matches[0].target?.part_id).toBe('s33');
+        expect(result?.attachments[1].status).toBe('error');
+    });
+
+    it('normalizes omitted optional fields', () => {
+        const metadata = {
+            summary: {
+                tool_name: 'find_in_attachments',
+                query: 'q',
+                total_matches: 1,
+                attachment_count: 1,
+                attachments: [{ library_id: 1, zotero_key: 'ABCD2345' }],
+            },
+        };
+        expect(isFindInAttachmentsResult('find_in_attachments', undefined, metadata)).toBe(true);
+        const result = extractFindInAttachmentsData(undefined, metadata);
+        expect(result?.attachments[0]).toEqual({
+            library_id: 1,
+            zotero_key: 'ABCD2345',
+            status: 'ok',
+            match_count: 0,
+            pages: [],
+            content_kind: 'pdf',
+            matches: [],
+        });
+    });
+
+    it('returns null when summary lacks the attachments array', () => {
+        expect(extractFindInAttachmentsData(undefined, { summary: { tool_name: 'find_in_attachments' } })).toBeNull();
+        expect(extractFindInAttachmentsData(undefined, undefined)).toBeNull();
     });
 });
 

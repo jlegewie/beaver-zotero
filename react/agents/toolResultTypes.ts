@@ -144,6 +144,74 @@ export interface SearchInAttachmentResultSummary {
     pages: PageSearchReference[];
 }
 
+/**
+ * Compact click-to-highlight target for one document part.
+ * Matches PartLocation from backend. Which fields are set depends on the
+ * attachment's content_kind; absent fields are omitted from JSON (not null).
+ */
+export interface AttachmentMatchTarget {
+    /** Citation anchor of the part, e.g. "s33", "p12", or "l12". */
+    part_id: string;
+    /** 0-based page index (PDF). */
+    page_idx?: number;
+    /** Bounding boxes as [l, t, r, b] integer PDF points, top-left origin (PDF). */
+    boxes?: [number, number, number, number][];
+    /** Section href (EPUB). */
+    section_href?: string;
+    /** HTML anchor id nearest the part (EPUB). */
+    anchor_id?: string;
+    /** Part text (possibly a prefix) for locating the passage in the reader DOM (EPUB). */
+    text?: string;
+    /** 1-based line number (text documents). */
+    line?: number;
+    /** Last line of a line range (text documents). */
+    line_end?: number;
+}
+
+/**
+ * One find_in_attachments match for display.
+ * Matches AttachmentMatchSummary from backend.
+ */
+export interface AttachmentMatchSummary {
+    /** Plain-text preview centered on the query hit (no citation markup). */
+    snippet: string;
+    /** 1-based page number (EPUB: 1-based section ordinal); absent for text files. */
+    page_number?: number;
+    /** Printed page label when the PDF defines one (e.g. "226" or "iv"). */
+    page_label?: string;
+    /** Click target; absent when the document carries no citation anchors. */
+    target?: AttachmentMatchTarget;
+}
+
+/**
+ * Per-attachment find_in_attachments result for display.
+ * Matches AttachmentSearchReference from backend.
+ */
+export interface AttachmentSearchReference {
+    library_id: number;
+    zotero_key: string;
+    status: 'ok' | 'no_matches' | 'error';
+    /** Total matches in this attachment; `matches` is the top-ranked subset. */
+    match_count: number;
+    /** Distinct 1-based page numbers of the returned matches, sorted. */
+    pages: number[];
+    content_kind: 'pdf' | 'epub' | 'text' | 'snapshot';
+    /** Display previews of the returned matches, in rank order. */
+    matches: AttachmentMatchSummary[];
+}
+
+/**
+ * Find in attachments result summary.
+ * Matches FindInAttachmentsResultSummary from backend.
+ */
+export interface FindInAttachmentsResultSummary {
+    tool_name: string;
+    query: string;
+    total_matches: number;
+    attachment_count: number;
+    attachments: AttachmentSearchReference[];
+}
+
 // ========================
 // External Search Results 
 // ========================
@@ -235,6 +303,11 @@ const SEARCH_IN_DOCUMENTS_TOOL_NAMES: readonly string[] = [
 /** Valid tool names for keyword search in attachment results */
 const SEARCH_IN_ATTACHMENT_TOOL_NAMES: readonly string[] = [
     'search_in_attachment',
+] as const;
+
+/** Valid tool names for find in attachments results */
+const FIND_IN_ATTACHMENTS_TOOL_NAMES: readonly string[] = [
+    'find_in_attachments',
 ] as const;
 
 /**
@@ -467,6 +540,39 @@ export function isSearchInAttachmentResult(
                 typeof obj.zotero_key === 'string' &&
                 typeof obj.page_number === 'number'
             );
+        })
+    );
+}
+
+/**
+ * Type guard for find in attachments results (keyword search across attachments).
+ * Checks if metadata.summary is FindInAttachmentsResultSummary.
+ *
+ * Deliberately lenient: only the discriminating shape is validated. Optional
+ * fields (status, matches, content_kind, ...) are omitted by the backend when
+ * absent and normalized by `extractFindInAttachmentsData`.
+ */
+export function isFindInAttachmentsResult(
+    toolName: string,
+    _content: unknown,
+    metadata?: Record<string, unknown>
+): metadata is { summary: FindInAttachmentsResultSummary } {
+    if (!metadata?.summary || typeof metadata.summary !== 'object') return false;
+    const summary = metadata.summary as Record<string, unknown>;
+
+    const toolNameIsFindInAttachments = FIND_IN_ATTACHMENTS_TOOL_NAMES.includes(toolName);
+    if (!toolNameIsFindInAttachments) {
+        const summaryToolName = typeof summary.tool_name === 'string' ? summary.tool_name : null;
+        if (!summaryToolName || !FIND_IN_ATTACHMENTS_TOOL_NAMES.includes(summaryToolName)) return false;
+    }
+
+    return (
+        typeof summary.tool_name === 'string' &&
+        Array.isArray(summary.attachments) &&
+        summary.attachments.every((att: unknown) => {
+            if (!att || typeof att !== 'object') return false;
+            const obj = att as Record<string, unknown>;
+            return typeof obj.library_id === 'number' && typeof obj.zotero_key === 'string';
         })
     );
 }
@@ -727,6 +833,53 @@ export function extractSearchInAttachmentData(
     }));
 
     return { pages };
+}
+
+/**
+ * Normalized find in attachments data ready for rendering.
+ */
+export interface FindInAttachmentsViewData {
+    query: string;
+    totalMatches: number;
+    attachmentCount: number;
+    attachments: AttachmentSearchReference[];
+}
+
+/**
+ * Extract per-attachment match data from metadata.summary for find_in_attachments.
+ * Normalizes fields the backend omits when absent.
+ * @returns FindInAttachmentsViewData or null if summary is not available
+ */
+export function extractFindInAttachmentsData(
+    _content: unknown,
+    metadata?: Record<string, unknown>
+): FindInAttachmentsViewData | null {
+    if (!metadata?.summary || typeof metadata.summary !== 'object') return null;
+    const summary = metadata.summary as FindInAttachmentsResultSummary;
+
+    if (!Array.isArray(summary.attachments)) return null;
+
+    const attachments: AttachmentSearchReference[] = summary.attachments.map(att => {
+        const matches = Array.isArray(att.matches) ? att.matches : [];
+        return {
+            library_id: att.library_id,
+            zotero_key: att.zotero_key,
+            status: att.status ?? 'ok',
+            match_count: typeof att.match_count === 'number' ? att.match_count : matches.length,
+            pages: Array.isArray(att.pages) ? att.pages : [],
+            content_kind: att.content_kind ?? 'pdf',
+            matches,
+        };
+    });
+
+    return {
+        query: summary.query ?? '',
+        totalMatches: typeof summary.total_matches === 'number' ? summary.total_matches : 0,
+        attachmentCount: typeof summary.attachment_count === 'number'
+            ? summary.attachment_count
+            : attachments.length,
+        attachments,
+    };
 }
 
 /**
@@ -1136,6 +1289,15 @@ export function extractZoteroReferences(part: ToolReturnPart): ZoteroItemReferen
     if (isSearchInAttachmentResult(tool_name, content, metadata)) {
         const data = extractSearchInAttachmentData(content, metadata);
         return data?.pages ?? [];
+    }
+
+    // Find in attachments results (attachments)
+    if (isFindInAttachmentsResult(tool_name, content, metadata)) {
+        const data = extractFindInAttachmentsData(content, metadata);
+        return data?.attachments.map(att => ({
+            library_id: att.library_id,
+            zotero_key: att.zotero_key,
+        })) ?? [];
     }
 
     // Extract tool results
