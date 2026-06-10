@@ -212,18 +212,33 @@ function getCurrentReaderAnnotations(reader: any) {
 }
 
 /**
- * Retrieves the current page number of the reader.
- * 
+ * Retrieves the current reading position of the reader as a 1-based "page".
+ *
+ * For PDFs this is the current page number. For EPUBs it is the spine section
+ * ordinal (section index + 1) of the section at the top of the viewport — the
+ * same coordinate used as "page N" by reading and citation tools.
+ *
  * @param reader - The reader instance.
- * @returns The current page number or null if the reader is not a PDF reader.
+ * @returns The 1-based position, or null for unsupported reader types.
  */
 function getCurrentPage(reader?: any): number | null {
     if (!reader) reader = getCurrentReader();
     if (!reader) return null;
+    if (reader.type === 'epub') {
+        try {
+            // The EPUB view's flow tracks the spine section at the top of the viewport.
+            const sectionIndex = reader._internalReader?._primaryView?.flow?.startSection?.index;
+            return typeof sectionIndex === 'number' ? sectionIndex + 1 : null;
+        }
+        catch (e) {
+            console.error('Error getting current EPUB section:', e);
+            return null;
+        }
+    }
     if (reader.type !== 'pdf') {
         return null;
     }
-    
+
     try {
         // Access the PDF.js viewer instance
         const pdfViewer = reader._internalReader._primaryView._iframeWindow.PDFViewerApplication.pdfViewer;
@@ -246,11 +261,20 @@ function getCurrentPage(reader?: any): number | null {
  * @param reader - The reader instance.
  * @returns The selected text or null if the reader is not a PDF reader.
  */
-function getSelectedText(reader?: _ZoteroTypes.Reader): string | null {    
+function getSelectedText(reader?: _ZoteroTypes.Reader): string | null {
     try {
         // Get reader
         reader = reader || getCurrentReader();
-        if (!reader || reader.type !== 'pdf') return null;
+        if (!reader) return null;
+
+        // EPUB (and other DOM-based) views expose the selection through the
+        // content iframe's window selection rather than _selectionRanges.
+        if (reader.type === 'epub') {
+            const selection = (reader as any)._internalReader?._primaryView?._iframeWindow?.getSelection();
+            const text = selection?.toString();
+            return text?.trim() ? text : null;
+        }
+        if (reader.type !== 'pdf') return null;
 
         // Access primaryView
         const primaryView = reader._internalReader._primaryView;
@@ -321,7 +345,9 @@ export type ReaderContext = {
 }
 
 function addSelectionChangeListener(reader: any, callback: (selection: TextSelection | null) => void) {
-    if (reader.type !== "pdf") {
+    // PDF and EPUB views both render content into an iframe whose document
+    // fires selectionchange; other reader types are not supported.
+    if (reader.type !== "pdf" && reader.type !== "epub") {
         return null;
     }
     try {

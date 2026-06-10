@@ -54,7 +54,7 @@ import {
 import { isWebSearchEnabledAtom, isLibraryTabAtom, removePopupMessagesByTypeAtom, isWebSearchAllowedAtom } from './ui';
 import { currentNoteItemAtom } from './zoteroContext';
 import { isAnnotationAttachment } from '../types/attachments/apiTypes';
-import { getCurrentPage } from '../utils/readerUtils';
+import { getCurrentPage, getCurrentReader } from '../utils/readerUtils';
 import { uint8ArrayToBase64 } from '../utils/fileUtils';
 import { isAttachmentOnServer } from '../../src/utils/webAPI';
 import { AgentRun, BeaverAgentPrompt, MessageSearchFilters, PromptOrigin, ToolRequest } from '../agents/types';
@@ -296,11 +296,16 @@ function getReaderState(get: Getter): ReaderState | null {
     const readerAttachment = get(currentReaderAttachmentAtom);
     if (!readerAttachment) return null;
 
+    const reader = getCurrentReader();
+    const contentKind = reader?.type === 'pdf' || reader?.type === 'epub'
+        ? reader.type
+        : undefined;
     const currentTextSelection = get(readerTextSelectionAtom);
     return {
         library_id: readerAttachment.libraryID,
         zotero_key: readerAttachment.key,
-        current_page: getCurrentPage() || null,
+        current_page: getCurrentPage(reader) || null,
+        ...(contentKind && { content_kind: contentKind }),
         ...(currentTextSelection && { text_selection: currentTextSelection })
     } as ReaderState;
 }
