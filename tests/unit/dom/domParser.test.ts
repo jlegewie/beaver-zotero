@@ -3,12 +3,15 @@
 import { describe, expect, it } from "vitest";
 import {
     buildDomCitationIndex,
+    buildDomDiagnostics,
     collectDomItems,
     createDomCounters,
     isFootnoteElement,
     mapElement,
+    measureSectionSourceText,
     parseDomSection,
     resolveDomCitationId,
+    splitSentences,
 } from "../../../src/services/documentExtraction/dom";
 import {
     EPUB_CONTENT_KIND,
@@ -40,7 +43,7 @@ describe("DOM mapping", () => {
             <h2 id="h">Heading</h2>
             <li id="li">Item</li>
             <figcaption id="cap">Caption</figcaption>
-            <table id="table"><tr><td>Cell</td></tr></table>
+            <table id="table"><tr><th>Header</th></tr><tr><td>Cell</td></tr></table>
             <img id="img" alt="Alt text" />
         `);
 
@@ -102,6 +105,223 @@ describe("DOM mapping", () => {
         const [item] = collectDomItems(bodyOf(doc));
         expect(item.anchorId).toBe("chapter");
     });
+
+    it("treats leaf <div> blocks as text but not their block-level wrappers", () => {
+        // EPUBs converted from PDF/Word use <div> for body text instead of <p>.
+        const doc = parseXhtml(`
+            <div id="chapter">
+                <div id="para1">First div paragraph.</div>
+                <div id="para2">Second div paragraph.</div>
+            </div>
+        `);
+
+        const items = collectDomItems(bodyOf(doc));
+        expect(items.map((item) => [item.kind, item.text])).toEqual([
+            ["text", "First div paragraph."],
+            ["text", "Second div paragraph."],
+        ]);
+    });
+
+    it("does not map a <div> that only wraps other block elements", () => {
+        const doc = parseXhtml(`<div id="wrap"><p>Real paragraph.</p></div>`);
+
+        const items = collectDomItems(bodyOf(doc));
+        expect(items.map((item) => [item.kind, item.text])).toEqual([
+            ["text", "Real paragraph."],
+        ]);
+    });
+
+    it("captures loose text mixed with block children in document order", () => {
+        const doc = parseXhtml(`<div>Intro text <p>A paragraph.</p> Outro text</div>`);
+
+        const items = collectDomItems(bodyOf(doc));
+        expect(items.map((item) => [item.kind, item.text])).toEqual([
+            ["text", "Intro text"],
+            ["text", "A paragraph."],
+            ["text", "Outro text"],
+        ]);
+    });
+
+    it("captures text in unrecognized containers instead of dropping it", () => {
+        // Definition lists and other non-allowlisted containers must not vanish.
+        const doc = parseXhtml(`
+            <dl>
+                <dt>Term</dt>
+                <dd>The definition text.</dd>
+            </dl>
+            <pre>preformatted line</pre>
+        `);
+
+        const items = collectDomItems(bodyOf(doc));
+        expect(items.map((item) => item.text)).toEqual([
+            "Term",
+            "The definition text.",
+            "preformatted line",
+        ]);
+    });
+
+    it("never captures style/script content as text", () => {
+        const doc = parseXhtml(`
+            <style>p { color: red; }</style>
+            <div><script type="text/javascript">var x = 1;</script>Real prose in a div.</div>
+            <p>Paragraph<style>.x { font-weight: bold; }</style> with inline style.</p>
+        `);
+
+        const items = collectDomItems(bodyOf(doc));
+        expect(items.map((item) => item.text)).toEqual([
+            "Real prose in a div.",
+            "Paragraph with inline style.",
+        ]);
+    });
+
+    it("keeps a genuine data table as a single table item", () => {
+        const doc = parseXhtml(`
+            <table id="data">
+                <tr><th>Year</th><th>Count</th></tr>
+                <tr><td>1995</td><td>42</td></tr>
+            </table>
+        `);
+
+        const items = collectDomItems(bodyOf(doc));
+        expect(items.map((item) => item.kind)).toEqual(["table"]);
+    });
+
+    it("linearizes a data table into one citable row per <tr>", () => {
+        const doc = parseXhtml(`
+            <table id="data">
+                <tr><th>Year</th><th>Count</th></tr>
+                <tr><td>1995</td><td>42</td></tr>
+                <tr><td>1996</td><td>43</td></tr>
+                <tr><td></td><td></td></tr>
+            </table>
+        `);
+
+        const [item] = collectDomItems(bodyOf(doc));
+        // Cells joined by " | "; rows joined by newline; fully empty row dropped.
+        expect(item.rows).toEqual(["Year | Count", "1995 | 42", "1996 | 43"]);
+        expect(item.text).toBe("Year | Count\n1995 | 42\n1996 | 43");
+    });
+
+    it("walks a layout table that wraps real headings and paragraphs", () => {
+        // A single positioning table around otherwise-normal content.
+        const doc = parseXhtml(`
+            <table><tr><td>
+                <h2>Chapter 7</h2>
+                <p>First paragraph of the chapter.</p>
+                <p>Second paragraph.</p>
+            </td></tr></table>
+        `);
+
+        const items = collectDomItems(bodyOf(doc));
+        expect(items.map((item) => [item.kind, item.text])).toEqual([
+            ["section_header", "Chapter 7"],
+            ["text", "First paragraph of the chapter."],
+            ["text", "Second paragraph."],
+        ]);
+    });
+
+    it("surfaces the data-table caption as the first citable row", () => {
+        const doc = parseXhtml(`
+            <table id="data">
+                <caption>Table 3: Annual counts</caption>
+                <tr><th>Year</th><th>Count</th></tr>
+                <tr><td>1995</td><td>42</td></tr>
+            </table>
+        `);
+
+        const [item] = collectDomItems(bodyOf(doc));
+        expect(item.kind).toBe("table");
+        expect(item.rows).toEqual([
+            "Table 3: Annual counts",
+            "Year | Count",
+            "1995 | 42",
+        ]);
+    });
+
+    it("classifies a wrapper around a th-bearing data table as layout (no duplication)", () => {
+        // Outer positioning table whose only content is an inner data table.
+        // The inner table's header cells must not make the OUTER table a data
+        // table — that would linearize the inner rows twice (once inside the
+        // outer cell text, once as the inner <tr>s).
+        const doc = parseXhtml(`
+            <table id="outer"><tr><td>
+                <table id="inner">
+                    <tr><th>Year</th><th>Count</th></tr>
+                    <tr><td>1995</td><td>42</td></tr>
+                </table>
+            </td></tr></table>
+        `);
+
+        const items = collectDomItems(bodyOf(doc));
+        expect(items.map((item) => item.kind)).toEqual(["table"]);
+        expect(items[0].element.getAttribute("id")).toBe("inner");
+        expect(items[0].rows).toEqual(["Year | Count", "1995 | 42"]);
+    });
+
+    it("skips nested-table rows when linearizing a data table", () => {
+        // A data table with its own header cells that holds a small table
+        // inside one cell: nested rows appear once (via the enclosing cell),
+        // not again as standalone rows.
+        const doc = parseXhtml(`
+            <table id="outer">
+                <tr><th>Label</th><th>Detail</th></tr>
+                <tr><td>A</td><td><table><tr><td>x</td> <td>y</td></tr></table></td></tr>
+            </table>
+        `);
+
+        const [item] = collectDomItems(bodyOf(doc));
+        expect(item.kind).toBe("table");
+        expect(item.rows).toEqual(["Label | Detail", "A | x y"]);
+    });
+
+    it("recovers prose held directly in layout-table cells", () => {
+        const prose = "This is a long run of body text that a PDF conversion placed "
+            + "directly inside a positioning table cell with no paragraph tag, so it "
+            + "must be recovered as a text item rather than dropped.";
+        const doc = parseXhtml(`
+            <table border="0"><tr><td><font>${prose}</font></td></tr></table>
+        `);
+
+        const items = collectDomItems(bodyOf(doc));
+        expect(items.map((item) => item.kind)).toEqual(["text"]);
+        expect(items[0].text).toBe(prose);
+    });
+});
+
+describe("sentence splitting", () => {
+    it("keeps author initials and abbreviations attached", () => {
+        expect(splitSentences("Edited by Marvin A. Sweeney and Eric D. Reymond.")).toEqual([
+            "Edited by Marvin A. Sweeney and Eric D. Reymond.",
+        ]);
+        expect(splitSentences("See p. 45 and vol. 2 for details.")).toEqual([
+            "See p. 45 and vol. 2 for details.",
+        ]);
+    });
+
+    it("splits a sentence that ends with a number", () => {
+        // A sentence-final number must not be mistaken for a list marker.
+        expect(splitSentences("The sample size was 42. Results were stable.")).toEqual([
+            "The sample size was 42.",
+            "Results were stable.",
+        ]);
+    });
+
+    it("keeps a leading list/section number attached to its item", () => {
+        expect(splitSentences("1. Hebrew is the older language.")).toEqual([
+            "1. Hebrew is the older language.",
+        ]);
+        expect(splitSentences("3.1. The morphology of the verb is complex.")).toEqual([
+            "3.1. The morphology of the verb is complex.",
+        ]);
+    });
+
+    it("still splits genuine sentence boundaries", () => {
+        expect(splitSentences("First sentence. Second sentence! Third?")).toEqual([
+            "First sentence.",
+            "Second sentence!",
+            "Third?",
+        ]);
+    });
 });
 
 describe("DOM section parser", () => {
@@ -126,7 +346,8 @@ describe("DOM section parser", () => {
         expect(first.items[0].sentences?.map((sentence) => sentence.id)).toEqual(["s1", "s2"]);
         expect(second.items[0].sentences?.map((sentence) => sentence.id)).toEqual(["s3"]);
         expect(second.items[1].sentences?.map((sentence) => sentence.id)).toEqual(["s4"]);
-        expect(first).toMatchObject({ index: 0, rawHref: "EPUB/first.xhtml", label: "Section title" });
+        // The section label prefers the in-body heading over the <head><title>.
+        expect(first).toMatchObject({ index: 0, rawHref: "EPUB/first.xhtml", label: "Heading" });
     });
 
     it("returns an empty section when the document has no body", () => {
@@ -140,6 +361,35 @@ describe("DOM section parser", () => {
         });
 
         expect(section).toEqual({ index: 3, rawHref: "EPUB/nav.xml", items: [] });
+    });
+
+    it("makes each data-table row a citable sentence", () => {
+        const section = parseDomSection({
+            doc: parseXhtml(`
+                <table>
+                    <tr><th>Manuscript</th><th>Reading</th></tr>
+                    <tr><td>Codex A</td><td>alpha</td></tr>
+                    <tr><td>Codex B</td><td>beta</td></tr>
+                </table>
+            `),
+            sectionIndex: 0,
+            rawHref: "EPUB/first.xhtml",
+            counters: createDomCounters(),
+        });
+
+        const [table] = section.items;
+        expect(table.kind).toBe("table");
+        expect(table.sentences?.map((s) => s.text)).toEqual([
+            "Manuscript | Reading",
+            "Codex A | alpha",
+            "Codex B | beta",
+        ]);
+        // Row sentences are document-global ids, so they join the citation index.
+        const index = buildDomCitationIndex([section]);
+        expect(resolveDomCitationId(index, table.sentences![1].id)).toMatchObject({
+            kind: "sentence",
+            itemId: table.id,
+        });
     });
 });
 
@@ -169,5 +419,75 @@ describe("DOM citation index", () => {
             anchorId: "anchor",
         });
         expect(resolveDomCitationId(index, "sentence:2")).toBeUndefined();
+    });
+});
+
+describe("DOM extraction diagnostics", () => {
+    it("reports full coverage when all body text is extracted", () => {
+        const doc = parseXhtml(`<p>First paragraph.</p><p>Second paragraph.</p>`);
+        const section = parseDomSection({
+            doc,
+            sectionIndex: 0,
+            rawHref: "EPUB/first.xhtml",
+            counters: createDomCounters(),
+        });
+
+        const sourceChars = measureSectionSourceText(doc);
+        const diagnostics = buildDomDiagnostics([section], sourceChars);
+        expect(diagnostics.textCoverage).toBe(1);
+        expect(diagnostics.extractedTextChars).toBe(sourceChars);
+    });
+
+    it("reports low coverage when body text is dropped (unsupported container)", () => {
+        // Definition-list text is not in the allowlist or the leaf-container set,
+        // so it is dropped — coverage must fall below 1 to flag the loss.
+        const doc = parseXhtml(`
+            <p>Visible paragraph of prose that the walk captures in full.</p>
+            <dl>
+                <dt>Term</dt>
+                <dd>A definition with a substantial amount of text that is dropped.</dd>
+            </dl>
+        `);
+        const section = parseDomSection({
+            doc,
+            sectionIndex: 0,
+            rawHref: "EPUB/first.xhtml",
+            counters: createDomCounters(),
+        });
+
+        const diagnostics = buildDomDiagnostics([section], measureSectionSourceText(doc));
+        expect(diagnostics.textCoverage).not.toBeNull();
+        expect(diagnostics.textCoverage!).toBeLessThan(1);
+    });
+
+    it("excludes style/script text from the coverage denominator", () => {
+        const doc = parseXhtml(`
+            <style>body { margin: 0; } p { text-indent: 1em; }</style>
+            <p>First paragraph.</p><p>Second paragraph.</p>
+        `);
+        const section = parseDomSection({
+            doc,
+            sectionIndex: 0,
+            rawHref: "EPUB/first.xhtml",
+            counters: createDomCounters(),
+        });
+
+        const sourceChars = measureSectionSourceText(doc);
+        const diagnostics = buildDomDiagnostics([section], sourceChars);
+        expect(diagnostics.textCoverage).toBe(1);
+        expect(diagnostics.extractedTextChars).toBe(sourceChars);
+    });
+
+    it("returns null coverage for a source with no visible text", () => {
+        const doc = parseXhtml(`<img src="scan.png" />`);
+        const section = parseDomSection({
+            doc,
+            sectionIndex: 0,
+            rawHref: "EPUB/first.xhtml",
+            counters: createDomCounters(),
+        });
+
+        const diagnostics = buildDomDiagnostics([section], measureSectionSourceText(doc));
+        expect(diagnostics.textCoverage).toBeNull();
     });
 });

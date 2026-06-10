@@ -45,6 +45,11 @@ import {
     preflightCachedPdfMeta,
 } from './documentExtraction';
 import { readableToExtractKind, type ExtractContentKind } from './documentExtraction/shared/contentKinds';
+import {
+    extractEpubDocumentFromFile,
+    preflightEpubFile,
+    type EpubDocument,
+} from './documentExtraction/epub';
 
 export interface ResolvedAttachment {
     libraryId: number;
@@ -86,6 +91,15 @@ export interface ExtractAndCacheResolvedPdfArgs
     contentType: string;
     /** Reuse the caller's timeout when item resolution and PDF extraction share one deadline. */
     timeoutContext?: TimeoutControllerContext;
+}
+
+export interface ExtractAndCacheEpubArgs {
+    item: Zotero.Item;
+    resolvedKey: string;
+    contentType: string;
+    maxFileSizeMB: number;
+    externalAbortSignal?: AbortSignal;
+    onFileNotSyncedLocally?: () => void;
 }
 
 export function buildExtractedDocumentCacheMetadata(extracted: BeaverExtractResult): {
@@ -155,6 +169,26 @@ export type ExtractAndCacheResult =
           pageCount: number | null;
           resolvedAttachment: ResolvedAttachment | null;
       };
+
+export type ExtractAndCacheEpubResult =
+    | {
+          kind: 'ok';
+          cached: boolean;
+          document: EpubDocument;
+          resolvedAttachment: ResolvedAttachment;
+          contentType: string;
+      }
+    | {
+          kind: 'response_error';
+          code: ZoteroDocumentErrorCode;
+          message: string;
+          resolvedAttachment: ResolvedAttachment;
+          contentKind?: ExtractContentKind;
+      };
+
+function isAbortError(error: unknown): boolean {
+    return error instanceof Error && /abort/i.test(error.message);
+}
 
 export async function extractAndCacheDocument(
     args: ExtractAndCacheArgs,
@@ -271,6 +305,139 @@ export async function extractAndCacheDocument(
         throw error;
     } finally {
         dispose();
+    }
+}
+
+/**
+ * Run the EPUB extraction pipeline for an already-resolved EPUB attachment.
+ * Expected outcomes are returned as a tagged union for caller-side mapping.
+ */
+export async function extractAndCacheEpubDocument(
+    args: ExtractAndCacheEpubArgs,
+): Promise<ExtractAndCacheEpubResult> {
+    const resolvedAttachment = {
+        libraryId: args.item.libraryID,
+        zoteroKey: args.item.key,
+    };
+    const requestKey = args.resolvedKey;
+
+    const preflight = await preflightEpubFile(args.item, {
+        maxFileSizeMB: args.maxFileSizeMB,
+        onFileNotSyncedLocally: args.onFileNotSyncedLocally,
+    });
+    if (preflight.kind === 'response_error') {
+        return {
+            kind: 'response_error',
+            code: preflight.code,
+            message: preflight.message,
+            resolvedAttachment,
+            contentKind: 'epub',
+        };
+    }
+
+    const filePath = preflight.filePath;
+    const maxFileSizeMB = effectiveMaxFileSizeMB(args.maxFileSizeMB);
+    const maxSourceSizeBytes = maxFileSizeMB * 1024 * 1024;
+
+    const okOrNoText = (
+        document: EpubDocument,
+        cached: boolean,
+    ): ExtractAndCacheEpubResult => {
+        if (document.diagnostics.extractedTextChars === 0) {
+            return {
+                kind: 'response_error',
+                code: 'no_text_layer',
+                message: `The EPUB file for ${requestKey} contains no extractable text.`,
+                resolvedAttachment,
+                contentKind: 'epub',
+            };
+        }
+        return {
+            kind: 'ok',
+            cached,
+            document,
+            resolvedAttachment,
+            contentType: args.contentType,
+        };
+    };
+
+    try {
+        const cache = Zotero.Beaver?.documentCache;
+        if (!cache) {
+            logger(`extractAndCacheEpubDocument: document cache not available for ${requestKey}`, 1);
+            return okOrNoText(
+                await extractEpubDocumentFromFile(filePath, { abortSignal: args.externalAbortSignal }),
+                false,
+            );
+        }
+
+        const ref = {
+            libraryId: args.item.libraryID,
+            zoteroKey: args.item.key,
+        };
+        const cached = await cache.getEpubResult(ref, filePath, { maxSourceSizeBytes }).catch(() => null);
+        if (cached) {
+            return okOrNoText(cached, true);
+        }
+
+        let created = false;
+        const document = await cache.getOrCreateResult<EpubDocument>({
+            item: args.item,
+            filePath,
+            contentKind: 'epub',
+            mode: 'structured',
+            sourceSizeBytes: 0,
+            contentType: args.contentType,
+            maxSourceSizeBytes,
+            abortSignal: args.externalAbortSignal,
+            readCached: (cacheRef) => cache.getEpubResult(cacheRef, filePath, { maxSourceSizeBytes }),
+            create: async (signal) => {
+                created = true;
+                return extractEpubDocumentFromFile(filePath, { abortSignal: signal });
+            },
+            metadata: (doc) => ({
+                contentKind: 'epub',
+                pageCount: null,
+                pageLabels: null,
+                pages: null,
+                epubSections: doc.sections.map((section) => ({
+                    index: section.index,
+                    rawHref: section.rawHref,
+                    label: section.label,
+                    itemCount: section.items.length,
+                })),
+                epubExtractedTextChars: doc.diagnostics.extractedTextChars,
+            }),
+        });
+
+        if (!document) {
+            return {
+                kind: 'response_error',
+                code: 'file_too_large',
+                message: `The EPUB file for ${requestKey} exceeds the ${maxFileSizeMB}MB limit.`,
+                resolvedAttachment,
+                contentKind: 'epub',
+            };
+        }
+
+        return okOrNoText(document, !created);
+    } catch (error) {
+        if (args.externalAbortSignal?.aborted && isAbortError(error)) {
+            return {
+                kind: 'response_error',
+                code: 'timeout',
+                message: `EPUB extraction interrupted for ${requestKey}`,
+                resolvedAttachment,
+                contentKind: 'epub',
+            };
+        }
+        return {
+            kind: 'response_error',
+            code: 'extraction_failed',
+            message: `Failed to extract EPUB content for ${requestKey}: ${error instanceof Error ? error.message : String(error)}`,
+            resolvedAttachment,
+            contentKind: 'epub',
+        };
     }
 }
 

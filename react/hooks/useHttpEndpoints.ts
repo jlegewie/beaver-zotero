@@ -63,6 +63,8 @@ import {
     handleTestFileStatusHttpRequest,
     handleTestResolveItemHttpRequest,
     handleTestResolveReadableHttpRequest,
+    handleTestBestEpubAttachmentHttpRequest,
+    handleTestValidateItemHttpRequest,
 } from './httpHandlers/testCacheHandlers';
 import {
     handleTestNoteCreateHttpRequest,
@@ -91,6 +93,13 @@ import {
     handleTestPdfExtractTraceHttpRequest,
     handleTestPdfAnalyzeLayoutHttpRequest,
 } from './httpHandlers/testPdfHandlers';
+import {
+    handleTestEpubExtractHttpRequest,
+} from './httpHandlers/testEpubHandlers';
+import {
+    handleTestReaderStateHttpRequest,
+    handleTestEpubCitationNavigateHttpRequest,
+} from './httpHandlers/testReaderHandlers';
 import {
     handleTestBackgroundEnqueueHttpRequest,
     handleTestBackgroundStatsHttpRequest,
@@ -177,6 +186,8 @@ const ENDPOINT_PATHS = [
     '/beaver/test/mcp-create-note',
     '/beaver/test/resolve-item',
     '/beaver/test/resolve-readable',
+    '/beaver/test/best-epub-attachment',
+    '/beaver/test/validate-item',
     // Test-only endpoints (note seeding/teardown/inspection)
     '/beaver/test/note-create',
     '/beaver/test/note-delete',
@@ -212,6 +223,11 @@ const ENDPOINT_PATHS = [
     // Document-wide style + margin analysis context (mirrors what
     // `extract({ mode: "structured" })` builds before per-page processing)
     '/beaver/test/pdf-analyze-layout',
+    // EPUB extraction over a raw file path or attachment (corpus triage)
+    '/beaver/test/epub-extract',
+    // Reader position / EPUB citation-navigation verification (dev-only)
+    '/beaver/test/reader-state',
+    '/beaver/test/epub-citation-navigate',
     // Background queue inspection / driving (dev-only)
     '/beaver/test/background-enqueue',
     '/beaver/test/background-stats',
@@ -763,6 +779,10 @@ function registerEndpoints(): boolean {
             createEndpoint(handleTestResolveItemHttpRequest);
         Zotero.Server.Endpoints['/beaver/test/resolve-readable'] =
             createEndpoint(handleTestResolveReadableHttpRequest);
+        Zotero.Server.Endpoints['/beaver/test/best-epub-attachment'] =
+            createEndpoint(handleTestBestEpubAttachmentHttpRequest);
+        Zotero.Server.Endpoints['/beaver/test/validate-item'] =
+            createEndpoint(handleTestValidateItemHttpRequest);
 
         // MuPDF worker singleton stats / lifecycle (dev-only)
         Zotero.Server.Endpoints['/beaver/test/worker-stats'] =
@@ -854,6 +874,18 @@ function registerEndpoints(): boolean {
         // debugging.
         Zotero.Server.Endpoints['/beaver/test/pdf-analyze-layout'] =
             createEndpoint(handleTestPdfAnalyzeLayoutHttpRequest);
+
+        // EPUB extraction over a raw file path / attachment (corpus triage)
+        Zotero.Server.Endpoints['/beaver/test/epub-extract'] =
+            createEndpoint(handleTestEpubExtractHttpRequest);
+
+        // Reader position (`getCurrentPage` / `content_kind`) and the EPUB
+        // citation-navigation path against the live reader.
+        Zotero.Server.Endpoints['/beaver/test/reader-state'] =
+            createEndpoint(handleTestReaderStateHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/epub-citation-navigate'] =
+            createEndpoint(handleTestEpubCitationNavigateHttpRequest);
 
         // Background queue (dev-only)
         Zotero.Server.Endpoints['/beaver/test/background-enqueue'] =

@@ -54,7 +54,7 @@ import {
 import { isWebSearchEnabledAtom, isLibraryTabAtom, removePopupMessagesByTypeAtom, isWebSearchAllowedAtom } from './ui';
 import { currentNoteItemAtom } from './zoteroContext';
 import { isAnnotationAttachment } from '../types/attachments/apiTypes';
-import { getCurrentPage } from '../utils/readerUtils';
+import { getCurrentPage, getCurrentReader } from '../utils/readerUtils';
 import { uint8ArrayToBase64 } from '../utils/fileUtils';
 import { isAttachmentOnServer } from '../../src/utils/webAPI';
 import { AgentRun, BeaverAgentPrompt, MessageSearchFilters, PromptOrigin, ToolRequest } from '../agents/types';
@@ -127,7 +127,7 @@ import { dismissDiffPreview } from '../utils/noteEditorDiffPreview';
 import { store } from '../store';
 import { profileSyncStatusAtom, searchableLibraryIdsAtom, syncWithZoteroAtom } from './profile';
 import { triggerProfileRefresh } from '../hooks/useProfileSync';
-import { syncingItemFilterAsync } from '../../src/utils/sync';
+import { agentItemFilterAsync, isAgentSupportedItem } from '../../src/utils/agentItemSupport';
 import { safeIsInTrash } from '../../src/utils/zoteroUtils';
 import { wasItemAddedBeforeLastSync } from '../utils/sourceUtils';
 import { ZoteroItemReference, createZoteroItemReference } from '../types/zotero';
@@ -296,11 +296,16 @@ function getReaderState(get: Getter): ReaderState | null {
     const readerAttachment = get(currentReaderAttachmentAtom);
     if (!readerAttachment) return null;
 
+    const reader = getCurrentReader();
+    const contentKind = reader?.type === 'pdf' || reader?.type === 'epub'
+        ? reader.type
+        : undefined;
     const currentTextSelection = get(readerTextSelectionAtom);
     return {
         library_id: readerAttachment.libraryID,
         zotero_key: readerAttachment.key,
-        current_page: getCurrentPage() || null,
+        current_page: getCurrentPage(reader) || null,
+        ...(contentKind && { content_kind: contentKind }),
         ...(currentTextSelection && { text_selection: currentTextSelection })
     } as ReaderState;
 }
@@ -796,9 +801,9 @@ async function determineMissingReason(ref: ZoteroItemReference, userId: string |
             return 'in_trash';
         }
 
-        // Check if passes sync filters
-        const passesSyncFilters = await syncingItemFilterAsync(item);
-        if (!passesSyncFilters) {
+        // Check if the item is a kind Beaver supports and is available
+        const passesAgentFilters = await agentItemFilterAsync(item);
+        if (!passesAgentFilters) {
             return 'filtered_from_sync';
         }
 
@@ -1005,14 +1010,14 @@ async function prevalidateExtractionApproval(
             if (item && item.isAttachment()) {
                 existingCount++;
             } else if (item && item.isRegularItem()) {
-                // Count regular items with exactly one PDF attachment
+                // Count regular items with exactly one supported attachment
                 // (the agent likely confused item ID with attachment ID)
                 await Zotero.Items.loadDataTypes([item], ['childItems']);
                 const attachmentIDs = item.getAttachments();
-                const pdfAttachments = attachmentIDs
+                const supportedAttachments = attachmentIDs
                     .map((id: number) => Zotero.Items.get(id))
-                    .filter((a: any) => a && a.isPDFAttachment());
-                if (pdfAttachments.length === 1) {
+                    .filter((a: any) => a && a.isAttachment() && isAgentSupportedItem(a));
+                if (supportedAttachments.length === 1) {
                     existingCount++;
                 }
             }

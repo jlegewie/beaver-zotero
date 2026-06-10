@@ -337,3 +337,78 @@ export async function handleTestResolveReadableHttpRequest(request: any) {
         error: resolved.resolved ? null : resolved.error,
     };
 }
+
+/**
+ * Dev-only: run the production `getBestEpubAttachmentAsync` helper for an item.
+ *
+ * Exposes the EPUB-attachment resolver used by the EPUB citation-navigation
+ * path so tests can assert which attachment it selects (an EPUB attachment
+ * passed directly, the EPUB child of a regular item, or null when none exists)
+ * without driving the reader UI.
+ */
+export async function handleTestBestEpubAttachmentHttpRequest(request: any) {
+    const { library_id, zotero_key } = request || {};
+    if (library_id == null || zotero_key == null) {
+        return { error: 'Provide library_id + zotero_key' };
+    }
+    const item = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);
+    if (!item) return { item_id: null, item_type: null };
+    await item.loadAllData();
+
+    const { getBestEpubAttachmentAsync } = await import(
+        '../../../src/utils/zoteroItemHelpers'
+    );
+    const attachment = await getBestEpubAttachmentAsync(item);
+
+    return {
+        item_id: item.id,
+        item_type: item.itemType,
+        is_attachment: item.isAttachment(),
+        is_regular_item: item.isRegularItem(),
+        resolved: !!attachment,
+        resolved_key: attachment ? `${attachment.libraryID}-${attachment.key}` : null,
+        content_type: attachment?.isAttachment?.() ? attachment.attachmentContentType : null,
+    };
+}
+
+/**
+ * Dev-only: run `itemValidationManager.validateItem` for an item.
+ *
+ * Exposes the production validation pipeline (frontend mode by default) so
+ * tests can assert which attachment kinds Beaver admits as sources — including
+ * the document-cache-backed EPUB checks — without driving the UI.
+ */
+export async function handleTestValidateItemHttpRequest(request: any) {
+    const { library_id, zotero_key, validation_type, force_refresh } = request || {};
+    if (library_id == null || zotero_key == null) {
+        return { ok: false, error: 'Provide library_id + zotero_key' };
+    }
+    const item = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);
+    if (!item) return { ok: false, error: 'not_found' };
+    await item.loadAllData();
+
+    const { itemValidationManager, ItemValidationType } = await import(
+        '../../../src/services/itemValidationManager'
+    );
+    const typeMap: Record<string, any> = {
+        frontend: ItemValidationType.FRONTEND,
+        local_only: ItemValidationType.LOCAL_ONLY,
+        backend: ItemValidationType.BACKEND,
+        cached: ItemValidationType.CACHED,
+    };
+    const validationType = typeMap[validation_type ?? 'frontend'];
+    if (!validationType) {
+        return { ok: false, error: `Unknown validation_type: ${validation_type}` };
+    }
+
+    const result = await itemValidationManager.validateItem(item, {
+        validationType,
+        forceRefresh: force_refresh !== false,
+    });
+    return {
+        ok: true,
+        is_valid: result.isValid,
+        reason: result.reason ?? null,
+        backend_checked: result.backendChecked,
+    };
+}

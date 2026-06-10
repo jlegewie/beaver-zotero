@@ -6,8 +6,11 @@ export {
     collectDomItems,
     findNearestAnchorId,
     isFootnoteElement,
+    isNonContentElement,
     mapElement,
+    NON_CONTENT_SELECTOR,
     normalizeText,
+    visibleTextContent,
 } from "./domWalk";
 export type {
     DomElementMapping,
@@ -16,8 +19,17 @@ export type {
 export {
     createDomCounters,
     parseDomSection,
-    splitSentences,
 } from "./sectionParser";
+export {
+    ensureSentencexLoaded,
+    regexSplitSentences,
+    splitSentences,
+} from "./sentenceSplitter";
+export {
+    buildDomDiagnostics,
+    measureSectionSourceText,
+    sumExtractedTextChars,
+} from "./diagnostics";
 export type {
     DomExtractionCounters,
     ParseDomSectionInput,
@@ -26,6 +38,7 @@ export type {
     DomCitationIndex,
     DomCitationIndexEntry,
     DomDocument,
+    DomExtractionDiagnostics,
     DomItem,
     DomItemKind,
     DomSection,

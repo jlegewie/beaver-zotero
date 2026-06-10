@@ -12,6 +12,7 @@ vi.mock("../../../src/services/documentExtraction/attachmentSource", () => ({
 
 import {
     extractEpubDocument,
+    extractEpubDocumentFromFile,
     extractEpubDocumentSafe,
 } from "../../../src/services/documentExtraction/epub";
 
@@ -122,6 +123,18 @@ describe("extractEpubDocument", () => {
             attachmentContentType: "application/epub+zip",
             getFilePathAsync: vi.fn().mockResolvedValue(""),
         } as any)).rejects.toThrow("EPUB attachment has no local file");
+    });
+
+    it("honors an abort signal before opening the EPUB", async () => {
+        const importESModule = vi.fn();
+        (globalThis as any).ChromeUtils = { importESModule };
+        const controller = new AbortController();
+        controller.abort();
+
+        await expect(extractEpubDocumentFromFile("/tmp/book.epub", {
+            abortSignal: controller.signal,
+        })).rejects.toThrow("Operation aborted");
+        expect(importESModule).not.toHaveBeenCalled();
     });
 });
 

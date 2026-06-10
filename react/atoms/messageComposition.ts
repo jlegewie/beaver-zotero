@@ -7,7 +7,7 @@ import { addPopupMessageAtom, addRegularItemPopupAtom, addRegularItemsSummaryPop
 import { ItemValidationType } from "../../src/services/itemValidationManager";
 import { getItemValidationAtom, validateItemsAtom, validateRegularItemWithModeAtom, getValidationTypeForMode } from './itemValidation';
 import { InvalidItemsMessageContent } from '../components/ui/popup/InvalidItemsMessageContent';
-import { syncingItemFilter } from "../../src/utils/sync";
+import { agentItemFilter } from "../../src/utils/agentItemSupport";
 import { getCurrentReader } from "../utils/readerUtils";
 import { TextSelection } from "../types/attachments/apiTypes";
 import { ZoteroTag, CollectionReference } from "../types/zotero";
@@ -264,7 +264,7 @@ export const addItemsToCurrentMessageItemsAtom = atom(
 
         // Pre-filter items using sync filter to avoid unnecessary state change
         // (validation still runs to show error message)
-        const preValidatedItems = newItems.filter((i) => syncingItemFilter(i) || i.isAnnotation() || i.isNote());
+        const preValidatedItems = newItems.filter((i) => agentItemFilter(i) || i.isAnnotation() || i.isNote());
 
         // Add items immediately (optimistic update)
         set(currentMessageItemsAtom, [...currentItems, ...preValidatedItems]);

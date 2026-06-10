@@ -3,6 +3,7 @@ import {
     collectDomItems,
     normalizeText,
 } from "./domWalk";
+import { splitSentences } from "./sentenceSplitter";
 import type {
     DomItem,
     DomSection,
@@ -19,6 +20,13 @@ export interface ParseDomSectionInput {
     sectionIndex: number;
     rawHref: string;
     counters: DomExtractionCounters;
+    /**
+     * BCP-47 / ISO 639-1 language for sentence splitting (normalized
+     * downstream; defaults to `en`). Supplied by the extractor from the
+     * document's declared language — or, in the future, a content-based
+     * language detector.
+     */
+    language?: string;
 }
 
 const SENTENCE_BEARING_KINDS = new Set([
@@ -48,8 +56,15 @@ export function parseDomSection(input: ParseDomSectionInput): DomSection {
         if (candidate.level !== undefined) {
             item.level = candidate.level;
         }
-        if (SENTENCE_BEARING_KINDS.has(candidate.kind)) {
-            item.sentences = splitSentences(candidate.text).map((sentenceText) => ({
+        if (candidate.kind === "table" && candidate.rows && candidate.rows.length > 0) {
+            // A data table is linearized row-by-row: each row is a citable
+            // sentence rather than the whole table being one opaque blob.
+            item.sentences = candidate.rows.map((rowText) => ({
+                id: nextSentenceId(input.counters),
+                text: rowText,
+            }));
+        } else if (SENTENCE_BEARING_KINDS.has(candidate.kind)) {
+            item.sentences = splitSentences(candidate.text, input.language).map((sentenceText) => ({
                 id: nextSentenceId(input.counters),
                 text: sentenceText,
             }));
@@ -63,17 +78,6 @@ export function parseDomSection(input: ParseDomSectionInput): DomSection {
         label: sectionLabel(input.doc),
         items,
     };
-}
-
-/** Split DOM prose into sentence-sized strings with a replaceable local splitter. */
-export function splitSentences(text: string): string[] {
-    const normalized = normalizeText(text);
-    if (!normalized) return [];
-
-    const matches = normalized.match(/[^.!?]+(?:[.!?]+(?=\s|$)|$)/g);
-    return (matches ?? [normalized])
-        .map((part) => normalizeText(part))
-        .filter((part) => part.length > 0);
 }
 
 /** Create mutable counters shared across section parsing for document-global ids. */
@@ -98,6 +102,14 @@ function nextSentenceId(counters: DomExtractionCounters): string {
 }
 
 function sectionLabel(doc: XMLDocument | Document): string | undefined {
+    // Prefer the first in-body heading: it is the chapter/section title. The
+    // <head><title> is frequently the book title repeated across every section,
+    // so it is only a fallback.
+    const body = findSectionBody(doc);
+    const heading = body?.querySelector("h1, h2, h3, h4, h5, h6");
+    const headingText = normalizeText(heading?.textContent);
+    if (headingText) return headingText;
+
     const title = doc.querySelector("title");
     const text = normalizeText(title?.textContent);
     return text || undefined;

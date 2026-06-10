@@ -10,6 +10,7 @@ import { getPref } from '../utils/prefs';
 import { BeaverExtractor, ExtractionError, ExtractionErrorCode } from '../beaver-extract';
 import { safeFileExists } from '../utils/zoteroUtils';
 import { isRemoteAccessAvailable } from './agentDataProvider/utils';
+import { getReadableContentKind } from './documentExtraction/attachmentResolution';
 import type { DocumentCacheMetadata } from './documentCache';
 import { effectiveMaxFileSizeMB, effectiveMaxPageCount } from './attachmentLimits';
 
@@ -272,7 +273,9 @@ class ItemValidationManager {
     private frontendValidationFromCachedMetadata(
         metadata: DocumentCacheMetadata | null
     ): { isValid: boolean; reason?: string } | null {
-        if (!metadata) return null;
+        // PDF-only reader: a non-PDF row (e.g. EPUB, with null errorCode and
+        // pageCount) must not be interpreted through the PDF fields.
+        if (!metadata || metadata.contentKind !== 'pdf') return null;
 
         if (metadata.errorCode === 'encrypted') {
             return { isValid: false, reason: 'PDF is password-protected' };
@@ -309,6 +312,35 @@ class ItemValidationManager {
         }
 
         return null;
+    }
+
+    /**
+     * Frontend validation for EPUB attachments from document-cache metadata.
+     * A cached successful extraction proves readability. A cache miss (or a
+     * row of another kind) is treated as valid — EPUB extraction is too heavy
+     * to run on the validation path, so cold EPUBs are admitted after the
+     * shared existence and size checks.
+     */
+    private frontendValidationFromCachedEpubMetadata(
+        metadata: DocumentCacheMetadata | null
+    ): { isValid: boolean; reason?: string } {
+        if (!metadata || metadata.contentKind !== 'epub') {
+            return { isValid: true };
+        }
+        if (metadata.errorCode) {
+            return { isValid: false, reason: 'EPUB could not be read by the local extractor' };
+        }
+        const epubMetadata = metadata.documentMetadata;
+        if (epubMetadata?.content_kind === 'epub' && epubMetadata.sectionCount === 0) {
+            return { isValid: false, reason: 'EPUB has no readable sections' };
+        }
+        // Image-only/scanned EPUBs have sections but zero extracted text; the
+        // read path rejects them as no_text_layer, so don't admit them here.
+        // Rows without the diagnostics field stay valid — unknown is not zero.
+        if (epubMetadata?.content_kind === 'epub' && epubMetadata.extractedTextChars === 0) {
+            return { isValid: false, reason: 'EPUB contains no extractable text' };
+        }
+        return { isValid: true };
     }
 
     /**
@@ -366,12 +398,13 @@ class ItemValidationManager {
             return { isValid: false, reason: 'Attachment is in trash' };
         }
 
-        // 3. Must be a PDF attachment
+        // 3. Must be a readable attachment kind (PDF or EPUB)
         const contentType = attachment.attachmentContentType;
-        if (!attachment.isPDFAttachment()) {
-            return { 
-                isValid: false, 
-                reason: `File type "${contentType || 'unknown'}" is not supported` 
+        const contentKind = getReadableContentKind(attachment);
+        if (contentKind !== 'pdf' && contentKind !== 'epub') {
+            return {
+                isValid: false,
+                reason: `File type "${contentType || 'unknown'}" is not supported`
             };
         }
 
@@ -442,6 +475,14 @@ class ItemValidationManager {
             { libraryId: attachment.libraryID, zoteroKey: attachment.key },
             filePath,
         );
+
+        // EPUB: cached extraction metadata is the only additional signal —
+        // extraction is too heavy to run on the validation path, so a cold
+        // cache is valid (existence and size were already checked above).
+        if (contentKind === 'epub') {
+            return this.frontendValidationFromCachedEpubMetadata(cachedMetadata ?? null);
+        }
+
         const cachedValidation = this.frontendValidationFromCachedMetadata(cachedMetadata ?? null);
         if (cachedValidation) {
             logger(`ItemValidationManager: Using document-cache metadata for frontend validation of ${attachment.libraryID}-${attachment.key}`, 4);

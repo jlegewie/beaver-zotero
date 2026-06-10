@@ -23,12 +23,13 @@ import {
 import { BUILTIN_ACTIONS } from '../../react/types/builtinActions';
 import { getPref } from '../utils/prefs';
 import { openPreferencesWindow } from '../ui/openPreferencesWindow';
+import { agentItemFilter, isAgentSupportedItem } from '../utils/agentItemSupport';
 import config from '../../package.json';
 
 // ---------------------------------------------------------------------------
-// Inlined helpers — can't import from sync.ts or zoteroUtils.ts because they
-// transitively pull in react/store (webpack-only). These mirror isSupportedItem,
-// safeIsInTrash, and isActionableItem from actionVisibility.ts.
+// Item gating uses the React-free agentItemSupport predicates (safe to import
+// from the esbuild bundle, unlike sync.ts/zoteroUtils.ts which transitively
+// pull in react/store). Only a local trash helper remains for note checks.
 // ---------------------------------------------------------------------------
 
 function safeIsInTrash(item: any): boolean {
@@ -38,9 +39,7 @@ function safeIsInTrash(item: any): boolean {
 }
 
 function isActionableContextItem(item: any): boolean {
-    if (!item) return false;
-    const supported = item.isRegularItem?.() || item.isPDFAttachment?.();
-    return !!supported && !safeIsInTrash(item);
+    return agentItemFilter(item);
 }
 
 // ---------------------------------------------------------------------------
@@ -54,14 +53,14 @@ let winningTarget: WinningTarget | null = null;
 
 /**
  * Determine the single winning target type from selected items.
- * Priority: regular items > PDF attachments > notes (mirrors getActiveTarget in ActionSuggestions).
+ * Priority: regular items > supported attachments > notes (mirrors getActiveTarget in ActionSuggestions).
  */
 function getWinningTarget(items: any[]): WinningTarget | null {
     const actionable = items.filter((i: any) => isActionableContextItem(i));
     const regular = actionable.filter((i: any) => i.isRegularItem());
     if (regular.length > 0) return { type: 'items', count: regular.length };
-    const pdfs = actionable.filter((i: any) => i.isPDFAttachment());
-    if (pdfs.length > 0) return { type: 'attachment', count: pdfs.length };
+    const attachments = actionable.filter((i: any) => i.isAttachment?.());
+    if (attachments.length > 0) return { type: 'attachment', count: attachments.length };
     const notes = items.filter((i: any) => i.isNote?.() && !safeIsInTrash(i));
     if (notes.length > 0) return { type: 'note', count: notes.length };
     return null;
@@ -393,7 +392,7 @@ function filterItemAction(action: Action, context: any): void {
         }
         case 'attachment': {
             const actionable = items.filter((i: any) => isActionableContextItem(i));
-            const hasAttachment = actionable.some((i: any) => i.isPDFAttachment());
+            const hasAttachment = actionable.some((i: any) => i.isAttachment?.());
             setVisible(hasAttachment);
             break;
         }
@@ -429,7 +428,7 @@ function dispatchAction(action: Action, context: any): void {
             filteredItems = allItems.filter((i: any) => i.isRegularItem() && !safeIsInTrash(i));
             break;
         case 'attachment':
-            filteredItems = allItems.filter((i: any) => i.isPDFAttachment() && !safeIsInTrash(i));
+            filteredItems = allItems.filter((i: any) => i.isAttachment?.() && isAgentSupportedItem(i) && !safeIsInTrash(i));
             break;
         case 'note':
             filteredItems = allItems.filter((i: any) => i.isNote?.() && !safeIsInTrash(i));

@@ -253,6 +253,17 @@ describe('MCP Tool Handlers (via useMcpServer)', () => {
             }
         });
 
+        it('describes read_attachment as supporting PDFs and EPUB sections', async () => {
+            const result = await listTools(endpoint);
+            const readAttachmentTool = result.tools.find((tool: any) => tool.name === 'read_attachment');
+
+            expect(readAttachmentTool?.description).toContain('PDF or EPUB');
+            expect(readAttachmentTool?.description).toContain('EPUB sections');
+            expect(readAttachmentTool?.description).not.toContain('Only PDF attachments');
+            expect(readAttachmentTool?.inputSchema.properties.start_page.description).toContain('section ordinal');
+            expect(readAttachmentTool?.inputSchema.properties.end_page.description).toContain('section ordinal');
+        });
+
         it('advertises MCP tool annotations', async () => {
             mockMcpCreateNoteToolEnabled.value = true;
             endpoint = setupMcpEndpoint();
@@ -992,6 +1003,67 @@ describe('MCP Tool Handlers (via useMcpServer)', () => {
 
             expect(result.isError).toBe(true);
             expect(result.content[0].text).toContain('File not found');
+        });
+
+        it('renders EPUB sections as page-addressable markdown', async () => {
+            mockHandleZoteroDocumentRequest.mockResolvedValue({
+                type: 'zotero_document',
+                request_id: 'req-epub',
+                content_kind: 'epub',
+                result: {
+                    content_kind: 'epub',
+                    schemaVersion: '1',
+                    sectionCount: 3,
+                    sections: [
+                        {
+                            index: 0,
+                            rawHref: 'EPUB/intro.xhtml',
+                            items: [
+                                { id: 'h1', kind: 'section_header', sectionIndex: 0, order: 0, level: 1, text: 'Intro' },
+                                { id: 'p1', kind: 'text', sectionIndex: 0, order: 1, text: 'Opening text.' },
+                            ],
+                        },
+                        {
+                            index: 1,
+                            rawHref: 'EPUB/chapter.xhtml',
+                            items: [
+                                { id: 'li1', kind: 'list_item', sectionIndex: 1, order: 0, text: 'First point' },
+                            ],
+                        },
+                        {
+                            index: 2,
+                            rawHref: 'EPUB/end.xhtml',
+                            items: [
+                                { id: 'p2', kind: 'text', sectionIndex: 2, order: 0, sentences: [{ id: 's1', text: 'Final sentence.' }] },
+                            ],
+                        },
+                    ],
+                    citationIndex: {},
+                    diagnostics: {
+                        extractedTextChars: 41,
+                        sourceTextChars: 41,
+                        textCoverage: 1,
+                    },
+                },
+            } as any);
+
+            const result = await callTool(endpoint, 'read_attachment', {
+                attachment_id: '1-KEY',
+                start_page: 1,
+                end_page: 2,
+            });
+
+            expect(result.isError).toBeFalsy();
+            const text = result.content[0].text;
+            expect(text).toContain('Total pages: 3');
+            expect(text).toContain('Showing pages 1-2');
+            expect(text).toContain('<page1>');
+            expect(text).toContain('# Intro');
+            expect(text).toContain('Opening text.');
+            expect(text).toContain('<page2>');
+            expect(text).toContain('- First point');
+            expect(text).not.toContain('<page3>');
+            expect(text).not.toContain('Final sentence.');
         });
 
         it('handles unknown total_pages', async () => {

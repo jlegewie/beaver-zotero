@@ -2,9 +2,9 @@
  * Whole-document extraction handler for zotero_document_request.
  *
  * Resolves the request to a readable attachment, then dispatches by content
- * kind. Plain text is read directly (no document cache). PDFs use the shared
- * extraction core (`documentExtractionCore.ts`). On a hot-path PDF timeout it
- * enqueues a `document_timeout_retry` background job.
+ * kind. Plain text is read directly (no document cache). PDFs and EPUBs use
+ * shared extraction helpers. On a hot-path PDF timeout it enqueues a
+ * `document_timeout_retry` background job; EPUB timeouts are returned directly.
  */
 
 import { logger } from '../../utils/logger';
@@ -13,7 +13,10 @@ import {
     WSZoteroDocumentResponse,
 } from '../agentProtocol';
 import type { ZoteroDocumentErrorCode } from '../agentProtocol';
-import { extractAndCacheResolvedPdfDocument } from '../documentExtractionCore';
+import {
+    extractAndCacheEpubDocument,
+    extractAndCacheResolvedPdfDocument,
+} from '../documentExtractionCore';
 import {
     extractTextDocument,
     loadAttachmentData,
@@ -32,7 +35,7 @@ import {
 // Hot-path handler keeps the remote-download-failed popup behavior by
 // passing the popup notifier through `onRemoteDownloadFailure`. The
 // background extractor deliberately omits it.
-import { notifyRemoteDownloadFailure } from './utils';
+import { notifyRemoteDownloadFailure, notifyRemoteFileNotSynced } from './utils';
 
 /**
  * Handle zotero_document_request event.
@@ -188,10 +191,44 @@ export async function handleZoteroDocumentRequest(
             };
         }
 
+        if (contentKind === 'epub') {
+            const result = await withRequestDeadline(
+                extractAndCacheEpubDocument({
+                    item: resolvedItem,
+                    resolvedKey,
+                    contentType,
+                    maxFileSizeMB: max_file_size_mb ?? 0,
+                    externalAbortSignal: timeout.signal,
+                    onFileNotSyncedLocally: notifyRemoteFileNotSynced,
+                }),
+                'epub_extraction',
+            );
+
+            if (result.kind === 'ok') {
+                if (result.cached) {
+                    const { libraryId, zoteroKey } = result.resolvedAttachment;
+                    logger(`handleZoteroDocumentRequest: document cache hit for ${libraryId}-${zoteroKey} content_kind=epub`, 3);
+                }
+                return {
+                    type: 'zotero_document',
+                    request_id,
+                    resolved_attachment: {
+                        library_id: result.resolvedAttachment.libraryId,
+                        zotero_key: result.resolvedAttachment.zoteroKey,
+                    },
+                    content_type: result.contentType,
+                    content_kind: 'epub',
+                    result: result.document,
+                };
+            }
+
+            return errorResponse(result.message, result.code, null, 'epub');
+        }
+
         if (contentKind !== 'pdf') {
             const extractKind = readableToExtractKind(contentKind);
             return errorResponse(
-                `Attachment ${resolvedKey} is a ${contentKind} document, but document extraction currently supports PDF and plain text only.`,
+                `Attachment ${resolvedKey} is a ${contentKind} document, but document extraction currently supports PDF, EPUB, and plain text only.`,
                 'unsupported_type',
                 null,
                 extractKind,

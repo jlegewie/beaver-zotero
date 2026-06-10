@@ -5,6 +5,7 @@ import type {
     PdfDocumentExtractResult,
     TextDocumentExtractResult,
 } from '../../../src/services/documentExtraction/shared/documentExtractResult';
+import type { EpubDocument } from '../../../src/services/documentExtraction/epub';
 
 describe('document extract result envelope', () => {
     it('supports the PDF arm with content_kind pdf', () => {
@@ -28,7 +29,7 @@ describe('document extract result envelope', () => {
         expect(union.content_kind).toBe('pdf');
     });
 
-    it('keeps the round-trip union scoped to pdf and text', () => {
+    it('supports the text arm', () => {
         const text: TextDocumentExtractResult = {
             content_kind: 'text',
             schemaVersion: '1',
@@ -41,6 +42,23 @@ describe('document extract result envelope', () => {
         };
         const union: DocumentExtractResult = text;
         expect(union.content_kind).toBe('text');
+    });
+
+    it('supports the EPUB arm with flat section data', () => {
+        const epub: EpubDocument = {
+            content_kind: 'epub',
+            schemaVersion: '1',
+            sectionCount: 1,
+            sections: [{ index: 0, rawHref: 'EPUB/chapter.xhtml', items: [] }],
+            citationIndex: {},
+            diagnostics: {
+                extractedTextChars: 0,
+                sourceTextChars: 0,
+                textCoverage: null,
+            },
+        };
+        const union: DocumentExtractResult = epub;
+        expect(union.content_kind).toBe('epub');
     });
 
     it('does not convert images into extract content kinds', () => {

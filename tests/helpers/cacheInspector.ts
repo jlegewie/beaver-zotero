@@ -43,6 +43,20 @@ export interface PdfCachedDocumentMetadata {
     pages: (CachedPageGeometry | null)[] | null;
 }
 
+/** Per-section summary persisted in the EPUB metadata blob. */
+export interface EpubCachedSectionSummary {
+    index: number;
+    rawHref: string;
+    label?: string | null;
+    itemCount: number;
+}
+
+export interface EpubCachedDocumentMetadata {
+    content_kind: 'epub';
+    sectionCount: number;
+    sections: EpubCachedSectionSummary[];
+}
+
 export interface CacheMetadataRecord {
     id: number;
     itemId: number;
@@ -52,7 +66,7 @@ export interface CacheMetadataRecord {
     filePath: string;
     sourceSizeBytes: number;
     contentType: string;
-    documentMetadata: PdfCachedDocumentMetadata | null;
+    documentMetadata: PdfCachedDocumentMetadata | EpubCachedDocumentMetadata | null;
     pageCount: number | null;
     pageLabels: Record<string, string> | null;
     pages: (CachedPageGeometry | null)[] | null;
@@ -496,6 +510,35 @@ export async function resolveItem(
     });
 }
 
+export interface ValidateItemResponse {
+    ok: boolean;
+    is_valid?: boolean;
+    reason?: string | null;
+    backend_checked?: boolean;
+    error?: string;
+}
+
+/**
+ * `/beaver/test/validate-item` — run `itemValidationManager.validateItem`
+ * (frontend mode by default, force-refreshed) against a live item.
+ */
+export async function validateItem(
+    libraryId: number,
+    key: string,
+    options?: {
+        validationType?: 'frontend' | 'local_only' | 'backend' | 'cached';
+        forceRefresh?: boolean;
+        timeout?: number;
+    },
+): Promise<ValidateItemResponse> {
+    return post('/beaver/test/validate-item', {
+        library_id: libraryId,
+        zotero_key: key,
+        validation_type: options?.validationType,
+        force_refresh: options?.forceRefresh,
+    }, { timeout: options?.timeout ?? 60_000 });
+}
+
 /** Readable content kinds the resolver can classify (extractor + image). */
 export type ReadableContentKind = ExtractContentKind | 'image';
 
@@ -532,6 +575,35 @@ export async function resolveReadable(
     });
 }
 
+export interface BestEpubAttachmentResponse {
+    item_id: number | null;
+    item_type: string | null;
+    is_attachment?: boolean;
+    is_regular_item?: boolean;
+    /** Whether an EPUB attachment was selected. */
+    resolved?: boolean;
+    /** `<libraryId>-<zoteroKey>` of the selected EPUB attachment, or null. */
+    resolved_key?: string | null;
+    /** Content type of the selected attachment, or null when none/regular item. */
+    content_type?: string | null;
+    error?: string;
+}
+
+/**
+ * `/beaver/test/best-epub-attachment` — runs the production
+ * `getBestEpubAttachmentAsync` helper (used by the EPUB citation-navigation
+ * path) and returns the selected attachment key/content type verbatim.
+ */
+export async function bestEpubAttachment(
+    libraryId: number,
+    key: string,
+): Promise<BestEpubAttachmentResponse> {
+    return post('/beaver/test/best-epub-attachment', {
+        library_id: libraryId,
+        zotero_key: key,
+    });
+}
+
 /** Completely wipe the document cache (metadata rows, payload rows, files). */
 export async function clearAllCache(): Promise<{
     metadataRows: number;
@@ -551,7 +623,7 @@ export interface FileStatus {
     is_primary: boolean;
     mime_type: string;
     page_count: number | null;
-    status: 'available' | 'unavailable';
+    status: 'readable' | 'unreadable' | 'processing';
     status_code?: string;
 }
 

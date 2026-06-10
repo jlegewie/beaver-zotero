@@ -178,12 +178,12 @@ function openBeaverMenu(reader: any, anchorButton: HTMLElement): void {
     });
     popup.appendChild(askItem);
 
-    // ---- Actions section (attachment actions, PDF only) ----
+    // ---- Actions section (attachment actions, PDF and EPUB readers) ----
     const isPdf = reader.type === 'pdf';
     const isEpub = reader.type === 'epub';
     const readerItemID: number | undefined = reader.itemID;
 
-    if (isPdf) {
+    if (isPdf || isEpub) {
         const actions = getMergedActions().filter(a => a.targetType === 'attachment');
 
         if (actions.length > 0) {

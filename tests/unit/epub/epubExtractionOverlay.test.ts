@@ -85,6 +85,7 @@ function baseDocument(): EpubDocument {
         content_kind: "epub",
         schemaVersion: "1",
         sectionCount: 2,
+        diagnostics: { extractedTextChars: 0, sourceTextChars: 0, textCoverage: null },
         citationIndex: {},
         sections: [
             {

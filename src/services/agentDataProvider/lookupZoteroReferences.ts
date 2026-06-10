@@ -417,11 +417,8 @@ export async function lookupZoteroReferences(
                 }
 
                 let fileStatus = undefined;
-                let fileExistsLocally: boolean | undefined;
                 if (fileStatusLevel === 'lightweight') {
-                    const result = await getAttachmentFileStatusLightweight(attachment, isPrimary);
-                    fileStatus = result.fileStatus;
-                    fileExistsLocally = result.fileExistsLocally;
+                    fileStatus = await getAttachmentFileStatusLightweight(attachment, isPrimary);
                 } else if (fileStatusLevel === 'full') {
                     fileStatus = await getAttachmentFileStatus(attachment, isPrimary);
                 }
@@ -431,7 +428,7 @@ export async function lookupZoteroReferences(
                     searchableLibraryIds,
                     syncWithZotero,
                     userId,
-                    { syncDateCache, fileExistsLocally },
+                    { syncDateCache },
                 );
 
                 return { attachment: serialized, status, file_status: fileStatus };
