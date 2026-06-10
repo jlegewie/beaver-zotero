@@ -26,35 +26,28 @@ import {
     WSDeferredApprovalRequest,
     WSStreamingDoneEvent,
     WSThreadNameEvent,
-    CurrentLibrary,
-    CurrentCollection,
     ChargingPermissions,
-    IndexingStatus,
 } from '../../src/services/agentProtocol';
 import { logger } from '../../src/utils/logger';
 import { selectedModelAtom, ModelConfig } from './models';
 import { getPref } from '../../src/utils/prefs';
-import { MessageAttachment, NoteState, ReaderState, SourceAttachment } from '../types/attachments/apiTypes';
+import { MessageAttachment, SourceAttachment } from '../types/attachments/apiTypes';
 import { toMessageAttachment } from '../types/attachments/converters';
 import { serializeCollection, serializeZoteroLibrary } from '../../src/utils/zoteroSerializers';
 import { SubscriptionStatus, ProcessingMode } from '../types/profile';
-import { isDatabaseSyncSupportedAtom, processingModeAtom } from './profile';
-import { embeddingIndexStateAtom } from './embeddingIndex';
-import { BeaverDB } from '../../src/services/database';
-import { EmbeddingIndexer } from '../../src/services/embeddingIndexer';
+import { isDatabaseSyncSupportedAtom } from './profile';
 import { addPopupMessageAtom } from '../utils/popupMessageUtils';
 import {
     currentMessageItemsAtom,
     currentMessageCollectionsAtom,
     currentReaderAttachmentAtom,
     currentMessageFiltersAtom,
-    readerTextSelectionAtom,
     currentMessageContentAtom,
 } from './messageComposition';
-import { isWebSearchEnabledAtom, isLibraryTabAtom, removePopupMessagesByTypeAtom, isWebSearchAllowedAtom } from './ui';
+import { isWebSearchEnabledAtom, removePopupMessagesByTypeAtom, isWebSearchAllowedAtom } from './ui';
 import { currentNoteItemAtom } from './zoteroContext';
 import { isAnnotationAttachment } from '../types/attachments/apiTypes';
-import { getCurrentPage, getCurrentReader } from '../utils/readerUtils';
+import { getReaderState, getApplicationStateProvider } from './applicationState';
 import { uint8ArrayToBase64 } from '../utils/fileUtils';
 import { isAttachmentOnServer } from '../../src/utils/webAPI';
 import { AgentRun, BeaverAgentPrompt, MessageSearchFilters, PromptOrigin, ToolRequest } from '../agents/types';
@@ -136,7 +129,6 @@ import type { CreateItemProposedData, CreateItemResultData } from '../types/agen
 import { appendRunIfMissing, findResumeChainRoot, findRunForResume, hasOnlyThinkingParts, resolveErrorRunId, toRunError } from '../agents/runResumeHelpers';
 import { prewarmMuPDFWorker } from '../../src/beaver-extract';
 import { BeaverTemporaryAnnotations } from '../utils/annotationUtils';
-import { getLibrarySummaries } from '../../src/services/agentDataProvider/libraryCounts';
 
 // =============================================================================
 // Helper Functions
@@ -287,41 +279,6 @@ async function cleanupTemporaryAnnotationsForRunReplacement(logPrefix: string): 
     } catch (error) {
         logger(`${logPrefix}: Error cleaning up temporary annotations: ${error}`);
     }
-}
-
-/**
- * Build reader state for the current reader attachment.
- */
-function getReaderState(get: Getter): ReaderState | null {
-    const readerAttachment = get(currentReaderAttachmentAtom);
-    if (!readerAttachment) return null;
-
-    const reader = getCurrentReader();
-    const contentKind = reader?.type === 'pdf' || reader?.type === 'epub'
-        ? reader.type
-        : undefined;
-    const currentTextSelection = get(readerTextSelectionAtom);
-    return {
-        library_id: readerAttachment.libraryID,
-        zotero_key: readerAttachment.key,
-        current_page: getCurrentPage(reader) || null,
-        ...(contentKind && { content_kind: contentKind }),
-        ...(currentTextSelection && { text_selection: currentTextSelection })
-    } as ReaderState;
-}
-
-/**
- * Build note state for the current note tab item.
- */
-function getNoteState(get: Getter): NoteState | null {
-    const noteItem = get(currentNoteItemAtom);
-    if (!noteItem) return null;
-    return {
-        library_id: noteItem.libraryID,
-        zotero_key: noteItem.key,
-        ...(noteItem.parentKey && { parent_key: noteItem.parentKey }),
-        ...(noteItem.getNoteTitle?.() && { title: noteItem.getNoteTitle() }),
-    };
 }
 
 /**
@@ -1711,132 +1668,10 @@ export const sendWSMessageAtom = atom(
             ? [{ function: "search_external_references", parameters: {} } as ToolRequest]
             : undefined;
 
-        // Get current library and collection context
-        let currentLibrary: CurrentLibrary | undefined = undefined;
-        let currentCollection: CurrentCollection | undefined = undefined;
-        
-        const searchableLibraryIds = get(searchableLibraryIdsAtom);
-        const noteState = getNoteState(get);
-        const currentView: 'library' | 'file_reader' | 'note_editor' = get(isLibraryTabAtom) ? 'library' : noteState ? 'note_editor' : 'file_reader';
-
-        if (currentView === 'file_reader' && readerState) {
-            // In reader view, use the library from the reader attachment
-            const library = Zotero.Libraries.get(readerState.library_id);
-            if (library) {
-                currentLibrary = {
-                    library_id: library.libraryID,
-                    name: library.name,
-                    is_group: library.isGroup,
-                    read_only: !library.editable,
-                    is_synced: searchableLibraryIds.includes(library.libraryID),
-                };
-            }
-        } else if (currentView === 'note_editor' && noteState) {
-            // In note editor view, use the library from the note item
-            const library = Zotero.Libraries.get(noteState.library_id);
-            if (library) {
-                currentLibrary = {
-                    library_id: library.libraryID,
-                    name: library.name,
-                    is_group: library.isGroup,
-                    read_only: !library.editable,
-                    is_synced: searchableLibraryIds.includes(library.libraryID),
-                };
-            }
-        } else if (currentView === 'library') {
-            // In library view, get from ZoteroPane
-            const zp = Zotero.getActiveZoteroPane();
-            if (zp) {
-                const libraryId = zp.getSelectedLibraryID();
-                const library = Zotero.Libraries.get(libraryId);
-                if (library) {
-                    currentLibrary = {
-                        library_id: library.libraryID,
-                        name: library.name,
-                        is_group: library.isGroup,
-                        read_only: !library.editable,
-                        is_synced: searchableLibraryIds.includes(library.libraryID),
-                    };
-                }
-                
-                const collection = zp.getSelectedCollection();
-                if (collection) {
-                    currentCollection = {
-                        collection_key: collection.key,
-                        name: collection.name,
-                        library_id: collection.libraryID,
-                        parent_key: collection.parentKey || null,
-                    };
-                }
-            }
-        }
-
-        // Frontend embedding index status
-        const processingMode = get(processingModeAtom);
-        const localIndexingActive = processingMode !== ProcessingMode.BACKEND;
-        let indexingStatus: IndexingStatus | undefined;
-        if (localIndexingActive && searchableLibraryIds.length > 0) {
-            const indexState = get(embeddingIndexStateAtom);
-
-            let isComplete: boolean;
-            if (indexState.phase === 'incremental') {
-                isComplete = true;
-            } else {
-                try {
-                    const db = Zotero.Beaver?.db as BeaverDB | undefined;
-                    if (db) {
-                        const indexer = new EmbeddingIndexer(db);
-                        let allUpToDate = true;
-                        for (const libId of searchableLibraryIds) {
-                            const diffCheck = await indexer.shouldRunFullDiff(libId);
-                            if (diffCheck.needsDiff) {
-                                logger(`indexing_status: library ${libId} not complete: ${diffCheck.reason}`, 4);
-                                allUpToDate = false;
-                                break;
-                            }
-                        }
-                        isComplete = allUpToDate;
-                    } else {
-                        isComplete = false;
-                    }
-                } catch (err) {
-                    logger(`indexing_status: state probe failed: ${err}`, 2);
-                    isComplete = false;
-                }
-            }
-
-            let percentComplete: number | undefined;
-            let totalItems: number | undefined;
-            let itemsPending: number | undefined;
-            if (!isComplete && indexState.totalItems > 0) {
-                percentComplete = Math.min(100, Math.max(0, Math.round((indexState.indexedItems / indexState.totalItems) * 100)));
-                totalItems = indexState.totalItems;
-                itemsPending = Math.max(0, indexState.totalItems - indexState.indexedItems);
-            }
-
-            indexingStatus = {
-                is_complete: isComplete,
-                ...(!isComplete && percentComplete !== undefined ? { percent_complete: percentComplete } : {}),
-                ...(!isComplete && totalItems !== undefined ? { total_items: totalItems } : {}),
-                ...(!isComplete && itemsPending !== undefined && itemsPending > 0 ? { items_pending: itemsPending } : {}),
-                ...(indexState.failedItems > 0 ? { items_failed: indexState.failedItems } : {}),
-            };
-        }
-
-        const libraries = searchableLibraryIds.length > 0
-            ? await getLibrarySummaries(searchableLibraryIds)
-            : undefined;
-
-        // Application state
-        const applicationState = {
-            current_view: currentView,
-            ...(readerState ? { reader_state: readerState } : {}),
-            ...(noteState ? { note_state: noteState } : {}),
-            ...(currentLibrary ? { current_library: currentLibrary } : {}),
-            ...(currentCollection ? { current_collection: currentCollection } : {}),
-            ...(indexingStatus ? { indexing_status: indexingStatus } : {}),
-            ...(libraries ? { libraries } : {}),
-        };
+        // Application state (current view, reader/note state, library context,
+        // indexing status). Built via the injectable provider so a non-Zotero
+        // host can supply its own document state through the same slot.
+        const applicationState = await getApplicationStateProvider()(get);
 
         // Build the message
         const userPrompt: BeaverAgentPrompt = {
