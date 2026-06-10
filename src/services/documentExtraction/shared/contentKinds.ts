@@ -57,6 +57,13 @@ export type CachedDocumentMetadata =
         content_kind: 'epub';
         sectionCount: number;
         sections: EpubSectionSummary[];
+        /**
+         * Total extracted text characters from the extraction diagnostics.
+         * Lets the read side flag image-only/scanned EPUBs (sections but no
+         * text) as unreadable without re-extracting. Absent on rows written
+         * before this field existed — treat as unknown, not as zero.
+         */
+        extractedTextChars?: number | null;
     }
     | {
         content_kind: 'text';
@@ -144,10 +151,12 @@ export function buildPdfCachedMetadata(
 
 export function buildEpubCachedMetadata(
     sections: EpubSectionSummary[],
+    extractedTextChars?: number | null,
 ): CachedDocumentMetadata {
     return {
         content_kind: 'epub',
         sectionCount: sections.length,
         sections,
+        extractedTextChars: extractedTextChars ?? null,
     };
 }

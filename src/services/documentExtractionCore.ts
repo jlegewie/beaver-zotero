@@ -406,6 +406,7 @@ export async function extractAndCacheEpubDocument(
                     label: section.label,
                     itemCount: section.items.length,
                 })),
+                epubExtractedTextChars: doc.diagnostics.extractedTextChars,
             }),
         });
 

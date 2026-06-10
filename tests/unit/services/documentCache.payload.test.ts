@@ -179,6 +179,7 @@ describe('DocumentCache payloads', () => {
                 pageLabels: null,
                 pages: null,
                 epubSections: [{ index: 0, rawHref: 'EPUB/chapter.xhtml', label: 'Chapter 1', itemCount: 1 }],
+                epubExtractedTextChars: 1234,
             },
         });
 
@@ -193,6 +194,7 @@ describe('DocumentCache payloads', () => {
             content_kind: 'epub',
             sectionCount: 1,
             sections: [{ index: 0, rawHref: 'EPUB/chapter.xhtml', label: 'Chapter 1', itemCount: 1 }],
+            extractedTextChars: 1234,
         });
         const payload = await db.getDocumentCachePayload(1, 'ABCD1234', 'structured');
         expect(payload?.contentKind).toBe('epub');

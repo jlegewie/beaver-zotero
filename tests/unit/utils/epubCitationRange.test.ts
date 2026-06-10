@@ -134,6 +134,24 @@ describe("resolveEpubCitationRange", () => {
                 .toBe("A sentence with emphasized words inside.");
         });
 
+        it("skips style/script text so extracted sentences still match", () => {
+            // Extraction omits non-content subtrees from item text; the live
+            // walk must skip the same nodes or the flattened text diverges
+            // and the extracted sentence is never found.
+            const { primaryView } = makePrimaryView([
+                {
+                    href: "chapter1.xhtml",
+                    html: "<p>Before the rule.<style>p { color: red; }</style> The cited sentence lives here.</p>",
+                },
+            ]);
+            const resolved = resolve(primaryView, {
+                sectionOrdinal: 1,
+                text: "The cited sentence lives here.",
+            });
+            expect(resolved?.range?.toString().replace(/\s+/g, " ").trim())
+                .toBe("The cited sentence lives here.");
+        });
+
         it("strips HTML fragments from the search text", () => {
             const { primaryView } = makePrimaryView([
                 {

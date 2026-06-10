@@ -160,6 +160,20 @@ describe("DOM mapping", () => {
         ]);
     });
 
+    it("never captures style/script content as text", () => {
+        const doc = parseXhtml(`
+            <style>p { color: red; }</style>
+            <div><script type="text/javascript">var x = 1;</script>Real prose in a div.</div>
+            <p>Paragraph<style>.x { font-weight: bold; }</style> with inline style.</p>
+        `);
+
+        const items = collectDomItems(bodyOf(doc));
+        expect(items.map((item) => item.text)).toEqual([
+            "Real prose in a div.",
+            "Paragraph with inline style.",
+        ]);
+    });
+
     it("keeps a genuine data table as a single table item", () => {
         const doc = parseXhtml(`
             <table id="data">
@@ -204,6 +218,42 @@ describe("DOM mapping", () => {
             ["text", "First paragraph of the chapter."],
             ["text", "Second paragraph."],
         ]);
+    });
+
+    it("classifies a wrapper around a th-bearing data table as layout (no duplication)", () => {
+        // Outer positioning table whose only content is an inner data table.
+        // The inner table's header cells must not make the OUTER table a data
+        // table — that would linearize the inner rows twice (once inside the
+        // outer cell text, once as the inner <tr>s).
+        const doc = parseXhtml(`
+            <table id="outer"><tr><td>
+                <table id="inner">
+                    <tr><th>Year</th><th>Count</th></tr>
+                    <tr><td>1995</td><td>42</td></tr>
+                </table>
+            </td></tr></table>
+        `);
+
+        const items = collectDomItems(bodyOf(doc));
+        expect(items.map((item) => item.kind)).toEqual(["table"]);
+        expect(items[0].element.getAttribute("id")).toBe("inner");
+        expect(items[0].rows).toEqual(["Year | Count", "1995 | 42"]);
+    });
+
+    it("skips nested-table rows when linearizing a data table", () => {
+        // A data table with its own header cells that holds a small table
+        // inside one cell: nested rows appear once (via the enclosing cell),
+        // not again as standalone rows.
+        const doc = parseXhtml(`
+            <table id="outer">
+                <tr><th>Label</th><th>Detail</th></tr>
+                <tr><td>A</td><td><table><tr><td>x</td> <td>y</td></tr></table></td></tr>
+            </table>
+        `);
+
+        const [item] = collectDomItems(bodyOf(doc));
+        expect(item.kind).toBe("table");
+        expect(item.rows).toEqual(["Label | Detail", "A | x y"]);
     });
 
     it("recovers prose held directly in layout-table cells", () => {
@@ -390,6 +440,24 @@ describe("DOM extraction diagnostics", () => {
         const diagnostics = buildDomDiagnostics([section], measureSectionSourceText(doc));
         expect(diagnostics.textCoverage).not.toBeNull();
         expect(diagnostics.textCoverage!).toBeLessThan(1);
+    });
+
+    it("excludes style/script text from the coverage denominator", () => {
+        const doc = parseXhtml(`
+            <style>body { margin: 0; } p { text-indent: 1em; }</style>
+            <p>First paragraph.</p><p>Second paragraph.</p>
+        `);
+        const section = parseDomSection({
+            doc,
+            sectionIndex: 0,
+            rawHref: "EPUB/first.xhtml",
+            counters: createDomCounters(),
+        });
+
+        const sourceChars = measureSectionSourceText(doc);
+        const diagnostics = buildDomDiagnostics([section], sourceChars);
+        expect(diagnostics.textCoverage).toBe(1);
+        expect(diagnostics.extractedTextChars).toBe(sourceChars);
     });
 
     it("returns null coverage for a source with no visible text", () => {

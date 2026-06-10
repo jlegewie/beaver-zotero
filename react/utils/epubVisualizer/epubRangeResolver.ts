@@ -1,6 +1,7 @@
 import { logger } from "../../../src/utils/logger";
 import {
     collectDomItems,
+    NON_CONTENT_SELECTOR,
     normalizeText,
     type DomItem,
 } from "../../../src/services/documentExtraction/dom";
@@ -174,6 +175,11 @@ function resolveCitationSectionIndex(
         logger(`[EpubVisualizer] No reader section matches citation href ${targetBasename}`, 1);
     }
 
+    // Ordinal fallback: extraction ordinals are 1:1 with reader spine indexes
+    // only for all-XHTML spines — the extractor skips non-XHTML spine items,
+    // compacting its indexes below the reader's. The href match above is the
+    // reliable locator; the ordinal can land one-or-more sections early for
+    // EPUBs with skipped spine entries.
     if (
         typeof target.sectionOrdinal === "number"
         && Number.isInteger(target.sectionOrdinal)
@@ -336,7 +342,12 @@ function collectTextNodes(root: Element): Text[] {
     const nodes: Text[] = [];
     let current = walker.nextNode();
     while (current) {
-        nodes.push(current as Text);
+        // Extraction skips non-content subtrees (style/script), so the live
+        // text walk must skip them too or extracted sentence text will not
+        // line up with the flattened live text.
+        if (!(current as Text).parentElement?.closest(NON_CONTENT_SELECTOR)) {
+            nodes.push(current as Text);
+        }
         current = walker.nextNode();
     }
     return nodes;

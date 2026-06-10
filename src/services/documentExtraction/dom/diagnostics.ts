@@ -1,10 +1,13 @@
-import { normalizeText } from "./domWalk";
+import { visibleTextContent } from "./domWalk";
 import type { DomExtractionDiagnostics, DomSection } from "./schema";
 
-/** Visible-text character count of a parsed section body (whitespace-normalized). */
+/**
+ * Visible-text character count of a parsed section body (whitespace-normalized,
+ * excluding non-content subtrees like style/script that the walk never emits).
+ */
 export function measureSectionSourceText(doc: XMLDocument | Document): number {
     const body = doc.body ?? doc.querySelector("body");
-    return normalizeText(body?.textContent ?? "").length;
+    return body ? visibleTextContent(body).length : 0;
 }
 
 /** Total characters across all extracted item text in the given sections. */

@@ -97,6 +97,10 @@ import {
     handleTestEpubExtractHttpRequest,
 } from './httpHandlers/testEpubHandlers';
 import {
+    handleTestReaderStateHttpRequest,
+    handleTestEpubCitationNavigateHttpRequest,
+} from './httpHandlers/testReaderHandlers';
+import {
     handleTestBackgroundEnqueueHttpRequest,
     handleTestBackgroundStatsHttpRequest,
     handleTestBackgroundPeekHttpRequest,
@@ -221,6 +225,9 @@ const ENDPOINT_PATHS = [
     '/beaver/test/pdf-analyze-layout',
     // EPUB extraction over a raw file path or attachment (corpus triage)
     '/beaver/test/epub-extract',
+    // Reader position / EPUB citation-navigation verification (dev-only)
+    '/beaver/test/reader-state',
+    '/beaver/test/epub-citation-navigate',
     // Background queue inspection / driving (dev-only)
     '/beaver/test/background-enqueue',
     '/beaver/test/background-stats',
@@ -871,6 +878,14 @@ function registerEndpoints(): boolean {
         // EPUB extraction over a raw file path / attachment (corpus triage)
         Zotero.Server.Endpoints['/beaver/test/epub-extract'] =
             createEndpoint(handleTestEpubExtractHttpRequest);
+
+        // Reader position (`getCurrentPage` / `content_kind`) and the EPUB
+        // citation-navigation path against the live reader.
+        Zotero.Server.Endpoints['/beaver/test/reader-state'] =
+            createEndpoint(handleTestReaderStateHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/epub-citation-navigate'] =
+            createEndpoint(handleTestEpubCitationNavigateHttpRequest);
 
         // Background queue (dev-only)
         Zotero.Server.Endpoints['/beaver/test/background-enqueue'] =

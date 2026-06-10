@@ -623,7 +623,7 @@ export interface FileStatus {
     is_primary: boolean;
     mime_type: string;
     page_count: number | null;
-    status: 'available' | 'unavailable';
+    status: 'readable' | 'unreadable' | 'processing';
     status_code?: string;
 }
 

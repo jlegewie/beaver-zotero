@@ -119,6 +119,16 @@ export async function extractEpubDocumentFromFile(
     let languageApplied = false;
 
     try {
+        // Section indexes are assigned sequentially over the documents that
+        // EPUB.mjs yields. EPUB.mjs skips spine items whose manifest media-type
+        // is not XHTML (or whose zip entry is missing), while the Zotero
+        // reader's spine indexes count every itemref — so for EPUBs with
+        // non-XHTML spine items, extraction indexes are compacted and sit
+        // below the reader's section indexes from the skipped entry onward.
+        // Consumers that map a reader position or section ordinal onto these
+        // indexes (reader state, progressive reads, the citation ordinal
+        // fallback) inherit that drift; href-based matching is unaffected.
+        // All-XHTML spines — the overwhelmingly common case — are 1:1.
         let sectionIndex = 0;
         for await (const { href, doc } of epub.getSectionDocuments()) {
             throwIfAborted(options?.abortSignal);

@@ -158,6 +158,56 @@ describe('getAttachmentInfo', () => {
         });
     });
 
+    it('reports a cached zero-text EPUB (image-only) as unreadable', async () => {
+        (globalThis as any).Zotero.Beaver = {
+            documentCache: {
+                getMetadata: vi.fn(async () => ({
+                    contentKind: 'epub',
+                    errorCode: null,
+                    documentMetadata: {
+                        content_kind: 'epub',
+                        sectionCount: 8,
+                        sections: [],
+                        extractedTextChars: 0,
+                    },
+                })),
+            },
+        };
+
+        const info = await getAttachmentInfo(
+            makeAttachment({ contentType: 'application/epub+zip', filePath: '/tmp/book.epub' }),
+        );
+
+        expect(info).toMatchObject({
+            content_kind: 'epub',
+            status: 'unreadable',
+            status_code: 'epub_no_text',
+            page_count: 8,
+        });
+    });
+
+    it('keeps an older cached EPUB row without text diagnostics readable', async () => {
+        (globalThis as any).Zotero.Beaver = {
+            documentCache: {
+                getMetadata: vi.fn(async () => ({
+                    contentKind: 'epub',
+                    errorCode: null,
+                    documentMetadata: { content_kind: 'epub', sectionCount: 5, sections: [] },
+                })),
+            },
+        };
+
+        const info = await getAttachmentInfo(
+            makeAttachment({ contentType: 'application/epub+zip', filePath: '/tmp/book.epub' }),
+        );
+
+        expect(info).toMatchObject({
+            content_kind: 'epub',
+            status: 'readable',
+            page_count: 5,
+        });
+    });
+
     it('reports a remote-only EPUB as unreadable even with remote access enabled', async () => {
         vi.mocked(getPref).mockImplementation((pref: string) => pref === 'accessRemoteFiles');
         vi.mocked(isAttachmentAvailableRemotely).mockReturnValue(true);

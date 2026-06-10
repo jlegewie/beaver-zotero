@@ -62,6 +62,29 @@ function isBlockBoundary(element: Element): boolean {
     return BLOCK_LEVEL_NAMES.has(element.localName.toLowerCase());
 }
 
+// Elements whose text content is code/markup, never prose. Skipped entirely by
+// the walk (and excluded from the coverage denominator) so inline CSS/JS in a
+// section body is not captured as citable text.
+const NON_CONTENT_NAMES = new Set(["style", "script", "template", "noscript"]);
+
+export function isNonContentElement(element: Element): boolean {
+    return NON_CONTENT_NAMES.has(element.localName.toLowerCase());
+}
+
+export const NON_CONTENT_SELECTOR = "style, script, template, noscript";
+
+/** `textContent` normalized, with non-content (style/script) subtrees removed. */
+export function visibleTextContent(element: Element): string {
+    if (!element.querySelector(NON_CONTENT_SELECTOR)) {
+        return normalizeText(element.textContent);
+    }
+    const clone = element.cloneNode(true) as Element;
+    for (const el of Array.from(clone.querySelectorAll(NON_CONTENT_SELECTOR)) as Element[]) {
+        el.remove();
+    }
+    return normalizeText(clone.textContent);
+}
+
 const TEXT_NODE = 3;
 const ELEMENT_NODE = 1;
 
@@ -77,19 +100,23 @@ const LAYOUT_TABLE_PROSE_CHARS = 200;
  * transparently so their headings, paragraphs, and prose cells are recovered.
  */
 function isLayoutTable(table: Element): boolean {
-    // Header cells signal tabular data — keep those opaque.
-    if (table.querySelector("th")) return false;
+    // Header cells signal tabular data — keep those opaque. Only count header
+    // cells that belong to this table, not to a table nested inside a cell:
+    // an outer wrapper around a th-bearing data table must stay a layout table
+    // so the walk descends and classifies the inner table on its own.
+    const headerCells = Array.from(table.querySelectorAll("th")) as Element[];
+    if (headerCells.some((th) => th.closest("table") === table)) return false;
     // Block-flow content or nested tables inside cells are not tabular data.
     if (table.querySelector("table, p, div, h1, h2, h3, h4, h5, h6, blockquote, ul, ol")) {
         return true;
     }
     // No nested tables remain past this point, so cell counting is flat.
-    const cells = Array.from(table.querySelectorAll("td"));
+    const cells = Array.from(table.querySelectorAll("td")) as Element[];
     // A single-cell table is a positioning wrapper, not a data grid.
     if (cells.length === 1) return true;
     // A cell carrying a long run of prose is body text laid out in a table.
     for (const cell of cells) {
-        if (cell && normalizeText(cell.textContent).length >= LAYOUT_TABLE_PROSE_CHARS) {
+        if (cell && visibleTextContent(cell).length >= LAYOUT_TABLE_PROSE_CHARS) {
             return true;
         }
     }
@@ -176,12 +203,15 @@ export function collectDomItems(body: Element): DomItemCandidate[] {
                 buffer += ` ${node.nodeValue ?? ""} `;
             } else if (node.nodeType === ELEMENT_NODE) {
                 const child = node as Element;
+                if (isNonContentElement(child)) {
+                    continue;
+                }
                 if (isBlockBoundary(child)) {
                     flush();
                     visit(child);
                 } else {
                     // Inline element: fold its text into the surrounding prose.
-                    buffer += ` ${child.textContent ?? ""} `;
+                    buffer += ` ${visibleTextContent(child)} `;
                 }
             }
         }
@@ -200,7 +230,7 @@ function buildCandidate(
         const rows = linearizeTableRows(element);
         // Linearized row text reads as a TSV-ish table and keeps row boundaries;
         // empty/degenerate tables fall back to the flat text content.
-        const text = rows.length > 0 ? rows.join("\n") : normalizeText(element.textContent);
+        const text = rows.length > 0 ? rows.join("\n") : visibleTextContent(element);
         if (!text) return undefined;
         return {
             element,
@@ -229,7 +259,7 @@ function textForMappedElement(element: Element, kind: DomItemKind): string {
             || element.getAttribute("title"),
         );
     }
-    return normalizeText(element.textContent);
+    return visibleTextContent(element);
 }
 
 /**
@@ -237,18 +267,19 @@ function textForMappedElement(element: Element, kind: DomItemKind): string {
  *
  * Each row becomes a citable unit (a sentence) instead of the whole table being
  * one opaque blob. Only direct `td`/`th` cells of each row are used; rows whose
- * cells are all empty are dropped. Data tables never nest (a table containing a
- * nested table is classified as layout and walked instead), so a flat
- * `tr`/`td` scan is safe.
+ * cells are all empty are dropped. Rows of tables nested inside a cell are
+ * skipped — their text already appears once in the enclosing cell's content —
+ * so nesting never duplicates rows.
  */
 export function linearizeTableRows(table: Element): string[] {
     const rows: string[] = [];
     for (const tr of Array.from(table.querySelectorAll("tr")) as Element[]) {
+        if (tr.closest("table") !== table) continue;
         const cells: string[] = [];
         for (const cell of Array.from(tr.children) as Element[]) {
             const name = cell.localName.toLowerCase();
             if (name !== "td" && name !== "th") continue;
-            cells.push(normalizeText(cell.textContent));
+            cells.push(visibleTextContent(cell));
         }
         // Drop fully empty rows (spacer/separator rows) but keep internal empty
         // cells so column alignment survives.

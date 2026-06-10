@@ -157,7 +157,7 @@ describe('file status writes errorCode to the document cache', () => {
             ENCRYPTED_PDF.library_id,
             ENCRYPTED_PDF.zotero_key,
         );
-        expect(status.status).toBe('unavailable');
+        expect(status.status).toBe('unreadable');
 
         const record = await getCacheMetadata(
             ENCRYPTED_PDF.library_id,
@@ -174,7 +174,7 @@ describe('file status writes errorCode to the document cache', () => {
             NO_TEXT_PDF.library_id,
             NO_TEXT_PDF.zotero_key,
         );
-        expect(status.status).toBe('unavailable');
+        expect(status.status).toBe('unreadable');
 
         const record = await getCacheMetadata(
             NO_TEXT_PDF.library_id,
@@ -191,7 +191,7 @@ describe('file status writes errorCode to the document cache', () => {
             SMALL_PDF.library_id,
             SMALL_PDF.zotero_key,
         );
-        expect(status.status).toBe('available');
+        expect(status.status).toBe('readable');
 
         const record = await getCacheMetadata(
             SMALL_PDF.library_id,
@@ -263,7 +263,7 @@ describe('document cache persists per-page geometry', () => {
             SMALL_PDF.library_id,
             SMALL_PDF.zotero_key,
         );
-        expect(status.status).toBe('available');
+        expect(status.status).toBe('readable');
 
         const record = await getCacheMetadata(
             SMALL_PDF.library_id,

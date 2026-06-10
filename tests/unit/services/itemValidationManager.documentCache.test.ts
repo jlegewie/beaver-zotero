@@ -298,6 +298,46 @@ describe('ItemValidationManager document-cache frontend validation', () => {
         expect(result.reason).toContain('no readable sections');
     });
 
+    it('rejects an EPUB whose cached extraction found zero text (image-only)', async () => {
+        (globalThis as any).Zotero.Beaver = {
+            documentCache: {
+                getMetadata: vi.fn().mockResolvedValue(makeEpubMetadata({
+                    documentMetadata: {
+                        content_kind: 'epub',
+                        sectionCount: 8,
+                        sections: [],
+                        extractedTextChars: 0,
+                    },
+                })),
+            },
+        };
+
+        const result = await itemValidationManager.validateItem(
+            makeAttachment({ contentType: 'application/epub+zip' }),
+            { validationType: ItemValidationType.FRONTEND, forceRefresh: true },
+        );
+
+        expect(result.isValid).toBe(false);
+        expect(result.reason).toContain('no extractable text');
+    });
+
+    it('validates an EPUB cache row without text diagnostics (older row)', async () => {
+        (globalThis as any).Zotero.Beaver = {
+            documentCache: {
+                getMetadata: vi.fn().mockResolvedValue(makeEpubMetadata({
+                    documentMetadata: { content_kind: 'epub', sectionCount: 5, sections: [] },
+                })),
+            },
+        };
+
+        const result = await itemValidationManager.validateItem(
+            makeAttachment({ contentType: 'application/epub+zip' }),
+            { validationType: ItemValidationType.FRONTEND, forceRefresh: true },
+        );
+
+        expect(result.isValid).toBe(true);
+    });
+
     it('rejects an EPUB whose cached metadata carries an error code', async () => {
         (globalThis as any).Zotero.Beaver = {
             documentCache: {

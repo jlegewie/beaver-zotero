@@ -334,6 +334,12 @@ class ItemValidationManager {
         if (epubMetadata?.content_kind === 'epub' && epubMetadata.sectionCount === 0) {
             return { isValid: false, reason: 'EPUB has no readable sections' };
         }
+        // Image-only/scanned EPUBs have sections but zero extracted text; the
+        // read path rejects them as no_text_layer, so don't admit them here.
+        // Rows without the diagnostics field stay valid — unknown is not zero.
+        if (epubMetadata?.content_kind === 'epub' && epubMetadata.extractedTextChars === 0) {
+            return { isValid: false, reason: 'EPUB contains no extractable text' };
+        }
         return { isValid: true };
     }
 

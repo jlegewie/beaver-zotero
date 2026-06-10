@@ -6,8 +6,11 @@ export {
     collectDomItems,
     findNearestAnchorId,
     isFootnoteElement,
+    isNonContentElement,
     mapElement,
+    NON_CONTENT_SELECTOR,
     normalizeText,
+    visibleTextContent,
 } from "./domWalk";
 export type {
     DomElementMapping,

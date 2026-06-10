@@ -226,7 +226,10 @@ function getCurrentPage(reader?: any): number | null {
     if (!reader) return null;
     if (reader.type === 'epub') {
         try {
-            // The EPUB view's flow tracks the spine section at the top of the viewport.
+            // The EPUB view's flow tracks the spine section at the top of the
+            // viewport. Reader spine indexes count every spine itemref, while
+            // extraction skips non-XHTML spine items — for such EPUBs this
+            // ordinal can run ahead of the extraction section numbering.
             const sectionIndex = reader._internalReader?._primaryView?.flow?.startSection?.index;
             return typeof sectionIndex === 'number' ? sectionIndex + 1 : null;
         }

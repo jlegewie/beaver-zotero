@@ -36,7 +36,8 @@ type FileStatusCodeValue =
     | 'pdf_parser_crash'
     | 'pdf_analysis_error'
     | 'pdf_unreadable'
-    | 'epub_invalid';
+    | 'epub_invalid'
+    | 'epub_no_text';
 
 type AttachmentAvailabilityResult =
     | { available: false; status_code?: FileStatusCodeValue | null; status_reason?: string | null; fileExistsLocally?: boolean }
@@ -292,7 +293,8 @@ async function resolveEpubInfo(
                     };
                 }
                 const meta = cached.documentMetadata;
-                const sectionCount = meta?.content_kind === 'epub' ? meta.sectionCount : null;
+                const epubMeta = meta?.content_kind === 'epub' ? meta : null;
+                const sectionCount = epubMeta?.sectionCount ?? null;
                 // The extraction path rejects section-less EPUBs as having no
                 // extractable text, so don't advertise them as readable.
                 if (sectionCount === 0) {
@@ -301,6 +303,18 @@ async function resolveEpubInfo(
                         status: 'unreadable',
                         status_code: 'epub_invalid',
                         status_reason: 'EPUB has no readable sections.',
+                    };
+                }
+                // Image-only/scanned EPUBs have sections but zero extracted
+                // text; the read path rejects them as no_text_layer, so the
+                // status must agree. Absent diagnostics (older cache rows)
+                // stay readable — unknown is not zero.
+                if (epubMeta?.extractedTextChars === 0) {
+                    return {
+                        page_count: sectionCount,
+                        status: 'unreadable',
+                        status_code: 'epub_no_text',
+                        status_reason: 'EPUB contains no extractable text (image-only or scanned book).',
                     };
                 }
                 return { page_count: sectionCount, status: 'readable' };

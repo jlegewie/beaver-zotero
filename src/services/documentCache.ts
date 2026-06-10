@@ -66,6 +66,8 @@ interface CacheMetadataInput {
     pageLabels: PageLabels | Record<number, string> | null;
     pages: (PageGeometry | null)[] | null;
     epubSections?: EpubSectionSummary[];
+    /** Extraction-diagnostics text total; flags image-only EPUBs on read. */
+    epubExtractedTextChars?: number | null;
     /** Authoritative error reason; omitted or `null` marks a successful extraction. */
     errorCode?: DocumentCacheErrorCode | null;
 }
@@ -857,7 +859,7 @@ export class DocumentCache {
             sourceSizeBytes: source.sourceSizeBytes,
             contentType,
             documentMetadata: contentKind === 'epub'
-                ? buildEpubCachedMetadata(metadata.epubSections ?? [])
+                ? buildEpubCachedMetadata(metadata.epubSections ?? [], metadata.epubExtractedTextChars)
                 : buildPdfCachedMetadata(metadata.pageCount, pageLabels, pages),
             errorCode: metadata.errorCode ?? null,
             extractionSchemaVersion,
