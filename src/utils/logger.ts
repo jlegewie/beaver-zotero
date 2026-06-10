@@ -1,6 +1,8 @@
+import { getRuntimeAdapter } from "../platform/runtime";
+
 /**
- * Log a message to the Zotero debug console and, in development, to the browser console.
- * 
+ * Log a message to the host debug console and, in development, to the browser console.
+ *
  * Backward compatible signature: logger(message, level?, maxDepth?, stack?)
  * New signature: logger(message, data, level?, maxDepth?, stack?)
  * 
@@ -45,10 +47,11 @@ export const logger = function (
     }
 
     const prefix = `[Beaver] ${message}`;
-    
+    const runtime = getRuntimeAdapter();
+
     // Log to browser console in development for object inspection.
     // Guard: `console` is unavailable in the esbuild sandbox (`loadSubScript` ctx).
-    if (typeof console !== 'undefined' && "Beaver" in Zotero && (Zotero as any).Beaver.data.env === "development") {
+    if (typeof console !== 'undefined' && runtime.isDevelopment()) {
         if (data !== null && data !== undefined) {
             console.log(prefix, data);
         } else {
@@ -56,8 +59,8 @@ export const logger = function (
         }
     }
 
-    // Log to Zotero debug console (text-only)
-    // Use JSON.stringify for data to make it visible in the Zotero debug output
+    // Log to the host debug console (text-only)
+    // Use JSON.stringify for data to make it visible in the debug output
     const debugMsg = (data !== null && data !== undefined) ? `${prefix} ${safeStringify(data)}` : prefix;
-    Zotero.debug(debugMsg, level, maxDepth, stack);
+    runtime.debug(debugMsg, level, maxDepth, stack);
 }
