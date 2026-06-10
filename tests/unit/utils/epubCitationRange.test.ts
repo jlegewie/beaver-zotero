@@ -152,6 +152,24 @@ describe("resolveEpubCitationRange", () => {
                 .toBe("The cited sentence lives here.");
         });
 
+        it("matches cited text that is itself literal markup (code samples)", () => {
+            // Books about markup render escaped tags as visible text; the
+            // cited sentence then contains literal angle brackets that must
+            // not be stripped before searching the live DOM.
+            const { primaryView } = makePrimaryView([
+                {
+                    href: "chapter1.xhtml",
+                    html: '<p>Example:</p><pre>&lt;seq type="table" textref="ch01.xhtml#t1"&gt; &lt;par&gt;…&lt;/par&gt; &lt;/seq&gt;</pre>',
+                },
+            ]);
+            const resolved = resolve(primaryView, {
+                sectionOrdinal: 1,
+                text: '<seq type="table" textref="ch01.xhtml#t1"> <par>…</par> </seq>',
+            });
+            expect(resolved?.range?.toString().replace(/\s+/g, " ").trim())
+                .toBe('<seq type="table" textref="ch01.xhtml#t1"> <par>…</par> </seq>');
+        });
+
         it("strips HTML fragments from the search text", () => {
             const { primaryView } = makePrimaryView([
                 {

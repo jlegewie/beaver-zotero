@@ -140,9 +140,8 @@ export function resolveEpubCitationRange(
     const anchorElement = target.anchorId
         ? findAnchorElement(body, target.anchorId)
         : undefined;
-    const searchText = sanitizeCitationSearchText(target.text);
 
-    if (searchText) {
+    for (const searchText of citationSearchTextCandidates(target.text)) {
         if (anchorElement) {
             const scopedRange = createSentenceRange(anchorElement, searchText);
             if (scopedRange) return { sectionIndex, range: scopedRange };
@@ -204,13 +203,20 @@ function findAnchorElement(body: HTMLElement, anchorId: string): Element | undef
 }
 
 /**
- * Citation preview text can arrive as an HTML fragment; strip markup so the
- * normalized substring search can match the live text nodes.
+ * Build the ordered search-text candidates for a cited passage. The raw
+ * normalized text is tried first: EPUB sentence text can legitimately contain
+ * literal angle-bracket markup (e.g. code samples rendered in the book), and
+ * stripping it would leave nothing to match. The tag-stripped variant is the
+ * fallback for preview text that arrives as an HTML fragment.
  */
-function sanitizeCitationSearchText(text: string | undefined): string | undefined {
-    if (!text) return undefined;
-    const stripped = text.replace(/<[^>]*>/g, " ");
-    return normalizeText(stripped) || undefined;
+function citationSearchTextCandidates(text: string | undefined): string[] {
+    if (!text) return [];
+    const candidates: string[] = [];
+    const raw = normalizeText(text);
+    if (raw) candidates.push(raw);
+    const stripped = normalizeText(text.replace(/<[^>]*>/g, " "));
+    if (stripped && stripped !== raw) candidates.push(stripped);
+    return candidates;
 }
 
 export function normalizeHrefBasename(href: string | undefined): string | undefined {
