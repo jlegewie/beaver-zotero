@@ -400,6 +400,7 @@ export {
     getCurrentReaderItemAsync,
     getCurrentReader,
     getCurrentReaderAndWaitForView,
+    waitForReaderForItem,
     getCurrentPage,
     navigateToPage,
     getSelectedText,

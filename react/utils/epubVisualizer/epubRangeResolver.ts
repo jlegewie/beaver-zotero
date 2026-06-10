@@ -8,7 +8,9 @@ import {
     type EpubDocument,
 } from "../../../src/services/documentExtraction/epub";
 import {
+    ensureSectionMounted,
     getSectionBody,
+    getSectionCount,
     getSectionHref,
     type EpubPrimaryView,
 } from "./epubReaderView";
@@ -87,6 +89,122 @@ export function resolveEpubRanges(
     }
 
     return resolved;
+}
+
+/** Citation locator inside an EPUB, as carried by citation metadata. */
+export interface EpubCitationTarget {
+    /** Section href from the citation's symbolic location (matched by basename). */
+    sectionHref?: string;
+    /** 1-based agent-facing "page" (section ordinal); used when no href matches. */
+    sectionOrdinal?: number;
+    /** DOM id of the cited element inside the section, when known. */
+    anchorId?: string;
+    /** Cited sentence text to anchor a precise highlight range. */
+    text?: string;
+}
+
+export interface ResolvedEpubCitationTarget {
+    /** Reader spine section index the citation points at. */
+    sectionIndex: number;
+    /** Precise live-DOM range when the cited text/anchor could be located. */
+    range?: Range;
+}
+
+/**
+ * Resolve a citation locator to a reader spine section and, when possible, a
+ * precise DOM range — without requiring an extracted `EpubDocument`. The
+ * section is found by href basename (falling back to the 1-based section
+ * ordinal, which is 1:1 with the spine); the range by anchor id and/or
+ * normalized sentence-text search. Text search returns the first match, so
+ * `anchorId` scoping is what disambiguates repeated phrases.
+ *
+ * Mounts the target section if the reader has it unmounted (mirrors the
+ * reader's own CFI navigation behavior). Returns null when no section can be
+ * determined; returns a section without a range when only coarse navigation
+ * is possible.
+ */
+export function resolveEpubCitationRange(
+    primaryView: EpubPrimaryView,
+    target: EpubCitationTarget,
+): ResolvedEpubCitationTarget | null {
+    const sectionIndex = resolveCitationSectionIndex(primaryView, target);
+    if (sectionIndex === undefined) return null;
+
+    if (!ensureSectionMounted(primaryView, sectionIndex)) {
+        return { sectionIndex };
+    }
+    const body = getSectionBody(primaryView, sectionIndex);
+    if (!body) return { sectionIndex };
+
+    const anchorElement = target.anchorId
+        ? findAnchorElement(body, target.anchorId)
+        : undefined;
+    const searchText = sanitizeCitationSearchText(target.text);
+
+    if (searchText) {
+        if (anchorElement) {
+            const scopedRange = createSentenceRange(anchorElement, searchText);
+            if (scopedRange) return { sectionIndex, range: scopedRange };
+        }
+        const bodyRange = createSentenceRange(body, searchText);
+        if (bodyRange) return { sectionIndex, range: bodyRange };
+    }
+
+    if (anchorElement) {
+        const anchorRange = createElementContentsRange(anchorElement);
+        if (anchorRange) return { sectionIndex, range: anchorRange };
+    }
+
+    return { sectionIndex };
+}
+
+function resolveCitationSectionIndex(
+    primaryView: EpubPrimaryView,
+    target: EpubCitationTarget,
+): number | undefined {
+    const sectionCount = getSectionCount(primaryView);
+
+    const targetBasename = normalizeHrefBasename(target.sectionHref);
+    if (targetBasename) {
+        for (let index = 0; index < sectionCount; index++) {
+            if (normalizeHrefBasename(getSectionHref(primaryView, index)) === targetBasename) {
+                return index;
+            }
+        }
+        logger(`[EpubVisualizer] No reader section matches citation href ${targetBasename}`, 1);
+    }
+
+    if (
+        typeof target.sectionOrdinal === "number"
+        && Number.isInteger(target.sectionOrdinal)
+    ) {
+        const index = target.sectionOrdinal - 1;
+        if (index >= 0 && index < sectionCount) return index;
+        logger(`[EpubVisualizer] Citation section ordinal ${target.sectionOrdinal} is out of range`, 1);
+    }
+
+    return undefined;
+}
+
+function findAnchorElement(body: HTMLElement, anchorId: string): Element | undefined {
+    // Attribute selector instead of #id so arbitrary ids only need string escaping.
+    const escaped = anchorId.replace(/["\\]/g, "\\$&");
+    try {
+        return body.querySelector(`[id="${escaped}"]`) ?? undefined;
+    } catch (error) {
+        logger(`[EpubVisualizer] Invalid citation anchor id "${anchorId}": ${error}`, 1);
+        return undefined;
+    }
+}
+
+/**
+ * Citation preview text can arrive as an HTML fragment; strip markup so the
+ * normalized substring search can match the live text nodes.
+ */
+function sanitizeCitationSearchText(text: string | undefined): string | undefined {
+    if (!text) return undefined;
+    const stripped = text.replace(/<[^>]*>/g, " ");
+    return normalizeText(stripped) || undefined;
 }
 
 export function normalizeHrefBasename(href: string | undefined): string | undefined {
@@ -179,7 +297,7 @@ function textsMatch(extractedText: string, candidateText: string): boolean {
     return candidateText.includes(extractedText) || extractedText.includes(candidateText);
 }
 
-function createElementContentsRange(element: Element): Range | undefined {
+export function createElementContentsRange(element: Element): Range | undefined {
     const doc = element.ownerDocument;
     const range = doc.createRange();
     try {
@@ -192,7 +310,7 @@ function createElementContentsRange(element: Element): Range | undefined {
     return undefined;
 }
 
-function createSentenceRange(element: Element, sentenceText: string): Range | undefined {
+export function createSentenceRange(element: Element, sentenceText: string): Range | undefined {
     const normalizedSentence = normalizeText(sentenceText);
     if (!normalizedSentence) return undefined;
 

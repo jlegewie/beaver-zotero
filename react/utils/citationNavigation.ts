@@ -1,7 +1,12 @@
 import { sourceBboxesToZoteroRects } from '../../src/services/annotations/annotationGeometry';
 import { logger } from '../../src/utils/logger';
 import type { BoundingBox } from '../types/citations';
-import type { ZoteroReader } from './annotationUtils';
+import type { ZoteroItemReference } from '../types/zotero';
+import {
+    BeaverTemporaryAnnotations,
+    installTemporaryAnnotationDismissOnNextClick,
+    type ZoteroReader,
+} from './annotationUtils';
 import { getPageViewportInfo } from './pdfUtils';
 
 /** A page of extracted bounding boxes to highlight. `pageIndex` is 0-based. */
@@ -18,6 +23,34 @@ export interface PdfNavPosition {
      * Rects for the immediately following page (`pageIndex + 1`)
      */
     nextPageRects?: number[][];
+}
+
+/**
+ * Present already-created temporary annotations in a reader: track them for
+ * cleanup, dismiss them on the next pointer interaction, and navigate to the
+ * first one. Shared by the PDF bounding-box and EPUB range citation paths —
+ * navigation by annotationID works for both reader types (the EPUB reader
+ * mounts the target section itself). Returns true when navigation was issued.
+ */
+export function presentTemporaryAnnotations(
+    reader: ZoteroReader,
+    annotationReferences: ZoteroItemReference[],
+    options: { ownerDocument?: Document; logContext?: string } = {},
+): boolean {
+    if (!reader || annotationReferences.length === 0) return false;
+
+    BeaverTemporaryAnnotations.addToTracking(annotationReferences);
+    installTemporaryAnnotationDismissOnNextClick(reader, {
+        ownerDocument: options.ownerDocument,
+        logContext: options.logContext ?? 'presentTemporaryAnnotations',
+    });
+
+    const firstAnnotationKey = annotationReferences[0].zotero_key;
+    // Brief delay so the reader registers the injected annotations before navigating.
+    setTimeout(() => {
+        (reader as any).navigate({ annotationID: firstAnnotationKey });
+    }, 100);
+    return true;
 }
 
 /**

@@ -18,9 +18,12 @@ import { getCurrentReaderAndWaitForView } from '../../utils/readerUtils';
 import {
     BeaverTemporaryAnnotations,
     createBoundingBoxHighlights,
-    installTemporaryAnnotationDismissOnNextClick,
 } from '../../utils/annotationUtils';
-import { flashHighlightBoundingBoxes } from '../../utils/citationNavigation';
+import {
+    flashHighlightBoundingBoxes,
+    presentTemporaryAnnotations,
+} from '../../utils/citationNavigation';
+import { navigateToEpubCitation } from '../../utils/epubVisualizer/epubCitationNavigation';
 import { logger } from '../../../src/utils/logger';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../../atoms/externalReferences';
 import { useCitationMarker } from '../../hooks/useCitationMarker';
@@ -527,6 +530,38 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
             return;
         }
 
+        if (contentKind === 'epub') {
+            // EPUB locator model: agent-facing "page N" is the 1-based spine
+            // section ordinal; the symbolic location (when present) carries the
+            // precise section href / anchor / sentence text.
+            const epubSymbolicLocation = symbolicLocation?.content_kind === 'epub'
+                ? symbolicLocation
+                : undefined;
+            const sectionOrdinals = getCitationPages(citationMetadata);
+            const hasEpubLocator = !!epubSymbolicLocation || sectionOrdinals.length > 0;
+            logger(`ZoteroCitation: EPUB citation (symbolic: ${!!epubSymbolicLocation}, sections: ${sectionOrdinals.length})`);
+
+            if (item.isRegularItem() && !hasEpubLocator) {
+                revealSource({ library_id: item.libraryID, zotero_key: item.key } as ZoteroItemReference);
+                return;
+            }
+
+            const outcome = await navigateToEpubCitation({
+                item,
+                symbolicLocation: epubSymbolicLocation,
+                sectionOrdinal: sectionOrdinals[0],
+                searchText: citationMetadata?.preview || undefined,
+                previewText,
+                useTemporaryAnnotations: useTemporaryCitationAnnotations,
+                ownerDocument,
+            });
+            logger(`ZoteroCitation: EPUB navigation outcome: ${outcome}`);
+            if (outcome === 'failed') {
+                revealSource({ library_id: item.libraryID, zotero_key: item.key } as ZoteroItemReference);
+            }
+            return;
+        }
+
         if (contentKind !== 'pdf') {
             logger(`ZoteroCitation: Non-PDF citation (${contentKind})`);
             if (item.isRegularItem()) {
@@ -643,16 +678,15 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
                         BEAVER_ANNOTATION_TEXT,
                         { authorName: BEAVER_CITATION_ANNOTATION_AUTHOR },
                     );
-                    BeaverTemporaryAnnotations.addToTracking(annotationReferences);
-                    const annotationIds = annotationReferences.map(reference => reference.zotero_key);
-                    if (annotationIds.length > 0 && reader) {
-                        installTemporaryAnnotationDismissOnNextClick(reader, {
+                    if (reader) {
+                        presentTemporaryAnnotations(reader, annotationReferences, {
                             ownerDocument,
                             logContext: 'ZoteroCitation',
                         });
-                        setTimeout(() => {
-                            reader.navigate({ annotationID: annotationIds[0] });
-                        }, 100);
+                    } else {
+                        // Keep created annotations tracked for cleanup even
+                        // when the reader handle is unavailable.
+                        BeaverTemporaryAnnotations.addToTracking(annotationReferences);
                     }
                 } else {
                     logger(`ZoteroCitation: Flashing highlight for bounding boxes`);
@@ -765,8 +799,11 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
     // Determine the CSS class based on citation type and state
     const isNoteCitation = citationMetadata?.type === 'note';
     const isAnnotationCitation = citationMetadata?.type === 'annotation';
+    const isEpubCitation = getContentKind(citationMetadata) === 'epub';
+    const hasEpubSymbolicLocator = isEpubCitation
+        && getSymbolicLocation(citationMetadata)?.content_kind === 'epub';
     const hasBoundingBoxes = !isNoteCitation && !isAnnotationCitation && !!citationMetadata && getCitationBoundingBoxes(citationMetadata).length > 0;
-    const hasLocator = !isNoteCitation && !isAnnotationCitation && (pages.length > 0 || hasBoundingBoxes);
+    const hasLocator = !isNoteCitation && !isAnnotationCitation && (pages.length > 0 || hasBoundingBoxes || hasEpubSymbolicLocator);
     const citationClassBase = isExternal && !mappedZoteroItem
         ? "zotero-citation external-citation"
         : (hasLocator || isAnnotationCitation)
@@ -798,7 +835,9 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
                 </span>
                 <span className="flex-1" />
                 {pages && pages.length > 0 && pages[0] && (
-                    <span className="font-color-secondary text-sm">Page {pageLabels[0]}</span>
+                    <span className="font-color-secondary text-sm">
+                        {isEpubCitation ? `Section ${pageLabels[0]}` : `Page ${pageLabels[0]}`}
+                    </span>
                 )}
             </span>
             <span className="font-color-secondary text-sm px-3 py-15 block" style={{ wordBreak: 'break-word', overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}>
@@ -839,9 +878,11 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
                     <span className="display-flex flex-row items-center gap-15">
                         <Icon icon={PdfIcon} className="font-color-secondary" />
                         <span className="text-sm font-color-secondary">
-                            {hasBoundingBoxes
-                                ? (pages[0] != null ? `Highlights passage on page ${pageLabels[0]}` : 'Highlights passage in PDF')
-                                : (pages[0] != null ? `Opens PDF on page ${pageLabels[0]}` : 'Opens PDF at location')}
+                            {isEpubCitation
+                                ? (pages[0] != null ? `Opens EPUB at section ${pageLabels[0]}` : 'Opens EPUB at cited passage')
+                                : hasBoundingBoxes
+                                    ? (pages[0] != null ? `Highlights passage on page ${pageLabels[0]}` : 'Highlights passage in PDF')
+                                    : (pages[0] != null ? `Opens PDF on page ${pageLabels[0]}` : 'Opens PDF at location')}
                         </span>
                     </span>
                 </span>
