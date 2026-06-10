@@ -127,7 +127,7 @@ import { dismissDiffPreview } from '../utils/noteEditorDiffPreview';
 import { store } from '../store';
 import { profileSyncStatusAtom, searchableLibraryIdsAtom, syncWithZoteroAtom } from './profile';
 import { triggerProfileRefresh } from '../hooks/useProfileSync';
-import { syncingItemFilterAsync } from '../../src/utils/sync';
+import { agentItemFilterAsync, isAgentSupportedItem } from '../../src/utils/agentItemSupport';
 import { safeIsInTrash } from '../../src/utils/zoteroUtils';
 import { wasItemAddedBeforeLastSync } from '../utils/sourceUtils';
 import { ZoteroItemReference, createZoteroItemReference } from '../types/zotero';
@@ -796,9 +796,9 @@ async function determineMissingReason(ref: ZoteroItemReference, userId: string |
             return 'in_trash';
         }
 
-        // Check if passes sync filters
-        const passesSyncFilters = await syncingItemFilterAsync(item);
-        if (!passesSyncFilters) {
+        // Check if the item is a kind Beaver supports and is available
+        const passesAgentFilters = await agentItemFilterAsync(item);
+        if (!passesAgentFilters) {
             return 'filtered_from_sync';
         }
 
@@ -1005,14 +1005,14 @@ async function prevalidateExtractionApproval(
             if (item && item.isAttachment()) {
                 existingCount++;
             } else if (item && item.isRegularItem()) {
-                // Count regular items with exactly one PDF attachment
+                // Count regular items with exactly one supported attachment
                 // (the agent likely confused item ID with attachment ID)
                 await Zotero.Items.loadDataTypes([item], ['childItems']);
                 const attachmentIDs = item.getAttachments();
-                const pdfAttachments = attachmentIDs
+                const supportedAttachments = attachmentIDs
                     .map((id: number) => Zotero.Items.get(id))
-                    .filter((a: any) => a && a.isPDFAttachment());
-                if (pdfAttachments.length === 1) {
+                    .filter((a: any) => a && a.isAttachment() && isAgentSupportedItem(a));
+                if (supportedAttachments.length === 1) {
                     existingCount++;
                 }
             }

@@ -1,7 +1,8 @@
 import { truncateText } from './stringUtils';
 import { stripHtmlTags, computeDiff } from '../components/agentRuns/EditNotePreview';
 import { logger } from '../../src/utils/logger';
-import { syncingItemFilter, syncingItemFilterAsync, isSupportedItem, isLibraryValidForSync } from '../../src/utils/sync';
+import { isLibraryValidForSync } from '../../src/utils/sync';
+import { isAgentSupportedItem, agentItemFilter, agentItemFilterAsync } from '../../src/utils/agentItemSupport';
 import { isValidAnnotationType, SourceAttachment } from '../types/attachments/apiTypes';
 import { selectItemById } from '../../src/utils/selectItem';
 import { CitationData } from '../types/citations';
@@ -165,7 +166,7 @@ export async function isValidZoteroItem(item: Zotero.Item): Promise<{valid: bool
         if (item.isInTrash()) return {valid: false, error: "Item is in trash"};
 
         // (a) Pass the syncing filter
-        if (!(await syncingItemFilterAsync(item))) {
+        if (!(await agentItemFilterAsync(item))) {
             return {valid: false, error: "File not available to use in Beaver"};
         }
 
@@ -186,8 +187,8 @@ export async function isValidZoteroItem(item: Zotero.Item): Promise<{valid: bool
     else if (item.isAttachment()) {
 
         // (a) Check if attachment is supported
-        if (!isSupportedItem(item)) {
-            return {valid: false, error: "Beaver only supports PDF attachments"};
+        if (!isAgentSupportedItem(item)) {
+            return {valid: false, error: "Beaver only supports PDF and EPUB attachments"};
         }
 
         // (b) Check if attachment is in trash
@@ -200,8 +201,8 @@ export async function isValidZoteroItem(item: Zotero.Item): Promise<{valid: bool
         }
 
         // (d) Use comprehensive syncing filter
-        if (!(await syncingItemFilterAsync(item))) {
-            return {valid: false, error: "Attachment not synced with Beaver"};
+        if (!(await agentItemFilterAsync(item))) {
+            return {valid: false, error: "Attachment not available to use in Beaver"};
         }
         
         // (e) If syncWithZotero is true, check whether item has been synced with Zotero
@@ -238,7 +239,7 @@ export async function isValidZoteroItem(item: Zotero.Item): Promise<{valid: bool
         if (!parent || !parent.isAttachment()) return {valid: false, error: "Parent item is not an attachment"};
 
         // (d) Check if the parent exists and is syncing
-        if (!syncingItemFilter(parent)) return {valid: false, error: "Parent item is not syncing"};
+        if (!agentItemFilter(parent)) return {valid: false, error: "Parent item is not available to use in Beaver"};
 
         // (e) Check if the parent file exists
         const hasFile = await safeFileExists(parent);

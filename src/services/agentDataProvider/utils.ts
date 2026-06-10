@@ -14,7 +14,7 @@ import { effectiveMaxFileSizeMB } from '../attachmentLimits';
 import type { DocumentCacheMetadata } from '../documentCache';
 import { DeferredToolPreference } from '../agentProtocol';
 import { deferredToolPreferencesAtom } from '../../../react/atoms/deferredToolPreferences';
-import { isSupportedItem } from '../../utils/sync';
+import { isAgentSupportedItem } from '../../utils/agentItemSupport';
 import { store } from '../../../react/store';
 import { searchableLibraryIdsAtom } from '../../../react/atoms/profile';
 import { serializeAttachment } from '../../utils/zoteroSerializers';
@@ -1331,8 +1331,7 @@ export function extractErrorDetails(error: unknown): { message: string; details:
 // `PdfAttachmentResolveResult` and `resolveToPdfAttachment` live in
 // `../documentExtraction` and are re-exported at the top of this file.
 // `getAttachmentInfo` stays here because other webpack-side callers depend
-// on its richer (text-with-filename) shape, and it transitively uses
-// `isSupportedItem` from `src/utils/sync.ts` (which is not esbuild-safe).
+// on its richer (text-with-filename) shape.
 
 export async function getAttachmentInfo(item: Zotero.Item): Promise<{ count: number, text: string, bestAttachmentKey: string | null }> {
     if (!item.isRegularItem()) {
@@ -1348,9 +1347,9 @@ export async function getAttachmentInfo(item: Zotero.Item): Promise<{ count: num
     const bestAttachment = await item.getBestAttachment();
     const bestAttachmentKey = bestAttachment ? `${bestAttachment.libraryID}-${bestAttachment.key}` : null;
 
-    const pdfAttachmentKeys = attachmentIDs
+    const supportedAttachmentKeys = attachmentIDs
         .map(id => Zotero.Items.get(id))
-        .filter(attachment => attachment && isSupportedItem(attachment))
+        .filter(attachment => attachment && isAgentSupportedItem(attachment))
         .map(attachment => {
             const key = `${attachment.libraryID}-${attachment.key}`;
             const isPrimary = bestAttachmentKey && key === bestAttachmentKey;
@@ -1361,8 +1360,8 @@ export async function getAttachmentInfo(item: Zotero.Item): Promise<{ count: num
         });
 
     return {
-        count: pdfAttachmentKeys.length,
-        text: pdfAttachmentKeys.join(', '),
+        count: supportedAttachmentKeys.length,
+        text: supportedAttachmentKeys.join(', '),
         bestAttachmentKey: bestAttachmentKey,
     }
 }

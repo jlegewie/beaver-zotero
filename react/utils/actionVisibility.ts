@@ -7,7 +7,7 @@
 
 import { Action, ActionTargetType } from '../types/actions';
 import { ZoteroContext } from '../atoms/zoteroContext';
-import { isSupportedItem } from '../../src/utils/sync';
+import { agentItemFilter } from '../../src/utils/agentItemSupport';
 import { getDisplayNameFromItem } from './sourceUtils';
 import { truncateText } from './stringUtils';
 import { safeIsInTrash } from '../../src/utils/zoteroUtils';
@@ -34,10 +34,10 @@ const MAX_LABEL_ITEMS = 1;
 
 /**
  * Returns `true` when an item is both supported and actionable.
- * Adds a trash check on top of `isSupportedItem` (type-only).
+ * Adds a trash check on top of `isAgentSupportedItem` (type-only).
  */
 export function isActionableItem(item: Zotero.Item): boolean {
-    return isSupportedItem(item) && !safeIsInTrash(item);
+    return agentItemFilter(item);
 }
 
 // ---------------------------------------------------------------------------

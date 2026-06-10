@@ -20,8 +20,7 @@
  */
 
 import { logger } from '../../src/utils/logger';
-import { isSupportedItem } from '../../src/utils/sync';
-import { safeIsInTrash } from '../../src/utils/zoteroUtils';
+import { agentItemFilter } from '../../src/utils/agentItemSupport';
 import { getCurrentReader } from './readerUtils';
 import { store } from '../store';
 import { currentReaderAttachmentAtom } from '../atoms/messageComposition';
@@ -154,7 +153,7 @@ interface TargetTypeContext {
 }
 
 function isActionableItem(item: Zotero.Item): boolean {
-    return isSupportedItem(item) && !safeIsInTrash(item);
+    return agentItemFilter(item);
 }
 
 function resolveTargetTypeContext(targetType: ActionTargetType): TargetTypeContext {

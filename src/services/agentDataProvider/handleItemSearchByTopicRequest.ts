@@ -9,7 +9,7 @@
 
 import { logger } from '../../utils/logger';
 import { deduplicateItems } from '../../utils/zoteroUtils';
-import { syncingItemFilter } from '../../utils/sync';
+import { agentItemFilter } from '../../utils/agentItemSupport';
 import { searchableLibraryIdsAtom } from '../../../react/atoms/profile';
 
 import { store } from '../../../react/store';
@@ -291,7 +291,7 @@ export async function handleItemSearchByTopicRequest(
         }
 
         // Validate item is regular item and not in trash
-        const isValidItem = syncingItemFilter(item);
+        const isValidItem = agentItemFilter(item);
         if (!isValidItem) continue;
 
         filteredItems.push({

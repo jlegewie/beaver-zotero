@@ -9,7 +9,7 @@
 
 import { logger } from '../../utils/logger';
 import { deduplicateItems } from '../../utils/zoteroUtils';
-import { syncingItemFilter } from '../../utils/sync';
+import { agentItemFilter } from '../../utils/agentItemSupport';
 import { searchableLibraryIdsAtom } from '../../../react/atoms/profile';
 
 import { store } from '../../../react/store';
@@ -229,7 +229,7 @@ export async function handleItemSearchByMetadataRequest(
 
     // Serialize items in parallel in bounded batches (with backfill on failures to ensure limit is reached)
     const targetLimit = request.limit > 0 ? request.limit : items.length;
-    const candidates = items.slice(offset).filter(item => syncingItemFilter(item));
+    const candidates = items.slice(offset).filter(item => agentItemFilter(item));
     const BATCH_SIZE = Math.min(targetLimit, 20);
 
     // Batch-fetch best attachments and sync dates for all candidate items

@@ -3,7 +3,7 @@
  */
 import { serializeItemSummary } from "./zoteroSerializers";
 import { logger } from "./logger";
-import { hasSupportedAttachment } from "./sync";
+import { hasAgentSupportedAttachment } from "./agentItemSupport";
 import {
     ActiveItem,
     ActiveItemKind,
@@ -41,7 +41,7 @@ export async function toSignalItem(item: Zotero.Item): Promise<SignalItem> {
         ? truncate(summary.abstract, ABSTRACT_MAX_CHARS)
         : null;
 
-    const supported = await hasSupportedAttachment(item);
+    const supported = await hasAgentSupportedAttachment(item);
 
     return {
         library_id: summary.library_id,

@@ -124,6 +124,13 @@ export const NON_PDF: AttachmentFixture = {
     description: 'EPUB attachment',
 };
 
+// EPUB attachment that has a parent regular item (NON_PDF is top-level)
+export const EPUB_WITH_PARENT: AttachmentFixture = {
+    library_id: 1,
+    zotero_key: 'RPZR45JZ',
+    description: 'EPUB attachment with parent item',
+};
+
 // Genuine linked-URL attachment (LINK_MODE_LINKED_URL) — no stored file.
 export const LINKED_URL: AttachmentFixture = {
     library_id: 1,

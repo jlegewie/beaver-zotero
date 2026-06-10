@@ -27,7 +27,8 @@ type FileStatusCodeValue =
     | 'pdf_needs_ocr'
     | 'pdf_parser_crash'
     | 'pdf_analysis_error'
-    | 'pdf_unreadable';
+    | 'pdf_unreadable'
+    | 'epub_invalid';
 
 type AttachmentAvailabilityResult =
     | { available: false; status_code?: FileStatusCodeValue | null; status_reason?: string | null; fileExistsLocally?: boolean }
@@ -142,7 +143,9 @@ async function resolvePdfInfo(
                 libraryId: attachment.libraryID,
                 zoteroKey: attachment.key,
             }, availability.filePath);
-            if (cached) {
+            // Only consume PDF-shaped rows: an EPUB row's null errorCode/pageCount
+            // would otherwise read as a readable PDF with unknown pages.
+            if (cached && cached.contentKind === 'pdf') {
                 return statusFromCachedPdf(cached);
             }
         } catch (error) {
@@ -231,6 +234,56 @@ async function resolvePdfInfo(
     }
 }
 
+/**
+ * Resolve readability info for an EPUB attachment.
+ *
+ * EPUB extraction requires the full DOM pipeline, so this never extracts on
+ * the hot path. A cached extraction supplies the section count (the EPUB
+ * analogue of a page count); a cold cache simply reports the attachment as
+ * readable — file existence and size were already checked by
+ * `checkAttachmentAvailability`.
+ */
+async function resolveEpubInfo(
+    attachment: Zotero.Item,
+    availability: Extract<AttachmentAvailabilityResult, { available: true }>,
+): Promise<Pick<AttachmentInfo, 'status' | 'status_code' | 'status_reason' | 'page_count'>> {
+    const cache = Zotero.Beaver?.documentCache;
+    if (cache) {
+        try {
+            const cached = await cache.getMetadata({
+                libraryId: attachment.libraryID,
+                zoteroKey: attachment.key,
+            }, availability.filePath);
+            if (cached && cached.contentKind === 'epub') {
+                if (cached.errorCode) {
+                    return {
+                        page_count: null,
+                        status: 'unreadable',
+                        status_code: 'epub_invalid',
+                        status_reason: 'EPUB could not be read by the local extractor.',
+                    };
+                }
+                const meta = cached.documentMetadata;
+                const sectionCount = meta?.content_kind === 'epub' ? meta.sectionCount : null;
+                // The extraction path rejects section-less EPUBs as having no
+                // extractable text, so don't advertise them as readable.
+                if (sectionCount === 0) {
+                    return {
+                        page_count: 0,
+                        status: 'unreadable',
+                        status_code: 'epub_invalid',
+                        status_reason: 'EPUB has no readable sections.',
+                    };
+                }
+                return { page_count: sectionCount, status: 'readable' };
+            }
+        } catch (error) {
+            logger(`getAttachmentInfo: cache read error: ${error}`, 1);
+        }
+    }
+    return { page_count: null, status: 'readable' };
+}
+
 async function loadRemoteData(attachment: Zotero.Item, filePath: string): Promise<Uint8Array> {
     const { loadAttachmentData } = await import('./attachmentSource');
     const result = await loadAttachmentData({
@@ -273,7 +326,10 @@ export async function getAttachmentInfo(
         return { ...base, status_reason: unreadableTypeReason(contentKind) };
     }
 
-    if (!isReadableContentKind(contentKind) || (contentKind !== 'pdf' && !options.nonPdfReadableEnabled)) {
+    // PDF and EPUB are always readable; the remaining readable kinds
+    // (text/snapshot/image) stay behind the nonPdfReadableEnabled option.
+    const isUnconditionallyReadable = contentKind === 'pdf' || contentKind === 'epub';
+    if (!isReadableContentKind(contentKind) || (!isUnconditionallyReadable && !options.nonPdfReadableEnabled)) {
         return { ...base, status_reason: unreadableTypeReason(contentKind) };
     }
 
@@ -287,10 +343,26 @@ export async function getAttachmentInfo(
         };
     }
 
-    if (contentKind !== 'pdf') {
-        return { ...base, status: 'readable' };
+    if (contentKind === 'pdf') {
+        const pdfInfo = await resolvePdfInfo(item, availability, options);
+        return { ...base, ...pdfInfo };
     }
 
-    const pdfInfo = await resolvePdfInfo(item, availability, options);
-    return { ...base, ...pdfInfo };
+    if (contentKind === 'epub') {
+        // EPUB extraction requires a local file (the zip reader cannot consume
+        // downloaded bytes, and the extractor never downloads remote files), so
+        // a remote-only EPUB is unreadable even with remote access enabled.
+        if (isRemoteFilePath(availability.filePath)) {
+            return {
+                ...base,
+                status: 'unreadable',
+                status_code: 'file_not_local_remote',
+                status_reason: 'The EPUB file is available remotely but is not synced locally. Sync it in Zotero so Beaver can read it.',
+            };
+        }
+        const epubInfo = await resolveEpubInfo(item, availability);
+        return { ...base, ...epubInfo };
+    }
+
+    return { ...base, status: 'readable' };
 }
