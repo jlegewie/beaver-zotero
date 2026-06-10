@@ -331,19 +331,35 @@ async function getCollectionAnnotationIDs(collection: any, recursive: boolean): 
         return new Set();
     }
     await Zotero.Items.loadDataTypes(attachments, ['primaryData', 'itemData', 'childItems']);
-
-    const allowed = new Set<number>();
-    for (const attachment of attachments) {
-        for (const annotation of attachment.getAnnotations?.() ?? []) {
-            allowed.add(itemID(annotation));
-        }
-    }
-    return allowed;
+    return getAnnotationIDsForAttachmentItemIDs(attachments.map(itemID));
 }
 
 async function getAttachmentAnnotationIDs(attachment: Zotero.Item): Promise<Set<number>> {
     await Zotero.Items.loadDataTypes([attachment], ['primaryData', 'itemData', 'childItems']);
-    return new Set((attachment.getAnnotations?.() ?? []).map(annotation => itemID(annotation)));
+    return getAnnotationIDsForAttachmentItemIDs([itemID(attachment)]);
+}
+
+/**
+ * Return annotation item IDs for attachments without hydrating child annotations.
+ */
+async function getAnnotationIDsForAttachmentItemIDs(attachmentItemIDs: number[]): Promise<Set<number>> {
+    const allowed = new Set<number>();
+    for (let i = 0; i < attachmentItemIDs.length; i += 900) {
+        const chunk = attachmentItemIDs.slice(i, i + 900);
+        if (chunk.length === 0) continue;
+        await Zotero.DB.queryAsync(
+            `SELECT itemID
+             FROM itemAnnotations
+             WHERE parentItemID IN (${chunk.map(() => '?').join(', ')})`,
+            chunk,
+            {
+                onRow: (row: any) => {
+                    allowed.add(row.getResultByIndex(0) as number);
+                },
+            },
+        );
+    }
+    return allowed;
 }
 
 async function buildParentInfo(
@@ -424,7 +440,7 @@ async function loadAnnotationItems(annotationIDs: number[]): Promise<AnnotationI
         ? (await Zotero.Items.getAsync(annotationIDs)).filter((item: Zotero.Item | false): item is Zotero.Item => Boolean(item)) as AnnotationItem[]
         : [];
     if (candidates.length > 0) {
-        await Zotero.Items.loadDataTypes(candidates, ['primaryData', 'itemData', 'tags', 'annotationDeferred']);
+        await Zotero.Items.loadDataTypes(candidates, ['primaryData', 'itemData', 'tags', 'annotation', 'annotationDeferred']);
     }
     return candidates;
 }

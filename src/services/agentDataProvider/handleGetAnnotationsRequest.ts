@@ -69,7 +69,7 @@ export async function handleGetAnnotationsRequest(
         const annotationItems = allAnnotations.slice(offset, offset + limit);
 
         if (annotationItems.length > 0) {
-            await Zotero.Items.loadDataTypes(annotationItems, ['primaryData', 'itemData', 'tags']);
+            await Zotero.Items.loadDataTypes(annotationItems, ['primaryData', 'itemData', 'tags', 'annotation', 'annotationDeferred']);
         }
 
         let itemInfo: {
