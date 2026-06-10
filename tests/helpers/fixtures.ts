@@ -131,6 +131,13 @@ export const EPUB_WITH_PARENT: AttachmentFixture = {
     description: 'EPUB attachment with parent item',
 };
 
+// Regular item (book) whose only child is the EPUB_WITH_PARENT attachment.
+export const EPUB_PARENT_ITEM: AttachmentFixture = {
+    library_id: 1,
+    zotero_key: 'AIH32E72',
+    description: 'Regular item with a single EPUB child',
+};
+
 // Genuine linked-URL attachment (LINK_MODE_LINKED_URL) — no stored file.
 export const LINKED_URL: AttachmentFixture = {
     library_id: 1,

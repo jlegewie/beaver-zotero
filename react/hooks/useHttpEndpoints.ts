@@ -63,6 +63,7 @@ import {
     handleTestFileStatusHttpRequest,
     handleTestResolveItemHttpRequest,
     handleTestResolveReadableHttpRequest,
+    handleTestBestEpubAttachmentHttpRequest,
     handleTestValidateItemHttpRequest,
 } from './httpHandlers/testCacheHandlers';
 import {
@@ -181,6 +182,7 @@ const ENDPOINT_PATHS = [
     '/beaver/test/mcp-create-note',
     '/beaver/test/resolve-item',
     '/beaver/test/resolve-readable',
+    '/beaver/test/best-epub-attachment',
     '/beaver/test/validate-item',
     // Test-only endpoints (note seeding/teardown/inspection)
     '/beaver/test/note-create',
@@ -770,6 +772,8 @@ function registerEndpoints(): boolean {
             createEndpoint(handleTestResolveItemHttpRequest);
         Zotero.Server.Endpoints['/beaver/test/resolve-readable'] =
             createEndpoint(handleTestResolveReadableHttpRequest);
+        Zotero.Server.Endpoints['/beaver/test/best-epub-attachment'] =
+            createEndpoint(handleTestBestEpubAttachmentHttpRequest);
         Zotero.Server.Endpoints['/beaver/test/validate-item'] =
             createEndpoint(handleTestValidateItemHttpRequest);
 

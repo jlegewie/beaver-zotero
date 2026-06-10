@@ -575,6 +575,35 @@ export async function resolveReadable(
     });
 }
 
+export interface BestEpubAttachmentResponse {
+    item_id: number | null;
+    item_type: string | null;
+    is_attachment?: boolean;
+    is_regular_item?: boolean;
+    /** Whether an EPUB attachment was selected. */
+    resolved?: boolean;
+    /** `<libraryId>-<zoteroKey>` of the selected EPUB attachment, or null. */
+    resolved_key?: string | null;
+    /** Content type of the selected attachment, or null when none/regular item. */
+    content_type?: string | null;
+    error?: string;
+}
+
+/**
+ * `/beaver/test/best-epub-attachment` — runs the production
+ * `getBestEpubAttachmentAsync` helper (used by the EPUB citation-navigation
+ * path) and returns the selected attachment key/content type verbatim.
+ */
+export async function bestEpubAttachment(
+    libraryId: number,
+    key: string,
+): Promise<BestEpubAttachmentResponse> {
+    return post('/beaver/test/best-epub-attachment', {
+        library_id: libraryId,
+        zotero_key: key,
+    });
+}
+
 /** Completely wipe the document cache (metadata rows, payload rows, files). */
 export async function clearAllCache(): Promise<{
     metadataRows: number;
