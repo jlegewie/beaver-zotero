@@ -496,6 +496,35 @@ export async function resolveItem(
     });
 }
 
+export interface ValidateItemResponse {
+    ok: boolean;
+    is_valid?: boolean;
+    reason?: string | null;
+    backend_checked?: boolean;
+    error?: string;
+}
+
+/**
+ * `/beaver/test/validate-item` — run `itemValidationManager.validateItem`
+ * (frontend mode by default, force-refreshed) against a live item.
+ */
+export async function validateItem(
+    libraryId: number,
+    key: string,
+    options?: {
+        validationType?: 'frontend' | 'local_only' | 'backend' | 'cached';
+        forceRefresh?: boolean;
+        timeout?: number;
+    },
+): Promise<ValidateItemResponse> {
+    return post('/beaver/test/validate-item', {
+        library_id: libraryId,
+        zotero_key: key,
+        validation_type: options?.validationType,
+        force_refresh: options?.forceRefresh,
+    }, { timeout: options?.timeout ?? 60_000 });
+}
+
 /** Readable content kinds the resolver can classify (extractor + image). */
 export type ReadableContentKind = ExtractContentKind | 'image';
 
