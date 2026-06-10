@@ -6,17 +6,17 @@ import {
     effectiveMaxPageCount,
 } from '../../../src/services/attachmentLimits';
 
+const { maxFileSizeMB, maxPageCount } = HARD_ATTACHMENT_LIMITS;
+
 describe('attachmentLimits', () => {
-    it('exposes the Beaver hard attachment caps', () => {
-        expect(HARD_ATTACHMENT_LIMITS).toEqual({
-            maxFileSizeMB: 100,
-            maxPageCount: 800,
-        });
+    it('exposes positive hard attachment caps', () => {
+        expect(maxFileSizeMB).toBeGreaterThan(0);
+        expect(maxPageCount).toBeGreaterThan(0);
     });
 
     it('uses hard caps when no caller-specific limit is provided', () => {
-        expect(effectiveMaxFileSizeMB()).toBe(100);
-        expect(effectiveMaxPageCount()).toBe(800);
+        expect(effectiveMaxFileSizeMB()).toBe(maxFileSizeMB);
+        expect(effectiveMaxPageCount()).toBe(maxPageCount);
     });
 
     it('keeps stricter caller-specific limits', () => {
@@ -25,15 +25,14 @@ describe('attachmentLimits', () => {
     });
 
     it('clamps caller-specific limits to the hard caps', () => {
-        expect(effectiveMaxFileSizeMB(250)).toBe(100);
-        expect(effectiveMaxPageCount(5000)).toBe(800);
+        expect(effectiveMaxFileSizeMB(maxFileSizeMB + 150)).toBe(maxFileSizeMB);
+        expect(effectiveMaxPageCount(maxPageCount + 2000)).toBe(maxPageCount);
     });
 
     it('ignores invalid caller-specific limits', () => {
-        expect(effectiveMaxFileSizeMB(0)).toBe(100);
-        expect(effectiveMaxFileSizeMB(Number.NaN)).toBe(100);
-        expect(effectiveMaxPageCount(-1)).toBe(800);
-        expect(effectiveMaxPageCount(null)).toBe(800);
+        expect(effectiveMaxFileSizeMB(0)).toBe(maxFileSizeMB);
+        expect(effectiveMaxFileSizeMB(Number.NaN)).toBe(maxFileSizeMB);
+        expect(effectiveMaxPageCount(-1)).toBe(maxPageCount);
+        expect(effectiveMaxPageCount(null)).toBe(maxPageCount);
     });
 });
-

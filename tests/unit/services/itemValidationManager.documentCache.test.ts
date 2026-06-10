@@ -86,6 +86,9 @@ vi.mock('../../../src/beaver-extract', () => ({
 }));
 
 import { itemValidationManager, ItemValidationType } from '../../../src/services/itemValidationManager';
+import { HARD_ATTACHMENT_LIMITS } from '../../../src/services/attachmentLimits';
+
+const MAX_PAGE_COUNT = HARD_ATTACHMENT_LIMITS.maxPageCount;
 
 function makeAttachment(options: { contentType?: string } = {}): Zotero.Item {
     const contentType = options.contentType ?? 'application/pdf';
@@ -192,7 +195,7 @@ describe('ItemValidationManager document-cache frontend validation', () => {
     it('rejects cached metadata over the hard page-count cap before dispatching to MuPDF', async () => {
         (globalThis as any).Zotero.Beaver = {
             documentCache: {
-                getMetadata: vi.fn().mockResolvedValue(makeMetadata({ pageCount: 801 })),
+                getMetadata: vi.fn().mockResolvedValue(makeMetadata({ pageCount: MAX_PAGE_COUNT + 1 })),
             },
         };
 
@@ -202,7 +205,7 @@ describe('ItemValidationManager document-cache frontend validation', () => {
         });
 
         expect(result.isValid).toBe(false);
-        expect(result.reason).toContain('exceeds the 800-page limit');
+        expect(result.reason).toContain(`exceeds the ${MAX_PAGE_COUNT}-page limit`);
         expect((globalThis as any).IOUtils.read).not.toHaveBeenCalled();
         expect(BeaverExtractorMock).not.toHaveBeenCalled();
     });
@@ -226,7 +229,7 @@ describe('ItemValidationManager document-cache frontend validation', () => {
     });
 
     it('rejects parser metadata over the hard page-count cap before OCR analysis', async () => {
-        extractorMethods.getPageCount.mockResolvedValueOnce(801);
+        extractorMethods.getPageCount.mockResolvedValueOnce(MAX_PAGE_COUNT + 1);
         (globalThis as any).Zotero.Beaver = {
             documentCache: {
                 getMetadata: vi.fn().mockResolvedValue(null),
@@ -239,7 +242,7 @@ describe('ItemValidationManager document-cache frontend validation', () => {
         });
 
         expect(result.isValid).toBe(false);
-        expect(result.reason).toContain('exceeds the 800-page limit');
+        expect(result.reason).toContain(`exceeds the ${MAX_PAGE_COUNT}-page limit`);
         expect(extractorMethods.analyzeOCRNeeds).not.toHaveBeenCalled();
     });
 
