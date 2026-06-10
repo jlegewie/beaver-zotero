@@ -15,8 +15,16 @@ export interface AttachmentInfoOptions {
     includeAnnotationsCount?: boolean;
     skipWorkerFallback?: boolean;
     nonPdfReadableEnabled?: boolean;
+    /**
+     * PDF analysis depth. 'full' (default) reads the file and runs OCR
+     * detection on a cache miss; 'lightweight' only probes cheap page-count
+     * sources (fulltext index, optionally the PDF worker) and reports
+     * optimistically — used by batch/lookup paths that must not read files.
+     */
+    pdfAnalysis?: 'full' | 'lightweight';
     timing?: TimingAccumulator;
 }
+
 
 type FileStatusCodeValue =
     | 'unsupported_file_type'
@@ -151,6 +159,26 @@ async function resolvePdfInfo(
         } catch (error) {
             logger(`getAttachmentInfo: cache read error: ${error}`, 1);
         }
+    }
+
+    if (options.pdfAnalysis === 'lightweight') {
+        const pageCount = await getCheapPdfPageCount(
+            attachment,
+            availability.filePath,
+            options.skipWorkerFallback ?? false,
+        );
+        if (pageCount === null) {
+            if (options.skipWorkerFallback || isRemoteFilePath(availability.filePath)) {
+                // Optimistic: the file exists and is the right type; it is
+                // just not fulltext-indexed yet (or remote-only, so the page
+                // count is determined on download).
+                return { page_count: null, status: 'readable' };
+            }
+            // Both cheap probes failed — the PDF is likely encrypted,
+            // corrupted, or unparseable.
+            return { page_count: null, status: 'unreadable', status_code: 'pdf_unreadable' };
+        }
+        return { page_count: pageCount, status: 'readable' };
     }
 
     if (options.skipWorkerFallback) {
@@ -304,6 +332,16 @@ export async function getAttachmentInfo(
     item: Zotero.Item,
     options: AttachmentInfoOptions = {},
 ): Promise<AttachmentInfo> {
+    // Batch callers preload item data, but one-off callers (annotation
+    // actions, dev endpoints) pass items with only primary data loaded, and
+    // reading the title field below would then throw "Item data not loaded".
+    // Load it on demand; the _loaded check avoids a redundant DB query when
+    // the data is already loaded (loadDataType always re-queries).
+    const loaded = (item as { _loaded?: Record<string, boolean> })._loaded;
+    if (!loaded?.itemData) {
+        await item.loadDataType?.('itemData');
+    }
+
     const contentKind = getContentKind(item);
     const isPrimary = options.isPrimary ?? false;
     const base: AttachmentInfo = {

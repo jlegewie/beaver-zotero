@@ -21,6 +21,7 @@ type MockAttachmentOptions = {
     contentType?: string;
     filePath?: string | null;
     linkMode?: number;
+    itemDataLoaded?: boolean;
 };
 
 function makeAttachment(options: MockAttachmentOptions = {}): Zotero.Item {
@@ -35,6 +36,8 @@ function makeAttachment(options: MockAttachmentOptions = {}): Zotero.Item {
         attachmentFilename: 'paper.pdf',
         attachmentContentType: contentType,
         attachmentLinkMode: options.linkMode ?? 0,
+        _loaded: { itemData: options.itemDataLoaded ?? true },
+        loadDataType: vi.fn(async () => {}),
         isAttachment: vi.fn(() => true),
         isPDFAttachment: vi.fn(() => contentType === 'application/pdf'),
         isFileAttachment: vi.fn(() => true),
@@ -202,6 +205,36 @@ describe('getAttachmentInfo', () => {
             status: 'unreadable',
             status_code: 'file_not_local',
         });
+    });
+
+    it('loads item data on demand when only primary data is loaded', async () => {
+        // One-off callers (annotation actions, dev endpoints) pass items from
+        // getByLibraryAndKeyAsync without itemData; the title read must not
+        // throw "Item data not loaded".
+        (globalThis as any).Zotero.Beaver = {
+            documentCache: {
+                getMetadata: vi.fn(async () => ({ contentKind: 'pdf', errorCode: null, pageCount: 3 })),
+            },
+        };
+        const attachment = makeAttachment({ itemDataLoaded: false });
+
+        const info = await getAttachmentInfo(attachment);
+
+        expect((attachment as any).loadDataType).toHaveBeenCalledWith('itemData');
+        expect(info.title).toBe('Attachment title');
+    });
+
+    it('skips the item data load when it is already loaded', async () => {
+        (globalThis as any).Zotero.Beaver = {
+            documentCache: {
+                getMetadata: vi.fn(async () => ({ contentKind: 'pdf', errorCode: null, pageCount: 3 })),
+            },
+        };
+        const attachment = makeAttachment();
+
+        await getAttachmentInfo(attachment);
+
+        expect((attachment as any).loadDataType).not.toHaveBeenCalled();
     });
 
     it('allows remote readable text attachments when remote access is enabled', async () => {

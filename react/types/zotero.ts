@@ -332,6 +332,10 @@ export const FileStatusCode = {
     PdfParserCrash: 'pdf_parser_crash',
     PdfAnalysisError: 'pdf_analysis_error',
     PdfUnreadable: 'pdf_unreadable',
+    // Deliberately has no backend template: EPUB statuses always carry a
+    // specific status_reason, and the backend falls back to it for codes
+    // without a template.
+    EpubInvalid: 'epub_invalid',
 } as const;
 export type FileStatusCodeValue = typeof FileStatusCode[keyof typeof FileStatusCode];
 
