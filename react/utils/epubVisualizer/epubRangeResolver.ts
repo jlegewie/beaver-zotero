@@ -141,11 +141,18 @@ export function resolveEpubCitationRange(
         ? findAnchorElement(body, target.anchorId)
         : undefined;
 
-    for (const searchText of citationSearchTextCandidates(target.text)) {
-        if (anchorElement) {
+    const searchTexts = citationSearchTextCandidates(target.text);
+
+    // Exhaust anchor-scoped candidates before any body-wide search: a
+    // body-wide match for an earlier candidate must not outrank the anchor
+    // disambiguation that `anchorId` exists to provide.
+    if (anchorElement) {
+        for (const searchText of searchTexts) {
             const scopedRange = createSentenceRange(anchorElement, searchText);
             if (scopedRange) return { sectionIndex, range: scopedRange };
         }
+    }
+    for (const searchText of searchTexts) {
         const bodyRange = createSentenceRange(body, searchText);
         if (bodyRange) return { sectionIndex, range: bodyRange };
     }

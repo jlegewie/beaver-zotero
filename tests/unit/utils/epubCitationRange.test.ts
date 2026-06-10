@@ -203,6 +203,25 @@ describe("resolveEpubCitationRange", () => {
             ).toBe(true);
         });
 
+        it("prefers a stripped-text match inside the anchor over a raw match elsewhere", () => {
+            // The raw candidate (with literal tags) matches a code sample
+            // outside the anchor; the anchor-scoped stripped match must win.
+            const { primaryView, renderers } = makePrimaryView([
+                {
+                    href: "chapter1.xhtml",
+                    html: '<pre>&lt;span&gt;Plain words&lt;/span&gt; to find.</pre><p id="target">Plain words to find.</p>',
+                },
+            ]);
+            const resolved = resolve(primaryView, {
+                sectionOrdinal: 1,
+                anchorId: "target",
+                text: "<span>Plain words</span> to find.",
+            });
+            const anchorParagraph = renderers[0].body!.querySelector("#target")!;
+            expect(resolved?.range?.toString()).toBe("Plain words to find.");
+            expect(anchorParagraph.contains(resolved!.range!.startContainer)).toBe(true);
+        });
+
         it("falls back to the anchor element contents when the text is not found", () => {
             const { primaryView } = makePrimaryView([
                 {
