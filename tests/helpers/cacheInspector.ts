@@ -43,6 +43,20 @@ export interface PdfCachedDocumentMetadata {
     pages: (CachedPageGeometry | null)[] | null;
 }
 
+/** Per-section summary persisted in the EPUB metadata blob. */
+export interface EpubCachedSectionSummary {
+    index: number;
+    rawHref: string;
+    label?: string | null;
+    itemCount: number;
+}
+
+export interface EpubCachedDocumentMetadata {
+    content_kind: 'epub';
+    sectionCount: number;
+    sections: EpubCachedSectionSummary[];
+}
+
 export interface CacheMetadataRecord {
     id: number;
     itemId: number;
@@ -52,7 +66,7 @@ export interface CacheMetadataRecord {
     filePath: string;
     sourceSizeBytes: number;
     contentType: string;
-    documentMetadata: PdfCachedDocumentMetadata | null;
+    documentMetadata: PdfCachedDocumentMetadata | EpubCachedDocumentMetadata | null;
     pageCount: number | null;
     pageLabels: Record<string, string> | null;
     pages: (CachedPageGeometry | null)[] | null;
