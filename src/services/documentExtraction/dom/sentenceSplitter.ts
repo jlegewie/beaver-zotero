@@ -8,9 +8,11 @@
  * parser. If the WASM cannot be loaded (or a split throws), it degrades to a
  * language-agnostic abbreviation-aware regex so extraction never fails.
  *
- * Call `ensureSentencexLoaded()` once before parsing a document and
- * `setSentenceLanguage()` with the document's language; both are no-ops for the
- * regex fallback.
+ * Call `ensureSentencexLoaded()` once before parsing a document, then pass the
+ * document's language per `splitSentences` call (mirrors the PDF path's
+ * `extract({ structured: { language } })` parameter — a future language
+ * detector supplies the value at the call site). The language is a no-op for
+ * the regex fallback.
  */
 
 import { normalizeText } from "./domWalk";
@@ -34,9 +36,12 @@ const SENTENCEX_FACTORY_URL =
 const SENTENCEX_BINARY_URL =
     "chrome://beaver/content/lib/sentencex/sentencex_wasm_bg.wasm";
 
+// Note: the esbuild and webpack bundles each carry their own copy of this
+// module state, so the WASM loads once per bundle, not once per process.
+// Today only webpack-side callers extract EPUBs (the background path is
+// PDF-only), so the copies cannot produce divergent segmentation in practice.
 let modulePromise: Promise<SentencexModule | null> | null = null;
 let loadedModule: SentencexModule | null = null;
-let currentLanguage = "en";
 
 async function loadSentencexModule(): Promise<SentencexModule | null> {
     try {
@@ -44,10 +49,9 @@ async function loadSentencexModule(): Promise<SentencexModule | null> {
         // `webpackIgnore` keeps webpack from rewriting this into its chunk
         // loader: we need a native dynamic import of the chrome:// wasm-bindgen
         // ESM. The URL is held in a const (not a literal in the call) so tsc
-        // does not try to resolve the chrome:// module. (These modules are
-        // webpack-only; an esbuild path would also need `external:
-        // ["chrome://*"]`.) `initSync` avoids the shim's import.meta.url /
-        // fetch(.wasm) path.
+        // does not try to resolve the chrome:// module and esbuild preserves
+        // the import unmodified in its iife output. `initSync` avoids the
+        // shim's import.meta.url / fetch(.wasm) path.
         const factoryUrl = SENTENCEX_FACTORY_URL;
         const mod = (await import(/* webpackIgnore: true */ factoryUrl)) as unknown as SentencexModule;
         mod.initSync({ module: binary });
@@ -71,25 +75,33 @@ export async function ensureSentencexLoaded(): Promise<boolean> {
     if (loadedModule) return true;
     if (!modulePromise) modulePromise = loadSentencexModule();
     loadedModule = await modulePromise;
+    if (!loadedModule) {
+        // A failed load (e.g. transient chrome:// churn during a plugin
+        // reload) is retried on the next document instead of pinning the
+        // regex fallback for the rest of the session.
+        modulePromise = null;
+    }
     return loadedModule !== null;
-}
-
-/** Set the language passed to sentencex (normalized; falls back to `en`). */
-export function setSentenceLanguage(language: string | null | undefined): void {
-    currentLanguage = normalizeLanguageCode(language);
 }
 
 /**
  * Split DOM prose into sentence-sized strings. Uses sentencex when loaded,
  * otherwise the abbreviation-aware regex fallback.
+ *
+ * `language` is a BCP-47 / ISO 639-1 code (normalized here; falls back to
+ * `en`). Passed per call so concurrent extractions of different documents
+ * cannot cross-contaminate each other's boundaries.
  */
-export function splitSentences(text: string): string[] {
+export function splitSentences(text: string, language?: string | null): string[] {
     const normalized = normalizeText(text);
     if (!normalized) return [];
 
     if (loadedModule) {
         try {
-            const boundaries = loadedModule.get_sentence_boundaries(currentLanguage, normalized);
+            const boundaries = loadedModule.get_sentence_boundaries(
+                normalizeLanguageCode(language),
+                normalized,
+            );
             if (boundaries && boundaries.length > 0) {
                 // Same post-processing the PDF path applies after sentencex:
                 // merges label-only/decimal/reference over-splits for

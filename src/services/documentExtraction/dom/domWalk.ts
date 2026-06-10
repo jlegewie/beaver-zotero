@@ -228,6 +228,13 @@ function buildCandidate(
 ): DomItemCandidate | undefined {
     if (mapping.kind === "table") {
         const rows = linearizeTableRows(element);
+        // The caption is the table's identity (e.g. "Table 3: …") but lives
+        // outside any <tr>; surface it as the first citable row so it is not
+        // silently dropped from an opaque data-table item.
+        const caption = tableCaptionText(element);
+        if (caption && rows.length > 0) {
+            rows.unshift(caption);
+        }
         // Linearized row text reads as a TSV-ish table and keeps row boundaries;
         // empty/degenerate tables fall back to the flat text content.
         const text = rows.length > 0 ? rows.join("\n") : visibleTextContent(element);
@@ -271,6 +278,16 @@ function textForMappedElement(element: Element, kind: DomItemKind): string {
  * skipped — their text already appears once in the enclosing cell's content —
  * so nesting never duplicates rows.
  */
+/** Text of the table's own <caption>, ignoring captions of nested tables. */
+function tableCaptionText(table: Element): string {
+    for (const caption of Array.from(table.querySelectorAll("caption")) as Element[]) {
+        if (caption.closest("table") === table) {
+            return visibleTextContent(caption);
+        }
+    }
+    return "";
+}
+
 export function linearizeTableRows(table: Element): string[] {
     const rows: string[] = [];
     for (const tr of Array.from(table.querySelectorAll("tr")) as Element[]) {

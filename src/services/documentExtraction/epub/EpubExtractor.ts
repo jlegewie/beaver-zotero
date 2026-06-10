@@ -5,7 +5,6 @@ import {
     ensureSentencexLoaded,
     measureSectionSourceText,
     parseDomSection,
-    setSentenceLanguage,
     type DomSection,
 } from "../dom";
 import {
@@ -116,7 +115,7 @@ export async function extractEpubDocumentFromFile(
     // Load the sentencex WASM once (best-effort; sentence splitting degrades to
     // a regex fallback if unavailable).
     await ensureSentencexLoaded();
-    let languageApplied = false;
+    let documentLanguage: string | null | undefined;
 
     try {
         // Section indexes are assigned sequentially over the documents that
@@ -132,13 +131,15 @@ export async function extractEpubDocumentFromFile(
         let sectionIndex = 0;
         for await (const { href, doc } of epub.getSectionDocuments()) {
             throwIfAborted(options?.abortSignal);
-            if (!languageApplied) {
+            if (documentLanguage === undefined) {
                 // Prefer an explicit language; otherwise use the EPUB's own
                 // declared language from the first section's <html lang>.
-                setSentenceLanguage(
-                    options?.language ?? doc.documentElement?.getAttribute("lang"),
-                );
-                languageApplied = true;
+                // A future content-based language detector slots in here:
+                // compute once per document and it flows down as a parameter
+                // (same shape as the PDF path's `structured.language`).
+                documentLanguage = options?.language
+                    ?? doc.documentElement?.getAttribute("lang")
+                    ?? null;
             }
             sourceTextChars += measureSectionSourceText(doc);
             sections.push(parseDomSection({
@@ -146,6 +147,7 @@ export async function extractEpubDocumentFromFile(
                 sectionIndex,
                 rawHref: href,
                 counters,
+                language: documentLanguage ?? undefined,
             }));
             sectionIndex += 1;
             await Zotero.Promise.delay(0);

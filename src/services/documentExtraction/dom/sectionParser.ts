@@ -20,6 +20,13 @@ export interface ParseDomSectionInput {
     sectionIndex: number;
     rawHref: string;
     counters: DomExtractionCounters;
+    /**
+     * BCP-47 / ISO 639-1 language for sentence splitting (normalized
+     * downstream; defaults to `en`). Supplied by the extractor from the
+     * document's declared language — or, in the future, a content-based
+     * language detector.
+     */
+    language?: string;
 }
 
 const SENTENCE_BEARING_KINDS = new Set([
@@ -57,7 +64,7 @@ export function parseDomSection(input: ParseDomSectionInput): DomSection {
                 text: rowText,
             }));
         } else if (SENTENCE_BEARING_KINDS.has(candidate.kind)) {
-            item.sentences = splitSentences(candidate.text).map((sentenceText) => ({
+            item.sentences = splitSentences(candidate.text, input.language).map((sentenceText) => ({
                 id: nextSentenceId(input.counters),
                 text: sentenceText,
             }));

@@ -220,6 +220,24 @@ describe("DOM mapping", () => {
         ]);
     });
 
+    it("surfaces the data-table caption as the first citable row", () => {
+        const doc = parseXhtml(`
+            <table id="data">
+                <caption>Table 3: Annual counts</caption>
+                <tr><th>Year</th><th>Count</th></tr>
+                <tr><td>1995</td><td>42</td></tr>
+            </table>
+        `);
+
+        const [item] = collectDomItems(bodyOf(doc));
+        expect(item.kind).toBe("table");
+        expect(item.rows).toEqual([
+            "Table 3: Annual counts",
+            "Year | Count",
+            "1995 | 42",
+        ]);
+    });
+
     it("classifies a wrapper around a th-bearing data table as layout (no duplication)", () => {
         // Outer positioning table whose only content is an inner data table.
         // The inner table's header cells must not make the OUTER table a data

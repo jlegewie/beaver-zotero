@@ -23,7 +23,6 @@ export {
 export {
     ensureSentencexLoaded,
     regexSplitSentences,
-    setSentenceLanguage,
     splitSentences,
 } from "./sentenceSplitter";
 export {

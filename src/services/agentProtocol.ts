@@ -318,7 +318,7 @@ export interface FrontendTimingMetadata {
     data_loading_ms?: number;
     /** Cumulative time in serializeItem() across all items */
     item_serialization_ms?: number;
-    /** Cumulative time in processAttachmentsParallel() across all items */
+    /** Cumulative time in processAttachmentInfoBatch() across all items */
     attachment_processing_ms?: number;
     /** Cumulative time fetching attachment items + best attachment + sync dates */
     att_fetch_ms?: number;
