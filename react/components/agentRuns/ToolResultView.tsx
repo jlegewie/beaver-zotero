@@ -13,6 +13,8 @@ import {
     extractSearchInDocumentsData,
     isSearchInAttachmentResult,
     extractSearchInAttachmentData,
+    isFindInAttachmentsResult,
+    extractFindInAttachmentsData,
     isExternalSearchResult,
     extractExternalSearchData,
     isLookupWorkResult,
@@ -47,6 +49,7 @@ import { ListTagsResultView } from './ListTagsResultView';
 import { ExtractResultView } from './ExtractResultView';
 import { ReadNoteResultView } from './ReadNoteResultView';
 import { GetAnnotationsResultView } from './GetAnnotationsResultView';
+import { FindInAttachmentsResultView } from './FindInAttachmentsResultView';
 
 interface ToolResultViewProps {
     toolcall: ToolCallPart;
@@ -129,6 +132,21 @@ export const ToolResultView: React.FC<ToolResultViewProps> = ({ toolcall, result
         const data = extractSearchInAttachmentData(content, metadata);
         if (data) {
             return <ReadPagesResultView pages={data.pages} />;
+        }
+    }
+
+    // Find in attachments results (find_in_attachments - keyword search across attachments)
+    if (isFindInAttachmentsResult(toolName, content, metadata)) {
+        const data = extractFindInAttachmentsData(content, metadata);
+        if (data) {
+            return (
+                <FindInAttachmentsResultView
+                    query={data.query}
+                    totalMatches={data.totalMatches}
+                    attachmentCount={data.attachmentCount}
+                    attachments={data.attachments}
+                />
+            );
         }
     }
 

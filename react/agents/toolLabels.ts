@@ -143,6 +143,7 @@ const TOOL_BASE_LABELS: Record<string, string> = {
     search_in_documents: 'Search in documents',
     search_in_attachment: 'Search in attachment',
     search_in_attachments: 'Search in attachments',
+    find_in_attachments: 'Find in attachments',
     read_file: 'Retrieving data',
     load_tool_results: 'Loading tool results',
     view_pages: 'Viewing pages',
@@ -451,7 +452,8 @@ export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): st
             return baseLabel;
         }
 
-        case 'search_in_attachment': {
+        case 'search_in_attachment':
+        case 'find_in_attachments': {
             const query = args.query as string | undefined;
             if (query) {
                 return `${baseLabel}: "${truncate(query, 40)}"`;
