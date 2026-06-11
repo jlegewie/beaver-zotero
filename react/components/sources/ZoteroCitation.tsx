@@ -902,9 +902,9 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
             {isTextCitation && !isNoteCitation && !isAnnotationCitation && (!isExternal || !!mappedZoteroItem) && (
                 <span className="px-3 py-15 border-top-quinary block">
                     <span className="display-flex flex-row items-center gap-15">
-                        <Icon icon={TextAlignLeftIcon} className="font-color-secondary" />
+                        <Icon icon={TextAlignLeftIcon} className="font-color-secondary scale-90" />
                         <span className="text-sm font-color-secondary">
-                            Opens text file
+                            Opens text file (external application)
                         </span>
                     </span>
                 </span>
