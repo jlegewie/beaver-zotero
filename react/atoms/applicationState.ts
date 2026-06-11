@@ -10,6 +10,7 @@
 
 import { Getter } from 'jotai';
 import { NoteState, ReaderState } from '../types/attachments/apiTypes';
+import { ZoteroItemReference } from '../types/zotero';
 import {
     ApplicationStateInput,
     CurrentCollection,
@@ -27,6 +28,13 @@ import { BeaverDB } from '../../src/services/database';
 import { EmbeddingIndexer } from '../../src/services/embeddingIndexer';
 import { getLibrarySummaries } from '../../src/services/agentDataProvider/libraryCounts';
 import { logger } from '../../src/utils/logger';
+
+/**
+ * Maximum number of selected library items included in `library_selection`.
+ * The selection is low-signal context (users often have items selected without
+ * asking about them), so large selections (e.g. select-all) are truncated.
+ */
+const MAX_LIBRARY_SELECTION = 5;
 
 /**
  * Build reader state for the current reader attachment.
@@ -75,6 +83,7 @@ export async function buildZoteroApplicationState(get: Getter): Promise<Applicat
     // Get current library and collection context
     let currentLibrary: CurrentLibrary | undefined = undefined;
     let currentCollection: CurrentCollection | undefined = undefined;
+    let librarySelection: ZoteroItemReference[] | undefined = undefined;
 
     const searchableLibraryIds = get(searchableLibraryIdsAtom);
     const currentView: 'library' | 'file_reader' | 'note_editor' = get(isLibraryTabAtom) ? 'library' : noteState ? 'note_editor' : 'file_reader';
@@ -127,6 +136,16 @@ export async function buildZoteroApplicationState(get: Getter): Promise<Applicat
                     library_id: collection.libraryID,
                     parent_key: collection.parentKey || null,
                 };
+            }
+
+            const selectedItems = zp.getSelectedItems();
+            if (selectedItems.length > 0) {
+                librarySelection = selectedItems
+                    .slice(0, MAX_LIBRARY_SELECTION)
+                    .map((item: Zotero.Item) => ({
+                        library_id: item.libraryID,
+                        zotero_key: item.key,
+                    }));
             }
         }
     }
@@ -193,6 +212,7 @@ export async function buildZoteroApplicationState(get: Getter): Promise<Applicat
         ...(noteState ? { note_state: noteState } : {}),
         ...(currentLibrary ? { current_library: currentLibrary } : {}),
         ...(currentCollection ? { current_collection: currentCollection } : {}),
+        ...(librarySelection ? { library_selection: librarySelection } : {}),
         ...(indexingStatus ? { indexing_status: indexingStatus } : {}),
         ...(libraries ? { libraries } : {}),
     };
