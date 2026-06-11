@@ -109,7 +109,7 @@ export function finalizeSuccessResponse(opts: {
     const gzipOk = request.accept_encoding?.includes('gzip') ?? false;
 
     const documentCache = Zotero.Beaver?.documentCache;
-    let gz = typeof documentCache?.takeGzipPayload === 'function'
+    const gz = typeof documentCache?.takeGzipPayload === 'function'
         ? documentCache.takeGzipPayload(cacheSourceResult)
         : undefined;
     const estimatedJsonBytes = gz
