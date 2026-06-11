@@ -882,7 +882,16 @@ export class DocumentCache {
         payloadKind: PayloadKind,
         result: T,
     ): Promise<{ path: string; size: number; sha256: string }> {
+        const gzipStart = Date.now();
         const bytes = await gzipJsonValueChunked(result);
+        const gzipMs = Date.now() - gzipStart;
+        if (gzipMs > 2000) {
+            logger(
+                `DocumentCache.writePayloadFile: gzip ${bytes.byteLength} bytes for `
+                + `${libraryId}-${zoteroKey} (${payloadKind}) took ${gzipMs}ms`,
+                2,
+            );
+        }
         const sha256 = await this.sha256Hex(bytes);
         const dir = this.libraryDir(libraryId);
         await (IOUtils as any).makeDirectory(dir, { createAncestors: true }).catch(() => undefined);

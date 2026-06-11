@@ -6,13 +6,16 @@ export function gzipString(text: string): Uint8Array {
 }
 
 export interface ChunkedGzipJsonOptions {
-    /** Approximate UTF-16 chars to write before yielding back to the event loop. */
+    /** UTF-16 chars per deflate slice; the event loop gets a yield after each slice. */
     yieldAfterChars?: number;
     /** Yield implementation for tests and non-window runtimes. */
     yieldToEventLoop?: () => Promise<void>;
-    /** Test hook called once per buffered write to the deflator. */
+    /** Test hook called once per slice pushed to the deflator. */
     onDeflatePush?: (chars: number) => void;
 }
+
+/** Default slice size */
+const DEFAULT_GZIP_SLICE_CHARS = 4 * 1024 * 1024;
 
 function defaultYieldToEventLoop(): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, 0));
@@ -29,179 +32,61 @@ function concatUint8Arrays(chunks: Uint8Array[]): Uint8Array {
     return out;
 }
 
-function hex4(code: number): string {
-    return code.toString(16).padStart(4, '0');
-}
-
 /**
- * JSON-serialize and gzip a value incrementally.
+ * JSON-serialize and gzip a value, yielding to the event loop between
+ * deflate slices.
  *
- * This preserves the cache's `.json.gz` payload format while avoiding one
- * large `JSON.stringify(value)` + gzip run on Zotero's main thread.
+ * Serialization is a single native `JSON.stringify` pass — cheap even for
+ * ~50MB payloads (sub-second), so only the deflate work needs chunking to
+ * keep Zotero's main thread responsive. The string is fed to the deflator
+ * in `yieldAfterChars`-sized slices with one event-loop yield per slice.
+ * Slice boundaries never split a UTF-16 surrogate pair: encoding a lone
+ * surrogate half would emit U+FFFD and corrupt the payload. (Lone
+ * surrogates inside string VALUES are already `\uXXXX`-escaped to ASCII by
+ * `JSON.stringify`, so only well-formed pairs reach the slicer.)
  */
 export async function gzipJsonValueChunked(
     value: unknown,
     options: ChunkedGzipJsonOptions = {},
 ): Promise<Uint8Array> {
-    const yieldAfterChars = options.yieldAfterChars ?? 128 * 1024;
+    // Slices must advance by at least one char per iteration or the loop
+    // below never terminates — fall back to the default for non-finite,
+    // fractional-below-1, or non-positive values.
+    const requestedSliceChars = options.yieldAfterChars ?? DEFAULT_GZIP_SLICE_CHARS;
+    const sliceChars = Number.isFinite(requestedSliceChars) && requestedSliceChars >= 1
+        ? Math.floor(requestedSliceChars)
+        : DEFAULT_GZIP_SLICE_CHARS;
     const yieldToEventLoop = options.yieldToEventLoop ?? defaultYieldToEventLoop;
+
+    const json = JSON.stringify(value);
+    if (json === undefined) {
+        throw new TypeError('JSON.stringify returned undefined');
+    }
+
     const encoder = new TextEncoder();
     const deflator = new (pako as any).Deflate({ gzip: true });
     const chunks: Uint8Array[] = [];
-    const seen = new WeakSet<object>();
-    let pendingText = '';
 
     deflator.onData = (chunk: Uint8Array | ArrayBuffer) => {
         chunks.push(chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk));
     };
 
-    const flushPending = async () => {
-        if (!pendingText) return;
-        const text = pendingText;
-        pendingText = '';
-        options.onDeflatePush?.(text.length);
-        deflator.push(encoder.encode(text), false);
+    for (let start = 0; start < json.length;) {
+        let end = Math.min(start + sliceChars, json.length);
+        if (end < json.length) {
+            const code = json.charCodeAt(end - 1);
+            if (code >= 0xd800 && code <= 0xdbff) end++;
+        }
+        const slice = json.slice(start, end);
+        options.onDeflatePush?.(slice.length);
+        deflator.push(encoder.encode(slice), false);
         if (deflator.err) {
             throw new Error(deflator.msg || `gzip deflate failed with code ${deflator.err}`);
         }
         await yieldToEventLoop();
-    };
-
-    const write = async (text: string) => {
-        pendingText += text;
-        if (pendingText.length >= yieldAfterChars) await flushPending();
-    };
-
-    const writeJsonString = async (value: string): Promise<void> => {
-        await write('"');
-        let chunk = '';
-        const flush = async () => {
-            if (!chunk) return;
-            const out = chunk;
-            chunk = '';
-            await write(out);
-        };
-
-        for (let i = 0; i < value.length; i++) {
-            const code = value.charCodeAt(i);
-            switch (code) {
-                case 0x08:
-                    chunk += '\\b';
-                    break;
-                case 0x09:
-                    chunk += '\\t';
-                    break;
-                case 0x0a:
-                    chunk += '\\n';
-                    break;
-                case 0x0c:
-                    chunk += '\\f';
-                    break;
-                case 0x0d:
-                    chunk += '\\r';
-                    break;
-                case 0x22:
-                    chunk += '\\"';
-                    break;
-                case 0x5c:
-                    chunk += '\\\\';
-                    break;
-                default:
-                    if (code < 0x20) {
-                        chunk += `\\u${hex4(code)}`;
-                    } else if (code >= 0xd800 && code <= 0xdbff) {
-                        const next = i + 1 < value.length ? value.charCodeAt(i + 1) : 0;
-                        if (next >= 0xdc00 && next <= 0xdfff) {
-                            chunk += value.charAt(i) + value.charAt(i + 1);
-                            i++;
-                        } else {
-                            chunk += `\\u${hex4(code)}`;
-                        }
-                    } else if (code >= 0xdc00 && code <= 0xdfff) {
-                        chunk += `\\u${hex4(code)}`;
-                    } else {
-                        chunk += value[i];
-                    }
-            }
-
-            if (chunk.length >= yieldAfterChars) {
-                await flush();
-            }
-        }
-
-        await flush();
-        await write('"');
-    };
-
-    const applyToJSON = (v: unknown, key: string): unknown => {
-        if (v === null || typeof v !== 'object') return v;
-        const objectValue = v as { toJSON?: unknown };
-        return typeof objectValue.toJSON === 'function'
-            ? (objectValue.toJSON as (key: string) => unknown).call(v, key)
-            : v;
-    };
-
-    const isJSONUnsupported = (v: unknown): boolean => (
-        typeof v === 'undefined'
-        || typeof v === 'function'
-        || typeof v === 'symbol'
-    );
-
-    const writeValue = async (v: unknown): Promise<void> => {
-        if (v === null) return write('null');
-        if (typeof v === 'string') return writeJsonString(v);
-        if (typeof v === 'number') return write(Number.isFinite(v) ? String(v) : 'null');
-        if (typeof v === 'boolean') return write(v ? 'true' : 'false');
-        if (typeof v === 'bigint') throw new TypeError('Do not know how to serialize a BigInt');
-        if (isJSONUnsupported(v)) return write('null');
-        if (typeof v !== 'object') return write('null');
-
-        const objectValue = v as Record<string, unknown>;
-        if (seen.has(objectValue)) {
-            throw new TypeError('Converting circular structure to JSON');
-        }
-        seen.add(objectValue);
-        try {
-            if (Array.isArray(objectValue)) {
-                await write('[');
-                for (let i = 0; i < objectValue.length; i++) {
-                    if (i > 0) await write(',');
-                    const item = applyToJSON(objectValue[i], String(i));
-                    if (isJSONUnsupported(item)) {
-                        await write('null');
-                    } else {
-                        await writeValue(item);
-                    }
-                }
-                await write(']');
-                return;
-            }
-
-            await write('{');
-            let first = true;
-            for (const key of Object.keys(objectValue)) {
-                const item = applyToJSON(objectValue[key], key);
-                if (isJSONUnsupported(item)) {
-                    continue;
-                }
-                if (!first) await write(',');
-                first = false;
-                await writeJsonString(key);
-                await write(':');
-                await writeValue(item);
-            }
-            await write('}');
-        } finally {
-            seen.delete(objectValue);
-        }
-    };
-
-    const root = applyToJSON(value, '');
-    if (isJSONUnsupported(root)) {
-        throw new TypeError('JSON.stringify returned undefined');
+        start = end;
     }
-    await writeValue(root);
-    await flushPending();
+
     deflator.push(new Uint8Array(), true);
     if (deflator.err) {
         throw new Error(deflator.msg || `gzip deflate failed with code ${deflator.err}`);

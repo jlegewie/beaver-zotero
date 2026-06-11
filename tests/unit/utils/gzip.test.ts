@@ -77,6 +77,33 @@ describe('gzip helpers', () => {
         expect(gunzipToString(bytes)).toBe(JSON.stringify(value));
     });
 
+    it('terminates and round trips for non-positive or invalid slice sizes', async () => {
+        const value = { text: 'payload '.repeat(50) };
+        for (const yieldAfterChars of [0, -5, 0.25, NaN, Infinity]) {
+            const bytes = await gzipJsonValueChunked(value, {
+                yieldAfterChars,
+                yieldToEventLoop: vi.fn().mockResolvedValue(undefined),
+            });
+            expect(gunzipToString(bytes)).toBe(JSON.stringify(value));
+        }
+    });
+
+    it('never splits surrogate pairs across deflate slices', async () => {
+        // Odd slice size over a run of astral chars forces slice boundaries
+        // onto high surrogates; the slicer must extend past the pair.
+        const value = { text: '😀'.repeat(100) };
+        const onDeflatePush = vi.fn();
+
+        const bytes = await gzipJsonValueChunked(value, {
+            yieldAfterChars: 13,
+            yieldToEventLoop: vi.fn().mockResolvedValue(undefined),
+            onDeflatePush,
+        });
+
+        expect(gunzipToString(bytes)).toBe(JSON.stringify(value));
+        expect(onDeflatePush.mock.calls.some(([chars]) => chars === 14)).toBe(true);
+    });
+
     it('batches small JSON tokens before deflating', async () => {
         const value = {
             pages: Array.from({ length: 100 }, (_, i) => ({
