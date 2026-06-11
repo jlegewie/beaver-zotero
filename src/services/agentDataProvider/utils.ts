@@ -26,12 +26,14 @@ export {
     checkRemotePdfSize,
     preflightCachedPdfMeta,
     resolveToPdfAttachment,
+    resolveToImageAttachment,
 } from '../documentExtraction';
 export type {
     PreflightErrorCode,
     PreflightFailure,
     PreflightOptions,
     PdfAttachmentResolveResult,
+    ImageAttachmentResolveResult,
 } from '../documentExtraction';
 
 // ---------------------------------------------------------------------------

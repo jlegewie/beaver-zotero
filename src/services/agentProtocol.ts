@@ -253,6 +253,32 @@ export interface WSZoteroAttachmentPageImagesRequest extends WSBaseEvent {
     timeout_seconds?: number;
 }
 
+/** Request from backend to fetch a Zotero image attachment as a vision-ready image */
+export interface WSZoteroAttachmentImageRequest extends WSBaseEvent {
+    event: 'zotero_attachment_image_request';
+    request_id: string;
+    /** May be a parent item; frontend resolves it to an image attachment. */
+    attachment: ZoteroItemReference;
+    /** Maximum output width in pixels. Default: 1568, hard-capped at 4096. Never upscales. */
+    max_width?: number;
+    /** Maximum output height in pixels. Default: 1568, hard-capped at 4096. Never upscales. */
+    max_height?: number;
+    /**
+     * Output format. 'auto' (default) passes PNG/JPEG sources through
+     * unchanged when no resize is needed; otherwise JPEG sources re-encode
+     * as JPEG and everything else as PNG (falling back to JPEG when the
+     * PNG exceeds the output byte budget).
+     *
+     * Animated sources (GIF/APNG/animated WebP) are decoded to their first
+     * frame.
+     */
+    format?: 'png' | 'jpeg' | 'auto';
+    /** JPEG quality (1-100), used when the output is JPEG. Default: 85 */
+    jpeg_quality?: number;
+    /** Frontend-side processing deadline in seconds. */
+    timeout_seconds?: number;
+}
+
 /**
  * Data for a single reference to check if it exists in Zotero library.
  * Matches the fields needed by findExistingReference.
@@ -606,6 +632,58 @@ export interface WSZoteroAttachmentPageImagesResponse {
     error?: string | null;
     /** Error code for programmatic handling */
     error_code?: AttachmentPageImagesErrorCode | null;
+}
+
+/** Error codes for attachment image failures */
+export type AttachmentImageErrorCode =
+    | 'invalid_format'             // Invalid library_id, zotero_key, or request parameter format
+    | 'not_found'                  // Attachment not found in Zotero
+    | 'not_attachment'             // Item is not (resolvable to) an image attachment
+    | 'not_image'                  // Attachment is not an image content type
+    | 'is_linked_url'              // Attachment is a linked URL, not a stored file
+    | 'unsupported_image_format'   // Image format the runtime cannot decode (TIFF, HEIC, SVG, ...)
+    | 'file_missing'               // Image file not available locally
+    | 'file_too_large'             // Image file exceeds size limit
+    | 'download_failed'            // Remote file download failed
+    | 'decode_failed'              // Image could not be decoded (corrupt/truncated)
+    | 'timeout'                    // Processing timed out
+    | 'image_processing_failed';   // General resize/encode failure
+
+/** A processed attachment image. Field shapes align with WSPageImage. */
+export interface WSAttachmentImage {
+    /** Base64-encoded image data */
+    image_data: string;
+    /** Image format (png or jpeg) */
+    format: 'png' | 'jpeg';
+    /** Output image width in pixels */
+    width: number;
+    /** Output image height in pixels */
+    height: number;
+    /** Source image width in pixels (after EXIF orientation) */
+    original_width: number;
+    /** Source image height in pixels (after EXIF orientation) */
+    original_height: number;
+    /** Source MIME type, e.g. 'image/webp' */
+    original_format: string;
+    /** True when the output dimensions differ from the source */
+    resized: boolean;
+    /** True when the output MIME type differs from the source MIME type */
+    converted: boolean;
+}
+
+/** Response to zotero attachment image request */
+export interface WSZoteroAttachmentImageResponse {
+    type: 'zotero_attachment_image';
+    request_id: string;
+    attachment: ZoteroItemReference;
+    /** The attachment actually served when a parent item was auto-resolved. */
+    resolved_attachment?: ZoteroItemReference | null;
+    /** The processed image (null on error) */
+    image: WSAttachmentImage | null;
+    /** Error message if processing failed */
+    error?: string | null;
+    /** Error code for programmatic handling */
+    error_code?: AttachmentImageErrorCode | null;
 }
 
 /** Error codes for attachment search failures */
@@ -1239,6 +1317,7 @@ export type WSEvent =
     | WSMissingZoteroDataEvent
     | WSZoteroDocumentRequest
     | WSZoteroAttachmentPageImagesRequest
+    | WSZoteroAttachmentImageRequest
     | WSZoteroAttachmentSearchRequest
     | WSExternalReferenceCheckRequest
     | WSZoteroDataRequest
