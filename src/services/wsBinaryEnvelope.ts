@@ -47,13 +47,28 @@ export const SMALL_PAYLOAD_THRESHOLD_BYTES = 256 * 1024;
  */
 export const LEGACY_MAX_JSON_BYTES = 60 * 1024 * 1024;
 
+export type WSBinaryFrame = Uint8Array | Blob;
+
 /** Build the single binary frame for a WSBinaryEnvelope. */
-export function buildEnvelopeFrame(envelope: WSBinaryEnvelope): Uint8Array {
+export function buildEnvelopeFrame(envelope: WSBinaryEnvelope): WSBinaryFrame {
     const headerBytes = new TextEncoder().encode(
         JSON.stringify({ ...envelope.header, payload_encoding: 'gzip' }),
     );
+    const prefix = new Uint8Array(4);
+    new DataView(prefix.buffer).setUint32(0, headerBytes.byteLength, false);
+    if (typeof Blob !== 'undefined') {
+        return new Blob(
+            [
+                prefix as unknown as BlobPart,
+                headerBytes as unknown as BlobPart,
+                envelope.payload as unknown as BlobPart,
+            ],
+            { type: 'application/octet-stream' },
+        );
+    }
+
     const frame = new Uint8Array(4 + headerBytes.byteLength + envelope.payload.byteLength);
-    new DataView(frame.buffer).setUint32(0, headerBytes.byteLength, false);
+    frame.set(prefix, 0);
     frame.set(headerBytes, 4);
     frame.set(envelope.payload, 4 + headerBytes.byteLength);
     return frame;

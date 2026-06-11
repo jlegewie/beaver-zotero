@@ -8,7 +8,6 @@
  */
 
 import { logger } from '../../utils/logger';
-import { gzipString } from '../../utils/gzip';
 import {
     WSZoteroDocumentRequest,
     WSZoteroDocumentResponse,
@@ -43,6 +42,38 @@ import {
 // passing the popup notifier through `onRemoteDownloadFailure`. The
 // background extractor deliberately omits it.
 import { notifyRemoteDownloadFailure, notifyRemoteFileNotSynced } from './utils';
+
+/** Conservatively estimate JSON byte size without serializing huge payloads. */
+function estimateJsonBytes(value: unknown, stopAfterBytes: number): number {
+    const seen = new WeakSet<object>();
+    let bytes = 0;
+    const add = (n: number) => {
+        bytes += n;
+        return bytes > stopAfterBytes;
+    };
+    const walk = (v: unknown): boolean => {
+        if (v == null || typeof v === 'boolean') return add(4);
+        if (typeof v === 'number') return add(16);
+        if (typeof v === 'string') return add(v.length * 3 + 2);
+        if (typeof v !== 'object') return add(4);
+        if (seen.has(v)) return add(4);
+        seen.add(v);
+        if (Array.isArray(v)) {
+            if (add(2)) return true;
+            for (const item of v) {
+                if (walk(item) || add(1)) return true;
+            }
+            return false;
+        }
+        if (add(2)) return true;
+        for (const [key, item] of Object.entries(v)) {
+            if (add(key.length * 3 + 3) || walk(item) || add(1)) return true;
+        }
+        return false;
+    };
+    walk(value);
+    return bytes;
+}
 
 /**
  * Finalize a successful document response for the wire.
@@ -81,22 +112,21 @@ export function finalizeSuccessResponse(opts: {
     let gz = typeof documentCache?.takeGzipPayload === 'function'
         ? documentCache.takeGzipPayload(cacheSourceResult)
         : undefined;
-    if (!gz) {
-        // No cached blob (text files, cache disabled, shared-extraction
-        // second waiter). Small results skip compression entirely; the
-        // stringify below is no extra cost — send() serializes JSON anyway.
-        const json = JSON.stringify(response.result);
-        if (json.length < SMALL_PAYLOAD_THRESHOLD_BYTES) {
-            return response;
-        }
-        gz = gzipString(json);
-    }
+    const estimatedJsonBytes = gz
+        ? gzipDecompressedSize(gz)
+        : estimateJsonBytes(
+            response.result,
+            Math.max(
+                SMALL_PAYLOAD_THRESHOLD_BYTES,
+                request.max_decompressed_bytes ?? 0,
+                LEGACY_MAX_JSON_BYTES,
+            ),
+        );
 
-    const decompressedBytes = gzipDecompressedSize(gz);
     const mb = (n: number) => (n / (1024 * 1024)).toFixed(1);
     const tooLargeError = () => errorResponse(
         `The extracted content of this attachment is too large to transfer ` +
-        `(${mb(decompressedBytes)}MB of extracted text` +
+        `(${mb(estimatedJsonBytes)}MB of extracted text` +
         `${totalPages != null ? ` across ${totalPages} pages` : ''}). ` +
         `Do not try again with extract or read_pages for this attachment.`,
         'document_too_large',
@@ -105,13 +135,16 @@ export function finalizeSuccessResponse(opts: {
     );
 
     if (gzipOk) {
+        if (request.max_decompressed_bytes != null && estimatedJsonBytes > request.max_decompressed_bytes) {
+            return tooLargeError();
+        }
+        if (!gz) {
+            return estimatedJsonBytes > LEGACY_MAX_JSON_BYTES ? tooLargeError() : response;
+        }
         if (request.max_payload_bytes != null && gz.byteLength > request.max_payload_bytes) {
             return tooLargeError();
         }
-        if (request.max_decompressed_bytes != null && decompressedBytes > request.max_decompressed_bytes) {
-            return tooLargeError();
-        }
-        if (decompressedBytes < SMALL_PAYLOAD_THRESHOLD_BYTES) {
+        if (estimatedJsonBytes < SMALL_PAYLOAD_THRESHOLD_BYTES) {
             return response;
         }
         const { result: _result, ...header } = response;
@@ -120,7 +153,7 @@ export function finalizeSuccessResponse(opts: {
 
     // Legacy backend (no accept_encoding): JSON only. Guard the serialized
     // size against the deployed server frame limit.
-    if (decompressedBytes > LEGACY_MAX_JSON_BYTES) {
+    if (estimatedJsonBytes > LEGACY_MAX_JSON_BYTES) {
         return tooLargeError();
     }
     return response;

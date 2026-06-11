@@ -168,7 +168,7 @@ describe('finalizeSuccessResponse negotiation matrix', () => {
         expect((out as WSZoteroDocumentResponse).error_code).toBe('document_too_large');
     });
 
-    it('gzip backend, no cached blob: compresses the response result on demand', () => {
+    it('gzip backend, no cached blob: sends guarded JSON instead of foreground compression', () => {
         // Large enough to clear the small-payload fast path.
         const result = { mode: 'structured', pad: 'y'.repeat(SMALL_PAYLOAD_THRESHOLD_BYTES) };
         const out = finalize(
@@ -176,9 +176,8 @@ describe('finalizeSuccessResponse negotiation matrix', () => {
             result,
         );
 
-        expect(isWSBinaryEnvelope(out)).toBe(true);
-        if (!isWSBinaryEnvelope(out)) throw new Error('unreachable');
-        expect(JSON.parse(gunzipToString(out.payload))).toEqual(result);
+        expect(isWSBinaryEnvelope(out)).toBe(false);
+        expect((out as WSZoteroDocumentResponse).result).toBe(result);
     });
 
     it('gzip backend, no cached blob, small result: skips compression entirely', () => {

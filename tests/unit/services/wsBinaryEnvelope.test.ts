@@ -9,7 +9,7 @@ import {
 import { gzipString, gunzipToString } from '../../../src/utils/gzip';
 
 describe('wsBinaryEnvelope', () => {
-    it('builds a frame with BE length prefix, JSON header, and intact payload', () => {
+    it('builds a frame with BE length prefix, JSON header, and intact payload', async () => {
         const payload = gzipString('{"hello": "world"}');
         const envelope: WSBinaryEnvelope = {
             kind: 'ws_binary_envelope',
@@ -17,7 +17,10 @@ describe('wsBinaryEnvelope', () => {
             payload,
         };
 
-        const frame = buildEnvelopeFrame(envelope);
+        const builtFrame = buildEnvelopeFrame(envelope);
+        const frame = builtFrame instanceof Blob
+            ? new Uint8Array(await builtFrame.arrayBuffer())
+            : builtFrame;
 
         const headerLen = new DataView(frame.buffer).getUint32(0, false);
         const headerText = new TextDecoder().decode(frame.subarray(4, 4 + headerLen));

@@ -266,8 +266,10 @@ describe('AgentService reconnect handling', () => {
         });
 
         expect(socket.send).toHaveBeenCalledTimes(1);
-        const frame = socket.send.mock.calls[0][0] as Uint8Array;
-        expect(frame).toBeInstanceOf(Uint8Array);
+        const sent = socket.send.mock.calls[0][0] as Uint8Array | Blob;
+        const frame = sent instanceof Blob
+            ? new Uint8Array(await sent.arrayBuffer())
+            : sent;
 
         const headerLen = new DataView(frame.buffer).getUint32(0, false);
         const header = JSON.parse(new TextDecoder().decode(frame.subarray(4, 4 + headerLen)));

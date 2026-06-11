@@ -295,10 +295,11 @@ export class AgentService {
         // Log byte sizes only — never the payload.
         if (isWSBinaryEnvelope(data)) {
             const frame = buildEnvelopeFrame(data);
+            const frameBytes = frame instanceof Blob ? frame.size : frame.byteLength;
             logger(
                 `AgentService: Sending binary "${data.header.type}" ` +
                 `(request_id=${data.header.request_id}, ` +
-                `payload=${data.payload.byteLength} bytes, frame=${frame.byteLength} bytes)`,
+                `payload=${data.payload.byteLength} bytes, frame=${frameBytes} bytes)`,
                 1,
             );
             this.ws.send(frame);
