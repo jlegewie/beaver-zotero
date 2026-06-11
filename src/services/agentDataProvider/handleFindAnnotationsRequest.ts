@@ -267,8 +267,13 @@ function sortAnnotations(
     });
 }
 
-async function collectCollectionScope(collection: any, recursive: boolean): Promise<any[]> {
-    const collections: any[] = [];
+/**
+ * Collect a collection's ID and, when recursive, all descendant collection IDs.
+ * Only collection objects are touched (loaded for all libraries at startup), so
+ * this never forces the library's items into memory.
+ */
+async function collectCollectionIDScope(collection: any, recursive: boolean): Promise<number[]> {
+    const ids: number[] = [];
     const queue: any[] = [collection];
     const seen = new Set<number>();
 
@@ -278,60 +283,63 @@ async function collectCollectionScope(collection: any, recursive: boolean): Prom
             continue;
         }
         seen.add(current.id);
+        ids.push(current.id);
 
-        await current.loadDataType?.('childItems');
         if (recursive) {
             await current.loadDataType?.('childCollections');
-        }
-        collections.push(current);
-
-        if (recursive) {
             const children = current.getChildCollections?.(false, false) ?? [];
             queue.push(...children);
         }
     }
 
-    return collections;
+    return ids;
 }
 
+/**
+ * Return annotation item IDs for every attachment within a collection scope,
+ * covering both file attachments placed directly in a collection and attachments
+ * of regular items in the collection. Resolved entirely in SQL so the library's
+ * items don't need to be loaded into memory (group libraries lazy-load items,
+ * and synchronous item access would otherwise throw UnloadedDataException).
+ * Trashed members and attachments are excluded to match the rest of the handler.
+ */
 async function getCollectionAnnotationIDs(collection: any, recursive: boolean): Promise<Set<number>> {
-    const collections = await collectCollectionScope(collection, recursive);
-
-    const memberMap = new Map<number, Zotero.Item>();
-    for (const col of collections) {
-        const children = col.getChildItems(false) ?? [];
-        for (const item of children) {
-            if (item?.id) {
-                memberMap.set(item.id, item);
-            }
-        }
-    }
-
-    const members = Array.from(memberMap.values());
-    if (members.length === 0) {
+    const collectionIDs = await collectCollectionIDScope(collection, recursive);
+    if (collectionIDs.length === 0) {
         return new Set();
     }
 
-    await Zotero.Items.loadDataTypes(members, ['primaryData', 'itemData', 'childItems']);
-
-    const attachments: Zotero.Item[] = [];
-    for (const member of members) {
-        if (member.isFileAttachment?.()) {
-            attachments.push(member);
-            continue;
-        }
-        const attachmentIDs = member.getAttachments?.() ?? [];
-        if (attachmentIDs.length > 0) {
-            const loaded = await Zotero.Items.getAsync(attachmentIDs);
-            attachments.push(...loaded.filter((item: Zotero.Item | false): item is Zotero.Item => Boolean(item)));
-        }
+    const allowed = new Set<number>();
+    for (let i = 0; i < collectionIDs.length; i += 900) {
+        const chunk = collectionIDs.slice(i, i + 900);
+        if (chunk.length === 0) continue;
+        const placeholders = chunk.map(() => '?').join(', ');
+        await Zotero.DB.queryAsync(
+            `SELECT itemID
+             FROM itemAnnotations
+             WHERE parentItemID IN (
+                 SELECT IA.itemID
+                 FROM collectionItems CI
+                 JOIN itemAttachments IA ON IA.itemID = CI.itemID
+                 WHERE CI.collectionID IN (${placeholders})
+                   AND IA.itemID NOT IN (SELECT itemID FROM deletedItems)
+                 UNION
+                 SELECT IA.itemID
+                 FROM collectionItems CI
+                 JOIN itemAttachments IA ON IA.parentItemID = CI.itemID
+                 WHERE CI.collectionID IN (${placeholders})
+                   AND CI.itemID NOT IN (SELECT itemID FROM deletedItems)
+                   AND IA.itemID NOT IN (SELECT itemID FROM deletedItems)
+             )`,
+            [...chunk, ...chunk],
+            {
+                onRow: (row: any) => {
+                    allowed.add(row.getResultByIndex(0) as number);
+                },
+            },
+        );
     }
-
-    if (attachments.length === 0) {
-        return new Set();
-    }
-    await Zotero.Items.loadDataTypes(attachments, ['primaryData', 'itemData', 'childItems']);
-    return getAnnotationIDsForAttachmentItemIDs(attachments.map(itemID));
+    return allowed;
 }
 
 async function getAttachmentAnnotationIDs(attachment: Zotero.Item): Promise<Set<number>> {

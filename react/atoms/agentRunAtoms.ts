@@ -1454,6 +1454,39 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             set(clearAllPendingApprovalsAtom);
             // Clear per-run auto-approve state if the socket drops before done/error.
             set(clearAutoApproveNoteKeysAtom);
+
+            // If the socket dropped uncleanly while a run was still in flight, the
+            // server never delivered an error event
+            if (!wasClean) {
+                const activeRun = store.get(activeRunAtom);
+                if (
+                    activeRun &&
+                    (activeRun.status === 'in_progress' ||
+                        activeRun.status === 'awaiting_deferred')
+                ) {
+                    const message =
+                        'The connection to the server was lost before the run finished. Please try again.';
+                    set(wsErrorAtom, {
+                        event: 'error',
+                        type: 'connection_error',
+                        message,
+                        is_retryable: true,
+                    });
+                    set(activeRunAtom, (prev) =>
+                        prev
+                            ? {
+                                  ...prev,
+                                  status: 'error',
+                                  error: {
+                                      type: 'connection_error',
+                                      message,
+                                      is_retryable: true,
+                                  },
+                              }
+                            : prev,
+                    );
+                }
+            }
         }
     };
 }
