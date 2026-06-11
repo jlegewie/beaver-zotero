@@ -440,6 +440,14 @@ async function onMainWindowUnload(win: Window): Promise<void> {
             win.__beaverEventBus = null;
         }
 
+        // Stop the busy-context heartbeat timer (registered by busyContext.ts in
+        // the webpack bundle) so it doesn't outlive the window.
+        try {
+            win.__beaverStopBusyHeartbeat?.();
+        } catch (e) {
+            ztoolkit.log(`stopBusyHeartbeat: ${e}`);
+        }
+
         // Dev-only: visualizer highlights are temporary reader annotations
         // owned by the React bundle, so clear them before unmounting React.
         await cleanupDevTemporaryAnnotations(win);

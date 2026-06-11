@@ -25,7 +25,9 @@ import {
     WSAuthMessage,
     WSReadyData,
     WSRequestAckData,
+    WSRequestReceivedAck,
 } from './agentProtocol';
+import { getBusyContext } from './busyContext';
 
 
 // =============================================================================
@@ -43,6 +45,8 @@ export class AgentService {
     private actionExecutionQueue: Promise<void> = Promise.resolve();
     /** Monotonic counter incremented on close to invalidate stale queued messages */
     private connectionId: number = 0;
+    /** Whether the connected backend understands `request_received` acks (from the ready event) */
+    private serverSupportsRequestAcks: boolean = false;
     /**
      * Map of backend data-request event -> handler. Injectable so a non-Zotero
      * host can serve the same requests its own way. Defaults to the Zotero
@@ -66,6 +70,7 @@ export class AgentService {
         this.connectionId++;
         this.messageQueue = Promise.resolve();
         this.actionExecutionQueue = Promise.resolve();
+        this.serverSupportsRequestAcks = false;
     }
 
     /**
@@ -233,12 +238,15 @@ export class AgentService {
 
                 const connId = this.connectionId;
                 this.ws.onmessage = (event) => {
+                    // Capture arrival time so dispatch lag (message-queue
+                    // backlog) can be reported in request acks.
+                    const receivedAt = Date.now();
                     // Chain onto the queue so async callbacks are processed in order.
                     // connId check prevents stale messages from a previous connection
                     // from being processed after a reconnect.
                     this.messageQueue = this.messageQueue.then(() => {
                         if (this.connectionId !== connId) return;
-                        return this.handleMessage(event.data);
+                        return this.handleMessage(event.data, receivedAt);
                     }).catch(err => {
                         logger(`AgentService: Unhandled error in message queue: ${err}`, 1);
                     });
@@ -287,6 +295,25 @@ export class AgentService {
             return;
         }
 
+        // Attach a completion-time busy-context snapshot to request responses
+        // (backend response models carry `timing: Dict[str, Any]` and ignore
+        // extra fields, so this is safe against any backend version). Shallow
+        // copy to avoid mutating the caller's object.
+        if (
+            'request_id' in data
+            && 'type' in data
+            && (data as any).type !== 'request_received'
+        ) {
+            try {
+                data = {
+                    ...data,
+                    timing: { ...(data as any).timing, ...getBusyContext() },
+                };
+            } catch (error) {
+                logger(`AgentService: Failed to attach busy context: ${error}`, 1);
+            }
+        }
+
         const message = JSON.stringify(data);
         
         // Sanitize sensitive data for logging
@@ -316,11 +343,44 @@ export class AgentService {
     }
 
     /**
+     * Acknowledge a backend→frontend request as received, before its handler
+     * runs. Gated on the backend's `supports_request_acks` capability (older
+     * backends would route the ack to the pending request as its response).
+     * Best-effort: never blocks or fails request dispatch.
+     */
+    private maybeAckRequest(event: WSEvent, receivedAt: number): void {
+        if (!this.serverSupportsRequestAcks) return;
+        const requestId = (event as any).request_id;
+        const eventName = event.event;
+        if (typeof requestId !== 'string' || typeof eventName !== 'string') return;
+        // Backend requests awaiting a response keyed by request_id: all
+        // `*_request` events plus the agent action validate/execute pair.
+        if (
+            !eventName.endsWith('_request')
+            && eventName !== 'agent_action_validate'
+            && eventName !== 'agent_action_execute'
+        ) return;
+        try {
+            const ack: WSRequestReceivedAck = {
+                type: 'request_received',
+                request_id: requestId,
+                busy: {
+                    ...getBusyContext(),
+                    dispatch_lag_ms: Math.max(0, Date.now() - receivedAt),
+                },
+            };
+            this.send(ack);
+        } catch (error) {
+            logger(`AgentService: Failed to send request_received ack: ${error}`, 1);
+        }
+    }
+
+    /**
      * Handle incoming WebSocket message.
      * Async to support callbacks that load item data before updating state.
      * Messages are serialized via messageQueue to preserve processing order.
      */
-    private async handleMessage(rawData: string): Promise<void> {
+    private async handleMessage(rawData: string, receivedAt: number = Date.now()): Promise<void> {
         if (!this.callbacks) return;
 
         // Guard against invalid data during close handshake
@@ -345,9 +405,14 @@ export class AgentService {
             return;
         }
 
+        // Ack backend requests immediately (before handler dispatch) so the
+        // backend can tell "request never arrived" from "handler is slow".
+        this.maybeAckRequest(event, receivedAt);
+
         try {
             switch (event.event) {
                 case 'ready': {
+                    this.serverSupportsRequestAcks = event.supports_request_acks === true;
                     // Convert snake_case backend response to camelCase frontend data
                     const readyData: WSReadyData = {
                         subscriptionStatus: event.subscription_status,

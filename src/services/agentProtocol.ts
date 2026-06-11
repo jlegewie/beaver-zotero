@@ -26,6 +26,18 @@ export interface WSReadyEvent extends WSBaseEvent {
     subscription_status: SubscriptionStatus;
     processing_mode: ProcessingMode;
     indexing_complete: boolean;
+    supports_request_acks?: boolean;
+}
+
+/**
+ * Per-request ack sent to the backend synchronously when a backend→frontend
+ * request is dispatched.
+ */
+export interface WSRequestReceivedAck {
+    type: 'request_received';
+    request_id: string;
+    /** Busy-context snapshot plus dispatch lag, all numeric (booleans as 0/1) */
+    busy: Record<string, number>;
 }
 
 /** Request acknowledgment event sent after chat request is validated */
