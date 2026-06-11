@@ -1,4 +1,4 @@
-import { createClient, AuthApiError } from '@supabase/supabase-js';
+import { createClient, AuthApiError, type SupabaseClient } from '@supabase/supabase-js';
 import { EncryptedStorage } from './EncryptedStorage';
 import { logger } from '../utils/logger';
 
@@ -27,14 +27,16 @@ export interface SupabaseStorageAdapter {
     removeItem: (key: string) => Promise<void> | void;
 }
 
-// Optional host-supplied storage adapter. Must be set (via setSupabaseStorageAdapter)
-// before this module is first imported to take effect, since the client below is
-// constructed at module load. When unset (the Zotero plugin), the EncryptedStorage
-// default is used and behavior is unchanged.
+// Optional host-supplied storage adapter. The Supabase client is created lazily,
+// so non-Zotero hosts can import this module, set the adapter, and then use the
+// exported client without instantiating the Zotero-specific encrypted storage.
 let injectedStorageAdapter: SupabaseStorageAdapter | null = null;
 
 /** Inject a storage adapter for the Supabase auth session (non-Zotero hosts). */
 export function setSupabaseStorageAdapter(adapter: SupabaseStorageAdapter): void {
+    if (supabaseInstance) {
+        throw new Error('Supabase storage adapter must be set before the Supabase client is first used');
+    }
     injectedStorageAdapter = adapter;
 }
 
@@ -101,16 +103,15 @@ function createEncryptedStorageAdapter(): SupabaseStorageAdapter {
     };
 }
 
-// Storage the auth client persists into: a host-injected adapter if provided,
-// otherwise the Zotero EncryptedStorage default.
-const sessionStorage: SupabaseStorageAdapter = injectedStorageAdapter ?? createEncryptedStorageAdapter();
-
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
 
 if (!supabaseUrl || !supabaseAnonKey) {
     throw new Error('Missing Supabase URL or Anon Key');
 }
+
+const requiredSupabaseUrl: string = supabaseUrl;
+const requiredSupabaseAnonKey: string = supabaseAnonKey;
 
 // =============================================================================
 // Auth Lock Implementation
@@ -309,66 +310,102 @@ function handleAuthError(error: unknown, lockName: string): void {
     }
 }
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-    auth: {
-        persistSession: true,
-        autoRefreshToken: true,
-        detectSessionInUrl: false,
-        storage: sessionStorage,
-        // Mutex-based lock to prevent concurrent token refresh operations
-        lock: acquireAuthLock
-    }
-});
+type SupabaseClientInstance = SupabaseClient<any, any, any>;
 
-// Force-start auto-refresh and remove the visibility-change listener.
-//
-// The Supabase SDK registers a `visibilitychange` listener during
-// _initialize() (inside _handleVisibilityChange, in the `finally` block).
-// That listener stops the auto-refresh ticker when the document becomes
-// "hidden" and calls _recoverAndRefresh() when it becomes "visible" again.
-// In Zotero this is harmful: if the window is briefly obscured the ticker
-// stops, the access token can expire, and _recoverAndRefresh may hit a
-// stale refresh token → "Invalid Refresh Token" → unexpected logout.
-//
-// startAutoRefresh() removes the visibility listener and runs the ticker
-// unconditionally.  We must call it AFTER initialize() resolves, because
-// _initialize()'s finally block re-registers the listener.  Calling it
-// before (as was done previously) is a no-op — the listener doesn't exist
-// yet and gets registered right after.
-// Guard: if the client is disposed (plugin reload / shutdown) before
-// initialize() resolves, skip startAutoRefresh() so we don't resurrect
-// the old client's ticker alongside the new one.
+let supabaseInstance: SupabaseClientInstance | null = null;
 let disposed = false;
 
-async function stopDisposedSupabaseClient(): Promise<void> {
+async function stopDisposedSupabaseClient(client: SupabaseClientInstance): Promise<void> {
     // initialize() always re-runs _handleVisibilityChange() in its finally
     // block, so a disposed client must stop auto-refresh again after
     // initialize() settles to remove any re-registered SDK listener.
-    await supabase.auth.stopAutoRefresh();
+    await client.auth.stopAutoRefresh();
 }
 
-supabase.auth.initialize().then(async () => {
-    if (disposed) {
-        await stopDisposedSupabaseClient();
-        return;
+function createSupabaseClient(): SupabaseClientInstance {
+    // Storage the auth client persists into: a host-injected adapter if provided,
+    // otherwise the Zotero EncryptedStorage default.
+    const sessionStorage: SupabaseStorageAdapter = injectedStorageAdapter ?? createEncryptedStorageAdapter();
+
+    const client = createClient(requiredSupabaseUrl, requiredSupabaseAnonKey, {
+        auth: {
+            persistSession: true,
+            autoRefreshToken: true,
+            detectSessionInUrl: false,
+            storage: sessionStorage,
+            // Mutex-based lock to prevent concurrent token refresh operations
+            lock: acquireAuthLock
+        }
+    });
+
+    // Force-start auto-refresh and remove the visibility-change listener.
+    //
+    // The Supabase SDK registers a `visibilitychange` listener during
+    // _initialize() (inside _handleVisibilityChange, in the `finally` block).
+    // That listener stops the auto-refresh ticker when the document becomes
+    // "hidden" and calls _recoverAndRefresh() when it becomes "visible" again.
+    // In Zotero this is harmful: if the window is briefly obscured the ticker
+    // stops, the access token can expire, and _recoverAndRefresh may hit a
+    // stale refresh token → "Invalid Refresh Token" → unexpected logout.
+    //
+    // startAutoRefresh() removes the visibility listener and runs the ticker
+    // unconditionally.  We must call it AFTER initialize() resolves, because
+    // _initialize()'s finally block re-registers the listener.  Calling it
+    // before (as was done previously) is a no-op — the listener doesn't exist
+    // yet and gets registered right after.
+    // Guard: if the client is disposed (plugin reload / shutdown) before
+    // initialize() resolves, skip startAutoRefresh() so we don't resurrect
+    // the old client's ticker alongside the new one.
+    client.auth.initialize().then(async () => {
+        if (disposed) {
+            await stopDisposedSupabaseClient(client);
+            return;
+        }
+        await client.auth.startAutoRefresh();
+    }).catch(async (e) => {
+        if (disposed) {
+            await stopDisposedSupabaseClient(client);
+            return;
+        }
+        logger(`Failed to initialize/start Supabase auto-refresh: ${e}`, 2);
+    });
+
+    // Register cleanup function on the current window so that:
+    // 1. Module-level reload cleanup (above) can stop this client's timer
+    // 2. hooks.ts (esbuild bundle) can call win.__beaverDisposeSupabase during shutdown
+    // Using `window` scopes the function to the window that loaded this bundle,
+    // so multi-window scenarios don't interfere with each other.
+    if (currentWindow) {
+        currentWindow.__beaverDisposeSupabase = async () => {
+            disposed = true;
+            await stopDisposedSupabaseClient(client);
+        };
     }
-    await supabase.auth.startAutoRefresh();
-}).catch(async (e) => {
-    if (disposed) {
-        await stopDisposedSupabaseClient();
-        return;
+
+    return client;
+}
+
+function getSupabaseClient(): SupabaseClientInstance {
+    supabaseInstance ??= createSupabaseClient();
+    return supabaseInstance;
+}
+
+export const supabase = new Proxy({} as SupabaseClientInstance, {
+    get(_target, property) {
+        const client = getSupabaseClient();
+        const value = Reflect.get(client, property, client);
+        return typeof value === 'function' ? value.bind(client) : value;
+    },
+    set(_target, property, value) {
+        return Reflect.set(getSupabaseClient(), property, value);
+    },
+    has(_target, property) {
+        return property in getSupabaseClient();
+    },
+    ownKeys() {
+        return Reflect.ownKeys(getSupabaseClient());
+    },
+    getOwnPropertyDescriptor(_target, property) {
+        return Reflect.getOwnPropertyDescriptor(getSupabaseClient(), property);
     }
-    logger(`Failed to initialize/start Supabase auto-refresh: ${e}`, 2);
 });
-
-// Register cleanup function on the current window so that:
-// 1. Module-level reload cleanup (above) can stop this client's timer
-// 2. hooks.ts (esbuild bundle) can call win.__beaverDisposeSupabase during shutdown
-// Using `window` scopes the function to the window that loaded this bundle,
-// so multi-window scenarios don't interfere with each other.
-if (currentWindow) {
-    currentWindow.__beaverDisposeSupabase = async () => {
-        disposed = true;
-        await stopDisposedSupabaseClient();
-    };
-}

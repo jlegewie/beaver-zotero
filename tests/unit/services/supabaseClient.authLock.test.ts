@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { capturedLocks, mockCreateClient, mockLogger } = vi.hoisted(() => ({
+const { capturedLocks, mockCreateClient, mockEncryptedStorageConstructed, mockLogger } = vi.hoisted(() => ({
     capturedLocks: [] as Array<(name: string, acquireTimeout: number, fn: () => Promise<unknown>) => Promise<unknown>>,
     mockCreateClient: vi.fn((_url: string, _key: string, options: {
         auth: {
             lock: (name: string, acquireTimeout: number, fn: () => Promise<unknown>) => Promise<unknown>;
+            storage: unknown;
         };
     }) => {
         capturedLocks.push(options.auth.lock);
@@ -16,6 +17,7 @@ const { capturedLocks, mockCreateClient, mockLogger } = vi.hoisted(() => ({
             },
         };
     }),
+    mockEncryptedStorageConstructed: vi.fn(),
     mockLogger: vi.fn(),
 }));
 
@@ -28,8 +30,12 @@ vi.mock('@supabase/supabase-js', () => {
     };
 });
 
-vi.mock('../src/services/EncryptedStorage', () => ({
+vi.mock('../../../src/services/EncryptedStorage', () => ({
     EncryptedStorage: class MockEncryptedStorage {
+        constructor() {
+            mockEncryptedStorageConstructed();
+        }
+
         async getItem(): Promise<null> {
             return null;
         }
@@ -44,7 +50,7 @@ vi.mock('../src/services/EncryptedStorage', () => ({
     },
 }));
 
-vi.mock('../src/utils/logger', () => ({
+vi.mock('../../../src/utils/logger', () => ({
     logger: mockLogger,
 }));
 
@@ -63,6 +69,7 @@ describe('supabaseClient auth lock reload handling', () => {
     beforeEach(() => {
         capturedLocks.length = 0;
         mockCreateClient.mockClear();
+        mockEncryptedStorageConstructed.mockClear();
         mockLogger.mockClear();
         vi.resetModules();
 
@@ -72,8 +79,49 @@ describe('supabaseClient auth lock reload handling', () => {
         vi.stubGlobal('window', {});
     });
 
+    it('does not create the client until the exported client is first used', async () => {
+        const module = await import('../../../src/services/supabaseClient');
+
+        expect(mockCreateClient).not.toHaveBeenCalled();
+        expect(mockEncryptedStorageConstructed).not.toHaveBeenCalled();
+
+        module.supabase.auth;
+
+        expect(mockCreateClient).toHaveBeenCalledTimes(1);
+        expect(mockEncryptedStorageConstructed).toHaveBeenCalledTimes(1);
+    });
+
+    it('uses an injected storage adapter when set before the exported client is used', async () => {
+        const injectedStorage = {
+            getItem: vi.fn(),
+            setItem: vi.fn(),
+            removeItem: vi.fn(),
+        };
+        const module = await import('../../../src/services/supabaseClient');
+
+        module.setSupabaseStorageAdapter(injectedStorage);
+        module.supabase.auth;
+
+        expect(mockCreateClient).toHaveBeenCalledTimes(1);
+        expect(mockCreateClient.mock.calls[0][2].auth.storage).toBe(injectedStorage);
+        expect(mockEncryptedStorageConstructed).not.toHaveBeenCalled();
+    });
+
+    it('rejects storage injection after the exported client has been used', async () => {
+        const module = await import('../../../src/services/supabaseClient');
+
+        module.supabase.auth;
+
+        expect(() => module.setSupabaseStorageAdapter({
+            getItem: vi.fn(),
+            setItem: vi.fn(),
+            removeItem: vi.fn(),
+        })).toThrow('Supabase storage adapter must be set before the Supabase client is first used');
+    });
+
     it('keeps inherited waiters queued across module reloads', async () => {
-        await import('../src/services/supabaseClient');
+        const firstModule = await import('../../../src/services/supabaseClient');
+        firstModule.supabase.auth;
         const firstGenerationLock = capturedLocks.at(-1)!;
         const initialWindowLock = (window as any).__beaverAuthLock;
 
@@ -98,7 +146,8 @@ describe('supabaseClient auth lock reload handling', () => {
         expect(events).toEqual(['holder:start']);
 
         vi.resetModules();
-        await import('../src/services/supabaseClient');
+        const secondModule = await import('../../../src/services/supabaseClient');
+        secondModule.supabase.auth;
         const reloadedLock = capturedLocks.at(-1)!;
         expect((window as any).__beaverAuthLock).toBe(initialWindowLock);
 
@@ -124,13 +173,15 @@ describe('supabaseClient auth lock reload handling', () => {
     });
 
     it('starts with a fresh auth lock after shutdown cleanup removes the persisted state', async () => {
-        await import('../src/services/supabaseClient');
+        const firstModule = await import('../../../src/services/supabaseClient');
+        firstModule.supabase.auth;
         const firstWindowLock = (window as any).__beaverAuthLock;
 
         delete (window as any).__beaverAuthLock;
 
         vi.resetModules();
-        await import('../src/services/supabaseClient');
+        const secondModule = await import('../../../src/services/supabaseClient');
+        secondModule.supabase.auth;
 
         expect((window as any).__beaverAuthLock).toBeDefined();
         expect((window as any).__beaverAuthLock).not.toBe(firstWindowLock);
