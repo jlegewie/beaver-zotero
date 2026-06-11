@@ -5,6 +5,8 @@ export const DEFAULT_TIMEOUT_SECONDS = 25;
 export const DEFAULT_PAGES_TIMEOUT_SECONDS = 40;
 export const DEFAULT_SEARCH_TIMEOUT_SECONDS = 30;
 export const DEFAULT_IMAGES_TIMEOUT_SECONDS = 60;
+/** Default deadline for single image-attachment processing (decode/resize/encode). */
+export const DEFAULT_ATTACHMENT_IMAGE_TIMEOUT_SECONDS = 30;
 export const MAX_PDF_TIMEOUT_SECONDS = 180;
 
 /** Timeout error for cooperative cancellation */
