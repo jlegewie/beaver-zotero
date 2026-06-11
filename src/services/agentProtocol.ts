@@ -1269,6 +1269,19 @@ export interface WSAuthMessage {
 }
 
 /**
+ * Wire shape (snake_case) identifying a Zotero install. `local_user_key` is always
+ * present and unique per install — the discriminator when one Beaver account has
+ * several installs connected. The rest are best-effort context/labels (`user_id`/
+ * `account_name` are absent when Zotero sync is off).
+ */
+export interface ZoteroInstanceWire {
+    local_user_key: string;
+    user_id?: string;
+    account_name?: string;
+    device_name?: string;
+}
+
+/**
  * Client feature identifiers — the shared vocabulary a client declares in the
  * auth handshake (`WSAuthMessage.client_features`) so the backend gates tools on
  * declared support rather than inferring from `frontend_version`. The string

@@ -17,7 +17,7 @@ import {
     AgentDataProviderMap,
     createZoteroDataProvider,
 } from './agentDataDispatch';
-import { AgentRunRequest } from './agentProtocol';
+import { AgentRunRequest, ZoteroInstanceWire } from './agentProtocol';
 import {
     WSEvent,
     WSErrorEvent,
@@ -132,7 +132,7 @@ export class AgentService {
      * @param callbacks Event callbacks
      * @returns Promise that resolves when connection is established and ready, rejects on error
      */
-    async connect(request: AgentRunRequest, callbacks: WSCallbacks, frontendVersion?: string, clientType?: string, clientFeatures?: string[]): Promise<void> {
+    async connect(request: AgentRunRequest, callbacks: WSCallbacks, frontendVersion?: string, clientType?: string, clientFeatures?: string[], zoteroInstance?: ZoteroInstanceWire): Promise<void> {
         // Guard: Don't allow overlapping connect attempts
         if (this.connecting) {
             logger('AgentService: connect() already in progress, ignoring duplicate call', 1);
@@ -161,6 +161,7 @@ export class AgentService {
                 frontend_version: frontendVersion,
                 ...(clientType ? { client_type: clientType } : {}),
                 ...(clientFeatures ? { client_features: clientFeatures } : {}),
+                ...(zoteroInstance ? { zotero_instance: zoteroInstance } : {}),
             };
 
             // Connect with clean URL (no sensitive data in params)
