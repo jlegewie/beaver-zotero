@@ -1307,6 +1307,7 @@ export const CLIENT_FEATURES = {
     IMAGE_EXTRACTION: 'image_extraction',
     VIEW_PAGE_IMAGES: 'view_page_images',
     FIND_IN_ATTACHMENTS: 'find_in_attachments',
+    DOCUMENT_PAYLOAD_BUDGET: 'document_payload_budget',
     FILTER_ONLY_SEARCH: 'filter_only_search',
     SENTENCE_LEVEL_CITATION: 'sentence_level_citation',
     UNIFIED_CITATION_FORMAT: 'unified_citation_format',
