@@ -625,9 +625,11 @@ export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): st
                 }
             }
             
-            // Multiple items: show count
+            // Multiple items: show query count while the lookup is running
             if (totalCount > 1) {
-                return `${baseLabel}: ${totalCount} works`;
+                return status === 'completed'
+                    ? baseLabel
+                    : `${baseLabel}: ${totalCount} queries`;
             }
             
             return baseLabel;

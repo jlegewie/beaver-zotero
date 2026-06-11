@@ -50,6 +50,7 @@ import { ExtractResultView } from './ExtractResultView';
 import { ReadNoteResultView } from './ReadNoteResultView';
 import { GetAnnotationsResultView } from './GetAnnotationsResultView';
 import { FindInAttachmentsResultView } from './FindInAttachmentsResultView';
+import { LookupWorkResultView } from './LookupWorkResultView';
 
 interface ToolResultViewProps {
     toolcall: ToolCallPart;
@@ -150,29 +151,20 @@ export const ToolResultView: React.FC<ToolResultViewProps> = ({ toolcall, result
         }
     }
 
+    // Lookup work results (lookup_work) — before external search because both
+    // can carry a `references` array in the return payload.
+    if (isLookupWorkResult(toolName, content, metadata)) {
+        const data = extractLookupWorkData(content, metadata);
+        if (data) {
+            return <LookupWorkResultView {...data} />;
+        }
+    }
+
     // External search results (external_search, search_external_references)
     if (isExternalSearchResult(toolName, content, metadata)) {
         const data = extractExternalSearchData(content, metadata);
         if (data) {
             return <ExternalSearchResultView references={data.references} />;
-        }
-    }
-
-    // Lookup work results (lookup_work)
-    if (isLookupWorkResult(toolName, content, metadata)) {
-        const data = extractLookupWorkData(content, metadata);
-        if (data) {
-            if (data.found && data.reference) {
-                return <ExternalSearchResultView references={[data.reference]} />;
-            }
-            // Not found case - show message
-            return (
-                <div className="tool-result-view p-3 text-sm">
-                    <div className="font-color-secondary">
-                        {data.message || 'Work not found'}
-                    </div>
-                </div>
-            );
         }
     }
 

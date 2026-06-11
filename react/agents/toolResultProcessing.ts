@@ -1,7 +1,7 @@
 import { Setter } from "jotai";
 import { addExternalReferencesToMappingAtom, checkExternalReferencesAtom } from "../atoms/externalReferences";
 import { loadFullItemDataWithAllTypes } from "../../src/utils/zoteroUtils";
-import { extractExternalSearchData, isExternalSearchResult } from "./toolResultTypes";
+import { extractExternalSearchData, extractLookupWorkData, isExternalSearchResult, isLookupWorkResult } from "./toolResultTypes";
 import { ToolReturnPart } from "./types";
 import { extractZoteroReferences } from "./toolResultTypes";
 import { logger } from "../../src/utils/logger";
@@ -26,6 +26,16 @@ export async function processToolReturnResults(
         const externalReferences = extractExternalSearchData(part.content, part.metadata)?.references;
         if (externalReferences) {
             logger(`processToolReturnResults: Adding ${externalReferences.length} external references to mapping`, 1);
+            set(addExternalReferencesToMappingAtom, externalReferences);
+            set(checkExternalReferencesAtom, externalReferences);
+        }
+    } else if (
+        part.metadata &&
+        isLookupWorkResult(part.tool_name, part.content, part.metadata)
+    ) {
+        const externalReferences = extractLookupWorkData(part.content, part.metadata)?.references;
+        if (externalReferences && externalReferences.length > 0) {
+            logger(`processToolReturnResults: Adding ${externalReferences.length} lookup references to mapping`, 1);
             set(addExternalReferencesToMappingAtom, externalReferences);
             set(checkExternalReferencesAtom, externalReferences);
         }
