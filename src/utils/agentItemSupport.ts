@@ -2,10 +2,10 @@
  * Agent-facing item support predicates.
  *
  * These predicates decide which items the Beaver agent and frontend UI treat
- * as supported sources (regular items plus PDF/EPUB attachments). They are
- * intentionally separate from the sync predicates in `./sync` — the backend
- * sync/upload path remains PDF-only, while frontend reading supports every
- * content kind the local extraction pipeline can handle.
+ * as supported sources (regular items plus PDF/EPUB/plain-text attachments).
+ * They are intentionally separate from the sync predicates in `./sync` — the
+ * backend sync/upload path remains PDF-only, while frontend reading supports
+ * every content kind the local extraction pipeline can handle.
  *
  * This module must stay React-free (no `react/*`, Jotai store, or transitive
  * imports of them) so esbuild-side callers like `src/modules/zoteroContextMenu.ts`
@@ -21,13 +21,14 @@ import { logger } from './logger';
 
 /**
  * True when the item is a kind the agent can work with: a regular item or an
- * attachment whose content the local extraction pipeline can read (PDF/EPUB).
+ * attachment whose content the local extraction pipeline can read
+ * (PDF/EPUB/plain text).
  */
 export const isAgentSupportedItem = (item: Zotero.Item | false): boolean => {
     if (!item) return false;
     if (item.isRegularItem()) return true;
     const kind = getReadableContentKind(item);
-    return kind === 'pdf' || kind === 'epub';
+    return kind === 'pdf' || kind === 'epub' || kind === 'text';
 };
 
 /**
@@ -71,9 +72,10 @@ export const agentItemFilterAsync = async (
     if (item.isAttachment()) {
         if (await safeFileExists(item)) return true;
         const remoteAccessible = getPref('accessRemoteFiles') && isAttachmentAvailableRemotely(item);
-        // EPUB extraction requires a local zip file; a remote copy only becomes
-        // usable through the pref-gated download-on-validate path, so a bare
-        // server copy (hash synced, remote access disabled) is PDF-only.
+        // Only PDFs can be read straight from a bare server copy. EPUB and plain
+        // text extraction require the actual file, which a remote-only copy only
+        // provides through the pref-gated download-on-validate path — so without
+        // remote access enabled, a server copy (hash synced) is PDF-only.
         if (getReadableContentKind(item) === 'pdf') {
             return isAttachmentOnServer(item) || remoteAccessible;
         }

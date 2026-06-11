@@ -188,7 +188,7 @@ export async function isValidZoteroItem(item: Zotero.Item): Promise<{valid: bool
 
         // (a) Check if attachment is supported
         if (!isAgentSupportedItem(item)) {
-            return {valid: false, error: "Beaver only supports PDF and EPUB attachments"};
+            return {valid: false, error: "Beaver only supports PDF, EPUB, and plain-text attachments"};
         }
 
         // (b) Check if attachment is in trash
