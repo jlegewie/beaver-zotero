@@ -70,6 +70,93 @@ function matchPageText(match: AttachmentMatchSummary): string {
     return page ? `Page ${page}` : '';
 }
 
+/**
+ * Word-token boundary shared with the backend, which tokenizes on `\w+` with
+ * Python's Unicode-aware `re` (letters, digits, underscore). JS `\w` is
+ * ASCII-only even under the `u` flag, so a Unicode property class is used to
+ * keep non-ASCII terms (e.g. "Müller", "café", CJK) as single tokens and match
+ * the backend's query terms exactly.
+ */
+const TOKEN_RE = /[\p{L}\p{N}_]+/gu;
+
+/**
+ * Tokenize the query the same way the backend search does — lowercase Unicode
+ * word tokens, no stemming or stopword filtering — so the tokens we highlight
+ * are exactly the terms BM25 matched on. Keeps the preview highlight faithful
+ * to which words actually drove the match.
+ */
+function queryTokenSet(query: string): Set<string> {
+    const terms = new Set<string>();
+    for (const m of query.toLowerCase().matchAll(TOKEN_RE)) {
+        terms.add(m[0]);
+    }
+    return terms;
+}
+
+/** Leading context kept before the first hit when re-anchoring a preview. */
+const PREVIEW_LEAD_CHARS = 20;
+
+/**
+ * Re-anchor a centered preview so the first query-term hit sits near the start.
+ * The backend centers the snippet on the match, but the row renders on a single
+ * truncated line whose visible width tracks the sidebar — a centered hit can
+ * fall past the cut and never show on a narrow sidebar. Dropping most leading
+ * context (to the word boundary before the hit) keeps the hit visible at any
+ * width and lets a wider sidebar reveal trailing context, the useful direction.
+ */
+function anchorSnippetOnMatch(snippet: string, terms: Set<string>): string {
+    if (terms.size === 0) return snippet;
+    let hit = -1;
+    for (const m of snippet.matchAll(TOKEN_RE)) {
+        if (terms.has(m[0].toLowerCase())) {
+            hit = m.index;
+            break;
+        }
+    }
+    if (hit <= PREVIEW_LEAD_CHARS) return snippet; // already near the start
+    let cut = hit - PREVIEW_LEAD_CHARS;
+    const space = snippet.indexOf(' ', cut);
+    if (space !== -1 && space < hit) cut = space + 1;
+    return '… ' + snippet.slice(cut).replace(/^…\s*/, '');
+}
+
+/**
+ * Render a snippet with query-term hits highlighted. Splits on the same `\w+`
+ * boundary the backend tokenizer uses and wraps any token whose lowercase form
+ * is a query term; characters between tokens are emitted verbatim so the text
+ * is unchanged apart from the marks.
+ */
+function highlightSnippet(snippet: string, terms: Set<string>): React.ReactNode {
+    if (terms.size === 0) return snippet;
+    const nodes: React.ReactNode[] = [];
+    let lastIndex = 0;
+    let key = 0;
+    for (const m of snippet.matchAll(TOKEN_RE)) {
+        const token = m[0];
+        const start = m.index;
+        if (start > lastIndex) nodes.push(snippet.slice(lastIndex, start));
+        if (terms.has(token.toLowerCase())) {
+            nodes.push(
+                <mark
+                    key={key++}
+                    style={{
+                        backgroundColor: 'var(--tag-yellow-tertiary)',
+                        color: 'var(--fill-primary)',
+                        borderRadius: '2px',
+                    }}
+                >
+                    {token}
+                </mark>
+            );
+        } else {
+            nodes.push(token);
+        }
+        lastIndex = start + token.length;
+    }
+    if (lastIndex < snippet.length) nodes.push(snippet.slice(lastIndex));
+    return nodes;
+}
+
 function pluralize(count: number, noun: string): string {
     if (count === 1) return `${count} ${noun}`;
     const plural = /(?:ch|sh|s|x|z)$/i.test(noun) ? `${noun}es` : `${noun}s`;
@@ -86,9 +173,11 @@ function pluralize(count: number, noun: string): string {
  * toggle row so negative results don't crowd out the hits.
  */
 export const FindInAttachmentsResultView: React.FC<FindInAttachmentsResultViewProps> = ({
+    query,
     totalMatches,
     attachments,
 }) => {
+    const queryTerms = React.useMemo(() => queryTokenSet(query), [query]);
     const [resolved, setResolved] = useState<ResolvedAttachment[]>([]);
     const [hoveredKey, setHoveredKey] = useState<string | null>(null);
     const [showNoMatches, setShowNoMatches] = useState(false);
@@ -235,7 +324,7 @@ export const FindInAttachmentsResultView: React.FC<FindInAttachmentsResultViewPr
                                     onMouseLeave={() => setHoveredKey(null)}
                                 >
                                     <div className="text-sm truncate min-w-0 flex-1 font-color-secondary">
-                                        &ldquo;{match.snippet}&rdquo;
+                                        &ldquo;{highlightSnippet(anchorSnippetOnMatch(match.snippet, queryTerms), queryTerms)}&rdquo;
                                     </div>
                                     {pageText && (
                                         <div className="text-sm font-color-secondary whitespace-nowrap">
