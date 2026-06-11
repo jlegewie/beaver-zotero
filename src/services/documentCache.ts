@@ -10,7 +10,7 @@ import type {
 } from './database';
 import { getFileSignature, isRemoteFilePath, type FileSignature } from './documentFileIdentity';
 import { logger } from '../utils/logger';
-import { gzipString, gunzipToString } from '../utils/gzip';
+import { gzipJsonValueChunked, gunzipToString } from '../utils/gzip';
 import { createAbortController } from '../utils/abortController';
 import type { BeaverExtractResult } from '../beaver-extract/schema/schema';
 import {
@@ -882,8 +882,7 @@ export class DocumentCache {
         payloadKind: PayloadKind,
         result: T,
     ): Promise<{ path: string; size: number; sha256: string }> {
-        const json = JSON.stringify(result);
-        const bytes = gzipString(json);
+        const bytes = await gzipJsonValueChunked(result);
         const sha256 = await this.sha256Hex(bytes);
         const dir = this.libraryDir(libraryId);
         await (IOUtils as any).makeDirectory(dir, { createAncestors: true }).catch(() => undefined);
