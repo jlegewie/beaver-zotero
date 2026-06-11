@@ -378,9 +378,11 @@ export async function getAttachmentInfo(
         return { ...base, status_reason: unreadableTypeReason(contentKind) };
     }
 
-    // PDF and EPUB are always readable; the remaining readable kinds
-    // (text/snapshot/image) stay behind the nonPdfReadableEnabled option.
-    const isUnconditionallyReadable = contentKind === 'pdf' || contentKind === 'epub';
+    // PDF, EPUB, and plain text are always readable (text via the line-based
+    // `read` tool); the remaining readable kinds (snapshot/image) stay behind
+    // the nonPdfReadableEnabled option until extraction supports them.
+    const isUnconditionallyReadable =
+        contentKind === 'pdf' || contentKind === 'epub' || contentKind === 'text';
     if (!isReadableContentKind(contentKind) || (!isUnconditionallyReadable && !options.nonPdfReadableEnabled)) {
         return { ...base, status_reason: unreadableTypeReason(contentKind) };
     }

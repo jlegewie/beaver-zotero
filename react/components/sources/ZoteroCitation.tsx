@@ -48,7 +48,7 @@ import {
     isExternalReferenceDetailsDialogVisibleAtom,
     selectedExternalReferenceAtom
 } from '../../atoms/ui';
-import { Icon, LibraryIcon, PdfIcon, GlobalSearchIcon, NoteIcon, HighlighterIcon } from '../icons/icons';
+import { Icon, LibraryIcon, PdfIcon, GlobalSearchIcon, NoteIcon, HighlighterIcon, TextAlignLeftIcon } from '../icons/icons';
 import {
     buildZoteroCitationLinkHTML,
     isLinkCitationItem,
@@ -802,6 +802,11 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
     const isEpubCitation = getContentKind(citationMetadata) === 'epub';
     const hasEpubSymbolicLocator = isEpubCitation
         && getSymbolicLocation(citationMetadata)?.content_kind === 'epub';
+    const isTextCitation = getContentKind(citationMetadata) === 'text';
+    const symbolicLocationForDisplay = getSymbolicLocation(citationMetadata);
+    const textLineLocation = isTextCitation && symbolicLocationForDisplay?.content_kind === 'text'
+        ? symbolicLocationForDisplay
+        : undefined;
     const hasBoundingBoxes = !isNoteCitation && !isAnnotationCitation && !!citationMetadata && getCitationBoundingBoxes(citationMetadata).length > 0;
     const hasLocator = !isNoteCitation && !isAnnotationCitation && (pages.length > 0 || hasBoundingBoxes || hasEpubSymbolicLocator);
     const citationClassBase = isExternal && !mappedZoteroItem
@@ -837,6 +842,13 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
                 {pages && pages.length > 0 && pages[0] && (
                     <span className="font-color-secondary text-sm">
                         {isEpubCitation ? `Section ${pageLabels[0]}` : `Page ${pageLabels[0]}`}
+                    </span>
+                )}
+                {(!pages || pages.length === 0) && textLineLocation && (
+                    <span className="font-color-secondary text-sm">
+                        {textLineLocation.line_end && textLineLocation.line_end !== textLineLocation.line
+                            ? `Lines ${textLineLocation.line}–${textLineLocation.line_end}`
+                            : `Line ${textLineLocation.line}`}
                     </span>
                 )}
             </span>
@@ -887,7 +899,17 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
                     </span>
                 </span>
             )}
-            {!hasLocator && !isNoteCitation && !isAnnotationCitation && (!isExternal || !!mappedZoteroItem) && (
+            {isTextCitation && !isNoteCitation && !isAnnotationCitation && (!isExternal || !!mappedZoteroItem) && (
+                <span className="px-3 py-15 border-top-quinary block">
+                    <span className="display-flex flex-row items-center gap-15">
+                        <Icon icon={TextAlignLeftIcon} className="font-color-secondary" />
+                        <span className="text-sm font-color-secondary">
+                            Opens text file
+                        </span>
+                    </span>
+                </span>
+            )}
+            {!hasLocator && !isTextCitation && !isNoteCitation && !isAnnotationCitation && (!isExternal || !!mappedZoteroItem) && (
                 <span className="px-3 py-15 border-top-quinary block">
                     <span className="display-flex flex-row items-center gap-15">
                         <Icon icon={LibraryIcon} className="font-color-secondary" />

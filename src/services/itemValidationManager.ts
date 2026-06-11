@@ -383,7 +383,8 @@ class ItemValidationManager {
     /**
      * Perform frontend mode validation for attachments
      * Comprehensive local checks without backend verification.
-     * Checks: PDF type, file exists, file size, page count, encryption, OCR needs
+     * Checks: readable kind (PDF/EPUB/text), file exists, file size, and for
+     * PDFs page count, encryption, and OCR needs
      */
     private async performFrontendAttachmentValidation(
         attachment: Zotero.Item
@@ -398,10 +399,10 @@ class ItemValidationManager {
             return { isValid: false, reason: 'Attachment is in trash' };
         }
 
-        // 3. Must be a readable attachment kind (PDF or EPUB)
+        // 3. Must be a readable attachment kind (PDF, EPUB, or plain text)
         const contentType = attachment.attachmentContentType;
         const contentKind = getReadableContentKind(attachment);
-        if (contentKind !== 'pdf' && contentKind !== 'epub') {
+        if (contentKind !== 'pdf' && contentKind !== 'epub' && contentKind !== 'text') {
             return {
                 isValid: false,
                 reason: `File type "${contentType || 'unknown'}" is not supported`
@@ -469,6 +470,12 @@ class ItemValidationManager {
         } catch (error: any) {
             logger(`ItemValidationManager: Error checking file size: ${error.message}`, 2);
             return { isValid: false, reason: 'Unable to check file size' };
+        }
+
+        // Text: no parser-level analysis needed — extraction is a plain UTF-8
+        // read, so existence and size (checked above) are sufficient.
+        if (contentKind === 'text') {
+            return { isValid: true };
         }
 
         const cachedMetadata = await Zotero.Beaver?.documentCache?.getMetadata(

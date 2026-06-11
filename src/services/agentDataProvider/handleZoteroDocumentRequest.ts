@@ -74,7 +74,7 @@ export function guardPayloadSize(
         `${mb(payloadBytes)}MB of extracted text` +
         `${totalPages != null ? ` across ${totalPages} pages` : ''}, ` +
         `limit ${mb(limit)}MB. Do not try again with extract, ` +
-        `find_in_attachments or read_pages for this attachment.`,
+        `find_in_attachments, read, or read_pages for this attachment.`,
         'document_too_large',
         totalPages,
         contentKind,
