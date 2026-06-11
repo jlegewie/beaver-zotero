@@ -132,7 +132,7 @@ export class AgentService {
      * @param callbacks Event callbacks
      * @returns Promise that resolves when connection is established and ready, rejects on error
      */
-    async connect(request: AgentRunRequest, callbacks: WSCallbacks, frontendVersion?: string): Promise<void> {
+    async connect(request: AgentRunRequest, callbacks: WSCallbacks, frontendVersion?: string, clientType?: string, clientFeatures?: string[]): Promise<void> {
         // Guard: Don't allow overlapping connect attempts
         if (this.connecting) {
             logger('AgentService: connect() already in progress, ignoring duplicate call', 1);
@@ -153,11 +153,14 @@ export class AgentService {
         try {
             const token = await this.getAuthToken();
 
-            // Auth message now includes token and frontend version
+            // Auth message includes token, frontend version, and — when the
+            // caller supplies them — the client identity and declared features.
             const authMessage: WSAuthMessage = {
                 type: 'auth',
                 token,
                 frontend_version: frontendVersion,
+                ...(clientType ? { client_type: clientType } : {}),
+                ...(clientFeatures ? { client_features: clientFeatures } : {}),
             };
 
             // Connect with clean URL (no sensitive data in params)

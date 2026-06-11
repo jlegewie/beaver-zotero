@@ -1260,7 +1260,50 @@ export interface WSAuthMessage {
     token: string;
     /** frontend version */
     frontend_version?: string;
+    /** Client identifier (e.g. 'zotero-plugin', 'word-addin'). Absent for older
+     * clients; the backend treats a missing value as 'zotero-plugin'. */
+    client_type?: string;
+    /** Features this client supports. When provided, the backend gates tools on
+     * this set instead of deriving it from `frontend_version`. */
+    client_features?: string[];
 }
+
+/**
+ * Client feature identifiers — the shared vocabulary a client declares in the
+ * auth handshake (`WSAuthMessage.client_features`) so the backend gates tools on
+ * declared support rather than inferring from `frontend_version`. The string
+ * values MUST match the backend's `FEAT_*` constants exactly.
+ */
+export const CLIENT_FEATURES = {
+    LIBRARY_MANAGEMENT: 'library_management',
+    MANAGE_LIBRARY_STRUCTURE: 'manage_library_structure',
+    NOTE_SUPPORT: 'note_support',
+    NOTE_APPEND: 'note_append',
+    ANNOTATION_SUPPORT: 'annotation_support',
+    FIND_ANNOTATIONS: 'find_annotations',
+    EXTRACT: 'extract',
+    BEAVER_EXTRACT: 'beaver_extract',
+    IMAGE_EXTRACTION: 'image_extraction',
+    VIEW_PAGE_IMAGES: 'view_page_images',
+    FIND_IN_ATTACHMENTS: 'find_in_attachments',
+    FILTER_ONLY_SEARCH: 'filter_only_search',
+    SENTENCE_LEVEL_CITATION: 'sentence_level_citation',
+    UNIFIED_CITATION_FORMAT: 'unified_citation_format',
+    EXTERNAL_SEARCH_SURCHARGE: 'external_search_surcharge',
+    EDIT_METADATA_CREATORS: 'edit_metadata_creators',
+} as const;
+
+/** Client type identifier for the Zotero plugin. */
+export const ZOTERO_PLUGIN_CLIENT_TYPE = 'zotero-plugin';
+
+/**
+ * Features the current Zotero plugin build supports, declared explicitly in the
+ * auth handshake. This build supports the full set, which equals what the
+ * backend would otherwise derive from this plugin version — so declaring it is
+ * behavior-preserving while letting the backend stop relying on version
+ * derivation for current clients.
+ */
+export const ZOTERO_PLUGIN_FEATURES: string[] = Object.values(CLIENT_FEATURES);
 
 /** Current library context for application state */
 export interface CurrentLibrary {
