@@ -210,7 +210,7 @@ export const ToolResultView: React.FC<ToolResultViewProps> = ({ toolcall, result
     if (isGetMetadataResult(toolName, content, metadata)) {
         const data = extractGetMetadataData(content, metadata);
         if (data && data.items.length > 0) {
-            return <ItemSearchResultView items={data.items} />;
+            return <ItemSearchResultView items={data.items} showParentItem={false} />;
         }
     }
 
