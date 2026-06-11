@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BeaverDB } from '../../../src/services/database';
 import { DocumentCache } from '../../../src/services/documentCache';
-import { gzipString } from '../../../src/utils/gzip';
+import { gzipString, gunzipToString } from '../../../src/utils/gzip';
 import { MockDBConnection } from '../../mocks/mockDBConnection';
 import { createMockAttachment } from '../../helpers/factories';
 import type { BeaverExtractResult } from '../../../src/beaver-extract/schema/schema';
@@ -161,6 +161,92 @@ describe('DocumentCache payloads', () => {
         });
         const payload = await db.getDocumentCachePayload(1, 'ABCD1234', 'structured');
         expect(payload?.contentKind).toBe('pdf');
+    });
+
+    it('putResult populates the gzip side-channel for the stored result (take-once)', async () => {
+        const item = createCacheAttachment();
+        await cache.putResult({
+            item,
+            filePath: sourcePath,
+            mode: 'structured',
+            sourceSizeBytes: 3,
+            contentType: 'application/pdf',
+            result: structuredResult,
+            metadata: {
+                pageCount: 1,
+                pageLabels: { '0': '1' },
+                pages: onePageGeometry,
+            },
+        });
+
+        const bytes = cache.takeGzipPayload(structuredResult);
+        expect(bytes).toBeInstanceOf(Uint8Array);
+        // The side-channel blob is byte-identical to the on-disk payload.
+        expect(JSON.parse(gunzipToString(bytes!))).toEqual(structuredResult);
+        // Take-once: a second take returns nothing.
+        expect(cache.takeGzipPayload(structuredResult)).toBeUndefined();
+    });
+
+    it('getResult populates the gzip side-channel on cache hits (take-once)', async () => {
+        const item = createCacheAttachment();
+        await cache.putResult({
+            item,
+            filePath: sourcePath,
+            mode: 'structured',
+            sourceSizeBytes: 3,
+            contentType: 'application/pdf',
+            result: structuredResult,
+            metadata: {
+                pageCount: 1,
+                pageLabels: { '0': '1' },
+                pages: onePageGeometry,
+            },
+        });
+        // Drain the put-side entry so the hit below proves the read path.
+        cache.takeGzipPayload(structuredResult);
+
+        const hit = await cache.getResult(
+            { libraryId: 1, zoteroKey: 'ABCD1234' },
+            'structured',
+            sourcePath,
+        );
+        expect(hit).not.toBeNull();
+
+        const bytes = cache.takeGzipPayload(hit!);
+        expect(bytes).toBeInstanceOf(Uint8Array);
+        expect(JSON.parse(gunzipToString(bytes!))).toEqual(structuredResult);
+        expect(cache.takeGzipPayload(hit!)).toBeUndefined();
+    });
+
+    it('getEpubResult populates the gzip side-channel on cache hits', async () => {
+        const item = createCacheAttachment();
+        await cache.putResult<EpubDocument>({
+            item,
+            filePath: sourcePath,
+            mode: 'structured',
+            sourceSizeBytes: 3,
+            contentType: 'application/epub+zip',
+            result: epubDocument,
+            metadata: {
+                contentKind: 'epub',
+                pageCount: null,
+                pageLabels: null,
+                pages: null,
+                epubSections: [{ index: 0, rawHref: 'EPUB/chapter.xhtml', label: 'Chapter 1', itemCount: 1 }],
+                epubExtractedTextChars: 1234,
+            },
+        });
+        cache.takeGzipPayload(epubDocument);
+
+        const hit = await cache.getEpubResult(
+            { libraryId: 1, zoteroKey: 'ABCD1234' },
+            sourcePath,
+        );
+        expect(hit).not.toBeNull();
+
+        const bytes = cache.takeGzipPayload(hit!);
+        expect(bytes).toBeInstanceOf(Uint8Array);
+        expect(JSON.parse(gunzipToString(bytes!))).toEqual(epubDocument);
     });
 
     it('putResult then getEpubResult returns the cached EPUB document', async () => {

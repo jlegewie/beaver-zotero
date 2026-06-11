@@ -23,6 +23,7 @@ import { useAtomValue } from 'jotai';
 import { isAuthenticatedAtom } from '../atoms/auth';
 import { logger } from '../../src/utils/logger';
 import { getZoteroUserIdentifier } from '../../src/utils/zoteroUtils';
+import { isWSBinaryEnvelope } from '../../src/services/wsBinaryEnvelope';
 import {
     handleZoteroDataRequest,
     handleExternalReferenceCheckRequest,
@@ -375,6 +376,11 @@ async function handleAttachmentDocumentHttpRequest(request: any) {
     };
 
     const response = await handleZoteroDocumentRequest(wsRequest);
+    if (isWSBinaryEnvelope(response)) {
+        // Unreachable: this request never negotiates accept_encoding, so the
+        // handler always returns plain JSON.
+        throw new Error('Unexpected binary document response on HTTP endpoint');
+    }
 
     return {
         resolved_attachment: response.resolved_attachment,

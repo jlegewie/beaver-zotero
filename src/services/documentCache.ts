@@ -89,6 +89,21 @@ export class DocumentCache {
     private payloadCacheDir = '';
     private writeLocks = new Map<string, Promise<void>>();
     private extractionLocks = new Map<string, ExtractionLockEntry<CacheablePayload>>();
+    /**
+     * Side-channel from a result object to the raw gzipped payload bytes it
+     * round-tripped through (read on cache hit, written on fresh put).
+     */
+    private gzipPayloadByResult = new WeakMap<object, Uint8Array>();
+
+    /**
+     * Take (get + delete) the gzipped payload bytes for a result object
+     * returned by this cache.
+     */
+    takeGzipPayload(result: object): Uint8Array | undefined {
+        const bytes = this.gzipPayloadByResult.get(result);
+        if (bytes) this.gzipPayloadByResult.delete(result);
+        return bytes;
+    }
 
     constructor(db: BeaverDB) {
         this.db = db;
@@ -216,6 +231,8 @@ export class DocumentCache {
             }
 
             await this.db.touchDocumentCachePayload(payload.id).catch(() => undefined);
+            // All checks passed: the raw gz bytes match this result exactly.
+            this.gzipPayloadByResult.set(result, bytes);
             return result;
         } catch (error) {
             logger(`DocumentCache.getResult error: ${error}`, 1);
@@ -294,6 +311,8 @@ export class DocumentCache {
             }
 
             await this.db.touchDocumentCachePayload(payload.id).catch(() => undefined);
+            // All checks passed: the raw gz bytes match this result exactly.
+            this.gzipPayloadByResult.set(result, bytes);
             return result;
         } catch (error) {
             logger(`DocumentCache.getEpubResult error: ${error}`, 1);
@@ -681,6 +700,9 @@ export class DocumentCache {
             payloadKind,
             input.result,
         );
+        // Fresh extraction: the gz bytes computed for the disk write double
+        // as the wire payload for the in-flight document request.
+        this.gzipPayloadByResult.set(input.result as object, payloadWrite.bytes);
         const { metadata, deletedPayloads } = await this.db.upsertDocumentCacheMetadata(metadataInput);
         const oldPayload = await this.db.getDocumentCachePayload(input.item.libraryID, input.item.key, payloadKind);
         await this.db.upsertDocumentCachePayload({
@@ -881,7 +903,7 @@ export class DocumentCache {
         zoteroKey: string,
         payloadKind: PayloadKind,
         result: T,
-    ): Promise<{ path: string; size: number; sha256: string }> {
+    ): Promise<{ path: string; size: number; sha256: string; bytes: Uint8Array }> {
         const json = JSON.stringify(result);
         const bytes = gzipString(json);
         const sha256 = await this.sha256Hex(bytes);
@@ -903,7 +925,7 @@ export class DocumentCache {
             await IOUtils.remove(tempPath).catch(() => undefined);
         }
 
-        return { path: finalPath, size: bytes.byteLength, sha256 };
+        return { path: finalPath, size: bytes.byteLength, sha256, bytes };
     }
 
     private async payloadFileMatches(path: string, expectedBytes: Uint8Array, expectedSha256: string): Promise<boolean> {

@@ -33,11 +33,16 @@ import {
     handleAgentActionExecuteRequest,
     handleReadNoteRequest,
 } from './agentDataProvider';
+import type { WSBinaryEnvelope } from './wsBinaryEnvelope';
 
 /** A single data-request handler plus its error-fallback response. */
 export interface AgentDataRequestEntry {
-    /** Run the request and resolve with the response object to send back. */
-    handle: (event: any) => Promise<Record<string, any>>;
+    /**
+     * Run the request and resolve with the response to send back: either a
+     * JSON object or a binary envelope (large gzip payloads, sent only when
+     * the request negotiated `accept_encoding`).
+     */
+    handle: (event: any) => Promise<Record<string, any> | WSBinaryEnvelope>;
     /** Build the response to send when `handle` rejects (keeps the backend from timing out). */
     errorResponse: (event: any, err: unknown) => Record<string, any>;
     /**

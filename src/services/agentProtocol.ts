@@ -207,6 +207,16 @@ export interface WSZoteroDocumentRequest extends WSBaseEvent {
     max_file_size_mb?: number | null;
     /** Frontend-side extraction deadline in seconds. */
     timeout_seconds?: number;
+    /**
+     * Payload encodings the backend accepts for the response (e.g. ['gzip']).
+     * When it includes 'gzip', large results are sent as a binary WebSocket
+     * envelope with a gzip payload instead of plain JSON.
+     */
+    accept_encoding?: string[] | null;
+    /** Max compressed payload size the backend accepts for binary responses. */
+    max_payload_bytes?: number | null;
+    /** Max decompressed payload size the backend accepts (bomb ceiling). */
+    max_decompressed_bytes?: number | null;
 }
 
 /** Request from backend to render attachment pages as images */
@@ -540,6 +550,7 @@ export type ZoteroDocumentErrorCode =
     | 'timeout'             // Extraction timed out
     | 'extraction_failed'  // General extraction failure
     | 'recursion_limit'     // Extraction overflowed the JS stack ("too much recursion" / "Maximum call stack")
+    | 'document_too_large'  // Extracted result exceeds the WebSocket transfer budget
     | 'schema_version_mismatch'
     | 'mode_mismatch';
 

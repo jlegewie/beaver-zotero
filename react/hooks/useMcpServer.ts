@@ -27,6 +27,7 @@ import {
     executeCreateNoteAction,
 } from '../../src/services/agentDataProvider';
 import type { TimeoutContext } from '../../src/services/agentDataProvider/timeout';
+import { isWSBinaryEnvelope } from '../../src/services/wsBinaryEnvelope';
 import { getCitationKeyFromItem, getZoteroSelectURI } from '../../src/utils/zoteroUtils';
 import { logger } from '../../src/utils/logger';
 import { isAuthenticatedAtom } from '../atoms/auth';
@@ -872,7 +873,13 @@ export async function handleReadAttachment(args: any): Promise<any> {
         mode: 'markdown',
     };
 
-    const response: WSZoteroDocumentResponse = await handleZoteroDocumentRequest(wsRequest);
+    const rawResponse = await handleZoteroDocumentRequest(wsRequest);
+    if (isWSBinaryEnvelope(rawResponse)) {
+        // Unreachable: this request never negotiates accept_encoding, so the
+        // handler always returns plain JSON.
+        return mcpError('Unexpected binary document response');
+    }
+    const response: WSZoteroDocumentResponse = rawResponse;
 
     if (response.error || !response.result) {
         return mcpError(response.error ?? 'Failed to read attachment');

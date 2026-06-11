@@ -249,4 +249,54 @@ describe('AgentService reconnect handling', () => {
         expect(callbacks.onClose).toHaveBeenCalledTimes(1);
         expect(callbacks.onClose).toHaveBeenCalledWith(1011, 'transport lost', false);
     });
+
+    it('sends a binary envelope as a single binary frame with the documented layout', async () => {
+        const service = new AgentService('https://api.example.com');
+        const callbacks = createCallbacks();
+        const request = { type: 'binary-test' } as AgentRunRequest;
+
+        const socket = await completeConnect(service, callbacks, request);
+        socket.send.mockClear();
+
+        const payload = new Uint8Array([1, 2, 3, 4, 5]);
+        service.send({
+            kind: 'ws_binary_envelope',
+            header: { type: 'zotero_document', request_id: 'req-1', content_kind: 'pdf' },
+            payload,
+        });
+
+        expect(socket.send).toHaveBeenCalledTimes(1);
+        const frame = socket.send.mock.calls[0][0] as Uint8Array;
+        expect(frame).toBeInstanceOf(Uint8Array);
+
+        const headerLen = new DataView(frame.buffer).getUint32(0, false);
+        const header = JSON.parse(new TextDecoder().decode(frame.subarray(4, 4 + headerLen)));
+        expect(header).toEqual({
+            type: 'zotero_document',
+            request_id: 'req-1',
+            content_kind: 'pdf',
+            payload_encoding: 'gzip',
+        });
+        expect(frame.subarray(4 + headerLen)).toEqual(payload);
+    });
+
+    it('still sends JSON messages as text frames', async () => {
+        const service = new AgentService('https://api.example.com');
+        const callbacks = createCallbacks();
+        const request = { type: 'json-test' } as AgentRunRequest;
+
+        const socket = await completeConnect(service, callbacks, request);
+        socket.send.mockClear();
+
+        service.send({ type: 'zotero_document', request_id: 'req-2', result: { ok: true } });
+
+        expect(socket.send).toHaveBeenCalledTimes(1);
+        const sent = socket.send.mock.calls[0][0];
+        expect(typeof sent).toBe('string');
+        expect(JSON.parse(sent)).toEqual({
+            type: 'zotero_document',
+            request_id: 'req-2',
+            result: { ok: true },
+        });
+    });
 });

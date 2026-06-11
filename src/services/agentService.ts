@@ -17,6 +17,11 @@ import {
     AgentDataProviderMap,
     createZoteroDataProvider,
 } from './agentDataDispatch';
+import {
+    WSBinaryEnvelope,
+    buildEnvelopeFrame,
+    isWSBinaryEnvelope,
+} from './wsBinaryEnvelope';
 import { AgentRunRequest } from './agentProtocol';
 import {
     WSEvent,
@@ -280,9 +285,23 @@ export class AgentService {
     /**
      * Send a message to the server
      */
-    send(data: AgentRunRequest | Record<string, any>): void {
+    send(data: AgentRunRequest | Record<string, any> | WSBinaryEnvelope): void {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
             logger('AgentService: Cannot send - WebSocket not connected', 1);
+            return;
+        }
+
+        // Binary envelopes (large gzip payloads) go out as one binary frame.
+        // Log byte sizes only — never the payload.
+        if (isWSBinaryEnvelope(data)) {
+            const frame = buildEnvelopeFrame(data);
+            logger(
+                `AgentService: Sending binary "${data.header.type}" ` +
+                `(request_id=${data.header.request_id}, ` +
+                `payload=${data.payload.byteLength} bytes, frame=${frame.byteLength} bytes)`,
+                1,
+            );
+            this.ws.send(frame);
             return;
         }
 

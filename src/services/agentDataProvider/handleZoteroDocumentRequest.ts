@@ -8,11 +8,18 @@
  */
 
 import { logger } from '../../utils/logger';
+import { gzipString } from '../../utils/gzip';
 import {
     WSZoteroDocumentRequest,
     WSZoteroDocumentResponse,
 } from '../agentProtocol';
 import type { ZoteroDocumentErrorCode } from '../agentProtocol';
+import {
+    LEGACY_MAX_JSON_BYTES,
+    SMALL_PAYLOAD_THRESHOLD_BYTES,
+    WSBinaryEnvelope,
+    gzipDecompressedSize,
+} from '../wsBinaryEnvelope';
 import {
     extractAndCacheEpubDocument,
     extractAndCacheResolvedPdfDocument,
@@ -38,11 +45,93 @@ import {
 import { notifyRemoteDownloadFailure, notifyRemoteFileNotSynced } from './utils';
 
 /**
+ * Finalize a successful document response for the wire.
+ *
+ * When the backend negotiated gzip (`accept_encoding`), large results are
+ * returned as a binary envelope whose payload reuses the gzipped blob the
+ * document cache read or wrote for this result (no recompression); small
+ * results stay JSON. Against legacy backends the serialized size is guarded
+ * so an oversized text frame returns a clean `document_too_large` error
+ * instead of tripping the server's WebSocket frame limit and killing the
+ * connection (the failure mode behind CloseCode 1009/1006 drops).
+ *
+ * `cacheSourceResult` is the exact object the document cache returned/stored
+ * (for PDFs, `response.result` is a spread copy of it), used to look up the
+ * raw gz bytes via `takeGzipPayload`.
+ *
+ * Exported for tests.
+ */
+export function finalizeSuccessResponse(opts: {
+    request: WSZoteroDocumentRequest;
+    response: WSZoteroDocumentResponse;
+    cacheSourceResult: object;
+    totalPages: number | null;
+    contentKind: ExtractContentKind;
+    errorResponse: (
+        error: string,
+        error_code: ZoteroDocumentErrorCode,
+        total_pages?: number | null,
+        content_kind?: ExtractContentKind,
+    ) => WSZoteroDocumentResponse;
+}): WSZoteroDocumentResponse | WSBinaryEnvelope {
+    const { request, response, cacheSourceResult, totalPages, contentKind, errorResponse } = opts;
+    const gzipOk = request.accept_encoding?.includes('gzip') ?? false;
+
+    const documentCache = Zotero.Beaver?.documentCache;
+    let gz = typeof documentCache?.takeGzipPayload === 'function'
+        ? documentCache.takeGzipPayload(cacheSourceResult)
+        : undefined;
+    if (!gz) {
+        // No cached blob (text files, cache disabled, shared-extraction
+        // second waiter). Small results skip compression entirely; the
+        // stringify below is no extra cost — send() serializes JSON anyway.
+        const json = JSON.stringify(response.result);
+        if (json.length < SMALL_PAYLOAD_THRESHOLD_BYTES) {
+            return response;
+        }
+        gz = gzipString(json);
+    }
+
+    const decompressedBytes = gzipDecompressedSize(gz);
+    const mb = (n: number) => (n / (1024 * 1024)).toFixed(1);
+    const tooLargeError = () => errorResponse(
+        `The extracted content of this attachment is too large to transfer ` +
+        `(${mb(decompressedBytes)}MB of extracted text` +
+        `${totalPages != null ? ` across ${totalPages} pages` : ''}). ` +
+        `Do not try again with extract or read_pages for this attachment.`,
+        'document_too_large',
+        totalPages,
+        contentKind,
+    );
+
+    if (gzipOk) {
+        if (request.max_payload_bytes != null && gz.byteLength > request.max_payload_bytes) {
+            return tooLargeError();
+        }
+        if (request.max_decompressed_bytes != null && decompressedBytes > request.max_decompressed_bytes) {
+            return tooLargeError();
+        }
+        if (decompressedBytes < SMALL_PAYLOAD_THRESHOLD_BYTES) {
+            return response;
+        }
+        const { result: _result, ...header } = response;
+        return { kind: 'ws_binary_envelope', header, payload: gz };
+    }
+
+    // Legacy backend (no accept_encoding): JSON only. Guard the serialized
+    // size against the deployed server frame limit.
+    if (decompressedBytes > LEGACY_MAX_JSON_BYTES) {
+        return tooLargeError();
+    }
+    return response;
+}
+
+/**
  * Handle zotero_document_request event.
  */
 export async function handleZoteroDocumentRequest(
     request: WSZoteroDocumentRequest,
-): Promise<WSZoteroDocumentResponse> {
+): Promise<WSZoteroDocumentResponse | WSBinaryEnvelope> {
     const { attachment, mode, max_pages, max_file_size_mb, request_id, timeout_seconds } = request;
     const requestKey = `${attachment.library_id}-${attachment.zotero_key}`;
 
@@ -178,17 +267,24 @@ export async function handleZoteroDocumentRequest(
                 contentType,
             });
 
-            return {
-                type: 'zotero_document',
-                request_id,
-                resolved_attachment: {
-                    library_id: resolvedItem.libraryID,
-                    zotero_key: resolvedItem.key,
+            return finalizeSuccessResponse({
+                request,
+                response: {
+                    type: 'zotero_document',
+                    request_id,
+                    resolved_attachment: {
+                        library_id: resolvedItem.libraryID,
+                        zotero_key: resolvedItem.key,
+                    },
+                    content_type: contentType,
+                    content_kind: 'text',
+                    result,
                 },
-                content_type: contentType,
-                content_kind: 'text',
-                result,
-            };
+                cacheSourceResult: result,
+                totalPages: null,
+                contentKind: 'text',
+                errorResponse,
+            });
         }
 
         if (contentKind === 'epub') {
@@ -209,17 +305,24 @@ export async function handleZoteroDocumentRequest(
                     const { libraryId, zoteroKey } = result.resolvedAttachment;
                     logger(`handleZoteroDocumentRequest: document cache hit for ${libraryId}-${zoteroKey} content_kind=epub`, 3);
                 }
-                return {
-                    type: 'zotero_document',
-                    request_id,
-                    resolved_attachment: {
-                        library_id: result.resolvedAttachment.libraryId,
-                        zotero_key: result.resolvedAttachment.zoteroKey,
+                return finalizeSuccessResponse({
+                    request,
+                    response: {
+                        type: 'zotero_document',
+                        request_id,
+                        resolved_attachment: {
+                            library_id: result.resolvedAttachment.libraryId,
+                            zotero_key: result.resolvedAttachment.zoteroKey,
+                        },
+                        content_type: result.contentType,
+                        content_kind: 'epub',
+                        result: result.document,
                     },
-                    content_type: result.contentType,
-                    content_kind: 'epub',
-                    result: result.document,
-                };
+                    cacheSourceResult: result.document,
+                    totalPages: null,
+                    contentKind: 'epub',
+                    errorResponse,
+                });
             }
 
             return errorResponse(result.message, result.code, null, 'epub');
@@ -253,17 +356,27 @@ export async function handleZoteroDocumentRequest(
                 const { libraryId, zoteroKey } = result.resolvedAttachment;
                 logger(`handleZoteroDocumentRequest: document cache hit for ${libraryId}-${zoteroKey} mode=${mode}`, 3);
             }
-            return {
-                type: 'zotero_document',
-                request_id,
-                resolved_attachment: {
-                    library_id: result.resolvedAttachment.libraryId,
-                    zotero_key: result.resolvedAttachment.zoteroKey,
+            return finalizeSuccessResponse({
+                request,
+                response: {
+                    type: 'zotero_document',
+                    request_id,
+                    resolved_attachment: {
+                        library_id: result.resolvedAttachment.libraryId,
+                        zotero_key: result.resolvedAttachment.zoteroKey,
+                    },
+                    content_type: result.contentType,
+                    content_kind: 'pdf',
+                    result: { ...result.result, content_kind: 'pdf' as const },
                 },
-                content_type: result.contentType,
-                content_kind: 'pdf',
-                result: { ...result.result, content_kind: 'pdf' as const },
-            };
+                // The cache keyed the gz blob by the original result object;
+                // the response carries a spread copy with content_kind added
+                // (the backend re-injects it from the envelope header).
+                cacheSourceResult: result.result,
+                totalPages: result.totalPages ?? null,
+                contentKind: 'pdf',
+                errorResponse,
+            });
         }
 
         if (result.kind === 'timeout' || (result.kind === 'external_abort' && timeout.signal.aborted)) {

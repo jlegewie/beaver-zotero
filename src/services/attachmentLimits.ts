@@ -1,6 +1,6 @@
 export const HARD_ATTACHMENT_LIMITS = {
     maxFileSizeMB: 100,
-    maxPageCount: 800,
+    maxPageCount: 2000,
 } as const;
 
 function positiveFiniteNumber(value: number | null | undefined): number | null {
