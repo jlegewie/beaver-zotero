@@ -207,6 +207,8 @@ export interface WSZoteroDocumentRequest extends WSBaseEvent {
     max_file_size_mb?: number | null;
     /** Frontend-side extraction deadline in seconds. */
     timeout_seconds?: number;
+    /** Maximum uncompressed serialized size of payload. */
+    max_payload_bytes?: number | null;
 }
 
 /** Request from backend to render attachment pages as images */
@@ -540,6 +542,7 @@ export type ZoteroDocumentErrorCode =
     | 'timeout'             // Extraction timed out
     | 'extraction_failed'  // General extraction failure
     | 'recursion_limit'     // Extraction overflowed the JS stack ("too much recursion" / "Maximum call stack")
+    | 'document_too_large'  // Serialized extraction result exceeds the WebSocket transfer budget
     | 'schema_version_mismatch'
     | 'mode_mismatch';
 
@@ -1266,6 +1269,11 @@ export interface WSAuthMessage {
     /** Features this client supports. When provided, the backend gates tools on
      * this set instead of deriving it from `frontend_version`. */
     client_features?: string[];
+    /** Identifies the specific Zotero install behind this connection. Lets the
+     * backend tell apart multiple installs of one Beaver account (e.g. work +
+     * home both open) and show the user a recognizable label. Absent for
+     * non-Zotero clients. */
+    zotero_instance?: ZoteroInstanceWire;
 }
 
 /**

@@ -3,7 +3,7 @@ export const HARD_ATTACHMENT_LIMITS = {
     // Whole-document transfers are additionally bounded by the backend's
     // serialized-payload budget (max_payload_bytes on the document request);
     // oversized extractions fail cleanly with document_too_large.
-    maxPageCount: 800,
+    maxPageCount: 2500,
 } as const;
 
 function positiveFiniteNumber(value: number | null | undefined): number | null {

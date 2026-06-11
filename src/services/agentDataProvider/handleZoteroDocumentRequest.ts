@@ -38,6 +38,50 @@ import {
 import { notifyRemoteDownloadFailure, notifyRemoteFileNotSynced } from './utils';
 
 /**
+ * Reject success responses whose serialized payload would exceed the
+ * WebSocket message budget (`request.max_payload_bytes`).
+ */
+export function guardPayloadSize(
+    request: WSZoteroDocumentRequest,
+    response: WSZoteroDocumentResponse,
+    totalPages: number | null,
+    contentKind: ExtractContentKind,
+    errorResponse: (
+        error: string,
+        error_code: ZoteroDocumentErrorCode,
+        total_pages?: number | null,
+        content_kind?: ExtractContentKind,
+    ) => WSZoteroDocumentResponse,
+): WSZoteroDocumentResponse {
+    const limit = request.max_payload_bytes;
+    if (typeof limit !== 'number' || !Number.isFinite(limit) || limit <= 0) {
+        return response;
+    }
+
+    const payloadBytes = new TextEncoder().encode(JSON.stringify(response.result)).byteLength;
+    if (payloadBytes <= limit) {
+        return response;
+    }
+
+    const mb = (n: number) => (n / (1024 * 1024)).toFixed(1);
+    logger(
+        `handleZoteroDocumentRequest: payload too large ` +
+        `(${payloadBytes} bytes > ${limit} byte limit, content_kind=${contentKind})`,
+        1,
+    );
+    return errorResponse(
+        `This attachment is too large for Beaver to handle. ` +
+        `${mb(payloadBytes)}MB of extracted text` +
+        `${totalPages != null ? ` across ${totalPages} pages` : ''}, ` +
+        `limit ${mb(limit)}MB. Do not try again with extract, ` +
+        `find_in_attachments or read_pages for this attachment.`,
+        'document_too_large',
+        totalPages,
+        contentKind,
+    );
+}
+
+/**
  * Handle zotero_document_request event.
  */
 export async function handleZoteroDocumentRequest(
@@ -178,7 +222,7 @@ export async function handleZoteroDocumentRequest(
                 contentType,
             });
 
-            return {
+            return guardPayloadSize(request, {
                 type: 'zotero_document',
                 request_id,
                 resolved_attachment: {
@@ -188,7 +232,7 @@ export async function handleZoteroDocumentRequest(
                 content_type: contentType,
                 content_kind: 'text',
                 result,
-            };
+            }, null, 'text', errorResponse);
         }
 
         if (contentKind === 'epub') {
@@ -209,7 +253,7 @@ export async function handleZoteroDocumentRequest(
                     const { libraryId, zoteroKey } = result.resolvedAttachment;
                     logger(`handleZoteroDocumentRequest: document cache hit for ${libraryId}-${zoteroKey} content_kind=epub`, 3);
                 }
-                return {
+                return guardPayloadSize(request, {
                     type: 'zotero_document',
                     request_id,
                     resolved_attachment: {
@@ -219,7 +263,7 @@ export async function handleZoteroDocumentRequest(
                     content_type: result.contentType,
                     content_kind: 'epub',
                     result: result.document,
-                };
+                }, null, 'epub', errorResponse);
             }
 
             return errorResponse(result.message, result.code, null, 'epub');
@@ -253,7 +297,7 @@ export async function handleZoteroDocumentRequest(
                 const { libraryId, zoteroKey } = result.resolvedAttachment;
                 logger(`handleZoteroDocumentRequest: document cache hit for ${libraryId}-${zoteroKey} mode=${mode}`, 3);
             }
-            return {
+            return guardPayloadSize(request, {
                 type: 'zotero_document',
                 request_id,
                 resolved_attachment: {
@@ -263,7 +307,7 @@ export async function handleZoteroDocumentRequest(
                 content_type: result.contentType,
                 content_kind: 'pdf',
                 result: { ...result.result, content_kind: 'pdf' as const },
-            };
+            }, result.totalPages ?? null, 'pdf', errorResponse);
         }
 
         if (result.kind === 'timeout' || (result.kind === 'external_abort' && timeout.signal.aborted)) {
