@@ -236,6 +236,98 @@ export async function resolveToPdfAttachment(
 }
 
 /**
+ * Result of resolving a Zotero item to an image attachment.
+ */
+export type ImageAttachmentResolveResult =
+    | { resolved: true; item: Zotero.Item; key: string }
+    | { resolved: false; error: string; error_code: 'not_attachment' | 'is_linked_url' | 'not_image' };
+
+/**
+ * Resolve a Zotero item to an image attachment.
+ *
+ * If the item is already an image attachment, returns it directly. If it is a
+ * regular item with exactly one image attachment, auto-resolves to that
+ * attachment. Notes, annotations, non-image attachments, and ambiguous
+ * regular items return an error.
+ *
+ * The linked-URL check runs before image detection so an image-typed linked
+ * URL is rejected instead of being treated as a stored file.
+ */
+export async function resolveToImageAttachment(
+    item: Zotero.Item,
+    uniqueKey: string,
+): Promise<ImageAttachmentResolveResult> {
+    if (item.isAttachment()) {
+        if (item.attachmentLinkMode === Zotero.Attachments.LINK_MODE_LINKED_URL) {
+            return {
+                resolved: false,
+                error: `Attachment ${uniqueKey} is a linked URL, not a stored file. Beaver cannot access linked URL attachments.`,
+                error_code: 'is_linked_url',
+            };
+        }
+        if (getReadableContentKind(item) === 'image') {
+            return { resolved: true, item, key: uniqueKey };
+        }
+        const contentType = item.attachmentContentType || 'unknown';
+        return {
+            resolved: false,
+            error: `Attachment ${uniqueKey} is not an image (type: ${contentType})`,
+            error_code: 'not_image',
+        };
+    }
+
+    if (item.isRegularItem()) {
+        await Zotero.Items.loadDataTypes([item], ['childItems']);
+        const ids = item.getAttachments();
+        const fetched = ids?.length ? await Zotero.Items.getAsync(ids) : [];
+        const imageAttachments = fetched.filter(
+            (a): a is Zotero.Item =>
+                !!a
+                && !a.deleted
+                && !isLinkedUrlAttachment(a)
+                && getReadableContentKind(a) === 'image',
+        );
+
+        if (imageAttachments.length > 0) {
+            await Zotero.Items.loadDataTypes(imageAttachments, ['itemData']);
+        }
+
+        if (imageAttachments.length === 1) {
+            const only = imageAttachments[0];
+            const onlyKey = getItemKey(only);
+            const resolved = await Zotero.Items.getByLibraryAndKeyAsync(
+                only.libraryID,
+                only.key,
+            );
+            if (!resolved) {
+                return {
+                    resolved: false,
+                    error: `The id '${uniqueKey}' is a regular item with one image attachment ('${only.attachmentFilename}' (${onlyKey})) but it could not be resolved.`,
+                    error_code: 'not_attachment',
+                };
+            }
+            await resolved.loadAllData();
+            return resolveToImageAttachment(resolved, onlyKey);
+        }
+
+        const text = imageAttachments
+            .map((a) => `'${a.attachmentFilename}' (${getItemKey(a)})`)
+            .join(', ');
+        const message = imageAttachments.length > 0
+            ? `The id '${uniqueKey}' is a regular item, not an attachment. The item has ${imageAttachments.length} image attachments: ${text}`
+            : `The id '${uniqueKey}' is a regular item, not an attachment. The item has no image attachments.`;
+        return { resolved: false, error: message, error_code: 'not_attachment' };
+    }
+
+    const kind = item.isNote() ? 'note' : item.isAnnotation() ? 'annotation' : 'non-attachment item';
+    return {
+        resolved: false,
+        error: `The id '${uniqueKey}' is a ${kind}, not an attachment.`,
+        error_code: 'not_attachment',
+    };
+}
+
+/**
  * Result of resolving a Zotero item to any readable attachment.
  */
 export type ReadableAttachmentResolveResult =

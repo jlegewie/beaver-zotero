@@ -6,6 +6,13 @@ import { ItemMetadataAttachment, SourceAttachment } from '../../types/attachment
 import { ZoteroItemReference } from '../../types/zotero';
 import { selectItemById } from '../../../src/utils/selectItem';
 import { getNoteContentPreviewText } from '../../utils/noteText';
+import { navigateToAnnotation } from '../../utils/readerUtils';
+import { logger } from '../../../src/utils/logger';
+import {
+    AnnotationRow,
+    ResolvedAnnotation,
+    resolveAnnotationRef,
+} from '../agentRuns/annotationListShared';
 
 export interface ZoteroItemReferenceWithLabel extends ZoteroItemReference {
     label: string;
@@ -33,6 +40,10 @@ interface ItemWithSelectionId {
     faded?: boolean;
 }
 
+type ResolvedListEntry =
+    | { kind: 'item'; entry: ItemWithSelectionId }
+    | { kind: 'annotation'; entry: ResolvedAnnotation; faded?: boolean };
+
 interface ZoteroItemsListProps {
     messageAttachments: (
         SourceAttachment |
@@ -51,59 +62,104 @@ const ZoteroItemsList: React.FC<ZoteroItemsListProps> = ({
     oneLine = false,
     muted = false
 }) => {
-    const [resolvedItems, setResolvedItems] = useState<ItemWithSelectionId[]>([]);
+    const [resolvedEntries, setResolvedEntries] = useState<ResolvedListEntry[]>([]);
     const [hoveredItemId, setHoveredItemId] = useState<number | null>(null);
+    const [hoveredAnnotationKey, setHoveredAnnotationKey] = useState<string | null>(null);
 
-    // Fetch Zotero items when results are visible
     useEffect(() => {
         const fetchItems = async () => {
             if (messageAttachments) {
-                const items: ItemWithSelectionId[] = [];
+                const entries: ResolvedListEntry[] = [];
                 for (const attachment of messageAttachments) {
                     const item = await Zotero.Items.getByLibraryAndKeyAsync(
                         attachment.library_id,
                         attachment.zotero_key
                     );
-                    if (item) {
-                        const displayItem = showParentItem ? (item.parentItem || item) : item;
-                        const isNote = displayItem.isNote();
-                        const displayName = isNote
-                            ? truncateText(displayItem.getNoteTitle(), NOTE_TITLE_MAX_LENGTH)
-                            : getDisplayNameFromItem(displayItem);
-                        const subtitle = isNote
-                            ? getNoteContentPreview(displayItem, NOTE_PREVIEW_MAX_LENGTH)
-                            : displayItem.getDisplayTitle();
-                        items.push({
+                    if (!item) continue;
+
+                    if (item.isAnnotation()) {
+                        const annotation = await resolveAnnotationRef(
+                            {
+                                library_id: attachment.library_id,
+                                zotero_key: attachment.zotero_key,
+                            },
+                            item
+                        );
+                        if (annotation) {
+                            entries.push({
+                                kind: 'annotation',
+                                entry: annotation,
+                                faded: 'faded' in attachment ? attachment.faded : false,
+                            });
+                        }
+                        continue;
+                    }
+
+                    const displayItem = showParentItem ? (item.parentItem || item) : item;
+                    const isNote = displayItem.isNote();
+                    const displayName = isNote
+                        ? truncateText(displayItem.getNoteTitle(), NOTE_TITLE_MAX_LENGTH)
+                        : getDisplayNameFromItem(displayItem);
+                    const subtitle = isNote
+                        ? getNoteContentPreview(displayItem, NOTE_PREVIEW_MAX_LENGTH)
+                        : displayItem.getDisplayTitle();
+                    entries.push({
+                        kind: 'item',
+                        entry: {
                             item: displayItem,
                             selectionItemId: item.id,
                             displayName,
                             subtitle,
                             label: 'label' in attachment ? attachment.label : undefined,
                             faded: 'faded' in attachment ? attachment.faded : false
-                        });
-                    }
+                        },
+                    });
                 }
-                setResolvedItems(items);
+                setResolvedEntries(entries);
             }
         };
-        
-        fetchItems();
-    }, [messageAttachments]);
 
-    
+        fetchItems();
+    }, [messageAttachments, showParentItem]);
+
     const handleItemClick = (selectionItemId: number) => {
         selectItemById(selectionItemId);
+    };
+
+    const handleAnnotationClick = async (annotation: ResolvedAnnotation) => {
+        try {
+            await navigateToAnnotation(annotation.item);
+        } catch (error) {
+            logger(`ZoteroItemsList: failed to navigate to ${annotation.ref.library_id}-${annotation.ref.zotero_key}: ${error}`, 1);
+        }
     };
 
     const fontColor = muted ? 'font-color-tertiary' : 'font-color-primary';
 
     return (
         <div className="min-w-0">
-            {resolvedItems.map((itemWithSelectionId: ItemWithSelectionId) => {
-                const {item, selectionItemId, displayName, subtitle, label, faded} = itemWithSelectionId;
+            {resolvedEntries.map((resolvedEntry) => {
+                if (resolvedEntry.kind === 'annotation') {
+                    const { entry: annotation, faded } = resolvedEntry;
+                    const key = `${annotation.ref.library_id}-${annotation.ref.zotero_key}`;
+                    return (
+                        <div key={key} className={faded ? 'opacity-50' : undefined}>
+                            <AnnotationRow
+                                annotation={annotation}
+                                variant="with-parent"
+                                isHovered={hoveredAnnotationKey === key}
+                                onMouseEnter={() => setHoveredAnnotationKey(key)}
+                                onMouseLeave={() => setHoveredAnnotationKey(null)}
+                                onClick={() => handleAnnotationClick(annotation)}
+                            />
+                        </div>
+                    );
+                }
+
+                const { item, selectionItemId, displayName, subtitle, label, faded } = resolvedEntry.entry;
                 const isHovered = hoveredItemId === selectionItemId;
                 const hasSubtitle = subtitle.length > 0;
-                
+
                 return (
                     <div
                         key={selectionItemId}

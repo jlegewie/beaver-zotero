@@ -61,6 +61,22 @@ export function extractZoteroReferencesFromToolCall(part: ToolCallPart): ZoteroI
         }
     }
 
+    // Extract file id if present (used by read). Zotero attachment ids use
+    // '<library_id>-<zotero_key>'; external file ids ('ext-1') carry no Zotero reference.
+    const file = args.file as string | undefined;
+    if (file && /^\d+-/.test(file)) {
+        const [libraryIdStr, zoteroKey] = file.split('-');
+        if (libraryIdStr && zoteroKey) {
+            const libraryId = parseInt(libraryIdStr, 10);
+            if (!isNaN(libraryId)) {
+                references.push({
+                    library_id: libraryId,
+                    zotero_key: zoteroKey,
+                });
+            }
+        }
+    }
+
     // Extract note_id if present (used by read_note, edit_note)
     const noteId = args.note_id as string | undefined;
     if (noteId) {
@@ -138,6 +154,7 @@ const TOOL_BASE_LABELS: Record<string, string> = {
     manage_collections: 'Manage collections',
 
     // Reading tools
+    read: 'Reading',
     read_pages: 'Reading',
     read_attachment: 'Reading',
     search_in_documents: 'Search in documents',
@@ -519,6 +536,52 @@ export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): st
             // Fallback: just show page range or base label
             if (pageRange) {
                 return `${baseLabel}: ${pageRange}`;
+            }
+            return baseLabel;
+        }
+
+        case 'read': {
+            const file = args.file as string | undefined;
+            const pagesArg = args.pages as string | undefined;
+            const linesArg = args.lines as string | undefined;
+
+            // Range args are contiguous 1-indexed range strings like "3" or "1-10"
+            const normalizeRange = (value: string | undefined): string | null => {
+                if (typeof value !== 'string') return null;
+                const trimmed = value.trim();
+                return /^\d+(-\d+)?$/.test(trimmed) ? trimmed : null;
+            };
+
+            const pageRangeValue = normalizeRange(pagesArg);
+            const lineRangeValue = normalizeRange(linesArg);
+
+            let rangeLabel = '';
+            if (pageRangeValue) {
+                rangeLabel = `p. ${pageRangeValue}`;
+            } else if (lineRangeValue && status !== 'completed') {
+                // Show the requested line range only while in progress; once
+                // completed, ToolCallPartView appends the actual range read
+                // from the result summary.
+                rangeLabel = lineRangeValue.includes('-')
+                    ? `lines ${lineRangeValue}`
+                    : `line ${lineRangeValue}`;
+            }
+
+            // Get item display name from the file id (skips external 'ext-<n>' ids)
+            if (file && /^\d+-/.test(file)) {
+                const item = getItemFromAttachmentId(file);
+                if (item) {
+                    const displayName = getItemDisplayName(item);
+                    if (rangeLabel) {
+                        return `${baseLabel}: ${displayName}, ${rangeLabel}`;
+                    }
+                    return `${baseLabel}: ${displayName}`;
+                }
+            }
+
+            // Fallback: just show the range or base label
+            if (rangeLabel) {
+                return `${baseLabel}: ${rangeLabel}`;
             }
             return baseLabel;
         }

@@ -82,7 +82,7 @@ describe('guardPayloadSize', () => {
         const out = guardPayloadSize(makeRequest(1000), response, 42, 'pdf', errorResponse);
 
         expect(out.error_code).toBe('document_too_large');
-        expect(out.error).toContain('too large to transfer');
+        expect(out.error).toContain('too large for Beaver to handle');
         expect(out.error).toContain('across 42 pages');
         expect(out.error).toContain('Do not try again');
         expect(out.total_pages).toBe(42);

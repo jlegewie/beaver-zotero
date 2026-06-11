@@ -72,12 +72,15 @@ describe('agentItemSupport', () => {
             expect(isAgentSupportedItem(item)).toBe(true);
         });
 
-        it('rejects other readable kinds and unsupported types', () => {
+        it('accepts plain-text attachments', () => {
             const text = withTrash(createMockAttachment({ contentType: 'text/plain' }));
+            expect(isAgentSupportedItem(text)).toBe(true);
+        });
+
+        it('rejects other readable kinds and unsupported types', () => {
             const image = withTrash(createMockAttachment({ contentType: 'image/png', isImage: true }));
             const word = withTrash(createMockAttachment({ contentType: 'application/msword' }));
             const note = withTrash(createMockItem({ isNote: true }));
-            expect(isAgentSupportedItem(text)).toBe(false);
             expect(isAgentSupportedItem(image)).toBe(false);
             expect(isAgentSupportedItem(word)).toBe(false);
             expect(isAgentSupportedItem(note)).toBe(false);
@@ -159,13 +162,13 @@ describe('agentItemSupport', () => {
         });
 
         it('returns false when children are unsupported or deleted', async () => {
-            const text = withTrash(createMockAttachment({ contentType: 'text/plain' }));
+            const word = withTrash(createMockAttachment({ contentType: 'application/msword' }));
             const deletedEpub = epubAttachment();
             (deletedEpub as any).deleted = true;
             const parent = regularItem();
             (parent.getAttachments as any) = vi.fn(() => [11, 12]);
             (globalThis as any).Zotero.Items = {
-                getAsync: vi.fn(async () => [text, deletedEpub]),
+                getAsync: vi.fn(async () => [word, deletedEpub]),
             };
             await expect(hasAgentSupportedAttachment(parent as any)).resolves.toBe(false);
         });

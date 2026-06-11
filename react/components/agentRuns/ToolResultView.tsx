@@ -21,6 +21,8 @@ import {
     extractLookupWorkData,
     isReadPagesFrontendResult,
     extractReadPagesFrontendData,
+    isReadTextResult,
+    extractReadTextData,
     isZoteroSearchResult,
     extractZoteroSearchData,
     isListItemsResult,
@@ -42,6 +44,7 @@ import {
 import { ItemSearchResultView } from './ItemSearchResultView';
 import { FulltextSearchResultView } from './FulltextSearchResultView';
 import { ReadPagesResultView } from './ReadPagesResultView';
+import { ReadTextResultView } from './ReadTextResultView';
 import { ViewPageImagesResultView } from './ViewPageImagesResultView';
 import { ExternalSearchResultView } from './ExternalSearchResultView';
 import { ListCollectionsResultView } from './ListCollectionsResultView';
@@ -102,13 +105,21 @@ export const ToolResultView: React.FC<ToolResultViewProps> = ({ toolcall, result
         }
     }
 
-    // Read pages results (read_pages)
+    // Read pages results (read_pages, and `read` on paginated documents)
     if (isReadPagesResult(toolName, content, metadata) || isReadPagesFrontendResult(toolName, content, metadata)) {
         const data = isReadPagesResult(toolName, content, metadata)
             ? extractReadPagesData(content, metadata)
             : extractReadPagesFrontendData(content, metadata);
         if (data) {
             return <ReadPagesResultView pages={data.pages} />;
+        }
+    }
+
+    // Text read results (`read` on text/markdown files)
+    if (isReadTextResult(toolName, content, metadata)) {
+        const data = extractReadTextData(content, metadata);
+        if (data) {
+            return <ReadTextResultView lines={data.lines} />;
         }
     }
 
@@ -199,7 +210,7 @@ export const ToolResultView: React.FC<ToolResultViewProps> = ({ toolcall, result
     if (isGetMetadataResult(toolName, content, metadata)) {
         const data = extractGetMetadataData(content, metadata);
         if (data && data.items.length > 0) {
-            return <ItemSearchResultView items={data.items} />;
+            return <ItemSearchResultView items={data.items} showParentItem={false} />;
         }
     }
 

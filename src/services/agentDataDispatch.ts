@@ -18,6 +18,7 @@ import {
     handleExternalReferenceCheckRequest,
     handleZoteroDocumentRequest,
     handleZoteroAttachmentPageImagesRequest,
+    handleZoteroAttachmentImageRequest,
     handleZoteroAttachmentSearchRequest,
     handleItemSearchByMetadataRequest,
     handleItemSearchByTopicRequest,
@@ -78,6 +79,18 @@ export function createZoteroDataProvider(): AgentDataProviderMap {
                 total_pages: null,
                 error: String(err),
                 error_code: 'render_failed',
+            }),
+        },
+        zotero_attachment_image_request: {
+            handle: handleZoteroAttachmentImageRequest,
+            errorResponse: (event, err) => ({
+                type: 'zotero_attachment_image',
+                request_id: event.request_id,
+                attachment: event.attachment,
+                resolved_attachment: null,
+                image: null,
+                error: String(err),
+                error_code: 'image_processing_failed',
             }),
         },
         zotero_attachment_search_request: {

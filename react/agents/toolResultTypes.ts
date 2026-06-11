@@ -93,11 +93,34 @@ export interface ReadPagesToolResultSummary {
 /**
  * Read pages frontend result summary.
  * Matches ReadPagesFrontendResultSummary from backend.
+ * The unified `read` tool reuses this shape for paginated documents
+ * (ReadDocumentResultSummary on the backend).
  */
 export interface ReadPagesFrontendResultSummary {
     tool_name: string;
     result_count: number;
     pages: PageReference[];
+}
+
+/**
+ * Line range reference with ZoteroItemReference fields and a contiguous
+ * 1-indexed line range. Matches LineReference from backend.
+ */
+export interface LineReference {
+    library_id: number;
+    zotero_key: string;
+    start_line: number;
+    end_line: number;
+}
+
+/**
+ * Read text result summary (unified `read` tool on text/markdown files).
+ * Matches ReadTextResultSummary from backend.
+ */
+export interface ReadTextResultSummary {
+    tool_name: string;
+    result_count: number;
+    lines: LineReference[];
 }
 
 /**
@@ -288,6 +311,14 @@ const FULLTEXT_SEARCH_TOOL_NAMES: readonly string[] = [
 const READ_PAGES_TOOL_NAMES: readonly string[] = [
     'read_pages',
     'read_attachment',
+    // Unified `read` tool: paginated results reuse the read_pages frontend
+    // summary shape; text results are handled by isReadTextResult below.
+    'read',
+] as const;
+
+/** Valid tool names for line-based text read results */
+const READ_TEXT_TOOL_NAMES: readonly string[] = [
+    'read',
 ] as const;
 
 /** Valid tool names for chunk-based fulltext retrieval results */
@@ -433,6 +464,41 @@ export function isReadPagesFrontendResult(
                 typeof obj.library_id === 'number' &&
                 typeof obj.zotero_key === 'string' &&
                 typeof obj.page_number === 'number'
+            );
+        })
+    );
+}
+
+/**
+ * Type guard for text/markdown read results (unified `read` tool).
+ * Checks if metadata.summary is ReadTextResultSummary.
+ */
+export function isReadTextResult(
+    toolName: string,
+    _content: unknown,
+    metadata?: Record<string, unknown>
+): metadata is { summary: ReadTextResultSummary } {
+    if (!metadata?.summary || typeof metadata.summary !== 'object') return false;
+    const summary = metadata.summary as Record<string, unknown>;
+
+    const toolNameIsRead = READ_TEXT_TOOL_NAMES.includes(toolName);
+    if (!toolNameIsRead) {
+        const summaryToolName = typeof summary.tool_name === 'string' ? summary.tool_name : null;
+        if (!summaryToolName || !READ_TEXT_TOOL_NAMES.includes(summaryToolName)) return false;
+    }
+
+    return (
+        typeof summary.tool_name === 'string' &&
+        typeof summary.result_count === 'number' &&
+        Array.isArray(summary.lines) &&
+        summary.lines.every((range: unknown) => {
+            if (!range || typeof range !== 'object') return false;
+            const obj = range as Record<string, unknown>;
+            return (
+                typeof obj.library_id === 'number' &&
+                typeof obj.zotero_key === 'string' &&
+                typeof obj.start_line === 'number' &&
+                typeof obj.end_line === 'number'
             );
         })
     );
@@ -772,6 +838,47 @@ export function extractReadPagesFrontendData(
     return { pages };
 }
 
+
+/**
+ * Normalized text read data - line ranges from the unified `read` tool.
+ */
+export interface ReadTextViewData {
+    lines: LineReference[];
+}
+
+/**
+ * Extract line range references from metadata.summary for text reads.
+ * @returns ReadTextViewData or null if summary is not available
+ */
+export function extractReadTextData(
+    _content: unknown,
+    metadata?: Record<string, unknown>
+): ReadTextViewData | null {
+    if (!metadata?.summary || typeof metadata.summary !== 'object') return null;
+    const summary = metadata.summary as ReadTextResultSummary;
+
+    if (!Array.isArray(summary.lines)) return null;
+
+    return { lines: summary.lines };
+}
+
+/**
+ * Build a human-readable line range label (e.g. "lines 1-120") from a
+ * completed text read result. Returns null if the result is not a text read.
+ */
+export function extractReadTextLineRangeLabel(
+    toolName: string,
+    content: unknown,
+    metadata?: Record<string, unknown>
+): string | null {
+    if (!isReadTextResult(toolName, content, metadata)) return null;
+    const data = extractReadTextData(content, metadata);
+    if (!data || data.lines.length === 0) return null;
+
+    const start = Math.min(...data.lines.map(range => range.start_line));
+    const end = Math.max(...data.lines.map(range => range.end_line));
+    return start === end ? `line ${start}` : `lines ${start}-${end}`;
+}
 
 /**
  * Normalized page images data.
@@ -1317,6 +1424,15 @@ export function extractZoteroReferences(part: ToolReturnPart): ZoteroItemReferen
     if (isReadPagesFrontendResult(tool_name, content, metadata)) {
         const data = extractReadPagesFrontendData(content, metadata);
         return data?.pages ?? [];
+    }
+
+    // Text read results (line ranges from the unified `read` tool)
+    if (isReadTextResult(tool_name, content, metadata)) {
+        const data = extractReadTextData(content, metadata);
+        return data?.lines.map(range => ({
+            library_id: range.library_id,
+            zotero_key: range.zotero_key,
+        })) ?? [];
     }
 
     // View page images results
