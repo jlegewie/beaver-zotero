@@ -1450,6 +1450,13 @@ export interface WSAuthMessage {
      * home both open) and show the user a recognizable label. Absent for
      * non-Zotero clients. */
     zotero_instance?: ZoteroInstanceWire;
+    /** Provider-mode handshakes only: echo of the `wake_id` from the
+     * provider-wake broadcast that triggered this connection. Absent for chat
+     * connections and for provider connections opened without a wake. */
+    wake_id?: string;
+    /** Provider-mode handshakes only: echo of the originating backend
+     * `instance_id` from the wake broadcast (multi-instance routing seam). */
+    wake_instance_id?: string;
 }
 
 /**

@@ -24,6 +24,7 @@ declare namespace _ZoteroTypes {
       "maxAddAttachmentToMessage": number;
       "readerExplainPrompt": string;
       "accessRemoteFiles": boolean;
+      "dataProviderEnabled": boolean;
       "autoApplyAnnotations": boolean;
       "autoCreateNotes": boolean;
       "autoImportItems": boolean;

@@ -14,6 +14,7 @@ export const activePreferencePageTabAtom = atom<PreferencePageTab>('general');
 export const isPreferencePageVisibleAtom = atom(false);
 export const mcpServerEnabledAtom = atom(getPref('mcpServerEnabled'));
 export const mcpCreateNoteToolEnabledAtom = atom(getPref('mcpCreateNoteToolEnabled'));
+export const dataProviderEnabledAtom = atom(getPref('dataProviderEnabled'));
 export const requestPlusToolsAtom = atom(getPref('requestPlusTools'));
 export const isWebSearchAllowedAtom = atom((get) => Boolean(get(isUsingBeaverCreditsAtom) || get(requestPlusToolsAtom)));
 export const showFileStatusDetailsAtom = atom(false);

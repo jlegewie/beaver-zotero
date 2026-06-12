@@ -23,6 +23,8 @@ import { useAtomValue } from 'jotai';
 import { isAuthenticatedAtom } from '../atoms/auth';
 import { logger } from '../../src/utils/logger';
 import { getZoteroUserIdentifier } from '../../src/utils/zoteroUtils';
+import { providerConnection } from '../../src/services/providerConnection';
+import { getPref, setPref } from '../../src/utils/prefs';
 import {
     handleZoteroDataRequest,
     handleExternalReferenceCheckRequest,
@@ -234,6 +236,12 @@ const ENDPOINT_PATHS = [
     '/beaver/test/background-peek',
     '/beaver/test/background-process-once',
     '/beaver/test/background-clear',
+    // Pref control (dev-only)
+    '/beaver/test/set-pref',
+    // Provider-mode connection control (dev-only)
+    '/beaver/test/provider-connect',
+    '/beaver/test/provider-status',
+    '/beaver/test/provider-close',
 ] as const;
 
 /**
@@ -674,6 +682,36 @@ async function handleReadNoteHttpRequest(request: any) {
     return await handleReadNoteRequest(wsRequest);
 }
 
+// Provider-mode connection control (dev-only). Lets tests/agents open the
+// provider WebSocket without a wake broadcast, inspect its state, and close it.
+// Set a Beaver pref (dev-only). Lets agents/tests flip pref-gated features
+// (e.g. dataProviderEnabled) without the RDP bridge.
+async function handleTestSetPrefHttpRequest(request: any) {
+    const { key, value } = request ?? {};
+    if (typeof key !== 'string' || !key) {
+        throw new Error('key is required');
+    }
+    setPref(key as any, value);
+    return { ok: true, key, value: getPref(key as any) };
+}
+
+async function handleTestProviderConnectHttpRequest(request: any) {
+    await providerConnection.connect({
+        wakeId: request?.wake_id,
+        wakeInstanceId: request?.wake_instance_id,
+    });
+    return { ok: true, status: providerConnection.getStatus() };
+}
+
+async function handleTestProviderStatusHttpRequest(_request: any) {
+    return providerConnection.getStatus();
+}
+
+async function handleTestProviderCloseHttpRequest(_request: any) {
+    providerConnection.close();
+    return { ok: true, status: providerConnection.getStatus() };
+}
+
 
 // =============================================================================
 // Registration Functions
@@ -902,6 +940,20 @@ function registerEndpoints(): boolean {
 
         Zotero.Server.Endpoints['/beaver/test/background-clear'] =
             createEndpoint(handleTestBackgroundClearHttpRequest);
+
+        // Pref control (dev-only)
+        Zotero.Server.Endpoints['/beaver/test/set-pref'] =
+            createEndpoint(handleTestSetPrefHttpRequest);
+
+        // Provider-mode connection control (dev-only manual trigger/inspection)
+        Zotero.Server.Endpoints['/beaver/test/provider-connect'] =
+            createEndpoint(handleTestProviderConnectHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/provider-status'] =
+            createEndpoint(handleTestProviderStatusHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/provider-close'] =
+            createEndpoint(handleTestProviderCloseHttpRequest);
     }
 
     logger(`useHttpEndpoints: Registered ${ENDPOINT_PATHS.length} HTTP endpoints`, 3);

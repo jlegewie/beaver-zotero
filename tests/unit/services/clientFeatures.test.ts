@@ -19,6 +19,7 @@ const EXPECTED_FEATURE_STRINGS = [
     'beaver_extract',
     'image_extraction',
     'view_page_images',
+    'read_tool',
     'view_tool',
     'find_in_attachments',
     'filter_only_search',

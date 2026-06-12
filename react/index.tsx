@@ -20,6 +20,7 @@ import { useValidateSyncLibraries } from './hooks/useValidateSyncLibraries';
 import { useUpgradeHandler } from './hooks/useUpgradeHandler';
 import { useHttpEndpoints } from './hooks/useHttpEndpoints';
 import { useMcpServer } from './hooks/useMcpServer';
+import { useProviderWake } from './hooks/useProviderWake';
 import { useThreadProtocolHandler } from './hooks/useThreadProtocolHandler';
 import { useContextMenuActionHandler } from './hooks/useContextMenuActionHandler';
 import { useReaderSelectionActionHandler } from './hooks/useReaderSelectionActionHandler';
@@ -74,6 +75,11 @@ const GlobalContextInitializer = () => {
 
     // Register MCP server endpoint (when mcpServerEnabled pref is true)
     useMcpServer();
+
+    // Provider-wake subscription: lets agent runs started from other Beaver
+    // clients request library data from this Zotero on demand
+    // (when dataProviderEnabled pref is true)
+    useProviderWake();
 
     // Handle zotero://beaver protocol links (thread deep-linking)
     useThreadProtocolHandler();

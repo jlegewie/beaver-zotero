@@ -1,7 +1,7 @@
 import React, { useCallback, useMemo, useState } from "react";
 import Button from "../ui/Button";
 import {SettingsGroup, SettingsRow, DocLink} from "./components/SettingsElements";
-import { mcpCreateNoteToolEnabledAtom, mcpServerEnabledAtom } from "../../atoms/ui";
+import { dataProviderEnabledAtom, mcpCreateNoteToolEnabledAtom, mcpServerEnabledAtom } from "../../atoms/ui";
 import { isMcpServerSupportedAtom } from "../../atoms/profile";
 import { useAtom, useAtomValue } from "jotai";
 import { ensureMcpBridgeScript } from "../../hooks/useMcpServer";
@@ -86,11 +86,51 @@ const AdvancedSection: React.FC = () => {
         setMcpCreateNoteToolEnabled(newValue);
     }, [mcpCreateNoteToolEnabled, isMcpServerSupported, setMcpCreateNoteToolEnabled]);
 
+    // --- Data provider (library access for other Beaver clients) ---
+    const [dataProviderEnabled, setDataProviderEnabled] = useAtom(dataProviderEnabledAtom);
+    const handleDataProviderToggle = useCallback(() => {
+        const newValue = !dataProviderEnabled;
+        setPref('dataProviderEnabled', newValue);
+        setDataProviderEnabled(newValue);
+    }, [dataProviderEnabled, setDataProviderEnabled]);
+
     return (
         <>
             {/* ===== CUSTOM INSTRUCTIONS ===== */}
             <CustomInstructionsSection />
-           
+
+            {/* ===== CONNECTED APPS (DATA PROVIDER) ===== */}
+            {process.env.NODE_ENV === 'development' && (
+                <>
+                    <div className="display-flex flex-row items-center gap-2" style={{ marginTop: '20px', marginBottom: '6px', paddingLeft: '2px' }}>
+                        <div className="text-lg font-color-primary font-bold">Connected Apps</div>
+                        <span className="text-xs font-color-secondary px-15 py-05 rounded-md bg-quinary border-quinary">Experimental</span>
+                    </div>
+                    <div className="text-base font-color-secondary mb-2" style={{ paddingLeft: '2px' }}>
+                        Lets Beaver in other apps access your Zotero library while Zotero is running.
+                    </div>
+                    <SettingsGroup>
+                        <SettingsRow
+                            title="Allow Library Access"
+                            description="Beaver chats started in connected apps can search and read this Zotero library"
+                            onClick={handleDataProviderToggle}
+                            control={
+                                <div className="display-flex flex-row items-center gap-2">
+                                    <input
+                                        type="checkbox"
+                                        aria-label="Allow Library Access"
+                                        checked={dataProviderEnabled}
+                                        onChange={handleDataProviderToggle}
+                                        onClick={(e) => e.stopPropagation()}
+                                        style={{ cursor: 'pointer', margin: 0 }}
+                                    />
+                                </div>
+                            }
+                        />
+                    </SettingsGroup>
+                </>
+            )}
+
             {/* ===== MCP SERVER ===== */}
             <div className="display-flex flex-row items-center gap-2" style={{ marginTop: '20px', marginBottom: '6px', paddingLeft: '2px' }}>
                 <div className="text-lg font-color-primary font-bold">MCP Server</div>

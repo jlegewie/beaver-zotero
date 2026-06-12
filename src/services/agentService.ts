@@ -31,6 +31,45 @@ import { getBusyContext } from './busyContext';
 
 
 // =============================================================================
+// Auth helpers
+// =============================================================================
+
+/**
+ * Get an auth token from the Supabase session for a backend WebSocket handshake.
+ * Includes a defense-in-depth expiry check to catch tokens that were valid
+ * when getSession() ran but became stale due to OS process suspension (e.g.
+ * macOS sleep between getSession()'s internal Date.now() check and here).
+ * Shared by the chat connection (AgentService) and the provider connection.
+ */
+export async function getWSAuthToken(): Promise<string> {
+    const { data, error } = await supabase.auth.getSession();
+
+    if (error) {
+        logger(`AgentService: Error getting session: ${error.message}`, 2);
+        throw new Error('Error getting user session');
+    }
+
+    if (!data.session?.access_token) {
+        throw new Error('User not authenticated');
+    }
+
+    // Proactively refresh if token is expired or expires within 30s.
+    const expiresAt = data.session.expires_at;
+    if (expiresAt && expiresAt - Math.floor(Date.now() / 1000) < 30) {
+        logger('AgentService: Access token expired or near-expiry, refreshing session');
+        const refreshResult = await supabase.auth.refreshSession();
+        if (refreshResult.error || !refreshResult.data.session?.access_token) {
+            logger(`AgentService: Session refresh failed: ${refreshResult.error?.message}`, 2);
+            throw new Error('Session expired and refresh failed');
+        }
+        return refreshResult.data.session.access_token;
+    }
+
+    return data.session.access_token;
+}
+
+
+// =============================================================================
 // Agent Service
 // =============================================================================
 
@@ -83,36 +122,10 @@ export class AgentService {
     }
 
     /**
-     * Get auth token from Supabase session.
-     * Includes a defense-in-depth expiry check to catch tokens that were valid
-     * when getSession() ran but became stale due to OS process suspension (e.g.
-     * macOS sleep between getSession()'s internal Date.now() check and here).
+     * Get auth token from Supabase session (see getWSAuthToken).
      */
     private async getAuthToken(): Promise<string> {
-        const { data, error } = await supabase.auth.getSession();
-
-        if (error) {
-            logger(`AgentService: Error getting session: ${error.message}`, 2);
-            throw new Error('Error getting user session');
-        }
-
-        if (!data.session?.access_token) {
-            throw new Error('User not authenticated');
-        }
-
-        // Proactively refresh if token is expired or expires within 30s.
-        const expiresAt = data.session.expires_at;
-        if (expiresAt && expiresAt - Math.floor(Date.now() / 1000) < 30) {
-            logger('AgentService: Access token expired or near-expiry, refreshing session');
-            const refreshResult = await supabase.auth.refreshSession();
-            if (refreshResult.error || !refreshResult.data.session?.access_token) {
-                logger(`AgentService: Session refresh failed: ${refreshResult.error?.message}`, 2);
-                throw new Error('Session expired and refresh failed');
-            }
-            return refreshResult.data.session.access_token;
-        }
-
-        return data.session.access_token;
+        return getWSAuthToken();
     }
 
     /**
