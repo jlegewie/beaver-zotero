@@ -1,5 +1,5 @@
 import { atom } from "jotai";
-import { currentMessageItemsAtom, currentMessageContentAtom, updateMessageItemsFromZoteroSelectionAtom, updateReaderAttachmentAtom } from "./messageComposition";
+import { currentMessageItemsAtom, currentMessageContentAtom, currentMessageCollectionsAtom, currentMessageExternalFilesAtom, updateMessageItemsFromZoteroSelectionAtom, updateReaderAttachmentAtom } from "./messageComposition";
 import { isLibraryTabAtom, isWebSearchEnabledAtom, removePopupMessagesByTypeAtom, userScrolledAtom, windowUserScrolledAtom } from "./ui";
 
 import { citationMetadataAtom, citationDataMapAtom, updateCitationDataAtom, resetCitationMarkersAtom, mergePageLabelsByAttachmentIdAtom } from "./citations";
@@ -257,6 +257,8 @@ export const newThreadAtom = atom(
             set(isWebSearchEnabledAtom, false);
             
             set(currentMessageItemsAtom, []);
+            set(currentMessageCollectionsAtom, []);
+            set(currentMessageExternalFilesAtom, []);
             set(removePopupMessagesByTypeAtom, ['items_summary']);
             set(citationMetadataAtom, []);
             set(resetCitationMarkersAtom);
@@ -507,6 +509,8 @@ export const loadThreadAtom = atom(
         }
         // Clear sources for now
         set(currentMessageItemsAtom, []);
+        set(currentMessageCollectionsAtom, []);
+        set(currentMessageExternalFilesAtom, []);
         set(removePopupMessagesByTypeAtom, ['items_summary']);
         set(currentMessageContentAtom, '');
     }
