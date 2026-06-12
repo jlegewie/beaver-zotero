@@ -175,6 +175,10 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
         // Handle button click
         const handleButtonClick = (e: React.MouseEvent<HTMLButtonElement>) => {
             e.stopPropagation();
+            // Chrome documents dispatch click for non-primary buttons too
+            // (right-click fires contextmenu AND click); only a left-click
+            // reveals the item.
+            if (e.button !== 0) return;
             revealItem();
         };
 

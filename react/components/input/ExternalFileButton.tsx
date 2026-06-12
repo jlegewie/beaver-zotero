@@ -53,19 +53,34 @@ export const ExternalFileButton = forwardRef<HTMLButtonElement, ExternalFileButt
         const [isHovered, setIsHovered] = React.useState(false);
 
         const showFile = () => {
-            if (!storedPath) return;
-            // Zotero.File.reveal is async; route rejections (e.g. a deleted
-            // copy) into the logger instead of an unhandled promise rejection.
+            // Persisted chips (sent messages) carry no storedPath prop; fall
+            // back to the local registry so the file can still be revealed on
+            // this device. Rejections (e.g. a deleted copy) go to the logger
+            // instead of an unhandled promise rejection — Zotero.File.reveal
+            // is async.
             Promise.resolve()
-                .then(() => Zotero.File.reveal(storedPath))
+                .then(async () => {
+                    let path = storedPath ?? null;
+                    if (!path) {
+                        const record = await Zotero.Beaver?.db?.getExternalFileByKey(extKey);
+                        path = record?.storedPath ?? null;
+                    }
+                    if (!path || !(await IOUtils.exists(path).catch(() => false))) {
+                        logger(`ExternalFileButton: no local copy for ext-${extKey}`, 2);
+                        return;
+                    }
+                    await Zotero.File.reveal(path);
+                })
                 .catch((error) => {
                     logger(`ExternalFileButton: Failed to reveal file: ${error}`, 2);
                 });
         };
 
-        const revealMenuItems: MenuItem[] = storedPath
-            ? [{ label: 'Show File', icon: FileViewIcon, onClick: showFile }]
-            : [];
+        // Always offered: showFile resolves the registry on demand and quietly
+        // no-ops when the copy is unavailable on this device.
+        const revealMenuItems: MenuItem[] = [
+            { label: 'Show File', icon: FileViewIcon, onClick: showFile },
+        ];
 
         const { isRemoveMenuOpen, contextMenuHandlers, removeHandlers, removeMenu } = useRemoveContextMenu({
             onRemove: () => {
@@ -104,6 +119,9 @@ export const ExternalFileButton = forwardRef<HTMLButtonElement, ExternalFileButt
                 onMouseLeave={() => setIsHovered(false)}
                 onClick={(e) => {
                     e.stopPropagation();
+                    // Chrome documents dispatch click for non-primary buttons
+                    // too; only a left-click reveals the file.
+                    if (e.button !== 0) return;
                     showFile();
                 }}
                 {...contextMenuHandlers}
