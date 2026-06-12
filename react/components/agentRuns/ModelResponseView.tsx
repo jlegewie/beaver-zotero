@@ -60,13 +60,15 @@ export const ModelResponseView: React.FC<ModelResponseViewProps> = React.memo(fu
         textParts.length > 0 ||
         toolCallParts.length > 0;
 
-    // Check if we have a tool search part
-    const isToolSearchPart = (
-        toolCallParts.length === 1 &&
-        (toolCallParts[0] as ToolCallPart)?.tool_kind === 'tool-search'
-    );
+    // Model response that is auto-loading a search capability
+    const isAutoLoadingModelResponse = 
+        toolCallParts.length > 0 &&
+        toolCallParts.every(part =>
+            part.part_kind === 'tool-call' &&
+            part.tool_call_id.startsWith('auto_load_')
+        );
 
-    if (!hasContent || isToolSearchPart) {
+    if (!hasContent || isAutoLoadingModelResponse) {
         return null;
     }
 
