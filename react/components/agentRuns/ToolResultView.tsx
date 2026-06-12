@@ -9,6 +9,8 @@ import {
     extractReadPagesData,
     isViewPageImagesResult,
     extractViewPageImagesData,
+    isViewToolResult,
+    extractViewToolData,
     isSearchInDocumentsResult,
     extractSearchInDocumentsData,
     isSearchInAttachmentResult,
@@ -46,6 +48,7 @@ import { FulltextSearchResultView } from './FulltextSearchResultView';
 import { ReadPagesResultView } from './ReadPagesResultView';
 import { ReadTextResultView } from './ReadTextResultView';
 import { ViewPageImagesResultView } from './ViewPageImagesResultView';
+import { ViewResultView } from './ViewResultView';
 import { ExternalSearchResultView } from './ExternalSearchResultView';
 import { ListCollectionsResultView } from './ListCollectionsResultView';
 import { ListTagsResultView } from './ListTagsResultView';
@@ -120,6 +123,14 @@ export const ToolResultView: React.FC<ToolResultViewProps> = ({ toolcall, result
         const data = extractReadTextData(content, metadata);
         if (data) {
             return <ReadTextResultView lines={data.lines} />;
+        }
+    }
+
+    // Unified view results (`view` on PDFs or image attachments)
+    if (isViewToolResult(toolName, content, metadata)) {
+        const data = extractViewToolData(content, metadata);
+        if (data) {
+            return <ViewResultView kind={data.kind} images={data.images} />;
         }
     }
 

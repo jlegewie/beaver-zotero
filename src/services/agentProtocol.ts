@@ -280,6 +280,43 @@ export interface WSZoteroAttachmentImageRequest extends WSBaseEvent {
 }
 
 /**
+ * Request from backend to fetch rendered images from an attachment (unified
+ * `view` tool). The frontend resolves the attachment and dispatches
+ * internally: PDF attachments render the requested page range; image
+ * attachments return a single (possibly downscaled/converted) image and
+ * ignore the page range and dpi. The response always carries a list of
+ * images (length 1 for image attachments).
+ *
+ * Supersedes WSZoteroAttachmentPageImagesRequest and
+ * WSZoteroAttachmentImageRequest for backends that gate on the `view_tool`
+ * client feature; the legacy messages remain for older backends.
+ */
+export interface WSZoteroViewImagesRequest extends WSBaseEvent {
+    event: 'zotero_view_images_request';
+    request_id: string;
+    /** May be a parent item; frontend resolves it to a PDF or image attachment. */
+    attachment: ZoteroItemReference;
+    /** First page to render (1-indexed, contiguous range). Default: 1. Ignored for image attachments. */
+    start_page?: number | null;
+    /** Last page to render (inclusive). Default: start_page. Ignored for image attachments. */
+    end_page?: number | null;
+    /** Target DPI for PDF page rendering. Ignored for image attachments. */
+    dpi?: number | null;
+    /** Maximum output width in pixels for image attachments (never upscales). Ignored for PDFs. */
+    max_width?: number | null;
+    /** Maximum output height in pixels for image attachments (never upscales). Ignored for PDFs. */
+    max_height?: number | null;
+    /** Output format. Defaults: 'png' for PDF pages, 'auto' for image attachments. */
+    format?: 'png' | 'jpeg' | 'auto' | null;
+    /** JPEG quality (1-100), used when the output is JPEG. Default: 85 */
+    jpeg_quality?: number | null;
+    /** Skip caller-specific soft limits. Beaver's hard caps still apply. Default: false */
+    skip_local_limits?: boolean;
+    /** Frontend-side processing deadline in seconds. */
+    timeout_seconds?: number;
+}
+
+/**
  * Data for a single reference to check if it exists in Zotero library.
  * Matches the fields needed by findExistingReference.
  */
@@ -684,6 +721,48 @@ export interface WSZoteroAttachmentImageResponse {
     error?: string | null;
     /** Error code for programmatic handling */
     error_code?: AttachmentImageErrorCode | null;
+}
+
+/** Error codes for unified view-images failures */
+export type ViewImagesErrorCode =
+    | AttachmentPageImagesErrorCode
+    | AttachmentImageErrorCode
+    | 'unsupported_type'   // Attachment is neither a PDF nor an image
+    | 'view_failed';       // General dispatch-level failure
+
+/** A single rendered image returned by a zotero_view_images request. */
+export interface WSViewImage {
+    /** Base64-encoded image data */
+    image_data: string;
+    /** Image format (png or jpeg) */
+    format: 'png' | 'jpeg';
+    /** Image width in pixels */
+    width: number;
+    /** Image height in pixels */
+    height: number;
+    /** 1-indexed physical page number for PDF pages. Absent for image attachments. */
+    page_number?: number | null;
+    /** PDF page label for this physical page, when the document declares one. */
+    page_label?: string | null;
+}
+
+/** Response to zotero view images request */
+export interface WSZoteroViewImagesResponse {
+    type: 'zotero_view_images';
+    request_id: string;
+    attachment: ZoteroItemReference;
+    /** The attachment actually served when a parent item was auto-resolved. */
+    resolved_attachment?: ZoteroItemReference | null;
+    /** Kind of the served attachment. Null on errors before resolution. */
+    kind: 'pdf' | 'image' | null;
+    /** Rendered images (empty on error; length 1 for image attachments) */
+    images: WSViewImage[];
+    /** Total number of pages in the document (PDFs only) */
+    total_pages: number | null;
+    /** Error message if processing failed */
+    error?: string | null;
+    /** Error code for programmatic handling */
+    error_code?: ViewImagesErrorCode | null;
 }
 
 /** Error codes for attachment search failures */
@@ -1318,6 +1397,7 @@ export type WSEvent =
     | WSZoteroDocumentRequest
     | WSZoteroAttachmentPageImagesRequest
     | WSZoteroAttachmentImageRequest
+    | WSZoteroViewImagesRequest
     | WSZoteroAttachmentSearchRequest
     | WSExternalReferenceCheckRequest
     | WSZoteroDataRequest
@@ -1397,6 +1477,7 @@ export const CLIENT_FEATURES = {
     BEAVER_EXTRACT: 'beaver_extract',
     IMAGE_EXTRACTION: 'image_extraction',
     VIEW_PAGE_IMAGES: 'view_page_images',
+    VIEW_TOOL: 'view_tool',
     FIND_IN_ATTACHMENTS: 'find_in_attachments',
     DOCUMENT_PAYLOAD_BUDGET: 'document_payload_budget',
     FILTER_ONLY_SEARCH: 'filter_only_search',

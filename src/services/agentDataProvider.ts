@@ -12,6 +12,7 @@ export { handleZoteroDataRequest } from './agentDataProvider/handleZoteroDataReq
 export { handleZoteroDocumentRequest } from './agentDataProvider/handleZoteroDocumentRequest';
 export { handleZoteroAttachmentPageImagesRequest } from './agentDataProvider/handleZoteroAttachmentPageImagesRequest';
 export { handleZoteroAttachmentImageRequest } from './agentDataProvider/handleZoteroAttachmentImageRequest';
+export { handleZoteroViewImagesRequest } from './agentDataProvider/handleZoteroViewImagesRequest';
 export { handleZoteroAttachmentSearchRequest } from './agentDataProvider/handleZoteroAttachmentSearchRequest';
 export { handleExternalReferenceCheckRequest } from './agentDataProvider/handleExternalReferenceCheckRequest';
 export { handleItemSearchByMetadataRequest } from './agentDataProvider/handleItemSearchByMetadataRequest';

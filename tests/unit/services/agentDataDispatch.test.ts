@@ -10,6 +10,7 @@ vi.mock('../../../src/services/agentDataProvider', () => ({
     handleZoteroDocumentRequest: vi.fn(),
     handleZoteroAttachmentPageImagesRequest: vi.fn(),
     handleZoteroAttachmentImageRequest: vi.fn(),
+    handleZoteroViewImagesRequest: vi.fn(),
     handleZoteroAttachmentSearchRequest: vi.fn(),
     handleItemSearchByMetadataRequest: vi.fn(),
     handleItemSearchByTopicRequest: vi.fn(),
@@ -34,6 +35,8 @@ import { createZoteroDataProvider } from '../../../src/services/agentDataDispatc
 const EXPECTED_EVENTS = [
     'zotero_document_request',
     'zotero_attachment_page_images_request',
+    'zotero_attachment_image_request',
+    'zotero_view_images_request',
     'zotero_attachment_search_request',
     'external_reference_check_request',
     'zotero_data_request',
