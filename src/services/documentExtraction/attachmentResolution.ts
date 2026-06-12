@@ -179,8 +179,11 @@ export async function resolveToPdfAttachment(
         await Zotero.Items.loadDataTypes([item], ['childItems']);
         const ids = item.getAttachments();
         const fetched = await Zotero.Items.getAsync(ids);
+        // Trashed children are excluded so a single live PDF still
+        // auto-resolves (and ambiguity errors never list trashed files),
+        // matching resolveToImageAttachment/resolveToReadableAttachment.
         const pdfAttachments = fetched.filter(
-            (a): a is Zotero.Item => !!a && a.isPDFAttachment(),
+            (a): a is Zotero.Item => !!a && !a.deleted && a.isPDFAttachment(),
         );
 
         if (pdfAttachments.length > 0) {

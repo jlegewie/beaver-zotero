@@ -267,6 +267,30 @@ describe('handleZoteroViewImagesRequest', () => {
         expect(resolveToPdfAttachment).not.toHaveBeenCalled();
     });
 
+    it('does not count a linked-URL image child in the pre-scan', async () => {
+        // isLinkedUrlAttachment checks attachmentLinkMode against
+        // Zotero.Attachments.LINK_MODE_LINKED_URL (99 in the fake env).
+        const linkedImageChild = makeItem({
+            isAttachment: true,
+            key: 'URLCHILD',
+            attachmentContentType: 'image/png',
+            attachmentLinkMode: 99,
+        });
+        const parent = makeItem({ isRegularItem: true, key: 'PARENT01', childIds: [41] });
+        setupZotero(parent, [linkedImageChild]);
+        vi.mocked(getReadableContentKind).mockImplementation(
+            (item: any) => (item === linkedImageChild ? 'image' : null),
+        );
+
+        const response = await handleZoteroViewImagesRequest(baseRequest() as any);
+
+        // The pre-scan mirrors the image resolver's linked-URL filter, so the
+        // request fails fast with unsupported_type instead of reaching the
+        // resolver's "no image attachments" error.
+        expect(response.error_code).toBe('unsupported_type');
+        expect(resolveToImageAttachment).not.toHaveBeenCalled();
+    });
+
     it('returns unsupported_type for a parent with no PDF or image attachments', async () => {
         const textChild = makeItem({
             isAttachment: true,

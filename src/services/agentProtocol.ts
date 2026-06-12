@@ -296,7 +296,12 @@ export interface WSZoteroViewImagesRequest extends WSBaseEvent {
     request_id: string;
     /** May be a parent item; frontend resolves it to a PDF or image attachment. */
     attachment: ZoteroItemReference;
-    /** First page to render (1-indexed, contiguous range). Default: 1. Ignored for image attachments. */
+    /**
+     * First page to render (1-indexed, contiguous range). Default: 1.
+     * Ignored for image attachments. Inverted ranges (end_page < start_page)
+     * and ranges spanning more than the frontend's hard per-request cap are
+     * rejected with `invalid_page_value`, not clamped.
+     */
     start_page?: number | null;
     /** Last page to render (inclusive). Default: start_page. Ignored for image attachments. */
     end_page?: number | null;

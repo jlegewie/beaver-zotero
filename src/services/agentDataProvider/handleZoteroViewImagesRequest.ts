@@ -21,6 +21,7 @@ import {
     resolveToImageAttachment,
     resolveToPdfAttachment,
 } from '../documentExtraction/attachmentResolution';
+import { isLinkedUrlAttachment } from '../../utils/attachmentFiles';
 import { validateZoteroItemReference } from './utils';
 import { handleZoteroAttachmentPageImagesRequest } from './handleZoteroAttachmentPageImagesRequest';
 import { handleZoteroAttachmentImageRequest } from './handleZoteroAttachmentImageRequest';
@@ -90,7 +91,11 @@ async function resolveViewTarget(
             await Zotero.Items.loadDataTypes(children, ['itemData']);
         }
         const hasPdf = children.some((a) => a.isPDFAttachment());
-        const hasImage = children.some((a) => getReadableContentKind(a) === 'image');
+        // Mirror resolveToImageAttachment's filter (linked URLs excluded) so
+        // the pre-scan and the resolver agree on which children count.
+        const hasImage = children.some(
+            (a) => !isLinkedUrlAttachment(a) && getReadableContentKind(a) === 'image',
+        );
 
         if (hasPdf) {
             // Single PDF resolves; multiple PDFs return the actionable
