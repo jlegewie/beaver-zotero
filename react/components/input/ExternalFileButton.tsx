@@ -7,7 +7,7 @@ import { FileViewIcon, ExternalLinkIcon } from '../icons/icons';
 import type { ExternalFileContentKind } from '../../types/attachments/apiTypes';
 import { logger } from '../../../src/utils/logger';
 
-const MAX_FILENAME_LENGTH = 30;
+const MAX_FILENAME_LENGTH = 25;
 
 const ICON_BY_KIND: Record<ExternalFileContentKind, string> = {
     pdf: 'attachmentPDF',
