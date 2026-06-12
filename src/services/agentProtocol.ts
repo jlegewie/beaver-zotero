@@ -1482,6 +1482,7 @@ export const CLIENT_FEATURES = {
     BEAVER_EXTRACT: 'beaver_extract',
     IMAGE_EXTRACTION: 'image_extraction',
     VIEW_PAGE_IMAGES: 'view_page_images',
+    READ_TOOL: 'read_tool',
     VIEW_TOOL: 'view_tool',
     FIND_IN_ATTACHMENTS: 'find_in_attachments',
     DOCUMENT_PAYLOAD_BUDGET: 'document_payload_budget',
