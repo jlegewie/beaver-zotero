@@ -36,7 +36,10 @@ export class MockDBConnection {
     ): Promise<any[]> {
         const trimmed = sql.trim().toUpperCase();
 
-        if (trimmed.startsWith('SELECT')) {
+        // Reader PRAGMAs like table_info return rows in Zotero's queryAsync, so
+        // they go through the reader path; assignment PRAGMAs fall through to
+        // run() (better-sqlite3 marks the difference via stmt.reader).
+        if (trimmed.startsWith('SELECT') || (trimmed.startsWith('PRAGMA') && this.db.prepare(sql).reader)) {
             const stmt = this.db.prepare(sql);
             const rows = stmt.all(...params);
 

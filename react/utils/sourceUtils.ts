@@ -25,18 +25,6 @@ import {
 export const MAX_NOTE_TITLE_LENGTH = 20;
 export const MAX_NOTE_CONTENT_LENGTH = 150;
 
-// Limits
-export const FILE_SIZE_LIMIT = 10 * 1024 * 1024; // 10MB
-export const MAX_ATTACHMENTS = 10;
-export const MAX_PAGES = 100;
-
-export const VALID_MIME_TYPES = ['application/pdf', 'image/png', 'image/jpeg', 'image/jpg'] as const;
-type ValidMimeType = typeof VALID_MIME_TYPES[number];
-
-function isValidMimeType(mimeType: string): mimeType is ValidMimeType {
-    return VALID_MIME_TYPES.includes(mimeType as ValidMimeType);
-}
-
 export function getDisplayNameFromItem(item: Zotero.Item, count: number | null = null, noteTitleLength: number = MAX_NOTE_TITLE_LENGTH): string {
     let displayName: string;
 

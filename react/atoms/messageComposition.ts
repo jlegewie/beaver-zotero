@@ -11,6 +11,7 @@ import { agentItemFilter } from "../../src/utils/agentItemSupport";
 import { getCurrentReader } from "../utils/readerUtils";
 import { TextSelection } from "../types/attachments/apiTypes";
 import { ZoteroTag, CollectionReference } from "../types/zotero";
+import type { ExternalFileRecord } from "../../src/services/database";
 import { processingModeAtom } from "./profile";
 import { ProcessingMode } from "../types/profile";
 import { currentNoteItemAtom } from "./zoteroContext";
@@ -102,6 +103,42 @@ export const currentMessageItemsAtom = atom<Zotero.Item[]>([]);
  * Cleared after the message is sent.
  */
 export const currentMessageCollectionsAtom = atom<CollectionReference[]>([]);
+
+/**
+ * External files (files from disk, not Zotero items) attached to the current
+ * message via drag-and-drop or the "Select File" menu. Kept separate from
+ * currentMessageItemsAtom, which is deeply coupled to Zotero.Item. Records
+ * point at copies in the Beaver-managed external-files folder; cleared after
+ * the message is sent.
+ */
+export const currentMessageExternalFilesAtom = atom<ExternalFileRecord[]>([]);
+
+/**
+ * Add external file records to the current message (deduped by ext key).
+ */
+export const addExternalFilesToCurrentMessageAtom = atom(
+    null,
+    (get, set, records: ExternalFileRecord[]) => {
+        const current = get(currentMessageExternalFilesAtom);
+        const newRecords = records.filter(
+            (record) => !current.some((existing) => existing.extKey === record.extKey)
+        );
+        if (newRecords.length === 0) return;
+        set(currentMessageExternalFilesAtom, [...current, ...newRecords]);
+    }
+);
+
+/**
+ * Remove one external file from the current message.
+ */
+export const removeExternalFileFromMessageAtom = atom(
+    null,
+    (_, set, extKey: string) => {
+        set(currentMessageExternalFilesAtom, (prev) =>
+            prev.filter((record) => record.extKey !== extKey)
+        );
+    }
+);
 
 /**
  * Counter that increments whenever an action with user-input variables is
@@ -224,6 +261,7 @@ export const clearMessageContextAtom = atom(
         }
         set(currentMessageItemsAtom, []);
         set(currentMessageCollectionsAtom, []);
+        set(currentMessageExternalFilesAtom, []);
         set(currentMessageFiltersAtom, createDefaultMessageFilters());
         set(readerTextSelectionAtom, null);
     }

@@ -25,6 +25,33 @@ import { isLinkedUrlAttachment } from '../../utils/attachmentFiles';
 import { validateZoteroItemReference } from './utils';
 import { handleZoteroAttachmentPageImagesRequest } from './handleZoteroAttachmentPageImagesRequest';
 import { handleZoteroAttachmentImageRequest } from './handleZoteroAttachmentImageRequest';
+import { resolveExternalFile } from '../externalFiles';
+import { externalFileMissingMessage } from './handleZoteroDocumentRequest';
+import { BeaverExtractor, ExtractionError, ExtractionErrorCode, WorkerAbortError } from '../../beaver-extract';
+import { effectiveMaxFileSizeMB, effectiveMaxPageCount } from '../attachmentLimits';
+import {
+    DEFAULT_IMAGES_TIMEOUT_SECONDS,
+    TimeoutError,
+    createTimeoutController,
+} from './timeout';
+import {
+    DEFAULT_MAX_IMAGE_DIMENSION,
+    HARD_MAX_IMAGE_DIMENSION,
+    ImageDecodeError,
+    MAX_OUTPUT_IMAGE_BYTES,
+    UnsupportedImageFormatError,
+    processImageBytes,
+    uint8ToBase64,
+} from './imageProcessing';
+
+/** Parse a requested dimension: positive finite number clamped to the hard cap. */
+function effectiveMaxDimension(requested: number | null | undefined): number {
+    const parsed =
+        typeof requested === 'number' && Number.isFinite(requested) && requested > 0
+            ? Math.floor(requested)
+            : DEFAULT_MAX_IMAGE_DIMENSION;
+    return Math.min(parsed, HARD_MAX_IMAGE_DIMENSION);
+}
 
 /**
  * Hard cap on the number of pages a single view request may render. The
@@ -132,6 +159,7 @@ export async function handleZoteroViewImagesRequest(
 ): Promise<WSZoteroViewImagesResponse> {
     const {
         attachment,
+        external_file_key,
         start_page,
         end_page,
         dpi,
@@ -143,6 +171,25 @@ export async function handleZoteroViewImagesRequest(
         request_id,
         timeout_seconds,
     } = request;
+
+    // External files are handled before any Zotero item resolution: the
+    // request carries an external file key instead of an attachment reference.
+    if (external_file_key) {
+        return handleExternalFileViewRequest(request, external_file_key);
+    }
+
+    if (!attachment) {
+        return {
+            type: 'zotero_view_images',
+            request_id,
+            attachment: null,
+            kind: null,
+            images: [],
+            total_pages: null,
+            error: 'View request carries neither an attachment reference nor an external file key.',
+            error_code: 'invalid_format',
+        };
+    }
     const requestKey = `${attachment.library_id}-${attachment.zotero_key}`;
 
     // Captured once the target attachment is resolved so error responses can
@@ -323,5 +370,250 @@ export async function handleZoteroViewImagesRequest(
             `Failed to retrieve images for ${requestKey}: ${error instanceof Error ? error.message : String(error)}`,
             'view_failed'
         );
+    }
+}
+
+/**
+ * Serve a view request for a user-attached external file. The registry
+ * resolves the key to the managed copy; images are converted directly and
+ * PDFs render through the MuPDF worker. EPUB and text files are not viewable.
+ */
+async function handleExternalFileViewRequest(
+    request: WSZoteroViewImagesRequest,
+    extKey: string,
+): Promise<WSZoteroViewImagesResponse> {
+    const {
+        start_page,
+        end_page,
+        dpi,
+        max_width,
+        max_height,
+        format,
+        jpeg_quality,
+        request_id,
+        timeout_seconds,
+    } = request;
+    const requestKey = `ext-${extKey}`;
+
+    let resolvedKind: 'pdf' | 'image' | null = null;
+
+    const errorResponse = (
+        error: string,
+        error_code: ViewImagesErrorCode,
+        total_pages: number | null = null,
+    ): WSZoteroViewImagesResponse => ({
+        type: 'zotero_view_images',
+        request_id,
+        external_file_key: extKey,
+        kind: resolvedKind,
+        images: [],
+        total_pages,
+        error,
+        error_code,
+    });
+
+    // Page-range validation (mirrors the Zotero path).
+    if (start_page != null && (!Number.isInteger(start_page) || start_page < 1)) {
+        return errorResponse(`Invalid start_page '${start_page}': must be a positive integer`, 'invalid_page_value');
+    }
+    if (end_page != null && (!Number.isInteger(end_page) || end_page < 1)) {
+        return errorResponse(`Invalid end_page '${end_page}': must be a positive integer`, 'invalid_page_value');
+    }
+    const startPage = start_page ?? 1;
+    const endPage = end_page ?? startPage;
+    if (endPage < startPage) {
+        return errorResponse(
+            `Invalid page range: end_page (${endPage}) must be greater than or equal to start_page (${startPage})`,
+            'invalid_page_value',
+        );
+    }
+    if (endPage - startPage + 1 > HARD_MAX_VIEW_PAGES) {
+        return errorResponse(
+            `Requested page range ${startPage}-${endPage} spans ${endPage - startPage + 1} pages, `
+            + `which exceeds the ${HARD_MAX_VIEW_PAGES}-page limit per request.`,
+            'invalid_page_value',
+        );
+    }
+
+    const resolved = await resolveExternalFile(extKey);
+    if (!resolved.ok) {
+        return errorResponse(externalFileMissingMessage(extKey, resolved.record), 'file_missing');
+    }
+    const record = resolved.record;
+
+    if (record.contentKind === 'epub' || record.contentKind === 'text') {
+        return errorResponse(
+            `External file '${requestKey}' ('${record.filename}') is a ${record.contentKind} document, which is not viewable. Use the read tool instead.`,
+            'unsupported_type',
+        );
+    }
+
+    const timeout = createTimeoutController(timeout_seconds, DEFAULT_IMAGES_TIMEOUT_SECONDS);
+    const { signal, timeoutSeconds, throwIfTimedOut, dispose } = timeout;
+
+    try {
+        // Size check against the hard cap (the copy is always local).
+        const maxFileSizeMB = effectiveMaxFileSizeMB();
+        if (record.fileSize > maxFileSizeMB * 1024 * 1024) {
+            return errorResponse(
+                `The file for ${requestKey} has a file size of ${(record.fileSize / 1024 / 1024).toFixed(1)}MB, which exceeds the ${maxFileSizeMB}MB limit.`,
+                'file_too_large',
+            );
+        }
+
+        let fileBytes: Uint8Array;
+        try {
+            fileBytes = await IOUtils.read(record.storedPath);
+        } catch {
+            return errorResponse(externalFileMissingMessage(extKey, record), 'file_missing');
+        }
+        // Outside the read's catch: a timeout here must surface as 'timeout',
+        // not as a missing-file error telling the user to re-attach the file.
+        throwIfTimedOut('external_file_read');
+
+        if (record.contentKind === 'image') {
+            resolvedKind = 'image';
+            let processed;
+            try {
+                processed = await processImageBytes(fileBytes, record.mimeType, {
+                    maxWidth: effectiveMaxDimension(max_width),
+                    maxHeight: effectiveMaxDimension(max_height),
+                    format: format ?? 'auto',
+                    jpegQuality: jpeg_quality ?? 85,
+                    maxOutputBytes: MAX_OUTPUT_IMAGE_BYTES,
+                    checkpoint: throwIfTimedOut,
+                });
+            } catch (error) {
+                throwIfTimedOut('image_processing_error_response');
+                if (error instanceof UnsupportedImageFormatError) {
+                    return errorResponse(
+                        `The image file for ${requestKey} has format '${error.mimeType}', which Beaver cannot convert.`,
+                        'unsupported_image_format',
+                    );
+                }
+                if (error instanceof ImageDecodeError) {
+                    return errorResponse(
+                        `The image file for ${requestKey} could not be decoded (it may be corrupted): ${error.message}`,
+                        'decode_failed',
+                    );
+                }
+                throw error;
+            }
+            return {
+                type: 'zotero_view_images',
+                request_id,
+                external_file_key: extKey,
+                kind: 'image',
+                images: [{
+                    image_data: uint8ToBase64(processed.data),
+                    format: processed.format,
+                    width: processed.width,
+                    height: processed.height,
+                }],
+                total_pages: null,
+            };
+        }
+
+        // PDF: render the requested contiguous range via the MuPDF worker.
+        resolvedKind = 'pdf';
+        const extractor = new BeaverExtractor();
+        const totalPages = await extractor.getPageCount(fileBytes, signal);
+        throwIfTimedOut('page_count_extraction');
+        if (totalPages === 0) {
+            return errorResponse(
+                `The PDF file for ${requestKey} has no readable pages (it may be empty or corrupted)`,
+                'empty_document',
+                0,
+            );
+        }
+        // Hard page-count cap, mirroring the Zotero-attachment view path.
+        const maxPageCount = effectiveMaxPageCount();
+        if (totalPages > maxPageCount) {
+            return errorResponse(
+                `The PDF file for ${requestKey} has ${totalPages} pages, which exceeds the ${maxPageCount}-page limit.`,
+                'too_many_pages',
+                totalPages,
+            );
+        }
+        const pageIndices: number[] = [];
+        for (let p = startPage; p <= Math.min(endPage, totalPages); p++) pageIndices.push(p - 1);
+        if (pageIndices.length === 0) {
+            return errorResponse(
+                `All requested pages are out of range (document has ${totalPages} pages)`,
+                'page_out_of_range',
+                totalPages,
+            );
+        }
+
+        const renderResult = await extractor.renderPages(fileBytes, {
+            pageIndices,
+            options: {
+                scale: 1.0,
+                dpi: dpi ?? 0,
+                format: format === 'jpeg' ? 'jpeg' : 'png',
+                jpegQuality: jpeg_quality ?? 85,
+            },
+        }, signal);
+        throwIfTimedOut('pdf_render');
+
+        const pageLabels = renderResult.pageLabels ?? {};
+        const images: WSViewImage[] = renderResult.pages.map((page) => ({
+            image_data: uint8ToBase64(page.data),
+            format: page.format,
+            width: page.width,
+            height: page.height,
+            page_number: page.pageIndex + 1,
+            page_label: pageLabels[page.pageIndex] ?? null,
+        }));
+
+        return {
+            type: 'zotero_view_images',
+            request_id,
+            external_file_key: extKey,
+            kind: 'pdf',
+            images,
+            total_pages: renderResult.pageCount,
+        };
+    } catch (error) {
+        if (signal.aborted || error instanceof WorkerAbortError || error instanceof TimeoutError) {
+            return errorResponse(`Rendering timed out after ${timeoutSeconds} seconds`, 'timeout');
+        }
+        if (error instanceof ExtractionError) {
+            switch (error.code) {
+                case ExtractionErrorCode.ENCRYPTED:
+                    return errorResponse(`The PDF file for ${requestKey} is password-protected`, 'encrypted');
+                case ExtractionErrorCode.INVALID_PDF:
+                    return errorResponse(`The PDF file for ${requestKey} is invalid or corrupted`, 'invalid_pdf');
+                case ExtractionErrorCode.EMPTY_DOCUMENT:
+                    return errorResponse(
+                        `The PDF file for ${requestKey} has no readable pages (it may be empty or corrupted)`,
+                        'empty_document',
+                        error.pageCount ?? null,
+                    );
+                case ExtractionErrorCode.PAGE_OUT_OF_RANGE:
+                    return errorResponse(error.message, 'page_out_of_range', error.pageCount ?? null);
+                case ExtractionErrorCode.WASM_ERROR:
+                    return errorResponse(
+                        `The PDF file for ${requestKey} crashes the PDF parser and cannot be rendered`,
+                        'pdf_parser_crash',
+                        error.pageCount ?? null,
+                    );
+                case ExtractionErrorCode.HEAP_EXHAUSTION:
+                    return errorResponse(
+                        `The PDF file for ${requestKey} is too large or complex to process and exhausted the parser's memory`,
+                        'pdf_too_complex',
+                        error.pageCount ?? null,
+                    );
+                default:
+                    return errorResponse(`Failed to render images for ${requestKey}: ${error.message}`, 'render_failed');
+            }
+        }
+        logger(`handleExternalFileViewRequest: Failed: ${error}`, 1);
+        return errorResponse(
+            `Failed to retrieve images for ${requestKey}: ${error instanceof Error ? error.message : String(error)}`,
+            'view_failed',
+        );
+    } finally {
+        dispose();
     }
 }

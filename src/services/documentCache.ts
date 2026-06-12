@@ -54,6 +54,17 @@ export interface DocumentCacheStats {
 
 type DocumentRef = { libraryId: number; zoteroKey: string };
 
+/**
+ * Minimal item identity the cache stores with each entry. Zotero.Item
+ * satisfies it structurally; external files pass a synthetic ref
+ * ({ id: 0, libraryID: EXTERNAL_LIBRARY_ID, key: extKey }).
+ */
+export interface DocumentCacheItemRef {
+    id: number;
+    libraryID: number;
+    key: string;
+}
+
 export interface DocumentCacheSourceIdentity {
     filePath: string;
     fileSignature: FileSignature;
@@ -318,7 +329,7 @@ export class DocumentCache {
      * in-flight slot.
      */
     async getOrCreateResult<T extends CacheablePayload = BeaverExtractResult>(input: {
-        item: Zotero.Item;
+        item: DocumentCacheItemRef;
         filePath: string;
         contentKind?: ExtractContentKind;
         mode: ExtractionMode;
@@ -452,7 +463,7 @@ export class DocumentCache {
 
     /** Store fresh source-level metadata without writing a payload. */
     async putMetadata(input: {
-        item: Zotero.Item;
+        item: DocumentCacheItemRef;
         filePath: string;
         sourceSizeBytes: number;
         contentType: string;
@@ -477,7 +488,7 @@ export class DocumentCache {
 
     /** Store fresh source-level metadata and a compressed full-document payload. */
     async putResult<T extends CacheablePayload = BeaverExtractResult>(input: {
-        item: Zotero.Item;
+        item: DocumentCacheItemRef;
         filePath: string;
         mode: ExtractionMode;
         sourceSizeBytes: number;
@@ -505,7 +516,7 @@ export class DocumentCache {
 
     /** Store authoritative error metadata and delete any payloads for the attachment. */
     async putErrorMetadata(input: {
-        item: Zotero.Item;
+        item: DocumentCacheItemRef;
         filePath: string;
         sourceSizeBytes: number;
         contentType: string;
@@ -650,7 +661,7 @@ export class DocumentCache {
     }
 
     private async putResultUnlocked<T extends CacheablePayload>(input: {
-        item: Zotero.Item;
+        item: DocumentCacheItemRef;
         filePath: string;
         mode: ExtractionMode;
         sourceSizeBytes: number;
@@ -837,7 +848,7 @@ export class DocumentCache {
     }
 
     private buildMetadataInput(
-        item: Zotero.Item,
+        item: DocumentCacheItemRef,
         source: DocumentCacheSourceIdentity,
         contentType: string,
         metadata: CacheMetadataInput,

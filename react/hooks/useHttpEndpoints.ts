@@ -67,6 +67,9 @@ import {
     handleTestResolveReadableHttpRequest,
     handleTestBestEpubAttachmentHttpRequest,
     handleTestValidateItemHttpRequest,
+    handleTestExternalFileAttachHttpRequest,
+    handleTestExternalFileDeleteHttpRequest,
+    handleTestExternalFileViewImagesHttpRequest,
 } from './httpHandlers/testCacheHandlers';
 import {
     handleTestNoteCreateHttpRequest,
@@ -190,6 +193,9 @@ const ENDPOINT_PATHS = [
     '/beaver/test/resolve-readable',
     '/beaver/test/best-epub-attachment',
     '/beaver/test/validate-item',
+    '/beaver/test/external-file-attach',
+    '/beaver/test/external-file-delete',
+    '/beaver/test/external-file-view-images',
     // Test-only endpoints (note seeding/teardown/inspection)
     '/beaver/test/note-create',
     '/beaver/test/note-delete',
@@ -376,6 +382,7 @@ async function handleAttachmentDocumentHttpRequest(request: any) {
         event: 'zotero_document_request',
         request_id: generateRequestId(),
         attachment: request.attachment,
+        external_file_key: request.external_file_key,
         mode: request.mode ?? 'structured',
         max_pages: request.max_pages,
         max_file_size_mb: request.max_file_size_mb,
@@ -386,6 +393,7 @@ async function handleAttachmentDocumentHttpRequest(request: any) {
 
     return {
         resolved_attachment: response.resolved_attachment,
+        external_file_key: response.external_file_key,
         content_type: response.content_type,
         content_kind: response.content_kind,
         result: response.result,
@@ -821,6 +829,14 @@ function registerEndpoints(): boolean {
             createEndpoint(handleTestBestEpubAttachmentHttpRequest);
         Zotero.Server.Endpoints['/beaver/test/validate-item'] =
             createEndpoint(handleTestValidateItemHttpRequest);
+
+        // External-file attach/delete/view-images (dev-only; seeds the registry for live tests)
+        Zotero.Server.Endpoints['/beaver/test/external-file-attach'] =
+            createEndpoint(handleTestExternalFileAttachHttpRequest);
+        Zotero.Server.Endpoints['/beaver/test/external-file-delete'] =
+            createEndpoint(handleTestExternalFileDeleteHttpRequest);
+        Zotero.Server.Endpoints['/beaver/test/external-file-view-images'] =
+            createEndpoint(handleTestExternalFileViewImagesHttpRequest);
 
         // MuPDF worker singleton stats / lifecycle (dev-only)
         Zotero.Server.Endpoints['/beaver/test/worker-stats'] =

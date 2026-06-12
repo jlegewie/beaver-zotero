@@ -8,7 +8,8 @@ import { MessageCollectionButton } from '../input/MessageCollectionButton';
 import { LibraryButton } from '../library/LibraryButton';
 import { CollectionButton } from '../library/CollectionButton';
 import { TagButton } from '../library/TagButton';
-import { CollectionAttachment } from '../../types/attachments/apiTypes';
+import { CollectionAttachment, isExternalFileAttachment } from '../../types/attachments/apiTypes';
+import { ExternalFileButton } from '../input/ExternalFileButton';
 import { collectionReferenceKey } from '../../types/zotero';
 import { EditIcon, Spinner } from '../icons/icons';
 import Button from '../ui/Button';
@@ -70,11 +71,12 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
         menuItems: selectionMenuItems
     } = useSelectionContextMenu(contentRef);
 
-    // Get Zotero items for attachments (skip collections — they're not Zotero.Item)
+    // Get Zotero items for attachments (skip collections and external files —
+    // they're not Zotero.Item)
     const attachmentItems = useMemo(() => {
         if (!userPrompt.attachments) return [];
         return userPrompt.attachments
-            .filter(att => att.type !== 'collection')
+            .filter(att => att.type !== 'collection' && att.type !== 'external_file')
             .map((att) => {
                 try {
                     const item = Zotero.Items.getByLibraryAndKey(att.library_id, att.zotero_key);
@@ -93,6 +95,13 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
         return userPrompt.attachments.filter(
             (att): att is CollectionAttachment => att.type === 'collection'
         );
+    }, [userPrompt.attachments]);
+
+    // External file attachments render entirely from the persisted inline
+    // metadata — no registry or Zotero lookup needed for display.
+    const externalFileAttachments = useMemo(() => {
+        if (!userPrompt.attachments) return [];
+        return userPrompt.attachments.filter(isExternalFileAttachment);
     }, [userPrompt.attachments]);
 
     // Initialize edited content when opening edit mode
@@ -198,11 +207,16 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
     const hasFiltersOrAttachments =
         attachmentItems.length > 0 ||
         collectionAttachments.length > 0 ||
+        externalFileAttachments.length > 0 ||
         (userPrompt.filters?.libraries && userPrompt.filters.libraries.length > 0) ||
         (userPrompt.filters?.collections && userPrompt.filters.collections.length > 0) ||
         (userPrompt.filters?.tags && userPrompt.filters.tags.length > 0);
 
-    const handleClick = useCallback(() => {
+    const handleClick = useCallback((e: React.MouseEvent) => {
+        // Chrome documents dispatch click for non-primary buttons too, so a
+        // right-click (e.g. opening a chip's context menu) must not enter
+        // edit mode and hide the view.
+        if (e.button !== 0) return;
         if (!isEditing && canEditNow) {
             setIsEditing(true);
         }
@@ -291,6 +305,17 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
                                 canEdit={false}
                             />
                         ))}
+
+                        {/* External file attachments */}
+                        {externalFileAttachments.map((file) => (
+                            <ExternalFileButton
+                                key={file.ext_key}
+                                extKey={file.ext_key}
+                                filename={file.filename}
+                                contentKind={file.content_kind}
+                                canEdit={false}
+                            />
+                        ))}
                     </div>
                 )}
 
@@ -376,6 +401,17 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
                                 <MessageItemButton
                                     key={item.key}
                                     item={item}
+                                    canEdit={false}
+                                />
+                            ))}
+
+                            {/* External file attachments (read-only in edit mode) */}
+                            {externalFileAttachments.map((file) => (
+                                <ExternalFileButton
+                                    key={file.ext_key}
+                                    extKey={file.ext_key}
+                                    filename={file.filename}
+                                    contentKind={file.content_kind}
                                     canEdit={false}
                                 />
                             ))}

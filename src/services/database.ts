@@ -144,6 +144,38 @@ export type DocumentCachePayloadInput = Omit<
 
 export type { BackgroundJobPayload } from './documentExtraction/shared/backgroundJobPayloads';
 
+/** Content kinds supported for user-attached external files. */
+export type ExternalFileContentKind = 'pdf' | 'epub' | 'text' | 'image';
+
+/**
+ * One row in `external_files`: a user-attached file from disk, copied into the
+ * Beaver-managed external-files folder at attach time. `extKey` is the
+ * 8-character key behind the model-facing `ext-<KEY>` id. `originalPath` is
+ * informational and local-only — it is never sent off-device.
+ */
+export interface ExternalFileRecord {
+    extKey: string;
+    filename: string;
+    originalPath: string | null;
+    storedPath: string;
+    contentKind: ExternalFileContentKind;
+    mimeType: string;
+    fileSize: number;
+    mtimeMs: number;
+    pageCount: number | null;
+    /** SHA-256 of the file content (hex). Null when hashing failed at attach time. */
+    sha256: string | null;
+    createdAt: string;
+}
+
+export type ExternalFileInput = Omit<ExternalFileRecord, 'createdAt'>;
+
+const EXTERNAL_FILE_CONTENT_KINDS: ReadonlySet<string> = new Set(['pdf', 'epub', 'text', 'image']);
+
+export function isExternalFileContentKind(value: string): value is ExternalFileContentKind {
+    return EXTERNAL_FILE_CONTENT_KINDS.has(value);
+}
+
 /** Background extraction job kinds. */
 export type BackgroundJobType = 'document_timeout_retry';
 
@@ -522,6 +554,42 @@ export class BeaverDB {
         await this.conn.queryAsync(`
             CREATE INDEX IF NOT EXISTS idx_dcp_library_key_payload_kind
             ON document_cache_payloads(library_id, zotero_key, payload_kind);
+        `);
+
+        // User-attached external files (registry behind the `ext-<KEY>` ids).
+        // One row per attached file; the copy lives in the Beaver-managed
+        // external-files folder at stored_path.
+        await this.conn.queryAsync(`
+            CREATE TABLE IF NOT EXISTS external_files (
+                ext_key        TEXT PRIMARY KEY,
+                filename       TEXT NOT NULL,
+                original_path  TEXT,
+                stored_path    TEXT NOT NULL,
+                content_kind   TEXT NOT NULL CHECK (content_kind IN ('pdf','epub','text','image')),
+                mime_type      TEXT NOT NULL,
+                file_size      INTEGER NOT NULL,
+                mtime_ms       INTEGER NOT NULL,
+                page_count     INTEGER,
+                sha256         TEXT,
+                created_at     TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+        `);
+
+        // Pre-release tables were created without the sha256 column; add it
+        // in place rather than dropping the registry.
+        const externalFileColumns: string[] = [];
+        await this.conn.queryAsync(`PRAGMA table_info(external_files)`, [], {
+            onRow: (row: any) => externalFileColumns.push(row.getResultByIndex(1)),
+        });
+        if (!externalFileColumns.includes('sha256')) {
+            await this.conn.queryAsync(`ALTER TABLE external_files ADD COLUMN sha256 TEXT`);
+        }
+
+        // Content-hash lookup for attach-time deduplication (non-unique:
+        // dedup is best-effort and concurrent attaches may race).
+        await this.conn.queryAsync(`
+            CREATE INDEX IF NOT EXISTS idx_external_files_sha256
+            ON external_files(sha256);
         `);
 
         // Drop and recreate the ephemeral queue if the schema or unique key is stale.
@@ -2319,6 +2387,144 @@ export class BeaverDB {
             await this.conn.queryAsync(`DELETE FROM document_cache_payloads`);
             await this.conn.queryAsync(`DELETE FROM document_cache_metadata`);
         });
+    }
+
+    // =====================================================================
+    // External files (user-attached files behind `ext-<KEY>` ids)
+    // =====================================================================
+
+    private static externalFileSelect(): string {
+        return `SELECT ext_key, filename, original_path, stored_path, content_kind,
+                       mime_type, file_size, mtime_ms, page_count, sha256, created_at
+                FROM external_files`;
+    }
+
+    /**
+     * Normalize SQLite's datetime('now') format ("YYYY-MM-DD HH:MM:SS", UTC
+     * with no timezone marker) to ISO-8601 UTC, so `new Date(createdAt)`
+     * never misparses it as local time. Attach-time records already carry
+     * ISO strings and pass through unchanged.
+     */
+    private static sqliteUtcToIso(value: string): string {
+        if (!value || value.includes('T')) return value;
+        return `${value.replace(' ', 'T')}Z`;
+    }
+
+    private async selectExternalFiles(sql: string, params: any[] = []): Promise<ExternalFileRecord[]> {
+        const rows: ExternalFileRecord[] = [];
+        await this.conn.queryAsync(sql, params, {
+            onRow: (row: any) => {
+                // These indices must match the SELECT column order above.
+                rows.push({
+                    extKey: row.getResultByIndex(0),
+                    filename: row.getResultByIndex(1),
+                    originalPath: row.getResultByIndex(2) ?? null,
+                    storedPath: row.getResultByIndex(3),
+                    contentKind: row.getResultByIndex(4),
+                    mimeType: row.getResultByIndex(5),
+                    fileSize: row.getResultByIndex(6),
+                    mtimeMs: row.getResultByIndex(7),
+                    pageCount: row.getResultByIndex(8) ?? null,
+                    sha256: row.getResultByIndex(9) ?? null,
+                    createdAt: BeaverDB.sqliteUtcToIso(row.getResultByIndex(10)),
+                });
+            },
+        });
+        return rows;
+    }
+
+    /** Insert or replace the registry row for an external file. */
+    public async upsertExternalFile(input: ExternalFileInput): Promise<void> {
+        await this.conn.queryAsync(
+            `INSERT INTO external_files (
+                ext_key, filename, original_path, stored_path, content_kind,
+                mime_type, file_size, mtime_ms, page_count, sha256
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(ext_key) DO UPDATE SET
+                filename = excluded.filename,
+                original_path = excluded.original_path,
+                stored_path = excluded.stored_path,
+                content_kind = excluded.content_kind,
+                mime_type = excluded.mime_type,
+                file_size = excluded.file_size,
+                mtime_ms = excluded.mtime_ms,
+                page_count = excluded.page_count,
+                sha256 = excluded.sha256`,
+            [
+                input.extKey,
+                input.filename,
+                input.originalPath,
+                input.storedPath,
+                input.contentKind,
+                input.mimeType,
+                input.fileSize,
+                input.mtimeMs,
+                input.pageCount,
+                input.sha256,
+            ],
+        );
+    }
+
+    /** Get one external file by its 8-character key. */
+    public async getExternalFileByKey(extKey: string): Promise<ExternalFileRecord | null> {
+        const rows = await this.selectExternalFiles(
+            `${BeaverDB.externalFileSelect()} WHERE ext_key = ?`,
+            [extKey],
+        );
+        return rows[0] ?? null;
+    }
+
+    /**
+     * Get the newest external file with the given content hash (attach-time
+     * deduplication). Returns null when no row carries the hash.
+     */
+    public async getExternalFileBySha256(sha256: string): Promise<ExternalFileRecord | null> {
+        const rows = await this.selectExternalFiles(
+            `${BeaverDB.externalFileSelect()} WHERE sha256 = ? ORDER BY created_at DESC, ext_key DESC LIMIT 1`,
+            [sha256],
+        );
+        return rows[0] ?? null;
+    }
+
+    /** Set the best-effort page count once it is known (async after attach). */
+    public async setExternalFilePageCount(extKey: string, pageCount: number | null): Promise<void> {
+        await this.conn.queryAsync(
+            `UPDATE external_files SET page_count = ? WHERE ext_key = ?`,
+            [pageCount, extKey],
+        );
+    }
+
+    /** Delete one external file registry row. */
+    public async deleteExternalFile(extKey: string): Promise<void> {
+        await this.conn.queryAsync(`DELETE FROM external_files WHERE ext_key = ?`, [extKey]);
+    }
+
+    /** List all external file registry rows (newest first). */
+    public async listExternalFiles(): Promise<ExternalFileRecord[]> {
+        return this.selectExternalFiles(
+            `${BeaverDB.externalFileSelect()} ORDER BY created_at DESC, ext_key DESC`,
+        );
+    }
+
+    /** Count and total size of all external file registry rows. */
+    public async getExternalFileStats(): Promise<{ count: number; totalBytes: number }> {
+        const rows: Array<{ count: number; totalBytes: number }> = [];
+        await this.conn.queryAsync(
+            `SELECT COUNT(*), COALESCE(SUM(file_size), 0) FROM external_files`,
+            [],
+            {
+                onRow: (row: any) => rows.push({
+                    count: row.getResultByIndex(0),
+                    totalBytes: row.getResultByIndex(1),
+                }),
+            },
+        );
+        return rows[0] ?? { count: 0, totalBytes: 0 };
+    }
+
+    /** Delete every external file registry row. */
+    public async deleteAllExternalFiles(): Promise<void> {
+        await this.conn.queryAsync(`DELETE FROM external_files`);
     }
 
     // =====================================================================

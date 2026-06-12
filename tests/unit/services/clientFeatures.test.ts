@@ -28,6 +28,7 @@ const EXPECTED_FEATURE_STRINGS = [
     'external_search_surcharge',
     'edit_metadata_creators',
     'document_payload_budget',
+    'external_files',
 ].sort();
 
 describe('client feature declaration (Lane C)', () => {

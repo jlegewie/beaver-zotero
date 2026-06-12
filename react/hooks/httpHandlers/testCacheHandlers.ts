@@ -412,3 +412,68 @@ export async function handleTestValidateItemHttpRequest(request: any) {
         backend_checked: result.backendChecked,
     };
 }
+
+/**
+ * Dev-only: attach an external file from a local path (registry + managed
+ * copy), mirroring the drag-and-drop / file-picker attach flow so live tests
+ * can exercise the external-file read path end to end.
+ */
+export async function handleTestExternalFileAttachHttpRequest(request: any) {
+    const { path } = request;
+    if (!path || typeof path !== 'string') {
+        return { ok: false, error: 'Provide a local file path' };
+    }
+    const { attachExternalFile } = await import('../../../src/services/externalFiles');
+    const result = await attachExternalFile(path);
+    if (result.status !== 'attached') {
+        return { ok: false, reason: result.reason, error: result.message };
+    }
+    return { ok: true, record: result.record };
+}
+
+/**
+ * Dev-only: delete an external file registry row and its managed copy.
+ */
+export async function handleTestExternalFileDeleteHttpRequest(request: any) {
+    const { ext_key, delete_copy } = request;
+    const db = Zotero.Beaver?.db;
+    if (!db) return { ok: false, error: 'db not available' };
+    if (!ext_key) return { ok: false, error: 'Provide ext_key' };
+    const record = await db.getExternalFileByKey(ext_key);
+    if (record && delete_copy !== false) {
+        await IOUtils.remove(record.storedPath).catch(() => undefined);
+    }
+    await db.deleteExternalFile(ext_key);
+    return { ok: true, existed: !!record };
+}
+
+/**
+ * Dev-only: invoke `handleZoteroViewImagesRequest` for an external file key.
+ *
+ * Exposes the external-file branch of the unified view-images handler over
+ * HTTP so live tests can verify the full registry lookup → file read → render
+ * pipeline without a WebSocket client. Accepts the same optional fields as
+ * the WebSocket request (`start_page`, `end_page`, `dpi`, `format`, etc.).
+ */
+export async function handleTestExternalFileViewImagesHttpRequest(request: any) {
+    const { ext_key, start_page, end_page, dpi, max_width, max_height, format, jpeg_quality, timeout_seconds } = request || {};
+    if (!ext_key) return { ok: false, error: 'Provide ext_key' };
+
+    const { handleZoteroViewImagesRequest } = await import(
+        '../../../src/services/agentDataProvider/handleZoteroViewImagesRequest'
+    );
+    const response = await handleZoteroViewImagesRequest({
+        event: 'zotero_view_images_request',
+        request_id: `test-view-${ext_key}`,
+        external_file_key: ext_key,
+        start_page: start_page ?? undefined,
+        end_page: end_page ?? undefined,
+        dpi: dpi ?? undefined,
+        max_width: max_width ?? undefined,
+        max_height: max_height ?? undefined,
+        format: format ?? undefined,
+        jpeg_quality: jpeg_quality ?? undefined,
+        timeout_seconds: timeout_seconds ?? undefined,
+    });
+    return response;
+}

@@ -294,11 +294,13 @@
 /* UserRequestView - Clickable user message display */
 [id^="beaver-pane-"] .user-request-view {
     cursor: pointer;
-    transition: filter 0.15s ease, border-color 0.15s ease;
+    transition: border-color 0.15s ease;
 }
 
 [id^="beaver-pane-"] .user-request-view-hover {
-    filter: brightness(1.02);
+    /* No `filter` here: a filter makes this element the containing block for
+       position:fixed descendants, which displaces the inline context menus
+       rendered by the attachment chips. */
     border-color: var(--fill-quarternary);
 }
 

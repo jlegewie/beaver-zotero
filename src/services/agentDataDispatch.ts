@@ -64,6 +64,7 @@ export function createZoteroDataProvider(): AgentDataProviderMap {
             errorResponse: (event, err) => ({
                 type: 'zotero_document',
                 request_id: event.request_id,
+                external_file_key: event.external_file_key ?? null,
                 content_kind: null,
                 total_pages: null,
                 error: String(err),
@@ -99,7 +100,10 @@ export function createZoteroDataProvider(): AgentDataProviderMap {
             errorResponse: (event, err) => ({
                 type: 'zotero_view_images',
                 request_id: event.request_id,
-                attachment: event.attachment,
+                // Echo whichever identity the request carried (external-file
+                // requests have no attachment reference).
+                attachment: event.attachment ?? null,
+                external_file_key: event.external_file_key ?? null,
                 resolved_attachment: null,
                 kind: null,
                 images: [],

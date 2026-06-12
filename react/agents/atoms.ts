@@ -18,7 +18,7 @@ import {
     WSToolCallProgressEvent,
     WSToolCallArgsStreamEvent,
 } from "../../src/services/agentProtocol";
-import { MessageAttachment } from "../types/attachments/apiTypes";
+import { MessageAttachment, messageAttachmentKey } from "../types/attachments/apiTypes";
 
 // =============================================================================
 // Core Atoms
@@ -85,8 +85,9 @@ export const toolResultsMapAtom = atom((get) => {
     return map;
 });
 
-/** 
- * Map of user attachments in all runs, keyed by library_id-zotero_key.
+/**
+ * Map of user attachments in all runs, keyed by messageAttachmentKey
+ * (`<library_id>-<zotero_key>`, or `ext-<KEY>` for external files).
  * Uses Map for proper deduplication (Set with objects uses reference equality).
  */
 export const allUserAttachmentsAtom = atom((get) => {
@@ -96,20 +97,20 @@ export const allUserAttachmentsAtom = atom((get) => {
     for (const run of runs) {
         const runAttachments = run.user_prompt.attachments || [];
         for (const attachment of runAttachments) {
-            const key = `${attachment.library_id}-${attachment.zotero_key}`;
+            const key = messageAttachmentKey(attachment);
             if (!attachmentsMap.has(key)) {
                 attachmentsMap.set(key, attachment);
             }
         }
-    }   
+    }
 
     return attachmentsMap;
 });
 
-/** Set of {library_id}-{zotero_key} for all user attachments in the thread */
+/** Set of messageAttachmentKey strings for all user attachments in the thread */
 export const allUserAttachmentKeysAtom = atom((get) => {
     const attachmentsMap = get(allUserAttachmentsAtom);
-    return new Set(Array.from(attachmentsMap.values()).map(a => `${a.library_id}-${a.zotero_key}`));
+    return new Set(Array.from(attachmentsMap.values()).map(messageAttachmentKey));
 });
 
 

@@ -13,6 +13,9 @@ import {
     ResolvedAnnotation,
     resolveAnnotationRef,
 } from '../agentRuns/annotationListShared';
+import { EXTERNAL_LIBRARY_ID } from '../../../src/services/externalFiles';
+import { EXTERNAL_FILE_ICON_BY_KIND } from '../input/ExternalFileButton';
+import type { ExternalFileContentKind } from '../../types/attachments/apiTypes';
 
 export interface ZoteroItemReferenceWithLabel extends ZoteroItemReference {
     label: string;
@@ -40,9 +43,20 @@ interface ItemWithSelectionId {
     faded?: boolean;
 }
 
+interface ResolvedExternalFile {
+    extKey: string;
+    filename: string;
+    contentKind: ExternalFileContentKind | null;
+    /** Path of the managed copy; null when the registry has no row or the copy is gone. */
+    storedPath: string | null;
+    label?: string;
+    faded?: boolean;
+}
+
 type ResolvedListEntry =
     | { kind: 'item'; entry: ItemWithSelectionId }
-    | { kind: 'annotation'; entry: ResolvedAnnotation; faded?: boolean };
+    | { kind: 'annotation'; entry: ResolvedAnnotation; faded?: boolean }
+    | { kind: 'externalFile'; entry: ResolvedExternalFile };
 
 interface ZoteroItemsListProps {
     messageAttachments: (
@@ -71,6 +85,29 @@ const ZoteroItemsList: React.FC<ZoteroItemsListProps> = ({
             if (messageAttachments) {
                 const entries: ResolvedListEntry[] = [];
                 for (const attachment of messageAttachments) {
+                    // Sentinel references (library_id = EXTERNAL_LIBRARY_ID)
+                    // identify external files; the key is the ext key.
+                    if (attachment.library_id === EXTERNAL_LIBRARY_ID) {
+                        const record = await Zotero.Beaver?.db
+                            ?.getExternalFileByKey(attachment.zotero_key)
+                            .catch(() => null);
+                        const copyExists = record
+                            ? await IOUtils.exists(record.storedPath).catch(() => false)
+                            : false;
+                        entries.push({
+                            kind: 'externalFile',
+                            entry: {
+                                extKey: attachment.zotero_key,
+                                filename: record?.filename ?? `Attached file (ext-${attachment.zotero_key})`,
+                                contentKind: record?.contentKind ?? null,
+                                storedPath: copyExists && record ? record.storedPath : null,
+                                label: 'label' in attachment ? attachment.label : undefined,
+                                faded: 'faded' in attachment ? attachment.faded : false,
+                            },
+                        });
+                        continue;
+                    }
+
                     const item = await Zotero.Items.getByLibraryAndKeyAsync(
                         attachment.library_id,
                         attachment.zotero_key
@@ -126,6 +163,16 @@ const ZoteroItemsList: React.FC<ZoteroItemsListProps> = ({
         selectItemById(selectionItemId);
     };
 
+    const handleExternalFileClick = (entry: ResolvedExternalFile) => {
+        if (!entry.storedPath) return;
+        // Zotero.File.reveal is async; route rejections into the logger.
+        Promise.resolve()
+            .then(() => Zotero.File.reveal(entry.storedPath as string))
+            .catch((error) => {
+                logger(`ZoteroItemsList: failed to reveal external file ext-${entry.extKey}: ${error}`, 1);
+            });
+    };
+
     const handleAnnotationClick = async (annotation: ResolvedAnnotation) => {
         try {
             await navigateToAnnotation(annotation.item);
@@ -139,6 +186,43 @@ const ZoteroItemsList: React.FC<ZoteroItemsListProps> = ({
     return (
         <div className="min-w-0">
             {resolvedEntries.map((resolvedEntry) => {
+                if (resolvedEntry.kind === 'externalFile') {
+                    const entry = resolvedEntry.entry;
+                    const clickable = !!entry.storedPath;
+                    return (
+                        <div
+                            key={`ext-${entry.extKey}`}
+                            className={`display-flex flex-row gap-1 items-start min-w-0 px-15 py-15 last:border-0 transition-colors duration-150 ${clickable ? 'cursor-pointer' : ''} ${entry.faded ? 'opacity-50' : ''}`}
+                            onClick={clickable ? () => handleExternalFileClick(entry) : undefined}
+                            title={clickable ? 'Click to show the file' : 'File not available on this device'}
+                        >
+                            <span className="scale-75" style={{ marginTop: '-2px' }}>
+                                <CSSItemTypeIcon
+                                    itemType={(entry.contentKind && EXTERNAL_FILE_ICON_BY_KIND[entry.contentKind]) || 'attachmentFile'}
+                                />
+                            </span>
+                            <div className={`display-flex flex-col flex-1 gap-1 min-w-0 ${fontColor}`}>
+                                <div className={`display-flex flex-row gap-1 min-w-0 ${fontColor}`}>
+                                    <div className={`truncate text-sm ${fontColor}`}>
+                                        {truncateText(entry.filename, 100)}
+                                    </div>
+                                    {!oneLine && entry.label && (
+                                        <>
+                                            <div className="flex-1" />
+                                            <div className="text-sm display-flex min-w-0 font-color-tertiary mr-1">
+                                                {truncateText(entry.label, 15)}
+                                            </div>
+                                        </>
+                                    )}
+                                </div>
+                                <div className={`truncate text-sm ${muted ? 'font-color-tertiary' : 'font-color-secondary'}`}>
+                                    Attached file
+                                </div>
+                            </div>
+                        </div>
+                    );
+                }
+
                 if (resolvedEntry.kind === 'annotation') {
                     const { entry: annotation, faded } = resolvedEntry;
                     const key = `${annotation.ref.library_id}-${annotation.ref.zotero_key}`;

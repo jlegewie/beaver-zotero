@@ -1,6 +1,6 @@
 import React from 'react'
 import { useAtomValue, useSetAtom } from 'jotai';
-import { currentReaderAttachmentAtom, readerTextSelectionAtom, currentMessageFiltersAtom, removeItemFromMessageAtom, currentMessageItemsAtom, currentMessageCollectionsAtom, clearMessageContextAtom } from '../../atoms/messageComposition';
+import { currentReaderAttachmentAtom, readerTextSelectionAtom, currentMessageFiltersAtom, removeItemFromMessageAtom, currentMessageItemsAtom, currentMessageCollectionsAtom, currentMessageExternalFilesAtom, removeExternalFileFromMessageAtom, clearMessageContextAtom } from '../../atoms/messageComposition';
 import { currentNoteItemAtom } from '../../atoms/zoteroContext';
 import { removePopupMessagesByTypeAtom } from '../../atoms/ui';
 import { TextSelectionButton } from '../input/TextSelectionButton';
@@ -11,6 +11,7 @@ import { CollectionButton } from '../library/CollectionButton';
 import { TagButton } from '../library/TagButton';
 import { MessageItemButton } from '../input/MessageItemButton';
 import { MessageCollectionButton } from '../input/MessageCollectionButton';
+import { ExternalFileButton } from '../input/ExternalFileButton';
 import { collectionReferenceKey } from '../../types/zotero';
 import { usePreviewHover } from '../../hooks/usePreviewHover';
 import { activePreviewAtom } from '../../atoms/ui';
@@ -41,6 +42,8 @@ const MessageAttachmentDisplay = ({
     const { libraryIds: currentLibraryIds, collectionIds: currentCollectionIds, tagSelections: currentTagSelections } = currentMessageFilters;
     const currentMessageItems = useAtomValue(currentMessageItemsAtom);
     const currentMessageCollections = useAtomValue(currentMessageCollectionsAtom);
+    const currentMessageExternalFiles = useAtomValue(currentMessageExternalFilesAtom);
+    const removeExternalFileFromMessage = useSetAtom(removeExternalFileFromMessageAtom);
     const removeItemFromMessage = useSetAtom(removeItemFromMessageAtom);
     const clearMessageContext = useSetAtom(clearMessageContextAtom);
     const removePopupMessagesByType = useSetAtom(removePopupMessagesByTypeAtom);
@@ -76,6 +79,7 @@ const MessageAttachmentDisplay = ({
         selectedCollections.length +
         currentTagSelections.length +
         currentMessageCollections.length +
+        currentMessageExternalFiles.length +
         (readerTextSelection ? 1 : 0);
 
     // Offer "Remove all" only when there is more than one removable item
@@ -95,8 +99,15 @@ const MessageAttachmentDisplay = ({
     return (
         <div className="display-flex flex-wrap gap-col-3 gap-row-2 mb-2">
             <AddSourcesMenu
-                // showText={currentMessageItems.length == 0 && threadSourceCount == 0 && !currentReaderAttachment}
-                showText={currentMessageItems.length == 0 && !currentReaderAttachment && !currentNoteItem && selectedLibraries.length == 0 && selectedCollections.length == 0 && currentTagSelections.length == 0}
+                showText={
+                    currentMessageItems.length == 0 &&
+                    !currentReaderAttachment &&
+                    !currentNoteItem &&
+                    selectedLibraries.length == 0 &&
+                    selectedCollections.length == 0 &&
+                    currentTagSelections.length == 0 &&
+                    currentMessageExternalFiles.length == 0
+                }
                 onClose={() => {
                     inputRef.current?.focus();
                     setIsAddAttachmentMenuOpen(false);
@@ -168,6 +179,19 @@ const MessageAttachmentDisplay = ({
                     +{overflowCount}
                 </button>
             )}
+
+            {/* External files */}
+            {currentMessageExternalFiles.map((file) => (
+                <ExternalFileButton
+                    key={file.extKey}
+                    extKey={file.extKey}
+                    filename={file.filename}
+                    contentKind={file.contentKind}
+                    storedPath={file.storedPath}
+                    onRemove={removeExternalFileFromMessage}
+                    onRemoveAll={handleRemoveAll}
+                />
+            ))}
 
             {/* Current text selection */}
             {readerTextSelection && (

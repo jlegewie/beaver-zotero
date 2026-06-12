@@ -1,5 +1,5 @@
 import { atom } from "jotai";
-import { currentMessageItemsAtom, currentMessageContentAtom, updateMessageItemsFromZoteroSelectionAtom, updateReaderAttachmentAtom } from "./messageComposition";
+import { currentMessageItemsAtom, currentMessageContentAtom, currentMessageCollectionsAtom, currentMessageExternalFilesAtom, updateMessageItemsFromZoteroSelectionAtom, updateReaderAttachmentAtom } from "./messageComposition";
 import { isLibraryTabAtom, isWebSearchEnabledAtom, removePopupMessagesByTypeAtom, userScrolledAtom, windowUserScrolledAtom } from "./ui";
 
 import { citationMetadataAtom, citationDataMapAtom, updateCitationDataAtom, resetCitationMarkersAtom, mergePageLabelsByAttachmentIdAtom } from "./citations";
@@ -257,6 +257,8 @@ export const newThreadAtom = atom(
             set(isWebSearchEnabledAtom, false);
             
             set(currentMessageItemsAtom, []);
+            set(currentMessageCollectionsAtom, []);
+            set(currentMessageExternalFilesAtom, []);
             set(removePopupMessagesByTypeAtom, ['items_summary']);
             set(citationMetadataAtom, []);
             set(resetCitationMarkersAtom);
@@ -399,10 +401,12 @@ export const loadThreadAtom = atom(
                     .filter(c => c.library_id && c.zotero_key)
                     .forEach(c => allItemReferences.add(`${c.library_id}-${c.zotero_key}`));
                 
-                // From user attachments in runs
+                // From user attachments in runs (external files have no Zotero
+                // reference to preload)
                 for (const run of processedRuns) {
                     const attachments = run.user_prompt.attachments || [];
                     attachments
+                        .filter(att => att.type !== 'external_file')
                         .filter(att => att.library_id && att.zotero_key)
                         .forEach(att => allItemReferences.add(`${att.library_id}-${att.zotero_key}`));
                 }
@@ -505,6 +509,8 @@ export const loadThreadAtom = atom(
         }
         // Clear sources for now
         set(currentMessageItemsAtom, []);
+        set(currentMessageCollectionsAtom, []);
+        set(currentMessageExternalFilesAtom, []);
         set(removePopupMessagesByTypeAtom, ['items_summary']);
         set(currentMessageContentAtom, '');
     }
