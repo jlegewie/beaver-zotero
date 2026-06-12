@@ -2506,6 +2506,27 @@ export class BeaverDB {
         );
     }
 
+    /** Count and total size of all external file registry rows. */
+    public async getExternalFileStats(): Promise<{ count: number; totalBytes: number }> {
+        const rows: Array<{ count: number; totalBytes: number }> = [];
+        await this.conn.queryAsync(
+            `SELECT COUNT(*), COALESCE(SUM(file_size), 0) FROM external_files`,
+            [],
+            {
+                onRow: (row: any) => rows.push({
+                    count: row.getResultByIndex(0),
+                    totalBytes: row.getResultByIndex(1),
+                }),
+            },
+        );
+        return rows[0] ?? { count: 0, totalBytes: 0 };
+    }
+
+    /** Delete every external file registry row. */
+    public async deleteAllExternalFiles(): Promise<void> {
+        await this.conn.queryAsync(`DELETE FROM external_files`);
+    }
+
     // =====================================================================
     // Background job queue
     // =====================================================================

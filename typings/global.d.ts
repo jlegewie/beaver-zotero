@@ -312,6 +312,10 @@ declare namespace Zotero {
 
             listExternalFiles(): Promise<import("../src/services/database").ExternalFileRecord[]>;
 
+            getExternalFileStats(): Promise<{ count: number; totalBytes: number }>;
+
+            deleteAllExternalFiles(): Promise<void>;
+
             // --- Background job queue ---
             enqueueBackgroundJob(
                 input: import("../src/services/database").BackgroundJobInput,

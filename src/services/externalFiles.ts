@@ -312,6 +312,50 @@ export async function attachExternalFile(
     }
 }
 
+/** Count and total size of the external files registry. */
+export async function getExternalFilesStats(): Promise<{ count: number; totalBytes: number }> {
+    return getDB().getExternalFileStats();
+}
+
+/**
+ * Delete all external files: managed copies, registry rows, and the cached
+ * extractions keyed under the external sentinel library. Files referenced in
+ * past conversations stop being readable by the agent (the designed
+ * "not available on this device" degradation); chips and metadata still
+ * render from inline message data.
+ */
+export async function deleteAllExternalFiles(): Promise<{ deletedCount: number }> {
+    const db = getDB();
+    const { count } = await db.getExternalFileStats();
+
+    // Remove the managed folder wholesale (also sweeps orphaned copies),
+    // then recreate it for future attaches.
+    const dir = getExternalFilesDir();
+    await IOUtils.remove(dir, { recursive: true, ignoreAbsent: true } as any).catch((error) => {
+        logger(`externalFiles: failed to remove external files folder: ${error}`, 1);
+    });
+    await IOUtils.makeDirectory(dir, { createAncestors: true, ignoreExisting: true }).catch(() => undefined);
+
+    await db.deleteAllExternalFiles();
+
+    // Drop cached extractions of the deleted files (document cache keys
+    // external entries under the sentinel library id).
+    await Zotero.Beaver?.documentCache?.invalidateByLibrary(EXTERNAL_LIBRARY_ID)?.catch?.(() => undefined);
+
+    logger(`externalFiles: deleted all external files (${count} registry rows)`, 3);
+    return { deletedCount: count };
+}
+
+/**
+ * Reveal the managed external-files folder in the system file manager,
+ * creating it first so the reveal never fails on a fresh profile.
+ */
+export async function revealExternalFilesDir(): Promise<void> {
+    const dir = getExternalFilesDir();
+    await IOUtils.makeDirectory(dir, { createAncestors: true, ignoreExisting: true }).catch(() => undefined);
+    await Zotero.File.reveal(dir);
+}
+
 /**
  * Look up an external file and verify its managed copy still exists on this
  * device. Returns a structured miss so callers can produce the

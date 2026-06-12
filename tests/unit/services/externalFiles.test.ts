@@ -10,6 +10,7 @@ vi.mock('../../../src/beaver-extract/MuPDFWorkerClient', () => ({
 import {
     attachExternalFile,
     contentKindFromMime,
+    deleteAllExternalFiles,
     getExternalFilesDir,
     resolveExternalFile,
 } from '../../../src/services/externalFiles';
@@ -19,6 +20,12 @@ const db = {
     getExternalFileByKey: vi.fn().mockResolvedValue(null),
     getExternalFileBySha256: vi.fn().mockResolvedValue(null),
     setExternalFilePageCount: vi.fn().mockResolvedValue(undefined),
+    getExternalFileStats: vi.fn().mockResolvedValue({ count: 0, totalBytes: 0 }),
+    deleteAllExternalFiles: vi.fn().mockResolvedValue(undefined),
+};
+
+const documentCache = {
+    invalidateByLibrary: vi.fn().mockResolvedValue(undefined),
 };
 
 function setupGlobals({
@@ -42,7 +49,7 @@ function setupGlobals({
     zotero.DataDirectory = { dir: '/mock/data' };
     zotero.MIME = { getMIMETypeFromFile: vi.fn().mockResolvedValue(mime) };
     zotero.Utilities.generateObjectKey = vi.fn(() => generateKey);
-    zotero.Beaver = { db };
+    zotero.Beaver = { db, documentCache };
 }
 
 describe('externalFiles', () => {
@@ -241,6 +248,25 @@ describe('externalFiles', () => {
             expect(result.record.extKey).toBe('ABCD2345');
             expect(result.record.sha256).toBeNull();
             expect(db.getExternalFileBySha256).not.toHaveBeenCalled();
+        });
+    });
+
+    describe('deleteAllExternalFiles', () => {
+        it('removes the folder, registry rows, and sentinel cache entries', async () => {
+            setupGlobals();
+            const io = (globalThis as any).IOUtils;
+            io.remove = vi.fn().mockResolvedValue(undefined);
+            db.getExternalFileStats.mockResolvedValue({ count: 3, totalBytes: 999 });
+
+            const result = await deleteAllExternalFiles();
+
+            expect(result.deletedCount).toBe(3);
+            expect(io.remove).toHaveBeenCalledWith(
+                getExternalFilesDir(),
+                expect.objectContaining({ recursive: true }),
+            );
+            expect(db.deleteAllExternalFiles).toHaveBeenCalledOnce();
+            expect(documentCache.invalidateByLibrary).toHaveBeenCalledWith(-1);
         });
     });
 
