@@ -255,6 +255,10 @@ async function hydrateAttachments(
     if (!attachments) return { items, collections };
 
     for (const a of attachments) {
+        if (a.type === 'external_file') {
+            // External files are not Zotero objects; nothing to hydrate.
+            continue;
+        }
         if (a.type === 'collection') {
             const c = await Zotero.Collections.getByLibraryAndKeyAsync(a.library_id, a.zotero_key);
             if (c) {

@@ -210,8 +210,17 @@ export interface WSPageImage {
 export interface WSZoteroDocumentRequest extends WSBaseEvent {
     event: 'zotero_document_request';
     request_id: string;
-    /** May be a parent item; frontend resolves it to a PDF attachment. */
-    attachment: ZoteroItemReference;
+    /**
+     * May be a parent item; frontend resolves it to a PDF attachment.
+     * Absent for external-file requests (exactly one of `attachment` or
+     * `external_file_key` is set).
+     */
+    attachment?: ZoteroItemReference | null;
+    /**
+     * Key of a user-attached external file (the 8-character key from an
+     * 'ext-<KEY>' id), served from the plugin's external-files store.
+     */
+    external_file_key?: string | null;
     mode: BeaverExtractResult['mode'];
     /** Reject threshold for total document page count; not a page clamp. */
     max_pages?: number | null;
@@ -294,8 +303,17 @@ export interface WSZoteroAttachmentImageRequest extends WSBaseEvent {
 export interface WSZoteroViewImagesRequest extends WSBaseEvent {
     event: 'zotero_view_images_request';
     request_id: string;
-    /** May be a parent item; frontend resolves it to a PDF or image attachment. */
-    attachment: ZoteroItemReference;
+    /**
+     * May be a parent item; frontend resolves it to a PDF or image attachment.
+     * Absent for external-file requests (exactly one of `attachment` or
+     * `external_file_key` is set).
+     */
+    attachment?: ZoteroItemReference | null;
+    /**
+     * Key of a user-attached external file (the 8-character key from an
+     * 'ext-<KEY>' id), served from the plugin's external-files store.
+     */
+    external_file_key?: string | null;
     /**
      * First page to render (1-indexed, contiguous range). Default: 1.
      * Ignored for image attachments. Inverted ranges (end_page < start_page)
@@ -630,7 +648,10 @@ export type ZoteroDocumentErrorCode =
 export interface WSZoteroDocumentResponse {
     type: 'zotero_document';
     request_id: string;
+    /** Resolved PDF attachment on success. Absent for external-file requests. */
     resolved_attachment?: ZoteroItemReference | null;
+    /** Echo of the external file key for external-file requests. */
+    external_file_key?: string | null;
     content_type?: string | null;
     content_kind?: ExtractContentKind | null;
     result?: DocumentExtractResult | null;
@@ -755,7 +776,13 @@ export interface WSViewImage {
 export interface WSZoteroViewImagesResponse {
     type: 'zotero_view_images';
     request_id: string;
-    attachment: ZoteroItemReference;
+    /**
+     * Echo of the requested attachment. Absent for external-file requests
+     * (exactly one of `attachment` or `external_file_key` is set).
+     */
+    attachment?: ZoteroItemReference | null;
+    /** Echo of the external file key for external-file requests. */
+    external_file_key?: string | null;
     /** The attachment actually served when a parent item was auto-resolved. */
     resolved_attachment?: ZoteroItemReference | null;
     /** Kind of the served attachment. Null on errors before resolution. */
@@ -1498,6 +1525,7 @@ export const CLIENT_FEATURES = {
     UNIFIED_CITATION_FORMAT: 'unified_citation_format',
     EXTERNAL_SEARCH_SURCHARGE: 'external_search_surcharge',
     EDIT_METADATA_CREATORS: 'edit_metadata_creators',
+    EXTERNAL_FILES: 'external_files',
 } as const;
 
 /** Client type identifier for the Zotero plugin. */

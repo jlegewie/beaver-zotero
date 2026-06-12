@@ -34,7 +34,7 @@ import {
 } from './agentDataProvider/timeout';
 import type { ZoteroDocumentErrorCode } from './agentProtocol';
 import type { DocumentCacheExtractionMode } from './database';
-import type { DocumentCacheSourceIdentity } from './documentCache';
+import type { DocumentCacheItemRef, DocumentCacheSourceIdentity } from './documentCache';
 import { logger } from '../utils/logger';
 import { effectiveMaxFileSizeMB, effectiveMaxPageCount } from './attachmentLimits';
 import {
@@ -43,6 +43,7 @@ import {
     resolveToReadableAttachment,
     validateZoteroItemReference,
     preflightCachedPdfMeta,
+    type AttachmentFileSource,
 } from './documentExtraction';
 import { readableToExtractKind, type ExtractContentKind } from './documentExtraction/shared/contentKinds';
 import {
@@ -54,6 +55,41 @@ import {
 export interface ResolvedAttachment {
     libraryId: number;
     zoteroKey: string;
+}
+
+/**
+ * Source identity for an already-resolved extraction target.
+ *
+ * `zotero` keeps the existing behavior exactly (item-based file resolution,
+ * remote download fallback). `external` is a user-attached external file: the
+ * managed copy at `filePath` is the only source (no remote fallback) and
+ * `itemRef` supplies the synthetic cache identity
+ * ({ id: 0, libraryID: EXTERNAL_LIBRARY_ID, key: extKey }).
+ */
+export type ExtractionSource =
+    | { kind: 'zotero'; item: Zotero.Item }
+    | { kind: 'external'; filePath: string; itemRef: DocumentCacheItemRef };
+
+/** Inline local-file source check for external files (no Zotero item). */
+async function resolveExternalFileSource(
+    filePath: string,
+    maxFileSizeMBInput: number,
+): Promise<
+    | { kind: 'ok'; filePath: string }
+    | { kind: 'error'; code: 'file_missing' | 'file_too_large'; sizeMB?: number; maxMB?: number }
+> {
+    const maxMB = effectiveMaxFileSizeMB(maxFileSizeMBInput);
+    let stat: { size?: number | null };
+    try {
+        stat = await IOUtils.stat(filePath);
+    } catch {
+        return { kind: 'error', code: 'file_missing' };
+    }
+    const sizeMB = (stat.size ?? 0) / 1024 / 1024;
+    if (sizeMB > maxMB) {
+        return { kind: 'error', code: 'file_too_large', sizeMB, maxMB };
+    }
+    return { kind: 'ok', filePath };
 }
 
 export interface ExtractAndCacheArgs {
@@ -86,7 +122,7 @@ export interface ExtractAndCacheArgs {
 
 export interface ExtractAndCacheResolvedPdfArgs
     extends Omit<ExtractAndCacheArgs, 'libraryId' | 'zoteroKey'> {
-    item: Zotero.Item;
+    source: ExtractionSource;
     resolvedKey: string;
     contentType: string;
     /** Reuse the caller's timeout when item resolution and PDF extraction share one deadline. */
@@ -94,7 +130,7 @@ export interface ExtractAndCacheResolvedPdfArgs
 }
 
 export interface ExtractAndCacheEpubArgs {
-    item: Zotero.Item;
+    source: ExtractionSource;
     resolvedKey: string;
     contentType: string;
     maxFileSizeMB: number;
@@ -279,7 +315,7 @@ export async function extractAndCacheDocument(
 
         return await extractAndCacheResolvedPdfDocument({
             ...args,
-            item: resolvedItem,
+            source: { kind: 'zotero', item: resolvedItem },
             resolvedKey: resolveResult.key,
             contentType: resolveResult.contentType,
             timeoutContext: timeout,
@@ -315,27 +351,49 @@ export async function extractAndCacheDocument(
 export async function extractAndCacheEpubDocument(
     args: ExtractAndCacheEpubArgs,
 ): Promise<ExtractAndCacheEpubResult> {
+    const cacheItemRef: DocumentCacheItemRef = args.source.kind === 'zotero'
+        ? args.source.item
+        : args.source.itemRef;
     const resolvedAttachment = {
-        libraryId: args.item.libraryID,
-        zoteroKey: args.item.key,
+        libraryId: cacheItemRef.libraryID,
+        zoteroKey: cacheItemRef.key,
     };
     const requestKey = args.resolvedKey;
 
-    const preflight = await preflightEpubFile(args.item, {
-        maxFileSizeMB: args.maxFileSizeMB,
-        onFileNotSyncedLocally: args.onFileNotSyncedLocally,
-    });
-    if (preflight.kind === 'response_error') {
-        return {
-            kind: 'response_error',
-            code: preflight.code,
-            message: preflight.message,
-            resolvedAttachment,
-            contentKind: 'epub',
-        };
+    let filePath: string;
+    if (args.source.kind === 'zotero') {
+        const preflight = await preflightEpubFile(args.source.item, {
+            maxFileSizeMB: args.maxFileSizeMB,
+            onFileNotSyncedLocally: args.onFileNotSyncedLocally,
+        });
+        if (preflight.kind === 'response_error') {
+            return {
+                kind: 'response_error',
+                code: preflight.code,
+                message: preflight.message,
+                resolvedAttachment,
+                contentKind: 'epub',
+            };
+        }
+        filePath = preflight.filePath;
+    } else {
+        // External files skip the Zotero preflight (kind already validated at
+        // attach time; the managed copy is local-only).
+        const externalSource = await resolveExternalFileSource(args.source.filePath, args.maxFileSizeMB);
+        if (externalSource.kind === 'error') {
+            return {
+                kind: 'response_error',
+                code: externalSource.code,
+                message: externalSource.code === 'file_missing'
+                    ? `The EPUB file for ${requestKey} is not available on this device.`
+                    : `The EPUB file for ${requestKey} is ${(externalSource.sizeMB ?? 0).toFixed(1)} MB, which exceeds the ${externalSource.maxMB} MB limit.`,
+                resolvedAttachment,
+                contentKind: 'epub',
+            };
+        }
+        filePath = externalSource.filePath;
     }
 
-    const filePath = preflight.filePath;
     const maxFileSizeMB = effectiveMaxFileSizeMB(args.maxFileSizeMB);
     const maxSourceSizeBytes = maxFileSizeMB * 1024 * 1024;
 
@@ -372,8 +430,8 @@ export async function extractAndCacheEpubDocument(
         }
 
         const ref = {
-            libraryId: args.item.libraryID,
-            zoteroKey: args.item.key,
+            libraryId: cacheItemRef.libraryID,
+            zoteroKey: cacheItemRef.key,
         };
         const cached = await cache.getEpubResult(ref, filePath, { maxSourceSizeBytes }).catch(() => null);
         if (cached) {
@@ -382,7 +440,7 @@ export async function extractAndCacheEpubDocument(
 
         let created = false;
         const document = await cache.getOrCreateResult<EpubDocument>({
-            item: args.item,
+            item: cacheItemRef,
             filePath,
             contentKind: 'epub',
             mode: 'structured',
@@ -468,7 +526,9 @@ export async function extractAndCacheResolvedPdfDocument(
 
     const client = getMuPDFWorkerClient(workerName);
 
-    let resolvedPdfItem: Zotero.Item | null = null;
+    const zoteroItem = args.source.kind === 'zotero' ? args.source.item : null;
+    const cacheItemRef: DocumentCacheItemRef = zoteroItem ?? (args.source as Extract<ExtractionSource, { kind: 'external' }>).itemRef;
+    let resolvedCacheRef: DocumentCacheItemRef | null = null;
     let resolvedAttachment: ResolvedAttachment | null = null;
     let resolvedFilePath: string | null = null;
     let totalPages: number | null = null;
@@ -487,44 +547,71 @@ export async function extractAndCacheResolvedPdfDocument(
     };
 
     try {
-        const pdfItem = args.item;
-        resolvedPdfItem = pdfItem;
+        resolvedCacheRef = cacheItemRef;
         resolvedAttachment = {
-            libraryId: pdfItem.libraryID,
-            zoteroKey: pdfItem.key,
+            libraryId: cacheItemRef.libraryID,
+            zoteroKey: cacheItemRef.key,
         };
         const resolvedKeyStr = args.resolvedKey;
 
-        const source = await resolveAttachmentFileSource({
-            item: pdfItem,
-            maxFileSizeMB: args.maxFileSizeMB,
-            localSizeStrategy: 'zotero-total',
-            signal,
-            throwIfTimedOut,
-        });
-        if (source.kind === 'error') {
+        let attachmentSource: AttachmentFileSource;
+        if (args.source.kind === 'external') {
+            // External files: the managed copy is the only source — no remote
+            // fallback, plain stat-based existence/size check.
+            const externalSource = await resolveExternalFileSource(args.source.filePath, args.maxFileSizeMB);
             throwIfTimedOut('file_missing_response');
-            if (source.code === 'file_too_large') {
+            if (externalSource.kind === 'error') {
+                if (externalSource.code === 'file_too_large') {
+                    return {
+                        kind: 'response_error',
+                        code: 'file_too_large',
+                        message: `The PDF file for ${resolvedKeyStr} has a file size of ${(externalSource.sizeMB ?? 0).toFixed(1)}MB, which exceeds the ${externalSource.maxMB}MB limit.`,
+                        pageCount: null,
+                        resolvedAttachment,
+                    };
+                }
                 return {
                     kind: 'response_error',
-                    code: 'file_too_large',
-                    message: `The PDF file for ${resolvedKeyStr} has a file size of ${(source.sizeMB ?? 0).toFixed(1)}MB, which exceeds the ${source.maxMB}MB limit.`,
+                    code: 'file_missing',
+                    message: `The PDF file for ${resolvedKeyStr} is not available on this device.`,
                     pageCount: null,
                     resolvedAttachment,
                 };
             }
-            return {
-                kind: 'response_error',
-                code: 'file_missing',
-                message: source.remoteAvailable
-                    ? `The PDF file for ${resolvedKeyStr} is not available locally and remote file access is disabled in settings.`
-                    : `The PDF file for ${resolvedKeyStr} is not available locally.`,
-                pageCount: null,
-                resolvedAttachment,
-            };
+            attachmentSource = { kind: 'local', filePath: externalSource.filePath, isRemoteOnly: false };
+        } else {
+            const source = await resolveAttachmentFileSource({
+                item: args.source.item,
+                maxFileSizeMB: args.maxFileSizeMB,
+                localSizeStrategy: 'zotero-total',
+                signal,
+                throwIfTimedOut,
+            });
+            if (source.kind === 'error') {
+                throwIfTimedOut('file_missing_response');
+                if (source.code === 'file_too_large') {
+                    return {
+                        kind: 'response_error',
+                        code: 'file_too_large',
+                        message: `The PDF file for ${resolvedKeyStr} has a file size of ${(source.sizeMB ?? 0).toFixed(1)}MB, which exceeds the ${source.maxMB}MB limit.`,
+                        pageCount: null,
+                        resolvedAttachment,
+                    };
+                }
+                return {
+                    kind: 'response_error',
+                    code: 'file_missing',
+                    message: source.remoteAvailable
+                        ? `The PDF file for ${resolvedKeyStr} is not available locally and remote file access is disabled in settings.`
+                        : `The PDF file for ${resolvedKeyStr} is not available locally.`,
+                    pageCount: null,
+                    resolvedAttachment,
+                };
+            }
+            attachmentSource = source.source;
         }
-        const effectiveFilePath = source.source.filePath;
-        const isRemoteOnly = source.source.isRemoteOnly;
+        const effectiveFilePath = attachmentSource.filePath;
+        const isRemoteOnly = attachmentSource.isRemoteOnly;
         resolvedFilePath = effectiveFilePath;
 
         const cache = Zotero.Beaver?.documentCache;
@@ -532,8 +619,8 @@ export async function extractAndCacheResolvedPdfDocument(
             logger(`extractAndCacheDocument: document cache not available for ${requestKey}`, 1);
         }
         const docRef = {
-            libraryId: pdfItem.libraryID,
-            zoteroKey: pdfItem.key,
+            libraryId: cacheItemRef.libraryID,
+            zoteroKey: cacheItemRef.key,
         };
         const initialSourceIdentity: DocumentCacheSourceIdentity | null = cache && !isRemoteOnly
             ? await cache.getSourceIdentitySnapshot(effectiveFilePath).catch((error: unknown) => {
@@ -589,7 +676,7 @@ export async function extractAndCacheResolvedPdfDocument(
         const maxSourceSizeBytes = maxFileSizeMB * 1024 * 1024;
         const cachedResult = cache
             ? await cache.getResult(
-                { libraryId: pdfItem.libraryID, zoteroKey: pdfItem.key },
+                { libraryId: cacheItemRef.libraryID, zoteroKey: cacheItemRef.key },
                 mode,
                 effectiveFilePath,
                 { maxSourceSizeBytes },
@@ -612,7 +699,7 @@ export async function extractAndCacheResolvedPdfDocument(
                 result: cachedResult,
                 totalPages: cachedResult.document.pageCount,
                 resolvedAttachment,
-                contentType: pdfItem.attachmentContentType || cachedMeta?.contentType || 'application/pdf',
+                contentType: zoteroItem?.attachmentContentType || cachedMeta?.contentType || args.contentType || 'application/pdf',
             };
         }
 
@@ -624,8 +711,8 @@ export async function extractAndCacheResolvedPdfDocument(
 
         if (totalPages == null) {
             const loaded = await loadAttachmentData({
-                item: pdfItem,
-                source: source.source,
+                item: zoteroItem,
+                source: attachmentSource,
                 maxFileSizeMB,
                 onRemoteDownloadFailure: args.onRemoteDownloadFailure,
                 signal,
@@ -689,8 +776,8 @@ export async function extractAndCacheResolvedPdfDocument(
 
         if (!pdfData) {
             const loaded = await loadAttachmentData({
-                item: pdfItem,
-                source: source.source,
+                item: zoteroItem,
+                source: attachmentSource,
                 maxFileSizeMB,
                 onRemoteDownloadFailure: args.onRemoteDownloadFailure,
                 signal,
@@ -754,11 +841,11 @@ export async function extractAndCacheResolvedPdfDocument(
 
         const resultPromise = cache
             ? cache.getOrCreateResult({
-                item: pdfItem,
+                item: cacheItemRef,
                 filePath: effectiveFilePath,
                 mode,
                 sourceSizeBytes: isRemoteOnly ? pdfBytes.byteLength : 0,
-                contentType: pdfItem.attachmentContentType || 'application/pdf',
+                contentType: zoteroItem?.attachmentContentType || args.contentType || 'application/pdf',
                 maxSourceSizeBytes,
                 sharedTimeoutMs: MAX_PDF_TIMEOUT_SECONDS * 1000,
                 abortSignal: signal,
@@ -798,7 +885,7 @@ export async function extractAndCacheResolvedPdfDocument(
             result,
             totalPages: result.document.pageCount,
             resolvedAttachment,
-            contentType: pdfItem.attachmentContentType || 'application/pdf',
+            contentType: zoteroItem?.attachmentContentType || args.contentType || 'application/pdf',
         };
     } catch (error) {
         if (error instanceof ExternalAbortError) {
@@ -840,7 +927,7 @@ export async function extractAndCacheResolvedPdfDocument(
 
         if (error instanceof ExtractionError) {
             if (
-                resolvedPdfItem
+                resolvedCacheRef
                 && resolvedFilePath
                 && (error.code === ExtractionErrorCode.ENCRYPTED
                     || error.code === ExtractionErrorCode.INVALID_PDF
@@ -850,10 +937,10 @@ export async function extractAndCacheResolvedPdfDocument(
                     ? error.pageLabels ?? null
                     : null;
                 await Zotero.Beaver?.documentCache?.putErrorMetadata({
-                    item: resolvedPdfItem,
+                    item: resolvedCacheRef,
                     filePath: resolvedFilePath,
                     sourceSizeBytes: loadedPdfData?.byteLength ?? 0,
-                    contentType: resolvedPdfItem.attachmentContentType || 'application/pdf',
+                    contentType: zoteroItem?.attachmentContentType || args.contentType || 'application/pdf',
                     errorCode: error.code === ExtractionErrorCode.ENCRYPTED
                         ? 'encrypted'
                         : error.code === ExtractionErrorCode.INVALID_PDF

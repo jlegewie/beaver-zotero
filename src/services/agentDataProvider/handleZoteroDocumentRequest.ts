@@ -36,6 +36,8 @@ import {
 // passing the popup notifier through `onRemoteDownloadFailure`. The
 // background extractor deliberately omits it.
 import { notifyRemoteDownloadFailure, notifyRemoteFileNotSynced } from './utils';
+import { EXTERNAL_LIBRARY_ID, resolveExternalFile } from '../externalFiles';
+import type { ExternalFileRecord } from '../database';
 
 /**
  * Reject success responses whose serialized payload would exceed the
@@ -87,8 +89,7 @@ export function guardPayloadSize(
 export async function handleZoteroDocumentRequest(
     request: WSZoteroDocumentRequest,
 ): Promise<WSZoteroDocumentResponse> {
-    const { attachment, mode, max_pages, max_file_size_mb, request_id, timeout_seconds } = request;
-    const requestKey = `${attachment.library_id}-${attachment.zotero_key}`;
+    const { attachment, external_file_key, mode, max_pages, max_file_size_mb, request_id, timeout_seconds } = request;
 
     const errorResponse = (
         error: string,
@@ -98,11 +99,26 @@ export async function handleZoteroDocumentRequest(
     ): WSZoteroDocumentResponse => ({
         type: 'zotero_document',
         request_id,
+        ...(external_file_key ? { external_file_key } : {}),
         ...(content_kind ? { content_kind } : {}),
         total_pages,
         error,
         error_code,
     });
+
+    // External files are handled before any Zotero item resolution: the
+    // request carries an external file key instead of an attachment reference.
+    if (external_file_key) {
+        return handleExternalFileDocumentRequest(request, external_file_key, errorResponse);
+    }
+
+    if (!attachment) {
+        return errorResponse(
+            'Document request carries neither an attachment reference nor an external file key.',
+            'invalid_format',
+        );
+    }
+    const requestKey = `${attachment.library_id}-${attachment.zotero_key}`;
 
     const formatError = validateZoteroItemReference(attachment);
     if (formatError) {
@@ -238,7 +254,7 @@ export async function handleZoteroDocumentRequest(
         if (contentKind === 'epub') {
             const result = await withRequestDeadline(
                 extractAndCacheEpubDocument({
-                    item: resolvedItem,
+                    source: { kind: 'zotero', item: resolvedItem },
                     resolvedKey,
                     contentType,
                     maxFileSizeMB: max_file_size_mb ?? 0,
@@ -280,7 +296,7 @@ export async function handleZoteroDocumentRequest(
         }
 
         const result = await extractAndCacheResolvedPdfDocument({
-            item: resolvedItem,
+            source: { kind: 'zotero', item: resolvedItem },
             resolvedKey,
             contentType,
             mode,
@@ -364,6 +380,182 @@ export async function handleZoteroDocumentRequest(
                 'timeout',
                 null,
                 timeoutContentKind,
+            );
+        }
+        throw error;
+    } finally {
+        timeout.dispose();
+    }
+}
+
+/** Model-facing message for an external file whose managed copy is unavailable. */
+export function externalFileMissingMessage(extKey: string, record: ExternalFileRecord | null): string {
+    const label = record ? `'ext-${extKey}' ('${record.filename}')` : `'ext-${extKey}'`;
+    return (
+        `External file ${label} is not available on this device — it was attached ` +
+        `on a different computer or its copy was removed. Ask the user to re-attach ` +
+        `the file on this device.`
+    );
+}
+
+/**
+ * Serve a document request for a user-attached external file. The registry
+ * resolves the key to the managed copy; extraction then reuses the shared
+ * pipeline with an external source (no Zotero item, no remote fallback).
+ */
+async function handleExternalFileDocumentRequest(
+    request: WSZoteroDocumentRequest,
+    extKey: string,
+    errorResponse: (
+        error: string,
+        error_code: ZoteroDocumentErrorCode,
+        total_pages?: number | null,
+        content_kind?: ExtractContentKind,
+    ) => WSZoteroDocumentResponse,
+): Promise<WSZoteroDocumentResponse> {
+    const { mode, max_pages, max_file_size_mb, request_id, timeout_seconds } = request;
+    const requestKey = `ext-${extKey}`;
+
+    const resolved = await resolveExternalFile(extKey);
+    if (!resolved.ok) {
+        return errorResponse(externalFileMissingMessage(extKey, resolved.record), 'file_missing');
+    }
+    const record = resolved.record;
+    const itemRef = { id: 0, libraryID: EXTERNAL_LIBRARY_ID, key: extKey };
+
+    const timeout = createTimeoutController(
+        timeout_seconds,
+        DEFAULT_PAGES_TIMEOUT_SECONDS,
+    );
+
+    try {
+        if (record.contentKind === 'image') {
+            return errorResponse(
+                `External file '${requestKey}' ('${record.filename}') is an image. Use the view tool to look at it.`,
+                'unsupported_type',
+            );
+        }
+
+        if (record.contentKind === 'text') {
+            let data: Uint8Array;
+            try {
+                data = await awaitWithRequestAbort(
+                    IOUtils.read(record.storedPath),
+                    timeout.signal,
+                    timeout.throwIfTimedOut,
+                    'external_file_read',
+                );
+            } catch (error) {
+                if (error instanceof TimeoutError) throw error;
+                return errorResponse(externalFileMissingMessage(extKey, record), 'file_missing', null, 'text');
+            }
+            const maxMB = max_file_size_mb ?? 0;
+            if (maxMB > 0 && data.byteLength > maxMB * 1024 * 1024) {
+                return errorResponse(
+                    `External file '${requestKey}' is too large (${(data.byteLength / 1024 / 1024).toFixed(1)}MB > ${maxMB}MB).`,
+                    'file_too_large',
+                    null,
+                    'text',
+                );
+            }
+            const result = extractTextDocument({
+                data,
+                contentType: record.mimeType,
+            });
+            return guardPayloadSize(request, {
+                type: 'zotero_document',
+                request_id,
+                external_file_key: extKey,
+                content_type: record.mimeType,
+                content_kind: 'text',
+                result,
+            }, null, 'text', errorResponse);
+        }
+
+        if (record.contentKind === 'epub') {
+            const result = await awaitWithRequestAbort(
+                extractAndCacheEpubDocument({
+                    source: { kind: 'external', filePath: record.storedPath, itemRef },
+                    resolvedKey: requestKey,
+                    contentType: record.mimeType,
+                    maxFileSizeMB: max_file_size_mb ?? 0,
+                    externalAbortSignal: timeout.signal,
+                }),
+                timeout.signal,
+                timeout.throwIfTimedOut,
+                'epub_extraction',
+            );
+            if (result.kind === 'ok') {
+                if (result.cached) {
+                    logger(`handleZoteroDocumentRequest: document cache hit for ${requestKey} content_kind=epub`, 3);
+                }
+                return guardPayloadSize(request, {
+                    type: 'zotero_document',
+                    request_id,
+                    external_file_key: extKey,
+                    content_type: result.contentType,
+                    content_kind: 'epub',
+                    result: result.document,
+                }, null, 'epub', errorResponse);
+            }
+            if (result.code === 'file_missing') {
+                return errorResponse(externalFileMissingMessage(extKey, record), 'file_missing', null, 'epub');
+            }
+            return errorResponse(result.message, result.code, null, 'epub');
+        }
+
+        // PDF
+        const result = await extractAndCacheResolvedPdfDocument({
+            source: { kind: 'external', filePath: record.storedPath, itemRef },
+            resolvedKey: requestKey,
+            contentType: record.mimeType,
+            mode,
+            maxPages: max_pages ?? null,
+            maxFileSizeMB: max_file_size_mb ?? 0,
+            timeoutSeconds: timeout_seconds ?? 0,
+            workerName: 'hot',
+            externalAbortSignal: timeout.signal,
+        });
+
+        if (result.kind === 'ok') {
+            if (result.cached) {
+                logger(`handleZoteroDocumentRequest: document cache hit for ${requestKey} mode=${mode}`, 3);
+            }
+            return guardPayloadSize(request, {
+                type: 'zotero_document',
+                request_id,
+                external_file_key: extKey,
+                content_type: result.contentType,
+                content_kind: 'pdf',
+                result: { ...result.result, content_kind: 'pdf' as const },
+            }, result.totalPages ?? null, 'pdf', errorResponse);
+        }
+
+        if (result.kind === 'timeout' || result.kind === 'external_abort') {
+            // No background retry for external files: the background extractor
+            // resolves Zotero items and cannot serve the external-files store.
+            return errorResponse(
+                result.kind === 'timeout'
+                    ? `PDF extraction timed out after ${result.timeoutSeconds} seconds`
+                    : 'PDF extraction interrupted',
+                'timeout',
+                result.pageCount,
+                'pdf',
+            );
+        }
+
+        if (result.code === 'file_missing') {
+            return errorResponse(externalFileMissingMessage(extKey, record), 'file_missing', result.pageCount, 'pdf');
+        }
+        const contentKindOnError = result.contentKind ?? (result.code !== 'unsupported_type' ? 'pdf' : undefined);
+        return errorResponse(result.message, result.code, result.pageCount, contentKindOnError);
+    } catch (error) {
+        if (error instanceof TimeoutError) {
+            return errorResponse(
+                `Document request timed out after ${error.timeoutSeconds} seconds`,
+                'timeout',
+                null,
+                readableToExtractKind(record.contentKind === 'image' ? 'image' : record.contentKind),
             );
         }
         throw error;

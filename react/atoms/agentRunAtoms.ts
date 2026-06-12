@@ -42,13 +42,15 @@ import { addPopupMessageAtom } from '../utils/popupMessageUtils';
 import {
     currentMessageItemsAtom,
     currentMessageCollectionsAtom,
+    currentMessageExternalFilesAtom,
     currentReaderAttachmentAtom,
     currentMessageFiltersAtom,
     currentMessageContentAtom,
 } from './messageComposition';
 import { isWebSearchEnabledAtom, removePopupMessagesByTypeAtom, isWebSearchAllowedAtom } from './ui';
 import { currentNoteItemAtom } from './zoteroContext';
-import { isAnnotationAttachment } from '../types/attachments/apiTypes';
+import { isAnnotationAttachment, messageAttachmentKey } from '../types/attachments/apiTypes';
+import type { ExternalFileAttachment } from '../types/attachments/apiTypes';
 import { getReaderState, getApplicationStateProvider } from './applicationState';
 import { uint8ArrayToBase64 } from '../utils/fileUtils';
 import { isAttachmentOnServer } from '../../src/utils/webAPI';
@@ -1644,13 +1646,42 @@ export const sendWSMessageAtom = atom(
             });
         }
 
+        // Add external file attachments (metadata only; content stays local and
+        // is served on demand through the read/view request paths). Files whose
+        // managed copy disappeared since attach are dropped with a popup.
+        const externalFiles = get(currentMessageExternalFilesAtom);
+        for (const file of externalFiles) {
+            const exists = await IOUtils.exists(file.storedPath).catch(() => false);
+            if (!exists) {
+                logger(`sendWSMessageAtom: External file copy missing, dropping: ext-${file.extKey} ('${file.filename}')`, 1);
+                set(addPopupMessageAtom, {
+                    type: 'warning',
+                    title: 'File unavailable',
+                    text: `"${file.filename}" is no longer available and was removed from the message.`,
+                    expire: true,
+                });
+                continue;
+            }
+            const externalAttachment: ExternalFileAttachment = {
+                type: 'external_file',
+                ext_key: file.extKey,
+                filename: file.filename,
+                content_kind: file.contentKind,
+                mime_type: file.mimeType,
+                file_size: file.fileSize,
+                ...(file.pageCount ? { page_count: file.pageCount } : {}),
+                date_added: new Date(file.createdAt).toISOString(),
+            };
+            attachments.push(externalAttachment);
+        }
+
         // Add current reader attachment as source if not already present in thread
         const readerState = getReaderState(get);
         const readerAttachment = get(currentReaderAttachmentAtom);
         if (readerAttachment && readerState) {
             const allUserAttachmentKeys = get(allUserAttachmentKeysAtom);
             const existingKeys = new Set([
-                ...attachments.map(att => `${att.library_id}-${att.zotero_key}`),
+                ...attachments.map(messageAttachmentKey),
                 ...allUserAttachmentKeys
             ]);
             logger(`sendWSMessageAtom: Handeling reader attachment - existingKeys: ${JSON.stringify(existingKeys)}`, 1);
@@ -1672,7 +1703,7 @@ export const sendWSMessageAtom = atom(
         if (currentNoteTabItem) {
             const allUserAttachmentKeys = get(allUserAttachmentKeysAtom);
             const existingKeys = new Set([
-                ...attachments.map(att => `${att.library_id}-${att.zotero_key}`),
+                ...attachments.map(messageAttachmentKey),
                 ...allUserAttachmentKeys
             ]);
             const noteKey = `${currentNoteTabItem.libraryID}-${currentNoteTabItem.key}`;
@@ -1771,6 +1802,7 @@ export const sendWSMessageAtom = atom(
             set(removePopupMessagesByTypeAtom, ['items_summary']);
             set(currentMessageItemsAtom, []);
             set(currentMessageCollectionsAtom, []);
+            set(currentMessageExternalFilesAtom, []);
 
             // Execute the WebSocket request
             await executeWSRequest(run, request, get, set);

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { ItemSearchResult } from '../../../../../src/services/searchService';
 import { getActiveZoteroLibraryId, getRecentAsync, loadFullItemData } from '../../../../../src/utils/zoteroUtils';
-import { ArrowRightIcon, CSSIcon, Icon } from '../../../icons/icons';
+import { ArrowRightIcon, CSSIcon, FileLinkIcon, Icon } from '../../../icons/icons';
 import { SearchMenuItem } from '../SearchMenu';
 import { SourceMenuItemContext, createSourceMenuItem } from '../utils/menuItemFactories';
 
@@ -15,6 +15,8 @@ interface UseSourcesMenuOptions {
     onNavigateToCollections: (libraryId: number) => void;
     onNavigateToTags: (libraryId: number) => void;
     onNavigateToNotes: () => void;
+    /** Open a file picker to attach external files (files from disk). */
+    onSelectFiles: () => void;
     getRecentItems: () => Promise<Zotero.Item[]>;
     recentItemsLimit: number;
     verticalPosition?: 'above' | 'below';
@@ -34,6 +36,7 @@ export const useSourcesMenu = ({
     onNavigateToCollections,
     onNavigateToTags,
     onNavigateToNotes,
+    onSelectFiles,
     getRecentItems,
     recentItemsLimit,
     verticalPosition = 'above'
@@ -196,6 +199,23 @@ export const useSourcesMenu = ({
                 )
             });
 
+            filterItems.unshift({
+                label: '"Select File"',
+                onClick: async () => {
+                    onSelectFiles();
+                },
+                customContent: (
+                    <div className={'display-flex flex-row flex-1 items-start font-color-secondary'}>
+                        <div className="display-flex flex-row gap-2">
+                            {/* <CSSIcon name="attachment-file" className="icon-16 font-color-secondary scale-90" /> */}
+                            <Icon icon={FileLinkIcon} className="font-color-secondary mt-015 ml-05 scale-11" />
+                            <div>Select File</div>
+                        </div>
+                        <div className="flex-1" />
+                    </div>
+                )
+            });
+
             const menuItemsCurrentItems = await Promise.all(
                 currentMessageItemsFiltered.map(async (item) => await createSourceMenuItem(item, sourceMenuItemContext))
             );
@@ -250,6 +270,7 @@ export const useSourcesMenu = ({
         onNavigateToCollections,
         onNavigateToTags,
         onNavigateToNotes,
+        onSelectFiles,
         getRecentItems,
         recentItemsLimit,
         verticalPosition

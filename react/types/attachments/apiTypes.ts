@@ -17,7 +17,8 @@ export type MessageAttachment =
     | ItemMetadataAttachment
     | AnnotationAttachment
     | NoteAttachment
-    | CollectionAttachment;
+    | CollectionAttachment
+    | ExternalFileAttachment;
 
 interface BaseMessageAttachment {
     library_id: number;
@@ -65,6 +66,31 @@ export interface CollectionAttachment extends BaseMessageAttachment {
     type: "collection";
     name: string;
     parent_key: string | null;
+}
+
+export type ExternalFileContentKind = 'pdf' | 'epub' | 'text' | 'image';
+
+/**
+ * "external_file" type attachment: a user-attached file from disk (not a
+ * Zotero item). Metadata only — the file content stays on this device and is
+ * served on demand through the read/view request paths. Does not extend
+ * BaseMessageAttachment (no library_id/zotero_key); the model-facing id is
+ * `ext-<ext_key>`. Never includes a file path (privacy).
+ */
+export interface ExternalFileAttachment {
+    type: "external_file";
+    /** 8-character key assigned at attach time (Zotero-style object key). */
+    ext_key: string;
+    /** File basename only — never a path. */
+    filename: string;
+    content_kind: ExternalFileContentKind;
+    mime_type: string;
+    /** File size in bytes. */
+    file_size: number;
+    /** Page count when known at attach time (PDFs, best-effort). */
+    page_count?: number;
+    /** ISO timestamp of when the file was attached. */
+    date_added?: string;
 }
 
 /**
@@ -148,6 +174,23 @@ export function isNoteAttachment(attachment: MessageAttachment): attachment is N
 
 export function isCollectionAttachment(attachment: MessageAttachment): attachment is CollectionAttachment {
     return attachment.type === "collection";
+}
+
+export function isExternalFileAttachment(attachment: MessageAttachment): attachment is ExternalFileAttachment {
+    return attachment.type === "external_file";
+}
+
+/**
+ * Stable key for any message attachment: `ext-<KEY>` for external files,
+ * `<library_id>-<zotero_key>` otherwise. Use this instead of reading
+ * `library_id`/`zotero_key` off the union directly — external files have
+ * neither.
+ */
+export function messageAttachmentKey(attachment: MessageAttachment): string {
+    if (isExternalFileAttachment(attachment)) {
+        return `ext-${attachment.ext_key}`;
+    }
+    return `${attachment.library_id}-${attachment.zotero_key}`;
 }
 
 /**

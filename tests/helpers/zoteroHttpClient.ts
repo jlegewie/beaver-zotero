@@ -141,6 +141,7 @@ export interface DocumentExtractResult {
 
 export interface DocumentResponse {
     resolved_attachment?: { library_id: number; zotero_key: string } | null;
+    external_file_key?: string | null;
     content_type?: string | null;
     content_kind?: 'pdf' | 'epub' | 'snapshot' | 'text' | null;
     result?: DocumentExtractResult | null;
@@ -170,4 +171,41 @@ export function fetchDocument(
         },
         ...extra,
     }, opts);
+}
+
+/**
+ * POST `/beaver/attachment/document` for a user-attached external file
+ * (`external_file_key` instead of a Zotero attachment reference).
+ */
+export function fetchExternalFileDocument(
+    extKey: string,
+    extra?: {
+        mode?: 'markdown' | 'structured';
+        max_pages?: number | null;
+        max_file_size_mb?: number | null;
+        timeout_seconds?: number;
+    },
+    opts?: RequestOptions,
+): Promise<DocumentResponse> {
+    return post('/beaver/attachment/document', {
+        external_file_key: extKey,
+        ...extra,
+    }, opts);
+}
+
+/** POST `/beaver/test/external-file-attach` — dev-only registry seeding. */
+export function attachExternalFileForTest(
+    path: string,
+    opts?: RequestOptions,
+): Promise<{ ok: boolean; record?: { extKey: string; storedPath: string; contentKind: string; filename: string }; reason?: string; error?: string }> {
+    return post('/beaver/test/external-file-attach', { path }, opts);
+}
+
+/** POST `/beaver/test/external-file-delete` — dev-only registry teardown. */
+export function deleteExternalFileForTest(
+    extKey: string,
+    deleteCopy = true,
+    opts?: RequestOptions,
+): Promise<{ ok: boolean; existed?: boolean; error?: string }> {
+    return post('/beaver/test/external-file-delete', { ext_key: extKey, delete_copy: deleteCopy }, opts);
 }

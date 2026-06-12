@@ -293,6 +293,21 @@ declare namespace Zotero {
                 payloadKind: import("../src/services/database").DocumentCachePayloadKind,
             ): Promise<import("../src/services/database").DocumentCachePayloadRecord | null>;
 
+            // --- External files (user-attached files behind `ext-<KEY>` ids) ---
+            upsertExternalFile(
+                input: import("../src/services/database").ExternalFileInput,
+            ): Promise<void>;
+
+            getExternalFileByKey(
+                extKey: string,
+            ): Promise<import("../src/services/database").ExternalFileRecord | null>;
+
+            setExternalFilePageCount(extKey: string, pageCount: number | null): Promise<void>;
+
+            deleteExternalFile(extKey: string): Promise<void>;
+
+            listExternalFiles(): Promise<import("../src/services/database").ExternalFileRecord[]>;
+
             // --- Background job queue ---
             enqueueBackgroundJob(
                 input: import("../src/services/database").BackgroundJobInput,
