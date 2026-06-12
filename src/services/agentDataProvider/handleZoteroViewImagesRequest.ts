@@ -464,10 +464,12 @@ async function handleExternalFileViewRequest(
         let fileBytes: Uint8Array;
         try {
             fileBytes = await IOUtils.read(record.storedPath);
-            throwIfTimedOut('external_file_read');
         } catch {
             return errorResponse(externalFileMissingMessage(extKey, record), 'file_missing');
         }
+        // Outside the read's catch: a timeout here must surface as 'timeout',
+        // not as a missing-file error telling the user to re-attach the file.
+        throwIfTimedOut('external_file_read');
 
         if (record.contentKind === 'image') {
             resolvedKind = 'image';

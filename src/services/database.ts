@@ -2379,6 +2379,17 @@ export class BeaverDB {
                 FROM external_files`;
     }
 
+    /**
+     * Normalize SQLite's datetime('now') format ("YYYY-MM-DD HH:MM:SS", UTC
+     * with no timezone marker) to ISO-8601 UTC, so `new Date(createdAt)`
+     * never misparses it as local time. Attach-time records already carry
+     * ISO strings and pass through unchanged.
+     */
+    private static sqliteUtcToIso(value: string): string {
+        if (!value || value.includes('T')) return value;
+        return `${value.replace(' ', 'T')}Z`;
+    }
+
     private async selectExternalFiles(sql: string, params: any[] = []): Promise<ExternalFileRecord[]> {
         const rows: ExternalFileRecord[] = [];
         await this.conn.queryAsync(sql, params, {
@@ -2394,7 +2405,7 @@ export class BeaverDB {
                     fileSize: row.getResultByIndex(6),
                     mtimeMs: row.getResultByIndex(7),
                     pageCount: row.getResultByIndex(8) ?? null,
-                    createdAt: row.getResultByIndex(9),
+                    createdAt: BeaverDB.sqliteUtcToIso(row.getResultByIndex(9)),
                 });
             },
         });

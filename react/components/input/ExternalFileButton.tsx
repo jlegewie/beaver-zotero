@@ -9,7 +9,7 @@ import { logger } from '../../../src/utils/logger';
 
 const MAX_FILENAME_LENGTH = 25;
 
-const ICON_BY_KIND: Record<ExternalFileContentKind, string> = {
+export const EXTERNAL_FILE_ICON_BY_KIND: Record<ExternalFileContentKind, string> = {
     pdf: 'attachmentPDF',
     epub: 'attachmentEPUB',
     text: 'attachmentFile',
@@ -54,11 +54,13 @@ export const ExternalFileButton = forwardRef<HTMLButtonElement, ExternalFileButt
 
         const showFile = () => {
             if (!storedPath) return;
-            try {
-                Zotero.File.reveal(storedPath);
-            } catch (error) {
-                logger(`ExternalFileButton: Failed to reveal file: ${error}`, 2);
-            }
+            // Zotero.File.reveal is async; route rejections (e.g. a deleted
+            // copy) into the logger instead of an unhandled promise rejection.
+            Promise.resolve()
+                .then(() => Zotero.File.reveal(storedPath))
+                .catch((error) => {
+                    logger(`ExternalFileButton: Failed to reveal file: ${error}`, 2);
+                });
         };
 
         const revealMenuItems: MenuItem[] = storedPath
@@ -85,7 +87,7 @@ export const ExternalFileButton = forwardRef<HTMLButtonElement, ExternalFileButt
             }
             return (
                 <span className="scale-80">
-                    <CSSItemTypeIcon itemType={ICON_BY_KIND[contentKind] || 'attachmentFile'} />
+                    <CSSItemTypeIcon itemType={EXTERNAL_FILE_ICON_BY_KIND[contentKind] || 'attachmentFile'} />
                 </span>
             );
         };
