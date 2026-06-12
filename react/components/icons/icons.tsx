@@ -85,3 +85,4 @@ export { default as BugIcon } from './BugIcon';
 export { default as PlayIcon } from './PlayIcon';
 export { default as ChevronIcon } from './ChevronIcon';
 export { default as ChartIcon } from './ChartIcon';
+export { default as FileLinkIcon } from './FileLinkIcon';
