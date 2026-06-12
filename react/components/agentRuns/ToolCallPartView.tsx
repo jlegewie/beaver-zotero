@@ -70,6 +70,7 @@ const TOOL_ICONS: Record<string, IconComponent> = {
     read_attachment: TextAlignLeftIcon,
     view_page_images: ViewIcon,
     view_pages: ViewIcon,
+    view: ViewIcon,
 
     // Note tools
     read_note: TextAlignLeftIcon,
@@ -271,7 +272,16 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
             ? extractReadTextLineRangeLabel(part.tool_name, result.content, result.metadata)
             : null;
 
-    const unit = UNIT_PAGES_TOOLS.has(part.tool_name) ? 'page' : 'result';
+    // The unified `view` tool serves PDF pages ("2 pages") or a single image
+    // attachment ("1 image") — branch on the result summary's kind so image
+    // attachments are not mislabeled as pages.
+    const viewKind =
+        part.tool_name === 'view' && result?.part_kind === 'tool-return'
+            ? ((result?.metadata?.summary as { kind?: string } | undefined)?.kind ?? null)
+            : null;
+    const unit = part.tool_name === 'view'
+        ? (viewKind === 'image' ? 'image' : 'page')
+        : UNIT_PAGES_TOOLS.has(part.tool_name) ? 'page' : 'result';
     const label = lookupFoundCount !== null
         ? `${baseLabel.split(':')[0]}: ${lookupFoundCount} found`
         : readTextLineRange !== null

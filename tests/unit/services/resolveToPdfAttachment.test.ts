@@ -14,6 +14,7 @@ function makeAttachment(opts: {
     contentType?: string;
     filename?: string;
     linkMode?: number;
+    deleted?: boolean;
 }): MockItem {
     const {
         id = 1,
@@ -23,12 +24,14 @@ function makeAttachment(opts: {
         contentType = isPdf ? 'application/pdf' : 'text/html',
         filename = `${key}.pdf`,
         linkMode,
+        deleted = false,
     } = opts;
 
     return {
         id,
         key,
         libraryID,
+        deleted,
         attachmentContentType: contentType,
         attachmentFilename: filename,
         attachmentLinkMode: linkMode,
@@ -171,6 +174,38 @@ describe('resolveToPdfAttachment', () => {
             ['itemData'],
         );
         expect(pdf.loadAllData).toHaveBeenCalledOnce();
+    });
+
+    it('auto-resolves when the only other PDF attachment is trashed', async () => {
+        // A trashed PDF must not count toward the ambiguity check — the
+        // single live PDF still auto-resolves and the error path never lists
+        // trashed files.
+        const livePdf = makeAttachment({
+            id: 10,
+            key: 'PDF00001',
+            filename: 'paper.pdf',
+        });
+        const trashedPdf = makeAttachment({
+            id: 11,
+            key: 'PDF00002',
+            filename: 'old-draft.pdf',
+            deleted: true,
+        });
+        const regular = makeRegularItem({
+            attachmentIds: [10, 11],
+            bestAttachment: livePdf,
+        });
+        itemsById.set(10, livePdf);
+        itemsById.set(11, trashedPdf);
+        itemsByLibraryAndKey.set('1-PDF00001', livePdf);
+
+        const result = await resolveToPdfAttachment(regular, '1-REG00001');
+
+        expect(result).toEqual({
+            resolved: true,
+            item: livePdf,
+            key: '1-PDF00001',
+        });
     });
 
     it('rejects a regular item with multiple PDF attachments', async () => {

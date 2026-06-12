@@ -134,6 +134,32 @@ export interface ViewPageImagesResultSummary {
 }
 
 /**
+ * Reference to a single image returned by the unified `view` tool.
+ * Matches ViewImageReference from backend. `page_number` is null/absent for
+ * image attachments.
+ */
+export interface ViewImageReference {
+    library_id: number;
+    zotero_key: string;
+    page_number?: number | null;
+    page_label?: string | null;
+    format: "png" | "jpeg";
+    width: number;
+    height: number;
+}
+
+/**
+ * Unified view tool result summary.
+ * Matches ViewResultSummary from backend.
+ */
+export interface ViewResultSummary {
+    tool_name: string;
+    kind: "pdf" | "image";
+    result_count: number;
+    images: ViewImageReference[];
+}
+
+/**
  * Passage retrieval result summary.
  * Matches SearchInDocumentsToolResultSummary from backend.
  */
@@ -324,6 +350,11 @@ const READ_TEXT_TOOL_NAMES: readonly string[] = [
 /** Valid tool names for chunk-based fulltext retrieval results */
 const VIEW_PAGE_IMAGES_TOOL_NAMES: readonly string[] = [
     'view_page_images',
+] as const;
+
+/** Valid tool names for unified view results */
+const VIEW_TOOL_NAMES: readonly string[] = [
+    'view',
 ] as const;
 
 /** Valid tool names for chunk-based passage retrieval results */
@@ -533,6 +564,44 @@ export function isViewPageImagesResult(
                 typeof obj.library_id === 'number' &&
                 typeof obj.zotero_key === 'string' &&
                 typeof obj.page_number === 'number' &&
+                typeof obj.format === 'string' &&
+                typeof obj.width === 'number' &&
+                typeof obj.height === 'number'
+            );
+        })
+    );
+}
+
+/**
+ * Type guard for unified view tool results.
+ * Checks if metadata.summary is ViewResultSummary.
+ */
+export function isViewToolResult(
+    toolName: string,
+    _content: unknown,
+    metadata?: Record<string, unknown>
+): metadata is { summary: ViewResultSummary } {
+    if (!metadata?.summary || typeof metadata.summary !== 'object') return false;
+    const summary = metadata.summary as Record<string, unknown>;
+
+    const toolNameIsView = VIEW_TOOL_NAMES.includes(toolName);
+    if (!toolNameIsView) {
+        const summaryToolName = typeof summary.tool_name === 'string' ? summary.tool_name : null;
+        if (!summaryToolName || !VIEW_TOOL_NAMES.includes(summaryToolName)) return false;
+    }
+
+    return (
+        typeof summary.tool_name === 'string' &&
+        (summary.kind === 'pdf' || summary.kind === 'image') &&
+        typeof summary.result_count === 'number' &&
+        Array.isArray(summary.images) &&
+        summary.images.every((image: unknown) => {
+            if (!image || typeof image !== 'object') return false;
+            const obj = image as Record<string, unknown>;
+            return (
+                typeof obj.library_id === 'number' &&
+                typeof obj.zotero_key === 'string' &&
+                (obj.page_number == null || typeof obj.page_number === 'number') &&
                 typeof obj.format === 'string' &&
                 typeof obj.width === 'number' &&
                 typeof obj.height === 'number'
@@ -901,6 +970,33 @@ export function extractViewPageImagesData(
     if (!Array.isArray(summary.pages)) return null;
 
     return { pages: summary.pages };
+}
+
+/**
+ * Normalized unified view tool data.
+ */
+export interface ViewToolViewData {
+    kind: "pdf" | "image";
+    images: ViewImageReference[];
+}
+
+/**
+ * Extract image references from metadata.summary for the unified view tool.
+ * @returns ViewToolViewData or null if summary is not available
+ */
+export function extractViewToolData(
+    _content: unknown,
+    metadata?: Record<string, unknown>
+): ViewToolViewData | null {
+    if (!metadata?.summary || typeof metadata.summary !== 'object') return null;
+    const summary = metadata.summary as ViewResultSummary;
+
+    if (!Array.isArray(summary.images)) return null;
+
+    return {
+        kind: summary.kind === 'image' ? 'image' : 'pdf',
+        images: summary.images,
+    };
 }
 
 /**

@@ -165,6 +165,7 @@ const TOOL_BASE_LABELS: Record<string, string> = {
     load_tool_results: 'Loading tool results',
     view_pages: 'Viewing pages',
     view_page_images: 'Viewing pages',
+    view: 'Viewing',
 
     // Extract tool
     extract: 'Extracting',
@@ -580,6 +581,34 @@ export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): st
             }
 
             // Fallback: just show the range or base label
+            if (rangeLabel) {
+                return `${baseLabel}: ${rangeLabel}`;
+            }
+            return baseLabel;
+        }
+
+        case 'view': {
+            const file = args.file as string | undefined;
+            const pagesArg = args.pages as string | undefined;
+
+            // `pages` is a contiguous 1-indexed range string like "3" or "1-5";
+            // absent for image attachments.
+            const pageRangeValue =
+                typeof pagesArg === 'string' && /^\d+(-\d+)?$/.test(pagesArg.trim())
+                    ? pagesArg.trim()
+                    : null;
+            const rangeLabel = pageRangeValue ? `p. ${pageRangeValue}` : '';
+
+            if (file && /^\d+-/.test(file)) {
+                const item = getItemFromAttachmentId(file);
+                if (item) {
+                    const displayName = getItemDisplayName(item);
+                    return rangeLabel
+                        ? `${baseLabel}: ${displayName}, ${rangeLabel}`
+                        : `${baseLabel}: ${displayName}`;
+                }
+            }
+
             if (rangeLabel) {
                 return `${baseLabel}: ${rangeLabel}`;
             }
