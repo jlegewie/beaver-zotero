@@ -399,10 +399,10 @@ class ItemValidationManager {
             return { isValid: false, reason: 'Attachment is in trash' };
         }
 
-        // 3. Must be a readable attachment kind (PDF, EPUB, or plain text)
+        // 3. Must be a readable attachment kind (PDF, EPUB, plain text, or image)
         const contentType = attachment.attachmentContentType;
         const contentKind = getReadableContentKind(attachment);
-        if (contentKind !== 'pdf' && contentKind !== 'epub' && contentKind !== 'text') {
+        if (contentKind !== 'pdf' && contentKind !== 'epub' && contentKind !== 'text' && contentKind !== 'image') {
             return {
                 isValid: false,
                 reason: `File type "${contentType || 'unknown'}" is not supported`

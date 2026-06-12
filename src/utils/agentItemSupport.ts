@@ -2,10 +2,10 @@
  * Agent-facing item support predicates.
  *
  * These predicates decide which items the Beaver agent and frontend UI treat
- * as supported sources (regular items plus PDF/EPUB/plain-text attachments).
+ * as supported sources (regular items plus PDF/EPUB/plain-text/image attachments).
  * They are intentionally separate from the sync predicates in `./sync` — the
- * backend sync/upload path remains PDF-only, while frontend reading supports
- * every content kind the local extraction pipeline can handle.
+ * backend sync/upload path remains PDF-only, while frontend access supports
+ * every content kind the local pipeline can handle (including images via `view`).
  *
  * This module must stay React-free (no `react/*`, Jotai store, or transitive
  * imports of them) so esbuild-side callers like `src/modules/zoteroContextMenu.ts`
@@ -21,14 +21,14 @@ import { logger } from './logger';
 
 /**
  * True when the item is a kind the agent can work with: a regular item or an
- * attachment whose content the local extraction pipeline can read
- * (PDF/EPUB/plain text).
+ * attachment whose content the agent can access (PDF/EPUB/plain text via `read`,
+ * or image via the `view` tool).
  */
 export const isAgentSupportedItem = (item: Zotero.Item | false): boolean => {
     if (!item) return false;
     if (item.isRegularItem()) return true;
     const kind = getReadableContentKind(item);
-    return kind === 'pdf' || kind === 'epub' || kind === 'text';
+    return kind === 'pdf' || kind === 'epub' || kind === 'text' || kind === 'image';
 };
 
 /**
@@ -72,11 +72,12 @@ export const agentItemFilterAsync = async (
     if (item.isAttachment()) {
         if (await safeFileExists(item)) return true;
         const remoteAccessible = getPref('accessRemoteFiles') && isAttachmentAvailableRemotely(item);
-        // Only PDFs can be read straight from a bare server copy. EPUB and plain
-        // text extraction require the actual file, which a remote-only copy only
-        // provides through the pref-gated download-on-validate path — so without
-        // remote access enabled, a server copy (hash synced) is PDF-only.
-        if (getReadableContentKind(item) === 'pdf') {
+        // PDFs and images can be served from a bare server copy (the read/view
+        // handlers download on-demand). EPUB and plain text extraction require
+        // the actual local file, so without remote access enabled a server copy
+        // is only viable for PDF/image.
+        const kind = getReadableContentKind(item);
+        if (kind === 'pdf' || kind === 'image') {
             return isAttachmentOnServer(item) || remoteAccessible;
         }
         return remoteAccessible;

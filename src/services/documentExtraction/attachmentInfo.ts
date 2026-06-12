@@ -59,6 +59,9 @@ function unreadableTypeReason(kind: ContentKind): string {
     if (kind === 'linked_url') {
         return 'Linked URL attachments are web links, not stored files Beaver can read.';
     }
+    if (kind === 'image') {
+        return 'Image attachments cannot be read as text.';
+    }
     if (isReadableContentKind(kind)) {
         return `Beaver cannot yet read ${contentKindLabel(kind)} attachments.`;
     }
