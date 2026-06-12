@@ -55,9 +55,18 @@ export const ModelResponseView: React.FC<ModelResponseViewProps> = React.memo(fu
     const toolCallParts = message.parts.filter(part => part.part_kind === 'tool-call' && part.tool_name !== 'return_suggestions');
 
     // Check if we have any visible content
-    const hasContent = thinkingParts.length > 0 || textParts.length > 0 || toolCallParts.length > 0;
+    const hasContent =
+        thinkingParts.length > 0 ||
+        textParts.length > 0 ||
+        toolCallParts.length > 0;
 
-    if (!hasContent) {
+    // Check if we have a tool search part
+    const isToolSearchPart = (
+        toolCallParts.length === 1 &&
+        (toolCallParts[0] as ToolCallPart)?.tool_kind === 'tool-search'
+    );
+
+    if (!hasContent || isToolSearchPart) {
         return null;
     }
 
