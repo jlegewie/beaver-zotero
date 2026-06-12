@@ -69,6 +69,7 @@ import {
     handleTestValidateItemHttpRequest,
     handleTestExternalFileAttachHttpRequest,
     handleTestExternalFileDeleteHttpRequest,
+    handleTestExternalFileViewImagesHttpRequest,
 } from './httpHandlers/testCacheHandlers';
 import {
     handleTestNoteCreateHttpRequest,
@@ -194,6 +195,7 @@ const ENDPOINT_PATHS = [
     '/beaver/test/validate-item',
     '/beaver/test/external-file-attach',
     '/beaver/test/external-file-delete',
+    '/beaver/test/external-file-view-images',
     // Test-only endpoints (note seeding/teardown/inspection)
     '/beaver/test/note-create',
     '/beaver/test/note-delete',
@@ -828,11 +830,13 @@ function registerEndpoints(): boolean {
         Zotero.Server.Endpoints['/beaver/test/validate-item'] =
             createEndpoint(handleTestValidateItemHttpRequest);
 
-        // External-file attach/delete (dev-only; seeds the registry for live tests)
+        // External-file attach/delete/view-images (dev-only; seeds the registry for live tests)
         Zotero.Server.Endpoints['/beaver/test/external-file-attach'] =
             createEndpoint(handleTestExternalFileAttachHttpRequest);
         Zotero.Server.Endpoints['/beaver/test/external-file-delete'] =
             createEndpoint(handleTestExternalFileDeleteHttpRequest);
+        Zotero.Server.Endpoints['/beaver/test/external-file-view-images'] =
+            createEndpoint(handleTestExternalFileViewImagesHttpRequest);
 
         // MuPDF worker singleton stats / lifecycle (dev-only)
         Zotero.Server.Endpoints['/beaver/test/worker-stats'] =

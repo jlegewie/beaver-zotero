@@ -4,11 +4,14 @@
  * Exercises the external-file branch of the unified document request path
  * against a running Zotero:
  *   - dev-endpoint attach: copy into the managed folder + registry row
- *   - PDF extraction through the shared core with the sentinel cache ref
+ *   - PDF extraction (markdown + structured mode) with sentinel cache ref
  *     (libraryId -1), including the warm cache hit on a second read
+ *   - EPUB extraction via the shared EPUB pipeline
  *   - text files read directly from the copy
+ *   - image files rejected at document-request time (use view tool instead)
  *   - the "attached on a different computer" file_missing error once the
  *     managed copy is deleted
+ *   - unknown ext keys return file_missing
  *
  * Prerequisites (per tests/README.md):
  *   - Dev build of Beaver loaded in a running Zotero (NODE_ENV=development).
@@ -29,7 +32,14 @@ import {
     fetchExternalFileDocument,
 } from '../helpers/zoteroHttpClient';
 
+// Minimal 1x1 transparent PNG — used to exercise the image content-kind path.
+const MINIMAL_PNG = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVQI12NgAAIABQAABjE+ibYAAAAASUVORK5CYII=',
+    'base64',
+);
+
 const FIXTURE_PDF = resolve(__dirname, '../fixtures/pdfs/extract-public/legewie-fagan__p0/source.pdf');
+const FIXTURE_EPUB = resolve(__dirname, '../fixtures/epubs/image-only.epub');
 const EXTRACT_OPTS = { timeout: 90_000 } as const;
 
 let available = false;
@@ -133,4 +143,43 @@ describe('external files (live)', () => {
         expect(response.error_code).toBe('file_missing');
         expect(response.error).toContain('not available on this device');
     }, 60_000);
+
+    it('returns file_missing for an unknown external file key', async () => {
+        const response = await fetchExternalFileDocument('XXXXXXXX', { mode: 'markdown' }, EXTRACT_OPTS);
+        expect(response.error_code).toBe('file_missing');
+        expect(response.error).toContain('not available on this device');
+    }, 30_000);
+
+    it('returns structured-mode extraction for an attached PDF', async () => {
+        const record = await attach(FIXTURE_PDF);
+
+        const response = await fetchExternalFileDocument(record.extKey, { mode: 'structured' }, EXTRACT_OPTS);
+        expect(response.error ?? null).toBeNull();
+        expect(response.content_kind).toBe('pdf');
+        expect(response.external_file_key).toBe(record.extKey);
+        expect(response.result?.document.pageCount).toBeGreaterThan(0);
+    }, 120_000);
+
+    it('rejects image files at document-request time with unsupported_type', async () => {
+        const pngPath = join(tmpDir, 'image.png');
+        writeFileSync(pngPath, MINIMAL_PNG);
+        const record = await attach(pngPath);
+        expect(record.contentKind).toBe('image');
+
+        const response = await fetchExternalFileDocument(record.extKey, { mode: 'markdown' }, EXTRACT_OPTS);
+        expect(response.error_code).toBe('unsupported_type');
+        expect(response.error).toContain('view tool');
+    }, 30_000);
+
+    it('routes an attached EPUB through the EPUB pipeline (image-only fixture returns no_text_layer)', async () => {
+        const record = await attach(FIXTURE_EPUB);
+        expect(record.contentKind).toBe('epub');
+
+        const response = await fetchExternalFileDocument(record.extKey, { mode: 'markdown' }, EXTRACT_OPTS);
+        // The EPUB code path was taken: external_file_key and content_kind are set regardless of outcome.
+        expect(response.external_file_key).toBe(record.extKey);
+        expect(response.content_kind).toBe('epub');
+        // The fixture is image-only, so the extractor returns no_text_layer — that is correct behavior.
+        expect(['no_text_layer', null]).toContain(response.error_code ?? null);
+    }, 120_000);
 });

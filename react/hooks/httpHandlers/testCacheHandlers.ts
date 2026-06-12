@@ -446,3 +446,34 @@ export async function handleTestExternalFileDeleteHttpRequest(request: any) {
     await db.deleteExternalFile(ext_key);
     return { ok: true, existed: !!record };
 }
+
+/**
+ * Dev-only: invoke `handleZoteroViewImagesRequest` for an external file key.
+ *
+ * Exposes the external-file branch of the unified view-images handler over
+ * HTTP so live tests can verify the full registry lookup → file read → render
+ * pipeline without a WebSocket client. Accepts the same optional fields as
+ * the WebSocket request (`start_page`, `end_page`, `dpi`, `format`, etc.).
+ */
+export async function handleTestExternalFileViewImagesHttpRequest(request: any) {
+    const { ext_key, start_page, end_page, dpi, max_width, max_height, format, jpeg_quality, timeout_seconds } = request || {};
+    if (!ext_key) return { ok: false, error: 'Provide ext_key' };
+
+    const { handleZoteroViewImagesRequest } = await import(
+        '../../../src/services/agentDataProvider/handleZoteroViewImagesRequest'
+    );
+    const response = await handleZoteroViewImagesRequest({
+        event: 'zotero_view_images_request',
+        request_id: `test-view-${ext_key}`,
+        external_file_key: ext_key,
+        start_page: start_page ?? undefined,
+        end_page: end_page ?? undefined,
+        dpi: dpi ?? undefined,
+        max_width: max_width ?? undefined,
+        max_height: max_height ?? undefined,
+        format: format ?? undefined,
+        jpeg_quality: jpeg_quality ?? undefined,
+        timeout_seconds: timeout_seconds ?? undefined,
+    });
+    return response;
+}

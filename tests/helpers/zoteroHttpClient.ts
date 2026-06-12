@@ -209,3 +209,39 @@ export function deleteExternalFileForTest(
 ): Promise<{ ok: boolean; existed?: boolean; error?: string }> {
     return post('/beaver/test/external-file-delete', { ext_key: extKey, delete_copy: deleteCopy }, opts);
 }
+
+export interface ViewImagesResponse {
+    type?: string;
+    request_id?: string;
+    external_file_key?: string | null;
+    kind?: 'pdf' | 'image' | null;
+    images?: Array<{
+        image_data: string;
+        format: string;
+        width: number;
+        height: number;
+        page_number?: number;
+        page_label?: string | null;
+    }>;
+    total_pages?: number | null;
+    error?: string | null;
+    error_code?: string | null;
+}
+
+/** POST `/beaver/test/external-file-view-images` — dev-only view images for an external file. */
+export function viewExternalFileImages(
+    extKey: string,
+    extra?: {
+        start_page?: number;
+        end_page?: number;
+        dpi?: number;
+        max_width?: number;
+        max_height?: number;
+        format?: 'png' | 'jpeg' | 'auto';
+        jpeg_quality?: number;
+        timeout_seconds?: number;
+    },
+    opts?: RequestOptions,
+): Promise<ViewImagesResponse> {
+    return post('/beaver/test/external-file-view-images', { ext_key: extKey, ...extra }, opts);
+}
