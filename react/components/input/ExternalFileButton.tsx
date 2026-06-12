@@ -1,9 +1,9 @@
 import React, { forwardRef } from 'react';
-import { CSSItemTypeIcon, CSSIcon } from "../icons/icons";
+import { CSSItemTypeIcon, CSSIcon, Icon } from "../icons/icons";
 import { useRemoveContextMenu } from '../../hooks/useRemoveContextMenu';
 import { MenuItem } from '../ui/menu/ContextMenu';
 import { truncateText } from '../../utils/stringUtils';
-import { FileViewIcon } from '../icons/icons';
+import { FileViewIcon, ExternalLinkIcon } from '../icons/icons';
 import type { ExternalFileContentKind } from '../../types/attachments/apiTypes';
 import { logger } from '../../../src/utils/logger';
 
@@ -111,6 +111,7 @@ export const ExternalFileButton = forwardRef<HTMLButtonElement, ExternalFileButt
                 <span className="truncate">
                     {truncateText(filename, MAX_FILENAME_LENGTH)}
                 </span>
+                <Icon icon={ExternalLinkIcon} className="ml-015 font-color-secondary scale-11" />
             </button>
             {removeMenu}
             </>
