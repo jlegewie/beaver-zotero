@@ -302,6 +302,10 @@ declare namespace Zotero {
                 extKey: string,
             ): Promise<import("../src/services/database").ExternalFileRecord | null>;
 
+            getExternalFileBySha256(
+                sha256: string,
+            ): Promise<import("../src/services/database").ExternalFileRecord | null>;
+
             setExternalFilePageCount(extKey: string, pageCount: number | null): Promise<void>;
 
             deleteExternalFile(extKey: string): Promise<void>;

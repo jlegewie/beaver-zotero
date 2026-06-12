@@ -166,8 +166,63 @@ function schedulePageCount(record: ExternalFileRecord): void {
 }
 
 /**
+ * SHA-256 of a file's content (hex). Returns null on failure — attaches then
+ * proceed without deduplication rather than failing.
+ */
+async function computeFileSha256(sourcePath: string): Promise<string | null> {
+    try {
+        return await IOUtils.computeHexDigest(sourcePath, 'sha256');
+    } catch (error) {
+        logger(`externalFiles: hashing failed for '${sourcePath}': ${error}`, 2);
+        return null;
+    }
+}
+
+/**
+ * Reuse an existing registry row for identical content (same SHA-256).
+ *
+ * Refreshes the display fields to the latest attach (message attachments
+ * snapshot their own filename, so past threads are unaffected) and re-copies
+ * the source to the original stored path when the managed copy has been
+ * deleted — which also heals `ext-<KEY>` reads in older threads.
+ */
+async function reuseExternalFile(
+    existing: ExternalFileRecord,
+    sourcePath: string,
+    filename: string,
+): Promise<ExternalFileRecord | null> {
+    const copyExists = await IOUtils.exists(existing.storedPath).catch(() => false);
+    if (!copyExists) {
+        try {
+            await IOUtils.makeDirectory(getExternalFilesDir(), { createAncestors: true, ignoreExisting: true });
+            await IOUtils.copy(sourcePath, existing.storedPath);
+        } catch (error) {
+            logger(`externalFiles: re-copy for dedup hit ext-${existing.extKey} failed: ${error}`, 2);
+            return null;
+        }
+    }
+    const storedStat = await IOUtils.stat(existing.storedPath);
+    const record: ExternalFileRecord = {
+        ...existing,
+        filename,
+        originalPath: sourcePath,
+        fileSize: storedStat.size ?? existing.fileSize,
+        mtimeMs: storedStat.lastModified ?? existing.mtimeMs,
+    };
+    await getDB().upsertExternalFile(record);
+    logger(
+        `externalFiles: dedup hit — '${filename}' matches ext-${record.extKey}`
+        + `${copyExists ? '' : ' (managed copy restored)'}`,
+        3,
+    );
+    return record;
+}
+
+/**
  * Attach an external file: validate kind and size, copy it into the managed
- * folder, and record it in the registry.
+ * folder, and record it in the registry. Identical content (same SHA-256)
+ * reuses the existing registry row and copy, so repeat attaches keep one
+ * stable `ext-<KEY>` id and stay warm in the document caches.
  *
  * Accepts either a path string (file picker) or an object with a `path`
  * property (`nsIFile` from drag-and-drop).
@@ -206,6 +261,22 @@ export async function attachExternalFile(
             };
         }
 
+        // Deduplicate by content hash: identical bytes reuse the existing
+        // key/copy (best-effort — a failed hash just skips dedup).
+        const sha256 = await computeFileSha256(sourcePath);
+        if (sha256) {
+            const existing = await getDB().getExternalFileBySha256(sha256);
+            if (existing) {
+                const reused = await reuseExternalFile(existing, sourcePath, filename);
+                if (reused) {
+                    if (reused.contentKind === 'pdf' && reused.pageCount == null) {
+                        schedulePageCount(reused);
+                    }
+                    return { status: 'attached', record: reused };
+                }
+            }
+        }
+
         const extKey = await generateUniqueExtKey();
         const extension = fileExtension(filename);
         const storedDir = getExternalFilesDir();
@@ -224,6 +295,7 @@ export async function attachExternalFile(
             fileSize: storedStat.size ?? sizeBytes,
             mtimeMs: storedStat.lastModified ?? 0,
             pageCount: null,
+            sha256,
             createdAt: new Date().toISOString(),
         };
         await getDB().upsertExternalFile(record);

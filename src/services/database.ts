@@ -163,6 +163,8 @@ export interface ExternalFileRecord {
     fileSize: number;
     mtimeMs: number;
     pageCount: number | null;
+    /** SHA-256 of the file content (hex). Null when hashing failed at attach time. */
+    sha256: string | null;
     createdAt: string;
 }
 
@@ -568,8 +570,26 @@ export class BeaverDB {
                 file_size      INTEGER NOT NULL,
                 mtime_ms       INTEGER NOT NULL,
                 page_count     INTEGER,
+                sha256         TEXT,
                 created_at     TEXT NOT NULL DEFAULT (datetime('now'))
             );
+        `);
+
+        // Pre-release tables were created without the sha256 column; add it
+        // in place rather than dropping the registry.
+        const externalFileColumns: string[] = [];
+        await this.conn.queryAsync(`PRAGMA table_info(external_files)`, [], {
+            onRow: (row: any) => externalFileColumns.push(row.getResultByIndex(1)),
+        });
+        if (!externalFileColumns.includes('sha256')) {
+            await this.conn.queryAsync(`ALTER TABLE external_files ADD COLUMN sha256 TEXT`);
+        }
+
+        // Content-hash lookup for attach-time deduplication (non-unique:
+        // dedup is best-effort and concurrent attaches may race).
+        await this.conn.queryAsync(`
+            CREATE INDEX IF NOT EXISTS idx_external_files_sha256
+            ON external_files(sha256);
         `);
 
         // Drop and recreate the ephemeral queue if the schema or unique key is stale.
@@ -2375,7 +2395,7 @@ export class BeaverDB {
 
     private static externalFileSelect(): string {
         return `SELECT ext_key, filename, original_path, stored_path, content_kind,
-                       mime_type, file_size, mtime_ms, page_count, created_at
+                       mime_type, file_size, mtime_ms, page_count, sha256, created_at
                 FROM external_files`;
     }
 
@@ -2405,7 +2425,8 @@ export class BeaverDB {
                     fileSize: row.getResultByIndex(6),
                     mtimeMs: row.getResultByIndex(7),
                     pageCount: row.getResultByIndex(8) ?? null,
-                    createdAt: BeaverDB.sqliteUtcToIso(row.getResultByIndex(9)),
+                    sha256: row.getResultByIndex(9) ?? null,
+                    createdAt: BeaverDB.sqliteUtcToIso(row.getResultByIndex(10)),
                 });
             },
         });
@@ -2417,8 +2438,8 @@ export class BeaverDB {
         await this.conn.queryAsync(
             `INSERT INTO external_files (
                 ext_key, filename, original_path, stored_path, content_kind,
-                mime_type, file_size, mtime_ms, page_count
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                mime_type, file_size, mtime_ms, page_count, sha256
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(ext_key) DO UPDATE SET
                 filename = excluded.filename,
                 original_path = excluded.original_path,
@@ -2427,7 +2448,8 @@ export class BeaverDB {
                 mime_type = excluded.mime_type,
                 file_size = excluded.file_size,
                 mtime_ms = excluded.mtime_ms,
-                page_count = excluded.page_count`,
+                page_count = excluded.page_count,
+                sha256 = excluded.sha256`,
             [
                 input.extKey,
                 input.filename,
@@ -2438,6 +2460,7 @@ export class BeaverDB {
                 input.fileSize,
                 input.mtimeMs,
                 input.pageCount,
+                input.sha256,
             ],
         );
     }
@@ -2447,6 +2470,18 @@ export class BeaverDB {
         const rows = await this.selectExternalFiles(
             `${BeaverDB.externalFileSelect()} WHERE ext_key = ?`,
             [extKey],
+        );
+        return rows[0] ?? null;
+    }
+
+    /**
+     * Get the newest external file with the given content hash (attach-time
+     * deduplication). Returns null when no row carries the hash.
+     */
+    public async getExternalFileBySha256(sha256: string): Promise<ExternalFileRecord | null> {
+        const rows = await this.selectExternalFiles(
+            `${BeaverDB.externalFileSelect()} WHERE sha256 = ? ORDER BY created_at DESC, ext_key DESC LIMIT 1`,
+            [sha256],
         );
         return rows[0] ?? null;
     }

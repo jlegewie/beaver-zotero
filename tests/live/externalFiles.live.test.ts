@@ -17,7 +17,7 @@
  * Run with: `npm run test:live -- externalFiles`
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -50,7 +50,7 @@ afterAll(async () => {
     rmSync(tmpDir, { recursive: true, force: true });
 });
 
-async function attach(path: string): Promise<{ extKey: string; storedPath: string }> {
+async function attach(path: string): Promise<{ extKey: string; storedPath: string; filename: string }> {
     const response = await attachExternalFileForTest(path);
     if (!response.ok || !response.record) {
         throw new Error(`attach failed: ${response.reason} ${response.error}`);
@@ -85,6 +85,21 @@ describe('external files (live)', () => {
         expect(second.error ?? null).toBeNull();
         expect(second.result?.document.pageCount).toBe(response.result?.document.pageCount);
     }, 120_000);
+
+    it('deduplicates identical content to one key and one copy', async () => {
+        const first = await attach(FIXTURE_PDF);
+        const second = await attach(FIXTURE_PDF);
+        expect(second.extKey).toBe(first.extKey);
+        expect(second.storedPath).toBe(first.storedPath);
+
+        // Identical bytes under a different name still reuse the record,
+        // refreshed to the latest filename.
+        const renamedPath = join(tmpDir, 'renamed-copy.pdf');
+        copyFileSync(FIXTURE_PDF, renamedPath);
+        const third = await attach(renamedPath);
+        expect(third.extKey).toBe(first.extKey);
+        expect(third.filename).toBe('renamed-copy.pdf');
+    }, 60_000);
 
     it('reads text files directly from the managed copy', async () => {
         const textPath = join(tmpDir, 'notes.md');

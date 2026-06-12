@@ -17,6 +17,7 @@ import {
 const db = {
     upsertExternalFile: vi.fn().mockResolvedValue(undefined),
     getExternalFileByKey: vi.fn().mockResolvedValue(null),
+    getExternalFileBySha256: vi.fn().mockResolvedValue(null),
     setExternalFilePageCount: vi.fn().mockResolvedValue(undefined),
 };
 
@@ -25,13 +26,17 @@ function setupGlobals({
     fileExists = true,
     size = 1024,
     generateKey = 'ABCD2345',
-}: { mime?: string | null; fileExists?: boolean; size?: number; generateKey?: string } = {}) {
+    sha256 = 'hash-abc',
+}: { mime?: string | null; fileExists?: boolean; size?: number; generateKey?: string; sha256?: string | null } = {}) {
     const io = (globalThis as any).IOUtils;
     io.exists = vi.fn().mockResolvedValue(fileExists);
     io.stat = vi.fn().mockResolvedValue({ size, lastModified: 1718000000000, type: 'regular' });
     io.copy = vi.fn().mockResolvedValue(undefined);
     io.makeDirectory = vi.fn().mockResolvedValue(undefined);
     io.read = vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3]));
+    io.computeHexDigest = sha256 === null
+        ? vi.fn().mockRejectedValue(new Error('hashing unavailable'))
+        : vi.fn().mockResolvedValue(sha256);
 
     const zotero = (globalThis as any).Zotero;
     zotero.DataDirectory = { dir: '/mock/data' };
@@ -44,6 +49,7 @@ describe('externalFiles', () => {
     beforeEach(() => {
         vi.clearAllMocks();
         db.getExternalFileByKey.mockResolvedValue(null);
+        db.getExternalFileBySha256.mockResolvedValue(null);
         getPageCountMock.mockResolvedValue(12);
     });
 
@@ -81,6 +87,7 @@ describe('externalFiles', () => {
                 '/home/user/paper.pdf',
                 `${getExternalFilesDir()}/ABCD2345.pdf`,
             );
+            expect(result.record.sha256).toBe('hash-abc');
             expect(db.upsertExternalFile).toHaveBeenCalledOnce();
         });
 
@@ -150,6 +157,90 @@ describe('externalFiles', () => {
             expect(result.status).toBe('attached');
             await new Promise((resolve) => setTimeout(resolve, 0));
             expect(db.setExternalFilePageCount).not.toHaveBeenCalled();
+        });
+    });
+
+    describe('deduplication by content hash', () => {
+        const existing = {
+            extKey: 'OLDK2345',
+            filename: 'paper.pdf',
+            originalPath: '/home/user/paper.pdf',
+            storedPath: '/mock/data/beaver/external-files/OLDK2345.pdf',
+            contentKind: 'pdf' as const,
+            mimeType: 'application/pdf',
+            fileSize: 1024,
+            mtimeMs: 1718000000000,
+            pageCount: 12,
+            sha256: 'hash-abc',
+            createdAt: '2026-06-01T00:00:00.000Z',
+        };
+
+        it('reuses the existing record for identical content', async () => {
+            setupGlobals();
+            db.getExternalFileBySha256.mockResolvedValue({ ...existing });
+
+            const result = await attachExternalFile('/home/user/paper.pdf');
+
+            expect(result.status).toBe('attached');
+            if (result.status !== 'attached') return;
+            expect(result.record.extKey).toBe('OLDK2345');
+            expect(result.record.storedPath).toBe(existing.storedPath);
+            // No new copy is written; the existing one is reused.
+            expect((globalThis as any).IOUtils.copy).not.toHaveBeenCalled();
+        });
+
+        it('refreshes filename and original path on a dedup hit', async () => {
+            setupGlobals();
+            db.getExternalFileBySha256.mockResolvedValue({ ...existing });
+
+            const result = await attachExternalFile('/somewhere/else/renamed.pdf');
+
+            expect(result.status).toBe('attached');
+            if (result.status !== 'attached') return;
+            expect(result.record.extKey).toBe('OLDK2345');
+            expect(result.record.filename).toBe('renamed.pdf');
+            expect(result.record.originalPath).toBe('/somewhere/else/renamed.pdf');
+            expect(db.upsertExternalFile).toHaveBeenCalledWith(
+                expect.objectContaining({ extKey: 'OLDK2345', filename: 'renamed.pdf' }),
+            );
+        });
+
+        it('restores a deleted managed copy on a dedup hit', async () => {
+            setupGlobals();
+            const io = (globalThis as any).IOUtils;
+            // Source exists; the managed copy does not.
+            io.exists = vi.fn(async (path: string) => path !== existing.storedPath);
+            db.getExternalFileBySha256.mockResolvedValue({ ...existing });
+
+            const result = await attachExternalFile('/home/user/paper.pdf');
+
+            expect(result.status).toBe('attached');
+            if (result.status !== 'attached') return;
+            expect(result.record.extKey).toBe('OLDK2345');
+            expect(io.copy).toHaveBeenCalledWith('/home/user/paper.pdf', existing.storedPath);
+        });
+
+        it('schedules a page count on dedup hits that still lack one', async () => {
+            setupGlobals();
+            db.getExternalFileBySha256.mockResolvedValue({ ...existing, pageCount: null });
+
+            const result = await attachExternalFile('/home/user/paper.pdf');
+
+            expect(result.status).toBe('attached');
+            await new Promise((resolve) => setTimeout(resolve, 0));
+            expect(db.setExternalFilePageCount).toHaveBeenCalledWith('OLDK2345', 12);
+        });
+
+        it('falls back to a fresh attach when hashing fails', async () => {
+            setupGlobals({ sha256: null });
+
+            const result = await attachExternalFile('/home/user/paper.pdf');
+
+            expect(result.status).toBe('attached');
+            if (result.status !== 'attached') return;
+            expect(result.record.extKey).toBe('ABCD2345');
+            expect(result.record.sha256).toBeNull();
+            expect(db.getExternalFileBySha256).not.toHaveBeenCalled();
         });
     });
 
