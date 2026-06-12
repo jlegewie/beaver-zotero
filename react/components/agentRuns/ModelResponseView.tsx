@@ -61,14 +61,15 @@ export const ModelResponseView: React.FC<ModelResponseViewProps> = React.memo(fu
         toolCallParts.length > 0;
 
     // Model response that is auto-loading a search capability
-    const isAutoLoadingModelResponse = 
+    const isAutoLoadingResponse = 
         toolCallParts.length > 0 &&
         toolCallParts.every(part =>
             part.part_kind === 'tool-call' &&
+            textParts.length === 0 &&
             part.tool_call_id.startsWith('auto_load_')
         );
 
-    if (!hasContent || isAutoLoadingModelResponse) {
+    if (!hasContent || isAutoLoadingResponse) {
         return null;
     }
 
