@@ -77,11 +77,14 @@ describe('agentItemSupport', () => {
             expect(isAgentSupportedItem(text)).toBe(true);
         });
 
-        it('rejects other readable kinds and unsupported types', () => {
+        it('accepts image attachments', () => {
             const image = withTrash(createMockAttachment({ contentType: 'image/png', isImage: true }));
+            expect(isAgentSupportedItem(image)).toBe(true);
+        });
+
+        it('rejects unsupported attachment types', () => {
             const word = withTrash(createMockAttachment({ contentType: 'application/msword' }));
             const note = withTrash(createMockItem({ isNote: true }));
-            expect(isAgentSupportedItem(image)).toBe(false);
             expect(isAgentSupportedItem(word)).toBe(false);
             expect(isAgentSupportedItem(note)).toBe(false);
             expect(isAgentSupportedItem(false)).toBe(false);
