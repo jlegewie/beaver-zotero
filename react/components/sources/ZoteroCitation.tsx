@@ -860,18 +860,18 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
 
     const citationPreview = (
         <span className="block" style={{ overflow: 'hidden' }}>
-            <span className="px-3 py-15 display-flex flex-row border-bottom-quinary">
-                <span className="font-color-primary text-sm" style={{ wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
+            <span className="px-3 py-15 display-flex flex-row border-bottom-quinary gap-2">
+                <span className="font-color-primary text-sm" style={{ minWidth: 0, wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
                     {citation}
                 </span>
                 <span className="flex-1" />
                 {pages && pages.length > 0 && pages[0] && (
-                    <span className="font-color-secondary text-sm">
+                    <span className="font-color-secondary text-sm" style={{ flexShrink: 0, whiteSpace: 'nowrap' }}>
                         {isEpubCitation ? `Section ${pageLabels[0]}` : `Page ${pageLabels[0]}`}
                     </span>
                 )}
                 {(!pages || pages.length === 0) && textLineLocation && (
-                    <span className="font-color-secondary text-sm">
+                    <span className="font-color-secondary text-sm" style={{ flexShrink: 0, whiteSpace: 'nowrap' }}>
                         {textLineLocation.line_end && textLineLocation.line_end !== textLineLocation.line
                             ? `Lines ${textLineLocation.line}–${textLineLocation.line_end}`
                             : `Line ${textLineLocation.line}`}
