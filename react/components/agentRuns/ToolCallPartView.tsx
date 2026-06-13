@@ -3,6 +3,7 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import { AgentRunStatus, ToolCallPart } from '../../agents/types';
 import { toolResultsMapAtom, getToolCallStatus } from '../../agents/atoms';
 import { getToolCallLabel } from '../../agents/toolLabels';
+import { extractLookupWorkFoundCount } from '../../agents/toolResultTypes';
 import { ToolResultView } from './ToolResultView';
 import { AgentActionView } from './AgentActionView';
 import { getPendingApprovalForToolcallAtom, getAgentActionsByToolcallAtom } from '../../agents/agentActions';
@@ -246,14 +247,22 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
             ? 'confirm_external_search'
             : part.tool_name;
 
+    const lookupFoundCount =
+        part.tool_name === 'lookup_work' &&
+        status === 'completed' &&
+        result?.part_kind === 'tool-return'
+            ? extractLookupWorkFoundCount(result.content)
+            : null;
+
     const resultCount =
         result && result.part_kind === 'tool-return'
             ? result?.metadata?.summary?.result_count ?? null
             : null;
 
     const unit = UNIT_PAGES_TOOLS.has(part.tool_name) ? 'page' : 'result';
-    const label =
-        status === 'completed' && resultCount !== null
+    const label = lookupFoundCount !== null
+        ? `${baseLabel.split(':')[0]}: ${lookupFoundCount} found`
+        : status === 'completed' && resultCount !== null
             ? `${baseLabel} (${resultCount} ${unit}${resultCount === 1 ? '' : 's'})`
             : baseLabel;
 

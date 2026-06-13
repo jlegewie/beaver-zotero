@@ -5,6 +5,10 @@ import {
     extractGetAnnotationsData,
     extractListCollectionsData,
     isGetAnnotationsResult,
+    isExternalSearchResult,
+    isLookupWorkResult,
+    extractLookupWorkData,
+    extractLookupWorkFoundCount,
 } from '../../../react/agents/toolResultTypes';
 
 /**
@@ -256,5 +260,133 @@ describe('extractAnnotationAttachmentId', () => {
         expect(extractAnnotationAttachmentId('{')).toBeNull();
         expect(extractAnnotationAttachmentId({ text_contains: 'foo' })).toBeNull();
         expect(extractAnnotationAttachmentId(null)).toBeNull();
+    });
+});
+
+describe('lookup_work results', () => {
+    const batchContent = {
+        tool_name: 'lookup_work',
+        found_count: 1,
+        references: [{
+            external_id: 'openlibrary:OL7453684M',
+            title: 'Embracing Defeat: Japan in the Wake of World War II',
+            authors: ['John W. Dower'],
+            year: 2000,
+            venue: 'W. W. Norton & Company',
+        }],
+        not_found_queries: ['Embracing Defeat'],
+        temporarily_unchecked_queries: [],
+    };
+
+    const metadata = {
+        supplemental_data: [{
+            external_id: 'openlibrary:OL7453684M',
+            source: 'openalex',
+            publication_url: 'https://openlibrary.org/books/OL7453684M',
+            authors: ['John W. Dower'],
+            library_items: [],
+        }],
+    };
+
+    it('recognizes batch lookup_work payloads', () => {
+        expect(isLookupWorkResult('lookup_work', batchContent, metadata)).toBe(true);
+    });
+
+    it('does not route lookup_work through external search', () => {
+        expect(isExternalSearchResult('lookup_work', batchContent, metadata)).toBe(false);
+    });
+
+    it('extracts found references and not-found queries', () => {
+        expect(extractLookupWorkData(batchContent, metadata)).toEqual({
+            foundCount: 1,
+            references: [{
+                source_id: 'openlibrary:OL7453684M',
+                title: 'Embracing Defeat: Japan in the Wake of World War II',
+                authors: ['John W. Dower'],
+                year: 2000,
+                venue: 'W. W. Norton & Company',
+                source: 'openalex',
+                id: 'openlibrary:OL7453684M',
+                publication_url: 'https://openlibrary.org/books/OL7453684M',
+                library_items: [],
+            }],
+            notFoundQueries: ['Embracing Defeat'],
+            temporarilyUncheckedQueries: [],
+            message: undefined,
+        });
+    });
+
+    it('reads found_count for completed labels', () => {
+        expect(extractLookupWorkFoundCount(batchContent)).toBe(1);
+    });
+
+    it('still supports legacy single-reference payloads', () => {
+        const legacyContent = {
+            found: true,
+            reference: {
+                external_id: 'openalex:W123',
+                title: 'Legacy Work',
+            },
+        };
+
+        expect(isLookupWorkResult('lookup_work', legacyContent)).toBe(true);
+        expect(extractLookupWorkFoundCount(legacyContent)).toBe(1);
+        expect(extractLookupWorkData(legacyContent)).toEqual({
+            foundCount: 1,
+            references: [{
+                source_id: 'openalex:W123',
+                title: 'Legacy Work',
+                source: 'openalex',
+                id: undefined,
+                library_items: [],
+            }],
+            notFoundQueries: [],
+            temporarilyUncheckedQueries: [],
+            message: undefined,
+        });
+    });
+
+    it('merges legacy single-object supplemental data for lookup_work', () => {
+        const legacyContent = {
+            found: true,
+            reference: {
+                external_id: 'openalex:W123',
+                title: 'Legacy Work',
+            },
+        };
+        const legacyMetadata = {
+            supplemental_data: {
+                external_id: 'openalex:W123',
+                source: 'openalex' as const,
+                publication_url: 'https://example.org/work',
+                identifiers: {
+                    doi: '10.1234/example',
+                },
+                library_items: [{
+                    library_id: 1,
+                    zotero_key: 'ABCDEFGH',
+                    item_id: '1-ABCDEFGH',
+                }],
+            },
+        };
+
+        expect(extractLookupWorkData(legacyContent, legacyMetadata)).toMatchObject({
+            foundCount: 1,
+            references: [{
+                source_id: 'openalex:W123',
+                title: 'Legacy Work',
+                source: 'openalex',
+                id: 'openalex:W123',
+                publication_url: 'https://example.org/work',
+                identifiers: {
+                    doi: '10.1234/example',
+                },
+                library_items: [{
+                    library_id: 1,
+                    zotero_key: 'ABCDEFGH',
+                    item_id: '1-ABCDEFGH',
+                }],
+            }],
+        });
     });
 });

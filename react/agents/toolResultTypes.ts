@@ -482,10 +482,12 @@ const LOOKUP_WORK_TOOL_NAMES: readonly string[] = [
  * metadata.supplemental_data has array with external_id.
  */
 export function isExternalSearchResult(
-    _toolName: string,
+    toolName: string,
     content: unknown,
     metadata?: Record<string, unknown>
 ): boolean {
+    if (LOOKUP_WORK_TOOL_NAMES.includes(toolName)) return false;
+
     // Validate content has references array with external_id
     if (!content || typeof content !== 'object') return false;
     const contentObj = content as Record<string, unknown>;
@@ -510,9 +512,15 @@ export function isExternalSearchResult(
     return true;
 }
 
+function isExternalReferenceResultContent(ref: unknown): ref is ExternalReferenceResultContent {
+    if (!ref || typeof ref !== 'object') return false;
+    return typeof (ref as Record<string, unknown>).external_id === 'string';
+}
+
 /**
  * Type guard for lookup_work results.
- * Checks content has found bool and optionally a single reference.
+ * Accepts the batch shape (`found_count`, `references`, …) and the legacy
+ * single-result shape (`found`, `reference`).
  */
 export function isLookupWorkResult(
     toolName: string,
@@ -520,20 +528,25 @@ export function isLookupWorkResult(
     _metadata?: Record<string, unknown>
 ): boolean {
     if (!LOOKUP_WORK_TOOL_NAMES.includes(toolName)) return false;
-    
+
     if (!content || typeof content !== 'object') return false;
     const contentObj = content as Record<string, unknown>;
-    
-    // Must have found boolean
+
+    if (typeof contentObj.found_count === 'number') {
+        if (contentObj.references != null && !Array.isArray(contentObj.references)) return false;
+        if (Array.isArray(contentObj.references)) {
+            return contentObj.references.every(isExternalReferenceResultContent);
+        }
+        return true;
+    }
+
     if (typeof contentObj.found !== 'boolean') return false;
-    
-    // If found is true, must have reference with external_id
+
     if (contentObj.found === true) {
         if (!contentObj.reference || typeof contentObj.reference !== 'object') return false;
-        const ref = contentObj.reference as Record<string, unknown>;
-        if (typeof ref.external_id !== 'string') return false;
+        return isExternalReferenceResultContent(contentObj.reference);
     }
-    
+
     return true;
 }
 
@@ -737,32 +750,39 @@ export interface ExternalSearchViewData {
 }
 
 /**
- * Extract and merge external references from content and metadata.supplemental_data.
- * Combines ExternalReferenceResultContent with ExternalReferenceResultSupplement by external_id.
+ * Normalize supplemental reference metadata from current batch arrays or legacy single objects.
  */
-export function extractExternalSearchData(
-    content: unknown,
-    metadata?: Record<string, unknown>
-): ExternalSearchViewData | null {
-    const contentObj = content as { references?: ExternalReferenceResultContent[] } | undefined;
-    if (!contentObj || !Array.isArray(contentObj.references)) return null;
+function getExternalReferenceSupplements(metadata?: Record<string, unknown>): ExternalReferenceResultSupplement[] {
+    const supplementalData = metadata?.supplemental_data;
+    if (Array.isArray(supplementalData)) {
+        return supplementalData as ExternalReferenceResultSupplement[];
+    }
 
-    // Build lookup map from supplemental data
+    if (supplementalData && typeof supplementalData === 'object') {
+        return [supplementalData as ExternalReferenceResultSupplement];
+    }
+
+    return [];
+}
+
+/**
+ * Merge ExternalReferenceResultContent rows with metadata.supplemental_data.
+ */
+export function mergeExternalReferenceContents(
+    referenceContents: ExternalReferenceResultContent[],
+    metadata?: Record<string, unknown>
+): ExternalReference[] {
     const supplementMap = new Map<string, ExternalReferenceResultSupplement>();
-    if (Array.isArray(metadata?.supplemental_data)) {
-        for (const supp of metadata.supplemental_data as ExternalReferenceResultSupplement[]) {
-            if (supp.external_id) {
-                supplementMap.set(supp.external_id, supp);
-            }
+    for (const supp of getExternalReferenceSupplements(metadata)) {
+        if (supp.external_id) {
+            supplementMap.set(supp.external_id, supp);
         }
     }
 
-    // Merge content references with supplements
-    const references: ExternalReference[] = contentObj.references.map(ref => {
+    return referenceContents.map(ref => {
         const supp = supplementMap.get(ref.external_id);
-        
+
         return {
-            // From content
             source_id: ref.external_id,
             title: ref.title,
             authors: supp?.authors ?? ref.authors,
@@ -771,8 +791,6 @@ export function extractExternalSearchData(
             abstract: ref.abstract,
             fields_of_study: ref.fields_of_study,
             citation_count: ref.citation_count,
-            
-            // From supplement (or defaults)
             source: supp?.source ?? "openalex",
             id: supp?.external_id,
             publication_date: supp?.publication_date,
@@ -786,77 +804,105 @@ export function extractExternalSearchData(
             library_items: supp?.library_items ?? [],
         };
     });
+}
 
-    return { references };
+/**
+ * Extract and merge external references from content and metadata.supplemental_data.
+ * Combines ExternalReferenceResultContent with ExternalReferenceResultSupplement by external_id.
+ */
+export function extractExternalSearchData(
+    content: unknown,
+    metadata?: Record<string, unknown>
+): ExternalSearchViewData | null {
+    const contentObj = content as { references?: ExternalReferenceResultContent[] } | undefined;
+    if (!contentObj || !Array.isArray(contentObj.references)) return null;
+
+    return { references: mergeExternalReferenceContents(contentObj.references, metadata) };
 }
 
 /**
  * Normalized lookup work data ready for rendering.
  */
 export interface LookupWorkViewData {
-    found: boolean;
-    reference?: ExternalReference;
+    foundCount: number;
+    references: ExternalReference[];
+    notFoundQueries: string[];
+    temporarilyUncheckedQueries: string[];
     message?: string;
+}
+
+function stringArrayField(value: unknown): string[] {
+    if (!Array.isArray(value)) return [];
+    return value.filter((entry): entry is string => typeof entry === 'string');
+}
+
+/**
+ * Read the number of works found from a lookup_work tool return payload.
+ */
+export function extractLookupWorkFoundCount(content: unknown): number | null {
+    if (!content || typeof content !== 'object') return null;
+    const contentObj = content as Record<string, unknown>;
+
+    if (typeof contentObj.found_count === 'number') {
+        return contentObj.found_count;
+    }
+
+    if (typeof contentObj.found === 'boolean') {
+        return contentObj.found ? 1 : 0;
+    }
+
+    if (Array.isArray(contentObj.references)) {
+        return contentObj.references.length;
+    }
+
+    return null;
 }
 
 /**
  * Extract and merge lookup work data from content and metadata.supplemental_data.
- * Combines ExternalReferenceResultContent with ExternalReferenceResultSupplement.
  */
 export function extractLookupWorkData(
     content: unknown,
     metadata?: Record<string, unknown>
 ): LookupWorkViewData | null {
-    const contentObj = content as { 
-        found?: boolean;
-        reference?: ExternalReferenceResultContent;
-        message?: string;
-    } | undefined;
-    
-    if (!contentObj || typeof contentObj.found !== 'boolean') return null;
-    
-    // Not found case
-    if (!contentObj.found) {
+    if (!content || typeof content !== 'object') return null;
+    const contentObj = content as Record<string, unknown>;
+    const message = typeof contentObj.message === 'string' ? contentObj.message : undefined;
+
+    if (typeof contentObj.found_count === 'number') {
+        const referenceContents = Array.isArray(contentObj.references)
+            ? contentObj.references.filter(isExternalReferenceResultContent)
+            : [];
+
         return {
-            found: false,
-            message: contentObj.message,
+            foundCount: contentObj.found_count,
+            references: mergeExternalReferenceContents(referenceContents, metadata),
+            notFoundQueries: stringArrayField(contentObj.not_found_queries),
+            temporarilyUncheckedQueries: stringArrayField(contentObj.temporarily_unchecked_queries),
+            message,
         };
     }
-    
-    // Found case - need to merge reference with supplement
-    if (!contentObj.reference) return null;
-    
-    const ref = contentObj.reference;
-    const supp = metadata?.supplemental_data as ExternalReferenceResultSupplement | undefined;
-    
-    const externalRef: ExternalReference = {
-        // From content
-        source_id: ref.external_id,
-        title: ref.title,
-        authors: supp?.authors ?? ref.authors,
-        year: ref.year,
-        venue: ref.venue,
-        abstract: ref.abstract,
-        fields_of_study: ref.fields_of_study,
-        citation_count: ref.citation_count,
-        
-        // From supplement (or defaults)
-        source: supp?.source ?? "openalex",
-        id: supp?.external_id,
-        publication_date: supp?.publication_date,
-        publication_url: supp?.publication_url,
-        url: supp?.url,
-        identifiers: supp?.identifiers,
-        is_open_access: supp?.is_open_access,
-        open_access_url: supp?.open_access_url,
-        reference_count: supp?.reference_count,
-        journal: supp?.journal ?? (ref.journal ? { name: ref.journal } : undefined),
-        library_items: supp?.library_items ?? [],
-    };
-    
+
+    if (typeof contentObj.found !== 'boolean') return null;
+
+    if (!contentObj.found) {
+        return {
+            foundCount: 0,
+            references: [],
+            notFoundQueries: [],
+            temporarilyUncheckedQueries: [],
+            message,
+        };
+    }
+
+    if (!isExternalReferenceResultContent(contentObj.reference)) return null;
+
     return {
-        found: true,
-        reference: externalRef,
+        foundCount: 1,
+        references: mergeExternalReferenceContents([contentObj.reference], metadata),
+        notFoundQueries: [],
+        temporarilyUncheckedQueries: [],
+        message,
     };
 }
 

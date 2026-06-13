@@ -202,7 +202,11 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
         (userPrompt.filters?.collections && userPrompt.filters.collections.length > 0) ||
         (userPrompt.filters?.tags && userPrompt.filters.tags.length > 0);
 
-    const handleClick = useCallback(() => {
+    const handleClick = useCallback((e: React.MouseEvent) => {
+        // Chrome documents dispatch click for non-primary buttons too, so a
+        // right-click (e.g. opening a chip's context menu) must not enter
+        // edit mode and hide the view.
+        if (e.button !== 0) return;
         if (!isEditing && canEditNow) {
             setIsEditing(true);
         }
