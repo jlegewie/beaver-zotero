@@ -1,10 +1,7 @@
 import { atom } from 'jotai';
-import { getDisplayNameFromItem, getReferenceFromItem } from '../utils/sourceUtils';
-import { createZoteroURI } from "../utils/zoteroURI";
 import { logger } from '../../src/utils/logger';
 import {
-    CitationMetadata,
-    CitationData,
+    Citation,
     isExternalCitation,
     getCitationPages,
 } from '../types/citations';
@@ -18,8 +15,6 @@ import {
     parseRawCitationAttributes,
     requestedCitationKey,
 } from '../utils/citationGrammar';
-import { loadFullItemDataWithAllTypes } from '../../src/utils/zoteroUtils';
-import { externalReferenceMappingAtom, formatExternalCitation } from './externalReferences';
 import { getPref, setPref } from '../../src/utils/prefs';
 import { addPopupMessageAtom } from '../utils/popupMessageUtils';
 import { isFirstRunVisibleAtom } from './firstRun';
@@ -28,7 +23,7 @@ import { isFirstRunOrigin } from '../agents/types';
 
 /**
  * Thread-scoped citation marker assignment.
- * 
+ *
  * Maps citation keys to numeric markers (e.g., "1", "2", "3").
  * This ensures consistent markers across streaming and post-metadata states:
  * - Markers are assigned in render order during streaming (first appearance = "1")
@@ -154,52 +149,52 @@ export const mergePageLabelsByAttachmentIdAtom = atom(
 
 
 /*
- * Citation metadata
+ * Citations
  *
- * citationMetadataAtom are all citations metadata for the current thread.
- * Populated by (a) "citation_metadata" events during streaming, and (b)
- * citations in message metadata.
- * 
- * They are used to display the citations in the assistant message footer.
- * 
+ * citationsAtom holds all citations for the current thread (run_id stamped
+ * client-side at the entry points). Populated by (a) WSRunCompleteEvent
+ * citations during streaming and (b) run metadata citations on thread load.
+ *
+ * Citations arrive render-ready from the backend (citation v2): the lookup
+ * maps below are pure derivations — no Zotero item loading happens here.
  */
-export const citationMetadataAtom = atom<CitationMetadata[]>([]);
+export const citationsAtom = atom<Citation[]>([]);
 
 
 /**
- * Citations by run ID
- *
- * citationsByRunIdAtom is a Record mapping run_id to CitationMetadata[].
+ * Citations by run ID — for the assistant message footer.
  */
-export const citationsByRunIdAtom = atom<Record<string, CitationMetadata[]>>(
+export const citationsByRunIdAtom = atom<Record<string, Citation[]>>(
     (get) => {
-        const citations = get(citationMetadataAtom);
-        const citationsByRunId: Record<string, CitationMetadata[]> = {};
+        const citations = get(citationsAtom);
+        const citationsByRunId: Record<string, Citation[]> = {};
         for (const citation of citations) {
-            if (!citationsByRunId[citation.run_id]) {
-                citationsByRunId[citation.run_id] = [];
+            const runId = citation.run_id ?? '';
+            if (!citationsByRunId[runId]) {
+                citationsByRunId[runId] = [];
             }
-            citationsByRunId[citation.run_id].push(citation);
+            citationsByRunId[runId].push(citation);
         }
         return citationsByRunId;
     }
 );
 
 
-/*
- * Citation data mapping for UI display
- *
- * citationDataMapAtom is a Record mapping citation_id to CitationData.
- * 
- * The atom is updated by updateCitationDataAtom, which is called on
- * "citation_metadata" events and when loading previous threads.
+/**
+ * Citations by citation_id.
  */
-export const citationDataMapAtom = atom<Record<string, CitationData>>({});
+export const citationMapAtom = atom<Record<string, Citation>>((get) => {
+    const map: Record<string, Citation> = {};
+    for (const citation of get(citationsAtom)) {
+        map[citation.citation_id] = citation;
+    }
+    return map;
+});
 
 /**
  * Extract the identifier value from a raw citation tag for fallback lookup.
- * This is used for invalid citations where library_id/zotero_key couldn't be parsed.
- * 
+ * This is used for invalid citations where the identity couldn't be parsed.
+ *
  * @param rawTag The original citation tag, e.g., '<citation att_id="garbage"/>'
  * @returns Fallback key like "invalid:garbage" or null if no ID found
  */
@@ -210,7 +205,7 @@ function getInvalidCitationFallbackKey(rawTag: string): string | null {
     return !normalized.ok && normalized.rawIdentity ? `invalid:${normalized.rawIdentity}` : null;
 }
 
-function addCitationKeys(keys: Set<string>, citation: CitationMetadata) {
+function addCitationKeys(keys: Set<string>, citation: Citation) {
     for (const ref of [getRequestedRef(citation), getResolvedRef(citation)]) {
         if (!ref) continue;
         keys.add(requestedCitationKey(ref));
@@ -238,7 +233,7 @@ function addCitationKeys(keys: Set<string>, citation: CitationMetadata) {
     }
 }
 
-function getCitationMarkerBaseKeys(citation: CitationMetadata): string[] {
+export function getCitationMarkerBaseKeys(citation: Citation): string[] {
     const keys: string[] = [];
     for (const ref of [getRequestedRef(citation), getResolvedRef(citation)]) {
         if (!ref) continue;
@@ -248,46 +243,32 @@ function getCitationMarkerBaseKeys(citation: CitationMetadata): string[] {
     return [...new Set(keys.filter(Boolean))];
 }
 
-function getDisplayRef(citation: CitationMetadata): CitationRef | null {
+function getDisplayRef(citation: Citation): CitationRef | null {
     return getResolvedRef(citation) ?? getRequestedRef(citation);
 }
 
-function getResolvedMetadataFields(citation: CitationMetadata): Partial<CitationMetadata> {
-    const ref = getDisplayRef(citation);
-    if (!ref) return {};
-    if (ref.kind === 'zotero') {
-        return {
-            library_id: ref.library_id,
-            zotero_key: ref.zotero_key,
-        };
-    }
-    return {
-        external_source: ref.source ?? citation.external_source,
-        external_source_id: ref.external_id,
-    };
-}
-
 /**
- * Citation data mapped by full citation key for lookup.
- * 
+ * Citations mapped by full citation key for lookup.
+ *
  * This is the primary lookup mechanism for ZoteroCitation components:
  * - MarkdownRenderer injects data-requested-citation-key during preprocessing
  * - ZoteroCitation looks up metadata using this key
- * - Key includes sid/page for unique identification of citation instances
- * 
+ * - Key includes loc/page for unique identification of citation instances
+ *
  * Key format:
  * - Zotero citations: "zotero:{library_id}-{zotero_key}" or with location: "zotero:1-ABC:sid=s0-s8"
  * - Structured-document locators use the raw token, e.g. "zotero:1-ABC:heading3"
  * - External citations: "external:{external_source_id}" or with location
+ * - External files: "extfile:{ext_key}" or with location
  * - Invalid citations (fallback): "invalid:{raw_id_value}"
  */
-export const citationDataByCitationKeyAtom = atom<Record<string, CitationData>>((get) => {
-    const dataMap = get(citationDataMapAtom);
-    const byKey: Record<string, CitationData> = {};
-    const baseCandidates = new Map<string, CitationData>();
+export const citationByKeyAtom = atom<Record<string, Citation>>((get) => {
+    const citations = get(citationsAtom);
+    const byKey: Record<string, Citation> = {};
+    const baseCandidates = new Map<string, Citation>();
     const ambiguousBaseKeys = new Set<string>();
-    
-    for (const citation of Object.values(dataMap)) {
+
+    for (const citation of citations) {
         const keys = new Set<string>();
         addCitationKeys(keys, citation);
         for (const key of keys) {
@@ -308,7 +289,7 @@ export const citationDataByCitationKeyAtom = atom<Record<string, CitationData>>(
                 }
             }
         }
-        
+
         if (citation.invalid && citation.raw_tag) {
             const fallbackKey = getInvalidCitationFallbackKey(citation.raw_tag);
             if (fallbackKey) {
@@ -322,16 +303,9 @@ export const citationDataByCitationKeyAtom = atom<Record<string, CitationData>>(
             byKey[baseKey] = citation;
         }
     }
-    
+
     return byKey;
 });
-
-/**
- * Get all citation data as an array (for components that need the full list)
- */
-export const citationDataListAtom = atom(
-    (get) => Object.values(get(citationDataMapAtom))
-);
 
 /**
  * One-time citation tip: shown when the first external or page-locator citation
@@ -361,181 +335,34 @@ function maybeTriggerCitationTip(get: (...args: any[]) => any, set: (...args: an
 }
 
 /**
- * Tracks the current pending update promise for race condition handling.
- * This replaces the module-level version counter with a cleaner pattern.
+ * Synchronous post-processing after citations enter the thread state:
+ * assigns thread-scoped numeric markers (in list order, aliasing requested
+ * and resolved identities to one marker) and fires the one-time citation tip.
+ *
+ * Call after writing citationsAtom on thread load and run completion. This
+ * replaced the async Zotero-enrichment atom — citations now arrive
+ * render-ready from the backend.
  */
-const pendingUpdateRef = { current: null as Promise<void> | null };
-
-export const updateCitationDataAtom = atom(
+export const processCitationsAtom = atom(
     null,
-    async (get, set) => {
-        const metadata = get(citationMetadataAtom);
-        const prevMap = get(citationDataMapAtom);
-        const externalReferenceMap = get(externalReferenceMappingAtom);
-        const newCitationDataMap: Record<string, CitationData> = {};
-        logger(`updateCitationDataAtom: Computing ${metadata.length} citations`);
-        
-        // Create a unique reference for this update
-        const thisUpdate = {} as Promise<void>;
-        pendingUpdateRef.current = thisUpdate;
+    (get, set) => {
+        const citations = get(citationsAtom);
+        logger(`processCitationsAtom: Processing ${citations.length} citations`);
 
-        // Extend the citation metadata with the attachment citation data
-        for (const citation of metadata) {
-
-            const resolvedRef = getResolvedRef(citation);
-            const citationKey = resolvedRef ? baseCitationKey(resolvedRef) : '';
-            const prevCitation = prevMap[citation.citation_id];
-
-            // Get or assign numeric citation using the shared thread-scoped atom.
-            // This ensures markers assigned during streaming are preserved.
-            const markerKeys = getCitationMarkerBaseKeys(citation);
-            const numericCitation = set(aliasCitationMarkerKeysAtom, markerKeys) || null;
-
-            // Use existing extended metadata if available
-            if (prevCitation) {
-                newCitationDataMap[citation.citation_id] = {
-                    ...prevCitation,
-                    ...citation,
-                    ...getResolvedMetadataFields(citation),
-                };
-                continue;
+        let tipTriggered = false;
+        for (const citation of citations) {
+            if (!citation.invalid) {
+                set(aliasCitationMarkerKeysAtom, getCitationMarkerBaseKeys(citation));
             }
-
-            logger(`updateCitationDataAtom: Computing citation ${citation.author_year} (${citation.citation_id})`);
-
-            // Handle invalid citations - create minimal entry without Zotero lookup
-            if (citation.invalid) {
-                newCitationDataMap[citation.citation_id] = {
-                    ...citation,
-                    ...getResolvedMetadataFields(citation),
-                    type: "item",
-                    parentKey: null,
-                    icon: null,
-                    name: citation.author_year || null,
-                    citation: citation.author_year || null,
-                    formatted_citation: null,
-                    url: null,
-                    numericCitation
-                };
-                continue;
-            }
-
-            // Handle external citations differently
-            if (isExternalCitation(citation)) {
+            if (
+                !tipTriggered
+                && (isExternalCitation(citation) || getCitationPages(citation).length > 0)
+            ) {
                 maybeTriggerCitationTip(get, set);
-
-                const externalRefForDisplay = getDisplayRef(citation);
-                const externalSourceId = externalRefForDisplay?.kind === 'external'
-                    ? externalRefForDisplay.external_id
-                    : citation.external_source_id;
-
-                // Look up additional data from external reference mapping
-                const externalRef = externalSourceId
-                    ? externalReferenceMap[externalSourceId]
-                    : undefined;
-
-                // Preview for external references
-                const externalFormattedCitation = externalRef ? formatExternalCitation(externalRef) : undefined;
-
-                // For external citations, use the metadata directly
-                newCitationDataMap[citation.citation_id] = {
-                    ...citation,
-                    ...getResolvedMetadataFields(citation),
-                    type: "external",
-                    parentKey: null,
-                    icon: 'webpage-gray',  // Default icon for external references
-                    name: citation.author_year || null,
-                    citation: citation.author_year || null,
-                    formatted_citation: externalFormattedCitation || null,
-                    preview: citation.preview,
-                    url: null,
-                    numericCitation
-                };
-                continue;
-            }
-
-            // Compute new extended metadata for Zotero citations
-            try {
-                if (!resolvedRef || resolvedRef.kind !== 'zotero') {
-                    throw new Error(`Missing library_id or zotero_key for citation ${citation.citation_id}`);
-                }
-
-                // Trigger citation tip for Zotero citations with page locators (green)
-                if (getCitationPages(citation).length > 0) {
-                    maybeTriggerCitationTip(get, set);
-                }
-
-                const item = await Zotero.Items.getByLibraryAndKeyAsync(resolvedRef.library_id, resolvedRef.zotero_key);
-                if (!item) throw new Error(`Item not found for citation ${citation.citation_id}`);
-                await loadFullItemDataWithAllTypes([item]);
-
-                const isAnnotationItem = item.isAnnotation();
-                const parentItem = item.parentItem;
-                // Annotations live two levels deep: regular item -> attachment ->
-                // annotation. Use the grandparent regular item for the
-                // bibliographic citation so an annotation citation shares its
-                // marker with sibling citations of the same paper.
-                const grandparentItem = isAnnotationItem ? parentItem?.parentItem ?? null : null;
-                const itemToCite = item.isNote()
-                    ? item
-                    : isAnnotationItem
-                        ? grandparentItem || parentItem || item
-                        : parentItem || item;
-
-                const baseDisplayName = getDisplayNameFromItem(itemToCite, null, 30);
-                let displayName = getDisplayNameFromItem(itemToCite);
-                if (item.isNote()) {
-                    displayName = `Note: ${baseDisplayName}`;
-                } else if (isAnnotationItem) {
-                    displayName = `Annotation: ${baseDisplayName}`;
-                }
-
-                newCitationDataMap[citation.citation_id] = {
-                    ...citation,
-                    library_id: resolvedRef.library_id,
-                    zotero_key: resolvedRef.zotero_key,
-                    type: item.isRegularItem()
-                        ? "item"
-                        : item.isAttachment()
-                            ? "attachment"
-                            : item.isNote()
-                                ? "note"
-                                : isAnnotationItem
-                                    ? "annotation"
-                                    : "external",
-                    parentKey: parentItem?.key || null,
-                    icon: item.getItemTypeIconName(),
-                    name: displayName,
-                    citation: displayName,
-                    formatted_citation: getReferenceFromItem(itemToCite),
-                    url: createZoteroURI(item),
-                    numericCitation
-                };
-            } catch (error) {
-                logger(`updateCitationDataAtom: Error processing citation ${citation.citation_id}: ${error instanceof Error ? error.message : String(error)}`);
-                newCitationDataMap[citation.citation_id] = {
-                    ...citation,
-                    ...getResolvedMetadataFields(citation),
-                    type: "item",
-                    parentKey: null,
-                    icon: null,
-                    name: citation.author_year || null,
-                    citation: citation.author_year || null,
-                    formatted_citation: null,
-                    url: null,
-                    numericCitation
-                };
+                tipTriggered = true;
             }
         }
-
-        // Check if this update is still the most recent one
-        // If a newer update started, skip applying this stale result
-        if (pendingUpdateRef.current !== thisUpdate) {
-            logger(`updateCitationDataAtom: Skipping stale update`, 3);
-            return;
-        }
-
-        logger(`updateCitationDataAtom: Setting citationDataMapAtom with ${Object.keys(newCitationDataMap).length} citations`);
-        set(citationDataMapAtom, newCitationDataMap);
     }
 );
+
+export { getDisplayRef };

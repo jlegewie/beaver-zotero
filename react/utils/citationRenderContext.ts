@@ -1,7 +1,7 @@
-import type { CitationData, CitationPart } from '../types/citations';
+import type { Citation, PartLocation } from '../types/citations';
 import type { RenderContextData } from './citationRenderers';
 import { store } from '../store';
-import { citationDataMapAtom } from '../atoms/citations';
+import { citationMapAtom } from '../atoms/citations';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../atoms/externalReferences';
 import { CITATION_TAG_PATTERN } from './citationPreprocessing';
 import {
@@ -14,8 +14,8 @@ import {
 import { getCitationPreloadFilePath, preloadPageLabelsForContent } from './pageLabels';
 import type { CitationIndexEntry, StructuredExtractResult } from '../../src/beaver-extract/schema/schema';
 
-function citationPartsFromEntries(entries: CitationIndexEntry[]): CitationPart[] {
-    const byPage = new Map<number, CitationPart>();
+function citationLocationsFromEntries(entries: CitationIndexEntry[]): PartLocation[] {
+    const byPage = new Map<number, PartLocation>();
     for (const entry of entries) {
         if (!Number.isInteger(entry.pageIndex) || entry.pageIndex < 0) continue;
         const key = entry.pageIndex;
@@ -23,7 +23,7 @@ function citationPartsFromEntries(entries: CitationIndexEntry[]): CitationPart[]
         if (existing) continue;
         byPage.set(key, {
             part_id: entry.id,
-            locations: [{ page_idx: entry.pageIndex }],
+            page_idx: entry.pageIndex,
         });
     }
     return [...byPage.values()];
@@ -61,11 +61,11 @@ function resolveEntriesFromStructuredResult(
  */
 export async function buildLocalCitationDataMapForContent(
     content: string,
-): Promise<Record<string, CitationData>> {
+): Promise<Record<string, Citation>> {
     const cache = Zotero.Beaver?.documentCache;
     if (!cache) return {};
 
-    const localMap: Record<string, CitationData> = {};
+    const localMap: Record<string, Citation> = {};
     const seen = new Set<string>();
     const structuredResultsByFile = new Map<string, Promise<StructuredExtractResult | null>>();
     const regex = new RegExp(CITATION_TAG_PATTERN.source, CITATION_TAG_PATTERN.flags);
@@ -110,30 +110,24 @@ export async function buildLocalCitationDataMapForContent(
             if (!result) continue;
 
             const entries = resolveEntriesFromStructuredResult(result, normalized.ref.loc);
-            const parts = citationPartsFromEntries(entries);
-            if (parts.length === 0) continue;
+            const locations = citationLocationsFromEntries(entries);
+            if (locations.length === 0) continue;
 
             const rawTag = match[0];
             const pageLabels = pageLabelsFromEntries(entries);
             localMap[`local:${citationKey}`] = {
                 citation_id: `local:${citationKey}`,
                 run_id: 'local',
-                parts,
-                pages: [...new Set(parts.flatMap((part) =>
-                    (part.locations || []).map((location) => location.page_idx + 1)
-                ))],
-                library_id: normalized.ref.library_id,
-                zotero_key: normalized.ref.zotero_key,
+                locations,
+                pages: [...new Set(locations
+                    .map((location) => location.page_idx)
+                    .filter((pageIdx): pageIdx is number => pageIdx !== undefined)
+                    .map((pageIdx) => pageIdx + 1)
+                )],
                 raw_tag: rawTag,
                 requested_ref: normalized.ref,
-                type: 'item',
-                parentKey: null,
-                icon: null,
-                name: null,
-                citation: null,
-                formatted_citation: null,
-                url: null,
-                numericCitation: null,
+                resolved_ref: normalized.ref,
+                citation_type: 'item',
                 ...(pageLabels ? { page_labels: pageLabels } : {}),
             };
         } catch {
@@ -162,7 +156,7 @@ export async function prepareCitationRenderContext(
     if (!contextData && !hasPageLabels && !hasLocalCitations) return undefined;
 
     const baseContext: RenderContextData = contextData ?? {
-        citationDataMap: store.get(citationDataMapAtom),
+        citationDataMap: store.get(citationMapAtom),
         externalMapping: store.get(externalReferenceItemMappingAtom),
         externalReferencesMap: store.get(externalReferenceMappingAtom),
     };

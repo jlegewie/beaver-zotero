@@ -19,6 +19,7 @@ const citationDataAttributes = [
     'data-zotero-key', 'dataZoteroKey',
     'data-external-id', 'dataExternalId',
     'data-external-source', 'dataExternalSource',
+    'data-ext-key', 'dataExtKey',
     'data-loc', 'dataLoc',
     'data-loc-kind', 'dataLocKind',
     'data-loc-value', 'dataLocValue',

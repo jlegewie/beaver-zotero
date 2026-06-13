@@ -152,3 +152,90 @@ describe('citationGrammar', () => {
         });
     });
 });
+
+describe('external file citations (ext-<KEY>)', () => {
+    it('parses ext ids under the generic id attribute and normalizes the key', () => {
+        for (const raw of ['ext-AB12CD34', 'ext-ab12cd34', 'EXT-ab12cd34']) {
+            const normalized = normalizeCitationTag({ id: raw, loc: 'page2' });
+            expect(normalized.ok).toBe(true);
+            if (normalized.ok) {
+                expect(normalized.ref).toEqual({
+                    kind: 'external_file',
+                    ext_key: 'AB12CD34',
+                    loc: { kind: 'page', value: '2', raw: 'page2' },
+                });
+            }
+        }
+    });
+
+    it('rejects malformed ext ids as invalid zotero ids', () => {
+        // wrong key length / characters fall through to the Zotero parse
+        const normalized = normalizeCitationTag({ id: 'ext-SHORT' });
+        expect(normalized.ok).toBe(false);
+    });
+
+    it('builds extfile citation keys with and without locators', () => {
+        const ref = { kind: 'external_file' as const, ext_key: 'AB12CD34' };
+        expect(baseCitationKey(ref)).toBe('extfile:AB12CD34');
+        expect(requestedCitationKey({
+            ...ref,
+            loc: { kind: 'page' as const, value: '2', raw: 'page2' },
+        })).toBe('extfile:AB12CD34:page2');
+    });
+
+    it('resolves external file refs through getRequestedRef/getResolvedRef', () => {
+        const citation = {
+            requested_ref: { kind: 'external_file' as const, ext_key: 'AB12CD34' },
+            resolved_ref: { kind: 'external_file' as const, ext_key: 'AB12CD34' },
+            raw_tag: '<citation id="ext-AB12CD34" loc="page2"/>',
+        };
+        // loc recovered from the raw tag when refs lack it
+        expect(getRequestedRef(citation)).toEqual({
+            kind: 'external_file',
+            ext_key: 'AB12CD34',
+            loc: { kind: 'page', value: '2', raw: 'page2' },
+        });
+        expect(getResolvedRef(citation)).toEqual({
+            kind: 'external_file',
+            ext_key: 'AB12CD34',
+            loc: { kind: 'page', value: '2', raw: 'page2' },
+        });
+    });
+});
+
+describe('unknown / future ref kinds (cross-app forward compat)', () => {
+    // A newer backend (or another connected app) may send a ref kind this
+    // client doesn't model. Keying must degrade gracefully — stable,
+    // kind-namespaced, non-colliding — rather than assuming a closed set.
+    it('builds a stable, kind-namespaced base key for unknown kinds', () => {
+        const ref = { kind: 'obsidian_note', note_path: 'vault/Note A.md' } as any;
+        const key = baseCitationKey(ref);
+        expect(key.startsWith('obsidian_note:')).toBe(true);
+        expect(key).toContain('Note A.md');
+    });
+
+    it('does not collide two distinct unknown-kind refs onto one key', () => {
+        const a = baseCitationKey({ kind: 'obsidian_note', note_path: 'A.md' } as any);
+        const b = baseCitationKey({ kind: 'obsidian_note', note_path: 'B.md' } as any);
+        expect(a).not.toBe(b);
+    });
+
+    it('excludes loc from the base key so markers stay location-independent', () => {
+        const withLoc = baseCitationKey({
+            kind: 'obsidian_note',
+            note_path: 'A.md',
+            loc: { kind: 'page', value: '2', raw: 'page2' },
+        } as any);
+        const withoutLoc = baseCitationKey({ kind: 'obsidian_note', note_path: 'A.md' } as any);
+        expect(withLoc).toBe(withoutLoc);
+    });
+
+    it('appends the locator only in the full requested key', () => {
+        const ref = {
+            kind: 'obsidian_note',
+            note_path: 'A.md',
+            loc: { kind: 'page', value: '2', raw: 'page2' },
+        } as any;
+        expect(requestedCitationKey(ref)).toBe(`${baseCitationKey(ref)}:page2`);
+    });
+});

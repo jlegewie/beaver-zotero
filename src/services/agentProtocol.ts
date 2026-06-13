@@ -89,7 +89,7 @@ export interface WSRunCompleteEvent extends WSBaseEvent {
     run_id: string;
     usage: RunUsage | null;
     cost: number | null;
-    citations: import('../../react/types/citations').CitationMetadata[] | null;
+    citations: import('../../react/types/citations').Citation[] | null;
     agent_actions: import('../../react/agents/agentActions').AgentAction[] | null;
     /** Whether the run had high input token usage (backend-assessed). */
     high_token_usage?: boolean;

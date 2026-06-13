@@ -1,5 +1,5 @@
 import { ApplicationStateInput } from "../../src/services/agentProtocol";
-import { CitationMetadata } from "../types/citations";
+import { Citation } from "../types/citations";
 import { MessageAttachment } from "../types/attachments/apiTypes";
 import { ZoteroLibrary, ZoteroCollection, ZoteroTag } from "../types/zotero";
 import type { CardKind } from "../types/librarySuggestions";
@@ -179,7 +179,7 @@ export interface ToolCallPart {
 export type AgentRunStatus = 'in_progress' | 'completed' | 'error' | 'canceled' | 'awaiting_deferred';
 
 interface AgentRunMetadata {
-    citations: CitationMetadata[];
+    citations: Citation[];
 }
 
 /**

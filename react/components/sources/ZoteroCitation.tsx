@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import Tooltip from '../ui/Tooltip';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { citationDataByCitationKeyAtom, pageLabelsByAttachmentIdAtom, type PageLabelsByAttachmentId } from '../../atoms/citations';
+import { citationByKeyAtom, pageLabelsByAttachmentIdAtom, type PageLabelsByAttachmentId } from '../../atoms/citations';
 import { getPref } from '../../../src/utils/prefs';
 import { createZoteroURI } from '../../utils/zoteroURI';
 import {
@@ -10,7 +10,7 @@ import {
     getContentKind,
     getSymbolicLocation,
     isExternalCitation,
-    isZoteroCitation,
+    isExternalFileCitation,
 } from '../../types/citations';
 import { formatNumberRanges, formatPageRangesWithLabels } from '../../utils/stringUtils';
 import { selectItemById } from '../../../src/utils/selectItem';
@@ -85,6 +85,7 @@ interface ZoteroCitationProps {
     dataZoteroKey?: string;
     dataExternalId?: string;
     dataExternalSource?: string;
+    dataExtKey?: string;
     dataLoc?: string;
     dataLocKind?: string;
     dataLocValue?: string;
@@ -130,6 +131,7 @@ export function readCitationProps(props: Record<string, unknown>): CitationProps
     const zoteroKey = propValue(props, 'dataZoteroKey', 'data-zotero-key');
     const externalId = propValue(props, 'dataExternalId', 'data-external-id');
     const externalSource = propValue(props, 'dataExternalSource', 'data-external-source');
+    const extKey = propValue(props, 'dataExtKey', 'data-ext-key');
     const locRaw = propValue(props, 'dataLoc', 'data-loc');
     const locKind = propValue(props, 'dataLocKind', 'data-loc-kind');
     const locValue = propValue(props, 'dataLocValue', 'data-loc-value');
@@ -143,6 +145,14 @@ export function readCitationProps(props: Record<string, unknown>): CitationProps
             const ref: CitationRef = { kind: 'zotero', library_id: libraryID, zotero_key: zoteroKey, ...(loc ? { loc } : {}) };
             return { ok: true, ref, requestedKey: requestedKey || requestedCitationKey(ref), consecutive, adjacent };
         }
+    }
+    if (extKey) {
+        const ref: CitationRef = {
+            kind: 'external_file',
+            ext_key: extKey.toUpperCase(),
+            ...(loc ? { loc } : {}),
+        };
+        return { ok: true, ref, requestedKey: requestedKey || requestedCitationKey(ref), consecutive, adjacent };
     }
     if (externalId) {
         const ref: CitationRef = {
@@ -173,7 +183,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
     const parsedProps = useMemo(() => readCitationProps(props as Record<string, unknown>), [props]);
     const { consecutive } = parsedProps;
     // Get citation data maps
-    const citationDataByCitationKey = useAtomValue(citationDataByCitationKeyAtom);
+    const citationDataByCitationKey = useAtomValue(citationByKeyAtom);
     const externalReferenceToZoteroItem = useAtomValue(externalReferenceItemMappingAtom);
     const externalReferenceMap = useAtomValue(externalReferenceMappingAtom);
     const labelsByAttachmentId = useAtomValue(pageLabelsByAttachmentIdAtom);
@@ -222,12 +232,18 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
             : null;
         const externalSourceId = displayRef?.kind === 'external'
             ? displayRef.external_id
-            : metadata?.external_source_id;
-        
+            : undefined;
+
         // Determine citation type
-        const isExternal = metadata 
-            ? isExternalCitation(metadata) 
+        const isExternal = metadata
+            ? isExternalCitation(metadata)
             : displayRef?.kind === 'external' || citationKey.startsWith('external:');
+        const isExternalFile = metadata
+            ? isExternalFileCitation(metadata)
+            : displayRef?.kind === 'external_file' || citationKey.startsWith('extfile:');
+        const externalFileKey = displayRef?.kind === 'external_file'
+            ? displayRef.ext_key
+            : null;
         
         // Determine display state (FSM)
         const hasIdentifier = parsedProps.ok || !!citationKey || (!parsedProps.ok && !!parsedProps.rawIdentity);
@@ -246,12 +262,14 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
             metadata,
             zoteroRef,
             isExternal,
+            isExternalFile,
+            externalFileKey,
             citationKey,     // Full key for metadata lookup
             markerKey,       // Base key for marker assignment
             displayState,
             // Convenience accessors
-            libraryID: zoteroRef?.libraryID ?? metadata?.library_id ?? 0,
-            itemKey: zoteroRef?.itemKey ?? metadata?.zotero_key ?? '',
+            libraryID: zoteroRef?.libraryID ?? 0,
+            itemKey: zoteroRef?.itemKey ?? '',
             hasIdentifier,
             requestedRef: parsedProps.ok ? parsedProps.ref : null,
             resolvedRef,
@@ -260,9 +278,11 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
     }, [parsedProps, citationDataByCitationKey]);
 
     // Destructure for easier access
-    const { 
-        metadata: citationMetadata, 
-        isExternal, 
+    const {
+        metadata: citationMetadata,
+        isExternal,
+        isExternalFile,
+        externalFileKey,
         citationKey,
         markerKey,
         displayState,
@@ -296,53 +316,27 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
     // Uses markerKey (without sid/page) so all citations to the same item share a marker
     const numericMarker = useCitationMarker(markerKey, exportRendering);
 
-    // Derive citation display data from metadata
-    // When metadata is not available (streaming), values are empty and component shows inactive "?"
-    const { formatted_citation, citation, url, previewText, rawPages } = useMemo(() => {
+    // Derive citation display data from metadata alone (citation v2): no
+    // Zotero item access happens here, so the same render path works for
+    // Zotero items, external references, and external files.
+    // When metadata is not available (streaming), values are empty and the
+    // component shows the inactive "?" state.
+    const { formatted_citation, citation, previewText, rawPages } = useMemo(() => {
         // No metadata yet - return empty values (component will show inactive state)
         if (!citationMetadata) {
             return {
                 formatted_citation: '',
                 citation: '',
-                url: '',
                 previewText: '',
                 rawPages: [] as number[]
             };
         }
 
-        let formatted_citation = '';
-        let citation = '';
-        let url = '';
-        let previewText = '';
-
-        if (isExternalCitation(citationMetadata)) {
-            // External citation - use metadata directly
-            citation = citationMetadata.author_year || '';
-            formatted_citation = citationMetadata.formatted_citation || citation;
-            previewText = citationMetadata.preview
-                ? `"${citationMetadata.preview}"`
-                : formatted_citation;
-
-            // If mapped to Zotero item, try to get URL
-            if (mappedZoteroItem) {
-                try {
-                    const item = Zotero.Items.getByLibraryAndKey(mappedZoteroItem.library_id, mappedZoteroItem.zotero_key);
-                    if (item) {
-                        url = createZoteroURI(item);
-                    }
-                } catch (e) {
-                    logger(`ZoteroCitation: Item not loaded for ${mappedZoteroItem.library_id}/${mappedZoteroItem.zotero_key}: ${e}`);
-                }
-            }
-        } else if (isZoteroCitation(citationMetadata)) {
-            // Zotero citation with metadata
-            formatted_citation = citationMetadata.formatted_citation || '';
-            citation = citationMetadata.citation || '';
-            url = citationMetadata.url || '';
-            previewText = citationMetadata.preview
-                ? `"${citationMetadata.preview}"`
-                : formatted_citation || '';
-        }
+        const citation = citationMetadata.display_name || '';
+        let formatted_citation = citationMetadata.formatted_citation || '';
+        let previewText = citationMetadata.preview
+            ? `"${citationMetadata.preview}"`
+            : formatted_citation || (isExternalFile ? citation : '');
 
         // Strip URLs from formatted citation and preview text (they clutter the tooltip)
         const stripUrls = (s: string) => s.replace(/\s*https?:\/\/\S+/g, '').trim();
@@ -358,27 +352,23 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
         previewText = stripHtml(stripUrls(previewText));
 
         const pages = [...new Set(getCitationPages(citationMetadata))];
-        const firstPage = pages.length > 0 ? pages[0] : null;
-        const finalUrl = firstPage ? `${url}?page=${firstPage}` : url;
 
         return {
             formatted_citation,
             citation,
-            url: finalUrl,
             previewText,
             rawPages: pages
         };
-    }, [citationMetadata, mappedZoteroItem]);
+    }, [citationMetadata, isExternalFile]);
 
     // Resolve page labels separately so page-label preload updates don't force
     // the citation/preview/HTML-stripping work above to recompute.
-    const isZoteroCitationMetadata = !!citationMetadata && isZoteroCitation(citationMetadata);
     const citationLibraryId = resolvedRef?.kind === 'zotero'
         ? resolvedRef.library_id
-        : (isZoteroCitationMetadata ? citationMetadata!.library_id : undefined);
+        : undefined;
     const citationZoteroKey = resolvedRef?.kind === 'zotero'
         ? resolvedRef.zotero_key
-        : (isZoteroCitationMetadata ? citationMetadata!.zotero_key : undefined);
+        : undefined;
     const { pageLabels, pagesDisplay, pages } = useMemo(() => {
         // Default labels: raw page numbers as strings.
         let pageLabels: string[] = rawPages.map((p) => String(p));
@@ -440,6 +430,27 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
                     setSelectedReference(externalReference);
                     setIsDetailsVisible(true);
                 }
+            }
+            return;
+        }
+
+        // External-file citations: open the locally stored copy. There is no
+        // reader navigation for external files, so page/sentence clicks just
+        // launch the file; a missing local copy (file attached on another
+        // computer) is a quiet no-op.
+        if (isExternalFile) {
+            logger(`ZoteroCitation: External file citation (ext-${externalFileKey})`);
+            if (!externalFileKey) return;
+            try {
+                const record = await Zotero.Beaver?.db?.getExternalFileByKey(externalFileKey);
+                const path = record?.storedPath ?? null;
+                if (path && (await IOUtils.exists(path).catch(() => false))) {
+                    Zotero.launchFile(path);
+                } else {
+                    logger(`ZoteroCitation: External file ext-${externalFileKey} has no local copy`);
+                }
+            } catch (error) {
+                logger(`ZoteroCitation: Failed to open external file: ${error}`, 2);
             }
             return;
         }
@@ -613,9 +624,10 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
             }
         }
 
-        // Handle file links
-        if (url.startsWith('file:///')) {
-            const filePath = url.replace('file:///', '');
+        // Handle file links (computed lazily: rendering never needs the URI)
+        const itemUri = createZoteroURI(item);
+        if (itemUri.startsWith('file:///')) {
+            const filePath = itemUri.replace('file:///', '');
             logger(`ZoteroCitation: File Link (${filePath})`);
             getCitationActions().launchFile(filePath);
             return;
@@ -706,9 +718,14 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
         } catch (error) {
             logger('ZoteroCitation: Failed to handle citation click: ' + error);
             
-            // Fallback: try to use the original URL-based approach
-            if (url.includes('zotero://')) {
-                getCitationActions().openExternalUrl(url);
+            // Fallback: try the URI-based approach from the loaded item
+            try {
+                const fallbackUri = createZoteroURI(item);
+                if (fallbackUri.includes('zotero://')) {
+                    getCitationActions().openExternalUrl(fallbackUri);
+                }
+            } catch {
+                // No usable fallback URI; nothing else to do.
             }
         }
     };
@@ -750,7 +767,15 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
             }
             return (<span>{`(${citation})`}</span>);
         }
-        
+
+        // External-file citations export as plain filename text (no Zotero
+        // item to format, excluded from the bibliography). Preserve the cited
+        // page/section locator so the export is as specific as the chat view.
+        if (isExternalFile) {
+            const locatorSuffix = pages.length > 0 ? `, p.${pagesDisplay}` : '';
+            return (<span>{`(${citation}${locatorSuffix})`}</span>);
+        }
+
         // For Zotero citations, use proper CSL format
         if (!effectiveLibraryID || !effectiveItemKey) return null;
         try {
@@ -797,8 +822,8 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
     }
 
     // Determine the CSS class based on citation type and state
-    const isNoteCitation = citationMetadata?.type === 'note';
-    const isAnnotationCitation = citationMetadata?.type === 'annotation';
+    const isNoteCitation = citationMetadata?.citation_type === 'note';
+    const isAnnotationCitation = citationMetadata?.citation_type === 'annotation';
     const isEpubCitation = getContentKind(citationMetadata) === 'epub';
     const hasEpubSymbolicLocator = isEpubCitation
         && getSymbolicLocation(citationMetadata)?.content_kind === 'epub';
@@ -865,7 +890,17 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
                     </span>
                 </span>
             )}
-            {isNoteCitation && (!isExternal || !!mappedZoteroItem) && (
+            {isExternalFile && (
+                <span className="px-3 py-15 border-top-quinary block">
+                    <span className="display-flex flex-row items-center gap-15">
+                        <Icon icon={TextAlignLeftIcon} className="font-color-secondary scale-90" />
+                        <span className="text-sm font-color-secondary">
+                            Opens attached file (when available on this computer)
+                        </span>
+                    </span>
+                </span>
+            )}
+            {isNoteCitation && !isExternalFile && (!isExternal || !!mappedZoteroItem) && (
                 <span className="px-3 py-15 border-top-quinary block">
                     <span className="display-flex flex-row items-center gap-15">
                         <Icon icon={NoteIcon} className="font-color-secondary" />
@@ -875,7 +910,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
                     </span>
                 </span>
             )}
-            {isAnnotationCitation && (!isExternal || !!mappedZoteroItem) && (
+            {isAnnotationCitation && !isExternalFile && (!isExternal || !!mappedZoteroItem) && (
                 <span className="px-3 py-15 border-top-quinary block">
                     <span className="display-flex flex-row items-center gap-15">
                         <Icon icon={HighlighterIcon} className="font-color-secondary" />
@@ -885,7 +920,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
                     </span>
                 </span>
             )}
-            {hasLocator && (!isExternal || !!mappedZoteroItem) && (
+            {hasLocator && !isExternalFile && (!isExternal || !!mappedZoteroItem) && (
                 <span className="px-3 py-15 border-top-quinary block">
                     <span className="display-flex flex-row items-center gap-15">
                         <Icon icon={PdfIcon} className="font-color-secondary" />
@@ -899,7 +934,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
                     </span>
                 </span>
             )}
-            {isTextCitation && !isNoteCitation && !isAnnotationCitation && (!isExternal || !!mappedZoteroItem) && (
+            {isTextCitation && !isExternalFile && !isNoteCitation && !isAnnotationCitation && (!isExternal || !!mappedZoteroItem) && (
                 <span className="px-3 py-15 border-top-quinary block">
                     <span className="display-flex flex-row items-center gap-15">
                         <Icon icon={TextAlignLeftIcon} className="font-color-secondary scale-90" />
@@ -909,7 +944,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
                     </span>
                 </span>
             )}
-            {!hasLocator && !isTextCitation && !isNoteCitation && !isAnnotationCitation && (!isExternal || !!mappedZoteroItem) && (
+            {!hasLocator && !isExternalFile && !isTextCitation && !isNoteCitation && !isAnnotationCitation && (!isExternal || !!mappedZoteroItem) && (
                 <span className="px-3 py-15 border-top-quinary block">
                     <span className="display-flex flex-row items-center gap-15">
                         <Icon icon={LibraryIcon} className="font-color-secondary" />

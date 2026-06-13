@@ -68,7 +68,7 @@ import {
     resetRunMessages,
 } from '../agents/atoms';
 import { userIdAtom } from './auth';
-import { citationMetadataAtom, updateCitationDataAtom, resetCitationMarkersAtom, mergePageLabelsByAttachmentIdAtom } from './citations';
+import { citationsAtom, processCitationsAtom, resetCitationMarkersAtom, mergePageLabelsByAttachmentIdAtom } from './citations';
 import { preloadPageLabelsForCitations } from '../utils/pageLabels';
 import {
     addAgentActionsAtom,
@@ -516,8 +516,8 @@ async function startAutoRetryRun(
             const runIdsToRemove = threadRuns.slice(rootIndex).map(r => r.id);
             set(threadRunsAtom, threadRuns.slice(0, rootIndex));
             set(threadAgentActionsAtom, prev => prev.filter(a => !runIdsToRemove.includes(a.run_id)));
-            set(citationMetadataAtom, prev => prev.filter(c => !runIdsToRemove.includes(c.run_id ?? '')));
-            set(updateCitationDataAtom);
+            set(citationsAtom, prev => prev.filter(c => !runIdsToRemove.includes(c.run_id ?? '')));
+            set(processCitationsAtom);
         }
 
         set(prepareForNewRunAtom);
@@ -1138,11 +1138,11 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             // Process citations from run complete event
             if (event.citations && event.citations.length > 0) {
                 logger(`WS onRunComplete: Processing ${event.citations.length} citations`, 1);
-                set(citationMetadataAtom, (prev) => [
+                set(citationsAtom, (prev) => [
                     ...prev,
                     ...event.citations!.map(c => ({ ...c, run_id: event.run_id }))
                 ]);
-                await set(updateCitationDataAtom);
+                set(processCitationsAtom);
 
                 // Preload PDF page labels for cited attachments so the rendering
                 // path can resolve page numbers from explicit render state.
@@ -1986,10 +1986,10 @@ export const regenerateFromRunAtom = atom(
             );
 
             // Clear citations for removed runs
-            set(citationMetadataAtom, (prev) =>
+            set(citationsAtom, (prev) =>
                 prev.filter(c => !runIdsToRemove.includes(c.run_id ?? ''))
             );
-            set(updateCitationDataAtom);
+            set(processCitationsAtom);
 
             // Reset WS state and set pending
             set(prepareForNewRunAtom);
@@ -2171,10 +2171,10 @@ export const regenerateWithEditedPromptAtom = atom(
             );
 
             // Clear citations for removed runs
-            set(citationMetadataAtom, (prev) => 
+            set(citationsAtom, (prev) => 
                 prev.filter(c => !runIdsToRemove.includes(c.run_id ?? ''))
             );
-            set(updateCitationDataAtom);
+            set(processCitationsAtom);
 
             // Reset WS state and set pending
             set(prepareForNewRunAtom);
@@ -2328,7 +2328,7 @@ export const clearThreadAtom = atom(null, (_get, set) => {
     set(resetWSStateAtom);
     // Clear agent actions, citations, and warnings for the thread
     set(clearAgentActionsAtom);
-    set(citationMetadataAtom, []);
+    set(citationsAtom, []);
     set(resetCitationMarkersAtom);  // Reset citation markers for cleared thread
     set(clearWarningsAtom);
     // Clear per-run auto-approve state (both keys and action IDs)

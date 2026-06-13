@@ -2,9 +2,8 @@ import { atom } from "jotai";
 import { currentMessageItemsAtom, currentMessageContentAtom, currentMessageCollectionsAtom, currentMessageExternalFilesAtom, updateMessageItemsFromZoteroSelectionAtom, updateReaderAttachmentAtom } from "./messageComposition";
 import { isLibraryTabAtom, isWebSearchEnabledAtom, removePopupMessagesByTypeAtom, userScrolledAtom, windowUserScrolledAtom } from "./ui";
 
-import { citationMetadataAtom, citationDataMapAtom, updateCitationDataAtom, resetCitationMarkersAtom, mergePageLabelsByAttachmentIdAtom } from "./citations";
+import { citationsAtom, citationMapAtom, processCitationsAtom, resetCitationMarkersAtom, mergePageLabelsByAttachmentIdAtom } from "./citations";
 import { preloadPageLabelsForCitations } from "../utils/pageLabels";
-import { isExternalCitation } from "../types/citations";
 import { agentRunService, agentService } from "../../src/services/agentService";
 import { threadService } from "../../src/services/threadService";
 import { getPref } from "../../src/utils/prefs";
@@ -260,9 +259,8 @@ export const newThreadAtom = atom(
             set(currentMessageCollectionsAtom, []);
             set(currentMessageExternalFilesAtom, []);
             set(removePopupMessagesByTypeAtom, ['items_summary']);
-            set(citationMetadataAtom, []);
+            set(citationsAtom, []);
             set(resetCitationMarkersAtom);
-            set(citationDataMapAtom, {});
             set(currentMessageContentAtom, '');
             set(resetMessageUIStateAtom);
             set(clearExternalReferenceCacheAtom);
@@ -392,15 +390,11 @@ export const loadThreadAtom = atom(
                     }
                 }
                 
-                // Load item data for citations and attachments
+                // Load item data for user attachments. Citations no longer
+                // need item preloading: they render from backend metadata
+                // alone (citation v2).
                 const allItemReferences = new Set<string>();
-                
-                // From citations (filter out external citations)
-                const zoteroCitations = citationMetadata.filter(citation => !isExternalCitation(citation));
-                zoteroCitations
-                    .filter(c => c.library_id && c.zotero_key)
-                    .forEach(c => allItemReferences.add(`${c.library_id}-${c.zotero_key}`));
-                
+
                 // From user attachments in runs (external files have no Zotero
                 // reference to preload)
                 for (const run of processedRuns) {
@@ -424,9 +418,9 @@ export const loadThreadAtom = atom(
                     }
                 }
 
-                // Update citation state
-                set(citationMetadataAtom, citationMetadata);
-                await set(updateCitationDataAtom);
+                // Update citation state (synchronous: markers + citation tip)
+                set(citationsAtom, citationMetadata);
+                set(processCitationsAtom);
 
                 // Preload PDF page labels in the background so subsequent
                 // renders can resolve page locators to their display labels.
@@ -480,7 +474,7 @@ export const loadThreadAtom = atom(
                 // No runs found, clear state
                 set(threadRunsAtom, []);
                 set(threadAgentActionsAtom, []);
-                set(citationMetadataAtom, []);
+                set(citationsAtom, []);
             }
 
             // Resolve thread name if fetched asynchronously
@@ -500,7 +494,7 @@ export const loadThreadAtom = atom(
                 set(threadRunsAtom, []);
                 set(activeRunAtom, null);
                 set(threadAgentActionsAtom, []);
-                set(citationMetadataAtom, []);
+                set(citationsAtom, []);
             } else {
                 console.error('Error loading thread:', error);
             }

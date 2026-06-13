@@ -36,7 +36,7 @@ import {
     noteTagsMatch,
     ParsedNoteBlock,
 } from '../../utils/agentActionUtils';
-import { citationDataMapAtom } from '../../atoms/citations';
+import { citationMapAtom } from '../../atoms/citations';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../../atoms/externalReferences';
 import { isLibraryTabAtom } from '../../atoms/ui';
 import { logger } from '../../../src/utils/logger';
@@ -59,7 +59,7 @@ const NoteAgentActionRow: React.FC<NoteAgentActionRowProps> = ({ action, runId, 
     const rejectAgentAction = useSetAtom(rejectAgentActionAtom);
     const undoAgentAction = useSetAtom(undoAgentActionAtom);
 
-    const citationDataMap = useAtomValue(citationDataMapAtom);
+    const citationDataMap = useAtomValue(citationMapAtom);
     const externalMapping = useAtomValue(externalReferenceItemMappingAtom);
     const externalReferencesMap = useAtomValue(externalReferenceMappingAtom);
     const isLibraryTab = useAtomValue(isLibraryTabAtom);

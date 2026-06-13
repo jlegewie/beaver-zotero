@@ -1,4 +1,4 @@
-import { citationMetadataAtom, citationDataListAtom, citationsByRunIdAtom } from "../atoms/citations"
+import { citationsAtom, citationMapAtom, citationsByRunIdAtom } from "../atoms/citations"
 import { userAtom, isAuthenticatedAtom, isWaitingForProfileAtom, authLoadingAtom } from "../atoms/auth"
 import { fileStatusAtom, errorCodeStatsAtom, errorCodeStatsIsLoadingAtom, errorCodeStatsErrorAtom, lastFetchedErrorCountsAtom, aggregatedErrorMessagesForFailedFilesAtom, aggregatedErrorMessagesForSkippedFilesAtom, fileStatusSummaryAtom, isUploadProcessedAtom } from "../atoms/files"
 import { readerTextSelectionAtom, currentMessageContentAtom, currentReaderAttachmentAtom, currentReaderAttachmentKeyAtom, currentNoteTabItemKeyAtom } from "../atoms/messageComposition"
@@ -43,8 +43,8 @@ export const atomRegistry = {
     wsWarning: wsWarningAtom,
 
     // Citations
-    citationMetadata: citationMetadataAtom,
-    citationMetadataView: citationDataListAtom,
+    citationMetadata: citationsAtom,
+    citationMetadataView: citationMapAtom,
     citationsByRunId: citationsByRunIdAtom,
 
     // Files
