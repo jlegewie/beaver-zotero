@@ -1,6 +1,7 @@
 import React, { forwardRef, useMemo, useState, useCallback } from 'react';
 import { useAtomValue } from 'jotai';
 import { AgentRun, ModelResponse, ToolCallPart } from '../../agents/types';
+import { isAutoLoadingToolCall } from './ModelResponseView';
 import { UserRequestView } from './UserRequestView';
 import { ModelMessagesView } from './ModelMessagesView';
 import { AgentRunFooter } from './AgentRunFooter';
@@ -27,10 +28,10 @@ const hasVisibleContent = (run: AgentRun): boolean => {
     if (lastMessage.kind !== 'response') return false;
     
     const response = lastMessage as ModelResponse;
-    return response.parts.some(part => 
+    return response.parts.some(part =>
         (part.part_kind === 'text' && part.content.trim() !== '') ||
         (part.part_kind === 'thinking' && part.content.trim() !== '') ||
-        part.part_kind === 'tool-call'
+        (part.part_kind === 'tool-call' && !isAutoLoadingToolCall(part))
     );
 };
 

@@ -356,6 +356,12 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
         );
     }
 
+    const effectiveLabelColor = effectiveExpanded
+        ? 'font-color-primary'
+        : NON_EXPANDABLE_TOOLS.has(part.tool_name)
+            ? 'font-color-secondary'
+            : '';
+
     return (
         <div
             id={`tool-${part.tool_call_id}`}
@@ -383,11 +389,11 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
                     disabled={!canExpand}
                 >
                     <div className="display-flex flex-row px-3 gap-2">
-                        <div className={`flex-1 display-flex mt-010 ${effectiveExpanded ? 'font-color-primary' : ''}`}>
+                        <div className={`flex-1 display-flex mt-010 ${effectiveLabelColor}`}>
                             <Icon icon={getIcon()} />
                         </div>
                         
-                        <div className={`display-flex ${effectiveExpanded ? 'font-color-primary' : ''} ${isShimmering ? 'shimmer-text' : ''}`}>
+                        <div className={`display-flex ${effectiveLabelColor} ${isShimmering ? 'shimmer-text' : ''}`}>
                             {label}
                         </div>
                     </div>

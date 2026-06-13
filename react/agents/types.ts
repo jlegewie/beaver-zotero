@@ -164,6 +164,7 @@ export interface ToolCallPart {
     tool_name: string;
     args: string | Record<string, any> | null;
     tool_call_id: string;
+    tool_kind?: 'tool-search' | 'capability-load' | null;
     provider_details?: Record<string, any>;
     /** Optional progress message during tool execution (e.g., "Searching OpenAlex...") */
     progress?: string;
