@@ -971,8 +971,8 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
                 :
                 isInvalid ?
                     <Tooltip
-                        content="Citation could not be resolved"
-                        width={TOOLTIP_WIDTH}
+                        content="Invalid citation"
+                        width="104px"
                         singleLine
                     >
                         {citationElement}
