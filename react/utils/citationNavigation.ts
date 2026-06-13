@@ -85,29 +85,46 @@ export async function flashHighlightBoundingBoxes(
 ): Promise<boolean> {
     if (!reader || !reader._internalReader) return false;
 
-    for (let i = 0; i < locations.length; i++) {
+    // Aggregate rects per page across every location. A single citation can
+    // span multiple parts (e.g. a sentence range like s28-s30), each arriving
+    // as its own HighlightLocation; merging by page ensures all cited boxes
+    // flash, not just the first part's.
+    const rectsByPage = new Map<number, number[][]>();
+    for (const location of locations) {
         try {
-            const position = await buildPdfNavPosition(reader, locations[i]);
-            if (!position) continue;
-
-            // Merge the immediately following page (if cited) so a passage that
-            // wraps across a page break flashes on both pages via nextPageRects.
-            const nextLocation = locations
-                .slice(i + 1)
-                .find((loc) => loc.pageIndex === position.pageIndex + 1);
-            if (nextLocation) {
-                const nextPosition = await buildPdfNavPosition(reader, nextLocation);
-                if (nextPosition) {
-                    position.nextPageRects = nextPosition.rects;
-                }
+            const position = await buildPdfNavPosition(reader, location);
+            if (!position || position.rects.length === 0) continue;
+            const existing = rectsByPage.get(position.pageIndex);
+            if (existing) {
+                existing.push(...position.rects);
+            } else {
+                rectsByPage.set(position.pageIndex, [...position.rects]);
             }
-
-            (reader as any).navigate({ position });
-            return true;
         } catch (error) {
-            logger('flashHighlightBoundingBoxes: failed to build/navigate position: ' + error);
+            logger('flashHighlightBoundingBoxes: failed to build position: ' + error);
         }
     }
 
-    return false;
+    if (rectsByPage.size === 0) return false;
+
+    // Anchor on the first cited page (insertion order = location order). Merge
+    // the immediately following page (if cited) so a passage that wraps across
+    // a page break flashes on both pages via nextPageRects.
+    const targetPage = rectsByPage.keys().next().value as number;
+    const position: PdfNavPosition = {
+        pageIndex: targetPage,
+        rects: rectsByPage.get(targetPage)!,
+    };
+    const nextPageRects = rectsByPage.get(targetPage + 1);
+    if (nextPageRects) {
+        position.nextPageRects = nextPageRects;
+    }
+
+    try {
+        (reader as any).navigate({ position });
+        return true;
+    } catch (error) {
+        logger('flashHighlightBoundingBoxes: failed to navigate position: ' + error);
+        return false;
+    }
 }
