@@ -1523,6 +1523,7 @@ export const CLIENT_FEATURES = {
     FILTER_ONLY_SEARCH: 'filter_only_search',
     SENTENCE_LEVEL_CITATION: 'sentence_level_citation',
     UNIFIED_CITATION_FORMAT: 'unified_citation_format',
+    CITATION_V2: 'citation_v2',
     EXTERNAL_SEARCH_SURCHARGE: 'external_search_surcharge',
     EDIT_METADATA_CREATORS: 'edit_metadata_creators',
     EXTERNAL_FILES: 'external_files',
