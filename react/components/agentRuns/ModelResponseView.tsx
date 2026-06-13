@@ -10,6 +10,15 @@ import ContextMenu from '../ui/menu/ContextMenu';
 import useSelectionContextMenu from '../../hooks/useSelectionContextMenu';
 import { buildEditNoteRenderItems, getEditNoteGroupInstanceId } from './editNoteShared';
 
+/**
+ * Backend-injected plumbing (load_capacity / read-tool auto_load injection).
+ * Only `auto_load_*` IDs are suppressed — `tool_kind` is also set on normal
+ * agent-initiated search/capability calls and must not drive visibility here.
+ */
+export function isAutoLoadingToolCall(part: ToolCallPart): boolean {
+    return part.tool_call_id.startsWith('auto_load_');
+}
+
 interface ModelResponseViewProps {
     /** The model response */
     message: ModelResponse;
@@ -52,7 +61,10 @@ export const ModelResponseView: React.FC<ModelResponseViewProps> = React.memo(fu
     // Separate parts by type for rendering
     const thinkingParts = message.parts.filter(part => part.part_kind === 'thinking');
     const textParts = message.parts.filter(part => part.part_kind === 'text');
-    const toolCallParts = message.parts.filter(part => part.part_kind === 'tool-call' && part.tool_name !== 'return_suggestions');
+    const toolCallParts = message.parts.filter(
+        (part): part is ToolCallPart =>
+            part.part_kind === 'tool-call' && part.tool_name !== 'return_suggestions',
+    );
 
     // Check if we have any visible content
     const hasContent =
@@ -61,13 +73,10 @@ export const ModelResponseView: React.FC<ModelResponseViewProps> = React.memo(fu
         toolCallParts.length > 0;
 
     // Model response that is auto-loading a search capability
-    const isAutoLoadingResponse = 
+    const isAutoLoadingResponse =
         toolCallParts.length > 0 &&
-        toolCallParts.every(part =>
-            part.part_kind === 'tool-call' &&
-            textParts.length === 0 &&
-            part.tool_call_id.startsWith('auto_load_')
-        );
+        textParts.length === 0 &&
+        toolCallParts.every(isAutoLoadingToolCall);
 
     if (!hasContent || isAutoLoadingResponse) {
         return null;
