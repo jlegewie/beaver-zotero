@@ -836,7 +836,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
     const hasLocator = !isNoteCitation && !isAnnotationCitation && (pages.length > 0 || hasBoundingBoxes || hasEpubSymbolicLocator);
     const citationClassBase = isExternal && !mappedZoteroItem
         ? "zotero-citation external-citation"
-        : (hasLocator || isAnnotationCitation)
+        : (hasLocator || isAnnotationCitation) && !isExternalFile
         ? "zotero-citation with-locator"
         : "zotero-citation";
     const citationClass = isStreaming
