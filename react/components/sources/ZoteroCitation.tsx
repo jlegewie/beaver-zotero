@@ -48,7 +48,7 @@ import {
     isExternalReferenceDetailsDialogVisibleAtom,
     selectedExternalReferenceAtom
 } from '../../atoms/ui';
-import { Icon, LibraryIcon, PdfIcon, GlobalSearchIcon, NoteIcon, HighlighterIcon, TextAlignLeftIcon } from '../icons/icons';
+import { Icon, LibraryIcon, PdfIcon, GlobalSearchIcon, NoteIcon, HighlighterIcon, TextAlignLeftIcon, ExternalLinkIcon } from '../icons/icons';
 import {
     buildZoteroCitationLinkHTML,
     isLinkCitationItem,
@@ -877,9 +877,11 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
                     </span>
                 )}
             </span>
-            <span className="font-color-secondary text-sm px-3 py-15 block" style={{ wordBreak: 'break-word', overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}>
-                {previewText}
-            </span>
+            {previewText && previewText !== citation && (
+                <span className="font-color-secondary text-sm px-3 py-15 block" style={{ wordBreak: 'break-word', overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}>
+                    {previewText}
+                </span>
+            )}
             {isExternal && !mappedZoteroItem && (
                 <span className="px-3 py-15 border-top-quinary block">
                     <span className="display-flex flex-row items-center gap-15">
@@ -893,9 +895,9 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
             {isExternalFile && (
                 <span className="px-3 py-15 border-top-quinary block">
                     <span className="display-flex flex-row items-center gap-15">
-                        <Icon icon={TextAlignLeftIcon} className="font-color-secondary scale-90" />
+                        <Icon icon={ExternalLinkIcon} className="font-color-secondary scale-90" />
                         <span className="text-sm font-color-secondary">
-                            Opens attached file (when available on this computer)
+                            Opens external file
                         </span>
                     </span>
                 </span>
