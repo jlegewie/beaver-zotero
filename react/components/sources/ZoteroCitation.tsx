@@ -844,6 +844,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
         : isInvalid
         ? `${citationClassBase} invalid`
         : citationClassBase;
+    const showPreviewText = previewText && previewText !== citation;
 
     const citationElement = (
         <span 
@@ -877,13 +878,13 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
                     </span>
                 )}
             </span>
-            {previewText && previewText !== citation && (
+            {showPreviewText && (
                 <span className="font-color-secondary text-sm px-3 py-15 block" style={{ wordBreak: 'break-word', overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}>
                     {previewText}
                 </span>
             )}
             {isExternal && !mappedZoteroItem && (
-                <span className="px-3 py-15 border-top-quinary block">
+                <span className={`px-3 py-15 block ${showPreviewText ? 'border-top-quinary' : ''}`}>
                     <span className="display-flex flex-row items-center gap-15">
                         <Icon icon={GlobalSearchIcon} className="font-color-secondary" />
                         <span className="text-sm font-color-secondary">
@@ -893,7 +894,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
                 </span>
             )}
             {isExternalFile && (
-                <span className="px-3 py-15 border-top-quinary block">
+                <span className={`px-3 py-15 block ${showPreviewText ? 'border-top-quinary' : ''}`}>
                     <span className="display-flex flex-row items-center gap-15">
                         <Icon icon={ExternalLinkIcon} className="font-color-secondary scale-90" />
                         <span className="text-sm font-color-secondary">
@@ -903,7 +904,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
                 </span>
             )}
             {isNoteCitation && !isExternalFile && (!isExternal || !!mappedZoteroItem) && (
-                <span className="px-3 py-15 border-top-quinary block">
+                <span className={`px-3 py-15 block ${showPreviewText ? 'border-top-quinary' : ''}`}>
                     <span className="display-flex flex-row items-center gap-15">
                         <Icon icon={NoteIcon} className="font-color-secondary" />
                         <span className="text-sm font-color-secondary">
@@ -913,7 +914,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
                 </span>
             )}
             {isAnnotationCitation && !isExternalFile && (!isExternal || !!mappedZoteroItem) && (
-                <span className="px-3 py-15 border-top-quinary block">
+                <span className={`px-3 py-15 block ${showPreviewText ? 'border-top-quinary' : ''}`}>
                     <span className="display-flex flex-row items-center gap-15">
                         <Icon icon={HighlighterIcon} className="font-color-secondary" />
                         <span className="text-sm font-color-secondary">
@@ -923,7 +924,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
                 </span>
             )}
             {hasLocator && !isExternalFile && (!isExternal || !!mappedZoteroItem) && (
-                <span className="px-3 py-15 border-top-quinary block">
+                <span className={`px-3 py-15 block ${showPreviewText ? 'border-top-quinary' : ''}`}>
                     <span className="display-flex flex-row items-center gap-15">
                         <Icon icon={PdfIcon} className="font-color-secondary" />
                         <span className="text-sm font-color-secondary">
@@ -937,7 +938,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
                 </span>
             )}
             {isTextCitation && !isExternalFile && !isNoteCitation && !isAnnotationCitation && (!isExternal || !!mappedZoteroItem) && (
-                <span className="px-3 py-15 border-top-quinary block">
+                <span className={`px-3 py-15 block ${showPreviewText ? 'border-top-quinary' : ''}`}>
                     <span className="display-flex flex-row items-center gap-15">
                         <Icon icon={TextAlignLeftIcon} className="font-color-secondary scale-90" />
                         <span className="text-sm font-color-secondary">
@@ -947,7 +948,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
                 </span>
             )}
             {!hasLocator && !isExternalFile && !isTextCitation && !isNoteCitation && !isAnnotationCitation && (!isExternal || !!mappedZoteroItem) && (
-                <span className="px-3 py-15 border-top-quinary block">
+                <span className={`px-3 py-15 block ${showPreviewText ? 'border-top-quinary' : ''}`}>
                     <span className="display-flex flex-row items-center gap-15">
                         <Icon icon={LibraryIcon} className="font-color-secondary" />
                         <span className="text-sm font-color-secondary">
