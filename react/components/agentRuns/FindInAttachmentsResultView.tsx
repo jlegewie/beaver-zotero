@@ -69,7 +69,7 @@ function attachmentStatusText(att: ResolvedAttachment): string {
     if (!att.resolved) return 'not in library';
     switch (att.ref.status) {
         case 'error':
-            return 'could not be searched';
+            return 'search error';
         case 'no_matches':
             return 'no matches';
         default:
