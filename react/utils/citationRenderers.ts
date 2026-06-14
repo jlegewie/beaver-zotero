@@ -4,7 +4,7 @@ import { Provider, createStore } from 'jotai';
 import { store } from '../store';
 import MarkdownRenderer from '../components/messages/MarkdownRenderer';
 import { Citation } from '../../src/services/CitationService';
-import { citationsAtom, citationByKeyAtom, citationKeyToMarkerAtom, pageLabelsByAttachmentIdAtom, type PageLabelsByAttachmentId } from '../atoms/citations';
+import { citationsAtom, citationByKeyAtom, citationKeyToMarkerAtom, pageLabelsByAttachmentIdAtom, externalFileLocalPathsAtom, type PageLabelsByAttachmentId } from '../atoms/citations';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../atoms/externalReferences';
 import { Citation as BeaverCitation } from '../types/citations';
 import { CITATION_TAG_PATTERN } from '../utils/citationPreprocessing';
@@ -213,6 +213,8 @@ export interface RenderContextData {
     externalMapping?: Record<string, ZoteroItemReference | null>;
     externalReferencesMap?: Record<string, ExternalReference>;
     pageLabelsByAttachmentId?: PageLabelsByAttachmentId;
+    /** Absolute local paths for external-file citations present on this computer, keyed by ext key. */
+    externalFileLocalPaths?: Record<string, string>;
 }
 
 /**
@@ -288,6 +290,10 @@ export function renderToHTML(
 
         if (contextData.pageLabelsByAttachmentId) {
             renderStore.set(pageLabelsByAttachmentIdAtom, contextData.pageLabelsByAttachmentId);
+        }
+
+        if (contextData.externalFileLocalPaths) {
+            renderStore.set(externalFileLocalPathsAtom, contextData.externalFileLocalPaths);
         }
     }
 

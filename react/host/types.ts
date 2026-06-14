@@ -143,6 +143,26 @@ export type CitationExportRender =
     | { kind: 'citation'; html: string; citationData: string };
 
 /**
+ * What the host needs to render an external-file citation (a user-attached,
+ * non-Zotero file) as host-native output for document export.
+ */
+export interface ExternalFileCitationExportRequest {
+    /** Ext key of the cited external file, or null when unknown. */
+    externalFileKey: string | null;
+    /** Display label (filename / cited name). */
+    displayName: string;
+    /** Cited page/section locator suffix (e.g. ", p.3"), already formatted; empty when none. */
+    locatorSuffix: string;
+    /**
+     * Absolute local paths for external files present on this computer, keyed by
+     * ext key. Passed in from the active render store (rather than read from a
+     * module-global store) so note export uses the isolated store that
+     * `renderToHTML` populates.
+     */
+    localPathsByExtKey: Record<string, string>;
+}
+
+/**
  * Render content into the host's native document format. For Zotero this is a
  * note (CSL-formatted HTML); other clients format
  * differently. Clients that don't support document export omit this slice.
@@ -150,6 +170,14 @@ export type CitationExportRender =
 export interface DocumentExportHost {
     /** Render a Zotero/library citation for export. Returns null when the item is unavailable. */
     renderCitation(request: CitationExportRequest): CitationExportRender | null;
+    /**
+     * Render an external-file citation as host-native output. Returns null when
+     * the host has no richer representation than plain text (e.g. no local copy
+     * of the file on this computer), in which case the render layer falls back to
+     * its client-agnostic plain-text form. Optional — clients without local
+     * external-file storage omit it.
+     */
+    renderExternalFileCitation?(request: ExternalFileCitationExportRequest): CitationExportRender | null;
 }
 
 /**

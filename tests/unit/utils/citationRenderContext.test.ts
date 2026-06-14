@@ -23,6 +23,7 @@ vi.mock('../../../react/utils/pageLabels', () => ({
 import {
     buildLocalCitationDataMapForContent,
     prepareCitationRenderContext,
+    resolveExternalFileLocalPaths,
 } from '../../../react/utils/citationRenderContext';
 import {
     getCitationPreloadFilePath,
@@ -179,5 +180,46 @@ describe('citation render context', () => {
 
         expect(map).toEqual({});
         expect(cache.getResult).not.toHaveBeenCalled();
+    });
+
+    describe('resolveExternalFileLocalPaths', () => {
+        let db: any;
+
+        beforeEach(() => {
+            db = { getExternalFileByKey: vi.fn() };
+            (globalThis as any).Zotero.Beaver.db = db;
+        });
+
+        it('returns local paths for external files present on this computer', async () => {
+            db.getExternalFileByKey.mockResolvedValue({ storedPath: '/beaver/external-files/AB12CD34.pdf' });
+            (globalThis as any).IOUtils.exists = vi.fn().mockResolvedValue(true);
+
+            const map = await resolveExternalFileLocalPaths('See <citation id="ext-ab12cd34"/>');
+
+            // Ext key normalized to uppercase before the DB lookup.
+            expect(db.getExternalFileByKey).toHaveBeenCalledWith('AB12CD34');
+            expect(map).toEqual({ AB12CD34: '/beaver/external-files/AB12CD34.pdf' });
+        });
+
+        it('omits external files with no local copy on this computer', async () => {
+            db.getExternalFileByKey.mockResolvedValue({ storedPath: '/beaver/external-files/AB12CD34.pdf' });
+            (globalThis as any).IOUtils.exists = vi.fn().mockResolvedValue(false);
+
+            const map = await resolveExternalFileLocalPaths('See <citation id="ext-ab12cd34"/>');
+
+            expect(map).toEqual({});
+        });
+
+        it('dedupes repeated ext keys and ignores non-external-file citations', async () => {
+            db.getExternalFileByKey.mockResolvedValue({ storedPath: '/p/AB12CD34.pdf' });
+            (globalThis as any).IOUtils.exists = vi.fn().mockResolvedValue(true);
+
+            const map = await resolveExternalFileLocalPaths(
+                'A <citation id="ext-ab12cd34"/> B <citation id="ext-ab12cd34" loc="page2"/> C <citation id="1-ATTACH01"/>'
+            );
+
+            expect(db.getExternalFileByKey).toHaveBeenCalledTimes(1);
+            expect(map).toEqual({ AB12CD34: '/p/AB12CD34.pdf' });
+        });
     });
 });

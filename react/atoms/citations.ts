@@ -110,6 +110,15 @@ export type PageLabelsByAttachmentId = Record<number, Record<number, string>>;
 export const pageLabelsByAttachmentIdAtom = atom<PageLabelsByAttachmentId>({});
 
 /**
+ * Absolute local paths for external-file citations, keyed by ext key. Populated
+ * only in the isolated render store during note export (see `renderToHTML`), and
+ * only for files that exist on this computer. Carries host-resolved data into the
+ * synchronous static render so the export layer can offer a clickable file link;
+ * empty for clients without locally stored external files.
+ */
+export const externalFileLocalPathsAtom = atom<Record<string, string>>({});
+
+/**
  * Reset citation markers and thread-scoped page-label render state. Called when
  * creating a new thread or loading an existing one.
  */
