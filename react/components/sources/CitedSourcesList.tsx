@@ -126,10 +126,19 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
                         ? displayMetaByKey.get(getCitationKey(citation))?.itemType
                         : undefined;
 
-                    // Icon from citation metadata alone (citation v2)
+                    // Legacy item citations (pre-citation-v2) carry no item_type,
+                    // so the icon would fall back to the generic document glyph.
+                    // Reuse the item type the host already resolves for the
+                    // PDF-button state (no extra lookup) to recover the precise
+                    // icon; when absent (non-Zotero host / unresolvable) the
+                    // metadata value stands.
+                    const resolvedItemType = displayMetaByKey.get(getCitationKey(citation))?.itemType;
+
+                    // Icon from citation metadata alone (citation v2), falling
+                    // back to the host-resolved item type for legacy citations.
                     const iconName = showAsExternal
                         ? undefined
-                        : mappedItemType ?? itemTypeToIconName(citation.item_type, citation.content_kind);
+                        : mappedItemType ?? itemTypeToIconName(citation.item_type ?? resolvedItemType, citation.content_kind);
 
                     return (
                         <div key={getCitationKey(citation)} className={`p-2 rounded-md display-flex flex-row ${index > 0 ? 'pt-0' : ''}`}>
