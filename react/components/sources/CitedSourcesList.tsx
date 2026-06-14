@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAtomValue } from 'jotai';
-import { CSSItemTypeIcon, PdfIcon } from '../icons/icons';
+import { CSSItemTypeIcon, ExternalLinkIcon, PdfIcon } from '../icons/icons';
 import IconButton from '../ui/IconButton';
 import { ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import { ZoteroIcon } from '../icons/ZoteroIcon';
@@ -177,7 +177,7 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
                                         ) : isExternalFile ? (
                                             <Tooltip content="Open file" singleLine>
                                                 <IconButton
-                                                    icon={PdfIcon}
+                                                    icon={ExternalLinkIcon}
                                                     variant="ghost-secondary"
                                                     onClick={() => {
                                                         const ref = getDisplayRef(citation);
@@ -187,7 +187,7 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
                                                     }}
                                                     ariaLabel="Open file"
                                                     title="Open file"
-                                                    className="display-flex scale-12"
+                                                    className="display-flex scale-11"
                                                 />
                                             </Tooltip>
                                         ) : (
