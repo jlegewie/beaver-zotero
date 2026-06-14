@@ -4,7 +4,7 @@
  * Assembles the `application_state` sent with each agent run (current view,
  * reader/note state, library/collection context, embedding-index status). This
  * is the Zotero implementation; it is exposed through an injectable provider so
- * a different host (e.g. a Word add-in) can supply its own document state via
+ * a different host can supply its own document state via
  * `setApplicationStateProvider` without changing the run-start path.
  */
 

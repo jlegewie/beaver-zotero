@@ -119,8 +119,8 @@ describe('citation render context', () => {
             '/storage/ATTACH01/file.pdf',
         );
         expect(data.pages).toEqual([3]);
-        expect(data.parts).toEqual([
-            { part_id: 's25', locations: [{ page_idx: 2 }] },
+        expect(data.locations).toEqual([
+            { part_id: 's25', page_idx: 2 },
         ]);
         expect(data.page_labels).toEqual({ 2: '7' });
         expect(data.requested_ref).toMatchObject({
@@ -132,7 +132,7 @@ describe('citation render context', () => {
     });
 
     it('merges local citation metadata with explicit render context', async () => {
-        const existing = { citation_id: 'c1', run_id: 'r1', parts: [] } as any;
+        const existing = { citation_id: 'c1', run_id: 'r1', locations: [] } as any;
         mockPreloadPageLabelsForContent.mockResolvedValue({ 42: { 2: '7' } });
 
         const context = await prepareCitationRenderContext(
@@ -159,14 +159,14 @@ describe('citation render context', () => {
             ].join('\n')
         );
 
-        expect(map['local:zotero:1-ATTACH01:paragraph12']?.parts).toEqual([
-            { part_id: 'p12', locations: [{ page_idx: 1 }] },
+        expect(map['local:zotero:1-ATTACH01:paragraph12']?.locations).toEqual([
+            { part_id: 'p12', page_idx: 1 },
         ]);
         expect(map['local:zotero:1-ATTACH01:paragraph12']?.pages).toEqual([2]);
         expect(map['local:zotero:1-ATTACH01:paragraph12']?.page_labels).toEqual({ 1: '6' });
 
-        expect(map['local:zotero:1-ATTACH01:tab3']?.parts).toEqual([
-            { part_id: 'table3', locations: [{ page_idx: 4 }] },
+        expect(map['local:zotero:1-ATTACH01:tab3']?.locations).toEqual([
+            { part_id: 'table3', page_idx: 4 },
         ]);
         expect(map['local:zotero:1-ATTACH01:tab3']?.pages).toEqual([5]);
         expect(map['local:zotero:1-ATTACH01:tab3']?.page_labels).toEqual({ 4: '12' });

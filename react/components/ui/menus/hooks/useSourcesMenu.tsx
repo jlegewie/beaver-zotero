@@ -210,7 +210,7 @@ export const useSourcesMenu = ({
                         <div className="display-flex flex-row gap-2">
                             {/* <CSSIcon name="attachment-file" className="icon-16 font-color-secondary scale-90" /> */}
                             <Icon icon={FileLinkIcon} className="font-color-secondary mt-015 ml-05 scale-11" />
-                            <div>Add File…</div>
+                            <div>Add External File…</div>
                         </div>
                         <div className="flex-1" />
                     </div>

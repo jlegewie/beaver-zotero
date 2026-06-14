@@ -9,7 +9,7 @@ import { getBeaverNoteFooterHTML } from '../../../utils/noteActions';
 import { extractThreadContent, ExtractThreadContentOptions } from '../../../utils/threadContent';
 import { allRunsAtom, toolResultsMapAtom } from '../../../agents/atoms';
 import { currentThreadIdAtom, currentThreadNameAtom, recentThreadsAtom, ThreadData } from '../../../atoms/threads';
-import { citationDataMapAtom } from '../../../atoms/citations';
+import { citationMapAtom } from '../../../atoms/citations';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../../../atoms/externalReferences';
 import { getZoteroTargetContextSync } from '../../../../src/utils/zoteroUtils';
 import { selectItem, selectItemById } from '../../../../src/utils/selectItem';
@@ -33,7 +33,7 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
 
     const runs = useAtomValue(allRunsAtom);
     const toolResultsMap = useAtomValue(toolResultsMapAtom);
-    const citationDataMap = useAtomValue(citationDataMapAtom);
+    const citationDataMap = useAtomValue(citationMapAtom);
     const externalReferenceMapping = useAtomValue(externalReferenceItemMappingAtom);
     const externalReferencesMap = useAtomValue(externalReferenceMappingAtom);
 

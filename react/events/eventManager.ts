@@ -4,7 +4,7 @@ class EventManager {
     private static instance: EventManager;
 
     // Resolves the window that owns the shared event bus. Defaults to the Zotero
-    // main window; a non-Zotero host (e.g. a Word add-in) injects its own window
+    // main window; a non-Zotero host injects its own window
     // via setWindowResolver so the bus and CustomEvent come from its global.
     private resolveWindow: () => Window = () => Zotero.getMainWindow();
 

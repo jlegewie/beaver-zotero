@@ -10,10 +10,10 @@ import CitedSourcesList from '../sources/CitedSourcesList';
 import { renderToMarkdown, renderToHTML, preprocessNoteContent } from '../../utils/citationRenderers';
 import { getBeaverNoteFooterHTML, wrapWithSchemaVersion, generateNoteTitle } from '../../utils/noteActions';
 import CopyButton from '../ui/buttons/CopyButton';
-import { citationDataMapAtom, citationsByRunIdAtom, citationKeyToMarkerAtom } from '../../atoms/citations';
+import { citationMapAtom, citationsByRunIdAtom, citationKeyToMarkerAtom } from '../../atoms/citations';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../../atoms/externalReferences';
 import { selectItem, selectItemById } from '../../../src/utils/selectItem';
-import { CitationData, getCitationKey } from '../../types/citations';
+import { CitedSource, getCitationKey } from '../../types/citations';
 import { messageSourcesVisibilityAtom, toggleMessageSourcesVisibilityAtom, setMessageSourcesVisibilityAtom } from '../../atoms/messageUIState';
 import { getZoteroTargetContextSync } from '../../../src/utils/zoteroUtils';
 import { toolResultsMapAtom, allRunsAtom } from '../../agents/atoms';
@@ -35,7 +35,7 @@ interface AgentRunFooterProps {
  * Displays sources, share options, regenerate, and copy buttons.
  */
 export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
-    const citationDataMap = useAtomValue(citationDataMapAtom);
+    const citationDataMap = useAtomValue(citationMapAtom);
     const citationsByRunId = useAtomValue(citationsByRunIdAtom);
     const runCitations = citationsByRunId[run.id] || [];
     const externalReferenceMapping = useAtomValue(externalReferenceItemMappingAtom);
@@ -51,47 +51,26 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
         if (isOpen) forceUpdate({});
     }, []);
 
-    // Get unique citations for this run, enriched with CitationData
+    // Get unique citations for this run with their thread-scoped markers.
+    // Citations render directly from metadata (citation v2) — no enrichment.
     const uniqueCitations = useMemo(() => {
         const seen = new Set<string>();
-        const unique: CitationData[] = [];
-        
+        const unique: CitedSource[] = [];
+
         for (const citation of runCitations) {
             if (citation.invalid) continue;
             const key = getCitationKey(citation);
             if (!seen.has(key)) {
                 seen.add(key);
-                // Look up the correct marker from the thread-scoped atom
-                const numericCitation = citationMarkerMap[key] || null;
-                // Look up enriched data from citationDataMapAtom
-                const enrichedData = citationDataMap[citation.citation_id];
-                if (enrichedData) {
-                    unique.push({
-                        ...enrichedData,
-                        numericCitation
-                    });
-                } else {
-                    // Fallback: create minimal CitationData from CitationMetadata
-                    unique.push({
-                        ...citation,
-                        type: citation.citation_type === 'external_reference' ? 'external' :
-                              citation.citation_type === 'attachment' ? 'attachment' :
-                              citation.citation_type === 'note' ? 'note' : 'item',
-                        parentKey: null,
-                        icon: null,
-                        name: citation.author_year || null,
-                        citation: citation.author_year || null,
-                        formatted_citation: null,
-                        url: null,
-                        numericCitation,
-                        message_id: run.id, // Use run ID as message ID for compatibility
-                    } as CitationData);
-                }
+                unique.push({
+                    ...citation,
+                    numericCitation: citationMarkerMap[key] || null,
+                });
             }
         }
-        
+
         return unique;
-    }, [runCitations, citationDataMap, citationMarkerMap]);
+    }, [runCitations, citationMarkerMap]);
 
     // Sources visibility state
     const sourcesVisibilityMap = useAtomValue(messageSourcesVisibilityAtom);

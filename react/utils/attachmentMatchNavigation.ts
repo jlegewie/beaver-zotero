@@ -36,9 +36,9 @@ export interface AttachmentMatchNavRequest {
 /**
  * Navigate to a find_in_attachments match and highlight it.
  *
- * Condensed adaptation of the citation click flow in
- * `react/components/sources/ZoteroCitation.tsx` (handleClick), driven by the
- * compact `AttachmentMatchTarget` wire format instead of CitationMetadata:
+ * Condensed adaptation of the citation activation flow in
+ * `react/host/zotero/citationActivation.ts`, driven by the compact
+ * `AttachmentMatchTarget` wire format instead of CitationMetadata:
  * PDF matches flash (or temporarily annotate) the target bounding boxes,
  * EPUB matches resolve the section/passage in the live reader, text files
  * open in the OS default viewer. Every failure degrades to selecting the

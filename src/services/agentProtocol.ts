@@ -89,7 +89,7 @@ export interface WSRunCompleteEvent extends WSBaseEvent {
     run_id: string;
     usage: RunUsage | null;
     cost: number | null;
-    citations: import('../../react/types/citations').CitationMetadata[] | null;
+    citations: import('../../react/types/citations').Citation[] | null;
     agent_actions: import('../../react/agents/agentActions').AgentAction[] | null;
     /** Whether the run had high input token usage (backend-assessed). */
     high_token_usage?: boolean;
@@ -1523,6 +1523,7 @@ export const CLIENT_FEATURES = {
     FILTER_ONLY_SEARCH: 'filter_only_search',
     SENTENCE_LEVEL_CITATION: 'sentence_level_citation',
     UNIFIED_CITATION_FORMAT: 'unified_citation_format',
+    CITATION_V2: 'citation_v2',
     EXTERNAL_SEARCH_SURCHARGE: 'external_search_surcharge',
     EDIT_METADATA_CREATORS: 'edit_metadata_creators',
     EXTERNAL_FILES: 'external_files',

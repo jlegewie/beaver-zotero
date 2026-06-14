@@ -29,6 +29,7 @@ import { useReaderVisualizerActionHandler } from './hooks/useReaderVisualizerAct
 import { useOnboardingPopups } from './hooks/useOnboardingPopups';
 import { useBackgroundWorkerStatus } from './hooks/useBackgroundWorkerStatus';
 import { BeaverTemporaryAnnotations } from './utils/annotationUtils';
+import { registerZoteroHost } from './host/zotero';
 
 // Configure the PDF package (webpack bundle copy). The esbuild bundle
 // configures its own copy from `src/hooks.ts`. Both must run because each
@@ -36,6 +37,11 @@ import { BeaverTemporaryAnnotations } from './utils/annotationUtils';
 // The cross-bundle `MuPDFWorkerClient` per-name singletons are shared via
 // `Zotero.__beaverMuPDFWorkerClient_hot` / `_background` regardless.
 configurePDFForBeaver();
+
+// Register the Zotero client host so rendered chat-history components can
+// resolve host-specific navigation and data lookups. Non-Zotero clients omit
+// this and run the render surface with the default empty host.
+registerZoteroHost();
 
 /**
  * Component to initialize global hooks that should only run once.

@@ -1,7 +1,7 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { getCurrentLibrary, isLibraryEditable, getZoteroTargetContext } from '../../../src/utils/zoteroUtils';
-import { citationDataMapAtom } from '../../atoms/citations';
+import { citationMapAtom } from '../../atoms/citations';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../../atoms/externalReferences';
 import IconButton from '../ui/IconButton';
 import {
@@ -258,7 +258,7 @@ const NoteDisplay: React.FC<NoteDisplayProps> = ({ note, runId, messageId, expor
     const ackAgentActions = useSetAtom(ackAgentActionsAtom);
     const setAgentActionsToError = useSetAtom(setAgentActionsToErrorAtom);
 
-    const citationDataMap = useAtomValue(citationDataMapAtom);
+    const citationDataMap = useAtomValue(citationMapAtom);
     const externalMapping = useAtomValue(externalReferenceItemMappingAtom);
     const externalReferencesMap = useAtomValue(externalReferenceMappingAtom);
 

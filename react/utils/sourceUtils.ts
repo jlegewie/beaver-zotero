@@ -5,7 +5,6 @@ import { isLibraryValidForSync } from '../../src/utils/sync';
 import { isAgentSupportedItem, agentItemFilter, agentItemFilterAsync } from '../../src/utils/agentItemSupport';
 import { isValidAnnotationType, SourceAttachment } from '../types/attachments/apiTypes';
 import { selectItemById } from '../../src/utils/selectItem';
-import { CitationData } from '../types/citations';
 import { ZoteroItemReference } from '../types/zotero';
 import { isDatabaseSyncSupportedAtom, searchableLibraryIdsAtom, syncWithZoteroAtom} from '../atoms/profile';
 import { store } from '../store';
@@ -60,7 +59,7 @@ export function getReferenceFromItem(item: Zotero.Item): string {
 /**
 * Source method: Get the Zotero item from a Source
 */
-export function getZoteroItem(source: SourceAttachment | CitationData): Zotero.Item | null {
+export function getZoteroItem(source: SourceAttachment | ZoteroItemReference): Zotero.Item | null {
     try {
         let libId: number;
         let itemKeyValue: string;
@@ -260,7 +259,7 @@ export async function isValidZoteroItem(item: Zotero.Item): Promise<{valid: bool
  * @param source - The source item to reveal
  * @param collectionKey - Optional collection key to navigate to before revealing
  */
-export function revealSource(source: ZoteroItemReference | SourceAttachment | CitationData, collectionKey?: string) {
+export function revealSource(source: ZoteroItemReference | SourceAttachment, collectionKey?: string) {
     if (!source.library_id || !source.zotero_key) return;
     const itemID = Zotero.Items.getIDFromLibraryAndKey(source.library_id, source.zotero_key);
     if (itemID && Zotero.getActiveZoteroPane()) {
@@ -315,7 +314,7 @@ export async function getCurrentCollectionKeyForItem(
     }
 }
 
-export async function openSource(source: SourceAttachment | CitationData) {
+export async function openSource(source: SourceAttachment | ZoteroItemReference) {
     const item = getZoteroItem(source);
     if (!item) return;
     

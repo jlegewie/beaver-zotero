@@ -890,3 +890,32 @@ export async function waitForQueueDrain(
         )}`,
     );
 }
+
+/** Item-display metadata resolved by the Zotero `itemData` citation host. */
+export interface ResolvedItemDisplay {
+    itemType?: string;
+    hasReadableAttachment: boolean;
+}
+
+interface ResolveItemDisplayResponse {
+    ok: boolean;
+    error?: string;
+    display: ResolvedItemDisplay | null;
+}
+
+/**
+ * Invoke the citation host's `resolveItemDisplay` for one item reference via
+ * `/beaver/test/resolve-item-display`. Returns the resolved display metadata,
+ * or null when the item is missing/unresolvable.
+ */
+export async function resolveItemDisplay(
+    libraryId: number,
+    zoteroKey: string,
+): Promise<ResolvedItemDisplay | null> {
+    const res = await post<ResolveItemDisplayResponse>('/beaver/test/resolve-item-display', {
+        library_id: libraryId,
+        zotero_key: zoteroKey,
+    });
+    if (!res.ok) throw new Error(`resolve-item-display failed: ${res.error ?? 'unknown'}`);
+    return res.display;
+}

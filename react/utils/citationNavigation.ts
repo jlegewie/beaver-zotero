@@ -84,7 +84,6 @@ export async function flashHighlightBoundingBoxes(
     locations: HighlightLocation[],
 ): Promise<boolean> {
     if (!reader || !reader._internalReader) return false;
-
     // Aggregate rects per page across every location. A single citation can
     // span multiple parts (e.g. a sentence range like s28-s30), each arriving
     // as its own HighlightLocation; merging by page ensures all cited boxes
@@ -106,10 +105,9 @@ export async function flashHighlightBoundingBoxes(
     }
 
     if (rectsByPage.size === 0) return false;
-
-    // Anchor on the first cited page (insertion order = location order). Merge
-    // the immediately following page (if cited) so a passage that wraps across
-    // a page break flashes on both pages via nextPageRects.
+    // Zotero's temporary position flash supports the target page plus the
+    // immediately following page. Merge all cited parts for each supported
+    // page so sentence ranges flash as a single passage.
     const targetPage = rectsByPage.keys().next().value as number;
     const position: PdfNavPosition = {
         pageIndex: targetPage,
