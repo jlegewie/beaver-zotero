@@ -106,6 +106,9 @@ import {
     handleTestEpubCitationNavigateHttpRequest,
 } from './httpHandlers/testReaderHandlers';
 import {
+    handleTestResolveItemDisplayHttpRequest,
+} from './httpHandlers/testCitationHandlers';
+import {
     handleTestBackgroundEnqueueHttpRequest,
     handleTestBackgroundStatsHttpRequest,
     handleTestBackgroundPeekHttpRequest,
@@ -236,6 +239,8 @@ const ENDPOINT_PATHS = [
     // Reader position / EPUB citation-navigation verification (dev-only)
     '/beaver/test/reader-state',
     '/beaver/test/epub-citation-navigate',
+    // Citation host: itemData.resolveItemDisplay (dev-only)
+    '/beaver/test/resolve-item-display',
     // Background queue inspection / driving (dev-only)
     '/beaver/test/background-enqueue',
     '/beaver/test/background-stats',
@@ -940,6 +945,11 @@ function registerEndpoints(): boolean {
 
         Zotero.Server.Endpoints['/beaver/test/epub-citation-navigate'] =
             createEndpoint(handleTestEpubCitationNavigateHttpRequest);
+
+        // Citation host: itemData.resolveItemDisplay (icon item type +
+        // readable-attachment availability for cited-source rows).
+        Zotero.Server.Endpoints['/beaver/test/resolve-item-display'] =
+            createEndpoint(handleTestResolveItemDisplayHttpRequest);
 
         // Background queue (dev-only)
         Zotero.Server.Endpoints['/beaver/test/background-enqueue'] =
