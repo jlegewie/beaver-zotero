@@ -8,7 +8,7 @@ interface ItemSearchResultViewProps {
 }
 
 /**
- * Renders the result of an item search tool (search_references_by_topic, search_references_by_metadata).
+ * Renders the result of an item search tool (item_search_by_topic, item_search_by_metadata).
  * Uses ZoteroItemsList to display the items with clickable links to reveal in Zotero.
  */
 export const ItemSearchResultView: React.FC<ItemSearchResultViewProps> = ({ items, showParentItem = true }) => {
