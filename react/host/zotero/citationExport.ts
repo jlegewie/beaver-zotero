@@ -3,7 +3,21 @@ import { getPageLocator } from '../../utils/citationGrammar';
 import { resolvePageLabelFromLabels, translatePageNumberToLabelFromLabels } from '../../utils/pageLabels';
 import { buildZoteroCitationLinkHTML, isLinkCitationItem } from '../../../src/utils/zoteroLinkCitation';
 import { logger } from '../../../src/utils/logger';
-import type { CitationExportRequest, CitationExportRender, DocumentExportHost } from '../types';
+import type {
+    CitationExportRequest,
+    CitationExportRender,
+    DocumentExportHost,
+    ExternalFileCitationExportRequest,
+} from '../types';
+
+/** Escape text for safe interpolation into an HTML attribute or text node. */
+function escapeHtml(value: string): string {
+    return value
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
 
 /**
  * Render a Zotero/library citation as CSL-formatted HTML for note export.
@@ -54,7 +68,34 @@ function renderCitation(request: CitationExportRequest): CitationExportRender | 
     }
 }
 
+/**
+ * Render an external-file citation as a clickable link to the locally stored
+ * copy, for note export.
+ *
+ * Zotero-only enhancement: the note editor opens a `file://` link via the OS
+ * default handler. Returns null when there's no local copy on this computer
+ * (the file was attached on another machine), so the render layer falls back to
+ * plain text. The locator suffix is appended outside the link, mirroring the
+ * external-reference export form.
+ */
+function renderExternalFileCitation(request: ExternalFileCitationExportRequest): CitationExportRender | null {
+    const { externalFileKey, displayName, locatorSuffix, localPathsByExtKey } = request;
+    if (!externalFileKey) return null;
+    const path = localPathsByExtKey[externalFileKey];
+    if (!path) return null;
+    try {
+        const href = escapeHtml(Zotero.File.pathToFileURI(path));
+        const label = escapeHtml(displayName);
+        const suffix = escapeHtml(locatorSuffix);
+        return { kind: 'html', html: `(<a href="${href}">${label}</a>${suffix})` };
+    } catch (e) {
+        logger(`zoteroDocumentExport: failed to build file link for ext-${externalFileKey}: ${e}`);
+        return null;
+    }
+}
+
 /** Zotero implementation of {@link DocumentExportHost}. */
 export const zoteroDocumentExport: DocumentExportHost = {
     renderCitation,
+    renderExternalFileCitation,
 };

@@ -7,7 +7,7 @@ import {
     getSymbolicLocation,
 } from '../../types/citations';
 import { externalReferenceMappingAtom } from '../../atoms/externalReferences';
-import { pageLabelsByAttachmentIdAtom } from '../../atoms/citations';
+import { pageLabelsByAttachmentIdAtom, externalFileLocalPathsAtom } from '../../atoms/citations';
 import { useCitationMarker } from '../../hooks/useCitationMarker';
 import { getHost } from '../../host';
 import { useCitationViewModel } from './useCitationViewModel';
@@ -93,6 +93,9 @@ const Citation: React.FC<CitationProps> = (props) => {
     // Read via the active store (the Provider's, isolated during note export) so
     // export locators use the labels renderToHTML preloads.
     const labelsByAttachmentId = useAtomValue(pageLabelsByAttachmentIdAtom);
+    // Host-resolved local paths for external files (note export only); empty
+    // otherwise. Read from the active store so it respects the isolated export store.
+    const externalFileLocalPaths = useAtomValue(externalFileLocalPathsAtom);
 
     // Get the citation format preference
     const authorYearFormat = (getHost().config?.citationFormat() ?? 'author-year') !== 'numeric';
@@ -163,11 +166,22 @@ const Citation: React.FC<CitationProps> = (props) => {
             return (<span>{`(${citation})`}</span>);
         }
 
-        // External-file citations export as plain filename text (no Zotero
-        // item to format, excluded from the bibliography). Preserve the cited
-        // page/section locator so the export is as specific as the chat view.
+        // External-file citations have no Zotero item to format and are excluded
+        // from the bibliography. Preserve the cited page/section locator so the
+        // export is as specific as the chat view. The host may upgrade this to a
+        // clickable link to the locally stored file; the plain-text form is the
+        // client-agnostic fallback when the host can't (e.g. no local copy).
         if (isExternalFile) {
             const locatorSuffix = pages.length > 0 ? `, p.${pagesDisplay}` : '';
+            const exportedFile = getHost().documentExport?.renderExternalFileCitation?.({
+                externalFileKey,
+                displayName: citation,
+                locatorSuffix,
+                localPathsByExtKey: externalFileLocalPaths,
+            });
+            if (exportedFile && exportedFile.kind === 'html') {
+                return <span dangerouslySetInnerHTML={{ __html: exportedFile.html }} />;
+            }
             return (<span>{`(${citation}${locatorSuffix})`}</span>);
         }
 

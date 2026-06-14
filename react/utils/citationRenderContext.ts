@@ -140,20 +140,62 @@ export async function buildLocalCitationDataMapForContent(
 }
 
 /**
+ * Resolve absolute local paths for external-file citations in the content,
+ * limited to files that exist on this computer. Used by note export to offer a
+ * clickable file link; files attached on another machine resolve to no entry and
+ * fall back to plain text.
+ */
+export async function resolveExternalFileLocalPaths(
+    content: string,
+): Promise<Record<string, string>> {
+    const db = Zotero.Beaver?.db;
+    if (!db) return {};
+
+    const result: Record<string, string> = {};
+    const seen = new Set<string>();
+    const regex = new RegExp(CITATION_TAG_PATTERN.source, CITATION_TAG_PATTERN.flags);
+    let match: RegExpExecArray | null;
+
+    while ((match = regex.exec(content)) !== null) {
+        const normalized = normalizeCitationTag(parseRawCitationAttributes(match[1] || ''));
+        if (!normalized.ok || normalized.ref.kind !== 'external_file') continue;
+
+        const extKey = normalized.ref.ext_key;
+        if (seen.has(extKey)) continue;
+        seen.add(extKey);
+
+        try {
+            const record = await db.getExternalFileByKey(extKey);
+            const path = record?.storedPath ?? null;
+            if (path && (await IOUtils.exists(path).catch(() => false))) {
+                result[extKey] = path;
+            }
+        } catch {
+            // The file link is an export enhancement; unresolved external files
+            // fall back to plain-text citation rendering.
+        }
+    }
+
+    return result;
+}
+
+/**
  * Build the full static-render context for Zotero note export.
  */
 export async function prepareCitationRenderContext(
     content: string,
     contextData?: RenderContextData,
 ): Promise<RenderContextData | undefined> {
-    const [pageLabelsByAttachmentId, localCitationDataMap] = await Promise.all([
+    const [pageLabelsByAttachmentId, localCitationDataMap, externalFileLocalPaths] = await Promise.all([
         preloadPageLabelsForContent(content),
         buildLocalCitationDataMapForContent(content),
+        resolveExternalFileLocalPaths(content),
     ]);
 
     const hasPageLabels = Object.keys(pageLabelsByAttachmentId).length > 0;
     const hasLocalCitations = Object.keys(localCitationDataMap).length > 0;
-    if (!contextData && !hasPageLabels && !hasLocalCitations) return undefined;
+    const hasExternalFilePaths = Object.keys(externalFileLocalPaths).length > 0;
+    if (!contextData && !hasPageLabels && !hasLocalCitations && !hasExternalFilePaths) return undefined;
 
     const baseContext: RenderContextData = contextData ?? {
         citationDataMap: store.get(citationMapAtom),
@@ -170,6 +212,10 @@ export async function prepareCitationRenderContext(
         pageLabelsByAttachmentId: {
             ...(baseContext.pageLabelsByAttachmentId ?? {}),
             ...pageLabelsByAttachmentId,
+        },
+        externalFileLocalPaths: {
+            ...(baseContext.externalFileLocalPaths ?? {}),
+            ...externalFileLocalPaths,
         },
     };
 }
