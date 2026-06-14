@@ -331,9 +331,10 @@ export function useCitationViewModel(props: Record<string, unknown>): CitationVi
     // Resolve page labels separately so page-label preload updates don't force
     // the citation/preview/HTML-stripping work above to recompute. The legacy
     // fallback (loading labels from the cited Zotero item) is delegated to the
-    // citation host; this hook stays free of Zotero data access. The
-    // `labelsByAttachmentId` subscription forces a recompute once the async
-    // page-label preload populates the store the host reads from.
+    // citation host; this hook stays free of Zotero data access. We pass the
+    // subscribed `labelsByAttachmentId` (from the active store) to the host so
+    // it resolves correctly under the isolated store used for note export, and
+    // so the recompute fires once the async page-label preload populates it.
     const { pageLabels, pagesDisplay, pages } = useMemo(() => {
         let pageLabels: string[] = rawPages.map((p) => String(p));
 
@@ -342,7 +343,7 @@ export function useCitationViewModel(props: Record<string, unknown>): CitationVi
             if (backendLabels && Object.keys(backendLabels).length > 0) {
                 pageLabels = rawPages.map((p) => resolvePageLabelFromLabels(backendLabels, p));
             } else if (resolvedRef) {
-                const hostLabels = getHost().itemData?.resolvePageLabels(resolvedRef) ?? null;
+                const hostLabels = getHost().itemData?.resolvePageLabels(resolvedRef, labelsByAttachmentId) ?? null;
                 if (hostLabels) {
                     pageLabels = rawPages.map((p) => resolvePageLabelFromLabels(hostLabels, p));
                 }

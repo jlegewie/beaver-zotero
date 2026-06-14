@@ -1,6 +1,7 @@
 import type { ZoteroItemReference } from '../types/zotero';
 import type { CitationRef } from '../utils/citationGrammar';
 import type { Citation } from '../types/citations';
+import type { PageLabelsByAttachmentId } from '../atoms/citations';
 
 /**
  * Everything the host needs to activate (navigate to / open) a cited location.
@@ -79,8 +80,55 @@ export interface ItemDataHost {
      * already carry them. Returns a sparse 0-based page index -> printed label
      * map, or null when unavailable (renderer then falls back to raw page
      * numbers).
+     *
+     * The label map is passed in from the active render store (rather than read
+     * from a module-global store) so this works under the isolated store that
+     * `renderToHTML` populates during note export.
      */
-    resolvePageLabels(ref: CitationRef): Record<number, string> | null;
+    resolvePageLabels(
+        ref: CitationRef,
+        pageLabelsByAttachmentId: PageLabelsByAttachmentId,
+    ): Record<number, string> | null;
+}
+
+/**
+ * What the host needs to render a citation as host-native formatted output for
+ * document export (e.g. a Zotero note). Derived from the citation view model.
+ */
+export interface CitationExportRequest {
+    effectiveLibraryID: number;
+    effectiveItemKey: string;
+    /** Identity as cited by the model, for page-locator fallback. */
+    requestedRef: CitationRef | null;
+    /** 1-based cited page numbers. */
+    pages: number[];
+    /** Self-contained metadata, for the page-label fallback. */
+    metadata?: Citation;
+    /**
+     * Page-label map from the active render store. Passed in (rather than read
+     * from a module-global store) so note export uses the isolated store that
+     * `renderToHTML` populates with preloaded labels.
+     */
+    pageLabelsByAttachmentId: PageLabelsByAttachmentId;
+}
+
+/**
+ * Host-native rendered citation for export. `html` is inserted via
+ * `dangerouslySetInnerHTML`; the `citation` variant also carries the serialized
+ * citation payload for the editor's `data-citation` attribute.
+ */
+export type CitationExportRender =
+    | { kind: 'html'; html: string }
+    | { kind: 'citation'; html: string; citationData: string };
+
+/**
+ * Render content into the host's native document format. For Zotero this is a
+ * note (CSL-formatted HTML); other clients (e.g. a Word add-in) format
+ * differently. Clients that don't support document export omit this slice.
+ */
+export interface DocumentExportHost {
+    /** Render a Zotero/library citation for export. Returns null when the item is unavailable. */
+    renderCitation(request: CitationExportRequest): CitationExportRender | null;
 }
 
 /**
@@ -90,4 +138,5 @@ export interface ItemDataHost {
 export interface ClientHost {
     navigation?: NavigationHost;
     itemData?: ItemDataHost;
+    documentExport?: DocumentExportHost;
 }

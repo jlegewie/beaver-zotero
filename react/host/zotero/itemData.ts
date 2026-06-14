@@ -1,5 +1,4 @@
-import { store } from '../../store';
-import { pageLabelsByAttachmentIdAtom, type PageLabelsByAttachmentId } from '../../atoms/citations';
+import { type PageLabelsByAttachmentId } from '../../atoms/citations';
 import { getBestPDFAttachment } from '../../../src/utils/zoteroItemHelpers';
 import type { CitationRef } from '../../utils/citationGrammar';
 import { logger } from '../../../src/utils/logger';
@@ -24,15 +23,18 @@ export function getPageLabelsForItem(
 
 /** Zotero implementation of {@link ItemDataHost}. */
 export const zoteroItemData: ItemDataHost = {
-    resolvePageLabels(ref: CitationRef): Record<number, string> | null {
+    resolvePageLabels(
+        ref: CitationRef,
+        labelsByAttachmentId: PageLabelsByAttachmentId,
+    ): Record<number, string> | null {
         if (ref.kind !== 'zotero') return null;
         try {
             const item = Zotero.Items.getByLibraryAndKey(ref.library_id, ref.zotero_key);
             if (!item || typeof item === 'boolean') return null;
-            // Read the preloaded labels straight from the store. The renderer
-            // subscribes to this atom separately so it re-resolves once the
-            // async page-label preload completes.
-            return getPageLabelsForItem(item, store.get(pageLabelsByAttachmentIdAtom));
+            // Labels come from the active render store (passed in by the caller),
+            // so this resolves correctly under the isolated store used for note
+            // export as well as the live UI store.
+            return getPageLabelsForItem(item, labelsByAttachmentId);
         } catch (e) {
             logger(`zoteroItemData: page label resolution failed: ${e}`);
             return null;

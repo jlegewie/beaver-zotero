@@ -1,6 +1,14 @@
 import type { ClientHost } from './types';
 
-export type { ClientHost, NavigationHost, ItemDataHost } from './types';
+export type {
+    ClientHost,
+    NavigationHost,
+    ItemDataHost,
+    DocumentExportHost,
+    CitationActivation,
+    CitationExportRequest,
+    CitationExportRender,
+} from './types';
 
 /**
  * Default host: no capabilities. A non-Zotero client can run the render surface

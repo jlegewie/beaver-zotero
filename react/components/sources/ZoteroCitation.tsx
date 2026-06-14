@@ -1,26 +1,18 @@
 import React from 'react';
 import Tooltip from '../ui/Tooltip';
 import { useAtomValue } from 'jotai';
-import { pageLabelsByAttachmentIdAtom } from '../../atoms/citations';
 import { getPref } from '../../../src/utils/prefs';
 import {
     getCitationBoundingBoxes,
     getContentKind,
     getSymbolicLocation,
 } from '../../types/citations';
-import { logger } from '../../../src/utils/logger';
 import { externalReferenceMappingAtom } from '../../atoms/externalReferences';
+import { pageLabelsByAttachmentIdAtom } from '../../atoms/citations';
 import { useCitationMarker } from '../../hooks/useCitationMarker';
 import { getHost } from '../../host';
-import { resolvePageLabelFromLabels, translatePageNumberToLabelFromLabels } from '../../utils/pageLabels';
-import { getPageLocator } from '../../utils/citationGrammar';
 import { useCitationViewModel } from '../citations/useCitationViewModel';
-import { getPageLabelsForItem } from '../../host/zotero/itemData';
 import { Icon, LibraryIcon, PdfIcon, GlobalSearchIcon, NoteIcon, HighlighterIcon, TextAlignLeftIcon, ExternalLinkIcon } from '../icons/icons';
-import {
-    buildZoteroCitationLinkHTML,
-    isLinkCitationItem,
-} from '../../../src/utils/zoteroLinkCitation';
 const TOOLTIP_WIDTH = '250px';
 
 /**
@@ -91,8 +83,11 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
         pages,
     } = vm;
 
-    // Atoms still needed for the Zotero-specific export handling below.
+    // External-reference map is read for the (presentational) external-citation
+    // export branch below.
     const externalReferenceMap = useAtomValue(externalReferenceMappingAtom);
+    // Read via the active store (the Provider's, isolated during note export) so
+    // export locators use the labels renderToHTML preloads.
     const labelsByAttachmentId = useAtomValue(pageLabelsByAttachmentIdAtom);
 
     // Get the citation format preference
@@ -172,49 +167,30 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
             return (<span>{`(${citation}${locatorSuffix})`}</span>);
         }
 
-        // For Zotero citations, use proper CSL format
-        if (!effectiveLibraryID || !effectiveItemKey) return null;
-        try {
-            const item = Zotero.Items.getByLibraryAndKey(effectiveLibraryID, effectiveItemKey);
-            if (!item) return null;
-            if (isLinkCitationItem(item)) {
-                const html = buildZoteroCitationLinkHTML(item);
-                return <span dangerouslySetInnerHTML={{ __html: html }} />;
-            }
-            const itemData = Zotero.Utilities.Item.itemToCSLJSON(item.parentItem || item);
-            const startPage = pages.length > 0 ? pages[0] : undefined;
-            // Fallback: use page prop directly when metadata doesn't provide pages
-            const requestedPage = requestedRef ? getPageLocator(requestedRef) : undefined;
-            const loadedLabels = getPageLabelsForItem(item, labelsByAttachmentId);
-            const exportLabels = loadedLabels ?? citationMetadata?.page_labels;
-            // Zotero note clicks use the CSL locator as a PDF page label.
-            // When labels are available, store the visible label for the physical page.
-            const navLocator = startPage
-                ? resolvePageLabelFromLabels(exportLabels, startPage)
-                : (requestedPage ? translatePageNumberToLabelFromLabels(exportLabels, requestedPage) : undefined);
-            const citationObj = {
-                citationItems: [{
-                    uris: [Zotero.URI.getItemURI(item.parentItem || item)],
-                    itemData: itemData,
-                    locator: navLocator,
-                    // label: 'p.'
-                }],
-                properties: {}
-            };
-            const formatted = Zotero.EditorInstanceUtilities.formatCitation(citationObj);
-            // Use dangerouslySetInnerHTML because formatCitation() returns HTML
-            // (e.g., "(<span class="citation-item">Author, 2024</span>)").
-            return (
-                <span
-                    className="citation"
-                    data-citation={encodeURIComponent(JSON.stringify(citationObj))}
-                    dangerouslySetInnerHTML={{ __html: formatted }}
-                />
-            );
-        } catch (e) {
-            logger(`ZoteroCitation: Item not loaded for ${effectiveLibraryID}/${effectiveItemKey}: ${e}`);
-            return null;
+        // For library citations, delegate host-native formatting (CSL for
+        // Zotero) to the host. The host returns formatted HTML; the wrapping
+        // element shape stays here so this component owns all the JSX.
+        const exported = getHost().documentExport?.renderCitation({
+            effectiveLibraryID,
+            effectiveItemKey,
+            requestedRef,
+            pages,
+            metadata: citationMetadata,
+            pageLabelsByAttachmentId: labelsByAttachmentId,
+        });
+        if (!exported) return null;
+        if (exported.kind === 'html') {
+            return <span dangerouslySetInnerHTML={{ __html: exported.html }} />;
         }
+        // Use dangerouslySetInnerHTML because the formatted citation is HTML
+        // (e.g., "(<span class="citation-item">Author, 2024</span>)").
+        return (
+            <span
+                className="citation"
+                data-citation={exported.citationData}
+                dangerouslySetInnerHTML={{ __html: exported.html }}
+            />
+        );
     }
 
     // Determine the CSS class based on citation type and state
