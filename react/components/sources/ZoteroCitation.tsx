@@ -1,7 +1,7 @@
-import React, { useMemo } from 'react';
+import React from 'react';
 import Tooltip from '../ui/Tooltip';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { citationByKeyAtom, pageLabelsByAttachmentIdAtom, type PageLabelsByAttachmentId } from '../../atoms/citations';
+import { pageLabelsByAttachmentIdAtom } from '../../atoms/citations';
 import { getPref } from '../../../src/utils/prefs';
 import { createZoteroURI } from '../../utils/zoteroURI';
 import {
@@ -9,10 +9,7 @@ import {
     getCitationBoundingBoxes,
     getContentKind,
     getSymbolicLocation,
-    isExternalCitation,
-    isExternalFileCitation,
 } from '../../types/citations';
-import { formatNumberRanges, formatPageRangesWithLabels } from '../../utils/stringUtils';
 import { selectItemById } from '../../../src/utils/selectItem';
 import { getCurrentReaderAndWaitForView } from '../../utils/readerUtils';
 import {
@@ -25,25 +22,16 @@ import {
 } from '../../utils/citationNavigation';
 import { navigateToEpubCitation } from '../../utils/epubVisualizer/epubCitationNavigation';
 import { logger } from '../../../src/utils/logger';
-import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../../atoms/externalReferences';
+import { externalReferenceMappingAtom } from '../../atoms/externalReferences';
 import { useCitationMarker } from '../../hooks/useCitationMarker';
 import { ZoteroItemReference } from '../../types/zotero';
-import { getCitationActions } from '../../utils/citationActions';
+import { getHost } from '../../host';
 import { resolvePageLabelFromLabels, translatePageNumberToLabelFromLabels } from '../../utils/pageLabels';
-import {
-    getBestPDFAttachment,
-    getBestPDFAttachmentAsync,
-    getBestReadableTextAttachmentAsync,
-} from '../../../src/utils/zoteroItemHelpers';
+import { getBestPDFAttachmentAsync, getBestReadableTextAttachmentAsync } from '../../../src/utils/zoteroItemHelpers';
 import { BEAVER_CITATION_ANNOTATION_AUTHOR } from '../../../src/constants/annotations';
-import {
-    baseCitationKey,
-    CitationRef,
-    getPageLocator,
-    getResolvedRef,
-    LocatorKind,
-    requestedCitationKey,
-} from '../../utils/citationGrammar';
+import { getPageLocator } from '../../utils/citationGrammar';
+import { useCitationViewModel } from '../citations/useCitationViewModel';
+import { getPageLabelsForItem } from '../../host/zotero/itemData';
 import {
     isExternalReferenceDetailsDialogVisibleAtom,
     selectedExternalReferenceAtom
@@ -55,17 +43,6 @@ import {
 } from '../../../src/utils/zoteroLinkCitation';
 const TOOLTIP_WIDTH = '250px';
 export const BEAVER_ANNOTATION_TEXT = BEAVER_CITATION_ANNOTATION_AUTHOR;
-
-/**
- * Citation display state - explicit FSM for citation lifecycle.
- * 
- * States:
- * - 'streaming': Tag parsed, waiting for metadata (shows "?")
- * - 'ready': Metadata available, fully rendered
- * - 'invalid': Citation could not be resolved (shows "?" with error tooltip)
- * - 'error': No identifier found (returns null)
- */
-type CitationDisplayState = 'streaming' | 'ready' | 'invalid' | 'error';
 
 /**
  * Props for ZoteroCitation component.
@@ -102,303 +79,53 @@ interface ZoteroCitationProps {
     children?: React.ReactNode;
 }
 
-type CitationPropsModel =
-    | { ok: true; ref: CitationRef; requestedKey: string; consecutive: boolean; adjacent: boolean }
-    | { ok: false; requestedKey: string; rawIdentity?: string; reason?: string; consecutive: boolean; adjacent: boolean };
-
-function propValue(props: Record<string, unknown>, camel: string, kebab: string): string | undefined {
-    const value = props[camel] ?? props[kebab];
-    if (value == null || value === false) return undefined;
-    return String(value);
-}
-
-function propBool(props: Record<string, unknown>, camel: string, kebab: string): boolean {
-    const value = props[camel] ?? props[kebab];
-    return value === true || value === 'true';
-}
-
-export function readCitationProps(props: Record<string, unknown>): CitationPropsModel {
-    const consecutive = propBool(props, 'dataConsecutive', 'data-consecutive');
-    const adjacent = propBool(props, 'dataAdjacent', 'data-adjacent');
-    const requestedKey = propValue(props, 'dataRequestedCitationKey', 'data-requested-citation-key') || '';
-    const rawIdentity = propValue(props, 'dataRawIdentity', 'data-raw-identity');
-    const invalidReason = propValue(props, 'dataInvalidReason', 'data-invalid-reason');
-    if (invalidReason) {
-        return { ok: false, requestedKey, rawIdentity, reason: invalidReason, consecutive, adjacent };
-    }
-
-    const libraryIDRaw = propValue(props, 'dataLibraryId', 'data-library-id');
-    const zoteroKey = propValue(props, 'dataZoteroKey', 'data-zotero-key');
-    const externalId = propValue(props, 'dataExternalId', 'data-external-id');
-    const externalSource = propValue(props, 'dataExternalSource', 'data-external-source');
-    const extKey = propValue(props, 'dataExtKey', 'data-ext-key');
-    const locRaw = propValue(props, 'dataLoc', 'data-loc');
-    const locKind = propValue(props, 'dataLocKind', 'data-loc-kind');
-    const locValue = propValue(props, 'dataLocValue', 'data-loc-value');
-    const loc = locRaw
-        ? { kind: (locKind || 'unknown') as LocatorKind, value: locValue || locRaw, raw: locRaw }
-        : undefined;
-
-    if (libraryIDRaw && zoteroKey) {
-        const libraryID = Number(libraryIDRaw);
-        if (Number.isInteger(libraryID) && libraryID > 0) {
-            const ref: CitationRef = { kind: 'zotero', library_id: libraryID, zotero_key: zoteroKey, ...(loc ? { loc } : {}) };
-            return { ok: true, ref, requestedKey: requestedKey || requestedCitationKey(ref), consecutive, adjacent };
-        }
-    }
-    if (extKey) {
-        const ref: CitationRef = {
-            kind: 'external_file',
-            ext_key: extKey.toUpperCase(),
-            ...(loc ? { loc } : {}),
-        };
-        return { ok: true, ref, requestedKey: requestedKey || requestedCitationKey(ref), consecutive, adjacent };
-    }
-    if (externalId) {
-        const ref: CitationRef = {
-            kind: 'external',
-            external_id: externalId,
-            ...(externalSource ? { source: externalSource } : {}),
-            ...(loc ? { loc } : {}),
-        };
-        return { ok: true, ref, requestedKey: requestedKey || requestedCitationKey(ref), consecutive, adjacent };
-    }
-
-    return { ok: false, requestedKey, rawIdentity, reason: invalidReason || 'missing_identity', consecutive, adjacent };
-}
-
-function getPageLabelsForItem(
-    item: Zotero.Item,
-    labelsByAttachmentId: PageLabelsByAttachmentId,
-): Record<number, string> | null {
-    const attachment = item.isAttachment()
-        ? item
-        : getBestPDFAttachment(item);
-    if (!attachment) return null;
-    return labelsByAttachmentId[attachment.id] ?? null;
-}
-
 const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
     const { exportRendering = false } = props;
-    const parsedProps = useMemo(() => readCitationProps(props as Record<string, unknown>), [props]);
-    const { consecutive } = parsedProps;
-    // Get citation data maps
-    const citationDataByCitationKey = useAtomValue(citationByKeyAtom);
-    const externalReferenceToZoteroItem = useAtomValue(externalReferenceItemMappingAtom);
-    const externalReferenceMap = useAtomValue(externalReferenceMappingAtom);
-    const labelsByAttachmentId = useAtomValue(pageLabelsByAttachmentIdAtom);
-    
-    // For opening external reference details dialog
-    const setIsDetailsVisible = useSetAtom(isExternalReferenceDetailsDialogVisibleAtom);
-    const setSelectedReference = useSetAtom(selectedExternalReferenceAtom);
 
-    // =========================================================================
-    // IDENTITY RESOLUTION - Using normalized citation keys for lookup and markers
-    // =========================================================================
-    // 
-    // data-requested-citation-key is injected by preprocessCitations for metadata lookup.
-    // It includes sid/page for unique identification of citation instances.
-    // 
-    // For marker assignment, we use a base key (item-only) so that all citations
-    // to the same item get the same marker number.
-    //
-    const identity = useMemo(() => {
-        const citationKey = parsedProps.requestedKey || '';
-        
-        let metadata = citationKey 
-            ? citationDataByCitationKey[citationKey] 
-            : undefined;
-
-        if (!metadata && parsedProps.ok) {
-            metadata = citationDataByCitationKey[baseCitationKey(parsedProps.ref)];
-        }
-
-        if (!metadata) {
-            const rawIdentity = parsedProps.ok ? undefined : parsedProps.rawIdentity;
-            if (rawIdentity) {
-                metadata = citationDataByCitationKey[`invalid:${rawIdentity}`];
-            }
-        }
-
-        let markerKey = parsedProps.ok ? baseCitationKey(parsedProps.ref) : '';
-        const resolvedRef = metadata ? getResolvedRef(metadata) : null;
-        if (resolvedRef) {
-            markerKey = baseCitationKey(resolvedRef);
-        }
-
-        const displayRef = resolvedRef ?? (parsedProps.ok ? parsedProps.ref : null);
-        const zoteroRef = displayRef?.kind === 'zotero'
-            ? { libraryID: displayRef.library_id, itemKey: displayRef.zotero_key }
-            : null;
-        const externalSourceId = displayRef?.kind === 'external'
-            ? displayRef.external_id
-            : undefined;
-
-        // Determine citation type
-        const isExternal = metadata
-            ? isExternalCitation(metadata)
-            : displayRef?.kind === 'external' || citationKey.startsWith('external:');
-        const isExternalFile = metadata
-            ? isExternalFileCitation(metadata)
-            : displayRef?.kind === 'external_file' || citationKey.startsWith('extfile:');
-        const externalFileKey = displayRef?.kind === 'external_file'
-            ? displayRef.ext_key
-            : null;
-        
-        // Determine display state (FSM)
-        const hasIdentifier = parsedProps.ok || !!citationKey || (!parsedProps.ok && !!parsedProps.rawIdentity);
-        let displayState: CitationDisplayState;
-        if (!hasIdentifier) {
-            displayState = 'error';
-        } else if (!metadata) {
-            displayState = 'streaming';
-        } else if (metadata.invalid) {
-            displayState = 'invalid';
-        } else {
-            displayState = 'ready';
-        }
-        
-        return {
-            metadata,
-            zoteroRef,
-            isExternal,
-            isExternalFile,
-            externalFileKey,
-            citationKey,     // Full key for metadata lookup
-            markerKey,       // Base key for marker assignment
-            displayState,
-            // Convenience accessors
-            libraryID: zoteroRef?.libraryID ?? 0,
-            itemKey: zoteroRef?.itemKey ?? '',
-            hasIdentifier,
-            requestedRef: parsedProps.ok ? parsedProps.ref : null,
-            resolvedRef,
-            externalSourceId,
-        };
-    }, [parsedProps, citationDataByCitationKey]);
-
-    // Destructure for easier access
+    // Derive the render-ready view model. This is client-agnostic: it reads only
+    // self-contained citation metadata (citation v2) and shared atoms, with the
+    // one host-specific concern (legacy page-label fallback) delegated to the
+    // citation host. Zotero data access below is confined to the click/export
+    // paths, which are inherently host-specific.
+    const vm = useCitationViewModel(props as Record<string, unknown>);
     const {
         metadata: citationMetadata,
         isExternal,
         isExternalFile,
         externalFileKey,
-        citationKey,
         markerKey,
         displayState,
+        isStreaming,
+        isInvalid,
         libraryID,
         itemKey,
         requestedRef,
-        resolvedRef,
-        externalSourceId
-    } = identity;
+        externalSourceId,
+        mappedZoteroItem,
+        effectiveLibraryID,
+        effectiveItemKey,
+        consecutive,
+        citation,
+        previewText,
+        pageLabels,
+        pagesDisplay,
+        pages,
+    } = vm;
 
-    // For external citations, check if they map to a Zotero item
-    const mappedZoteroItem = isExternal && externalSourceId
-        ? externalReferenceToZoteroItem[externalSourceId]
-        : undefined;
-    
-    // Compute effective libraryID and itemKey (accounting for mapped external citations)
-    const effectiveLibraryID = libraryID || mappedZoteroItem?.library_id || 0;
-    const effectiveItemKey = itemKey || mappedZoteroItem?.zotero_key || '';
-    
+    // Atoms still needed for the Zotero-specific click/export handling below.
+    const externalReferenceMap = useAtomValue(externalReferenceMappingAtom);
+    const labelsByAttachmentId = useAtomValue(pageLabelsByAttachmentIdAtom);
+
+    // For opening external reference details dialog
+    const setIsDetailsVisible = useSetAtom(isExternalReferenceDetailsDialogVisibleAtom);
+    const setSelectedReference = useSetAtom(selectedExternalReferenceAtom);
+
     // Get the citation format preference
     const authorYearFormat = getPref("citationFormat") !== "numeric";
-    // Whether page locators should be rendered using the PDF's page labels
-    // (e.g., Roman numerals for front matter) instead of raw page numbers.
-    const usePageLabels = getPref("usePageLabels") !== false;
-
-    // Use display state for rendering decisions
-    const isStreaming = displayState === 'streaming';
-    const isInvalid = displayState === 'invalid';
 
     // Get or assign numeric marker using base key (same item = same marker)
     // Uses markerKey (without sid/page) so all citations to the same item share a marker
     const numericMarker = useCitationMarker(markerKey, exportRendering);
-
-    // Derive citation display data from metadata alone (citation v2): no
-    // Zotero item access happens here, so the same render path works for
-    // Zotero items, external references, and external files.
-    // When metadata is not available (streaming), values are empty and the
-    // component shows the inactive "?" state.
-    const { formatted_citation, citation, previewText, rawPages } = useMemo(() => {
-        // No metadata yet - return empty values (component will show inactive state)
-        if (!citationMetadata) {
-            return {
-                formatted_citation: '',
-                citation: '',
-                previewText: '',
-                rawPages: [] as number[]
-            };
-        }
-
-        const citation = citationMetadata.display_name || '';
-        let formatted_citation = citationMetadata.formatted_citation || '';
-        let previewText = citationMetadata.preview
-            ? `"${citationMetadata.preview}"`
-            : formatted_citation || (isExternalFile ? citation : '');
-
-        // Strip URLs from formatted citation and preview text (they clutter the tooltip)
-        const stripUrls = (s: string) => s.replace(/\s*https?:\/\/\S+/g, '').trim();
-        // Convert <br> tags to newlines and strip any remaining HTML tags
-        // (note previews arrive as HTML fragments and would otherwise render as literal markup)
-        const stripHtml = (s: string) => s
-            .replace(/<br\s*\/?>/gi, '\n')
-            .replace(/<\/(p|div|h[1-6]|li)>/gi, '\n')
-            .replace(/<[^>]*>/g, '')
-            .replace(/\n{3,}/g, '\n\n')
-            .trim();
-        formatted_citation = stripHtml(stripUrls(formatted_citation));
-        previewText = stripHtml(stripUrls(previewText));
-
-        const pages = [...new Set(getCitationPages(citationMetadata))];
-
-        return {
-            formatted_citation,
-            citation,
-            previewText,
-            rawPages: pages
-        };
-    }, [citationMetadata, isExternalFile]);
-
-    // Resolve page labels separately so page-label preload updates don't force
-    // the citation/preview/HTML-stripping work above to recompute.
-    const citationLibraryId = resolvedRef?.kind === 'zotero'
-        ? resolvedRef.library_id
-        : undefined;
-    const citationZoteroKey = resolvedRef?.kind === 'zotero'
-        ? resolvedRef.zotero_key
-        : undefined;
-    const { pageLabels, pagesDisplay, pages } = useMemo(() => {
-        // Default labels: raw page numbers as strings.
-        let pageLabels: string[] = rawPages.map((p) => String(p));
-
-        if (usePageLabels && rawPages.length > 0) {
-            const backendLabels = citationMetadata?.page_labels;
-            if (backendLabels && Object.keys(backendLabels).length > 0) {
-                pageLabels = rawPages.map((p) => resolvePageLabelFromLabels(backendLabels, p));
-            } else if (citationLibraryId && citationZoteroKey) {
-                try {
-                    const item = Zotero.Items.getByLibraryAndKey(citationLibraryId, citationZoteroKey);
-                    if (item && typeof item !== 'boolean') {
-                        const loadedLabels = getPageLabelsForItem(item, labelsByAttachmentId);
-                        pageLabels = rawPages.map((p) => resolvePageLabelFromLabels(loadedLabels, p));
-                    }
-                } catch (e) {
-                    logger(`ZoteroCitation: Page label resolution failed: ${e}`);
-                }
-            }
-        }
-
-        const pagesDisplay = rawPages.length === 0
-            ? ''
-            : usePageLabels
-                ? formatPageRangesWithLabels(rawPages, pageLabels)
-                : formatNumberRanges(rawPages);
-
-        return { pageLabels, pagesDisplay, pages: rawPages };
-    }, [rawPages, usePageLabels, citationLibraryId, citationZoteroKey, labelsByAttachmentId, citationMetadata]);
-
 
     // Render as soon as we have an identifier; citationMetadata may arrive later.
     // 'error' state means no valid identifier was found - don't render.
@@ -521,7 +248,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
                 ? item
                 : await getBestReadableTextAttachmentAsync(item);
             if (!target) {
-                getCitationActions().revealInLibrary({ library_id: item.libraryID, zotero_key: item.key } as ZoteroItemReference);
+                getHost().navigation?.revealInLibrary({ library_id: item.libraryID, zotero_key: item.key } as ZoteroItemReference);
                 return;
             }
             const filePath = await target.getFilePathAsync();
@@ -534,7 +261,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
                 } else {
                     logger(`ZoteroCitation: Opening text file: ${filePath}`);
                 }
-                getCitationActions().launchFile(filePath);
+                getHost().navigation?.launchFile(filePath);
             } else {
                 await selectItemById(target.id);
             }
@@ -553,7 +280,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
             logger(`ZoteroCitation: EPUB citation (symbolic: ${!!epubSymbolicLocation}, sections: ${sectionOrdinals.length})`);
 
             if (item.isRegularItem() && !hasEpubLocator) {
-                getCitationActions().revealInLibrary({ library_id: item.libraryID, zotero_key: item.key } as ZoteroItemReference);
+                getHost().navigation?.revealInLibrary({ library_id: item.libraryID, zotero_key: item.key } as ZoteroItemReference);
                 return;
             }
 
@@ -568,7 +295,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
             });
             logger(`ZoteroCitation: EPUB navigation outcome: ${outcome}`);
             if (outcome === 'failed') {
-                getCitationActions().revealInLibrary({ library_id: item.libraryID, zotero_key: item.key } as ZoteroItemReference);
+                getHost().navigation?.revealInLibrary({ library_id: item.libraryID, zotero_key: item.key } as ZoteroItemReference);
             }
             return;
         }
@@ -576,7 +303,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
         if (contentKind !== 'pdf') {
             logger(`ZoteroCitation: Non-PDF citation (${contentKind})`);
             if (item.isRegularItem()) {
-                getCitationActions().revealInLibrary({ library_id: item.libraryID, zotero_key: item.key } as ZoteroItemReference);
+                getHost().navigation?.revealInLibrary({ library_id: item.libraryID, zotero_key: item.key } as ZoteroItemReference);
                 return;
             }
             if (item.isAttachment()) {
@@ -588,7 +315,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
                 }
                 return;
             }
-            getCitationActions().revealInLibrary({ library_id: item.libraryID, zotero_key: item.key } as ZoteroItemReference);
+            getHost().navigation?.revealInLibrary({ library_id: item.libraryID, zotero_key: item.key } as ZoteroItemReference);
             return;
         }
 
@@ -613,13 +340,13 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
                     pdfItem = attachment;
                 } else {
                     logger(`ZoteroCitation: Regular item has locator but no PDF attachment (${item.id})`);
-                    getCitationActions().revealInLibrary({ library_id: item.libraryID, zotero_key: item.key } as ZoteroItemReference);
+                    getHost().navigation?.revealInLibrary({ library_id: item.libraryID, zotero_key: item.key } as ZoteroItemReference);
                     return;
                 }
             } else {
                 logger(`ZoteroCitation: Selecting regular item (${item.id})`);
                 // await selectItemById(item.id);
-                getCitationActions().revealInLibrary({ library_id: item.libraryID, zotero_key: item.key } as ZoteroItemReference);
+                getHost().navigation?.revealInLibrary({ library_id: item.libraryID, zotero_key: item.key } as ZoteroItemReference);
                 return;
             }
         }
@@ -629,7 +356,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
         if (itemUri.startsWith('file:///')) {
             const filePath = itemUri.replace('file:///', '');
             logger(`ZoteroCitation: File Link (${filePath})`);
-            getCitationActions().launchFile(filePath);
+            getHost().navigation?.launchFile(filePath);
             return;
         }
 
@@ -722,7 +449,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
             try {
                 const fallbackUri = createZoteroURI(item);
                 if (fallbackUri.includes('zotero://')) {
-                    getCitationActions().openExternalUrl(fallbackUri);
+                    getHost().navigation?.openExternalUrl(fallbackUri);
                 }
             } catch {
                 // No usable fallback URI; nothing else to do.
