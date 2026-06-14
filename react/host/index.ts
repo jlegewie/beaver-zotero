@@ -6,6 +6,7 @@ export type {
     ItemDataHost,
     DocumentExportHost,
     ConfigHost,
+    ResolvedItemDisplay,
     CitationActivation,
     CitationExportRequest,
     CitationExportRender,

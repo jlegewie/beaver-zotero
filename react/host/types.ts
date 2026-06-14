@@ -66,6 +66,21 @@ export interface NavigationHost {
      * client-agnostic. Only called for "ready" citations.
      */
     activateCitation(activation: CitationActivation): void | Promise<void>;
+    /** Open a library item's best attachment (PDF/etc.) or note in the host viewer. */
+    openSource(ref: ZoteroItemReference): void | Promise<void>;
+    /** Open a locally stored external-file copy by its ext key (no-op if no local copy). */
+    launchExternalFile(extKey: string): void | Promise<void>;
+}
+
+/**
+ * Display metadata for a library item, resolved by the host for source/result
+ * lists. Currently minimal; grows as more list surfaces are decoupled.
+ */
+export interface ResolvedItemDisplay {
+    /** Zotero item type, for icon rendering. */
+    itemType?: string;
+    /** Whether the item has a readable attachment (enables an "open" action). */
+    hasReadableAttachment: boolean;
 }
 
 /**
@@ -89,6 +104,12 @@ export interface ItemDataHost {
         ref: CitationRef,
         pageLabelsByAttachmentId: PageLabelsByAttachmentId,
     ): Record<number, string> | null;
+    /**
+     * Resolve display metadata (icon type + attachment availability) for a
+     * library item in a source/result list. Async because it may load the item;
+     * returns null when the item can't be resolved.
+     */
+    resolveItemDisplay(ref: ZoteroItemReference): Promise<ResolvedItemDisplay | null>;
 }
 
 /**

@@ -1,11 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useAtomValue } from 'jotai';
-import { openSource, revealSource } from '../../utils/sourceUtils';
 import { CSSItemTypeIcon, PdfIcon } from '../icons/icons';
 import IconButton from '../ui/IconButton';
 import { ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import { ZoteroIcon } from '../icons/ZoteroIcon';
-import { getPref } from '../../../src/utils/prefs';
 import {
     CitedSource,
     getCitationKey,
@@ -20,7 +18,7 @@ import { externalReferenceMappingAtom, externalReferenceItemMappingAtom, formatE
 import ActionButtons from '../externalReferences/actionButtons';
 import { ExternalReference } from '../../types/externalReferences';
 import { ZoteroItemReference } from '../../types/zotero';
-import { logger } from '../../../src/utils/logger';
+import { getHost, type ResolvedItemDisplay } from '../../host';
 
 interface CitedSourcesListProps {
     citations: CitedSource[];
@@ -29,50 +27,56 @@ interface CitedSourcesListProps {
 const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
     citations
 }) => {
-    const authorYearFormat = getPref("citationFormat") !== "numeric";
+    const authorYearFormat = (getHost().config?.citationFormat() ?? 'author-year') !== 'numeric';
     const externalReferenceMapping = useAtomValue(externalReferenceMappingAtom);
     const externalItemMapping = useAtomValue(externalReferenceItemMappingAtom);
 
-    // Track which item citations have best attachments available
-    const [itemsWithBestAttachment, setItemsWithBestAttachment] = useState<Set<string>>(new Set());
+    // Per-citation display metadata (icon item type + attachment availability),
+    // resolved via the host. Rows render from citation v2 metadata alone; this
+    // only backs the icon for mapped external citations and the PDF-button
+    // enabled state, neither of which is in the citation metadata yet.
+    const [displayMetaByKey, setDisplayMetaByKey] = useState<Map<string, ResolvedItemDisplay>>(new Map());
 
-    // Check for best attachments on item citations (interactivity only — the
-    // rows themselves render from citation metadata without Zotero access)
     useEffect(() => {
         let cancelled = false;
 
-        const checkBestAttachments = async () => {
-            const newSet = new Set<string>();
+        const resolveDisplayMeta = async () => {
+            const itemData = getHost().itemData;
+            if (!itemData?.resolveItemDisplay) {
+                setDisplayMetaByKey(new Map());
+                return;
+            }
 
+            const next = new Map<string, ResolvedItemDisplay>();
             for (const citation of citations) {
                 if (cancelled) return;
-                const zoteroRef = getZoteroReference(citation);
-                if (citation.citation_type === "item" && zoteroRef) {
-                    try {
-                        const item = Zotero.Items.getByLibraryAndKey(zoteroRef.library_id, zoteroRef.zotero_key);
-                        if (item && item.isRegularItem()) {
-                            const bestAttachment = await item.getBestAttachment();
-                            if (bestAttachment) {
-                                newSet.add(getCitationKey(citation));
-                            }
-                        }
-                    } catch (e) {
-                        logger(`CitedSourcesList: Item not loaded for ${zoteroRef.library_id}/${zoteroRef.zotero_key}: ${e}`);
-                    }
+                // Resolve only where a row needs host data: mapped external
+                // citations (icon item type) and item citations (attachment
+                // availability for the PDF button).
+                let ref: ZoteroItemReference | undefined;
+                if (isExternalCitation(citation)) {
+                    const sourceId = getExternalSourceId(citation);
+                    const mapped = sourceId ? externalItemMapping[sourceId] : null;
+                    ref = mapped ?? undefined;
+                } else if (citation.citation_type === 'item') {
+                    ref = getZoteroReference(citation);
                 }
+                if (!ref) continue;
+
+                const meta = await itemData.resolveItemDisplay(ref);
+                if (cancelled) return;
+                if (meta) next.set(getCitationKey(citation), meta);
             }
 
-            if (!cancelled) {
-                setItemsWithBestAttachment(newSet);
-            }
+            if (!cancelled) setDisplayMetaByKey(next);
         };
 
-        checkBestAttachments();
+        resolveDisplayMeta();
 
         return () => {
             cancelled = true;
         };
-    }, [citations]);
+    }, [citations, externalItemMapping]);
 
     // Helper to get external reference from mapping
     const getExternalReference = (citation: CitedSource): ExternalReference | undefined => {
@@ -94,26 +98,10 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
         const zoteroRef = getZoteroReference(citation);
         if (mappedZoteroItem) return true;
         if (citation.citation_type === "attachment" && zoteroRef) return true;
-        if (citation.citation_type === "item" && itemsWithBestAttachment.has(getCitationKey(citation))) return true;
-        return false;
-    };
-
-    // Open the locally stored copy of an external-file citation (quiet no-op
-    // when the file was attached on another computer)
-    const openExternalFile = async (citation: CitedSource) => {
-        const ref = getDisplayRef(citation);
-        if (ref?.kind !== 'external_file') return;
-        try {
-            const record = await Zotero.Beaver?.db?.getExternalFileByKey(ref.ext_key);
-            const path = record?.storedPath ?? null;
-            if (path && (await IOUtils.exists(path).catch(() => false))) {
-                Zotero.launchFile(path);
-            } else {
-                logger(`CitedSourcesList: External file ext-${ref.ext_key} has no local copy`);
-            }
-        } catch (e) {
-            logger(`CitedSourcesList: Failed to open external file: ${e}`, 2);
+        if (citation.citation_type === "item") {
+            return !!displayMetaByKey.get(getCitationKey(citation))?.hasReadableAttachment;
         }
+        return false;
     };
 
     // Filter out invalid citations
@@ -132,18 +120,11 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
                     // Only show as external if there's no mapped Zotero item
                     const showAsExternal = isExternal && !mappedZoteroItem;
 
-                    // Get item type icon for mapped external citations
-                    const getMappedItemType = (): string | undefined => {
-                        if (!mappedZoteroItem) return undefined;
-                        try {
-                            const item = Zotero.Items.getByLibraryAndKey(mappedZoteroItem.library_id, mappedZoteroItem.zotero_key);
-                            return item ? item.itemType : undefined;
-                        } catch (e) {
-                            logger(`CitedSourcesList: Item not loaded for ${mappedZoteroItem.library_id}/${mappedZoteroItem.zotero_key}: ${e}`);
-                            return undefined;
-                        }
-                    };
-                    const mappedItemType = isExternal && mappedZoteroItem ? getMappedItemType() : undefined;
+                    // Item type icon for mapped external citations comes from the
+                    // host-resolved display meta (not a render-time Zotero read).
+                    const mappedItemType = isExternal && mappedZoteroItem
+                        ? displayMetaByKey.get(getCitationKey(citation))?.itemType
+                        : undefined;
 
                     // Icon from citation metadata alone (citation v2)
                     const iconName = showAsExternal
@@ -198,7 +179,12 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
                                                 <IconButton
                                                     icon={PdfIcon}
                                                     variant="ghost-secondary"
-                                                    onClick={() => openExternalFile(citation)}
+                                                    onClick={() => {
+                                                        const ref = getDisplayRef(citation);
+                                                        if (ref?.kind === 'external_file') {
+                                                            getHost().navigation?.launchExternalFile(ref.ext_key);
+                                                        }
+                                                    }}
                                                     ariaLabel="Open file"
                                                     title="Open file"
                                                     className="display-flex scale-12"
@@ -212,7 +198,7 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
                                                         variant="ghost-secondary"
                                                         onClick={() => {
                                                             const target = mappedZoteroItem || zoteroRef;
-                                                            if (target) revealSource(target);
+                                                            if (target) getHost().navigation?.revealInLibrary(target);
                                                         }}
                                                         ariaLabel="Reveal source"
                                                         title="Reveal in Zotero"
@@ -225,28 +211,9 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
                                                         <IconButton
                                                             icon={PdfIcon}
                                                             variant="ghost-secondary"
-                                                            onClick={async () => {
+                                                            onClick={() => {
                                                                 const target = mappedZoteroItem || zoteroRef;
-                                                                if (!target) return;
-                                                                try {
-                                                                    const item = Zotero.Items.getByLibraryAndKey(
-                                                                        target.library_id,
-                                                                        target.zotero_key
-                                                                    );
-                                                                    if (item && item.isRegularItem()) {
-                                                                        const bestAttachment = await item.getBestAttachment();
-                                                                        if (bestAttachment) {
-                                                                            Zotero.getActiveZoteroPane().viewAttachment(bestAttachment.id);
-                                                                        }
-                                                                    } else if (item && item.isAttachment()) {
-                                                                        Zotero.getActiveZoteroPane().viewAttachment(item.id);
-                                                                    } else {
-                                                                        await openSource(target);
-                                                                    }
-                                                                } catch (e) {
-                                                                    logger(`CitedSourcesList: Item not loaded, falling back to openSource: ${e}`);
-                                                                    await openSource(target);
-                                                                }
+                                                                if (target) getHost().navigation?.openSource(target);
                                                             }}
                                                             ariaLabel="Open PDF"
                                                             title="Open PDF"

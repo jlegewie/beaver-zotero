@@ -26,6 +26,7 @@ import {
 import { navigateToEpubCitation } from '../../utils/epubVisualizer/epubCitationNavigation';
 import { resolvePageLabelFromLabels } from '../../utils/pageLabels';
 import { getPageLabelsForItem } from './itemData';
+import { launchExternalFile } from './sourceActions';
 import { getPref } from '../../../src/utils/prefs';
 import { logger } from '../../../src/utils/logger';
 import { selectItemById } from '../../../src/utils/selectItem';
@@ -83,17 +84,7 @@ export async function activateCitation(activation: CitationActivation): Promise<
     if (isExternalFile) {
         logger(`Citation activation: External file citation (ext-${externalFileKey})`);
         if (!externalFileKey) return;
-        try {
-            const record = await Zotero.Beaver?.db?.getExternalFileByKey(externalFileKey);
-            const path = record?.storedPath ?? null;
-            if (path && (await IOUtils.exists(path).catch(() => false))) {
-                Zotero.launchFile(path);
-            } else {
-                logger(`Citation activation: External file ext-${externalFileKey} has no local copy`);
-            }
-        } catch (error) {
-            logger(`Citation activation: Failed to open external file: ${error}`, 2);
-        }
+        await launchExternalFile(externalFileKey);
         return;
     }
 

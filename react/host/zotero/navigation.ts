@@ -1,7 +1,8 @@
 import type { NavigationHost } from '../types';
 import type { ZoteroItemReference } from '../../types/zotero';
-import { revealSource } from '../../utils/sourceUtils';
+import { revealSource, openSource as openZoteroSource } from '../../utils/sourceUtils';
 import { activateCitation } from './citationActivation';
+import { launchExternalFile } from './sourceActions';
 
 /**
  * Zotero implementation of {@link NavigationHost}.
@@ -21,4 +22,8 @@ export const zoteroNavigation: NavigationHost = {
         Zotero.getMainWindow().location.href = url;
     },
     activateCitation,
+    openSource(ref: ZoteroItemReference): Promise<void> {
+        return openZoteroSource(ref);
+    },
+    launchExternalFile,
 };

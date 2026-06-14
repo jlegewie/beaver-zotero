@@ -1,8 +1,9 @@
 import { type PageLabelsByAttachmentId } from '../../atoms/citations';
 import { getBestPDFAttachment } from '../../../src/utils/zoteroItemHelpers';
 import type { CitationRef } from '../../utils/citationGrammar';
+import type { ZoteroItemReference } from '../../types/zotero';
 import { logger } from '../../../src/utils/logger';
-import type { ItemDataHost } from '../types';
+import type { ItemDataHost, ResolvedItemDisplay } from '../types';
 
 /**
  * Resolve the page-label map (0-based page index -> printed label) for a Zotero
@@ -37,6 +38,23 @@ export const zoteroItemData: ItemDataHost = {
             return getPageLabelsForItem(item, labelsByAttachmentId);
         } catch (e) {
             logger(`zoteroItemData: page label resolution failed: ${e}`);
+            return null;
+        }
+    },
+
+    async resolveItemDisplay(ref: ZoteroItemReference): Promise<ResolvedItemDisplay | null> {
+        try {
+            const item = Zotero.Items.getByLibraryAndKey(ref.library_id, ref.zotero_key);
+            if (!item || typeof item === 'boolean') return null;
+            let hasReadableAttachment = false;
+            if (item.isRegularItem()) {
+                hasReadableAttachment = !!(await item.getBestAttachment());
+            } else if (item.isAttachment()) {
+                hasReadableAttachment = true;
+            }
+            return { itemType: item.itemType, hasReadableAttachment };
+        } catch (e) {
+            logger(`zoteroItemData: item display resolution failed: ${e}`);
             return null;
         }
     },
