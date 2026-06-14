@@ -123,7 +123,7 @@ export type CitationExportRender =
 
 /**
  * Render content into the host's native document format. For Zotero this is a
- * note (CSL-formatted HTML); other clients (e.g. a Word add-in) format
+ * note (CSL-formatted HTML); other clients format
  * differently. Clients that don't support document export omit this slice.
  */
 export interface DocumentExportHost {

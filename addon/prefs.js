@@ -23,7 +23,7 @@ pref("readerExplainPrompt", "Explain the selected passage or annotation(s) from 
 pref("accessRemoteFiles", true);
 
 // Data provider: keep a provider-wake subscription open while logged in so
-// agent runs started from other Beaver clients (e.g. Beaver for Word) can
+// agent runs started from other Beaver clients can
 // request library data from this Zotero on demand.
 pref("dataProviderEnabled", false);
 

@@ -10,24 +10,29 @@ import { externalReferenceMappingAtom } from '../../atoms/externalReferences';
 import { pageLabelsByAttachmentIdAtom } from '../../atoms/citations';
 import { useCitationMarker } from '../../hooks/useCitationMarker';
 import { getHost } from '../../host';
-import { useCitationViewModel } from '../citations/useCitationViewModel';
+import { useCitationViewModel } from './useCitationViewModel';
 import { Icon, LibraryIcon, PdfIcon, GlobalSearchIcon, NoteIcon, HighlighterIcon, TextAlignLeftIcon, ExternalLinkIcon } from '../icons/icons';
 const TOOLTIP_WIDTH = '250px';
 
 /**
- * Props for ZoteroCitation component.
- * 
+ * Presentational citation component. Client-agnostic: it renders from the
+ * citation view model and delegates every client-specific concern (navigation,
+ * note export, display config) to the host registry (`react/host`). It must not
+ * touch the `Zotero` global or import the Zotero host implementation — the lint
+ * guard in `eslint.config.mjs` enforces this.
+ * See docs-zotero/client-host-architecture.md.
+ *
  * Supported citation tag formats from LLM:
- *   <citation id="libraryID-itemKey"/>           - Zotero item reference
- *   <citation id="..." loc="page5"/>             - Zotero item with page reference
- *   <citation id="..." loc="s25"/>               - Zotero item with sentence/record ID
+ *   <citation id="libraryID-itemKey"/>           - library item reference
+ *   <citation id="..." loc="page5"/>             - library item with page reference
+ *   <citation id="..." loc="s25"/>               - library item with sentence/record ID
  *   <citation external_id="..."/>                - external reference
  * Legacy item_id/att_id/page attrs are still accepted by preprocessing.
- * 
+ *
  * Note: Props are passed from HTML attributes after sanitization,
  * so values may have 'user-content-' prefix added by rehype-sanitize.
  */
-interface ZoteroCitationProps {
+interface CitationProps {
     dataLibraryId?: string | number;
     dataZoteroKey?: string;
     dataExternalId?: string;
@@ -49,7 +54,7 @@ interface ZoteroCitationProps {
     children?: React.ReactNode;
 }
 
-const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
+const Citation: React.FC<CitationProps> = (props) => {
     const { exportRendering = false } = props;
 
     // Derive the render-ready view model. This is client-agnostic: it reads only
@@ -366,4 +371,4 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
 
 };
 
-export default ZoteroCitation;
+export default Citation;

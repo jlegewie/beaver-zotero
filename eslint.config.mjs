@@ -113,10 +113,7 @@ export default tseslint.config(
     // directly — those couplings go through `getHost()`.
     // See docs-zotero/client-host-architecture.md.
     {
-        files: [
-            "react/components/citations/**/*.{ts,tsx}",
-            "react/components/sources/ZoteroCitation.tsx",
-        ],
+        files: ["react/components/citations/**/*.{ts,tsx}"],
         rules: {
             "no-restricted-globals": [
                 "error",
