@@ -2367,6 +2367,13 @@ export function extractGetMetadataData(
             // Convert item_ids to ZoteroItemReference
             const items: ZoteroItemReference[] = obj.items
                 .map(item => {
+                    // Some results carry library_id/zotero_key directly instead of a composite item_id.
+                    const libId = (item as Record<string, unknown>)?.library_id;
+                    const key = (item as Record<string, unknown>)?.zotero_key;
+                    if (typeof libId === 'number' && typeof key === 'string' && key) {
+                        return { library_id: libId, zotero_key: key };
+                    }
+                    if (typeof item?.item_id !== 'string') return null;
                     const parts = item.item_id.split('-');
                     if (parts.length < 2) return null;
                     const libraryId = parseInt(parts[0], 10);
