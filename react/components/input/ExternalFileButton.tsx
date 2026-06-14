@@ -131,7 +131,7 @@ export const ExternalFileButton = forwardRef<HTMLButtonElement, ExternalFileButt
                 <span className="truncate">
                     {truncateText(filename, MAX_FILENAME_LENGTH)}
                 </span>
-                <Icon icon={ExternalLinkIcon} className="ml-015 font-color-secondary scale-11" />
+                <Icon icon={ExternalLinkIcon} className="scale-95" />
             </button>
             {removeMenu}
             </>
