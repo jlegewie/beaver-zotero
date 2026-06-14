@@ -1,7 +1,6 @@
 import React from 'react';
 import Tooltip from '../ui/Tooltip';
 import { useAtomValue } from 'jotai';
-import { getPref } from '../../../src/utils/prefs';
 import {
     getCitationBoundingBoxes,
     getContentKind,
@@ -91,7 +90,7 @@ const ZoteroCitation: React.FC<ZoteroCitationProps> = (props) => {
     const labelsByAttachmentId = useAtomValue(pageLabelsByAttachmentIdAtom);
 
     // Get the citation format preference
-    const authorYearFormat = getPref("citationFormat") !== "numeric";
+    const authorYearFormat = (getHost().config?.citationFormat() ?? 'author-year') !== 'numeric';
 
     // Get or assign numeric marker using base key (same item = same marker)
     // Uses markerKey (without sid/page) so all citations to the same item share a marker

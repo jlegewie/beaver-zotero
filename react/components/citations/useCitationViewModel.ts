@@ -18,7 +18,6 @@ import {
 import { formatNumberRanges, formatPageRangesWithLabels } from '../../utils/stringUtils';
 import { resolvePageLabelFromLabels } from '../../utils/pageLabels';
 import { ZoteroItemReference } from '../../types/zotero';
-import { getPref } from '../../../src/utils/prefs';
 import { getHost } from '../../host';
 
 /**
@@ -177,7 +176,7 @@ export function useCitationViewModel(props: Record<string, unknown>): CitationVi
 
     // Whether page locators should render using the PDF's page labels (e.g.,
     // Roman numerals for front matter) instead of raw page numbers.
-    const usePageLabels = getPref('usePageLabels') !== false;
+    const usePageLabels = getHost().config?.usePageLabels() ?? true;
 
     // =========================================================================
     // IDENTITY RESOLUTION - Using normalized citation keys for lookup and markers

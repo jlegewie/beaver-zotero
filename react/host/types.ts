@@ -132,6 +132,18 @@ export interface DocumentExportHost {
 }
 
 /**
+ * Display configuration the render layer needs. Typed, named accessors (rather
+ * than a generic `getPref`) so the render layer never couples to a client's
+ * preference system. Read on each render — no reactivity is implied.
+ */
+export interface ConfigHost {
+    /** Citation display format. */
+    citationFormat(): 'author-year' | 'numeric';
+    /** Whether to render printed page labels instead of raw page numbers. */
+    usePageLabels(): boolean;
+}
+
+/**
  * Aggregate client host. Registered once per client at bundle init via
  * {@link setHost}. Slices are optional — check before use.
  */
@@ -139,4 +151,5 @@ export interface ClientHost {
     navigation?: NavigationHost;
     itemData?: ItemDataHost;
     documentExport?: DocumentExportHost;
+    config?: ConfigHost;
 }

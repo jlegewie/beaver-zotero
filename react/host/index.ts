@@ -5,6 +5,7 @@ export type {
     NavigationHost,
     ItemDataHost,
     DocumentExportHost,
+    ConfigHost,
     CitationActivation,
     CitationExportRequest,
     CitationExportRender,
