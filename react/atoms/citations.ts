@@ -250,9 +250,9 @@ function getDisplayRef(citation: Citation): CitationRef | null {
 /**
  * Citations mapped by full citation key for lookup.
  *
- * This is the primary lookup mechanism for ZoteroCitation components:
+ * This is the primary lookup mechanism for Citation components:
  * - MarkdownRenderer injects data-requested-citation-key during preprocessing
- * - ZoteroCitation looks up metadata using this key
+ * - Citation looks up metadata using this key
  * - Key includes loc/page for unique identification of citation instances
  *
  * Key format:
