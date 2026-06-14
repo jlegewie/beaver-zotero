@@ -3,11 +3,14 @@ import {
     AttachmentSearchReference,
     AttachmentMatchSummary,
 } from '../../agents/toolResultTypes';
-import { CSSItemTypeIcon, ArrowDownIcon, ArrowRightIcon, Icon } from '../icons/icons';
+import { CSSItemTypeIcon, ArrowDownIcon, ArrowRightIcon, ExternalLinkIcon, Icon } from '../icons/icons';
 import { getDisplayNameFromItem, revealSource } from '../../utils/sourceUtils';
 import { navigateToAttachmentMatch } from '../../utils/attachmentMatchNavigation';
 import { ZoteroItemReference } from '../../types/zotero';
 import { logger } from '../../../src/utils/logger';
+import { EXTERNAL_LIBRARY_ID } from '../../../src/services/externalFiles';
+import { EXTERNAL_FILE_ICON_BY_KIND } from '../input/ExternalFileButton';
+import { launchExternalFile } from '../../host/zotero/sourceActions';
 
 interface FindInAttachmentsResultViewProps {
     query: string;
@@ -18,11 +21,20 @@ interface FindInAttachmentsResultViewProps {
 
 interface ResolvedAttachment {
     ref: AttachmentSearchReference;
-    /** Parent item display name ("Smith 2024"); zotero_key when unresolved. */
+    /** Parent item display name ("Smith 2024"); external filename; or key when unresolved. */
     displayName: string;
     iconType: string | null;
-    /** False when the attachment no longer exists in the local library. */
+    /**
+     * The reference points to something we recognize and that carries a real
+     * search status — a Zotero item that exists, or any external file (the
+     * search already ran). False only for a Zotero attachment no longer in the
+     * library, which has no status to show.
+     */
     resolved: boolean;
+    /** Can the user click to open/reveal it (Zotero item exists, or external copy present)? */
+    openable: boolean;
+    /** External file (library_id === EXTERNAL_LIBRARY_ID); zotero_key holds the ext key. */
+    isExternal: boolean;
 }
 
 /** Whether the attachment contributes match rows to the primary list. */
@@ -187,6 +199,28 @@ export const FindInAttachmentsResultView: React.FC<FindInAttachmentsResultViewPr
         const resolve = async () => {
             const items: ResolvedAttachment[] = [];
             for (const ref of attachments) {
+                // Sentinel references (library_id === EXTERNAL_LIBRARY_ID) are
+                // user-attached external files, not Zotero items: resolve the
+                // filename/icon from the external-files store, not the library.
+                if (ref.library_id === EXTERNAL_LIBRARY_ID) {
+                    const record = await Zotero.Beaver?.db
+                        ?.getExternalFileByKey(ref.zotero_key)
+                        .catch(() => null);
+                    const copyExists = record
+                        ? await IOUtils.exists(record.storedPath).catch(() => false)
+                        : false;
+                    items.push({
+                        ref,
+                        displayName: record?.filename ?? `Attached file (ext-${ref.zotero_key})`,
+                        iconType: (record?.contentKind && EXTERNAL_FILE_ICON_BY_KIND[record.contentKind])
+                            || 'attachmentFile',
+                        resolved: true,
+                        openable: copyExists,
+                        isExternal: true,
+                    });
+                    continue;
+                }
+
                 let item: Zotero.Item | false | undefined;
                 try {
                     item = await Zotero.Items.getByLibraryAndKeyAsync(
@@ -202,6 +236,8 @@ export const FindInAttachmentsResultView: React.FC<FindInAttachmentsResultViewPr
                         displayName: ref.zotero_key,
                         iconType: null,
                         resolved: false,
+                        openable: false,
+                        isExternal: false,
                     });
                     continue;
                 }
@@ -231,7 +267,14 @@ export const FindInAttachmentsResultView: React.FC<FindInAttachmentsResultViewPr
                 } catch {
                     // Icon is cosmetic; render the row without one.
                 }
-                items.push({ ref, displayName, iconType, resolved: true });
+                items.push({
+                    ref,
+                    displayName,
+                    iconType,
+                    resolved: true,
+                    openable: true,
+                    isExternal: false,
+                });
             }
             if (!cancelled) setResolved(items);
         };
@@ -248,7 +291,14 @@ export const FindInAttachmentsResultView: React.FC<FindInAttachmentsResultViewPr
     }
 
     const handleAttachmentClick = (att: ResolvedAttachment) => {
-        if (!att.resolved) return;
+        if (!att.openable) return;
+        // External files have no library entry to reveal — open the file copy.
+        if (att.isExternal) {
+            launchExternalFile(att.ref.zotero_key).catch((error) => {
+                logger(`FindInAttachmentsResultView: failed to open external file ext-${att.ref.zotero_key}: ${error}`, 1);
+            });
+            return;
+        }
         try {
             revealSource({
                 library_id: att.ref.library_id,
@@ -264,7 +314,15 @@ export const FindInAttachmentsResultView: React.FC<FindInAttachmentsResultViewPr
         match: AttachmentMatchSummary,
         e: React.MouseEvent
     ) => {
-        if (!att.resolved) return;
+        if (!att.openable) return;
+        // In-reader navigation/highlight is not wired for external files (they
+        // open in the OS viewer, not Zotero's reader) — open the file instead.
+        if (att.isExternal) {
+            launchExternalFile(att.ref.zotero_key).catch((error) => {
+                logger(`FindInAttachmentsResultView: failed to open external file ext-${att.ref.zotero_key}: ${error}`, 1);
+            });
+            return;
+        }
         const ownerDocument = e.currentTarget.ownerDocument;
         try {
             await navigateToAttachmentMatch({
@@ -285,7 +343,10 @@ export const FindInAttachmentsResultView: React.FC<FindInAttachmentsResultViewPr
     const renderAttachment = (att: ResolvedAttachment) => {
         const attKey = `${att.ref.library_id}-${att.ref.zotero_key}`;
         const isHovered = hoveredKey === attKey;
-        const clickable = att.resolved;
+        const clickable = att.openable;
+        const title = !clickable
+            ? undefined
+            : att.isExternal ? 'Click to open the file' : 'Click to reveal in Zotero';
         return (
             <React.Fragment key={attKey}>
                 <div
@@ -293,7 +354,7 @@ export const FindInAttachmentsResultView: React.FC<FindInAttachmentsResultViewPr
                     onClick={() => handleAttachmentClick(att)}
                     onMouseEnter={() => setHoveredKey(attKey)}
                     onMouseLeave={() => setHoveredKey(null)}
-                    title={clickable ? 'Click to reveal in Zotero' : undefined}
+                    title={title}
                 >
                     {att.iconType && (
                         <span className="scale-75" style={{ marginTop: '-2px' }}>
@@ -303,12 +364,27 @@ export const FindInAttachmentsResultView: React.FC<FindInAttachmentsResultViewPr
                     <div className="truncate text-sm font-color-primary">
                         {att.displayName}
                     </div>
+                    {att.isExternal && (
+                        <Icon
+                            icon={ExternalLinkIcon}
+                            size={12}
+                            className="font-color-primary scale-85"
+                            style={{ marginTop: '2px' }}
+                        />
+                    )}
                     <div className="flex-1" />
                     <StatusBadge
                         text={attachmentStatusText(att)}
                         variant={hasMatchRows(att) ? 'match' : 'muted'}
                     />
                 </div>
+                {att.resolved && att.ref.status === 'error' && att.ref.error && (
+                    <div className="display-flex flex-row min-w-0 ml-3 border-left-quarternary">
+                        <div className="text-sm font-color-secondary px-25 py-2">
+                            {att.ref.error}
+                        </div>
+                    </div>
+                )}
                 {att.ref.status === 'ok' && att.ref.matches.length > 0 && (
                     <div className="display-flex flex-col min-w-0 ml-3 border-left-quarternary">
                         {att.ref.matches.map((match, index) => {

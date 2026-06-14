@@ -247,6 +247,8 @@ export interface AttachmentSearchReference {
     content_kind: 'pdf' | 'epub' | 'text' | 'snapshot';
     /** Display previews of the returned matches, in rank order. */
     matches: AttachmentMatchSummary[];
+    /** Short, user-facing reason the attachment could not be searched (status='error'). */
+    error?: string;
 }
 
 /**
@@ -1085,6 +1087,7 @@ export function extractFindInAttachmentsData(
             pages: Array.isArray(att.pages) ? att.pages : [],
             content_kind: att.content_kind ?? 'pdf',
             matches,
+            error: typeof att.error === 'string' ? att.error : undefined,
         };
     });
 

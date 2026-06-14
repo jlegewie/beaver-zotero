@@ -366,6 +366,29 @@ describe('find_in_attachments summary', () => {
         expect(result?.attachments[1].status).toBe('error');
     });
 
+    it('parses the display error reason on errored attachments', () => {
+        const metadata = {
+            summary: {
+                tool_name: 'find_in_attachments',
+                query: 'q',
+                total_matches: 0,
+                attachment_count: 1,
+                attachments: [{
+                    library_id: -1,
+                    zotero_key: 'AB12CD34',
+                    status: 'error',
+                    match_count: 0,
+                    pages: [],
+                    content_kind: 'pdf',
+                    matches: [],
+                    error: 'Scanned document (no text layer) — can\'t be keyword-searched.',
+                }],
+            },
+        };
+        const result = extractFindInAttachmentsData(undefined, metadata);
+        expect(result?.attachments[0].error).toContain('Scanned document');
+    });
+
     it('normalizes omitted optional fields', () => {
         const metadata = {
             summary: {
