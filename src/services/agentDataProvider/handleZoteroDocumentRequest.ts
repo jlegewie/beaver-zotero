@@ -99,7 +99,6 @@ async function getResolvedAttachmentParentSummary(
     }
 
     await Zotero.Items.loadDataTypes([parent], [
-        'primaryData',
         'itemData',
         'creators',
         'tags',
@@ -220,10 +219,19 @@ export async function handleZoteroDocumentRequest(
 
         const { item: resolvedItem, key: resolvedKey, contentKind, contentType } = resolved;
         timeoutContentKind = readableToExtractKind(contentKind);
-        const parentItem = await withRequestDeadline(
-            getResolvedAttachmentParentSummary(resolvedItem),
-            'parent_item_summary',
-        );
+        let parentItem: ItemSummary | null = null;
+        try {
+            parentItem = await withRequestDeadline(
+                getResolvedAttachmentParentSummary(resolvedItem),
+                'parent_item_summary',
+            );
+        } catch (error) {
+            // parent_item is optional metadata; a genuine request-deadline hit
+            // still fails the request, but any other failure must not break
+            // document delivery.
+            if (error instanceof TimeoutError) throw error;
+            logger(`handleZoteroDocumentRequest: parent summary failed for ${resolvedKey}: ${error}`, 1);
+        }
         const servedAttachment = buildServedAttachmentInfo(resolvedItem, contentKind);
 
         if (contentKind === 'text') {

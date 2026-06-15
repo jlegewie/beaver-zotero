@@ -393,8 +393,49 @@ describe('handleZoteroDocumentRequest document cache integration', () => {
         expect((globalThis as any).Zotero.Items.getAsync).toHaveBeenCalledWith(parentItem.id);
         expect((globalThis as any).Zotero.Items.loadDataTypes).toHaveBeenCalledWith(
             [parentItem],
-            ['primaryData', 'itemData', 'creators', 'tags', 'collections'],
+            ['itemData', 'creators', 'tags', 'collections'],
         );
+    });
+
+    it('still serves the document when parent-item resolution fails', async () => {
+        const attachmentWithParent = {
+            ...resolvedPdfItem,
+            isAttachment: vi.fn(() => true),
+            parentItemID: 7,
+        };
+        const documentCache = {
+            getSourceIdentitySnapshot: vi.fn().mockResolvedValue(null),
+            getMetadata: vi.fn().mockResolvedValue({
+                pageCount: 1,
+                pageLabels: { '0': '1' },
+                errorCode: null,
+                contentType: 'application/pdf',
+            }),
+            getResult: vi.fn().mockResolvedValue(structuredResult),
+        };
+        (globalThis as any).Zotero.Beaver = { data: { env: 'test' }, documentCache };
+        // Parent lookup rejects: the optional parent_item must degrade to absent
+        // without failing the document delivery.
+        (globalThis as any).Zotero.Items.getAsync = vi.fn().mockRejectedValue(new Error('db error'));
+        (globalThis as any).Zotero.Items.loadDataTypes = vi.fn().mockResolvedValue(undefined);
+        vi.mocked(resolveToReadableAttachment).mockResolvedValue({
+            resolved: true,
+            item: attachmentWithParent,
+            key: '1-ABCD1234',
+            contentKind: 'pdf',
+            contentType: 'application/pdf',
+        } as any);
+
+        const response = await handleZoteroDocumentRequest({
+            event: 'zotero_document_request',
+            request_id: 'req-parent-fail',
+            attachment: { library_id: 1, zotero_key: 'ABCD1234' },
+            mode: 'structured',
+        });
+
+        expect(response.error).toBeUndefined();
+        expect(response.result).toBeTruthy();
+        expect(response.parent_item).toBeUndefined();
     });
 
     it('passes the request abort signal into cache-backed cold extraction', async () => {
@@ -553,6 +594,15 @@ describe('handleZoteroDocumentRequest document cache integration', () => {
             content_type: 'application/epub+zip',
             content_kind: 'epub',
             result: epubDocument,
+            served_attachment: {
+                attachment_id: '1-EPUB1234',
+                parent_item_id: null,
+                title: null,
+                filename: null,
+                content_kind: 'epub',
+                status: 'readable',
+                is_primary: false,
+            },
         });
         expect(documentCache.getEpubResult).toHaveBeenCalledWith(
             { libraryId: 1, zoteroKey: 'EPUB1234' },
