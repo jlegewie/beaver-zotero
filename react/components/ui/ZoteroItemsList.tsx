@@ -209,7 +209,7 @@ const ZoteroItemsList: React.FC<ZoteroItemsListProps> = ({
                                     {!oneLine && entry.label && (
                                         <>
                                             <div className="flex-1" />
-                                            <div className="text-sm display-flex min-w-0 font-color-tertiary mr-1">
+                                            <div className="text-sm display-flex min-w-0 font-color-tertiary mr-1" style={{ flexShrink: 0, whiteSpace: 'nowrap' }}>
                                                 {truncateText(entry.label, 15)}
                                             </div>
                                         </>
@@ -276,7 +276,7 @@ const ZoteroItemsList: React.FC<ZoteroItemsListProps> = ({
                                     {!oneLine && label &&
                                          <>
                                             <div className="flex-1" />
-                                            <div className="text-sm display-flex min-w-0 font-color-tertiary mr-1">
+                                            <div className="text-sm display-flex min-w-0 font-color-tertiary mr-1" style={{ flexShrink: 0, whiteSpace: 'nowrap' }}>
                                                 {truncateText(label, 15)}
                                             </div>
                                         </>
