@@ -2,7 +2,7 @@ import { SubscriptionStatus, ProcessingMode, ChargeType } from '../../react/type
 import { TextPart, ThinkingPart, ToolCallPart, ToolReturnPart, RetryPromptPart, RunUsage } from '../../react/agents/types';
 import { ZoteroItemReference } from '../../react/types/zotero';
 import { ItemDataWithStatus, AttachmentDataWithStatus, ItemSummary, AttachmentInfo } from '../../react/types/zotero';
-import { ReaderState, NoteState } from '../../react/types/attachments/apiTypes';
+import { ReaderState, NoteState, ExternalFileAttachment } from '../../react/types/attachments/apiTypes';
 import { BeaverAgentPrompt } from '../../react/agents/types';
 import { CustomChatModel } from '../../react/types/settings';
 import { AttachmentData, ItemData } from '../../react/types/zotero';
@@ -657,6 +657,12 @@ export interface WSZoteroDocumentResponse {
     result?: DocumentExtractResult | null;
     /** Resolved attachment's parent regular item, when it has one. */
     parent_item?: ItemSummary | null;
+    /**
+     * The served attachment's own metadata — a Zotero attachment
+     * (`AttachmentInfo`) or a user-attached external file
+     * (`ExternalFileAttachment`).
+     */
+    served_attachment?: AttachmentInfo | ExternalFileAttachment | null;
     /** Page count on error responses when available. */
     total_pages?: number | null;
     error?: string | null;

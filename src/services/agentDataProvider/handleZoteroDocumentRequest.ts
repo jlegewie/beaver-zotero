@@ -13,7 +13,8 @@ import {
     WSZoteroDocumentResponse,
 } from '../agentProtocol';
 import type { ZoteroDocumentErrorCode } from '../agentProtocol';
-import type { ItemSummary } from '../../../react/types/zotero';
+import type { AttachmentInfo, ItemSummary } from '../../../react/types/zotero';
+import type { ExternalFileAttachment } from '../../../react/types/attachments/apiTypes';
 import {
     extractAndCacheEpubDocument,
     extractAndCacheResolvedPdfDocument,
@@ -25,7 +26,7 @@ import {
     resolveAttachmentFileSource,
     validateZoteroItemReference,
 } from '../documentExtraction';
-import { readableToExtractKind, type ExtractContentKind } from '../documentExtraction/shared/contentKinds';
+import { readableToExtractKind, type ExtractContentKind, type ReadableContentKind } from '../documentExtraction/shared/contentKinds';
 import {
     DEFAULT_PAGES_TIMEOUT_SECONDS,
     MAX_PDF_TIMEOUT_SECONDS,
@@ -105,6 +106,30 @@ async function getResolvedAttachmentParentSummary(
         'collections',
     ]);
     return serializeItemSummary(parent);
+}
+
+/**
+ * Lightweight `AttachmentInfo` for the served Zotero attachment, for the
+ * backend tool-result view row (the file's own title/filename + content_kind).
+ * Built inline rather than via `getAttachmentInfo` to avoid re-running the
+ * expensive availability/OCR analysis on the hot read path — the document was
+ * just read, so it is readable by construction.
+ */
+function buildServedAttachmentInfo(
+    attachment: Zotero.Item,
+    contentKind: ReadableContentKind,
+): AttachmentInfo {
+    return {
+        attachment_id: `${attachment.libraryID}-${attachment.key}`,
+        parent_item_id: attachment.parentKey
+            ? `${attachment.libraryID}-${attachment.parentKey}`
+            : null,
+        title: attachment.getField?.('title') || attachment.getDisplayTitle?.() || null,
+        filename: attachment.attachmentFilename || null,
+        content_kind: contentKind,
+        status: 'readable',
+        is_primary: false,
+    };
 }
 
 /**
@@ -199,6 +224,7 @@ export async function handleZoteroDocumentRequest(
             getResolvedAttachmentParentSummary(resolvedItem),
             'parent_item_summary',
         );
+        const servedAttachment = buildServedAttachmentInfo(resolvedItem, contentKind);
 
         if (contentKind === 'text') {
             const source = await resolveAttachmentFileSource({
@@ -277,6 +303,7 @@ export async function handleZoteroDocumentRequest(
                 content_kind: 'text',
                 result,
                 ...(parentItem ? { parent_item: parentItem } : {}),
+                served_attachment: servedAttachment,
             }, null, 'text', errorResponse);
         }
 
@@ -309,6 +336,7 @@ export async function handleZoteroDocumentRequest(
                     content_kind: 'epub',
                     result: result.document,
                     ...(parentItem ? { parent_item: parentItem } : {}),
+                    served_attachment: servedAttachment,
                 }, null, 'epub', errorResponse);
             }
 
@@ -354,6 +382,7 @@ export async function handleZoteroDocumentRequest(
                 content_kind: 'pdf',
                 result: { ...result.result, content_kind: 'pdf' as const },
                 ...(parentItem ? { parent_item: parentItem } : {}),
+                served_attachment: servedAttachment,
             }, result.totalPages ?? null, 'pdf', errorResponse);
         }
 
@@ -453,6 +482,17 @@ async function handleExternalFileDocumentRequest(
     }
     const record = resolved.record;
     const itemRef = { id: 0, libraryID: EXTERNAL_LIBRARY_ID, key: extKey };
+    // The served external file's own metadata, for the backend tool-result view
+    // row (mirrors the Zotero `served_attachment`).
+    const servedExternal: ExternalFileAttachment = {
+        type: 'external_file',
+        ext_key: extKey,
+        filename: record.filename,
+        content_kind: record.contentKind,
+        mime_type: record.mimeType,
+        file_size: record.fileSize,
+        ...(record.pageCount != null ? { page_count: record.pageCount } : {}),
+    };
 
     const timeout = createTimeoutController(
         timeout_seconds,
@@ -500,6 +540,7 @@ async function handleExternalFileDocumentRequest(
                 content_type: record.mimeType,
                 content_kind: 'text',
                 result,
+                served_attachment: servedExternal,
             }, null, 'text', errorResponse);
         }
 
@@ -527,6 +568,7 @@ async function handleExternalFileDocumentRequest(
                     content_type: result.contentType,
                     content_kind: 'epub',
                     result: result.document,
+                    served_attachment: servedExternal,
                 }, null, 'epub', errorResponse);
             }
             if (result.code === 'file_missing') {
@@ -559,6 +601,7 @@ async function handleExternalFileDocumentRequest(
                 content_type: result.contentType,
                 content_kind: 'pdf',
                 result: { ...result.result, content_kind: 'pdf' as const },
+                served_attachment: servedExternal,
             }, result.totalPages ?? null, 'pdf', errorResponse);
         }
 
