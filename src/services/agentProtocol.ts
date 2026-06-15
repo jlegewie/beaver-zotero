@@ -655,6 +655,8 @@ export interface WSZoteroDocumentResponse {
     content_type?: string | null;
     content_kind?: ExtractContentKind | null;
     result?: DocumentExtractResult | null;
+    /** Resolved attachment's parent regular item, when it has one. */
+    parent_item?: ItemSummary | null;
     /** Page count on error responses when available. */
     total_pages?: number | null;
     error?: string | null;

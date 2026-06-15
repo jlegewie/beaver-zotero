@@ -13,6 +13,7 @@ import {
     WSZoteroDocumentResponse,
 } from '../agentProtocol';
 import type { ZoteroDocumentErrorCode } from '../agentProtocol';
+import type { ItemSummary } from '../../../react/types/zotero';
 import {
     extractAndCacheEpubDocument,
     extractAndCacheResolvedPdfDocument,
@@ -38,6 +39,7 @@ import {
 import { notifyRemoteDownloadFailure, notifyRemoteFileNotSynced } from './utils';
 import { EXTERNAL_LIBRARY_ID, resolveExternalFile } from '../externalFiles';
 import type { ExternalFileRecord } from '../database';
+import { serializeItemSummary } from '../../utils/zoteroSerializers';
 
 /**
  * Reject success responses whose serialized payload would exceed the
@@ -81,6 +83,28 @@ export function guardPayloadSize(
         totalPages,
         contentKind,
     );
+}
+
+async function getResolvedAttachmentParentSummary(
+    attachment: Zotero.Item,
+): Promise<ItemSummary | null> {
+    if (!attachment.isAttachment?.() || !attachment.parentItemID) {
+        return null;
+    }
+
+    const parent = await Zotero.Items.getAsync(attachment.parentItemID);
+    if (!parent || !parent.isRegularItem?.()) {
+        return null;
+    }
+
+    await Zotero.Items.loadDataTypes([parent], [
+        'primaryData',
+        'itemData',
+        'creators',
+        'tags',
+        'collections',
+    ]);
+    return serializeItemSummary(parent);
 }
 
 /**
@@ -171,6 +195,10 @@ export async function handleZoteroDocumentRequest(
 
         const { item: resolvedItem, key: resolvedKey, contentKind, contentType } = resolved;
         timeoutContentKind = readableToExtractKind(contentKind);
+        const parentItem = await withRequestDeadline(
+            getResolvedAttachmentParentSummary(resolvedItem),
+            'parent_item_summary',
+        );
 
         if (contentKind === 'text') {
             const source = await resolveAttachmentFileSource({
@@ -248,6 +276,7 @@ export async function handleZoteroDocumentRequest(
                 content_type: contentType,
                 content_kind: 'text',
                 result,
+                ...(parentItem ? { parent_item: parentItem } : {}),
             }, null, 'text', errorResponse);
         }
 
@@ -279,6 +308,7 @@ export async function handleZoteroDocumentRequest(
                     content_type: result.contentType,
                     content_kind: 'epub',
                     result: result.document,
+                    ...(parentItem ? { parent_item: parentItem } : {}),
                 }, null, 'epub', errorResponse);
             }
 
@@ -323,6 +353,7 @@ export async function handleZoteroDocumentRequest(
                 content_type: result.contentType,
                 content_kind: 'pdf',
                 result: { ...result.result, content_kind: 'pdf' as const },
+                ...(parentItem ? { parent_item: parentItem } : {}),
             }, result.totalPages ?? null, 'pdf', errorResponse);
         }
 

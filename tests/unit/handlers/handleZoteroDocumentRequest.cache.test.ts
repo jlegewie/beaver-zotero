@@ -308,6 +308,95 @@ describe('handleZoteroDocumentRequest document cache integration', () => {
         expect((globalThis as any).Zotero.Items.getByLibraryAndKeyAsync).toHaveBeenCalledTimes(1);
     });
 
+    it('emits the resolved attachment parent item for direct attachment requests', async () => {
+        const parentItem = {
+            id: 7,
+            key: 'PARENT1',
+            libraryID: 1,
+            itemType: 'journalArticle',
+            itemTypeID: 1,
+            isRegularItem: vi.fn(() => true),
+            getField: vi.fn((field: string) => {
+                const fields: Record<string, string> = {
+                    title: 'Parent Paper',
+                    date: '2024',
+                    publicationTitle: 'Journal',
+                    abstractNote: 'Abstract',
+                    language: 'en',
+                    citationKey: '',
+                    extra: '',
+                };
+                return fields[field] ?? '';
+            }),
+            getCreators: vi.fn(() => [
+                {
+                    firstName: 'Jane',
+                    lastName: 'Smith',
+                    fieldMode: 0,
+                    creatorTypeID: 8,
+                },
+            ]),
+            getTags: vi.fn(() => [{ tag: 'tag-1' }]),
+            getCollections: vi.fn(() => []),
+        };
+        const attachmentWithParent = {
+            ...resolvedPdfItem,
+            isAttachment: vi.fn(() => true),
+            parentItemID: parentItem.id,
+        };
+        const documentCache = {
+            getSourceIdentitySnapshot: vi.fn().mockResolvedValue(null),
+            getMetadata: vi.fn().mockResolvedValue({
+                pageCount: 1,
+                pageLabels: { '0': '1' },
+                errorCode: null,
+                contentType: 'application/pdf',
+            }),
+            getResult: vi.fn().mockResolvedValue(structuredResult),
+        };
+        (globalThis as any).Zotero.Beaver = { data: { env: 'test' }, documentCache };
+        (globalThis as any).Zotero.Items.getAsync = vi.fn().mockResolvedValue(parentItem);
+        (globalThis as any).Zotero.Items.loadDataTypes = vi.fn().mockResolvedValue(undefined);
+        (globalThis as any).Zotero.CreatorTypes = {
+            getPrimaryIDForType: vi.fn(() => 8),
+            getName: vi.fn(() => 'author'),
+        };
+        (globalThis as any).Zotero.Collections = { get: vi.fn() };
+        vi.mocked(resolveToReadableAttachment).mockResolvedValue({
+            resolved: true,
+            item: attachmentWithParent,
+            key: '1-ABCD1234',
+            contentKind: 'pdf',
+            contentType: 'application/pdf',
+        } as any);
+
+        const response = await handleZoteroDocumentRequest({
+            event: 'zotero_document_request',
+            request_id: 'req-parent',
+            attachment: { library_id: 1, zotero_key: 'ABCD1234' },
+            mode: 'structured',
+        });
+
+        expect(response.parent_item).toMatchObject({
+            library_id: 1,
+            zotero_key: 'PARENT1',
+            item_type: 'journalArticle',
+            title: 'Parent Paper',
+            year: 2024,
+        });
+        expect(response.parent_item?.creators?.[0]).toMatchObject({
+            first_name: 'Jane',
+            last_name: 'Smith',
+            creator_type: 'author',
+            is_primary: true,
+        });
+        expect((globalThis as any).Zotero.Items.getAsync).toHaveBeenCalledWith(parentItem.id);
+        expect((globalThis as any).Zotero.Items.loadDataTypes).toHaveBeenCalledWith(
+            [parentItem],
+            ['primaryData', 'itemData', 'creators', 'tags', 'collections'],
+        );
+    });
+
     it('passes the request abort signal into cache-backed cold extraction', async () => {
         let abortSignal: AbortSignal | undefined;
         const documentCache = {
