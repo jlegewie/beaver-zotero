@@ -12,10 +12,11 @@ import { getNoteHtmlForRead } from '../../utils/noteEditorIO';
 import {
     WSReadNoteRequest,
     WSReadNoteResponse,
+    ItemStub,
 } from '../agentProtocol';
 import { ItemSummary } from '../../../react/types/zotero';
 import { serializeItemSummary } from '../../utils/zoteroSerializers';
-import { prepareAttachmentInfoBatchData, processAttachmentInfoBatch } from './utils';
+import { prepareAttachmentInfoBatchData, processAttachmentInfoBatch, buildItemStub } from './utils';
 import { CITATION_TAG_PATTERN } from '../../../react/utils/citationPreprocessing';
 import {
     normalizeCitationTag,
@@ -285,10 +286,12 @@ export async function handleReadNoteRequest(
         // 8. Gather parent metadata
         let parentItemId: string | undefined;
         let parentTitle: string | undefined;
+        let parentStub: ItemStub | undefined;
         if (item.parentItem) {
-            await item.parentItem.loadDataType('itemData');
+            await Zotero.Items.loadDataTypes([item.parentItem], ['itemData', 'creators']);
             parentItemId = `${item.parentItem.libraryID}-${item.parentItem.key}`;
             parentTitle = item.parentItem.getField('title') as string;
+            parentStub = buildItemStub(item.parentItem);
         }
 
         // 9. Resolve cited items from the visible slice only
@@ -304,6 +307,7 @@ export async function handleReadNoteRequest(
             title: item.getNoteTitle() || '(untitled)',
             parent_item_id: parentItemId,
             parent_title: parentTitle,
+            parent_item: parentStub,
             total_lines: totalLines,
             content,
             has_more: hasMore,

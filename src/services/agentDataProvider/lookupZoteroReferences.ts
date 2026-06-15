@@ -19,7 +19,7 @@ import {
     serializeItem,
     serializeNote,
 } from '../../utils/zoteroSerializers';
-import { computeItemStatus, prefetchSyncDates, getAttachmentFileStatus, getAttachmentFileStatusLightweight, getBestAttachmentBatch } from './utils';
+import { computeItemStatus, prefetchSyncDates, getAttachmentFileStatus, getAttachmentFileStatusLightweight, getBestAttachmentBatch, buildItemStub } from './utils';
 import {
     WSDataError,
     AnnotationResultItem,
@@ -449,20 +449,24 @@ export async function lookupZoteroReferences(
     const items = itemResults.filter((i): i is ItemDataWithStatus => i !== null);
     const attachments = attachmentResults.filter((a): a is AttachmentDataWithStatus => a !== null);
 
+    // Note parents
+    const noteParentItems = [...new Set(
+        notesToSerialize
+            .map(note => note.parentID)
+            .filter((id): id is number => typeof id === 'number')
+    )]
+        .map(id => parentItemsById.get(id))
+        .filter((p): p is Zotero.Item => p != null);
+    if (noteParentItems.length > 0) {
+        await Zotero.Items.loadDataTypes(noteParentItems, ['itemData', 'creators']);
+    }
+
     // Serialize notes using the same pattern as zotero_search/list_items
     const noteResults: NoteResultItem[] = [];
     for (const note of notesToSerialize) {
         try {
-            const parentInfo = note.parentID ? parentItemsById.get(note.parentID) : null;
-            let parentTitle = '';
-            if (parentInfo) {
-                try { parentTitle = (parentInfo.getField('title', false, true) as string) || ''; }
-                catch { parentTitle = parentInfo.getDisplayTitle?.() || ''; }
-            }
-            noteResults.push(serializeNote(
-                note,
-                parentInfo ? { item_id: `${parentInfo.libraryID}-${parentInfo.key}`, title: parentTitle } : null,
-            ));
+            const parentItem = note.parentID ? parentItemsById.get(note.parentID) : null;
+            noteResults.push(serializeNote(note, parentItem ? buildItemStub(parentItem) : null));
         } catch (error: any) {
             logger(`lookupZoteroReferences: Failed to serialize note ${note.libraryID}/${note.key}: ${error}`, 1);
             errors.push({

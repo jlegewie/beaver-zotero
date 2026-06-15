@@ -30,6 +30,13 @@ vi.mock('../../../src/services/agentDataProvider/utils', () => ({
     prepareAttachmentInfoBatchData: vi.fn(async () => ({ bestAttachmentMap: new Map() })),
     processAttachmentInfoBatch: vi.fn(async () => []),
     toAttachmentSummary: vi.fn((attachment: any) => attachment),
+    buildItemStub: vi.fn((item: any) => ({
+        item_id: `${item.libraryID}-${item.key}`,
+        item_type: item.itemType,
+        title: item.getField?.('title', false, true) || item.getDisplayTitle?.() || null,
+        creators: null,
+        year: null,
+    })),
 }));
 
 // Mock logger

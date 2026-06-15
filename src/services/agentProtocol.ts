@@ -904,8 +904,12 @@ export interface WSReadNoteResponse {
     /** Note metadata */
     note_id?: string;
     title?: string;
+    /** @deprecated Superseded by `parent_item.item_id`. Still emitted for clients/backends predating `parent_item`; remove once the backend reads `parent_item`. */
     parent_item_id?: string;
+    /** @deprecated Superseded by `parent_item.title`. Still emitted for clients/backends predating `parent_item`; remove once the backend reads `parent_item`. */
     parent_title?: string;
+    /** Bibliographic anchor for the parent item, when the note has one. */
+    parent_item?: ItemStub | null;
     /** Total line count of the simplified HTML */
     total_lines?: number;
     /** The simplified HTML content */
@@ -956,6 +960,24 @@ export interface WSZoteroSearchRequest extends WSBaseEvent {
     has_attachments?: boolean | null;
 }
 
+/**
+ * Minimal bibliographic anchor for a Zotero regular item (Tier-1 "stub").
+ * Mirrors the backend `ItemStub`: the canonical shape for a 1:1 inline
+ * reference to a parent item (e.g. a note's or attachment's parent).
+ */
+export interface ItemStub {
+    /** Unique Zotero identifier in the form "<library_id>-<zotero_key>". */
+    item_id: string;
+    /** Zotero item type (e.g., journalArticle, book). */
+    item_type?: string | null;
+    /** Item title. */
+    title?: string | null;
+    /** Formatted creator string, e.g. "Smith, Jones & Lee". */
+    creators?: string | null;
+    /** Publication year if available. */
+    year?: number | null;
+}
+
 /** Regular (non-note) result item from zotero_search */
 export interface RegularSearchResultItem {
     result_type: 'regular';
@@ -972,15 +994,22 @@ export interface NoteResultItem {
     result_type: 'note';
     item_id: string;
     title?: string | null;
+    /** @deprecated Superseded by `parent_item.item_id`. Still emitted for clients/backends predating `parent_item`; remove once the backend reads `parent_item`. */
     parent_item_id?: string | null;
+    /** @deprecated Superseded by `parent_item.title`. Still emitted for clients/backends predating `parent_item`; remove once the backend reads `parent_item`. */
     parent_title?: string | null;
+    /** Bibliographic anchor for the parent item, when the note has one. */
+    parent_item?: ItemStub | null;
     date_modified?: string | null;
 }
 
 /** Attachment result item from search/list results */
 export type AttachmentRowResult = AttachmentInfo & {
     result_type: 'attachment';
+    /** @deprecated Superseded by `parent_item.title`. Still emitted for clients/backends predating `parent_item`; remove once the backend reads `parent_item`. */
     parent_title?: string | null;
+    /** Bibliographic anchor for the parent item, when the attachment has one. */
+    parent_item?: ItemStub | null;
     date_modified?: string | null;
 };
 

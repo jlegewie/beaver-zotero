@@ -29,6 +29,13 @@ vi.mock('../../../src/services/agentDataProvider/utils', () => ({
     extractYear: vi.fn(() => null),
     formatCreatorsString: vi.fn(() => ''),
     getAttachmentInfoForItem: vi.fn(),
+    buildItemStub: vi.fn((item: any) => ({
+        item_id: `${item.libraryID}-${item.key}`,
+        item_type: item.itemType,
+        title: item.getField?.('title', false, true) || item.getDisplayTitle?.() || null,
+        creators: null,
+        year: null,
+    })),
 }));
 
 import { handleZoteroSearchRequest } from '../../../src/services/agentDataProvider/handleZoteroSearchRequest';
