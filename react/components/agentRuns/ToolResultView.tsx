@@ -11,10 +11,6 @@ import {
     extractViewPageImagesData,
     isViewToolResult,
     extractViewToolData,
-    isSearchInDocumentsResult,
-    extractSearchInDocumentsData,
-    isSearchInAttachmentResult,
-    extractSearchInAttachmentData,
     isFindInAttachmentsResult,
     extractFindInAttachmentsData,
     isExternalSearchResult,
@@ -139,22 +135,6 @@ export const ToolResultView: React.FC<ToolResultViewProps> = ({ toolcall, result
         const data = extractViewPageImagesData(content, metadata);
         if (data) {
             return <ViewPageImagesResultView pages={data.pages} />;
-        }
-    }
-
-    // Search in documents results (search_in_documents)
-    if (isSearchInDocumentsResult(toolName, content, metadata)) {
-        const data = extractSearchInDocumentsData(content, metadata);
-        if (data) {
-            return <FulltextSearchResultView chunks={data.chunks} />;
-        }
-    }
-
-    // Search in attachment results (search_in_attachment - keyword search)
-    if (isSearchInAttachmentResult(toolName, content, metadata)) {
-        const data = extractSearchInAttachmentData(content, metadata);
-        if (data) {
-            return <ReadPagesResultView pages={data.pages} />;
         }
     }
 
@@ -290,7 +270,7 @@ const GenericResultView: React.FC<{ content: unknown }> = ({ content }) => {
                 </pre>
             ) : (
                 <div className="font-color-secondary">
-                    No result to display
+                    Tool results not available
                 </div>
             )}
             

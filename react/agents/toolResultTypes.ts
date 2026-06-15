@@ -612,74 +612,6 @@ export function isViewToolResult(
     );
 }
 
-/**
- * Type guard for passage retrieval results.
- * Checks if metadata.summary is SearchInDocumentsToolResultSummary.
- */
-export function isSearchInDocumentsResult(
-    toolName: string,
-    _content: unknown,
-    metadata?: Record<string, unknown>
-): metadata is { summary: SearchInDocumentsToolResultSummary } {
-    if (!metadata?.summary || typeof metadata.summary !== 'object') return false;
-    const summary = metadata.summary as Record<string, unknown>;
-
-    const toolNameIsPassageRetrieval = SEARCH_IN_DOCUMENTS_TOOL_NAMES.includes(toolName);
-    const toolNameIsOtherKnownChunkTool =
-        FULLTEXT_SEARCH_TOOL_NAMES.includes(toolName) ||
-        READ_PAGES_TOOL_NAMES.includes(toolName);
-    if (!toolNameIsPassageRetrieval) {
-        if (toolNameIsOtherKnownChunkTool) return false;
-        const summaryToolName = typeof summary.tool_name === 'string' ? summary.tool_name : null;
-        if (!summaryToolName || !SEARCH_IN_DOCUMENTS_TOOL_NAMES.includes(summaryToolName)) return false;
-    }
-    
-    return (
-        typeof summary.tool_name === 'string' &&
-        typeof summary.result_count === 'number' &&
-        Array.isArray(summary.chunks) &&
-        summary.chunks.every((chunk: unknown) => {
-            if (!chunk || typeof chunk !== 'object') return false;
-            const obj = chunk as Record<string, unknown>;
-            return typeof obj.library_id === 'number' && typeof obj.zotero_key === 'string';
-        })
-    );
-}
-
-/**
- * Type guard for search in attachment results (keyword search).
- * Checks if metadata.summary is SearchInAttachmentResultSummary.
- */
-export function isSearchInAttachmentResult(
-    toolName: string,
-    _content: unknown,
-    metadata?: Record<string, unknown>
-): metadata is { summary: SearchInAttachmentResultSummary } {
-    if (!metadata?.summary || typeof metadata.summary !== 'object') return false;
-    const summary = metadata.summary as Record<string, unknown>;
-
-    const toolNameIsSearchInAttachment = SEARCH_IN_ATTACHMENT_TOOL_NAMES.includes(toolName);
-    if (!toolNameIsSearchInAttachment) {
-        const summaryToolName = typeof summary.tool_name === 'string' ? summary.tool_name : null;
-        if (!summaryToolName || !SEARCH_IN_ATTACHMENT_TOOL_NAMES.includes(summaryToolName)) return false;
-    }
-    
-    return (
-        typeof summary.tool_name === 'string' &&
-        typeof summary.total_matches === 'number' &&
-        typeof summary.pages_with_matches === 'number' &&
-        Array.isArray(summary.pages) &&
-        summary.pages.every((page: unknown) => {
-            if (!page || typeof page !== 'object') return false;
-            const obj = page as Record<string, unknown>;
-            return (
-                typeof obj.library_id === 'number' &&
-                typeof obj.zotero_key === 'string' &&
-                typeof obj.page_number === 'number'
-            );
-        })
-    );
-}
 
 /**
  * Type guard for find in attachments results (keyword search across attachments).
@@ -1009,48 +941,10 @@ export interface PassageRetrievalViewData {
 }
 
 /**
- * Extract chunk-level data from metadata.summary for passage retrieval.
- * @returns PassageRetrievalViewData or null if summary is not available
- */
-export function extractSearchInDocumentsData(
-    _content: unknown,
-    metadata?: Record<string, unknown>
-): PassageRetrievalViewData | null {
-    if (!metadata?.summary || typeof metadata.summary !== 'object') return null;
-    const summary = metadata.summary as SearchInDocumentsToolResultSummary;
-    
-    if (!Array.isArray(summary.chunks)) return null;
-
-    return { chunks: summary.chunks };
-}
-
-/**
  * Normalized search in attachment data.
  */
 export interface SearchInAttachmentViewData {
     pages: PageReference[];
-}
-
-/**
- * Extract page-level data from metadata.summary for search in attachment.
- * @returns SearchInAttachmentViewData or null if summary is not available
- */
-export function extractSearchInAttachmentData(
-    _content: unknown,
-    metadata?: Record<string, unknown>
-): SearchInAttachmentViewData | null {
-    if (!metadata?.summary || typeof metadata.summary !== 'object') return null;
-    const summary = metadata.summary as SearchInAttachmentResultSummary;
-    
-    if (!Array.isArray(summary.pages)) return null;
-
-    const pages: PageReference[] = summary.pages.map(page => ({
-        library_id: page.library_id,
-        zotero_key: page.zotero_key,
-        page_number: page.page_number,
-    }));
-
-    return { pages };
 }
 
 /**
@@ -1537,18 +1431,6 @@ export function extractZoteroReferences(part: ToolReturnPart): ZoteroItemReferen
     // View page images results
     if (isViewPageImagesResult(tool_name, content, metadata)) {
         const data = extractViewPageImagesData(content, metadata);
-        return data?.pages ?? [];
-    }
-
-    // Passage retrieval results (chunks)
-    if (isSearchInDocumentsResult(tool_name, content, metadata)) {
-        const data = extractSearchInDocumentsData(content, metadata);
-        return data?.chunks ?? [];
-    }
-
-    // Search in attachment results (pages)
-    if (isSearchInAttachmentResult(tool_name, content, metadata)) {
-        const data = extractSearchInAttachmentData(content, metadata);
         return data?.pages ?? [];
     }
 
