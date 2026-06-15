@@ -14,10 +14,10 @@ import {
     ListItemsResultItem,
     RegularListResultItem,
     AttachmentRowResult,
-    ItemStub,
 } from '../agentProtocol';
-import { serializeNote } from '../../utils/zoteroSerializers';
-import { getCollectionByIdOrName, validateLibraryAccess, isLibrarySearchable, getSearchableLibraries, extractYear, formatCreatorsString, getAttachmentInfoForItem, buildItemStub } from './utils';
+import { ItemSummary } from '../../../react/types/zotero';
+import { serializeNote, serializeItemSummary } from '../../utils/zoteroSerializers';
+import { getCollectionByIdOrName, validateLibraryAccess, isLibrarySearchable, getSearchableLibraries, extractYear, formatCreatorsString, getAttachmentInfoForItem } from './utils';
 
 function isAnnotationItem(item: Zotero.Item): boolean {
     return String(item.itemType) === 'annotation' || (item as { isAnnotation?: () => boolean }).isAnnotation?.() === true;
@@ -309,15 +309,14 @@ export async function handleListItemsRequest(
                 childParentIds.add(item.parentItemID);
             }
         }
-        const parentMap = new Map<number, ItemStub>();
+        const parentMap = new Map<number, ItemSummary>();
         if (childParentIds.size > 0) {
             const parentItems = await Zotero.Items.getAsync([...childParentIds]);
             const validParents = parentItems.filter((p): p is Zotero.Item => p !== null);
             if (validParents.length > 0) {
-                await Zotero.Items.loadDataTypes(validParents, ['primaryData', 'itemData', 'creators']);
-            }
-            for (const parent of validParents) {
-                parentMap.set(parent.id, buildItemStub(parent));
+                await Zotero.Items.loadDataTypes(validParents, ['primaryData', 'itemData', 'creators', 'tags', 'collections']);
+                const summaries = await Promise.all(validParents.map(p => serializeItemSummary(p)));
+                validParents.forEach((parent, i) => parentMap.set(parent.id, summaries[i]));
             }
         }
 
@@ -330,7 +329,7 @@ export async function handleListItemsRequest(
             } else if (item.isAttachment()) {
                 const parentInfo = item.parentItemID ? parentMap.get(item.parentItemID) : null;
                 const attachmentInfo = await getAttachmentInfoForItem(item, {
-                    parentItemId: parentInfo?.item_id ?? null,
+                    parentItemId: parentInfo ? `${parentInfo.library_id}-${parentInfo.zotero_key}` : null,
                     isPrimary: false,
                     includeAnnotationsCount: true,
                     skipWorkerFallback: true,

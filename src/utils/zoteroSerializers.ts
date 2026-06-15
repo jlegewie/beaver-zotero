@@ -5,7 +5,7 @@ import { getCollectionClientDateModifiedAsISOString, getCitationKeyFromItem, get
 import { syncingItemFilterAsync } from './sync';
 import { isAttachmentOnServer } from './webAPI';
 import { skippedItemsManager } from '../services/skippedItemsManager';
-import { AnnotationResultItem, NoteResultItem, ItemStub } from '../services/agentProtocol';
+import { AnnotationResultItem, NoteResultItem } from '../services/agentProtocol';
 
 export interface FileData {
     // filename: string;
@@ -588,25 +588,25 @@ export async function serializeItemWithAttachments(
 /**
  * Serializes a Zotero note item into a NoteResultItem.
  *
- * The `parent_item` anchor surfaces the bibliographic parent as an `ItemStub`.
- * The flat `parent_item_id`/`parent_title` fields are derived from it and are
- * deprecated: they remain only for clients/backends that predate `parent_item`
- * and should be dropped once the backend reads `parent_item`.
+ * The `parent_item` field carries the bibliographic parent as an `ItemSummary`
+ * (the same wire shape used for cited items and search rows). The flat
+ * `parent_item_id`/`parent_title` fields are derived from it and are deprecated:
+ * they remain only for clients/backends that predate `parent_item` and should be
+ * dropped once the backend reads `parent_item`.
  *
  * @param note Zotero note item
- * @param parent Optional parent item anchor (ItemStub). A minimal
- *   `{ item_id, title }` is also accepted for callers that lack a full stub.
+ * @param parent Optional parent item summary (ItemSummary)
  * @returns NoteResultItem
  */
 export function serializeNote(
     note: Zotero.Item,
-    parent?: ItemStub | null,
+    parent?: ItemSummary | null,
 ): NoteResultItem {
     return {
         result_type: 'note',
         item_id: `${note.libraryID}-${note.key}`,
         title: note.getDisplayTitle?.() || '',
-        parent_item_id: parent?.item_id ?? null,
+        parent_item_id: parent ? `${parent.library_id}-${parent.zotero_key}` : null,
         parent_title: parent?.title ?? null,
         parent_item: parent ?? null,
         date_modified: note.dateModified,

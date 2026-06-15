@@ -32,14 +32,25 @@ vi.mock('../../../src/services/agentDataProvider/utils', () => ({
     extractYear: vi.fn(() => null),
     formatCreatorsString: vi.fn(() => ''),
     getAttachmentInfoForItem: vi.fn(),
-    buildItemStub: vi.fn((item: any) => ({
-        item_id: `${item.libraryID}-${item.key}`,
-        item_type: item.itemType,
-        title: item.getField?.('title', false, true) || item.getDisplayTitle?.() || null,
-        creators: null,
-        year: null,
-    })),
 }));
+
+// Keep the real serializeNote; stub serializeItemSummary so parent serialization
+// doesn't hit getCitationKeyFromItem/getTags/getCollections on mock items.
+vi.mock('../../../src/utils/zoteroSerializers', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('../../../src/utils/zoteroSerializers')>();
+    return {
+        ...actual,
+        serializeItemSummary: vi.fn(async (item: any) => ({
+            library_id: item.libraryID,
+            zotero_key: item.key,
+            item_type: item.itemType,
+            title: item.getField?.('title', false, true) || item.getDisplayTitle?.() || null,
+            creators: null,
+            date: null,
+            year: null,
+        })),
+    };
+});
 
 import { handleListItemsRequest } from '../../../src/services/agentDataProvider/handleListItemsRequest';
 import { getAttachmentInfoForItem, getCollectionByIdOrName, validateLibraryAccess } from '../../../src/services/agentDataProvider/utils';

@@ -11,10 +11,10 @@ import { logger } from '../../utils/logger';
 import {
     WSGetMetadataRequest,
     WSGetMetadataResponse,
-    ItemStub,
 } from '../agentProtocol';
-import { serializeNote, serializeAnnotation } from '../../utils/zoteroSerializers';
-import { getAttachmentInfoForItem, formatCreatorsString, extractYear, buildItemStub } from './utils';
+import { ItemSummary } from '../../../react/types/zotero';
+import { serializeNote, serializeAnnotation, serializeItemSummary } from '../../utils/zoteroSerializers';
+import { getAttachmentInfoForItem, formatCreatorsString, extractYear } from './utils';
 
 
 /**
@@ -86,12 +86,12 @@ export async function handleGetMetadataRequest(
                 const parentId = item.parentItemID;
                 const parent = parentId ? await Zotero.Items.getAsync(parentId) : null;
                 let parentItemId: string | undefined;
-                let parentStub: ItemStub | null = null;
+                let parentSummary: ItemSummary | null = null;
                 let isPrimary = false;
                 if (parent) {
                     parentItemId = `${parent.libraryID}-${parent.key}`;
-                    await Zotero.Items.loadDataTypes([parent], ['itemData', 'creators']);
-                    parentStub = buildItemStub(parent);
+                    await Zotero.Items.loadDataTypes([parent], ['primaryData', 'itemData', 'creators', 'tags', 'collections']);
+                    parentSummary = await serializeItemSummary(parent);
                     try {
                         const best = await parent.getBestAttachment();
                         isPrimary = best ? best.id === item.id : false;
@@ -109,7 +109,7 @@ export async function handleGetMetadataRequest(
                     ...info,
                     item_id: itemId,
                     itemType: 'attachment',
-                    parent_item: parentStub,
+                    parent_item: parentSummary,
                     collections: enrichItemCollections(item),
                     tags: item.getTags(),
                     // Emit ISO-8601 to match the regular-item toJSON path (the
@@ -124,13 +124,13 @@ export async function handleGetMetadataRequest(
             if (item.isNote()) {
                 const parentId = item.parentItemID;
                 const parent = parentId ? await Zotero.Items.getAsync(parentId) : null;
-                let parentStub: ItemStub | null = null;
+                let parentSummary: ItemSummary | null = null;
                 if (parent) {
-                    await Zotero.Items.loadDataTypes([parent], ['itemData', 'creators']);
-                    parentStub = buildItemStub(parent);
+                    await Zotero.Items.loadDataTypes([parent], ['primaryData', 'itemData', 'creators', 'tags', 'collections']);
+                    parentSummary = await serializeItemSummary(parent);
                 }
                 items.push({
-                    ...serializeNote(item, parentStub),
+                    ...serializeNote(item, parentSummary),
                     itemType: 'note',
                 });
                 continue;
@@ -259,14 +259,15 @@ export async function handleGetMetadataRequest(
 
                     const notes: any[] = [];
                     // The requested regular item is the parent; it was loaded with
-                    // itemData + creators above, so a full stub is available.
-                    const parentStub = buildItemStub(item);
+                    // itemData + creators + tags + collections above, so a full
+                    // summary is available.
+                    const parentSummary = await serializeItemSummary(item);
 
                     for (const note of noteItems) {
                         if (!note || !note.isNote()) continue;
 
                         try {
-                            notes.push(serializeNote(note, parentStub));
+                            notes.push(serializeNote(note, parentSummary));
                         } catch (error) {
                             logger(`handleGetMetadataRequest: Error processing note ${note.key}: ${error}`, 2);
                         }

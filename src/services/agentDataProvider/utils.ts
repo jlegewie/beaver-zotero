@@ -7,7 +7,7 @@ import { getPref } from '../../utils/prefs';
 import { isAttachmentOnServer } from '../../utils/webAPI';
 import { addPopupMessageAtom } from '../../../react/utils/popupMessageUtils';
 import { wasItemAddedBeforeLastSync } from '../../../react/utils/sourceUtils';
-import { DeferredToolPreference, ItemStub } from '../agentProtocol';
+import { DeferredToolPreference } from '../agentProtocol';
 import { deferredToolPreferencesAtom } from '../../../react/atoms/deferredToolPreferences';
 import { isAgentSupportedItem } from '../../utils/agentItemSupport';
 import { store } from '../../../react/store';
@@ -736,34 +736,6 @@ export function extractYear(dateStr: string | undefined): number | null {
     if (!dateStr) return null;
     const match = dateStr.match(/(\d{4})/);
     return match ? parseInt(match[1], 10) : null;
-}
-
-/**
- * Build a Tier-1 bibliographic anchor (`ItemStub`) for a parent item.
- * The item must already have its `itemData` and `creators` loaded.
- */
-export function buildItemStub(item: Zotero.Item): ItemStub {
-    let title = '';
-    try {
-        title = (item.getField('title', false, true) as string) || '';
-    } catch {
-        title = item.getDisplayTitle?.() || '';
-    }
-
-    let year: number | null = null;
-    try {
-        year = extractYear(item.getField('date', false, true) as string);
-    } catch {
-        // Date field may not exist for some item types
-    }
-
-    return {
-        item_id: `${item.libraryID}-${item.key}`,
-        item_type: item.itemType,
-        title: title || null,
-        creators: formatCreatorsString(item.getCreators?.()),
-        year,
-    };
 }
 
 /**
