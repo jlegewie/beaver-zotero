@@ -58,6 +58,7 @@ const pdfRecord = {
     fileSize: 1024,
     mtimeMs: 1718000000000,
     pageCount: 12,
+    sha256: 'abc123',
     createdAt: '2026-06-01T00:00:00.000Z',
 };
 
