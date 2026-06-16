@@ -1041,6 +1041,8 @@ export interface AnnotationResultItem {
     color?: string | null;
     /** 1-based page number of the annotation's location. */
     page?: number | null;
+    /** Document's printed page label (e.g. roman numerals); UI rendering only, not surfaced to the agent. */
+    page_label?: string | null;
     /** Tag names attached to the annotation. */
     tags?: string[];
     /** Annotation author, when Zotero stores one. */

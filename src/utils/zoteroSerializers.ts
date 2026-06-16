@@ -621,9 +621,9 @@ export function serializeNote(
  * Callers pass it in as `itemInfo`. The PDF attachment is `attachmentInfo`.
  *
  * `page` is the 1-based page number derived from the annotation's stored
- * position. Page labels (e.g. roman numerals) are intentionally omitted: this
- * shape is designed to be consumed by the agent, which reasons in 1-based
- * page numbers.
+ * position; the agent reasons in 1-based page numbers. `page_label` carries the
+ * document's printed label (e.g. roman numerals) for UI rendering only — the
+ * backend keeps it out of the agent-facing tool result.
  */
 export function serializeAnnotation(
     annotation: Zotero.Item,
@@ -643,6 +643,7 @@ export function serializeAnnotation(
         annotationColor?: string;
         annotationAuthorName?: string;
         annotationPosition?: string;
+        annotationPageLabel?: string;
     };
 
     // Derive 1-based page from the annotation's position. Zotero stores
@@ -672,6 +673,7 @@ export function serializeAnnotation(
         comment: ann.annotationComment ?? null,
         color: ann.annotationColor ?? null,
         page,
+        page_label: ann.annotationPageLabel ?? null,
         tags,
         author: ann.annotationAuthorName || null,
         attachment_id: attachmentInfo?.item_id ?? null,
