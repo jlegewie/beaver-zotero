@@ -15,8 +15,8 @@ import {
     RegularListResultItem,
     AttachmentRowResult,
 } from '../agentProtocol';
-import { ItemSummary } from '../../../react/types/zotero';
-import { serializeNote, serializeItemSummary } from '../../utils/zoteroSerializers';
+import { ItemStub } from '../../../react/types/zotero';
+import { serializeNote, serializeItemStub } from '../../utils/zoteroSerializers';
 import { getCollectionByIdOrName, validateLibraryAccess, isLibrarySearchable, getSearchableLibraries, extractYear, formatCreatorsString, getAttachmentInfoForItem } from './utils';
 
 function isAnnotationItem(item: Zotero.Item): boolean {
@@ -309,14 +309,13 @@ export async function handleListItemsRequest(
                 childParentIds.add(item.parentItemID);
             }
         }
-        const parentMap = new Map<number, ItemSummary>();
+        const parentMap = new Map<number, ItemStub>();
         if (childParentIds.size > 0) {
             const parentItems = await Zotero.Items.getAsync([...childParentIds]);
             const validParents = parentItems.filter((p): p is Zotero.Item => p !== null);
             if (validParents.length > 0) {
-                await Zotero.Items.loadDataTypes(validParents, ['primaryData', 'itemData', 'creators', 'tags', 'collections']);
-                const summaries = await Promise.all(validParents.map(p => serializeItemSummary(p)));
-                validParents.forEach((parent, i) => parentMap.set(parent.id, summaries[i]));
+                await Zotero.Items.loadDataTypes(validParents, ['primaryData', 'itemData', 'creators']);
+                validParents.forEach(parent => parentMap.set(parent.id, serializeItemStub(parent)));
             }
         }
 

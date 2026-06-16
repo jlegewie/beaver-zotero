@@ -6,7 +6,7 @@
  */
 
 import { logger } from '../../utils/logger';
-import { ItemDataWithStatus, AttachmentDataWithStatus, ZoteroItemReference, ItemSummary } from '../../../react/types/zotero';
+import { ItemDataWithStatus, AttachmentDataWithStatus, ZoteroItemReference, ItemStub } from '../../../react/types/zotero';
 import { searchableLibraryIdsAtom, syncWithZoteroAtom } from '../../../react/atoms/profile';
 import { userIdAtom } from '../../../react/atoms/auth';
 import { store } from '../../../react/store';
@@ -18,7 +18,7 @@ import {
     serializeAnnotation,
     serializeItem,
     serializeNote,
-    serializeItemSummary,
+    serializeItemStub,
 } from '../../utils/zoteroSerializers';
 import { computeItemStatus, prefetchSyncDates, getAttachmentFileStatus, getAttachmentFileStatusLightweight, getBestAttachmentBatch } from './utils';
 import {
@@ -450,7 +450,7 @@ export async function lookupZoteroReferences(
     const items = itemResults.filter((i): i is ItemDataWithStatus => i !== null);
     const attachments = attachmentResults.filter((a): a is AttachmentDataWithStatus => a !== null);
 
-    // Note parents — serialize each distinct parent once into an ItemSummary.
+    // Note parents — serialize each distinct parent once into an ItemStub anchor.
     const noteParentItems = [...new Set(
         notesToSerialize
             .map(note => note.parentID)
@@ -458,11 +458,10 @@ export async function lookupZoteroReferences(
     )]
         .map(id => parentItemsById.get(id))
         .filter((p): p is Zotero.Item => p != null);
-    const noteParentSummaries = new Map<number, ItemSummary>();
+    const noteParentSummaries = new Map<number, ItemStub>();
     if (noteParentItems.length > 0) {
-        await Zotero.Items.loadDataTypes(noteParentItems, ['primaryData', 'itemData', 'creators', 'tags', 'collections']);
-        const summaries = await Promise.all(noteParentItems.map(p => serializeItemSummary(p)));
-        noteParentItems.forEach((parent, i) => noteParentSummaries.set(parent.id, summaries[i]));
+        await Zotero.Items.loadDataTypes(noteParentItems, ['primaryData', 'itemData', 'creators']);
+        noteParentItems.forEach(parent => noteParentSummaries.set(parent.id, serializeItemStub(parent)));
     }
 
     // Serialize notes using the same pattern as zotero_search/list_items

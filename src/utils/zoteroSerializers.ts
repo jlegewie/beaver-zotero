@@ -1,6 +1,6 @@
 import { calculateObjectHash } from '../utils/hash';
 import { logger } from './logger';
-import { ItemDataHashedFields, AttachmentDataHashedFields, ItemData, ItemSummary, CollectionSummary, ZoteroCreator, ZoteroCollection, BibliographicIdentifier, AttachmentDataWithMimeType, ZoteroLibrary } from '../../react/types/zotero';
+import { ItemDataHashedFields, AttachmentDataHashedFields, ItemData, ItemStub, ItemSummary, CollectionSummary, ZoteroCreator, ZoteroCollection, BibliographicIdentifier, AttachmentDataWithMimeType, ZoteroLibrary } from '../../react/types/zotero';
 import { getCollectionClientDateModifiedAsISOString, getCitationKeyFromItem, getMimeType, safeIsInTrash, safeFileExists } from './zoteroUtils';
 import { syncingItemFilterAsync } from './sync';
 import { isAttachmentOnServer } from './webAPI';
@@ -341,13 +341,8 @@ export async function serializeItem(item: Zotero.Item, clientDateModified: strin
 export async function serializeItemSummary(item: Zotero.Item): Promise<ItemSummary> {
     const tags = item.getTags();
     return {
-        zotero_key: item.key,
-        library_id: item.libraryID,
-        item_type: item.itemType,
-        title: item.getField('title', false, true) || null,
-        creators: getCreatorsFromItem(item),
+        ...serializeItemStub(item),
         date: item.getField('date', false, true) || null,
-        year: getYearFromItem(item) ?? null,
         publication_title: item.getField('publicationTitle', false, true) || null,
         abstract: item.getField('abstractNote') || null,
         identifiers: getIdentifiersFromItem(item),
@@ -355,6 +350,20 @@ export async function serializeItemSummary(item: Zotero.Item): Promise<ItemSumma
         tags: tags.length > 0 ? tags.map((t: any) => t.tag) : null,
         collections: getCollectionSummariesFromItem(item),
         citation_key: await getCitationKeyFromItem(item),
+    };
+}
+
+/**
+ * Serializes the minimal bibliographic anchor (`ItemStub`) for a regular item.
+ */
+export function serializeItemStub(item: Zotero.Item): ItemStub {
+    return {
+        zotero_key: item.key,
+        library_id: item.libraryID,
+        item_type: item.itemType,
+        title: item.getField('title', false, true) || null,
+        creators: getCreatorsFromItem(item),
+        year: getYearFromItem(item) ?? null,
     };
 }
 
@@ -588,19 +597,19 @@ export async function serializeItemWithAttachments(
 /**
  * Serializes a Zotero note item into a NoteResultItem.
  *
- * The `parent_item` field carries the bibliographic parent as an `ItemSummary`
- * (the same wire shape used for cited items and search rows). The flat
+ * The `parent_item` field carries the bibliographic parent as an `ItemStub`
+ * (the minimal anchor the backend reduces every parent reference to). The flat
  * `parent_item_id`/`parent_title` fields are derived from it and are deprecated:
  * they remain only for clients/backends that predate `parent_item` and should be
  * dropped once the backend reads `parent_item`.
  *
  * @param note Zotero note item
- * @param parent Optional parent item summary (ItemSummary)
+ * @param parent Optional parent item anchor (ItemStub)
  * @returns NoteResultItem
  */
 export function serializeNote(
     note: Zotero.Item,
-    parent?: ItemSummary | null,
+    parent?: ItemStub | null,
 ): NoteResultItem {
     return {
         result_type: 'note',

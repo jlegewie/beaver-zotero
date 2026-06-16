@@ -15,14 +15,12 @@ import {
     WSViewImage,
     ViewImagesErrorCode,
 } from '../agentProtocol';
-import { ZoteroItemReference, ItemSummary, AttachmentInfo } from '../../../react/types/zotero';
-import type { ExternalFileAttachment } from '../../../react/types/attachments/apiTypes';
+import { ZoteroItemReference, ItemStub, AttachmentStub } from '../../../react/types/zotero';
 import {
     getReadableContentKind,
     resolveToImageAttachment,
     resolveToPdfAttachment,
 } from '../documentExtraction/attachmentResolution';
-import { getAttachmentInfo } from '../documentExtraction/attachmentInfo';
 import { isLinkedUrlAttachment } from '../../utils/attachmentFiles';
 import { validateZoteroItemReference } from './utils';
 import { handleZoteroAttachmentPageImagesRequest } from './handleZoteroAttachmentPageImagesRequest';
@@ -30,7 +28,8 @@ import { handleZoteroAttachmentImageRequest } from './handleZoteroAttachmentImag
 import { resolveExternalFile } from '../externalFiles';
 import {
     externalFileMissingMessage,
-    getResolvedAttachmentParentSummary,
+    getResolvedAttachmentParentStub,
+    buildServedAttachmentStub,
 } from './handleZoteroDocumentRequest';
 import { BeaverExtractor, ExtractionError, ExtractionErrorCode, WorkerAbortError } from '../../beaver-extract';
 import { effectiveMaxFileSizeMB, effectiveMaxPageCount } from '../attachmentLimits';
@@ -198,9 +197,13 @@ export async function handleZoteroViewImagesRequest(
     const requestKey = `${attachment.library_id}-${attachment.zotero_key}`;
 
     // Captured once the target attachment is resolved so error responses can
-    // report which child was actually targeted.
+    // report which child was actually targeted and carry the same view-row
+    // metadata as success responses (best-effort: pre-resolution errors leave
+    // these null and omit them).
     let resolvedRef: ZoteroItemReference | null = null;
     let resolvedKind: 'pdf' | 'image' | null = null;
+    let parentItem: ItemStub | null = null;
+    let servedAttachment: AttachmentStub | null = null;
 
     const errorResponse = (
         error: string,
@@ -214,6 +217,8 @@ export async function handleZoteroViewImagesRequest(
         kind: resolvedKind,
         images: [],
         total_pages,
+        ...(parentItem ? { parent_item: parentItem } : {}),
+        ...(servedAttachment ? { served_attachment: servedAttachment } : {}),
         error,
         error_code,
     });
@@ -289,20 +294,20 @@ export async function handleZoteroViewImagesRequest(
         }
 
         // View-row metadata for the backend tool-result view (parent-centric
-        // display + the served file's own name/content_kind/readability). Both
-        // are optional; a failure here must never fail the view itself.
-        let parentItem: ItemSummary | null = null;
+        // display + the served file's own name/content_kind). Both are optional;
+        // a failure here must never fail the view itself, and both ride on
+        // post-resolution error responses too. Build the served-file stub first
+        // (synchronous, no file analysis) so it is present even if the parent
+        // lookup throws.
         try {
-            parentItem = await getResolvedAttachmentParentSummary(target.item);
+            servedAttachment = buildServedAttachmentStub(target.item, target.kind);
         } catch (error) {
-            logger(`handleZoteroViewImagesRequest: parent summary failed for ${requestKey}: ${error}`, 1);
+            logger(`handleZoteroViewImagesRequest: served attachment stub failed for ${requestKey}: ${error}`, 1);
         }
-        // Get attachment info
-        let servedAttachment: AttachmentInfo | null = null;
         try {
-            servedAttachment = await getAttachmentInfo(target.item, { pdfAnalysis: 'lightweight' });
+            parentItem = await getResolvedAttachmentParentStub(target.item);
         } catch (error) {
-            logger(`handleZoteroViewImagesRequest: served attachment info failed for ${requestKey}: ${error}`, 1);
+            logger(`handleZoteroViewImagesRequest: parent stub failed for ${requestKey}: ${error}`, 1);
         }
 
         // 3. Dispatch by kind
@@ -422,6 +427,9 @@ async function handleExternalFileViewRequest(
     const requestKey = `ext-${extKey}`;
 
     let resolvedKind: 'pdf' | 'image' | null = null;
+    // Populated once the registry resolves the key so post-resolution error
+    // responses carry the served-file stub. External files carry no Zotero parent.
+    let servedExternal: AttachmentStub | null = null;
 
     const errorResponse = (
         error: string,
@@ -434,6 +442,7 @@ async function handleExternalFileViewRequest(
         kind: resolvedKind,
         images: [],
         total_pages,
+        ...(servedExternal ? { served_attachment: servedExternal } : {}),
         error,
         error_code,
     });
@@ -467,25 +476,25 @@ async function handleExternalFileViewRequest(
     }
     const record = resolved.record;
 
+    // The served external file's own display metadata, for the backend
+    // tool-result view row (mirrors the Zotero `served_attachment`). Uses the
+    // model-facing `ext-<key>` id; external files carry no Zotero parent, so no
+    // `parent_item` is emitted. Built before the unsupported-type check so that
+    // error carries it too.
+    servedExternal = {
+        attachment_id: `ext-${extKey}`,
+        parent_item_id: null,
+        title: null,
+        filename: record.filename,
+        content_kind: record.contentKind,
+    };
+
     if (record.contentKind === 'epub' || record.contentKind === 'text') {
         return errorResponse(
             `External file '${requestKey}' ('${record.filename}') is a ${record.contentKind} document, which is not viewable. Use the read tool instead.`,
             'unsupported_type',
         );
     }
-
-    // The served external file's own metadata, for the backend tool-result view
-    // row (mirrors the Zotero `served_attachment`). External files carry no
-    // Zotero parent, so no `parent_item` is emitted.
-    const servedExternal: ExternalFileAttachment = {
-        type: 'external_file',
-        ext_key: extKey,
-        filename: record.filename,
-        content_kind: record.contentKind,
-        mime_type: record.mimeType,
-        file_size: record.fileSize,
-        ...(record.pageCount != null ? { page_count: record.pageCount } : {}),
-    };
 
     const timeout = createTimeoutController(timeout_seconds, DEFAULT_IMAGES_TIMEOUT_SECONDS);
     const { signal, timeoutSeconds, throwIfTimedOut, dispose } = timeout;

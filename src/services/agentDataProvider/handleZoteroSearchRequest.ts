@@ -16,8 +16,8 @@ import {
     RegularSearchResultItem,
     AttachmentRowResult,
 } from '../agentProtocol';
-import { ItemSummary } from '../../../react/types/zotero';
-import { serializeNote, serializeItemSummary } from '../../utils/zoteroSerializers';
+import { ItemStub } from '../../../react/types/zotero';
+import { serializeNote, serializeItemStub } from '../../utils/zoteroSerializers';
 import { validateLibraryAccess, extractYear, formatCreatorsString, getAttachmentInfoForItem } from './utils';
 
 
@@ -303,14 +303,13 @@ export async function handleZoteroSearchRequest(
                 childParentIds.add(item.parentItemID);
             }
         }
-        const parentMap = new Map<number, ItemSummary>();
+        const parentMap = new Map<number, ItemStub>();
         if (childParentIds.size > 0) {
             const parentItems = await Zotero.Items.getAsync([...childParentIds]);
             const validParents = parentItems.filter((p): p is Zotero.Item => p !== null);
             if (validParents.length > 0) {
-                await Zotero.Items.loadDataTypes(validParents, ['primaryData', 'itemData', 'creators', 'tags', 'collections']);
-                const summaries = await Promise.all(validParents.map(p => serializeItemSummary(p)));
-                validParents.forEach((parent, i) => parentMap.set(parent.id, summaries[i]));
+                await Zotero.Items.loadDataTypes(validParents, ['primaryData', 'itemData', 'creators']);
+                validParents.forEach(parent => parentMap.set(parent.id, serializeItemStub(parent)));
             }
         }
 

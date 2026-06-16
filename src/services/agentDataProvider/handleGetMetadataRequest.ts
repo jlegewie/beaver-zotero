@@ -12,8 +12,8 @@ import {
     WSGetMetadataRequest,
     WSGetMetadataResponse,
 } from '../agentProtocol';
-import { ItemSummary } from '../../../react/types/zotero';
-import { serializeNote, serializeAnnotation, serializeItemSummary } from '../../utils/zoteroSerializers';
+import { ItemStub } from '../../../react/types/zotero';
+import { serializeNote, serializeAnnotation, serializeItemStub } from '../../utils/zoteroSerializers';
 import { getAttachmentInfoForItem, formatCreatorsString, extractYear } from './utils';
 
 
@@ -86,12 +86,12 @@ export async function handleGetMetadataRequest(
                 const parentId = item.parentItemID;
                 const parent = parentId ? await Zotero.Items.getAsync(parentId) : null;
                 let parentItemId: string | undefined;
-                let parentSummary: ItemSummary | null = null;
+                let parentSummary: ItemStub | null = null;
                 let isPrimary = false;
                 if (parent) {
                     parentItemId = `${parent.libraryID}-${parent.key}`;
-                    await Zotero.Items.loadDataTypes([parent], ['primaryData', 'itemData', 'creators', 'tags', 'collections']);
-                    parentSummary = await serializeItemSummary(parent);
+                    await Zotero.Items.loadDataTypes([parent], ['primaryData', 'itemData', 'creators']);
+                    parentSummary = serializeItemStub(parent);
                     try {
                         const best = await parent.getBestAttachment();
                         isPrimary = best ? best.id === item.id : false;
@@ -124,10 +124,10 @@ export async function handleGetMetadataRequest(
             if (item.isNote()) {
                 const parentId = item.parentItemID;
                 const parent = parentId ? await Zotero.Items.getAsync(parentId) : null;
-                let parentSummary: ItemSummary | null = null;
+                let parentSummary: ItemStub | null = null;
                 if (parent) {
-                    await Zotero.Items.loadDataTypes([parent], ['primaryData', 'itemData', 'creators', 'tags', 'collections']);
-                    parentSummary = await serializeItemSummary(parent);
+                    await Zotero.Items.loadDataTypes([parent], ['primaryData', 'itemData', 'creators']);
+                    parentSummary = serializeItemStub(parent);
                 }
                 items.push({
                     ...serializeNote(item, parentSummary),
@@ -259,9 +259,9 @@ export async function handleGetMetadataRequest(
 
                     const notes: any[] = [];
                     // The requested regular item is the parent; it was loaded with
-                    // itemData + creators + tags + collections above, so a full
-                    // summary is available.
-                    const parentSummary = await serializeItemSummary(item);
+                    // itemData + creators above, so the bibliographic anchor is
+                    // available without another load.
+                    const parentSummary = serializeItemStub(item);
 
                     for (const note of noteItems) {
                         if (!note || !note.isNote()) continue;

@@ -1,8 +1,8 @@
 import { SubscriptionStatus, ProcessingMode, ChargeType } from '../../react/types/profile';
 import { TextPart, ThinkingPart, ToolCallPart, ToolReturnPart, RetryPromptPart, RunUsage } from '../../react/agents/types';
 import { ZoteroItemReference } from '../../react/types/zotero';
-import { ItemDataWithStatus, AttachmentDataWithStatus, ItemSummary, AttachmentInfo } from '../../react/types/zotero';
-import { ReaderState, NoteState, ExternalFileAttachment } from '../../react/types/attachments/apiTypes';
+import { ItemDataWithStatus, AttachmentDataWithStatus, ItemStub, ItemSummary, AttachmentInfo, AttachmentStub } from '../../react/types/zotero';
+import { ReaderState, NoteState } from '../../react/types/attachments/apiTypes';
 import { BeaverAgentPrompt } from '../../react/agents/types';
 import { CustomChatModel } from '../../react/types/settings';
 import { AttachmentData, ItemData } from '../../react/types/zotero';
@@ -648,21 +648,22 @@ export type ZoteroDocumentErrorCode =
 export interface WSZoteroDocumentResponse {
     type: 'zotero_document';
     request_id: string;
-    /** Resolved PDF attachment on success. Absent for external-file requests. */
+    /** Reference for the served Zotero attachment (routing handle) */
     resolved_attachment?: ZoteroItemReference | null;
     /** Echo of the external file key for external-file requests. */
     external_file_key?: string | null;
     content_type?: string | null;
     content_kind?: ExtractContentKind | null;
     result?: DocumentExtractResult | null;
-    /** Resolved attachment's parent regular item, when it has one. */
-    parent_item?: ItemSummary | null;
-    /**
-     * The served attachment's own metadata — a Zotero attachment
-     * (`AttachmentInfo`) or a user-attached external file
-     * (`ExternalFileAttachment`).
+    /** Served attachment's parent regular item anchor, when it has one. */
+    parent_item?: ItemStub | null;
+    /** Display metadata for the served attachment.
+     * 
+     * `attachment_id` is the model-facing id of the same file
+     * (`<library_id>-<zotero_key>` for Zotero attachments,
+     * `ext-<key>` for external files).
      */
-    served_attachment?: AttachmentInfo | ExternalFileAttachment | null;
+    served_attachment?: AttachmentStub | null;
     /** Page count on error responses when available. */
     total_pages?: number | null;
     error?: string | null;
@@ -791,7 +792,7 @@ export interface WSZoteroViewImagesResponse {
     attachment?: ZoteroItemReference | null;
     /** Echo of the external file key for external-file requests. */
     external_file_key?: string | null;
-    /** The attachment actually served when a parent item was auto-resolved. */
+    /** Reference for the served Zotero attachment (routing handle) */
     resolved_attachment?: ZoteroItemReference | null;
     /** Kind of the served attachment. Null on errors before resolution. */
     kind: 'pdf' | 'image' | null;
@@ -799,19 +800,15 @@ export interface WSZoteroViewImagesResponse {
     images: WSViewImage[];
     /** Total number of pages in the document (PDFs only) */
     total_pages: number | null;
-    /**
-     * The served attachment's parent regular item, when it has one. Drives the
-     * backend tool-result view row's parent-centric display. Omitted for
-     * standalone attachments and external files.
+    /** Served attachment's parent regular item anchor, when it has one. */
+    parent_item?: ItemStub | null;
+    /** Display metadata for the served attachment.
+     * 
+     * `attachment_id` is the model-facing id of the same file
+     * (`<library_id>-<zotero_key>` for Zotero attachments,
+     * `ext-<key>` for external files).
      */
-    parent_item?: ItemSummary | null;
-    /**
-     * The served attachment's own metadata — a Zotero attachment
-     * (`AttachmentInfo`) or a user-attached external file
-     * (`ExternalFileAttachment`). Carries the attachment's own title/filename
-     * and content_kind for the backend tool-result view row.
-     */
-    served_attachment?: AttachmentInfo | ExternalFileAttachment | null;
+    served_attachment?: AttachmentStub | null;
     /** Error message if processing failed */
     error?: string | null;
     /** Error code for programmatic handling */
@@ -929,8 +926,8 @@ export interface WSReadNoteResponse {
     parent_item_id?: string;
     /** @deprecated Superseded by `parent_item`. Still emitted for clients/backends predating `parent_item`; remove once the backend reads `parent_item`. */
     parent_title?: string;
-    /** Bibliographic summary of the parent item, when the note has one. */
-    parent_item?: ItemSummary | null;
+    /** Bibliographic anchor for the parent item, when the note has one. */
+    parent_item?: ItemStub | null;
     /** Total line count of the simplified HTML */
     total_lines?: number;
     /** The simplified HTML content */
@@ -1001,8 +998,8 @@ export interface NoteResultItem {
     parent_item_id?: string | null;
     /** @deprecated Superseded by `parent_item`. Still emitted for clients/backends predating `parent_item`; remove once the backend reads `parent_item`. */
     parent_title?: string | null;
-    /** Bibliographic summary of the parent item, when the note has one. */
-    parent_item?: ItemSummary | null;
+    /** Bibliographic anchor for the parent item, when the note has one. */
+    parent_item?: ItemStub | null;
     date_modified?: string | null;
 }
 
@@ -1011,8 +1008,8 @@ export type AttachmentRowResult = AttachmentInfo & {
     result_type: 'attachment';
     /** @deprecated Superseded by `parent_item`. Still emitted for clients/backends predating `parent_item`; remove once the backend reads `parent_item`. */
     parent_title?: string | null;
-    /** Bibliographic summary of the parent item, when the attachment has one. */
-    parent_item?: ItemSummary | null;
+    /** Bibliographic anchor for the parent item, when the attachment has one. */
+    parent_item?: ItemStub | null;
     date_modified?: string | null;
 };
 

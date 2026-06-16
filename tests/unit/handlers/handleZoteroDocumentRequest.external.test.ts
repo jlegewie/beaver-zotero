@@ -71,6 +71,8 @@ describe('handleZoteroDocumentRequest (external files)', () => {
         expect(response.error).toContain('not available on this device');
         expect(response.error).toContain('different computer');
         expect(response.external_file_key).toBe(EXT_KEY);
+        // Pre-resolution error: the registry never resolved a file, so no stub.
+        expect(response.served_attachment).toBeUndefined();
     });
 
     it('names the file when the copy is gone from disk', async () => {
@@ -117,6 +119,12 @@ describe('handleZoteroDocumentRequest (external files)', () => {
 
         expect(response.error_code).toBe('unsupported_type');
         expect(response.error).toContain('view tool');
+        // Post-resolution error: the served-file stub rides along for the view row.
+        expect(response.served_attachment).toMatchObject({
+            attachment_id: `ext-${EXT_KEY}`,
+            filename: 'figure.png',
+            content_kind: 'image',
+        });
     });
 
     it('routes PDFs through the extraction core with an external source', async () => {

@@ -34,19 +34,18 @@ vi.mock('../../../src/services/agentDataProvider/utils', () => ({
     getAttachmentInfoForItem: vi.fn(),
 }));
 
-// Keep the real serializeNote; stub serializeItemSummary so parent serialization
-// doesn't hit getCitationKeyFromItem/getTags/getCollections on mock items.
+// Keep the real serializeNote; stub serializeItemStub so parent serialization
+// doesn't hit getCreators/getYear on mock items.
 vi.mock('../../../src/utils/zoteroSerializers', async (importOriginal) => {
     const actual = await importOriginal<typeof import('../../../src/utils/zoteroSerializers')>();
     return {
         ...actual,
-        serializeItemSummary: vi.fn(async (item: any) => ({
+        serializeItemStub: vi.fn((item: any) => ({
             library_id: item.libraryID,
             zotero_key: item.key,
             item_type: item.itemType,
             title: item.getField?.('title', false, true) || item.getDisplayTitle?.() || null,
             creators: null,
-            date: null,
             year: null,
         })),
     };
