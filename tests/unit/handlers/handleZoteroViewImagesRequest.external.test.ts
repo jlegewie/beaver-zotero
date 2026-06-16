@@ -114,6 +114,15 @@ describe('handleZoteroViewImagesRequest (external files)', () => {
         expect(response.images).toHaveLength(1);
         expect(response.images[0].width).toBe(80);
         expect(response.external_file_key).toBe(EXT_KEY);
+        // The served external file's own metadata is attached for the backend
+        // tool-result view row; external files carry no Zotero parent.
+        expect(response.served_attachment).toMatchObject({
+            type: 'external_file',
+            ext_key: EXT_KEY,
+            filename: 'figure.png',
+            content_kind: 'image',
+        });
+        expect(response.parent_item).toBeUndefined();
     });
 
     it('renders PDF pages via the MuPDF worker', async () => {
@@ -137,6 +146,14 @@ describe('handleZoteroViewImagesRequest (external files)', () => {
         expect(response.images[0].page_label).toBe('i');
         const renderArgs = renderPagesMock.mock.calls[0];
         expect(renderArgs[1].pageIndices).toEqual([0, 1]);
+        expect(response.served_attachment).toMatchObject({
+            type: 'external_file',
+            ext_key: EXT_KEY,
+            filename: 'paper.pdf',
+            content_kind: 'pdf',
+            page_count: 12,
+        });
+        expect(response.parent_item).toBeUndefined();
     });
 
     it('rejects text and EPUB files as not viewable', async () => {

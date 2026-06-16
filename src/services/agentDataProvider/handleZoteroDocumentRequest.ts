@@ -86,7 +86,7 @@ export function guardPayloadSize(
     );
 }
 
-async function getResolvedAttachmentParentSummary(
+export async function getResolvedAttachmentParentSummary(
     attachment: Zotero.Item,
 ): Promise<ItemSummary | null> {
     if (!attachment.isAttachment?.() || !attachment.parentItemID) {
@@ -114,7 +114,7 @@ async function getResolvedAttachmentParentSummary(
  * expensive availability/OCR analysis on the hot read path — the document was
  * just read, so it is readable by construction.
  */
-function buildServedAttachmentInfo(
+export function buildServedAttachmentInfo(
     attachment: Zotero.Item,
     contentKind: ReadableContentKind,
 ): AttachmentInfo {

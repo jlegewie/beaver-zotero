@@ -15,7 +15,8 @@ import {
     WSViewImage,
     ViewImagesErrorCode,
 } from '../agentProtocol';
-import { ZoteroItemReference } from '../../../react/types/zotero';
+import { ZoteroItemReference, ItemSummary } from '../../../react/types/zotero';
+import type { ExternalFileAttachment } from '../../../react/types/attachments/apiTypes';
 import {
     getReadableContentKind,
     resolveToImageAttachment,
@@ -26,7 +27,11 @@ import { validateZoteroItemReference } from './utils';
 import { handleZoteroAttachmentPageImagesRequest } from './handleZoteroAttachmentPageImagesRequest';
 import { handleZoteroAttachmentImageRequest } from './handleZoteroAttachmentImageRequest';
 import { resolveExternalFile } from '../externalFiles';
-import { externalFileMissingMessage } from './handleZoteroDocumentRequest';
+import {
+    buildServedAttachmentInfo,
+    externalFileMissingMessage,
+    getResolvedAttachmentParentSummary,
+} from './handleZoteroDocumentRequest';
 import { BeaverExtractor, ExtractionError, ExtractionErrorCode, WorkerAbortError } from '../../beaver-extract';
 import { effectiveMaxFileSizeMB, effectiveMaxPageCount } from '../attachmentLimits';
 import {
@@ -283,6 +288,17 @@ export async function handleZoteroViewImagesRequest(
             resolvedRef = targetRef;
         }
 
+        // View-row metadata for the backend tool-result view (parent-centric
+        // display + the served file's own name/content_kind). Both are optional;
+        // a parent-summary failure must never fail the view itself.
+        let parentItem: ItemSummary | null = null;
+        try {
+            parentItem = await getResolvedAttachmentParentSummary(target.item);
+        } catch (error) {
+            logger(`handleZoteroViewImagesRequest: parent summary failed for ${requestKey}: ${error}`, 1);
+        }
+        const servedAttachment = buildServedAttachmentInfo(target.item, target.kind);
+
         // 3. Dispatch by kind
         if (target.kind === 'pdf') {
             // Inverted and oversized ranges were rejected in step 0, so this
@@ -327,6 +343,8 @@ export async function handleZoteroViewImagesRequest(
                 kind: 'pdf',
                 images,
                 total_pages: pdfResponse.total_pages,
+                ...(parentItem ? { parent_item: parentItem } : {}),
+                served_attachment: servedAttachment,
             };
         }
 
@@ -362,6 +380,8 @@ export async function handleZoteroViewImagesRequest(
                 height: imageResponse.image.height,
             }],
             total_pages: null,
+            ...(parentItem ? { parent_item: parentItem } : {}),
+            served_attachment: servedAttachment,
         };
 
     } catch (error) {
@@ -448,6 +468,19 @@ async function handleExternalFileViewRequest(
         );
     }
 
+    // The served external file's own metadata, for the backend tool-result view
+    // row (mirrors the Zotero `served_attachment`). External files carry no
+    // Zotero parent, so no `parent_item` is emitted.
+    const servedExternal: ExternalFileAttachment = {
+        type: 'external_file',
+        ext_key: extKey,
+        filename: record.filename,
+        content_kind: record.contentKind,
+        mime_type: record.mimeType,
+        file_size: record.fileSize,
+        ...(record.pageCount != null ? { page_count: record.pageCount } : {}),
+    };
+
     const timeout = createTimeoutController(timeout_seconds, DEFAULT_IMAGES_TIMEOUT_SECONDS);
     const { signal, timeoutSeconds, throwIfTimedOut, dispose } = timeout;
 
@@ -511,6 +544,7 @@ async function handleExternalFileViewRequest(
                     height: processed.height,
                 }],
                 total_pages: null,
+                served_attachment: servedExternal,
             };
         }
 
@@ -573,6 +607,7 @@ async function handleExternalFileViewRequest(
             kind: 'pdf',
             images,
             total_pages: renderResult.pageCount,
+            served_attachment: servedExternal,
         };
     } catch (error) {
         if (signal.aborted || error instanceof WorkerAbortError || error instanceof TimeoutError) {

@@ -799,6 +799,19 @@ export interface WSZoteroViewImagesResponse {
     images: WSViewImage[];
     /** Total number of pages in the document (PDFs only) */
     total_pages: number | null;
+    /**
+     * The served attachment's parent regular item, when it has one. Drives the
+     * backend tool-result view row's parent-centric display. Omitted for
+     * standalone attachments and external files.
+     */
+    parent_item?: ItemSummary | null;
+    /**
+     * The served attachment's own metadata — a Zotero attachment
+     * (`AttachmentInfo`) or a user-attached external file
+     * (`ExternalFileAttachment`). Carries the attachment's own title/filename
+     * and content_kind for the backend tool-result view row.
+     */
+    served_attachment?: AttachmentInfo | ExternalFileAttachment | null;
     /** Error message if processing failed */
     error?: string | null;
     /** Error code for programmatic handling */
