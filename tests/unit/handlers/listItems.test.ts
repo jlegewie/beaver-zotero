@@ -41,8 +41,7 @@ vi.mock('../../../src/utils/zoteroSerializers', async (importOriginal) => {
     return {
         ...actual,
         serializeItemStub: vi.fn((item: any) => ({
-            library_id: item.libraryID,
-            zotero_key: item.key,
+            item_id: `${item.libraryID}-${item.key}`,
             item_type: item.itemType,
             title: item.getField?.('title', false, true) || item.getDisplayTitle?.() || null,
             creators: null,

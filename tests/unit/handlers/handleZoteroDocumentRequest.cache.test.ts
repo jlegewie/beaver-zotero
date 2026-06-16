@@ -378,17 +378,11 @@ describe('handleZoteroDocumentRequest document cache integration', () => {
         });
 
         expect(response.parent_item).toMatchObject({
-            library_id: 1,
-            zotero_key: 'PARENT1',
+            item_id: '1-PARENT1',
             item_type: 'journalArticle',
             title: 'Parent Paper',
+            creators: 'Smith',
             year: 2024,
-        });
-        expect(response.parent_item?.creators?.[0]).toMatchObject({
-            first_name: 'Jane',
-            last_name: 'Smith',
-            creator_type: 'author',
-            is_primary: true,
         });
         expect((globalThis as any).Zotero.Items.getAsync).toHaveBeenCalledWith(parentItem.id);
         expect((globalThis as any).Zotero.Items.loadDataTypes).toHaveBeenCalledWith(
@@ -450,9 +444,10 @@ describe('handleZoteroDocumentRequest document cache integration', () => {
         expect(response.error_code).toBe('too_many_pages');
         expect(response.result).toBeUndefined();
         expect(response.parent_item).toMatchObject({
-            zotero_key: 'PARENT1',
+            item_id: '1-PARENT1',
             item_type: 'journalArticle',
             title: 'Parent Paper',
+            creators: 'Smith',
             year: 2024,
         });
         expect(response.served_attachment).toEqual({

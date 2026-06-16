@@ -141,15 +141,24 @@ export interface DeleteData extends ZoteroItemReference {
 }
 
 /** Minimal bibliographic anchor for a regular item */
-export interface ItemStub extends ZoteroItemReference {
+export interface ItemStub {
+    item_id: string;
+    item_type?: string | null;
+    title?: string | null;
+    creators?: string | null;
+    year?: number | null;
+}
+
+/**
+ * Lightweight item data for search results. 
+ *
+ * Omits formatted_citation, item_json, hashes, sync fields.
+ */
+export interface ItemSummary extends ZoteroItemReference {
     item_type: string;
     title?: string | null;
     creators?: ZoteroCreator[] | null;
     year?: number | null;
-}
-
-/** Lightweight item data for search results. Omits formatted_citation, item_json, hashes, sync fields. */
-export interface ItemSummary extends ItemStub {
     date?: string | null;
     publication_title?: string | null;
     abstract?: string | null;

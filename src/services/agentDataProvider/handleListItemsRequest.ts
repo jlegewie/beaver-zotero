@@ -328,7 +328,7 @@ export async function handleListItemsRequest(
             } else if (item.isAttachment()) {
                 const parentInfo = item.parentItemID ? parentMap.get(item.parentItemID) : null;
                 const attachmentInfo = await getAttachmentInfoForItem(item, {
-                    parentItemId: parentInfo ? `${parentInfo.library_id}-${parentInfo.zotero_key}` : null,
+                    parentItemId: parentInfo?.item_id ?? null,
                     isPrimary: false,
                     includeAnnotationsCount: true,
                     skipWorkerFallback: true,

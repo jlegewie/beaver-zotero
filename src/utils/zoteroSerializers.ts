@@ -76,18 +76,34 @@ export function getCreatorsFromItem(item: Zotero.Item): ZoteroCreator[] | null {
     return creators.length > 0 ? creators : null;
 }
 
+/**
+ * Formats creators as a compact, citation-style string (last names only),
+ * matching the backend `format_item_stub_creators` projection so the strings the
+ * frontend sends in an `ItemStub` are identical to what the backend would derive:
+ *   - prefer primary creators; fall back to author-typed creators if none flagged
+ *   - 1 name → "Smith"; 2–3 → "Smith, Jones & Lee"; 4+ → "Smith et al."
+ *   - returns null when the kept set has no usable names (e.g. editors only)
+ */
 export function formatZoteroCreatorsString(creators: ZoteroCreator[] | null | undefined): string | null {
     if (!creators || creators.length === 0) return null;
 
-    const names = creators.map(c => {
-        if (c.last_name) return c.last_name;
-        if (c.first_name) return c.first_name;
-        return null;
-    }).filter((name): name is string => Boolean(name));
+    let list = creators;
+    if (list.some(c => c.is_primary != null)) {
+        list = list.filter(c => c.is_primary);
+    } else if (list.some(c => c.creator_type)) {
+        const authors = list.filter(c => c.creator_type === 'author');
+        if (authors.length > 0) list = authors;
+    }
+
+    const names = list
+        .map(c => c.last_name || c.first_name || null)
+        .filter((name): name is string => Boolean(name));
 
     if (names.length === 0) return null;
     if (names.length === 1) return names[0];
-    if (names.length === 2) return `${names[0]} & ${names[1]}`;
+    if (names.length <= 3) {
+        return `${names.slice(0, -1).join(', ')} & ${names[names.length - 1]}`;
+    }
     return `${names[0]} et al.`;
 }
 
@@ -341,7 +357,14 @@ export async function serializeItem(item: Zotero.Item, clientDateModified: strin
 export async function serializeItemSummary(item: Zotero.Item): Promise<ItemSummary> {
     const tags = item.getTags();
     return {
-        ...serializeItemStub(item),
+        // ItemSummary keeps split keys + structured creators (it is parsed as a
+        // full ItemSummary by the backend), unlike the lean ItemStub.
+        zotero_key: item.key,
+        library_id: item.libraryID,
+        item_type: item.itemType,
+        title: item.getField('title', false, true) || null,
+        creators: getCreatorsFromItem(item),
+        year: getYearFromItem(item) ?? null,
         date: item.getField('date', false, true) || null,
         publication_title: item.getField('publicationTitle', false, true) || null,
         abstract: item.getField('abstractNote') || null,
@@ -355,14 +378,17 @@ export async function serializeItemSummary(item: Zotero.Item): Promise<ItemSumma
 
 /**
  * Serializes the minimal bibliographic anchor (`ItemStub`) for a regular item.
+ *
+ * Emits the lean, model-facing shape the backend consumes directly: a combined
+ * `item_id` and a pre-formatted `creators` string. Keep this in sync with the
+ * backend `ItemStub` projection (`format_item_stub_creators`).
  */
 export function serializeItemStub(item: Zotero.Item): ItemStub {
     return {
-        zotero_key: item.key,
-        library_id: item.libraryID,
+        item_id: `${item.libraryID}-${item.key}`,
         item_type: item.itemType,
         title: item.getField('title', false, true) || null,
-        creators: getCreatorsFromItem(item),
+        creators: formatZoteroCreatorsString(getCreatorsFromItem(item)),
         year: getYearFromItem(item) ?? null,
     };
 }
@@ -615,7 +641,7 @@ export function serializeNote(
         result_type: 'note',
         item_id: `${note.libraryID}-${note.key}`,
         title: note.getDisplayTitle?.() || '',
-        parent_item_id: parent ? `${parent.library_id}-${parent.zotero_key}` : null,
+        parent_item_id: parent?.item_id ?? null,
         parent_title: parent?.title ?? null,
         parent_item: parent ?? null,
         date_modified: note.dateModified,
