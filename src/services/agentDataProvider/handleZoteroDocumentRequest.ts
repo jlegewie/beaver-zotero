@@ -114,7 +114,7 @@ export async function getResolvedAttachmentParentSummary(
  * expensive availability/OCR analysis on the hot read path — the document was
  * just read, so it is readable by construction.
  */
-export function buildServedAttachmentInfo(
+function buildServedAttachmentInfo(
     attachment: Zotero.Item,
     contentKind: ReadableContentKind,
 ): AttachmentInfo {

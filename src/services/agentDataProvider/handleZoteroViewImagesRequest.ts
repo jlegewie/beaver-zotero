@@ -15,20 +15,20 @@ import {
     WSViewImage,
     ViewImagesErrorCode,
 } from '../agentProtocol';
-import { ZoteroItemReference, ItemSummary } from '../../../react/types/zotero';
+import { ZoteroItemReference, ItemSummary, AttachmentInfo } from '../../../react/types/zotero';
 import type { ExternalFileAttachment } from '../../../react/types/attachments/apiTypes';
 import {
     getReadableContentKind,
     resolveToImageAttachment,
     resolveToPdfAttachment,
 } from '../documentExtraction/attachmentResolution';
+import { getAttachmentInfo } from '../documentExtraction/attachmentInfo';
 import { isLinkedUrlAttachment } from '../../utils/attachmentFiles';
 import { validateZoteroItemReference } from './utils';
 import { handleZoteroAttachmentPageImagesRequest } from './handleZoteroAttachmentPageImagesRequest';
 import { handleZoteroAttachmentImageRequest } from './handleZoteroAttachmentImageRequest';
 import { resolveExternalFile } from '../externalFiles';
 import {
-    buildServedAttachmentInfo,
     externalFileMissingMessage,
     getResolvedAttachmentParentSummary,
 } from './handleZoteroDocumentRequest';
@@ -289,15 +289,21 @@ export async function handleZoteroViewImagesRequest(
         }
 
         // View-row metadata for the backend tool-result view (parent-centric
-        // display + the served file's own name/content_kind). Both are optional;
-        // a parent-summary failure must never fail the view itself.
+        // display + the served file's own name/content_kind/readability). Both
+        // are optional; a failure here must never fail the view itself.
         let parentItem: ItemSummary | null = null;
         try {
             parentItem = await getResolvedAttachmentParentSummary(target.item);
         } catch (error) {
             logger(`handleZoteroViewImagesRequest: parent summary failed for ${requestKey}: ${error}`, 1);
         }
-        const servedAttachment = buildServedAttachmentInfo(target.item, target.kind);
+        // Get attachment info
+        let servedAttachment: AttachmentInfo | null = null;
+        try {
+            servedAttachment = await getAttachmentInfo(target.item, { pdfAnalysis: 'lightweight' });
+        } catch (error) {
+            logger(`handleZoteroViewImagesRequest: served attachment info failed for ${requestKey}: ${error}`, 1);
+        }
 
         // 3. Dispatch by kind
         if (target.kind === 'pdf') {
@@ -344,7 +350,7 @@ export async function handleZoteroViewImagesRequest(
                 images,
                 total_pages: pdfResponse.total_pages,
                 ...(parentItem ? { parent_item: parentItem } : {}),
-                served_attachment: servedAttachment,
+                ...(servedAttachment ? { served_attachment: servedAttachment } : {}),
             };
         }
 
@@ -381,7 +387,7 @@ export async function handleZoteroViewImagesRequest(
             }],
             total_pages: null,
             ...(parentItem ? { parent_item: parentItem } : {}),
-            served_attachment: servedAttachment,
+            ...(servedAttachment ? { served_attachment: servedAttachment } : {}),
         };
 
     } catch (error) {
