@@ -223,19 +223,20 @@ export async function handleZoteroDocumentRequest(
 
         const { item: resolvedItem, key: resolvedKey, contentKind, contentType } = resolved;
         timeoutContentKind = readableToExtractKind(contentKind);
-        // Build the served-file stub first (synchronous) so post-resolution error
-        // responses carry it even if the parent lookup below times out.
-        servedAttachment = buildServedAttachmentStub(resolvedItem, contentKind);
+        // View-row metadata for the backend tool-result view (parent-centric
+        // display + the served file's own name/content_kind). Both are optional;
+        // a failure here must never fail document delivery, and both ride on
+        // post-resolution error responses too. Build the served-file stub first
+        // (synchronous, no file analysis) so it is present even if the parent
+        // lookup throws.
         try {
-            parentItem = await withRequestDeadline(
-                getResolvedAttachmentParentStub(resolvedItem),
-                'parent_item_stub',
-            );
+            servedAttachment = buildServedAttachmentStub(resolvedItem, contentKind);
         } catch (error) {
-            // parent_item is optional metadata; a genuine request-deadline hit
-            // still fails the request, but any other failure must not break
-            // document delivery.
-            if (error instanceof TimeoutError) throw error;
+            logger(`handleZoteroDocumentRequest: served attachment stub failed for ${resolvedKey}: ${error}`, 1);
+        }
+        try {
+            parentItem = await getResolvedAttachmentParentStub(resolvedItem);
+        } catch (error) {
             logger(`handleZoteroDocumentRequest: parent stub failed for ${resolvedKey}: ${error}`, 1);
         }
 
