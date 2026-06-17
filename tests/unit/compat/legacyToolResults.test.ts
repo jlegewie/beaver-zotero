@@ -690,6 +690,27 @@ describe('buildLegacyView — annotation list', () => {
         }))) as AnnotationListView;
         expect(view.annotations).toHaveLength(0);
     });
+
+    it('caps long annotation text/comment to a bounded preview (not the full body)', async () => {
+        const longText = 'x'.repeat(500);
+        installItems([
+            { id: 157, key: 'PAR17', firstCreator: 'Quinn', date: '2021' },
+            { id: 158, key: 'ATT17', kind: 'attachment', parentItemID: 157, isPDF: true },
+            {
+                id: 159, key: 'ANN002', kind: 'annotation', parentItemID: 158,
+                annotationType: 'highlight', annotationText: longText, annotationComment: longText,
+            },
+        ]);
+        const view = (await buildLegacyView(returnPart('get_annotations', {
+            tool_name: 'get_annotations', result_count: 1, total_count: 1, has_more: false,
+            annotations: [{ library_id: 1, zotero_key: 'ANN002' }],
+        }))) as AnnotationListView;
+        const row = view.annotations[0];
+        expect(row.text!.length).toBeLessThanOrEqual(303);
+        expect(row.text!.endsWith('...')).toBe(true);
+        expect(longText.startsWith(row.text!.slice(0, 300))).toBe(true);
+        expect(row.comment!.length).toBeLessThanOrEqual(303);
+    });
 });
 
 // ===========================================================================

@@ -53,6 +53,13 @@ import { ReadNoteResultView } from './ReadNoteResultView';
 import { GetAnnotationsResultView } from './GetAnnotationsResultView';
 import { FindInAttachmentsResultView } from './FindInAttachmentsResultView';
 import { LookupWorkResultView } from './LookupWorkResultView';
+import { isToolResultView, ToolResultView as ToolResultViewModel } from '../../types/toolResultViews';
+import { ItemListResultView } from './toolResultViews/ItemListResultView';
+import { ExternalReferenceListResultView } from './toolResultViews/ExternalReferenceListResultView';
+import { CollectionListResultView } from './toolResultViews/CollectionListResultView';
+import { TagListResultView } from './toolResultViews/TagListResultView';
+import { AnnotationListResultView } from './toolResultViews/AnnotationListResultView';
+import { AttachmentSearchResultView } from './toolResultViews/AttachmentSearchResultView';
 
 interface ToolResultViewProps {
     toolcall: ToolCallPart;
@@ -60,14 +67,50 @@ interface ToolResultViewProps {
 }
 
 /**
- * Renders the result of a tool call.
- * Dispatches to specialized renderers based on the result type,
- * with a fallback to generic JSON/markdown rendering.
- * 
+ * Map a hydrated view model to its shared presentational component.
+ *
+ * Returns null for unsupported view types so the legacy renderer can handle the
+ * result.
+ */
+function renderFromView(view: ToolResultViewModel): React.ReactNode | null {
+    switch (view.view_type) {
+        case 'item_list':
+            return <ItemListResultView view={view} />;
+        case 'external_reference_list':
+            return <ExternalReferenceListResultView view={view} />;
+        case 'collection_list':
+            return <CollectionListResultView view={view} />;
+        case 'tag_list':
+            return <TagListResultView view={view} />;
+        case 'annotation_list':
+            return <AnnotationListResultView view={view} />;
+        case 'attachment_search':
+            return <AttachmentSearchResultView view={view} />;
+        default:
+            return null;
+    }
+}
+
+/**
+ * Renders a tool result from a structured view model when one is available.
+ *
  * Note: Annotation tools are handled separately by AnnotationToolCallView
  * and don't go through this dispatcher.
  */
 export const ToolResultView: React.FC<ToolResultViewProps> = ({ toolcall, result }) => {
+    const view = result.metadata?.view;
+    if (isToolResultView(view)) {
+        const fromView = renderFromView(view);
+        if (fromView) return <>{fromView}</>;
+    }
+    return <LegacyToolResultView toolcall={toolcall} result={result} />;
+};
+
+/**
+ * Legacy reference-based dispatcher: renders from `metadata.summary`/`content`
+ * via the existing per-tool renderers, ending in the generic fallback.
+ */
+const LegacyToolResultView: React.FC<ToolResultViewProps> = ({ toolcall, result }) => {
     const toolName = toolcall.tool_name;
     const content = result.content;
     const metadata = result.metadata;

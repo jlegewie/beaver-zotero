@@ -82,6 +82,8 @@ import {
 } from "../agents/toolResultTypes";
 
 const NOTE_TITLE_MAX_LENGTH = 100;
+/** Maximum annotation text/comment preview stored in legacy view rows. */
+const ANNOTATION_PREVIEW_MAX_LENGTH = 300;
 
 // ===========================================================================
 // Live-Zotero hydration helpers
@@ -225,8 +227,10 @@ async function hydrateAnnotationRow(
         library_id: ref.library_id,
         zotero_key: ref.zotero_key,
         annotation_type: item.annotationType ?? null,
-        text: item.annotationText ?? "",
-        comment: item.annotationComment ?? "",
+        // Store a bounded preview; result rows and tooltips do not need the full
+        // annotation body.
+        text: truncateText(item.annotationText ?? "", ANNOTATION_PREVIEW_MAX_LENGTH),
+        comment: truncateText(item.annotationComment ?? "", ANNOTATION_PREVIEW_MAX_LENGTH),
         color: item.annotationColor ?? null,
         page_label: item.annotationPageLabel ?? "",
         source_display_name: await annotationSourceDisplayName(item),

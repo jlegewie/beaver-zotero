@@ -1,6 +1,6 @@
 import type { ZoteroItemReference } from '../types/zotero';
 import type { CitationRef } from '../utils/citationGrammar';
-import type { Citation } from '../types/citations';
+import type { Citation, PartLocation } from '../types/citations';
 import type { PageLabelsByAttachmentId } from '../atoms/citations';
 
 /**
@@ -45,6 +45,26 @@ export interface CitationActivation {
  */
 
 /**
+ * One find_in_attachments match to navigate to in the reader. Assembled by the
+ * render layer from an attachment-search row and match.
+ */
+export interface AttachmentMatchNavigation {
+    library_id: number;
+    zotero_key: string;
+    content_kind: 'pdf' | 'epub' | 'text' | 'snapshot';
+    /** 1-based page number (EPUB: 1-based section ordinal). */
+    page_number?: number | null;
+    /** Printed page label for the matched page, when known. */
+    page_label?: string | null;
+    /** Compact part location used for reader navigation. */
+    target?: PartLocation | null;
+    /** Match preview text, used for temporary-annotation comments and EPUB search. */
+    snippet?: string;
+    /** Owning document of the clicked row, so the host targets the right window. */
+    ownerDocument?: Document;
+}
+
+/**
  * Navigation actions a rendered chat surface can trigger on the host.
  *
  * These are inherently client-specific: where "reveal in library" or "open the
@@ -75,6 +95,8 @@ export interface NavigationHost {
     openSource(ref: ZoteroItemReference): void | Promise<void>;
     /** Open the referenced annotation in the reader, scrolled to its location. */
     openAnnotation(ref: ZoteroItemReference): void | Promise<void>;
+    /** Open the reader at a find_in_attachments match and highlight it. */
+    navigateToAttachmentMatch(match: AttachmentMatchNavigation): void | Promise<void>;
     /** Open a locally stored external-file copy by its ext key (no-op if no local copy). */
     launchExternalFile(extKey: string): void | Promise<void>;
 }
