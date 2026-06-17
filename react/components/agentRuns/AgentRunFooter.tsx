@@ -23,6 +23,7 @@ import { store } from '../../store';
 import Tooltip from '../ui/Tooltip';
 import Spinner from '../icons/Spinner';
 import { prepareCitationRenderContext } from '../../utils/citationRenderContext';
+import { addPopupMessageAtom } from '../../utils/popupMessageUtils';
 import { getHost } from '../../host';
 
 interface AgentRunFooterProps {
@@ -42,7 +43,8 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
     const toolResultsMap = useAtomValue(toolResultsMapAtom);
     const citationMarkerMap = useAtomValue(citationKeyToMarkerAtom);
     const allRuns = useAtomValue(allRunsAtom);
-    
+    const addPopupMessage = useSetAtom(addPopupMessageAtom);
+
     // Force re-render when menu opens to get fresh context for disabled state
     const [, forceUpdate] = useState({});
     
@@ -167,40 +169,43 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
         return renderToHTML(renderContent, "markdown", renderContextData);
     };
 
-    /** Save as standalone note to current library/collection. */
-    const saveToLibrary = async () => {
+    /**
+     * Render the run as a Zotero note and persist it through the host.
+     * When `asChild` is true the note is saved under the current parent item
+     * (which must exist); otherwise it is saved standalone to the current
+     * library/collection. Surfaces save failures (e.g. read-only library) as a
+     * popup since the share menu is fire-and-forget.
+     */
+    const saveRunNote = async (asChild: boolean) => {
         const noteWriter = getHost().noteWriter;
         if (!noteWriter) return;
-        const contentHtml = await buildRunNoteContentHtml();
-        const responseIndex = allRuns.findIndex(r => r.id === run.id) + 1;
-        await noteWriter.saveNote({
-            contentHtml,
-            asChild: false,
-            format: {
-                kind: 'agent-run',
-                responseIndex: responseIndex || undefined,
-                runId: run.id,
-            },
-        });
+        try {
+            const contentHtml = await buildRunNoteContentHtml();
+            const responseIndex = allRuns.findIndex(r => r.id === run.id) + 1;
+            await noteWriter.saveNote({
+                contentHtml,
+                asChild,
+                requireParent: asChild,
+                format: {
+                    kind: 'agent-run',
+                    responseIndex: responseIndex || undefined,
+                    runId: run.id,
+                },
+            });
+        } catch (error: any) {
+            addPopupMessage({
+                type: 'error',
+                title: 'Could not save note',
+                text: error?.message || 'Failed to save note.',
+            });
+        }
     };
 
+    /** Save as standalone note to current library/collection. */
+    const saveToLibrary = () => saveRunNote(false);
+
     /** Save as child note attached to selected/current item. */
-    const saveToItem = async () => {
-        const noteWriter = getHost().noteWriter;
-        if (!noteWriter) return;
-        const contentHtml = await buildRunNoteContentHtml();
-        const responseIndex = allRuns.findIndex(r => r.id === run.id) + 1;
-        await noteWriter.saveNote({
-            contentHtml,
-            asChild: true,
-            requireParent: true,
-            format: {
-                kind: 'agent-run',
-                responseIndex: responseIndex || undefined,
-                runId: run.id,
-            },
-        });
-    };
+    const saveToItem = () => saveRunNote(true);
 
     const copyRunUrl = async () => {
         const threadId = store.get(currentThreadIdAtom);
