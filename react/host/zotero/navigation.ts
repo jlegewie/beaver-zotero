@@ -1,6 +1,7 @@
 import type { NavigationHost } from '../types';
 import type { ZoteroItemReference } from '../../types/zotero';
 import { revealSource, openSource as openZoteroSource } from '../../utils/sourceUtils';
+import { selectCollection } from '../../../src/utils/selectItem';
 import { activateCitation } from './citationActivation';
 import { launchExternalFile } from './sourceActions';
 
@@ -14,6 +15,10 @@ import { launchExternalFile } from './sourceActions';
 export const zoteroNavigation: NavigationHost = {
     revealInLibrary(ref: ZoteroItemReference): void {
         revealSource(ref);
+    },
+    revealCollection(ref: ZoteroItemReference): void {
+        const found = Zotero.Collections.getByLibraryAndKey(ref.library_id, ref.zotero_key);
+        if (found) selectCollection(found);
     },
     launchFile(filePath: string): void {
         Zotero.launchFile(filePath);
