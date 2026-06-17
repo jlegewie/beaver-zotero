@@ -73,6 +73,8 @@ export interface NavigationHost {
     activateCitation(activation: CitationActivation): void | Promise<void>;
     /** Open a library item's best attachment (PDF/etc.) or note in the host viewer. */
     openSource(ref: ZoteroItemReference): void | Promise<void>;
+    /** Open the referenced annotation in the reader, scrolled to its location. */
+    openAnnotation(ref: ZoteroItemReference): void | Promise<void>;
     /** Open a locally stored external-file copy by its ext key (no-op if no local copy). */
     launchExternalFile(extKey: string): void | Promise<void>;
 }

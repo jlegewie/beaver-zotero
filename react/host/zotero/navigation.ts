@@ -4,6 +4,7 @@ import { revealSource, openSource as openZoteroSource } from '../../utils/source
 import { selectCollection } from '../../../src/utils/selectItem';
 import { activateCitation } from './citationActivation';
 import { launchExternalFile } from './sourceActions';
+import { navigateToAnnotation } from '../../utils/readerUtils';
 
 /**
  * Zotero implementation of {@link NavigationHost}.
@@ -29,6 +30,10 @@ export const zoteroNavigation: NavigationHost = {
     activateCitation,
     openSource(ref: ZoteroItemReference): Promise<void> {
         return openZoteroSource(ref);
+    },
+    async openAnnotation(ref: ZoteroItemReference): Promise<void> {
+        const item = await Zotero.Items.getByLibraryAndKeyAsync(ref.library_id, ref.zotero_key);
+        if (item && item.isAnnotation()) await navigateToAnnotation(item);
     },
     launchExternalFile,
 };
