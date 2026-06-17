@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { CSSIcon, Icon, ArrowRightIcon } from '../icons/icons';
-import type { ManageCollectionsResultData } from '../../types/agentActions/base';
+import { CSSIcon, Icon, ArrowRightIcon } from '../../../components/icons/icons';
+import type { ManageCollectionsResultData } from '../../../types/agentActions/base';
 import { shortenActionError } from './agentActionViewHelpers';
 
 type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error' | 'awaiting';

@@ -1,5 +1,5 @@
 import React from 'react';
-import MarkdownRenderer from '../messages/MarkdownRenderer';
+import MarkdownRenderer from '../../../components/messages/MarkdownRenderer';
 
 type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error' | 'awaiting';
 

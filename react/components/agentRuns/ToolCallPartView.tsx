@@ -5,7 +5,8 @@ import { toolResultsMapAtom, getToolCallStatus } from '../../agents/atoms';
 import { getToolCallLabel } from '../../agents/toolLabels';
 import { extractLookupWorkFoundCount, extractReadTextLineRangeLabel } from '../../agents/toolResultTypes';
 import { ToolResultView } from './ToolResultView';
-import { AgentActionView } from './AgentActionView';
+import { GenericAgentActionView } from './GenericAgentActionView';
+import { getHost } from '../../host';
 import { getPendingApprovalForToolcallAtom, getAgentActionsByToolcallAtom } from '../../agents/agentActions';
 import {
     Spinner,
@@ -350,34 +351,34 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
     const showStreamingPreview = !!streamingArgs && runStatus === 'in_progress'
         && STREAMING_PREVIEW_TOOLS.has(part.tool_name) && !showAgentActionView && !hasError;
 
+    // Agent-action UI (incl. streaming preview) is host-injected; non-Zotero
+    // clients fall back to a request-side summary.
     if (showStreamingPreview && streamingArgs) {
-        return (
-            <AgentActionView
-                toolcallId={part.tool_call_id}
-                toolName={part.tool_name}
-                runId={runId}
-                responseIndex={responseIndex}
-                pendingApproval={null}
-                hasToolReturn={false}
-                streamingArgs={streamingArgs}
-                runStatus={runStatus}
-            />
-        );
+        return getHost().components?.agentActionInStream({
+            kind: 'tool-action',
+            part,
+            runId,
+            responseIndex,
+            runStatus,
+            toolName: part.tool_name,
+            pendingApproval: null,
+            hasToolReturn: false,
+            streamingArgs,
+        }) ?? <GenericAgentActionView part={part} runStatus={runStatus} streamingArgs={streamingArgs} />;
     }
 
-    // For agent action tools, show the AgentActionView instead of normal tool result
+    // For agent action tools, show the action UI instead of the normal tool result
     if (showAgentActionView) {
-        return (
-            <AgentActionView
-                toolcallId={part.tool_call_id}
-                toolName={actionToolName}
-                runId={runId}
-                responseIndex={responseIndex}
-                pendingApproval={pendingApproval}
-                hasToolReturn={hasResult}
-                runStatus={runStatus}
-            />
-        );
+        return getHost().components?.agentActionInStream({
+            kind: 'tool-action',
+            part,
+            runId,
+            responseIndex,
+            runStatus,
+            toolName: actionToolName,
+            pendingApproval,
+            hasToolReturn: hasResult,
+        }) ?? <GenericAgentActionView part={part} runStatus={runStatus} />;
     }
 
     const effectiveLabelColor = effectiveExpanded

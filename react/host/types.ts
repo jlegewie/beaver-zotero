@@ -4,6 +4,9 @@ import type { CitationRef } from '../utils/citationGrammar';
 import type { Citation, PartLocation } from '../types/citations';
 import type { PageLabelsByAttachmentId } from '../atoms/citations';
 import type { ExternalReference } from '../types/externalReferences';
+import type { ToolCallPart, AgentRun, AgentRunStatus } from '../agents/types';
+import type { PendingApproval } from '../agents/agentActions';
+import type { EditNoteResolvedTarget } from '../components/agentRuns/editNoteShared';
 
 /**
  * Everything the host needs to activate (navigate to / open) a cited location.
@@ -287,6 +290,36 @@ export interface ExternalReferenceActionsProps {
  * for that surface (the shared caller then renders nothing). The slice grows as
  * more action UIs move behind the host seam.
  */
+/**
+ * Inputs for the in-stream agent-action UI, discriminated by `kind` to cover the
+ * three render situations: a single action tool-call (`tool-action`), a bulk
+ * annotation tool-call (`annotation`), and a grouped edit_note run
+ * (`edit-note-group`). The shared dispatchers classify and pass these; the host
+ * owns the rich apply/undo rendering. Mirrors the props the Zotero components
+ * (`AgentActionView` / `AnnotationToolCallView` / `EditNoteGroupView`) take today.
+ */
+export type AgentActionInStreamProps =
+    | {
+        kind: 'tool-action';
+        part: ToolCallPart;
+        runId: string;
+        responseIndex: number;
+        runStatus: AgentRunStatus;
+        toolName: string;
+        pendingApproval: PendingApproval | null;
+        hasToolReturn: boolean;
+        streamingArgs?: Record<string, unknown> | null;
+    }
+    | { kind: 'annotation'; part: ToolCallPart; runId: string; runStatus: AgentRunStatus }
+    | {
+        kind: 'edit-note-group';
+        parts: ToolCallPart[];
+        target: EditNoteResolvedTarget | null;
+        runId: string;
+        responseIndex: number;
+        runStatus: AgentRunStatus;
+    };
+
 export interface ComponentsHost {
     /**
      * Render the action buttons for an external (non-library) reference —
@@ -295,6 +328,18 @@ export interface ComponentsHost {
      * whole control is client-specific. Returns null when the host has no such UI.
      */
     externalReferenceActions(props: ExternalReferenceActionsProps): ReactNode;
+    /**
+     * Render the rich in-stream agent-action / mutation UI for one tool-call part
+     * or edit-note group (approve/apply/undo controls, bulk-annotation panel, the
+     * edit_note group). Return null to fall back to the shared generic summary.
+     */
+    agentActionInStream(props: AgentActionInStreamProps): ReactNode;
+    /**
+     * Render the post-run pending-approval review block (create-item / note /
+     * annotation mutation summaries). Return null when the client has nothing to
+     * approve.
+     */
+    pendingActionsReview(props: { run: AgentRun }): ReactNode;
 }
 
 /**

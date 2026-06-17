@@ -1,14 +1,14 @@
 import React from 'react';
-import ReferenceMetadataDisplay from '../externalReferences/ReferenceMetadataDisplay';
-import { AgentAction } from '../../agents/agentActions';
-import { CreateItemProposedData, CreateItemResultData } from '../../types/agentActions/items';
-import { CheckmarkCircleIcon, CancelCircleIcon, AlertIcon, Icon } from '../icons/icons';
-import { revealSource } from '../../utils/sourceUtils';
-import IconButton from '../ui/IconButton';
-import { ArrowUpRightIcon } from '../icons/icons';
-import Tooltip from '../ui/Tooltip';
-import Spinner from '../icons/Spinner';
-import { usePdfFetchStatus } from '../../hooks/useBackgroundTasks';
+import ReferenceMetadataDisplay from '../../../components/externalReferences/ReferenceMetadataDisplay';
+import { AgentAction } from '../../../agents/agentActions';
+import { CreateItemProposedData, CreateItemResultData } from '../../../types/agentActions/items';
+import { CheckmarkCircleIcon, CancelCircleIcon, AlertIcon, Icon } from '../../../components/icons/icons';
+import { revealSource } from '../../../utils/sourceUtils';
+import IconButton from '../../../components/ui/IconButton';
+import { ArrowUpRightIcon } from '../../../components/icons/icons';
+import Tooltip from '../../../components/ui/Tooltip';
+import Spinner from '../../../components/icons/Spinner';
+import { usePdfFetchStatus } from '../../../hooks/useBackgroundTasks';
 
 type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error' | 'awaiting';
 

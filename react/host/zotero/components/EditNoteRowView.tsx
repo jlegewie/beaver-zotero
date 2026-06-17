@@ -1,5 +1,5 @@
 import React from 'react';
-import { AgentRunStatus, ToolCallPart } from '../../agents/types';
+import { AgentRunStatus, ToolCallPart } from '../../../agents/types';
 import {
     AlertIcon,
     ArrowUpRightIcon,
@@ -10,9 +10,9 @@ import {
     Spinner,
     TickIcon,
     UndoIcon,
-} from '../icons/icons';
-import IconButton from '../ui/IconButton';
-import Tooltip from '../ui/Tooltip';
+} from '../../../components/icons/icons';
+import IconButton from '../../../components/ui/IconButton';
+import Tooltip from '../../../components/ui/Tooltip';
 import { ActionPreview } from './ActionPreview';
 import { useEditNoteActions } from './useEditNoteActions';
 

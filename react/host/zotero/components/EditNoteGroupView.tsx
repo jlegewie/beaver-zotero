@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { AgentRunStatus, ToolCallPart } from '../../agents/types';
-import { getToolCallStatus, toolResultsMapAtom } from '../../agents/atoms';
+import { AgentRunStatus, ToolCallPart } from '../../../agents/types';
+import { getToolCallStatus, toolResultsMapAtom } from '../../../agents/atoms';
 import {
     AgentAction,
     PendingApproval,
@@ -11,15 +11,15 @@ import {
     rejectAgentActionAtom,
     setAgentActionsToErrorAtom,
     undoAgentActionAtom,
-} from '../../agents/agentActions';
-import { isWSChatPendingAtom, sendApprovalResponseAtom } from '../../atoms/agentRunAtoms';
+} from '../../../agents/agentActions';
+import { isWSChatPendingAtom, sendApprovalResponseAtom } from '../../../atoms/agentRunAtoms';
 import {
     agentActionItemTitlesAtom,
     setAgentActionItemTitleAtom,
     toolExpandedAtom,
     setToolExpandedAtom,
-} from '../../atoms/messageUIState';
-import { addAutoApproveNoteKeyAtom, makeNoteKey } from '../../atoms/editNoteAutoApprove';
+} from '../../../atoms/messageUIState';
+import { addAutoApproveNoteKeyAtom, makeNoteKey } from '../../../atoms/editNoteAutoApprove';
 import { STATUS_CONFIGS, type ActionStatus } from './agentActionViewHelpers';
 import {
     ArrowDownIcon,
@@ -33,16 +33,16 @@ import {
     RepeatIcon,
     Spinner,
     TickIcon,
-} from '../icons/icons';
-import Button from '../ui/Button';
-import IconButton from '../ui/IconButton';
-import Tooltip from '../ui/Tooltip';
-import SplitApplyButton from '../ui/buttons/SplitApplyButton';
-import { openNoteByKey } from '../../utils/sourceUtils';
-import { executeEditNoteAction, undoEditNoteAction } from '../../utils/editNoteActions';
-import { logger } from '../../../src/utils/logger';
+} from '../../../components/icons/icons';
+import Button from '../../../components/ui/Button';
+import IconButton from '../../../components/ui/IconButton';
+import Tooltip from '../../../components/ui/Tooltip';
+import SplitApplyButton from '../../../components/ui/buttons/SplitApplyButton';
+import { openNoteByKey } from '../../../utils/sourceUtils';
+import { executeEditNoteAction, undoEditNoteAction } from '../../../utils/editNoteActions';
+import { logger } from '../../../../src/utils/logger';
 import { EditNoteRowView } from './EditNoteRowView';
-import { isDiffPreviewLive } from '../../utils/diffPreviewCoordinator';
+import { isDiffPreviewLive } from '../../../utils/diffPreviewCoordinator';
 import {
     buildPreviewableEditOperations,
     dismissActiveEditNotePreview,
@@ -58,7 +58,7 @@ import {
     isEditNoteStreamingPlaceholder,
     parseEditNoteToolCallArgs,
     resolveEditNoteTargetFromData,
-} from './editNoteShared';
+} from '../../../components/agentRuns/editNoteShared';
 
 interface EditNoteGroupViewProps {
     parts: ToolCallPart[];

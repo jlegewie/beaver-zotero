@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useSetAtom, useAtomValue } from 'jotai';
-import { AgentRunStatus, ToolCallPart } from '../../agents/types';
-import { toolResultsMapAtom, getToolCallStatus } from '../../agents/atoms';
+import { AgentRunStatus, ToolCallPart } from '../../../agents/types';
+import { toolResultsMapAtom, getToolCallStatus } from '../../../agents/atoms';
 import {
     AgentAction,
     getAgentActionsByToolcallAtom,
@@ -11,16 +11,16 @@ import {
     setAgentActionsToErrorAtom,
     rejectAgentActionAtom,
     undoAgentActionAtom,
-} from '../../agents/agentActions';
-import { AckActionLink } from '../../../src/services/agentActionsService';
-import { AnnotationResultData } from '../../types/agentActions/annotations';
-import { applyAnnotation, deleteAnnotationFromReader } from '../../utils/annotationActions';
-import { getCurrentPage, getCurrentReaderAndWaitForView, navigateToAnnotation, navigateToPage } from '../../utils/readerUtils';
-import { currentReaderAttachmentKeyAtom } from '../../atoms/messageComposition';
-import { isLibraryEditable, shortItemTitle } from '../../../src/utils/zoteroUtils';
-import { ZoteroReader } from '../../utils/annotationUtils';
-import { logger } from '../../../src/utils/logger';
-import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
+} from '../../../agents/agentActions';
+import { AckActionLink } from '../../../../src/services/agentActionsService';
+import { AnnotationResultData } from '../../../types/agentActions/annotations';
+import { applyAnnotation, deleteAnnotationFromReader } from '../../../utils/annotationActions';
+import { getCurrentPage, getCurrentReaderAndWaitForView, navigateToAnnotation, navigateToPage } from '../../../utils/readerUtils';
+import { currentReaderAttachmentKeyAtom } from '../../../atoms/messageComposition';
+import { isLibraryEditable, shortItemTitle } from '../../../../src/utils/zoteroUtils';
+import { ZoteroReader } from '../../../utils/annotationUtils';
+import { logger } from '../../../../src/utils/logger';
+import { ZoteroIcon, ZOTERO_ICONS } from '../../../components/icons/ZoteroIcon';
 import {
     Spinner,
     AlertIcon,
@@ -30,9 +30,9 @@ import {
     TickIcon,
     CancelIcon,
     HighlighterIcon,
-} from '../icons/icons';
-import IconButton from '../ui/IconButton';
-import Tooltip from '../ui/Tooltip';
+} from '../../../components/icons/icons';
+import IconButton from '../../../components/ui/IconButton';
+import Tooltip from '../../../components/ui/Tooltip';
 import {
     annotationAttachmentTitlesAtom,
     annotationBusyAtom,
@@ -42,8 +42,8 @@ import {
     setAnnotationBusyStateAtom,
     setAnnotationPanelStateAtom,
     toggleAnnotationPanelVisibilityAtom
-} from '../../atoms/messageUIState';
-import { isNoteAnnotationToolResult, isHighlightAnnotationToolResult } from '../../agents/toolResultTypes';
+} from '../../../atoms/messageUIState';
+import { isNoteAnnotationToolResult, isHighlightAnnotationToolResult } from '../../../agents/toolResultTypes';
 
 // =============================================================================
 // Types

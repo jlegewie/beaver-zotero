@@ -1,13 +1,13 @@
 import React from 'react';
-import type { AgentAction } from '../../agents/agentActions';
-import type { OrganizeItemsResultData } from '../../types/agentActions/base';
+import type { AgentAction } from '../../../agents/agentActions';
+import type { OrganizeItemsResultData } from '../../../types/agentActions/base';
 import { EditMetadataPreview } from './EditMetadataPreview';
 import { CreateCollectionPreview } from './CreateCollectionPreview';
 import { OrganizeItemsPreview } from './OrganizeItemsPreview';
 import { CreateItemsPreview } from './CreateItemsPreview';
 import { ConfirmExtractionPreview } from './ConfirmExtractionPreview';
 import { ConfirmExternalSearchPreview } from './ConfirmExternalSearchPreview';
-import { EditNotePreview } from './EditNotePreview';
+import { EditNotePreview } from '../../../components/agentRuns/EditNotePreview';
 import { CreateNotePreview } from './CreateNotePreview';
 import { ManageTagsPreview } from './ManageTagsPreview';
 import { ManageCollectionsPreview } from './ManageCollectionsPreview';
@@ -208,7 +208,7 @@ export const ActionPreview: React.FC<{
     }
 
     if (toolName === 'edit_note' || previewData.actionType === 'edit_note') {
-        const op = (previewData.actionData.operation ?? 'str_replace') as import('../../types/agentActions/editNote').EditNoteOperation;
+        const op = (previewData.actionData.operation ?? 'str_replace') as import('../../../types/agentActions/editNote').EditNoteOperation;
         const isRewrite = op === 'rewrite';
         const oldString = isRewrite ? '' : (previewData.actionData.old_string || '');
         const newString = previewData.actionData.new_string || '';

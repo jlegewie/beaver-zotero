@@ -10,8 +10,8 @@ import {
     isCreateNoteAnnotationsAgentAction,
     CreateHighlightAnnotationsAgentAction,
     CreateNoteAnnotationsAgentAction,
-} from '../../agents/agentActions';
-import { AgentRun } from '../../agents/types';
+} from '../../../agents/agentActions';
+import { AgentRun } from '../../../agents/types';
 import {
     CancelIcon,
     Icon,
@@ -21,17 +21,17 @@ import {
     NoteIcon,
     ArrowDownIcon,
     ArrowRightIcon,
-} from '../icons/icons';
-import IconButton from '../ui/IconButton';
-import Tooltip from '../ui/Tooltip';
-import Button from '../ui/Button';
+} from '../../../components/icons/icons';
+import IconButton from '../../../components/ui/IconButton';
+import Tooltip from '../../../components/ui/Tooltip';
+import Button from '../../../components/ui/Button';
 import CreateAnnotationsPreview from './CreateAnnotationsPreview';
 import {
     executeCreateHighlightAnnotationsAction,
     executeCreateNoteAnnotationsAction,
     undoCreateAnnotationsAction,
-} from '../../utils/createAnnotationsActions';
-import { logger } from '../../../src/utils/logger';
+} from '../../../utils/createAnnotationsActions';
+import { logger } from '../../../../src/utils/logger';
 
 type CreateAnnotationsAction =
     | CreateHighlightAnnotationsAgentAction

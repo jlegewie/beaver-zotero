@@ -1,12 +1,12 @@
 import React from 'react';
-import { AgentAction, PendingApproval } from '../../agents/agentActions';
+import { AgentAction, PendingApproval } from '../../../agents/agentActions';
 import {
     CheckmarkCircleIcon,
     CancelCircleIcon,
     AlertIcon,
     Spinner,
-} from '../icons/icons';
-import { truncateText } from '../../utils/stringUtils';
+} from '../../../components/icons/icons';
+import { truncateText } from '../../../utils/stringUtils';
 
 export type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error';
 

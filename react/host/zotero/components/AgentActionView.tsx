@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { navigateToAnnotation } from '../../utils/readerUtils';
+import { navigateToAnnotation } from '../../../utils/readerUtils';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { AgentRunStatus } from '../../agents/types';
+import { AgentRunStatus } from '../../../agents/types';
 import {
     AgentAction,
     PendingApproval,
@@ -12,34 +12,34 @@ import {
     rejectAgentActionAtom,
     setAgentActionsToErrorAtom,
     isCreateAnnotationsAgentAction,
-} from '../../agents/agentActions';
+} from '../../../agents/agentActions';
 import {
     approvalResponseIntentsAtom,
     isWSChatPendingAtom,
     removeApprovalResponseIntentAtom,
     sendApprovalResponseAtom,
-} from '../../atoms/agentRunAtoms';
+} from '../../../atoms/agentRunAtoms';
 import {
     agentActionItemTitlesAtom,
     setAgentActionItemTitleAtom,
     toolExpandedAtom,
     setToolExpandedAtom,
-} from '../../atoms/messageUIState';
-import { executeEditMetadataAction, undoEditMetadataAction, UndoResult } from '../../utils/editMetadataActions';
-import { executeCreateCollectionAction, undoCreateCollectionAction } from '../../utils/createCollectionActions';
-import { executeOrganizeItemsAction, undoOrganizeItemsAction } from '../../utils/organizeItemsActions';
-import { executeCreateItemActions, undoCreateItemActions } from '../../utils/createItemActions';
-import { executeCreateNoteAction, undoCreateNoteAction } from '../../utils/createNoteActions';
-import { executeManageTagsAction, undoManageTagsAction } from '../../utils/manageTagsActions';
-import { executeManageCollectionsAction, undoManageCollectionsAction } from '../../utils/manageCollectionsActions';
+} from '../../../atoms/messageUIState';
+import { executeEditMetadataAction, undoEditMetadataAction, UndoResult } from '../../../utils/editMetadataActions';
+import { executeCreateCollectionAction, undoCreateCollectionAction } from '../../../utils/createCollectionActions';
+import { executeOrganizeItemsAction, undoOrganizeItemsAction } from '../../../utils/organizeItemsActions';
+import { executeCreateItemActions, undoCreateItemActions } from '../../../utils/createItemActions';
+import { executeCreateNoteAction, undoCreateNoteAction } from '../../../utils/createNoteActions';
+import { executeManageTagsAction, undoManageTagsAction } from '../../../utils/manageTagsActions';
+import { executeManageCollectionsAction, undoManageCollectionsAction } from '../../../utils/manageCollectionsActions';
 import {
     executeCreateHighlightAnnotationsAction,
     executeCreateNoteAnnotationsAction,
     undoCreateAnnotationsAction,
-} from '../../utils/createAnnotationsActions';
-import type { CreateItemProposedData } from '../../types/agentActions/items';
-import { shortItemTitle } from '../../../src/utils/zoteroUtils';
-import { logger } from '../../../src/utils/logger';
+} from '../../../utils/createAnnotationsActions';
+import type { CreateItemProposedData } from '../../../types/agentActions/items';
+import { shortItemTitle } from '../../../../src/utils/zoteroUtils';
+import { logger } from '../../../../src/utils/logger';
 import {
     TickIcon,
     CancelIcon,
@@ -61,15 +61,15 @@ import {
     DollarCircleIcon,
     GlobalSearchIcon,
     NoteIcon,
-} from '../icons/icons';
-import { revealSource, openNoteByKey, getCurrentCollectionKeyForItem } from '../../utils/sourceUtils';
-import Button from '../ui/Button';
-import IconButton from '../ui/IconButton';
-import Tooltip from '../ui/Tooltip';
-import DeferredToolPreferenceButton from '../ui/buttons/DeferredToolPreferenceButton';
-import ExtractionApprovalButton from '../ui/buttons/ExtractionApprovalButton';
-import ExternalSearchApprovalButton from '../ui/buttons/ExternalSearchApprovalButton';
-import { markExternalReferenceImportedAtom, markExternalReferenceDeletedAtom } from '../../atoms/externalReferences';
+} from '../../../components/icons/icons';
+import { revealSource, openNoteByKey, getCurrentCollectionKeyForItem } from '../../../utils/sourceUtils';
+import Button from '../../../components/ui/Button';
+import IconButton from '../../../components/ui/IconButton';
+import Tooltip from '../../../components/ui/Tooltip';
+import DeferredToolPreferenceButton from '../../../components/ui/buttons/DeferredToolPreferenceButton';
+import ExtractionApprovalButton from '../../../components/ui/buttons/ExtractionApprovalButton';
+import ExternalSearchApprovalButton from '../../../components/ui/buttons/ExternalSearchApprovalButton';
+import { markExternalReferenceImportedAtom, markExternalReferenceDeletedAtom } from '../../../atoms/externalReferences';
 import {
     ActionStatus,
     STATUS_CONFIGS,
@@ -82,7 +82,7 @@ import {
     PreviewData,
 } from './agentActionViewHelpers';
 import { ActionPreview } from './ActionPreview';
-import { currentThreadIdAtom } from '../../atoms/threads';
+import { currentThreadIdAtom } from '../../../atoms/threads';
 
 export { STATUS_CONFIGS, getOverallStatus } from './agentActionViewHelpers';
 export type { ActionStatus } from './agentActionViewHelpers';

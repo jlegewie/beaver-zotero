@@ -9,6 +9,7 @@ export type {
     ComponentsHost,
     ExternalReferenceActionsProps,
     ExternalReferenceActionMode,
+    AgentActionInStreamProps,
     HostButtonVariant,
     ResolvedItemDisplay,
     CitationActivation,

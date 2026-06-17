@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { CSSIcon, Icon, PlusSignIcon } from '../icons/icons';
+import { CSSIcon, Icon, PlusSignIcon } from '../../../components/icons/icons';
 
 type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error' | 'awaiting';
 
