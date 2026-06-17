@@ -1,9 +1,33 @@
 import { type PageLabelsByAttachmentId } from '../../atoms/citations';
 import { getBestPDFAttachment } from '../../../src/utils/zoteroItemHelpers';
+import { getLibraryByIdOrName, getCollectionByIdOrName } from '../../../src/services/agentDataProvider/utils';
 import type { CitationRef } from '../../utils/citationGrammar';
 import type { ZoteroItemReference } from '../../types/zotero';
 import { logger } from '../../../src/utils/logger';
 import type { ItemDataHost, ResolvedItemDisplay } from '../types';
+
+/**
+ * Bibliographic display name for a tool-call header label.
+ *
+ * - Notes → the note's own title.
+ * - Attachments → the parent item's "Author Year" identity.
+ * - Regular items → their own "Author Year" identity.
+ *
+ * Loads the data types it reads (Zotero lazy-loads field/creator/note data), so
+ * it is reliable even for items not preloaded by the live-run path.
+ */
+async function resolveDisplayName(item: Zotero.Item): Promise<string | undefined> {
+    if (item.isNote()) {
+        await item.loadDataType('note').catch(() => {});
+        const title = item.getNoteTitle?.();
+        return title || undefined;
+    }
+    const target = item.isAttachment() ? (item.parentItem || item) : item;
+    await Zotero.Items.loadDataTypes([target], ['itemData', 'creators']).catch(() => {});
+    const firstCreator = target.firstCreator || 'Unknown';
+    const year = target.getField('date')?.match(/\d{4}/)?.[0] || '';
+    return `${firstCreator}${year ? ` ${year}` : ''}`;
+}
 
 /**
  * Resolve the page-label map (0-based page index -> printed label) for a Zotero
@@ -52,9 +76,30 @@ export const zoteroItemData: ItemDataHost = {
             } else if (item.isAttachment()) {
                 hasReadableAttachment = true;
             }
-            return { itemType: item.itemType, hasReadableAttachment };
+            const displayName = await resolveDisplayName(item);
+            return { itemType: item.itemType, hasReadableAttachment, displayName };
         } catch (e) {
             logger(`zoteroItemData: item display resolution failed: ${e}`);
+            return null;
+        }
+    },
+
+    async resolveLibraryName(libraryParam: number | string): Promise<string | null> {
+        try {
+            const { library } = getLibraryByIdOrName(libraryParam);
+            return library?.name ?? null;
+        } catch (e) {
+            logger(`zoteroItemData: library name resolution failed: ${e}`);
+            return null;
+        }
+    },
+
+    async resolveCollectionName(keyOrName: string | number, libraryId?: number): Promise<string | null> {
+        try {
+            const result = getCollectionByIdOrName(keyOrName, libraryId);
+            return result?.collection.name ?? null;
+        } catch (e) {
+            logger(`zoteroItemData: collection name resolution failed: ${e}`);
             return null;
         }
     },

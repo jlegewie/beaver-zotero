@@ -115,6 +115,13 @@ export interface ResolvedItemDisplay {
     itemType?: string;
     /** Whether the item has a readable attachment (enables an "open" action). */
     hasReadableAttachment: boolean;
+    /**
+     * Bibliographic display name for the referenced item, used by tool-call
+     * header labels (e.g. "Smith 2005"; a note's title for note references).
+     * For attachments this is the parent item's display name. Absent when it
+     * can't be resolved.
+     */
+    displayName?: string;
 }
 
 /**
@@ -139,11 +146,22 @@ export interface ItemDataHost {
         pageLabelsByAttachmentId: PageLabelsByAttachmentId,
     ): Record<number, string> | null;
     /**
-     * Resolve display metadata (icon type + attachment availability) for a
-     * library item in a source/result list. Async because it may load the item;
-     * returns null when the item can't be resolved.
+     * Resolve display metadata (icon type + attachment availability + display
+     * name) for a library item in a source/result list. Async because it may
+     * load the item; returns null when the item can't be resolved.
      */
     resolveItemDisplay(ref: ZoteroItemReference): Promise<ResolvedItemDisplay | null>;
+    /**
+     * Resolve a library's display name for a tool-call header label. Accepts the
+     * raw `library` arg (numeric id or name). Returns null when unavailable.
+     */
+    resolveLibraryName(libraryParam: number | string): Promise<string | null>;
+    /**
+     * Resolve a collection's display name for a tool-call header label. Accepts
+     * the raw collection key/id/name arg and an optional scoping library id.
+     * Returns null when unavailable.
+     */
+    resolveCollectionName(keyOrName: string | number, libraryId?: number): Promise<string | null>;
 }
 
 /**

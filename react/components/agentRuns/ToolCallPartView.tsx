@@ -2,8 +2,13 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { AgentRunStatus, ToolCallPart } from '../../agents/types';
 import { toolResultsMapAtom, getToolCallStatus } from '../../agents/atoms';
-import { getToolCallLabel } from '../../agents/toolLabels';
-import { extractLookupWorkFoundCount, extractReadTextLineRangeLabel } from '../../agents/toolResultTypes';
+import { getToolCallLabel, getLabelEnrichmentNeeds, type ToolCallLabelEnrich } from '../../agents/toolLabels';
+import { extractZoteroReferencesFromToolCall, parseArgs } from '../../agents/toolCallRequest';
+import {
+    isToolResultView,
+    getToolResultRenderableCount,
+    type ToolResultView as ToolResultViewModel,
+} from '../../types/toolResultViews';
 import { ToolResultView } from './ToolResultView';
 import { GenericAgentActionView } from './GenericAgentActionView';
 import { getHost } from '../../host';
@@ -107,10 +112,6 @@ const TOOL_ICONS: Record<string, IconComponent> = {
 /** Progressive disclosure tools whose returns are framework-internal and shouldn't be expandable. */
 const NON_EXPANDABLE_TOOLS = new Set(['read_file', 'load_capability', 'search_tools', 'load_tool_results']);
 
-/** Tools that return pages. `read` results on text files are line-based and
- * get a line-range suffix instead of a page count. */
-const UNIT_PAGES_TOOLS = new Set(['read', 'read_pages', 'read_attachment', 'view_page_images', 'view_pages']);
-
 /** Tools that support streaming argument preview */
 const STREAMING_PREVIEW_TOOLS = new Set(['create_note']);
 
@@ -200,7 +201,57 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
     const result = resultsMap.get(part.tool_call_id);
     const hasResult = result !== undefined;
     const status = getToolCallStatus(part.tool_call_id, resultsMap, runStatus);
-    const baseLabel = getToolCallLabel(part, status);
+
+    // Hydrated tool-result view model — present once the call has returned.
+    const rawView = result?.part_kind === 'tool-return' ? result.metadata?.view : undefined;
+    const view: ToolResultViewModel | null = isToolResultView(rawView) ? rawView : null;
+    // Renderable count, for expansion gating only (don't expand a zero-result tool).
+    const renderableCount = view ? getToolResultRenderableCount(view) : null;
+
+    // Host-resolved request-side display names for the parts the view model does
+    // not cover (pending/failed item names, list_* library/collection scope names).
+    // Resolved in an effect via the itemData host slice, mirroring CitedSourcesList;
+    // degrades to the base label on clients without that capability.
+    const [labelEnrich, setLabelEnrich] = useState<ToolCallLabelEnrich | null>(null);
+    useEffect(() => {
+        let cancelled = false;
+        const itemData = getHost().itemData;
+        const needs = getLabelEnrichmentNeeds(part, view);
+        if (!itemData || (!needs.itemName && !needs.scope)) {
+            setLabelEnrich(null);
+            return;
+        }
+        (async () => {
+            const next: ToolCallLabelEnrich = {};
+            if (needs.itemName && itemData.resolveItemDisplay) {
+                const ref = extractZoteroReferencesFromToolCall(part)[0];
+                if (ref) {
+                    const display = await itemData.resolveItemDisplay(ref);
+                    if (display?.displayName) next.itemDisplayName = display.displayName;
+                }
+            }
+            if (needs.scope) {
+                const args = parseArgs(part);
+                const libParam = args.library as string | number | undefined;
+                const libId = typeof libParam === 'number'
+                    ? libParam
+                    : (typeof libParam === 'string' ? parseInt(libParam, 10) : undefined);
+                const collParam = (args.collection_key ?? args.collection ?? args.parent_collection) as string | undefined;
+                if (collParam && itemData.resolveCollectionName) {
+                    const name = await itemData.resolveCollectionName(collParam, Number.isNaN(libId as number) ? undefined : libId);
+                    if (!cancelled && name) next.collectionName = name;
+                }
+                if (libParam != null && itemData.resolveLibraryName) {
+                    const name = await itemData.resolveLibraryName(libParam);
+                    if (!cancelled && name) next.libraryName = name;
+                }
+            }
+            if (!cancelled) setLabelEnrich(Object.keys(next).length ? next : null);
+        })();
+        return () => { cancelled = true; };
+    }, [part.tool_call_id, part.args, view]);
+
+    const label = getToolCallLabel(part, status, { view, enrich: labelEnrich });
     
     // Check for pending approval for this tool call
     const getPendingApproval = useAtomValue(getPendingApprovalForToolcallAtom);
@@ -252,45 +303,6 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
             ? 'confirm_external_search'
             : part.tool_name;
 
-    const lookupFoundCount =
-        part.tool_name === 'lookup_work' &&
-        status === 'completed' &&
-        result?.part_kind === 'tool-return'
-            ? extractLookupWorkFoundCount(result.content)
-            : null;
-
-    const resultCount =
-        result && result.part_kind === 'tool-return'
-            ? result?.metadata?.summary?.result_count ?? null
-            : null;
-
-    // Text reads (`read` with `lines`) show the actual line range read
-    // (e.g. "lines 1-120") instead of a bare result count.
-    const readTextLineRange =
-        part.tool_name === 'read' &&
-        status === 'completed' &&
-        result?.part_kind === 'tool-return'
-            ? extractReadTextLineRangeLabel(part.tool_name, result.content, result.metadata)
-            : null;
-
-    // The unified `view` tool serves PDF pages ("2 pages") or a single image
-    // attachment ("1 image") — branch on the result summary's kind so image
-    // attachments are not mislabeled as pages.
-    const viewKind =
-        part.tool_name === 'view' && result?.part_kind === 'tool-return'
-            ? ((result?.metadata?.summary as { kind?: string } | undefined)?.kind ?? null)
-            : null;
-    const unit = part.tool_name === 'view'
-        ? (viewKind === 'image' ? 'image' : 'page')
-        : UNIT_PAGES_TOOLS.has(part.tool_name) ? 'page' : 'result';
-    const label = lookupFoundCount !== null
-        ? `${baseLabel.split(':')[0]}: ${lookupFoundCount} found`
-        : readTextLineRange !== null
-            ? `${baseLabel} (${readTextLineRange})`
-            : status === 'completed' && resultCount !== null
-                ? `${baseLabel} (${resultCount} ${unit}${resultCount === 1 ? '' : 's'})`
-                : baseLabel;
-
     // Use global Jotai atom for expansion state (persists across re-renders and syncs between panes)
     const expansionKey = `${runId}:${responseIndex}:${part.tool_call_id}`;
     const expansionState = useAtomValue(toolExpandedAtom);
@@ -319,7 +331,7 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
         hasResult &&
         result?.part_kind === 'tool-return' &&
         // If we can compute a count (search-like tools), block expansion for 0 results.
-        (resultCount === null || resultCount > 0) &&
+        (renderableCount === null || renderableCount > 0) &&
         !NON_EXPANDABLE_TOOLS.has(part.tool_name) &&
         !isExtractionRejected &&
         !isExternalSearchRejected &&
