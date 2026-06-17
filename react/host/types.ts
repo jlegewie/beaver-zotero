@@ -1,7 +1,10 @@
+import type { ReactNode } from 'react';
 import type { ZoteroItemReference } from '../types/zotero';
 import type { CitationRef } from '../utils/citationGrammar';
 import type { Citation, PartLocation } from '../types/citations';
 import type { PageLabelsByAttachmentId } from '../atoms/citations';
+import type { ExternalReference } from '../types/externalReferences';
+import type { ButtonVariant } from '../components/ui/Button';
 
 /**
  * Everything the host needs to activate (navigate to / open) a cited location.
@@ -222,6 +225,66 @@ export interface ConfigHost {
 }
 
 /**
+ * Display mode for a single host-rendered action button.
+ *
+ * - `full`     — icon + label.
+ * - `icon-only`— compact icon button.
+ * - `none`     — button is omitted.
+ */
+export type ExternalReferenceActionMode = 'full' | 'icon-only' | 'none';
+
+/**
+ * Render inputs for the external-reference action buttons (details / web / PDF /
+ * reveal / import). The shared render layer assembles these from a client-agnostic
+ * {@link ExternalReference}; the host owns the actual buttons and their
+ * client-specific behavior (importing into the library, revealing, opening PDFs).
+ */
+export interface ExternalReferenceActionsProps {
+    /** The external reference whose actions are rendered. */
+    item: ExternalReference;
+    /** Visual variant for the rendered buttons. */
+    buttonVariant?: ButtonVariant;
+    /** Extra class names applied to each button. */
+    className?: string;
+    /** Display mode for the Reveal button (shown when the item exists in the library). */
+    revealButtonMode?: ExternalReferenceActionMode;
+    /** Display mode for the Import button (shown when the item is not in the library). */
+    importButtonMode?: ExternalReferenceActionMode;
+    /** Display mode for the Details button. */
+    detailsButtonMode?: ExternalReferenceActionMode;
+    /** Display mode for the Web button. */
+    webButtonMode?: ExternalReferenceActionMode;
+    /** Display mode for the PDF button. */
+    pdfButtonMode?: ExternalReferenceActionMode;
+    /** Whether to show the citation count. */
+    showCitationCount?: boolean;
+}
+
+/**
+ * Host-provided, client-specific UI components.
+ *
+ * Unlike the other slices (which inject *behavior*), this slice injects *UI* for
+ * surfaces that are inherently client-specific — chiefly the agent-action
+ * approve/apply/undo controls and item-mutation buttons that only make sense for
+ * a Zotero library. Shared dispatchers ask the host for these renderers instead
+ * of importing the client components directly, so the dependency arrow stays
+ * shared → host-interface, never shared → client UI.
+ *
+ * Each method returns a {@link ReactNode}, or `null` when the client has no UI
+ * for that surface (the shared caller then renders nothing). The slice grows as
+ * more action UIs move behind the host seam.
+ */
+export interface ComponentsHost {
+    /**
+     * Render the action buttons for an external (non-library) reference —
+     * details / web / open-PDF plus reveal-in-library / import-to-library. The
+     * import and reveal actions write to / navigate the Zotero library, so the
+     * whole control is client-specific. Returns null when the host has no such UI.
+     */
+    externalReferenceActions(props: ExternalReferenceActionsProps): ReactNode;
+}
+
+/**
  * Aggregate client host. Registered once per client at bundle init via
  * {@link setHost}. Slices are optional — check before use.
  */
@@ -230,4 +293,5 @@ export interface ClientHost {
     itemData?: ItemDataHost;
     documentExport?: DocumentExportHost;
     config?: ConfigHost;
+    components?: ComponentsHost;
 }

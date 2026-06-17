@@ -1,68 +1,44 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { ExternalReference } from '../../types/externalReferences';
 import {
     ArrowUpRightIcon,
     DownloadIcon,
     PdfIcon,
     InformationCircleIcon,
     Spinner,
-} from '../icons/icons';
-import { 
-    isExternalReferenceDetailsDialogVisibleAtom, 
-    selectedExternalReferenceAtom 
-} from '../../atoms/ui';
-import Button from '../ui/Button';
-import IconButton from '../ui/IconButton';
-import Tooltip from '../ui/Tooltip';
-import { ZOTERO_ICONS } from '../icons/ZoteroIcon';
-import { ZoteroIcon } from '../icons/ZoteroIcon';
-import { revealSource } from '../../utils/sourceUtils';
-import { 
-    checkExternalReferenceAtom, 
+} from '../../../components/icons/icons';
+import {
+    isExternalReferenceDetailsDialogVisibleAtom,
+    selectedExternalReferenceAtom
+} from '../../../atoms/ui';
+import Button from '../../../components/ui/Button';
+import IconButton from '../../../components/ui/IconButton';
+import Tooltip from '../../../components/ui/Tooltip';
+import { ZOTERO_ICONS } from '../../../components/icons/ZoteroIcon';
+import { ZoteroIcon } from '../../../components/icons/ZoteroIcon';
+import { revealSource } from '../../../utils/sourceUtils';
+import {
+    checkExternalReferenceAtom,
     externalReferenceItemMappingAtom,
     isCheckingReferenceObjectAtom,
     markExternalReferenceImportedAtom,
-} from '../../atoms/externalReferences';
-import { ButtonVariant } from '../ui/Button';
-import { createZoteroItem, stampBeaverProvenanceExtra } from '../../utils/addItemActions';
-import { logger } from '../../../src/utils/logger';
-import { ensureItemSynced } from '../../../src/utils/sync';
-import { getPref } from '../../../src/utils/prefs';
-import { createProvenanceNote } from '../../utils/noteActions';
-import { 
+} from '../../../atoms/externalReferences';
+import { createZoteroItem, stampBeaverProvenanceExtra } from '../../../utils/addItemActions';
+import { logger } from '../../../../src/utils/logger';
+import { ensureItemSynced } from '../../../../src/utils/sync';
+import { getPref } from '../../../../src/utils/prefs';
+import { createProvenanceNote } from '../../../utils/noteActions';
+import {
     getPendingCreateItemActionBySourceIdAtom,
     ackAgentActionsAtom,
-} from '../../agents/agentActions';
-import { CreateItemResultData } from '../../types/agentActions/items';
-import { currentThreadIdAtom } from '../../atoms/threads';
-
-/** Display mode for action buttons */
-export type ButtonDisplayMode = 'full' | 'icon-only' | 'none';
+} from '../../../agents/agentActions';
+import { CreateItemResultData } from '../../../types/agentActions/items';
+import { currentThreadIdAtom } from '../../../atoms/threads';
+import type { ExternalReferenceActionMode, ExternalReferenceActionsProps } from '../../types';
 
 const CITED_BY_URL = 'https://openalex.org/works?page=1&filter=cites:';
 
-interface ActionButtonsProps {
-    item: ExternalReference;
-    /** Button variant */
-    buttonVariant?: ButtonVariant;
-    /** Button size */
-    className?: string;
-    /** Display mode for the Reveal button (shown when item exists in library) */
-    revealButtonMode?: ButtonDisplayMode;
-    /** Display mode for the Import button (shown when item doesn't exist in library) */
-    importButtonMode?: ButtonDisplayMode;
-    /** Display mode for the Details button */
-    detailsButtonMode?: ButtonDisplayMode;
-    /** Display mode for the Web button */
-    webButtonMode?: ButtonDisplayMode;
-    /** Display mode for the PDF button */
-    pdfButtonMode?: ButtonDisplayMode;
-    /** Whether to show citation count */
-    showCitationCount?: boolean;
-}
-
-const ActionButtons: React.FC<ActionButtonsProps> = ({
+const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
     item,
     buttonVariant = 'surface-light',
     className = '',
@@ -84,13 +60,13 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
     // Active thread ID — used to stamp the background PDF fetch so the
     // attachment_resolved ws event can route back to the live agent run.
     const threadId = useAtomValue(currentThreadIdAtom);
-    
+
     // Get cached reference directly from the cache for this item's source_id
     const sourceId = item.source_id;
-    const cachedRef = sourceId && sourceId in externalReferenceCache 
-        ? externalReferenceCache[sourceId] 
+    const cachedRef = sourceId && sourceId in externalReferenceCache
+        ? externalReferenceCache[sourceId]
         : undefined;
-    
+
     // Track the actual item existence state
     const [itemExists, setItemExists] = useState(item.library_items && item.library_items.length > 0);
     const [zoteroItemRef, setZoteroItemRef] = useState(
@@ -216,18 +192,18 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
             setIsImporting(false);
         }
     }, [item, isImporting, isLoading, threadId, markExternalReferenceImported, getPendingCreateItemAction, ackAgentActions]);
-    
+
     // React to cache changes (e.g., when item is deleted and cache is invalidated)
     useEffect(() => {
         if (cachedRef === undefined) {
             // Not in cache yet - will be handled by the check effect below
             return;
         }
-        
+
         // Cache was updated (either set to a value or cleared to null)
         setItemExists(cachedRef !== null);
         setZoteroItemRef(cachedRef);
-        
+
         // Check for best attachment if item exists
         if (cachedRef !== null) {
             try {
@@ -249,19 +225,19 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
     // Check cache and validate on mount
     useEffect(() => {
         if (!sourceId) return;
-        
+
         // If we have cached data, the above effect handles it
         if (cachedRef !== undefined) {
             return;
         }
-        
+
         // If not cached and not currently checking, start a check
         if (!isChecking(item)) {
             setIsLoading(true);
             checkReference(item).then(result => {
                 setItemExists(result !== null);
                 setZoteroItemRef(result);
-                
+
                 // Check for best attachment if item exists
                 if (result !== null) {
                     try {
@@ -283,7 +259,7 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
             setIsLoading(true);
         }
     }, [item, sourceId, cachedRef, checkReference, isChecking]);
-    
+
     // Update loading state when checking state changes
     useEffect(() => {
         const checking = isChecking(item);
@@ -297,7 +273,7 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
 
     // Helper to render a button in different modes
     const renderButton = (
-        mode: ButtonDisplayMode,
+        mode: ExternalReferenceActionMode,
         tooltipContent: string,
         label: string,
         icon: React.ComponentType<{ className?: string }> | (() => React.ReactElement),
@@ -307,7 +283,7 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
         iconClassName?: string,
     ) => {
         if (mode === 'none') return null;
-        
+
         if (mode === 'icon-only') {
             return (
                 <Tooltip content={tooltipContent} singleLine>
@@ -324,7 +300,7 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
                 </Tooltip>
             );
         }
-        
+
         // mode === 'full'
         return (
             <Tooltip content={tooltipContent} singleLine>
@@ -360,7 +336,7 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
                 'Show details',
                 detailsButtonMode=='icon-only' ? 'scale-90' : undefined
             )}
-            
+
             {/* Web button */}
             {renderButton(
                 webButtonMode,
@@ -371,7 +347,7 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
                 !item.publication_url && !item.url,
                 'Open website'
             )}
-            
+
             {/* PDF button - always rendered, disabled when no PDF available */}
             {renderButton(
                 pdfButtonMode,
@@ -388,7 +364,7 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
                 !hasPdf,
                 'Open PDF'
             )}
-            
+
             {/* Citation count */}
             {showCitationCount && item.citation_count !== undefined && item.citation_count > 0 && (
                 <a
@@ -420,7 +396,7 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
                 isLoading,
                 'Reveal in Zotero'
             )}
-            
+
             {/* Import button - shown when item doesn't exist in library */}
             {!itemExists && renderButton(
                 importButtonMode,

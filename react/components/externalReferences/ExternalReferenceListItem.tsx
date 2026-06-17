@@ -1,6 +1,6 @@
 import React, { useCallback } from 'react';
 import { ExternalReference } from '../../types/externalReferences';
-import ActionButtons from './actionButtons';
+import { getHost } from '../../host';
 import ReferenceMetadataDisplay from './ReferenceMetadataDisplay';
 
 interface ExternalReferenceItemPListrops {
@@ -53,14 +53,12 @@ const ExternalReferenceListItem: React.FC<ExternalReferenceItemPListrops> = ({
                         publicationTitle={item.journal?.name || item.venue}
                         year={item.year}
                     />
-                    <ActionButtons
-                        item={item}
-                        detailsButtonMode="icon-only"
-                        webButtonMode="icon-only"
-                        pdfButtonMode="icon-only"
-                        // revealButtonMode="icon-only"
-                        // importButtonMode="icon-only"
-                    />
+                    {getHost().components?.externalReferenceActions({
+                        item,
+                        detailsButtonMode: 'icon-only',
+                        webButtonMode: 'icon-only',
+                        pdfButtonMode: 'icon-only',
+                    })}
                 </div>
             </div>
         </div>
