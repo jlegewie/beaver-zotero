@@ -4,7 +4,6 @@ import type { CitationRef } from '../utils/citationGrammar';
 import type { Citation, PartLocation } from '../types/citations';
 import type { PageLabelsByAttachmentId } from '../atoms/citations';
 import type { ExternalReference } from '../types/externalReferences';
-import type { ButtonVariant } from '../components/ui/Button';
 
 /**
  * Everything the host needs to activate (navigate to / open) a cited location.
@@ -234,6 +233,20 @@ export interface ConfigHost {
 export type ExternalReferenceActionMode = 'full' | 'icon-only' | 'none';
 
 /**
+ * Visual variant the render layer can request for host-rendered buttons.
+ */
+export type HostButtonVariant =
+    | 'solid'
+    | 'surface'
+    | 'outline'
+    | 'subtle'
+    | 'ghost'
+    | 'surface-light'
+    | 'ghost-secondary'
+    | 'ghost-tertiary'
+    | 'error';
+
+/**
  * Render inputs for the external-reference action buttons (details / web / PDF /
  * reveal / import). The shared render layer assembles these from a client-agnostic
  * {@link ExternalReference}; the host owns the actual buttons and their
@@ -243,7 +256,7 @@ export interface ExternalReferenceActionsProps {
     /** The external reference whose actions are rendered. */
     item: ExternalReference;
     /** Visual variant for the rendered buttons. */
-    buttonVariant?: ButtonVariant;
+    buttonVariant?: HostButtonVariant;
     /** Extra class names applied to each button. */
     className?: string;
     /** Display mode for the Reveal button (shown when the item exists in the library). */
