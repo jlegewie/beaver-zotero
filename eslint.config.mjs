@@ -107,7 +107,7 @@ export default tseslint.config(
             ],
         },
     },
-    // The citation render layer must stay client-agnostic so it can be reused
+    // The shared render layer must stay client-agnostic so it can be reused
     // across clients. It may use the host registry (`react/host`) but must NOT
     // touch the `Zotero` global or import the Zotero host implementation / prefs
     // directly — those couplings go through `getHost()`.
@@ -116,6 +116,7 @@ export default tseslint.config(
         files: [
             "react/components/citations/**/*.{ts,tsx}",
             "react/components/sources/CitedSourcesList.tsx",
+            "react/components/agentRuns/toolResultViews/**/*.{ts,tsx}",
         ],
         rules: {
             "no-restricted-globals": [
