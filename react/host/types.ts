@@ -232,6 +232,59 @@ export interface DocumentExportHost {
     renderExternalFileCitation?(request: ExternalFileCitationExportRequest): CitationExportRender | null;
 }
 
+export type NoteSaveFormat =
+    | {
+        kind: 'agent-run';
+        /** 1-based message index used in the generated Zotero note title. */
+        responseIndex?: number;
+        /** Thread/run identity for the Beaver provenance link. */
+        threadId?: string | null;
+        runId?: string;
+    }
+    | {
+        kind: 'streaming-note';
+        /** Thread/run identity for the Beaver provenance link. */
+        threadId?: string | null;
+        runId?: string;
+    };
+
+export interface SaveNoteRequest {
+    /**
+     * Inner note HTML already rendered by the shared citation/markdown renderer.
+     * The host owns Zotero-note wrappers, provenance chrome, persistence, and
+     * navigation.
+     */
+    contentHtml: string;
+    /** Human-readable title for clients that expose one in their native note model. */
+    title?: string;
+    /**
+     * When true, save under the current parent item when one exists. If
+     * `requireParent` is also true, the host returns null when no parent exists.
+     */
+    asChild: boolean;
+    /** Require a parent item instead of falling back to a standalone note. */
+    requireParent?: boolean;
+    /** Existing Beaver/Zotero note format to preserve for this save surface. */
+    format: NoteSaveFormat;
+}
+
+export interface SavedNoteReference extends ZoteroItemReference {
+    parent_key?: string;
+}
+
+/**
+ * Host-native note writes. The render layer supplies already-rendered content;
+ * the host resolves Zotero/library targets and performs the mutation.
+ */
+export interface NoteWriterHost {
+    /** Render-time: whether the current target library can accept new notes. */
+    isCurrentLibraryEditable(): boolean;
+    /** Render-time: whether the current Zotero context has a parent item target. */
+    canSaveAsChildNote(): boolean;
+    /** Interaction-time: create a note in the host library and optionally reveal it. */
+    saveNote(request: SaveNoteRequest): Promise<SavedNoteReference | null>;
+}
+
 /**
  * Display configuration the render layer needs. Typed, named accessors (rather
  * than a generic `getPref`) so the render layer never couples to a client's
@@ -242,6 +295,8 @@ export interface ConfigHost {
     citationFormat(): 'author-year' | 'numeric';
     /** Whether to render printed page labels instead of raw page numbers. */
     usePageLabels(): boolean;
+    /** Whether to expose development-only UI affordances. */
+    isDevelopment(): boolean;
 }
 
 /**
@@ -368,6 +423,7 @@ export interface ClientHost {
     navigation?: NavigationHost;
     itemData?: ItemDataHost;
     documentExport?: DocumentExportHost;
+    noteWriter?: NoteWriterHost;
     config?: ConfigHost;
     components?: ComponentsHost;
 }

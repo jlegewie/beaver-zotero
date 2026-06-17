@@ -1,6 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { getCurrentLibrary, isLibraryEditable, getZoteroTargetContext } from '../../../src/utils/zoteroUtils';
 import { citationMapAtom } from '../../atoms/citations';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../../atoms/externalReferences';
 import IconButton from '../ui/IconButton';
@@ -21,7 +20,6 @@ import {
     setAgentActionsToErrorAtom,
     isZoteroNoteAgentAction,
 } from '../../agents/agentActions';
-import { saveStreamingNote } from '../../utils/noteActions';
 import {
     notePanelStateAtom,
     defaultNotePanelState,
@@ -31,11 +29,10 @@ import {
 import { ZOTERO_ICONS, ZoteroIcon } from '../icons/ZoteroIcon';
 import { copyToClipboard } from '../../utils/clipboard';
 import Tooltip from '../ui/Tooltip';
-import { renderToMarkdown } from '../../utils/citationRenderers';
-import { selectItemById } from '../../../src/utils/selectItem';
+import { renderToHTML, renderToMarkdown } from '../../utils/citationRenderers';
 import { ToolDisplayFooter } from './ToolDisplayFooter';
-import { currentThreadIdAtom } from '../../atoms/threads';
-import { store } from '../../store';
+import { prepareCitationRenderContext } from '../../utils/citationRenderContext';
+import { getHost } from '../../host';
 
 export interface StreamingNoteBlock {
     id: string;
@@ -310,10 +307,10 @@ const NoteDisplay: React.FC<NoteDisplayProps> = ({ note, runId, messageId, expor
 
     const handleReveal = useCallback(async () => {
         if (noteAction?.result_data?.library_id && noteAction?.result_data?.zotero_key) {
-            const item = await Zotero.Items.getByLibraryAndKeyAsync(noteAction.result_data.library_id, noteAction.result_data.zotero_key);
-            if (item) {
-                await selectItemById(item.id);
-            }
+            getHost().navigation?.revealInLibrary({
+                library_id: noteAction.result_data.library_id,
+                zotero_key: noteAction.result_data.zotero_key,
+            });
         }
     }, [noteAction]);
 
@@ -324,45 +321,28 @@ const NoteDisplay: React.FC<NoteDisplayProps> = ({ note, runId, messageId, expor
         
         setNotePanelState({ key: panelKey, updates: { isSaving: true } });
         try {
-            const { targetLibraryId, parentReference, collectionToAddTo } = await getZoteroTargetContext();
-
-            if (!targetLibraryId) {
-                throw new Error("Could not determine target library");
+            const noteWriter = getHost().noteWriter;
+            if (!noteWriter) {
+                throw new Error("Saving notes is not available in this client");
             }
-            
-            if (!isLibraryEditable(targetLibraryId)) {
-                throw new Error("Library is read-only");
-            }
-
             const noteContent = `<h1>${noteTitle}</h1>\n\n${trimmedContent || note.content}`;
-            const threadId = store.get(currentThreadIdAtom);
-            const result = await saveStreamingNote({
-                markdownContent: noteContent,
-                title: noteTitle,
-                parentReference: parentReference || undefined,
-                targetLibraryId: targetLibraryId,
-                contextData: { citationDataMap, externalMapping, externalReferencesMap },
-                threadId: threadId || undefined,
-                runId: runId || undefined,
+            const renderContextData = await prepareCitationRenderContext(noteContent, {
+                citationDataMap,
+                externalMapping,
+                externalReferencesMap,
             });
-            
-            // Handle collection addition if needed
-            if (collectionToAddTo && result.zotero_key) {
-                 const newItem = await Zotero.Items.getByLibraryAndKeyAsync(result.library_id, result.zotero_key);
-                 if (newItem) {
-                     await Zotero.DB.executeTransaction(async function () {
-                        // @ts-ignore - Zotero types
-                        await collectionToAddTo.addItem(newItem.id);
-                     });
-                 }
-            }
-
-            // Select the item
-            if (result.zotero_key) {
-                 const newItem = await Zotero.Items.getByLibraryAndKeyAsync(result.library_id, result.zotero_key);
-                 if (newItem) {
-                     await selectItemById(newItem.id);
-                 }
+            const contentHtml = renderToHTML(noteContent.trim(), "markdown", renderContextData);
+            const result = await noteWriter.saveNote({
+                contentHtml,
+                title: noteTitle,
+                asChild: true,
+                format: {
+                    kind: 'streaming-note',
+                    runId: runId || undefined,
+                },
+            });
+            if (!result) {
+                throw new Error("Failed to save note");
             }
 
             // Update agent action state (UI + backend)
@@ -384,9 +364,7 @@ const NoteDisplay: React.FC<NoteDisplayProps> = ({ note, runId, messageId, expor
     const canToggleContent = note.isComplete;
     const hasContent = trimmedContent.length > 0;
     
-    // Current library check for read-only state in UI
-    const currentLib = getCurrentLibrary();
-    const isReadOnly = currentLib ? !isLibraryEditable(currentLib.libraryID) : true;
+    const isReadOnly = !(getHost().noteWriter?.isCurrentLibraryEditable() ?? false);
 
     return (
         <div
