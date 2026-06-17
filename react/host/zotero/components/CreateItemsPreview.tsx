@@ -111,7 +111,7 @@ const CreateItemPreviewRow: React.FC<{
 
                 {/* Background PDF fetch indicator */}
                 {pdfStatus.isLoading && (
-                    <div className="display-flex items-center gap-1 font-color-tertiary text-xs">
+                    <div className="display-flex items-center gap-1 font-color-secondary text-sm">
                         <Spinner size={12} />
                         <span>Fetching PDF…</span>
                     </div>
