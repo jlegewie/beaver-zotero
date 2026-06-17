@@ -25,6 +25,7 @@ import {
     clearAllPendingApprovalsAtom,
 } from "../agents/agentActions";
 import { processToolReturnResults } from "../agents/toolResultProcessing";
+import { upgradeToolReturn } from "../compat/legacyToolResults";
 import { loadItemDataForAgentActions } from "../utils/agentActionUtils";
 import { BeaverTemporaryAnnotations } from "../utils/annotationUtils";
 
@@ -378,13 +379,34 @@ export const loadThreadAtom = atom(
                     }))
                 );
                 
+                // Build a tool_call_id → args map so the compat layer can derive
+                // the annotation-list variant (it needs the originating call args).
+                const toolCallArgsById = new Map<string, string | Record<string, any> | null>();
+                for (const run of processedRuns) {
+                    for (const message of run.model_messages) {
+                        if (message.kind === 'response') {
+                            for (const part of message.parts) {
+                                if (part.part_kind === 'tool-call' && part.tool_call_id) {
+                                    toolCallArgsById.set(part.tool_call_id, part.args);
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // Process tool return results
                 const externalReferences: ExternalReference[] = [];
                 for (const run of processedRuns) {
                     for (const message of run.model_messages) {
                         if (message.kind === 'request') {
                             for (const part of message.parts) {
-                                if (part.part_kind === "tool-return") await processToolReturnResults(part, set);
+                                if (part.part_kind === "tool-return") {
+                                    await processToolReturnResults(part, set);
+                                    // Synthesize a hydrated `view` for legacy results
+                                    // that lack one, so the shared render layer can
+                                    // render old threads from `metadata.view`.
+                                    await upgradeToolReturn(part, toolCallArgsById.get(part.tool_call_id));
+                                }
                             }
                         }
                     }
