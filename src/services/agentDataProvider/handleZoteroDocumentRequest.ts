@@ -317,7 +317,7 @@ export async function handleZoteroDocumentRequest(
                 content_kind: 'text',
                 result,
                 ...(parentItem ? { parent_item: parentItem } : {}),
-                served_attachment: servedAttachment,
+                ...(servedAttachment ? { served_attachment: servedAttachment } : {}),
             }, null, 'text', errorResponse);
         }
 
@@ -350,7 +350,7 @@ export async function handleZoteroDocumentRequest(
                     content_kind: 'epub',
                     result: result.document,
                     ...(parentItem ? { parent_item: parentItem } : {}),
-                    served_attachment: servedAttachment,
+                    ...(servedAttachment ? { served_attachment: servedAttachment } : {}),
                 }, null, 'epub', errorResponse);
             }
 
@@ -396,7 +396,7 @@ export async function handleZoteroDocumentRequest(
                 content_kind: 'pdf',
                 result: { ...result.result, content_kind: 'pdf' as const },
                 ...(parentItem ? { parent_item: parentItem } : {}),
-                served_attachment: servedAttachment,
+                ...(servedAttachment ? { served_attachment: servedAttachment } : {}),
             }, result.totalPages ?? null, 'pdf', errorResponse);
         }
 
