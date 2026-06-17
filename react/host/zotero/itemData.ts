@@ -13,12 +13,15 @@ import type { ItemDataHost, ResolvedItemDisplay } from '../types';
  * - Attachments → the parent item's "Author Year" identity.
  * - Regular items → their own "Author Year" identity.
  *
- * Loads the data types it reads (Zotero lazy-loads field/creator/note data), so
- * it is reliable even for items not preloaded by the live-run path.
+ * Loads the data types it reads (Zotero lazy-loads field/creator data), so it is
+ * reliable even for items not preloaded by the live-run path.
  */
 async function resolveDisplayName(item: Zotero.Item): Promise<string | undefined> {
     if (item.isNote()) {
-        await item.loadDataType('note').catch(() => {});
+        // A note's title lives in itemData: getNoteTitle() reads _noteTitle, which
+        // is populated by the itemData load (the 'note' data type only loads the
+        // full note body and would leave getNoteTitle() throwing UnloadedDataException).
+        await item.loadDataType('itemData').catch(() => {});
         const title = item.getNoteTitle?.();
         return title || undefined;
     }

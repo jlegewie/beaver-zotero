@@ -206,7 +206,13 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
     const rawView = result?.part_kind === 'tool-return' ? result.metadata?.view : undefined;
     const view: ToolResultViewModel | null = isToolResultView(rawView) ? rawView : null;
     // Renderable count, for expansion gating only (don't expand a zero-result tool).
-    const renderableCount = view ? getToolResultRenderableCount(view) : null;
+    // Prefer the view; fall back to the legacy summary count so view-less returns
+    // still block expansion at zero results.
+    const renderableCount = view
+        ? getToolResultRenderableCount(view)
+        : result?.part_kind === 'tool-return'
+            ? result.metadata?.summary?.result_count ?? null
+            : null;
 
     // Host-resolved request-side display names for the parts the view model does
     // not cover (pending/failed item names, list_* library/collection scope names).

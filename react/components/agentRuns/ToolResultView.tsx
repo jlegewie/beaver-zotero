@@ -103,7 +103,8 @@ export const ToolResultView: React.FC<ToolResultViewProps> = ({ toolcall, result
         const fromView = renderFromView(view);
         if (fromView) return <>{fromView}</>;
     }
-    return <LegacyToolResultView toolcall={toolcall} result={result} />;
+    return <span>No view model available</span>;
+    // return <LegacyToolResultView toolcall={toolcall} result={result} />;
 };
 
 /**
