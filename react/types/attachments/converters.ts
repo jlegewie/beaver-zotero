@@ -78,3 +78,17 @@ export function toMessageAttachment(item: Zotero.Item): MessageAttachment | null
         return null;
     }
 }
+
+/**
+ * Fills optional display stubs on legacy message attachments from a loaded item.
+ */
+export function enrichMessageAttachmentStub(att: MessageAttachment, item: Zotero.Item): void {
+    if (att.type === "item") {
+        if (!att.item) att.item = safeStub(() => serializeItemStub(item));
+    } else if (att.type === "source") {
+        if (!att.attachment) att.attachment = safeStub(() => serializeAttachmentStub(item));
+        if (!att.parent_item) {
+            att.parent_item = safeStub(() => item.parentItem ? serializeItemStub(item.parentItem) : undefined);
+        }
+    }
+}

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React from 'react';
 import type { BeaverAgentPrompt } from '../../../agents/types';
 import {
     AnnotationAttachment,
@@ -9,8 +9,6 @@ import {
     SourceAttachment,
 } from '../../../types/attachments/apiTypes';
 import type { ZoteroItemReference } from '../../../types/zotero';
-import { getHost } from '../../../host';
-import type { ResolvedItemDisplay } from '../../../host/types';
 import {
     AnnotationChip,
     CollectionChip,
@@ -51,43 +49,8 @@ function annotationTitle(att: AnnotationAttachment): string | undefined {
     return [att.text, att.comment].filter(Boolean).join('\n') || undefined;
 }
 
-function needsDisplayFallback(att: ItemMetadataAttachment | SourceAttachment): boolean {
-    return att.type === 'item' ? !att.item : !att.attachment;
-}
-
 export function RequestChips({ userPrompt }: { userPrompt: BeaverAgentPrompt }) {
     const attachments = userPrompt.attachments ?? EMPTY_ATTACHMENTS;
-    const unresolvedRefs = useMemo(
-        () => attachments
-            .filter((att): att is ItemMetadataAttachment | SourceAttachment => (
-                (att.type === 'item' || att.type === 'source') && needsDisplayFallback(att)
-            ))
-            .map(attachmentRef),
-        [attachments],
-    );
-    const [resolvedDisplays, setResolvedDisplays] = useState<Map<string, ResolvedItemDisplay>>(new Map());
-
-    useEffect(() => {
-        if (unresolvedRefs.length === 0) {
-            setResolvedDisplays((prev) => prev.size === 0 ? prev : new Map());
-            return;
-        }
-        const resolver = getHost().itemData?.resolveItemDisplay;
-        if (!resolver) return;
-        let cancelled = false;
-        Promise.all(unresolvedRefs.map(async (ref) => {
-            const display = await resolver(ref);
-            return display ? [refKey(ref), display] as const : null;
-        })).then((entries) => {
-            if (cancelled) return;
-            setResolvedDisplays(new Map(entries.filter((entry): entry is readonly [string, ResolvedItemDisplay] => entry !== null)));
-        }).catch(() => {
-            if (!cancelled) setResolvedDisplays(new Map());
-        });
-        return () => {
-            cancelled = true;
-        };
-    }, [unresolvedRefs]);
 
     return (
         <div className="display-flex flex-wrap gap-col-3 gap-row-2 mb-2">
@@ -112,28 +75,25 @@ export function RequestChips({ userPrompt }: { userPrompt: BeaverAgentPrompt }) 
                 switch (att.type) {
                     case 'item': {
                         const ref = attachmentRef(att);
-                        const fallback = resolvedDisplays.get(refKey(ref));
                         return (
                             <ItemChip
                                 key={`item-${refKey(ref)}`}
                                 itemRef={ref}
                                 isAttachment={false}
-                                itemType={att.item?.item_type ?? fallback?.itemType}
-                                label={itemStubLabel(att) ?? fallback?.displayName ?? null}
+                                itemType={att.item?.item_type}
+                                label={itemStubLabel(att)}
                             />
                         );
                     }
                     case 'source': {
                         const ref = attachmentRef(att);
-                        const fallback = resolvedDisplays.get(refKey(ref));
                         return (
                             <ItemChip
                                 key={`source-${refKey(ref)}`}
                                 itemRef={ref}
                                 isAttachment={true}
                                 contentKind={att.attachment?.content_kind}
-                                itemType={fallback?.itemType}
-                                label={sourceStubLabel(att) ?? fallback?.displayName ?? null}
+                                label={sourceStubLabel(att)}
                             />
                         );
                     }

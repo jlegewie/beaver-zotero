@@ -28,6 +28,7 @@ import { processToolReturnResults } from "../agents/toolResultProcessing";
 import { upgradeToolReturn } from "../compat/legacyToolResults";
 import { loadItemDataForAgentActions } from "../utils/agentActionUtils";
 import { BeaverTemporaryAnnotations } from "../utils/annotationUtils";
+import { enrichMessageAttachmentStub } from "../types/attachments/converters";
 
 /**
  * Stores a run ID that ThreadView should scroll to after a thread finishes loading.
@@ -427,16 +428,28 @@ export const loadThreadAtom = atom(
                         .forEach(att => allItemReferences.add(`${att.library_id}-${att.zotero_key}`));
                 }
 
-                const itemsPromises = Array.from(allItemReferences).map(ref => {
+                const refToItem = new Map<string, Zotero.Item>();
+                const itemsPromises = Array.from(allItemReferences).map(async ref => {
                     const [libraryId, key] = ref.split('-');
-                    return Zotero.Items.getByLibraryAndKeyAsync(parseInt(libraryId), key);
+                    const item = await Zotero.Items.getByLibraryAndKeyAsync(parseInt(libraryId), key);
+                    if (item) refToItem.set(ref, item);
+                    return item;
                 });
-                const itemsToLoad = (await Promise.all(itemsPromises)).filter(Boolean) as Zotero.Item[];
+                await Promise.all(itemsPromises);
+                const itemsToLoad = Array.from(refToItem.values());
 
                 if (itemsToLoad.length > 0) {
                     await loadFullItemDataWithAllTypes(itemsToLoad);
                     if (!Zotero.Styles.initialized()) {
                         await Zotero.Styles.init();
+                    }
+                }
+
+                for (const run of processedRuns) {
+                    for (const att of run.user_prompt.attachments || []) {
+                        if (att.type !== 'item' && att.type !== 'source') continue;
+                        const item = refToItem.get(`${att.library_id}-${att.zotero_key}`);
+                        if (item) enrichMessageAttachmentStub(att, item);
                     }
                 }
 
