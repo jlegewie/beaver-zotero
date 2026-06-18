@@ -35,6 +35,8 @@ vi.mock('../../../src/utils/zoteroSerializers', () => ({
 import { enrichMessageAttachmentStub } from '../../../react/types/attachments/converters';
 import { serializeAttachmentStub, serializeItemStub } from '../../../src/utils/zoteroSerializers';
 
+type MockZoteroItem = Parameters<typeof enrichMessageAttachmentStub>[1];
+
 describe('enrichMessageAttachmentStub', () => {
     beforeEach(() => {
         vi.clearAllMocks();
@@ -45,7 +47,7 @@ describe('enrichMessageAttachmentStub', () => {
             key: 'ITEM1234',
             fields: { title: 'Display Title' },
             itemType: 'book',
-        }) as unknown as Zotero.Item;
+        }) as unknown as MockZoteroItem;
         const attachment: ItemMetadataAttachment = {
             type: 'item',
             library_id: 1,
@@ -83,7 +85,7 @@ describe('enrichMessageAttachmentStub', () => {
             include: 'fulltext',
         };
 
-        enrichMessageAttachmentStub(attachment, item as Zotero.Item);
+        enrichMessageAttachmentStub(attachment, item as MockZoteroItem);
 
         expect(attachment.attachment).toEqual({
             attachment_id: '1-SOURCE12',
@@ -104,7 +106,7 @@ describe('enrichMessageAttachmentStub', () => {
     });
 
     it('leaves already-stubbed attachments unchanged', () => {
-        const item = createMockAttachment({ key: 'SOURCE12' }) as unknown as Zotero.Item;
+        const item = createMockAttachment({ key: 'SOURCE12' }) as unknown as MockZoteroItem;
         const attachment: SourceAttachment = {
             type: 'source',
             library_id: 1,
@@ -137,7 +139,7 @@ describe('enrichMessageAttachmentStub', () => {
     });
 
     it('does not modify attachment types that carry inline metadata', () => {
-        const item = createMockItem({ key: 'ITEM1234' }) as unknown as Zotero.Item;
+        const item = createMockItem({ key: 'ITEM1234' }) as unknown as MockZoteroItem;
         const annotation: AnnotationAttachment = {
             type: 'annotation',
             library_id: 1,
