@@ -12,7 +12,8 @@ import {
     WSGetMetadataRequest,
     WSGetMetadataResponse,
 } from '../agentProtocol';
-import { serializeNote, serializeAnnotation } from '../../utils/zoteroSerializers';
+import { ItemStub } from '../../../react/types/zotero';
+import { serializeNote, serializeAnnotation, serializeItemStub } from '../../utils/zoteroSerializers';
 import { getAttachmentInfoForItem, formatCreatorsString, extractYear } from './utils';
 
 
@@ -85,9 +86,12 @@ export async function handleGetMetadataRequest(
                 const parentId = item.parentItemID;
                 const parent = parentId ? await Zotero.Items.getAsync(parentId) : null;
                 let parentItemId: string | undefined;
+                let parentSummary: ItemStub | null = null;
                 let isPrimary = false;
                 if (parent) {
                     parentItemId = `${parent.libraryID}-${parent.key}`;
+                    await Zotero.Items.loadDataTypes([parent], ['primaryData', 'itemData', 'creators']);
+                    parentSummary = serializeItemStub(parent);
                     try {
                         const best = await parent.getBestAttachment();
                         isPrimary = best ? best.id === item.id : false;
@@ -105,6 +109,7 @@ export async function handleGetMetadataRequest(
                     ...info,
                     item_id: itemId,
                     itemType: 'attachment',
+                    parent_item: parentSummary,
                     collections: enrichItemCollections(item),
                     tags: item.getTags(),
                     // Emit ISO-8601 to match the regular-item toJSON path (the
@@ -119,16 +124,13 @@ export async function handleGetMetadataRequest(
             if (item.isNote()) {
                 const parentId = item.parentItemID;
                 const parent = parentId ? await Zotero.Items.getAsync(parentId) : null;
-                let parentInfo: { item_id: string; title: string } | null = null;
+                let parentSummary: ItemStub | null = null;
                 if (parent) {
-                    await Zotero.Items.loadDataTypes([parent], ['itemData']);
-                    parentInfo = {
-                        item_id: `${parent.libraryID}-${parent.key}`,
-                        title: parent.getDisplayTitle?.() || '',
-                    };
+                    await Zotero.Items.loadDataTypes([parent], ['primaryData', 'itemData', 'creators']);
+                    parentSummary = serializeItemStub(parent);
                 }
                 items.push({
-                    ...serializeNote(item, parentInfo),
+                    ...serializeNote(item, parentSummary),
                     itemType: 'note',
                 });
                 continue;
@@ -256,13 +258,16 @@ export async function handleGetMetadataRequest(
                     await Zotero.Items.loadDataTypes(noteItems, ['primaryData', 'itemData']);
 
                     const notes: any[] = [];
-                    const parentInfo = { item_id: itemId, title: itemData.title || '' };
+                    // The requested regular item is the parent; it was loaded with
+                    // itemData + creators above, so the bibliographic anchor is
+                    // available without another load.
+                    const parentSummary = serializeItemStub(item);
 
                     for (const note of noteItems) {
                         if (!note || !note.isNote()) continue;
 
                         try {
-                            notes.push(serializeNote(note, parentInfo));
+                            notes.push(serializeNote(note, parentSummary));
                         } catch (error) {
                             logger(`handleGetMetadataRequest: Error processing note ${note.key}: ${error}`, 2);
                         }

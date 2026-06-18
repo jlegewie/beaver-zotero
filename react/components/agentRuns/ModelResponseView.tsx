@@ -3,12 +3,12 @@ import { AgentRunStatus, ModelResponse, ToolCallPart } from '../../agents/types'
 import { TextPartView } from './TextPartView';
 import { ThinkingPartView } from './ThinkingPartView';
 import { ToolCallPartView } from './ToolCallPartView';
-import { AnnotationToolCallView } from './AnnotationToolCallView';
-import { EditNoteGroupView } from './EditNoteGroupView';
 import { isAnnotationToolResult } from '../../agents/toolResultTypes';
 import ContextMenu from '../ui/menu/ContextMenu';
 import useSelectionContextMenu from '../../hooks/useSelectionContextMenu';
 import { buildEditNoteRenderItems, getEditNoteGroupInstanceId } from './editNoteShared';
+import { getHost } from '../../host';
+import { GenericAgentActionView } from './GenericAgentActionView';
 
 /**
  * Backend-injected plumbing (load_capacity / read-tool auto_load injection).
@@ -124,29 +124,35 @@ export const ModelResponseView: React.FC<ModelResponseViewProps> = React.memo(fu
                 <div className="display-flex flex-col py-2 gap-1">
                     {buildEditNoteRenderItems(toolCallParts as ToolCallPart[]).map((item) => {
                         if (item.kind === 'edit-note-group') {
+                            // Agent-action UI is host-injected; non-Zotero clients
+                            // get a request-side summary via the generic fallback.
                             return (
-                                <EditNoteGroupView
-                                    key={`edit-note-group-${getEditNoteGroupInstanceId(item.parts)}`}
-                                    parts={item.parts}
-                                    target={item.target}
-                                    runId={runId}
-                                    responseIndex={responseIndex}
-                                    runStatus={runStatus}
-                                />
+                                <React.Fragment key={`edit-note-group-${getEditNoteGroupInstanceId(item.parts)}`}>
+                                    {getHost().components?.agentActionInStream({
+                                        kind: 'edit-note-group',
+                                        parts: item.parts,
+                                        target: item.target,
+                                        runId,
+                                        responseIndex,
+                                        runStatus,
+                                    }) ?? <GenericAgentActionView editNoteParts={item.parts} runStatus={runStatus} />}
+                                </React.Fragment>
                             );
                         }
 
                         const part = item.part;
 
-                        // Use specialized view for annotation tools
+                        // Use specialized (host-injected) view for annotation tools
                         if (isAnnotationToolResult(part.tool_name)) {
                             return (
-                                <AnnotationToolCallView
-                                    key={`tool-${part.tool_call_id}`}
-                                    part={part}
-                                    runId={runId}
-                                    runStatus={runStatus}
-                                />
+                                <React.Fragment key={`tool-${part.tool_call_id}`}>
+                                    {getHost().components?.agentActionInStream({
+                                        kind: 'annotation',
+                                        part,
+                                        runId,
+                                        runStatus,
+                                    }) ?? <GenericAgentActionView part={part} runStatus={runStatus} />}
+                                </React.Fragment>
                             );
                         }
 

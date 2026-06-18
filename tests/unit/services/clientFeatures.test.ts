@@ -29,6 +29,7 @@ const VERSION_GATES: { feature: string; minVersion: string; op: Op }[] = [
     { feature: 'sentence_level_citation', minVersion: '0.19.999', op: 'gte' },
     { feature: 'unified_citation_format', minVersion: '0.19.999', op: 'gte' },
     { feature: 'citation_v2', minVersion: '0.20.999', op: 'gte' },
+    { feature: 'tool_result_view', minVersion: '0.20.999', op: 'gte' },
     { feature: 'external_search_surcharge', minVersion: '0.12.3', op: 'gte' },
     { feature: 'edit_metadata_creators', minVersion: '0.11.2', op: 'gte' },
 ];

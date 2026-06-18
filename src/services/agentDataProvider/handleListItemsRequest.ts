@@ -15,7 +15,8 @@ import {
     RegularListResultItem,
     AttachmentRowResult,
 } from '../agentProtocol';
-import { serializeNote } from '../../utils/zoteroSerializers';
+import { ItemStub } from '../../../react/types/zotero';
+import { serializeNote, serializeItemStub } from '../../utils/zoteroSerializers';
 import { getCollectionByIdOrName, validateLibraryAccess, isLibrarySearchable, getSearchableLibraries, extractYear, formatCreatorsString, getAttachmentInfoForItem } from './utils';
 
 function isAnnotationItem(item: Zotero.Item): boolean {
@@ -308,18 +309,13 @@ export async function handleListItemsRequest(
                 childParentIds.add(item.parentItemID);
             }
         }
-        const parentMap = new Map<number, { item_id: string; title: string }>();
+        const parentMap = new Map<number, ItemStub>();
         if (childParentIds.size > 0) {
             const parentItems = await Zotero.Items.getAsync([...childParentIds]);
             const validParents = parentItems.filter((p): p is Zotero.Item => p !== null);
             if (validParents.length > 0) {
-                await Zotero.Items.loadDataTypes(validParents, ['primaryData', 'itemData']);
-            }
-            for (const parent of validParents) {
-                let ptitle = '';
-                try { ptitle = (parent.getField('title', false, true) as string) || ''; }
-                catch { ptitle = parent.getDisplayTitle?.() || ''; }
-                parentMap.set(parent.id, { item_id: `${parent.libraryID}-${parent.key}`, title: ptitle });
+                await Zotero.Items.loadDataTypes(validParents, ['primaryData', 'itemData', 'creators']);
+                validParents.forEach(parent => parentMap.set(parent.id, serializeItemStub(parent)));
             }
         }
 
@@ -341,6 +337,7 @@ export async function handleListItemsRequest(
                     ...attachmentInfo,
                     result_type: 'attachment',
                     parent_title: parentInfo?.title ?? null,
+                    parent_item: parentInfo ?? null,
                     date_modified: item.dateModified,
                 };
                 items.push(attachmentItem);

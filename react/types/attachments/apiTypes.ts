@@ -3,6 +3,7 @@
  * Mirrors the pydantic models SourceAttachment, AnnotationAttachment, NoteAttachment
  */
 
+import type { AttachmentStub, ItemStub } from "../zotero";
 
 // Valid annotation types
 export const VALID_ANNOTATION_TYPES = ["highlight", "underline", "note", "image"] as const;
@@ -27,12 +28,15 @@ interface BaseMessageAttachment {
 
 export interface ItemMetadataAttachment extends BaseMessageAttachment {
     type: "item";
+    item?: ItemStub;
 }
 
 // "source" type attachment (Zotero attachment item)
 export type SourceAttachmentInclude = "none"| "metadata" | "fulltext" | "chunks" | "custom";
 export interface SourceAttachment extends BaseMessageAttachment {
     type: "source";
+    attachment?: AttachmentStub;
+    parent_item?: ItemStub;
     include: SourceAttachmentInclude;
 
     chunk_ids?: string[]; // UUIDs as strings

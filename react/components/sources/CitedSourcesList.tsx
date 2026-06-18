@@ -15,7 +15,6 @@ import {
 } from '../../types/citations';
 import Tooltip from '../ui/Tooltip';
 import { externalReferenceMappingAtom, externalReferenceItemMappingAtom, formatExternalCitation } from '../../atoms/externalReferences';
-import ActionButtons from '../externalReferences/actionButtons';
 import { ExternalReference } from '../../types/externalReferences';
 import { ZoteroItemReference } from '../../types/zotero';
 import { getHost, type ResolvedItemDisplay } from '../../host';
@@ -172,17 +171,17 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
                                     {/* Action buttons */}
                                     <div className="display-flex gap-4 flex-shrink-0 p-2">
                                         {showAsExternal && externalRef ? (
-                                            <ActionButtons
-                                                item={externalRef}
-                                                buttonVariant="ghost-secondary"
-                                                revealButtonMode="icon-only"
-                                                importButtonMode="none"
-                                                detailsButtonMode="icon-only"
-                                                webButtonMode="icon-only"
-                                                pdfButtonMode="icon-only"
-                                                showCitationCount={false}
-                                                className="scale-12"
-                                            />
+                                            getHost().components?.externalReferenceActions({
+                                                item: externalRef,
+                                                buttonVariant: 'ghost-secondary',
+                                                revealButtonMode: 'icon-only',
+                                                importButtonMode: 'none',
+                                                detailsButtonMode: 'icon-only',
+                                                webButtonMode: 'icon-only',
+                                                pdfButtonMode: 'icon-only',
+                                                showCitationCount: false,
+                                                className: 'scale-12',
+                                            })
                                         ) : isExternalFile ? (
                                             <Tooltip content="Open file" singleLine>
                                                 <IconButton

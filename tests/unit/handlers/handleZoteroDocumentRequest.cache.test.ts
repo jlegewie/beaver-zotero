@@ -308,6 +308,198 @@ describe('handleZoteroDocumentRequest document cache integration', () => {
         expect((globalThis as any).Zotero.Items.getByLibraryAndKeyAsync).toHaveBeenCalledTimes(1);
     });
 
+    it('emits the resolved attachment parent item for direct attachment requests', async () => {
+        const parentItem = {
+            id: 7,
+            key: 'PARENT1',
+            libraryID: 1,
+            itemType: 'journalArticle',
+            itemTypeID: 1,
+            isRegularItem: vi.fn(() => true),
+            getField: vi.fn((field: string) => {
+                const fields: Record<string, string> = {
+                    title: 'Parent Paper',
+                    date: '2024',
+                    publicationTitle: 'Journal',
+                    abstractNote: 'Abstract',
+                    language: 'en',
+                    citationKey: '',
+                    extra: '',
+                };
+                return fields[field] ?? '';
+            }),
+            getCreators: vi.fn(() => [
+                {
+                    firstName: 'Jane',
+                    lastName: 'Smith',
+                    fieldMode: 0,
+                    creatorTypeID: 8,
+                },
+            ]),
+            getTags: vi.fn(() => [{ tag: 'tag-1' }]),
+            getCollections: vi.fn(() => []),
+        };
+        const attachmentWithParent = {
+            ...resolvedPdfItem,
+            isAttachment: vi.fn(() => true),
+            parentItemID: parentItem.id,
+        };
+        const documentCache = {
+            getSourceIdentitySnapshot: vi.fn().mockResolvedValue(null),
+            getMetadata: vi.fn().mockResolvedValue({
+                pageCount: 1,
+                pageLabels: { '0': '1' },
+                errorCode: null,
+                contentType: 'application/pdf',
+            }),
+            getResult: vi.fn().mockResolvedValue(structuredResult),
+        };
+        (globalThis as any).Zotero.Beaver = { data: { env: 'test' }, documentCache };
+        (globalThis as any).Zotero.Items.getAsync = vi.fn().mockResolvedValue(parentItem);
+        (globalThis as any).Zotero.Items.loadDataTypes = vi.fn().mockResolvedValue(undefined);
+        (globalThis as any).Zotero.CreatorTypes = {
+            getPrimaryIDForType: vi.fn(() => 8),
+            getName: vi.fn(() => 'author'),
+        };
+        (globalThis as any).Zotero.Collections = { get: vi.fn() };
+        vi.mocked(resolveToReadableAttachment).mockResolvedValue({
+            resolved: true,
+            item: attachmentWithParent,
+            key: '1-ABCD1234',
+            contentKind: 'pdf',
+            contentType: 'application/pdf',
+        } as any);
+
+        const response = await handleZoteroDocumentRequest({
+            event: 'zotero_document_request',
+            request_id: 'req-parent',
+            attachment: { library_id: 1, zotero_key: 'ABCD1234' },
+            mode: 'structured',
+        });
+
+        expect(response.parent_item).toMatchObject({
+            item_id: '1-PARENT1',
+            item_type: 'journalArticle',
+            title: 'Parent Paper',
+            creators: 'Smith',
+            year: 2024,
+        });
+        expect((globalThis as any).Zotero.Items.getAsync).toHaveBeenCalledWith(parentItem.id);
+        expect((globalThis as any).Zotero.Items.loadDataTypes).toHaveBeenCalledWith(
+            [parentItem],
+            ['itemData', 'creators'],
+        );
+    });
+
+    it('carries parent_item and served_attachment on a post-resolution error', async () => {
+        const parentItem = {
+            id: 7,
+            key: 'PARENT1',
+            libraryID: 1,
+            itemType: 'journalArticle',
+            isRegularItem: vi.fn(() => true),
+            getField: vi.fn((field: string) => (({ title: 'Parent Paper', date: '2024' } as Record<string, string>)[field] ?? '')),
+            getCreators: vi.fn(() => [{ firstName: 'Jane', lastName: 'Smith', fieldMode: 0, creatorTypeID: 8 }]),
+        };
+        const attachmentWithParent = {
+            ...resolvedPdfItem,
+            isAttachment: vi.fn(() => true),
+            parentItemID: parentItem.id,
+            parentKey: 'PARENT1',
+            attachmentFilename: 'paper.pdf',
+        };
+        const documentCache = {
+            getSourceIdentitySnapshot: vi.fn().mockResolvedValue(null),
+            getMetadata: vi.fn().mockResolvedValue({
+                pageCount: 23,
+                pageLabels: null,
+                errorCode: null,
+                contentType: 'application/pdf',
+            }),
+            getResult: vi.fn(),
+        };
+        (globalThis as any).Zotero.Beaver = { data: { env: 'test' }, documentCache };
+        (globalThis as any).Zotero.Items.getAsync = vi.fn().mockResolvedValue(parentItem);
+        (globalThis as any).Zotero.Items.loadDataTypes = vi.fn().mockResolvedValue(undefined);
+        (globalThis as any).Zotero.CreatorTypes = {
+            getPrimaryIDForType: vi.fn(() => 8),
+            getName: vi.fn(() => 'author'),
+        };
+        vi.mocked(resolveToReadableAttachment).mockResolvedValue({
+            resolved: true,
+            item: attachmentWithParent,
+            key: '1-ABCD1234',
+            contentKind: 'pdf',
+            contentType: 'application/pdf',
+        } as any);
+
+        const response = await handleZoteroDocumentRequest({
+            event: 'zotero_document_request',
+            request_id: 'req-error-parent',
+            attachment: { library_id: 1, zotero_key: 'ABCD1234' },
+            mode: 'structured',
+            max_pages: 20,
+        });
+
+        expect(response.error_code).toBe('too_many_pages');
+        expect(response.result).toBeUndefined();
+        expect(response.parent_item).toMatchObject({
+            item_id: '1-PARENT1',
+            item_type: 'journalArticle',
+            title: 'Parent Paper',
+            creators: 'Smith',
+            year: 2024,
+        });
+        expect(response.served_attachment).toEqual({
+            attachment_id: '1-ABCD1234',
+            parent_item_id: '1-PARENT1',
+            title: null,
+            filename: 'paper.pdf',
+            content_kind: 'pdf',
+        });
+    });
+
+    it('still serves the document when parent-item resolution fails', async () => {
+        const attachmentWithParent = {
+            ...resolvedPdfItem,
+            isAttachment: vi.fn(() => true),
+            parentItemID: 7,
+        };
+        const documentCache = {
+            getSourceIdentitySnapshot: vi.fn().mockResolvedValue(null),
+            getMetadata: vi.fn().mockResolvedValue({
+                pageCount: 1,
+                pageLabels: { '0': '1' },
+                errorCode: null,
+                contentType: 'application/pdf',
+            }),
+            getResult: vi.fn().mockResolvedValue(structuredResult),
+        };
+        (globalThis as any).Zotero.Beaver = { data: { env: 'test' }, documentCache };
+        // Parent lookup rejects: the optional parent_item must degrade to absent
+        // without failing the document delivery.
+        (globalThis as any).Zotero.Items.getAsync = vi.fn().mockRejectedValue(new Error('db error'));
+        (globalThis as any).Zotero.Items.loadDataTypes = vi.fn().mockResolvedValue(undefined);
+        vi.mocked(resolveToReadableAttachment).mockResolvedValue({
+            resolved: true,
+            item: attachmentWithParent,
+            key: '1-ABCD1234',
+            contentKind: 'pdf',
+            contentType: 'application/pdf',
+        } as any);
+
+        const response = await handleZoteroDocumentRequest({
+            event: 'zotero_document_request',
+            request_id: 'req-parent-fail',
+            attachment: { library_id: 1, zotero_key: 'ABCD1234' },
+            mode: 'structured',
+        });
+
+        expect(response.error).toBeUndefined();
+        expect(response.result).toBeTruthy();
+        expect(response.parent_item).toBeUndefined();
+    });
+
     it('passes the request abort signal into cache-backed cold extraction', async () => {
         let abortSignal: AbortSignal | undefined;
         const documentCache = {
@@ -368,10 +560,21 @@ describe('handleZoteroDocumentRequest document cache integration', () => {
             total_pages: 23,
             error: 'The PDF file for 1-ABCD1234 has 23 pages, which exceeds the 20-page limit.',
             error_code: 'too_many_pages',
+            // This is a post-resolution error, so the served-file stub rides along
+            // for the view row; the heavier success-only fields stay omitted.
+            served_attachment: {
+                attachment_id: '1-ABCD1234',
+                parent_item_id: null,
+                title: null,
+                filename: null,
+                content_kind: 'pdf',
+            },
         });
         expect(response).not.toHaveProperty('result');
         expect(response).not.toHaveProperty('resolved_attachment');
         expect(response).not.toHaveProperty('content_type');
+        // The served PDF has no regular-item parent in this fixture.
+        expect(response).not.toHaveProperty('parent_item');
         expect(documentCache.getResult).not.toHaveBeenCalled();
     });
 
@@ -464,6 +667,13 @@ describe('handleZoteroDocumentRequest document cache integration', () => {
             content_type: 'application/epub+zip',
             content_kind: 'epub',
             result: epubDocument,
+            served_attachment: {
+                attachment_id: '1-EPUB1234',
+                parent_item_id: null,
+                title: null,
+                filename: null,
+                content_kind: 'epub',
+            },
         });
         expect(documentCache.getEpubResult).toHaveBeenCalledWith(
             { libraryId: 1, zoteroKey: 'EPUB1234' },

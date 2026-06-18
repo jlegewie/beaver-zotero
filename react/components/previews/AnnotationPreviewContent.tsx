@@ -4,15 +4,8 @@ import { activePreviewAtom } from '../../atoms/ui';
 import { currentMessageItemsAtom } from '../../atoms/messageComposition';
 import { navigateToAnnotation } from '../../utils/readerUtils';
 import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
-import { ANNOTATION_ICON_BY_TYPE } from '../input/MessageItemButton';
+import { ANNOTATION_ICON_BY_TYPE, ANNOTATION_PREVIEW_TEXT_BY_TYPE } from '../../utils/annotationDisplay';
 import { toAnnotation } from '../../types/attachments/converters';
-
-const ANNOTATION_TEXT_BY_TYPE = {
-    highlight: 'Highlighted Text',
-    underline: 'Underlined Text',
-    note: 'Sticky Note',
-    image: 'Selected Area',
-}
 
 
 interface AnnotationPreviewContentProps {
@@ -32,7 +25,7 @@ const AnnotationPreviewContent: React.FC<AnnotationPreviewContentProps> = ({ ite
         ? ANNOTATION_ICON_BY_TYPE[annotation.annotation_type] || ZOTERO_ICONS.ANNOTATION
         : ZOTERO_ICONS.ANNOTATION;
     const annotationText = annotation?.annotation_type
-        ? ANNOTATION_TEXT_BY_TYPE[annotation.annotation_type] || 'Annotation'
+        ? ANNOTATION_PREVIEW_TEXT_BY_TYPE[annotation.annotation_type] || 'Annotation'
         : 'Annotation';
 
     // Fetch image path for image annotations

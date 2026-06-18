@@ -1,11 +1,13 @@
 import { calculateObjectHash } from '../utils/hash';
 import { logger } from './logger';
-import { ItemDataHashedFields, AttachmentDataHashedFields, ItemData, ItemSummary, CollectionSummary, ZoteroCreator, ZoteroCollection, BibliographicIdentifier, AttachmentDataWithMimeType, ZoteroLibrary } from '../../react/types/zotero';
+import { ItemDataHashedFields, AttachmentDataHashedFields, ItemData, ItemStub, ItemSummary, CollectionSummary, ZoteroCreator, ZoteroCollection, BibliographicIdentifier, AttachmentDataWithMimeType, ZoteroLibrary, AttachmentStub } from '../../react/types/zotero';
 import { getCollectionClientDateModifiedAsISOString, getCitationKeyFromItem, getMimeType, safeIsInTrash, safeFileExists } from './zoteroUtils';
 import { syncingItemFilterAsync } from './sync';
 import { isAttachmentOnServer } from './webAPI';
 import { skippedItemsManager } from '../services/skippedItemsManager';
 import { AnnotationResultItem, NoteResultItem } from '../services/agentProtocol';
+import { getContentKind } from '../services/documentExtraction/attachmentResolution';
+import type { ContentKind } from '../services/documentExtraction/shared/contentKinds';
 
 export interface FileData {
     // filename: string;
@@ -76,18 +78,34 @@ export function getCreatorsFromItem(item: Zotero.Item): ZoteroCreator[] | null {
     return creators.length > 0 ? creators : null;
 }
 
+/**
+ * Formats creators as a compact, citation-style string (last names only),
+ * matching the backend `format_item_stub_creators` projection so the strings the
+ * frontend sends in an `ItemStub` are identical to what the backend would derive:
+ *   - prefer primary creators; fall back to author-typed creators if none flagged
+ *   - 1 name → "Smith"; 2–3 → "Smith, Jones & Lee"; 4+ → "Smith et al."
+ *   - returns null when the kept set has no usable names (e.g. editors only)
+ */
 export function formatZoteroCreatorsString(creators: ZoteroCreator[] | null | undefined): string | null {
     if (!creators || creators.length === 0) return null;
 
-    const names = creators.map(c => {
-        if (c.last_name) return c.last_name;
-        if (c.first_name) return c.first_name;
-        return null;
-    }).filter((name): name is string => Boolean(name));
+    let list = creators;
+    if (list.some(c => c.is_primary != null)) {
+        list = list.filter(c => c.is_primary);
+    } else if (list.some(c => c.creator_type)) {
+        const authors = list.filter(c => c.creator_type === 'author');
+        if (authors.length > 0) list = authors;
+    }
+
+    const names = list
+        .map(c => c.last_name || c.first_name || null)
+        .filter((name): name is string => Boolean(name));
 
     if (names.length === 0) return null;
     if (names.length === 1) return names[0];
-    if (names.length === 2) return `${names[0]} & ${names[1]}`;
+    if (names.length <= 3) {
+        return `${names.slice(0, -1).join(', ')} & ${names[names.length - 1]}`;
+    }
     return `${names[0]} et al.`;
 }
 
@@ -341,13 +359,15 @@ export async function serializeItem(item: Zotero.Item, clientDateModified: strin
 export async function serializeItemSummary(item: Zotero.Item): Promise<ItemSummary> {
     const tags = item.getTags();
     return {
+        // ItemSummary keeps split keys + structured creators (it is parsed as a
+        // full ItemSummary by the backend), unlike the lean ItemStub.
         zotero_key: item.key,
         library_id: item.libraryID,
         item_type: item.itemType,
         title: item.getField('title', false, true) || null,
         creators: getCreatorsFromItem(item),
-        date: item.getField('date', false, true) || null,
         year: getYearFromItem(item) ?? null,
+        date: item.getField('date', false, true) || null,
         publication_title: item.getField('publicationTitle', false, true) || null,
         abstract: item.getField('abstractNote') || null,
         identifiers: getIdentifiersFromItem(item),
@@ -355,6 +375,53 @@ export async function serializeItemSummary(item: Zotero.Item): Promise<ItemSumma
         tags: tags.length > 0 ? tags.map((t: any) => t.tag) : null,
         collections: getCollectionSummariesFromItem(item),
         citation_key: await getCitationKeyFromItem(item),
+    };
+}
+
+/**
+ * Serializes the minimal bibliographic anchor (`ItemStub`) for a regular item.
+ *
+ * Emits the lean, model-facing shape the backend consumes directly: a combined
+ * `item_id` and a pre-formatted `creators` string. Keep this in sync with the
+ * backend `ItemStub` projection (`format_item_stub_creators`).
+ */
+export function serializeItemStub(item: Zotero.Item): ItemStub {
+    return {
+        item_id: `${item.libraryID}-${item.key}`,
+        item_type: item.itemType,
+        title: item.getField('title', false, true) || null,
+        creators: formatZoteroCreatorsString(getCreatorsFromItem(item)),
+        year: getYearFromItem(item) ?? null,
+    };
+}
+
+/**
+ * Runs display-stub serialization defensively.
+ *
+ * Message attachment stubs are optional UI data, so a Zotero lazy-load or
+ * metadata edge case must not prevent constructing the attachment payload.
+ */
+export function safeStub<T>(build: () => T): T | undefined {
+    try {
+        return build();
+    } catch {
+        return undefined;
+    }
+}
+
+/**
+ * Serializes the minimal display anchor (`AttachmentStub`) for a Zotero attachment.
+ *
+ * Carries the served file's identity and broad content kind for client-side
+ * rendering; availability and readability analysis belongs in `AttachmentInfo`.
+ */
+export function serializeAttachmentStub(item: Zotero.Item, contentKind?: ContentKind): AttachmentStub {
+    return {
+        attachment_id: `${item.libraryID}-${item.key}`,
+        parent_item_id: item.parentKey ? `${item.libraryID}-${item.parentKey}` : null,
+        title: item.getField?.('title') || item.getDisplayTitle?.() || null,
+        filename: item.attachmentFilename || null,
+        content_kind: contentKind ?? getContentKind(item),
     };
 }
 
@@ -587,20 +654,28 @@ export async function serializeItemWithAttachments(
 
 /**
  * Serializes a Zotero note item into a NoteResultItem.
+ *
+ * The `parent_item` field carries the bibliographic parent as an `ItemStub`
+ * (the minimal anchor the backend reduces every parent reference to). The flat
+ * `parent_item_id`/`parent_title` fields are derived from it and are deprecated:
+ * they remain only for clients/backends that predate `parent_item` and should be
+ * dropped once the backend reads `parent_item`.
+ *
  * @param note Zotero note item
- * @param parentInfo Optional parent item info (id string and title)
+ * @param parent Optional parent item anchor (ItemStub)
  * @returns NoteResultItem
  */
 export function serializeNote(
     note: Zotero.Item,
-    parentInfo?: { item_id: string; title: string } | null,
+    parent?: ItemStub | null,
 ): NoteResultItem {
     return {
         result_type: 'note',
         item_id: `${note.libraryID}-${note.key}`,
         title: note.getDisplayTitle?.() || '',
-        parent_item_id: parentInfo?.item_id ?? null,
-        parent_title: parentInfo?.title ?? null,
+        parent_item_id: parent?.item_id ?? null,
+        parent_title: parent?.title ?? null,
+        parent_item: parent ?? null,
         date_modified: note.dateModified,
     };
 }
@@ -613,9 +688,9 @@ export function serializeNote(
  * Callers pass it in as `itemInfo`. The PDF attachment is `attachmentInfo`.
  *
  * `page` is the 1-based page number derived from the annotation's stored
- * position. Page labels (e.g. roman numerals) are intentionally omitted: this
- * shape is designed to be consumed by the agent, which reasons in 1-based
- * page numbers.
+ * position; the agent reasons in 1-based page numbers. `page_label` carries the
+ * document's printed label (e.g. roman numerals) for UI rendering only — the
+ * backend keeps it out of the agent-facing tool result.
  */
 export function serializeAnnotation(
     annotation: Zotero.Item,
@@ -635,6 +710,7 @@ export function serializeAnnotation(
         annotationColor?: string;
         annotationAuthorName?: string;
         annotationPosition?: string;
+        annotationPageLabel?: string;
     };
 
     // Derive 1-based page from the annotation's position. Zotero stores
@@ -664,6 +740,7 @@ export function serializeAnnotation(
         comment: ann.annotationComment ?? null,
         color: ann.annotationColor ?? null,
         page,
+        page_label: ann.annotationPageLabel ?? null,
         tags,
         author: ann.annotationAuthorName || null,
         attachment_id: attachmentInfo?.item_id ?? null,

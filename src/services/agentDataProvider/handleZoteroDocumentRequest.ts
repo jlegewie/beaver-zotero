@@ -13,6 +13,7 @@ import {
     WSZoteroDocumentResponse,
 } from '../agentProtocol';
 import type { ZoteroDocumentErrorCode } from '../agentProtocol';
+import type { AttachmentStub, ItemStub } from '../../../react/types/zotero';
 import {
     extractAndCacheEpubDocument,
     extractAndCacheResolvedPdfDocument,
@@ -24,7 +25,7 @@ import {
     resolveAttachmentFileSource,
     validateZoteroItemReference,
 } from '../documentExtraction';
-import { readableToExtractKind, type ExtractContentKind } from '../documentExtraction/shared/contentKinds';
+import { readableToExtractKind, type ExtractContentKind, type ReadableContentKind } from '../documentExtraction/shared/contentKinds';
 import {
     DEFAULT_PAGES_TIMEOUT_SECONDS,
     MAX_PDF_TIMEOUT_SECONDS,
@@ -38,6 +39,7 @@ import {
 import { notifyRemoteDownloadFailure, notifyRemoteFileNotSynced } from './utils';
 import { EXTERNAL_LIBRARY_ID, resolveExternalFile } from '../externalFiles';
 import type { ExternalFileRecord } from '../database';
+import { serializeAttachmentStub, serializeItemStub } from '../../utils/zoteroSerializers';
 
 /**
  * Reject success responses whose serialized payload would exceed the
@@ -83,6 +85,40 @@ export function guardPayloadSize(
     );
 }
 
+export async function getResolvedAttachmentParentStub(
+    attachment: Zotero.Item,
+): Promise<ItemStub | null> {
+    if (!attachment.isAttachment?.() || !attachment.parentItemID) {
+        return null;
+    }
+
+    const parent = await Zotero.Items.getAsync(attachment.parentItemID);
+    if (!parent || !parent.isRegularItem?.()) {
+        return null;
+    }
+
+    await Zotero.Items.loadDataTypes([parent], ['itemData', 'creators']);
+    return serializeItemStub(parent);
+}
+
+/**
+ * Display-only `AttachmentStub` for the served Zotero attachment, for the
+ * backend tool-result view row (the file's own title/filename + content_kind).
+ * Built inline rather than via `getAttachmentInfo` to avoid re-running the
+ * expensive availability/OCR analysis on the hot read path — the document was
+ * just read, so it is readable by construction, and the view row needs only the
+ * file's identity, not its readability status.
+ *
+ * Precondition: `attachment` must have `itemData` loaded — `getField`/
+ * `attachmentFilename` are read directly here without a defensive load.
+ */
+export function buildServedAttachmentStub(
+    attachment: Zotero.Item,
+    contentKind: ReadableContentKind,
+): AttachmentStub {
+    return serializeAttachmentStub(attachment, contentKind);
+}
+
 /**
  * Handle zotero_document_request event.
  */
@@ -90,6 +126,12 @@ export async function handleZoteroDocumentRequest(
     request: WSZoteroDocumentRequest,
 ): Promise<WSZoteroDocumentResponse> {
     const { attachment, external_file_key, mode, max_pages, max_file_size_mb, request_id, timeout_seconds } = request;
+
+    // Populated once the attachment resolves so post-resolution error responses
+    // carry the same view-row metadata as success responses (best-effort:
+    // pre-resolution errors leave these null and omit them).
+    let parentItem: ItemStub | null = null;
+    let servedAttachment: AttachmentStub | null = null;
 
     const errorResponse = (
         error: string,
@@ -101,6 +143,8 @@ export async function handleZoteroDocumentRequest(
         request_id,
         ...(external_file_key ? { external_file_key } : {}),
         ...(content_kind ? { content_kind } : {}),
+        ...(parentItem ? { parent_item: parentItem } : {}),
+        ...(servedAttachment ? { served_attachment: servedAttachment } : {}),
         total_pages,
         error,
         error_code,
@@ -171,6 +215,22 @@ export async function handleZoteroDocumentRequest(
 
         const { item: resolvedItem, key: resolvedKey, contentKind, contentType } = resolved;
         timeoutContentKind = readableToExtractKind(contentKind);
+        // View-row metadata for the backend tool-result view (parent-centric
+        // display + the served file's own name/content_kind). Both are optional;
+        // a failure here must never fail document delivery, and both ride on
+        // post-resolution error responses too. Build the served-file stub first
+        // (synchronous, no file analysis) so it is present even if the parent
+        // lookup throws.
+        try {
+            servedAttachment = buildServedAttachmentStub(resolvedItem, contentKind);
+        } catch (error) {
+            logger(`handleZoteroDocumentRequest: served attachment stub failed for ${resolvedKey}: ${error}`, 1);
+        }
+        try {
+            parentItem = await getResolvedAttachmentParentStub(resolvedItem);
+        } catch (error) {
+            logger(`handleZoteroDocumentRequest: parent stub failed for ${resolvedKey}: ${error}`, 1);
+        }
 
         if (contentKind === 'text') {
             const source = await resolveAttachmentFileSource({
@@ -248,6 +308,8 @@ export async function handleZoteroDocumentRequest(
                 content_type: contentType,
                 content_kind: 'text',
                 result,
+                ...(parentItem ? { parent_item: parentItem } : {}),
+                ...(servedAttachment ? { served_attachment: servedAttachment } : {}),
             }, null, 'text', errorResponse);
         }
 
@@ -279,6 +341,8 @@ export async function handleZoteroDocumentRequest(
                     content_type: result.contentType,
                     content_kind: 'epub',
                     result: result.document,
+                    ...(parentItem ? { parent_item: parentItem } : {}),
+                    ...(servedAttachment ? { served_attachment: servedAttachment } : {}),
                 }, null, 'epub', errorResponse);
             }
 
@@ -323,6 +387,8 @@ export async function handleZoteroDocumentRequest(
                 content_type: result.contentType,
                 content_kind: 'pdf',
                 result: { ...result.result, content_kind: 'pdf' as const },
+                ...(parentItem ? { parent_item: parentItem } : {}),
+                ...(servedAttachment ? { served_attachment: servedAttachment } : {}),
             }, result.totalPages ?? null, 'pdf', errorResponse);
         }
 
@@ -406,7 +472,7 @@ export function externalFileMissingMessage(extKey: string, record: ExternalFileR
 async function handleExternalFileDocumentRequest(
     request: WSZoteroDocumentRequest,
     extKey: string,
-    errorResponse: (
+    baseErrorResponse: (
         error: string,
         error_code: ZoteroDocumentErrorCode,
         total_pages?: number | null,
@@ -416,12 +482,36 @@ async function handleExternalFileDocumentRequest(
     const { mode, max_pages, max_file_size_mb, request_id, timeout_seconds } = request;
     const requestKey = `ext-${extKey}`;
 
+    // Attach the served-file stub to post-resolution error responses too (it is
+    // null until the registry resolves the key, so the early file_missing error
+    // omits it). External files carry no Zotero parent.
+    let servedExternal: AttachmentStub | null = null;
+    const errorResponse = (
+        error: string,
+        error_code: ZoteroDocumentErrorCode,
+        total_pages?: number | null,
+        content_kind?: ExtractContentKind,
+    ): WSZoteroDocumentResponse =>
+        servedExternal
+            ? { ...baseErrorResponse(error, error_code, total_pages, content_kind), served_attachment: servedExternal }
+            : baseErrorResponse(error, error_code, total_pages, content_kind);
+
     const resolved = await resolveExternalFile(extKey);
     if (!resolved.ok) {
         return errorResponse(externalFileMissingMessage(extKey, resolved.record), 'file_missing');
     }
     const record = resolved.record;
     const itemRef = { id: 0, libraryID: EXTERNAL_LIBRARY_ID, key: extKey };
+    // The served external file's own display metadata, for the backend
+    // tool-result view row (mirrors the Zotero `served_attachment`). Uses the
+    // model-facing `ext-<key>` id; external files carry no Zotero parent.
+    servedExternal = {
+        attachment_id: `ext-${extKey}`,
+        parent_item_id: null,
+        title: null,
+        filename: record.filename,
+        content_kind: record.contentKind,
+    };
 
     const timeout = createTimeoutController(
         timeout_seconds,
@@ -469,6 +559,7 @@ async function handleExternalFileDocumentRequest(
                 content_type: record.mimeType,
                 content_kind: 'text',
                 result,
+                served_attachment: servedExternal,
             }, null, 'text', errorResponse);
         }
 
@@ -496,6 +587,7 @@ async function handleExternalFileDocumentRequest(
                     content_type: result.contentType,
                     content_kind: 'epub',
                     result: result.document,
+                    served_attachment: servedExternal,
                 }, null, 'epub', errorResponse);
             }
             if (result.code === 'file_missing') {
@@ -528,6 +620,7 @@ async function handleExternalFileDocumentRequest(
                 content_type: result.contentType,
                 content_kind: 'pdf',
                 result: { ...result.result, content_kind: 'pdf' as const },
+                served_attachment: servedExternal,
             }, result.totalPages ?? null, 'pdf', errorResponse);
         }
 

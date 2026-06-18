@@ -1209,9 +1209,8 @@ async function handleListCollections(args: any): Promise<any> {
         total_count: response.total_count,
         has_more: hasMore,
         next_offset: hasMore ? offset + limit : null,
-        // library_id/library_name are required for ToolResultView to render the
-        // specialized ListCollectionsResultView (extractListCollectionsData fills
-        // each collection's library scope from this container).
+        // library_id/library_name carry the library scope each collection row needs
+        // (used when building the hydrated collection-list view for rendering).
         library_id: response.library_id,
         library_name: response.library_name,
         collections: response.collections.map((c) => ({

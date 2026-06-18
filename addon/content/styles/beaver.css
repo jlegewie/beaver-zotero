@@ -635,6 +635,9 @@
 [id^="beaver-pane-"] .-translate-x-1\/2 { transform: translateX(-50%); }
 [id^="beaver-pane-"] .z-10 { z-index: 10; }
 [id^="beaver-pane-"] .z-1000 { z-index: 1000; }
+/* Floating overlays (tooltips) must clear Zotero's focused items-tree row,
+   which gets z-index: 10000 while the tree has focus (blue selection). */
+[id^="beaver-pane-"] .z-100000 { z-index: 100000; }
 [id^="beaver-pane-"] .hidden { display: none; }
 
 [id^="beaver-pane-"] .inline-flex { display: inline-flex; }

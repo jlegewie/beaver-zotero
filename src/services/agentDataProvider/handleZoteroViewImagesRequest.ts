@@ -15,7 +15,7 @@ import {
     WSViewImage,
     ViewImagesErrorCode,
 } from '../agentProtocol';
-import { ZoteroItemReference } from '../../../react/types/zotero';
+import { ZoteroItemReference, ItemStub, AttachmentStub } from '../../../react/types/zotero';
 import {
     getReadableContentKind,
     resolveToImageAttachment,
@@ -26,7 +26,11 @@ import { validateZoteroItemReference } from './utils';
 import { handleZoteroAttachmentPageImagesRequest } from './handleZoteroAttachmentPageImagesRequest';
 import { handleZoteroAttachmentImageRequest } from './handleZoteroAttachmentImageRequest';
 import { resolveExternalFile } from '../externalFiles';
-import { externalFileMissingMessage } from './handleZoteroDocumentRequest';
+import {
+    externalFileMissingMessage,
+    getResolvedAttachmentParentStub,
+    buildServedAttachmentStub,
+} from './handleZoteroDocumentRequest';
 import { BeaverExtractor, ExtractionError, ExtractionErrorCode, WorkerAbortError } from '../../beaver-extract';
 import { effectiveMaxFileSizeMB, effectiveMaxPageCount } from '../attachmentLimits';
 import {
@@ -193,9 +197,13 @@ export async function handleZoteroViewImagesRequest(
     const requestKey = `${attachment.library_id}-${attachment.zotero_key}`;
 
     // Captured once the target attachment is resolved so error responses can
-    // report which child was actually targeted.
+    // report which child was actually targeted and carry the same view-row
+    // metadata as success responses (best-effort: pre-resolution errors leave
+    // these null and omit them).
     let resolvedRef: ZoteroItemReference | null = null;
     let resolvedKind: 'pdf' | 'image' | null = null;
+    let parentItem: ItemStub | null = null;
+    let servedAttachment: AttachmentStub | null = null;
 
     const errorResponse = (
         error: string,
@@ -209,6 +217,8 @@ export async function handleZoteroViewImagesRequest(
         kind: resolvedKind,
         images: [],
         total_pages,
+        ...(parentItem ? { parent_item: parentItem } : {}),
+        ...(servedAttachment ? { served_attachment: servedAttachment } : {}),
         error,
         error_code,
     });
@@ -283,6 +293,23 @@ export async function handleZoteroViewImagesRequest(
             resolvedRef = targetRef;
         }
 
+        // View-row metadata for the backend tool-result view (parent-centric
+        // display + the served file's own name/content_kind). Both are optional;
+        // a failure here must never fail the view itself, and both ride on
+        // post-resolution error responses too. Build the served-file stub first
+        // (synchronous, no file analysis) so it is present even if the parent
+        // lookup throws.
+        try {
+            servedAttachment = buildServedAttachmentStub(target.item, target.kind);
+        } catch (error) {
+            logger(`handleZoteroViewImagesRequest: served attachment stub failed for ${requestKey}: ${error}`, 1);
+        }
+        try {
+            parentItem = await getResolvedAttachmentParentStub(target.item);
+        } catch (error) {
+            logger(`handleZoteroViewImagesRequest: parent stub failed for ${requestKey}: ${error}`, 1);
+        }
+
         // 3. Dispatch by kind
         if (target.kind === 'pdf') {
             // Inverted and oversized ranges were rejected in step 0, so this
@@ -327,6 +354,8 @@ export async function handleZoteroViewImagesRequest(
                 kind: 'pdf',
                 images,
                 total_pages: pdfResponse.total_pages,
+                ...(parentItem ? { parent_item: parentItem } : {}),
+                ...(servedAttachment ? { served_attachment: servedAttachment } : {}),
             };
         }
 
@@ -362,6 +391,8 @@ export async function handleZoteroViewImagesRequest(
                 height: imageResponse.image.height,
             }],
             total_pages: null,
+            ...(parentItem ? { parent_item: parentItem } : {}),
+            ...(servedAttachment ? { served_attachment: servedAttachment } : {}),
         };
 
     } catch (error) {
@@ -396,6 +427,9 @@ async function handleExternalFileViewRequest(
     const requestKey = `ext-${extKey}`;
 
     let resolvedKind: 'pdf' | 'image' | null = null;
+    // Populated once the registry resolves the key so post-resolution error
+    // responses carry the served-file stub. External files carry no Zotero parent.
+    let servedExternal: AttachmentStub | null = null;
 
     const errorResponse = (
         error: string,
@@ -408,6 +442,7 @@ async function handleExternalFileViewRequest(
         kind: resolvedKind,
         images: [],
         total_pages,
+        ...(servedExternal ? { served_attachment: servedExternal } : {}),
         error,
         error_code,
     });
@@ -440,6 +475,19 @@ async function handleExternalFileViewRequest(
         return errorResponse(externalFileMissingMessage(extKey, resolved.record), 'file_missing');
     }
     const record = resolved.record;
+
+    // The served external file's own display metadata, for the backend
+    // tool-result view row (mirrors the Zotero `served_attachment`). Uses the
+    // model-facing `ext-<key>` id; external files carry no Zotero parent, so no
+    // `parent_item` is emitted. Built before the unsupported-type check so that
+    // error carries it too.
+    servedExternal = {
+        attachment_id: `ext-${extKey}`,
+        parent_item_id: null,
+        title: null,
+        filename: record.filename,
+        content_kind: record.contentKind,
+    };
 
     if (record.contentKind === 'epub' || record.contentKind === 'text') {
         return errorResponse(
@@ -511,6 +559,7 @@ async function handleExternalFileViewRequest(
                     height: processed.height,
                 }],
                 total_pages: null,
+                served_attachment: servedExternal,
             };
         }
 
@@ -573,6 +622,7 @@ async function handleExternalFileViewRequest(
             kind: 'pdf',
             images,
             total_pages: renderResult.pageCount,
+            served_attachment: servedExternal,
         };
     } catch (error) {
         if (signal.aborted || error instanceof WorkerAbortError || error instanceof TimeoutError) {

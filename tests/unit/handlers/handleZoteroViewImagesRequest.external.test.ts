@@ -58,6 +58,7 @@ const pdfRecord = {
     fileSize: 1024,
     mtimeMs: 1718000000000,
     pageCount: 12,
+    sha256: 'abc123',
     createdAt: '2026-06-01T00:00:00.000Z',
 };
 
@@ -85,6 +86,8 @@ describe('handleZoteroViewImagesRequest (external files)', () => {
         expect(response.error).toContain('different computer');
         expect(response.external_file_key).toBe(EXT_KEY);
         expect(response.attachment).toBeUndefined();
+        // Pre-resolution error: the registry never resolved a file, so no stub.
+        expect(response.served_attachment).toBeUndefined();
     });
 
     it('serves image files through the image conversion path', async () => {
@@ -114,6 +117,16 @@ describe('handleZoteroViewImagesRequest (external files)', () => {
         expect(response.images).toHaveLength(1);
         expect(response.images[0].width).toBe(80);
         expect(response.external_file_key).toBe(EXT_KEY);
+        // The served external file's own display stub is attached for the backend
+        // tool-result view row; external files carry no Zotero parent and use the
+        // model-facing `ext-<key>` id.
+        expect(response.served_attachment).toMatchObject({
+            attachment_id: `ext-${EXT_KEY}`,
+            parent_item_id: null,
+            filename: 'figure.png',
+            content_kind: 'image',
+        });
+        expect(response.parent_item).toBeUndefined();
     });
 
     it('renders PDF pages via the MuPDF worker', async () => {
@@ -137,6 +150,13 @@ describe('handleZoteroViewImagesRequest (external files)', () => {
         expect(response.images[0].page_label).toBe('i');
         const renderArgs = renderPagesMock.mock.calls[0];
         expect(renderArgs[1].pageIndices).toEqual([0, 1]);
+        expect(response.served_attachment).toMatchObject({
+            attachment_id: `ext-${EXT_KEY}`,
+            parent_item_id: null,
+            filename: 'paper.pdf',
+            content_kind: 'pdf',
+        });
+        expect(response.parent_item).toBeUndefined();
     });
 
     it('rejects text and EPUB files as not viewable', async () => {
@@ -147,6 +167,12 @@ describe('handleZoteroViewImagesRequest (external files)', () => {
 
         expect(response.error_code).toBe('unsupported_type');
         expect(response.error).toContain('read tool');
+        // Post-resolution error: the served-file stub rides along for the view row.
+        expect(response.served_attachment).toMatchObject({
+            attachment_id: `ext-${EXT_KEY}`,
+            filename: 'notes.txt',
+            content_kind: 'text',
+        });
     });
 
     it('rejects PDFs over the hard page-count cap before rendering', async () => {
@@ -158,6 +184,11 @@ describe('handleZoteroViewImagesRequest (external files)', () => {
         expect(response.error_code).toBe('too_many_pages');
         expect(response.total_pages).toBe(1501);
         expect(renderPagesMock).not.toHaveBeenCalled();
+        expect(response.served_attachment).toMatchObject({
+            attachment_id: `ext-${EXT_KEY}`,
+            filename: 'paper.pdf',
+            content_kind: 'pdf',
+        });
     });
 
     it('reports out-of-range pages against the document length', async () => {
@@ -168,5 +199,10 @@ describe('handleZoteroViewImagesRequest (external files)', () => {
 
         expect(response.error_code).toBe('page_out_of_range');
         expect(response.total_pages).toBe(3);
+        expect(response.served_attachment).toMatchObject({
+            attachment_id: `ext-${EXT_KEY}`,
+            filename: 'paper.pdf',
+            content_kind: 'pdf',
+        });
     });
 });

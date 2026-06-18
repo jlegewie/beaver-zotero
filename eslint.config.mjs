@@ -107,7 +107,7 @@ export default tseslint.config(
             ],
         },
     },
-    // The citation render layer must stay client-agnostic so it can be reused
+    // The shared render layer must stay client-agnostic so it can be reused
     // across clients. It may use the host registry (`react/host`) but must NOT
     // touch the `Zotero` global or import the Zotero host implementation / prefs
     // directly — those couplings go through `getHost()`.
@@ -116,6 +116,23 @@ export default tseslint.config(
         files: [
             "react/components/citations/**/*.{ts,tsx}",
             "react/components/sources/CitedSourcesList.tsx",
+            "react/components/agentRuns/toolResultViews/**/*.{ts,tsx}",
+            // The tool-result dispatcher: renders only from hydrated view models and
+            // a generic fallback (dev-mode check via getHost().config), no Zotero global.
+            "react/components/agentRuns/ToolResultView.tsx",
+            // Shared agent-run dispatchers + the request-side action fallback.
+            "react/components/agentRuns/ModelResponseView.tsx",
+            "react/components/agentRuns/AgentRunView.tsx",
+            "react/components/agentRuns/GenericAgentActionView.tsx",
+            "react/components/agentRuns/AgentRunFooter.tsx",
+            "react/components/agentRuns/UserRequestView.tsx",
+            "react/components/agentRuns/requestChips/**/*.{ts,tsx}",
+            "react/components/messages/NoteDisplay.tsx",
+            // The tool-call header label is now pure (Zotero data arrives via the
+            // view model / itemData host slice); ToolCallPartView resolves request-
+            // side display names through getHost(), not the Zotero global.
+            "react/components/agentRuns/ToolCallPartView.tsx",
+            "react/agents/toolLabels.ts",
         ],
         rules: {
             "no-restricted-globals": [

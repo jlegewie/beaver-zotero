@@ -9,4 +9,7 @@ export const zoteroConfig: ConfigHost = {
     usePageLabels() {
         return getPref('usePageLabels') !== false;
     },
+    isDevelopment() {
+        return Zotero.Beaver?.data?.env === 'development';
+    },
 };

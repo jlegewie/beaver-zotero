@@ -1,195 +1,146 @@
 import { ToolCallStatus } from './atoms';
 import { ToolCallPart } from './types';
-import { getLibraryByIdOrName, getCollectionByIdOrName } from '../../src/services/agentDataProvider/utils';
-import { ZoteroItemReference } from '../types/zotero';
+import { parseArgs, TOOL_BASE_LABELS } from './toolCallRequest';
+import { isItemRow, type ToolResultView } from '../types/toolResultViews';
+
+// Request-side, Zotero-free helpers live in `./toolCallRequest`; re-exported here
+// so existing importers (e.g. agentRunAtoms) keep their import path.
+export { extractZoteroReferencesFromToolCall } from './toolCallRequest';
 
 /**
- * Get display name from a Zotero item (Author Year format).
- * For attachments, uses the parent item's metadata.
+ * Host-resolved display data folded into a tool-call header label for calls that
+ * have no view model yet (pending / failed). Resolved by the caller via the
+ * `itemData` host slice; absent on clients without that capability.
  */
-function getItemDisplayName(item: Zotero.Item): string {
-    // For attachments, get the parent item
-    const targetItem = item.isAttachment() ? item.parentItem || item : item;
-    
-    const firstCreator = targetItem.firstCreator || 'Unknown';
-    const year = targetItem.getField('date')?.match(/\d{4}/)?.[0] || '';
-    
-    return `${firstCreator}${year ? ` ${year}` : ''}`;
+export interface ToolCallLabelEnrich {
+    /** Bibliographic name for a content/note/annotation reference ("Smith 2005"). */
+    itemDisplayName?: string;
+    /** Library scope name for list_* tools. */
+    libraryName?: string;
+    /** Collection scope name for list_* tools. */
+    collectionName?: string;
+}
+
+export interface ToolCallLabelOptions {
+    /** Hydrated tool-result view model — present once the call has returned. */
+    view?: ToolResultView | null;
+    /** Host-resolved request-side display data (used when there is no `view`). */
+    enrich?: ToolCallLabelEnrich | null;
+}
+
+/** Tools whose label headlines a single item's bibliographic name. */
+const SINGLE_ITEM_NAME_TOOLS = new Set([
+    'read', 'read_pages', 'read_attachment', 'view', 'read_note',
+]);
+
+/** Annotation tools whose label headlines the annotation source name. */
+const ANNOTATION_NAME_TOOLS = new Set(['get_annotations', 'find_annotations']);
+
+/** List tools whose label shows a host-resolved library/collection scope name. */
+const LIST_SCOPE_TOOLS = new Set(['list_items', 'list_collections', 'list_tags']);
+
+/**
+ * What host-resolved display data a tool-call label needs *beyond* its view
+ * model. The caller (e.g. `ToolCallPartView`) uses this to decide whether to run
+ * the `itemData` host resolution effect, and skips it otherwise.
+ *
+ * - `itemName` — a content/note/annotation reference whose name the view does not
+ *   already supply (pending/failed, or an empty annotation view).
+ * - `scope` — a `list_*` library/collection scope name (never carried by the view).
+ */
+export function getLabelEnrichmentNeeds(
+    part: ToolCallPart,
+    view: ToolResultView | null | undefined,
+): { itemName: boolean; scope: boolean } {
+    const toolName = part.tool_name;
+    const itemName =
+        (SINGLE_ITEM_NAME_TOOLS.has(toolName) || ANNOTATION_NAME_TOOLS.has(toolName)) &&
+        getViewDisplayName(view, toolName) === null;
+    return { itemName, scope: LIST_SCOPE_TOOLS.has(toolName) };
 }
 
 /**
- * Parse attachment_id format '<library_id>-<zotero_key>' and get the Zotero item.
- * Returns null if the item isn't loaded yet (gracefully degrades the label).
+ * The headline display name a completed view supplies for a tool-call label, or
+ * null when the view carries none (the label then falls back to the host-resolved
+ * request-side name, or the base label). Pure — derived from the view model only.
  */
-function getItemFromAttachmentId(attachmentId: string): Zotero.Item | null {
-    const [libraryIdStr, zoteroKey] = attachmentId.split('-');
-    if (!libraryIdStr || !zoteroKey) return null;
-    
-    const libraryId = parseInt(libraryIdStr, 10);
-    if (isNaN(libraryId)) return null;
-    
-    try {
-        return Zotero.Items.getByLibraryAndKey(libraryId, zoteroKey) || null;
-    } catch (e) {
-        // Item not yet loaded - return null to gracefully degrade the label
-        return null;
+export function getViewDisplayName(
+    view: ToolResultView | null | undefined,
+    toolName: string,
+): string | null {
+    if (!view) return null;
+    if (SINGLE_ITEM_NAME_TOOLS.has(toolName) && view.view_type === 'item_list') {
+        const row = view.items[0];
+        return row && isItemRow(row) ? (row.display_name ?? null) : null;
     }
+    if (ANNOTATION_NAME_TOOLS.has(toolName) && view.view_type === 'annotation_list') {
+        // Scoped (single distinct source) → that source name; unscoped
+        // multi-source → null (label falls back to base + count suffix).
+        const sources = new Set(
+            view.annotations
+                .map(a => a.source_display_name)
+                .filter((s): s is string => !!s),
+        );
+        return sources.size === 1 ? [...sources][0] : null;
+    }
+    return null;
+}
+
+/** The completed view's locator badge for a single-item tool ("Page 1-3" / "Lines 10-20"). */
+function getViewLocationLabel(view: ToolResultView | null | undefined, toolName: string): string | null {
+    if (!view || view.view_type !== 'item_list' || !SINGLE_ITEM_NAME_TOOLS.has(toolName)) return null;
+    const row = view.items[0];
+    return row && isItemRow(row) ? (row.location_label ?? null) : null;
 }
 
 /**
- * Extract Zotero item references from a tool call part.
- * Looks for attachment_id parameters in tool call arguments.
- * Returns an array of ZoteroItemReference, or empty array if none found.
+ * Parenthetical count suffix for a completed tool-call label, derived from the
+ * view model. Per-tool wording (not a single number): read/view/read_note carry
+ * their locator inline and get no suffix; search/list use "(N results/collections/
+ * tags)"; attachment_search uses match count; lookup_work uses "(N found)".
+ * Returns null when there is nothing to append.
  */
-export function extractZoteroReferencesFromToolCall(part: ToolCallPart): ZoteroItemReference[] {
-    const args = parseArgs(part);
-    const references: ZoteroItemReference[] = [];
-
-    // Extract attachment_id if present (used by read_pages, add_highlight_annotations, 
-    // add_note_annotations, search_in_attachment, view_pages, view_page_images, etc.)
-    const attachmentId = args.attachment_id as string | undefined;
-    if (attachmentId) {
-        const [libraryIdStr, zoteroKey] = attachmentId.split('-');
-        if (libraryIdStr && zoteroKey) {
-            const libraryId = parseInt(libraryIdStr, 10);
-            if (!isNaN(libraryId)) {
-                references.push({
-                    library_id: libraryId,
-                    zotero_key: zoteroKey,
-                });
-            }
+export function getToolResultLabelSuffix(
+    view: ToolResultView | null | undefined,
+    toolName: string,
+): string | null {
+    if (!view) return null;
+    // Single-item read/view/read_note carry the locator inline — no count suffix.
+    if (SINGLE_ITEM_NAME_TOOLS.has(toolName)) return null;
+    const plural = (n: number, noun: string) => `${n} ${noun}${n === 1 ? '' : 's'}`;
+    switch (view.view_type) {
+        case 'item_list': {
+            const n = view.items.length;
+            return n ? ` (${plural(n, 'result')})` : null;
         }
-    }
-
-    // Extract file id if present (used by read). Zotero attachment ids use
-    // '<library_id>-<zotero_key>'; external file ids ('ext-1') carry no Zotero reference.
-    const file = args.file as string | undefined;
-    if (file && /^\d+-/.test(file)) {
-        const [libraryIdStr, zoteroKey] = file.split('-');
-        if (libraryIdStr && zoteroKey) {
-            const libraryId = parseInt(libraryIdStr, 10);
-            if (!isNaN(libraryId)) {
-                references.push({
-                    library_id: libraryId,
-                    zotero_key: zoteroKey,
-                });
-            }
+        case 'collection_list': {
+            const n = view.total_count;
+            return n ? ` (${plural(n, 'collection')})` : null;
         }
-    }
-
-    // Extract note_id if present (used by read_note, edit_note)
-    const noteId = args.note_id as string | undefined;
-    if (noteId) {
-        const [libraryIdStr, ...keyParts] = noteId.split('-');
-        const zoteroKey = keyParts.join('-');
-        if (libraryIdStr && zoteroKey) {
-            const libraryId = parseInt(libraryIdStr, 10);
-            if (!isNaN(libraryId)) {
-                references.push({
-                    library_id: libraryId,
-                    zotero_key: zoteroKey,
-                });
-            }
+        case 'tag_list': {
+            const n = view.total_count;
+            return n ? ` (${plural(n, 'tag')})` : null;
         }
-    }
-
-    // Extract attachment_ids array if present (for tools that accept multiple attachments)
-    const attachmentIds = args.attachment_ids as string[] | undefined;
-    if (Array.isArray(attachmentIds)) {
-        for (const id of attachmentIds) {
-            const [libraryIdStr, zoteroKey] = id.split('-');
-            if (libraryIdStr && zoteroKey) {
-                const libraryId = parseInt(libraryIdStr, 10);
-                if (!isNaN(libraryId)) {
-                    references.push({
-                        library_id: libraryId,
-                        zotero_key: zoteroKey,
-                    });
-                }
-            }
+        case 'attachment_search': {
+            const n = view.total_matches;
+            return n ? ` (${n} match${n === 1 ? '' : 'es'})` : null;
         }
+        case 'annotation_list': {
+            const n = view.annotations.length;
+            return n ? ` (${plural(n, 'annotation')})` : null;
+        }
+        case 'external_reference_list': {
+            if (toolName === 'lookup_work') {
+                const n = view.found_count ?? view.references.length;
+                return n != null ? ` (${n} found)` : null;
+            }
+            const n = view.references.length;
+            return n ? ` (${plural(n, 'result')})` : null;
+        }
+        default:
+            return null;
     }
-
-    return references;
 }
-
-/**
- * Base labels for tool calls (display names).
- * Maps tool_name to a human-readable base label.
- */
-const TOOL_BASE_LABELS: Record<string, string> = {
-    // Search tools
-    item_search: 'Item search',
-    item_search_by_topic: 'Item search',
-    item_search_by_metadata: 'Item search',
-    fulltext_search: 'Fulltext search',
-    fulltext_search_keywords: 'Keyword search',
-
-    // List tools
-    list_items: 'List items',
-    list_collections: 'List collections',
-    list_tags: 'List tags',
-    list_libraries: 'List libraries',
-    zotero_search: 'Zotero search',
-
-    // Metadata tools
-    get_metadata: 'Get metadata',
-    edit_metadata: 'Edit metadata',
-
-    // Annotation tools
-    get_annotations: 'Get annotations',
-    find_annotations: 'Find annotations',
-
-    // Note tools
-    read_note: 'Reading note',
-    edit_note: 'Edit note',
-    create_note: 'Create note',
-
-    // Organization tools
-    organize_items: 'Organize items',
-    create_collection: 'Create collection',
-
-    // Tag tools
-    manage_tags: 'Manage tags',
-    manage_collections: 'Manage collections',
-
-    // Reading tools
-    read: 'Reading',
-    read_pages: 'Reading',
-    read_attachment: 'Reading',
-    search_in_documents: 'Search in documents',
-    search_in_attachment: 'Search in attachment',
-    search_in_attachments: 'Search in attachments',
-    find_in_attachments: 'Find in attachments',
-    read_file: 'Retrieving data',
-    load_tool_results: 'Loading tool results',
-    view_pages: 'Viewing pages',
-    view_page_images: 'Viewing pages',
-    view: 'Viewing',
-
-    // Extract tool
-    extract: 'Extracting',
-
-    // Annotations
-    add_highlight_annotations: 'Highlight annotations',
-    add_note_annotations: 'Note annotations',
-    create_highlight_annotations: 'Creating highlight annotations',
-    create_note_annotations: 'Creating sticky notes',
-
-    // Suggestions
-    return_suggestions: 'Suggestions',
-
-    // External search
-    search_external_references: 'Web search',
-    create_zotero_item: 'Add item',
-    external_search: 'Web search',
-    lookup_work: 'Lookup work',
-
-    // Framework tools
-    load_capability: 'Loading capability',
-    search_tools: 'Finding tools',
-};
-
 
 /**
  * Labels for skill names.
@@ -258,21 +209,6 @@ function detectReadFileType(path: string): 'tool_result' | 'skill' | 'skill_reso
 function truncate(str: string, maxLength: number): string {
     if (str.length <= maxLength) return str;
     return str.slice(0, maxLength) + '...';
-}
-
-/**
- * Parse args from ToolCallPart - handles both string and object formats.
- */
-function parseArgs(part: ToolCallPart): Record<string, unknown> {
-    if (!part.args) return {};
-    if (typeof part.args === 'string') {
-        try {
-            return JSON.parse(part.args);
-        } catch {
-            return {};
-        }
-    }
-    return part.args as Record<string, unknown>;
 }
 
 /**
@@ -365,16 +301,44 @@ function normalizeListParam(value: unknown): string[] | null {
  * 
  * If the tool has a progress message, it takes precedence over the default label.
  */
-export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): string {
+export function getToolCallLabel(
+    part: ToolCallPart,
+    status: ToolCallStatus,
+    opts?: ToolCallLabelOptions,
+): string {
+    const main = computeMainLabel(part, status, opts);
+    const suffix = getToolResultLabelSuffix(opts?.view ?? null, part.tool_name);
+    return suffix ? `${main}${suffix}` : main;
+}
+
+/**
+ * Build the inline part of the label (base + arg-derived qualifier + headline
+ * name + locator), without the view-derived count suffix. Pure: any Zotero
+ * resolved names/locators arrive via `opts.enrich` / `opts.view`.
+ */
+function computeMainLabel(
+    part: ToolCallPart,
+    status: ToolCallStatus,
+    opts?: ToolCallLabelOptions,
+): string {
     const toolName = part.tool_name;
     const baseLabel = TOOL_BASE_LABELS[toolName] ?? 'Calling function';
-    
+
     // Progress messages take precedence when present
     if (status === 'in_progress' && part.progress) {
         return `${baseLabel}: ${part.progress}`;
     }
-    
+
     const args = parseArgs(part);
+    const view = opts?.view ?? null;
+
+    // Headline name (item/note/annotation tools): prefer the hydrated view, else
+    // the host-resolved request-side name. Not length-capped here — the label
+    // renders on a single line and the whole string ellipsis-truncates responsively
+    // to the available width (see ToolCallPartView).
+    const resolvedName = getViewDisplayName(view, toolName) ?? opts?.enrich?.itemDisplayName ?? null;
+    // Actual locator from the completed view (overrides the requested range).
+    const viewLocator = getViewLocationLabel(view, toolName);
 
     switch (toolName) {
         // === Fulltext search tools ===
@@ -420,39 +384,28 @@ export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): st
 
         // === List tools ===
         case 'list_items': {
+            // Library/collection scope names are host-resolved into opts.enrich.
             const parts: string[] = [];
-            
-            // Handle library parameter
             const libraryParam = args.library as string | number | undefined;
-            const libraryId = typeof libraryParam === 'number' 
-                ? libraryParam 
-                : (typeof libraryParam === 'string' ? parseInt(libraryParam, 10) : undefined);
-            
-            // Handle collection parameter
-            const collectionParam = (args.collection_key as string) || (args.collection as string) || undefined;
-            if (collectionParam) {
-                const result = getCollectionByIdOrName(collectionParam, libraryId);
-                if (result) {
-                    parts.push(`"${result.collection.name}"`);
-                }
+
+            // Collection scope (host-resolved name)
+            if (opts?.enrich?.collectionName) {
+                parts.push(`"${opts.enrich.collectionName}"`);
             }
-            
-            // Handle tag parameter
+
+            // Tag parameter (pure, arg-derived)
             const tag = args.tag as string | undefined;
             if (tag) {
                 parts.push(`tag "${truncate(tag, 20)}"`);
             }
-            
+
             // Show library name only when no collection/tag filter and library is specified
-            if (parts.length === 0 && libraryParam) {
-                const library = getLibraryByIdOrName(libraryParam);
-                if (library.library && library.library.name) {
-                    parts.push(`"${library.library.name}"`);
-                } else {
-                    parts.push(`"${libraryParam}"`);
-                }
+            if (parts.length === 0 && libraryParam != null) {
+                parts.push(opts?.enrich?.libraryName
+                    ? `"${opts.enrich.libraryName}"`
+                    : `"${libraryParam}"`);
             }
-            
+
             if (parts.length > 0) {
                 return `${baseLabel}: ${truncate(parts.join(' '), 50)}`;
             }
@@ -508,41 +461,29 @@ export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): st
 
         case 'read_attachment':
         case 'read_pages': {
-            const attachmentId = args.attachment_id as string | undefined;
             const startPage = args.start_page as number | undefined;
             const endPage = args.end_page as number | undefined;
 
-            // Build page range string
-            let pageRange = '';
+            // Requested page range from args (fallback when no completed view)
+            let argRange = '';
             if (startPage !== undefined && endPage !== undefined) {
-                pageRange = startPage === endPage ? `p. ${startPage}` : `p. ${startPage}-${endPage}`;
+                argRange = startPage === endPage ? `p. ${startPage}` : `p. ${startPage}-${endPage}`;
             } else if (startPage !== undefined) {
-                pageRange = `p. ${startPage}+`;
+                argRange = `p. ${startPage}+`;
             } else if (endPage !== undefined) {
-                pageRange = `p. 1-${endPage}`;
+                argRange = `p. 1-${endPage}`;
             }
 
-            // Get item display name from attachment_id
-            if (attachmentId) {
-                const item = getItemFromAttachmentId(attachmentId);
-                if (item) {
-                    const displayName = getItemDisplayName(item);
-                    if (pageRange) {
-                        return `${baseLabel}: ${displayName}, ${pageRange}`;
-                    }
-                    return `${baseLabel}: ${displayName}`;
-                }
-            }
-
-            // Fallback: just show page range or base label
-            if (pageRange) {
-                return `${baseLabel}: ${pageRange}`;
+            // Prefer the completed view's actual locator; the locator is shown only
+            // alongside a resolved item name (never a bare page range).
+            const locator = viewLocator ?? argRange;
+            if (resolvedName) {
+                return locator ? `${baseLabel}: ${resolvedName}, ${locator}` : `${baseLabel}: ${resolvedName}`;
             }
             return baseLabel;
         }
 
         case 'read': {
-            const file = args.file as string | undefined;
             const pagesArg = args.pages as string | undefined;
             const linesArg = args.lines as string | undefined;
 
@@ -556,39 +497,24 @@ export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): st
             const pageRangeValue = normalizeRange(pagesArg);
             const lineRangeValue = normalizeRange(linesArg);
 
-            let rangeLabel = '';
+            // Requested locator from args (fallback when no completed view).
+            let argRange = '';
             if (pageRangeValue) {
-                rangeLabel = `p. ${pageRangeValue}`;
-            } else if (lineRangeValue && status !== 'completed') {
-                // Show the requested line range only while in progress; once
-                // completed, ToolCallPartView appends the actual range read
-                // from the result summary.
-                rangeLabel = lineRangeValue.includes('-')
-                    ? `lines ${lineRangeValue}`
-                    : `line ${lineRangeValue}`;
+                argRange = `p. ${pageRangeValue}`;
+            } else if (lineRangeValue) {
+                argRange = lineRangeValue.includes('-') ? `lines ${lineRangeValue}` : `line ${lineRangeValue}`;
             }
 
-            // Get item display name from the file id (skips external 'ext-<n>' ids)
-            if (file && /^\d+-/.test(file)) {
-                const item = getItemFromAttachmentId(file);
-                if (item) {
-                    const displayName = getItemDisplayName(item);
-                    if (rangeLabel) {
-                        return `${baseLabel}: ${displayName}, ${rangeLabel}`;
-                    }
-                    return `${baseLabel}: ${displayName}`;
-                }
-            }
-
-            // Fallback: just show the range or base label
-            if (rangeLabel) {
-                return `${baseLabel}: ${rangeLabel}`;
+            // The completed view's actual locator wins over the requested range;
+            // the locator is shown only alongside a resolved item name.
+            const locator = viewLocator ?? argRange;
+            if (resolvedName) {
+                return locator ? `${baseLabel}: ${resolvedName}, ${locator}` : `${baseLabel}: ${resolvedName}`;
             }
             return baseLabel;
         }
 
         case 'view': {
-            const file = args.file as string | undefined;
             const pagesArg = args.pages as string | undefined;
 
             // `pages` is a contiguous 1-indexed range string like "3" or "1-5";
@@ -597,43 +523,27 @@ export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): st
                 typeof pagesArg === 'string' && /^\d+(-\d+)?$/.test(pagesArg.trim())
                     ? pagesArg.trim()
                     : null;
-            const rangeLabel = pageRangeValue ? `p. ${pageRangeValue}` : '';
+            const argRange = pageRangeValue ? `p. ${pageRangeValue}` : '';
 
-            if (file && /^\d+-/.test(file)) {
-                const item = getItemFromAttachmentId(file);
-                if (item) {
-                    const displayName = getItemDisplayName(item);
-                    return rangeLabel
-                        ? `${baseLabel}: ${displayName}, ${rangeLabel}`
-                        : `${baseLabel}: ${displayName}`;
-                }
-            }
-
-            if (rangeLabel) {
-                return `${baseLabel}: ${rangeLabel}`;
+            const locator = viewLocator ?? argRange;
+            if (resolvedName) {
+                return locator ? `${baseLabel}: ${resolvedName}, ${locator}` : `${baseLabel}: ${resolvedName}`;
             }
             return baseLabel;
         }
 
         // === Annotation tools ===
         case 'get_annotations': {
-            const attachmentId = args.attachment_id as string | undefined;
-            if (attachmentId) {
-                const item = getItemFromAttachmentId(attachmentId);
-                if (item) {
-                    return `${baseLabel}: ${getItemDisplayName(item)}`;
-                }
+            if (resolvedName) {
+                return `${baseLabel}: ${resolvedName}`;
             }
             return baseLabel;
         }
 
         case 'find_annotations': {
-            const attachmentId = args.attachment_id as string | undefined;
-            if (attachmentId) {
-                const item = getItemFromAttachmentId(attachmentId);
-                if (item) {
-                    return `${baseLabel}: ${getItemDisplayName(item)}`;
-                }
+            // Scoped (single-source) calls headline the source name.
+            if (resolvedName) {
+                return `${baseLabel}: ${resolvedName}`;
             }
 
             const color = args.color as string | undefined;
@@ -775,54 +685,40 @@ export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): st
 
         case 'list_collections': {
             const libraryParam = args.library as string | number | undefined;
-            const libraryId = typeof libraryParam === 'number' 
-                ? libraryParam 
-                : (typeof libraryParam === 'string' ? parseInt(libraryParam, 10) : undefined);
-            
+
             const parentKey = args.parent_collection as string | undefined;
             if (parentKey) {
-                const result = getCollectionByIdOrName(parentKey, libraryId);
-                if (result) {
-                    return `${baseLabel} in "${result.collection.name}"`;
+                if (opts?.enrich?.collectionName) {
+                    return `${baseLabel} in "${opts.enrich.collectionName}"`;
                 }
                 return `${baseLabel}: subcollections`;
             }
-            
+
             // Show library name when listing top-level collections
-            if (libraryParam) {
-                const library = getLibraryByIdOrName(libraryParam);
-                if (library.library && library.library.name) {
-                    return `${baseLabel}: "${library.library.name}"`;
-                } else {
-                    return `${baseLabel}: "${libraryParam}"`;
-                }
+            if (libraryParam != null) {
+                return opts?.enrich?.libraryName
+                    ? `${baseLabel}: "${opts.enrich.libraryName}"`
+                    : `${baseLabel}: "${libraryParam}"`;
             }
             return `${baseLabel}`;
         }
 
         case 'list_tags': {
             const libraryParam = args.library as string | number | undefined;
-            const libraryId = typeof libraryParam === 'number' 
-                ? libraryParam 
-                : (typeof libraryParam === 'string' ? parseInt(libraryParam, 10) : undefined);
-            
+
             const collectionKey = args.collection_key as string | undefined;
             if (collectionKey) {
-                const result = getCollectionByIdOrName(collectionKey, libraryId);
-                if (result) {
-                    return `${baseLabel} in "${result.collection.name}"`;
+                if (opts?.enrich?.collectionName) {
+                    return `${baseLabel} in "${opts.enrich.collectionName}"`;
                 }
                 return `${baseLabel} in collection`;
             }
-            
+
             // Show library name when listing all tags in a library
-            if (libraryParam) {
-                const library = getLibraryByIdOrName(libraryParam);
-                if (library.library && library.library.name) {
-                    return `${baseLabel}: "${library.library.name}"`;
-                } else {
-                    return `${baseLabel}: "${libraryParam}"`;
-                }
+            if (libraryParam != null) {
+                return opts?.enrich?.libraryName
+                    ? `${baseLabel}: "${opts.enrich.libraryName}"`
+                    : `${baseLabel}: "${libraryParam}"`;
             }
             return `${baseLabel}`;
         }
@@ -845,17 +741,9 @@ export function getToolCallLabel(part: ToolCallPart, status: ToolCallStatus): st
 
         // === Note tools ===
         case 'read_note': {
-            const noteId = args.note_id as string | undefined;
-            if (noteId) {
-                const item = getItemFromAttachmentId(noteId);
-                if (item && item.isNote()) {
-                    const noteTitle = item.getNoteTitle?.();
-                    if (noteTitle) {
-                        return `${baseLabel}: "${truncate(noteTitle, 30)}"`;
-                    }
-                } else {
-                    return `${baseLabel}: Unknown note`;
-                }
+            // resolvedName is the note title (from the view, or host-resolved).
+            if (resolvedName) {
+                return `${baseLabel}: "${truncate(resolvedName, 30)}"`;
             }
             return baseLabel;
         }

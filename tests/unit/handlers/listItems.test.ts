@@ -34,6 +34,22 @@ vi.mock('../../../src/services/agentDataProvider/utils', () => ({
     getAttachmentInfoForItem: vi.fn(),
 }));
 
+// Keep the real serializeNote; stub serializeItemStub so parent serialization
+// doesn't hit getCreators/getYear on mock items.
+vi.mock('../../../src/utils/zoteroSerializers', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('../../../src/utils/zoteroSerializers')>();
+    return {
+        ...actual,
+        serializeItemStub: vi.fn((item: any) => ({
+            item_id: `${item.libraryID}-${item.key}`,
+            item_type: item.itemType,
+            title: item.getField?.('title', false, true) || item.getDisplayTitle?.() || null,
+            creators: null,
+            year: null,
+        })),
+    };
+});
+
 import { handleListItemsRequest } from '../../../src/services/agentDataProvider/handleListItemsRequest';
 import { getAttachmentInfoForItem, getCollectionByIdOrName, validateLibraryAccess } from '../../../src/services/agentDataProvider/utils';
 

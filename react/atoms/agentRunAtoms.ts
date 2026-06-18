@@ -35,7 +35,7 @@ import { selectedModelAtom, ModelConfig } from './models';
 import { getPref } from '../../src/utils/prefs';
 import { MessageAttachment, SourceAttachment } from '../types/attachments/apiTypes';
 import { toMessageAttachment } from '../types/attachments/converters';
-import { serializeCollection, serializeZoteroLibrary } from '../../src/utils/zoteroSerializers';
+import { safeStub, serializeAttachmentStub, serializeCollection, serializeItemStub, serializeZoteroLibrary } from '../../src/utils/zoteroSerializers';
 import { SubscriptionStatus, ProcessingMode } from '../types/profile';
 import { isDatabaseSyncSupportedAtom } from './profile';
 import { addPopupMessageAtom } from '../utils/popupMessageUtils';
@@ -107,6 +107,8 @@ import { undoEditNoteAction } from '../utils/editNoteActions';
 import { undoCreateNoteAction } from '../utils/createNoteActions';
 import { undoCreateAnnotationsAction } from '../utils/createAnnotationsActions';
 import { processToolReturnResults } from '../agents/toolResultProcessing';
+import { upgradeToolReturn } from '../compat/legacyToolResults';
+import { isToolResultView } from '../types/toolResultViews';
 import { addWarningAtom, clearWarningsAtom } from './warnings';
 import { backendHighTokenUsageRunsAtom, softCapTriggeredRunsAtom } from './messageUIState';
 import { currentThreadNameAtom } from './threads';
@@ -1000,6 +1002,27 @@ async function prevalidateExtractionApproval(
 }
 
 /**
+ * Find the args of the tool-call part that produced a given tool return, by
+ * scanning the run's response messages. Used to derive the annotation-list
+ * variant when synthesizing a legacy view; null when the call can't be found.
+ */
+function findToolCallArgs(
+    run: AgentRun | null,
+    toolCallId: string,
+): string | Record<string, any> | null {
+    if (!run) return null;
+    for (const message of run.model_messages) {
+        if (message.kind !== 'response') continue;
+        for (const part of message.parts) {
+            if (part.part_kind === 'tool-call' && part.tool_call_id === toolCallId) {
+                return part.args;
+            }
+        }
+    }
+    return null;
+}
+
+/**
  * Create WebSocket callbacks for handling streaming events.
  * Shared between sendWSMessageAtom and regenerateFromRunAtom.
  */
@@ -1073,9 +1096,23 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             });
 
             // Process tool return results
-            if (event.part.part_kind === "tool-return") await processToolReturnResults(event.part, set);
+            if (event.part.part_kind === "tool-return") {
+                await processToolReturnResults(event.part, set);
 
-            // Update run with tool return
+                // Safety net: the current backend ships a hydrated `metadata.view`
+                // on every tool return, but synthesize one from the legacy summary
+                // when it is missing OR malformed so the shared render layer always
+                // has a valid view to render. The `isToolResultView` check matches
+                // the render-time predicate; `upgradeToolReturn` no-ops on a valid view.
+                if (!isToolResultView(event.part.metadata?.view)) {
+                    logger(`WS onToolReturn: No view model available for tool call ${event.part.tool_call_id}`, 1);
+                    const toolCallArgs = findToolCallArgs(store.get(activeRunAtom), event.part.tool_call_id);
+                    await upgradeToolReturn(event.part, toolCallArgs);
+                }
+            }
+
+            // Update run with tool return (event.part now carries a synthesized
+            // `view` when the backend omitted one).
             set(activeRunAtom, (prev) => prev ? updateRunWithToolReturn(prev, event) : prev);
 
             // Remove pending approval for this specific tool call (if any)
@@ -1627,6 +1664,23 @@ export const sendWSMessageAtom = atom(
         if (allNoteItems.length > 0) {
             await Promise.all(allNoteItems.map(item => item.loadDataType('note')));
         }
+        const regularItems = selectedItems.filter(item => item.isRegularItem());
+        if (regularItems.length > 0) {
+            await Zotero.Items.loadDataTypes(regularItems, ['itemData', 'creators']);
+        }
+        const attachmentItems = selectedItems.filter(item => item.isAttachment());
+        if (attachmentItems.length > 0) {
+            await Zotero.Items.loadDataTypes(attachmentItems, ['itemData']);
+        }
+        const attachmentParentItemsById = new Map<number, Zotero.Item>();
+        for (const attachment of attachmentItems) {
+            const parent = attachment.parentItem;
+            if (parent) attachmentParentItemsById.set(parent.id, parent);
+        }
+        const attachmentParentItems = Array.from(attachmentParentItemsById.values());
+        if (attachmentParentItems.length > 0) {
+            await Zotero.Items.loadDataTypes(attachmentParentItems, ['itemData', 'creators']);
+        }
 
         let attachments: MessageAttachment[] =
             selectedItems
@@ -1688,10 +1742,16 @@ export const sendWSMessageAtom = atom(
             const readerKey = `${readerAttachment.libraryID}-${readerAttachment.key}`;
             if (!existingKeys.has(readerKey)) {
                 logger(`sendWSMessageAtom: Handeling reader attachment - Adding reader attachment: ${readerKey}`, 1);
+                await Zotero.Items.loadDataTypes([readerAttachment], ['itemData']);
+                if (readerAttachment.parentItem) {
+                    await Zotero.Items.loadDataTypes([readerAttachment.parentItem], ['itemData', 'creators']);
+                }
                 attachments.push({
                     library_id: readerAttachment.libraryID,
                     zotero_key: readerAttachment.key,
                     type: 'source',
+                    attachment: safeStub(() => serializeAttachmentStub(readerAttachment)),
+                    parent_item: safeStub(() => readerAttachment.parentItem ? serializeItemStub(readerAttachment.parentItem) : undefined),
                     include: 'fulltext'
                 } as SourceAttachment);
             } else {

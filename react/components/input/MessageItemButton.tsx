@@ -7,29 +7,15 @@ import { getItemValidationAtom } from '../../atoms/itemValidation';
 import { usePreviewHover } from '../../hooks/usePreviewHover';
 import { getDisplayNameFromItem } from '../../utils/sourceUtils';
 import { truncateText } from '../../utils/stringUtils';
-import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
+import { ZoteroIcon } from '../icons/ZoteroIcon';
 import { navigateToAnnotation, isItemActiveTab } from '../../utils/readerUtils';
 import { currentReaderAttachmentKeyAtom } from '../../atoms/messageComposition';
 import { toAnnotation } from '../../types/attachments/converters';
 import { selectItemById } from '../../../src/utils/selectItem';
 import { openNoteById } from '../../utils/sourceUtils';
+import { ANNOTATION_ICON_BY_TYPE, ANNOTATION_TEXT_BY_TYPE } from '../../utils/annotationDisplay';
 
 const MAX_ITEM_TEXT_LENGTH = 30;
-
-const ANNOTATION_TEXT_BY_TYPE = {
-    highlight: 'Highlight',
-    underline: 'Underline',
-    note: 'Sticky Note',
-    image: 'Area',
-}
-
-export const ANNOTATION_ICON_BY_TYPE = {
-    highlight: ZOTERO_ICONS.ANNOTATE_HIGHLIGHT,
-    underline: ZOTERO_ICONS.ANNOTATE_UNDERLINE,
-    note: ZOTERO_ICONS.ANNOTATION,
-    text: ZOTERO_ICONS.ANNOTATE_TEXT,
-    image: ZOTERO_ICONS.ANNOTATE_AREA,
-}
 
 interface MessageItemButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'item'> {
     item: Zotero.Item;

@@ -18,12 +18,16 @@ export type ContentKind =
 
 export type ContentInfoStatus = 'readable' | 'unreadable' | 'processing';
 
-export interface AttachmentInfo {
+/** Display subset of attachment metadata */
+export interface AttachmentStub {
     attachment_id: string;
     parent_item_id?: string | null;
     title?: string | null;
     filename?: string | null;
     content_kind: ContentKind;
+}
+
+export interface AttachmentInfo extends AttachmentStub {
     status: ContentInfoStatus;
     status_code?: string | null;
     status_reason?: string | null;
