@@ -4,16 +4,13 @@ import { allUserAttachmentKeysAtom } from "../agents/atoms";
 import { createElement } from 'react';
 import { logger } from "../../src/utils/logger";
 import { addPopupMessageAtom, addRegularItemPopupAtom, addRegularItemsSummaryPopupAtom, removePopupMessageAtom } from "../utils/popupMessageUtils";
-import { ItemValidationType } from "../../src/services/itemValidationManager";
-import { getItemValidationAtom, validateItemsAtom, validateRegularItemWithModeAtom, getValidationTypeForMode } from './itemValidation';
+import { getItemValidationAtom, validateItemsAtom, validateRegularItemAtom } from './itemValidation';
 import { InvalidItemsMessageContent } from '../components/ui/popup/InvalidItemsMessageContent';
 import { agentItemFilter } from "../../src/utils/agentItemSupport";
 import { getCurrentReader } from "../utils/readerUtils";
 import { TextSelection } from "../types/attachments/apiTypes";
 import { ZoteroTag, CollectionReference } from "../types/zotero";
 import type { ExternalFileRecord } from "../../src/services/database";
-import { processingModeAtom } from "./profile";
-import { ProcessingMode } from "../types/profile";
 import { currentNoteItemAtom } from "./zoteroContext";
 
 
@@ -321,9 +318,7 @@ export const addItemsToCurrentMessageItemsAtom = atom(
  * Uses batch validation for regular items (validates item + all attachments together)
  * and individual validation for standalone attachments and annotations.
  * 
- * Automatically uses the appropriate validation mode based on processingModeAtom:
- * - FRONTEND mode: comprehensive local validation (file size, pages, OCR, etc.)
- * - BACKEND mode: backend verification for processed status
+ * Uses the local validation path for all item types.
  */
 async function validateItemsInBackground(
     get: any,
@@ -332,12 +327,7 @@ async function validateItemsInBackground(
     isReaderAttachment: boolean = false
 ) {
     const getValidation = get(getItemValidationAtom);
-    
-    // Get processing mode to determine validation type
-    const processingMode = get(processingModeAtom);
-    const validationType = getValidationTypeForMode(processingMode);
-    
-    logger(`validateItemsInBackground: Using ${processingMode} mode with validation type ${validationType}`, 3);
+    logger(`validateItemsInBackground: Validating ${items.length} items`, 3);
     
     try {
         // Separate regular items from standalone attachments, annotations, and notes
@@ -346,19 +336,18 @@ async function validateItemsInBackground(
         const annotations = items.filter((item) => item.isAnnotation());
         const notes = items.filter((item) => item.isNote());
         
-        // Validate regular items using mode-aware batch validation (item + all attachments)
+        // Validate regular items with their attachments.
         const regularItemValidationPromises = regularItems.map((item) => 
-            set(validateRegularItemWithModeAtom, item).catch((error: any) => {
+            set(validateRegularItemAtom, item).catch((error: any) => {
                 logger(`Batch validation failed for regular item ${item.key}: ${error.message}`, 2);
                 return null;
             })
         );
         
-        // Validate attachments individually using appropriate validation type
+        // Validate standalone attachments individually.
         const attachmentValidationPromises = attachments.map((item) =>
             set(validateItemsAtom, {
                 items: [item],
-                validationType,
                 forceRefresh: false
             }).catch((error: any) => {
                 logger(`Validation failed for standalone attachment ${item.key}: ${error.message}`, 2);
@@ -366,17 +355,11 @@ async function validateItemsInBackground(
             })
         );
         
-        // Validate annotations themselves first (always use FRONTEND since annotations
-        // only need local validation - checking type and parent existence)
-        const annotationValidationType = processingMode === ProcessingMode.FRONTEND
-            ? ItemValidationType.FRONTEND
-            : ItemValidationType.LOCAL_ONLY;
-        
+        // Validate annotations themselves first, then their parent attachments.
         const annotationValidationPromises = annotations.map((item) => {
             logger(`validateItemsInBackground: Validating annotation ${item.libraryID}-${item.key}`, 3);
             return set(validateItemsAtom, {
                 items: [item],
-                validationType: annotationValidationType,
                 forceRefresh: false
             }).catch((error: any) => {
                 logger(`Validation failed for annotation ${item.key}: ${error.message}`, 2);
@@ -384,16 +367,10 @@ async function validateItemsInBackground(
             });
         });
 
-        // Validate notes (always use LOCAL_ONLY/FRONTEND since notes only need local validation)
-        const noteValidationType = processingMode === ProcessingMode.FRONTEND
-            ? ItemValidationType.FRONTEND
-            : ItemValidationType.LOCAL_ONLY;
-
         const noteValidationPromises = notes.map((item) => {
             logger(`validateItemsInBackground: Validating note ${item.libraryID}-${item.key}`, 3);
             return set(validateItemsAtom, {
                 items: [item],
-                validationType: noteValidationType,
                 forceRefresh: false
             }).catch((error: any) => {
                 logger(`Validation failed for note ${item.key}: ${error.message}`, 2);
@@ -401,7 +378,7 @@ async function validateItemsInBackground(
             });
         });
 
-        // Validate parent items of annotations using appropriate validation type
+        // Validate parent items of annotations.
         const parentItems = annotations
             .map((item) => item.parentItem ?? null)
             .filter((item): item is Zotero.Item => item !== null);
@@ -409,7 +386,6 @@ async function validateItemsInBackground(
         const parentItemValidationPromises = parentItems.map((item) =>
             set(validateItemsAtom, {
                 items: [item],
-                validationType,
                 forceRefresh: false
             }).catch((error: any) => {
                 logger(`Validation failed for parent item ${item.key}: ${error.message}`, 2);

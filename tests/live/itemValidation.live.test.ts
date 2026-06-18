@@ -1,7 +1,7 @@
 /**
  * Item-validation live suite (`/beaver/test/validate-item`).
  *
- * Exercises `itemValidationManager.validateItem` (frontend mode) through the
+ * Exercises `itemValidationManager.validateItem` through the
  * dev-only validate-item endpoint, covering the agent-support gating:
  *   - PDF attachments still validate (readable PDF valid, encrypted rejected)
  *   - EPUB attachments are admitted — cold document cache (no extraction on
@@ -46,7 +46,6 @@ describe('frontend validation of attachment kinds', () => {
         expect(res.ok).toBe(true);
         expect(res.is_valid).toBe(true);
         expect(res.reason).toBeNull();
-        expect(res.backend_checked).toBe(false);
     }, 60_000);
 
     it('rejects an encrypted PDF as password-protected', async () => {

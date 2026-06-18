@@ -374,12 +374,12 @@ export async function handleTestBestEpubAttachmentHttpRequest(request: any) {
 /**
  * Dev-only: run `itemValidationManager.validateItem` for an item.
  *
- * Exposes the production validation pipeline (frontend mode by default) so
+ * Exposes the production validation pipeline so
  * tests can assert which attachment kinds Beaver admits as sources — including
  * the document-cache-backed EPUB checks — without driving the UI.
  */
 export async function handleTestValidateItemHttpRequest(request: any) {
-    const { library_id, zotero_key, validation_type, force_refresh } = request || {};
+    const { library_id, zotero_key, force_refresh } = request || {};
     if (library_id == null || zotero_key == null) {
         return { ok: false, error: 'Provide library_id + zotero_key' };
     }
@@ -387,29 +387,17 @@ export async function handleTestValidateItemHttpRequest(request: any) {
     if (!item) return { ok: false, error: 'not_found' };
     await item.loadAllData();
 
-    const { itemValidationManager, ItemValidationType } = await import(
+    const { itemValidationManager } = await import(
         '../../../src/services/itemValidationManager'
     );
-    const typeMap: Record<string, any> = {
-        frontend: ItemValidationType.FRONTEND,
-        local_only: ItemValidationType.LOCAL_ONLY,
-        backend: ItemValidationType.BACKEND,
-        cached: ItemValidationType.CACHED,
-    };
-    const validationType = typeMap[validation_type ?? 'frontend'];
-    if (!validationType) {
-        return { ok: false, error: `Unknown validation_type: ${validation_type}` };
-    }
 
     const result = await itemValidationManager.validateItem(item, {
-        validationType,
         forceRefresh: force_refresh !== false,
     });
     return {
         ok: true,
         is_valid: result.isValid,
         reason: result.reason ?? null,
-        backend_checked: result.backendChecked,
     };
 }
 

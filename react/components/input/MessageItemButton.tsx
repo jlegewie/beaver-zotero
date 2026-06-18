@@ -221,11 +221,6 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
                 return `${baseClasses} border-red`;
             }
             
-            // Valid and backend checked
-            if (validation?.backendChecked && validation.isValid) {
-                return `${baseClasses} border-green`;
-            }
-            
             return baseClasses;
         };
 
@@ -265,17 +260,6 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
                 {/* Show arrow icon for annotations not in current reader */}
                 {isAnnotation && annotation && currentReaderAttachmentKey !== annotation.parent_key && (
                     <Icon icon={ArrowUpRightIcon} className="scale-11" />
-                )}
-                
-                {/* Validation status indicator */}
-                {validation?.backendChecked && showInvalid && (
-                    <span className="validation-indicator">
-                        {validation.isValid ? (
-                            <CSSIcon name="checkmark" className="icon-12 text-green" />
-                        ) : (
-                            <CSSIcon name="alert" className="icon-12 text-red" />
-                        )}
-                    </span>
                 )}
             </button>
             {removeMenu}

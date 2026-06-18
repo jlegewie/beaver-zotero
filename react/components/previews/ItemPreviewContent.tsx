@@ -88,10 +88,6 @@ const ItemPreviewContent: React.FC<ItemPreviewContentProps> = ({
             );
         }
         
-        if (validation?.backendChecked && validation.isValid) {
-            return <CSSIcon name="checkmark" className="icon-12 text-green" />;
-        }
-        
         // Default: show item icon
         return <CSSItemTypeIcon className="scale-85" itemType={childItem.getItemTypeIconName()} />;
     };

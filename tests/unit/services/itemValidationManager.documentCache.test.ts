@@ -1,9 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('../../../react/utils/sourceUtils', () => ({
-    isValidZoteroItem: vi.fn(),
-}));
-
 vi.mock('../../../src/utils/logger', () => ({
     logger: vi.fn(),
 }));
@@ -19,7 +15,6 @@ vi.mock('../../../react/store', () => ({
 }));
 
 vi.mock('../../../react/atoms/profile', () => ({
-    planFeaturesAtom: 'planFeaturesAtom',
     searchableLibraryIdsAtom: 'searchableLibraryIdsAtom',
 }));
 
@@ -41,16 +36,6 @@ vi.mock('../../../src/utils/zoteroUtils', () => ({
 
 vi.mock('../../../src/utils/webAPI', () => ({
     isAttachmentOnServer: vi.fn().mockReturnValue(false),
-}));
-
-vi.mock('../../../src/services/attachmentsService', () => ({
-    attachmentsService: {
-        validateAttachment: vi.fn(),
-    },
-}));
-
-vi.mock('../../../src/services/itemsService', () => ({
-    itemsService: {},
 }));
 
 vi.mock('../../../src/services/agentDataProvider/utils', () => ({
@@ -85,12 +70,14 @@ vi.mock('../../../src/beaver-extract', () => ({
     },
 }));
 
-import { itemValidationManager, ItemValidationType } from '../../../src/services/itemValidationManager';
+import { itemValidationManager } from '../../../src/services/itemValidationManager';
 import { HARD_ATTACHMENT_LIMITS } from '../../../src/services/attachmentLimits';
 
 const MAX_PAGE_COUNT = HARD_ATTACHMENT_LIMITS.maxPageCount;
 
-function makeAttachment(options: { contentType?: string } = {}): Zotero.Item {
+type ValidationItem = Parameters<typeof itemValidationManager.validateItem>[0];
+
+function makeAttachment(options: { contentType?: string } = {}): ValidationItem {
     const contentType = options.contentType ?? 'application/pdf';
     return {
         id: 10,
@@ -105,7 +92,7 @@ function makeAttachment(options: { contentType?: string } = {}): Zotero.Item {
         isInTrash: () => false,
         isPDFAttachment: () => contentType === 'application/pdf',
         getFilePathAsync: vi.fn().mockResolvedValue('/tmp/test.pdf'),
-    } as unknown as Zotero.Item;
+    } as unknown as ValidationItem;
 }
 
 function makeMetadata(overrides: Record<string, unknown> = {}) {
@@ -161,11 +148,10 @@ describe('ItemValidationManager document-cache frontend validation', () => {
         (globalThis as any).Zotero.Beaver = { documentCache };
 
         const result = await itemValidationManager.validateItem(makeAttachment(), {
-            validationType: ItemValidationType.FRONTEND,
             forceRefresh: true,
         });
 
-        expect(result).toEqual({ isValid: true, reason: undefined, backendChecked: false });
+        expect(result).toEqual({ isValid: true, reason: undefined });
         expect(documentCache.getMetadata).toHaveBeenCalledWith(
             { libraryId: 1, zoteroKey: '2YWA8DTZ' },
             '/tmp/test.pdf',
@@ -182,7 +168,6 @@ describe('ItemValidationManager document-cache frontend validation', () => {
         };
 
         const result = await itemValidationManager.validateItem(makeAttachment(), {
-            validationType: ItemValidationType.FRONTEND,
             forceRefresh: true,
         });
 
@@ -200,7 +185,6 @@ describe('ItemValidationManager document-cache frontend validation', () => {
         };
 
         const result = await itemValidationManager.validateItem(makeAttachment(), {
-            validationType: ItemValidationType.FRONTEND,
             forceRefresh: true,
         });
 
@@ -218,7 +202,6 @@ describe('ItemValidationManager document-cache frontend validation', () => {
         };
 
         const result = await itemValidationManager.validateItem(makeAttachment(), {
-            validationType: ItemValidationType.FRONTEND,
             forceRefresh: true,
         });
 
@@ -237,7 +220,6 @@ describe('ItemValidationManager document-cache frontend validation', () => {
         };
 
         const result = await itemValidationManager.validateItem(makeAttachment(), {
-            validationType: ItemValidationType.FRONTEND,
             forceRefresh: true,
         });
 
@@ -255,10 +237,10 @@ describe('ItemValidationManager document-cache frontend validation', () => {
 
         const result = await itemValidationManager.validateItem(
             makeAttachment({ contentType: 'application/epub+zip' }),
-            { validationType: ItemValidationType.FRONTEND, forceRefresh: true },
+            { forceRefresh: true },
         );
 
-        expect(result).toEqual({ isValid: true, reason: undefined, backendChecked: false });
+        expect(result).toEqual({ isValid: true, reason: undefined });
         expect((globalThis as any).IOUtils.read).not.toHaveBeenCalled();
         expect(BeaverExtractorMock).not.toHaveBeenCalled();
     });
@@ -272,7 +254,7 @@ describe('ItemValidationManager document-cache frontend validation', () => {
 
         const result = await itemValidationManager.validateItem(
             makeAttachment({ contentType: 'application/epub+zip' }),
-            { validationType: ItemValidationType.FRONTEND, forceRefresh: true },
+            { forceRefresh: true },
         );
 
         expect(result.isValid).toBe(true);
@@ -291,7 +273,7 @@ describe('ItemValidationManager document-cache frontend validation', () => {
 
         const result = await itemValidationManager.validateItem(
             makeAttachment({ contentType: 'application/epub+zip' }),
-            { validationType: ItemValidationType.FRONTEND, forceRefresh: true },
+            { forceRefresh: true },
         );
 
         expect(result.isValid).toBe(false);
@@ -314,7 +296,7 @@ describe('ItemValidationManager document-cache frontend validation', () => {
 
         const result = await itemValidationManager.validateItem(
             makeAttachment({ contentType: 'application/epub+zip' }),
-            { validationType: ItemValidationType.FRONTEND, forceRefresh: true },
+            { forceRefresh: true },
         );
 
         expect(result.isValid).toBe(false);
@@ -332,7 +314,7 @@ describe('ItemValidationManager document-cache frontend validation', () => {
 
         const result = await itemValidationManager.validateItem(
             makeAttachment({ contentType: 'application/epub+zip' }),
-            { validationType: ItemValidationType.FRONTEND, forceRefresh: true },
+            { forceRefresh: true },
         );
 
         expect(result.isValid).toBe(true);
@@ -350,7 +332,7 @@ describe('ItemValidationManager document-cache frontend validation', () => {
 
         const result = await itemValidationManager.validateItem(
             makeAttachment({ contentType: 'application/epub+zip' }),
-            { validationType: ItemValidationType.FRONTEND, forceRefresh: true },
+            { forceRefresh: true },
         );
 
         expect(result.isValid).toBe(false);
@@ -367,7 +349,6 @@ describe('ItemValidationManager document-cache frontend validation', () => {
         };
 
         const result = await itemValidationManager.validateItem(makeAttachment(), {
-            validationType: ItemValidationType.FRONTEND,
             forceRefresh: true,
         });
 
