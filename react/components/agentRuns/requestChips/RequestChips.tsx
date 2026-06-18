@@ -9,6 +9,7 @@ import {
     SourceAttachment,
 } from '../../../types/attachments/apiTypes';
 import type { ZoteroItemReference } from '../../../types/zotero';
+import { EXTERNAL_LIBRARY_ID } from '../../../../src/services/externalFiles';
 import {
     AnnotationChip,
     CollectionChip,
@@ -18,6 +19,7 @@ import {
     NoteChip,
     TagChip,
 } from './RequestChipPrimitives';
+import type { ChipPopupSubtitle } from './ChipPopup';
 
 const EMPTY_ATTACHMENTS: NonNullable<BeaverAgentPrompt['attachments']> = [];
 
@@ -49,6 +51,38 @@ function annotationTitle(att: AnnotationAttachment): string | undefined {
     return [att.text, att.comment].filter(Boolean).join('\n') || undefined;
 }
 
+/**
+ * Popup second line for a regular item. The chip headline is the
+ * creator/year (when present), so the title goes beneath it — mirroring a
+ * regular-item row in ItemListResultView. When the headline already is the
+ * title (no creator/year), there is no second line.
+ */
+function itemStubSubtitle(att: ItemMetadataAttachment): ChipPopupSubtitle | null {
+    const stub = att.item;
+    if (!stub) return null;
+    const creatorYear = [stub.creators, stub.year].filter(Boolean).join(' ');
+    return creatorYear && stub.title ? { text: stub.title } : null;
+}
+
+/**
+ * Popup second line for an attachment: "Attached to <parent>" (parent bib
+ * italicized) when the parent is known, else a standalone/external label.
+ */
+function sourceSubtitle(att: SourceAttachment): ChipPopupSubtitle | null {
+    const parent = att.parent_item ? itemStubDisplayLabel(att.parent_item) : null;
+    if (parent) return { prefix: 'Attached to ', text: parent, italic: true };
+    if (att.library_id === EXTERNAL_LIBRARY_ID) return { text: 'External file' };
+    return { text: 'Standalone attachment' };
+}
+
+/**
+ * Popup second line for a note. Hydrated note attachments carry only the
+ * parent key (no parent bib), so a child note shows a generic "Attached note".
+ */
+function noteSubtitle(att: NoteAttachment): ChipPopupSubtitle {
+    return att.parent_key ? { text: 'Attached note' } : { text: 'Standalone note' };
+}
+
 export function RequestChips({ userPrompt }: { userPrompt: BeaverAgentPrompt }) {
     const attachments = userPrompt.attachments ?? EMPTY_ATTACHMENTS;
 
@@ -66,6 +100,7 @@ export function RequestChips({ userPrompt }: { userPrompt: BeaverAgentPrompt }) 
                     key={`${collection.library_id}-${collection.zotero_key}`}
                     name={collection.name}
                     collectionRef={{ library_id: collection.library_id, zotero_key: collection.zotero_key }}
+                    isFilter={true}
                 />
             ))}
             {userPrompt.filters?.tags?.map((tag) => (
@@ -82,6 +117,7 @@ export function RequestChips({ userPrompt }: { userPrompt: BeaverAgentPrompt }) 
                                 isAttachment={false}
                                 itemType={att.item?.item_type}
                                 label={itemStubLabel(att)}
+                                subtitle={itemStubSubtitle(att)}
                             />
                         );
                     }
@@ -94,6 +130,7 @@ export function RequestChips({ userPrompt }: { userPrompt: BeaverAgentPrompt }) 
                                 isAttachment={true}
                                 contentKind={att.attachment?.content_kind}
                                 label={sourceStubLabel(att)}
+                                subtitle={sourceSubtitle(att)}
                             />
                         );
                     }
@@ -116,6 +153,7 @@ export function RequestChips({ userPrompt }: { userPrompt: BeaverAgentPrompt }) 
                                 key={`note-${note.library_id}-${note.zotero_key}`}
                                 noteRef={{ library_id: note.library_id, zotero_key: note.zotero_key }}
                                 title={note.title}
+                                subtitle={noteSubtitle(note)}
                             />
                         );
                     }
