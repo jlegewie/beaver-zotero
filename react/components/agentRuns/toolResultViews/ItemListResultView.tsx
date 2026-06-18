@@ -22,8 +22,20 @@ import { AnnotationResultRow } from './AnnotationResultRow';
 /** Right-aligned labels are capped so they never crowd out the primary text. */
 const LABEL_MAX_LENGTH = 24;
 
-function revealRow(libraryId: number, zoteroKey: string): void {
-    getHost().navigation?.revealInLibrary({ library_id: libraryId, zotero_key: zoteroKey });
+/**
+ * Activate an item row through the host. External-file rows (`library_id ===
+ * EXTERNAL_LIBRARY_ID`, `zotero_key` holding the ext key) open the local copy in
+ * the OS viewer; every other row reveals the item in the library pane. Both host
+ * methods surface a warning popup when the target is gone — a missing local copy
+ * or a deleted library item — so the render layer only routes by the row's
+ * hydrated library identity.
+ */
+function activateRow(row: ItemRowView): void {
+    if (row.library_id === EXTERNAL_LIBRARY_ID) {
+        getHost().navigation?.launchExternalFile(row.zotero_key);
+        return;
+    }
+    getHost().navigation?.revealInLibrary({ library_id: row.library_id, zotero_key: row.zotero_key });
 }
 
 /**
@@ -84,14 +96,15 @@ const ItemRow: React.FC<{ row: ItemRowView } & RowEventProps> = ({
     const faded = row.status === 'error';
     const subtitle = rowSubtitle(row);
     const hasSecondLine = Boolean(subtitle) || Boolean(row.attachment_label);
+    const isExternal = row.library_id === EXTERNAL_LIBRARY_ID;
 
     return (
         <div
             className={`display-flex flex-row items-start gap-25 p-2 cursor-pointer transition-colors ${isHovered ? 'bg-quinary' : ''} ${faded ? 'opacity-50' : ''}`}
-            onClick={() => revealRow(row.library_id, row.zotero_key)}
+            onClick={() => activateRow(row)}
             onMouseEnter={onMouseEnter}
             onMouseLeave={onMouseLeave}
-            title="Click to reveal in Zotero"
+            title={isExternal ? 'Click to open the file' : 'Click to reveal in Zotero'}
         >
             <div
                 className="display-flex items-center justify-center flex-shrink-0 rounded-md ml-05 mt-010"
