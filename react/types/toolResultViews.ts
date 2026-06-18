@@ -129,7 +129,12 @@ export interface AttachmentSearchRowView {
     item_type?: string | null;
     /** Also disambiguates the attachment icon. */
     content_kind: "pdf" | "epub" | "text" | "snapshot";
-    status: "ok" | "no_matches" | "error";
+    /**
+     * Per-attachment search outcome. The backend omits this when it is the
+     * default `"ok"` (only `no_matches`/`error` rows carry it), so a missing
+     * value means a successful search — treat absent as `"ok"`.
+     */
+    status?: "ok" | "no_matches" | "error";
     match_count: number;
     pages: number[];
     /** Omitted by the backend for `no_matches`/`error` rows; treat absent as empty. */

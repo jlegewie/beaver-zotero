@@ -101,13 +101,23 @@ function rowMatches(row: AttachmentSearchRowView): AttachmentMatchView[] {
     return row.matches ?? [];
 }
 
+/**
+ * Per-row search status. The backend omits `status` when it is the default
+ * `'ok'` (only `no_matches`/`error` rows carry it on the wire), so a missing
+ * value means a successful search — never compare `row.status` to `'ok'`
+ * directly or matched rows render as empty.
+ */
+function rowStatus(row: AttachmentSearchRowView): 'ok' | 'no_matches' | 'error' {
+    return row.status ?? 'ok';
+}
+
 /** Whether the attachment contributes match rows to the primary list. */
 function hasMatchRows(row: AttachmentSearchRowView): boolean {
-    return row.status === 'ok' && rowMatches(row).length > 0;
+    return rowStatus(row) === 'ok' && rowMatches(row).length > 0;
 }
 
 function attachmentStatusText(row: AttachmentSearchRowView): string {
-    switch (row.status) {
+    switch (rowStatus(row)) {
         case 'error':
             return 'search error';
         case 'no_matches':
@@ -219,14 +229,14 @@ export const AttachmentSearchResultView: React.FC<{ view: AttachmentSearchView }
                         variant={hasMatchRows(row) ? 'match' : 'muted'}
                     />
                 </div>
-                {row.status === 'error' && row.error && (
+                {rowStatus(row) === 'error' && row.error && (
                     <div className="display-flex flex-row min-w-0 ml-3 border-left-quarternary">
                         <div className="text-sm font-color-secondary px-25 py-2">
                             {row.error}
                         </div>
                     </div>
                 )}
-                {row.status === 'ok' && rowMatches(row).length > 0 && (
+                {rowStatus(row) === 'ok' && rowMatches(row).length > 0 && (
                     <div className="display-flex flex-col min-w-0 ml-3 border-left-quarternary">
                         {rowMatches(row).map((match, index) => {
                             const matchKey = `${attKey}-m${index}`;
@@ -261,7 +271,7 @@ export const AttachmentSearchResultView: React.FC<{ view: AttachmentSearchView }
     const negative = attachments.filter((row) => !hasMatchRows(row));
     // Show negative rows directly when they are the whole result.
     const collapseNegative = positive.length > 0 && negative.length > 0;
-    const errorCount = negative.filter((row) => row.status === 'error').length;
+    const errorCount = negative.filter((row) => rowStatus(row) === 'error').length;
     const toggleHovered = hoveredKey === '__no-matches-toggle';
     const toggleLabel = `${showNoMatches ? 'Hide' : 'Show'} ${pluralize(negative.length, 'document')} without matches`
         + (errorCount > 0 ? ` (${errorCount} could not be searched)` : '');
