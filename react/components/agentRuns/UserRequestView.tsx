@@ -1,23 +1,15 @@
-import React, { useMemo, useRef, useState, useEffect, useCallback } from 'react';
+import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { BeaverAgentPrompt } from '../../agents/types';
 import ContextMenu from '../ui/menu/ContextMenu';
 import useSelectionContextMenu from '../../hooks/useSelectionContextMenu';
-import { MessageItemButton } from '../input/MessageItemButton';
-import { MessageCollectionButton } from '../input/MessageCollectionButton';
-import { LibraryButton } from '../library/LibraryButton';
-import { CollectionButton } from '../library/CollectionButton';
-import { TagButton } from '../library/TagButton';
-import { CollectionAttachment, isExternalFileAttachment } from '../../types/attachments/apiTypes';
-import { ExternalFileButton } from '../input/ExternalFileButton';
-import { collectionReferenceKey } from '../../types/zotero';
+import { RequestChips } from './requestChips';
 import { EditIcon, Spinner } from '../icons/icons';
 import Button from '../ui/Button';
 import ModelSelectionButton from '../ui/buttons/ModelSelectionButton';
 import { regenerateWithEditedPromptAtom, isWSChatPendingAtom } from '../../atoms/agentRunAtoms';
 import { selectedModelAtom } from '../../atoms/models';
 import { isStreamingAtom } from '../../agents/atoms';
-import { logger } from '../../../src/utils/logger';
 
 interface UserRequestViewProps {
     userPrompt: BeaverAgentPrompt;
@@ -70,39 +62,6 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
         handleContextMenu,
         menuItems: selectionMenuItems
     } = useSelectionContextMenu(contentRef);
-
-    // Get Zotero items for attachments (skip collections and external files —
-    // they're not Zotero.Item)
-    const attachmentItems = useMemo(() => {
-        if (!userPrompt.attachments) return [];
-        return userPrompt.attachments
-            .filter(att => att.type !== 'collection' && att.type !== 'external_file')
-            .map((att) => {
-                try {
-                    const item = Zotero.Items.getByLibraryAndKey(att.library_id, att.zotero_key);
-                    return item ? { attachment: att, item } : null;
-                } catch (e) {
-                    logger(`UserRequestView: Item not loaded for ${att.library_id}/${att.zotero_key}: ${e}`);
-                    return null;
-                }
-            })
-            .filter((a): a is NonNullable<typeof a> => a !== null);
-    }, [userPrompt.attachments]);
-
-    // Get collection attachments separately
-    const collectionAttachments = useMemo(() => {
-        if (!userPrompt.attachments) return [];
-        return userPrompt.attachments.filter(
-            (att): att is CollectionAttachment => att.type === 'collection'
-        );
-    }, [userPrompt.attachments]);
-
-    // External file attachments render entirely from the persisted inline
-    // metadata — no registry or Zotero lookup needed for display.
-    const externalFileAttachments = useMemo(() => {
-        if (!userPrompt.attachments) return [];
-        return userPrompt.attachments.filter(isExternalFileAttachment);
-    }, [userPrompt.attachments]);
 
     // Initialize edited content when opening edit mode
     useEffect(() => {
@@ -205,12 +164,10 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
 
     // Check if we have content to display in the filters/attachments section
     const hasFiltersOrAttachments =
-        attachmentItems.length > 0 ||
-        collectionAttachments.length > 0 ||
-        externalFileAttachments.length > 0 ||
-        (userPrompt.filters?.libraries && userPrompt.filters.libraries.length > 0) ||
-        (userPrompt.filters?.collections && userPrompt.filters.collections.length > 0) ||
-        (userPrompt.filters?.tags && userPrompt.filters.tags.length > 0);
+        (userPrompt.attachments?.length ?? 0) > 0 ||
+        (userPrompt.filters?.libraries?.length ?? 0) > 0 ||
+        (userPrompt.filters?.collections?.length ?? 0) > 0 ||
+        (userPrompt.filters?.tags?.length ?? 0) > 0;
 
     const handleClick = useCallback((e: React.MouseEvent) => {
         // Gecko dispatches click for non-primary buttons too, so a right-click
@@ -266,57 +223,7 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
             >
                 {/* Message attachments and filters */}
                 {hasFiltersOrAttachments && (
-                    <div className="display-flex flex-wrap gap-col-3 gap-row-2 mb-2">
-                        {/* Library filters */}
-                        {userPrompt.filters?.libraries && (
-                            userPrompt.filters.libraries
-                                .map((library) => Zotero.Libraries.get(library.library_id))
-                                .filter((library): library is Zotero.Library => Boolean(library))
-                                .map((library) => (
-                                    <LibraryButton key={library.libraryID} library={library} canEdit={false} />
-                                ))
-                        )}
-
-                        {/* Collection filters */}
-                        {userPrompt.filters?.collections && (
-                            userPrompt.filters.collections
-                                .map((collection) => Zotero.Collections.getByLibraryAndKey(collection.library_id, collection.zotero_key))
-                                .filter((collection): collection is Zotero.Collection => Boolean(collection))
-                                .map((collection) => (
-                                    <CollectionButton key={collection.id} collection={collection} canEdit={false} />
-                                ))
-                        )}
-
-                        {/* Tag filters */}
-                        {userPrompt.filters?.tags?.map((tag) => (
-                            <TagButton key={tag.id} tag={tag} canEdit={false} />
-                        ))}
-
-                        {/* Collection attachments */}
-                        {collectionAttachments.map((col) => (
-                            <MessageCollectionButton key={collectionReferenceKey(col)} collection={col} canEdit={false} />
-                        ))}
-
-                        {/* Attachments */}
-                        {attachmentItems.map(({ item }, index) => (
-                            <MessageItemButton
-                                key={index}
-                                item={item}
-                                canEdit={false}
-                            />
-                        ))}
-
-                        {/* External file attachments */}
-                        {externalFileAttachments.map((file) => (
-                            <ExternalFileButton
-                                key={file.ext_key}
-                                extKey={file.ext_key}
-                                filename={file.filename}
-                                contentKind={file.content_kind}
-                                canEdit={false}
-                            />
-                        ))}
-                    </div>
+                    <RequestChips userPrompt={userPrompt} />
                 )}
 
                 {/* Message content with max height and fade */}
@@ -365,57 +272,7 @@ export const UserRequestView: React.FC<UserRequestViewProps> = ({
                 >
                     {/* Attachments and filters display (read-only) */}
                     {hasFiltersOrAttachments && (
-                        <div className="display-flex flex-wrap gap-col-3 gap-row-2 mb-2">
-                            {/* Library filters (read-only in edit mode) */}
-                            {userPrompt.filters?.libraries && (
-                                userPrompt.filters.libraries
-                                    .map((library) => Zotero.Libraries.get(library.library_id))
-                                    .filter((library): library is Zotero.Library => Boolean(library))
-                                    .map((library) => (
-                                        <LibraryButton key={library.libraryID} library={library} canEdit={false} />
-                                    ))
-                            )}
-
-                            {/* Collection filters (read-only in edit mode) */}
-                            {userPrompt.filters?.collections && (
-                                userPrompt.filters.collections
-                                    .map((collection) => Zotero.Collections.getByLibraryAndKey(collection.library_id, collection.zotero_key))
-                                    .filter((collection): collection is Zotero.Collection => Boolean(collection))
-                                    .map((collection) => (
-                                        <CollectionButton key={collection.id} collection={collection} canEdit={false} />
-                                    ))
-                            )}
-
-                            {/* Tag filters (read-only in edit mode) */}
-                            {userPrompt.filters?.tags?.map((tag) => (
-                                <TagButton key={tag.id} tag={tag} canEdit={false} />
-                            ))}
-
-                            {/* Collection attachments (read-only in edit mode) */}
-                            {collectionAttachments.map((col) => (
-                                <MessageCollectionButton key={collectionReferenceKey(col)} collection={col} canEdit={false} />
-                            ))}
-
-                            {/* Attachments (read-only in edit mode) */}
-                            {attachmentItems.map(({ item }) => (
-                                <MessageItemButton
-                                    key={item.key}
-                                    item={item}
-                                    canEdit={false}
-                                />
-                            ))}
-
-                            {/* External file attachments (read-only in edit mode) */}
-                            {externalFileAttachments.map((file) => (
-                                <ExternalFileButton
-                                    key={file.ext_key}
-                                    extKey={file.ext_key}
-                                    filename={file.filename}
-                                    contentKind={file.content_kind}
-                                    canEdit={false}
-                                />
-                            ))}
-                        </div>
+                        <RequestChips userPrompt={userPrompt} />
                     )}
 
                     {/* Textarea input */}

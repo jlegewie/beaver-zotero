@@ -8,10 +8,15 @@ import {
     isItemRow,
 } from '../../../types/toolResultViews';
 import { getHost } from '../../../host';
+import { EXTERNAL_LIBRARY_ID } from '../../../../src/services/externalFiles';
 import { AnnotationResultRow } from './AnnotationResultRow';
 
 /**
  * Shared renderer for hydrated item and annotation rows.
+ *
+ * Each item row pairs its item-type icon (in a rounded tile) with a two-line
+ * title/subtitle block; clicking reveals the item in the host library. Rows are
+ * separated by a hairline divider.
  */
 
 /** Right-aligned labels are capped so they never crowd out the primary text. */
@@ -19,6 +24,45 @@ const LABEL_MAX_LENGTH = 24;
 
 function revealRow(libraryId: number, zoteroKey: string): void {
     getHost().navigation?.revealInLibrary({ library_id: libraryId, zotero_key: zoteroKey });
+}
+
+/**
+ * The second line of an item row, split so only the parent bibliographic
+ * identity is italicized.
+ *
+ * `prefix` (e.g. "Attached to ") renders in normal style; `text` is the body.
+ * `italic` is true only when `text` is parent-item information ("Smith 2004.
+ * Title"), so the relationship prefix and the standalone/external labels stay
+ * upright.
+ */
+interface RowSubtitle {
+    prefix: string | null;
+    text: string;
+    italic: boolean;
+}
+
+/**
+ * Build the second-line content for an item row.
+ *
+ * Child-item rows whose headline is the item itself — attachment-headline (A)
+ * rows (`item_type === "attachment"` with no `attachment_label`, so
+ * `display_name` is the file's own name) and note (N) rows — describe their
+ * parent relationship on the second line: "Attached to <parent bib>" when a
+ * parent subtitle is present (the parent bib italicized), else a "Standalone …"
+ * / "External file" label when there is none. Every other row (regular items,
+ * and parent-centric (P) attachment rows that already headline the parent and
+ * carry an `attachment_label`) renders `subtitle` as-is.
+ */
+function rowSubtitle(row: ItemRowView): RowSubtitle | null {
+    const isAttachmentHeadline = row.item_type === 'attachment' && !row.attachment_label;
+    const isNote = row.item_type === 'note';
+    if (!isAttachmentHeadline && !isNote) {
+        return row.subtitle ? { prefix: null, text: row.subtitle, italic: false } : null;
+    }
+    if (row.subtitle) return { prefix: 'Attached to ', text: row.subtitle, italic: true };
+    if (isNote) return { prefix: null, text: 'Standalone note', italic: false };
+    const label = row.library_id === EXTERNAL_LIBRARY_ID ? 'External file' : 'Standalone attachment';
+    return { prefix: null, text: label, italic: false };
 }
 
 interface RowEventProps {
@@ -38,48 +82,56 @@ const ItemRow: React.FC<{ row: ItemRowView } & RowEventProps> = ({
         (row.content_kind ?? undefined) as ContentKind | undefined,
     );
     const faded = row.status === 'error';
-    const hasSecondLine = Boolean(row.subtitle) || Boolean(row.attachment_label);
+    const subtitle = rowSubtitle(row);
+    const hasSecondLine = Boolean(subtitle) || Boolean(row.attachment_label);
 
     return (
         <div
-            className={`display-flex flex-row gap-1 items-start min-w-0 px-15 py-15 last:border-0 cursor-pointer transition-colors duration-150 ${isHovered ? 'bg-quinary' : ''} ${faded ? 'opacity-50' : ''}`}
+            className={`display-flex flex-row items-start gap-25 p-2 cursor-pointer transition-colors ${isHovered ? 'bg-quinary' : ''} ${faded ? 'opacity-50' : ''}`}
             onClick={() => revealRow(row.library_id, row.zotero_key)}
             onMouseEnter={onMouseEnter}
             onMouseLeave={onMouseLeave}
             title="Click to reveal in Zotero"
         >
-            <span className="scale-90 p-1" style={{ marginTop: '-5px' }}>
-                <CSSItemTypeIcon itemType={iconType} />
-            </span>
-            <div className="display-flex flex-col flex-1 gap-1 min-w-0 font-color-primary">
-                <div className="display-flex flex-row gap-1 min-w-0 font-color-primary">
-                    <div className="truncate text-sm font-color-primary">
+            <div
+                className="display-flex items-center justify-center flex-shrink-0 rounded-md ml-05 mt-010"
+            >
+                <CSSItemTypeIcon itemType={iconType} className="scale-90" />
+            </div>
+            <div className="display-flex flex-col flex-1 gap-05 min-w-0 font-color-primary">
+                <div className="display-flex flex-row items-center gap-2 min-w-0">
+                    <div className="truncate font-color-primary" style={{ fontSize: '0.925rem' }}>
                         {row.display_name}
                     </div>
                     {row.location_label && (
                         <>
                             <div className="flex-1" />
-                            <div className="text-sm font-color-tertiary mr-1" style={{ flexShrink: 0, whiteSpace: 'nowrap' }}>
+                            <div className="text-sm font-color-tertiary" style={{ flexShrink: 0, whiteSpace: 'nowrap' }}>
                                 {truncateText(row.location_label, LABEL_MAX_LENGTH)}
                             </div>
                         </>
                     )}
                 </div>
                 {hasSecondLine && (
-                    <div className="display-flex flex-row gap-1 min-w-0">
-                        {row.subtitle && (
+                    <div className="display-flex flex-row items-center gap-2 min-w-0">
+                        {subtitle && (
                             <div className="truncate text-sm font-color-secondary">
-                                {row.subtitle}
+                                {subtitle.prefix}
+                                {subtitle.italic ? (
+                                    <span className="font-italic">{subtitle.text}</span>
+                                ) : (
+                                    subtitle.text
+                                )}
                             </div>
                         )}
-                        {row.attachment_label && (
+                        {/* {row.attachment_label && (
                             <>
                                 <div className="flex-1" />
-                                <div className="text-sm font-color-tertiary mr-1" style={{ flexShrink: 0, whiteSpace: 'nowrap' }}>
+                                <div className="text-sm font-color-tertiary" style={{ flexShrink: 0, whiteSpace: 'nowrap' }}>
                                     {truncateText(row.attachment_label, LABEL_MAX_LENGTH)}
                                 </div>
                             </>
-                        )}
+                        )} */}
                     </div>
                 )}
             </div>
@@ -107,10 +159,15 @@ export const ItemListResultView: React.FC<{ view: ItemListView }> = ({ view }) =
                     onMouseEnter: () => setHoveredKey(key),
                     onMouseLeave: () => setHoveredKey(null),
                 };
-                return isItemRow(row) ? (
-                    <ItemRow key={key} row={row} {...rowEvents} />
-                ) : (
-                    <AnnotationResultRow key={key} row={row} variant="with-parent" {...rowEvents} />
+                const isLast = index === view.items.length - 1;
+                return (
+                    <div key={key} className={isLast ? '' : 'border-bottom-quinary'}>
+                        {isItemRow(row) ? (
+                            <ItemRow row={row} {...rowEvents} />
+                        ) : (
+                            <AnnotationResultRow row={row} variant="with-parent" {...rowEvents} />
+                        )}
+                    </div>
                 );
             })}
         </div>

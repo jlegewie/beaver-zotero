@@ -4,6 +4,9 @@ import type { CitationRef } from '../utils/citationGrammar';
 import type { Citation, PartLocation } from '../types/citations';
 import type { PageLabelsByAttachmentId } from '../atoms/citations';
 import type { ExternalReference } from '../types/externalReferences';
+import type { ToolCallPart, AgentRun, AgentRunStatus } from '../agents/types';
+import type { PendingApproval } from '../agents/agentActions';
+import type { EditNoteResolvedTarget } from '../components/agentRuns/editNoteShared';
 
 /**
  * Everything the host needs to activate (navigate to / open) a cited location.
@@ -77,6 +80,8 @@ export interface AttachmentMatchNavigation {
 export interface NavigationHost {
     /** Reveal/select the referenced item in the library view. */
     revealInLibrary(ref: ZoteroItemReference): void;
+    /** Reveal/select the referenced library in the library view. */
+    revealLibrary(libraryId: number): void | Promise<void>;
     /**
      * Reveal/select the referenced collection in the library view. The ref's
      * `zotero_key` is the collection key (not an item key).
@@ -112,6 +117,13 @@ export interface ResolvedItemDisplay {
     itemType?: string;
     /** Whether the item has a readable attachment (enables an "open" action). */
     hasReadableAttachment: boolean;
+    /**
+     * Bibliographic display name for the referenced item, used by tool-call
+     * header labels (e.g. "Smith 2005"; a note's title for note references).
+     * For attachments this is the parent item's display name. Absent when it
+     * can't be resolved.
+     */
+    displayName?: string;
 }
 
 /**
@@ -136,11 +148,22 @@ export interface ItemDataHost {
         pageLabelsByAttachmentId: PageLabelsByAttachmentId,
     ): Record<number, string> | null;
     /**
-     * Resolve display metadata (icon type + attachment availability) for a
-     * library item in a source/result list. Async because it may load the item;
-     * returns null when the item can't be resolved.
+     * Resolve display metadata (icon type + attachment availability + display
+     * name) for a library item in a source/result list. Async because it may
+     * load the item; returns null when the item can't be resolved.
      */
     resolveItemDisplay(ref: ZoteroItemReference): Promise<ResolvedItemDisplay | null>;
+    /**
+     * Resolve a library's display name for a tool-call header label. Accepts the
+     * raw `library` arg (numeric id or name). Returns null when unavailable.
+     */
+    resolveLibraryName(libraryParam: number | string): Promise<string | null>;
+    /**
+     * Resolve a collection's display name for a tool-call header label. Accepts
+     * the raw collection key/id/name arg and an optional scoping library id.
+     * Returns null when unavailable.
+     */
+    resolveCollectionName(keyOrName: string | number, libraryId?: number): Promise<string | null>;
 }
 
 /**
@@ -211,6 +234,59 @@ export interface DocumentExportHost {
     renderExternalFileCitation?(request: ExternalFileCitationExportRequest): CitationExportRender | null;
 }
 
+export type NoteSaveFormat =
+    | {
+        kind: 'agent-run';
+        /** 1-based message index used in the generated Zotero note title. */
+        responseIndex?: number;
+        /** Thread/run identity for the Beaver provenance link. */
+        threadId?: string | null;
+        runId?: string;
+    }
+    | {
+        kind: 'streaming-note';
+        /** Thread/run identity for the Beaver provenance link. */
+        threadId?: string | null;
+        runId?: string;
+    };
+
+export interface SaveNoteRequest {
+    /**
+     * Inner note HTML already rendered by the shared citation/markdown renderer.
+     * The host owns Zotero-note wrappers, provenance chrome, persistence, and
+     * navigation.
+     */
+    contentHtml: string;
+    /** Human-readable title for clients that expose one in their native note model. */
+    title?: string;
+    /**
+     * When true, save under the current parent item when one exists. If
+     * `requireParent` is also true, the host returns null when no parent exists.
+     */
+    asChild: boolean;
+    /** Require a parent item instead of falling back to a standalone note. */
+    requireParent?: boolean;
+    /** Existing Beaver/Zotero note format to preserve for this save surface. */
+    format: NoteSaveFormat;
+}
+
+export interface SavedNoteReference extends ZoteroItemReference {
+    parent_key?: string;
+}
+
+/**
+ * Host-native note writes. The render layer supplies already-rendered content;
+ * the host resolves Zotero/library targets and performs the mutation.
+ */
+export interface NoteWriterHost {
+    /** Render-time: whether the current target library can accept new notes. */
+    isCurrentLibraryEditable(): boolean;
+    /** Render-time: whether the current Zotero context has a parent item target. */
+    canSaveAsChildNote(): boolean;
+    /** Interaction-time: create a note in the host library and optionally reveal it. */
+    saveNote(request: SaveNoteRequest): Promise<SavedNoteReference | null>;
+}
+
 /**
  * Display configuration the render layer needs. Typed, named accessors (rather
  * than a generic `getPref`) so the render layer never couples to a client's
@@ -221,6 +297,8 @@ export interface ConfigHost {
     citationFormat(): 'author-year' | 'numeric';
     /** Whether to render printed page labels instead of raw page numbers. */
     usePageLabels(): boolean;
+    /** Whether to expose development-only UI affordances. */
+    isDevelopment(): boolean;
 }
 
 /**
@@ -287,6 +365,36 @@ export interface ExternalReferenceActionsProps {
  * for that surface (the shared caller then renders nothing). The slice grows as
  * more action UIs move behind the host seam.
  */
+/**
+ * Inputs for the in-stream agent-action UI, discriminated by `kind` to cover the
+ * three render situations: a single action tool-call (`tool-action`), a bulk
+ * annotation tool-call (`annotation`), and a grouped edit_note run
+ * (`edit-note-group`). The shared dispatchers classify and pass these; the host
+ * owns the rich apply/undo rendering. Mirrors the props the Zotero components
+ * (`AgentActionView` / `AnnotationToolCallView` / `EditNoteGroupView`) take today.
+ */
+export type AgentActionInStreamProps =
+    | {
+        kind: 'tool-action';
+        part: ToolCallPart;
+        runId: string;
+        responseIndex: number;
+        runStatus: AgentRunStatus;
+        toolName: string;
+        pendingApproval: PendingApproval | null;
+        hasToolReturn: boolean;
+        streamingArgs?: Record<string, unknown> | null;
+    }
+    | { kind: 'annotation'; part: ToolCallPart; runId: string; runStatus: AgentRunStatus }
+    | {
+        kind: 'edit-note-group';
+        parts: ToolCallPart[];
+        target: EditNoteResolvedTarget | null;
+        runId: string;
+        responseIndex: number;
+        runStatus: AgentRunStatus;
+    };
+
 export interface ComponentsHost {
     /**
      * Render the action buttons for an external (non-library) reference —
@@ -295,6 +403,18 @@ export interface ComponentsHost {
      * whole control is client-specific. Returns null when the host has no such UI.
      */
     externalReferenceActions(props: ExternalReferenceActionsProps): ReactNode;
+    /**
+     * Render the rich in-stream agent-action / mutation UI for one tool-call part
+     * or edit-note group (approve/apply/undo controls, bulk-annotation panel, the
+     * edit_note group). Return null to fall back to the shared generic summary.
+     */
+    agentActionInStream(props: AgentActionInStreamProps): ReactNode;
+    /**
+     * Render the post-run pending-approval review block (create-item / note /
+     * annotation mutation summaries). Return null when the client has nothing to
+     * approve.
+     */
+    pendingActionsReview(props: { run: AgentRun }): ReactNode;
 }
 
 /**
@@ -305,6 +425,7 @@ export interface ClientHost {
     navigation?: NavigationHost;
     itemData?: ItemDataHost;
     documentExport?: DocumentExportHost;
+    noteWriter?: NoteWriterHost;
     config?: ConfigHost;
     components?: ComponentsHost;
 }

@@ -6,13 +6,13 @@ import { UserRequestView } from './UserRequestView';
 import { ModelMessagesView } from './ModelMessagesView';
 import { AgentRunFooter } from './AgentRunFooter';
 import { SuggestionsView } from './SuggestionsView';
-import { AgentActionsReview } from './AgentActionsReview';
 import { RunErrorDisplay } from './RunErrorDisplay';
 import { RunWarningDisplay } from './RunWarningDisplay';
 import { RunResumeDisplay } from './RunResumeDisplay';
 import { threadWarningsAtom } from '../../atoms/warnings';
 import { getToolCallStatus, toolResultsMapAtom, resumedRunIdsAtom } from '../../agents/atoms';
 import { streamingDoneRunIdsAtom } from '../../atoms/agentRunAtoms';
+import { getHost } from '../../host';
 
 interface AgentRunViewProps {
     run: AgentRun;
@@ -138,8 +138,9 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
             )}
 
 
-            {/* Agent actions (e.g., create item from citations) */}
-            {run.status === 'completed' && <AgentActionsReview run={run} />}
+            {/* Agent actions (e.g., create item from citations) — client-specific
+                UI injected by the host; absent for clients without it. */}
+            {run.status === 'completed' && (getHost().components?.pendingActionsReview({ run }) ?? null)}
 
             {/* Suggestions (only for the last run, rendered below footer) */}
             {suggestionParts.length > 0 && !suggestionsDismissed && (

@@ -6,11 +6,11 @@ import {
     rejectAgentActionAtom,
     undoAgentActionAtom,
     isCreateNoteAgentAction,
-} from '../../agents/agentActions';
-import { NoteProposedData } from '../../types/agentActions/base';
-import { AgentRun } from '../../agents/types';
-import { ZoteroItemReference } from '../../types/zotero';
-import { ZOTERO_ICONS, ZoteroIcon } from '../icons/ZoteroIcon';
+} from '../../../agents/agentActions';
+import { NoteProposedData } from '../../../types/agentActions/base';
+import { AgentRun } from '../../../agents/types';
+import { ZoteroItemReference } from '../../../types/zotero';
+import { ZOTERO_ICONS, ZoteroIcon } from '../../../components/icons/ZoteroIcon';
 import {
     TickIcon,
     NoteIcon,
@@ -22,26 +22,26 @@ import {
     Spinner,
     CheckmarkCircleIcon,
     DeleteIcon,
-} from '../icons/icons';
-import IconButton from '../ui/IconButton';
-import Tooltip from '../ui/Tooltip';
-import { selectItemById } from '../../../src/utils/selectItem';
-import { revealSource, getCurrentCollectionKeyForItem } from '../../utils/sourceUtils';
-import { isLibraryEditable } from '../../../src/utils/zoteroUtils';
-import { saveStreamingNote } from '../../utils/noteActions';
+} from '../../../components/icons/icons';
+import IconButton from '../../../components/ui/IconButton';
+import Tooltip from '../../../components/ui/Tooltip';
+import { selectItemById } from '../../../../src/utils/selectItem';
+import { revealSource, getCurrentCollectionKeyForItem } from '../../../utils/sourceUtils';
+import { isLibraryEditable } from '../../../../src/utils/zoteroUtils';
+import { saveStreamingNote } from '../../../utils/noteActions';
 import {
     extractNoteBlocksFromMessages,
     isNoteAutoApplied,
     clearNoteAutoApplied,
     noteTagsMatch,
     ParsedNoteBlock,
-} from '../../utils/agentActionUtils';
-import { citationMapAtom } from '../../atoms/citations';
-import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../../atoms/externalReferences';
-import { isLibraryTabAtom } from '../../atoms/ui';
-import { logger } from '../../../src/utils/logger';
-import Button from '../ui/Button';
-import { textWithTrailingNoWrap } from '../../utils/textWithTrailingNoWrap';
+} from '../../../utils/agentActionUtils';
+import { citationMapAtom } from '../../../atoms/citations';
+import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../../../atoms/externalReferences';
+import { isLibraryTabAtom } from '../../../atoms/ui';
+import { logger } from '../../../../src/utils/logger';
+import Button from '../../../components/ui/Button';
+import { textWithTrailingNoWrap } from '../../../utils/textWithTrailingNoWrap';
 
 interface NoteAgentActionRowProps {
     action: AgentAction;

@@ -117,6 +117,19 @@ export default tseslint.config(
             "react/components/citations/**/*.{ts,tsx}",
             "react/components/sources/CitedSourcesList.tsx",
             "react/components/agentRuns/toolResultViews/**/*.{ts,tsx}",
+            // Shared agent-run dispatchers + the request-side action fallback.
+            "react/components/agentRuns/ModelResponseView.tsx",
+            "react/components/agentRuns/AgentRunView.tsx",
+            "react/components/agentRuns/GenericAgentActionView.tsx",
+            "react/components/agentRuns/AgentRunFooter.tsx",
+            "react/components/agentRuns/UserRequestView.tsx",
+            "react/components/agentRuns/requestChips/**/*.{ts,tsx}",
+            "react/components/messages/NoteDisplay.tsx",
+            // The tool-call header label is now pure (Zotero data arrives via the
+            // view model / itemData host slice); ToolCallPartView resolves request-
+            // side display names through getHost(), not the Zotero global.
+            "react/components/agentRuns/ToolCallPartView.tsx",
+            "react/agents/toolLabels.ts",
         ],
         rules: {
             "no-restricted-globals": [

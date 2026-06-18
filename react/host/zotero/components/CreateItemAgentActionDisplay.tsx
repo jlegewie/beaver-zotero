@@ -9,21 +9,21 @@ import {
     CancelIcon,
     DocumentValidationIcon,
     Icon,
-} from '../icons/icons';
-import IconButton from '../ui/IconButton';
-import Tooltip from '../ui/Tooltip';
-import { applyCreateItemData } from '../../utils/addItemActions';
-import { ensureItemSynced, ensureItemsSynced } from '../../../src/utils/sync';
-import { logger } from '../../../src/utils/logger';
+} from '../../../components/icons/icons';
+import IconButton from '../../../components/ui/IconButton';
+import Tooltip from '../../../components/ui/Tooltip';
+import { applyCreateItemData } from '../../../utils/addItemActions';
+import { ensureItemSynced, ensureItemsSynced } from '../../../../src/utils/sync';
+import { logger } from '../../../../src/utils/logger';
 import {
     CreateItemAgentAction,
     ackAgentActionsAtom,
     setAgentActionsToErrorAtom,
     rejectAgentActionAtom,
     undoAgentActionAtom,
-} from '../../agents/agentActions';
-import { AckActionLink } from '../../../src/services/agentActionsService';
-import { CreateItemResultData } from '../../types/agentActions/items';
+} from '../../../agents/agentActions';
+import { AckActionLink } from '../../../../src/services/agentActionsService';
+import { CreateItemResultData } from '../../../types/agentActions/items';
 import {
     annotationBusyAtom,
     annotationPanelStateAtom,
@@ -31,13 +31,13 @@ import {
     setAnnotationBusyStateAtom,
     setAnnotationPanelStateAtom,
     toggleAnnotationPanelVisibilityAtom
-} from '../../atoms/messageUIState';
-import { markExternalReferenceImportedAtom } from '../../atoms/externalReferences';
-import { currentThreadIdAtom } from '../../atoms/threads';
-import { ToolDisplayFooter } from '../messages/ToolDisplayFooter';
+} from '../../../atoms/messageUIState';
+import { markExternalReferenceImportedAtom } from '../../../atoms/externalReferences';
+import { currentThreadIdAtom } from '../../../atoms/threads';
+import { ToolDisplayFooter } from '../../../components/messages/ToolDisplayFooter';
 import AgentActionItemButtons from './AgentActionItemButtons';
-import ReferenceMetadataDisplay from '../externalReferences/ReferenceMetadataDisplay';
-import { ZoteroItemReference } from '../../types/zotero';
+import ReferenceMetadataDisplay from '../../../components/externalReferences/ReferenceMetadataDisplay';
+import { ZoteroItemReference } from '../../../types/zotero';
 
 interface CreateItemListItemProps {
     action: CreateItemAgentAction;

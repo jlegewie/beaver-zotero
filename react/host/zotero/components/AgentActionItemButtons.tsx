@@ -8,24 +8,24 @@ import {
     TickIcon,
     CancelIcon,
     AlertIcon,
-} from '../icons/icons';
+} from '../../../components/icons/icons';
 import { 
     isExternalReferenceDetailsDialogVisibleAtom, 
     selectedExternalReferenceAtom 
-} from '../../atoms/ui';
-import Button from '../ui/Button';
-import IconButton from '../ui/IconButton';
-import Tooltip from '../ui/Tooltip';
-import { ZOTERO_ICONS, ZoteroIcon } from '../icons/ZoteroIcon';
-import { revealSource } from '../../utils/sourceUtils';
+} from '../../../atoms/ui';
+import Button from '../../../components/ui/Button';
+import IconButton from '../../../components/ui/IconButton';
+import Tooltip from '../../../components/ui/Tooltip';
+import { ZOTERO_ICONS, ZoteroIcon } from '../../../components/icons/ZoteroIcon';
+import { revealSource } from '../../../utils/sourceUtils';
 import { 
     checkExternalReferenceAtom, 
     getCachedReferenceForObjectAtom,
     isCheckingReferenceObjectAtom,
-} from '../../atoms/externalReferences';
-import { ButtonVariant } from '../ui/Button';
-import { CreateItemAgentAction } from '../../agents/agentActions';
-import { ZoteroItemReference } from '../../types/zotero';
+} from '../../../atoms/externalReferences';
+import { ButtonVariant } from '../../../components/ui/Button';
+import { CreateItemAgentAction } from '../../../agents/agentActions';
+import { ZoteroItemReference } from '../../../types/zotero';
 
 const CITED_BY_URL = 'https://openalex.org/works?page=1&filter=cites:';
 

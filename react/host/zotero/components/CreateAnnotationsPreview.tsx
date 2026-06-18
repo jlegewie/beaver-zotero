@@ -1,17 +1,17 @@
 import React, { useCallback, useRef } from 'react';
-import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
-import { AlertIcon, Icon } from '../icons/icons';
-import { navigateToAnnotation, navigateToPage } from '../../utils/readerUtils';
+import { ZoteroIcon, ZOTERO_ICONS } from '../../../components/icons/ZoteroIcon';
+import { AlertIcon, Icon } from '../../../components/icons/icons';
+import { navigateToAnnotation, navigateToPage } from '../../../utils/readerUtils';
 import {
     BeaverTemporaryAnnotations,
     createBoundingBoxHighlights,
     createTemporaryNoteAnnotation,
     installTemporaryAnnotationDismissOnNextClick,
-} from '../../utils/annotationUtils';
-import { logger } from '../../../src/utils/logger';
-import { BEAVER_ANNOTATION_COLORS } from '../../../src/constants/annotations';
-import { TagPill } from './TagPill';
-import { AnnotationTooltip, getAnnotationTooltipIcon } from './AnnotationTooltip';
+} from '../../../utils/annotationUtils';
+import { logger } from '../../../../src/utils/logger';
+import { BEAVER_ANNOTATION_COLORS } from '../../../../src/constants/annotations';
+import { TagPill } from '../../../components/agentRuns/TagPill';
+import { AnnotationTooltip, getAnnotationTooltipIcon } from '../../../components/agentRuns/AnnotationTooltip';
 import type {
     CreateHighlightAnnotationsProposedData,
     CreateHighlightAnnotationsResultData,
@@ -21,7 +21,7 @@ import type {
     FailedAnnotationResult,
     HighlightAnnotationItem,
     NoteAnnotationItem,
-} from '../../types/agentActions/createAnnotations';
+} from '../../../types/agentActions/createAnnotations';
 
 type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error' | 'awaiting';
 

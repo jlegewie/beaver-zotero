@@ -1,17 +1,10 @@
 import React from 'react';
 import { CSSItemTypeIcon, CSSIcon, Icon, TickIcon } from '../../icons/icons';
 import { ZoteroIcon, ZOTERO_ICONS } from '../../icons/ZoteroIcon';
-import { ANNOTATION_ICON_BY_TYPE } from '../../input/MessageItemButton';
+import { ANNOTATION_ICON_BY_TYPE, ANNOTATION_TEXT_BY_TYPE } from '../../../utils/annotationDisplay';
 import { toAnnotation } from '../../../types/attachments/converters';
 import { getDisplayNameFromItem } from '../../../utils/sourceUtils';
 import { truncateText } from '../../../utils/stringUtils';
-
-const ANNOTATION_TEXT_BY_TYPE: Record<string, string> = {
-    highlight: 'Highlight',
-    underline: 'Underline',
-    note: 'Sticky Note',
-    image: 'Area',
-};
 
 /**
  * Icon for a row in the overflow items summary preview.
@@ -108,4 +101,3 @@ export const RegularItemsSummaryContent: React.FC<RegularItemsSummaryContentProp
         </div>
     );
 };
-

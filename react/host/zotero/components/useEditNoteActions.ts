@@ -1,6 +1,6 @@
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AgentRunStatus, ToolCallPart } from '../../agents/types';
+import { AgentRunStatus, ToolCallPart } from '../../../agents/types';
 import {
     AgentAction,
     PendingApproval,
@@ -11,26 +11,26 @@ import {
     rejectAgentActionAtom,
     setAgentActionsToErrorAtom,
     undoAgentActionAtom,
-} from '../../agents/agentActions';
+} from '../../../agents/agentActions';
 import {
     approvalResponseIntentsAtom,
     isWSChatPendingAtom,
     removeApprovalResponseIntentAtom,
     sendApprovalResponseAtom,
-} from '../../atoms/agentRunAtoms';
-import { getToolCallStatus, toolResultsMapAtom } from '../../agents/atoms';
-import { executeEditNoteAction, undoEditNoteAction } from '../../utils/editNoteActions';
-import { openNoteAndSearchEdit, openNoteByKey } from '../../utils/sourceUtils';
+} from '../../../atoms/agentRunAtoms';
+import { getToolCallStatus, toolResultsMapAtom } from '../../../agents/atoms';
+import { executeEditNoteAction, undoEditNoteAction } from '../../../utils/editNoteActions';
+import { openNoteAndSearchEdit, openNoteByKey } from '../../../utils/sourceUtils';
 import {
     dismissDiffPreview,
     isDiffPreviewActive,
     isNoteOpenInEditor,
     showDiffPreview,
     type EditOperation,
-} from '../../utils/noteEditorDiffPreview';
-import { diffPreviewNoteKeyAtom, isDiffPreviewLive } from '../../utils/diffPreviewCoordinator';
-import { logger } from '../../../src/utils/logger';
-import { store } from '../../store';
+} from '../../../utils/noteEditorDiffPreview';
+import { diffPreviewNoteKeyAtom, isDiffPreviewLive } from '../../../utils/diffPreviewCoordinator';
+import { logger } from '../../../../src/utils/logger';
+import { store } from '../../../store';
 import { PreviewData, STATUS_CONFIGS, buildPreviewData } from './agentActionViewHelpers';
 import {
     EditNoteDisplayStatus,
@@ -42,7 +42,7 @@ import {
     isEditNoteStreamingPlaceholder,
     parseEditNoteToolCallArgs,
     resolveEditNoteTargetFromData,
-} from './editNoteShared';
+} from '../../../components/agentRuns/editNoteShared';
 
 export function buildPreviewableEditOperations(
     entries: Array<Record<string, any> | null | undefined>,

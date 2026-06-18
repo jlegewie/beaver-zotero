@@ -39,7 +39,7 @@ import {
 import { notifyRemoteDownloadFailure, notifyRemoteFileNotSynced } from './utils';
 import { EXTERNAL_LIBRARY_ID, resolveExternalFile } from '../externalFiles';
 import type { ExternalFileRecord } from '../database';
-import { serializeItemStub } from '../../utils/zoteroSerializers';
+import { serializeAttachmentStub, serializeItemStub } from '../../utils/zoteroSerializers';
 
 /**
  * Reject success responses whose serialized payload would exceed the
@@ -116,15 +116,7 @@ export function buildServedAttachmentStub(
     attachment: Zotero.Item,
     contentKind: ReadableContentKind,
 ): AttachmentStub {
-    return {
-        attachment_id: `${attachment.libraryID}-${attachment.key}`,
-        parent_item_id: attachment.parentKey
-            ? `${attachment.libraryID}-${attachment.parentKey}`
-            : null,
-        title: attachment.getField?.('title') || attachment.getDisplayTitle?.() || null,
-        filename: attachment.attachmentFilename || null,
-        content_kind: contentKind,
-    };
+    return serializeAttachmentStub(attachment, contentKind);
 }
 
 /**

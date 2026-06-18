@@ -256,4 +256,32 @@ export function isAnnotationRow(row: ItemListRow): row is AnnotationRowView {
     return row.kind === "annotation";
 }
 
+/**
+ * Number of renderable rows/results a view represents, used **for expansion
+ * gating only** (a tool call with a zero count isn't worth expanding).
+ *
+ * This is deliberately NOT a label-formatting helper — labels need per-tool,
+ * per-view-type wording (locator text vs "N matches" vs "N found"), which lives
+ * in `getToolResultLabelSuffix` (react/agents/toolLabels.ts). Returns null when
+ * the view has no meaningful count (don't block expansion).
+ */
+export function getToolResultRenderableCount(view: ToolResultView): number | null {
+    switch (view.view_type) {
+        case "item_list":
+            return view.items.length;
+        case "annotation_list":
+            return view.annotations.length;
+        case "collection_list":
+            return view.total_count;
+        case "tag_list":
+            return view.total_count;
+        case "attachment_search":
+            return view.attachment_count;
+        case "external_reference_list":
+            return view.found_count ?? view.references.length;
+        default:
+            return null;
+    }
+}
+
 export type { ContentKind };

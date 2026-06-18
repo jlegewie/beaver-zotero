@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { Icon, ArrowRightIcon } from '../icons/icons';
-import type { ManageTagsResultData } from '../../types/agentActions/base';
+import { Icon, ArrowRightIcon } from '../../../components/icons/icons';
+import type { ManageTagsResultData } from '../../../types/agentActions/base';
 import { shortenActionError } from './agentActionViewHelpers';
-import { TagPill } from './TagPill';
+import { TagPill } from '../../../components/agentRuns/TagPill';
 
 type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error' | 'awaiting';
 

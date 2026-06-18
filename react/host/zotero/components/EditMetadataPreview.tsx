@@ -1,6 +1,6 @@
 import React from 'react';
-import type { MetadataEdit, AppliedMetadataEdit, CreatorJSON } from '../../types/agentActions/base';
-import { resolveFieldForItemType } from '../../../src/utils/zoteroUtils';
+import type { MetadataEdit, AppliedMetadataEdit, CreatorJSON } from '../../../types/agentActions/base';
+import { resolveFieldForItemType } from '../../../../src/utils/zoteroUtils';
 
 type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error' | 'awaiting';
 

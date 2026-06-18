@@ -20,8 +20,7 @@ export interface NoteAttachmentWithId extends NoteAttachment {
     item?: Zotero.Item;
 }
 
-export interface ItemMetadataAttachmentWithId extends ItemMetadataAttachment {
+export interface ItemMetadataAttachmentWithId extends Omit<ItemMetadataAttachment, 'item'> {
     messageId: string;
     item?: Zotero.Item;
 }
-

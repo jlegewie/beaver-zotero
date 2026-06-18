@@ -1,6 +1,6 @@
 import React from 'react';
 import { useAtomValue } from 'jotai';
-import { AgentRun } from '../../agents/types';
+import { AgentRun } from '../../../agents/types';
 import {
     getAgentActionsByRunAtom,
     isCreateItemAgentAction,
@@ -9,7 +9,7 @@ import {
     isCreateAnnotationsAgentAction,
     CreateItemAgentAction,
     AgentAction,
-} from '../../agents/agentActions';
+} from '../../../agents/agentActions';
 import CreateItemAgentActionDisplay from './CreateItemAgentActionDisplay';
 import NoteAgentActionDisplay from './NoteAgentActionDisplay';
 import CreateAnnotationsAgentActionDisplay from './CreateAnnotationsAgentActionDisplay';

@@ -2,6 +2,7 @@ import { setHost } from '../index';
 import { zoteroNavigation } from './navigation';
 import { zoteroItemData } from './itemData';
 import { zoteroDocumentExport } from './citationExport';
+import { zoteroNoteWriter } from './noteWriter';
 import { zoteroConfig } from './config';
 import { zoteroComponents } from './components';
 
@@ -16,6 +17,7 @@ export function registerZoteroHost(): void {
         navigation: zoteroNavigation,
         itemData: zoteroItemData,
         documentExport: zoteroDocumentExport,
+        noteWriter: zoteroNoteWriter,
         config: zoteroConfig,
         components: zoteroComponents,
     });

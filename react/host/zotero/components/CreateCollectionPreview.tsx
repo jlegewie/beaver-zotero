@@ -1,7 +1,14 @@
 import React, { useEffect, useState } from 'react';
-import { CSSIcon, Icon, PlusSignIcon } from '../icons/icons';
+import { CSSIcon, Icon, PlusSignIcon } from '../../../components/icons/icons';
+import { getHost } from '../..';
 
 type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error' | 'awaiting';
+
+// Rows render full-width (flush to the card edges) so the hover highlight spans
+// the whole row; content is inset via internal padding. Subcollections indent
+// their content further to convey the parent → child hierarchy.
+const ROW_PADDING = '12px';
+const CHILD_ROW_PADDING = '32px';
 
 interface CreateCollectionPreviewProps {
     /** Name of the collection to create */
@@ -35,27 +42,33 @@ export const CreateCollectionPreview: React.FC<CreateCollectionPreviewProps> = (
     resultData,
 }) => {
     const [parentName, setParentName] = useState<string | null>(null);
+    // Resolved library id, used to reveal the collections in the library view.
+    const [libraryId, setLibraryId] = useState<number | null>(null);
+    const [hoveredRow, setHoveredRow] = useState<'new' | 'parent' | null>(null);
 
     useEffect(() => {
-        if (!parentKey || typeof Zotero === 'undefined') return;
+        if (typeof Zotero === 'undefined') return;
 
         try {
             const libraries = Zotero.Libraries.getAll();
             let library = libraries.find(l => l.name === libraryName);
-            
+
             // Fallback to user library if not found by name (or if name not provided)
             if (!library && (!libraryName || libraryName === 'My Library')) {
                 library = Zotero.Libraries.userLibrary;
             }
 
             if (library) {
-                const parent = Zotero.Collections.getByLibraryAndKey(library.libraryID, parentKey);
-                if (parent) {
-                    setParentName(parent.name);
+                setLibraryId(library.libraryID);
+                if (parentKey) {
+                    const parent = Zotero.Collections.getByLibraryAndKey(library.libraryID, parentKey);
+                    if (parent) {
+                        setParentName(parent.name);
+                    }
                 }
             }
         } catch (e) {
-            console.warn('Failed to resolve parent collection name:', e);
+            console.warn('Failed to resolve collection library/parent name:', e);
         }
     }, [parentKey, libraryName]);
 
@@ -63,22 +76,42 @@ export const CreateCollectionPreview: React.FC<CreateCollectionPreviewProps> = (
     const isError = status === 'error';
     const isRejectedOrUndone = status === 'rejected' || status === 'undone';
 
+    // Once the action is applied, the collections exist and can be revealed in
+    // the library view. The newly created collection's key comes from resultData.
+    const newCollectionKey = resultData?.collection_key;
+    const canRevealNew = isApplied && !!newCollectionKey && libraryId != null;
+    const canRevealParent = isApplied && !!parentKey && libraryId != null;
+
+    const revealCollection = (collectionKey: string) => {
+        if (libraryId == null) return;
+        getHost().navigation?.revealCollection({ library_id: libraryId, zotero_key: collectionKey });
+    };
+
     const getNewItemStyles = () => {
         if (isApplied) return 'bg-transparent';
         if (isRejectedOrUndone) return 'opacity-60';
-        if (isError) return 'bg-red-50/10 border-red-200/20';
+        if (isError) return 'bg-red-50/10';
         // Pending state - highlight as new
-        return 'bg-green-500/10 border border-green-500/20';
+        return 'bg-green-500/10';
     };
 
     return (
         <div className={`create-collection-preview overflow-hidden ${isRejectedOrUndone ? 'opacity-60' : ''}`}>
-            <div className="flex flex-col px-3 py-1 gap-2">
-                
-                <div className="flex flex-col gap-0.5">
+            <div className="display-flex flex-col">
+
+                {/* Full-width clickable rows (flush to the card edges, content inset
+                    via internal padding; subcollections indent their content). */}
+                <div className="display-flex flex-col">
                     {/* Parent Collection (if exists) */}
                     {parentKey && (
-                        <div className="display-flex flex-row items-center gap-2 py-1 opacity-60">
+                        <div
+                            className={`display-flex flex-row items-center gap-2 py-1 transition-colors duration-150 ${canRevealParent ? 'cursor-pointer' : 'opacity-60'} ${canRevealParent && hoveredRow === 'parent' ? 'bg-quinary' : ''}`}
+                            style={{ paddingLeft: ROW_PADDING, paddingRight: ROW_PADDING }}
+                            onClick={canRevealParent ? () => revealCollection(parentKey) : undefined}
+                            onMouseEnter={canRevealParent ? () => setHoveredRow('parent') : undefined}
+                            onMouseLeave={canRevealParent ? () => setHoveredRow(null) : undefined}
+                            title={canRevealParent ? 'Click to reveal in Zotero' : undefined}
+                        >
                             <span className="scale-75 display-flex">
                                 <CSSIcon name="collection" className="icon-16" />
                             </span>
@@ -89,7 +122,14 @@ export const CreateCollectionPreview: React.FC<CreateCollectionPreviewProps> = (
                     )}
 
                     {/* New Collection */}
-                    <div className={`display-flex flex-row items-center gap-2 px-2 py-1.5 rounded ${parentKey ? 'ml-8' : ''} ${getNewItemStyles()}`}>
+                    <div
+                        className={`display-flex flex-row items-center gap-2 py-15 transition-colors duration-150 ${canRevealNew ? 'cursor-pointer' : ''} ${canRevealNew ? (hoveredRow === 'new' ? 'bg-quinary' : 'bg-transparent') : getNewItemStyles()}`}
+                        style={{ paddingLeft: parentKey ? CHILD_ROW_PADDING : ROW_PADDING, paddingRight: ROW_PADDING }}
+                        onClick={canRevealNew ? () => revealCollection(newCollectionKey!) : undefined}
+                        onMouseEnter={canRevealNew ? () => setHoveredRow('new') : undefined}
+                        onMouseLeave={canRevealNew ? () => setHoveredRow(null) : undefined}
+                        title={canRevealNew ? 'Click to reveal in Zotero' : undefined}
+                    >
                         <span className="scale-75 display-flex">
                             <CSSIcon name="collection" className="icon-16" />
                         </span>
@@ -107,7 +147,10 @@ export const CreateCollectionPreview: React.FC<CreateCollectionPreviewProps> = (
 
                 {/* Footer Info */}
                 {itemCount > 0 && (
-                    <div className="display-flex flex-col gap-1 items-start mt-3 text-sm font-color-secondary">
+                    <div
+                        className="display-flex flex-col gap-1 items-start mt-2 mb-1 text-sm font-color-secondary"
+                        style={{ paddingLeft: ROW_PADDING, paddingRight: ROW_PADDING }}
+                    >
                         <div className="display-flex flex-row items-center gap-05">
                             <Icon icon={PlusSignIcon} className="scale-90" />
                             <span>

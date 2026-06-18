@@ -67,7 +67,7 @@ export const AnnotationResultRow: React.FC<AnnotationResultRowProps> = ({
 
     const node = (
         <div
-            className={`display-flex flex-row items-start gap-2 px-25 py-2 cursor-pointer rounded-sm transition user-select-none ${isHovered ? 'bg-quinary' : ''}`}
+            className={`display-flex flex-row items-start gap-25 p-2 ml-1 cursor-pointer rounded-sm transition user-select-none ${isHovered ? 'bg-quinary' : ''}`}
             onClick={handleClick}
             onMouseEnter={onMouseEnter}
             onMouseLeave={onMouseLeave}
@@ -82,9 +82,7 @@ export const AnnotationResultRow: React.FC<AnnotationResultRowProps> = ({
                 {variant === 'with-parent' ? (
                     <>
                         <div
-                            className={`text-base truncate min-w-0 ${
-                                hasText || row.comment ? 'font-color-secondary' : 'font-color-tertiary italic'
-                            }`}
+                            className={`text-base truncate min-w-0 font-color-primary`}
                         >
                             {primary}
                         </div>

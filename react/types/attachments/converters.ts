@@ -8,6 +8,7 @@ import {
     ItemMetadataAttachment
 } from './apiTypes';
 import { ZoteroItemReference } from '../zotero';
+import { safeStub, serializeAttachmentStub, serializeItemStub } from '../../../src/utils/zoteroSerializers';
 
 
 export function toAnnotation(item: Zotero.Item): Annotation | null {
@@ -44,12 +45,15 @@ export function toMessageAttachment(item: Zotero.Item): MessageAttachment | null
     if(item.isRegularItem()) {
         return {
             type: "item",
+            item: safeStub(() => serializeItemStub(item)),
             ...zoteroItemReference
         } as ItemMetadataAttachment;
 
     } else if (item.isAttachment()) {
         return {
             type: "source",
+            attachment: safeStub(() => serializeAttachmentStub(item)),
+            parent_item: safeStub(() => item.parentItem ? serializeItemStub(item.parentItem) : undefined),
             include: "fulltext",
             ...zoteroItemReference
         } as SourceAttachment;
@@ -72,5 +76,19 @@ export function toMessageAttachment(item: Zotero.Item): MessageAttachment | null
 
     } else {
         return null;
+    }
+}
+
+/**
+ * Fills optional display stubs on legacy message attachments from a loaded item.
+ */
+export function enrichMessageAttachmentStub(att: MessageAttachment, item: Zotero.Item): void {
+    if (att.type === "item") {
+        if (!att.item) att.item = safeStub(() => serializeItemStub(item));
+    } else if (att.type === "source") {
+        if (!att.attachment) att.attachment = safeStub(() => serializeAttachmentStub(item));
+        if (!att.parent_item) {
+            att.parent_item = safeStub(() => item.parentItem ? serializeItemStub(item.parentItem) : undefined);
+        }
     }
 }
