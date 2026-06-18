@@ -63,10 +63,8 @@ export const previewCloseTimeoutAtom = atom<number | null>(null)
 
 // Active preview
 export type ActivePreview = 
-    | { type: 'item'; content: Zotero.Item }
     | { type: 'textSelection'; content: TextSelection }
     | { type: 'annotation'; content: Zotero.Item }
-    | { type: 'itemsSummary'; content: Zotero.Item[] }
     | null;
 
 export const activePreviewAtom = atom<ActivePreview>(null);

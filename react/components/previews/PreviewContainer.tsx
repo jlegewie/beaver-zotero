@@ -1,11 +1,8 @@
-import React, { useRef, useEffect, useState, useLayoutEffect, useMemo } from 'react';
-import { useAtom, useAtomValue, useSetAtom } from 'jotai';
-import { activePreviewAtom, popupMessagesAtom, previewCloseTimeoutAtom } from '../../atoms/ui';
+import React, { useRef, useEffect, useState } from 'react';
+import { useAtom } from 'jotai';
+import { activePreviewAtom, previewCloseTimeoutAtom } from '../../atoms/ui';
 import TextSelectionPreviewContent from './TextSelectionPreviewContent';
 import AnnotationPreviewContent from './AnnotationPreviewContent';
-import ItemPreviewContent from './ItemPreviewContent';
-import ItemsSummaryPreviewContent from './ItemsSummaryPreviewContent';
-import { removePopupMessageAtom } from '../../utils/popupMessageUtils';
 import { getWindowFromElement, getDocumentFromElement } from '../../utils/windowContext';
 
 interface PreviewContainerProps {
@@ -28,10 +25,6 @@ const PreviewContainer: React.FC<PreviewContainerProps> = ({ className, hasAbove
     const [activePreview, setActivePreview] = useAtom(activePreviewAtom);
     const [previewCloseTimeout, setPreviewCloseTimeout] = useAtom(previewCloseTimeoutAtom);
     const [maxContentHeight, setMaxContentHeight] = useState<number | null>(null);
-    const popupMessages = useAtomValue(popupMessagesAtom);
-    const removePopupMessage = useSetAtom(removePopupMessageAtom);
-    const [skipFade, setSkipFade] = useState(false);
-    const skipFadePreviewKeyRef = useRef<string | null>(null);
 
     // Calculate available space
     useEffect(() => {
@@ -119,35 +112,6 @@ const PreviewContainer: React.FC<PreviewContainerProps> = ({ className, hasAbove
         };
     }, [activePreview, setActivePreview]); // Rerun if activePreview changes
 
-    const previewItemKey = activePreview?.type === 'item' ? activePreview.content?.key : null;
-
-    const hasMatchingPopup = useMemo(() => {
-        if (!previewItemKey) {
-            return false;
-        }
-        return popupMessages.some((message) => message.id === previewItemKey);
-    }, [popupMessages, previewItemKey]);
-
-    useLayoutEffect(() => {
-        if (!previewItemKey) {
-            skipFadePreviewKeyRef.current = null;
-            setSkipFade(false);
-            return;
-        }
-
-        if (skipFadePreviewKeyRef.current !== previewItemKey) {
-            const shouldSkip = hasMatchingPopup;
-            skipFadePreviewKeyRef.current = shouldSkip ? previewItemKey : null;
-            setSkipFade(shouldSkip);
-        }
-    }, [previewItemKey, hasMatchingPopup]);
-
-    useEffect(() => {
-        if (previewItemKey && hasMatchingPopup) {
-            removePopupMessage(previewItemKey);
-        }
-    }, [previewItemKey, hasMatchingPopup, removePopupMessage]);
-
     if (!activePreview || !maxContentHeight) {
         return null; // Render nothing if no active preview or height not calculated yet
     }
@@ -159,14 +123,10 @@ const PreviewContainer: React.FC<PreviewContainerProps> = ({ className, hasAbove
     // Determine which content component to render
     const renderPreviewContent = () => {
         switch (activePreview.type) {
-            case 'item':
-                return <ItemPreviewContent item={activePreview.content} maxContentHeight={maxContentHeight} />;
             case 'textSelection':
                 return <TextSelectionPreviewContent selection={activePreview.content} maxContentHeight={maxContentHeight} />;
             case 'annotation':
                 return <AnnotationPreviewContent item={activePreview.content} maxContentHeight={maxContentHeight} />;
-            case 'itemsSummary':
-                return <ItemsSummaryPreviewContent items={activePreview.content} maxContentHeight={maxContentHeight} />;
             default:
                 return null;
         }
@@ -176,7 +136,7 @@ const PreviewContainer: React.FC<PreviewContainerProps> = ({ className, hasAbove
         <div className={containerClassName}>
             <div
                 ref={previewRef}
-                className={`source-preview border-popup shadow-md mx-0 ${skipFade ? 'no-fade' : ''}`}
+                className="source-preview border-popup shadow-md mx-0"
                 onMouseEnter={handleMouseEnter}
                 onMouseLeave={handleMouseLeave}
             >

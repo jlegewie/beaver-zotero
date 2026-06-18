@@ -3,7 +3,7 @@ import { CSSItemTypeIcon, CSSIcon, Spinner, Icon, ArrowUpRightIcon, LibraryIcon,
 import { useAtomValue } from 'jotai';
 import { useRemoveContextMenu } from '../../hooks/useRemoveContextMenu';
 import { MenuItem } from '../ui/menu/ContextMenu';
-import { getItemValidationAtom, isRejectedItemValidation } from '../../atoms/itemValidation';
+import { getItemValidationAtom, isHardBlockedValidation } from '../../atoms/itemValidation';
 import { usePreviewHover } from '../../hooks/usePreviewHover';
 import { getDisplayNameFromItem } from '../../utils/sourceUtils';
 import { truncateText } from '../../utils/stringUtils';
@@ -14,6 +14,8 @@ import { toAnnotation } from '../../types/attachments/converters';
 import { selectItemById } from '../../../src/utils/selectItem';
 import { openNoteById } from '../../utils/sourceUtils';
 import { ANNOTATION_ICON_BY_TYPE, ANNOTATION_TEXT_BY_TYPE } from '../../utils/annotationDisplay';
+import { ChipWithPopup } from '../agentRuns/requestChips/ChipPopup';
+import { buildMessageItemChipPopup, type UnvalidatedAttachmentState } from './MessageItemChipPopup';
 
 const MAX_ITEM_TEXT_LENGTH = 30;
 
@@ -32,6 +34,8 @@ interface MessageItemButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLBut
     showInvalid?: boolean;
     /** Optional collection key to reveal the item within when clicked */
     revealInCollectionKey?: string;
+    /** How the chip popup should summarize attachments whose validation has not run. */
+    unvalidatedAttachmentState?: UnvalidatedAttachmentState;
 }
 
 /**
@@ -51,6 +55,9 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
             tabContextType,
             showInvalid = true,
             revealInCollectionKey,
+            unvalidatedAttachmentState = 'checking',
+            onMouseEnter,
+            onMouseLeave,
             ...rest
         } = props;
 
@@ -64,13 +71,13 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
         // Get validation state
         const getValidation = useAtomValue(getItemValidationAtom);
         const validation = getValidation(item);
+        const [isHovered, setIsHovered] = React.useState(false);
 
-        // Use the custom hook for hover preview logic
-        const { hoverEventHandlers, isHovered, cancelTimers } = usePreviewHover(
-            isAnnotation 
-                ? { type: 'annotation', content: item }
-                : { type: 'item', content: item },
-            { isEnabled: !disabled }
+        // Annotations still use the large preview. Regular items and
+        // attachments use the compact chip popup.
+        const { hoverEventHandlers: previewHoverHandlers, cancelTimers } = usePreviewHover(
+            isAnnotation ? { type: 'annotation', content: item } : null,
+            { isEnabled: !disabled && isAnnotation }
         );
 
         // Determine display name based on item type
@@ -216,9 +223,17 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
         const getButtonClasses = () => {
             const baseClasses = `variant-outline source-button ${className || ''} ${disabled ? 'disabled-but-styled' : ''}`;
             
-            // Rejected state
-            if (showInvalid && isRejectedItemValidation(item, validation)) {
+            if (showInvalid && isHardBlockedValidation(validation)) {
                 return `${baseClasses} border-red`;
+            }
+
+            if (
+                showInvalid
+                && validation
+                && !validation.isValidating
+                && validation.state === 'unreadable'
+            ) {
+                return `${baseClasses} opacity-80`;
             }
             
             return baseClasses;
@@ -235,13 +250,38 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
             return undefined;
         };
 
-        return (
-            <>
+        const handleMouseEnter = (event: React.MouseEvent<HTMLButtonElement>) => {
+            setIsHovered(true);
+            previewHoverHandlers.onMouseEnter?.();
+            onMouseEnter?.(event);
+        };
+
+        const handleMouseLeave = (event: React.MouseEvent<HTMLButtonElement>) => {
+            setIsHovered(false);
+            previewHoverHandlers.onMouseLeave?.();
+            onMouseLeave?.(event);
+        };
+
+        const isStrongError = showInvalid && isHardBlockedValidation(validation);
+        const isUnreadable = showInvalid
+            && validation
+            && !validation.isValidating
+            && validation.state === 'unreadable';
+
+        const chipPopup = React.useMemo(
+            () => isAnnotation
+                ? null
+                : buildMessageItemChipPopup(item, validation, getValidation, { unvalidatedAttachmentState }),
+            [getValidation, isAnnotation, item, unvalidatedAttachmentState, validation],
+        );
+
+        const button = (
             <button
                 ref={ref}
                 style={{ height: '22px' }}
-                title={getTooltipTitle()}
-                {...hoverEventHandlers}
+                title={isAnnotation ? getTooltipTitle() : undefined}
+                onMouseEnter={handleMouseEnter}
+                onMouseLeave={handleMouseLeave}
                 {...contextMenuHandlers}
                 className={getButtonClasses()}
                 disabled={disabled}
@@ -249,9 +289,9 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
                 {...rest}
             >
                 {getIconElement()}
-                <span className={`truncate ${isRejectedItemValidation(item, validation) ? 'font-color-red' : ''}`}>
+                <span className={`truncate ${isStrongError ? 'font-color-red' : isUnreadable ? 'font-color-secondary' : ''}`}>
                     {tabContextType === 'reader'
-                        ? isRejectedItemValidation(item, validation) && showInvalid ? 'Invalid File' : 'Current File'
+                        ? isStrongError ? 'Invalid File' : isUnreadable ? 'Unreadable File' : 'Current File'
                         : tabContextType === 'note'
                             ? 'Current Note'
                             : displayName || '...'}
@@ -262,6 +302,17 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
                     <Icon icon={ArrowUpRightIcon} className="scale-11" />
                 )}
             </button>
+        );
+
+        return (
+            <>
+            {isAnnotation ? (
+                button
+            ) : (
+                <ChipWithPopup popup={chipPopup!}>
+                    {button}
+                </ChipWithPopup>
+            )}
             {removeMenu}
             </>
         );
