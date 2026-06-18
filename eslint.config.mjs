@@ -122,6 +122,8 @@ export default tseslint.config(
             "react/components/agentRuns/AgentRunView.tsx",
             "react/components/agentRuns/GenericAgentActionView.tsx",
             "react/components/agentRuns/AgentRunFooter.tsx",
+            "react/components/agentRuns/UserRequestView.tsx",
+            "react/components/agentRuns/requestChips/**/*.{ts,tsx}",
             "react/components/messages/NoteDisplay.tsx",
             // The tool-call header label is now pure (Zotero data arrives via the
             // view model / itemData host slice); ToolCallPartView resolves request-

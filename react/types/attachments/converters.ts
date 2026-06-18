@@ -8,6 +8,7 @@ import {
     ItemMetadataAttachment
 } from './apiTypes';
 import { ZoteroItemReference } from '../zotero';
+import { safeStub, serializeAttachmentStub, serializeItemStub } from '../../../src/utils/zoteroSerializers';
 
 
 export function toAnnotation(item: Zotero.Item): Annotation | null {
@@ -44,12 +45,15 @@ export function toMessageAttachment(item: Zotero.Item): MessageAttachment | null
     if(item.isRegularItem()) {
         return {
             type: "item",
+            item: safeStub(() => serializeItemStub(item)),
             ...zoteroItemReference
         } as ItemMetadataAttachment;
 
     } else if (item.isAttachment()) {
         return {
             type: "source",
+            attachment: safeStub(() => serializeAttachmentStub(item)),
+            parent_item: safeStub(() => item.parentItem ? serializeItemStub(item.parentItem) : undefined),
             include: "fulltext",
             ...zoteroItemReference
         } as SourceAttachment;

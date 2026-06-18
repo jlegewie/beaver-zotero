@@ -80,6 +80,8 @@ export interface AttachmentMatchNavigation {
 export interface NavigationHost {
     /** Reveal/select the referenced item in the library view. */
     revealInLibrary(ref: ZoteroItemReference): void;
+    /** Reveal/select the referenced library in the library view. */
+    revealLibrary(libraryId: number): void | Promise<void>;
     /**
      * Reveal/select the referenced collection in the library view. The ref's
      * `zotero_key` is the collection key (not an item key).

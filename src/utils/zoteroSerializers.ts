@@ -1,11 +1,13 @@
 import { calculateObjectHash } from '../utils/hash';
 import { logger } from './logger';
-import { ItemDataHashedFields, AttachmentDataHashedFields, ItemData, ItemStub, ItemSummary, CollectionSummary, ZoteroCreator, ZoteroCollection, BibliographicIdentifier, AttachmentDataWithMimeType, ZoteroLibrary } from '../../react/types/zotero';
+import { ItemDataHashedFields, AttachmentDataHashedFields, ItemData, ItemStub, ItemSummary, CollectionSummary, ZoteroCreator, ZoteroCollection, BibliographicIdentifier, AttachmentDataWithMimeType, ZoteroLibrary, AttachmentStub } from '../../react/types/zotero';
 import { getCollectionClientDateModifiedAsISOString, getCitationKeyFromItem, getMimeType, safeIsInTrash, safeFileExists } from './zoteroUtils';
 import { syncingItemFilterAsync } from './sync';
 import { isAttachmentOnServer } from './webAPI';
 import { skippedItemsManager } from '../services/skippedItemsManager';
 import { AnnotationResultItem, NoteResultItem } from '../services/agentProtocol';
+import { getContentKind } from '../services/documentExtraction/attachmentResolution';
+import type { ContentKind } from '../services/documentExtraction/shared/contentKinds';
 
 export interface FileData {
     // filename: string;
@@ -390,6 +392,36 @@ export function serializeItemStub(item: Zotero.Item): ItemStub {
         title: item.getField('title', false, true) || null,
         creators: formatZoteroCreatorsString(getCreatorsFromItem(item)),
         year: getYearFromItem(item) ?? null,
+    };
+}
+
+/**
+ * Runs display-stub serialization defensively.
+ *
+ * Message attachment stubs are optional UI data, so a Zotero lazy-load or
+ * metadata edge case must not prevent constructing the attachment payload.
+ */
+export function safeStub<T>(build: () => T): T | undefined {
+    try {
+        return build();
+    } catch {
+        return undefined;
+    }
+}
+
+/**
+ * Serializes the minimal display anchor (`AttachmentStub`) for a Zotero attachment.
+ *
+ * Carries the served file's identity and broad content kind for client-side
+ * rendering; availability and readability analysis belongs in `AttachmentInfo`.
+ */
+export function serializeAttachmentStub(item: Zotero.Item, contentKind?: ContentKind): AttachmentStub {
+    return {
+        attachment_id: `${item.libraryID}-${item.key}`,
+        parent_item_id: item.parentKey ? `${item.libraryID}-${item.parentKey}` : null,
+        title: item.getField?.('title') || item.getDisplayTitle?.() || null,
+        filename: item.attachmentFilename || null,
+        content_kind: contentKind ?? getContentKind(item),
     };
 }
 

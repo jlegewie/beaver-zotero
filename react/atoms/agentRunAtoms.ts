@@ -35,7 +35,7 @@ import { selectedModelAtom, ModelConfig } from './models';
 import { getPref } from '../../src/utils/prefs';
 import { MessageAttachment, SourceAttachment } from '../types/attachments/apiTypes';
 import { toMessageAttachment } from '../types/attachments/converters';
-import { serializeCollection, serializeZoteroLibrary } from '../../src/utils/zoteroSerializers';
+import { safeStub, serializeAttachmentStub, serializeCollection, serializeItemStub, serializeZoteroLibrary } from '../../src/utils/zoteroSerializers';
 import { SubscriptionStatus, ProcessingMode } from '../types/profile';
 import { isDatabaseSyncSupportedAtom } from './profile';
 import { addPopupMessageAtom } from '../utils/popupMessageUtils';
@@ -1627,6 +1627,23 @@ export const sendWSMessageAtom = atom(
         if (allNoteItems.length > 0) {
             await Promise.all(allNoteItems.map(item => item.loadDataType('note')));
         }
+        const regularItems = selectedItems.filter(item => item.isRegularItem());
+        if (regularItems.length > 0) {
+            await Zotero.Items.loadDataTypes(regularItems, ['itemData', 'creators']);
+        }
+        const attachmentItems = selectedItems.filter(item => item.isAttachment());
+        if (attachmentItems.length > 0) {
+            await Zotero.Items.loadDataTypes(attachmentItems, ['itemData']);
+        }
+        const attachmentParentItemsById = new Map<number, Zotero.Item>();
+        for (const attachment of attachmentItems) {
+            const parent = attachment.parentItem;
+            if (parent) attachmentParentItemsById.set(parent.id, parent);
+        }
+        const attachmentParentItems = Array.from(attachmentParentItemsById.values());
+        if (attachmentParentItems.length > 0) {
+            await Zotero.Items.loadDataTypes(attachmentParentItems, ['itemData', 'creators']);
+        }
 
         let attachments: MessageAttachment[] =
             selectedItems
@@ -1688,10 +1705,16 @@ export const sendWSMessageAtom = atom(
             const readerKey = `${readerAttachment.libraryID}-${readerAttachment.key}`;
             if (!existingKeys.has(readerKey)) {
                 logger(`sendWSMessageAtom: Handeling reader attachment - Adding reader attachment: ${readerKey}`, 1);
+                await Zotero.Items.loadDataTypes([readerAttachment], ['itemData']);
+                if (readerAttachment.parentItem) {
+                    await Zotero.Items.loadDataTypes([readerAttachment.parentItem], ['itemData', 'creators']);
+                }
                 attachments.push({
                     library_id: readerAttachment.libraryID,
                     zotero_key: readerAttachment.key,
                     type: 'source',
+                    attachment: safeStub(() => serializeAttachmentStub(readerAttachment)),
+                    parent_item: safeStub(() => readerAttachment.parentItem ? serializeItemStub(readerAttachment.parentItem) : undefined),
                     include: 'fulltext'
                 } as SourceAttachment);
             } else {

@@ -2,7 +2,7 @@ import type { NavigationHost, AttachmentMatchNavigation } from '../types';
 import type { ZoteroItemReference } from '../../types/zotero';
 import type { AttachmentMatchTarget } from '../../agents/toolResultTypes';
 import { revealSource, openSource as openZoteroSource } from '../../utils/sourceUtils';
-import { selectCollection } from '../../../src/utils/selectItem';
+import { selectCollection, selectLibrary } from '../../../src/utils/selectItem';
 import { activateCitation } from './citationActivation';
 import { launchExternalFile } from './sourceActions';
 import { navigateToAnnotation } from '../../utils/readerUtils';
@@ -18,6 +18,10 @@ import { navigateToAttachmentMatch as navigateToAttachmentMatchImpl } from '../.
 export const zoteroNavigation: NavigationHost = {
     revealInLibrary(ref: ZoteroItemReference): void {
         revealSource(ref);
+    },
+    revealLibrary(libraryId: number): void {
+        const library = Zotero.Libraries.get(libraryId);
+        if (library) void selectLibrary(library as Zotero.Library);
     },
     revealCollection(ref: ZoteroItemReference): void {
         const found = Zotero.Collections.getByLibraryAndKey(ref.library_id, ref.zotero_key);
