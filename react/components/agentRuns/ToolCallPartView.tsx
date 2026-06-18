@@ -451,7 +451,7 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
             {/* Expanded result view */}
             {hasExpandedResult && (
                 <div id={`tool-result-${part.tool_call_id}`}>
-                    <ToolResultView toolcall={part} result={result} />
+                    <ToolResultView result={result} />
                 </div>
             )}
         </div>

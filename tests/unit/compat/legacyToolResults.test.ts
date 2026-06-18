@@ -180,6 +180,22 @@ describe('upgradeToolReturn', () => {
         expect((globalThis as any).Zotero.Items.getByLibraryAndKeyAsync).not.toHaveBeenCalled();
     });
 
+    it('re-synthesizes when the existing view is truthy but malformed', async () => {
+        // A truthy-but-invalid view must NOT pass through: it would fail the
+        // render-time isToolResultView check and drop to the generic fallback.
+        // The guard re-derives a valid view from the legacy summary instead.
+        installItems([{ id: 1, key: 'AAAA1111', firstCreator: 'Smith', date: '2004', title: 'A Paper' }]);
+        const part = returnPart('zotero_search', {
+            tool_name: 'zotero_search',
+            total_count: 1,
+            items: [{ library_id: 1, zotero_key: 'AAAA1111' }],
+        });
+        part.metadata!.view = { view_type: 'not_a_real_view', junk: true };
+        const result = await upgradeToolReturn(part);
+        expect(isToolResultView(result.metadata!.view)).toBe(true);
+        expect(result.metadata!.view.view_type).toBe('item_list');
+    });
+
     it('leaves an unrecognized tool without a view', async () => {
         const part = returnPart('totally_unknown_tool', { foo: 'bar' });
         const result = await upgradeToolReturn(part);

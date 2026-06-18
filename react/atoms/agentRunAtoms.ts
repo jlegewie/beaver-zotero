@@ -108,6 +108,7 @@ import { undoCreateNoteAction } from '../utils/createNoteActions';
 import { undoCreateAnnotationsAction } from '../utils/createAnnotationsActions';
 import { processToolReturnResults } from '../agents/toolResultProcessing';
 import { upgradeToolReturn } from '../compat/legacyToolResults';
+import { isToolResultView } from '../types/toolResultViews';
 import { addWarningAtom, clearWarningsAtom } from './warnings';
 import { backendHighTokenUsageRunsAtom, softCapTriggeredRunsAtom } from './messageUIState';
 import { currentThreadNameAtom } from './threads';
@@ -1100,9 +1101,10 @@ function createWSCallbacks(set: Setter): WSCallbacks {
 
                 // Safety net: the current backend ships a hydrated `metadata.view`
                 // on every tool return, but synthesize one from the legacy summary
-                // when it is missing so the shared render layer always has a view
-                // to render. No-ops (returns immediately) when a view is present.
-                if (!event.part.metadata?.view) {
+                // when it is missing OR malformed so the shared render layer always
+                // has a valid view to render. The `isToolResultView` check matches
+                // the render-time predicate; `upgradeToolReturn` no-ops on a valid view.
+                if (!isToolResultView(event.part.metadata?.view)) {
                     logger(`WS onToolReturn: No view model available for tool call ${event.part.tool_call_id}`, 1);
                     const toolCallArgs = findToolCallArgs(store.get(activeRunAtom), event.part.tool_call_id);
                     await upgradeToolReturn(event.part, toolCallArgs);

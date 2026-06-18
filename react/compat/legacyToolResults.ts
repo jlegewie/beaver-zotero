@@ -32,6 +32,7 @@ import {
     AttachmentSearchView,
     AttachmentSearchRowView,
     AttachmentMatchView,
+    isToolResultView,
 } from "../types/toolResultViews";
 import {
     // type guards
@@ -843,7 +844,11 @@ export async function upgradeToolReturn(
     toolCallArgs?: string | Record<string, any> | null,
 ): Promise<ToolReturnPart> {
     if (part.part_kind !== "tool-return") return part;
-    if (part.metadata?.view) return part; // already hydrated by the backend
+    // Pass through only when the existing view is a VALID, renderable view model.
+    // A truthy-but-malformed view falls through to re-synthesis below (and, if it
+    // can't be rebuilt, is rejected by the same `isToolResultView` check at render
+    // time → generic fallback). This keeps the upgrade and render predicates aligned.
+    if (isToolResultView(part.metadata?.view)) return part;
 
     const view = await buildLegacyView(part, toolCallArgs);
     if (!view) return part;

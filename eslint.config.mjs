@@ -117,6 +117,9 @@ export default tseslint.config(
             "react/components/citations/**/*.{ts,tsx}",
             "react/components/sources/CitedSourcesList.tsx",
             "react/components/agentRuns/toolResultViews/**/*.{ts,tsx}",
+            // The tool-result dispatcher: renders only from hydrated view models and
+            // a generic fallback (dev-mode check via getHost().config), no Zotero global.
+            "react/components/agentRuns/ToolResultView.tsx",
             // Shared agent-run dispatchers + the request-side action fallback.
             "react/components/agentRuns/ModelResponseView.tsx",
             "react/components/agentRuns/AgentRunView.tsx",
