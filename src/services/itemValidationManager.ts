@@ -14,7 +14,6 @@ export type ItemValidationResultState = 'readable' | 'unreadable' | 'blocked';
  */
 export interface ItemValidationResult {
     state: ItemValidationResultState;
-    isValid: boolean;
     reason?: string;
     statusCode?: string | null;
     contentKind?: ContentKind;
@@ -43,7 +42,7 @@ export interface ItemValidationOptions {
     canHandleOCRLocally?: boolean;
 }
 
-type BasicValidationResult = Pick<ItemValidationResult, 'state' | 'isValid' | 'reason'>;
+type BasicValidationResult = Pick<ItemValidationResult, 'state' | 'reason'>;
 
 function attachmentId(item: Zotero.Item): string {
     return `${item.libraryID}-${item.key}`;
@@ -52,7 +51,6 @@ function attachmentId(item: Zotero.Item): string {
 function readableResult(overrides: Partial<ItemValidationResult> = {}): ItemValidationResult {
     return {
         state: 'readable',
-        isValid: true,
         ...overrides,
     };
 }
@@ -60,7 +58,6 @@ function readableResult(overrides: Partial<ItemValidationResult> = {}): ItemVali
 function unreadableResult(reason: string | undefined, overrides: Partial<ItemValidationResult> = {}): ItemValidationResult {
     return {
         state: 'unreadable',
-        isValid: false,
         reason,
         ...overrides,
     };
@@ -69,7 +66,6 @@ function unreadableResult(reason: string | undefined, overrides: Partial<ItemVal
 function blockedResult(reason: string): ItemValidationResult {
     return {
         state: 'blocked',
-        isValid: false,
         reason,
     };
 }
@@ -177,7 +173,7 @@ class ItemValidationManager {
         options: ItemValidationOptions,
     ): BasicValidationResult {
         const libraryCheck = this.checkLibrarySearchable(item, options.searchableLibraryIds);
-        if (!libraryCheck.isValid) {
+        if (libraryCheck.state === 'blocked') {
             return libraryCheck;
         }
 
@@ -255,7 +251,7 @@ class ItemValidationManager {
         try {
             logger(`ItemValidationManager: Starting validation for ${attachmentId(item)}`, 4);
             const shellValidation = this.validateItemShell(item, options);
-            if (!shellValidation.isValid) {
+            if (shellValidation.state === 'blocked') {
                 return shellValidation;
             }
 
@@ -302,7 +298,7 @@ class ItemValidationManager {
 
         logger(`ItemValidationManager: Starting validation for regular item ${attachmentId(item)}`, 4);
         const itemValidation = this.validateItemShell(item, options);
-        if (!itemValidation.isValid) {
+        if (itemValidation.state === 'blocked') {
             return {
                 ...itemValidation,
                 attachmentResults: new Map(),

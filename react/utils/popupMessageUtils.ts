@@ -6,12 +6,10 @@ import { v4 as uuidv4 } from 'uuid';
 import { ZoteroItemReference } from '../types/zotero';
 import { RepeatIcon, CSSItemTypeIcon } from '../components/icons/icons';
 import { retryUploads } from '../../src/services/FileUploader';
-import { RegularItemMessageContent } from '../components/ui/popup/RegularItemMessageContent';
 import { RegularItemsSummaryContent } from '../components/ui/popup/RegularItemsSummaryContent';
 import { truncateText } from '../utils/stringUtils';
 import { getDisplayNameFromItem } from '../utils/sourceUtils';
 import type { ItemValidationState } from '../atoms/itemValidation';
-import { buildMessageItemSummary } from '../hooks/useMessageItemSummary';
 
 /**
  * Adds a new popup message to the list.
@@ -242,9 +240,53 @@ export const addAPIKeyMessageAtom = atom(
     }
 );
 
+function safeChildAttachments(item: Zotero.Item): Zotero.Item[] {
+    try {
+        if (!item.isRegularItem()) return [];
+        return item
+            .getAttachments()
+            .map((id: number) => {
+                try {
+                    return Zotero.Items.get(id) || null;
+                } catch {
+                    return null;
+                }
+            })
+            .filter((attachment): attachment is Zotero.Item => Boolean(attachment));
+    } catch {
+        return [];
+    }
+}
+
+function buildRegularItemPopupSummary(
+    item: Zotero.Item,
+    getValidation: (item: Zotero.Item) => ItemValidationState | undefined,
+) {
+    const attachments = safeChildAttachments(item);
+    let readableAttachments = 0;
+    let unreadableAttachments = 0;
+
+    for (const attachment of attachments) {
+        const validation = getValidation(attachment);
+        if (validation?.isValidating) continue;
+        if (validation?.state === 'readable') {
+            readableAttachments += 1;
+        } else if (validation?.state === 'unreadable' || validation?.state === 'blocked') {
+            unreadableAttachments += 1;
+        }
+    }
+
+    return {
+        item,
+        totalAttachments: attachments.length,
+        readableAttachments,
+        unreadableAttachments,
+    };
+}
+
 /**
  * Adds a popup message for a regular item showing its attachment status.
- * Always shows popup; duration is longer if there are issues (no PDF or invalid attachments).
+ * Always shows popup; duration is longer if readability issues were found.
  * 
  * @param item The regular Zotero item
  * @param getValidation Function to get validation results for items
@@ -258,7 +300,8 @@ export const addRegularItemPopupAtom = atom(
         item: Zotero.Item; 
         getValidation: (item: Zotero.Item) => ItemValidationState | undefined;
     }) => {
-        const summary = buildMessageItemSummary(item, getValidation);
+        const itemSummary = buildRegularItemPopupSummary(item, getValidation);
+        const hasIssues = itemSummary.totalAttachments === 0 || itemSummary.unreadableAttachments > 0;
 
         // Always show popup for regular items
         set(addPopupMessageAtom, {
@@ -266,12 +309,9 @@ export const addRegularItemPopupAtom = atom(
             type: 'items_summary',
             icon: createElement(CSSItemTypeIcon, { itemType: item.getItemTypeIconName() }),
             title: truncateText(getDisplayNameFromItem(item), 68),
-            customContent: createElement(RegularItemMessageContent, { 
-                item,
-                summary
-            }),
+            customContent: createElement(RegularItemsSummaryContent, { items: [itemSummary] }),
             expire: true,
-            duration: summary.hasIssues ? 3400 : 2400
+            duration: hasIssues ? 3400 : 2400
         });
     }
 );
@@ -292,16 +332,7 @@ export const addRegularItemsSummaryPopupAtom = atom(
         getValidation: (item: Zotero.Item) => ItemValidationState | undefined;
     }) => {
         // Build summary data for each item
-        const itemsSummary = items.map(item => {
-            const summary = buildMessageItemSummary(item, getValidation);
-            
-            return {
-                item,
-                totalAttachments: summary.attachments.length,
-                readableAttachments: summary.validAttachmentCount,
-                unreadableAttachments: summary.invalidAttachmentCount
-            };
-        });
+        const itemsSummary = items.map(item => buildRegularItemPopupSummary(item, getValidation));
 
         // Determine if there are any issues
         const hasIssues = itemsSummary.some(summary => 

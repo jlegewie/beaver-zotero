@@ -63,6 +63,7 @@ export const RegularItemsSummaryContent: React.FC<RegularItemsSummaryContentProp
             {items.map((itemSummary) => {
                 const displayName = getItemSummaryDisplayName(itemSummary.item);
                 const readableCount = Math.max(itemSummary.readableAttachments, 0);
+                const hasNoAttachments = itemSummary.totalAttachments === 0;
                 
                 return (
                     <div key={itemSummary.item.key} className="display-flex flex-col gap-2">
@@ -78,17 +79,21 @@ export const RegularItemsSummaryContent: React.FC<RegularItemsSummaryContentProp
                         </div>
                         {itemSummary.item.isRegularItem() && (
                             <div className="display-flex flex-row font-color-tertiary gap-2 ml-15 text-md">
-                                <div className="display-flex items-center flex-row gap-1">
-                                    {readableCount > 0 && (
-                                        <Icon icon={TickIcon} size={15} className="scale-12 font-color-accent-green" />
-                                    )}
-                                    {readableCount === 0 && (
-                                        <CSSIcon name="x-8" className="icon-16 font-color-error" style={{ fill: 'red' }}/>
-                                    )}
-                                    <span>{readableCount}/{itemSummary.totalAttachments} Attachment{itemSummary.totalAttachments !== 1 ? 's' : ''} readable</span>
-                                </div>
+                                {hasNoAttachments ? (
+                                    <span>Only metadata (title etc.) shared with the model</span>
+                                ) : (
+                                    <div className="display-flex items-center flex-row gap-1">
+                                        {readableCount > 0 && (
+                                            <Icon icon={TickIcon} size={15} className="scale-12 font-color-accent-green" />
+                                        )}
+                                        {readableCount === 0 && (
+                                            <CSSIcon name="x-8" className="icon-16 font-color-error" style={{ fill: 'red' }}/>
+                                        )}
+                                        <span>{readableCount}/{itemSummary.totalAttachments} Attachment{itemSummary.totalAttachments !== 1 ? 's' : ''} readable</span>
+                                    </div>
+                                )}
 
-                                {itemSummary.unreadableAttachments > 0 && (
+                                {!hasNoAttachments && itemSummary.unreadableAttachments > 0 && (
                                     <div className="display-flex items-center flex-row gap-1">
                                         <CSSIcon name="x-8" className="icon-16 font-color-error" style={{ fill: 'red' }}/>
                                         <span>{itemSummary.unreadableAttachments} not readable</span>

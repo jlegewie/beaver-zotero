@@ -95,7 +95,6 @@ describe('ItemValidationManager unified attachment-info validation', () => {
 
         expect(result).toMatchObject({
             state: 'readable',
-            isValid: true,
             contentKind: 'pdf',
             pageCount: 12,
         });
@@ -118,7 +117,6 @@ describe('ItemValidationManager unified attachment-info validation', () => {
 
         expect(result).toMatchObject({
             state: 'unreadable',
-            isValid: false,
             statusCode: 'pdf_needs_ocr',
             contentKind: 'pdf',
             pageCount: 8,
@@ -141,7 +139,6 @@ describe('ItemValidationManager unified attachment-info validation', () => {
 
         expect(result).toMatchObject({
             state: 'readable',
-            isValid: true,
             statusCode: 'pdf_needs_ocr',
             contentKind: 'pdf',
             pageCount: 8,
@@ -162,7 +159,6 @@ describe('ItemValidationManager unified attachment-info validation', () => {
 
         expect(result).toMatchObject({
             state: 'unreadable',
-            isValid: false,
             contentKind: 'pdf',
             pageCount: HARD_ATTACHMENT_LIMITS.maxPageCount + 1,
         });
@@ -177,7 +173,6 @@ describe('ItemValidationManager unified attachment-info validation', () => {
 
         expect(result).toMatchObject({
             state: 'blocked',
-            isValid: false,
         });
         expect(result.reason).toContain('excluded from Beaver');
         expect(getAttachmentInfoMock).not.toHaveBeenCalled();
@@ -203,7 +198,6 @@ describe('ItemValidationManager unified attachment-info validation', () => {
 
         expect(result).toMatchObject({
             state: 'readable',
-            isValid: true,
         });
         expect(prepareAttachmentInfoBatchDataMock).toHaveBeenCalledWith([item]);
         expect(processAttachmentInfoBatchMock).toHaveBeenCalledWith(item, { bestAttachmentMap: new Map([[20, 10]]) }, {
@@ -211,11 +205,9 @@ describe('ItemValidationManager unified attachment-info validation', () => {
         });
         expect(result.attachmentResults.get('1-2YWA8DTZ')).toMatchObject({
             state: 'readable',
-            isValid: true,
         });
         expect(result.attachmentResults.get('1-UNREAD1')).toMatchObject({
             state: 'unreadable',
-            isValid: false,
             statusCode: 'epub_no_text',
         });
     });
@@ -228,7 +220,6 @@ describe('ItemValidationManager unified attachment-info validation', () => {
 
         expect(result).toMatchObject({
             state: 'readable',
-            isValid: true,
         });
         expect(result.attachmentResults.size).toBe(0);
         expect(processAttachmentInfoBatchMock).not.toHaveBeenCalled();

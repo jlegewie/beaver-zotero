@@ -27,12 +27,10 @@ function canHandleOCRLocally(get: any): boolean {
 }
 
 /**
- * Extended validation state that includes UI state (isValidating)
- * Combines manager result with atom-managed state
+ * Extended validation state that includes atom-managed UI progress.
  */
 export type ItemValidationState = (ItemValidationResult | {
     state: 'checking';
-    isValid: true;
     reason?: undefined;
 }) & {
     isValidating: boolean;
@@ -94,7 +92,6 @@ export const validateItemAtom = atom(
         const newResults = new Map(results);
         newResults.set(itemKey, {
             state: 'checking',
-            isValid: true,
             isValidating: true
         });
         set(itemValidationResultsAtom, newResults);
@@ -116,7 +113,7 @@ export const validateItemAtom = atom(
             });
             set(itemValidationResultsAtom, updatedResults);
             
-            logger(`Validated item ${itemKey}: ${result.isValid ? 'valid' : 'invalid'}`, 4);
+            logger(`Validated item ${itemKey}: ${result.state}`, 4);
             
             return result;
         } catch (error: any) {
@@ -126,7 +123,6 @@ export const validateItemAtom = atom(
             const errorResults = new Map(get(itemValidationResultsAtom));
             errorResults.set(itemKey, {
                 state: 'blocked',
-                isValid: false,
                 reason: `Validation error: ${error.message}`,
                 isValidating: false
             });
@@ -160,13 +156,14 @@ export const validateItemsAtom = atom(
         const results = await Promise.all(validationPromises);
         
         // Return summary
-        const validCount = results.filter(r => r?.isValid).length;
-        const invalidCount = results.filter(r => r && !r.isValid).length;
+        const readableCount = results.filter(r => r?.state === 'readable').length;
+        const unreadableCount = results.filter(r => r?.state === 'unreadable').length;
+        const blockedCount = results.filter(r => r?.state === 'blocked').length;
         const errorCount = results.filter(r => r === null).length;
         
-        logger(`Validation complete: ${validCount} valid, ${invalidCount} invalid, ${errorCount} errors`, 3);
+        logger(`Validation complete: ${readableCount} readable, ${unreadableCount} unreadable, ${blockedCount} blocked, ${errorCount} errors`, 3);
         
-        return { validCount, invalidCount, errorCount };
+        return { readableCount, unreadableCount, blockedCount, errorCount };
     }
 );
 
@@ -188,7 +185,6 @@ export const validateRegularItemAtom = atom(
         const newResults = new Map(results);
         newResults.set(itemKey, {
             state: 'checking',
-            isValid: true,
             isValidating: true
         });
         
@@ -199,7 +195,6 @@ export const validateRegularItemAtom = atom(
             const attachmentKey = getItemKey(attachment);
             newResults.set(attachmentKey, {
                 state: 'checking',
-                isValid: true,
                 isValidating: true
             });
         }
@@ -217,7 +212,6 @@ export const validateRegularItemAtom = atom(
             // Update item itself
             updatedResults.set(itemKey, {
                 state: result.state,
-                isValid: result.isValid,
                 reason: result.reason,
                 statusCode: result.statusCode,
                 contentKind: result.contentKind,
@@ -238,7 +232,6 @@ export const validateRegularItemAtom = atom(
                 if (!result.attachmentResults.has(attachmentKey)) {
                     updatedResults.set(attachmentKey, {
                         state: 'blocked',
-                        isValid: false,
                         reason: 'Unable to validate attachment',
                         isValidating: false
                     });
@@ -247,7 +240,7 @@ export const validateRegularItemAtom = atom(
             
             set(itemValidationResultsAtom, updatedResults);
             
-            logger(`Validated regular item ${itemKey} with ${result.attachmentResults.size} attachments: ${result.isValid ? 'valid' : 'invalid'}`, 4);
+            logger(`Validated regular item ${itemKey} with ${result.attachmentResults.size} attachments: ${result.state}`, 4);
             
             return result;
         } catch (error: any) {
@@ -257,7 +250,6 @@ export const validateRegularItemAtom = atom(
             const errorResults = new Map(get(itemValidationResultsAtom));
             errorResults.set(itemKey, {
                 state: 'blocked',
-                isValid: false,
                 reason: `Validation error: ${error.message}`,
                 isValidating: false
             });
@@ -267,7 +259,6 @@ export const validateRegularItemAtom = atom(
                 const attachmentKey = getItemKey(attachment);
                 errorResults.set(attachmentKey, {
                     state: 'blocked',
-                    isValid: false,
                     reason: `Validation error: ${error.message}`,
                     isValidating: false
                 });
@@ -319,20 +310,23 @@ export const itemValidationStatsAtom = atom((get) => {
     const results = get(itemValidationResultsAtom);
     const managerStats = itemValidationManager.getCacheStats();
     
-    let validCount = 0;
-    let invalidCount = 0;
+    let readableCount = 0;
+    let unreadableCount = 0;
+    let blockedCount = 0;
     let validatingCount = 0;
     
     results.forEach(result => {
         if (result.isValidating) validatingCount++;
-        else if (result.isValid) validCount++;
-        else invalidCount++;
+        else if (result.state === 'readable') readableCount++;
+        else if (result.state === 'unreadable') unreadableCount++;
+        else if (result.state === 'blocked') blockedCount++;
     });
     
     return {
         totalCached: results.size,
-        validCount,
-        invalidCount,
+        readableCount,
+        unreadableCount,
+        blockedCount,
         validatingCount,
         managerCacheSize: managerStats.size,
         pendingValidations: managerStats.pendingValidations

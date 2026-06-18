@@ -467,7 +467,7 @@ async function validateItemsInBackground(
         // Show popup for regular items with invalid attachments or no PDF attachments
         const validRegularItems = regularItems.filter((item) => {
             const validation = getValidation(item);
-            return validation && validation.isValid;
+            return validation && !isRejectedItemValidation(item, validation);
         });
         
         // Show individual popup for single item, summary popup for multiple items

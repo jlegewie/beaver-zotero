@@ -244,7 +244,7 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
             if (validation?.isValidating) {
                 return 'Validating...';
             }
-            if (validation && !validation.isValid && validation.reason) {
+            if (validation && validation.state !== 'readable' && validation.reason) {
                 return validation.reason;
             }
             return undefined;

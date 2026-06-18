@@ -3,11 +3,10 @@
  *
  * Exercises `itemValidationManager.validateItem` through the
  * dev-only validate-item endpoint, covering the agent-support gating:
- *   - PDF attachments still validate (readable PDF valid, encrypted rejected)
+ *   - PDF attachments still validate (readable PDF readable, encrypted unreadable)
  *   - EPUB attachments are admitted — cold document cache (no extraction on
  *     the validation path) and warm cache (successful extraction metadata)
- *   - unsupported attachment kinds (text, image) are rejected with a
- *     file-type reason
+ *   - text and image attachments are readable source types
  *   - regular items pass the simple existence/trash check
  *
  * Prerequisites (per tests/README.md):
@@ -44,36 +43,36 @@ describe('frontend validation of attachment kinds', () => {
     it('validates a readable PDF attachment', async () => {
         const res = await validateItem(SMALL_PDF.library_id, SMALL_PDF.zotero_key);
         expect(res.ok).toBe(true);
-        expect(res.is_valid).toBe(true);
+        expect(res.state).toBe('readable');
         expect(res.reason).toBeNull();
     }, 60_000);
 
-    it('rejects an encrypted PDF as password-protected', async () => {
+    it('marks an encrypted PDF as password-protected', async () => {
         const res = await validateItem(ENCRYPTED_PDF.library_id, ENCRYPTED_PDF.zotero_key);
         expect(res.ok).toBe(true);
-        expect(res.is_valid).toBe(false);
+        expect(res.state).toBe('unreadable');
         expect(res.reason).toContain('password-protected');
     }, 60_000);
 
-    it('rejects a text attachment as an unsupported file type', async () => {
+    it('validates a text attachment as readable', async () => {
         const res = await validateItem(TEXT_ATTACHMENT.library_id, TEXT_ATTACHMENT.zotero_key);
         expect(res.ok).toBe(true);
-        expect(res.is_valid).toBe(false);
-        expect(res.reason).toContain('is not supported');
+        expect(res.state).toBe('readable');
+        expect(res.content_kind).toBe('text');
     });
 
-    it('rejects an image attachment as an unsupported file type', async () => {
+    it('validates an image attachment as readable', async () => {
         const res = await validateItem(IMAGE.library_id, IMAGE.zotero_key);
         expect(res.ok).toBe(true);
-        expect(res.is_valid).toBe(false);
-        expect(res.reason).toContain('is not supported');
+        expect(res.state).toBe('readable');
+        expect(res.content_kind).toBe('image');
     });
 });
 
 describe('frontend validation of EPUB attachments', () => {
     beforeEach((ctx) => skipIfNoZotero(ctx, available));
 
-    it('validates an EPUB with a cold document cache without extracting', async () => {
+    it('validates an EPUB through the shared attachment-info path', async () => {
         await invalidateCache(NON_PDF.library_id, NON_PDF.zotero_key);
 
         const start = Date.now();
@@ -81,10 +80,10 @@ describe('frontend validation of EPUB attachments', () => {
         const elapsedMs = Date.now() - start;
 
         expect(res.ok).toBe(true);
-        expect(res.is_valid).toBe(true);
+        expect(res.state).toBe('readable');
         expect(res.reason).toBeNull();
-        // Validation must not run the (multi-second) EPUB extraction pipeline;
-        // a cold cache is admitted after the existence and size checks.
+        // A cold cache is admitted after existence and size checks; EPUB
+        // extraction is reserved for the document read path.
         expect(elapsedMs).toBeLessThan(5_000);
     }, 30_000);
 
@@ -95,7 +94,7 @@ describe('frontend validation of EPUB attachments', () => {
 
         const res = await validateItem(NON_PDF.library_id, NON_PDF.zotero_key);
         expect(res.ok).toBe(true);
-        expect(res.is_valid).toBe(true);
+        expect(res.state).toBe('readable');
         expect(res.reason).toBeNull();
     }, EXTRACT_TIMEOUT + 30_000);
 });
@@ -114,6 +113,6 @@ describe('frontend validation of regular items', () => {
 
         const res = await validateItem(EPUB_WITH_PARENT.library_id, parentKey);
         expect(res.ok).toBe(true);
-        expect(res.is_valid).toBe(true);
+        expect(res.state).toBe('readable');
     });
 });

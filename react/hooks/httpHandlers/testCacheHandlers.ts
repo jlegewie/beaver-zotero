@@ -396,8 +396,11 @@ export async function handleTestValidateItemHttpRequest(request: any) {
     });
     return {
         ok: true,
-        is_valid: result.isValid,
+        state: result.state,
         reason: result.reason ?? null,
+        status_code: result.statusCode ?? null,
+        content_kind: result.contentKind ?? null,
+        page_count: result.pageCount ?? null,
     };
 }
 

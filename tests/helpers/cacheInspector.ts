@@ -512,8 +512,11 @@ export async function resolveItem(
 
 export interface ValidateItemResponse {
     ok: boolean;
-    is_valid?: boolean;
+    state?: 'readable' | 'unreadable' | 'blocked';
     reason?: string | null;
+    status_code?: string | null;
+    content_kind?: string | null;
+    page_count?: number | null;
     error?: string;
 }
 
