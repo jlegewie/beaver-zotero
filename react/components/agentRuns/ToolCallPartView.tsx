@@ -424,19 +424,23 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
             >
                 <button
                     type="button"
-                    className={`variant-ghost-secondary display-flex flex-row py-15 gap-2 w-full text-left ${canExpand ? 'cursor-pointer' : ''}`}
+                    className={`variant-ghost-secondary display-flex flex-row py-15 gap-2 w-full text-left min-w-0 ${canExpand ? 'cursor-pointer' : ''}`}
                     style={{ fontSize: '0.95rem', background: 'transparent', border: 0, padding: 0 }}
                     aria-expanded={effectiveExpanded}
                     aria-controls={`tool-result-${part.tool_call_id}`}
                     onClick={handleToggleExpanded}
                     disabled={!canExpand}
                 >
-                    <div className="display-flex flex-row px-3 gap-2">
+                    <div className="display-flex flex-row px-3 gap-2 min-w-0">
                         <div className={`flex-1 display-flex mt-010 ${effectiveLabelColor}`}>
                             <Icon icon={getIcon()} />
                         </div>
-                        
-                        <div className={`display-flex ${effectiveLabelColor} ${isShimmering ? 'shimmer-text' : ''}`}>
+
+                        {/* min-w-0 + truncate keep the label on a single line; long item
+                            names/locators get an ellipsis instead of wrapping. Must stay a
+                            block (not display-flex) — text-overflow:ellipsis is ignored on
+                            flex containers, which clips the text without the "…". */}
+                        <div className={`min-w-0 truncate ${effectiveLabelColor} ${isShimmering ? 'shimmer-text' : ''}`}>
                             {label}
                         </div>
                     </div>

@@ -333,7 +333,9 @@ function computeMainLabel(
     const view = opts?.view ?? null;
 
     // Headline name (item/note/annotation tools): prefer the hydrated view, else
-    // the host-resolved request-side name.
+    // the host-resolved request-side name. Not length-capped here — the label
+    // renders on a single line and the whole string ellipsis-truncates responsively
+    // to the available width (see ToolCallPartView).
     const resolvedName = getViewDisplayName(view, toolName) ?? opts?.enrich?.itemDisplayName ?? null;
     // Actual locator from the completed view (overrides the requested range).
     const viewLocator = getViewLocationLabel(view, toolName);
