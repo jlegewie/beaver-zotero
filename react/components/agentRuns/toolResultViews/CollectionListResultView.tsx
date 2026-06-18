@@ -33,7 +33,7 @@ export const CollectionListResultView: React.FC<{ view: CollectionListView }> = 
                 return (
                     <div
                         key={compositeKey}
-                        className={`display-flex flex-row gap-1 items-start min-w-0 px-15 py-15 last:border-0 transition-colors duration-150 cursor-pointer ${
+                        className={`display-flex flex-row items-start gap-25 p-2 min-w-0 cursor-pointer transition-colors ${
                             isHovered ? 'bg-quinary' : ''
                         }`}
                         onClick={() => revealCollection(collection.library_id, collection.collection_key)}
@@ -41,13 +41,13 @@ export const CollectionListResultView: React.FC<{ view: CollectionListView }> = 
                         onMouseLeave={() => setHoveredKey(null)}
                         title="Click to reveal in Zotero"
                     >
-                        <span className="scale-75" style={{ marginTop: '-2px' }}>
-                            <CSSIcon name="collection" className="icon-16" />
-                        </span>
-                        <div className="display-flex flex-col flex-1 min-w-0">
-                            <span className="text-sm font-color-primary truncate">
+                        <div className="display-flex items-center justify-center flex-shrink-0 rounded-md ml-05 mt-010">
+                            <CSSIcon name="collection" className="icon-16 scale-90" />
+                        </div>
+                        <div className="display-flex flex-col flex-1 min-w-0 font-color-primary">
+                            <div className="truncate font-color-primary" style={{ fontSize: '0.925rem' }}>
                                 {collection.name}
-                            </span>
+                            </div>
                         </div>
                     </div>
                 );
