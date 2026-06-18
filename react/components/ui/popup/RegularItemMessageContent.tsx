@@ -12,8 +12,7 @@ interface RegularItemMessageContentProps {
 }
 
 /**
- * Custom popup content for displaying invalid items that were removed
- * Shows item icon, display name, and reason for removal
+ * Popup content for a regular item and its attachment readability summary.
  */
 export const RegularItemMessageContent: React.FC<RegularItemMessageContentProps> = ({ item, summary: summaryOverride }) => {
     const [validAttachmentsVisible, setValidAttachmentsVisible] = useState<boolean>(false);
@@ -67,7 +66,7 @@ export const RegularItemMessageContent: React.FC<RegularItemMessageContentProps>
                     {validAttachmentsCount === 0 && (
                         <CSSIcon name="x-8" className="icon-16 font-color-error" style={{ fill: 'red' }}/>
                     )}
-                    <span className="font-color-secondary">{validAttachmentsCount} Attachment{validAttachmentsCount !== 1 ? 's' : ''} available</span>
+                    <span className="font-color-secondary">{validAttachmentsCount} Attachment{validAttachmentsCount !== 1 ? 's' : ''} readable</span>
                 </Button>
                 {validAttachmentsVisible && (
                     <div className="display-flex flex-col gap-2 max-height-200 overflow-y-auto">
@@ -100,7 +99,7 @@ export const RegularItemMessageContent: React.FC<RegularItemMessageContentProps>
                             iconClassName="scale-12 -ml-1"
                         >
                             <CSSIcon name="x-8" className="icon-16 font-color-error" style={{ fill: 'red' }}/>
-                            <span>{invalidAttachments.length} Attachment{invalidAttachments.length !== 1 ? 's' : ''} skipped</span>
+                            <span>{invalidAttachments.length} Attachment{invalidAttachments.length !== 1 ? 's' : ''} not readable</span>
                         </Button>
                         {invalidAttachmentsVisible && (
                             <div className="display-flex flex-col gap-2 max-height-200 overflow-y-auto">

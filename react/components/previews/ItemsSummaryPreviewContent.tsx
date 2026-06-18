@@ -19,8 +19,9 @@ const ItemsSummaryPreviewContent: React.FC<ItemsSummaryPreviewContentProps> = ({
             const summary = buildMessageItemSummary(item, getValidation);
             return {
                 item,
-                totalAttachments: summary.validAttachmentCount,
-                invalidAttachments: summary.invalidAttachmentCount,
+                totalAttachments: summary.attachments.length,
+                readableAttachments: summary.validAttachmentCount,
+                unreadableAttachments: summary.invalidAttachmentCount,
             };
         });
     }, [items, getValidation]);

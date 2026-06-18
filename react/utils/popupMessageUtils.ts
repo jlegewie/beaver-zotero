@@ -297,14 +297,15 @@ export const addRegularItemsSummaryPopupAtom = atom(
             
             return {
                 item,
-                totalAttachments: summary.validAttachmentCount,
-                invalidAttachments: summary.invalidAttachmentCount
+                totalAttachments: summary.attachments.length,
+                readableAttachments: summary.validAttachmentCount,
+                unreadableAttachments: summary.invalidAttachmentCount
             };
         });
 
         // Determine if there are any issues
         const hasIssues = itemsSummary.some(summary => 
-            summary.totalAttachments === 0 || summary.invalidAttachments > 0
+            summary.totalAttachments === 0 || summary.unreadableAttachments > 0
         );
 
         // Show summary popup

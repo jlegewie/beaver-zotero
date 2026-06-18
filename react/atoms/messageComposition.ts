@@ -4,7 +4,7 @@ import { allUserAttachmentKeysAtom } from "../agents/atoms";
 import { createElement } from 'react';
 import { logger } from "../../src/utils/logger";
 import { addPopupMessageAtom, addRegularItemPopupAtom, addRegularItemsSummaryPopupAtom, removePopupMessageAtom } from "../utils/popupMessageUtils";
-import { getItemValidationAtom, validateItemsAtom, validateRegularItemAtom } from './itemValidation';
+import { getItemValidationAtom, isHardBlockedValidation, isRejectedItemValidation, validateItemsAtom, validateRegularItemAtom } from './itemValidation';
 import { InvalidItemsMessageContent } from '../components/ui/popup/InvalidItemsMessageContent';
 import { agentItemFilter } from "../../src/utils/agentItemSupport";
 import { getCurrentReader } from "../utils/readerUtils";
@@ -266,7 +266,7 @@ export const clearMessageContextAtom = atom(
 
 /**
 * Add single item to currentMessageItemsAtom
-* Validates in background and removes if invalid
+* Validates in background and removes if rejected
 */
 export const addItemToCurrentMessageItemsAtom = atom(
     null,
@@ -284,7 +284,7 @@ export const addItemToCurrentMessageItemsAtom = atom(
 
 /**
 * Add multiple items to currentMessageItemsAtom
-* Validates in background and removes if invalid
+* Validates in background and removes if rejected
 */
 export const addItemsToCurrentMessageItemsAtom = atom(
     null,
@@ -312,7 +312,7 @@ export const addItemsToCurrentMessageItemsAtom = atom(
 );
 
 /**
- * Validate items in background and remove invalid ones
+ * Validate items in background and remove rejected ones
  * This runs asynchronously without blocking the UI
  * 
  * Uses batch validation for regular items (validates item + all attachments together)
@@ -402,19 +402,16 @@ async function validateItemsInBackground(
             ...parentItemValidationPromises
         ]);
         
-        // Remove invalid items from currentMessageItemsAtom
-        const invalidItems = items
+        // Remove rejected items from currentMessageItemsAtom.
+        const rejectedItems = items
             .map(item => {
                 const itemValidation = getValidation(item);
                 const parentValidation = item.parentItem ? getValidation(item.parentItem) : undefined;
                 
                 logger(`validateItemsInBackground: Checking item ${item.libraryID}-${item.key}, isAnnotation: ${item.isAnnotation()}, itemValidation: ${itemValidation ? JSON.stringify(itemValidation) : 'undefined'}, parentValidation: ${parentValidation ? JSON.stringify(parentValidation) : 'undefined'}`, 3);
                 
-                const validation = item.isAnnotation() && item.parentItem
-                    ? {
-                        ...parentValidation,
-                        isValid: itemValidation?.isValid && parentValidation?.isValid   
-                    }
+                const validation = item.isAnnotation() && item.parentItem && isHardBlockedValidation(parentValidation)
+                    ? parentValidation
                     : itemValidation;
                 
                 logger(`validateItemsInBackground: Combined validation for ${item.libraryID}-${item.key}: ${validation ? JSON.stringify(validation) : 'undefined'}`, 3);
@@ -422,33 +419,33 @@ async function validateItemsInBackground(
                 return { item, validation };
             })
             .filter(({ item, validation }) => {
-                const isInvalid = validation && !validation.isValid;
-                if (isInvalid) {
-                    logger(`validateItemsInBackground: Filtering out invalid item ${item.libraryID}-${item.key}, reason: ${validation.reason}`, 3);
+                const isRejected = isRejectedItemValidation(item, validation);
+                if (isRejected) {
+                    logger(`validateItemsInBackground: Filtering out rejected item ${item.libraryID}-${item.key}, reason: ${validation?.reason}`, 3);
                 }
-                return isInvalid;
+                return isRejected;
             });
 
-        logger(`validateItemsInBackground: Found ${invalidItems.length} invalid items to remove`, 3);
+        logger(`validateItemsInBackground: Found ${rejectedItems.length} rejected items to remove`, 3);
 
-        if (invalidItems.length > 0) {
-            // Remove invalid items from currentMessageItemsAtom
+        if (rejectedItems.length > 0) {
+            // Remove rejected items from currentMessageItemsAtom
             const currentItems = get(currentMessageItemsAtom);
-            const invalidKeys = new Set(invalidItems.map(({ item }) => item.key));
+            const invalidKeys = new Set(rejectedItems.map(({ item }) => item.key));
             const validItems = currentItems.filter((item: Zotero.Item) => !invalidKeys.has(item.key));
             set(currentMessageItemsAtom, validItems);
 
             // Show error message with custom content
-            let title = `${invalidItems.length} Items Removed`;
-            if (invalidItems.length === 1) {
-                const label = invalidItems[0].item.isAttachment() ? 'Invalid File' : 'Invalid Item';
-                const name = invalidItems[0].item.isAnnotation()
+            let title = `${rejectedItems.length} Items Removed`;
+            if (rejectedItems.length === 1) {
+                const label = rejectedItems[0].item.isAttachment() ? 'File Removed' : 'Item Removed';
+                const name = rejectedItems[0].item.isAnnotation()
                     ? 'Annotation'
-                    : invalidItems[0].item.isNote() ? 'Note' : `"${invalidItems[0].item.getDisplayTitle()}"`
+                    : rejectedItems[0].item.isNote() ? 'Note' : `"${rejectedItems[0].item.getDisplayTitle()}"`
                 title = `${label} ${truncateText(name, 60)}`
             }
             
-            const invalidItemsData = invalidItems.map(({ item, validation }) => ({
+            const invalidItemsData = rejectedItems.map(({ item, validation }) => ({
                 item,
                 reason: validation?.reason || 'Unknown error'
             }));

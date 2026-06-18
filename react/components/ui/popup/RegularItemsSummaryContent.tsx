@@ -46,7 +46,8 @@ function getItemSummaryDisplayName(item: Zotero.Item): string {
 interface RegularItemSummary {
     item: Zotero.Item;
     totalAttachments: number;
-    invalidAttachments: number;
+    readableAttachments: number;
+    unreadableAttachments: number;
 }
 
 interface RegularItemsSummaryContentProps {
@@ -61,7 +62,7 @@ export const RegularItemsSummaryContent: React.FC<RegularItemsSummaryContentProp
         <div className="display-flex flex-col gap-15">
             {items.map((itemSummary) => {
                 const displayName = getItemSummaryDisplayName(itemSummary.item);
-                const validCount = Math.max(itemSummary.totalAttachments - itemSummary.invalidAttachments, 0);
+                const readableCount = Math.max(itemSummary.readableAttachments, 0);
                 
                 return (
                     <div key={itemSummary.item.key} className="display-flex flex-col gap-2">
@@ -78,19 +79,19 @@ export const RegularItemsSummaryContent: React.FC<RegularItemsSummaryContentProp
                         {itemSummary.item.isRegularItem() && (
                             <div className="display-flex flex-row font-color-tertiary gap-2 ml-15 text-md">
                                 <div className="display-flex items-center flex-row gap-1">
-                                    {validCount > 0 && (
+                                    {readableCount > 0 && (
                                         <Icon icon={TickIcon} size={15} className="scale-12 font-color-accent-green" />
                                     )}
-                                    {validCount === 0 && (
+                                    {readableCount === 0 && (
                                         <CSSIcon name="x-8" className="icon-16 font-color-error" style={{ fill: 'red' }}/>
                                     )}
-                                    <span>{validCount} Attachment{validCount !== 1 ? 's' : ''} available</span>
+                                    <span>{readableCount}/{itemSummary.totalAttachments} Attachment{itemSummary.totalAttachments !== 1 ? 's' : ''} readable</span>
                                 </div>
 
-                                {itemSummary.invalidAttachments > 0 && (
+                                {itemSummary.unreadableAttachments > 0 && (
                                     <div className="display-flex items-center flex-row gap-1">
                                         <CSSIcon name="x-8" className="icon-16 font-color-error" style={{ fill: 'red' }}/>
-                                        <span>{itemSummary.invalidAttachments} skipped</span>
+                                        <span>{itemSummary.unreadableAttachments} not readable</span>
                                     </div>
                                 )}
                             </div>

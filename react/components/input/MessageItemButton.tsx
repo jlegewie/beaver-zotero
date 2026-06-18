@@ -3,7 +3,7 @@ import { CSSItemTypeIcon, CSSIcon, Spinner, Icon, ArrowUpRightIcon, LibraryIcon,
 import { useAtomValue } from 'jotai';
 import { useRemoveContextMenu } from '../../hooks/useRemoveContextMenu';
 import { MenuItem } from '../ui/menu/ContextMenu';
-import { getItemValidationAtom } from '../../atoms/itemValidation';
+import { getItemValidationAtom, isRejectedItemValidation } from '../../atoms/itemValidation';
 import { usePreviewHover } from '../../hooks/usePreviewHover';
 import { getDisplayNameFromItem } from '../../utils/sourceUtils';
 import { truncateText } from '../../utils/stringUtils';
@@ -216,8 +216,8 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
         const getButtonClasses = () => {
             const baseClasses = `variant-outline source-button ${className || ''} ${disabled ? 'disabled-but-styled' : ''}`;
             
-            // Invalid state
-            if (showInvalid && validation && !validation.isValid && !validation.isValidating) {
+            // Rejected state
+            if (showInvalid && isRejectedItemValidation(item, validation)) {
                 return `${baseClasses} border-red`;
             }
             
@@ -249,9 +249,9 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
                 {...rest}
             >
                 {getIconElement()}
-                <span className={`truncate ${validation && !validation.isValid ? 'font-color-red' : ''}`}>
+                <span className={`truncate ${isRejectedItemValidation(item, validation) ? 'font-color-red' : ''}`}>
                     {tabContextType === 'reader'
-                        ? (validation && !validation.isValid && showInvalid) ? 'Invalid File' : 'Current File'
+                        ? isRejectedItemValidation(item, validation) && showInvalid ? 'Invalid File' : 'Current File'
                         : tabContextType === 'note'
                             ? 'Current Note'
                             : displayName || '...'}

@@ -3,7 +3,7 @@ import { CSSItemTypeIcon, CSSIcon, AlertIcon, Icon } from '../icons/icons';
 import { useSetAtom, useAtomValue } from 'jotai';
 import { activePreviewAtom } from '../../atoms/ui';
 import { removeItemFromMessageAtom } from '../../atoms/messageComposition';
-import { getItemValidationAtom } from '../../atoms/itemValidation';
+import { getItemValidationAtom, isRejectedItemValidation } from '../../atoms/itemValidation';
 import { openPDFInNewWindow } from '../../utils/openPDFInNewWindow';
 import { RegularItemMessageContent } from '../ui/popup/RegularItemMessageContent';
 import PopupMessageHeader from '../ui/popup/PopupMessageHeader';
@@ -77,13 +77,13 @@ const ItemPreviewContent: React.FC<ItemPreviewContentProps> = ({
             return <CSSIcon name="spinner" className="icon-12 scale-11" />;
         }
         
-        if (validation && !validation.isValid) {
+        if (isRejectedItemValidation(childItem, validation)) {
             return (
                 <CSSIcon 
                     name="x-8" 
                     className="icon-16 font-color-error scale-11" 
                     style={{ fill: 'red' }}
-                    title={validation.reason}
+                    title={validation?.reason}
                 />
             );
         }
@@ -110,27 +110,28 @@ const ItemPreviewContent: React.FC<ItemPreviewContentProps> = ({
         } else if (item.isAttachment()) {
             // Show attachment info
             const validation = getValidation(item);
-            const isInvalid = validation && !validation.isValid && !validation.isValidating;
+            const isRejected = isRejectedItemValidation(item, validation);
+            const isUnreadable = isRejected && validation?.state === 'unreadable';
             
             return (
                 <div className="p-3 display-flex flex-col items-start gap-2">
                     <PopupMessageHeader
-                        icon={!isInvalid
+                        icon={!isRejected
                             ? createElement(CSSItemTypeIcon, { itemType: item.getItemTypeIconName() })
                             : <Icon icon={AlertIcon} className="font-color-error scale-11 mt-020" />
                         }
-                        title={isInvalid
-                            ? `Invalid File "${item.getDisplayTitle()}"`
+                        title={isRejected
+                            ? `${isUnreadable ? 'File Not Readable' : 'Invalid File'} "${item.getDisplayTitle()}"`
                             : getDisplayNameFromItem(item.parentItem ?? item)
                         }
                         // title={item.getDisplayTitle()}
                         handleDismiss={() => setActivePreview(null)}
-                        fontColor={isInvalid ? 'font-color-error' : 'font-color-secondary'}
+                        fontColor={isRejected ? 'font-color-error' : 'font-color-secondary'}
                     />
                     <div className="display-flex flex-col gap-3 -ml-1">
                         <div className="display-flex flex-row items-center gap-2 ml-15">
-                            <div className={`text-md ${isInvalid ? 'font-color-tertiary' : 'font-color-secondary'}`}>
-                                {!isInvalid ? truncateText(item.getDisplayTitle(), 100) : validation?.reason}
+                            <div className={`text-md ${isRejected ? 'font-color-tertiary' : 'font-color-secondary'}`}>
+                                {!isRejected ? truncateText(item.getDisplayTitle(), 100) : validation?.reason}
                             </div>
                         </div>
                     </div>

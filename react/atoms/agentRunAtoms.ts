@@ -135,6 +135,7 @@ import type { CreateItemProposedData, CreateItemResultData } from '../types/agen
 import { appendRunIfMissing, findResumeChainRoot, findRunForResume, hasOnlyThinkingParts, resolveErrorRunId, toRunError } from '../agents/runResumeHelpers';
 import { prewarmMuPDFWorker } from '../../src/beaver-extract';
 import { BeaverTemporaryAnnotations } from '../utils/annotationUtils';
+import { isRejectedItemValidation, itemValidationResultsAtom } from './itemValidation';
 
 // =============================================================================
 // Helper Functions
@@ -1652,8 +1653,28 @@ export const sendWSMessageAtom = atom(
             // Custom instructions (if any)
         const customInstructions = getPref('customInstructions') || undefined;
 
-        // Build attachments from current message items
-        const selectedItems = get(currentMessageItemsAtom);
+        // Build attachments from current message items, dropping anything that
+        // validation has already rejected.
+        const validationResults = get(itemValidationResultsAtom);
+        const rawSelectedItems = get(currentMessageItemsAtom);
+        const rejectedSelectedItems = rawSelectedItems.filter((item) =>
+            isRejectedItemValidation(item, validationResults.get(`${item.libraryID}-${item.key}`))
+        );
+        const selectedItems = rejectedSelectedItems.length > 0
+            ? rawSelectedItems.filter((item) => !rejectedSelectedItems.includes(item))
+            : rawSelectedItems;
+        if (rejectedSelectedItems.length > 0) {
+            set(currentMessageItemsAtom, selectedItems);
+            set(addPopupMessageAtom, {
+                type: 'error',
+                title: rejectedSelectedItems.length === 1 ? 'File Removed' : 'Files Removed',
+                text: rejectedSelectedItems.length === 1
+                    ? 'A file that Beaver cannot read was removed from this message.'
+                    : `${rejectedSelectedItems.length} files that Beaver cannot read were removed from this message.`,
+                expire: true,
+                duration: 4000,
+            });
+        }
 
         // Load note data for any note items (getNoteTitle() requires 'note' data type)
         const currentNoteTabItem = get(currentNoteItemAtom);

@@ -39,6 +39,31 @@ export type ItemValidationState = (ItemValidationResult | {
 };
 
 /**
+ * Return whether a completed validation result should prevent an item from
+ * being attached or sent.
+ */
+export function isHardBlockedValidation(
+    validation: Pick<ItemValidationState, 'state' | 'isValidating'> | undefined | null,
+): boolean {
+    return !!validation && !validation.isValidating && validation.state === 'blocked';
+}
+
+/**
+ * Return whether a completed validation result should reject this item.
+ * Regular items remain attachable even when none of their child attachments
+ * are readable; standalone attachments are rejected when Beaver cannot read
+ * the file.
+ */
+export function isRejectedItemValidation(
+    item: Zotero.Item,
+    validation: Pick<ItemValidationState, 'state' | 'isValidating'> | undefined | null,
+): boolean {
+    if (!validation || validation.isValidating) return false;
+    if (validation.state === 'blocked') return true;
+    return item.isAttachment() && validation.state === 'unreadable';
+}
+
+/**
  * Store validation results for items
  * Key: "libraryID-itemKey"
  * Value: ItemValidationState (includes isValidating)
