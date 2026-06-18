@@ -2,7 +2,7 @@
   "schema": 5,
   "id": "legewie-fagan__p0",
   "capturedAt": "2026-05-14T00:37:13.235Z",
-  "updatedAt": "2026-05-20T20:34:38.805Z",
+  "updatedAt": "2026-06-18T18:34:57.165Z",
   "pdfSha256": "d86a26bf17a0e19194abe41f10b32b4cf86e8caddf3c854773802e5a76b607cf",
   "pdfBytes": 50492,
   "config": {
@@ -17,9 +17,9 @@
     "paragraphSettings": {}
   },
   "fingerprints": {
-    "extractorGitSha": "0f80454d",
-    "extractorVersion": "0.19.4-beta.1",
-    "mupdfWasmSha256": "92c606975298110af7f2641c48a4ed768ef6a1d4f9bc0015f99f68b946e71bf0",
+    "extractorGitSha": "0387e7a8",
+    "extractorVersion": "0.21.1",
+    "mupdfWasmSha256": "2b64bd1d1748272672b7ed2f620df24d4d85ae98d477e9f686625c5ecc477f79",
     "sentencexWasmSha256": "cd6114eed20aafefcc047f9048f901b8de595299c093e6be513e6f4b55cb2528"
   },
   "tolerance": {
@@ -33,6 +33,13 @@
           "label": "220",
           "width": 486,
           "height": 711,
+          "viewBox": [
+            0,
+            0,
+            486,
+            711
+          ],
+          "rotation": 0,
           "items": [
             {
               "id": "p1",
@@ -84,12 +91,12 @@
                 {
                   "id": "s2",
                   "order": 0,
-                  "text": "strongly agree or from uncomfortable to com- fortable.",
+                  "text": "strongly agree or from uncomfortable to comfortable.",
                   "bboxes": [
                     [
                       51.5,
                       65,
-                      234,
+                      230.7,
                       76.1
                     ],
                     [
@@ -103,7 +110,7 @@
                 {
                   "id": "s3",
                   "order": 1,
-                  "text": "They include: “I feel welcome in my  school” (factor loading .61), “Discipline in my  school is fair” (factor loading .52), “My teach- ers inspire me to learn” (factor loading .60),  “The adults at my school look out for me”  (factor loading .64), and “The adults at my  school help me understand what I need to do  to succeed in school” (factor loading .62).",
+                  "text": "They include: “I feel welcome in my  school” (factor loading .61), “Discipline in my  school is fair” (factor loading .52), “My teachers inspire me to learn” (factor loading .60),  “The adults at my school look out for me”  (factor loading .64), and “The adults at my  school help me understand what I need to do  to succeed in school” (factor loading .62).",
                   "bboxes": [
                     [
                       87.1,
@@ -120,7 +127,7 @@
                     [
                       51.5,
                       101,
-                      234,
+                      230.7,
                       112.1
                     ],
                     [
@@ -158,7 +165,7 @@
                 {
                   "id": "s4",
                   "order": 2,
-                  "text": "The  variables cover different aspects of school- related attitudes and trust.",
+                  "text": "The  variables cover different aspects of schoolrelated attitudes and trust.",
                   "bboxes": [
                     [
                       218.6,
@@ -169,7 +176,7 @@
                     [
                       51.5,
                       173,
-                      234,
+                      230.7,
                       184.1
                     ],
                     [
@@ -239,7 +246,7 @@
                 {
                   "id": "s7",
                   "order": 5,
-                  "text": "Third, we use  school attendance to measure system avoid- ance based on administrative data from the  NYCDOE.",
+                  "text": "Third, we use  school attendance to measure system avoidance based on administrative data from the  NYCDOE.",
                   "bboxes": [
                     [
                       174.4,
@@ -250,7 +257,7 @@
                     [
                       51.5,
                       257,
-                      234,
+                      230.7,
                       268.1
                     ],
                     [
@@ -692,7 +699,7 @@
                 {
                   "id": "s22",
                   "order": 2,
-                  "text": "Students in  impact zones are more likely to receive free or  reduced lunch and to score lower on the Eng- lish Language Art and Mathematics Tests.",
+                  "text": "Students in  impact zones are more likely to receive free or  reduced lunch and to score lower on the English Language Art and Mathematics Tests.",
                   "bboxes": [
                     [
                       387.5,
@@ -709,7 +716,7 @@
                     [
                       252,
                       161,
-                      434.5,
+                      431.3,
                       172.1
                     ],
                     [
@@ -723,12 +730,12 @@
                 {
                   "id": "s23",
                   "order": 3,
-                  "text": "Stu- dents in impact zones live in neighborhoods  with a higher poverty rate, a smaller proportion  of White residents, a higher share of minority  groups, and substantially higher crime rates.",
+                  "text": "Students in impact zones live in neighborhoods  with a higher poverty rate, a smaller proportion  of White residents, a higher share of minority  groups, and substantially higher crime rates.",
                   "bboxes": [
                     [
                       418.1,
                       173,
-                      434.5,
+                      431.3,
                       184.1
                     ],
                     [
@@ -814,7 +821,7 @@
                 {
                   "id": "s25",
                   "order": 1,
-                  "text": "Figure 1 presents the results; Appendix Tables  A2 and A3 show the corresponding regres- sion tables.",
+                  "text": "Figure 1 presents the results; Appendix Tables  A2 and A3 show the corresponding regression tables.",
                   "bboxes": [
                     [
                       252,
@@ -825,7 +832,7 @@
                     [
                       252,
                       317,
-                      434.5,
+                      431.2,
                       328.1
                     ],
                     [
@@ -852,7 +859,7 @@
                 {
                   "id": "s27",
                   "order": 3,
-                  "text": "African  American boys age 9 and 10 are unaffected  by the police surge, with small and statisti- cally insignificant effect estimates.",
+                  "text": "African  American boys age 9 and 10 are unaffected  by the police surge, with small and statistically insignificant effect estimates.",
                   "bboxes": [
                     [
                       404,
@@ -869,7 +876,7 @@
                     [
                       252,
                       353,
-                      434.5,
+                      431.2,
                       364.1
                     ],
                     [
@@ -883,7 +890,7 @@
                 {
                   "id": "s28",
                   "order": 4,
-                  "text": "As they  grow older, however, African American boys  begin to experience a negative effect of living  in areas designated as impact zones and sub- ject to increased police activity.",
+                  "text": "As they  grow older, however, African American boys  begin to experience a negative effect of living  in areas designated as impact zones and subject to increased police activity.",
                   "bboxes": [
                     [
                       401.6,
@@ -906,7 +913,7 @@
                     [
                       252,
                       401,
-                      434.5,
+                      431.2,
                       412.1
                     ],
                     [
@@ -970,12 +977,12 @@
                 {
                   "id": "s31",
                   "order": 7,
-                  "text": "For 15-year-old students, expo- sure to impact zones for one school year  decreased ELA test scores by –.136 in the  difference-in-differences model without stu- dent fixed effects and by –.150 in our pre- ferred model with student fixed effects.",
+                  "text": "For 15-year-old students, exposure to impact zones for one school year  decreased ELA test scores by –.136 in the  difference-in-differences model without student fixed effects and by –.150 in our preferred model with student fixed effects.",
                   "bboxes": [
                     [
                       302,
                       473,
-                      434.5,
+                      431.2,
                       484.1
                     ],
                     [
@@ -993,13 +1000,13 @@
                     [
                       252,
                       509,
-                      434.5,
+                      431.2,
                       520.1
                     ],
                     [
                       252,
                       521,
-                      434.5,
+                      431.2,
                       532.1
                     ],
                     [
@@ -1013,7 +1020,7 @@
                 {
                   "id": "s32",
                   "order": 8,
-                  "text": "These  estimates refer to the relative increase in the  intensity of police activity related to Opera- tion Impact of around 30 percent in pedes- trian stops and arrests for low-level crimes.",
+                  "text": "These  estimates refer to the relative increase in the  intensity of police activity related to Operation Impact of around 30 percent in pedestrian stops and arrests for low-level crimes.",
                   "bboxes": [
                     [
                       410.6,
@@ -1030,13 +1037,13 @@
                     [
                       252,
                       557,
-                      434.5,
+                      431.2,
                       568.1
                     ],
                     [
                       252,
                       569,
-                      434.5,
+                      431.2,
                       580.1
                     ],
                     [
@@ -1075,7 +1082,7 @@
                 {
                   "id": "s34",
                   "order": 10,
-                  "text": "It is similar in size  to some of the most popular programs  designed to increase educational achieve- ment.",
+                  "text": "It is similar in size  to some of the most popular programs  designed to increase educational achievement.",
                   "bboxes": [
                     [
                       359.5,
@@ -1092,7 +1099,7 @@
                     [
                       252,
                       641,
-                      434.7,
+                      431.3,
                       652.1
                     ],
                     [
@@ -1129,6 +1136,13 @@
           "label": "220",
           "width": 486,
           "height": 711,
+          "viewBox": [
+            0,
+            0,
+            486,
+            711
+          ],
+          "rotation": 0,
           "markdown": "Legewie and Fagan 231\n\nstrongly agree or from uncomfortable to comfortable. They include: “I feel welcome in my school” (factor loading .61), “Discipline in my school is fair” (factor loading .52), “My teachers inspire me to learn” (factor loading .60), “The adults at my school look out for me” (factor loading .64), and “The adults at my school help me understand what I need to do to succeed in school” (factor loading .62). The variables cover different aspects of schoolrelated attitudes and trust. Our results suggest the five items belong to the same factor.11 The factor score from the exploratory maximum likelihood factor analysis can be understood as an index for positive attitudes and trust toward school and teachers. Third, we use school attendance to measure system avoidance based on administrative data from the NYCDOE. Our measure is defined as the attendance rate for a specific school year using days on the roll as the denominator. We scale the variable from 0 to 100 percent. On average, the attendance rate is 92 percent with a standard deviation of 7.6.\n\n## Sample And Summary Statistics\n\nWe restrict student data in several ways to obtain our primary analysis sample of 285,439 students who were exposed to Operation Impact, with over 827,922 student-year observations. First, we restrict our sample to African American and Hispanic students, because the sample size of White and Asian students living in impact zones is too small to support our analysis.12 Second, we exclude students who did not participate in the yearly state test in grades 3 to 8. Third, we limit our analysis to students age 9 to 15. The number of cases for younger and older students is insufficient to obtain age-specific estimates. Fourth, as part of our estimation strategy, we restrict our sample to areas designated as impact zones at least once. Finally, we exclude 2.6 percent of observations with missing data on any of the relevant variables.\n\nAppendix Table A1 reports student-level summary statistics. It compares all students age 9 to 15 who participated in the yearly state\n\nexam with our analytic sample restricted to areas that were part of Operation Impact at some point in time. The proportion of White students is far lower among students in impact zones, whereas the share of African American and Hispanic students is higher compared to the general student population. Students in impact zones are more likely to receive free or reduced lunch and to score lower on the English Language Art and Mathematics Tests. Students in impact zones live in neighborhoods with a higher poverty rate, a smaller proportion of White residents, a higher share of minority groups, and substantially higher crime rates.\n\n## Results\n\nWe begin with two regression models that estimate the effect of Operation Impact on ELA test scores for African American boys. Figure 1 presents the results; Appendix Tables A2 and A3 show the corresponding regression tables. The findings are striking. African American boys age 9 and 10 are unaffected by the police surge, with small and statistically insignificant effect estimates. As they grow older, however, African American boys begin to experience a negative effect of living in areas designated as impact zones and subject to increased police activity. At age 12, this effect is modest in size and statistically significant for the difference-in-differences model with and without student fixed effects. For 13- to 15-year-old students, the effect is substantial. For 15-year-old students, exposure to impact zones for one school year decreased ELA test scores by –.136 in the difference-in-differences model without student fixed effects and by –.150 in our preferred model with student fixed effects. These estimates refer to the relative increase in the intensity of police activity related to Operation Impact of around 30 percent in pedestrian stops and arrests for low-level crimes. The size of the effect corresponds to a fifth of the Black-White test-score gap (.72 standard deviations in our sample). It is similar in size to some of the most popular programs designed to increase educational achievement. For example, it is comparable to the"
         }
       ]

@@ -93,6 +93,7 @@ import { isRecoverablePageError } from "../wasmFatal";
 import { acquireDoc, releaseDoc } from "./docCache";
 import { ensureApi } from "./wasmInit";
 import {
+    buildCompoundVocabulary,
     extractSentencesForPage,
     runSentenceExtractionFromDoc,
 } from "./sentenceExtraction";
@@ -348,6 +349,14 @@ function buildAnalysisFromDoc(
     styleProfile: StyleProfile;
     marginAnalysis: MarginAnalysis;
     marginRemoval: MarginRemovalResult;
+    /**
+     * Genuine hyphenated compounds (lowercased) seen mid-line across the
+     * analysis window. Used by the structured sentence mapper to keep a
+     * line-break hyphen when the compound is attested (e.g. "broken-windows")
+     * and join it otherwise. Coverage scales with the analysis window — for
+     * full-document structured extraction it spans the whole document.
+     */
+    compoundVocabulary: ReadonlySet<string>;
     walkMs: number;
     analysisMs: number;
 } {
@@ -379,6 +388,10 @@ function buildAnalysisFromDoc(
     const analysisPageByIndex = new Map<number, RawPageData>(
         analysisPages.map((p) => [p.pageIndex, p]),
     );
+    // Genuine mid-line hyphenated compounds across the analysis window. Built
+    // from the already-walked line text (no extra walk) and consumed by the
+    // structured sentence mapper's line-break de-hyphenation.
+    const compoundVocabulary = buildCompoundVocabulary(analysisPages);
     const walkMs = performance.now() - tWalkStart;
 
     const tAnalysisStart = performance.now();
@@ -399,6 +412,7 @@ function buildAnalysisFromDoc(
         styleProfile,
         marginAnalysis,
         marginRemoval,
+        compoundVocabulary,
         walkMs,
         analysisMs,
     };
@@ -633,6 +647,7 @@ export function runExtractFromIndices(
         styleProfile,
         marginAnalysis,
         marginRemoval,
+        compoundVocabulary,
         walkMs: jsonWalkMs,
         analysisMs,
     } = buildAnalysisFromDoc(
@@ -770,6 +785,7 @@ export function runExtractFromIndices(
                     paragraphSettings,
                     marginRemoval,
                     styleProfile,
+                    compoundVocabulary,
                     margins: opts.margins,
                     marginZone: opts.marginZone,
                     graphicsLayerMode: opts.graphicsLayerMode,

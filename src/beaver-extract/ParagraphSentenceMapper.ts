@@ -215,6 +215,133 @@ function lineMedianCharHeight(line: RawLineDetailed): number {
     return heights[Math.floor(heights.length / 2)];
 }
 
+// ---------------------------------------------------------------------------
+// Line-break hyphenation
+// ---------------------------------------------------------------------------
+
+/**
+ * Matches a genuine in-text hyphenated run: two or more letter groups joined by
+ * ASCII hyphen-minus (U+002D), with no surrounding whitespace. A word split
+ * across a line break never matches, because the hyphen ends one line's text
+ * while the continuation starts the next line's text, so the two letters are
+ * never adjacent to the hyphen within a single line string.
+ */
+const MIDLINE_COMPOUND_RE = /\p{L}+(?:-\p{L}+)+/gu;
+
+/**
+ * Collect the document's genuine hyphenated compounds (e.g. "broken-windows",
+ * "neighborhood-level") from raw line text. This is the signal for whether a
+ * word split across a line break is a real compound (keep the hyphen) or a soft
+ * hyphen inserted for justification (join the halves).
+ *
+ * The line-break lookup only ever probes a two-part `<prevWord>-<nextWord>`
+ * key, so a multi-hyphen run is recorded as each of its **consecutive** pairs:
+ * "difference-in-differences" yields "difference-in" and "in-differences", so a
+ * break at either hyphen is recognized as a genuine compound. Compounds are
+ * stored lowercased so the lookup is case-insensitive. Pass an existing set as
+ * `into` to accumulate across pages.
+ */
+export function collectHyphenatedCompounds(
+    lineTexts: Iterable<string>,
+    into: Set<string> = new Set(),
+): Set<string> {
+    for (const text of lineTexts) {
+        for (const match of text.matchAll(MIDLINE_COMPOUND_RE)) {
+            const parts = match[0].toLowerCase().split("-");
+            for (let i = 0; i + 1 < parts.length; i++) {
+                into.add(`${parts[i]}-${parts[i + 1]}`);
+            }
+        }
+    }
+    return into;
+}
+
+/** Trailing `<letters>-` of a line (ASCII hyphen-minus only). */
+const TRAILING_HYPHEN_RE = /(\p{L}+)-$/u;
+/** Leading letters of the next line. */
+const LEADING_WORD_RE = /^(\p{L}+)/u;
+/** Host with a known TLD (`forbes.com`, `broken-windows.org`, `bbc.co.uk`). */
+const URL_HOST_RE =
+    /[a-z0-9-]+\.(?:com|org|net|edu|gov|mil|int|io|co|info|biz|us|uk|ca|eu|de|fr|au|nl|jp|cn|in|ru|br|gov\.uk|ac\.uk)\b/i;
+/** Filename with a known extension (`report-final.pdf`). */
+const FILE_EXT_RE =
+    /\.(?:pdf|html?|php|aspx?|jsp|xml|json|csv|tsv|txt|docx?|xlsx?|pptx?|zip|tar|gz|png|jpe?g|gif|svg)\b/i;
+
+/**
+ * True when a whitespace-delimited token is a URL / email / DOI / filesystem
+ * path, where hyphens are literal and a line break must not fuse them
+ * (`https://x.com/some-article`, `10.1234/abc-def`, `a-b@x.com`,
+ * `www.broken-windows.org`, `/usr/some-bin`, `report-final.pdf`).
+ *
+ * Deliberately tight: a **bare `/` between two letters is a conjunction**
+ * ("inequality/stratification", "and/or"), NOT a path — fusing must still apply
+ * there. The host / extension tests use closed allowlists rather than a generic
+ * `word.word` pattern, so a run-together `sentence.Next` (seen on PDFs that drop
+ * inter-word spaces) is not mistaken for a host. A token qualifies only on a
+ * real URL/path signal: a `://` scheme, a `mailto:` / `@host.tld` email, a
+ * `www.` label, a known `host.tld`, a known `file.ext`, a `10.NNNN/` DOI prefix,
+ * a leading `/ ./ ../` path, or a backslash. Digit-adjacent hyphens (COVID-19,
+ * 15-trillion, year ranges) need no handling here — they are already excluded
+ * by the letter-anchored `TRAILING_HYPHEN_RE` / `LEADING_WORD_RE`.
+ */
+function isUrlishToken(token: string): boolean {
+    return (
+        /:\/\//.test(token) ||                     // scheme:// (http, https, ftp, …)
+        /^mailto:/i.test(token) ||                 // mailto:
+        /@[a-z0-9.-]+\.[a-z]{2,}/i.test(token) ||  // email local@host.tld
+        /\bwww\./i.test(token) ||                  // www. host label
+        URL_HOST_RE.test(token) ||                 // host.tld (com, org, edu, …)
+        FILE_EXT_RE.test(token) ||                 // filename.ext
+        /\b10\.\d{4,}\//.test(token) ||            // DOI 10.NNNN/…
+        /^\.{0,2}\//.test(token) ||                // absolute / relative path: / ./ ../
+        /\\/.test(token)                           // Windows path backslash
+    );
+}
+
+export type LineBreakHyphenDecision = "none" | "join" | "keep";
+
+/**
+ * Decide how to treat a hyphen that falls at a physical line break.
+ *
+ *  - `"none"` — the previous line does not end in `<letter>-`, or the next line
+ *    does not start with a letter; leave the text untouched.
+ *  - `"keep"` — the hyphen is genuine (keep it) but the inter-line space is a
+ *    line-break artifact (drop it). Either the joined compound is attested
+ *    elsewhere in the document (`vocabulary`, e.g. "neighborhood-level"), or the
+ *    hyphen sits inside a URL / email / DOI / path token where it is always
+ *    literal (e.g. ".../ai-will-add" wrapped at "ai-"). Reconstructs as
+ *    "neighborhood-level" / ".../ai-will-add".
+ *  - `"join"` — default. A soft hyphen inserted for justification (e.g. "con-"
+ *    / "sequences"). Drop the hyphen and the inter-line space.
+ *
+ * Only ASCII hyphen-minus (U+002D) is considered, matching the markdown path's
+ * `joinLines` in `ParagraphDetector`. En/em dashes and double hyphens never
+ * join. With no `vocabulary`, every line-break hyphen joins.
+ */
+export function decideLineBreakHyphen(
+    prevLineText: string,
+    nextLineText: string,
+    vocabulary?: ReadonlySet<string>,
+): LineBreakHyphenDecision {
+    const prev = prevLineText.replace(/\s+$/u, "");
+    const prevMatch = TRAILING_HYPHEN_RE.exec(prev);
+    if (!prevMatch) return "none";
+    const next = nextLineText.replace(/^\s+/u, "");
+    const nextMatch = LEADING_WORD_RE.exec(next);
+    if (!nextMatch) return "none";
+    // A hyphen inside a URL / email / DOI / path token is literal: keep it (and
+    // drop the line-break space) so the link reconstructs intact instead of
+    // being fused. Checked on the two tokens adjacent to the break only, so a
+    // URL elsewhere on the line does not affect an ordinary hyphenation.
+    const prevToken = /\S+$/.exec(prev)?.[0] ?? "";
+    const nextToken = /^\S+/.exec(next)?.[0] ?? "";
+    if (isUrlishToken(prevToken) || isUrlishToken(nextToken)) {
+        return "keep";
+    }
+    const compound = `${prevMatch[1]}-${nextMatch[1]}`.toLowerCase();
+    return vocabulary?.has(compound) ? "keep" : "join";
+}
+
 /**
  * Build a `ParagraphText` (text + source map + lines) from a list of
  * detailed raw lines belonging to a single paragraph.
@@ -233,14 +360,53 @@ function lineMedianCharHeight(line: RawLineDetailed): number {
  * clauses in one sentence; with it the splitter sees `. ` and recovers
  * the boundary. The footnote chars contribute no source entry, so they
  * drop out of bbox mapping cleanly.
+ *
+ * Words split across a line break are de-hyphenated: when a line ends in
+ * `<letter>-` and the next line starts with a letter, the inter-line space is
+ * suppressed and — unless the joined compound is in `vocabulary` (a genuine
+ * compound like "neighborhood-level") — the trailing hyphen is dropped, so
+ * "con-" / "sequences" becomes "consequences". The dropped hyphen and any
+ * trailing whitespace contribute no source entry, preserving the text/source
+ * lockstep; the rejoined word's bboxes simply span both source lines. See
+ * `decideLineBreakHyphen`. With no `vocabulary`, every line-break hyphen joins.
  */
 export function buildParagraphText(
     lines: RawLineDetailed[],
+    vocabulary?: ReadonlySet<string>,
 ): ParagraphText {
     const textParts: string[] = [];
     const source: ParagraphText["source"] = [];
     let lastEmittedNonWhitespaceRealChar: string | null = null;
     let inFootnoteRun = false;
+
+    // Per-line plan for the boundary AFTER each line. When the line ends in
+    // `<letter>-` and the next line starts with a letter, `lastRealIdx` is the
+    // char index of that trailing hyphen and `dropHyphen` distinguishes join
+    // (drop the hyphen) from keep (retain it). In both cases the hyphen's
+    // line and the inter-line filler are de-spaced; chars after `lastRealIdx`
+    // are trailing whitespace and are dropped so no stray space survives.
+    const dehyphenate: Array<
+        { lastRealIdx: number; dropHyphen: boolean } | null
+    > = new Array(lines.length).fill(null);
+    for (let li = 0; li < lines.length - 1; li++) {
+        const decision = decideLineBreakHyphen(
+            lines[li].text,
+            lines[li + 1].text,
+            vocabulary,
+        );
+        if (decision === "none") continue;
+        const chars = lines[li].chars;
+        let lastRealIdx = -1;
+        for (let ci = chars.length - 1; ci >= 0; ci--) {
+            if (!/\s/.test(chars[ci].c)) {
+                lastRealIdx = ci;
+                break;
+            }
+        }
+        if (lastRealIdx < 0) continue;
+        dehyphenate[li] = { lastRealIdx, dropHyphen: decision === "join" };
+    }
+
     for (let li = 0; li < lines.length; li++) {
         const line = lines[li];
         if (line.text.length !== line.chars.length) {
@@ -249,11 +415,30 @@ export function buildParagraphText(
                 `text.length=${line.text.length}, chars.length=${line.chars.length}`,
             );
         }
+        const cut = dehyphenate[li];
+        // After a de-hyphenated break, drop this continuation line's leading
+        // whitespace too. `decideLineBreakHyphen` ignored it when forming the
+        // compound, so emitting it here would reintroduce the space
+        // ("con" + " sequences" → "con sequences" instead of "consequences").
+        let leadingWhitespace = li > 0 && dehyphenate[li - 1] !== null;
         const median = lineMedianCharHeight(line);
         const superscriptThreshold =
             median > 0 ? median * SUPERSCRIPT_HEIGHT_RATIO : 0;
         for (let ci = 0; ci < line.chars.length; ci++) {
             const ch = line.chars[ci];
+            // Line-break de-hyphenation: drop the trailing whitespace after the
+            // last real char, and (join only) the trailing hyphen itself.
+            if (
+                cut &&
+                (ci > cut.lastRealIdx ||
+                    (cut.dropHyphen && ci === cut.lastRealIdx))
+            ) {
+                continue;
+            }
+            if (leadingWhitespace) {
+                if (/\s/.test(ch.c)) continue;
+                leadingWhitespace = false;
+            }
             const isSmall =
                 superscriptThreshold > 0 &&
                 bboxHeight(ch.bbox) > 0 &&
@@ -280,7 +465,9 @@ export function buildParagraphText(
             textParts.push(ch.c);
             source.push({ lineIndex: li, charIndex: ci });
         }
-        if (li < lines.length - 1) {
+        // Inter-line filler. Suppressed across a de-hyphenated break so the two
+        // halves of the split word are concatenated directly.
+        if (li < lines.length - 1 && !cut) {
             textParts.push(" ");
             source.push(null);
         }
@@ -296,11 +483,12 @@ export function buildParagraphText(
  */
 export function tryBuildParagraphText(
     lines: RawLineDetailed[],
+    vocabulary?: ReadonlySet<string>,
 ):
     | { ok: true; paragraphText: ParagraphText }
     | { ok: false; error: string } {
     try {
-        return { ok: true, paragraphText: buildParagraphText(lines) };
+        return { ok: true, paragraphText: buildParagraphText(lines, vocabulary) };
     } catch (err) {
         return {
             ok: false,
@@ -502,6 +690,16 @@ export interface PageSentenceOptions {
      *   - Infinity    = whole document
      */
     analysisWindow?: number;
+    /**
+     * Document-wide vocabulary of genuine hyphenated compounds (lowercased,
+     * e.g. "broken-windows"). When a word is split across a line break, the
+     * mapper keeps the hyphen if the joined compound is in this set and
+     * otherwise joins the halves (the default for the dominant soft-hyphen
+     * case). Built once per document by the worker from the analysis-window
+     * line text; absent ⇒ every line-break hyphen joins. See
+     * `collectHyphenatedCompounds` / `decideLineBreakHyphen`.
+     */
+    compoundVocabulary?: ReadonlySet<string>;
 }
 
 /**
@@ -610,7 +808,10 @@ export function extractPageSentences(
         // Degradation path 2: text/chars invariant failed on this paragraph.
         // Caught here so one bad line (ligature, astral-plane char) doesn't
         // crash the whole page.
-        const built = tryBuildParagraphText(detailedLines);
+        const built = tryBuildParagraphText(
+            detailedLines,
+            options.compoundVocabulary,
+        );
         if (!built.ok) {
             const docItem = itemFromContentItem(
                 item,
