@@ -107,6 +107,7 @@ import { undoEditNoteAction } from '../utils/editNoteActions';
 import { undoCreateNoteAction } from '../utils/createNoteActions';
 import { undoCreateAnnotationsAction } from '../utils/createAnnotationsActions';
 import { processToolReturnResults } from '../agents/toolResultProcessing';
+import { upgradeToolReturn } from '../compat/legacyToolResults';
 import { addWarningAtom, clearWarningsAtom } from './warnings';
 import { backendHighTokenUsageRunsAtom, softCapTriggeredRunsAtom } from './messageUIState';
 import { currentThreadNameAtom } from './threads';
@@ -1000,6 +1001,27 @@ async function prevalidateExtractionApproval(
 }
 
 /**
+ * Find the args of the tool-call part that produced a given tool return, by
+ * scanning the run's response messages. Used to derive the annotation-list
+ * variant when synthesizing a legacy view; null when the call can't be found.
+ */
+function findToolCallArgs(
+    run: AgentRun | null,
+    toolCallId: string,
+): string | Record<string, any> | null {
+    if (!run) return null;
+    for (const message of run.model_messages) {
+        if (message.kind !== 'response') continue;
+        for (const part of message.parts) {
+            if (part.part_kind === 'tool-call' && part.tool_call_id === toolCallId) {
+                return part.args;
+            }
+        }
+    }
+    return null;
+}
+
+/**
  * Create WebSocket callbacks for handling streaming events.
  * Shared between sendWSMessageAtom and regenerateFromRunAtom.
  */
@@ -1073,9 +1095,22 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             });
 
             // Process tool return results
-            if (event.part.part_kind === "tool-return") await processToolReturnResults(event.part, set);
+            if (event.part.part_kind === "tool-return") {
+                await processToolReturnResults(event.part, set);
 
-            // Update run with tool return
+                // Safety net: the current backend ships a hydrated `metadata.view`
+                // on every tool return, but synthesize one from the legacy summary
+                // when it is missing so the shared render layer always has a view
+                // to render. No-ops (returns immediately) when a view is present.
+                if (!event.part.metadata?.view) {
+                    logger(`WS onToolReturn: No view model available for tool call ${event.part.tool_call_id}`, 1);
+                    const toolCallArgs = findToolCallArgs(store.get(activeRunAtom), event.part.tool_call_id);
+                    await upgradeToolReturn(event.part, toolCallArgs);
+                }
+            }
+
+            // Update run with tool return (event.part now carries a synthesized
+            // `view` when the backend omitted one).
             set(activeRunAtom, (prev) => prev ? updateRunWithToolReturn(prev, event) : prev);
 
             // Remove pending approval for this specific tool call (if any)
