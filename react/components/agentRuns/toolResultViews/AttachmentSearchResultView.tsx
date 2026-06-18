@@ -93,9 +93,17 @@ function matchPageText(match: AttachmentMatchView): string {
     return page ? `Page ${page}` : '';
 }
 
+/**
+ * Match rows for an attachment. The backend omits `matches` entirely for
+ * `no_matches`/`error` rows, so never assume it is an array.
+ */
+function rowMatches(row: AttachmentSearchRowView): AttachmentMatchView[] {
+    return row.matches ?? [];
+}
+
 /** Whether the attachment contributes match rows to the primary list. */
 function hasMatchRows(row: AttachmentSearchRowView): boolean {
-    return row.status === 'ok' && row.matches.length > 0;
+    return row.status === 'ok' && rowMatches(row).length > 0;
 }
 
 function attachmentStatusText(row: AttachmentSearchRowView): string {
@@ -218,9 +226,9 @@ export const AttachmentSearchResultView: React.FC<{ view: AttachmentSearchView }
                         </div>
                     </div>
                 )}
-                {row.status === 'ok' && row.matches.length > 0 && (
+                {row.status === 'ok' && rowMatches(row).length > 0 && (
                     <div className="display-flex flex-col min-w-0 ml-3 border-left-quarternary">
-                        {row.matches.map((match, index) => {
+                        {rowMatches(row).map((match, index) => {
                             const matchKey = `${attKey}-m${index}`;
                             const matchHovered = hoveredKey === matchKey;
                             const pageText = matchPageText(match);
@@ -258,8 +266,8 @@ export const AttachmentSearchResultView: React.FC<{ view: AttachmentSearchView }
     const toggleLabel = `${showNoMatches ? 'Hide' : 'Show'} ${pluralize(negative.length, 'document')} without matches`
         + (errorCount > 0 ? ` (${errorCount} could not be searched)` : '');
 
-    const returnedMatches = attachments.reduce((sum, row) => sum + row.matches.length, 0);
-    const documentsWithMatches = attachments.filter((row) => row.matches.length > 0).length;
+    const returnedMatches = attachments.reduce((sum, row) => sum + rowMatches(row).length, 0);
+    const documentsWithMatches = attachments.filter((row) => rowMatches(row).length > 0).length;
     const footerText = returnedMatches === view.total_matches
         ? `${pluralize(view.total_matches, 'match')} found across ${pluralize(documentsWithMatches, 'document')}`
         : `Showing ${returnedMatches} of ${view.total_matches} matches across ${pluralize(documentsWithMatches, 'document')}`;

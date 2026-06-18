@@ -132,7 +132,8 @@ export interface AttachmentSearchRowView {
     status: "ok" | "no_matches" | "error";
     match_count: number;
     pages: number[];
-    matches: AttachmentMatchView[];
+    /** Omitted by the backend for `no_matches`/`error` rows; treat absent as empty. */
+    matches?: AttachmentMatchView[];
     error?: string | null;
     /** External-file ref; filename/availability resolved client-side. */
     is_external: boolean;
