@@ -8,6 +8,10 @@ vi.mock('../../../../src/utils/webAPI', () => ({
     isAttachmentAvailableRemotely: vi.fn(() => false),
 }));
 
+vi.mock('../../../../src/utils/logger', () => ({
+    logger: vi.fn(),
+}));
+
 vi.mock('../../../../src/services/attachmentLimits', () => ({
     effectiveMaxFileSizeMB: vi.fn(() => 50),
 }));
@@ -15,6 +19,8 @@ vi.mock('../../../../src/services/attachmentLimits', () => ({
 import { getAttachmentInfo } from '../../../../src/services/documentExtraction/attachmentInfo';
 import { getPref } from '../../../../src/utils/prefs';
 import { isAttachmentAvailableRemotely } from '../../../../src/utils/webAPI';
+
+type AttachmentItem = Parameters<typeof getAttachmentInfo>[0];
 
 type MockAttachmentOptions = {
     key?: string;
@@ -24,7 +30,7 @@ type MockAttachmentOptions = {
     itemDataLoaded?: boolean;
 };
 
-function makeAttachment(options: MockAttachmentOptions = {}): Zotero.Item {
+function makeAttachment(options: MockAttachmentOptions = {}): AttachmentItem {
     const contentType = options.contentType ?? 'application/pdf';
     const filePath = Object.prototype.hasOwnProperty.call(options, 'filePath')
         ? options.filePath
@@ -45,13 +51,14 @@ function makeAttachment(options: MockAttachmentOptions = {}): Zotero.Item {
         getDisplayTitle: vi.fn(() => 'Attachment title'),
         getField: vi.fn(() => 'Attachment title'),
         getFilePathAsync: vi.fn(async () => filePath),
-    } as unknown as Zotero.Item;
+    } as unknown as AttachmentItem;
 }
 
 describe('getAttachmentInfo', () => {
     beforeEach(() => {
         vi.clearAllMocks();
         (globalThis as any).Zotero.Beaver = {};
+        (globalThis as any).IOUtils.stat = vi.fn().mockResolvedValue({ size: 1024 });
         vi.mocked(getPref).mockReturnValue(false);
         vi.mocked(isAttachmentAvailableRemotely).mockReturnValue(false);
     });
@@ -98,6 +105,35 @@ describe('getAttachmentInfo', () => {
             status: 'unreadable',
             status_code: 'file_not_local',
         });
+    });
+
+    it('reports a stale local path as unreadable when remote access is unavailable', async () => {
+        (globalThis as any).IOUtils.stat.mockRejectedValueOnce(new Error('not found'));
+
+        const info = await getAttachmentInfo(makeAttachment({ filePath: '/tmp/missing.pdf' }));
+
+        expect(info).toMatchObject({
+            content_kind: 'pdf',
+            status: 'unreadable',
+            status_code: 'file_not_local',
+        });
+    });
+
+    it('falls back from a stale local path to remote access when enabled', async () => {
+        (globalThis as any).IOUtils.stat.mockRejectedValueOnce(new Error('not found'));
+        vi.mocked(getPref).mockImplementation((pref) => pref === 'accessRemoteFiles');
+        vi.mocked(isAttachmentAvailableRemotely).mockReturnValue(true);
+
+        const info = await getAttachmentInfo(
+            makeAttachment({ contentType: 'text/plain', filePath: '/tmp/missing.txt' }),
+            { nonPdfReadableEnabled: true },
+        );
+
+        expect(info).toMatchObject({
+            content_kind: 'text',
+            status: 'readable',
+        });
+        expect(info.status_code).toBeUndefined();
     });
 
     it('reports EPUB attachments as readable without nonPdfReadableEnabled', async () => {
@@ -209,7 +245,7 @@ describe('getAttachmentInfo', () => {
     });
 
     it('reports a remote-only EPUB as unreadable even with remote access enabled', async () => {
-        vi.mocked(getPref).mockImplementation((pref: string) => pref === 'accessRemoteFiles');
+        vi.mocked(getPref).mockImplementation((pref) => pref === 'accessRemoteFiles');
         vi.mocked(isAttachmentAvailableRemotely).mockReturnValue(true);
 
         const info = await getAttachmentInfo(
@@ -288,7 +324,7 @@ describe('getAttachmentInfo', () => {
     });
 
     it('allows remote readable text attachments when remote access is enabled', async () => {
-        vi.mocked(getPref).mockImplementation((pref: string) => pref === 'accessRemoteFiles');
+        vi.mocked(getPref).mockImplementation((pref) => pref === 'accessRemoteFiles');
         vi.mocked(isAttachmentAvailableRemotely).mockReturnValue(true);
 
         const info = await getAttachmentInfo(

@@ -14,6 +14,12 @@ import { store } from '../../../react/store';
 import { searchableLibraryIdsAtom } from '../../../react/atoms/profile';
 import { TimingAccumulator } from '../../utils/timing';
 import { getAttachmentInfo as resolveAttachmentInfo, type AttachmentInfoOptions } from '../documentExtraction/attachmentInfo';
+export {
+    getBestAttachmentBatch,
+    prepareAttachmentInfoBatchData,
+    processAttachmentInfoBatch,
+} from '../documentExtraction/attachmentInfoBatch';
+export type { AttachmentInfoBatchData } from '../documentExtraction/attachmentInfoBatch';
 // Re-export shared document-extraction helpers so existing agent-data-provider
 // callers keep importing them from `./utils`.
 import {
@@ -380,97 +386,6 @@ export async function computeItemStatus(
 }
 
 /**
- * Batch-fetch the "best attachment" for multiple parent items in a single SQL query.
- * Replicates Zotero's `getBestAttachment()` ranking:
- *   1. PDF content type preferred
- *   2. URL matches parent's URL preferred
- *   3. Earliest dateAdded wins ties
- *
- * Uses `ROW_NUMBER() OVER (PARTITION BY ...)` to pick the best attachment per parent
- * in one pass instead of N individual queries.
- *
- * @param parentItemIds - IDs of regular (parent) items
- * @returns Map from parentItemID to bestAttachmentItemID
- */
-export async function getBestAttachmentBatch(
-    parentItemIds: number[]
-): Promise<Map<number, number>> {
-    const result = new Map<number, number>();
-    if (parentItemIds.length === 0) return result;
-
-    const CHUNK_SIZE = 500;
-    for (let i = 0; i < parentItemIds.length; i += CHUNK_SIZE) {
-        const chunk = parentItemIds.slice(i, i + CHUNK_SIZE);
-        const placeholders = chunk.map(() => '?').join(',');
-
-        const sql = `
-            WITH ranked AS (
-                SELECT
-                    IA.parentItemID,
-                    IA.itemID AS attachmentItemID,
-                    ROW_NUMBER() OVER (
-                        PARTITION BY IA.parentItemID
-                        ORDER BY
-                            CASE WHEN IA.contentType = 'application/pdf' THEN 0 ELSE 1 END,
-                            CASE WHEN COALESCE(IDV_att.value, '') = COALESCE(IDV_parent.value, '') THEN 0 ELSE 1 END,
-                            I.dateAdded ASC
-                    ) AS rn
-                FROM itemAttachments IA
-                JOIN items I ON I.itemID = IA.itemID
-                LEFT JOIN deletedItems DI ON DI.itemID = IA.itemID
-                LEFT JOIN itemData ID_att ON ID_att.itemID = IA.itemID
-                    AND ID_att.fieldID = (SELECT fieldID FROM fields WHERE fieldName = 'url')
-                LEFT JOIN itemDataValues IDV_att ON IDV_att.valueID = ID_att.valueID
-                LEFT JOIN itemData ID_parent ON ID_parent.itemID = IA.parentItemID
-                    AND ID_parent.fieldID = (SELECT fieldID FROM fields WHERE fieldName = 'url')
-                LEFT JOIN itemDataValues IDV_parent ON IDV_parent.valueID = ID_parent.valueID
-                WHERE IA.parentItemID IN (${placeholders})
-                  AND DI.itemID IS NULL
-                  AND IA.linkMode != ${Zotero.Attachments.LINK_MODE_LINKED_URL}
-            )
-            SELECT parentItemID, attachmentItemID
-            FROM ranked
-            WHERE rn = 1
-        `;
-
-        const rows: { parentItemID: number; attachmentItemID: number }[] = [];
-        await Zotero.DB.queryAsync(sql, chunk, {
-            onRow: (row: any) => {
-                rows.push({
-                    parentItemID: row.getResultByIndex(0),
-                    attachmentItemID: row.getResultByIndex(1),
-                });
-            },
-        });
-
-        for (const row of rows) {
-            result.set(row.parentItemID, row.attachmentItemID);
-        }
-    }
-
-    return result;
-}
-
-export interface AttachmentInfoBatchData {
-    bestAttachmentMap: Map<number, number>;
-}
-
-/**
- * Prepare batch data needed for AttachmentInfo resolution.
- */
-export async function prepareAttachmentInfoBatchData(
-    parentItems: Zotero.Item[],
-    timing?: TimingAccumulator,
-): Promise<AttachmentInfoBatchData> {
-    const parentItemIds = parentItems.map(item => item.id);
-    const fn = () => getBestAttachmentBatch(parentItemIds);
-    const bestAttachmentMap = timing
-        ? await timing.track('batch_prefetch_ms', fn)
-        : await fn();
-    return { bestAttachmentMap };
-}
-
-/**
  * Resolve one attachment to the unified AttachmentInfo shape.
  */
 export async function getAttachmentInfoForItem(
@@ -481,56 +396,6 @@ export async function getAttachmentInfoForItem(
         ...options,
         nonPdfReadableEnabled: options?.nonPdfReadableEnabled ?? false,
     });
-}
-
-/**
- * Process a regular item's child attachments into AttachmentInfo results.
- */
-export async function processAttachmentInfoBatch(
-    item: Zotero.Item,
-    batchData: AttachmentInfoBatchData,
-    options?: {
-        skipWorkerFallback?: boolean;
-        timing?: TimingAccumulator;
-        includeAnnotationsCount?: boolean;
-    },
-): Promise<AttachmentInfo[]> {
-    const ta = options?.timing;
-    const attachmentIds = item.getAttachments();
-    if (attachmentIds.length === 0) {
-        return [];
-    }
-
-    const fetchFn = () => Zotero.Items.getAsync(attachmentIds);
-    const attachmentItems = ta
-        ? await ta.track('att_fetch_ms', fetchFn)
-        : await fetchFn();
-
-    const loadFn = () => Zotero.Items.loadDataTypes(
-        attachmentItems,
-        ["primaryData", "itemData", "tags", "collections", "relations", "childItems"],
-    );
-    await (ta ? ta.track('att_load_data_ms', loadFn) : loadFn());
-
-    const bestAttachmentId = batchData.bestAttachmentMap.get(item.id);
-    const parentItemId = `${item.libraryID}-${item.key}`;
-    const attachmentPromises = attachmentItems.map(async (attachment): Promise<AttachmentInfo | null> => {
-        if (!attachment || attachment.deleted || safeIsInTrash(attachment)) {
-            return null;
-        }
-        const isPrimary = bestAttachmentId !== undefined && attachment.id === bestAttachmentId;
-        const infoFn = () => getAttachmentInfoForItem(attachment, {
-            parentItemId,
-            isPrimary,
-            includeAnnotationsCount: options?.includeAnnotationsCount,
-            skipWorkerFallback: options?.skipWorkerFallback,
-            timing: ta,
-        });
-        return ta ? ta.track('att_file_status_ms', infoFn) : infoFn();
-    });
-
-    const results = await Promise.all(attachmentPromises);
-    return results.filter((result): result is AttachmentInfo => result !== null);
 }
 
 /**

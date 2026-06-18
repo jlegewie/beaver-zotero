@@ -5,6 +5,9 @@ import {
     ItemValidationOptions 
 } from '../../src/services/itemValidationManager';
 import { logger } from '../../src/utils/logger';
+import { searchableLibraryIdsAtom } from './profile';
+import { selectedModelAtom } from './models';
+import { getPref } from '../../src/utils/prefs';
 
 /**
  * Generate unique key for a Zotero item
@@ -14,12 +17,26 @@ function getItemKey(item: Zotero.Item): string {
 }
 
 /**
+ * Return whether the active client setup can use scanned/OCR-only PDFs.
+ */
+function canHandleOCRLocally(get: any): boolean {
+    const selectedModel = get(selectedModelAtom);
+    const supportsVision = selectedModel?.supports_vision === true;
+    const requestPlusTools = getPref('requestPlusTools');
+    return supportsVision || requestPlusTools;
+}
+
+/**
  * Extended validation state that includes UI state (isValidating)
  * Combines manager result with atom-managed state
  */
-export interface ItemValidationState extends ItemValidationResult {
+export type ItemValidationState = (ItemValidationResult | {
+    state: 'checking';
+    isValid: true;
+    reason?: undefined;
+}) & {
     isValidating: boolean;
-}
+};
 
 /**
  * Store validation results for items
@@ -51,6 +68,7 @@ export const validateItemAtom = atom(
         const results = get(itemValidationResultsAtom);
         const newResults = new Map(results);
         newResults.set(itemKey, {
+            state: 'checking',
             isValid: true,
             isValidating: true
         });
@@ -58,7 +76,9 @@ export const validateItemAtom = atom(
         
         try {
             const options: ItemValidationOptions = {
-                forceRefresh
+                forceRefresh,
+                searchableLibraryIds: get(searchableLibraryIdsAtom),
+                canHandleOCRLocally: canHandleOCRLocally(get),
             };
             
             const result = await itemValidationManager.validateItem(item, options);
@@ -80,6 +100,7 @@ export const validateItemAtom = atom(
             // Update with error result
             const errorResults = new Map(get(itemValidationResultsAtom));
             errorResults.set(itemKey, {
+                state: 'blocked',
                 isValid: false,
                 reason: `Validation error: ${error.message}`,
                 isValidating: false
@@ -141,6 +162,7 @@ export const validateRegularItemAtom = atom(
         const results = get(itemValidationResultsAtom);
         const newResults = new Map(results);
         newResults.set(itemKey, {
+            state: 'checking',
             isValid: true,
             isValidating: true
         });
@@ -151,6 +173,7 @@ export const validateRegularItemAtom = atom(
         for (const attachment of attachments) {
             const attachmentKey = getItemKey(attachment);
             newResults.set(attachmentKey, {
+                state: 'checking',
                 isValid: true,
                 isValidating: true
             });
@@ -158,15 +181,23 @@ export const validateRegularItemAtom = atom(
         set(itemValidationResultsAtom, newResults);
         
         try {
-            const result = await itemValidationManager.validateRegularItem(item);
+            const result = await itemValidationManager.validateRegularItem(item, {
+                searchableLibraryIds: get(searchableLibraryIdsAtom),
+                canHandleOCRLocally: canHandleOCRLocally(get),
+            });
             
             // Update validation results for item and all attachments
             const updatedResults = new Map(get(itemValidationResultsAtom));
             
             // Update item itself
             updatedResults.set(itemKey, {
+                state: result.state,
                 isValid: result.isValid,
                 reason: result.reason,
+                statusCode: result.statusCode,
+                contentKind: result.contentKind,
+                pageCount: result.pageCount,
+                attachmentInfo: result.attachmentInfo,
                 isValidating: false
             });
             
@@ -176,6 +207,17 @@ export const validateRegularItemAtom = atom(
                     ...attachmentResult,
                     isValidating: false
                 });
+            }
+            for (const attachment of attachments) {
+                const attachmentKey = getItemKey(attachment);
+                if (!result.attachmentResults.has(attachmentKey)) {
+                    updatedResults.set(attachmentKey, {
+                        state: 'blocked',
+                        isValid: false,
+                        reason: 'Unable to validate attachment',
+                        isValidating: false
+                    });
+                }
             }
             
             set(itemValidationResultsAtom, updatedResults);
@@ -189,6 +231,7 @@ export const validateRegularItemAtom = atom(
             // Update with error result for item and attachments
             const errorResults = new Map(get(itemValidationResultsAtom));
             errorResults.set(itemKey, {
+                state: 'blocked',
                 isValid: false,
                 reason: `Validation error: ${error.message}`,
                 isValidating: false
@@ -198,6 +241,7 @@ export const validateRegularItemAtom = atom(
             for (const attachment of attachments) {
                 const attachmentKey = getItemKey(attachment);
                 errorResults.set(attachmentKey, {
+                    state: 'blocked',
                     isValid: false,
                     reason: `Validation error: ${error.message}`,
                     isValidating: false

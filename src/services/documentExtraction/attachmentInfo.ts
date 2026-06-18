@@ -102,6 +102,19 @@ async function checkAttachmentAvailability(
             }
         } catch (error) {
             logger(`getAttachmentInfo: IOUtils.stat failed for ${filePath}: ${error}`, 2);
+            if (isRemoteAccessAvailable(attachment)) {
+                return {
+                    available: true,
+                    filePath: makeRemoteFilePath(attachment),
+                    contentType: attachment.attachmentContentType || 'application/octet-stream',
+                };
+            }
+            const isFileAvailableOnServer = isAttachmentAvailableRemotely(attachment);
+            return {
+                available: false,
+                fileExistsLocally: false,
+                status_code: isFileAvailableOnServer ? 'file_not_local_remote' : 'file_not_local',
+            };
         }
     }
 
