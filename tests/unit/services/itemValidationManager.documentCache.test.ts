@@ -247,7 +247,8 @@ describe('ItemValidationManager unified attachment-info validation', () => {
             state: 'readable',
         });
         expect(result.attachmentResults.get('1-UNREAD1')).toMatchObject({
-            state: 'unreadable',
+            state: 'blocked',
+            severity: 'error',
             statusCode: 'epub_no_text',
         });
     });
@@ -327,6 +328,24 @@ describe('resultFromAttachmentInfo', () => {
             severity: 'error',
             contentKind: 'image',
         });
+    });
+
+    it('blocks image-only EPUBs', () => {
+        const result = resultFromAttachmentInfo(attachmentInfo({
+            content_kind: 'epub',
+            status: 'unreadable',
+            status_code: 'epub_no_text',
+            status_reason: 'EPUB contains no extractable text (image-only or scanned book).',
+            page_count: null,
+        }));
+
+        expect(result).toMatchObject({
+            state: 'blocked',
+            severity: 'error',
+            statusCode: 'epub_no_text',
+            contentKind: 'epub',
+        });
+        expect(result.reason).toContain('no extractable text');
     });
 
     it('blocks missing local files before they reach composition', () => {

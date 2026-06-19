@@ -157,11 +157,14 @@ export function resultFromAttachmentInfo(
     if (info.status_code === 'pdf_needs_ocr') {
         return blockedResult(reasonFromAttachmentInfo(info) || 'PDF requires OCR (no text layer). Select a model with vision support or enabled Plus Tools.', base);
     }
+    if (info.status_code === 'epub_no_text') {
+        return blockedResult(reasonFromAttachmentInfo(info) || 'EPUB contains no extractable text', base);
+    }
     if (info.status === 'readable' || info.status === 'processing') {
         return readableResult(base);
     }
     const severity: ItemValidationSeverity =
-        info.status_code === 'pdf_needs_ocr' || info.status_code === 'epub_no_text'
+        info.status_code === 'pdf_needs_ocr'
             ? 'info'
             : 'error';
     return unreadableResult(reasonFromAttachmentInfo(info), base, severity);
