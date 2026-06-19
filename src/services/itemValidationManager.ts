@@ -132,10 +132,9 @@ export function resultFromAttachmentInfo(
     if (info.content_kind === 'pdf' && info.page_count != null) {
         const maxPageCount = effectiveMaxPageCount();
         if (info.page_count > maxPageCount) {
-            return unreadableResult(
+            return blockedResult(
                 `PDF has ${info.page_count} pages, which exceeds the ${maxPageCount}-page limit.`,
                 base,
-                'info',
             );
         }
     }

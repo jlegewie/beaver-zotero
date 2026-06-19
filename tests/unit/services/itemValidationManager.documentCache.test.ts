@@ -186,7 +186,7 @@ describe('ItemValidationManager unified attachment-info validation', () => {
         });
     });
 
-    it('marks PDFs over the effective page-count limit as informationally unreadable', async () => {
+    it('blocks PDFs over the effective page-count limit', async () => {
         getAttachmentInfoMock.mockResolvedValueOnce(attachmentInfo({
             status: 'readable',
             page_count: HARD_ATTACHMENT_LIMITS.maxPageCount + 1,
@@ -198,8 +198,8 @@ describe('ItemValidationManager unified attachment-info validation', () => {
         });
 
         expect(result).toMatchObject({
-            state: 'unreadable',
-            severity: 'info',
+            state: 'blocked',
+            severity: 'error',
             contentKind: 'pdf',
             pageCount: HARD_ATTACHMENT_LIMITS.maxPageCount + 1,
         });
@@ -267,15 +267,15 @@ describe('ItemValidationManager unified attachment-info validation', () => {
 });
 
 describe('resultFromAttachmentInfo', () => {
-    it('keeps over-page-limit PDFs as soft unreadable results', () => {
+    it('blocks over-page-limit PDFs', () => {
         const result = resultFromAttachmentInfo(attachmentInfo({
             status: 'readable',
             page_count: HARD_ATTACHMENT_LIMITS.maxPageCount + 1,
         }));
 
         expect(result).toMatchObject({
-            state: 'unreadable',
-            severity: 'info',
+            state: 'blocked',
+            severity: 'error',
             statusCode: undefined,
             contentKind: 'pdf',
             pageCount: HARD_ATTACHMENT_LIMITS.maxPageCount + 1,
