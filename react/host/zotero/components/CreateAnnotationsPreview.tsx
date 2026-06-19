@@ -2,6 +2,8 @@ import React, { useCallback, useRef } from 'react';
 import { ZoteroIcon, ZOTERO_ICONS } from '../../../components/icons/ZoteroIcon';
 import { AlertIcon, Icon } from '../../../components/icons/icons';
 import { navigateToAnnotation, navigateToPage } from '../../../utils/readerUtils';
+import { navigateToEpubCitation } from '../../../utils/epubVisualizer/epubCitationNavigation';
+import type { SymbolicLocation } from '../../../types/citations';
 import {
     BeaverTemporaryAnnotations,
     createBoundingBoxHighlights,
@@ -204,13 +206,43 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
                 }
             }
 
-            // The inline reader preview below is PDF-only (page navigation +
-            // bounding-box temporary highlights). EPUB created items are handled
-            // by navigateToAnnotation above; pending EPUB items have no inline
-            // preview, so clicking is a no-op rather than a mis-navigation.
-            if (isEpubItem(item)) return;
-
             if (!resolvedRef?.zotero_key || typeof resolvedRef.library_id !== 'number') return;
+
+            // EPUB pending preview: flash a temporary highlight at the cited
+            // section/passage via the citation-navigation path (the inline
+            // PDF preview below uses page geometry EPUB items don't have).
+            // Created EPUB items are handled by navigateToAnnotation above.
+            if (isEpubItem(item)) {
+                const epubItem = await Zotero.Items.getByLibraryAndKeyAsync(
+                    resolvedRef.library_id,
+                    resolvedRef.zotero_key,
+                );
+                if (!epubItem) return;
+                const rawItem = item as any;
+                const sectionHref = rawItem.section_href ?? rawItem.sectionHref ?? undefined;
+                const anchorId = rawItem.anchor_id ?? rawItem.anchorId ?? undefined;
+                const searchText = (kind === 'highlight'
+                    ? rawItem.text
+                    : (rawItem.text ?? rawItem.comment)) ?? undefined;
+                const rawPageLabel = rawItem.page_label ?? rawItem.pageLabel;
+                const sectionOrdinal = typeof rawPageLabel === 'string' && /^\d+$/.test(rawPageLabel)
+                    ? Number(rawPageLabel)
+                    : undefined;
+                const symbolicLocation: SymbolicLocation | undefined = sectionHref
+                    ? { content_kind: 'epub', section_href: sectionHref, anchor_id: anchorId, text: searchText }
+                    : undefined;
+                await navigateToEpubCitation({
+                    item: epubItem as Zotero.Item,
+                    symbolicLocation,
+                    sectionOrdinal,
+                    searchText,
+                    previewText: searchText,
+                    useTemporaryAnnotations: true,
+                    ownerDocument,
+                });
+                return;
+            }
+
             const pageIndex = pageIndexForItem(kind, item);
             const pdfItem = await Zotero.Items.getByLibraryAndKeyAsync(
                 resolvedRef.library_id,

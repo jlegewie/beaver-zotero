@@ -95,14 +95,23 @@ export async function handleTestEpubAnnotationParityHttpRequest(request: any): P
         const headless = await resolveEpubAnnotationTarget(filePath, target);
         const headlessOk = !('error' in headless);
 
+        // The reader stores '' for the page label unless the EPUB has confident
+        // physical paging (epub-view.ts: isPhysical && getPageLabel || '').
+        let readerPageLabel: string | null = null;
+        if (resolved?.range) {
+            const annotation = annotationFromRange(primaryView, resolved.range, 'highlight', '#ffd400');
+            readerPageLabel = (annotation as any)?.pageLabel ?? '';
+        }
+
         results.push({
             target: raw,
-            reader: { cfi: readerCfi, sort_index: readerSortIndex, text: readerText },
+            reader: { cfi: readerCfi, sort_index: readerSortIndex, text: readerText, page_label: readerPageLabel },
             headless: headlessOk
-                ? { cfi: headless.position.value, sort_index: headless.sortIndex, text: headless.text }
+                ? { cfi: headless.position.value, sort_index: headless.sortIndex, text: headless.text, page_label: headless.pageLabel }
                 : { error: headless.error, message: (headless as any).message },
             cfi_match: readerCfi != null && headlessOk ? readerCfi === headless.position.value : null,
             sort_index_match: readerSortIndex != null && headlessOk ? readerSortIndex === headless.sortIndex : null,
+            page_label_match: readerPageLabel != null && headlessOk ? readerPageLabel === headless.pageLabel : null,
         });
     }
 

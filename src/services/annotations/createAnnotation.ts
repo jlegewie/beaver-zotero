@@ -503,7 +503,10 @@ export async function createEpubHighlightAnnotation(
     item.annotationText = resolved.text;
     item.annotationComment = input.comment ?? "";
     item.annotationColor = resolveBeaverAnnotationColor(input.color);
-    item.annotationPageLabel = firstNonBlankPageLabel(input.pageLabel) ?? "";
+    // The reader stores the print page label only for EPUBs with confident
+    // physical paging, else ''. The resolver computes that headlessly; the
+    // section ordinal in input.pageLabel is a locator fallback, not a label.
+    item.annotationPageLabel = resolved.pageLabel;
     const sortIndexField: Pick<ZoteroAnnotationItem, "annotationSortIndex"> = {
         annotationSortIndex: resolved.sortIndex,
     };
@@ -540,7 +543,8 @@ export async function createEpubNoteAnnotation(
     item.annotationType = "note";
     item.annotationComment = input.comment;
     item.annotationColor = resolveBeaverAnnotationColor(input.color);
-    item.annotationPageLabel = firstNonBlankPageLabel(input.pageLabel) ?? "";
+    // See createEpubHighlightAnnotation: '' unless the EPUB has physical paging.
+    item.annotationPageLabel = resolved.pageLabel;
     const sortIndexField: Pick<ZoteroAnnotationItem, "annotationSortIndex"> = {
         annotationSortIndex: resolved.sortIndex,
     };
