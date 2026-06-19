@@ -8,6 +8,8 @@ import { useSetAtom, useAtomValue } from 'jotai';
 import { searchableLibraryIdsAtom } from '../../atoms/profile';
 import { attachExternalFile } from '../../../src/services/externalFiles';
 import type { ExternalFileRecord } from '../../../src/services/database';
+import { selectedModelAtom } from '../../atoms/models';
+import { requestPlusToolsAtom } from '../../atoms/ui';
 
 interface DragDropWrapperProps {
     children: React.ReactNode;
@@ -51,6 +53,8 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
     const addItemToCurrentMessageItems = useSetAtom(addItemToCurrentMessageItemsAtom);
     const addExternalFilesToCurrentMessage = useSetAtom(addExternalFilesToCurrentMessageAtom);
     const searchableLibraryIds = useAtomValue(searchableLibraryIdsAtom);
+    const selectedModel = useAtomValue(selectedModelAtom);
+    const requestPlusTools = useAtomValue(requestPlusToolsAtom);
     const setCurrentMessageFilters = useSetAtom(currentMessageFiltersAtom);
 
     const maxAddAttachmentToMessage = getPref('maxAddAttachmentToMessage') as number || 10;
@@ -436,8 +440,12 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
                 return;
             }
             const attached: ExternalFileRecord[] = [];
+            const supportsVision = selectedModel?.supports_vision === true;
             for (const file of files) {
-                const result = await attachExternalFile(file);
+                const result = await attachExternalFile(file, {
+                    supportsVision,
+                    canHandleOCRLocally: supportsVision || Boolean(requestPlusTools),
+                });
                 if (result.status === 'attached') {
                     attached.push(result.record);
                 } else {

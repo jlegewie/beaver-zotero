@@ -114,7 +114,7 @@ describe('ItemValidationManager unified attachment-info validation', () => {
         });
 
         expect(result).toMatchObject({
-            state: 'unreadable',
+            state: 'blocked',
             statusCode: 'pdf_needs_ocr',
             contentKind: 'pdf',
             pageCount: 8,
@@ -139,6 +139,50 @@ describe('ItemValidationManager unified attachment-info validation', () => {
             statusCode: 'pdf_needs_ocr',
             contentKind: 'pdf',
             pageCount: 8,
+        });
+    });
+
+    it('blocks image attachments when the selected model lacks vision support', async () => {
+        getAttachmentInfoMock.mockResolvedValueOnce(attachmentInfo({
+            content_kind: 'image',
+            status: 'readable',
+            page_count: null,
+        }));
+
+        const result = await itemValidationManager.validateItem(makeAttachment({
+            attachmentContentType: 'image/png',
+            attachmentFilename: 'figure.png',
+        }), {
+            searchableLibraryIds: [1],
+            supportsVision: false,
+        });
+
+        expect(result).toMatchObject({
+            state: 'blocked',
+            statusCode: undefined,
+            contentKind: 'image',
+        });
+        expect(result.reason).toContain('vision');
+    });
+
+    it('allows image attachments when the selected model supports vision', async () => {
+        getAttachmentInfoMock.mockResolvedValueOnce(attachmentInfo({
+            content_kind: 'image',
+            status: 'readable',
+            page_count: null,
+        }));
+
+        const result = await itemValidationManager.validateItem(makeAttachment({
+            attachmentContentType: 'image/png',
+            attachmentFilename: 'figure.png',
+        }), {
+            searchableLibraryIds: [1],
+            supportsVision: true,
+        });
+
+        expect(result).toMatchObject({
+            state: 'readable',
+            contentKind: 'image',
         });
     });
 
@@ -239,7 +283,7 @@ describe('resultFromAttachmentInfo', () => {
         expect(result.reason).toContain(`exceeds the ${HARD_ATTACHMENT_LIMITS.maxPageCount}-page limit`);
     });
 
-    it('keeps scanned PDFs as soft unreadable without local OCR support', () => {
+    it('blocks scanned PDFs without local OCR support', () => {
         const result = resultFromAttachmentInfo(attachmentInfo({
             status: 'unreadable',
             status_code: 'pdf_needs_ocr',
@@ -247,8 +291,8 @@ describe('resultFromAttachmentInfo', () => {
         }));
 
         expect(result).toMatchObject({
-            state: 'unreadable',
-            severity: 'info',
+            state: 'blocked',
+            severity: 'error',
             statusCode: 'pdf_needs_ocr',
         });
         expect(result.reason).toContain('PDF requires OCR');
@@ -266,6 +310,22 @@ describe('resultFromAttachmentInfo', () => {
         expect(result).toMatchObject({
             state: 'readable',
             statusCode: 'pdf_needs_ocr',
+        });
+    });
+
+    it('blocks readable images without vision support', () => {
+        const result = resultFromAttachmentInfo(attachmentInfo({
+            content_kind: 'image',
+            status: 'readable',
+            page_count: null,
+        }), {
+            supportsVision: false,
+        });
+
+        expect(result).toMatchObject({
+            state: 'blocked',
+            severity: 'error',
+            contentKind: 'image',
         });
     });
 

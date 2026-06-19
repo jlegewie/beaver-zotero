@@ -18,13 +18,19 @@ function getItemKey(item: Zotero.Item): string {
 }
 
 /**
+ * Return whether the active selected model can receive images.
+ */
+function supportsVision(get: any): boolean {
+    const selectedModel = get(selectedModelAtom);
+    return selectedModel?.supports_vision === true;
+}
+
+/**
  * Return whether the active client setup can use scanned/OCR-only PDFs.
  */
 function canHandleOCRLocally(get: any): boolean {
-    const selectedModel = get(selectedModelAtom);
-    const supportsVision = selectedModel?.supports_vision === true;
     const requestPlusTools = getPref('requestPlusTools');
-    return supportsVision || requestPlusTools;
+    return supportsVision(get) || requestPlusTools;
 }
 
 /**
@@ -104,6 +110,7 @@ export const validateItemAtom = atom(
         try {
             const options: ItemValidationOptions = {
                 searchableLibraryIds: get(searchableLibraryIdsAtom),
+                supportsVision: supportsVision(get),
                 canHandleOCRLocally: canHandleOCRLocally(get),
             };
             
@@ -208,6 +215,7 @@ export const validateRegularItemAtom = atom(
         try {
             const result = await itemValidationManager.validateRegularItem(item, {
                 searchableLibraryIds: get(searchableLibraryIdsAtom),
+                supportsVision: supportsVision(get),
                 canHandleOCRLocally: canHandleOCRLocally(get),
             });
             

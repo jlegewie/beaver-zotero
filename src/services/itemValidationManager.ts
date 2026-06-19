@@ -40,6 +40,7 @@ export interface RegularItemValidationResult extends ItemValidationResult {
  */
 export interface ItemValidationOptions {
     searchableLibraryIds?: number[];
+    supportsVision?: boolean;
     canHandleOCRLocally?: boolean;
 }
 
@@ -98,7 +99,7 @@ function reasonFromAttachmentInfo(info: AttachmentInfo): string | undefined {
         return 'PDF file is invalid or corrupted';
     }
     if (info.status_code === 'pdf_needs_ocr') {
-        return 'PDF requires OCR (no text layer).';
+        return 'PDF requires OCR (no text layer). Select a model with vision support or enabled Plus Tools.';
     }
     if (info.status_code === 'pdf_parser_crash') {
         return 'PDF crashes the local PDF parser';
@@ -145,11 +146,17 @@ export function resultFromAttachmentInfo(
     ) {
         return blockedResult(reasonFromAttachmentInfo(info) || 'Attachment is not available to Beaver', base);
     }
+    if (info.content_kind === 'image' && !options.supportsVision) {
+        return blockedResult('Images require a model with vision support.', base);
+    }
     if (info.status_code === 'pdf_needs_ocr' && options.canHandleOCRLocally) {
         return readableResult({
             ...base,
             reason: reasonFromAttachmentInfo(info),
         });
+    }
+    if (info.status_code === 'pdf_needs_ocr') {
+        return blockedResult(reasonFromAttachmentInfo(info) || 'PDF requires OCR (no text layer). Select a model with vision support or enabled Plus Tools.', base);
     }
     if (info.status === 'readable' || info.status === 'processing') {
         return readableResult(base);
