@@ -301,7 +301,7 @@ export const addRegularItemPopupAtom = atom(
         getValidation: (item: Zotero.Item) => ItemValidationState | undefined;
     }) => {
         const itemSummary = buildRegularItemPopupSummary(item, getValidation);
-        const hasIssues = itemSummary.totalAttachments === 0 || itemSummary.unreadableAttachments > 0;
+        const hasIssues = itemSummary.unreadableAttachments > 0;
 
         // Always show popup for regular items
         set(addPopupMessageAtom, {
@@ -336,7 +336,7 @@ export const addRegularItemsSummaryPopupAtom = atom(
 
         // Determine if there are any issues
         const hasIssues = itemsSummary.some(summary => 
-            summary.totalAttachments === 0 || summary.unreadableAttachments > 0
+            summary.unreadableAttachments > 0
         );
 
         // Show summary popup

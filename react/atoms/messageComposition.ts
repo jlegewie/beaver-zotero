@@ -317,7 +317,7 @@ function shouldShowRegularItemAddedPopup(
     getValidation: (item: Zotero.Item) => ItemValidationState | undefined,
 ): boolean {
     const attachments = safeChildAttachments(item);
-    if (attachments.length === 0) return true;
+    if (attachments.length === 0) return false;
 
     return attachments.some((attachment) => {
         const validation = getValidation(attachment);
