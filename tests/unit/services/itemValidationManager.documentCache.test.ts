@@ -24,7 +24,7 @@ vi.mock('../../../src/services/documentExtraction/attachmentInfoBatch', () => ({
     processAttachmentInfoBatch: processAttachmentInfoBatchMock,
 }));
 
-import { itemValidationManager } from '../../../src/services/itemValidationManager';
+import { itemValidationManager, resultFromAttachmentInfo } from '../../../src/services/itemValidationManager';
 import { HARD_ATTACHMENT_LIMITS } from '../../../src/services/attachmentLimits';
 
 type ValidationItem = Parameters<typeof itemValidationManager.validateItem>[0];
@@ -79,7 +79,6 @@ function attachmentInfo(overrides: Partial<AttachmentInfo> = {}): AttachmentInfo
 describe('ItemValidationManager unified attachment-info validation', () => {
     beforeEach(() => {
         vi.clearAllMocks();
-        itemValidationManager.clearCache();
         (globalThis as any).Zotero.Libraries.get = vi.fn(() => ({ name: 'Library' }));
         getAttachmentInfoMock.mockResolvedValue(attachmentInfo());
         prepareAttachmentInfoBatchDataMock.mockResolvedValue({ bestAttachmentMap: new Map([[20, 10]]) });
@@ -112,7 +111,6 @@ describe('ItemValidationManager unified attachment-info validation', () => {
 
         const result = await itemValidationManager.validateItem(makeAttachment(), {
             searchableLibraryIds: [1],
-            forceRefresh: true,
         });
 
         expect(result).toMatchObject({
@@ -134,7 +132,6 @@ describe('ItemValidationManager unified attachment-info validation', () => {
         const result = await itemValidationManager.validateItem(makeAttachment(), {
             searchableLibraryIds: [1],
             canHandleOCRLocally: true,
-            forceRefresh: true,
         });
 
         expect(result).toMatchObject({
@@ -145,7 +142,7 @@ describe('ItemValidationManager unified attachment-info validation', () => {
         });
     });
 
-    it('rejects PDFs over the effective page-count limit', async () => {
+    it('marks PDFs over the effective page-count limit as informationally unreadable', async () => {
         getAttachmentInfoMock.mockResolvedValueOnce(attachmentInfo({
             status: 'readable',
             page_count: HARD_ATTACHMENT_LIMITS.maxPageCount + 1,
@@ -154,11 +151,11 @@ describe('ItemValidationManager unified attachment-info validation', () => {
         const result = await itemValidationManager.validateItem(makeAttachment(), {
             searchableLibraryIds: [1],
             canHandleOCRLocally: true,
-            forceRefresh: true,
         });
 
         expect(result).toMatchObject({
             state: 'unreadable',
+            severity: 'info',
             contentKind: 'pdf',
             pageCount: HARD_ATTACHMENT_LIMITS.maxPageCount + 1,
         });
@@ -168,7 +165,6 @@ describe('ItemValidationManager unified attachment-info validation', () => {
     it('blocks excluded libraries before reading attachment info', async () => {
         const result = await itemValidationManager.validateItem(makeAttachment(), {
             searchableLibraryIds: [2],
-            forceRefresh: true,
         });
 
         expect(result).toMatchObject({
@@ -223,5 +219,81 @@ describe('ItemValidationManager unified attachment-info validation', () => {
         });
         expect(result.attachmentResults.size).toBe(0);
         expect(processAttachmentInfoBatchMock).not.toHaveBeenCalled();
+    });
+});
+
+describe('resultFromAttachmentInfo', () => {
+    it('keeps over-page-limit PDFs as soft unreadable results', () => {
+        const result = resultFromAttachmentInfo(attachmentInfo({
+            status: 'readable',
+            page_count: HARD_ATTACHMENT_LIMITS.maxPageCount + 1,
+        }));
+
+        expect(result).toMatchObject({
+            state: 'unreadable',
+            severity: 'info',
+            statusCode: undefined,
+            contentKind: 'pdf',
+            pageCount: HARD_ATTACHMENT_LIMITS.maxPageCount + 1,
+        });
+        expect(result.reason).toContain(`exceeds the ${HARD_ATTACHMENT_LIMITS.maxPageCount}-page limit`);
+    });
+
+    it('keeps scanned PDFs as soft unreadable without local OCR support', () => {
+        const result = resultFromAttachmentInfo(attachmentInfo({
+            status: 'unreadable',
+            status_code: 'pdf_needs_ocr',
+            page_count: 8,
+        }));
+
+        expect(result).toMatchObject({
+            state: 'unreadable',
+            severity: 'info',
+            statusCode: 'pdf_needs_ocr',
+        });
+        expect(result.reason).toContain('PDF requires OCR');
+    });
+
+    it('promotes scanned PDFs to readable when local OCR is available', () => {
+        const result = resultFromAttachmentInfo(attachmentInfo({
+            status: 'unreadable',
+            status_code: 'pdf_needs_ocr',
+            page_count: 8,
+        }), {
+            canHandleOCRLocally: true,
+        });
+
+        expect(result).toMatchObject({
+            state: 'readable',
+            statusCode: 'pdf_needs_ocr',
+        });
+    });
+
+    it('blocks missing local files before they reach composition', () => {
+        const result = resultFromAttachmentInfo(attachmentInfo({
+            status: 'unreadable',
+            status_code: 'file_not_local',
+        }));
+
+        expect(result).toMatchObject({
+            state: 'blocked',
+            severity: 'error',
+            statusCode: 'file_not_local',
+        });
+        expect(result.reason).toContain('not available locally');
+    });
+
+    it('maps encrypted PDFs to hard unreadable results', () => {
+        const result = resultFromAttachmentInfo(attachmentInfo({
+            status: 'unreadable',
+            status_code: 'pdf_encrypted',
+        }));
+
+        expect(result).toMatchObject({
+            state: 'unreadable',
+            severity: 'error',
+            statusCode: 'pdf_encrypted',
+        });
+        expect(result.reason).toContain('password-protected');
     });
 });

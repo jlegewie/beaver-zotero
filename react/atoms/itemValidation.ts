@@ -2,7 +2,8 @@ import { atom } from 'jotai';
 import { 
     itemValidationManager, 
     ItemValidationResult,
-    ItemValidationOptions 
+    ItemValidationOptions,
+    type ItemValidationSeverity,
 } from '../../src/services/itemValidationManager';
 import { logger } from '../../src/utils/logger';
 import { searchableLibraryIdsAtom } from './profile';
@@ -54,11 +55,15 @@ export function isHardBlockedValidation(
  */
 export function isRejectedItemValidation(
     item: Zotero.Item,
-    validation: Pick<ItemValidationState, 'state' | 'isValidating'> | undefined | null,
+    validation: {
+        state: ItemValidationState['state'];
+        isValidating: boolean;
+        severity?: ItemValidationSeverity;
+    } | undefined | null,
 ): boolean {
     if (!validation || validation.isValidating) return false;
     if (validation.state === 'blocked') return true;
-    return item.isAttachment() && validation.state === 'unreadable';
+    return item.isAttachment() && validation.state === 'unreadable' && validation.severity !== 'info';
 }
 
 /**
@@ -83,8 +88,8 @@ export const getItemValidationAtom = atom((get) => (item: Zotero.Item) => {
  */
 export const validateItemAtom = atom(
     null,
-    async (get, set, params: { item: Zotero.Item; forceRefresh?: boolean }) => {
-        const { item, forceRefresh = false } = params;
+    async (get, set, params: { item: Zotero.Item }) => {
+        const { item } = params;
         const itemKey = getItemKey(item);
         
         // Set validating state (optimistic, assume valid until checked)
@@ -98,7 +103,6 @@ export const validateItemAtom = atom(
         
         try {
             const options: ItemValidationOptions = {
-                forceRefresh,
                 searchableLibraryIds: get(searchableLibraryIdsAtom),
                 canHandleOCRLocally: canHandleOCRLocally(get),
             };
@@ -123,6 +127,7 @@ export const validateItemAtom = atom(
             const errorResults = new Map(get(itemValidationResultsAtom));
             errorResults.set(itemKey, {
                 state: 'blocked',
+                severity: 'error',
                 reason: `Validation error: ${error.message}`,
                 isValidating: false
             });
@@ -139,14 +144,14 @@ export const validateItemAtom = atom(
  */
 export const validateItemsAtom = atom(
     null,
-    async (get, set, params: { items: Zotero.Item[]; forceRefresh?: boolean }) => {
-        const { items, forceRefresh = false } = params;
+    async (get, set, params: { items: Zotero.Item[] }) => {
+        const { items } = params;
         
         logger(`Validating ${items.length} items`, 3);
         
         // Validate all items in parallel
         const validationPromises = items.map(item => 
-            set(validateItemAtom, { item, forceRefresh })
+            set(validateItemAtom, { item })
                 .catch(error => {
                     logger(`Validation failed for item ${getItemKey(item)}: ${error.message}`, 2);
                     return null;
@@ -212,6 +217,7 @@ export const validateRegularItemAtom = atom(
             // Update item itself
             updatedResults.set(itemKey, {
                 state: result.state,
+                severity: result.severity,
                 reason: result.reason,
                 statusCode: result.statusCode,
                 contentKind: result.contentKind,
@@ -231,8 +237,9 @@ export const validateRegularItemAtom = atom(
                 const attachmentKey = getItemKey(attachment);
                 if (!result.attachmentResults.has(attachmentKey)) {
                     updatedResults.set(attachmentKey, {
-                        state: 'blocked',
-                        reason: 'Unable to validate attachment',
+                        state: 'unreadable',
+                        severity: 'info',
+                        reason: 'Attachment skipped during readability validation',
                         isValidating: false
                     });
                 }
@@ -250,6 +257,7 @@ export const validateRegularItemAtom = atom(
             const errorResults = new Map(get(itemValidationResultsAtom));
             errorResults.set(itemKey, {
                 state: 'blocked',
+                severity: 'error',
                 reason: `Validation error: ${error.message}`,
                 isValidating: false
             });
@@ -259,6 +267,7 @@ export const validateRegularItemAtom = atom(
                 const attachmentKey = getItemKey(attachment);
                 errorResults.set(attachmentKey, {
                     state: 'blocked',
+                    severity: 'error',
                     reason: `Validation error: ${error.message}`,
                     isValidating: false
                 });
@@ -272,43 +281,10 @@ export const validateRegularItemAtom = atom(
 );
 
 /**
- * Invalidate cache for a specific item
- * Removes the validation result from the map
- */
-export const invalidateItemAtom = atom(
-    null,
-    (get, set, item: Zotero.Item) => {
-        const itemKey = getItemKey(item);
-        const results = get(itemValidationResultsAtom);
-        const newResults = new Map(results);
-        newResults.delete(itemKey);
-        set(itemValidationResultsAtom, newResults);
-        
-        // Also invalidate in the manager's cache
-        itemValidationManager.invalidateItem(item);
-        
-        logger(`Invalidated validation for item ${itemKey}`, 4);
-    }
-);
-
-/**
- * Clear all validation results
- */
-export const clearItemValidationAtom = atom(
-    null,
-    (get, set) => {
-        set(itemValidationResultsAtom, new Map());
-        itemValidationManager.clearCache();
-        logger('Cleared all item validation results', 3);
-    }
-);
-
-/**
  * Get validation stats for debugging
  */
 export const itemValidationStatsAtom = atom((get) => {
     const results = get(itemValidationResultsAtom);
-    const managerStats = itemValidationManager.getCacheStats();
     
     let readableCount = 0;
     let unreadableCount = 0;
@@ -328,7 +304,5 @@ export const itemValidationStatsAtom = atom((get) => {
         unreadableCount,
         blockedCount,
         validatingCount,
-        managerCacheSize: managerStats.size,
-        pendingValidations: managerStats.pendingValidations
     };
 });

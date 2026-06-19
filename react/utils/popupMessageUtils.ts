@@ -240,7 +240,7 @@ export const addAPIKeyMessageAtom = atom(
     }
 );
 
-function safeChildAttachments(item: Zotero.Item): Zotero.Item[] {
+export function safeChildAttachments(item: Zotero.Item): Zotero.Item[] {
     try {
         if (!item.isRegularItem()) return [];
         return item

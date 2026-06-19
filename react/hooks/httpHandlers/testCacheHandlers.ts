@@ -379,7 +379,7 @@ export async function handleTestBestEpubAttachmentHttpRequest(request: any) {
  * the document-cache-backed EPUB checks — without driving the UI.
  */
 export async function handleTestValidateItemHttpRequest(request: any) {
-    const { library_id, zotero_key, force_refresh } = request || {};
+    const { library_id, zotero_key } = request || {};
     if (library_id == null || zotero_key == null) {
         return { ok: false, error: 'Provide library_id + zotero_key' };
     }
@@ -391,12 +391,11 @@ export async function handleTestValidateItemHttpRequest(request: any) {
         '../../../src/services/itemValidationManager'
     );
 
-    const result = await itemValidationManager.validateItem(item, {
-        forceRefresh: force_refresh !== false,
-    });
+    const result = await itemValidationManager.validateItem(item);
     return {
         ok: true,
         state: result.state,
+        severity: result.severity ?? null,
         reason: result.reason ?? null,
         status_code: result.statusCode ?? null,
         content_kind: result.contentKind ?? null,

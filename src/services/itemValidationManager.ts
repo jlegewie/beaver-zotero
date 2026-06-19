@@ -8,12 +8,14 @@ import type { AttachmentInfo, ContentKind } from './documentExtraction/shared/co
 import { effectiveMaxPageCount } from './attachmentLimits';
 
 export type ItemValidationResultState = 'readable' | 'unreadable' | 'blocked';
+export type ItemValidationSeverity = 'info' | 'error';
 
 /**
  * Result of item validation.
  */
 export interface ItemValidationResult {
     state: ItemValidationResultState;
+    severity?: ItemValidationSeverity;
     reason?: string;
     statusCode?: string | null;
     contentKind?: ContentKind;
@@ -37,7 +39,6 @@ export interface RegularItemValidationResult extends ItemValidationResult {
  * Options for validation.
  */
 export interface ItemValidationOptions {
-    forceRefresh?: boolean;
     searchableLibraryIds?: number[];
     canHandleOCRLocally?: boolean;
 }
@@ -55,18 +56,25 @@ function readableResult(overrides: Partial<ItemValidationResult> = {}): ItemVali
     };
 }
 
-function unreadableResult(reason: string | undefined, overrides: Partial<ItemValidationResult> = {}): ItemValidationResult {
+function unreadableResult(
+    reason: string | undefined,
+    overrides: Partial<ItemValidationResult> = {},
+    severity: ItemValidationSeverity = 'error',
+): ItemValidationResult {
     return {
         state: 'unreadable',
+        severity,
         reason,
         ...overrides,
     };
 }
 
-function blockedResult(reason: string): ItemValidationResult {
+function blockedResult(reason: string, overrides: Partial<ItemValidationResult> = {}): ItemValidationResult {
     return {
         state: 'blocked',
+        severity: 'error',
         reason,
+        ...overrides,
     };
 }
 
@@ -79,6 +87,9 @@ function reasonFromAttachmentInfo(info: AttachmentInfo): string | undefined {
     }
     if (info.status_code === 'file_not_local') {
         return 'File is not available locally';
+    }
+    if (info.status_code === 'file_too_large') {
+        return info.status_reason || 'File exceeds the maximum readable size.';
     }
     if (info.status_code === 'pdf_encrypted') {
         return 'PDF is password-protected';
@@ -107,7 +118,7 @@ function reasonFromAttachmentInfo(info: AttachmentInfo): string | undefined {
     return info.status === 'unreadable' ? 'Attachment is not readable by Beaver' : undefined;
 }
 
-function resultFromAttachmentInfo(
+export function resultFromAttachmentInfo(
     info: AttachmentInfo,
     options: ItemValidationOptions = {},
 ): ItemValidationResult {
@@ -123,8 +134,16 @@ function resultFromAttachmentInfo(
             return unreadableResult(
                 `PDF has ${info.page_count} pages, which exceeds the ${maxPageCount}-page limit.`,
                 base,
+                'info',
             );
         }
+    }
+    if (
+        info.status_code === 'file_not_local'
+        || info.status_code === 'file_not_local_remote'
+        || info.status_code === 'file_too_large'
+    ) {
+        return blockedResult(reasonFromAttachmentInfo(info) || 'Attachment is not available to Beaver', base);
     }
     if (info.status_code === 'pdf_needs_ocr' && options.canHandleOCRLocally) {
         return readableResult({
@@ -135,7 +154,11 @@ function resultFromAttachmentInfo(
     if (info.status === 'readable' || info.status === 'processing') {
         return readableResult(base);
     }
-    return unreadableResult(reasonFromAttachmentInfo(info), base);
+    const severity: ItemValidationSeverity =
+        info.status_code === 'pdf_needs_ocr' || info.status_code === 'epub_no_text'
+            ? 'info'
+            : 'error';
+    return unreadableResult(reasonFromAttachmentInfo(info), base, severity);
 }
 
 /**
@@ -270,22 +293,6 @@ class ItemValidationManager {
     }
 
     /**
-     * Invalidate cache for a specific item.
-     */
-    invalidateItem(item: Zotero.Item): void {
-        this.pendingValidations.delete(attachmentId(item));
-        logger(`ItemValidationManager: Invalidated validation for ${attachmentId(item)}`, 4);
-    }
-
-    /**
-     * Clear all cached validation results.
-     */
-    clearCache(): void {
-        this.pendingValidations.clear();
-        logger('ItemValidationManager: Cleared all pending validation results', 3);
-    }
-
-    /**
      * Validate a regular item and all child attachments with unified attachment info.
      */
     async validateRegularItem(
@@ -334,15 +341,6 @@ class ItemValidationManager {
         };
     }
 
-    /**
-     * Get validation statistics for debugging.
-     */
-    getCacheStats(): { size: number; pendingValidations: number } {
-        return {
-            size: 0,
-            pendingValidations: this.pendingValidations.size,
-        };
-    }
 }
 
 export const itemValidationManager = new ItemValidationManager();

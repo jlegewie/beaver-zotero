@@ -3,8 +3,9 @@ import { truncateText } from "../utils/stringUtils";
 import { allUserAttachmentKeysAtom } from "../agents/atoms";
 import { createElement } from 'react';
 import { logger } from "../../src/utils/logger";
-import { addPopupMessageAtom, addRegularItemPopupAtom, addRegularItemsSummaryPopupAtom, removePopupMessageAtom } from "../utils/popupMessageUtils";
+import { addPopupMessageAtom, addRegularItemPopupAtom, addRegularItemsSummaryPopupAtom, removePopupMessageAtom, safeChildAttachments } from "../utils/popupMessageUtils";
 import { getItemValidationAtom, isHardBlockedValidation, isRejectedItemValidation, validateItemsAtom, validateRegularItemAtom } from './itemValidation';
+import type { ItemValidationState } from './itemValidation';
 import { InvalidItemsMessageContent } from '../components/ui/popup/InvalidItemsMessageContent';
 import { agentItemFilter } from "../../src/utils/agentItemSupport";
 import { getCurrentReader } from "../utils/readerUtils";
@@ -311,6 +312,21 @@ export const addItemsToCurrentMessageItemsAtom = atom(
     }
 );
 
+function shouldShowRegularItemAddedPopup(
+    item: Zotero.Item,
+    getValidation: (item: Zotero.Item) => ItemValidationState | undefined,
+): boolean {
+    const attachments = safeChildAttachments(item);
+    if (attachments.length === 0) return true;
+
+    return attachments.some((attachment) => {
+        const validation = getValidation(attachment);
+        return !!validation
+            && !validation.isValidating
+            && (validation.state === 'unreadable' || validation.state === 'blocked');
+    });
+}
+
 /**
  * Validate items in background and remove rejected ones
  * This runs asynchronously without blocking the UI
@@ -347,8 +363,7 @@ async function validateItemsInBackground(
         // Validate standalone attachments individually.
         const attachmentValidationPromises = attachments.map((item) =>
             set(validateItemsAtom, {
-                items: [item],
-                forceRefresh: false
+                items: [item]
             }).catch((error: any) => {
                 logger(`Validation failed for standalone attachment ${item.key}: ${error.message}`, 2);
                 return null;
@@ -359,8 +374,7 @@ async function validateItemsInBackground(
         const annotationValidationPromises = annotations.map((item) => {
             logger(`validateItemsInBackground: Validating annotation ${item.libraryID}-${item.key}`, 3);
             return set(validateItemsAtom, {
-                items: [item],
-                forceRefresh: false
+                items: [item]
             }).catch((error: any) => {
                 logger(`Validation failed for annotation ${item.key}: ${error.message}`, 2);
                 return null;
@@ -370,8 +384,7 @@ async function validateItemsInBackground(
         const noteValidationPromises = notes.map((item) => {
             logger(`validateItemsInBackground: Validating note ${item.libraryID}-${item.key}`, 3);
             return set(validateItemsAtom, {
-                items: [item],
-                forceRefresh: false
+                items: [item]
             }).catch((error: any) => {
                 logger(`Validation failed for note ${item.key}: ${error.message}`, 2);
                 return null;
@@ -385,8 +398,7 @@ async function validateItemsInBackground(
 
         const parentItemValidationPromises = parentItems.map((item) =>
             set(validateItemsAtom, {
-                items: [item],
-                forceRefresh: false
+                items: [item]
             }).catch((error: any) => {
                 logger(`Validation failed for parent item ${item.key}: ${error.message}`, 2);
                 return null;
@@ -464,17 +476,18 @@ async function validateItemsInBackground(
             });
         }
 
-        // Show popup for regular items with invalid attachments or no PDF attachments
-        const validRegularItems = regularItems.filter((item) => {
+        const regularItemsNeedingPopup = regularItems.filter((item) => {
             const validation = getValidation(item);
-            return validation && !isRejectedItemValidation(item, validation);
+            return validation
+                && !isRejectedItemValidation(item, validation)
+                && shouldShowRegularItemAddedPopup(item, getValidation);
         });
         
         // Show individual popup for single item, summary popup for multiple items
-        if (validRegularItems.length === 1) {
-            set(addRegularItemPopupAtom, { item: validRegularItems[0], getValidation });
-        } else if (validRegularItems.length > 1) {
-            set(addRegularItemsSummaryPopupAtom, { items: validRegularItems, getValidation });
+        if (regularItemsNeedingPopup.length === 1) {
+            set(addRegularItemPopupAtom, { item: regularItemsNeedingPopup[0], getValidation });
+        } else if (regularItemsNeedingPopup.length > 1) {
+            set(addRegularItemsSummaryPopupAtom, { items: regularItemsNeedingPopup, getValidation });
         }
 
     } catch (error: any) {

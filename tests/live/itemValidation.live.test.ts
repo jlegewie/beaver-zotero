@@ -51,6 +51,7 @@ describe('frontend validation of attachment kinds', () => {
         const res = await validateItem(ENCRYPTED_PDF.library_id, ENCRYPTED_PDF.zotero_key);
         expect(res.ok).toBe(true);
         expect(res.state).toBe('unreadable');
+        expect(res.severity).toBe('error');
         expect(res.reason).toContain('password-protected');
     }, 60_000);
 

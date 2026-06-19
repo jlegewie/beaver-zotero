@@ -30,6 +30,7 @@ type FileStatusCodeValue =
     | 'unsupported_file_type'
     | 'file_not_local'
     | 'file_not_local_remote'
+    | 'file_too_large'
     | 'pdf_encrypted'
     | 'pdf_invalid'
     | 'pdf_needs_ocr'
@@ -61,6 +62,9 @@ function unreadableTypeReason(kind: ContentKind): string {
     }
     if (kind === 'image') {
         return 'Image attachments cannot be read as text.';
+    }
+    if (kind === 'snapshot') {
+        return 'Beaver cannot read web page snapshots yet.';
     }
     if (isReadableContentKind(kind)) {
         return `Beaver cannot yet read ${contentKindLabel(kind)} attachments.`;
@@ -97,6 +101,7 @@ async function checkAttachmentAvailability(
                 return {
                     available: false,
                     fileExistsLocally: true,
+                    status_code: 'file_too_large',
                     status_reason: `File size of ${fileSizeInMB.toFixed(1)}MB exceeds the ${maxFileSizeMB}MB limit.`,
                 };
             }
@@ -390,13 +395,16 @@ export async function getAttachmentInfo(
         base.annotations_count = item.isFileAttachment?.() ? item.getAnnotations().length : 0;
     }
 
-    if (contentKind === 'linked_url') {
+    // Linked URLs are web links, not files. Snapshots are a recognized content
+    // kind but not agent-readable yet, so they are surfaced as unreadable here
+    // (revisit when end-to-end snapshot support lands).
+    if (contentKind === 'linked_url' || contentKind === 'snapshot') {
         return { ...base, status_reason: unreadableTypeReason(contentKind) };
     }
 
     // PDF, EPUB, and plain text are always readable (text via the line-based
-    // `read` tool); the remaining readable kinds (snapshot/image) stay behind
-    // the nonPdfReadableEnabled option until extraction supports them.
+    // `read` tool); image stays behind the nonPdfReadableEnabled option until
+    // extraction supports it.
     const isUnconditionallyReadable =
         contentKind === 'pdf' || contentKind === 'epub' || contentKind === 'text';
     if (!isReadableContentKind(contentKind) || (!isUnconditionallyReadable && !options.nonPdfReadableEnabled)) {
