@@ -261,7 +261,7 @@ const CreateAnnotationsGroup: React.FC<GroupProps> = ({
 };
 
 /**
- * Summary display for bulk PDF annotation actions (create_highlight_annotations
+ * Summary display for bulk annotation actions (create_highlight_annotations
  * and create_note_annotations) at the end of a completed run. Aggregates
  * applied + pending annotations per kind and renders one expandable card per
  * status × kind bucket (e.g. "Created 4 Highlights"). Each card reuses

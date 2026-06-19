@@ -41,6 +41,12 @@ interface CreateAnnotationsPreviewProps {
 
 const COLOR_VALUES = BEAVER_ANNOTATION_COLORS;
 
+/** EPUB items carry a section/anchor locator instead of PDF page geometry. */
+function isEpubItem(item: HighlightAnnotationItem | NoteAnnotationItem): boolean {
+    const raw = item as any;
+    return (raw.section_href ?? raw.sectionHref ?? raw.anchor_id ?? raw.anchorId) != null;
+}
+
 function pageIndexForItem(kind: 'highlight' | 'note', item: HighlightAnnotationItem | NoteAnnotationItem): number | null {
     const raw = item as any;
     if (kind === 'highlight') {
@@ -103,6 +109,14 @@ function formatAnnotationFailureMessage(
             return 'Could not create annotation because the PDF could not be processed.';
         case 'page_geometry_unavailable':
             return 'Could not create annotation because the target position was not found in the PDF.';
+        case 'epub_section_not_found':
+            return 'Could not create annotation because the cited section was not found in the EPUB.';
+        case 'epub_text_not_found':
+            return 'Could not create annotation because the cited passage was not found in the EPUB.';
+        case 'epub_math_section_unsupported':
+            return 'Could not create annotation because the passage follows a math equation, which is not yet supported.';
+        case 'attachment_file_unavailable':
+            return 'Could not create annotation because the attachment file is not available locally.';
         case 'apply_failed':
             return `Failed to create ${noun}.`;
         default:
@@ -189,6 +203,12 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
                     return;
                 }
             }
+
+            // The inline reader preview below is PDF-only (page navigation +
+            // bounding-box temporary highlights). EPUB created items are handled
+            // by navigateToAnnotation above; pending EPUB items have no inline
+            // preview, so clicking is a no-op rather than a mis-navigation.
+            if (isEpubItem(item)) return;
 
             if (!resolvedRef?.zotero_key || typeof resolvedRef.library_id !== 'number') return;
             const pageIndex = pageIndexForItem(kind, item);
@@ -295,18 +315,22 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
                         const isPartial = itemStatus === 'partial';
                         const isCreated = itemStatus === 'created' || itemStatus === 'partial';
                         const failureMessage = formatAnnotationFailureMessages(failures, noun);
+                        const isEpub = isEpubItem(item);
                         const pageIndex = pageIndexForItem(kind, item);
                         const pageNumber = typeof pageIndex === 'number' ? pageIndex + 1 : null;
                         const pageLabel = pageLabelForItem(kind, item);
                         const pageDisplay = pageLabel ?? (pageNumber !== null ? String(pageNumber) : null);
+                        // EPUB has no page geometry; the chip shows a "Section N"
+                        // label only, and clicking just views created items.
+                        const locationPrefix = isEpub ? 'Section' : 'Page';
 
                         const kindLabel = kind === 'highlight' ? 'Highlight Annotation' : 'Sticky Note';
                         const tooltipContent = text || rawItem.title || '';
                         const footerLabel = isFailed
                             ? failureMessage || `Failed to create ${noun}`
                             : isCreated
-                                ? `Click to view in PDF`
-                                : `Click to preview in PDF`;
+                                ? (isEpub ? `Click to view in reader` : `Click to view in PDF`)
+                                : (isEpub ? `Click to view in reader` : `Click to preview in PDF`);
                         const footerClass = isFailed ? 'font-color-red' : 'font-color-tertiary';
 
                         const isDimmed = status === 'rejected' || status === 'undone';
@@ -332,7 +356,7 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
                                     </div>
                                     {(isFailed || isPartial || pageDisplay !== null) && (
                                         <div className='font-color-tertiary whitespace-nowrap'>
-                                            {pageDisplay !== null ? `Page ${pageDisplay}` : ''}
+                                            {pageDisplay !== null ? `${locationPrefix} ${pageDisplay}` : ''}
                                         </div>
                                     )}
                                 </div>
@@ -345,6 +369,7 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
                                 key={`${clientItemId}-${rawItem.index}`}
                                 typeLabel={kindLabel}
                                 pageDisplay={pageDisplay}
+                                locationPrefix={locationPrefix}
                                 body={tooltipContent}
                                 footerLabel={footerLabel}
                                 footerClassName={footerClass}

@@ -8,6 +8,8 @@ interface AnnotationTooltipProps {
     children: ReactNode;
     typeLabel: string;
     pageDisplay?: string | null;
+    /** Prefix for the location chip (e.g. "Page" for PDF, "Section" for EPUB). */
+    locationPrefix?: string;
     body?: string | null;
     footerLabel: string;
     footerClassName?: string;
@@ -23,6 +25,7 @@ export const AnnotationTooltip: React.FC<AnnotationTooltipProps> = ({
     children,
     typeLabel,
     pageDisplay,
+    locationPrefix = 'Page',
     body,
     footerLabel,
     footerClassName = 'font-color-tertiary',
@@ -41,7 +44,7 @@ export const AnnotationTooltip: React.FC<AnnotationTooltipProps> = ({
                 </span>
                 <span className="flex-1" />
                 {pageDisplay && (
-                    <span className="font-color-secondary text-sm">{`Page ${pageDisplay}`}</span>
+                    <span className="font-color-secondary text-sm">{`${locationPrefix} ${pageDisplay}`}</span>
                 )}
             </span>
             {tooltipBody && (

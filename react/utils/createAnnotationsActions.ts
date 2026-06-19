@@ -12,9 +12,19 @@ import {
     CreateNoteAnnotationsResultData,
     FailedAnnotationResult,
 } from '../types/agentActions/createAnnotations';
-import { MissingPageGeometryError, createHighlightAnnotation, createNoteAnnotation } from '../../src/services/annotations/createAnnotation';
+import {
+    EpubAnnotationError,
+    MissingPageGeometryError,
+    createEpubHighlightAnnotation,
+    createEpubNoteAnnotation,
+    createHighlightAnnotation,
+    createNoteAnnotation,
+} from '../../src/services/annotations/createAnnotation';
+import { getReadableContentKind } from '../../src/services/documentExtraction/attachmentResolution';
 import { getAttachmentFileStatus } from '../../src/services/agentDataProvider/utils';
 import { logger } from '../../src/utils/logger';
+
+type AnnotationContentKind = 'pdf' | 'epub';
 
 function mapAnnotationErrorCode(error: unknown): string {
     if (error instanceof MissingPageGeometryError) {
@@ -22,15 +32,27 @@ function mapAnnotationErrorCode(error: unknown): string {
             ? 'page_extraction_failed'
             : 'page_geometry_unavailable';
     }
+    if (error instanceof EpubAnnotationError) {
+        return error.code;
+    }
     return 'apply_failed';
 }
 
-async function getPdfAttachment(libraryId: number, zoteroKey: string): Promise<Zotero.Item> {
+async function getAnnotationAttachment(
+    libraryId: number,
+    zoteroKey: string,
+): Promise<{ attachment: Zotero.Item; contentKind: AnnotationContentKind }> {
     const attachment = await Zotero.Items.getByLibraryAndKeyAsync(libraryId, zoteroKey);
-    if (!attachment || !attachment.isPDFAttachment()) {
-        throw new Error('Resolved item is not a PDF attachment');
+    const kind = attachment ? getReadableContentKind(attachment) : null;
+    if (!attachment || (kind !== 'pdf' && kind !== 'epub')) {
+        throw new Error('Resolved item is not a PDF or EPUB attachment');
     }
-    return attachment;
+    return { attachment, contentKind: kind };
+}
+
+/** A numeric page_label doubles as the 1-based EPUB section ordinal fallback. */
+function epubSectionOrdinal(pageLabel: string | null | undefined): number | undefined {
+    return pageLabel && /^\d+$/.test(pageLabel) ? Number(pageLabel) : undefined;
 }
 
 /**
@@ -41,7 +63,10 @@ export async function executeCreateHighlightAnnotationsAction(
 ): Promise<CreateHighlightAnnotationsResultData> {
     const data = action.proposed_data as CreateHighlightAnnotationsProposedData;
     const { requested_ref, resolved_ref, items, tags } = data;
-    const attachment = await getPdfAttachment(resolved_ref.library_id, resolved_ref.zotero_key);
+    const { attachment, contentKind } = await getAnnotationAttachment(
+        resolved_ref.library_id,
+        resolved_ref.zotero_key,
+    );
 
     await getAttachmentFileStatus(attachment, false);
 
@@ -49,6 +74,37 @@ export async function executeCreateHighlightAnnotationsAction(
     const failed: FailedAnnotationResult[] = [];
 
     for (const item of items) {
+        if (contentKind === 'epub') {
+            try {
+                const ref = await createEpubHighlightAnnotation(attachment, {
+                    sectionHref: item.section_href ?? undefined,
+                    sectionOrdinal: epubSectionOrdinal(item.page_label),
+                    anchorId: item.anchor_id ?? undefined,
+                    text: item.text ?? '',
+                    color: item.color,
+                    comment: item.comment ?? item.title,
+                    pageLabel: item.page_label ?? null,
+                    tags,
+                });
+                created.push({
+                    client_item_id: item.client_item_id,
+                    index: item.index,
+                    loc_raw: item.loc_raw,
+                    library_id: ref.library_id,
+                    zotero_key: ref.zotero_key,
+                });
+            } catch (error: any) {
+                failed.push({
+                    client_item_id: item.client_item_id,
+                    index: item.index,
+                    loc_raw: item.loc_raw,
+                    error: error?.message ?? String(error),
+                    error_code: mapAnnotationErrorCode(error),
+                });
+            }
+            continue;
+        }
+
         if (!item.page_locations?.length) {
             failed.push({
                 client_item_id: item.client_item_id,
@@ -73,7 +129,7 @@ export async function executeCreateHighlightAnnotationsAction(
                 const ref = await createHighlightAnnotation(attachment, {
                     pageIndex: loc.page_idx,
                     boxes: loc.boxes ?? [],
-                    text: item.text,
+                    text: item.text ?? '',
                     color: item.color,
                     comment: item.comment ?? item.title,
                     pageLabel: loc.page_label ?? itemPageLabelFallback,
@@ -117,7 +173,10 @@ export async function executeCreateNoteAnnotationsAction(
 ): Promise<CreateNoteAnnotationsResultData> {
     const data = action.proposed_data as CreateNoteAnnotationsProposedData;
     const { requested_ref, resolved_ref, items, tags } = data;
-    const attachment = await getPdfAttachment(resolved_ref.library_id, resolved_ref.zotero_key);
+    const { attachment, contentKind } = await getAnnotationAttachment(
+        resolved_ref.library_id,
+        resolved_ref.zotero_key,
+    );
 
     await getAttachmentFileStatus(attachment, false);
 
@@ -126,14 +185,39 @@ export async function executeCreateNoteAnnotationsAction(
 
     for (const item of items) {
         try {
-            const ref = await createNoteAnnotation(attachment, {
-                notePosition: item.note_position,
-                comment: item.comment,
-                color: item.color,
-                pageLabel: item.page_label ?? null,
-                readingOrderOffset: item.reading_order_offset ?? null,
-                tags,
-            });
+            let ref;
+            if (contentKind === 'epub') {
+                ref = await createEpubNoteAnnotation(attachment, {
+                    sectionHref: item.section_href ?? undefined,
+                    sectionOrdinal: epubSectionOrdinal(item.page_label),
+                    anchorId: item.anchor_id ?? undefined,
+                    text: item.text ?? undefined,
+                    comment: item.comment,
+                    color: item.color,
+                    pageLabel: item.page_label ?? null,
+                    tags,
+                });
+            } else {
+                const notePosition = item.note_position;
+                if (!notePosition) {
+                    failed.push({
+                        client_item_id: item.client_item_id,
+                        index: item.index,
+                        loc_raw: item.loc_raw,
+                        error: 'No note position provided',
+                        error_code: 'page_geometry_unavailable',
+                    });
+                    continue;
+                }
+                ref = await createNoteAnnotation(attachment, {
+                    notePosition,
+                    comment: item.comment,
+                    color: item.color,
+                    pageLabel: item.page_label ?? null,
+                    readingOrderOffset: item.reading_order_offset ?? null,
+                    tags,
+                });
+            }
             created.push({
                 client_item_id: item.client_item_id,
                 index: item.index,

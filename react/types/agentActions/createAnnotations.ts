@@ -44,11 +44,17 @@ export interface HighlightAnnotationItem {
     title: string;
     loc_raw: string;
     loc: BackendLocator;
-    text: string;
+    /** Highlighted text. Required for PDF; EPUB also uses it to locate the range. */
+    text?: string;
     color: ToolAnnotationColor;
     comment?: string | null;
-    page_locations: PageLocation[];
+    /** PDF-only: page rects/geometry. Absent for EPUB. */
+    page_locations?: PageLocation[];
     page_label?: string | null;
+    /** EPUB locator (content_kind === 'epub'): section file href, matched by basename. */
+    section_href?: string | null;
+    /** EPUB locator: DOM id of the cited element inside the section. */
+    anchor_id?: string | null;
 }
 
 export interface NoteAnnotationItem {
@@ -60,10 +66,17 @@ export interface NoteAnnotationItem {
     loc: BackendLocator;
     comment: string;
     color: ToolAnnotationColor;
-    note_position: NotePosition;
+    /** PDF-only: page anchor position. Absent for EPUB. */
+    note_position?: NotePosition;
     page_label?: string | null;
     /** Per-page cumulative character offset in reading order (Zotero sortIndex offset). */
     reading_order_offset?: number | null;
+    /** EPUB locator: cited passage text used to anchor the note point. */
+    text?: string;
+    /** EPUB locator: section file href, matched by basename. */
+    section_href?: string | null;
+    /** EPUB locator: DOM id of the cited element inside the section. */
+    anchor_id?: string | null;
 }
 
 export interface CreatedAnnotationResult extends ZoteroItemReference {
