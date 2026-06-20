@@ -406,6 +406,7 @@ async function getEpubPageMapping(
 export async function resolveEpubAnnotationTarget(
     filePath: string,
     target: EpubAnnotationLocator,
+    options?: { skipPageLabel?: boolean },
 ): Promise<ResolvedEpubAnnotation | EpubAnnotationResolveError> {
     let zip: any;
     try {
@@ -455,13 +456,17 @@ export async function resolveEpubAnnotationTarget(
         if (isResolveError(built)) return built;
 
         // Derive the print page label from the EPUB's physical page markers
-        // (empty for EPUBs without confident physical paging), matching the reader.
+        // (empty for EPUBs without confident physical paging), matching the
+        // reader. Skipped for callers that only need the position (e.g. preview
+        // navigation), since the mapping scans every section.
         let pageLabel = "";
-        try {
-            const mapping = await getEpubPageMapping(zip, spine, filePath);
-            pageLabel = epubPageLabelForPosition(mapping, match.rawIndex, built.charOffset);
-        } catch (error) {
-            logger(`[EpubAnnotation] page-label computation failed: ${error}`, 1);
+        if (!options?.skipPageLabel) {
+            try {
+                const mapping = await getEpubPageMapping(zip, spine, filePath);
+                pageLabel = epubPageLabelForPosition(mapping, match.rawIndex, built.charOffset);
+            } catch (error) {
+                logger(`[EpubAnnotation] page-label computation failed: ${error}`, 1);
+            }
         }
 
         const { charOffset: _charOffset, ...annotation } = built;
