@@ -35,20 +35,28 @@ export interface PdfNavPosition {
 export function presentTemporaryAnnotations(
     reader: ZoteroReader,
     annotationReferences: ZoteroItemReference[],
-    options: { ownerDocument?: Document; logContext?: string } = {},
+    options: {
+        ownerDocument?: Document;
+        logContext?: string;
+        ignoredClickRoot?: Element | null;
+        /** Reader location to navigate to. */
+        navigateLocation?: Record<string, any>;
+    } = {},
 ): boolean {
     if (!reader || annotationReferences.length === 0) return false;
 
     BeaverTemporaryAnnotations.addToTracking(annotationReferences);
     installTemporaryAnnotationDismissOnNextClick(reader, {
         ownerDocument: options.ownerDocument,
+        ignoredClickRoot: options.ignoredClickRoot,
         logContext: options.logContext ?? 'presentTemporaryAnnotations',
     });
 
-    const firstAnnotationKey = annotationReferences[0].zotero_key;
+    const location = options.navigateLocation
+        ?? { annotationID: annotationReferences[0].zotero_key };
     // Brief delay so the reader registers the injected annotations before navigating.
     setTimeout(() => {
-        (reader as any).navigate({ annotationID: firstAnnotationKey });
+        (reader as any).navigate(location);
     }, 100);
     return true;
 }

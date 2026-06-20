@@ -6,6 +6,9 @@ import { navigateToAnnotation } from '../../utils/readerUtils';
 import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import { ANNOTATION_ICON_BY_TYPE, ANNOTATION_PREVIEW_TEXT_BY_TYPE } from '../../utils/annotationDisplay';
 import { toAnnotation } from '../../types/attachments/converters';
+import { getReadableContentKind } from '../../../src/services/documentExtraction/attachmentResolution';
+import type { ContentKind } from '../../types/citations';
+import { formatLocationChip } from '../../utils/locationDisplay';
 
 
 interface AnnotationPreviewContentProps {
@@ -60,6 +63,7 @@ const AnnotationPreviewContent: React.FC<AnnotationPreviewContentProps> = ({ ite
     }, [annotation]);
 
     if (!annotation || !annotationIcon || !annotationText) return null;
+    const locationChip = formatLocationChip(annotationContentKind(item), annotation.page_label);
 
     const handleRemove = () => {
         setCurrentMessageItems((prev) => prev.filter((i) => i.key !== annotation.zotero_key))
@@ -119,7 +123,7 @@ const AnnotationPreviewContent: React.FC<AnnotationPreviewContentProps> = ({ ite
                     <ZoteroIcon icon={annotationIcon} size={14} />
                     <div className="font-color-primary">{annotationText}</div>
                     <div className="flex-1" />
-                    {annotation.page_label && <div className="font-color-secondary">Page {annotation.page_label}</div>}
+                    {locationChip && <div className="font-color-secondary">{locationChip}</div>}
                 </div>
                 {renderAnnotationContent()}
             </div>
@@ -160,5 +164,20 @@ const AnnotationPreviewContent: React.FC<AnnotationPreviewContentProps> = ({ ite
         </>
     );
 };
+
+function annotationContentKind(item: Zotero.Item): ContentKind {
+    const parent = item.parentItem;
+    if (parent?.isAttachment?.()) {
+        return getReadableContentKind(parent) ?? 'pdf';
+    }
+    const parentItemID = (item as Zotero.Item & { parentItemID?: number }).parentItemID;
+    if (typeof parentItemID === 'number') {
+        const loadedParent = Zotero.Items.get(parentItemID);
+        if (loadedParent?.isAttachment?.()) {
+            return getReadableContentKind(loadedParent) ?? 'pdf';
+        }
+    }
+    return 'pdf';
+}
 
 export default AnnotationPreviewContent;

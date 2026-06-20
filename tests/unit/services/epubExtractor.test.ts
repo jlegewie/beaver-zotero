@@ -18,7 +18,7 @@ import {
 
 function parseXhtml(markup: string): Document {
     return new DOMParser().parseFromString(
-        `<html xmlns="http://www.w3.org/1999/xhtml"><body>${markup}</body></html>`,
+        `<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><body>${markup}</body></html>`,
         "application/xhtml+xml",
     );
 }
@@ -135,6 +135,86 @@ describe("extractEpubDocument", () => {
             abortSignal: controller.signal,
         })).rejects.toThrow("Operation aborted");
         expect(importESModule).not.toHaveBeenCalled();
+    });
+
+    it("stamps item and sentence page labels for physical EPUB sections", async () => {
+        installEpubModule([
+            { href: "EPUB/one.xhtml", doc: parseXhtml('<a id="page_1"></a><p>First sentence.</p>') },
+            { href: "EPUB/two.xhtml", doc: parseXhtml('<a id="page_2"></a><p>Second sentence.</p>') },
+        ]);
+
+        const doc = await extractEpubDocumentFromFile("/tmp/book.epub");
+
+        expect(doc.sections[0].items[0]).toMatchObject({
+            text: "First sentence.",
+            pageLabel: "1",
+            sentences: [{ text: "First sentence.", pageLabel: "1" }],
+        });
+        expect(doc.sections[1].items[0]).toMatchObject({
+            text: "Second sentence.",
+            pageLabel: "2",
+            sentences: [{ text: "Second sentence.", pageLabel: "2" }],
+        });
+    });
+
+    it("leaves page labels unset when marker coverage is not physical", async () => {
+        installEpubModule([
+            { href: "EPUB/one.xhtml", doc: parseXhtml('<a id="page_1"></a><p>Marked.</p>') },
+            { href: "EPUB/two.xhtml", doc: parseXhtml("<p>Unmarked.</p>") },
+            { href: "EPUB/three.xhtml", doc: parseXhtml("<p>Also unmarked.</p>") },
+        ]);
+
+        const doc = await extractEpubDocumentFromFile("/tmp/book.epub");
+
+        expect(doc.sections[0].items[0].pageLabel).toBeUndefined();
+        expect(doc.sections[0].items[0].sentences?.[0]?.pageLabel).toBeUndefined();
+        expect(doc.sections[1].items[0].pageLabel).toBeUndefined();
+    });
+
+    it("detects mid-paragraph page markers and applies item-level labels", async () => {
+        installEpubModule([
+            {
+                href: "EPUB/one.xhtml",
+                doc: parseXhtml(
+                    '<p><span epub:type="pagebreak" title="1"></span>Before break <span epub:type="pagebreak" title="2"></span>after break.</p>'
+                    + "<p>Next paragraph.</p>",
+                ),
+            },
+        ]);
+
+        const doc = await extractEpubDocumentFromFile("/tmp/book.epub");
+        const [spanningParagraph, nextParagraph] = doc.sections[0].items;
+
+        expect(spanningParagraph).toMatchObject({
+            text: "Before break after break.",
+            pageLabel: "1",
+        });
+        expect(nextParagraph).toMatchObject({
+            text: "Next paragraph.",
+            pageLabel: "2",
+        });
+    });
+
+    it("labels flushed loose text from its emitted first text node", async () => {
+        installEpubModule([
+            {
+                href: "EPUB/one.xhtml",
+                doc: parseXhtml(
+                    '<div><a id="page_1"></a>A text.<p>Middle text.</p><a id="page_2"></a> B text.</div>',
+                ),
+            },
+        ]);
+
+        const doc = await extractEpubDocumentFromFile("/tmp/book.epub");
+
+        expect(doc.sections[0].items.map((item) => ({
+            text: item.text,
+            pageLabel: item.pageLabel,
+        }))).toEqual([
+            { text: "A text.", pageLabel: "1" },
+            { text: "Middle text.", pageLabel: "1" },
+            { text: "B text.", pageLabel: "2" },
+        ]);
     });
 });
 

@@ -82,7 +82,6 @@ const Citation: React.FC<CitationProps> = (props) => {
         consecutive,
         citation,
         previewText,
-        pageLabels,
         pagesDisplay,
         pages,
     } = vm;
@@ -130,14 +129,15 @@ const Citation: React.FC<CitationProps> = (props) => {
 
     // Format for display
     let displayText = '';
+    const hasLocatorDisplay = pagesDisplay.trim().length > 0;
     if (authorYearFormat) {
         if (isStreaming || isInvalid) {
             // We don't know the author/year string yet, or citation is invalid. Render a subtle placeholder.
             displayText = '?';
         } else {
             displayText = consecutive
-                ? (pages.length > 0 ? `p.${pagesDisplay}` : 'Ibid')
-                : (pages.length > 0 ? `${citation}, p.${pagesDisplay}` : citation);
+                ? (hasLocatorDisplay ? `p.${pagesDisplay}` : 'Ibid')
+                : (hasLocatorDisplay ? `${citation}, p.${pagesDisplay}` : citation);
         }
     } else {
         // Numeric markers should be stable and independent of citationMetadata.
@@ -172,7 +172,7 @@ const Citation: React.FC<CitationProps> = (props) => {
         // clickable link to the locally stored file; the plain-text form is the
         // client-agnostic fallback when the host can't (e.g. no local copy).
         if (isExternalFile) {
-            const locatorSuffix = pages.length > 0 ? `, p.${pagesDisplay}` : '';
+            const locatorSuffix = hasLocatorDisplay ? `, p.${pagesDisplay}` : '';
             const exportedFile = getHost().documentExport?.renderExternalFileCitation?.({
                 externalFileKey,
                 displayName: citation,
@@ -255,9 +255,9 @@ const Citation: React.FC<CitationProps> = (props) => {
                     {citation}
                 </span>
                 <span className="flex-1" />
-                {pages && pages.length > 0 && pages[0] && (
+                {hasLocatorDisplay && (
                     <span className="font-color-secondary text-sm" style={{ flexShrink: 0, whiteSpace: 'nowrap' }}>
-                        {isEpubCitation ? `Section ${pageLabels[0]}` : `Page ${pageLabels[0]}`}
+                        {`Page ${pagesDisplay}`}
                     </span>
                 )}
                 {(!pages || pages.length === 0) && textLineLocation && (
@@ -319,10 +319,10 @@ const Citation: React.FC<CitationProps> = (props) => {
                         <Icon icon={PdfIcon} className="font-color-secondary" />
                         <span className="text-sm font-color-secondary">
                             {isEpubCitation
-                                ? (pages[0] != null ? `Opens EPUB at section ${pageLabels[0]}` : 'Opens EPUB at cited passage')
+                                ? (hasLocatorDisplay ? `Opens EPUB at page ${pagesDisplay}` : 'Opens EPUB at cited passage')
                                 : hasBoundingBoxes
-                                    ? (pages[0] != null ? `Highlights passage on page ${pageLabels[0]}` : 'Highlights passage in PDF')
-                                    : (pages[0] != null ? `Opens PDF on page ${pageLabels[0]}` : 'Opens PDF at location')}
+                                    ? (hasLocatorDisplay ? `Highlights passage on page ${pagesDisplay}` : 'Highlights passage in PDF')
+                                    : (hasLocatorDisplay ? `Opens PDF on page ${pagesDisplay}` : 'Opens PDF at location')}
                         </span>
                     </span>
                 </span>

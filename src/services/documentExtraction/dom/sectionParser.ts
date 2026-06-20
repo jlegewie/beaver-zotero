@@ -2,6 +2,7 @@ import { ID_PREFIXES } from "../../../beaver-extract/schema/schema";
 import {
     collectDomItems,
     normalizeText,
+    type DomItemCandidate,
 } from "./domWalk";
 import { splitSentences } from "./sentenceSplitter";
 import type {
@@ -27,6 +28,8 @@ export interface ParseDomSectionInput {
      * language detector.
      */
     language?: string;
+    /** Receives each emitted item with its source candidate for extractor-only metadata. */
+    onItem?: (item: DomItem, candidate: DomItemCandidate) => void;
 }
 
 const SENTENCE_BEARING_KINDS = new Set([
@@ -69,6 +72,7 @@ export function parseDomSection(input: ParseDomSectionInput): DomSection {
                 text: sentenceText,
             }));
         }
+        input.onItem?.(item, candidate);
         items.push(item);
     }
 

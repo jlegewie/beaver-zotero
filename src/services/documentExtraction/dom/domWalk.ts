@@ -12,6 +12,8 @@ export interface DomItemCandidate extends DomElementMapping {
     element: Element;
     text: string;
     anchorId?: string;
+    /** First real text node that contributes to this emitted candidate. */
+    firstTextNode?: Text;
     /** For a data table: one linearized string per row, so rows are citable. */
     rows?: string[];
 }
@@ -184,6 +186,7 @@ export function collectDomItems(body: Element): DomItemCandidate[] {
     // block boundary before descending into that block child.
     const walkChildren = (parent: Element): void => {
         let buffer = "";
+        let firstTextNode: Text | undefined;
         const flush = (): void => {
             const text = normalizeText(buffer);
             buffer = "";
@@ -193,14 +196,23 @@ export function collectDomItems(body: Element): DomItemCandidate[] {
                     kind: "text",
                     text,
                     anchorId: findNearestAnchorId(parent),
+                    ...(firstTextNode ? { firstTextNode } : {}),
                 });
             }
+            firstTextNode = undefined;
+        };
+
+        const appendTextNode = (node: Text): void => {
+            if (!firstTextNode && /\S/.test(node.nodeValue ?? "")) {
+                firstTextNode = node;
+            }
+            buffer += ` ${node.nodeValue ?? ""} `;
         };
 
         for (const node of Array.from(parent.childNodes)) {
             if (!node) continue;
             if (node.nodeType === TEXT_NODE) {
-                buffer += ` ${node.nodeValue ?? ""} `;
+                appendTextNode(node as Text);
             } else if (node.nodeType === ELEMENT_NODE) {
                 const child = node as Element;
                 if (isNonContentElement(child)) {
@@ -211,6 +223,7 @@ export function collectDomItems(body: Element): DomItemCandidate[] {
                     visit(child);
                 } else {
                     // Inline element: fold its text into the surrounding prose.
+                    firstTextNode ??= firstContentTextNode(child);
                     buffer += ` ${visibleTextContent(child)} `;
                 }
             }
@@ -245,6 +258,7 @@ function buildCandidate(
             text,
             ...(rows.length > 0 ? { rows } : {}),
             anchorId: findNearestAnchorId(element),
+            ...optionalFirstTextNode(element),
         };
     }
 
@@ -256,7 +270,29 @@ function buildCandidate(
         level: mapping.level,
         text,
         anchorId: findNearestAnchorId(element),
+        ...optionalFirstTextNode(element),
     };
+}
+
+function optionalFirstTextNode(element: Element): Pick<DomItemCandidate, "firstTextNode"> {
+    const firstTextNode = firstContentTextNode(element);
+    return firstTextNode ? { firstTextNode } : {};
+}
+
+function firstContentTextNode(element: Element): Text | undefined {
+    for (const node of Array.from(element.childNodes)) {
+        if (!node) continue;
+        if (node.nodeType === TEXT_NODE) {
+            const text = node.nodeValue ?? "";
+            if (/\S/.test(text)) return node as Text;
+        } else if (node.nodeType === ELEMENT_NODE) {
+            const child = node as Element;
+            if (isNonContentElement(child)) continue;
+            const nested = firstContentTextNode(child);
+            if (nested) return nested;
+        }
+    }
+    return undefined;
 }
 
 function textForMappedElement(element: Element, kind: DomItemKind): string {
