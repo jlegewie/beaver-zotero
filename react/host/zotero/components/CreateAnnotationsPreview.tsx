@@ -4,6 +4,7 @@ import { ZoteroIcon, ZOTERO_ICONS } from '../../../components/icons/ZoteroIcon';
 import { AlertIcon, Icon } from '../../../components/icons/icons';
 import { navigateToAnnotation, navigateToPage } from '../../../utils/readerUtils';
 import { flashHighlightBoundingBoxes } from '../../../utils/citationNavigation';
+import { formatLocationChip } from '../../../utils/locationDisplay';
 import { resolveEpubAnnotationTarget } from '../../../../src/services/annotations/epub/epubAnnotationResolver';
 import { BeaverTemporaryAnnotations } from '../../../utils/annotationUtils';
 import { logger } from '../../../../src/utils/logger';
@@ -200,7 +201,6 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
     const handleItemClick = useCallback(async (
         item: HighlightAnnotationItem | NoteAnnotationItem,
         createdEntries: CreatedAnnotationResult[],
-        ownerDocument?: Document,
     ) => {
         try {
             await BeaverTemporaryAnnotations.cleanupAll();
@@ -315,10 +315,13 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
                         const pageIndex = pageIndexForItem(kind, item);
                         const pageNumber = typeof pageIndex === 'number' ? pageIndex + 1 : null;
                         const pageLabel = pageLabelForItem(kind, item, isEpub);
-                        const pageDisplay = isEpub
+                        const fallbackLabel = isEpub
                             ? pageLabel
                             : pageLabel ?? (pageNumber !== null ? String(pageNumber) : null);
-                        const locationPrefix = 'Page';
+                        // Route through the shared chip formatter
+                        const pageDisplay = formatLocationChip(isEpub ? 'epub' : 'pdf', fallbackLabel)
+                            ? fallbackLabel
+                            : null;
 
                         const kindLabel = kind === 'highlight' ? 'Highlight Annotation' : 'Sticky Note';
                         const tooltipContent = text || rawItem.title || '';
@@ -338,7 +341,7 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
                         const row = (
                             <div
                                 className={`create-annotations-preview-row display-flex flex-row items-start gap-2 py-15 cursor-pointer ${isDimmed ? 'opacity-60' : ''}`}
-                                onClick={(event) => handleItemClick(item, createdEntries, event.currentTarget.ownerDocument)}
+                                onClick={() => handleItemClick(item, createdEntries)}
                             >
                                 {isFailed ? (
                                     <Icon icon={AlertIcon} size={14} className="font-color-red" style={{ marginTop: 2 }} />
@@ -357,7 +360,7 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
                                     </div>
                                     {(isFailed || isPartial || pageDisplay !== null) && (
                                         <div className='font-color-tertiary whitespace-nowrap'>
-                                            {pageDisplay !== null ? `${locationPrefix} ${pageDisplay}` : ''}
+                                            {pageDisplay !== null ? `Page ${pageDisplay}` : ''}
                                         </div>
                                     )}
                                 </div>
@@ -370,7 +373,6 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
                                 key={`${clientItemId}-${rawItem.index}`}
                                 typeLabel={kindLabel}
                                 pageDisplay={pageDisplay}
-                                locationPrefix={locationPrefix}
                                 body={tooltipContent}
                                 footerLabel={footerLabel}
                                 footerClassName={footerClass}
