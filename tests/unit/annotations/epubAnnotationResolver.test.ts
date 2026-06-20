@@ -114,20 +114,71 @@ describe("buildAnnotationFromDocument", () => {
         expect(built.text).toBe("Second sentence");
     });
 
-    it("produces a collapsed (point) CFI for note annotations", () => {
+    it("anchors note annotations to the cited text's containing block", () => {
         const doc = section("<p>First.</p><p>Second sentence here.</p>");
+        sanitizeSectionDocument(doc);
         const built = buildAnnotationFromDocument(doc, 0, 2, {
             text: "Second sentence",
-            collapse: true,
+            anchorToBlock: true,
         });
         if ("error" in built) throw new Error(`unexpected error: ${built.error}`);
-        // Collapsed to the range start: a single point, no range commas.
-        expect(built.position.value).toBe("epubcfi(/6/2!/4/4/1:0)");
+        // Range spans the 2nd <p> (the cited text's containing block, bounded by
+        // its text nodes) so the reader renders the note icon in the margin
+        // beside it, not inline over the start of the passage. body(/4) > 2nd
+        // p(/4) > text(/1); the block's text "Second sentence here." is 21 chars.
+        expect(built.position.value).toBe("epubcfi(/6/2!/4/4,/1:0,/1:21)");
+        // sortIndex: section 0, offset = chars before the block ("First." = 6).
+        expect(built.sortIndex).toBe("00000|00000006");
+    });
+
+    it("spans the whole block for a note even when inline markup splits the text", () => {
+        const doc = section("<p>First.</p><p>Second <b>sentence</b> here.</p>");
+        sanitizeSectionDocument(doc);
+        const built = buildAnnotationFromDocument(doc, 0, 2, {
+            text: "Second sentence",
+            anchorToBlock: true,
+        });
+        if ("error" in built) throw new Error(`unexpected error: ${built.error}`);
+        // The block range runs from the 2nd p's first text node ("Second ") to
+        // its last (" here.") so the bbox still reaches the column margin.
+        // body(/4) > 2nd p(/4); start text /1 offset 0, end text /3 (" here.").
+        expect(built.position.value).toBe("epubcfi(/6/2!/4/4,/1:0,/3:6)");
+    });
+
+    it("falls back to the passage range for a note when no block ancestor exists", () => {
+        // Loose text directly under <body> has no block-level container; the note
+        // anchors to the passage range instead of failing.
+        const doc = section("Loose cited text with no block.");
+        sanitizeSectionDocument(doc);
+        const built = buildAnnotationFromDocument(doc, 0, 2, {
+            text: "cited text",
+            anchorToBlock: true,
+        });
+        if ("error" in built) throw new Error(`unexpected error: ${built.error}`);
+        // A range (two commas), not a collapsed point — the cited passage itself.
+        expect(built.position.value).toMatch(/^epubcfi\(.+,.+,.+\)$/);
+        expect(built.text).toBe("cited text");
     });
 
     it("fails observably when a MathML element precedes the range", () => {
         const doc = section(`<p><math xmlns="http://www.w3.org/1998/Math/MathML"><mi>x</mi></math></p><p>After the math.</p>`);
         const built = buildAnnotationFromDocument(doc, 2, 2, { text: "After the math" });
+        expect("error" in built && built.error).toBe("epub_math_section_unsupported");
+    });
+
+    it("fails a block-anchored note when math sits inside the block after the cited text", () => {
+        // The cited text precedes the math, but the note's block range extends to
+        // the block's last text node — past the math. The guard must check that
+        // end boundary, not the (math-free) start, or the persisted end path
+        // diverges once the reader runs renderMath.
+        const doc = section(
+            `<p>Cited text <math xmlns="http://www.w3.org/1998/Math/MathML"><mi>x</mi></math> trailing text.</p>`,
+        );
+        sanitizeSectionDocument(doc);
+        const built = buildAnnotationFromDocument(doc, 0, 2, {
+            text: "Cited text",
+            anchorToBlock: true,
+        });
         expect("error" in built && built.error).toBe("epub_math_section_unsupported");
     });
 

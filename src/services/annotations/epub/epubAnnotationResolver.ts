@@ -1,6 +1,7 @@
 import { logger } from "../../../utils/logger";
 import {
     citationSearchTextCandidates,
+    createContainingBlockRange,
     createElementContentsRange,
     createSentenceRange,
     findAnchorElement,
@@ -37,8 +38,14 @@ export interface EpubAnnotationLocator {
     anchorId?: string;
     /** Cited passage text used to anchor a precise range. */
     text?: string;
-    /** Collapse the range to its start (note/point annotations). */
-    collapse?: boolean;
+    /**
+     * Anchor the stored CFI to the cited text's containing block instead of the
+     * exact passage range. Used for note/point annotations so the reader renders
+     * the comment icon in the margin beside the block (see
+     * {@link createContainingBlockRange}); the cited passage still selects which
+     * block. Highlights leave this unset and store the precise passage range.
+     */
+    anchorToBlock?: boolean;
 }
 
 /** A resolved EPUB annotation position + sortIndex, ready to persist. */
@@ -299,25 +306,31 @@ export function buildAnnotationFromDocument(
     }
     if (!range) return { error: "epub_text_not_found" };
 
+    // Highlights store the precise passage range. Notes anchor to the cited
+    // text's containing block so the reader's comment icon lands in the margin
+    // beside the block instead of inline on the text (see
+    // createContainingBlockRange); the cited passage still selects the block.
+    // Falls back to the passage range when there is no block ancestor.
+    const text = range.toString();
+    const cfiRange = target.anchorToBlock
+        ? (createContainingBlockRange(range) ?? range)
+        : range;
+
     // renderMath mutates math subtrees in the reader; a CFI past that point
     // could diverge and we cannot detect it headlessly, so fail observably.
-    // A highlight stores a range (its END path must hold); a note collapses to
-    // the start, so only the start path matters — check the boundary that ends
-    // up in the stored CFI.
-    const mathBoundary = target.collapse ? range.startContainer : range.endContainer;
+    // Both highlights and block-anchored notes persist a range, so the END
+    // boundary is the strictest check: it subsumes the start and catches math
+    // sitting between the cited text and the block's last text node — which a
+    // start-only check would miss, since a note's stored end path runs past it.
+    const mathBoundary = cfiRange.endContainer;
     if (nodePrecededByMath(doc, mathBoundary)) {
         return { error: "epub_math_section_unsupported" };
     }
 
-    const text = range.toString();
-    const charOffset = computeCharOffset(doc, range);
-
-    if (target.collapse) {
-        range.collapse(true);
-    }
+    const charOffset = computeCharOffset(doc, cfiRange);
 
     const base = new EpubCFI().generateChapterComponent(spineNodeIndex, rawSectionIndex);
-    const cfi = new EpubCFI(range, base);
+    const cfi = new EpubCFI(cfiRange, base);
     const position = toEpubFragmentSelector(cfi.toString(true));
     const sortIndex = buildEpubSortIndex(rawSectionIndex, charOffset);
 

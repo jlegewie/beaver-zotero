@@ -522,8 +522,10 @@ export async function createEpubHighlightAnnotation(
 }
 
 /**
- * Create a headless Zotero EPUB note annotation: a point annotation whose CFI
- * is the collapsed start of the located passage (or anchor).
+ * Create a headless Zotero EPUB note annotation: a comment-icon annotation whose
+ * CFI spans the cited passage's containing block, so the reader renders the icon
+ * in the margin beside the block (matching a note added in the reader itself)
+ * rather than inline over the text.
  */
 export async function createEpubNoteAnnotation(
     attachment: Zotero.Item,
@@ -534,7 +536,7 @@ export async function createEpubNoteAnnotation(
         sectionOrdinal: input.sectionOrdinal,
         anchorId: input.anchorId,
         text: input.text,
-        collapse: true,
+        anchorToBlock: true,
     });
 
     const item = new Zotero.Item("annotation");

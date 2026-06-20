@@ -239,7 +239,7 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
                 if (filePath && text) {
                     const resolved = await resolveEpubAnnotationTarget(
                         filePath,
-                        { sectionHref, sectionOrdinal, anchorId, text, collapse: kind === 'note' },
+                        { sectionHref, sectionOrdinal, anchorId, text, anchorToBlock: kind === 'note' },
                         { skipPageLabel: true },
                     );
                     if (!('error' in resolved)) {

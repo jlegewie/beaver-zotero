@@ -13,6 +13,60 @@ import { NON_CONTENT_SELECTOR, normalizeText } from "../dom";
 // document parsed by DOMParser outside a window has no `defaultView`, so the
 // global `NodeFilter` may be unavailable in the headless path.
 const SHOW_TEXT = 0x4;
+// Node.ELEMENT_NODE — same rationale as SHOW_TEXT (no live `Node` global).
+const ELEMENT_NODE = 1;
+
+/**
+ * Block-level container element names, mirroring the reader's getContainingBlock
+ * tag set (reader/src/dom/common/lib/nodes.ts). The reader additionally consults
+ * computed `display`, but a DOMParser document has no layout, so the headless
+ * path relies on the tag set — the robust signal for EPUB content.
+ */
+const BLOCK_ELEMENT_NAMES = new Set([
+    "div", "p", "li", "ol", "ul", "table", "thead", "tbody", "tr", "td", "th",
+    "dl", "dt", "dd", "form", "fieldset", "section", "header", "footer",
+    "aside", "nav", "article", "h1", "h2", "h3", "h4", "h5", "h6",
+]);
+
+/** Nearest ancestor-or-self block element of `node`, or undefined if none. */
+export function getContainingBlockElement(node: Node): Element | undefined {
+    let el: Element | null = node.nodeType === ELEMENT_NODE
+        ? (node as Element)
+        : node.parentElement;
+    while (el) {
+        if (BLOCK_ELEMENT_NAMES.has(el.localName.toLowerCase())) return el;
+        el = el.parentElement;
+    }
+    return undefined;
+}
+
+/**
+ * Range over the containing block element of `range`'s start, bounded by the
+ * block's first and last content text nodes. Note/point annotations anchor here
+ * so the reader renders the comment icon in the margin beside the block (it
+ * places the icon just past the right edge of a note's range bbox; a
+ * block-spanning range reaches the content column's right edge). This matches
+ * the native reader's note placement (selectNode(containingBlock) then
+ * moveRangeEndsIntoTextNodes), keeping the CFI endpoints in text nodes so it
+ * resolves cleanly. Returns undefined when there is no block ancestor or it has
+ * no text content.
+ */
+export function createContainingBlockRange(range: Range): Range | undefined {
+    const block = getContainingBlockElement(range.startContainer);
+    if (!block) return undefined;
+    const textNodes = collectTextNodes(block);
+    if (textNodes.length === 0) return undefined;
+    const first = textNodes[0];
+    const last = textNodes[textNodes.length - 1];
+    const blockRange = block.ownerDocument.createRange();
+    blockRange.setStart(first, 0);
+    blockRange.setEnd(last, (last.nodeValue ?? "").length);
+    if (!normalizeText(blockRange.toString())) {
+        blockRange.detach();
+        return undefined;
+    }
+    return blockRange;
+}
 
 /** Find an element by id within `root`, escaping the id for attribute-selector use. */
 export function findAnchorElement(root: Element, anchorId: string): Element | undefined {
