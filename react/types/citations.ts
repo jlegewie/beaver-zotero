@@ -176,6 +176,8 @@ export interface Citation {
     formatted_citation?: string;
     /** Zotero item type of the resolved object for icon rendering. */
     item_type?: string;
+    /** Filename of the cited attachment */
+    filename?: string;
     /** Preview of the cited passage. */
     preview?: string;
     /** 1-based cited page numbers (EPUB: section ordinals). */
