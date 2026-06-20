@@ -10,6 +10,7 @@ export type DomItemKind =
 export interface DomSentence {
     id: string;
     text: string;
+    pageLabel?: string;
 }
 
 export interface DomItem {
@@ -21,6 +22,7 @@ export interface DomItem {
     level?: number;
     sentences?: DomSentence[];
     anchorId?: string;
+    pageLabel?: string;
 }
 
 export interface DomSection {

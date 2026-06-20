@@ -291,6 +291,9 @@ function normalizeCreateAnnotationBaseItem(item: any) {
         loc_raw: String(item?.loc_raw ?? item?.locRaw ?? ''),
         loc: item?.loc ?? { kind: 'unknown', value: '', raw: '' },
         page_label: item?.page_label ?? item?.pageLabel ?? null,
+        section_href: item?.section_href ?? item?.sectionHref ?? null,
+        section_ordinal: item?.section_ordinal ?? item?.sectionOrdinal ?? null,
+        anchor_id: item?.anchor_id ?? item?.anchorId ?? null,
     };
 }
 
@@ -320,6 +323,7 @@ function normalizeNoteAnnotationItem(item: any): NoteAnnotationItem {
             x: 0,
             y: 0,
         },
+        text: item?.text != null ? String(item.text) : undefined,
         ...(readingOrderOffset !== undefined ? { reading_order_offset: readingOrderOffset } : {}),
     };
 }

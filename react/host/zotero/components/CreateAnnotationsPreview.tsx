@@ -1,13 +1,11 @@
-import React, { useCallback, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { getReadableContentKind } from '../../../../src/services/documentExtraction/attachmentResolution';
 import { ZoteroIcon, ZOTERO_ICONS } from '../../../components/icons/ZoteroIcon';
 import { AlertIcon, Icon } from '../../../components/icons/icons';
 import { navigateToAnnotation, navigateToPage } from '../../../utils/readerUtils';
-import {
-    BeaverTemporaryAnnotations,
-    createBoundingBoxHighlights,
-    createTemporaryNoteAnnotation,
-    installTemporaryAnnotationDismissOnNextClick,
-} from '../../../utils/annotationUtils';
+import { flashHighlightBoundingBoxes } from '../../../utils/citationNavigation';
+import { resolveEpubAnnotationTarget } from '../../../../src/services/annotations/epub/epubAnnotationResolver';
+import { BeaverTemporaryAnnotations } from '../../../utils/annotationUtils';
 import { logger } from '../../../../src/utils/logger';
 import { BEAVER_ANNOTATION_COLORS } from '../../../../src/constants/annotations';
 import { TagPill } from '../../../components/agentRuns/TagPill';
@@ -58,10 +56,18 @@ function pageIndexForItem(kind: 'highlight' | 'note', item: HighlightAnnotationI
  * location carries its own label, a note carries it at the item level. Blank
  * labels are treated as absent so the caller falls back to the page number.
  */
-function pageLabelForItem(kind: 'highlight' | 'note', item: HighlightAnnotationItem | NoteAnnotationItem): string | null {
+function pageLabelForItem(
+    kind: 'highlight' | 'note',
+    item: HighlightAnnotationItem | NoteAnnotationItem,
+    isEpub: boolean,
+): string | null {
     const raw = item as any;
     const nonBlank = (value: unknown): string | null =>
         typeof value === 'string' && value.trim() !== '' ? value : null;
+
+    if (isEpub) {
+        return nonBlank(raw.page_label ?? raw.pageLabel);
+    }
 
     if (kind !== 'highlight') {
         return nonBlank(raw.page_label ?? raw.pageLabel);
@@ -103,6 +109,14 @@ function formatAnnotationFailureMessage(
             return 'Could not create annotation because the PDF could not be processed.';
         case 'page_geometry_unavailable':
             return 'Could not create annotation because the target position was not found in the PDF.';
+        case 'epub_section_not_found':
+            return 'Could not create annotation because the cited section was not found in the EPUB.';
+        case 'epub_text_not_found':
+            return 'Could not create annotation because the cited passage was not found in the EPUB.';
+        case 'epub_math_section_unsupported':
+            return 'Could not create annotation because the passage follows a math equation, which is not yet supported.';
+        case 'attachment_file_unavailable':
+            return 'Could not create annotation because the attachment file is not available locally.';
         case 'apply_failed':
             return `Failed to create ${noun}.`;
         default:
@@ -125,16 +139,8 @@ function getHighlightLocations(item: HighlightAnnotationItem | NoteAnnotationIte
     return Array.isArray(locations) ? locations : [];
 }
 
-function colorWithPreviewAlpha(colorName: string | undefined): string {
-    const hex = COLOR_VALUES[colorName || 'yellow'] ?? COLOR_VALUES.yellow;
-    const r = parseInt(hex.slice(1, 3), 16);
-    const g = parseInt(hex.slice(3, 5), 16);
-    const b = parseInt(hex.slice(5, 7), 16);
-    return `rgba(${r}, ${g}, ${b}, 0.45)`;
-}
-
 /**
- * Preview for bulk PDF highlight and note annotation actions.
+ * Preview for bulk highlight and note annotation actions.
  */
 export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> = ({
     kind,
@@ -170,6 +176,27 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
     const resolvedRef = actionData.resolved_ref;
     const noun = kind === 'highlight' ? 'highlight' : 'note';
 
+    // Resolve the attachment's content kind once
+    const [contentKind, setContentKind] = useState<'pdf' | 'epub' | null>(null);
+    useEffect(() => {
+        let cancelled = false;
+        (async () => {
+            if (!resolvedRef?.zotero_key || typeof resolvedRef.library_id !== 'number') return;
+            try {
+                const attachment = await Zotero.Items.getByLibraryAndKeyAsync(
+                    resolvedRef.library_id,
+                    resolvedRef.zotero_key,
+                );
+                const resolved = attachment ? getReadableContentKind(attachment as Zotero.Item) : null;
+                if (!cancelled) setContentKind(resolved === 'pdf' || resolved === 'epub' ? resolved : null);
+            } catch (error) {
+                logger(`CreateAnnotationsPreview: content-kind resolution failed: ${error}`, 1);
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [resolvedRef?.library_id, resolvedRef?.zotero_key]);
+    const isEpub = contentKind === 'epub';
+
     const handleItemClick = useCallback(async (
         item: HighlightAnnotationItem | NoteAnnotationItem,
         createdEntries: CreatedAnnotationResult[],
@@ -191,90 +218,80 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
             }
 
             if (!resolvedRef?.zotero_key || typeof resolvedRef.library_id !== 'number') return;
-            const pageIndex = pageIndexForItem(kind, item);
-            const pdfItem = await Zotero.Items.getByLibraryAndKeyAsync(
+
+            // Determine the navigation path from the attachment's actual content
+            // kind.
+            const attachment = await Zotero.Items.getByLibraryAndKeyAsync(
                 resolvedRef.library_id,
                 resolvedRef.zotero_key,
             );
-            if (!pdfItem) return;
-            const page = typeof pageIndex === 'number' ? pageIndex + 1 : 1;
-            const reader = await navigateToPage((pdfItem as Zotero.Item).id, page) as any;
+            if (!attachment) return;
+            const attachmentKind = getReadableContentKind(attachment as Zotero.Item);
 
-            const canCreatePreview = status === 'pending'
-                || status === 'awaiting'
-                || status === 'rejected'
-                || status === 'undone';
-            if (kind === 'highlight' && canCreatePreview) {
+            // Pending preview: compute the epubcfi headlessly and open the reader
+            // WITH that location, so Zotero navigates atomically once the view is
+            // ready.
+            if (attachmentKind === 'epub') {
                 const rawItem = item as any;
-                const rawHighlightLocations = getHighlightLocations(item);
-                // Item-level label is only a safe fallback for single-page
-                // highlights; for multi-page items each location carries its
-                // own label (mirrors the create-annotation executors).
-                const itemPageLabelFallback = rawHighlightLocations.length === 1
-                    ? (rawItem.page_label ?? rawItem.pageLabel ?? null)
-                    : null;
-                const locations = rawHighlightLocations
+                const attachmentId = (attachment as Zotero.Item).id;
+                const sectionHref = rawItem.section_href ?? rawItem.sectionHref ?? undefined;
+                const anchorId = rawItem.anchor_id ?? rawItem.anchorId ?? undefined;
+                const text = rawItem.text || undefined;
+                const explicitSectionOrdinal = rawItem.section_ordinal ?? rawItem.sectionOrdinal;
+                const rawPageLabel = rawItem.page_label ?? rawItem.pageLabel;
+                const sectionOrdinal = typeof explicitSectionOrdinal === 'number'
+                    ? explicitSectionOrdinal
+                    : typeof rawPageLabel === 'string' && /^\d+$/.test(rawPageLabel)
+                    ? Number(rawPageLabel)
+                    : undefined;
+
+                let located = false;
+                const filePath = await (attachment as Zotero.Item).getFilePathAsync();
+                if (filePath && text) {
+                    const resolved = await resolveEpubAnnotationTarget(
+                        filePath,
+                        { sectionHref, sectionOrdinal, anchorId, text, anchorToBlock: kind === 'note' },
+                    );
+                    if (!('error' in resolved)) {
+                        const location = kind === 'highlight'
+                            ? { position: resolved.position }
+                            : { pageNumber: resolved.position.value };
+                        await Zotero.Reader.open(attachmentId, location as any);
+                        located = true;
+                    }
+                }
+                if (!located) {
+                    // Fall back to the section start when the passage can't be resolved.
+                    await Zotero.Reader.open(attachmentId, sectionHref ? { href: sectionHref } as any : undefined);
+                }
+                return;
+            }
+
+            // PDF: scroll to the page, then flash the cited boxes for highlights.
+            const pageIndex = pageIndexForItem(kind, item);
+            const page = typeof pageIndex === 'number' ? pageIndex + 1 : 1;
+            const reader = await navigateToPage((attachment as Zotero.Item).id, page) as any;
+            if (reader && kind === 'highlight') {
+                const locations = getHighlightLocations(item)
                     .map((loc: any) => {
                         const rawPageIndex = loc.page_idx ?? loc.pageIndex ?? loc.page_index;
-                        const pageIndex = rawPageIndex !== undefined && rawPageIndex !== null
+                        const locPageIndex = rawPageIndex !== undefined && rawPageIndex !== null
                             ? Number(rawPageIndex)
                             : Number(loc.page ?? 1) - 1;
                         return {
-                            pageIndex,
+                            pageIndex: locPageIndex,
                             boxes: loc.boxes ?? loc.boundingBoxes ?? loc.bboxes ?? loc.rects ?? [],
-                            pageLabel: loc.page_label ?? loc.pageLabel ?? itemPageLabelFallback,
                         };
                     })
                     .filter((loc: any) => loc.pageIndex >= 0 && loc.boxes.length > 0);
-
-                const annotationReferences = await createBoundingBoxHighlights(
-                    locations,
-                    rawItem.text ?? rawItem.title ?? '',
-                    rawItem.title ?? rawItem.text ?? 'Beaver annotation preview',
-                    { color: colorWithPreviewAlpha(rawItem.color) },
-                );
-
-                if (annotationReferences.length > 0) {
-                    BeaverTemporaryAnnotations.addToTracking(annotationReferences);
-                    installTemporaryAnnotationDismissOnNextClick(reader, {
-                        ownerDocument,
-                        ignoredClickRoot: previewRootRef.current,
-                        logContext: 'CreateAnnotationsPreview',
-                    });
-                    setTimeout(() => {
-                        reader?.navigate?.({ annotationID: annotationReferences[0].zotero_key });
-                    }, 100);
-                }
-            } else if (kind === 'note' && canCreatePreview) {
-                const rawItem = item as any;
-                const notePosition = rawItem.note_position ?? rawItem.notePosition;
-                if (!notePosition) return;
-
-                const annotationReferences = await createTemporaryNoteAnnotation(
-                    notePosition,
-                    rawItem.comment ?? rawItem.title ?? '',
-                    {
-                        color: colorWithPreviewAlpha(rawItem.color),
-                        pageLabel: rawItem.page_label ?? rawItem.pageLabel ?? null,
-                    },
-                );
-
-                if (annotationReferences.length > 0) {
-                    BeaverTemporaryAnnotations.addToTracking(annotationReferences);
-                    installTemporaryAnnotationDismissOnNextClick(reader, {
-                        ownerDocument,
-                        ignoredClickRoot: previewRootRef.current,
-                        logContext: 'CreateAnnotationsPreview',
-                    });
-                    setTimeout(() => {
-                        reader?.navigate?.({ annotationID: annotationReferences[0].zotero_key });
-                    }, 100);
+                if (locations.length > 0) {
+                    await flashHighlightBoundingBoxes(reader, locations);
                 }
             }
         } catch (error) {
             logger(`CreateAnnotationsPreview: navigation failed: ${error}`, 1);
         }
-    }, [kind, resolvedRef?.library_id, resolvedRef?.zotero_key, status]);
+    }, [kind, resolvedRef?.library_id, resolvedRef?.zotero_key]);
 
     return (
         <div ref={previewRootRef} className="create-annotations-preview overflow-hidden">
@@ -297,16 +314,24 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
                         const failureMessage = formatAnnotationFailureMessages(failures, noun);
                         const pageIndex = pageIndexForItem(kind, item);
                         const pageNumber = typeof pageIndex === 'number' ? pageIndex + 1 : null;
-                        const pageLabel = pageLabelForItem(kind, item);
-                        const pageDisplay = pageLabel ?? (pageNumber !== null ? String(pageNumber) : null);
+                        const pageLabel = pageLabelForItem(kind, item, isEpub);
+                        const pageDisplay = isEpub
+                            ? pageLabel
+                            : pageLabel ?? (pageNumber !== null ? String(pageNumber) : null);
+                        const locationPrefix = 'Page';
 
                         const kindLabel = kind === 'highlight' ? 'Highlight Annotation' : 'Sticky Note';
                         const tooltipContent = text || rawItem.title || '';
-                        const footerLabel = isFailed
+                        const surface = isEpub ? 'reader' : 'PDF';
+                        // Only a pending highlight previews (the reader flashes its
+                        // cited extent). Notes have no flashable extent and applied
+                        // items navigate to the saved annotation, so both say "view".
+                        let footerLabel = isFailed
                             ? failureMessage || `Failed to create ${noun}`
-                            : isCreated
-                                ? `Click to view in PDF`
-                                : `Click to preview in PDF`;
+                            : (kind === 'highlight' && !isCreated)
+                                ? `Click to preview in ${surface}`
+                                : `Click to view in ${surface}`;
+                        if (kind === 'note' && !isCreated) footerLabel = `Click to view page in ${surface}`
                         const footerClass = isFailed ? 'font-color-red' : 'font-color-tertiary';
 
                         const isDimmed = status === 'rejected' || status === 'undone';
@@ -332,7 +357,7 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
                                     </div>
                                     {(isFailed || isPartial || pageDisplay !== null) && (
                                         <div className='font-color-tertiary whitespace-nowrap'>
-                                            {pageDisplay !== null ? `Page ${pageDisplay}` : ''}
+                                            {pageDisplay !== null ? `${locationPrefix} ${pageDisplay}` : ''}
                                         </div>
                                     )}
                                 </div>
@@ -345,6 +370,7 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
                                 key={`${clientItemId}-${rawItem.index}`}
                                 typeLabel={kindLabel}
                                 pageDisplay={pageDisplay}
+                                locationPrefix={locationPrefix}
                                 body={tooltipContent}
                                 footerLabel={footerLabel}
                                 footerClassName={footerClass}

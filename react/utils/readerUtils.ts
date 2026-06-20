@@ -72,71 +72,6 @@ async function waitForReaderForItem(itemID: number, openedReader?: any, timeoutM
     return undefined;
 }
 
-function getAnnotationPageIndex(annotationItem: Zotero.Item): number | undefined {
-    try {
-        const position = JSON.parse((annotationItem as any).annotationPosition || '{}');
-        return typeof position?.pageIndex === 'number' ? position.pageIndex : undefined;
-    } catch {
-        return undefined;
-    }
-}
-
-function isAnnotationLoadedInReader(reader: any, annotationID: string): boolean | null {
-    const annotationLists = [
-        reader?._internalReader?._state?.annotations,
-        reader?._internalReader?._primaryView?._annotations,
-    ].filter(Array.isArray);
-
-    if (annotationLists.length === 0) return null;
-    return annotationLists.some((annotations) => annotations.some((annotation: any) => annotation?.id === annotationID));
-}
-
-/**
- * Navigates to an annotation once the reader has had time to load and render it.
- */
-async function navigateReaderToAnnotation(reader: any, annotationID: string, pageIndex?: number): Promise<boolean> {
-    for (let attempt = 0; attempt < 6; attempt++) {
-        const annotationLoaded = isAnnotationLoadedInReader(reader, annotationID);
-        if (annotationLoaded === false) {
-            if (attempt === 1 && typeof pageIndex === 'number') {
-                try {
-                    await reader?.navigate?.({ pageIndex });
-                } catch {
-                    // Page navigation is a best-effort fallback before retrying annotation navigation.
-                }
-            }
-            await delay(150);
-            continue;
-        }
-
-        try {
-            await reader?.navigate?.({ annotationID });
-            return true;
-        } catch {
-            // Retry while the newly opened reader finishes registering annotations.
-        }
-
-        try {
-            await reader?._internalReader?.navigate?.({ annotationID });
-            return true;
-        } catch {
-            // Retry below.
-        }
-
-        if (attempt === 1 && typeof pageIndex === 'number') {
-            try {
-                await reader?.navigate?.({ pageIndex });
-            } catch {
-                // Page navigation is a best-effort fallback before retrying annotation navigation.
-            }
-        }
-
-        await delay(150);
-    }
-
-    return false;
-}
-
 /**
  * Navigates to a page in the reader.
  * 
@@ -170,33 +105,34 @@ async function navigateToAnnotation(annotationItem: Zotero.Item) {
     const parentID = annotationItem.parentID;
     if (!parentID) return;
 
-    const annotationID = annotationItem.key;
-    const pageIndex = getAnnotationPageIndex(annotationItem);
-    // Get reader
-    const reader = getCurrentReader();
-    
-    // Navigate to annotation if reader is open and current item is the annotation's parent
-    if (reader && reader.itemID === parentID) {
-        await waitForReaderView(reader, true);
-        const didNavigate = await navigateReaderToAnnotation(reader, annotationID, pageIndex);
-        if (!didNavigate && typeof pageIndex === 'number') {
-            await reader.navigate?.({ pageIndex });
-        }
-        return;
-    }
+    // Match the native library double-click (FileHandlers.open → Reader.open
+    // with the annotation as the location): one Reader.open call selects the
+    // annotation and covers every case — reader closed, on another tab, or
+    // already showing the attachment.
+    const reader: any = await Zotero.Reader.open(parentID, { annotationID: annotationItem.key } as any);
 
-    // Open reader if not open
-    const openedReader = await Zotero.Reader.open(parentID, {annotationID} as any);
-    const openedOrSelectedReader = await waitForReaderForItem(parentID, openedReader);
-    if (!openedOrSelectedReader) return;
+    // EPUB only: Zotero strips an { annotationID } location and navigates to the
+    // annotation *after* the view initializes (Reader.setSelectedAnnotations),
+    // bypassing the EPUB view's initial navigation.
+    try {
+        const resolved = reader ?? await waitForReaderForItem(parentID);
+        if (resolved?.type !== 'epub') return;
+        await waitForReaderForItem(parentID, resolved);
 
-    const didNavigate = await navigateReaderToAnnotation(openedOrSelectedReader, annotationID, pageIndex);
-    if (!didNavigate) {
-        if (typeof pageIndex === 'number') {
-            await openedOrSelectedReader.navigate?.({ pageIndex });
-        } else if (annotationItem.annotationPageLabel) {
-            await openedOrSelectedReader.navigate?.({ pageLabel: annotationItem.annotationPageLabel });
+        let position: any;
+        try {
+            position = JSON.parse((annotationItem as any).annotationPosition);
+        } catch {
+            return;
         }
+        if (position?.type !== 'FragmentSelector') return;
+
+        // Short settle so this runs after Zotero's post-init by-id navigation
+        // and any final layout pass, then land precisely on the cited range.
+        await delay(50);
+        resolved.navigate({ position });
+    } catch (error) {
+        logger(`navigateToAnnotation: EPUB position navigation failed: ${error}`, 1);
     }
 }
 

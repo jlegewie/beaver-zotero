@@ -1,13 +1,28 @@
 import { logger } from "../../../src/utils/logger";
 import {
     collectDomItems,
-    NON_CONTENT_SELECTOR,
     normalizeText,
     type DomItem,
 } from "../../../src/services/documentExtraction/dom";
 import {
     type EpubDocument,
 } from "../../../src/services/documentExtraction/epub";
+import {
+    citationSearchTextCandidates,
+    createElementContentsRange,
+    createSentenceRange,
+    findAnchorElement,
+    normalizeHrefBasename,
+} from "../../../src/services/documentExtraction/epub/epubTextRange";
+
+// Re-export the shared text-search helpers so existing consumers of this module
+// (and tests) keep their import paths. The implementations now live in `src/`
+// so the headless EPUB annotation resolver can reuse them.
+export {
+    createElementContentsRange,
+    createSentenceRange,
+    normalizeHrefBasename,
+} from "../../../src/services/documentExtraction/epub/epubTextRange";
 import {
     ensureSectionMounted,
     getSectionBody,
@@ -198,42 +213,6 @@ function resolveCitationSectionIndex(
     return undefined;
 }
 
-function findAnchorElement(body: HTMLElement, anchorId: string): Element | undefined {
-    // Attribute selector instead of #id so arbitrary ids only need string escaping.
-    const escaped = anchorId.replace(/["\\]/g, "\\$&");
-    try {
-        return body.querySelector(`[id="${escaped}"]`) ?? undefined;
-    } catch (error) {
-        logger(`[EpubVisualizer] Invalid citation anchor id "${anchorId}": ${error}`, 1);
-        return undefined;
-    }
-}
-
-/**
- * Build the ordered search-text candidates for a cited passage. The raw
- * normalized text is tried first: EPUB sentence text can legitimately contain
- * literal angle-bracket markup (e.g. code samples rendered in the book), and
- * stripping it would leave nothing to match. The tag-stripped variant is the
- * fallback for preview text that arrives as an HTML fragment.
- */
-function citationSearchTextCandidates(text: string | undefined): string[] {
-    if (!text) return [];
-    const candidates: string[] = [];
-    const raw = normalizeText(text);
-    if (raw) candidates.push(raw);
-    const stripped = normalizeText(text.replace(/<[^>]*>/g, " "));
-    if (stripped && stripped !== raw) candidates.push(stripped);
-    return candidates;
-}
-
-export function normalizeHrefBasename(href: string | undefined): string | undefined {
-    if (!href) return undefined;
-    const withoutHash = href.split("#", 1)[0];
-    const withoutQuery = withoutHash.split("?", 1)[0];
-    const parts = withoutQuery.split("/").filter(Boolean);
-    return parts[parts.length - 1]?.toLowerCase();
-}
-
 function mapExtractedSectionsToReaderSections(
     primaryView: EpubPrimaryView,
     document: EpubDocument,
@@ -314,86 +293,4 @@ function alignSectionItems(
 function textsMatch(extractedText: string, candidateText: string): boolean {
     if (extractedText === candidateText) return true;
     return candidateText.includes(extractedText) || extractedText.includes(candidateText);
-}
-
-export function createElementContentsRange(element: Element): Range | undefined {
-    const doc = element.ownerDocument;
-    const range = doc.createRange();
-    try {
-        range.selectNodeContents(element);
-        if (normalizeText(range.toString())) return range;
-    } catch (error) {
-        logger(`[EpubVisualizer] Failed to create EPUB item range: ${error}`, 1);
-    }
-    range.detach();
-    return undefined;
-}
-
-export function createSentenceRange(element: Element, sentenceText: string): Range | undefined {
-    const normalizedSentence = normalizeText(sentenceText);
-    if (!normalizedSentence) return undefined;
-
-    const textNodes = collectTextNodes(element);
-    const flattened = flattenTextNodes(textNodes);
-    const offset = flattened.normalized.indexOf(normalizedSentence);
-    if (offset === -1) return undefined;
-
-    const start = flattened.positions[offset];
-    const end = flattened.positions[offset + normalizedSentence.length - 1];
-    if (!start || !end) return undefined;
-
-    const range = element.ownerDocument.createRange();
-    range.setStart(start.node, start.offset);
-    range.setEnd(end.node, end.offset + 1);
-    return range;
-}
-
-function collectTextNodes(root: Element): Text[] {
-    const doc = root.ownerDocument;
-    const showText = doc.defaultView?.NodeFilter.SHOW_TEXT ?? NodeFilter.SHOW_TEXT;
-    const walker = doc.createTreeWalker(root, showText);
-    const nodes: Text[] = [];
-    let current = walker.nextNode();
-    while (current) {
-        // Extraction skips non-content subtrees (style/script), so the live
-        // text walk must skip them too or extracted sentence text will not
-        // line up with the flattened live text.
-        if (!(current as Text).parentElement?.closest(NON_CONTENT_SELECTOR)) {
-            nodes.push(current as Text);
-        }
-        current = walker.nextNode();
-    }
-    return nodes;
-}
-
-interface FlattenedText {
-    normalized: string;
-    positions: Array<{ node: Text; offset: number }>;
-}
-
-function flattenTextNodes(nodes: Text[]): FlattenedText {
-    let normalized = "";
-    const positions: Array<{ node: Text; offset: number }> = [];
-    let pendingSpace: { node: Text; offset: number } | undefined;
-
-    for (const node of nodes) {
-        const value = node.nodeValue ?? "";
-        for (let offset = 0; offset < value.length; offset++) {
-            const char = value[offset];
-            if (/\s/.test(char)) {
-                pendingSpace = { node, offset };
-                continue;
-            }
-
-            if (pendingSpace && normalized.length > 0) {
-                normalized += " ";
-                positions.push(pendingSpace);
-            }
-            pendingSpace = undefined;
-            normalized += char;
-            positions.push({ node, offset });
-        }
-    }
-
-    return { normalized: normalized.trim(), positions };
 }

@@ -115,6 +115,13 @@ export async function navigateToEpubCitation(
                         {
                             ownerDocument: options.ownerDocument,
                             logContext: "ZoteroCitation",
+                            // Navigate by the CFI position, not the temporary
+                            // annotation id: it resolves immediately and lands
+                            // reliably even on a cold reader open (the by-id
+                            // navigate races the annotation registration).
+                            navigateLocation: annotation.position
+                                ? { position: annotation.position }
+                                : undefined,
                         },
                     );
                     if (presented) return "highlighted";

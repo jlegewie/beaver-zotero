@@ -4,7 +4,13 @@ import {
     WSAgentActionValidateRequest,
     WSAgentActionValidateResponse,
 } from '../../agentProtocol';
-import { MissingPageGeometryError, createNoteAnnotation } from '../../annotations/createAnnotation';
+import {
+    EpubAnnotationError,
+    MissingPageGeometryError,
+    createEpubNoteAnnotation,
+    createNoteAnnotation,
+} from '../../annotations/createAnnotation';
+import { getReadableContentKind } from '../../documentExtraction/attachmentResolution';
 import { getAttachmentFileStatus, getDeferredToolPreference, validateLibraryAccess } from '../utils';
 import { TimeoutContext, checkAborted, TimeoutError } from '../timeout';
 import type {
@@ -25,7 +31,21 @@ function mapAnnotationErrorCode(error: unknown): string {
             ? 'page_extraction_failed'
             : 'page_geometry_unavailable';
     }
+    if (error instanceof EpubAnnotationError) {
+        return error.code;
+    }
     return 'apply_failed';
+}
+
+/** PDF and EPUB are the supported annotation targets; everything else is rejected. */
+function getAnnotationContentKind(attachment: Zotero.Item): 'pdf' | 'epub' | null {
+    const kind = getReadableContentKind(attachment);
+    return kind === 'pdf' || kind === 'epub' ? kind : null;
+}
+
+/** A numeric page_label doubles as the 1-based EPUB section ordinal fallback. */
+function epubSectionOrdinal(pageLabel: string | null | undefined): number | undefined {
+    return pageLabel && /^\d+$/.test(pageLabel) ? Number(pageLabel) : undefined;
 }
 
 function normalizeRef(raw: any): ZoteroItemReference {
@@ -66,6 +86,10 @@ function normalizeItem(raw: any): NoteAnnotationItem {
             y: 0,
         },
         page_label: raw?.page_label ?? raw?.pageLabel ?? null,
+        text: raw?.text != null ? String(raw.text) : undefined,
+        section_href: raw?.section_href ?? raw?.sectionHref ?? null,
+        section_ordinal: raw?.section_ordinal ?? raw?.sectionOrdinal ?? null,
+        anchor_id: raw?.anchor_id ?? raw?.anchorId ?? null,
         ...(readingOrderOffset !== undefined ? { reading_order_offset: readingOrderOffset } : {}),
     };
 }
@@ -145,12 +169,13 @@ export async function validateCreateNoteAnnotationsAction(
     }
 
     const attachment = await resolveAttachment(resolved_ref);
-    if (!attachment || !attachment.isPDFAttachment()) {
+    const contentKind = attachment ? getAnnotationContentKind(attachment) : null;
+    if (!attachment || !contentKind) {
         return {
             type: 'agent_action_validate_response',
             request_id: request.request_id,
             valid: false,
-            error: 'Resolved item is not a local PDF attachment',
+            error: 'Resolved item is not a local PDF or EPUB attachment',
             error_code: 'invalid_attachment',
             preference: 'always_ask',
         };
@@ -162,21 +187,26 @@ export async function validateCreateNoteAnnotationsAction(
             type: 'agent_action_validate_response',
             request_id: request.request_id,
             valid: false,
-            error: 'PDF attachment file is not available locally',
+            error: 'Attachment file is not available locally',
             error_code: 'attachment_file_unavailable',
             preference: 'always_ask',
         };
     }
 
-    let needsExtraction = true;
-    try {
-        const cached = await Zotero.Beaver?.documentCache?.getMetadata(
-            { libraryId: attachment.libraryID, zoteroKey: attachment.key },
-            filePath,
-        );
-        needsExtraction = !cached || !cached.pages || cached.pages.length === 0;
-    } catch (error) {
-        logger(`validateCreateNoteAnnotationsAction: cache probe failed: ${error}`, 1);
+    // EPUB annotations parse the section on demand (no document-cache geometry),
+    // so extraction is never a prerequisite. PDFs need cached page geometry.
+    let needsExtraction = false;
+    if (contentKind === 'pdf') {
+        needsExtraction = true;
+        try {
+            const cached = await Zotero.Beaver?.documentCache?.getMetadata(
+                { libraryId: attachment.libraryID, zoteroKey: attachment.key },
+                filePath,
+            );
+            needsExtraction = !cached || !cached.pages || cached.pages.length === 0;
+        } catch (error) {
+            logger(`validateCreateNoteAnnotationsAction: cache probe failed: ${error}`, 1);
+        }
     }
 
     return {
@@ -206,12 +236,13 @@ export async function executeCreateNoteAnnotationsAction(
     const { requested_ref, resolved_ref, items, tags } = data;
 
     const attachment = await resolveAttachment(resolved_ref);
-    if (!attachment || !attachment.isPDFAttachment()) {
+    const contentKind = attachment ? getAnnotationContentKind(attachment) : null;
+    if (!attachment || !contentKind) {
         return {
             type: 'agent_action_execute_response',
             request_id: request.request_id,
             success: false,
-            error: 'Resolved item is not a local PDF attachment',
+            error: 'Resolved item is not a local PDF or EPUB attachment',
             error_code: 'invalid_attachment',
         };
     }
@@ -226,14 +257,39 @@ export async function executeCreateNoteAnnotationsAction(
         for (const item of items) {
             checkAborted(ctx, `create_note_annotations:item_${item.index}`);
             try {
-                const ref = await createNoteAnnotation(attachment, {
-                    notePosition: item.note_position,
-                    comment: item.comment,
-                    color: item.color,
-                    pageLabel: item.page_label ?? null,
-                    readingOrderOffset: item.reading_order_offset ?? null,
-                    tags,
-                });
+                let ref;
+                if (contentKind === 'epub') {
+                    ref = await createEpubNoteAnnotation(attachment, {
+                        sectionHref: item.section_href ?? undefined,
+                        sectionOrdinal: item.section_ordinal ?? epubSectionOrdinal(item.page_label),
+                        anchorId: item.anchor_id ?? undefined,
+                        text: item.text ?? undefined,
+                        comment: item.comment,
+                        color: item.color,
+                        pageLabel: item.page_label ?? null,
+                        tags,
+                    });
+                } else {
+                    const notePosition = item.note_position;
+                    if (!notePosition) {
+                        failed.push({
+                            client_item_id: item.client_item_id,
+                            index: item.index,
+                            loc_raw: item.loc_raw,
+                            error: 'No note position provided',
+                            error_code: 'page_geometry_unavailable',
+                        });
+                        continue;
+                    }
+                    ref = await createNoteAnnotation(attachment, {
+                        notePosition,
+                        comment: item.comment,
+                        color: item.color,
+                        pageLabel: item.page_label ?? null,
+                        readingOrderOffset: item.reading_order_offset ?? null,
+                        tags,
+                    });
+                }
                 created.push({
                     client_item_id: item.client_item_id,
                     index: item.index,
