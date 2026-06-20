@@ -13,9 +13,17 @@ import {
     type EpubDocument,
     type ExtractEpubResult,
 } from "./schema";
+import {
+    epubPageLabelForPosition,
+    extractSectionPageMarkers,
+    scorePageMarkers,
+    type PageMappingSectionMarkers,
+} from "./epubPageMapping";
 import { effectiveMaxFileSizeMB } from "../../attachmentLimits";
 import { isRemoteAccessAvailable } from "../attachmentSource";
 import { logger } from "../../../utils/logger";
+import type { DomItemCandidate } from "../dom/domWalk";
+import type { DomItem } from "../dom";
 
 // Coverage below this fraction means the walk dropped a meaningful share of the
 // book's visible text (an unrecognized container/table structure) and warrants a
@@ -92,6 +100,17 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
     }
 }
 
+interface RawTextOffsetIndex {
+    elementOffsets: Map<Element, number>;
+    textNodeOffsets: Map<Text, number>;
+}
+
+interface ExtractedItemPosition {
+    item: DomItem;
+    sectionIndex: number;
+    charOffset: number;
+}
+
 /**
  * Extract an EPUB into Beaver's section-based schema directly from a file path.
  *
@@ -110,6 +129,8 @@ export async function extractEpubDocumentFromFile(
     const epub = new EPUB(filePath);
     const counters = createDomCounters();
     const sections: DomSection[] = [];
+    const sectionMarkers: PageMappingSectionMarkers[] = [];
+    const itemPositions: ExtractedItemPosition[] = [];
     let sourceTextChars = 0;
 
     // Load the sentencex WASM once (best-effort; sentence splitting degrades to
@@ -131,6 +152,8 @@ export async function extractEpubDocumentFromFile(
         let sectionIndex = 0;
         for await (const { href, doc } of epub.getSectionDocuments()) {
             throwIfAborted(options?.abortSignal);
+            const body = findSectionBody(doc);
+            const rawOffsets = body ? buildRawTextOffsetIndex(body) : emptyRawTextOffsetIndex();
             if (documentLanguage === undefined) {
                 // Prefer an explicit language; otherwise use the EPUB's own
                 // declared language from the first section's <html lang>.
@@ -142,12 +165,28 @@ export async function extractEpubDocumentFromFile(
                     ?? null;
             }
             sourceTextChars += measureSectionSourceText(doc);
+            if (body) {
+                sectionMarkers.push(extractSectionPageMarkers(
+                    body,
+                    sectionIndex,
+                    (element) => rawOffsets.elementOffsets.get(element) ?? 0,
+                ));
+            } else {
+                sectionMarkers.push({ sectionIndex, markersByMatcher: [] });
+            }
             sections.push(parseDomSection({
                 doc,
                 sectionIndex,
                 rawHref: href,
                 counters,
                 language: documentLanguage ?? undefined,
+                onItem: (item, candidate) => {
+                    itemPositions.push({
+                        item,
+                        sectionIndex,
+                        charOffset: itemCharOffset(candidate, rawOffsets),
+                    });
+                },
             }));
             sectionIndex += 1;
             await Zotero.Promise.delay(0);
@@ -158,6 +197,7 @@ export async function extractEpubDocumentFromFile(
     }
 
     throwIfAborted(options?.abortSignal);
+    stampEpubPageLabels(itemPositions, scorePageMarkers(sectionMarkers, sections.length));
     const diagnostics = buildDomDiagnostics(sections, sourceTextChars);
     if (diagnostics.textCoverage !== null && diagnostics.textCoverage < LOW_COVERAGE_WARN_THRESHOLD) {
         logger(
@@ -176,6 +216,60 @@ export async function extractEpubDocumentFromFile(
         citationIndex: buildDomCitationIndex(sections),
         diagnostics,
     };
+}
+
+function findSectionBody(doc: XMLDocument | Document): Element | null {
+    return doc.body ?? doc.querySelector("body");
+}
+
+function emptyRawTextOffsetIndex(): RawTextOffsetIndex {
+    return { elementOffsets: new Map(), textNodeOffsets: new Map() };
+}
+
+/** Build raw text offsets for every element start and text node in DOM order. */
+function buildRawTextOffsetIndex(root: Element): RawTextOffsetIndex {
+    const elementOffsets = new Map<Element, number>();
+    const textNodeOffsets = new Map<Text, number>();
+    let offset = 0;
+
+    const visitElement = (element: Element): void => {
+        elementOffsets.set(element, offset);
+        for (const node of Array.from(element.childNodes)) {
+            if (!node) continue;
+            if (node.nodeType === 3) {
+                textNodeOffsets.set(node as Text, offset);
+                offset += (node.nodeValue ?? "").length;
+            } else if (node.nodeType === 1) {
+                visitElement(node as Element);
+            }
+        }
+    };
+
+    visitElement(root);
+    return { elementOffsets, textNodeOffsets };
+}
+
+function itemCharOffset(candidate: DomItemCandidate, offsets: RawTextOffsetIndex): number {
+    if (candidate.firstTextNode) {
+        const textOffset = offsets.textNodeOffsets.get(candidate.firstTextNode);
+        if (textOffset !== undefined) return textOffset;
+    }
+    return offsets.elementOffsets.get(candidate.element) ?? 0;
+}
+
+function stampEpubPageLabels(
+    itemPositions: ExtractedItemPosition[],
+    mapping: ReturnType<typeof scorePageMarkers>,
+): void {
+    if (!mapping.isPhysical) return;
+    for (const { item, sectionIndex, charOffset } of itemPositions) {
+        const label = epubPageLabelForPosition(mapping, sectionIndex, charOffset);
+        if (!label) continue;
+        item.pageLabel = label;
+        for (const sentence of item.sentences ?? []) {
+            sentence.pageLabel = label;
+        }
+    }
 }
 
 /** Extract an EPUB attachment with request-safe preflight and error responses. */

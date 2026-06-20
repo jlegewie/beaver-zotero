@@ -14,6 +14,13 @@
  */
 
 import { resolveEpubAnnotationTarget } from '../../../src/services/annotations/epub/epubAnnotationResolver';
+import { extractEpubDocumentFromFile } from '../../../src/services/documentExtraction/epub';
+import type { EpubDocument } from '../../../src/services/documentExtraction/epub';
+import {
+    citationSearchTextCandidates,
+    normalizeHrefBasename,
+} from '../../../src/services/documentExtraction/epub/epubTextRange';
+import { normalizeText, type DomItem } from '../../../src/services/documentExtraction/dom';
 import { resolveEpubCitationRange } from '../../utils/epubVisualizer/epubRangeResolver';
 import {
     annotationFromRange,
@@ -67,6 +74,14 @@ export async function handleTestEpubAnnotationParityHttpRequest(request: any): P
     if (!primaryView) return { ok: false, error: 'no_primary_view' };
     await waitForSectionRenderers(primaryView);
 
+    let extractedDocument: EpubDocument | null = null;
+    let extractionError: string | null = null;
+    try {
+        extractedDocument = await extractEpubDocumentFromFile(filePath);
+    } catch (error) {
+        extractionError = error instanceof Error ? error.message : String(error);
+    }
+
     const results: any[] = [];
     for (const raw of items as ParityTargetInput[]) {
         const target = {
@@ -94,12 +109,22 @@ export async function handleTestEpubAnnotationParityHttpRequest(request: any): P
         // Headless side.
         const headless = await resolveEpubAnnotationTarget(filePath, target);
         const headlessOk = !('error' in headless);
+        const extractedPageLabel = extractedDocument
+            ? findExtractedPageLabel(extractedDocument, raw)
+            : null;
 
         // The reader stores '' for the page label unless the EPUB has confident
         // physical paging (epub-view.ts: isPhysical && getPageLabel || '').
         let readerPageLabel: string | null = null;
-        if (resolved?.range) {
-            const annotation = annotationFromRange(primaryView, resolved.range, 'highlight', '#ffd400');
+        const pageLabelResolved = target.anchorId
+            ? resolveEpubCitationRange(primaryView, {
+                sectionHref: target.sectionHref,
+                sectionOrdinal: target.sectionOrdinal,
+                anchorId: target.anchorId,
+            })
+            : resolved;
+        if (pageLabelResolved?.range) {
+            const annotation = annotationFromRange(primaryView, pageLabelResolved.range, 'highlight', '#ffd400');
             readerPageLabel = (annotation as any)?.pageLabel ?? '';
         }
 
@@ -107,13 +132,74 @@ export async function handleTestEpubAnnotationParityHttpRequest(request: any): P
             target: raw,
             reader: { cfi: readerCfi, sort_index: readerSortIndex, text: readerText, page_label: readerPageLabel },
             headless: headlessOk
-                ? { cfi: headless.position.value, sort_index: headless.sortIndex, text: headless.text, page_label: headless.pageLabel }
+                ? {
+                    cfi: headless.position.value,
+                    sort_index: headless.sortIndex,
+                    text: headless.text,
+                    page_label: extractedPageLabel,
+                    page_label_source: extractedDocument ? 'extraction' : 'extraction_error',
+                    ...(extractionError ? { extraction_error: extractionError } : {}),
+                }
                 : { error: headless.error, message: (headless as any).message },
             cfi_match: readerCfi != null && headlessOk ? readerCfi === headless.position.value : null,
             sort_index_match: readerSortIndex != null && headlessOk ? readerSortIndex === headless.sortIndex : null,
-            page_label_match: readerPageLabel != null && headlessOk ? readerPageLabel === headless.pageLabel : null,
+            page_label_match: readerPageLabel != null && headlessOk && extractedPageLabel != null
+                ? readerPageLabel === extractedPageLabel
+                : null,
         });
     }
 
     return { ok: true, results };
+}
+
+function findExtractedPageLabel(
+    document: EpubDocument,
+    target: ParityTargetInput,
+): string | null {
+    const section = findExtractedSection(document, target);
+    const sections = section ? [section] : document.sections;
+
+    // Exact anchor lookup is preferred; text matching is intentionally fuzzy and
+    // only backs up targets that do not carry a stable anchor id.
+    if (target.anchor_id) {
+        for (const candidateSection of sections) {
+            const item = candidateSection.items.find((candidate) => candidate.anchorId === target.anchor_id);
+            if (item) return item.pageLabel ?? '';
+        }
+    }
+
+    const searchTexts = citationSearchTextCandidates(target.text);
+    if (searchTexts.length === 0) return null;
+    for (const candidateSection of sections) {
+        for (const item of candidateSection.items) {
+            if (itemMatchesText(item, searchTexts)) return item.pageLabel ?? '';
+        }
+    }
+    return null;
+}
+
+function findExtractedSection(
+    document: EpubDocument,
+    target: ParityTargetInput,
+): EpubDocument['sections'][number] | undefined {
+    const basename = normalizeHrefBasename(target.section_href);
+    if (basename) {
+        const byHref = document.sections.find((section) => normalizeHrefBasename(section.rawHref) === basename);
+        if (byHref) return byHref;
+    }
+    if (typeof target.section_ordinal === 'number') {
+        return document.sections[target.section_ordinal - 1];
+    }
+    return undefined;
+}
+
+function itemMatchesText(item: DomItem, searchTexts: string[]): boolean {
+    const itemText = normalizeText(item.text);
+    for (const searchText of searchTexts) {
+        if (itemText.includes(searchText)) return true;
+        if ((item.sentences ?? []).some((sentence) => normalizeText(sentence.text).includes(searchText))) {
+            return true;
+        }
+    }
+    return false;
 }

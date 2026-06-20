@@ -36,6 +36,11 @@ export interface PageMappingSection {
     body: Element;
 }
 
+export interface PageMappingSectionMarkers {
+    sectionIndex: number;
+    markersByMatcher: EpubPageMarker[][];
+}
+
 export const EMPTY_EPUB_PAGE_MAPPING: EpubPageMapping = { isPhysical: false, markers: [] };
 
 interface Matcher {
@@ -72,42 +77,54 @@ function markerCharOffset(el: Element): number {
     }
 }
 
+/** Extract candidate page markers for one section using the reader's matchers. */
+export function extractSectionPageMarkers(
+    body: Element,
+    sectionIndex: number,
+    charOffsetForElement: (element: Element) => number = markerCharOffset,
+): PageMappingSectionMarkers {
+    const markersByMatcher = MATCHERS.map((matcher) => {
+        let elems: Element[];
+        try {
+            elems = Array.from(body.querySelectorAll(matcher.selector)) as Element[];
+        } catch {
+            return [];
+        }
+        const markers: EpubPageMarker[] = [];
+        for (const el of elems) {
+            const label = matcher.extract(el);
+            if (!label) continue;
+            markers.push({
+                sectionIndex,
+                charOffset: charOffsetForElement(el),
+                label,
+            });
+        }
+        return markers;
+    });
+    return { sectionIndex, markersByMatcher };
+}
+
 /**
- * Build the physical page mapping over all (sanitized) section bodies, scoring
- * the three matchers exactly as the reader does and keeping the highest-count
- * non-aborted matcher. `totalSpineCount` is the reader's denominator for the
- * "at least half the sections have markers" confidence gate.
+ * Score already-collected page markers exactly as the reader does, keeping the
+ * highest-count non-aborted matcher.
  */
-export function buildEpubPageMapping(
-    sections: PageMappingSection[],
+export function scorePageMarkers(
+    sections: PageMappingSectionMarkers[],
     totalSpineCount: number,
 ): EpubPageMapping {
     const denominator = Math.max(totalSpineCount, sections.length, 1);
     let best: EpubPageMarker[] | null = null;
 
-    for (const matcher of MATCHERS) {
+    for (let matcherIndex = 0; matcherIndex < MATCHERS.length; matcherIndex++) {
         const markers: EpubPageMarker[] = [];
         let score = 0;
         let sectionsWithMatches = 0;
 
         for (const section of sections) {
-            let elems: Element[];
-            try {
-                elems = Array.from(section.body.querySelectorAll(matcher.selector)) as Element[];
-            } catch {
-                continue;
-            }
-            let successes = 0;
-            for (const el of elems) {
-                const label = matcher.extract(el);
-                if (!label) continue;
-                markers.push({
-                    sectionIndex: section.sectionIndex,
-                    charOffset: markerCharOffset(el),
-                    label,
-                });
-                successes++;
-            }
+            const sectionMarkers = section.markersByMatcher[matcherIndex] ?? [];
+            markers.push(...sectionMarkers);
+            const successes = sectionMarkers.length;
             if (successes) {
                 score += successes;
                 sectionsWithMatches++;
@@ -154,6 +171,20 @@ export function buildEpubPageMapping(
 
     if (!best) return EMPTY_EPUB_PAGE_MAPPING;
     return { isPhysical: true, markers: best };
+}
+
+/**
+ * Build the physical page mapping over all section bodies. Kept as a facade for
+ * callers that still operate over retained DOM sections.
+ */
+export function buildEpubPageMapping(
+    sections: PageMappingSection[],
+    totalSpineCount: number,
+): EpubPageMapping {
+    return scorePageMarkers(
+        sections.map((section) => extractSectionPageMarkers(section.body, section.sectionIndex)),
+        totalSpineCount,
+    );
 }
 
 /**

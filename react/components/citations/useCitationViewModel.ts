@@ -5,6 +5,7 @@ import { externalReferenceItemMappingAtom } from '../../atoms/externalReferences
 import {
     Citation,
     getCitationPages,
+    getContentKind,
     isExternalCitation,
     isExternalFileCitation,
 } from '../../types/citations';
@@ -17,6 +18,7 @@ import {
 } from '../../utils/citationGrammar';
 import { formatNumberRanges, formatPageRangesWithLabels } from '../../utils/stringUtils';
 import { resolvePageLabelFromLabels } from '../../utils/pageLabels';
+import { explicitPageLabel } from '../../utils/locationDisplay';
 import { ZoteroItemReference } from '../../types/zotero';
 import { getHost } from '../../host';
 
@@ -336,6 +338,21 @@ export function useCitationViewModel(props: Record<string, unknown>): CitationVi
     // so the recompute fires once the async page-label preload populates it.
     const { pageLabels, pagesDisplay, pages } = useMemo(() => {
         let pageLabels: string[] = rawPages.map((p) => String(p));
+        const contentKind = getContentKind(metadata);
+
+        if (contentKind === 'epub') {
+            const backendLabels = metadata?.page_labels;
+            pageLabels = rawPages.map((p) => explicitPageLabel(backendLabels, p));
+            const labelledPages = rawPages.filter((page) => explicitPageLabel(backendLabels, page));
+            const labelledPageLabels = labelledPages.map((page) => explicitPageLabel(backendLabels, page));
+            return {
+                pageLabels,
+                pagesDisplay: labelledPages.length > 0
+                    ? formatPageRangesWithLabels(labelledPages, labelledPageLabels)
+                    : '',
+                pages: rawPages,
+            };
+        }
 
         if (usePageLabels && rawPages.length > 0) {
             const backendLabels = metadata?.page_labels;

@@ -7,18 +7,18 @@ import {
     findAnchorElement,
     normalizeHrefBasename,
 } from "../../documentExtraction/epub/epubTextRange";
+import {
+    buildEpubPageMapping,
+    epubPageLabelForPosition,
+    type EpubPageMapping,
+    type PageMappingSection,
+} from "../../documentExtraction/epub/epubPageMapping";
 import EpubCFI from "./vendor/epubcfi";
 import {
     buildEpubSortIndex,
     toEpubFragmentSelector,
     type EpubFragmentSelector,
 } from "./epubAnnotationGeometry";
-import {
-    buildEpubPageMapping,
-    epubPageLabelForPosition,
-    type EpubPageMapping,
-    type PageMappingSection,
-} from "./epubPageMapping";
 
 declare const Components: any;
 

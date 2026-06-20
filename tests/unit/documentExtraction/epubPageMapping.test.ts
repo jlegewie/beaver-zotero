@@ -4,12 +4,14 @@ import { describe, expect, it } from "vitest";
 import {
     buildEpubPageMapping,
     epubPageLabelForPosition,
+    extractSectionPageMarkers,
+    scorePageMarkers,
     type PageMappingSection,
-} from "../../../src/services/annotations/epub/epubPageMapping";
+} from "../../../src/services/documentExtraction/epub/epubPageMapping";
 
 /** Build a section body Element (in its own document) from inner HTML. */
 function sectionBody(sectionIndex: number, bodyHtml: string): PageMappingSection {
-    const doc = document.implementation.createHTMLDocument("");
+    const doc = globalThis.document.implementation.createHTMLDocument("");
     doc.body.innerHTML = bodyHtml;
     return { sectionIndex, body: doc.body };
 }
@@ -45,6 +47,25 @@ describe("buildEpubPageMapping", () => {
         ];
         const mapping = buildEpubPageMapping(sections, 1);
         expect(mapping.markers.map((m) => m.label)).toEqual(["9", "10", "11"]);
+    });
+});
+
+describe("extractSectionPageMarkers and scorePageMarkers", () => {
+    it("collects markers per section and scores them after streaming collection", () => {
+        const sections = [
+            sectionBody(0, '<p><span epub:type="pagebreak" title="10"></span>First page.</p>'),
+            sectionBody(1, '<p><span epub:type="pagebreak" title="11"></span>Second page.</p>'),
+        ];
+
+        const collected = sections.map((section) => extractSectionPageMarkers(
+            section.body,
+            section.sectionIndex,
+            (element) => element.textContent?.length ?? 0,
+        ));
+        const mapping = scorePageMarkers(collected, 2);
+
+        expect(mapping.isPhysical).toBe(true);
+        expect(mapping.markers.map((marker) => marker.label)).toEqual(["10", "11"]);
     });
 });
 
