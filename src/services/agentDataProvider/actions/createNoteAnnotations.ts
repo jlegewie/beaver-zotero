@@ -88,6 +88,7 @@ function normalizeItem(raw: any): NoteAnnotationItem {
         page_label: raw?.page_label ?? raw?.pageLabel ?? null,
         text: raw?.text != null ? String(raw.text) : undefined,
         section_href: raw?.section_href ?? raw?.sectionHref ?? null,
+        section_ordinal: raw?.section_ordinal ?? raw?.sectionOrdinal ?? null,
         anchor_id: raw?.anchor_id ?? raw?.anchorId ?? null,
         ...(readingOrderOffset !== undefined ? { reading_order_offset: readingOrderOffset } : {}),
     };
@@ -260,7 +261,7 @@ export async function executeCreateNoteAnnotationsAction(
                 if (contentKind === 'epub') {
                     ref = await createEpubNoteAnnotation(attachment, {
                         sectionHref: item.section_href ?? undefined,
-                        sectionOrdinal: epubSectionOrdinal(item.page_label),
+                        sectionOrdinal: item.section_ordinal ?? epubSectionOrdinal(item.page_label),
                         anchorId: item.anchor_id ?? undefined,
                         text: item.text ?? undefined,
                         comment: item.comment,

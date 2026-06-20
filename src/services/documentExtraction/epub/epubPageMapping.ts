@@ -30,12 +30,6 @@ export interface EpubPageMapping {
     markers: EpubPageMarker[];
 }
 
-/** A sanitized section body plus its raw spine index, for marker extraction. */
-export interface PageMappingSection {
-    sectionIndex: number;
-    body: Element;
-}
-
 export interface PageMappingSectionMarkers {
     sectionIndex: number;
     markersByMatcher: EpubPageMarker[][];
@@ -60,28 +54,11 @@ const MATCHERS: Matcher[] = [
     { selector: '[*|type="pagebreak"]', extract: (el) => el.getAttribute("title") ?? undefined },
 ];
 
-/** Character count from the section root to `el` (its position before any text). */
-function markerCharOffset(el: Element): number {
-    const doc = el.ownerDocument;
-    const root = doc?.documentElement;
-    if (!doc || !root) return 0;
-    const range = doc.createRange();
-    try {
-        range.setStart(root, 0);
-        range.setEnd(el, 0);
-        return range.toString().length;
-    } catch {
-        return 0;
-    } finally {
-        range.detach();
-    }
-}
-
 /** Extract candidate page markers for one section using the reader's matchers. */
 export function extractSectionPageMarkers(
     body: Element,
     sectionIndex: number,
-    charOffsetForElement: (element: Element) => number = markerCharOffset,
+    charOffsetForElement: (element: Element) => number,
 ): PageMappingSectionMarkers {
     const markersByMatcher = MATCHERS.map((matcher) => {
         let elems: Element[];
@@ -171,20 +148,6 @@ export function scorePageMarkers(
 
     if (!best) return EMPTY_EPUB_PAGE_MAPPING;
     return { isPhysical: true, markers: best };
-}
-
-/**
- * Build the physical page mapping over all section bodies. Kept as a facade for
- * callers that still operate over retained DOM sections.
- */
-export function buildEpubPageMapping(
-    sections: PageMappingSection[],
-    totalSpineCount: number,
-): EpubPageMapping {
-    return scorePageMarkers(
-        sections.map((section) => extractSectionPageMarkers(section.body, section.sectionIndex)),
-        totalSpineCount,
-    );
 }
 
 /**

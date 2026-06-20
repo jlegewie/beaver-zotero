@@ -78,6 +78,7 @@ function normalizeItem(raw: any): HighlightAnnotationItem {
         page_locations: normalizePageLocations({ locations: raw?.page_locations ?? raw?.pageLocations ?? raw?.locations }) ?? [],
         page_label: raw?.page_label ?? raw?.pageLabel ?? null,
         section_href: raw?.section_href ?? raw?.sectionHref ?? null,
+        section_ordinal: raw?.section_ordinal ?? raw?.sectionOrdinal ?? null,
         anchor_id: raw?.anchor_id ?? raw?.anchorId ?? null,
     };
 }
@@ -249,7 +250,7 @@ export async function executeCreateHighlightAnnotationsAction(
                 try {
                     const ref = await createEpubHighlightAnnotation(attachment, {
                         sectionHref: item.section_href ?? undefined,
-                        sectionOrdinal: epubSectionOrdinal(item.page_label),
+                        sectionOrdinal: item.section_ordinal ?? epubSectionOrdinal(item.page_label),
                         anchorId: item.anchor_id ?? undefined,
                         text: item.text ?? '',
                         color: item.color,

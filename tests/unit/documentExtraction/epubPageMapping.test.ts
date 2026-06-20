@@ -2,27 +2,54 @@
 
 import { describe, expect, it } from "vitest";
 import {
-    buildEpubPageMapping,
     epubPageLabelForPosition,
     extractSectionPageMarkers,
     scorePageMarkers,
-    type PageMappingSection,
 } from "../../../src/services/documentExtraction/epub/epubPageMapping";
 
+interface TestSection {
+    sectionIndex: number;
+    body: Element;
+}
+
 /** Build a section body Element (in its own document) from inner HTML. */
-function sectionBody(sectionIndex: number, bodyHtml: string): PageMappingSection {
+function sectionBody(sectionIndex: number, bodyHtml: string): TestSection {
     const doc = globalThis.document.implementation.createHTMLDocument("");
     doc.body.innerHTML = bodyHtml;
     return { sectionIndex, body: doc.body };
 }
 
-describe("buildEpubPageMapping", () => {
+/** Character count from the section root to `el`, used only by tests. */
+function charOffsetForElement(el: Element): number {
+    const doc = el.ownerDocument;
+    const root = doc?.documentElement;
+    if (!doc || !root) return 0;
+    const range = doc.createRange();
+    try {
+        range.setStart(root, 0);
+        range.setEnd(el, 0);
+        return range.toString().length;
+    } finally {
+        range.detach();
+    }
+}
+
+function collectAndScore(sections: TestSection[], totalSpineCount: number) {
+    const markers = sections.map((section) => extractSectionPageMarkers(
+        section.body,
+        section.sectionIndex,
+        charOffsetForElement,
+    ));
+    return scorePageMarkers(markers, totalSpineCount);
+}
+
+describe("extractSectionPageMarkers and scorePageMarkers", () => {
     it("detects physical pages from empty page anchors across sections", () => {
         const sections = [
             sectionBody(0, '<p><a id="page_1"></a>First page text here.</p><p><a id="page_2"></a>Second page text.</p>'),
             sectionBody(1, '<p><a id="page_3"></a>Third page text.</p>'),
         ];
-        const mapping = buildEpubPageMapping(sections, 2);
+        const mapping = collectAndScore(sections, 2);
 
         expect(mapping.isPhysical).toBe(true);
         expect(mapping.markers.map((m) => m.label)).toEqual(["1", "2", "3"]);
@@ -36,7 +63,7 @@ describe("buildEpubPageMapping", () => {
             sectionBody(2, "<p>No marker.</p>"),
             sectionBody(3, "<p>No marker.</p>"),
         ];
-        const mapping = buildEpubPageMapping(sections, 4);
+        const mapping = collectAndScore(sections, 4);
         expect(mapping.isPhysical).toBe(false);
         expect(mapping.markers).toEqual([]);
     });
@@ -45,12 +72,10 @@ describe("buildEpubPageMapping", () => {
         const sections = [
             sectionBody(0, '<a id="page_9"></a>a<a id="page10"></a>b<a id="x_page_11"></a>c'),
         ];
-        const mapping = buildEpubPageMapping(sections, 1);
+        const mapping = collectAndScore(sections, 1);
         expect(mapping.markers.map((m) => m.label)).toEqual(["9", "10", "11"]);
     });
-});
 
-describe("extractSectionPageMarkers and scorePageMarkers", () => {
     it("collects markers per section and scores them after streaming collection", () => {
         const sections = [
             sectionBody(0, '<p><span epub:type="pagebreak" title="10"></span>First page.</p>'),
@@ -74,7 +99,7 @@ describe("epubPageLabelForPosition", () => {
         sectionBody(0, '<p><a id="page_1"></a>First page text here.</p><p><a id="page_2"></a>Second page text.</p>'),
         sectionBody(1, '<p><a id="page_3"></a>Third page text.</p>'),
     ];
-    const mapping = buildEpubPageMapping(sections, 2);
+    const mapping = collectAndScore(sections, 2);
     const page2Offset = mapping.markers.find((m) => m.label === "2")!.charOffset;
 
     it("returns the nearest marker at or before the position", () => {

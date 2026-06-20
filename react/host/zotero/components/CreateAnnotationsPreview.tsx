@@ -56,10 +56,18 @@ function pageIndexForItem(kind: 'highlight' | 'note', item: HighlightAnnotationI
  * location carries its own label, a note carries it at the item level. Blank
  * labels are treated as absent so the caller falls back to the page number.
  */
-function pageLabelForItem(kind: 'highlight' | 'note', item: HighlightAnnotationItem | NoteAnnotationItem): string | null {
+function pageLabelForItem(
+    kind: 'highlight' | 'note',
+    item: HighlightAnnotationItem | NoteAnnotationItem,
+    isEpub: boolean,
+): string | null {
     const raw = item as any;
     const nonBlank = (value: unknown): string | null =>
         typeof value === 'string' && value.trim() !== '' ? value : null;
+
+    if (isEpub) {
+        return nonBlank(raw.page_label ?? raw.pageLabel);
+    }
 
     if (kind !== 'highlight') {
         return nonBlank(raw.page_label ?? raw.pageLabel);
@@ -229,8 +237,11 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
                 const sectionHref = rawItem.section_href ?? rawItem.sectionHref ?? undefined;
                 const anchorId = rawItem.anchor_id ?? rawItem.anchorId ?? undefined;
                 const text = rawItem.text || undefined;
+                const explicitSectionOrdinal = rawItem.section_ordinal ?? rawItem.sectionOrdinal;
                 const rawPageLabel = rawItem.page_label ?? rawItem.pageLabel;
-                const sectionOrdinal = typeof rawPageLabel === 'string' && /^\d+$/.test(rawPageLabel)
+                const sectionOrdinal = typeof explicitSectionOrdinal === 'number'
+                    ? explicitSectionOrdinal
+                    : typeof rawPageLabel === 'string' && /^\d+$/.test(rawPageLabel)
                     ? Number(rawPageLabel)
                     : undefined;
 
@@ -240,7 +251,6 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
                     const resolved = await resolveEpubAnnotationTarget(
                         filePath,
                         { sectionHref, sectionOrdinal, anchorId, text, anchorToBlock: kind === 'note' },
-                        { skipPageLabel: true },
                     );
                     if (!('error' in resolved)) {
                         const location = kind === 'highlight'
@@ -304,11 +314,11 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
                         const failureMessage = formatAnnotationFailureMessages(failures, noun);
                         const pageIndex = pageIndexForItem(kind, item);
                         const pageNumber = typeof pageIndex === 'number' ? pageIndex + 1 : null;
-                        const pageLabel = pageLabelForItem(kind, item);
-                        const pageDisplay = pageLabel ?? (pageNumber !== null ? String(pageNumber) : null);
-                        // EPUB has no page geometry; the chip shows a "Section N"
-                        // label only, and clicking just views created items.
-                        const locationPrefix = isEpub ? 'Section' : 'Page';
+                        const pageLabel = pageLabelForItem(kind, item, isEpub);
+                        const pageDisplay = isEpub
+                            ? pageLabel
+                            : pageLabel ?? (pageNumber !== null ? String(pageNumber) : null);
+                        const locationPrefix = 'Page';
 
                         const kindLabel = kind === 'highlight' ? 'Highlight Annotation' : 'Sticky Note';
                         const tooltipContent = text || rawItem.title || '';

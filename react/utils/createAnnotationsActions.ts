@@ -78,7 +78,7 @@ export async function executeCreateHighlightAnnotationsAction(
             try {
                 const ref = await createEpubHighlightAnnotation(attachment, {
                     sectionHref: item.section_href ?? undefined,
-                    sectionOrdinal: epubSectionOrdinal(item.page_label),
+                    sectionOrdinal: item.section_ordinal ?? epubSectionOrdinal(item.page_label),
                     anchorId: item.anchor_id ?? undefined,
                     text: item.text ?? '',
                     color: item.color,
@@ -189,7 +189,7 @@ export async function executeCreateNoteAnnotationsAction(
             if (contentKind === 'epub') {
                 ref = await createEpubNoteAnnotation(attachment, {
                     sectionHref: item.section_href ?? undefined,
-                    sectionOrdinal: epubSectionOrdinal(item.page_label),
+                    sectionOrdinal: item.section_ordinal ?? epubSectionOrdinal(item.page_label),
                     anchorId: item.anchor_id ?? undefined,
                     text: item.text ?? undefined,
                     comment: item.comment,

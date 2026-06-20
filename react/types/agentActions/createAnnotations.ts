@@ -53,6 +53,8 @@ export interface HighlightAnnotationItem {
     page_label?: string | null;
     /** EPUB locator (content_kind === 'epub'): section file href, matched by basename. */
     section_href?: string | null;
+    /** EPUB locator: 1-based extractor section ordinal. */
+    section_ordinal?: number | null;
     /** EPUB locator: DOM id of the cited element inside the section. */
     anchor_id?: string | null;
 }
@@ -75,6 +77,8 @@ export interface NoteAnnotationItem {
     text?: string;
     /** EPUB locator: section file href, matched by basename. */
     section_href?: string | null;
+    /** EPUB locator: 1-based extractor section ordinal. */
+    section_ordinal?: number | null;
     /** EPUB locator: DOM id of the cited element inside the section. */
     anchor_id?: string | null;
 }

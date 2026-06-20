@@ -7,12 +7,6 @@ import {
     findAnchorElement,
     normalizeHrefBasename,
 } from "../../documentExtraction/epub/epubTextRange";
-import {
-    buildEpubPageMapping,
-    epubPageLabelForPosition,
-    type EpubPageMapping,
-    type PageMappingSection,
-} from "../../documentExtraction/epub/epubPageMapping";
 import EpubCFI from "./vendor/epubcfi";
 import {
     buildEpubSortIndex,
@@ -58,11 +52,6 @@ export interface ResolvedEpubAnnotation {
     rawSectionIndex: number;
     /** Resolved section href (zip entry path). */
     sectionHref: string;
-    /**
-     * Physical print page label (nearest preceding page marker), matching the
-     * reader. Empty when the EPUB has no confident physical page mapping.
-     */
-    pageLabel: string;
 }
 
 export type EpubAnnotationResolveErrorCode =
@@ -279,7 +268,7 @@ export function buildAnnotationFromDocument(
     rawSectionIndex: number,
     spineNodeIndex: number,
     target: EpubAnnotationLocator,
-): { position: EpubFragmentSelector; sortIndex: string; text: string; charOffset: number } | EpubAnnotationResolveError {
+): { position: EpubFragmentSelector; sortIndex: string; text: string } | EpubAnnotationResolveError {
     const body = doc.body ?? doc.querySelector("body") ?? doc.documentElement;
     if (!body) return { error: "epub_text_not_found" };
 
@@ -334,7 +323,7 @@ export function buildAnnotationFromDocument(
     const position = toEpubFragmentSelector(cfi.toString(true));
     const sortIndex = buildEpubSortIndex(rawSectionIndex, charOffset);
 
-    return { position, sortIndex, text, charOffset };
+    return { position, sortIndex, text };
 }
 
 // ---------------------------------------------------------------------------
@@ -362,54 +351,6 @@ async function readEntryToDocument(zip: any, entry: string, type: string): Promi
     return parser.parseFromString(xml, type as DOMParserSupportedType) as unknown as Document;
 }
 
-// The physical page mapping is a whole-document property (the reader scans every
-// section to decide confidence), so cache it per file+mtime to avoid re-reading
-// all sections for each annotation item in a batch.
-const PAGE_MAPPING_CACHE_MAX = 8;
-const pageMappingCache = new Map<string, EpubPageMapping>();
-
-function fileMtimeMs(filePath: string): number {
-    try {
-        return (Zotero as any).File.pathToFile(filePath).lastModifiedTime ?? 0;
-    } catch {
-        return 0;
-    }
-}
-
-async function buildPageMappingFromZip(zip: any, spine: EpubSpine): Promise<EpubPageMapping> {
-    const sections: PageMappingSection[] = [];
-    for (let i = 0; i < spine.itemrefs.length; i++) {
-        const ref = spine.itemrefs[i];
-        if (!ref.isXhtml || !ref.hasEntry) continue;
-        try {
-            const doc = await readEntryToDocument(zip, ref.href, "application/xhtml+xml");
-            sanitizeSectionDocument(doc);
-            const body = doc.body ?? doc.querySelector("body") ?? doc.documentElement;
-            if (body) sections.push({ sectionIndex: i, body });
-        } catch (error) {
-            logger(`[EpubAnnotation] page-mapping: failed to read ${ref.href}: ${error}`, 1);
-        }
-    }
-    return buildEpubPageMapping(sections, spine.itemrefs.length);
-}
-
-async function getEpubPageMapping(
-    zip: any,
-    spine: EpubSpine,
-    filePath: string,
-): Promise<EpubPageMapping> {
-    const key = `${filePath}::${fileMtimeMs(filePath)}`;
-    const cached = pageMappingCache.get(key);
-    if (cached) return cached;
-    const mapping = await buildPageMappingFromZip(zip, spine);
-    pageMappingCache.set(key, mapping);
-    if (pageMappingCache.size > PAGE_MAPPING_CACHE_MAX) {
-        const oldest = pageMappingCache.keys().next().value;
-        if (oldest !== undefined) pageMappingCache.delete(oldest);
-    }
-    return mapping;
-}
-
 /**
  * Resolve an EPUB annotation locator to a persistable `{ position, sortIndex }`
  * by parsing the EPUB headlessly — no reader instance. Reads `container.xml` →
@@ -419,7 +360,6 @@ async function getEpubPageMapping(
 export async function resolveEpubAnnotationTarget(
     filePath: string,
     target: EpubAnnotationLocator,
-    options?: { skipPageLabel?: boolean },
 ): Promise<ResolvedEpubAnnotation | EpubAnnotationResolveError> {
     let zip: any;
     try {
@@ -468,26 +408,10 @@ export async function resolveEpubAnnotationTarget(
         );
         if (isResolveError(built)) return built;
 
-        // Derive the print page label from the EPUB's physical page markers
-        // (empty for EPUBs without confident physical paging), matching the
-        // reader. Skipped for callers that only need the position (e.g. preview
-        // navigation), since the mapping scans every section.
-        let pageLabel = "";
-        if (!options?.skipPageLabel) {
-            try {
-                const mapping = await getEpubPageMapping(zip, spine, filePath);
-                pageLabel = epubPageLabelForPosition(mapping, match.rawIndex, built.charOffset);
-            } catch (error) {
-                logger(`[EpubAnnotation] page-label computation failed: ${error}`, 1);
-            }
-        }
-
-        const { charOffset: _charOffset, ...annotation } = built;
         return {
-            ...annotation,
+            ...built,
             rawSectionIndex: match.rawIndex,
             sectionHref: match.itemref.href,
-            pageLabel,
         };
     } catch (error) {
         logger(`[EpubAnnotation] resolveEpubAnnotationTarget failed: ${error}`, 1);

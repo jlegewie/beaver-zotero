@@ -206,4 +206,62 @@ describe('toAgentAction reading_order_offset plumbing', () => {
         const data = action.proposed_data as CreateNoteAnnotationsProposedData;
         expect(data.items[0].reading_order_offset).toBe(4);
     });
+
+    it('preserves EPUB locator fields for manual-apply bulk annotations', () => {
+        const highlightAction = toAgentAction({
+            action_type: 'create_highlight_annotations',
+            proposed_data: {
+                items: [
+                    {
+                        index: 0,
+                        client_item_id: 'h1',
+                        loc_raw: 's4',
+                        loc: { kind: 'sentence', value: '4', raw: 's4' },
+                        text: 'Highlighted text.',
+                        color: 'yellow',
+                        page_label: '191',
+                        section_href: 'OEBPS/ch1.xhtml',
+                        section_ordinal: 18,
+                        anchor_id: 'para-4',
+                    },
+                ],
+            },
+        });
+        const highlightData = highlightAction.proposed_data as CreateHighlightAnnotationsProposedData;
+        expect(highlightData.items[0]).toMatchObject({
+            text: 'Highlighted text.',
+            page_label: '191',
+            section_href: 'OEBPS/ch1.xhtml',
+            section_ordinal: 18,
+            anchor_id: 'para-4',
+        });
+
+        const noteAction = toAgentAction({
+            action_type: 'create_note_annotations',
+            proposed_data: {
+                items: [
+                    {
+                        index: 0,
+                        client_item_id: 'n1',
+                        loc_raw: 'p2',
+                        loc: { kind: 'paragraph', value: '2', raw: 'p2' },
+                        comment: 'Note.',
+                        text: 'Anchor text.',
+                        page_label: '192',
+                        sectionHref: 'OEBPS/ch2.xhtml',
+                        sectionOrdinal: 19,
+                        anchorId: 'para-5',
+                    },
+                ],
+            },
+        });
+        const noteData = noteAction.proposed_data as CreateNoteAnnotationsProposedData;
+        expect(noteData.items[0]).toMatchObject({
+            text: 'Anchor text.',
+            page_label: '192',
+            section_href: 'OEBPS/ch2.xhtml',
+            section_ordinal: 19,
+            anchor_id: 'para-5',
+        });
+    });
 });
