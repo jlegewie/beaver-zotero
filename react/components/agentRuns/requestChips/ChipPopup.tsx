@@ -63,7 +63,7 @@ const ChipPopupCard: React.FC<ChipPopupContent> = ({ icon, title, subtitle, acti
             </span>
         </span>
         {action && (
-            <span className="px-3 py-15 block border-top-quinary">
+            <span className="px-3 ml-05 py-15 block border-top-quinary">
                 <span className="display-flex flex-row items-center gap-15">
                     <Icon icon={action.icon} className={`font-color-secondary ${action.iconClassName ?? ''}`} />
                     <span className="text-sm font-color-secondary">{action.label}</span>
