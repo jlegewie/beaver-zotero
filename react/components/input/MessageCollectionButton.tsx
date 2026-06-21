@@ -6,6 +6,8 @@ import { CollectionReference, collectionReferenceKey } from '../../types/zotero'
 import { truncateText } from '../../utils/stringUtils';
 import { selectCollection } from '../../../src/utils/selectItem';
 import { useRemoveContextMenu } from '../../hooks/useRemoveContextMenu';
+import { ChipWithPopup, type ChipPopupContent } from '../agentRuns/requestChips/ChipPopup';
+import { ChipButton } from '../agentRuns/requestChips/ChipButton';
 
 const MAX_TEXT_LENGTH = 20;
 
@@ -53,13 +55,6 @@ export const MessageCollectionButton: React.FC<MessageCollectionButtonProps> = (
         }],
     });
 
-    const handleButtonClick = (e: React.MouseEvent<HTMLButtonElement>) => {
-        e.stopPropagation();
-        if (!disabled) {
-            revealCollection();
-        }
-    };
-
     const getIconElement = () => {
         if ((isHovered || isRemoveMenuOpen) && canEdit && !disabled) {
             return (
@@ -76,24 +71,35 @@ export const MessageCollectionButton: React.FC<MessageCollectionButtonProps> = (
         );
     };
 
+    const popup: ChipPopupContent = {
+        icon: (
+            <span className="scale-90">
+                <CSSIcon name="collection" className="icon-16" />
+            </span>
+        ),
+        title: collection.name,
+        subtitle: { text: 'Collection' },
+        action: { icon: LibraryIcon, label: 'Reveal in library' },
+    };
+
     return (
         <>
-        <button
-            style={{ height: '22px' }}
-            title={collection.name}
-            onMouseEnter={() => setIsHovered(true)}
-            onMouseLeave={() => setIsHovered(false)}
-            {...contextMenuHandlers}
-            className={`variant-outline source-button ${className || ''} ${disabled ? 'disabled-but-styled' : ''}`}
-            disabled={disabled}
-            onClick={handleButtonClick}
-            {...rest}
-        >
-            {getIconElement()}
-            <span className="truncate">
-                {truncateText(collection.name, MAX_TEXT_LENGTH)}
-            </span>
-        </button>
+        <ChipWithPopup popup={popup} suppressed={isRemoveMenuOpen}>
+            <ChipButton
+                onMouseEnter={() => setIsHovered(true)}
+                onMouseLeave={() => setIsHovered(false)}
+                {...contextMenuHandlers}
+                className={`${className || ''} ${disabled ? 'disabled-but-styled' : ''}`}
+                disabled={disabled}
+                onClick={() => revealCollection()}
+                {...rest}
+            >
+                {getIconElement()}
+                <span className="truncate">
+                    {truncateText(collection.name, MAX_TEXT_LENGTH)}
+                </span>
+            </ChipButton>
+        </ChipWithPopup>
         {removeMenu}
         </>
     );

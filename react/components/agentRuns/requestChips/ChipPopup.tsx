@@ -77,13 +77,19 @@ const ChipPopupCard: React.FC<ChipPopupContent> = ({ icon, title, subtitle, acti
  * Wraps a chip with its hover-card. The chip (`children`) stays the click
  * target; the card only appears on hover. `content` feeds the tooltip's
  * non-empty check — the card itself is supplied via `customContent`.
+ *
+ * `suppressed` force-closes the card and blocks it from reopening. Editable
+ * chips pass their context-menu open state here so a right-click menu (rendered
+ * at a lower z-index than the card) is never covered or intercepted by it.
  */
 export function ChipWithPopup({
     popup,
     children,
+    suppressed = false,
 }: {
     popup: ChipPopupContent;
     children: React.ReactNode;
+    suppressed?: boolean;
 }) {
     return (
         <Tooltip
@@ -91,6 +97,7 @@ export function ChipWithPopup({
             customContent={<ChipPopupCard {...popup} />}
             width={POPUP_WIDTH}
             padding={false}
+            disabled={suppressed}
         >
             {children}
         </Tooltip>

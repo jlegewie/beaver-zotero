@@ -6,6 +6,9 @@ import { truncateText } from '../../utils/stringUtils';
 import { FileViewIcon, ExternalLinkIcon } from '../icons/icons';
 import type { ExternalFileContentKind } from '../../types/attachments/apiTypes';
 import { logger } from '../../../src/utils/logger';
+import { ChipWithPopup, type ChipPopupContent } from '../agentRuns/requestChips/ChipPopup';
+import { ChipButton } from '../agentRuns/requestChips/ChipButton';
+import { getHost } from '../../host';
 
 const MAX_FILENAME_LENGTH = 25;
 
@@ -52,7 +55,13 @@ export const ExternalFileButton = forwardRef<HTMLButtonElement, ExternalFileButt
 
         const [isHovered, setIsHovered] = React.useState(false);
 
+        // Primary click opens the file in its default app, matching the
+        // read-only request chips. Routed through the host so the "no local
+        // copy on this device" warning is shared with the history surfaces.
+        const openFile = () => getHost().navigation?.launchExternalFile(extKey);
+
         const showFile = () => {
+            // Reveal the local copy in Finder/Explorer (right-click "Show File").
             // Persisted chips (sent messages) carry no storedPath prop; fall
             // back to the local registry so the file can still be revealed on
             // this device. Rejections (e.g. a deleted copy) go to the logger
@@ -76,9 +85,12 @@ export const ExternalFileButton = forwardRef<HTMLButtonElement, ExternalFileButt
                 });
         };
 
-        // Always offered: showFile resolves the registry on demand and quietly
-        // no-ops when the copy is unavailable on this device.
-        const revealMenuItems: MenuItem[] = [
+        // Both actions resolve the local copy on demand: "Open File" launches it
+        // in the default app (the same as a left-click), "Show File" reveals it
+        // in Finder/Explorer. Each no-ops gracefully when the copy is
+        // unavailable on this device.
+        const fileMenuItems: MenuItem[] = [
+            { label: 'Open File', icon: ExternalLinkIcon, onClick: openFile },
             { label: 'Show File', icon: FileViewIcon, onClick: showFile },
         ];
 
@@ -89,7 +101,7 @@ export const ExternalFileButton = forwardRef<HTMLButtonElement, ExternalFileButt
             onRemoveAll,
             canEdit,
             disabled,
-            extraMenuItems: revealMenuItems,
+            extraMenuItems: fileMenuItems,
         });
 
         const getIconElement = () => {
@@ -107,32 +119,38 @@ export const ExternalFileButton = forwardRef<HTMLButtonElement, ExternalFileButt
             );
         };
 
+        const popup: ChipPopupContent = {
+            icon: (
+                <CSSItemTypeIcon
+                    itemType={EXTERNAL_FILE_ICON_BY_KIND[contentKind] || 'attachmentFile'}
+                    className="scale-90"
+                />
+            ),
+            title: filename,
+            subtitle: { text: 'External file' },
+            action: { icon: ExternalLinkIcon, label: 'Open external file', iconClassName: 'scale-75' },
+        };
+
         return (
             <>
-            <button
-                ref={ref}
-                style={{ height: '22px' }}
-                title={filename}
-                className={`variant-outline source-button ${className || ''} ${disabled ? 'disabled-but-styled' : ''}`}
-                disabled={disabled}
-                onMouseEnter={() => setIsHovered(true)}
-                onMouseLeave={() => setIsHovered(false)}
-                onClick={(e) => {
-                    e.stopPropagation();
-                    // Chrome documents dispatch click for non-primary buttons
-                    // too; only a left-click reveals the file.
-                    if (e.button !== 0) return;
-                    showFile();
-                }}
-                {...contextMenuHandlers}
-                {...rest}
-            >
-                {getIconElement()}
-                <span className="truncate">
-                    {truncateText(filename, MAX_FILENAME_LENGTH)}
-                </span>
-                <Icon icon={ExternalLinkIcon} className="scale-95" />
-            </button>
+            <ChipWithPopup popup={popup} suppressed={isRemoveMenuOpen}>
+                <ChipButton
+                    ref={ref}
+                    className={`${className || ''} ${disabled ? 'disabled-but-styled' : ''}`}
+                    disabled={disabled}
+                    onMouseEnter={() => setIsHovered(true)}
+                    onMouseLeave={() => setIsHovered(false)}
+                    onClick={() => openFile()}
+                    {...contextMenuHandlers}
+                    {...rest}
+                >
+                    {getIconElement()}
+                    <span className="truncate">
+                        {truncateText(filename, MAX_FILENAME_LENGTH)}
+                    </span>
+                    <Icon icon={ExternalLinkIcon} className="scale-95" />
+                </ChipButton>
+            </ChipWithPopup>
             {removeMenu}
             </>
         );

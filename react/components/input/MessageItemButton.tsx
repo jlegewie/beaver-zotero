@@ -15,7 +15,8 @@ import { selectItemById } from '../../../src/utils/selectItem';
 import { openNoteById } from '../../utils/sourceUtils';
 import { ANNOTATION_ICON_BY_TYPE, ANNOTATION_TEXT_BY_TYPE } from '../../utils/annotationDisplay';
 import { ChipWithPopup } from '../agentRuns/requestChips/ChipPopup';
-import { buildMessageItemChipPopup, type UnvalidatedAttachmentState } from './MessageItemChipPopup';
+import { ChipButton } from '../agentRuns/requestChips/ChipButton';
+import { buildMessageItemChipPopup } from './MessageItemChipPopup';
 
 const MAX_ITEM_TEXT_LENGTH = 30;
 
@@ -34,8 +35,6 @@ interface MessageItemButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLBut
     showInvalid?: boolean;
     /** Optional collection key to reveal the item within when clicked */
     revealInCollectionKey?: string;
-    /** How the chip popup should summarize attachments whose validation has not run. */
-    unvalidatedAttachmentState?: UnvalidatedAttachmentState;
 }
 
 /**
@@ -55,7 +54,6 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
             tabContextType,
             showInvalid = true,
             revealInCollectionKey,
-            unvalidatedAttachmentState = 'checking',
             onMouseEnter,
             onMouseLeave,
             ...rest
@@ -165,12 +163,9 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
             extraMenuItems: revealMenuItems,
         });
 
-        // Handle button click
-        const handleButtonClick = (e: React.MouseEvent<HTMLButtonElement>) => {
-            e.stopPropagation();
-            // Gecko dispatches click for non-primary buttons too (right-click
-            // fires contextmenu AND click); only a left-click reveals the item.
-            if (e.button !== 0) return;
+        // Handle button click. ChipButton already swallows non-primary clicks and
+        // stops propagation, so this only runs for a left-click.
+        const handleButtonClick = () => {
             revealItem();
         };
 
@@ -221,10 +216,10 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
 
         // Determine button styling based on validation state
         const getButtonClasses = () => {
-            const baseClasses = `variant-outline source-button ${className || ''} ${disabled ? 'disabled-but-styled' : ''}`;
-            
+            const classes = `${className || ''} ${disabled ? 'disabled-but-styled' : ''}`;
+
             if (showInvalid && isHardBlockedValidation(validation)) {
-                return `${baseClasses} border-red`;
+                return `${classes} border-red`;
             }
 
             if (
@@ -233,10 +228,10 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
                 && !validation.isValidating
                 && validation.state === 'unreadable'
             ) {
-                return `${baseClasses} opacity-80`;
+                return `${classes} opacity-80`;
             }
-            
-            return baseClasses;
+
+            return classes;
         };
 
         // Tooltip text
@@ -271,14 +266,13 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
         const chipPopup = React.useMemo(
             () => isAnnotation
                 ? null
-                : buildMessageItemChipPopup(item, validation, getValidation, { unvalidatedAttachmentState }),
-            [getValidation, isAnnotation, item, unvalidatedAttachmentState, validation],
+                : buildMessageItemChipPopup(item, validation),
+            [isAnnotation, item, validation],
         );
 
         const button = (
-            <button
+            <ChipButton
                 ref={ref}
-                style={{ height: '22px' }}
                 title={isAnnotation ? getTooltipTitle() : undefined}
                 onMouseEnter={handleMouseEnter}
                 onMouseLeave={handleMouseLeave}
@@ -296,12 +290,12 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
                             ? 'Current Note'
                             : displayName || '...'}
                 </span>
-                
+
                 {/* Show arrow icon for annotations not in current reader */}
                 {isAnnotation && annotation && currentReaderAttachmentKey !== annotation.parent_key && (
                     <Icon icon={ArrowUpRightIcon} className="scale-11" />
                 )}
-            </button>
+            </ChipButton>
         );
 
         return (
@@ -309,7 +303,7 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
             {isAnnotation ? (
                 button
             ) : (
-                <ChipWithPopup popup={chipPopup!}>
+                <ChipWithPopup popup={chipPopup!} suppressed={isRemoveMenuOpen}>
                     {button}
                 </ChipWithPopup>
             )}

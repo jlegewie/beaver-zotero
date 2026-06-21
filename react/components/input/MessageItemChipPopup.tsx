@@ -1,26 +1,9 @@
 import React from 'react';
-import { CSSItemTypeIcon, Icon, AlertCircleIcon, InformationCircleIcon, MoreHorizontalIcon } from '../icons/icons';
-import type { ChipPopupContent, ChipPopupSubtitle } from '../agentRuns/requestChips/ChipPopup';
+import { CSSItemTypeIcon, Icon, InformationCircleIcon, MoreHorizontalIcon, NoteIcon, LibraryIcon } from '../icons/icons';
+import type { ChipPopupAction, ChipPopupContent, ChipPopupSubtitle } from '../agentRuns/requestChips/ChipPopup';
 import type { ItemValidationState } from '../../atoms/itemValidation';
-import { isHardBlockedValidation } from '../../atoms/itemValidation';
 import { getDisplayNameFromItem } from '../../utils/sourceUtils';
 import type { AttachmentInfo, ContentKind } from '../../../src/services/documentExtraction/shared/contentKinds';
-
-const CONTENT_KIND_LABELS: Partial<Record<ContentKind, string>> = {
-    pdf: 'PDF',
-    epub: 'EPUB',
-    text: 'Text file',
-    image: 'Image',
-    snapshot: 'Snapshot',
-    word: 'Word document',
-    spreadsheet: 'Spreadsheet',
-    presentation: 'Presentation',
-    audio: 'Audio',
-    video: 'Video',
-    archive: 'Archive',
-    linked_url: 'Linked URL',
-    other: 'File',
-};
 
 function safeDisplayName(item: Zotero.Item, fallback = 'Item'): string {
     try {
@@ -74,24 +57,40 @@ function validationDetails(validation?: ItemValidationState): ValidationDetails 
     return validation;
 }
 
-function attachmentLabel(validation?: ItemValidationState): string {
-    const details = validationDetails(validation);
-    const contentKind = details.contentKind ?? details.attachmentInfo?.content_kind;
-    return contentKind ? (CONTENT_KIND_LABELS[contentKind] ?? 'File') : 'Attachment';
-}
-
 function plural(count: number, singular: string, pluralForm = `${singular}s`): string {
     return `${count} ${count === 1 ? singular : pluralForm}`;
 }
 
-function parentSubtitle(item: Zotero.Item): ChipPopupSubtitle | null {
+/**
+ * Second line of an item chip popup, mirroring the read-only request chips:
+ * regular items show their title beneath the creator/year headline; attachments
+ * and notes describe their relationship to a parent.
+ */
+function itemSubtitle(item: Zotero.Item): ChipPopupSubtitle | null {
     try {
-        const parent = item.parentItem;
-        if (!parent) return null;
-        return { prefix: 'Attached to ', text: safeDisplayName(parent), italic: true };
+        if (item.isAttachment()) {
+            const parent = item.parentItem;
+            if (parent) {
+                return { prefix: 'Attached to ', text: safeDisplayName(parent), italic: true };
+            }
+            return { text: 'Standalone attachment' };
+        }
+        if (item.isNote()) {
+            return item.parentItem ? { text: 'Attached note' } : { text: 'Standalone note' };
+        }
+        if (item.isRegularItem()) {
+            const firstCreator = item.firstCreator || '';
+            const year = item.getField('date')?.match(/\d{4}/)?.[0] || '';
+            const creatorYear = [firstCreator, year].filter(Boolean).join(' ');
+            const title = item.getField('title') || '';
+            // When the headline is the creator/year, surface the title beneath it;
+            // when the headline already is the title, there is no second line.
+            return creatorYear && title && title !== creatorYear ? { text: title } : null;
+        }
     } catch {
         return null;
     }
+    return null;
 }
 
 function safeChildAttachments(item: Zotero.Item): Zotero.Item[] {
@@ -113,99 +112,6 @@ function safeChildAttachments(item: Zotero.Item): Zotero.Item[] {
     }
 }
 
-function attachmentHint(item: Zotero.Item, validation?: ItemValidationState): string {
-    const details = validationDetails(validation);
-
-    if (validation?.isValidating) {
-        return 'Checking readability';
-    }
-    if (validation?.state === 'blocked') {
-        return validation.reason || 'Unavailable to Beaver';
-    }
-    if (details.statusCode === 'pdf_needs_ocr') {
-        return 'Scanned PDF - no text layer';
-    }
-    if (validation?.state === 'unreadable') {
-        return validation.reason || `${attachmentLabel(validation)} is not readable`;
-    }
-
-    const label = attachmentLabel(validation);
-    if (details.contentKind === 'pdf' && typeof details.pageCount === 'number') {
-        return `${label} - ${plural(details.pageCount, 'page')}`;
-    }
-    if (details.contentKind === 'epub' && typeof details.pageCount === 'number') {
-        return `${label} - ${plural(details.pageCount, 'section')}`;
-    }
-    if (details.contentKind === 'text' && typeof details.attachmentInfo?.line_count === 'number') {
-        return `${label} - ${plural(details.attachmentInfo.line_count, 'line')}`;
-    }
-    if (details.contentKind === 'image') {
-        return 'Image - Beaver will view it';
-    }
-    if (details.contentKind === 'snapshot') {
-        return 'Snapshot - web page text';
-    }
-
-    try {
-        if (item.isAttachment()) return `${label} attached`;
-    } catch {
-        return 'Attachment attached';
-    }
-    return 'Attachment attached';
-}
-
-function itemHint(
-    item: Zotero.Item,
-    validation: ItemValidationState | undefined,
-    getValidation: (item: Zotero.Item) => ItemValidationState | undefined,
-    unvalidatedAttachmentState: UnvalidatedAttachmentState,
-): string {
-    try {
-        if (item.isAttachment()) {
-            return attachmentHint(item, validation);
-        }
-        if (item.isNote()) {
-            return 'Note content attached';
-        }
-        if (!item.isRegularItem()) {
-            return validation?.reason || 'Item attached';
-        }
-    } catch {
-        return validation?.reason || 'Item attached';
-    }
-
-    if (validation?.isValidating) {
-        return 'Checking attachment readability';
-    }
-
-    const attachments = safeChildAttachments(item);
-    if (attachments.length === 0) {
-        return 'Metadata only - no file attachments';
-    }
-
-    let readable = 0;
-    let checking = 0;
-    for (const attachment of attachments) {
-        const attachmentValidation = getValidation(attachment);
-        if (!attachmentValidation) {
-            if (unvalidatedAttachmentState === 'checking') {
-                checking += 1;
-            } else {
-                readable += 1;
-            }
-        } else if (attachmentValidation.isValidating) {
-            checking += 1;
-        } else if (attachmentValidation.state === 'readable') {
-            readable += 1;
-        }
-    }
-
-    if (checking > 0) {
-        return `Checking ${plural(checking, 'attachment')}`;
-    }
-    return `${readable}/${attachments.length} attachments readable`;
-}
-
 function itemIconName(item: Zotero.Item, validation?: ItemValidationState): string {
     try {
         if (item.isAttachment()) {
@@ -218,30 +124,31 @@ function itemIconName(item: Zotero.Item, validation?: ItemValidationState): stri
     return safeItemTypeIconName(item);
 }
 
+/**
+ * Footer affordance describing the chip's primary (left-click) action, mirroring
+ * the read-only request chips: notes open in the editor, everything else is
+ * revealed in the library.
+ */
+function itemAction(item: Zotero.Item): ChipPopupAction {
+    try {
+        if (item.isNote()) {
+            return { icon: NoteIcon, label: 'Open note' };
+        }
+    } catch {
+        // Fall through to the default reveal action.
+    }
+    return { icon: LibraryIcon, label: 'Reveal in library' };
+}
+
 export function buildMessageItemChipPopup(
     item: Zotero.Item,
     validation: ItemValidationState | undefined,
-    getValidation: (item: Zotero.Item) => ItemValidationState | undefined,
-    options: { unvalidatedAttachmentState?: UnvalidatedAttachmentState } = {},
 ): ChipPopupContent {
-    const title = safeDisplayName(item);
-    const hint = itemHint(
-        item,
-        validation,
-        getValidation,
-        options.unvalidatedAttachmentState ?? 'checking',
-    );
-    const hasStrongIssue = isHardBlockedValidation(validation);
-
     return {
         icon: <CSSItemTypeIcon itemType={itemIconName(item, validation)} className="scale-90" />,
-        title,
-        subtitle: parentSubtitle(item),
-        action: {
-            icon: hasStrongIssue ? AlertCircleIcon : InformationCircleIcon,
-            label: hint,
-            iconClassName: hasStrongIssue ? '' : 'scale-95',
-        },
+        title: safeDisplayName(item),
+        subtitle: itemSubtitle(item),
+        action: itemAction(item),
     };
 }
 

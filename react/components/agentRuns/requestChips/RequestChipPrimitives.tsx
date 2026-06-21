@@ -8,36 +8,9 @@ import { truncateText } from '../../../utils/stringUtils';
 import { ANNOTATION_ICON_BY_TYPE, ANNOTATION_TEXT_BY_TYPE } from '../../../utils/annotationDisplay';
 import type { ValidAnnotationType, ExternalFileContentKind } from '../../../types/attachments/apiTypes';
 import { ChipWithPopup, type ChipPopupSubtitle } from './ChipPopup';
+import { ChipButton } from './ChipButton';
 
 const MAX_CHIP_TEXT_LENGTH = 30;
-
-function stopLeftClick(e: React.MouseEvent<HTMLButtonElement>) {
-    e.stopPropagation();
-    if (e.button !== 0) {
-        e.preventDefault();
-    }
-}
-
-interface ChipButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
-    children: React.ReactNode;
-}
-
-function ChipButton({ children, className = '', onClick, ...rest }: ChipButtonProps) {
-    return (
-        <button
-            type="button"
-            style={{ height: '22px' }}
-            className={`variant-outline source-button ${className}`}
-            onClick={(e) => {
-                stopLeftClick(e);
-                if (e.button === 0) onClick?.(e);
-            }}
-            {...rest}
-        >
-            {children}
-        </button>
-    );
-}
 
 function attachmentIconName(contentKind?: ContentKind | ExternalFileContentKind | null): string {
     switch (contentKind) {
@@ -134,7 +107,7 @@ export function NoteChip({
     noteRef: ZoteroItemReference;
     subtitle?: ChipPopupSubtitle | null;
 }) {
-    const displayName = title || 'Note';
+    const displayName = title || 'Untitled Note';
     return (
         <ChipWithPopup
             popup={{

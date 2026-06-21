@@ -143,7 +143,6 @@ export const OrganizeItemsPreview: React.FC<OrganizeItemsPreviewProps> = ({
                             canEdit={false}
                             showInvalid={false}
                             revealInCollectionKey={collectionsToAdd[0]}
-                            unvalidatedAttachmentState="readable"
                         />
                     ))}
                     {overflowPopup && (
