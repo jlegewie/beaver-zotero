@@ -40,6 +40,9 @@ pref("showDiffPreviewInNoteEditor", true);
 // Show an OS-native system notification when an agent action needs approval
 pref("enableSystemNotifications", true);
 
+// Show an OS-native system notification when a response is complete and Beaver is not visible
+pref("enableResponseCompleteNotifications", true);
+
 // Deferred tool preferences: maps tool group to preference (always_ask, always_apply, continue_without_applying)
 // Defaults are defined in react/atoms/deferredToolPreferences.ts and merged at load time.
 // This pref only stores user overrides.
