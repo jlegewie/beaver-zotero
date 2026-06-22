@@ -87,7 +87,7 @@ function describeApproval(event: WSDeferredApprovalRequest): { title: string; bo
     const title = "Beaver needs your approval";
     switch (event.action_type) {
         case "confirm_extraction":
-            return { title, body: "Approve PDF text extraction to let the task continue." };
+            return { title, body: "Approve text extraction to let the task continue." };
         case "confirm_external_search":
             return { title, body: "Approve an external literature search to let the task continue." };
         case "edit_note":
