@@ -32,6 +32,17 @@ type ApprovalVisibility = "beaver-visible" | "zotero-focused" | "zotero-unfocuse
 
 const NOTIFICATION_ICON = `chrome://${config.addonRef}/content/icons/beaver.png`;
 
+// Stable alert name: a new notification with the same name replaces the
+// previous one instead of stacking, so parallel approvals never pile up.
+const NOTIFICATION_NAME = "beaver-approval";
+
+// Parallel tool calls can queue several approvals in the same tick. Collect
+// them for a short window and surface a single notification with a count.
+const COALESCE_WINDOW_MS = 400;
+
+let queuedApprovals: WSDeferredApprovalRequest[] = [];
+let coalesceTimer: ReturnType<typeof setTimeout> | null = null;
+
 /**
  * Determine whether the user can currently see the Beaver approval UI.
  */
@@ -89,6 +100,20 @@ function describeApproval(event: WSDeferredApprovalRequest): { title: string; bo
 }
 
 /**
+ * Notification text for one or more queued approval requests. A single request
+ * gets a specific message; a burst collapses into a count.
+ */
+function describeApprovals(events: WSDeferredApprovalRequest[]): { title: string; body: string } {
+    if (events.length === 1) {
+        return describeApproval(events[0]);
+    }
+    return {
+        title: "Beaver needs your approval",
+        body: `${events.length} actions are waiting for your decision.`,
+    };
+}
+
+/**
  * Focus the Beaver UI: raise the separate window if open, otherwise focus the
  * main Zotero window and open the sidebar.
  */
@@ -118,14 +143,15 @@ function focusBeaver(): void {
 }
 
 /**
- * Show an OS-native notification for a pending approval request.
+ * Show an OS-native notification for one or more pending approval requests.
  */
-function showSystemNotification(event: WSDeferredApprovalRequest): void {
+function showSystemNotification(events: WSDeferredApprovalRequest[]): void {
+    if (events.length === 0) return;
     try {
         const alertsService = (Components.classes as any)["@mozilla.org/alerts-service;1"]
             .getService(Components.interfaces.nsIAlertsService);
 
-        const { title, body } = describeApproval(event);
+        const { title, body } = describeApprovals(events);
 
         const listener = {
             observe(_subject: unknown, topic: string) {
@@ -140,15 +166,26 @@ function showSystemNotification(event: WSDeferredApprovalRequest): void {
             title,
             body,
             true, // text clickable
-            event.action_id, // cookie
+            "", // cookie (unused — the click handler always focuses Beaver)
             listener,
-            `beaver-approval-${event.action_id}`, // name (unique per request)
+            NOTIFICATION_NAME, // shared name so notifications replace, never stack
         );
     } catch (error) {
         // System notifications are best-effort; the in-sidebar approval UI
         // remains the source of truth.
         logger(`systemNotifications: Failed to show notification: ${error}`, 1);
     }
+}
+
+/**
+ * Surface the approvals collected during the coalescing window as one
+ * notification, then reset for the next batch.
+ */
+function flushQueuedApprovals(): void {
+    coalesceTimer = null;
+    const events = queuedApprovals;
+    queuedApprovals = [];
+    showSystemNotification(events);
 }
 
 /**
@@ -176,5 +213,10 @@ export function notifyApprovalRequest(event: WSDeferredApprovalRequest): void {
             break;
     }
 
-    showSystemNotification(event);
+    // Coalesce a burst of parallel approvals into a single notification. The
+    // window opens on the first queued request and flushes everything together.
+    queuedApprovals.push(event);
+    if (coalesceTimer === null) {
+        coalesceTimer = setTimeout(flushQueuedApprovals, COALESCE_WINDOW_MS);
+    }
 }
