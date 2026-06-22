@@ -149,6 +149,7 @@ const SubmitOnEnterPlugin: React.FC<{ onSubmit: () => void }> = ({ onSubmit }) =
 // text-entity nodes, which is what makes rich pills possible.
 const editorConfig = {
     namespace: 'beaver-input',
+    // Plain-text behavior with custom decorator/text nodes for pills.
     nodes: [MentionNode, SlashCommandNode],
     // Plain text editors still need a theme object; we leave it empty.
     theme: {},
@@ -168,38 +169,60 @@ export const LexicalEditorInput = forwardRef<LexicalEditorInputHandle, LexicalEd
         const [anchorElement, setAnchorElement] = useState<HTMLElement | null>(null);
         const contentEditableRef = useRef<HTMLDivElement | null>(null);
 
+        // The ContentEditable ref callback MUST keep a stable identity across
+        // renders. Lexical memoizes its root-element ref on this callback, so a
+        // changing identity makes it re-run editor.setRootElement() on every
+        // render; that re-reads the DOM selection (collapsed at offset 0) back
+        // into the editor, pinning the caret to the start and freezing input.
+        // We stash the latest onContentEditableRef in a ref so the callback can
+        // stay stable while still forwarding to the most recent prop.
+        const onContentEditableRefCb = useRef(onContentEditableRef);
+        onContentEditableRefCb.current = onContentEditableRef;
+
         const handleContentEditableRef = useCallback(
             (el: HTMLDivElement | null) => {
                 contentEditableRef.current = el;
-                onContentEditableRef?.(el);
+                onContentEditableRefCb.current?.(el);
             },
-            [onContentEditableRef],
+            [],
         );
 
         return (
             <LexicalComposer initialConfig={{ ...editorConfig, editable: !disabled }}>
                 <div className="beaver-lexical-root" ref={setAnchorElement}>
-                    <PlainTextPlugin
-                        contentEditable={
-                            <ContentEditable
-                                ref={handleContentEditableRef}
-                                className="chat-input beaver-lexical-content"
-                                aria-label={ariaLabel ?? 'Message'}
-                                aria-multiline="true"
-                                role="textbox"
-                                spellCheck={true}
-                            />
-                        }
-                        placeholder={
-                            <div
-                                className="beaver-lexical-placeholder"
-                                aria-hidden="true"
-                            >
-                                {placeholder}
-                            </div>
-                        }
-                        ErrorBoundary={LexicalErrorBoundary}
-                    />
+                    {/*
+                     * Scroll host. Zotero's main window is a XUL document whose
+                     * `document.body` is null, so Lexical's typeahead positioning
+                     * (getScrollParent -> document.body fallback) throws and
+                     * unmounts the editor when the @ / mention menu opens. Giving
+                     * the contenteditable an `overflow` ancestor makes
+                     * getScrollParent return this element instead of the null
+                     * body. It is NOT the menu's portal parent (that is
+                     * .beaver-lexical-root), so it never clips the popup.
+                     */}
+                    <div className="beaver-lexical-scroll">
+                        <PlainTextPlugin
+                            contentEditable={
+                                <ContentEditable
+                                    ref={handleContentEditableRef}
+                                    className="chat-input beaver-lexical-content"
+                                    aria-label={ariaLabel ?? 'Message'}
+                                    aria-multiline="true"
+                                    role="textbox"
+                                    spellCheck={true}
+                                />
+                            }
+                            placeholder={
+                                <div
+                                    className="beaver-lexical-placeholder"
+                                    aria-hidden="true"
+                                >
+                                    {placeholder}
+                                </div>
+                            }
+                            ErrorBoundary={LexicalErrorBoundary}
+                        />
+                    </div>
                     <HistoryPlugin />
                     <PlainTextSync value={value} onChange={onChange} />
                     <SubmitOnEnterPlugin onSubmit={onSubmit} />
