@@ -5,7 +5,7 @@ import { Spinner, Icon, AlertIcon, TickIcon, InformationCircleIcon } from "../ic
 import { openPreferencesWindow } from "../../../src/ui/openPreferencesWindow";
 import { useFileStatus } from "../../hooks/useFileStatus";
 import { useIndexingCompleteMessage } from "../../hooks/useIndexingCompleteMessage";
-import { hasPopupsOrPreviewsAtom } from "../../atoms/ui";
+import { hasPopupMessagesAtom } from "../../atoms/ui";
 
 /**
  * Minimal one-line file processing status indicator for the homepage footer.
@@ -18,7 +18,7 @@ const FileStatusBar: React.FC = () => {
 
     const summary = useAtomValue(fileStatusSummaryAtom);
     const connectionStatus = useAtomValue(connectionStatusAtom);
-    const hasPopupsOrPreviews = useAtomValue(hasPopupsOrPreviewsAtom);
+    const hasPopupMessages = useAtomValue(hasPopupMessagesAtom);
 
     const isConnecting = connectionStatus === 'connecting' || connectionStatus === 'reconnecting';
     const isError = connectionStatus === 'error' || connectionStatus === 'disconnected';
@@ -58,7 +58,7 @@ const FileStatusBar: React.FC = () => {
 
     return (
         <div
-            className={`file-status-bar mt-2 -mb-1 ${hasPopupsOrPreviews ? 'opacity-50' : 'opacity-100'}`}
+            className={`file-status-bar mt-2 -mb-1 ${hasPopupMessages ? 'opacity-50' : 'opacity-100'}`}
             onClick={() => openPreferencesWindow('sync')}
             role="button"
             tabIndex={0}

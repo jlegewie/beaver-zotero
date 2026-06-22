@@ -1,5 +1,4 @@
 import { atom } from 'jotai';
-import { TextSelection } from '../types/attachments/apiTypes';
 import { PopupMessage, PopupMessageType } from '../types/popupMessage';
 import { ExternalReference } from '../types/externalReferences';
 import { getPref } from '../../src/utils/prefs';
@@ -58,26 +57,10 @@ export const userScrolledAtom = atom(false);
 // Independent scroll state for separate window
 export const windowUserScrolledAtom = atom(false);
 
-// Create a shared close timeout atom to coordinate between SourceButton and SourcePreview
-export const previewCloseTimeoutAtom = atom<number | null>(null)
-
-// Active preview
-export type ActivePreview = 
-    | { type: 'textSelection'; content: TextSelection }
-    | { type: 'annotation'; content: Zotero.Item }
-    | null;
-
-export const activePreviewAtom = atom<ActivePreview>(null);
-
 // Popup Messages
 export const popupMessagesAtom = atom<PopupMessage[]>([]);
 
-// Has popups or previews
-export const hasPopupsOrPreviewsAtom = atom(get => {
-    const hasPopupMessages = get(popupMessagesAtom).length > 0;
-    const hasActivePreview = get(activePreviewAtom) !== null;
-    return hasPopupMessages || hasActivePreview;
-});
+export const hasPopupMessagesAtom = atom(get => get(popupMessagesAtom).length > 0);
 
 // Remove popup messages by type
 export const removePopupMessagesByTypeAtom = atom(

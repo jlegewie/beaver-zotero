@@ -6,7 +6,7 @@ import { supportedModelsAtom, selectedModelAtom, availableModelsAtom } from "../
 import { isProfileInvalidAtom, profileWithPlanAtom, isProfileLoadedAtom, syncedLibraryIdsAtom, updateRequiredAtom, minimumFrontendVersionAtom, planFeaturesAtom, isDatabaseSyncSupportedAtom, processingModeAtom, isBackendIndexingCompleteAtom, profileBalanceAtom, hasAuthorizedAccessAtom, hasAuthorizedProAccessAtom, hasAuthorizedFreeAccessAtom, hasCompletedOnboardingAtom, syncWithZoteroAtom } from "../atoms/profile"
 import { syncStatusAtom, syncingAtom, syncErrorAtom, syncStatusSummaryAtom, overallSyncStatusAtom } from "../atoms/sync"
 import { recentThreadsAtom, currentThreadIdAtom } from "../atoms/threads"
-import { isSidebarVisibleAtom, isLibraryTabAtom, isPreferencePageVisibleAtom, showFileStatusDetailsAtom, userScrolledAtom, activePreviewAtom, popupMessagesAtom } from "../atoms/ui"
+import { isSidebarVisibleAtom, isLibraryTabAtom, isPreferencePageVisibleAtom, showFileStatusDetailsAtom, userScrolledAtom, popupMessagesAtom } from "../atoms/ui"
 import { store } from "../store"
 
 // Agent-related atoms
@@ -106,7 +106,6 @@ export const atomRegistry = {
     isPreferencePageVisible: isPreferencePageVisibleAtom,
     showFileStatusDetails: showFileStatusDetailsAtom,
     userScrolled: userScrolledAtom,
-    activePreview: activePreviewAtom,
     popupMessages: popupMessagesAtom,
 }
 

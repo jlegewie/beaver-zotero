@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { userAtom } from '../atoms/auth';
-import { isThreadListViewAtom, isLibraryTabAtom, selectedZoteroTabIdAtom, hasPopupsOrPreviewsAtom } from '../atoms/ui';
+import { isThreadListViewAtom, isLibraryTabAtom, selectedZoteroTabIdAtom, hasPopupMessagesAtom } from '../atoms/ui';
 import { ThreadData, loadThreadAtom } from '../atoms/threads';
 import { currentThreadIdAtom } from '../agents/atoms';
 import { threadService, ThreadRunMatch } from '../../src/services/threadService';
@@ -100,7 +100,7 @@ const RecentChats: React.FC = () => {
     const setIsThreadListView = useSetAtom(isThreadListViewAtom);
     const loadThread = useSetAtom(loadThreadAtom);
     const currentThreadId = useAtomValue(currentThreadIdAtom);
-    const hasPopupsOrPreviews = useAtomValue(hasPopupsOrPreviewsAtom);
+    const hasPopupMessages = useAtomValue(hasPopupMessagesAtom);
 
     const [threads, setThreads] = useState<ThreadData[]>([]);
     const [contextType, setContextType] = useState<ContextType>('recent');
@@ -294,7 +294,7 @@ const RecentChats: React.FC = () => {
         : 'Recent';
 
     return (
-        <div className={`recent-chats${hasPopupsOrPreviews ? ' recent-chats-faded' : ''}`}>
+        <div className={`recent-chats${hasPopupMessages ? ' recent-chats-faded' : ''}`}>
             <div className="recent-chats-header">
                 <span className="recent-chats-label">
                     {headerLabel}

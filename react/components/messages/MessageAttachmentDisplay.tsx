@@ -13,7 +13,6 @@ import { MessageItemButton } from '../input/MessageItemButton';
 import { MessageCollectionButton } from '../input/MessageCollectionButton';
 import { ExternalFileButton } from '../input/ExternalFileButton';
 import { collectionReferenceKey } from '../../types/zotero';
-import { activePreviewAtom } from '../../atoms/ui';
 import { ChipWithPopup } from '../agentRuns/requestChips/ChipPopup';
 import { buildItemsSummaryChipPopup } from '../input/MessageItemChipPopup';
 import { getItemValidationAtom } from '../../atoms/itemValidation';
@@ -49,7 +48,6 @@ const MessageAttachmentDisplay = ({
     const removeItemFromMessage = useSetAtom(removeItemFromMessageAtom);
     const clearMessageContext = useSetAtom(clearMessageContextAtom);
     const removePopupMessagesByType = useSetAtom(removePopupMessagesByTypeAtom);
-    const setActivePreview = useSetAtom(activePreviewAtom);
     const getValidation = useAtomValue(getItemValidationAtom);
 
     const selectedLibraries = currentLibraryIds
@@ -105,7 +103,6 @@ const MessageAttachmentDisplay = ({
         ? () => {
             clearMessageContext();
             removePopupMessagesByType(['items_summary']);
-            setActivePreview(null);
         }
         : undefined;
 
