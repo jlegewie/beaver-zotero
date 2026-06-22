@@ -184,7 +184,7 @@ const PermissionsSection: React.FC = () => {
                 />
                 <SettingsRow
                     title="System Notifications"
-                    description="Show a system notification when an agent action needs your approval and Beaver is not visible. Lets you respond before a task stalls."
+                    description="Show a system notification when an agent action needs your approval and Beaver is not visible."
                     onClick={handleEnableSystemNotificationsToggle}
                     hasBorder
                     control={
