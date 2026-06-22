@@ -13,8 +13,9 @@ import { MessageItemButton } from '../input/MessageItemButton';
 import { MessageCollectionButton } from '../input/MessageCollectionButton';
 import { ExternalFileButton } from '../input/ExternalFileButton';
 import { collectionReferenceKey } from '../../types/zotero';
-import { usePreviewHover } from '../../hooks/usePreviewHover';
-import { activePreviewAtom } from '../../atoms/ui';
+import { ChipWithPopup } from '../agentRuns/requestChips/ChipPopup';
+import { buildItemsSummaryChipPopup } from '../input/MessageItemChipPopup';
+import { getItemValidationAtom } from '../../atoms/itemValidation';
 
 const MAX_ATTACHMENTS = 4;
 
@@ -47,7 +48,7 @@ const MessageAttachmentDisplay = ({
     const removeItemFromMessage = useSetAtom(removeItemFromMessageAtom);
     const clearMessageContext = useSetAtom(clearMessageContextAtom);
     const removePopupMessagesByType = useSetAtom(removePopupMessagesByTypeAtom);
-    const setActivePreview = useSetAtom(activePreviewAtom);
+    const getValidation = useAtomValue(getItemValidationAtom);
 
     const selectedLibraries = currentLibraryIds
         .map(id => Zotero.Libraries.get(id))
@@ -63,13 +64,28 @@ const MessageAttachmentDisplay = ({
         })
         .filter((collection): collection is Zotero.Collection => Boolean(collection));
 
-    const filteredMessageItems = currentMessageItems.filter(
-        (item) => (!currentReaderAttachment || item.key !== currentReaderAttachment.key)
-            && (!currentNoteItem || item.key !== currentNoteItem.key)
+    const filteredMessageItems = React.useMemo(
+        () => currentMessageItems.filter(
+            (item) => (!currentReaderAttachment || item.key !== currentReaderAttachment.key)
+                && (!currentNoteItem || item.key !== currentNoteItem.key),
+        ),
+        [currentMessageItems, currentNoteItem, currentReaderAttachment],
     );
-    const displayedMessageItems = filteredMessageItems.slice(0, MAX_ATTACHMENTS);
-    const overflowMessageItems = filteredMessageItems.slice(MAX_ATTACHMENTS);
+    const displayedMessageItems = React.useMemo(
+        () => filteredMessageItems.slice(0, MAX_ATTACHMENTS),
+        [filteredMessageItems],
+    );
+    const overflowMessageItems = React.useMemo(
+        () => filteredMessageItems.slice(MAX_ATTACHMENTS),
+        [filteredMessageItems],
+    );
     const overflowCount = overflowMessageItems.length;
+    const overflowPopup = React.useMemo(
+        () => overflowCount > 0
+            ? buildItemsSummaryChipPopup(overflowMessageItems, getValidation)
+            : null,
+        [getValidation, overflowCount, overflowMessageItems],
+    );
 
     // Count of editable (removable) context items currently attached. Excludes
     // the non-removable reader attachment and note tab item.
@@ -87,14 +103,8 @@ const MessageAttachmentDisplay = ({
         ? () => {
             clearMessageContext();
             removePopupMessagesByType(['items_summary']);
-            setActivePreview(null);
         }
         : undefined;
-
-    const { hoverEventHandlers: overflowHoverHandlers } = usePreviewHover(
-        overflowCount > 0 ? { type: 'itemsSummary', content: overflowMessageItems } : null,
-        { isEnabled: overflowCount > 0 }
-    );
 
     return (
         <div className="display-flex flex-wrap gap-col-3 gap-row-2 mb-2">
@@ -157,27 +167,22 @@ const MessageAttachmentDisplay = ({
                     item={item}
                     onRemove={(item) => {
                         removeItemFromMessage(item);
-                        setActivePreview((prev) => {
-                            if (prev && prev.type === 'item' && prev.content.key === item.key) {
-                                return null;
-                            }
-                            return prev;
-                        });
                     }}
                     onRemoveAll={handleRemoveAll}
                 />
             ))}
 
-            {overflowCount > 0 && (
-                <button
-                    type="button"
-                    className="variant-outline source-button"
-                    style={{ height: '22px' }}
-                    title={`${overflowCount} more attachment${overflowCount === 1 ? '' : 's'}`}
-                    {...overflowHoverHandlers}
-                >
-                    +{overflowCount}
-                </button>
+            {overflowPopup && (
+                <ChipWithPopup popup={overflowPopup}>
+                    <button
+                        type="button"
+                        className="variant-outline source-button"
+                        style={{ height: '22px' }}
+                        title={`${overflowCount} more attachment${overflowCount === 1 ? '' : 's'}`}
+                    >
+                        +{overflowCount}
+                    </button>
+                </ChipWithPopup>
             )}
 
             {/* External files */}

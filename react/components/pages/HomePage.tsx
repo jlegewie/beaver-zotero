@@ -6,7 +6,7 @@ import ActionSuggestions from "../ActionSuggestions";
 import { actionsForContextAtom } from "../../atoms/actions";
 import InputArea from "../input/InputArea";
 import DragDropWrapper from "../input/DragDropWrapper";
-import PreviewAndPopupContainer from "../PreviewAndPopupContainer";
+import PopupOverlayContainer from "../PopupOverlayContainer";
 import FileStatusBar from "../status/FileStatusBar";
 import { threadWarningsAtom } from "../../atoms/warnings";
 import { libraryHasItemsAtom } from "../../atoms/zoteroContext";
@@ -69,7 +69,7 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false, inputRef }) => {
                 )}
 
                 <div className="relative -mx-4 px-4 mb-3">
-                    <PreviewAndPopupContainer />
+                    <PopupOverlayContainer />
                 </div>
 
                 {isBeta && (

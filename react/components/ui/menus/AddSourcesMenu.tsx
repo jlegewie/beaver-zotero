@@ -14,6 +14,8 @@ import { searchTitleCreatorYear, scoreSearchResult } from '../../../utils/search
 import { logger } from '../../../../src/utils/logger';
 import { searchableLibraryIdsAtom } from '../../../atoms/profile';
 import { store } from '../../../store';
+import { selectedModelAtom } from '../../../atoms/models';
+import { requestPlusToolsAtom } from '../../../atoms/ui';
 import { SourceMenuItemContext, LibraryMenuItemContext, CollectionMenuItemContext, TagMenuItemContext } from './utils/menuItemFactories';
 import { useSourcesMenu } from './hooks/useSourcesMenu';
 import { useLibrariesMenu } from './hooks/useLibrariesMenu';
@@ -107,6 +109,8 @@ const AddSourcesMenu: React.FC<{
     const addExternalFilesToCurrentMessage = useSetAtom(addExternalFilesToCurrentMessageAtom);
     const addPopupMessage = useSetAtom(addPopupMessageAtom);
     const currentMessageItems = useAtomValue(currentMessageItemsAtom);
+    const selectedModel = useAtomValue(selectedModelAtom);
+    const requestPlusTools = useAtomValue(requestPlusToolsAtom);
     const removeItemFromMessage = useSetAtom(removeItemFromMessageAtom);
 
     // Add ref for tracking the current search request
@@ -234,8 +238,12 @@ const AddSourcesMenu: React.FC<{
             if (rv !== fp.returnOK) return;
             const paths: string[] = fp.files || [];
             const attached: ExternalFileRecord[] = [];
+            const supportsVision = selectedModel?.supports_vision === true;
             for (const path of paths) {
-                const result = await attachExternalFile(path);
+                const result = await attachExternalFile(path, {
+                    supportsVision,
+                    canHandleOCRLocally: supportsVision || Boolean(requestPlusTools),
+                });
                 if (result.status === 'attached') {
                     attached.push(result.record);
                 } else {
@@ -253,7 +261,7 @@ const AddSourcesMenu: React.FC<{
         })().catch((error) => {
             logger(`AddSourcesMenu.handleSelectFiles: ${error}`, 1);
         });
-    }, [handleOnClose, addExternalFilesToCurrentMessage, addPopupMessage]);
+    }, [handleOnClose, addExternalFilesToCurrentMessage, addPopupMessage, selectedModel, requestPlusTools]);
 
     // Handler functions for menu item callbacks
     const handleAddSourceItem = useCallback((item: Zotero.Item) => {

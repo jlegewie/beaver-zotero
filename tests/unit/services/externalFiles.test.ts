@@ -3,8 +3,12 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 vi.mock('../../../src/utils/logger', () => ({ logger: vi.fn() }));
 
 const getPageCountMock = vi.fn().mockResolvedValue(12);
+const analyzeOCRNeedsMock = vi.fn().mockResolvedValue({ needsOCR: false });
 vi.mock('../../../src/beaver-extract/MuPDFWorkerClient', () => ({
-    getMuPDFWorkerClient: vi.fn(() => ({ getPageCount: getPageCountMock })),
+    getMuPDFWorkerClient: vi.fn(() => ({
+        getPageCount: getPageCountMock,
+        analyzeOCRNeeds: analyzeOCRNeedsMock,
+    })),
 }));
 
 import {
@@ -58,6 +62,7 @@ describe('externalFiles', () => {
         db.getExternalFileByKey.mockResolvedValue(null);
         db.getExternalFileBySha256.mockResolvedValue(null);
         getPageCountMock.mockResolvedValue(12);
+        analyzeOCRNeedsMock.mockResolvedValue({ needsOCR: false });
     });
 
     describe('contentKindFromMime', () => {
@@ -105,6 +110,34 @@ describe('externalFiles', () => {
             if (result.status !== 'attached') return;
             expect(result.record.contentKind).toBe('image');
             expect(result.record.filename).toBe('figure.png');
+        });
+
+        it('rejects image files when the selected model lacks vision support', async () => {
+            setupGlobals({ mime: 'image/png', generateKey: 'IMGK2345' });
+            const result = await attachExternalFile('/tmp/figure.png', { supportsVision: false });
+            expect(result).toMatchObject({ status: 'rejected', reason: 'requires_vision' });
+            expect((globalThis as any).IOUtils.copy).not.toHaveBeenCalled();
+        });
+
+        it('rejects scanned PDFs when OCR is unavailable', async () => {
+            setupGlobals();
+            analyzeOCRNeedsMock.mockResolvedValueOnce({ needsOCR: true });
+            const result = await attachExternalFile('/home/user/scanned.pdf', {
+                supportsVision: false,
+                canHandleOCRLocally: false,
+            });
+            expect(result).toMatchObject({ status: 'rejected', reason: 'requires_ocr' });
+            expect((globalThis as any).IOUtils.copy).not.toHaveBeenCalled();
+        });
+
+        it('accepts scanned PDFs when OCR is available through vision or plus tools', async () => {
+            setupGlobals();
+            const result = await attachExternalFile('/home/user/scanned.pdf', {
+                supportsVision: false,
+                canHandleOCRLocally: true,
+            });
+            expect(result.status).toBe('attached');
+            expect(analyzeOCRNeedsMock).not.toHaveBeenCalled();
         });
 
         it('retries key generation on collision', async () => {

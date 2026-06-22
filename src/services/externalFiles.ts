@@ -34,9 +34,14 @@ export type AttachExternalFileResult =
     | { status: 'attached'; record: ExternalFileRecord }
     | {
         status: 'rejected';
-        reason: 'not_found' | 'unsupported_type' | 'file_too_large' | 'error';
+        reason: 'not_found' | 'unsupported_type' | 'file_too_large' | 'requires_vision' | 'requires_ocr' | 'error';
         message: string;
     };
+
+export interface AttachExternalFileOptions {
+    supportsVision?: boolean;
+    canHandleOCRLocally?: boolean;
+}
 
 /** File-picker filter extensions for the supported kinds. */
 export const EXTERNAL_FILE_PICKER_EXTENSIONS = [
@@ -166,6 +171,32 @@ function schedulePageCount(record: ExternalFileRecord): void {
 }
 
 /**
+ * Reject scanned PDFs up front when neither model vision nor plus tools can
+ * provide OCR for the attached file.
+ */
+async function checkPdfOcrCompatibility(
+    sourcePath: string,
+    filename: string,
+    options: AttachExternalFileOptions,
+): Promise<AttachExternalFileResult | null> {
+    if (options.canHandleOCRLocally !== false) return null;
+    try {
+        const data = await IOUtils.read(sourcePath);
+        const ocr = await getMuPDFWorkerClient().analyzeOCRNeeds(data);
+        if (ocr.needsOCR) {
+            return {
+                status: 'rejected',
+                reason: 'requires_ocr',
+                message: `PDF requires OCR and the selected model cannot read it: ${filename}`,
+            };
+        }
+    } catch (error) {
+        logger(`externalFiles: OCR compatibility check failed for '${filename}': ${error}`, 2);
+    }
+    return null;
+}
+
+/**
  * SHA-256 of a file's content (hex). Returns null on failure — attaches then
  * proceed without deduplication rather than failing.
  */
@@ -229,6 +260,7 @@ async function reuseExternalFile(
  */
 export async function attachExternalFile(
     source: string | { path: string },
+    options: AttachExternalFileOptions = {},
 ): Promise<AttachExternalFileResult> {
     try {
         const sourcePath = typeof source === 'string' ? source : source.path;
@@ -250,7 +282,13 @@ export async function attachExternalFile(
                 message: `Unsupported file type: ${filename}`,
             };
         }
-
+        if (resolved.contentKind === 'image' && options.supportsVision === false) {
+            return {
+                status: 'rejected',
+                reason: 'requires_vision',
+                message: `Images require a model with vision support: ${filename}`,
+            };
+        }
         const maxSizeMB = effectiveMaxFileSizeMB();
         const sizeBytes = stat.size ?? 0;
         if (sizeBytes > maxSizeMB * 1024 * 1024) {
@@ -259,6 +297,10 @@ export async function attachExternalFile(
                 reason: 'file_too_large',
                 message: `File too large: ${filename} (max ${maxSizeMB} MB)`,
             };
+        }
+        if (resolved.contentKind === 'pdf') {
+            const ocrRejection = await checkPdfOcrCompatibility(sourcePath, filename, options);
+            if (ocrRejection) return ocrRejection;
         }
 
         // Deduplicate by content hash: identical bytes reuse the existing

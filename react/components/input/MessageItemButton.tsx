@@ -3,8 +3,7 @@ import { CSSItemTypeIcon, CSSIcon, Spinner, Icon, ArrowUpRightIcon, LibraryIcon,
 import { useAtomValue } from 'jotai';
 import { useRemoveContextMenu } from '../../hooks/useRemoveContextMenu';
 import { MenuItem } from '../ui/menu/ContextMenu';
-import { getItemValidationAtom } from '../../atoms/itemValidation';
-import { usePreviewHover } from '../../hooks/usePreviewHover';
+import { getItemValidationAtom, isHardBlockedValidation } from '../../atoms/itemValidation';
 import { getDisplayNameFromItem } from '../../utils/sourceUtils';
 import { truncateText } from '../../utils/stringUtils';
 import { ZoteroIcon } from '../icons/ZoteroIcon';
@@ -14,8 +13,81 @@ import { toAnnotation } from '../../types/attachments/converters';
 import { selectItemById } from '../../../src/utils/selectItem';
 import { openNoteById } from '../../utils/sourceUtils';
 import { ANNOTATION_ICON_BY_TYPE, ANNOTATION_TEXT_BY_TYPE } from '../../utils/annotationDisplay';
+import { ChipWithPopup, type ChipPopupContent } from '../agentRuns/requestChips/ChipPopup';
+import { buildAnnotationChipPopup } from '../agentRuns/requestChips/RequestChipPrimitives';
+import { ChipButton } from '../agentRuns/requestChips/ChipButton';
+import { buildMessageItemChipPopup } from './MessageItemChipPopup';
 
 const MAX_ITEM_TEXT_LENGTH = 30;
+
+async function ensureAnnotationImageCache(item: Zotero.Item): Promise<string | null> {
+    const annotationItem = { libraryID: item.libraryID, key: item.key };
+    if (await Zotero.Annotations.hasCacheImage(annotationItem)) {
+        return Zotero.File.pathToFileURI(Zotero.Annotations.getCacheImagePath(annotationItem));
+    }
+
+    const parentID = item.parentID ?? item.parentItemID;
+    if (!parentID) return null;
+
+    await Zotero.PDFWorker.renderAttachmentAnnotations(parentID);
+    if (!(await Zotero.Annotations.hasCacheImage(annotationItem))) {
+        return null;
+    }
+
+    return Zotero.File.pathToFileURI(Zotero.Annotations.getCacheImagePath(annotationItem));
+}
+
+const AnnotationImagePopupPreview = ({ item }: { item: Zotero.Item }) => {
+    const [imageUri, setImageUri] = React.useState<string | null>(null);
+    const [imageError, setImageError] = React.useState(false);
+
+    React.useEffect(() => {
+        let isMounted = true;
+        setImageUri(null);
+        setImageError(false);
+
+        const loadImage = async () => {
+            try {
+                const uri = await ensureAnnotationImageCache(item);
+                if (!isMounted) return;
+
+                if (!uri) {
+                    setImageError(true);
+                    return;
+                }
+
+                setImageUri(uri);
+            } catch (error) {
+                console.error('Failed to load annotation image preview:', error);
+                if (isMounted) setImageError(true);
+            }
+        };
+
+        loadImage();
+        return () => {
+            isMounted = false;
+        };
+    }, [item]);
+
+    return (
+        <span
+            className="display-flex items-center justify-center overflow-hidden"
+            style={{ width: '100%', minHeight: imageUri ? undefined : '64px' }}
+        >
+            {imageUri ? (
+                <img
+                    src={imageUri}
+                    alt="Area annotation"
+                    style={{ maxWidth: '100%', maxHeight: '150px', objectFit: 'contain' }}
+                />
+            ) : (
+                <span className="font-color-secondary text-sm px-2 text-center">
+                    {imageError ? 'Image preview unavailable' : 'Loading image...'}
+                </span>
+            )}
+        </span>
+    );
+};
 
 interface MessageItemButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'item'> {
     item: Zotero.Item;
@@ -51,6 +123,8 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
             tabContextType,
             showInvalid = true,
             revealInCollectionKey,
+            onMouseEnter,
+            onMouseLeave,
             ...rest
         } = props;
 
@@ -64,14 +138,7 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
         // Get validation state
         const getValidation = useAtomValue(getItemValidationAtom);
         const validation = getValidation(item);
-
-        // Use the custom hook for hover preview logic
-        const { hoverEventHandlers, isHovered, cancelTimers } = usePreviewHover(
-            isAnnotation 
-                ? { type: 'annotation', content: item }
-                : { type: 'item', content: item },
-            { isEnabled: !disabled }
-        );
+        const [isHovered, setIsHovered] = React.useState(false);
 
         // Determine display name based on item type
         const displayName = isAnnotation && annotation
@@ -148,22 +215,17 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
         // one removable item is attached).
         const { isRemoveMenuOpen, contextMenuHandlers, removeHandlers, removeMenu } = useRemoveContextMenu({
             onRemove: () => {
-                cancelTimers();
                 if (onRemove) onRemove(item);
             },
             onRemoveAll,
             canEdit,
             disabled,
-            onMenuOpen: cancelTimers,
             extraMenuItems: revealMenuItems,
         });
 
-        // Handle button click
-        const handleButtonClick = (e: React.MouseEvent<HTMLButtonElement>) => {
-            e.stopPropagation();
-            // Gecko dispatches click for non-primary buttons too (right-click
-            // fires contextmenu AND click); only a left-click reveals the item.
-            if (e.button !== 0) return;
+        // Handle button click. ChipButton already swallows non-primary clicks and
+        // stops propagation, so this only runs for a left-click.
+        const handleButtonClick = () => {
             revealItem();
         };
 
@@ -214,39 +276,69 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
 
         // Determine button styling based on validation state
         const getButtonClasses = () => {
-            const baseClasses = `variant-outline source-button ${className || ''} ${disabled ? 'disabled-but-styled' : ''}`;
-            
-            // Invalid state
-            if (showInvalid && validation && !validation.isValid && !validation.isValidating) {
-                return `${baseClasses} border-red`;
+            const classes = `${className || ''} ${disabled ? 'disabled-but-styled' : ''}`;
+
+            if (showInvalid && isHardBlockedValidation(validation)) {
+                return `${classes} border-red`;
             }
-            
-            // Valid and backend checked
-            if (validation?.backendChecked && validation.isValid) {
-                return `${baseClasses} border-green`;
+
+            if (
+                showInvalid
+                && validation
+                && !validation.isValidating
+                && validation.state === 'unreadable'
+            ) {
+                return `${classes} opacity-80`;
             }
-            
-            return baseClasses;
+
+            return classes;
         };
 
-        // Tooltip text
-        const getTooltipTitle = () => {
-            if (validation?.isValidating) {
-                return 'Validating...';
-            }
-            if (validation && !validation.isValid && validation.reason) {
-                return validation.reason;
-            }
-            return undefined;
+        const handleMouseEnter = (event: React.MouseEvent<HTMLButtonElement>) => {
+            setIsHovered(true);
+            onMouseEnter?.(event);
         };
 
-        return (
-            <>
-            <button
+        const handleMouseLeave = (event: React.MouseEvent<HTMLButtonElement>) => {
+            setIsHovered(false);
+            onMouseLeave?.(event);
+        };
+
+        const isStrongError = showInvalid && isHardBlockedValidation(validation);
+        const isUnreadable = showInvalid
+            && validation
+            && !validation.isValidating
+            && validation.state === 'unreadable';
+
+        const chipPopup = React.useMemo<ChipPopupContent>(() => {
+            if (isAnnotation && annotation) {
+                const annotationText = [annotation.text, annotation.comment]
+                    .filter(Boolean)
+                    .join(' ')
+                    .replace(/\s+/g, ' ')
+                    .trim();
+                return {
+                    ...buildAnnotationChipPopup({
+                        annotationType: annotation.annotation_type,
+                        color: annotation.color,
+                        title: annotationText || undefined,
+                    }),
+                    media: annotation.annotation_type === 'image'
+                        ? <AnnotationImagePopupPreview item={item} />
+                        : null,
+                    status: validation && !validation.isValidating && validation.state !== 'readable' && validation.reason
+                        ? { label: validation.reason }
+                        : null,
+                };
+            }
+            return buildMessageItemChipPopup(item, validation, getValidation);
+        }, [isAnnotation, annotation, item, validation, getValidation]);
+
+        const button = (
+            <ChipButton
                 ref={ref}
-                style={{ height: '22px' }}
-                title={getTooltipTitle()}
-                {...hoverEventHandlers}
+                onMouseEnter={handleMouseEnter}
+                onMouseLeave={handleMouseLeave}
                 {...contextMenuHandlers}
                 className={getButtonClasses()}
                 disabled={disabled}
@@ -254,30 +346,26 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
                 {...rest}
             >
                 {getIconElement()}
-                <span className={`truncate ${validation && !validation.isValid ? 'font-color-red' : ''}`}>
+                <span className={`truncate ${isStrongError ? 'font-color-red' : isUnreadable ? 'font-color-secondary' : ''}`}>
                     {tabContextType === 'reader'
-                        ? (validation && !validation.isValid && showInvalid) ? 'Invalid File' : 'Current File'
+                        ? isStrongError ? 'Invalid File' : isUnreadable ? 'Unreadable File' : 'Current File'
                         : tabContextType === 'note'
                             ? 'Current Note'
                             : displayName || '...'}
                 </span>
-                
+
                 {/* Show arrow icon for annotations not in current reader */}
                 {isAnnotation && annotation && currentReaderAttachmentKey !== annotation.parent_key && (
                     <Icon icon={ArrowUpRightIcon} className="scale-11" />
                 )}
-                
-                {/* Validation status indicator */}
-                {validation?.backendChecked && showInvalid && (
-                    <span className="validation-indicator">
-                        {validation.isValid ? (
-                            <CSSIcon name="checkmark" className="icon-12 text-green" />
-                        ) : (
-                            <CSSIcon name="alert" className="icon-12 text-red" />
-                        )}
-                    </span>
-                )}
-            </button>
+            </ChipButton>
+        );
+
+        return (
+            <>
+            <ChipWithPopup popup={chipPopup} suppressed={isRemoveMenuOpen}>
+                {button}
+            </ChipWithPopup>
             {removeMenu}
             </>
         );

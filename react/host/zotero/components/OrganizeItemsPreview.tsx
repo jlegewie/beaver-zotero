@@ -1,8 +1,11 @@
 import React, { useEffect, useState } from 'react';
+import { useAtomValue } from 'jotai';
 import { CSSIcon } from '../../../components/icons/icons';
 import type { TagChanges, CollectionChanges, OrganizeItemsResultData } from '../../../types/agentActions/base';
 import { MessageItemButton } from '../../../components/input/MessageItemButton';
-import { usePreviewHover } from '../../../hooks/usePreviewHover';
+import { ChipWithPopup } from '../../../components/agentRuns/requestChips/ChipPopup';
+import { buildItemsSummaryChipPopup } from '../../../components/input/MessageItemChipPopup';
+import { getItemValidationAtom } from '../../../atoms/itemValidation';
 
 type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error' | 'awaiting';
 
@@ -34,6 +37,7 @@ export const OrganizeItemsPreview: React.FC<OrganizeItemsPreviewProps> = ({
 }) => {
     const [collectionNames, setCollectionNames] = useState<Record<string, string>>({});
     const [resolvedItems, setResolvedItems] = useState<Zotero.Item[]>([]);
+    const getValidation = useAtomValue(getItemValidationAtom);
 
     // Resolve items from item IDs
     useEffect(() => {
@@ -94,14 +98,22 @@ export const OrganizeItemsPreview: React.FC<OrganizeItemsPreviewProps> = ({
     }, [collections, itemIds]);
 
     // Items to display and overflow
-    const displayedItems = resolvedItems.slice(0, MAX_ITEMS_DISPLAY);
-    const overflowItems = resolvedItems.slice(MAX_ITEMS_DISPLAY);
+    const displayedItems = React.useMemo(
+        () => resolvedItems.slice(0, MAX_ITEMS_DISPLAY),
+        [resolvedItems],
+    );
+    const overflowItems = React.useMemo(
+        () => resolvedItems.slice(MAX_ITEMS_DISPLAY),
+        [resolvedItems],
+    );
     const overflowCount = overflowItems.length;
-
-    // Hover preview for overflow items
-    const { hoverEventHandlers: overflowHoverHandlers } = usePreviewHover(
-        overflowCount > 0 ? { type: 'itemsSummary', content: overflowItems } : null,
-        { isEnabled: overflowCount > 0 }
+    const overflowPopup = React.useMemo(
+        () => overflowCount > 0
+            ? buildItemsSummaryChipPopup(overflowItems, getValidation, {
+                unvalidatedAttachmentState: 'readable',
+            })
+            : null,
+        [getValidation, overflowCount, overflowItems],
     );
 
     const isApplied = status === 'applied';
@@ -133,16 +145,17 @@ export const OrganizeItemsPreview: React.FC<OrganizeItemsPreviewProps> = ({
                             revealInCollectionKey={collectionsToAdd[0]}
                         />
                     ))}
-                    {overflowCount > 0 && (
-                        <button
-                            type="button"
-                            className="variant-outline source-button"
-                            style={{ height: '22px' }}
-                            title={`${overflowCount} more item${overflowCount === 1 ? '' : 's'}`}
-                            {...overflowHoverHandlers}
-                        >
-                            +{overflowCount}
-                        </button>
+                    {overflowPopup && (
+                        <ChipWithPopup popup={overflowPopup}>
+                            <button
+                                type="button"
+                                className="variant-outline source-button"
+                                style={{ height: '22px' }}
+                                title={`${overflowCount} more item${overflowCount === 1 ? '' : 's'}`}
+                            >
+                                +{overflowCount}
+                            </button>
+                        </ChipWithPopup>
                     )}
                     {resolvedItems.length === 0 && itemCount > 0 && (
                         <span className="text-sm font-color-secondary">Loading {itemCount} item{itemCount !== 1 ? 's' : ''}...</span>

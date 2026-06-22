@@ -1,1211 +1,355 @@
-import { attachmentsService } from './attachmentsService';
-import { itemsService } from './itemsService';
-import { isValidZoteroItem } from '../../react/utils/sourceUtils';
 import { logger } from '../utils/logger';
-import { store } from '../../react/store';
-import { planFeaturesAtom, searchableLibraryIdsAtom } from '../../react/atoms/profile';
-import { selectedModelAtom } from '../../react/atoms/models';
-import { isAttachmentOnServer } from '../utils/webAPI';
-import { getPref } from '../utils/prefs';
-import { BeaverExtractor, ExtractionError, ExtractionErrorCode } from '../beaver-extract';
-import { safeFileExists } from '../utils/zoteroUtils';
-import { isRemoteAccessAvailable } from './agentDataProvider/utils';
-import { getReadableContentKind } from './documentExtraction/attachmentResolution';
-import type { DocumentCacheMetadata } from './documentCache';
-import { effectiveMaxFileSizeMB, effectiveMaxPageCount } from './attachmentLimits';
+import { getAttachmentInfo } from './documentExtraction/attachmentInfo';
+import {
+    prepareAttachmentInfoBatchData,
+    processAttachmentInfoBatch,
+} from './documentExtraction/attachmentInfoBatch';
+import type { AttachmentInfo, ContentKind } from './documentExtraction/shared/contentKinds';
+import { effectiveMaxPageCount } from './attachmentLimits';
+
+export type ItemValidationResultState = 'readable' | 'unreadable' | 'blocked';
+export type ItemValidationSeverity = 'info' | 'error';
 
 /**
- * Types of item validation
- */
-export enum ItemValidationType {
-    LOCAL_ONLY = 'local_only',   // only local validation (fast)
-    BACKEND = 'backend',         // check backend processed status
-    CACHED = 'cached',           // use cached result if available, fallback to LOCAL_ONLY
-    FRONTEND = 'frontend',       // frontend processing mode (comprehensive local checks, no backend)
-}
-
-/**
- * Result of item validation
+ * Result of item validation.
  */
 export interface ItemValidationResult {
-    isValid: boolean;
+    state: ItemValidationResultState;
+    severity?: ItemValidationSeverity;
     reason?: string;
-    backendChecked: boolean;
+    statusCode?: string | null;
+    contentKind?: ContentKind;
+    pageCount?: number | null;
+    attachmentInfo?: AttachmentInfo;
 }
 
 /**
- * Result of validating a single attachment within a regular item
+ * Result of validating a single attachment within a regular item.
  */
-export interface AttachmentValidationResult {
-    isValid: boolean;
-    reason?: string;
-    backendChecked: boolean;
-}
+export type AttachmentValidationResult = ItemValidationResult;
 
 /**
- * Result of validating a regular item with all its attachments
+ * Result of validating a regular item with all its attachments.
  */
-export interface RegularItemValidationResult {
-    isValid: boolean;
-    reason?: string;
+export interface RegularItemValidationResult extends ItemValidationResult {
     attachmentResults: Map<string, AttachmentValidationResult>;
 }
 
 /**
- * Internal validation state for caching
- */
-interface ValidationCacheEntry {
-    result: ItemValidationResult;
-    timestamp: number;
-    fileHash?: string;
-}
-
-/**
- * Options for validation
+ * Options for validation.
  */
 export interface ItemValidationOptions {
-    validationType: ItemValidationType;
-    forceRefresh?: boolean;
+    searchableLibraryIds?: number[];
+    supportsVision?: boolean;
+    canHandleOCRLocally?: boolean;
 }
 
-const REMOTE_DOWNLOAD_TIMEOUT_MS = 20_000;
+type BasicValidationResult = Pick<ItemValidationResult, 'state' | 'reason'>;
+
+function attachmentId(item: Zotero.Item): string {
+    return `${item.libraryID}-${item.key}`;
+}
+
+function readableResult(overrides: Partial<ItemValidationResult> = {}): ItemValidationResult {
+    return {
+        state: 'readable',
+        ...overrides,
+    };
+}
+
+function unreadableResult(
+    reason: string | undefined,
+    overrides: Partial<ItemValidationResult> = {},
+    severity: ItemValidationSeverity = 'error',
+): ItemValidationResult {
+    return {
+        state: 'unreadable',
+        severity,
+        reason,
+        ...overrides,
+    };
+}
+
+function blockedResult(reason: string, overrides: Partial<ItemValidationResult> = {}): ItemValidationResult {
+    return {
+        state: 'blocked',
+        severity: 'error',
+        reason,
+        ...overrides,
+    };
+}
+
+function reasonFromAttachmentInfo(info: AttachmentInfo): string | undefined {
+    if (info.status_reason) {
+        return info.status_reason;
+    }
+    if (info.status_code === 'file_not_local_remote') {
+        return 'File not available locally and remote file access is disabled in settings.';
+    }
+    if (info.status_code === 'file_not_local') {
+        return 'File is not available locally';
+    }
+    if (info.status_code === 'file_too_large') {
+        return info.status_reason || 'File exceeds the maximum readable size.';
+    }
+    if (info.status_code === 'pdf_encrypted') {
+        return 'PDF is password-protected';
+    }
+    if (info.status_code === 'pdf_invalid') {
+        return 'PDF file is invalid or corrupted';
+    }
+    if (info.status_code === 'pdf_needs_ocr') {
+        return 'PDF requires OCR (no text layer). Select a model with vision support or enabled Plus Tools.';
+    }
+    if (info.status_code === 'pdf_parser_crash') {
+        return 'PDF crashes the local PDF parser';
+    }
+    if (info.status_code === 'pdf_analysis_error') {
+        return 'Error analyzing PDF';
+    }
+    if (info.status_code === 'pdf_unreadable') {
+        return 'PDF could not be read';
+    }
+    if (info.status_code === 'epub_invalid') {
+        return 'EPUB could not be read by the local extractor';
+    }
+    if (info.status_code === 'epub_no_text') {
+        return 'EPUB contains no extractable text';
+    }
+    return info.status === 'unreadable' ? 'Attachment is not readable by Beaver' : undefined;
+}
+
+export function resultFromAttachmentInfo(
+    info: AttachmentInfo,
+    options: ItemValidationOptions = {},
+): ItemValidationResult {
+    const base = {
+        statusCode: info.status_code,
+        contentKind: info.content_kind,
+        pageCount: info.page_count,
+        attachmentInfo: info,
+    };
+    if (info.content_kind === 'pdf' && info.page_count != null) {
+        const maxPageCount = effectiveMaxPageCount();
+        if (info.page_count > maxPageCount) {
+            return blockedResult(
+                `PDF has ${info.page_count} pages, which exceeds the ${maxPageCount}-page limit.`,
+                base,
+            );
+        }
+    }
+    if (
+        info.status_code === 'file_not_local'
+        || info.status_code === 'file_not_local_remote'
+        || info.status_code === 'file_too_large'
+    ) {
+        return blockedResult(reasonFromAttachmentInfo(info) || 'Attachment is not available to Beaver', base);
+    }
+    if (info.content_kind === 'image' && !options.supportsVision) {
+        return blockedResult('Images require a model with vision support.', base);
+    }
+    if (info.status_code === 'pdf_needs_ocr' && options.canHandleOCRLocally) {
+        return readableResult({
+            ...base,
+            reason: reasonFromAttachmentInfo(info),
+        });
+    }
+    if (info.status_code === 'pdf_needs_ocr') {
+        return blockedResult(reasonFromAttachmentInfo(info) || 'PDF requires OCR (no text layer). Select a model with vision support or enabled Plus Tools.', base);
+    }
+    if (info.status_code === 'epub_no_text') {
+        return blockedResult(reasonFromAttachmentInfo(info) || 'EPUB contains no extractable text', base);
+    }
+    if (info.status === 'readable' || info.status === 'processing') {
+        return readableResult(base);
+    }
+    const severity: ItemValidationSeverity =
+        info.status_code === 'pdf_needs_ocr'
+            ? 'info'
+            : 'error';
+    return unreadableResult(reasonFromAttachmentInfo(info), base, severity);
+}
 
 /**
- * Manages item validation with caching and deduplication
- * 
- * Purpose: Business logic layer for validation
- * - Performs local and backend validation
- * - Caches results with file hash validation
- * - Deduplicates concurrent validation requests
- * 
- * Note: UI state (isValidating, etc.) is managed by atoms
+ * Manages item validation and deduplicates concurrent validation requests.
  */
 class ItemValidationManager {
-    private validationCache = new Map<string, ValidationCacheEntry>();
     private pendingValidations = new Map<string, Promise<ItemValidationResult>>();
-    
-    // Cache settings
-    // private readonly CACHE_DURATION_MS = 10 * 60 * 1000; // 10 minutes
-    private readonly CACHE_DURATION_MS = 100;
-    private readonly MAX_CACHE_SIZE = 1000;
 
     /**
-     * Generate cache key from source and validation type
+     * Check whether an item's library can be used in Beaver.
      */
-    private getCacheKey(item: Zotero.Item, validationType: ItemValidationType): string {
-        return `${item.libraryID}-${item.key}-${validationType}`;
-    }
-
-    /**
-     * Clean expired cache entries and enforce size limit
-     */
-    private cleanCache(): void {
-        const now = Date.now();
-        const entries = Array.from(this.validationCache.entries());
-        
-        // Remove expired entries
-        entries.forEach(([key, entry]) => {
-            if (now - entry.timestamp > this.CACHE_DURATION_MS) {
-                this.validationCache.delete(key);
-            }
-        });
-
-        // Enforce cache size limit by removing oldest entries
-        if (this.validationCache.size > this.MAX_CACHE_SIZE) {
-            const sortedEntries = Array.from(this.validationCache.entries())
-                .sort(([, a], [, b]) => a.timestamp - b.timestamp);
-            
-            const entriesToRemove = sortedEntries.slice(0, this.validationCache.size - this.MAX_CACHE_SIZE);
-            entriesToRemove.forEach(([key]) => {
-                this.validationCache.delete(key);
-            });
-        }
-    }
-
-    /**
-     * Check if cached result is still valid
-     */
-    private isCacheValid(entry: ValidationCacheEntry, currentFileHash?: string): boolean {
-        const now = Date.now();
-        const isExpired = now - entry.timestamp > this.CACHE_DURATION_MS;
-        
-        if (isExpired) {
-            return false;
-        }
-
-        // If we have a file hash, ensure it matches the cached one
-        if (currentFileHash && entry.fileHash && entry.fileHash !== currentFileHash) {
-            return false;
-        }
-
-        return true;
-    }
-
-    /**
-     * Get a cached validation entry if it is still valid
-     * Refreshes the timestamp to extend the cache lifetime when returning a hit
-     */
-    private async getCachedValidationEntry(
+    private checkLibrarySearchable(
         item: Zotero.Item,
-        validationType: ItemValidationType
-    ): Promise<ValidationCacheEntry | null> {
-        const cacheKey = this.getCacheKey(item, validationType);
-        const cachedEntry = this.validationCache.get(cacheKey);
-
-        if (!cachedEntry) {
-            return null;
-        }
-
-        let currentFileHash: string | undefined;
-        try {
-            if (item && item.isAttachment()) {
-                currentFileHash = await item.attachmentHash;
-            }
-        } catch {
-            // Ignore hash lookup issues for cache validation
-        }
-
-        if (!this.isCacheValid(cachedEntry, currentFileHash)) {
-            return null;
-        }
-
-        const refreshedEntry: ValidationCacheEntry = {
-            ...cachedEntry,
-            timestamp: Date.now()
-        };
-
-        this.validationCache.set(cacheKey, refreshedEntry);
-
-        return refreshedEntry;
-    }
-
-    /**
-     * Store a validation result in the cache
-     */
-    private setCacheEntry(
-        item: Zotero.Item,
-        validationType: ItemValidationType,
-        result: ItemValidationResult,
-        fileHash?: string
-    ): void {
-        const cacheKey = this.getCacheKey(item, validationType);
-        this.validationCache.set(cacheKey, {
-            result,
-            timestamp: Date.now(),
-            fileHash
-        });
-    }
-
-    /**
-     * Perform local validation checks
-     */
-    private async performLocalValidation(item: Zotero.Item): Promise<{ isValid: boolean; reason?: string; isServerOnly?: boolean }> {
-        // 1. Use existing frontend validation
-        const localValidation = await isValidZoteroItem(item);
-        if (!localValidation.valid) {
-            return { isValid: false, reason: localValidation.error };
-        }
-
-        // 2. Get the Zotero item for file size validation
-        if (!item || !item.isAttachment()) {
-            return { isValid: true }; // Non-attachments pass local validation
-        }
-
-        // 3. Check file availability (same logic as syncingItemFilterAsync)
-        const isLocalFile = await safeFileExists(item);
-        const isServerFile = isAttachmentOnServer(item);
-        
-        // If file is not available locally or on server, it is invalid
-        if (!isLocalFile && !isServerFile) {
-            return { isValid: false, reason: 'File not available locally or on server' };
-        }
-
-        // Skip file size check if file is on server only
-        // Server-only files will be downloaded during upload process
-        if (!isLocalFile && isServerFile) {
-            return { isValid: true, isServerOnly: true };
-        }
-
-        try {
-            const fileSize = await Zotero.Attachments.getTotalFileSize(item);
-            const fileSizeInMB = fileSize / 1024 / 1024;
-            const planFeatures = store.get(planFeaturesAtom);
-            const sizeLimit = planFeatures.uploadFileSizeLimit;
-
-            if (fileSizeInMB > sizeLimit) {
-                return { 
-                    isValid: false, 
-                    reason: `File size (${fileSizeInMB.toFixed(1)}MB) exceeds limit (${sizeLimit}MB)` 
-                };
-            }
-        } catch (error: any) {
-            logger(`ItemValidationManager: Error checking file size for ${item.libraryID}-${item.key}: ${error.message}`, 2);
-            return { isValid: false, reason: 'Unable to check file size' };
-        }
-
-        return { isValid: true };
-    }
-
-    /**
-     * Whether the client can handle OCR-only PDFs without backend text extraction.
-     * True when the selected model supports vision OR plus tools (server-side OCR) are enabled.
-     */
-    private canHandleOCRLocally(): boolean {
-        const selectedModel = store.get(selectedModelAtom);
-        const supportsVision = selectedModel?.supports_vision === true;
-        const requestPlusTools = getPref('requestPlusTools');
-        return supportsVision || requestPlusTools;
-    }
-
-    /**
-     * Detect whether a backend rejection message indicates the file requires OCR.
-     * The backend currently signals this through the `details` string
-     * (e.g. "File requires OCR (not yet supported)"), not a structured error code.
-     */
-    private isBackendOCRRejection(details?: string): boolean {
-        return !!details && /ocr/i.test(details);
-    }
-
-    /**
-     * Convert fresh document-cache metadata into a frontend validation result.
-     * Returns null when the metadata is not decisive enough to skip parser work.
-     */
-    private frontendValidationFromCachedMetadata(
-        metadata: DocumentCacheMetadata | null
-    ): { isValid: boolean; reason?: string } | null {
-        // PDF-only reader: a non-PDF row (e.g. EPUB, with null errorCode and
-        // pageCount) must not be interpreted through the PDF fields.
-        if (!metadata || metadata.contentKind !== 'pdf') return null;
-
-        if (metadata.errorCode === 'encrypted') {
-            return { isValid: false, reason: 'PDF is password-protected' };
-        }
-        if (metadata.errorCode === 'invalid_pdf') {
-            return { isValid: false, reason: 'PDF file is invalid or corrupted' };
-        }
-        if (metadata.errorCode === 'no_text_layer') {
-            if (this.canHandleOCRLocally()) {
-                return { isValid: true };
-            }
-            return {
-                isValid: false,
-                reason: 'PDF requires OCR (no text layer). Use a model with vision support or enable plus tools under Settings > API Keys.'
-            };
-        }
-
-        if (metadata.pageCount === 0) {
-            return { isValid: false, reason: 'PDF has no readable pages' };
-        }
-        if (metadata.pageCount != null) {
-            const maxPageCount = effectiveMaxPageCount();
-            if (metadata.pageCount > maxPageCount) {
-                return {
-                    isValid: false,
-                    reason: `PDF has ${metadata.pageCount} pages, which exceeds the ${maxPageCount}-page limit.`,
-                };
-            }
-        }
-
-        // Successful extraction metadata proves page readability and text-layer status.
-        if (metadata.errorCode === null && metadata.pageCount != null) {
-            return { isValid: true };
-        }
-
-        return null;
-    }
-
-    /**
-     * Frontend validation for EPUB attachments from document-cache metadata.
-     * A cached successful extraction proves readability. A cache miss (or a
-     * row of another kind) is treated as valid — EPUB extraction is too heavy
-     * to run on the validation path, so cold EPUBs are admitted after the
-     * shared existence and size checks.
-     */
-    private frontendValidationFromCachedEpubMetadata(
-        metadata: DocumentCacheMetadata | null
-    ): { isValid: boolean; reason?: string } {
-        if (!metadata || metadata.contentKind !== 'epub') {
-            return { isValid: true };
-        }
-        if (metadata.errorCode) {
-            return { isValid: false, reason: 'EPUB could not be read by the local extractor' };
-        }
-        const epubMetadata = metadata.documentMetadata;
-        if (epubMetadata?.content_kind === 'epub' && epubMetadata.sectionCount === 0) {
-            return { isValid: false, reason: 'EPUB has no readable sections' };
-        }
-        // Image-only/scanned EPUBs have sections but zero extracted text; the
-        // read path rejects them as no_text_layer, so don't admit them here.
-        // Rows without the diagnostics field stay valid — unknown is not zero.
-        if (epubMetadata?.content_kind === 'epub' && epubMetadata.extractedTextChars === 0) {
-            return { isValid: false, reason: 'EPUB contains no extractable text' };
-        }
-        return { isValid: true };
-    }
-
-    /**
-     * Perform backend validation
-     * Checks if the item has been processed on the backend
-     */
-    private async performBackendValidation(
-        item: Zotero.Item,
-        fileHash: string
-    ): Promise<{ isValid: boolean; reason?: string }> {
-        try {
-            const backendResponse = await attachmentsService.validateAttachment(
-                item.libraryID,
-                item.key,
-                fileHash,
-                item.dateAdded,
-                false // don't request upload URL
-            );
-
-            // Item is valid if processed on backend
-            let isValid = backendResponse.processed;
-            let reason = isValid ? undefined : (backendResponse.details || 'File not processed');
-
-            // OCR override: if backend rejected due to missing text layer but the client can
-            // handle scanned PDFs (vision model or plus tools), treat as valid.
-            if (!isValid && this.isBackendOCRRejection(backendResponse.details) && this.canHandleOCRLocally()) {
-                logger(`ItemValidationManager: Overriding backend OCR rejection for ${item.libraryID}-${item.key} — client can handle OCR`, 4);
-                isValid = true;
-                reason = undefined;
-            }
-
-            return { isValid, reason };
-        } catch (error: any) {
-            logger(`ItemValidationManager: Backend validation failed for ${item.libraryID}-${item.key}: ${error.message}`, 2);
-            throw new Error(`Backend validation failed: ${error.message}`);
-        }
-    }
-
-
-    /**
-     * Perform frontend mode validation for attachments
-     * Comprehensive local checks without backend verification.
-     * Checks: readable kind (PDF/EPUB/text), file exists, file size, and for
-     * PDFs page count, encryption, and OCR needs
-     */
-    private async performFrontendAttachmentValidation(
-        attachment: Zotero.Item
-    ): Promise<{ isValid: boolean; reason?: string }> {
-        // 1. Must be an attachment
-        if (!attachment.isAttachment()) {
-            return { isValid: false, reason: 'Item is not an attachment' };
-        }
-
-        // 2. Check if in trash
-        if (attachment.isInTrash()) {
-            return { isValid: false, reason: 'Attachment is in trash' };
-        }
-
-        // 3. Must be a readable attachment kind (PDF, EPUB, plain text, or image)
-        const contentType = attachment.attachmentContentType;
-        const contentKind = getReadableContentKind(attachment);
-        if (contentKind !== 'pdf' && contentKind !== 'epub' && contentKind !== 'text' && contentKind !== 'image') {
-            return {
-                isValid: false,
-                reason: `File type "${contentType || 'unknown'}" is not supported`
-            };
-        }
-
-        // 4. Check if file exists locally; download from remote storage when possible
-        let filePath = await attachment.getFilePathAsync();
-        if (!filePath) {
-            if (!isRemoteAccessAvailable(attachment)) {
-                const isOnServer = isAttachmentOnServer(attachment);
-                const reason = isOnServer
-                    ? 'File not available locally and remote file access is disabled in settings.'
-                    : 'File is not available locally';
-                return { isValid: false, reason };
-            }
-
-            let timeoutId: ReturnType<typeof setTimeout> | undefined;
-            try {
-                const timeoutPromise = new Promise<'timeout'>((resolve) => {
-                    timeoutId = setTimeout(() => resolve('timeout'), REMOTE_DOWNLOAD_TIMEOUT_MS);
-                });
-                const result = await Promise.race([
-                    Zotero.Sync.Runner.downloadFile(attachment),
-                    timeoutPromise,
-                ]);
-                if (result === 'timeout') {
-                    logger(`ItemValidationManager: Remote download timed out after ${REMOTE_DOWNLOAD_TIMEOUT_MS}ms for ${attachment.libraryID}-${attachment.key}`, 2);
-                    return { isValid: false, reason: 'Unable to download file from remote storage.' };
-                }
-                if (!result || !result.localChanges) {
-                    return { isValid: false, reason: 'Failed to download file from remote storage' };
-                }
-            } catch (error: any) {
-                logger(`ItemValidationManager: Remote download failed for ${attachment.libraryID}-${attachment.key}: ${error?.message ?? error}`, 2);
-                return { isValid: false, reason: 'Failed to download file from remote storage' };
-            } finally {
-                if (timeoutId !== undefined) clearTimeout(timeoutId);
-            }
-
-            filePath = await attachment.getFilePathAsync();
-            if (!filePath) {
-                return { isValid: false, reason: 'File is not available after remote download' };
-            }
-        }
-
-        const fileExists = await safeFileExists(attachment);
-        if (!fileExists) {
-            return { isValid: false, reason: 'File is not available' };
-        }
-
-        // 5. Check file size limits
-        const maxFileSizeMB = effectiveMaxFileSizeMB();
-        try {
-            const fileSize = await Zotero.Attachments.getTotalFileSize(attachment);
-            if (fileSize) {
-                const fileSizeInMB = fileSize / 1024 / 1024;
-                if (fileSizeInMB > maxFileSizeMB) {
-                    return { 
-                        isValid: false, 
-                        reason: `File size (${fileSizeInMB.toFixed(1)}MB) exceeds limit (${maxFileSizeMB}MB)` 
-                    };
-                }
-            }
-        } catch (error: any) {
-            logger(`ItemValidationManager: Error checking file size: ${error.message}`, 2);
-            return { isValid: false, reason: 'Unable to check file size' };
-        }
-
-        // Text: no parser-level analysis needed — extraction is a plain UTF-8
-        // read, so existence and size (checked above) are sufficient.
-        if (contentKind === 'text') {
-            return { isValid: true };
-        }
-
-        const cachedMetadata = await Zotero.Beaver?.documentCache?.getMetadata(
-            { libraryId: attachment.libraryID, zoteroKey: attachment.key },
-            filePath,
-        );
-
-        // EPUB: cached extraction metadata is the only additional signal —
-        // extraction is too heavy to run on the validation path, so a cold
-        // cache is valid (existence and size were already checked above).
-        if (contentKind === 'epub') {
-            return this.frontendValidationFromCachedEpubMetadata(cachedMetadata ?? null);
-        }
-
-        const cachedValidation = this.frontendValidationFromCachedMetadata(cachedMetadata ?? null);
-        if (cachedValidation) {
-            logger(`ItemValidationManager: Using document-cache metadata for frontend validation of ${attachment.libraryID}-${attachment.key}`, 4);
-            return cachedValidation;
-        }
-
-        // 6. Analyze PDF (page count, encryption, OCR needs)
-        try {
-            const pdfData = await IOUtils.read(filePath);
-            const extractor = new BeaverExtractor();
-
-            // Get page count (also validates PDF and detects encryption)
-            let pageCount: number;
-            try {
-                pageCount = await extractor.getPageCount(pdfData);
-            } catch (error) {
-                if (error instanceof ExtractionError) {
-                    if (error.code === ExtractionErrorCode.ENCRYPTED) {
-                        return { isValid: false, reason: 'PDF is password-protected' };
-                    } else if (error.code === ExtractionErrorCode.INVALID_PDF) {
-                        return { isValid: false, reason: 'PDF file is invalid or corrupted' };
-                    } else if (error.code === ExtractionErrorCode.EMPTY_DOCUMENT) {
-                        return { isValid: false, reason: 'PDF has no readable pages' };
-                    } else if (error.code === ExtractionErrorCode.WASM_ERROR) {
-                        return { isValid: false, reason: 'PDF crashes the local PDF parser' };
-                    }
-                }
-                throw error;
-            }
-
-            const maxPageCount = effectiveMaxPageCount();
-            if (pageCount > maxPageCount) {
-                return {
-                    isValid: false,
-                    reason: `PDF has ${pageCount} pages, which exceeds the ${maxPageCount}-page limit.`,
-                };
-            }
-
-            // Check if PDF needs OCR
-            // Only fail if the selected model can't handle scanned PDFs:
-            // no vision support AND plus tools (server-side OCR) disabled.
-            if (!this.canHandleOCRLocally()) {
-                const ocrAnalysis = await extractor.analyzeOCRNeeds(pdfData);
-                if (ocrAnalysis.needsOCR) {
-                    return {
-                        isValid: false,
-                        reason: 'PDF requires OCR (no text layer). Use a model with vision support or enable plus tools under Settings > API Keys.'
-                    };
-                }
-            }
-
-            return { isValid: true };
-
-        } catch (error: any) {
-            if (error instanceof ExtractionError && error.code === ExtractionErrorCode.WASM_ERROR) {
-                logger(`ItemValidationManager: PDF parser crashed while analyzing ${attachment.libraryID}-${attachment.key}: ${error.message}`, 2);
-                return { isValid: false, reason: 'PDF crashes the local PDF parser' };
-            }
-            logger(`ItemValidationManager: Error analyzing PDF: ${error.message}`, 2);
-            return { isValid: false, reason: 'Error analyzing PDF' };
-        }
-    }
-
-    /**
-     * Check if item's library is synced with Beaver
-     * Simple check for frontend validation
-     */
-    private checkLibrarySearchable(item: Zotero.Item): { isValid: boolean; reason?: string } {
-        // Check if library exists
+        searchableLibraryIds?: number[],
+    ): BasicValidationResult {
         const library = Zotero.Libraries.get(item.libraryID);
         if (!library) {
-            return { isValid: false, reason: 'Library not found' };
+            return blockedResult('Library not found');
         }
 
-        // Check if library is in searchable libraries
-        const searchableLibraryIds = store.get(searchableLibraryIdsAtom);
-        if (!searchableLibraryIds.includes(item.libraryID)) {
-            return { 
-                isValid: false, 
-                reason: `Library "${library.name}" is excluded from Beaver. You can update this setting in Beaver Preferences.` 
-            };
+        if (searchableLibraryIds && !searchableLibraryIds.includes(item.libraryID)) {
+            return blockedResult(
+                `Library "${library.name}" is excluded from Beaver. You can update this setting in Beaver Preferences.`,
+            );
         }
 
-        return { isValid: true };
+        return readableResult();
     }
 
     /**
-     * Perform frontend mode validation
-     * For regular items: checks library sync status, existence and trash status
-     * For attachments: checks library sync status + comprehensive file validation
-     * For annotations: checks type and parent
+     * Validate cheap item-level constraints that do not require file analysis.
      */
-    private async performFrontendValidation(
-        item: Zotero.Item
-    ): Promise<{ isValid: boolean; reason?: string }> {
-        // Check if library is searchable for Beaver (applies to all item types)
-        const libraryCheck = this.checkLibrarySearchable(item);
-        if (!libraryCheck.isValid) {
+    private validateItemShell(
+        item: Zotero.Item,
+        options: ItemValidationOptions,
+    ): BasicValidationResult {
+        const libraryCheck = this.checkLibrarySearchable(item, options.searchableLibraryIds);
+        if (libraryCheck.state === 'blocked') {
             return libraryCheck;
         }
 
-        // Regular items: simple existence and trash check
         if (item.isRegularItem()) {
-            if (item.isInTrash()) {
-                return { isValid: false, reason: 'Item is in trash' };
-            }
-            return { isValid: true };
+            return item.isInTrash()
+                ? blockedResult('Item is in trash')
+                : readableResult();
         }
 
-        // Attachments: comprehensive file validation
         if (item.isAttachment()) {
-            return this.performFrontendAttachmentValidation(item);
+            return item.isInTrash()
+                ? blockedResult('Attachment is in trash')
+                : readableResult();
         }
 
-        // Annotations: check type and parent
         if (item.isAnnotation()) {
-            // Check annotation type
             const validTypes = ['highlight', 'underline', 'note', 'image'];
             if (!validTypes.includes(item.annotationType)) {
-                return { isValid: false, reason: 'Invalid annotation type' };
+                return blockedResult('Invalid annotation type');
             }
-
-            // Check if annotation has content
-            if ((item.annotationType === 'highlight' || item.annotationType === 'underline') 
-                && !item.annotationText && !item.annotationComment) {
-                return { isValid: false, reason: 'Annotation is empty' };
+            if (
+                (item.annotationType === 'highlight' || item.annotationType === 'underline')
+                && !item.annotationText
+                && !item.annotationComment
+            ) {
+                return blockedResult('Annotation is empty');
             }
-
-            // Check parent exists and is an attachment
             const parent = item.parentItem;
             if (!parent || !parent.isAttachment()) {
-                return { isValid: false, reason: 'Parent item is not an attachment' };
+                return blockedResult('Parent item is not an attachment');
             }
-
-            return { isValid: true };
+            return readableResult();
         }
 
-        // Notes: check trash
         if (item.isNote()) {
-            if (item.isInTrash()) {
-                return { isValid: false, reason: 'Note is in trash' };
-            }
-            return { isValid: true };
+            return item.isInTrash()
+                ? blockedResult('Note is in trash')
+                : readableResult();
         }
 
-        return { isValid: false, reason: 'Invalid item type' };
+        return blockedResult('Invalid item type');
     }
 
     /**
-     * Check for cached results in priority order for CACHED validation type
+     * Main validation method for one Zotero item.
      */
-    private async checkCachedResultsInPriority(item: Zotero.Item): Promise<ItemValidationResult | null> {
-        // Priority order: BACKEND -> LOCAL_ONLY
-        const priorityOrder = [
-            ItemValidationType.BACKEND,
-            ItemValidationType.LOCAL_ONLY
-        ];
+    async validateItem(
+        item: Zotero.Item,
+        options: ItemValidationOptions = {},
+    ): Promise<ItemValidationResult> {
+        const cacheKey = attachmentId(item);
 
-        // Get current file hash for cache validation
-        let currentFileHash: string | undefined;
-        try {
-            if (item && item.isAttachment()) {
-                currentFileHash = await item.attachmentHash;
-            }
-        } catch (error) {
-            // Ignore hash errors for cache validation
-        }
-
-        for (const validationType of priorityOrder) {
-            const cacheKey = this.getCacheKey(item, validationType);
-            const cachedEntry = this.validationCache.get(cacheKey);
-            
-            if (cachedEntry && this.isCacheValid(cachedEntry, currentFileHash)) {
-                logger(`ItemValidationManager: Found cached result for ${item.libraryID}-${item.key} with type ${validationType}`, 4);
-                return cachedEntry.result;
-            }
-        }
-
-        return null;
-    }
-
-    /**
-     * Main validation method
-     */
-    async validateItem(item: Zotero.Item, options: ItemValidationOptions): Promise<ItemValidationResult> {
-        const { validationType, forceRefresh = false } = options;
-        
-        // Handle CACHED validation type
-        if (validationType === ItemValidationType.CACHED && !forceRefresh) {
-            this.cleanCache();
-            
-            // Check for cached results in priority order
-            const cachedResult = await this.checkCachedResultsInPriority(item);
-            if (cachedResult) {
-                return cachedResult;
-            }
-            
-            // No cached results found, fall back to LOCAL_ONLY validation
-            logger(`ItemValidationManager: No cached results found for ${item.libraryID}-${item.key}, falling back to LOCAL_ONLY`, 4);
-            return this.validateItem(item, { 
-                validationType: ItemValidationType.LOCAL_ONLY,
-                forceRefresh: false 
-            });
-        }
-
-        const cacheKey = this.getCacheKey(item, validationType);
-
-        // Clean cache periodically
-        this.cleanCache();
-
-        // Check cache first (unless force refresh)
-        if (!forceRefresh) {
-            const cachedEntry = this.validationCache.get(cacheKey);
-            if (cachedEntry) {
-                // Get current file hash for cache validation
-                let currentFileHash: string | undefined;
-                try {
-                    if (item && item.isAttachment()) {
-                        currentFileHash = await item.attachmentHash;
-                    }
-                } catch (error) {
-                    // Ignore hash errors for cache validation
-                }
-
-                if (this.isCacheValid(cachedEntry, currentFileHash)) {
-                    // For local-only cached results, re-check to ensure still valid
-                    // Backend validation results are authoritative and don't need re-checking
-                    if (!cachedEntry.result.backendChecked) {
-                        const localValidationResult = await this.performLocalValidation(item);
-                        if (localValidationResult.isValid === cachedEntry.result.isValid) {
-                            return cachedEntry.result;
-                        }
-                        logger(`ItemValidationManager: Cached local validation changed for ${item.libraryID}-${item.key}`, 4);
-                    } else {
-                        // Backend validation results are authoritative
-                        return cachedEntry.result;
-                    }
-                }
-            }
-        }
-
-        // Deduplicate concurrent requests
         if (this.pendingValidations.has(cacheKey)) {
-            logger(`ItemValidationManager: Returning pending validation for ${item.libraryID}-${item.key}`, 4);
+            logger(`ItemValidationManager: Returning pending validation for ${cacheKey}`, 4);
             return this.pendingValidations.get(cacheKey)!;
         }
 
-        // Start new validation
-        const validationPromise = this.performValidation(item, validationType);
+        const validationPromise = this.performValidation(item, options);
         this.pendingValidations.set(cacheKey, validationPromise);
 
         try {
-            const result = await validationPromise;
-            
-            // Cache the result
-            let fileHash: string | undefined;
-            try {
-                if (item && item.isAttachment()) {
-                    fileHash = await item.attachmentHash;
-                }
-            } catch (error) {
-                // Ignore hash errors for caching
-            }
-
-            this.validationCache.set(cacheKey, {
-                result,
-                timestamp: Date.now(),
-                fileHash
-            });
-
-            return result;
+            return await validationPromise;
         } finally {
             this.pendingValidations.delete(cacheKey);
         }
     }
 
     /**
-     * Internal validation logic
+     * Validate an item using cheap item checks plus unified attachment info.
      */
     private async performValidation(
-        item: Zotero.Item, 
-        validationType: ItemValidationType
+        item: Zotero.Item,
+        options: ItemValidationOptions,
     ): Promise<ItemValidationResult> {
         try {
-            // ------ FRONTEND validation mode ------
-            if (validationType === ItemValidationType.FRONTEND) {
-                logger(`ItemValidationManager: Starting frontend validation for ${item.libraryID}-${item.key}`, 4);
-                const frontendValidation = await this.performFrontendValidation(item);
-                return {
-                    isValid: frontendValidation.isValid,
-                    reason: frontendValidation.reason,
-                    backendChecked: false
-                };
+            logger(`ItemValidationManager: Starting validation for ${attachmentId(item)}`, 4);
+            const shellValidation = this.validateItemShell(item, options);
+            if (shellValidation.state === 'blocked') {
+                return shellValidation;
             }
 
-            // ------ Step 1: Local validation (for LOCAL_ONLY and BACKEND modes) ------
-            logger(`ItemValidationManager: Starting local validation for ${item.libraryID}-${item.key}`, 4);
-            const localValidation = await this.performLocalValidation(item);
-            
-            // Return if local validation fails or validation type is local only
-            if (!localValidation.isValid || validationType === ItemValidationType.LOCAL_ONLY) {
-                return {
-                    isValid: localValidation.isValid,
-                    reason: localValidation.reason,
-                    backendChecked: false
-                };
+            if (!item.isAttachment()) {
+                return readableResult();
             }
 
-            // ------ Step 2: Backend validation (only for attachments) ------
-            if (!item || !item.isAttachment()) {
-                // TODO: This sets regular items to valid WITHOUT checking the attachments! Validate all attachments!?
-                // Non-attachments that pass local validation are considered valid
-                return {
-                    isValid: true,
-                    backendChecked: false
-                };
-            }
-
-            // Get file hash for backend validation
-            // For server-only files, use the synced hash instead of local hash
-            let fileHash: string;
-            try {
-                const localHash = await item.attachmentHash;
-                const serverHash = item.attachmentSyncedHash;
-                
-                // Prefer local hash, fall back to server hash for server-only files
-                fileHash = localHash || serverHash || '';
-            } catch (error: any) {
-                logger(`ItemValidationManager: Unable to get file hash for ${item.libraryID}-${item.key}: ${error.message}`, 1);
-                return {
-                    isValid: false,
-                    reason: 'Unable to get file details',
-                    backendChecked: false
-                };
-            }
-
-            // Check if file hash is missing (file doesn't exist locally or on server)
-            if (!fileHash) {
-                logger(`ItemValidationManager: Attachment ${item.libraryID}-${item.key} has no file hash (file is missing)`, 4);
-                return {
-                    isValid: false,
-                    reason: 'File is missing',
-                    backendChecked: false
-                };
-            }
-
-            // Perform backend validation
-            logger(`ItemValidationManager: Starting backend validation for ${item.libraryID}-${item.key}`, 4);
-            const { isValid, reason } = await this.performBackendValidation(item, fileHash);
-
-            return {
-                isValid,
-                reason,
-                backendChecked: true
-            };
-
+            const info = await getAttachmentInfo(item, {
+                nonPdfReadableEnabled: true,
+            });
+            return resultFromAttachmentInfo(info, options);
         } catch (error: any) {
-            logger(`ItemValidationManager: Validation failed for ${item.libraryID}-${item.key}: ${error.message}`, 1);
-            return {
-                isValid: false,
-                reason: `Unexpected error`,
-                backendChecked: false
-            };
+            logger(`ItemValidationManager: Validation failed for ${attachmentId(item)}: ${error.message}`, 1);
+            return blockedResult('Unexpected validation error');
         }
     }
 
     /**
-     * Invalidate cache for a specific item
+     * Validate a regular item and all child attachments with unified attachment info.
      */
-    invalidateItem(item: Zotero.Item): void {
-        const localKey = this.getCacheKey(item, ItemValidationType.LOCAL_ONLY);
-        const backendKey = this.getCacheKey(item, ItemValidationType.BACKEND);
-        const frontendKey = this.getCacheKey(item, ItemValidationType.FRONTEND);
-        
-        this.validationCache.delete(localKey);
-        this.validationCache.delete(backendKey);
-        this.validationCache.delete(frontendKey);
-        
-        logger(`ItemValidationManager: Invalidated cache for ${item.libraryID}-${item.key}`, 4);
-    }
-
-    /**
-     * Clear all cached validation results
-     */
-    clearCache(): void {
-        this.validationCache.clear();
-        this.pendingValidations.clear();
-        logger('ItemValidationManager: Cleared all cached validation results', 3);
-    }
-
-    /**
-     * Validate a regular item along with all its attachments
-     * This performs local validation on all items, then batch validates with backend
-     * 
-     * @param item A regular Zotero item (not an attachment)
-     * @returns Result containing overall validity and per-attachment results
-     */
-    async validateRegularItem(item: Zotero.Item): Promise<RegularItemValidationResult> {
+    async validateRegularItem(
+        item: Zotero.Item,
+        options: ItemValidationOptions = {},
+    ): Promise<RegularItemValidationResult> {
         if (!item.isRegularItem()) {
             throw new Error('validateRegularItem can only be called on regular items');
         }
 
-        this.cleanCache();
-
-        // Step 1: Local validation for the regular item itself
-        logger(`ItemValidationManager: Starting local validation for regular item ${item.libraryID}-${item.key}`, 4);
-        const itemLocalValidation = await this.performLocalValidation(item);
-        
-        if (!itemLocalValidation.isValid) {
-            logger(`ItemValidationManager: Regular item failed local validation: ${itemLocalValidation.reason}`, 3);
+        logger(`ItemValidationManager: Starting validation for regular item ${attachmentId(item)}`, 4);
+        const itemValidation = this.validateItemShell(item, options);
+        if (itemValidation.state === 'blocked') {
             return {
-                isValid: false,
-                reason: itemLocalValidation.reason,
-                attachmentResults: new Map()
+                ...itemValidation,
+                attachmentResults: new Map(),
             };
         }
 
-        // Step 2: Get all attachments
         const attachmentIDs = item.getAttachments();
         if (attachmentIDs.length === 0) {
-            logger(`ItemValidationManager: Regular item has no attachments`, 4);
             return {
-                isValid: true,
-                reason: undefined,
-                attachmentResults: new Map()
+                ...readableResult(),
+                attachmentResults: new Map(),
             };
         }
 
-        const attachments = (await Zotero.Items.getAsync(attachmentIDs))
-            .filter((attachment): attachment is Zotero.Item => Boolean(attachment));
+        const batchData = await prepareAttachmentInfoBatchData([item]);
+        const attachmentInfos = await processAttachmentInfoBatch(item, batchData, {
+            nonPdfReadableEnabled: true,
+        });
 
-        // Step 3: Validate attachments using cache-aware local/backend checks
-        logger(`ItemValidationManager: Validating ${attachments.length} attachments`, 4);
         const attachmentResults = new Map<string, AttachmentValidationResult>();
-        const backendCandidates: Array<{
-            item: Zotero.Item;
-            fileHash: string;
-        }> = [];
-
-        for (const attachment of attachments) {
-            const attachmentKey = `${attachment.libraryID}-${attachment.key}`;
-
-            // Prefer cached backend results when available
-            const cachedBackendEntry = await this.getCachedValidationEntry(
-                attachment,
-                ItemValidationType.BACKEND
-            );
-
-            if (cachedBackendEntry) {
-                logger(`ItemValidationManager: Using cached backend validation for ${attachmentKey}`, 4);
-                attachmentResults.set(attachmentKey, {
-                    ...cachedBackendEntry.result
-                });
-                continue;
-            }
-
-            // Perform local validation
-            const localValidation = await this.performLocalValidation(attachment);
-            const localResult: AttachmentValidationResult = {
-                isValid: localValidation.isValid,
-                reason: localValidation.reason,
-                backendChecked: false
-            };
-
-            if (!localValidation.isValid) {
-                logger(`ItemValidationManager: Attachment ${attachmentKey} failed local validation: ${localValidation.reason}`, 4);
-                this.setCacheEntry(attachment, ItemValidationType.LOCAL_ONLY, localResult);
-                this.setCacheEntry(attachment, ItemValidationType.BACKEND, localResult);
-                attachmentResults.set(attachmentKey, localResult);
-                continue;
-            }
-
-            // Retrieve file hash for backend validation
-            // For server-only files, use the synced hash instead of local hash
-            let fileHash: string | undefined;
-            try {
-                const localHash = await attachment.attachmentHash;
-                const serverHash = attachment.attachmentSyncedHash;
-                
-                // Prefer local hash, fall back to server hash for server-only files
-                fileHash = localHash || serverHash || '';
-            } catch (error: any) {
-                logger(`ItemValidationManager: Unable to get file hash for ${attachmentKey}: ${error.message}`, 2);
-                const errorResult: AttachmentValidationResult = {
-                    isValid: false,
-                    reason: 'Unable to get file details',
-                    backendChecked: false
-                };
-                this.setCacheEntry(attachment, ItemValidationType.LOCAL_ONLY, errorResult);
-                this.setCacheEntry(attachment, ItemValidationType.BACKEND, errorResult);
-                attachmentResults.set(attachmentKey, errorResult);
-                continue;
-            }
-
-            if (!fileHash) {
-                logger(`ItemValidationManager: Attachment ${attachmentKey} has no file hash (file is missing)`, 4);
-                const missingHashResult: AttachmentValidationResult = {
-                    isValid: false,
-                    reason: 'File is missing',
-                    backendChecked: false
-                };
-                this.setCacheEntry(attachment, ItemValidationType.LOCAL_ONLY, missingHashResult);
-                this.setCacheEntry(attachment, ItemValidationType.BACKEND, missingHashResult);
-                attachmentResults.set(attachmentKey, missingHashResult);
-                continue;
-            }
-
-            // Cache successful local validation result
-            this.setCacheEntry(attachment, ItemValidationType.LOCAL_ONLY, localResult, fileHash);
-
-            backendCandidates.push({
-                item: attachment,
-                fileHash
-            });
+        for (const info of attachmentInfos) {
+            attachmentResults.set(info.attachment_id, resultFromAttachmentInfo(info, options));
         }
 
-        if (backendCandidates.length > 0) {
-            logger(`ItemValidationManager: Starting backend validation for ${backendCandidates.length} attachments`, 4);
-            try {
-                const backendResponse = await itemsService.validateRegularItemBatch(
-                    item,
-                    backendCandidates.map(candidate => ({
-                        item: candidate.item,
-                        fileHash: candidate.fileHash
-                    }))
-                );
-
-                // Check if the regular item exists in the backend
-                if (!backendResponse.item.exists) {
-                    logger(`ItemValidationManager: Regular item not found in backend: ${backendResponse.item.details || 'Item does not exist'}`, 3);
-                    return {
-                        isValid: false,
-                        reason: backendResponse.item.details || 'Item not found in Beaver',
-                        attachmentResults: new Map()
-                    };
-                }
-
-                const backendResultsMap = new Map<string, typeof backendResponse.attachments[number]>();
-                for (const backendAttachment of backendResponse.attachments) {
-                    const key = `${backendAttachment.library_id}-${backendAttachment.zotero_key}`;
-                    backendResultsMap.set(key, backendAttachment);
-                }
-
-                for (const candidate of backendCandidates) {
-                    const key = `${candidate.item.libraryID}-${candidate.item.key}`;
-                    const backendData = backendResultsMap.get(key);
-
-                    if (!backendData) {
-                        logger(`ItemValidationManager: Missing backend response for ${key}`, 2);
-                        const fallbackResult: AttachmentValidationResult = {
-                            isValid: false,
-                            reason: 'Unexpected error',
-                            backendChecked: false
-                        };
-                        attachmentResults.set(key, fallbackResult);
-                        this.setCacheEntry(candidate.item, ItemValidationType.BACKEND, fallbackResult, candidate.fileHash);
-                        continue;
-                    }
-
-                    let isValid = backendData.processed;
-                    let reason = isValid ? undefined : (backendData.details || 'File not processed');
-
-                    // OCR override: if backend rejected due to missing text layer but the client can
-                    // handle scanned PDFs (vision model or plus tools), treat as valid.
-                    if (!isValid && this.isBackendOCRRejection(backendData.details) && this.canHandleOCRLocally()) {
-                        logger(`ItemValidationManager: Overriding backend OCR rejection for ${key} — client can handle OCR`, 4);
-                        isValid = true;
-                        reason = undefined;
-                    }
-
-                    const backendResult: AttachmentValidationResult = {
-                        isValid,
-                        reason,
-                        backendChecked: true
-                    };
-
-                    attachmentResults.set(key, backendResult);
-                    this.setCacheEntry(candidate.item, ItemValidationType.BACKEND, backendResult, candidate.fileHash);
-                }
-            } catch (error: any) {
-                logger(`ItemValidationManager: Backend validation failed for regular item ${item.libraryID}-${item.key}: ${error.message}`, 2);
-
-                for (const candidate of backendCandidates) {
-                    const key = `${candidate.item.libraryID}-${candidate.item.key}`;
-                    const errorResult: AttachmentValidationResult = {
-                        isValid: false,
-                        reason: 'Unexpected error',
-                        backendChecked: false
-                    };
-                    attachmentResults.set(key, errorResult);
-                    this.setCacheEntry(candidate.item, ItemValidationType.BACKEND, errorResult, candidate.fileHash);
-                }
-            }
-        }
-
-        // Ensure every attachment has a result (cached entries already handled)
-        for (const attachment of attachments) {
-            const key = `${attachment.libraryID}-${attachment.key}`;
-            if (!attachmentResults.has(key)) {
-                attachmentResults.set(key, {
-                    isValid: true,
-                    backendChecked: false
-                });
-            }
-        }
-
-        logger(`ItemValidationManager: Regular item validation complete. Attachments processed: ${attachmentResults.size}`, 4);
+        logger(
+            `ItemValidationManager: Regular item validation complete. Attachments processed: ${attachmentResults.size}`,
+            4,
+        );
 
         return {
-            isValid: true,
-            reason: undefined,
-            attachmentResults
+            ...readableResult(),
+            attachmentResults,
         };
     }
 
-    /**
-     * Validate a regular item using frontend mode (no backend calls)
-     * For regular items: checks existence and trash status
-     * For attachments: comprehensive file validation (size, pages, OCR, etc.)
-     * 
-     * @param item A regular Zotero item (not an attachment)
-     * @returns Result containing overall validity and per-attachment results
-     */
-    async validateRegularItemFrontend(item: Zotero.Item): Promise<RegularItemValidationResult> {
-        if (!item.isRegularItem()) {
-            throw new Error('validateRegularItemFrontend can only be called on regular items');
-        }
-
-        this.cleanCache();
-
-        // Step 1: Frontend validation for the regular item itself
-        logger(`ItemValidationManager: Starting frontend validation for regular item ${item.libraryID}-${item.key}`, 4);
-        const itemValidation = await this.performFrontendValidation(item);
-        
-        if (!itemValidation.isValid) {
-            logger(`ItemValidationManager: Regular item failed frontend validation: ${itemValidation.reason}`, 3);
-            return {
-                isValid: false,
-                reason: itemValidation.reason,
-                attachmentResults: new Map()
-            };
-        }
-
-        // Step 2: Get all attachments
-        const attachmentIDs = item.getAttachments();
-        if (attachmentIDs.length === 0) {
-            logger(`ItemValidationManager: Regular item has no attachments`, 4);
-            return {
-                isValid: true,
-                reason: undefined,
-                attachmentResults: new Map()
-            };
-        }
-
-        const attachments = (await Zotero.Items.getAsync(attachmentIDs))
-            .filter((attachment): attachment is Zotero.Item => Boolean(attachment));
-
-        // Step 3: Validate each attachment using frontend validation
-        logger(`ItemValidationManager: Frontend validating ${attachments.length} attachments`, 4);
-        const attachmentResults = new Map<string, AttachmentValidationResult>();
-
-        for (const attachment of attachments) {
-            const attachmentKey = `${attachment.libraryID}-${attachment.key}`;
-
-            // Check cache first
-            const cachedEntry = await this.getCachedValidationEntry(
-                attachment,
-                ItemValidationType.FRONTEND
-            );
-
-            if (cachedEntry) {
-                logger(`ItemValidationManager: Using cached frontend validation for ${attachmentKey}`, 4);
-                attachmentResults.set(attachmentKey, { ...cachedEntry.result });
-                continue;
-            }
-
-            // Perform frontend validation
-            const frontendValidation = await this.performFrontendAttachmentValidation(attachment);
-            const result: AttachmentValidationResult = {
-                isValid: frontendValidation.isValid,
-                reason: frontendValidation.reason,
-                backendChecked: false
-            };
-
-            // Cache the result
-            let fileHash: string | undefined;
-            try {
-                fileHash = await attachment.attachmentHash || '';
-            } catch {
-                // Ignore hash errors for caching
-            }
-            this.setCacheEntry(attachment, ItemValidationType.FRONTEND, result, fileHash);
-            
-            attachmentResults.set(attachmentKey, result);
-            logger(`ItemValidationManager: Attachment ${attachmentKey} frontend validation: ${result.isValid ? 'valid' : result.reason}`, 4);
-        }
-
-        logger(`ItemValidationManager: Regular item frontend validation complete. Attachments processed: ${attachmentResults.size}`, 4);
-
-        return {
-            isValid: true,
-            reason: undefined,
-            attachmentResults
-        };
-    }
-
-    /**
-     * Get cache statistics for debugging
-     */
-    getCacheStats(): { size: number; pendingValidations: number } {
-        return {
-            size: this.validationCache.size,
-            pendingValidations: this.pendingValidations.size
-        };
-    }
 }
 
-// Export singleton instance
 export const itemValidationManager = new ItemValidationManager();

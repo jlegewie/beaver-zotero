@@ -512,30 +512,29 @@ export async function resolveItem(
 
 export interface ValidateItemResponse {
     ok: boolean;
-    is_valid?: boolean;
+    state?: 'readable' | 'unreadable' | 'blocked';
+    severity?: 'info' | 'error' | null;
     reason?: string | null;
-    backend_checked?: boolean;
+    status_code?: string | null;
+    content_kind?: string | null;
+    page_count?: number | null;
     error?: string;
 }
 
 /**
  * `/beaver/test/validate-item` — run `itemValidationManager.validateItem`
- * (frontend mode by default, force-refreshed) against a live item.
+ * against a live item.
  */
 export async function validateItem(
     libraryId: number,
     key: string,
     options?: {
-        validationType?: 'frontend' | 'local_only' | 'backend' | 'cached';
-        forceRefresh?: boolean;
         timeout?: number;
     },
 ): Promise<ValidateItemResponse> {
     return post('/beaver/test/validate-item', {
         library_id: libraryId,
         zotero_key: key,
-        validation_type: options?.validationType,
-        force_refresh: options?.forceRefresh,
     }, { timeout: options?.timeout ?? 60_000 });
 }
 

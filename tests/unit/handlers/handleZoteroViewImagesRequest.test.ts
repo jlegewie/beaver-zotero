@@ -20,6 +20,16 @@ vi.mock(
     '../../../src/services/agentDataProvider/handleZoteroAttachmentImageRequest',
     () => ({ handleZoteroAttachmentImageRequest: vi.fn() }),
 );
+vi.mock('../../../src/services/agentDataProvider/handleZoteroDocumentRequest', () => ({
+    externalFileMissingMessage: vi.fn((key: string) => `External file ${key} is missing.`),
+    getResolvedAttachmentParentStub: vi.fn().mockResolvedValue(null),
+    buildServedAttachmentStub: vi.fn((item: any, kind: string) => ({
+        attachment_id: `${item.libraryID}-${item.key}`,
+        title: null,
+        filename: null,
+        content_kind: kind,
+    })),
+}));
 
 import { handleZoteroViewImagesRequest } from '../../../src/services/agentDataProvider/handleZoteroViewImagesRequest';
 import {
