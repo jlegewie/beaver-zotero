@@ -10,6 +10,12 @@ import { RegularItemsSummaryContent } from '../components/ui/popup/RegularItemsS
 import { truncateText } from '../utils/stringUtils';
 import { getDisplayNameFromItem } from '../utils/sourceUtils';
 import type { ItemValidationState } from '../atoms/itemValidation';
+import {
+    toReadabilityInfo,
+    summarizeRegularItemReadability,
+    summarizeUnsupportedAttachments,
+    type AttachmentReadabilityInfo,
+} from './attachmentReadabilityCopy';
 
 /**
  * Adds a new popup message to the list.
@@ -263,91 +269,101 @@ function buildRegularItemPopupSummary(
     getValidation: (item: Zotero.Item) => ItemValidationState | undefined,
 ) {
     const attachments = safeChildAttachments(item);
-    let readableAttachments = 0;
-    let unreadableAttachments = 0;
-
-    for (const attachment of attachments) {
-        const validation = getValidation(attachment);
-        if (validation?.isValidating) continue;
-        if (validation?.state === 'readable') {
-            readableAttachments += 1;
-        } else if (validation?.state === 'unreadable' || validation?.state === 'blocked') {
-            unreadableAttachments += 1;
-        }
-    }
+    const infos = attachments.map((attachment) => toReadabilityInfo(getValidation(attachment)));
+    const summary = summarizeRegularItemReadability(infos);
 
     return {
         item,
-        totalAttachments: attachments.length,
-        readableAttachments,
-        unreadableAttachments,
+        label: summary.label,
     };
 }
 
+function readabilityInfosForItem(
+    item: Zotero.Item,
+    getValidation: (item: Zotero.Item) => ItemValidationState | undefined,
+): AttachmentReadabilityInfo[] {
+    return safeChildAttachments(item).map((attachment) => toReadabilityInfo(getValidation(attachment)));
+}
+
 /**
- * Adds a popup message for a regular item showing its attachment status.
- * Always shows popup; duration is longer if readability issues were found.
- * 
+ * Adds a popup message warning that a regular item's attachments aren't readable.
+ * Shown when at least one completed attachment has an issue; the header carries
+ * the item, the body the attachment-scoped reason.
+ *
  * @param item The regular Zotero item
  * @param getValidation Function to get validation results for items
  */
 export const addRegularItemPopupAtom = atom(
     null,
-    (get, set, { 
-        item, 
-        getValidation 
-    }: { 
-        item: Zotero.Item; 
+    (get, set, {
+        item,
+        getValidation
+    }: {
+        item: Zotero.Item;
         getValidation: (item: Zotero.Item) => ItemValidationState | undefined;
     }) => {
         const itemSummary = buildRegularItemPopupSummary(item, getValidation);
-        const hasIssues = itemSummary.unreadableAttachments > 0;
 
-        // Always show popup for regular items
         set(addPopupMessageAtom, {
             id: item.key,
             type: 'items_summary',
             icon: createElement(CSSItemTypeIcon, { itemType: item.getItemTypeIconName() }),
             title: truncateText(getDisplayNameFromItem(item), 68),
-            customContent: createElement(RegularItemsSummaryContent, { items: [itemSummary] }),
+            // Header already shows the item's icon + title, so the body renders the
+            // readability reason only (showItemTitles: false) to avoid duplicating them.
+            customContent: createElement(RegularItemsSummaryContent, { items: [itemSummary], showItemTitles: false }),
             expire: true,
-            duration: hasIssues ? 3400 : 2400
+            duration: 3400
         });
     }
 );
 
 /**
- * Adds a summary popup message for multiple regular items showing their attachment status.
- * 
+ * Adds a summary popup warning that several regular items have unsupported
+ * attachments. The body aggregates unsupported attachment kinds across every
+ * listed item.
+ *
  * @param items Array of regular Zotero items
  * @param getValidation Function to get validation results for items
  */
 export const addRegularItemsSummaryPopupAtom = atom(
     null,
-    (get, set, { 
-        items, 
-        getValidation 
-    }: { 
-        items: Zotero.Item[]; 
+    (get, set, {
+        items,
+        getValidation
+    }: {
+        items: Zotero.Item[];
         getValidation: (item: Zotero.Item) => ItemValidationState | undefined;
     }) => {
-        // Build summary data for each item
-        const itemsSummary = items.map(item => buildRegularItemPopupSummary(item, getValidation));
+        if (items.length === 0) return;
 
-        // Determine if there are any issues
-        const hasIssues = itemsSummary.some(summary => 
-            summary.unreadableAttachments > 0
-        );
+        const perItemInfos = items.map((item) => ({
+            item,
+            infos: readabilityInfosForItem(item, getValidation),
+        }));
+        const unsupportedItemCount = perItemInfos
+            .filter(({ infos }) => summarizeUnsupportedAttachments(infos))
+            .length;
+        const allInfos = perItemInfos.flatMap(({ infos }) => infos);
+        const unsupportedLabel = summarizeUnsupportedAttachments(allInfos);
+        const hasUnsupportedAttachments = Boolean(unsupportedLabel);
+        const label = unsupportedLabel
+            || summarizeRegularItemReadability(allInfos).label
+            || "Some attachments can't be read";
+        const affectedItemCount = hasUnsupportedAttachments ? unsupportedItemCount : items.length;
 
-        // Show summary popup
         set(addPopupMessageAtom, {
             type: 'items_summary',
-            title: `${items.length} Items Added`,
-            customContent: createElement(RegularItemsSummaryContent, { 
-                items: itemsSummary 
+            title: hasUnsupportedAttachments
+                ? `${affectedItemCount} ${affectedItemCount === 1 ? 'item has' : 'items have'} unsupported attachments`
+                : `${affectedItemCount} ${affectedItemCount === 1 ? 'item has' : 'items have'} attachment issues`,
+            customContent: createElement(RegularItemsSummaryContent, {
+                items: [{ item: items[0], label }],
+                showItemTitles: false,
+                showStatusIcon: false,
             }),
             expire: true,
-            duration: hasIssues ? 3000 : 2000
+            duration: 3400
         });
     }
 );

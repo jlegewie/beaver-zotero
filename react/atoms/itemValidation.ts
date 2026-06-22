@@ -9,6 +9,7 @@ import { logger } from '../../src/utils/logger';
 import { searchableLibraryIdsAtom } from './profile';
 import { selectedModelAtom } from './models';
 import { getPref } from '../../src/utils/prefs';
+import { getContentKind } from '../../src/services/documentExtraction/attachmentResolution';
 
 /**
  * Generate unique key for a Zotero item
@@ -248,6 +249,7 @@ export const validateRegularItemAtom = atom(
                         state: 'unreadable',
                         severity: 'info',
                         reason: 'Attachment skipped during readability validation',
+                        contentKind: getContentKind(attachment),
                         isValidating: false
                     });
                 }

@@ -234,7 +234,7 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
             return classes;
         };
 
-        // Tooltip text
+        // Tooltip text (annotations only — other items use the chip popup card).
         const getTooltipTitle = () => {
             if (validation?.isValidating) {
                 return 'Validating...';
@@ -266,8 +266,8 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
         const chipPopup = React.useMemo(
             () => isAnnotation
                 ? null
-                : buildMessageItemChipPopup(item, validation),
-            [isAnnotation, item, validation],
+                : buildMessageItemChipPopup(item, validation, getValidation),
+            [isAnnotation, item, validation, getValidation],
         );
 
         const button = (

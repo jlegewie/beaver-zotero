@@ -1,5 +1,5 @@
 import React from 'react';
-import { Icon } from '../../icons/icons';
+import { Icon, InformationCircleIcon } from '../../icons/icons';
 import Tooltip from '../../ui/Tooltip';
 
 /**
@@ -27,6 +27,11 @@ export interface ChipPopupAction {
     iconClassName?: string;
 }
 
+/** Readability note line, shown only when an attachment's content can't be read. */
+export interface ChipPopupStatus {
+    label: string;
+}
+
 export interface ChipPopupContent {
     /** Pre-rendered icon node — mirrors the icon shown on the chip itself. */
     icon: React.ReactNode;
@@ -34,13 +39,15 @@ export interface ChipPopupContent {
     title: string;
     /** Optional relationship/second line. */
     subtitle?: ChipPopupSubtitle | null;
+    /** Optional readability status line. */
+    status?: ChipPopupStatus | null;
     /** Optional action hint footer. */
     action?: ChipPopupAction | null;
 }
 
 const POPUP_WIDTH = '260px';
 
-const ChipPopupCard: React.FC<ChipPopupContent> = ({ icon, title, subtitle, action }) => (
+const ChipPopupCard: React.FC<ChipPopupContent> = ({ icon, title, subtitle, status, action }) => (
     <span className="block" style={{ overflow: 'hidden' }}>
         <span className="px-3 py-15 mt-1 display-flex flex-row items-start gap-2">
             <span className="flex-shrink-0">{icon}</span>
@@ -58,6 +65,15 @@ const ChipPopupCard: React.FC<ChipPopupContent> = ({ icon, title, subtitle, acti
                     >
                         {subtitle.prefix}
                         {subtitle.italic ? <span className="font-italic">{subtitle.text}</span> : subtitle.text}
+                    </span>
+                )}
+                {status && (
+                    <span
+                        className="text-sm display-flex flex-row items-start gap-1 font-color-secondary"
+                        style={{ fontSize: '0.9rem' }}
+                    >
+                        <Icon icon={InformationCircleIcon} className="scale-95 font-color-secondary flex-shrink-0 mt-020" />
+                        <span style={{ wordBreak: 'break-word', overflowWrap: 'anywhere' }}>{status.label}</span>
                     </span>
                 )}
             </span>

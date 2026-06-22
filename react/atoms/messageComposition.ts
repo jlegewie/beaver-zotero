@@ -6,6 +6,7 @@ import { logger } from "../../src/utils/logger";
 import { addPopupMessageAtom, addRegularItemPopupAtom, addRegularItemsSummaryPopupAtom, removePopupMessageAtom, safeChildAttachments } from "../utils/popupMessageUtils";
 import { getItemValidationAtom, isHardBlockedValidation, isRejectedItemValidation, validateItemsAtom, validateRegularItemAtom } from './itemValidation';
 import type { ItemValidationState } from './itemValidation';
+import { toReadabilityInfo, summarizeRegularItemReadability } from '../utils/attachmentReadabilityCopy';
 import { InvalidItemsMessageContent } from '../components/ui/popup/InvalidItemsMessageContent';
 import { agentItemFilter } from "../../src/utils/agentItemSupport";
 import { getCurrentReader } from "../utils/readerUtils";
@@ -312,6 +313,12 @@ export const addItemsToCurrentMessageItemsAtom = atom(
     }
 );
 
+/**
+ * Whether to warn that a freshly added regular item has unreadable attachments.
+ *
+ * The item itself remains usable when at least one attachment is readable, but
+ * the popup still surfaces any completed attachment-level issue.
+ */
 function shouldShowRegularItemAddedPopup(
     item: Zotero.Item,
     getValidation: (item: Zotero.Item) => ItemValidationState | undefined,
@@ -319,12 +326,9 @@ function shouldShowRegularItemAddedPopup(
     const attachments = safeChildAttachments(item);
     if (attachments.length === 0) return false;
 
-    return attachments.some((attachment) => {
-        const validation = getValidation(attachment);
-        return !!validation
-            && !validation.isValidating
-            && (validation.state === 'unreadable' || validation.state === 'blocked');
-    });
+    const infos = attachments.map((attachment) => toReadabilityInfo(getValidation(attachment)));
+    const summary = summarizeRegularItemReadability(infos);
+    return Boolean(summary.label);
 }
 
 /**

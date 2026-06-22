@@ -1,9 +1,14 @@
 import React from 'react';
 import { CSSItemTypeIcon, Icon, InformationCircleIcon, MoreHorizontalIcon, NoteIcon, LibraryIcon } from '../icons/icons';
-import type { ChipPopupAction, ChipPopupContent, ChipPopupSubtitle } from '../agentRuns/requestChips/ChipPopup';
+import type { ChipPopupAction, ChipPopupContent, ChipPopupStatus, ChipPopupSubtitle } from '../agentRuns/requestChips/ChipPopup';
 import type { ItemValidationState } from '../../atoms/itemValidation';
 import { getDisplayNameFromItem } from '../../utils/sourceUtils';
 import type { AttachmentInfo, ContentKind } from '../../../src/services/documentExtraction/shared/contentKinds';
+import {
+    toReadabilityInfo,
+    attachmentIssueLabel,
+    summarizeRegularItemReadability,
+} from '../../utils/attachmentReadabilityCopy';
 
 function safeDisplayName(item: Zotero.Item, fallback = 'Item'): string {
     try {
@@ -140,14 +145,44 @@ function itemAction(item: Zotero.Item): ChipPopupAction {
     return { icon: LibraryIcon, label: 'Reveal in library' };
 }
 
+/**
+ * Readability note for a chip popup, shown only when content can't be read.
+ * Regular items aggregate their child attachments (needs `getValidation`);
+ * attachments report their own result. Notes and annotations have none.
+ */
+function readabilityStatus(
+    item: Zotero.Item,
+    validation: ItemValidationState | undefined,
+    getValidation?: (item: Zotero.Item) => ItemValidationState | undefined,
+): ChipPopupStatus | null {
+    try {
+        if (item.isRegularItem()) {
+            if (!getValidation) return null;
+            const infos = safeChildAttachments(item).map((a) => toReadabilityInfo(getValidation(a)));
+            const summary = summarizeRegularItemReadability(infos);
+            return summary.label ? { label: summary.label } : null;
+        }
+        if (item.isAttachment()) {
+            const info = toReadabilityInfo(validation);
+            if (info.state === 'checking' || info.state === 'readable') return null;
+            return { label: attachmentIssueLabel(info) };
+        }
+    } catch {
+        return null;
+    }
+    return null;
+}
+
 export function buildMessageItemChipPopup(
     item: Zotero.Item,
     validation: ItemValidationState | undefined,
+    getValidation?: (item: Zotero.Item) => ItemValidationState | undefined,
 ): ChipPopupContent {
     return {
         icon: <CSSItemTypeIcon itemType={itemIconName(item, validation)} className="scale-90" />,
         title: safeDisplayName(item),
         subtitle: itemSubtitle(item),
+        status: readabilityStatus(item, validation, getValidation),
         action: itemAction(item),
     };
 }
