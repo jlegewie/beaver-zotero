@@ -1,6 +1,6 @@
 import React from 'react';
-import { CSSItemTypeIcon, Icon, InformationCircleIcon, MoreHorizontalIcon, NoteIcon, LibraryIcon } from '../icons/icons';
-import type { ChipPopupAction, ChipPopupContent, ChipPopupStatus, ChipPopupSubtitle } from '../agentRuns/requestChips/ChipPopup';
+import { CSSItemTypeIcon, NoteIcon, LibraryIcon } from '../icons/icons';
+import type { ChipListPopupContent, ChipPopupAction, ChipPopupContent, ChipPopupStatus, ChipPopupSubtitle } from '../agentRuns/requestChips/ChipPopup';
 import type { ItemValidationState } from '../../atoms/itemValidation';
 import { getDisplayNameFromItem } from '../../utils/sourceUtils';
 import type { AttachmentInfo, ContentKind } from '../../../src/services/documentExtraction/shared/contentKinds';
@@ -53,17 +53,11 @@ type ValidationDetails = {
     attachmentInfo?: AttachmentInfo;
 };
 
-export type UnvalidatedAttachmentState = 'checking' | 'readable';
-
 function validationDetails(validation?: ItemValidationState): ValidationDetails {
     if (!validation || validation.state === 'checking') {
         return {};
     }
     return validation;
-}
-
-function plural(count: number, singular: string, pluralForm = `${singular}s`): string {
-    return `${count} ${count === 1 ? singular : pluralForm}`;
 }
 
 /**
@@ -187,45 +181,27 @@ export function buildMessageItemChipPopup(
     };
 }
 
-export function buildItemsSummaryChipPopup(
-    items: Zotero.Item[],
-    getValidation: (item: Zotero.Item) => ItemValidationState | undefined,
-    options: { unvalidatedAttachmentState?: UnvalidatedAttachmentState } = {},
-): ChipPopupContent {
-    const attachments = items.flatMap(safeChildAttachments);
-    let readable = 0;
-    let checking = 0;
-    const unvalidatedAttachmentState = options.unvalidatedAttachmentState ?? 'checking';
+/** Max item rows listed in the "+N" overflow popup before a summary line. */
+const ITEMS_SUMMARY_MAX_ROWS = 4;
 
-    for (const attachment of attachments) {
-        const validation = getValidation(attachment);
-        if (!validation) {
-            if (unvalidatedAttachmentState === 'checking') {
-                checking += 1;
-            } else {
-                readable += 1;
-            }
-        } else if (validation.isValidating) {
-            checking += 1;
-        } else if (validation.state === 'readable') {
-            readable += 1;
-        }
-    }
+/**
+ * Popup for the "+N" overflow chip: a plain list of the collapsed items, each
+ * rendered like its own chip (icon, display name, subtitle). Listing is capped
+ * at {@link ITEMS_SUMMARY_MAX_ROWS}; any further items are summarized in a
+ * trailing "N more attachments" line.
+ */
+export function buildItemsSummaryListPopup(items: Zotero.Item[]): ChipListPopupContent {
+    const rows = items.slice(0, ITEMS_SUMMARY_MAX_ROWS).map((item) => ({
+        key: item.key,
+        icon: <CSSItemTypeIcon itemType={safeItemTypeIconName(item)} className="scale-90" />,
+        title: safeDisplayName(item),
+        subtitle: itemSubtitle(item),
+    }));
 
-    const label = attachments.length === 0
-        ? 'No file attachments'
-        : checking > 0
-            ? `Checking ${plural(checking, 'attachment')}`
-            : `${readable}/${attachments.length} attachments readable`;
+    const remaining = items.length - rows.length;
+    const footer = remaining > 0
+        ? `${remaining} more attachment${remaining === 1 ? '' : 's'}`
+        : null;
 
-    return {
-        icon: <Icon icon={MoreHorizontalIcon} className="font-color-secondary" />,
-        title: `${items.length} more ${items.length === 1 ? 'item' : 'items'}`,
-        subtitle: { text: `${attachments.length} file ${attachments.length === 1 ? 'attachment' : 'attachments'}` },
-        action: {
-            icon: InformationCircleIcon,
-            label,
-            iconClassName: 'scale-95',
-        },
-    };
+    return { rows, footer };
 }

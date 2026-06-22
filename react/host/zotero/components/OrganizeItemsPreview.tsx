@@ -1,11 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { useAtomValue } from 'jotai';
 import { CSSIcon } from '../../../components/icons/icons';
 import type { TagChanges, CollectionChanges, OrganizeItemsResultData } from '../../../types/agentActions/base';
 import { MessageItemButton } from '../../../components/input/MessageItemButton';
-import { ChipWithPopup } from '../../../components/agentRuns/requestChips/ChipPopup';
-import { buildItemsSummaryChipPopup } from '../../../components/input/MessageItemChipPopup';
-import { getItemValidationAtom } from '../../../atoms/itemValidation';
+import { ChipWithListPopup } from '../../../components/agentRuns/requestChips/ChipPopup';
+import { buildItemsSummaryListPopup } from '../../../components/input/MessageItemChipPopup';
 
 type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error' | 'awaiting';
 
@@ -37,7 +35,6 @@ export const OrganizeItemsPreview: React.FC<OrganizeItemsPreviewProps> = ({
 }) => {
     const [collectionNames, setCollectionNames] = useState<Record<string, string>>({});
     const [resolvedItems, setResolvedItems] = useState<Zotero.Item[]>([]);
-    const getValidation = useAtomValue(getItemValidationAtom);
 
     // Resolve items from item IDs
     useEffect(() => {
@@ -109,11 +106,9 @@ export const OrganizeItemsPreview: React.FC<OrganizeItemsPreviewProps> = ({
     const overflowCount = overflowItems.length;
     const overflowPopup = React.useMemo(
         () => overflowCount > 0
-            ? buildItemsSummaryChipPopup(overflowItems, getValidation, {
-                unvalidatedAttachmentState: 'readable',
-            })
+            ? buildItemsSummaryListPopup(overflowItems)
             : null,
-        [getValidation, overflowCount, overflowItems],
+        [overflowCount, overflowItems],
     );
 
     const isApplied = status === 'applied';
@@ -146,7 +141,7 @@ export const OrganizeItemsPreview: React.FC<OrganizeItemsPreviewProps> = ({
                         />
                     ))}
                     {overflowPopup && (
-                        <ChipWithPopup popup={overflowPopup}>
+                        <ChipWithListPopup content={overflowPopup}>
                             <button
                                 type="button"
                                 className="variant-outline source-button"
@@ -155,7 +150,7 @@ export const OrganizeItemsPreview: React.FC<OrganizeItemsPreviewProps> = ({
                             >
                                 +{overflowCount}
                             </button>
-                        </ChipWithPopup>
+                        </ChipWithListPopup>
                     )}
                     {resolvedItems.length === 0 && itemCount > 0 && (
                         <span className="text-sm font-color-secondary">Loading {itemCount} item{itemCount !== 1 ? 's' : ''}...</span>

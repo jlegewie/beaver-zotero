@@ -13,9 +13,8 @@ import { MessageItemButton } from '../input/MessageItemButton';
 import { MessageCollectionButton } from '../input/MessageCollectionButton';
 import { ExternalFileButton } from '../input/ExternalFileButton';
 import { collectionReferenceKey } from '../../types/zotero';
-import { ChipWithPopup } from '../agentRuns/requestChips/ChipPopup';
-import { buildItemsSummaryChipPopup } from '../input/MessageItemChipPopup';
-import { getItemValidationAtom } from '../../atoms/itemValidation';
+import { ChipWithListPopup } from '../agentRuns/requestChips/ChipPopup';
+import { buildItemsSummaryListPopup } from '../input/MessageItemChipPopup';
 
 const MAX_ATTACHMENTS = 4;
 
@@ -48,7 +47,6 @@ const MessageAttachmentDisplay = ({
     const removeItemFromMessage = useSetAtom(removeItemFromMessageAtom);
     const clearMessageContext = useSetAtom(clearMessageContextAtom);
     const removePopupMessagesByType = useSetAtom(removePopupMessagesByTypeAtom);
-    const getValidation = useAtomValue(getItemValidationAtom);
 
     const selectedLibraries = currentLibraryIds
         .map(id => Zotero.Libraries.get(id))
@@ -82,9 +80,9 @@ const MessageAttachmentDisplay = ({
     const overflowCount = overflowMessageItems.length;
     const overflowPopup = React.useMemo(
         () => overflowCount > 0
-            ? buildItemsSummaryChipPopup(overflowMessageItems, getValidation)
+            ? buildItemsSummaryListPopup(overflowMessageItems)
             : null,
-        [getValidation, overflowCount, overflowMessageItems],
+        [overflowCount, overflowMessageItems],
     );
 
     // Count of editable (removable) context items currently attached. Excludes
@@ -173,7 +171,7 @@ const MessageAttachmentDisplay = ({
             ))}
 
             {overflowPopup && (
-                <ChipWithPopup popup={overflowPopup}>
+                <ChipWithListPopup content={overflowPopup}>
                     <button
                         type="button"
                         className="variant-outline source-button"
@@ -182,7 +180,7 @@ const MessageAttachmentDisplay = ({
                     >
                         +{overflowCount}
                     </button>
-                </ChipWithPopup>
+                </ChipWithListPopup>
             )}
 
             {/* External files */}
