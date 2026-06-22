@@ -230,7 +230,10 @@ const InputArea: React.FC<InputAreaProps> = ({
     }, [inputRef, selectionRestoreTick]);
 
     const handleEditorChange = useCallback((value: string) => {
-        if (handleSlashMenuChange(value)) return;
+        if (handleSlashMenuChange(value)) {
+            queueSelectionRestore(value.length, false);
+            return;
+        }
 
         const inputEl = inputRef.current;
         if (
