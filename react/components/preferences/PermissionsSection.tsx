@@ -11,6 +11,8 @@ const PermissionsSection: React.FC = () => {
     const [autoCreateNotes, setAutoCreateNotes] = useState(() => getPref('autoCreateNotes'));
     const [confirmExtractionCosts, setConfirmExtractionCosts] = useState(() => getPref('confirmExtractionCosts'));
     const [confirmExternalSearchCosts, setConfirmExternalSearchCosts] = useState(() => getPref('confirmExternalSearchCosts'));
+    const [enableSystemNotifications, setEnableSystemNotifications] = useState(() => getPref('enableSystemNotifications'));
+    const [enableResponseCompleteNotifications, setEnableResponseCompleteNotifications] = useState(() => getPref('enableResponseCompleteNotifications'));
     const [pauseLongRunningAgent, setPauseLongRunningAgent] = useState(() => getPref('pauseLongRunningAgent'));
     const [accessRemoteFiles, setAccessRemoteFiles] = useState(() => getPref('accessRemoteFiles'));
 
@@ -41,6 +43,20 @@ const PermissionsSection: React.FC = () => {
         setPref('confirmExternalSearchCosts', newValue);
         setConfirmExternalSearchCosts(newValue);
     }, [confirmExternalSearchCosts]);
+
+    // --- Handle System Notifications Toggle ---
+    const handleEnableSystemNotificationsToggle = useCallback(() => {
+        const newValue = !enableSystemNotifications;
+        setPref('enableSystemNotifications', newValue);
+        setEnableSystemNotifications(newValue);
+    }, [enableSystemNotifications]);
+
+    // --- Handle Response Complete Notifications Toggle ---
+    const handleEnableResponseCompleteNotificationsToggle = useCallback(() => {
+        const newValue = !enableResponseCompleteNotifications;
+        setPref('enableResponseCompleteNotifications', newValue);
+        setEnableResponseCompleteNotifications(newValue);
+    }, [enableResponseCompleteNotifications]);
 
     // --- Handle Pause Long-Running Agent Toggle ---
     const handlePauseLongRunningAgentToggle = useCallback(() => {
@@ -169,6 +185,36 @@ const PermissionsSection: React.FC = () => {
                             type="checkbox"
                             checked={confirmExternalSearchCosts}
                             onChange={handleConfirmExternalSearchCostsToggle}
+                            onClick={(e) => e.stopPropagation()}
+                            style={{ cursor: 'pointer', margin: 0 }}
+                        />
+                    }
+                />
+                <SettingsRow
+                    title="Approval Notifications"
+                    description="Show a system notification when an agent action needs your approval and Beaver is not visible."
+                    onClick={handleEnableSystemNotificationsToggle}
+                    hasBorder
+                    control={
+                        <input
+                            type="checkbox"
+                            checked={enableSystemNotifications}
+                            onChange={handleEnableSystemNotificationsToggle}
+                            onClick={(e) => e.stopPropagation()}
+                            style={{ cursor: 'pointer', margin: 0 }}
+                        />
+                    }
+                />
+                <SettingsRow
+                    title="Response Notifications"
+                    description="Show a system notification when a response is ready and Beaver is not visible."
+                    onClick={handleEnableResponseCompleteNotificationsToggle}
+                    hasBorder
+                    control={
+                        <input
+                            type="checkbox"
+                            checked={enableResponseCompleteNotifications}
+                            onChange={handleEnableResponseCompleteNotificationsToggle}
                             onClick={(e) => e.stopPropagation()}
                             style={{ cursor: 'pointer', margin: 0 }}
                         />

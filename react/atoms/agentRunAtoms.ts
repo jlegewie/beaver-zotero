@@ -8,6 +8,7 @@
 import { atom, Getter, Setter } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
 import { agentService } from '../../src/services/agentService';
+import { notifyRunComplete } from '../../src/services/systemNotifications';
 import {
     WSCallbacks,
     AgentRunRequest,
@@ -1212,26 +1213,9 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                 );
             }
 
-            // Show floating popup when the user can't see the result
-            /*const sidebarVisible = store.get(isSidebarVisibleAtom);
-            const beaverWindow = BeaverUIFactory.findBeaverWindow();
-            const beaverWindowFocused = beaverWindow != null && !beaverWindow.closed &&
-                beaverWindow.document?.hasFocus?.() === true;
-
-            if (!sidebarVisible && !beaverWindowFocused) {
-                const isLibraryTab = Zotero.getMainWindow().Zotero_Tabs.selectedType === 'library';
-                set(addFloatingPopupMessageAtom, {
-                    type: 'info',
-                    title: 'Response ready',
-                    text: 'Open Beaver to read the reply.',
-                    expire: false,
-                    duration: 6000,
-                    button: {
-                        text: 'Open',
-                        onClick: () => eventManager.dispatch('toggleChat', { location: isLibraryTab ? 'library' : 'reader' }),
-                    },
-                });
-            }*/
+            // Surface an OS-native notification if the user can't currently see
+            // the completed response (e.g. working in another app).
+            notifyRunComplete();
         },
 
         onThread: (newThreadId: string) => {
