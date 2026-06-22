@@ -20,13 +20,14 @@ import {
     $isRangeSelection,
     COMMAND_PRIORITY_HIGH,
     KEY_ENTER_COMMAND,
+    SKIP_SELECTION_FOCUS_TAG,
 } from 'lexical';
 
 export type LexicalEditorInputHandle = {
     focus: () => void;
     clear: () => void;
     setText: (text: string, caretOffset?: number) => void;
-    selectRange: (start: number, end: number) => void;
+    selectRange: (start: number, end: number, options?: { skipFocus?: boolean }) => void;
     getSelectionOffset: () => number | null;
 };
 
@@ -88,12 +89,46 @@ const EditorApi = forwardRef<LexicalEditorInputHandle>(
                 setText: (text, caretOffset = text.length) => {
                     setPlainText(text, caretOffset);
                 },
-                selectRange: (start, end) => {
-                    let text = '';
-                    editor.getEditorState().read(() => {
-                        text = $getRoot().getTextContent();
-                    });
-                    setPlainText(text, start, end);
+                selectRange: (start, end, options) => {
+                    editor.update(() => {
+                        const root = $getRoot();
+                        const textLength = root.getTextContent().length;
+                        const safeStart = Math.max(0, Math.min(start, textLength));
+                        const safeEnd = Math.max(0, Math.min(end, textLength));
+                        const textNodes = root.getAllTextNodes();
+                        if (textNodes.length === 0) {
+                            root.selectEnd();
+                            return;
+                        }
+
+                        let startNode = textNodes[0];
+                        let endNode = textNodes[textNodes.length - 1];
+                        let startOffset = 0;
+                        let endOffset = endNode.getTextContentSize();
+                        let runningOffset = 0;
+
+                        for (const textNode of textNodes) {
+                            const nodeLength = textNode.getTextContentSize();
+                            const nodeStart = runningOffset;
+                            const nodeEnd = nodeStart + nodeLength;
+                            if (safeStart >= nodeStart && safeStart <= nodeEnd) {
+                                startNode = textNode;
+                                startOffset = safeStart - nodeStart;
+                            }
+                            if (safeEnd >= nodeStart && safeEnd <= nodeEnd) {
+                                endNode = textNode;
+                                endOffset = safeEnd - nodeStart;
+                                break;
+                            }
+                            runningOffset = nodeEnd;
+                        }
+
+                        startNode.select(startOffset, startOffset);
+                        const selection = $getSelection();
+                        if ($isRangeSelection(selection)) {
+                            selection.focus.set(endNode.getKey(), endOffset, 'text');
+                        }
+                    }, options?.skipFocus ? { tag: SKIP_SELECTION_FOCUS_TAG } : undefined);
                 },
                 getSelectionOffset: () => {
                     let offset: number | null = null;
@@ -181,46 +216,6 @@ const SubmitOnEnterPlugin: React.FC<{ onSubmit: () => void }> = ({ onSubmit }) =
     return null;
 };
 
-/**
- * Raw DOM focus on a contenteditable can leave Firefox/Zotero with a collapsed
- * selection outside Lexical's root. Programmatic focus callers should land at
- * the end of the message; pointer focus is left alone so user clicks can place
- * the caret exactly where they clicked.
- */
-const ProgrammaticFocusPlugin: React.FC = () => {
-    const [editor] = useLexicalComposerContext();
-    const pointerFocusRef = useRef(false);
-
-    useEffect(() => {
-        const rootElement = editor.getRootElement();
-        if (!rootElement) return;
-        const win = rootElement.ownerDocument.defaultView;
-
-        const handlePointerDown = () => {
-            pointerFocusRef.current = true;
-            win?.setTimeout(() => {
-                pointerFocusRef.current = false;
-            }, 0);
-        };
-
-        const handleFocus = () => {
-            if (pointerFocusRef.current) return;
-            editor.update(() => {
-                $getRoot().selectEnd();
-            });
-        };
-
-        rootElement.addEventListener('pointerdown', handlePointerDown);
-        rootElement.addEventListener('focus', handleFocus);
-        return () => {
-            rootElement.removeEventListener('pointerdown', handlePointerDown);
-            rootElement.removeEventListener('focus', handleFocus);
-        };
-    }, [editor]);
-
-    return null;
-};
-
 // Keep the composer configured as a plain-text editor. Menu orchestration stays
 // in InputArea so the source and slash menus share the same behavior as the
 // rest of the app.
@@ -291,7 +286,6 @@ export const LexicalEditorInput = forwardRef<LexicalEditorInputHandle, LexicalEd
                     <HistoryPlugin />
                     <PlainTextSync value={value} onChange={onChange} />
                     <SubmitOnEnterPlugin onSubmit={onSubmit} />
-                    <ProgrammaticFocusPlugin />
                     <EditorApi ref={ref} />
                 </div>
             </LexicalComposer>

@@ -25,6 +25,8 @@ const MessageAttachmentDisplay = ({
     setMenuPosition,
     inputRef,
     focusInput,
+    menuPortalContainer,
+    onAfterMenuInitialFocus,
     disabled = false,
     verticalPosition = 'above',
 }: {
@@ -34,6 +36,8 @@ const MessageAttachmentDisplay = ({
     setMenuPosition: (menuPosition: { x: number; y: number }) => void;
     inputRef: React.RefObject<HTMLElement | null>;
     focusInput?: () => void;
+    menuPortalContainer?: HTMLElement | null;
+    onAfterMenuInitialFocus?: () => void;
     disabled?: boolean;
     verticalPosition?: 'above' | 'below';
 }) => {
@@ -126,6 +130,8 @@ const MessageAttachmentDisplay = ({
                 onOpen={() => setIsAddAttachmentMenuOpen(true)}
                 menuPosition={menuPosition}
                 setMenuPosition={setMenuPosition}
+                menuPortalContainer={menuPortalContainer}
+                onAfterMenuInitialFocus={onAfterMenuInitialFocus}
                 disabled={disabled}
                 verticalPosition={verticalPosition}
             />

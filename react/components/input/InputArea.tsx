@@ -55,6 +55,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     const newThread = useSetAtom(newThreadAtom);
     const [isAddAttachmentMenuOpen, setIsAddAttachmentMenuOpen] = useState(false);
     const [menuPosition, setMenuPosition] = useState<MenuPosition>({ x: 0, y: 0 });
+    const [selectionRestoreTick, setSelectionRestoreTick] = useState(0);
     const isLibraryTab = useAtomValue(isLibraryTabAtom);
     const [isWebSearchEnabled, setIsWebSearchEnabled] = useAtom(isWebSearchEnabledAtom);
     const allRuns = useAtomValue(allRunsAtom);
@@ -72,6 +73,8 @@ const InputArea: React.FC<InputAreaProps> = ({
 
     // Imperative handle exposed by the Lexical editor (focus / clear).
     const editorHandleRef = useRef<LexicalEditorInputHandle | null>(null);
+    const pendingSelectionRestoreRef = useRef<{ offset: number; skipFocus: boolean } | null>(null);
+    const sourceMenuSelectionRestoreRef = useRef<{ offset: number; skipFocus: boolean } | null>(null);
     const focusEditor = useCallback(() => {
         editorHandleRef.current?.focus();
     }, []);
@@ -188,6 +191,44 @@ const InputArea: React.FC<InputAreaProps> = ({
         return () => clearTimeout(timer);
     }, [focusEditor, messageContent, pendingActionFocus]);
 
+    const queueSelectionRestore = useCallback((offset: number, skipFocus: boolean) => {
+        pendingSelectionRestoreRef.current = { offset, skipFocus };
+        setSelectionRestoreTick((tick) => tick + 1);
+    }, []);
+
+    const restoreSourceMenuSelection = useCallback(() => {
+        const pendingRestore = sourceMenuSelectionRestoreRef.current;
+        if (!pendingRestore) return;
+        editorHandleRef.current?.selectRange(
+            pendingRestore.offset,
+            pendingRestore.offset,
+            { skipFocus: pendingRestore.skipFocus },
+        );
+    }, []);
+
+    useEffect(() => {
+        if (!isAddAttachmentMenuOpen) {
+            sourceMenuSelectionRestoreRef.current = null;
+        }
+    }, [isAddAttachmentMenuOpen]);
+
+    useEffect(() => {
+        const pendingRestore = pendingSelectionRestoreRef.current;
+        if (!pendingRestore) return;
+        pendingSelectionRestoreRef.current = null;
+        const win = inputRef.current?.ownerDocument.defaultView;
+        const timer = win?.setTimeout(() => {
+            editorHandleRef.current?.selectRange(
+                pendingRestore.offset,
+                pendingRestore.offset,
+                { skipFocus: pendingRestore.skipFocus },
+            );
+        }, 0);
+        return () => {
+            if (timer !== undefined) win?.clearTimeout(timer);
+        };
+    }, [inputRef, selectionRestoreTick]);
+
     const handleEditorChange = useCallback((value: string) => {
         if (handleSlashMenuChange(value)) return;
 
@@ -197,6 +238,7 @@ const InputArea: React.FC<InputAreaProps> = ({
             !isAddAttachmentMenuOpen &&
             handleSlashTrigger(value, inputEl.getBoundingClientRect())
         ) {
+            queueSelectionRestore(value.length, false);
             return;
         }
 
@@ -213,6 +255,7 @@ const InputArea: React.FC<InputAreaProps> = ({
             setIsAddAttachmentMenuOpen(true);
             setMessageContent(nextValue);
             editorHandleRef.current?.setText(nextValue, nextValue.length);
+            sourceMenuSelectionRestoreRef.current = { offset: nextValue.length, skipFocus: true };
             return;
         }
 
@@ -224,6 +267,7 @@ const InputArea: React.FC<InputAreaProps> = ({
         inputRef,
         isAddAttachmentMenuOpen,
         isAwaitingApproval,
+        queueSelectionRestore,
         setMessageContent,
         verticalPosition,
     ]);
@@ -370,6 +414,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     const webSearchDescription = isWebSearchAllowed
         ? (isWebSearchEnabled ? 'Web search is enabled.' : 'Web search is disabled.')
         : 'Web search is unavailable. It requires Beaver credits. Use a Beaver model, or enable Plus Tools in Settings, API Keys.';
+    const menuPortalContainer = inputRef.current?.closest('[id^="beaver-react-root-"], #beaver-pane-window') as HTMLElement | null;
 
     return (
         <div
@@ -423,6 +468,8 @@ const InputArea: React.FC<InputAreaProps> = ({
                     setMenuPosition={setMenuPosition}
                     inputRef={inputRef}
                     focusInput={focusEditor}
+                    menuPortalContainer={menuPortalContainer}
+                    onAfterMenuInitialFocus={restoreSourceMenuSelection}
                     disabled={isAwaitingApproval}
                     verticalPosition={verticalPosition}
                 />
@@ -443,6 +490,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                 placeholder="Search actions..."
                 closeOnSelect={false}
                 showSearchInput={false}
+                portalContainer={menuPortalContainer}
             />
 
             {/* Input Form */}

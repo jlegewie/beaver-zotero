@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState, ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { Icon, SearchIcon } from '../../icons/icons';
 import { getWindowFromElement, getDocumentFromElement } from '../../../utils/windowContext';
 
@@ -78,6 +79,10 @@ export interface SearchMenuProps {
     showSearchInput?: boolean;
     /** Optional callback when backspace/delete is pressed with empty search. Defaults to onClose. */
     onEmptyBackspace?: () => void;
+    /** Optional container for rendering overlay DOM away from the trigger. */
+    portalContainer?: HTMLElement | null;
+    /** Called after the menu performs its initial focus behavior. */
+    onAfterInitialFocus?: () => void;
 }
 
 /**
@@ -102,7 +107,9 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
     searchQuery,
     setSearchQuery,
     showSearchInput = true,
-    onEmptyBackspace
+    onEmptyBackspace,
+    portalContainer,
+    onAfterInitialFocus,
 }) => {
     const menuRef = useRef<HTMLDivElement | null>(null);
     const scrollContainerRef = useRef<HTMLDivElement | null>(null);
@@ -326,6 +333,7 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
         if (isOpen) {
             // Focus the input
             inputRef.current?.focus();
+            onAfterInitialFocus?.();
 
             const displayOrderMenuItems = verticalPosition === 'above' 
                 ? [...menuItems].reverse() 
@@ -357,7 +365,7 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
             setFocusedIndex(-1);
             setHoveredIndex(-1);
         }
-    }, [isOpen, menuItems, verticalPosition]);
+    }, [isOpen, menuItems, onAfterInitialFocus, verticalPosition]);
     
     // Modified search input handler
     const handleSearchInput = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -497,7 +505,7 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
         </div>
     )
 
-    return (
+    const menu = (
         <div
             ref={menuRef}
             className={`bg-quaternary border-popup rounded-md outline-none z-1000 shadow-md display-flex flex-col ${className}`}
@@ -558,6 +566,8 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
             )}
         </div>
     );
+
+    return portalContainer ? createPortal(menu, portalContainer) : menu;
 };
 
 export default SearchMenu; 
