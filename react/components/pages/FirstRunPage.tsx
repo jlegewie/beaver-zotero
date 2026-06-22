@@ -33,7 +33,7 @@ const FIRST_RUN_PERMISSIONS_OVERRIDE: Partial<ChargingPermissions> = {
 
 interface FirstRunPageProps {
     isWindow?: boolean;
-    inputRef: React.RefObject<HTMLTextAreaElement | null>;
+    inputRef: React.RefObject<HTMLElement | null>;
 }
 
 const isDev = process.env.NODE_ENV === 'development';

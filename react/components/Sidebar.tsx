@@ -143,7 +143,9 @@ const SidebarShell = ({
 };
 
 const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
-    const inputRef = useRef<HTMLTextAreaElement>(null);
+    // Input element is now a contenteditable div (Lexical editor) rather than
+    // a textarea. Typed as HTMLElement so `.focus()` keeps working.
+    const inputRef = useRef<HTMLElement | null>(null);
     const loginEmailRef = useRef<HTMLInputElement>(null);
     const runs = useAtomValue(allRunsAtom);
     const messagesContainerRef = useRef<HTMLDivElement>(null);
