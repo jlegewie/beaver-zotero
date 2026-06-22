@@ -20,6 +20,60 @@ import { buildMessageItemChipPopup } from './MessageItemChipPopup';
 
 const MAX_ITEM_TEXT_LENGTH = 30;
 
+const AnnotationImagePopupPreview = ({ item }: { item: Zotero.Item }) => {
+    const [imageUri, setImageUri] = React.useState<string | null>(null);
+    const [imageError, setImageError] = React.useState(false);
+
+    React.useEffect(() => {
+        let isMounted = true;
+        setImageUri(null);
+        setImageError(false);
+
+        const loadImage = async () => {
+            try {
+                const annotationItem = { libraryID: item.libraryID, key: item.key };
+                const hasCache = await Zotero.Annotations.hasCacheImage(annotationItem);
+                if (!isMounted) return;
+
+                if (!hasCache) {
+                    setImageError(true);
+                    return;
+                }
+
+                const path = Zotero.Annotations.getCacheImagePath(annotationItem);
+                setImageUri(Zotero.File.pathToFileURI(path));
+            } catch (error) {
+                console.error('Failed to load annotation image preview:', error);
+                if (isMounted) setImageError(true);
+            }
+        };
+
+        loadImage();
+        return () => {
+            isMounted = false;
+        };
+    }, [item]);
+
+    return (
+        <span
+            className="display-flex items-center justify-center overflow-hidden"
+            style={{ width: '100%', minHeight: imageUri ? undefined : '64px' }}
+        >
+            {imageUri ? (
+                <img
+                    src={imageUri}
+                    alt="Area annotation"
+                    style={{ maxWidth: '100%', maxHeight: '150px', objectFit: 'contain' }}
+                />
+            ) : (
+                <span className="font-color-secondary text-sm px-2 text-center">
+                    {imageError ? 'Image preview unavailable' : 'Loading image...'}
+                </span>
+            )}
+        </span>
+    );
+};
+
 interface MessageItemButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'item'> {
     item: Zotero.Item;
     canEdit?: boolean;
@@ -254,6 +308,9 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
                         color: annotation.color,
                         title: annotationText || undefined,
                     }),
+                    media: annotation.annotation_type === 'image'
+                        ? <AnnotationImagePopupPreview item={item} />
+                        : null,
                     status: validation && !validation.isValidating && validation.state !== 'readable' && validation.reason
                         ? { label: validation.reason }
                         : null,

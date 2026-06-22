@@ -41,13 +41,15 @@ export interface ChipPopupContent {
     subtitle?: ChipPopupSubtitle | null;
     /** Optional readability status line. */
     status?: ChipPopupStatus | null;
+    /** Optional rich preview rendered between the summary and action footer. */
+    media?: React.ReactNode;
     /** Optional action hint footer. */
     action?: ChipPopupAction | null;
 }
 
 const POPUP_WIDTH = '260px';
 
-const ChipPopupCard: React.FC<ChipPopupContent> = ({ icon, title, subtitle, status, action }) => (
+const ChipPopupCard: React.FC<ChipPopupContent> = ({ icon, title, subtitle, status, media, action }) => (
     <span className="block" style={{ overflow: 'hidden' }}>
         <span className="px-3 py-15 mt-1 display-flex flex-row items-start gap-2">
             <span className="flex-shrink-0">{icon}</span>
@@ -78,6 +80,11 @@ const ChipPopupCard: React.FC<ChipPopupContent> = ({ icon, title, subtitle, stat
                 )}
             </span>
         </span>
+        {media && (
+            <span className="px-3 pb-2 block">
+                {media}
+            </span>
+        )}
         {action && (
             <span className="px-3 ml-05 py-15 block border-top-quinary">
                 <span className="display-flex flex-row items-center gap-15">
