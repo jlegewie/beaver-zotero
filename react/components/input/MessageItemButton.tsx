@@ -4,7 +4,6 @@ import { useAtomValue } from 'jotai';
 import { useRemoveContextMenu } from '../../hooks/useRemoveContextMenu';
 import { MenuItem } from '../ui/menu/ContextMenu';
 import { getItemValidationAtom, isHardBlockedValidation } from '../../atoms/itemValidation';
-import { usePreviewHover } from '../../hooks/usePreviewHover';
 import { getDisplayNameFromItem } from '../../utils/sourceUtils';
 import { truncateText } from '../../utils/stringUtils';
 import { ZoteroIcon } from '../icons/ZoteroIcon';
@@ -14,7 +13,8 @@ import { toAnnotation } from '../../types/attachments/converters';
 import { selectItemById } from '../../../src/utils/selectItem';
 import { openNoteById } from '../../utils/sourceUtils';
 import { ANNOTATION_ICON_BY_TYPE, ANNOTATION_TEXT_BY_TYPE } from '../../utils/annotationDisplay';
-import { ChipWithPopup } from '../agentRuns/requestChips/ChipPopup';
+import { ChipWithPopup, type ChipPopupContent } from '../agentRuns/requestChips/ChipPopup';
+import { buildAnnotationChipPopup } from '../agentRuns/requestChips/RequestChipPrimitives';
 import { ChipButton } from '../agentRuns/requestChips/ChipButton';
 import { buildMessageItemChipPopup } from './MessageItemChipPopup';
 
@@ -70,13 +70,6 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
         const getValidation = useAtomValue(getItemValidationAtom);
         const validation = getValidation(item);
         const [isHovered, setIsHovered] = React.useState(false);
-
-        // Annotations still use the large preview. Regular items and
-        // attachments use the compact chip popup.
-        const { hoverEventHandlers: previewHoverHandlers, cancelTimers } = usePreviewHover(
-            isAnnotation ? { type: 'annotation', content: item } : null,
-            { isEnabled: !disabled && isAnnotation }
-        );
 
         // Determine display name based on item type
         const displayName = isAnnotation && annotation
@@ -153,13 +146,11 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
         // one removable item is attached).
         const { isRemoveMenuOpen, contextMenuHandlers, removeHandlers, removeMenu } = useRemoveContextMenu({
             onRemove: () => {
-                cancelTimers();
                 if (onRemove) onRemove(item);
             },
             onRemoveAll,
             canEdit,
             disabled,
-            onMenuOpen: cancelTimers,
             extraMenuItems: revealMenuItems,
         });
 
@@ -234,26 +225,13 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
             return classes;
         };
 
-        // Tooltip text (annotations only — other items use the chip popup card).
-        const getTooltipTitle = () => {
-            if (validation?.isValidating) {
-                return 'Validating...';
-            }
-            if (validation && validation.state !== 'readable' && validation.reason) {
-                return validation.reason;
-            }
-            return undefined;
-        };
-
         const handleMouseEnter = (event: React.MouseEvent<HTMLButtonElement>) => {
             setIsHovered(true);
-            previewHoverHandlers.onMouseEnter?.();
             onMouseEnter?.(event);
         };
 
         const handleMouseLeave = (event: React.MouseEvent<HTMLButtonElement>) => {
             setIsHovered(false);
-            previewHoverHandlers.onMouseLeave?.();
             onMouseLeave?.(event);
         };
 
@@ -263,17 +241,30 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
             && !validation.isValidating
             && validation.state === 'unreadable';
 
-        const chipPopup = React.useMemo(
-            () => isAnnotation
-                ? null
-                : buildMessageItemChipPopup(item, validation, getValidation),
-            [isAnnotation, item, validation, getValidation],
-        );
+        const chipPopup = React.useMemo<ChipPopupContent>(() => {
+            if (isAnnotation && annotation) {
+                const annotationText = [annotation.text, annotation.comment]
+                    .filter(Boolean)
+                    .join(' ')
+                    .replace(/\s+/g, ' ')
+                    .trim();
+                return {
+                    ...buildAnnotationChipPopup({
+                        annotationType: annotation.annotation_type,
+                        color: annotation.color,
+                        title: annotationText || undefined,
+                    }),
+                    status: validation && !validation.isValidating && validation.state !== 'readable' && validation.reason
+                        ? { label: validation.reason }
+                        : null,
+                };
+            }
+            return buildMessageItemChipPopup(item, validation, getValidation);
+        }, [isAnnotation, annotation, item, validation, getValidation]);
 
         const button = (
             <ChipButton
                 ref={ref}
-                title={isAnnotation ? getTooltipTitle() : undefined}
                 onMouseEnter={handleMouseEnter}
                 onMouseLeave={handleMouseLeave}
                 {...contextMenuHandlers}
@@ -300,13 +291,9 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
 
         return (
             <>
-            {isAnnotation ? (
-                button
-            ) : (
-                <ChipWithPopup popup={chipPopup!} suppressed={isRemoveMenuOpen}>
-                    {button}
-                </ChipWithPopup>
-            )}
+            <ChipWithPopup popup={chipPopup} suppressed={isRemoveMenuOpen}>
+                {button}
+            </ChipWithPopup>
             {removeMenu}
             </>
         );

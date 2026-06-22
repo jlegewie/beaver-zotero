@@ -3,11 +3,14 @@ import { CSSIcon, Icon, TextAlignLeftIcon, PdfIcon } from "../icons/icons"
 import { useSetAtom } from 'jotai'
 import { readerTextSelectionAtom } from '../../atoms/messageComposition'
 import { navigateToPageInCurrentReader } from '../../utils/readerUtils'
-import { usePreviewHover } from '../../hooks/usePreviewHover'
 import { useRemoveContextMenu } from '../../hooks/useRemoveContextMenu'
-import { activePreviewAtom } from '../../atoms/ui'
 import { TextSelection } from '../../types/attachments/apiTypes'
+import { truncateText } from '../../utils/stringUtils'
+import { ChipWithPopup, type ChipPopupContent } from '../agentRuns/requestChips/ChipPopup'
+import { ChipButton } from '../agentRuns/requestChips/ChipButton'
 
+
+const MAX_TEXT_SELECTION_TOOLTIP_TEXT_LENGTH = 160;
 
 interface TextSelectionButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'source'> {
     selection: TextSelection
@@ -25,29 +28,23 @@ export const TextSelectionButton = forwardRef<HTMLButtonElement, TextSelectionBu
             disabled = false,
             canEdit = true,
             onRemoveAll,
+            onMouseEnter,
+            onMouseLeave,
+            onClick,
             ...rest
         } = props
 
         // States/Atoms needed for non-preview logic
-        const setActivePreview = useSetAtom(activePreviewAtom)
         const setReaderTextSelection = useSetAtom(readerTextSelectionAtom)
-
-        // Use the custom hook for hover preview logic
-        const { hoverEventHandlers, isHovered, cancelTimers } = usePreviewHover(
-            { type: 'textSelection', content: selection }, // Preview content
-            { isEnabled: !disabled && canEdit } // Options: Disable if button disabled or not editable
-        )
+        const [isHovered, setIsHovered] = React.useState(false);
 
         const { isRemoveMenuOpen, contextMenuHandlers, removeHandlers, removeMenu } = useRemoveContextMenu({
             onRemove: () => {
-                cancelTimers() // Cancel preview timers
-                setActivePreview(null) // Ensure preview is explicitly closed
                 setReaderTextSelection(null) // Remove the selection itself
             },
             onRemoveAll,
             canEdit,
             disabled,
-            onMenuOpen: cancelTimers,
             // Mirror the button click: scroll the reader to the selection's page.
             extraMenuItems: [{
                 label: 'Reveal in PDF',
@@ -56,9 +53,17 @@ export const TextSelectionButton = forwardRef<HTMLButtonElement, TextSelectionBu
             }],
         })
 
-        // Update getIconElement to use isHovered from the hook
+        const popup = React.useMemo<ChipPopupContent>(() => {
+            const selectionText = truncateText(selection.text.replace(/\s+/g, ' ').trim(), MAX_TEXT_SELECTION_TOOLTIP_TEXT_LENGTH);
+            return {
+                icon: <Icon icon={TextAlignLeftIcon} className="scale-90 font-color-primary" />,
+                title: 'Text Selection',
+                subtitle: selectionText ? { text: selectionText } : null,
+                action: { icon: PdfIcon, label: `Reveal page ${selection.page} in PDF` },
+            };
+        }, [selection.page, selection.text]);
+
         const getIconElement = () => {
-            // Use isHovered from the hook
             if ((isHovered || isRemoveMenuOpen) && canEdit) {
                 return (<span
                     role="button"
@@ -75,28 +80,33 @@ export const TextSelectionButton = forwardRef<HTMLButtonElement, TextSelectionBu
 
         return (
             <>
-            <button
-                ref={ref}
-                // Spread the event handlers from the hook
-                {...hoverEventHandlers}
-                {...contextMenuHandlers}
-                className={
-                    `variant-outline source-button
-                    ${className || ''}
-                    ${disabled ? 'disabled-but-styled' : ''}
-                `}
-                disabled={disabled}
-                onClick={(e) => {
-                    e.stopPropagation();
-                    navigateToPageInCurrentReader(selection.page);
-                }}
-                {...rest}
-            >
-                {getIconElement()}
-                <span className={`truncate`}>
-                    Text Selection
-                </span>
-            </button>
+            <ChipWithPopup popup={popup} suppressed={isRemoveMenuOpen}>
+                <ChipButton
+                    ref={ref}
+                    {...rest}
+                    {...contextMenuHandlers}
+                    className={`${className || ''} ${disabled ? 'disabled-but-styled' : ''}`}
+                    disabled={disabled}
+                    onMouseEnter={(event) => {
+                        setIsHovered(true);
+                        onMouseEnter?.(event);
+                    }}
+                    onMouseLeave={(event) => {
+                        setIsHovered(false);
+                        onMouseLeave?.(event);
+                    }}
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        navigateToPageInCurrentReader(selection.page);
+                        onClick?.(e);
+                    }}
+                >
+                    {getIconElement()}
+                    <span className={`truncate`}>
+                        Text Selection
+                    </span>
+                </ChipButton>
+            </ChipWithPopup>
             {removeMenu}
             </>
         )

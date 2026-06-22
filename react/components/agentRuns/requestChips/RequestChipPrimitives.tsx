@@ -7,10 +7,11 @@ import type { ContentKind } from '../../../types/zotero';
 import { truncateText } from '../../../utils/stringUtils';
 import { ANNOTATION_ICON_BY_TYPE, ANNOTATION_TEXT_BY_TYPE } from '../../../utils/annotationDisplay';
 import type { ValidAnnotationType, ExternalFileContentKind } from '../../../types/attachments/apiTypes';
-import { ChipWithPopup, type ChipPopupSubtitle } from './ChipPopup';
+import { ChipWithPopup, type ChipPopupContent, type ChipPopupSubtitle } from './ChipPopup';
 import { ChipButton } from './ChipButton';
 
 const MAX_CHIP_TEXT_LENGTH = 30;
+const MAX_ANNOTATION_TOOLTIP_TEXT_LENGTH = 160;
 
 function attachmentIconName(contentKind?: ContentKind | ExternalFileContentKind | null): string {
     switch (contentKind) {
@@ -81,12 +82,7 @@ export function AnnotationChip({
     const typeLabel = ANNOTATION_TEXT_BY_TYPE[annotationType] || 'Annotation';
     return (
         <ChipWithPopup
-            popup={{
-                icon: <ZoteroIcon icon={icon} size={16} style={color ? { color } : undefined} />,
-                title: typeLabel,
-                subtitle: title ? { text: title } : null,
-                action: { icon: HighlighterIcon, label: 'Open annotation in PDF' },
-            }}
+            popup={buildAnnotationChipPopup({ annotationType, color, title })}
         >
             <ChipButton onClick={() => getHost().navigation?.openAnnotation(annotationRef)}>
                 <ZoteroIcon icon={icon} size={14} style={color ? { color } : undefined} />
@@ -96,6 +92,26 @@ export function AnnotationChip({
             </ChipButton>
         </ChipWithPopup>
     );
+}
+
+export function buildAnnotationChipPopup({
+    annotationType,
+    color,
+    title,
+}: {
+    annotationType: ValidAnnotationType | string;
+    color?: string;
+    title?: string;
+}): ChipPopupContent {
+    const icon = ANNOTATION_ICON_BY_TYPE[annotationType] || ZOTERO_ICONS.ANNOTATION;
+    const typeLabel = ANNOTATION_TEXT_BY_TYPE[annotationType] || 'Annotation';
+    const tooltipText = title ? truncateText(title.replace(/\s+/g, ' ').trim(), MAX_ANNOTATION_TOOLTIP_TEXT_LENGTH) : '';
+    return {
+        icon: <ZoteroIcon icon={icon} size={16} style={color ? { color } : undefined} />,
+        title: typeLabel,
+        subtitle: tooltipText ? { text: tooltipText } : null,
+        action: { icon: HighlighterIcon, label: 'Open annotation in PDF' },
+    };
 }
 
 export function NoteChip({
