@@ -4,6 +4,7 @@ import { dismissDiffPreview } from '../utils/noteEditorDiffPreview';
 import { updateDiffPreviewForNote, diffPreviewNoteKeyAtom } from '../utils/diffPreviewCoordinator';
 import { makeNoteKey } from '../atoms/editNoteAutoApprove';
 import { agentActionsService, AckActionLink } from '../../src/services/agentActionsService';
+import { notifyApprovalRequest } from '../../src/services/systemNotifications';
 import { ZoteroItemReference } from '../types/zotero';
 import {
     ActionStatus,
@@ -971,6 +972,10 @@ export const addPendingApprovalAtom = atom(
                 updateDiffPreviewForNote(library_id, zotero_key);
             }
         }
+
+        // Surface an OS-native notification if the user can't currently see
+        // the approval UI (e.g. working in another app).
+        notifyApprovalRequest(event);
     }
 );
 
