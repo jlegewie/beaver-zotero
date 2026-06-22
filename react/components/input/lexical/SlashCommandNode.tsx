@@ -7,10 +7,13 @@ import {
     Spread,
     TextNode,
 } from 'lexical';
+import { ActionTargetType } from '../../../types/actions';
 
 export type SerializedSlashCommandNode = Spread<
     {
         commandName: string;
+        actionId: string;
+        targetType?: ActionTargetType;
     },
     SerializedTextNode
 >;
@@ -28,25 +31,45 @@ export type SerializedSlashCommandNode = Spread<
  */
 export class SlashCommandNode extends TextNode {
     __commandName: string;
+    __actionId: string;
+    __targetType?: ActionTargetType;
 
     static getType(): string {
         return 'beaver-slash-command';
     }
 
     static clone(node: SlashCommandNode): SlashCommandNode {
-        return new SlashCommandNode(node.__commandName, node.__text, node.__key);
+        return new SlashCommandNode(
+            node.__commandName,
+            node.__actionId,
+            node.__targetType,
+            node.__text,
+            node.__key,
+        );
     }
 
-    constructor(commandName: string, text?: string, key?: NodeKey) {
+    constructor(
+        commandName: string,
+        actionId = '',
+        targetType?: ActionTargetType,
+        text?: string,
+        key?: NodeKey,
+    ) {
         // Display the "/name" literal in the text so screen readers still hear it
         super(text ?? `/${commandName}`, key);
         this.__commandName = commandName;
+        this.__actionId = actionId;
+        this.__targetType = targetType;
         // Token mode = atomic deletion, no mid-node editing
         this.setMode('token');
     }
 
     static importJSON(serializedNode: SerializedSlashCommandNode): SlashCommandNode {
-        const node = $createSlashCommandNode(serializedNode.commandName);
+        const node = $createSlashCommandNode(
+            serializedNode.commandName,
+            serializedNode.actionId,
+            serializedNode.targetType,
+        );
         node.setFormat(serializedNode.format);
         node.setDetail(serializedNode.detail);
         node.setMode(serializedNode.mode);
@@ -60,6 +83,8 @@ export class SlashCommandNode extends TextNode {
             type: SlashCommandNode.getType(),
             version: 1,
             commandName: this.__commandName,
+            actionId: this.__actionId,
+            targetType: this.__targetType,
         };
     }
 
@@ -83,6 +108,14 @@ export class SlashCommandNode extends TextNode {
         return this.__commandName;
     }
 
+    getActionId(): string {
+        return this.__actionId;
+    }
+
+    getTargetType(): ActionTargetType | undefined {
+        return this.__targetType;
+    }
+
     // Slash pills should never split into two text nodes on typing
     canInsertTextBefore(): boolean {
         return false;
@@ -97,8 +130,12 @@ export class SlashCommandNode extends TextNode {
     }
 }
 
-export function $createSlashCommandNode(commandName: string): SlashCommandNode {
-    return $applyNodeReplacement(new SlashCommandNode(commandName));
+export function $createSlashCommandNode(
+    commandName: string,
+    actionId = '',
+    targetType?: ActionTargetType,
+): SlashCommandNode {
+    return $applyNodeReplacement(new SlashCommandNode(commandName, actionId, targetType));
 }
 
 export function $isSlashCommandNode(

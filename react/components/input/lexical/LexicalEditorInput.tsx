@@ -17,11 +17,27 @@ import {
     $createTextNode,
     $getRoot,
     $getSelection,
+    $isElementNode,
     $isRangeSelection,
     COMMAND_PRIORITY_HIGH,
     KEY_ENTER_COMMAND,
+    LexicalNode,
     SKIP_SELECTION_FOCUS_TAG,
 } from 'lexical';
+import { ActionTargetType } from '../../../types/actions';
+import {
+    $createSlashCommandNode,
+    $isSlashCommandNode,
+    SlashCommandNode,
+} from './SlashCommandNode';
+
+/** A /slash-command pill present in the editor, with the action identity it
+ *  carries so the send path can resolve it back to the action's prompt. */
+export interface SlashCommandDescriptor {
+    commandName: string;
+    actionId: string;
+    targetType?: ActionTargetType;
+}
 
 export type LexicalEditorInputHandle = {
     focus: () => void;
@@ -29,6 +45,11 @@ export type LexicalEditorInputHandle = {
     setText: (text: string, caretOffset?: number) => void;
     selectRange: (start: number, end: number, options?: { skipFocus?: boolean }) => void;
     getSelectionOffset: () => number | null;
+    /** Replace the trailing `/query` (length `queryLength`, excluding the `/`)
+     *  with a styled command pill followed by a space, caret left at the end. */
+    insertSlashCommand: (descriptor: SlashCommandDescriptor, queryLength: number) => void;
+    /** Returns the command pills currently in the editor, in document order. */
+    getSlashCommands: () => SlashCommandDescriptor[];
 };
 
 export interface LexicalEditorInputProps {
@@ -147,6 +168,71 @@ const EditorApi = forwardRef<LexicalEditorInputHandle>(
                     });
                     return offset;
                 },
+                insertSlashCommand: (descriptor, queryLength) => {
+                    editor.update(() => {
+                        const root = $getRoot();
+                        // Remove the trailing "/query" the user typed (the `/`
+                        // trigger plus the typed query). The slash menu closes on
+                        // whitespace, so the query never spans nodes and always
+                        // lives in the final plain-text node(s) - never inside an
+                        // existing pill.
+                        let remaining = queryLength + 1; // +1 for the leading '/'
+                        const textNodes = root.getAllTextNodes();
+                        for (let i = textNodes.length - 1; i >= 0 && remaining > 0; i--) {
+                            const node = textNodes[i];
+                            if ($isSlashCommandNode(node)) break;
+                            const text = node.getTextContent();
+                            if (text.length <= remaining) {
+                                remaining -= text.length;
+                                node.remove();
+                            } else {
+                                node.setTextContent(text.slice(0, text.length - remaining));
+                                remaining = 0;
+                            }
+                        }
+
+                        // Append the pill + a trailing space so the caret can
+                        // continue typing after it.
+                        const slashNode = $createSlashCommandNode(
+                            descriptor.commandName,
+                            descriptor.actionId,
+                            descriptor.targetType,
+                        );
+                        const spaceNode = $createTextNode(' ');
+                        const lastChild = root.getLastChild();
+                        const paragraph = $isElementNode(lastChild)
+                            ? lastChild
+                            : $createParagraphNode();
+                        if (!$isElementNode(lastChild)) {
+                            root.append(paragraph);
+                        }
+                        paragraph.append(slashNode);
+                        slashNode.insertAfter(spaceNode);
+                        spaceNode.selectEnd();
+                    });
+                    // Re-focus (the selection may have been lost to the menu on a
+                    // mouse click) and land the caret at the end, right after the
+                    // inserted pill + space.
+                    editor.focus(() => { /* noop */ }, { defaultSelection: 'rootEnd' });
+                },
+                getSlashCommands: () => {
+                    const result: SlashCommandDescriptor[] = [];
+                    editor.getEditorState().read(() => {
+                        const visit = (node: LexicalNode) => {
+                            if ($isSlashCommandNode(node)) {
+                                result.push({
+                                    commandName: node.getCommandName(),
+                                    actionId: node.getActionId(),
+                                    targetType: node.getTargetType(),
+                                });
+                            } else if ($isElementNode(node)) {
+                                node.getChildren().forEach(visit);
+                            }
+                        };
+                        $getRoot().getChildren().forEach(visit);
+                    });
+                    return result;
+                },
             }),
             [editor, setPlainText],
         );
@@ -221,7 +307,7 @@ const SubmitOnEnterPlugin: React.FC<{ onSubmit: () => void }> = ({ onSubmit }) =
 // rest of the app.
 const editorConfig = {
     namespace: 'beaver-input',
-    nodes: [],
+    nodes: [SlashCommandNode],
     // Plain text editors still need a theme object; we leave it empty.
     theme: {},
     onError(error: Error) {

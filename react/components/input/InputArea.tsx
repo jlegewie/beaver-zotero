@@ -27,8 +27,9 @@ import { firstRunNextStepsDismissedAtom } from '../../atoms/firstRun';
 import { dismissHighTokenWarningForThreadAtom, dismissedHighTokenWarningByThreadAtom, dismissSoftCapWarningForThreadAtom, dismissedSoftCapWarningByThreadAtom, backendHighTokenUsageRunsAtom, softCapTriggeredRunsAtom } from '../../atoms/messageUIState';
 import { getLastRequestInputTokens } from '../../utils/runUsage';
 import { getPref, setPref } from '../../../src/utils/prefs';
-import { LexicalEditorInput, LexicalEditorInputHandle } from './lexical/LexicalEditorInput';
+import { LexicalEditorInput, LexicalEditorInputHandle, SlashCommandDescriptor } from './lexical/LexicalEditorInput';
 import { useSlashMenu } from '../../hooks/useSlashMenu';
+import { sendComposedMessageAtom } from '../../atoms/actions';
 
 const HIGH_INPUT_TOKEN_WARNING_THRESHOLD = 100_000;
 
@@ -78,9 +79,15 @@ const InputArea: React.FC<InputAreaProps> = ({
     const focusEditor = useCallback(() => {
         editorHandleRef.current?.focus();
     }, []);
+    // Stable forwarder so the slash menu can insert a command pill into the
+    // Lexical editor (the editor handle isn't available until after mount).
+    const insertSlashCommand = useCallback((descriptor: SlashCommandDescriptor, queryLength: number) => {
+        editorHandleRef.current?.insertSlashCommand(descriptor, queryLength);
+    }, []);
 
     // WebSocket state
     const sendWSMessage = useSetAtom(sendWSMessageAtom);
+    const sendComposedMessage = useSetAtom(sendComposedMessageAtom);
     const closeWSConnection = useSetAtom(closeWSConnectionAtom);
     const isPending = useAtomValue(isWSChatPendingAtom);
 
@@ -164,7 +171,7 @@ const InputArea: React.FC<InputAreaProps> = ({
         handleSlashMenuChange,
         handleSlashTrigger,
         handleSlashMenuKeyDown,
-    } = useSlashMenu(inputRef, verticalPosition, focusEditor);
+    } = useSlashMenu(inputRef, verticalPosition, focusEditor, insertSlashCommand);
 
     useEffect(() => {
         if (isPending && getPref('focusResponseForScreenReaders')) {
@@ -309,6 +316,14 @@ const InputArea: React.FC<InputAreaProps> = ({
 
     const sendMessage = (message: string) => {
         if (isPending || message.length === 0) return;
+        // If the message contains /command pills, resolve each back to its
+        // action's prompt (and attach its items/collection) before sending.
+        const pills = editorHandleRef.current?.getSlashCommands() ?? [];
+        if (pills.length > 0) {
+            logger(`Sending composed message with ${pills.length} action pill(s)`);
+            sendComposedMessage({ baseText: message, pills });
+            return;
+        }
         logger(`Sending message: ${message}`);
         sendWSMessage(message);
     };

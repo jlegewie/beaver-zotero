@@ -308,3 +308,110 @@ export const stageActionInInputAtom = atom(
         set(pendingActionInputFocusAtom, (n) => n + 1);
     },
 );
+
+// ---------------------------------------------------------------------------
+// Send a composed message that contains one or more /command pills.
+// ---------------------------------------------------------------------------
+
+export const sendComposedMessageAtom = atom(
+    null,
+    async (
+        get,
+        set,
+        payload: {
+            baseText: string;
+            pills: { commandName: string; actionId: string; targetType?: ActionTargetType }[];
+        },
+    ): Promise<boolean> => {
+        const { baseText, pills } = payload;
+        const actions = get(actionsAtom);
+        const validationResults = get(itemValidationResultsAtom);
+
+        const accumulatedItems: Zotero.Item[] = [];
+        let accumulatedCollection: CollectionReference | null = null;
+        // Resolved prompt for each pill, by index (null = unknown/deleted action).
+        const resolvedTexts: (string | null)[] = [];
+
+        for (const pill of pills) {
+            const action = actions.find(a => a.id === pill.actionId);
+            if (!action) {
+                resolvedTexts.push(null);
+                continue;
+            }
+
+            const { text: resolvedText, items, collection, emptyItemVariables } =
+                await resolvePromptVariables(action.text, pill.targetType);
+
+            if (emptyItemVariables.length > 0) {
+                const hint = EMPTY_VARIABLE_HINTS[emptyItemVariables[0]] ?? 'No items found for this prompt.';
+                set(addPopupMessageAtom, {
+                    type: 'warning',
+                    title: 'Action skipped',
+                    text: hint,
+                    expire: true,
+                    duration: 4000,
+                });
+                return false;
+            }
+
+            for (const item of items) {
+                const key = `${item.libraryID}-${item.key}`;
+                const cached = validationResults.get(key);
+                if (isRejectedItemValidation(item, cached)) {
+                    set(addPopupMessageAtom, {
+                        type: 'error',
+                        title: 'Action skipped',
+                        text: cached?.reason || 'One or more items failed validation.',
+                        expire: true,
+                        duration: 4000,
+                    });
+                    return false;
+                }
+            }
+
+            for (const item of items) {
+                const key = `${item.libraryID}-${item.key}`;
+                if (!accumulatedItems.some(i => `${i.libraryID}-${i.key}` === key)) {
+                    accumulatedItems.push(item);
+                }
+            }
+            if (collection && !accumulatedCollection) {
+                accumulatedCollection = collection;
+            }
+            resolvedTexts.push(resolvedText);
+        }
+
+        // Substitute each "/command" token with its resolved prompt, scanning
+        // left-to-right so repeated/duplicate tokens map to the right pill and
+        // surrounding user text is preserved.
+        let finalText = '';
+        let cursor = 0;
+        pills.forEach((pill, idx) => {
+            const resolved = resolvedTexts[idx];
+            if (resolved === null) return;
+            const token = `/${pill.commandName}`;
+            const tokenIdx = baseText.indexOf(token, cursor);
+            if (tokenIdx === -1) return;
+            finalText += baseText.slice(cursor, tokenIdx) + resolved;
+            cursor = tokenIdx + token.length;
+        });
+        finalText += baseText.slice(cursor);
+        finalText = finalText.trim();
+
+        if (accumulatedItems.length > 0) {
+            const currentItems = get(currentMessageItemsAtom);
+            const existingKeys = new Set(currentItems.map(i => `${i.libraryID}-${i.key}`));
+            const newItems = accumulatedItems.filter(i => !existingKeys.has(`${i.libraryID}-${i.key}`));
+            if (newItems.length > 0) {
+                set(currentMessageItemsAtom, [...currentItems, ...newItems]);
+            }
+        }
+
+        if (accumulatedCollection && (get(currentMessageCollectionsAtom) as CollectionReference[]).length === 0) {
+            set(currentMessageCollectionsAtom, [accumulatedCollection]);
+        }
+
+        await set(sendWSMessageAtom, finalText);
+        return true;
+    },
+);

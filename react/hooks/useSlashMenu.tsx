@@ -2,79 +2,58 @@ import React, { useState, useRef, useCallback, useMemo } from 'react';
 import { useAtom, useSetAtom, useAtomValue } from 'jotai';
 import { PlusSignIcon } from '../components/icons/icons';
 import { CSSIcon, CSSItemTypeIcon } from '../components/icons/zotero';
-import { currentMessageContentAtom, currentMessageItemsAtom } from '../atoms/messageComposition';
-import { isWSChatPendingAtom } from '../atoms/agentRunAtoms';
-import { actionsAtom, actionContextAtom, markActionUsedAtom, sendResolvedActionAtom, stageActionInInputAtom } from '../atoms/actions';
-import { resolvePromptVariables, EMPTY_VARIABLE_HINTS } from '../utils/promptVariables';
-import { hasUserInputVariables } from '../utils/userInputVariables';
+import { currentMessageContentAtom } from '../atoms/messageComposition';
+import { actionsAtom, actionContextAtom, markActionUsedAtom } from '../atoms/actions';
 import { computeActionGroups } from '../utils/actionVisibility';
-import { addPopupMessageAtom } from '../utils/popupMessageUtils';
 import { openPreferencesWindow } from '../../src/ui/openPreferencesWindow';
 import { Action, ActionTargetType } from '../types/actions';
+import { SlashCommandDescriptor } from '../components/input/lexical/LexicalEditorInput';
 import { MenuPosition, SearchMenuItem } from '../components/ui/menus/SearchMenu';
+
+/** Turn an action title into a single `/command` token (e.g. "Summarize Paper"
+ *  → "summarize-paper"). The slash menu closes on whitespace, so the token must
+ *  not contain spaces. */
+const toSlashToken = (title: string): string =>
+    title
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '') || 'action';
 
 export function useSlashMenu(
     inputRef: React.RefObject<HTMLElement | null>,
     verticalPosition: 'above' | 'below' = 'above',
     focusInput?: () => void,
+    insertSlashCommand?: (descriptor: SlashCommandDescriptor, queryLength: number) => void,
 ) {
-    const [messageContent, setMessageContent] = useAtom(currentMessageContentAtom);
-    const [, setCurrentMessageItems] = useAtom(currentMessageItemsAtom);
-    const isPending = useAtomValue(isWSChatPendingAtom);
+    const [, setMessageContent] = useAtom(currentMessageContentAtom);
     const allActions = useAtomValue(actionsAtom);
     const ctx = useAtomValue(actionContextAtom);
     const markActionUsed = useSetAtom(markActionUsedAtom);
-    const sendResolvedAction = useSetAtom(sendResolvedActionAtom);
-    const stageActionInInput = useSetAtom(stageActionInInputAtom);
-    const addPopupMessage = useSetAtom(addPopupMessageAtom);
 
     const [isSlashMenuOpen, setIsSlashMenuOpen] = useState(false);
     const [slashMenuPosition, setSlashMenuPosition] = useState<MenuPosition>({ x: 0, y: 0 });
     const [slashSearchQuery, setSlashSearchQuery] = useState('');
     const preSlashTextRef = useRef('');
+    // Live mirror of the typed query so handleSlashSelect can compute how much
+    // trailing "/query" text to replace, even when the editor lost DOM focus to
+    // the menu (e.g. selecting with the mouse).
+    const slashQueryRef = useRef('');
 
-    const handleSlashSelect = useCallback(async (action: Action, groupTargetType?: ActionTargetType) => {
-        const pre = preSlashTextRef.current;
-        const fullPromptText = pre.length > 0
-            ? `${pre}\n\n${action.text}`.trim()
-            : action.text.trim();
+    // Selecting an action completes the typed "/query" into a styled command pill
+    const handleSlashSelect = useCallback((action: Action, groupTargetType?: ActionTargetType) => {
+        const queryLength = slashQueryRef.current.length;
         setIsSlashMenuOpen(false);
         setSlashSearchQuery('');
+        slashQueryRef.current = '';
 
-        if (hasUserInputVariables(action.text)) {
-            await stageActionInInput({
-                actionId: action.id,
-                text: action.text,
-                targetType: groupTargetType,
-                pretext: pre,
-            });
-            setTimeout(() => focusInput ? focusInput() : inputRef.current?.focus(), 0);
-            return;
-        }
-
-        if (isPending) {
-            const { text: resolvedText, items, emptyItemVariables } = await resolvePromptVariables(fullPromptText, groupTargetType);
-            if (emptyItemVariables.length > 0) {
-                addPopupMessage({ type: 'warning', title: 'Action skipped', text: EMPTY_VARIABLE_HINTS[emptyItemVariables[0]] ?? 'No items found for this prompt.', expire: true, duration: 4000 });
-                setTimeout(() => focusInput ? focusInput() : inputRef.current?.focus(), 0);
-                return;
-            }
-            setMessageContent(resolvedText);
-            if (items.length > 0) {
-                setCurrentMessageItems(prev => {
-                    const existingKeys = new Set(prev.map(item => `${item.libraryID}-${item.key}`));
-                    const newItems = items.filter(item => !existingKeys.has(`${item.libraryID}-${item.key}`));
-                    return newItems.length > 0 ? [...prev, ...newItems] : prev;
-                });
-            }
-            markActionUsed(action.id);
-        } else {
-            setMessageContent('');
-            markActionUsed(action.id);
-            sendResolvedAction({ text: fullPromptText, targetType: groupTargetType });
-        }
+        insertSlashCommand?.(
+            { commandName: toSlashToken(action.title), actionId: action.id, targetType: groupTargetType },
+            queryLength,
+        );
+        markActionUsed(action.id);
         setTimeout(() => focusInput ? focusInput() : inputRef.current?.focus(), 0);
-    }, [focusInput, inputRef, isPending, sendResolvedAction, stageActionInInput, markActionUsed]);
+    }, [focusInput, inputRef, insertSlashCommand, markActionUsed]);
 
     const handleSlashDismiss = useCallback(() => {
         setIsSlashMenuOpen(false);
@@ -208,9 +187,12 @@ export function useSlashMenu(
         if (isSlashMenuOpen) {
             const prefix = preSlashTextRef.current + '/';
             if (value.startsWith(prefix)) {
-                setSlashSearchQuery(value.slice(prefix.length));
+                const query = value.slice(prefix.length);
+                slashQueryRef.current = query;
+                setSlashSearchQuery(query);
                 setMessageContent(value);
             } else {
+                slashQueryRef.current = '';
                 setIsSlashMenuOpen(false);
                 setSlashSearchQuery('');
                 setMessageContent(value);
@@ -226,6 +208,7 @@ export function useSlashMenu(
             const charBefore = value.length > 1 ? value[value.length - 2] : null;
             if (charBefore === null || charBefore === ' ' || charBefore === '\n') {
                 preSlashTextRef.current = value.slice(0, -1);
+                slashQueryRef.current = '';
                 const y = verticalPosition === 'above' ? rect.top - 5 : rect.bottom - 10;
                 setSlashMenuPosition({ x: rect.left, y });
                 setIsSlashMenuOpen(true);
