@@ -122,7 +122,7 @@ function focusBeaver(): void {
  */
 function showSystemNotification(event: WSDeferredApprovalRequest): void {
     try {
-        const alertsService = Components.classes["@mozilla.org/alerts-service;1"]
+        const alertsService = (Components.classes as any)["@mozilla.org/alerts-service;1"]
             .getService(Components.interfaces.nsIAlertsService);
 
         const { title, body } = describeApproval(event);
