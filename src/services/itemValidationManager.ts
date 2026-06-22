@@ -163,11 +163,10 @@ export function resultFromAttachmentInfo(
     if (info.status === 'readable' || info.status === 'processing') {
         return readableResult(base);
     }
-    const severity: ItemValidationSeverity =
-        info.status_code === 'pdf_needs_ocr'
-            ? 'info'
-            : 'error';
-    return unreadableResult(reasonFromAttachmentInfo(info), base, severity);
+    // Remaining unreadable codes (pdf_encrypted/invalid/parser_crash/analysis_error,
+    // epub_invalid, unsupported types, …) are genuine read failures; pdf_needs_ocr
+    // is fully resolved above, so this path always carries the default 'error' severity.
+    return unreadableResult(reasonFromAttachmentInfo(info), base);
 }
 
 /**
