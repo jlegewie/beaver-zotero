@@ -372,11 +372,43 @@ export async function handleTestBestEpubAttachmentHttpRequest(request: any) {
 }
 
 /**
+ * Build `ItemValidationOptions` from a dev-endpoint request body. The capability
+ * flags (`supports_vision`, `can_handle_ocr_locally`) and `searchable_library_ids`
+ * are normally supplied by the running app; exposing them lets tests drive the
+ * capability-dependent gating (images, OCR, excluded libraries) directly.
+ */
+function validationOptionsFromRequest(request: any): {
+    supportsVision?: boolean;
+    canHandleOCRLocally?: boolean;
+    searchableLibraryIds?: number[];
+} {
+    const options: {
+        supportsVision?: boolean;
+        canHandleOCRLocally?: boolean;
+        searchableLibraryIds?: number[];
+    } = {};
+    if (typeof request?.supports_vision === 'boolean') {
+        options.supportsVision = request.supports_vision;
+    }
+    if (typeof request?.can_handle_ocr_locally === 'boolean') {
+        options.canHandleOCRLocally = request.can_handle_ocr_locally;
+    }
+    if (Array.isArray(request?.searchable_library_ids)) {
+        options.searchableLibraryIds = request.searchable_library_ids
+            .map((id: any) => Number(id))
+            .filter((id: number) => Number.isFinite(id));
+    }
+    return options;
+}
+
+/**
  * Dev-only: run `itemValidationManager.validateItem` for an item.
  *
  * Exposes the production validation pipeline so
  * tests can assert which attachment kinds Beaver admits as sources — including
- * the document-cache-backed EPUB checks — without driving the UI.
+ * the document-cache-backed EPUB checks — without driving the UI. Optional
+ * `supports_vision`, `can_handle_ocr_locally`, and `searchable_library_ids`
+ * fields drive the capability-dependent gating.
  */
 export async function handleTestValidateItemHttpRequest(request: any) {
     const { library_id, zotero_key } = request || {};
@@ -391,7 +423,7 @@ export async function handleTestValidateItemHttpRequest(request: any) {
         '../../../src/services/itemValidationManager'
     );
 
-    const result = await itemValidationManager.validateItem(item);
+    const result = await itemValidationManager.validateItem(item, validationOptionsFromRequest(request));
     return {
         ok: true,
         state: result.state,
@@ -404,17 +436,64 @@ export async function handleTestValidateItemHttpRequest(request: any) {
 }
 
 /**
+ * Dev-only: run `itemValidationManager.validateRegularItem` for a regular item.
+ *
+ * Exposes the batch validation pipeline (best-attachment ranking +
+ * per-attachment `AttachmentInfo`) so tests can assert which child attachment
+ * Beaver promotes as primary and how each child validates, without driving the UI.
+ */
+export async function handleTestValidateRegularItemHttpRequest(request: any) {
+    const { library_id, zotero_key } = request || {};
+    if (library_id == null || zotero_key == null) {
+        return { ok: false, error: 'Provide library_id + zotero_key' };
+    }
+    const item = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);
+    if (!item) return { ok: false, error: 'not_found' };
+    await item.loadAllData();
+    if (!item.isRegularItem()) {
+        return { ok: false, error: 'not_a_regular_item' };
+    }
+
+    const { itemValidationManager } = await import(
+        '../../../src/services/itemValidationManager'
+    );
+
+    const result = await itemValidationManager.validateRegularItem(item, validationOptionsFromRequest(request));
+    const attachments = Array.from(result.attachmentResults.entries()).map(([attachmentId, r]) => ({
+        attachment_id: attachmentId,
+        state: r.state,
+        severity: r.severity ?? null,
+        reason: r.reason ?? null,
+        status_code: r.statusCode ?? null,
+        content_kind: r.contentKind ?? null,
+        page_count: r.pageCount ?? null,
+        is_primary: r.attachmentInfo?.is_primary ?? false,
+        filename: r.attachmentInfo?.filename ?? null,
+    }));
+    return {
+        ok: true,
+        state: result.state,
+        severity: result.severity ?? null,
+        reason: result.reason ?? null,
+        attachments,
+    };
+}
+
+/**
  * Dev-only: attach an external file from a local path (registry + managed
  * copy), mirroring the drag-and-drop / file-picker attach flow so live tests
  * can exercise the external-file read path end to end.
  */
 export async function handleTestExternalFileAttachHttpRequest(request: any) {
-    const { path } = request;
+    const { path, supports_vision, can_handle_ocr_locally } = request;
     if (!path || typeof path !== 'string') {
         return { ok: false, error: 'Provide a local file path' };
     }
     const { attachExternalFile } = await import('../../../src/services/externalFiles');
-    const result = await attachExternalFile(path);
+    const options: { supportsVision?: boolean; canHandleOCRLocally?: boolean } = {};
+    if (typeof supports_vision === 'boolean') options.supportsVision = supports_vision;
+    if (typeof can_handle_ocr_locally === 'boolean') options.canHandleOCRLocally = can_handle_ocr_locally;
+    const result = await attachExternalFile(path, options);
     if (result.status !== 'attached') {
         return { ok: false, reason: result.reason, error: result.message };
     }

@@ -196,9 +196,14 @@ export function fetchExternalFileDocument(
 /** POST `/beaver/test/external-file-attach` — dev-only registry seeding. */
 export function attachExternalFileForTest(
     path: string,
+    capabilities?: { supportsVision?: boolean; canHandleOCRLocally?: boolean },
     opts?: RequestOptions,
 ): Promise<{ ok: boolean; record?: { extKey: string; storedPath: string; contentKind: string; filename: string }; reason?: string; error?: string }> {
-    return post('/beaver/test/external-file-attach', { path }, opts);
+    return post('/beaver/test/external-file-attach', {
+        path,
+        supports_vision: capabilities?.supportsVision,
+        can_handle_ocr_locally: capabilities?.canHandleOCRLocally,
+    }, opts);
 }
 
 /** POST `/beaver/test/external-file-delete` — dev-only registry teardown. */

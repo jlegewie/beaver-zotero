@@ -67,6 +67,7 @@ import {
     handleTestResolveReadableHttpRequest,
     handleTestBestEpubAttachmentHttpRequest,
     handleTestValidateItemHttpRequest,
+    handleTestValidateRegularItemHttpRequest,
     handleTestExternalFileAttachHttpRequest,
     handleTestExternalFileDeleteHttpRequest,
     handleTestExternalFileViewImagesHttpRequest,
@@ -199,6 +200,7 @@ const ENDPOINT_PATHS = [
     '/beaver/test/resolve-readable',
     '/beaver/test/best-epub-attachment',
     '/beaver/test/validate-item',
+    '/beaver/test/validate-regular-item',
     '/beaver/test/external-file-attach',
     '/beaver/test/external-file-delete',
     '/beaver/test/external-file-view-images',
@@ -839,6 +841,8 @@ function registerEndpoints(): boolean {
             createEndpoint(handleTestBestEpubAttachmentHttpRequest);
         Zotero.Server.Endpoints['/beaver/test/validate-item'] =
             createEndpoint(handleTestValidateItemHttpRequest);
+        Zotero.Server.Endpoints['/beaver/test/validate-regular-item'] =
+            createEndpoint(handleTestValidateRegularItemHttpRequest);
 
         // External-file attach/delete/view-images (dev-only; seeds the registry for live tests)
         Zotero.Server.Endpoints['/beaver/test/external-file-attach'] =

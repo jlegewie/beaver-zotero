@@ -521,20 +521,73 @@ export interface ValidateItemResponse {
     error?: string;
 }
 
+export interface ValidateItemOptions {
+    /** Whether the active model can read images (gates image attachments). */
+    supportsVision?: boolean;
+    /** Whether OCR can run locally (admits scanned/no-text PDFs). */
+    canHandleOCRLocally?: boolean;
+    /** Restrict the searchable libraries (excluded libraries are blocked). */
+    searchableLibraryIds?: number[];
+    timeout?: number;
+}
+
 /**
  * `/beaver/test/validate-item` — run `itemValidationManager.validateItem`
- * against a live item.
+ * against a live item. Capability flags drive the option-dependent gating
+ * (images, OCR, excluded libraries); omit them for the no-capability baseline.
  */
 export async function validateItem(
     libraryId: number,
     key: string,
-    options?: {
-        timeout?: number;
-    },
+    options?: ValidateItemOptions,
 ): Promise<ValidateItemResponse> {
     return post('/beaver/test/validate-item', {
         library_id: libraryId,
         zotero_key: key,
+        supports_vision: options?.supportsVision,
+        can_handle_ocr_locally: options?.canHandleOCRLocally,
+        searchable_library_ids: options?.searchableLibraryIds,
+    }, { timeout: options?.timeout ?? 60_000 });
+}
+
+export interface ValidateRegularItemAttachment {
+    attachment_id: string;
+    state: 'readable' | 'unreadable' | 'blocked';
+    severity?: 'info' | 'error' | null;
+    reason?: string | null;
+    status_code?: string | null;
+    content_kind?: string | null;
+    page_count?: number | null;
+    is_primary: boolean;
+    filename?: string | null;
+}
+
+export interface ValidateRegularItemResponse {
+    ok: boolean;
+    state?: 'readable' | 'unreadable' | 'blocked';
+    severity?: 'info' | 'error' | null;
+    reason?: string | null;
+    attachments?: ValidateRegularItemAttachment[];
+    error?: string;
+}
+
+/**
+ * `/beaver/test/validate-regular-item` — run
+ * `itemValidationManager.validateRegularItem` against a live regular item,
+ * surfacing the top-level state plus each child attachment's validation
+ * (including which child was promoted as primary).
+ */
+export async function validateRegularItem(
+    libraryId: number,
+    key: string,
+    options?: ValidateItemOptions,
+): Promise<ValidateRegularItemResponse> {
+    return post('/beaver/test/validate-regular-item', {
+        library_id: libraryId,
+        zotero_key: key,
+        supports_vision: options?.supportsVision,
+        can_handle_ocr_locally: options?.canHandleOCRLocally,
+        searchable_library_ids: options?.searchableLibraryIds,
     }, { timeout: options?.timeout ?? 60_000 });
 }
 

@@ -39,6 +39,12 @@ const MINIMAL_PNG = Buffer.from(
 );
 
 const FIXTURE_PDF = resolve(__dirname, '../fixtures/pdfs/extract-public/legewie-fagan__p0/source.pdf');
+// Image-only (no text layer) raster PDF — the `legewie-fagan-scanned` fixture.
+// Used to exercise the OCR-compatibility rejection at attach time.
+const FIXTURE_SCANNED_PDF = resolve(
+    __dirname,
+    '../fixtures/pdfs/extract-public/_shared/56f5ca419d881c56b3b8715779a9c4b1f7bd4f9b085dd20c6b8d0f1f27657a0f.pdf',
+);
 const FIXTURE_EPUB = resolve(__dirname, '../fixtures/epubs/image-only.epub');
 const EXTRACT_OPTS = { timeout: 90_000 } as const;
 
@@ -182,4 +188,40 @@ describe('external files (live)', () => {
         // The fixture is image-only, so the extractor returns no_text_layer — that is correct behavior.
         expect(['no_text_layer', null]).toContain(response.error_code ?? null);
     }, 120_000);
+});
+
+describe('external-file capability gating (live)', () => {
+    beforeEach((ctx) => {
+        skipIfNoZotero(ctx, available);
+    });
+
+    it('rejects an image when the model lacks vision support', async () => {
+        const pngPath = join(tmpDir, 'no-vision.png');
+        writeFileSync(pngPath, MINIMAL_PNG);
+        const response = await attachExternalFileForTest(pngPath, { supportsVision: false });
+        expect(response.ok).toBe(false);
+        expect(response.reason).toBe('requires_vision');
+    }, 30_000);
+
+    it('attaches an image when the model supports vision', async () => {
+        const pngPath = join(tmpDir, 'with-vision.png');
+        writeFileSync(pngPath, MINIMAL_PNG);
+        const response = await attachExternalFileForTest(pngPath, { supportsVision: true });
+        expect(response.ok).toBe(true);
+        expect(response.record?.contentKind).toBe('image');
+        if (response.record) attachedKeys.push(response.record.extKey);
+    }, 30_000);
+
+    it('rejects a scanned PDF when OCR cannot run locally', async () => {
+        const response = await attachExternalFileForTest(FIXTURE_SCANNED_PDF, { canHandleOCRLocally: false });
+        expect(response.ok).toBe(false);
+        expect(response.reason).toBe('requires_ocr');
+    }, 60_000);
+
+    it('attaches a text-layer PDF even when OCR cannot run locally', async () => {
+        const response = await attachExternalFileForTest(FIXTURE_PDF, { canHandleOCRLocally: false });
+        expect(response.ok).toBe(true);
+        expect(response.record?.contentKind).toBe('pdf');
+        if (response.record) attachedKeys.push(response.record.extKey);
+    }, 60_000);
 });
