@@ -20,6 +20,23 @@ import { buildMessageItemChipPopup } from './MessageItemChipPopup';
 
 const MAX_ITEM_TEXT_LENGTH = 30;
 
+async function ensureAnnotationImageCache(item: Zotero.Item): Promise<string | null> {
+    const annotationItem = { libraryID: item.libraryID, key: item.key };
+    if (await Zotero.Annotations.hasCacheImage(annotationItem)) {
+        return Zotero.File.pathToFileURI(Zotero.Annotations.getCacheImagePath(annotationItem));
+    }
+
+    const parentID = item.parentID ?? item.parentItemID;
+    if (!parentID) return null;
+
+    await Zotero.PDFWorker.renderAttachmentAnnotations(parentID);
+    if (!(await Zotero.Annotations.hasCacheImage(annotationItem))) {
+        return null;
+    }
+
+    return Zotero.File.pathToFileURI(Zotero.Annotations.getCacheImagePath(annotationItem));
+}
+
 const AnnotationImagePopupPreview = ({ item }: { item: Zotero.Item }) => {
     const [imageUri, setImageUri] = React.useState<string | null>(null);
     const [imageError, setImageError] = React.useState(false);
@@ -31,17 +48,15 @@ const AnnotationImagePopupPreview = ({ item }: { item: Zotero.Item }) => {
 
         const loadImage = async () => {
             try {
-                const annotationItem = { libraryID: item.libraryID, key: item.key };
-                const hasCache = await Zotero.Annotations.hasCacheImage(annotationItem);
+                const uri = await ensureAnnotationImageCache(item);
                 if (!isMounted) return;
 
-                if (!hasCache) {
+                if (!uri) {
                     setImageError(true);
                     return;
                 }
 
-                const path = Zotero.Annotations.getCacheImagePath(annotationItem);
-                setImageUri(Zotero.File.pathToFileURI(path));
+                setImageUri(uri);
             } catch (error) {
                 console.error('Failed to load annotation image preview:', error);
                 if (isMounted) setImageError(true);
