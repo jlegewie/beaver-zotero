@@ -162,6 +162,13 @@ function showNotification(title: string, body: string, name: string): void {
             observe(_subject: unknown, topic: string) {
                 if (topic === "alertclickcallback") {
                     focusBeaver();
+                    // Dismiss the notification so it does not linger (e.g. in the
+                    // macOS Notification Center) after the user has acted on it.
+                    try {
+                        alertsService.closeAlert(name);
+                    } catch {
+                        // Best-effort: the OS usually clears the clicked alert itself.
+                    }
                 }
             },
         };
