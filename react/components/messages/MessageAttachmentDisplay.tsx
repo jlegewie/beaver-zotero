@@ -24,6 +24,7 @@ const MessageAttachmentDisplay = ({
     menuPosition,
     setMenuPosition,
     inputRef,
+    focusInput,
     disabled = false,
     verticalPosition = 'above',
 }: {
@@ -32,6 +33,7 @@ const MessageAttachmentDisplay = ({
     menuPosition: { x: number; y: number };
     setMenuPosition: (menuPosition: { x: number; y: number }) => void;
     inputRef: React.RefObject<HTMLElement | null>;
+    focusInput?: () => void;
     disabled?: boolean;
     verticalPosition?: 'above' | 'below';
 }) => {
@@ -117,7 +119,7 @@ const MessageAttachmentDisplay = ({
                     currentMessageExternalFiles.length == 0
                 }
                 onClose={() => {
-                    inputRef.current?.focus();
+                    focusInput?.();
                     setIsAddAttachmentMenuOpen(false);
                 }}
                 isMenuOpen={isAddAttachmentMenuOpen}

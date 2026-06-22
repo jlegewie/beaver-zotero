@@ -459,10 +459,7 @@
     width: 100%;
 }
 
-/* Scroll host around the contenteditable. Carries the height cap + scrolling
-   AND gives Lexical's typeahead a non-null getScrollParent result (the XUL
-   window has no document.body to fall back to). Must stay a separate element
-   from .beaver-lexical-root so it never clips the mention/command popup. */
+/* Scroll host around the contenteditable. Carries the height cap + scrolling. */
 [id^="beaver-pane-"] .beaver-lexical-scroll {
     position: relative;
     max-height: 12.5em;

@@ -2,11 +2,12 @@ import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { StopIcon, GlobalSearchIcon } from '../icons/icons';
 import { useAtom, useSetAtom, useAtomValue } from 'jotai';
 import { newThreadAtom, currentThreadIdAtom } from '../../atoms/threads';
-import { currentMessageContentAtom, currentMessageItemsAtom, pendingActionInputFocusAtom } from '../../atoms/messageComposition';
+import { currentMessageContentAtom, pendingActionInputFocusAtom } from '../../atoms/messageComposition';
+import { findNextUserInputVariable } from '../../utils/userInputVariables';
 import { sendWSMessageAtom, isWSChatPendingAtom, closeWSConnectionAtom, sendApprovalResponseAtom } from '../../atoms/agentRunAtoms';
 import { pendingApprovalsAtom, removePendingApprovalAtom } from '../../agents/agentActions';
 import Button from '../ui/Button';
-import { MenuPosition } from '../ui/menus/SearchMenu';
+import SearchMenu, { MenuPosition } from '../ui/menus/SearchMenu';
 import ModelSelectionButton from '../ui/buttons/ModelSelectionButton';
 import MessageAttachmentDisplay from '../messages/MessageAttachmentDisplay';
 import { logger } from '../../../src/utils/logger';
@@ -27,6 +28,7 @@ import { dismissHighTokenWarningForThreadAtom, dismissedHighTokenWarningByThread
 import { getLastRequestInputTokens } from '../../utils/runUsage';
 import { getPref, setPref } from '../../../src/utils/prefs';
 import { LexicalEditorInput, LexicalEditorInputHandle } from './lexical/LexicalEditorInput';
+import { useSlashMenu } from '../../hooks/useSlashMenu';
 
 const HIGH_INPUT_TOKEN_WARNING_THRESHOLD = 100_000;
 
@@ -48,7 +50,6 @@ const InputArea: React.FC<InputAreaProps> = ({
     hideAttachmentMenu = false,
 }) => {
     const [messageContent, setMessageContent] = useAtom(currentMessageContentAtom);
-    const [currentMessageItems, setCurrentMessageItems] = useAtom(currentMessageItemsAtom);
     const selectedModel = useAtomValue(selectedModelAtom);
     const isUsingBeaverCredits = useAtomValue(isUsingBeaverCreditsAtom);
     const newThread = useSetAtom(newThreadAtom);
@@ -71,6 +72,9 @@ const InputArea: React.FC<InputAreaProps> = ({
 
     // Imperative handle exposed by the Lexical editor (focus / clear).
     const editorHandleRef = useRef<LexicalEditorInputHandle | null>(null);
+    const focusEditor = useCallback(() => {
+        editorHandleRef.current?.focus();
+    }, []);
 
     // WebSocket state
     const sendWSMessage = useSetAtom(sendWSMessageAtom);
@@ -147,18 +151,24 @@ const InputArea: React.FC<InputAreaProps> = ({
     const canRenderHighTokenWarningBar = showHighTokenWarningBar && lastRequestInputTokens !== null;
     const showSoftCapWarningBar = shouldShowSoftCapWarning && !firstRunPanelVisible && !canRenderHighTokenWarningBar;
 
-    // Slash handling now lives inside the Lexical editor (SlashCommandsPlugin),
-    // as do `@` mentions (MentionsPlugin). The legacy textarea slash-menu hook
-    // and `[[name]]` variable-tab handling are therefore no longer wired here.
-    // Keep slash-menu state inert so the existing call sites stay valid.
-    const isSlashMenuOpen = false;
+    const {
+        isSlashMenuOpen,
+        slashMenuPosition,
+        slashSearchQuery,
+        setSlashSearchQuery,
+        slashMenuItems,
+        handleSlashDismiss,
+        handleSlashMenuChange,
+        handleSlashTrigger,
+        handleSlashMenuKeyDown,
+    } = useSlashMenu(inputRef, verticalPosition, focusEditor);
 
     useEffect(() => {
         if (isPending && getPref('focusResponseForScreenReaders')) {
             return;
         }
         // Focus on mount via the Lexical handle.
-        editorHandleRef.current?.focus();
+        focusEditor();
     }, []);
 
     // When an action with `[[name]]` placeholders is staged, focus the editor so
@@ -167,11 +177,76 @@ const InputArea: React.FC<InputAreaProps> = ({
     useEffect(() => {
         if (pendingActionFocus === 0) return;
         const timer = setTimeout(() => {
-            editorHandleRef.current?.focus();
+            focusEditor();
+            const first = findNextUserInputVariable(messageContent, 0);
+            if (first) {
+                editorHandleRef.current?.selectRange(first.start, first.end);
+            } else {
+                editorHandleRef.current?.selectRange(messageContent.length, messageContent.length);
+            }
         }, 0);
         return () => clearTimeout(timer);
-    }, [pendingActionFocus]);
+    }, [focusEditor, messageContent, pendingActionFocus]);
 
+    const handleEditorChange = useCallback((value: string) => {
+        if (handleSlashMenuChange(value)) return;
+
+        const inputEl = inputRef.current;
+        if (
+            inputEl &&
+            !isAddAttachmentMenuOpen &&
+            handleSlashTrigger(value, inputEl.getBoundingClientRect())
+        ) {
+            return;
+        }
+
+        if (value.endsWith('@') && !isAwaitingApproval && !hideAttachmentMenu) {
+            const nextValue = value.slice(0, -1);
+            if (inputEl) {
+                const rect = inputEl.getBoundingClientRect();
+                const y = verticalPosition === 'above' ? rect.top - 5 : rect.bottom - 10;
+                setMenuPosition({
+                    x: rect.left,
+                    y,
+                });
+            }
+            setIsAddAttachmentMenuOpen(true);
+            setMessageContent(nextValue);
+            editorHandleRef.current?.setText(nextValue, nextValue.length);
+            return;
+        }
+
+        setMessageContent(value);
+    }, [
+        handleSlashMenuChange,
+        handleSlashTrigger,
+        hideAttachmentMenu,
+        inputRef,
+        isAddAttachmentMenuOpen,
+        isAwaitingApproval,
+        setMessageContent,
+        verticalPosition,
+    ]);
+
+    /** Tab selects the next `[[name]]` after the cursor, or falls through. */
+    const handleVariableTab = useCallback((e: React.KeyboardEvent<HTMLElement>): boolean => {
+        if (e.key !== 'Tab' || e.shiftKey) return false;
+        const cursor = editorHandleRef.current?.getSelectionOffset();
+        const next = findNextUserInputVariable(messageContent, cursor ?? 0);
+        if (!next) return false;
+        e.preventDefault();
+        editorHandleRef.current?.selectRange(next.start, next.end);
+        return true;
+    }, [messageContent]);
+
+    const handleEditorKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+        if (handleSlashMenuKeyDown(e)) return;
+        if (handleVariableTab(e)) return;
+        if ((e.key === 'n' || e.key === 'N') && ((Zotero.isMac && e.metaKey) || (!Zotero.isMac && e.ctrlKey))) {
+            e.preventDefault();
+            newThread();
+        }
+    }, [handleSlashMenuKeyDown, handleVariableTab, newThread]);
 
     const handleSubmit = async (
         e: React.FormEvent<HTMLFormElement> | React.MouseEvent<HTMLButtonElement>
@@ -221,11 +296,13 @@ const InputArea: React.FC<InputAreaProps> = ({
 
     const handleContainerClick = (e: React.MouseEvent<HTMLDivElement>) => {
         // Check if the click target is a button or within a button
-        const isButtonClick = (e.target as Element).closest('button') !== null;
+        const target = e.target as Element;
+        const isButtonClick = target.closest('button') !== null;
+        const isEditorClick = target.closest('.beaver-lexical-content') !== null;
 
         // Only focus if not clicking a button and editing is enabled
-        if (!isButtonClick) {
-            editorHandleRef.current?.focus();
+        if (!isButtonClick && !isEditorClick) {
+            focusEditor();
         }
     };
 
@@ -345,10 +422,28 @@ const InputArea: React.FC<InputAreaProps> = ({
                     menuPosition={menuPosition}
                     setMenuPosition={setMenuPosition}
                     inputRef={inputRef}
+                    focusInput={focusEditor}
                     disabled={isAwaitingApproval}
                     verticalPosition={verticalPosition}
                 />
             )}
+
+            <SearchMenu
+                menuItems={slashMenuItems}
+                isOpen={isSlashMenuOpen}
+                onClose={handleSlashDismiss}
+                position={slashMenuPosition}
+                verticalPosition={verticalPosition}
+                useFixedPosition={true}
+                width="250px"
+                searchQuery={slashSearchQuery}
+                setSearchQuery={setSlashSearchQuery}
+                onSearch={() => {}}
+                noResultsText="No actions found"
+                placeholder="Search actions..."
+                closeOnSelect={false}
+                showSearchInput={false}
+            />
 
             {/* Input Form */}
             <form onSubmit={handleSubmit} className="display-flex flex-col">
@@ -357,11 +452,12 @@ const InputArea: React.FC<InputAreaProps> = ({
                     <LexicalEditorInput
                         ref={editorHandleRef}
                         value={messageContent}
-                        onChange={setMessageContent}
+                        onChange={handleEditorChange}
                         onSubmit={handleEditorSubmit}
                         placeholder={getPlaceholderText()}
                         ariaLabel="Message Beaver"
                         disabled={isAwaitingApproval}
+                        onKeyDown={handleEditorKeyDown}
                         onContentEditableRef={(el) => {
                             // Forward the Lexical content-editable element to the
                             // parent's inputRef so legacy `.focus()` callers work.
@@ -373,7 +469,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                 {/* Button Row */}
                 <div className="display-flex flex-row items-center pt-2">
                     {!hideModelSelector && (
-                        <ModelSelectionButton inputRef={inputRef} disabled={isAwaitingApproval} />
+                        <ModelSelectionButton inputRef={inputRef} focusInput={focusEditor} disabled={isAwaitingApproval} />
                     )}
                     <div className="flex-1" />
                     <div className="display-flex flex-row items-center gap-4">

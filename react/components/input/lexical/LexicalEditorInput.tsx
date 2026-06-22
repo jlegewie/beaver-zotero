@@ -4,7 +4,6 @@ import React, {
     useEffect,
     useImperativeHandle,
     useRef,
-    useState,
 } from 'react';
 import { LexicalComposer } from '@lexical/react/LexicalComposer';
 import { PlainTextPlugin } from '@lexical/react/LexicalPlainTextPlugin';
@@ -21,16 +20,14 @@ import {
     $isRangeSelection,
     COMMAND_PRIORITY_HIGH,
     KEY_ENTER_COMMAND,
-    LexicalEditor,
 } from 'lexical';
-import { MentionNode } from './MentionNode';
-import { SlashCommandNode } from './SlashCommandNode';
-import { MentionsPlugin } from './MentionsPlugin';
-import { SlashCommandsPlugin } from './SlashCommandsPlugin';
 
 export type LexicalEditorInputHandle = {
     focus: () => void;
     clear: () => void;
+    setText: (text: string, caretOffset?: number) => void;
+    selectRange: (start: number, end: number) => void;
+    getSelectionOffset: () => number | null;
 };
 
 export interface LexicalEditorInputProps {
@@ -40,6 +37,7 @@ export interface LexicalEditorInputProps {
     placeholder?: string;
     ariaLabel?: string;
     disabled?: boolean;
+    onKeyDown?: React.KeyboardEventHandler<HTMLDivElement>;
     /**
      * Callback fired with the contenteditable root element when it mounts /
      * unmounts. Useful for parents that keep an HTMLElement ref around (e.g.
@@ -50,34 +48,72 @@ export interface LexicalEditorInputProps {
 
 // Exposes a textarea-like focus()/clear() API to the parent via ref so the
 // surrounding InputArea can keep its existing imperative usage.
-const EditorApi = forwardRef<LexicalEditorInputHandle, { contentEditableRef: React.RefObject<HTMLElement | null> }>(
-    function EditorApi({ contentEditableRef }, ref) {
+const EditorApi = forwardRef<LexicalEditorInputHandle>(
+    function EditorApi(_props, ref) {
         const [editor] = useLexicalComposerContext();
+        const setPlainText = useCallback((text: string, selectionStart = text.length, selectionEnd = selectionStart) => {
+            editor.update(() => {
+                const root = $getRoot();
+                root.clear();
+                const p = $createParagraphNode();
+                const textNode = $createTextNode(text);
+                if (text.length > 0) {
+                    p.append(textNode);
+                }
+                root.append(p);
+                const safeStart = Math.max(0, Math.min(selectionStart, text.length));
+                const safeEnd = Math.max(0, Math.min(selectionEnd, text.length));
+                if (text.length > 0) {
+                    textNode.select(safeStart, safeEnd);
+                } else {
+                    p.select();
+                }
+            });
+        }, [editor]);
+
         useImperativeHandle(
             ref,
             () => ({
                 focus: () => {
-                    // Prefer the editor's focus() to restore selection state;
-                    // fall back to DOM focus if the editor hasn't mounted yet.
                     editor.focus(
                         () => {
                             /* noop */
                         },
                         { defaultSelection: 'rootEnd' },
                     );
-                    contentEditableRef.current?.focus();
                 },
                 clear: () => {
-                    editor.update(() => {
-                        const root = $getRoot();
-                        root.clear();
-                        const p = $createParagraphNode();
-                        root.append(p);
-                        p.select();
+                    setPlainText('', 0);
+                },
+                setText: (text, caretOffset = text.length) => {
+                    setPlainText(text, caretOffset);
+                },
+                selectRange: (start, end) => {
+                    let text = '';
+                    editor.getEditorState().read(() => {
+                        text = $getRoot().getTextContent();
                     });
+                    setPlainText(text, start, end);
+                },
+                getSelectionOffset: () => {
+                    let offset: number | null = null;
+                    editor.getEditorState().read(() => {
+                        const selection = $getSelection();
+                        if (!$isRangeSelection(selection)) return;
+                        const anchorNode = selection.anchor.getNode();
+                        let runningOffset = 0;
+                        for (const textNode of $getRoot().getAllTextNodes()) {
+                            if (textNode.getKey() === anchorNode.getKey()) {
+                                offset = runningOffset + selection.anchor.offset;
+                                return;
+                            }
+                            runningOffset += textNode.getTextContentSize();
+                        }
+                    });
+                    return offset;
                 },
             }),
-            [editor, contentEditableRef],
+            [editor, setPlainText],
         );
         return null;
     },
@@ -111,12 +147,13 @@ const PlainTextSync: React.FC<{
     }, [editor, value]);
 
     const handleChange = useCallback(() => {
+        let text = '';
         editor.getEditorState().read(() => {
-            const text = $getRoot().getTextContent();
-            if (text === lastEmitted.current) return;
-            lastEmitted.current = text;
-            onChange(text);
+            text = $getRoot().getTextContent();
         });
+        if (text === lastEmitted.current) return;
+        lastEmitted.current = text;
+        onChange(text);
     }, [editor, onChange]);
 
     return <OnChangePlugin onChange={handleChange} ignoreSelectionChange />;
@@ -144,13 +181,52 @@ const SubmitOnEnterPlugin: React.FC<{ onSubmit: () => void }> = ({ onSubmit }) =
     return null;
 };
 
-// Disables Lexical's default rich formatting shortcuts (bold/italic/underline
-// etc) so the editor behaves like a plain textarea - but keeps decorator and
-// text-entity nodes, which is what makes rich pills possible.
+/**
+ * Raw DOM focus on a contenteditable can leave Firefox/Zotero with a collapsed
+ * selection outside Lexical's root. Programmatic focus callers should land at
+ * the end of the message; pointer focus is left alone so user clicks can place
+ * the caret exactly where they clicked.
+ */
+const ProgrammaticFocusPlugin: React.FC = () => {
+    const [editor] = useLexicalComposerContext();
+    const pointerFocusRef = useRef(false);
+
+    useEffect(() => {
+        const rootElement = editor.getRootElement();
+        if (!rootElement) return;
+        const win = rootElement.ownerDocument.defaultView;
+
+        const handlePointerDown = () => {
+            pointerFocusRef.current = true;
+            win?.setTimeout(() => {
+                pointerFocusRef.current = false;
+            }, 0);
+        };
+
+        const handleFocus = () => {
+            if (pointerFocusRef.current) return;
+            editor.update(() => {
+                $getRoot().selectEnd();
+            });
+        };
+
+        rootElement.addEventListener('pointerdown', handlePointerDown);
+        rootElement.addEventListener('focus', handleFocus);
+        return () => {
+            rootElement.removeEventListener('pointerdown', handlePointerDown);
+            rootElement.removeEventListener('focus', handleFocus);
+        };
+    }, [editor]);
+
+    return null;
+};
+
+// Keep the composer configured as a plain-text editor. Menu orchestration stays
+// in InputArea so the source and slash menus share the same behavior as the
+// rest of the app.
 const editorConfig = {
     namespace: 'beaver-input',
-    // Plain-text behavior with custom decorator/text nodes for pills.
-    nodes: [MentionNode, SlashCommandNode],
+    nodes: [],
     // Plain text editors still need a theme object; we leave it empty.
     theme: {},
     onError(error: Error) {
@@ -161,12 +237,9 @@ const editorConfig = {
 
 export const LexicalEditorInput = forwardRef<LexicalEditorInputHandle, LexicalEditorInputProps>(
     function LexicalEditorInput(
-        { value, onChange, onSubmit, placeholder, ariaLabel, disabled = false, onContentEditableRef },
+        { value, onChange, onSubmit, placeholder, ariaLabel, disabled = false, onKeyDown, onContentEditableRef },
         ref,
     ) {
-        // Portal anchor for typeahead menus. Positioned relative to the editor
-        // container so the menu follows the caret naturally.
-        const [anchorElement, setAnchorElement] = useState<HTMLElement | null>(null);
         const contentEditableRef = useRef<HTMLDivElement | null>(null);
 
         // The ContentEditable ref callback MUST keep a stable identity across
@@ -189,17 +262,8 @@ export const LexicalEditorInput = forwardRef<LexicalEditorInputHandle, LexicalEd
 
         return (
             <LexicalComposer initialConfig={{ ...editorConfig, editable: !disabled }}>
-                <div className="beaver-lexical-root" ref={setAnchorElement}>
-                    {/*
-                     * Scroll host. Zotero's main window is a XUL document whose
-                     * `document.body` is null, so Lexical's typeahead positioning
-                     * (getScrollParent -> document.body fallback) throws and
-                     * unmounts the editor when the @ / mention menu opens. Giving
-                     * the contenteditable an `overflow` ancestor makes
-                     * getScrollParent return this element instead of the null
-                     * body. It is NOT the menu's portal parent (that is
-                     * .beaver-lexical-root), so it never clips the popup.
-                     */}
+                <div className="beaver-lexical-root">
+                    {/* Scroll host carries the height cap and textarea-like scrolling. */}
                     <div className="beaver-lexical-scroll">
                         <PlainTextPlugin
                             contentEditable={
@@ -210,6 +274,7 @@ export const LexicalEditorInput = forwardRef<LexicalEditorInputHandle, LexicalEd
                                     aria-multiline="true"
                                     role="textbox"
                                     spellCheck={true}
+                                    onKeyDown={onKeyDown}
                                 />
                             }
                             placeholder={
@@ -226,9 +291,8 @@ export const LexicalEditorInput = forwardRef<LexicalEditorInputHandle, LexicalEd
                     <HistoryPlugin />
                     <PlainTextSync value={value} onChange={onChange} />
                     <SubmitOnEnterPlugin onSubmit={onSubmit} />
-                    <MentionsPlugin anchorElement={anchorElement} />
-                    <SlashCommandsPlugin anchorElement={anchorElement} />
-                    <EditorApi ref={ref} contentEditableRef={contentEditableRef} />
+                    <ProgrammaticFocusPlugin />
+                    <EditorApi ref={ref} />
                 </div>
             </LexicalComposer>
         );

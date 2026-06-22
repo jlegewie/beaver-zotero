@@ -13,7 +13,11 @@ import { openPreferencesWindow } from '../../src/ui/openPreferencesWindow';
 import { Action, ActionTargetType } from '../types/actions';
 import { MenuPosition, SearchMenuItem } from '../components/ui/menus/SearchMenu';
 
-export function useSlashMenu(inputRef: React.RefObject<HTMLTextAreaElement | null>, verticalPosition: 'above' | 'below' = 'above') {
+export function useSlashMenu(
+    inputRef: React.RefObject<HTMLElement | null>,
+    verticalPosition: 'above' | 'below' = 'above',
+    focusInput?: () => void,
+) {
     const [messageContent, setMessageContent] = useAtom(currentMessageContentAtom);
     const [, setCurrentMessageItems] = useAtom(currentMessageItemsAtom);
     const isPending = useAtomValue(isWSChatPendingAtom);
@@ -44,7 +48,7 @@ export function useSlashMenu(inputRef: React.RefObject<HTMLTextAreaElement | nul
                 targetType: groupTargetType,
                 pretext: pre,
             });
-            setTimeout(() => inputRef.current?.focus(), 0);
+            setTimeout(() => focusInput ? focusInput() : inputRef.current?.focus(), 0);
             return;
         }
 
@@ -52,7 +56,7 @@ export function useSlashMenu(inputRef: React.RefObject<HTMLTextAreaElement | nul
             const { text: resolvedText, items, emptyItemVariables } = await resolvePromptVariables(fullPromptText, groupTargetType);
             if (emptyItemVariables.length > 0) {
                 addPopupMessage({ type: 'warning', title: 'Action skipped', text: EMPTY_VARIABLE_HINTS[emptyItemVariables[0]] ?? 'No items found for this prompt.', expire: true, duration: 4000 });
-                setTimeout(() => inputRef.current?.focus(), 0);
+                setTimeout(() => focusInput ? focusInput() : inputRef.current?.focus(), 0);
                 return;
             }
             setMessageContent(resolvedText);
@@ -69,8 +73,8 @@ export function useSlashMenu(inputRef: React.RefObject<HTMLTextAreaElement | nul
             markActionUsed(action.id);
             sendResolvedAction({ text: fullPromptText, targetType: groupTargetType });
         }
-        setTimeout(() => inputRef.current?.focus(), 0);
-    }, [isPending, sendResolvedAction, stageActionInInput, markActionUsed]);
+        setTimeout(() => focusInput ? focusInput() : inputRef.current?.focus(), 0);
+    }, [focusInput, inputRef, isPending, sendResolvedAction, stageActionInInput, markActionUsed]);
 
     const handleSlashDismiss = useCallback(() => {
         setIsSlashMenuOpen(false);
@@ -234,7 +238,7 @@ export function useSlashMenu(inputRef: React.RefObject<HTMLTextAreaElement | nul
     }, [setMessageContent, verticalPosition]);
 
     /** Handle keydown when the slash menu is open. Returns true if the event was consumed. */
-    const handleSlashMenuKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>): boolean => {
+    const handleSlashMenuKeyDown = useCallback((e: React.KeyboardEvent<HTMLElement>): boolean => {
         if (!isSlashMenuOpen) return false;
         if (e.key === 'Enter' || e.key === 'ArrowDown' || e.key === 'ArrowUp') {
             e.preventDefault();
