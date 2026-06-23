@@ -32,6 +32,7 @@ function clearSafetyTimer(): void {
 function armSafetyTimer(): void {
     clearSafetyTimer();
     safetyTimer = setTimeout(() => {
+        logger(`syncPause: idle safety timer fired after ${SAFETY_IDLE_MS}ms, releasing`, 2);
         resumeSyncNow();
     }, SAFETY_IDLE_MS);
 }
@@ -52,6 +53,7 @@ export function pauseSyncForMutatingRun(): void {
         }
 
         resumeSync = runner.delayIndefinite();
+        logger('syncPause: paused Zotero sync for mutating run', 3);
     } catch (err) {
         logger('Zotero sync pause failed', { error: String(err) }, 1);
     }
@@ -63,10 +65,14 @@ export function scheduleResumeAfterRun(): void {
     releaseDebounceTimer = setTimeout(() => {
         resumeSyncNow();
     }, RELEASE_DEBOUNCE_MS);
+    logger(`syncPause: scheduled resume in ${RELEASE_DEBOUNCE_MS}ms`, 3);
 }
 
 /** Cancel a pending debounced resume when a run becomes active again. */
 export function cancelScheduledResume(): void {
+    if (releaseDebounceTimer !== null) {
+        logger('syncPause: cancelled scheduled resume (run active again)', 3);
+    }
     clearReleaseDebounce();
 }
 
@@ -83,6 +89,7 @@ export function resumeSyncNow(): void {
 
     try {
         resume();
+        logger('syncPause: resumed Zotero sync', 3);
     } catch (err) {
         logger('Zotero sync resume failed', { error: String(err) }, 1);
     }
