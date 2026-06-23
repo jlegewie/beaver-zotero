@@ -207,6 +207,19 @@ describe('DocumentCache payloads', () => {
         )).resolves.toEqual(structuredResult);
     });
 
+    it('serialized PDF probe does not accept pageCount substring matches', () => {
+        const bytes = new TextEncoder().encode(
+            JSON.stringify({
+                schemaVersion: '4',
+                mode: 'structured',
+                document: { pageCount: 15, pages: [] },
+            }),
+        );
+
+        expect((cache as any).isLikelySerializedPdfResult(bytes, 'structured', 1)).toBe(false);
+        expect((cache as any).isLikelySerializedPdfResult(bytes, 'structured', 15)).toBe(true);
+    });
+
     it('putResult then getEpubResult returns the cached EPUB document', async () => {
         const item = createCacheAttachment();
 

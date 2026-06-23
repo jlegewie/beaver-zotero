@@ -69,6 +69,36 @@ function serializedPdfResultToWireJson(jsonBytes: Uint8Array): string {
     return `{"content_kind":"pdf",${raw.slice(1)}`;
 }
 
+function buildPayloadTooLargeResponse(
+    payloadBytes: number,
+    limit: number,
+    totalPages: number | null,
+    contentKind: ExtractContentKind,
+    errorResponse: (
+        error: string,
+        error_code: ZoteroDocumentErrorCode,
+        total_pages?: number | null,
+        content_kind?: ExtractContentKind,
+    ) => WSZoteroDocumentResponse,
+): WSZoteroDocumentResponse {
+    const mb = (n: number) => (n / (1024 * 1024)).toFixed(1);
+    logger(
+        `handleZoteroDocumentRequest: payload too large ` +
+        `(${payloadBytes} bytes > ${limit} byte limit, content_kind=${contentKind})`,
+        1,
+    );
+    return errorResponse(
+        `This attachment is too large for Beaver to handle. ` +
+        `${mb(payloadBytes)}MB of extracted text` +
+        `${totalPages != null ? ` across ${totalPages} pages` : ''}, ` +
+        `limit ${mb(limit)}MB. Do not try again with extract, ` +
+        `find_in_attachments, read, or read_pages for this attachment.`,
+        'document_too_large',
+        totalPages,
+        contentKind,
+    );
+}
+
 /**
  * Reject success responses whose serialized payload would exceed the
  * WebSocket message budget (`request.max_payload_bytes`).
@@ -95,21 +125,12 @@ export function guardPayloadSize(
         return response;
     }
 
-    const mb = (n: number) => (n / (1024 * 1024)).toFixed(1);
-    logger(
-        `handleZoteroDocumentRequest: payload too large ` +
-        `(${payloadBytes} bytes > ${limit} byte limit, content_kind=${contentKind})`,
-        1,
-    );
-    return errorResponse(
-        `This attachment is too large for Beaver to handle. ` +
-        `${mb(payloadBytes)}MB of extracted text` +
-        `${totalPages != null ? ` across ${totalPages} pages` : ''}, ` +
-        `limit ${mb(limit)}MB. Do not try again with extract, ` +
-        `find_in_attachments, read, or read_pages for this attachment.`,
-        'document_too_large',
+    return buildPayloadTooLargeResponse(
+        payloadBytes,
+        limit,
         totalPages,
         contentKind,
+        errorResponse,
     );
 }
 
@@ -134,21 +155,12 @@ export function guardSerializedPayloadSize(
         return null;
     }
 
-    const mb = (n: number) => (n / (1024 * 1024)).toFixed(1);
-    logger(
-        `handleZoteroDocumentRequest: payload too large ` +
-        `(${payloadBytes} bytes > ${limit} byte limit, content_kind=${contentKind})`,
-        1,
-    );
-    return errorResponse(
-        `This attachment is too large for Beaver to handle. ` +
-        `${mb(payloadBytes)}MB of extracted text` +
-        `${totalPages != null ? ` across ${totalPages} pages` : ''}, ` +
-        `limit ${mb(limit)}MB. Do not try again with extract, ` +
-        `find_in_attachments, read, or read_pages for this attachment.`,
-        'document_too_large',
+    return buildPayloadTooLargeResponse(
+        payloadBytes,
+        limit,
         totalPages,
         contentKind,
+        errorResponse,
     );
 }
 

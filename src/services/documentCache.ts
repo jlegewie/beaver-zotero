@@ -1101,7 +1101,7 @@ export class DocumentCache {
         if (expectedSchema && !head.includes(`"schemaVersion":"${expectedSchema}"`)) {
             return false;
         }
-        if (pageCount != null && !head.includes(`"pageCount":${pageCount}`)) {
+        if (pageCount != null && !new RegExp(`"pageCount":${pageCount}(?=[,}])`).test(head)) {
             return false;
         }
         return true;
@@ -1181,36 +1181,13 @@ export class DocumentCache {
         payloadKind: PayloadKind,
         result: T,
     ): Promise<{ path: string; size: number; sha256: string }> {
-        const gzipStart = Date.now();
-        const bytes = await gzipJsonValueChunked(result);
-        const gzipMs = Date.now() - gzipStart;
-        if (gzipMs > 2000) {
-            logger(
-                `DocumentCache.writePayloadFile: gzip ${bytes.byteLength} bytes for `
-                + `${libraryId}-${zoteroKey} (${payloadKind}) took ${gzipMs}ms`,
-                2,
-            );
-        }
-        const sha256 = await this.sha256Hex(bytes);
-        const dir = this.libraryDir(libraryId);
-        await (IOUtils as any).makeDirectory(dir, { createAncestors: true }).catch(() => undefined);
-
-        const finalPath = PathUtils.join(dir, `${zoteroKey}.${payloadKind}.${sha256}.json.gz`);
-        const nonce = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-        const tempPath = PathUtils.join(dir, `${zoteroKey}.${payloadKind}.${sha256}.${nonce}.tmp`);
-
-        const exists = await IOUtils.exists(finalPath).catch(() => false);
-        if (exists && !(await this.payloadFileMatches(finalPath, bytes, sha256))) {
-            await IOUtils.remove(finalPath).catch(() => undefined);
-        }
-        const validExists = await IOUtils.exists(finalPath).catch(() => false);
-        if (!validExists) {
-            await IOUtils.write(tempPath, bytes);
-            await IOUtils.write(finalPath, bytes);
-            await IOUtils.remove(tempPath).catch(() => undefined);
-        }
-
-        return { path: finalPath, size: bytes.byteLength, sha256 };
+        return this.writePayloadFromGzip(
+            libraryId,
+            zoteroKey,
+            payloadKind,
+            () => gzipJsonValueChunked(result),
+            'writePayloadFile',
+        );
     }
 
     private async writePayloadBytesFile(
@@ -1219,12 +1196,28 @@ export class DocumentCache {
         payloadKind: PayloadKind,
         jsonBytes: Uint8Array,
     ): Promise<{ path: string; size: number; sha256: string }> {
+        return this.writePayloadFromGzip(
+            libraryId,
+            zoteroKey,
+            payloadKind,
+            () => gzipUtf8BytesChunked(jsonBytes),
+            'writePayloadBytesFile',
+        );
+    }
+
+    private async writePayloadFromGzip(
+        libraryId: number,
+        zoteroKey: string,
+        payloadKind: PayloadKind,
+        gzipPayload: () => Promise<Uint8Array>,
+        label: string,
+    ): Promise<{ path: string; size: number; sha256: string }> {
         const gzipStart = Date.now();
-        const bytes = await gzipUtf8BytesChunked(jsonBytes);
+        const bytes = await gzipPayload();
         const gzipMs = Date.now() - gzipStart;
         if (gzipMs > 2000) {
             logger(
-                `DocumentCache.writePayloadBytesFile: gzip ${bytes.byteLength} bytes for `
+                `DocumentCache.${label}: gzip ${bytes.byteLength} bytes for `
                 + `${libraryId}-${zoteroKey} (${payloadKind}) took ${gzipMs}ms`,
                 2,
             );
