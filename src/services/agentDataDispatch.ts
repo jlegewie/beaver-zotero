@@ -35,6 +35,7 @@ import {
     handleAgentActionExecuteRequest,
     handleReadNoteRequest,
 } from './agentDataProvider';
+import { pauseSyncForMutatingRun } from './syncPause';
 
 /** A single data-request handler plus its error-fallback response. */
 export interface AgentDataRequestEntry {
@@ -277,7 +278,10 @@ export function createZoteroDataProvider(): AgentDataProviderMap {
             }),
         },
         agent_action_execute: {
-            handle: handleAgentActionExecuteRequest,
+            handle: async (event) => {
+                pauseSyncForMutatingRun();
+                return handleAgentActionExecuteRequest(event);
+            },
             // Serialized: concurrent edit_note actions on the same note otherwise
             // race (each reads the original HTML and saves its own edit, so only
             // the last save survives).

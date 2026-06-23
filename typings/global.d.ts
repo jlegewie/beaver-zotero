@@ -31,6 +31,8 @@ interface Window {
     __beaverDisposeSupabase?: () => Promise<void>;
     /** Stops the busy-context event-loop-lag heartbeat (registered by busyContext.ts) */
     __beaverStopBusyHeartbeat?: () => void;
+    /** Resumes Zotero sync suppression held during mutating agent runs */
+    __beaverResumeSyncAfterRun?: () => void;
     /** Auth lock shared across webpack module reloads to prevent concurrent token refresh */
     __beaverAuthLock?: {
         locked: boolean;

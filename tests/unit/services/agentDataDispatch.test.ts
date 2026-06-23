@@ -26,8 +26,13 @@ vi.mock('../../../src/services/agentDataProvider', () => ({
     handleAgentActionExecuteRequest: vi.fn(),
     handleReadNoteRequest: vi.fn(),
 }));
+vi.mock('../../../src/services/syncPause', () => ({
+    pauseSyncForMutatingRun: vi.fn(),
+}));
 
 import { createZoteroDataProvider } from '../../../src/services/agentDataDispatch';
+import { handleAgentActionExecuteRequest } from '../../../src/services/agentDataProvider';
+import { pauseSyncForMutatingRun } from '../../../src/services/syncPause';
 
 // The full set of backend data-request events the Zotero plugin answers. If the
 // backend adds a new data-request type for the Zotero data plane, add it here
@@ -80,5 +85,19 @@ describe('createZoteroDataProvider dispatch map', () => {
             .filter(([, entry]) => entry.serialize)
             .map(([event]) => event);
         expect(serialized).toEqual(['agent_action_execute']);
+    });
+
+    it('pauses Zotero sync before running mutating agent actions', async () => {
+        const execute = vi.mocked(handleAgentActionExecuteRequest);
+        const pause = vi.mocked(pauseSyncForMutatingRun);
+        execute.mockResolvedValueOnce({ type: 'agent_action_execute_response', request_id: 'req-1' });
+
+        const map = createZoteroDataProvider();
+        const response = await map.agent_action_execute.handle({ request_id: 'req-1' });
+
+        expect(response).toEqual({ type: 'agent_action_execute_response', request_id: 'req-1' });
+        expect(pause).toHaveBeenCalledTimes(1);
+        expect(execute).toHaveBeenCalledTimes(1);
+        expect(pause.mock.invocationCallOrder[0]).toBeLessThan(execute.mock.invocationCallOrder[0]);
     });
 });
