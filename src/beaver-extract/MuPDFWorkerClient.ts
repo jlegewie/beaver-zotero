@@ -259,6 +259,15 @@ export class MuPDFWorkerClient {
         return this.slotName;
     }
 
+    /**
+     * Number of in-flight worker operations (PDF extraction work); 0 = idle.
+     * Read cross-bundle via the `Zotero.__beaverMuPDFWorkerClient_*` globals to
+     * feed `busy_extracting` in busy-context diagnostics.
+     */
+    get inFlight(): number {
+        return this.pending.size;
+    }
+
     /** Test-only: change the idle timeout on a live instance. */
     setIdleTimeoutForTest(ms: number): void {
         this.idleTimeoutMs = ms;
