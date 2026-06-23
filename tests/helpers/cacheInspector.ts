@@ -801,6 +801,9 @@ export interface SyncPauseResponse {
     runner: {
         available: boolean;
         delayIndefiniteAvailable: boolean;
+        delaySyncAvailable: boolean;
+        clearSyncTimeoutAvailable: boolean;
+        setSyncTimeoutAvailable: boolean;
         syncInProgress: boolean | null;
     };
     paused: boolean;
@@ -811,6 +814,7 @@ export interface SyncPauseResponse {
         delayIndefiniteAvailable: boolean;
         resolveType: string | null;
         roundTripOk: boolean;
+        suppressionApisOk: boolean;
         error?: string;
     };
 }

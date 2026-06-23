@@ -451,7 +451,8 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         // Resume Zotero sync suppression held by a mutating agent run before
         // this window's timers and React cleanup are torn down.
         try {
-            win.__beaverResumeSyncAfterRun?.();
+            const rescheduleSync = !(isAppQuitting || isAppShuttingDown);
+            win.__beaverResumeSyncAfterRun?.(rescheduleSync);
         } catch (e) {
             ztoolkit.log(`resumeSyncAfterRun: ${e}`);
         }

@@ -3,8 +3,10 @@
  *
  * Drives the real `src/services/syncPause` functions against the running
  * Zotero's `Zotero.Sync.Runner`, so live tests can confirm what unit tests can
- * only mock: that `delayIndefinite()` exists and returns a resolve function,
- * and that the pause/resume round-trip works against the real runner.
+ * only mock: that the runner APIs the module depends on exist (`delayIndefinite`
+ * for the hard sync hold, plus `delaySync` / `clearSyncTimeout` / `setSyncTimeout`
+ * for suppressing the auto-sync spinner), and that the pause/resume round-trip
+ * works against the real runner.
  *
  * Registered in `useHttpEndpoints.ts` under `/beaver/test/sync-pause`.
  *
@@ -12,7 +14,8 @@
  * (the `agent_action_execute` dispatch wrapper and `useSyncSuppression`), so
  * callers must always release the pause (`action: 'resume'`) to avoid leaving
  * Zotero auto-sync suppressed; the module's idle safety timer is only a
- * backstop.
+ * backstop. `resume` here intentionally does NOT reschedule a sync (no real
+ * edits were made), so running the suite never triggers a sync of the library.
  */
 
 import {
@@ -41,6 +44,9 @@ function snapshot() {
         runner: {
             available: !!runner,
             delayIndefiniteAvailable: typeof runner?.delayIndefinite === 'function',
+            delaySyncAvailable: typeof runner?.delaySync === 'function',
+            clearSyncTimeoutAvailable: typeof runner?.clearSyncTimeout === 'function',
+            setSyncTimeoutAvailable: typeof runner?.setSyncTimeout === 'function',
             syncInProgress: typeof runner?.syncInProgress === 'boolean' ? runner.syncInProgress : null,
         },
         paused: isSyncPaused(),
@@ -75,11 +81,15 @@ export async function handleTestSyncPauseHttpRequest(request: any) {
                 delayIndefiniteAvailable: boolean;
                 resolveType: string | null;
                 roundTripOk: boolean;
+                // The spinner-suppression APIs the fix depends on. Exercised with
+                // no-op arguments so the probe never starts a real sync.
+                suppressionApisOk: boolean;
                 error?: string;
             } = {
                 delayIndefiniteAvailable: typeof runner?.delayIndefinite === 'function',
                 resolveType: null,
                 roundTripOk: false,
+                suppressionApisOk: false,
             };
             try {
                 const resolve = runner.delayIndefinite();
@@ -87,6 +97,13 @@ export async function handleTestSyncPauseHttpRequest(request: any) {
                 if (typeof resolve === 'function') {
                     resolve();
                     probe.roundTripOk = true;
+                }
+                // delaySync(0) clears the window; clearSyncTimeout() cancels any
+                // pending auto-sync timer. Neither initiates a sync.
+                if (typeof runner.delaySync === 'function' && typeof runner.clearSyncTimeout === 'function') {
+                    runner.delaySync(0);
+                    runner.clearSyncTimeout();
+                    probe.suppressionApisOk = typeof runner.setSyncTimeout === 'function';
                 }
             } catch (err) {
                 probe.error = String(err);

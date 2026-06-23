@@ -4,11 +4,14 @@
  * Exercises the real `src/services/syncPause` module against the running
  * Zotero's `Zotero.Sync.Runner` via the dev-only `/beaver/test/sync-pause`
  * endpoint. The unit tests (`tests/unit/services/syncPause.test.ts`) cover the
- * state machine with a mocked `delayIndefinite`; this suite's load-bearing
- * value is confirming the parts the unit tests can only fake:
- *   - `Zotero.Sync.Runner.delayIndefinite()` exists and returns a resolve fn
- *     (the central assumption the feature silently no-ops without),
- *   - the pause -> resume round-trip works against the real runner,
+ * state machine with a mocked runner; this suite's load-bearing value is
+ * confirming the parts the unit tests can only fake:
+ *   - the runner APIs the module depends on exist on the real runner:
+ *     `delayIndefinite()` (the hard sync hold, which the feature silently
+ *     no-ops without) plus `delaySync` / `clearSyncTimeout` / `setSyncTimeout`
+ *     (the auto-sync spinner suppression),
+ *   - the pause -> resume round-trip works against the real runner and never
+ *     starts a sync (`syncInProgress` stays false),
  *   - the debounced and cancel paths behave with real timers, and
  *   - the window unload-cleanup hook (`__beaverResumeSyncAfterRun`) is wired.
  *
@@ -46,12 +49,24 @@ describe('sync suppression — Zotero.Sync.Runner contract', () => {
         expect(typeof res.runner.syncInProgress).toBe('boolean');
     });
 
+    it('exposes the auto-sync spinner-suppression APIs on the live Sync.Runner', async () => {
+        // The fix prevents the sync spinner mid-run by parking Zotero's auto-sync
+        // timer before it animates the icon. That relies on these three runner
+        // APIs existing — guard against an upstream rename silently regressing it.
+        const res = await syncPause('status');
+        expect(res.runner.delaySyncAvailable).toBe(true);
+        expect(res.runner.clearSyncTimeoutAvailable).toBe(true);
+        expect(res.runner.setSyncTimeoutAvailable).toBe(true);
+    });
+
     it('acquires and releases a real Zotero sync delay in one round-trip', async () => {
         const res = await syncPause('probe-runner');
         expect(res.ok).toBe(true);
         expect(res.probe?.delayIndefiniteAvailable).toBe(true);
         expect(res.probe?.resolveType).toBe('function');
         expect(res.probe?.roundTripOk).toBe(true);
+        // delaySync(0)/clearSyncTimeout round-trip cleanly and setSyncTimeout exists.
+        expect(res.probe?.suppressionApisOk).toBe(true);
         expect(res.probe?.error).toBeUndefined();
     });
 
@@ -82,6 +97,22 @@ describe('sync suppression — pause/resume against live Zotero', () => {
 
         const resumed = await syncPause('resume');
         expect(resumed.paused).toBe(false);
+    });
+
+    it('never starts a sync across a pause/resume cycle (no mid-run spinner)', async () => {
+        // Suppression cancels the auto-sync timer and parks it before the icon
+        // animates, so pausing must not flip the runner into a sync. The dev
+        // resume path also does not reschedule a sync (no real edits were made).
+        const idle = await syncPause('status');
+        expect(idle.runner.syncInProgress).toBe(false);
+
+        const paused = await syncPause('pause');
+        expect(paused.paused).toBe(true);
+        expect(paused.runner.syncInProgress).toBe(false);
+
+        const resumed = await syncPause('resume');
+        expect(resumed.paused).toBe(false);
+        expect(resumed.runner.syncInProgress).toBe(false);
     });
 
     it('acquires the pause once across repeated mutating actions', async () => {

@@ -2,12 +2,25 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../../src/utils/logger', () => ({ logger: vi.fn() }));
 
+// The fix suppresses the auto-sync spinner via three additional runner APIs.
+// Install them as spies on every mock runner so the module's suppress/restore
+// calls work and can be asserted via `globalThis.Zotero.Sync.Runner`.
 async function loadSyncPause(delayIndefinite?: () => () => void) {
     vi.resetModules();
-    (globalThis as any).Zotero.Sync.Runner = delayIndefinite
-        ? { delayIndefinite }
-        : {};
+    const runner: any = {
+        clearSyncTimeout: vi.fn(),
+        delaySync: vi.fn(),
+        setSyncTimeout: vi.fn(),
+    };
+    if (delayIndefinite) {
+        runner.delayIndefinite = delayIndefinite;
+    }
+    (globalThis as any).Zotero.Sync.Runner = runner;
     return import('../../../src/services/syncPause');
+}
+
+function runner() {
+    return (globalThis as any).Zotero.Sync.Runner;
 }
 
 describe('syncPause', () => {
@@ -122,5 +135,122 @@ describe('syncPause', () => {
 
         expect(() => pauseSyncForMutatingRun()).not.toThrow();
         expect(() => resumeSyncNow()).not.toThrow();
+    });
+
+    describe('auto-sync spinner suppression', () => {
+        it('cancels the pending auto-sync timer and arms the suppression window on pause', async () => {
+            const resume = vi.fn();
+            const { pauseSyncForMutatingRun, SAFETY_IDLE_MS } = await loadSyncPause(() => resume);
+
+            pauseSyncForMutatingRun();
+
+            expect(runner().clearSyncTimeout).toHaveBeenCalled();
+            expect(runner().delaySync).toHaveBeenCalledWith(SAFETY_IDLE_MS);
+            // No sync is scheduled while paused.
+            expect(runner().setSyncTimeout).not.toHaveBeenCalled();
+        });
+
+        it('re-applies suppression on every mutating action, even while already paused', async () => {
+            const resume = vi.fn();
+            const { pauseSyncForMutatingRun } = await loadSyncPause(() => resume);
+
+            pauseSyncForMutatingRun();
+            pauseSyncForMutatingRun();
+            pauseSyncForMutatingRun();
+
+            // delayIndefinite is acquired once, but the spinner suppression is
+            // refreshed each time so freshly-armed auto-sync timers stay covered.
+            expect(runner().clearSyncTimeout).toHaveBeenCalledTimes(3);
+            expect(runner().delaySync).toHaveBeenCalledTimes(3);
+        });
+
+        it('clears the window and reschedules one sync when a run completes', async () => {
+            const resume = vi.fn();
+            const {
+                pauseSyncForMutatingRun,
+                scheduleResumeAfterRun,
+                RELEASE_DEBOUNCE_MS,
+            } = await loadSyncPause(() => resume);
+
+            pauseSyncForMutatingRun();
+            scheduleResumeAfterRun();
+            await vi.advanceTimersByTimeAsync(RELEASE_DEBOUNCE_MS);
+
+            expect(resume).toHaveBeenCalledTimes(1);
+            // Window dropped...
+            expect(runner().delaySync).toHaveBeenLastCalledWith(0);
+            // ...and a single, non-recurring auto-sync scheduled to push edits.
+            expect(runner().setSyncTimeout).toHaveBeenCalledTimes(1);
+            expect(runner().setSyncTimeout.mock.calls[0][1]).toBe(false);
+        });
+
+        it('clears the window but does not reschedule a sync on a direct resume', async () => {
+            const resume = vi.fn();
+            const { pauseSyncForMutatingRun, resumeSyncNow } = await loadSyncPause(() => resume);
+
+            pauseSyncForMutatingRun();
+            resumeSyncNow();
+
+            expect(resume).toHaveBeenCalledTimes(1);
+            expect(runner().delaySync).toHaveBeenLastCalledWith(0);
+            expect(runner().setSyncTimeout).not.toHaveBeenCalled();
+        });
+
+        it('does not reschedule a sync when the idle safety timer fires', async () => {
+            const resume = vi.fn();
+            const { pauseSyncForMutatingRun, SAFETY_IDLE_MS } = await loadSyncPause(() => resume);
+
+            pauseSyncForMutatingRun();
+            await vi.advanceTimersByTimeAsync(SAFETY_IDLE_MS);
+
+            expect(resume).toHaveBeenCalledTimes(1);
+            expect(runner().delaySync).toHaveBeenLastCalledWith(0);
+            expect(runner().setSyncTimeout).not.toHaveBeenCalled();
+        });
+
+        it('reschedules a sync through the window resume hook used on unload', async () => {
+            // The plugin-disable / window-close path calls this hook with `true`
+            // so an interrupted run still pushes its edits (hooks.ts onMainWindowUnload).
+            const resume = vi.fn();
+            const win: any = {};
+            (globalThis as any).window = win;
+            const { pauseSyncForMutatingRun } = await loadSyncPause(() => resume);
+
+            expect(typeof win.__beaverResumeSyncAfterRun).toBe('function');
+
+            pauseSyncForMutatingRun();
+            win.__beaverResumeSyncAfterRun(true);
+
+            expect(resume).toHaveBeenCalledTimes(1);
+            expect(runner().delaySync).toHaveBeenLastCalledWith(0);
+            expect(runner().setSyncTimeout).toHaveBeenCalledTimes(1);
+        });
+
+        it('does not reschedule a sync through the window resume hook when quitting', async () => {
+            // During an app quit hooks.ts passes `false`: Zotero runs its own
+            // shutdown sync, so arming a timer mid-teardown is pointless.
+            const resume = vi.fn();
+            const win: any = {};
+            (globalThis as any).window = win;
+            const { pauseSyncForMutatingRun } = await loadSyncPause(() => resume);
+
+            pauseSyncForMutatingRun();
+            win.__beaverResumeSyncAfterRun(false);
+
+            expect(resume).toHaveBeenCalledTimes(1);
+            expect(runner().delaySync).toHaveBeenLastCalledWith(0);
+            expect(runner().setSyncTimeout).not.toHaveBeenCalled();
+        });
+
+        it('does not touch runner suppression APIs when no pause was held', async () => {
+            const resume = vi.fn();
+            const { resumeSyncNow } = await loadSyncPause(() => resume);
+
+            resumeSyncNow(true);
+
+            expect(resume).not.toHaveBeenCalled();
+            expect(runner().delaySync).not.toHaveBeenCalled();
+            expect(runner().setSyncTimeout).not.toHaveBeenCalled();
+        });
     });
 });
