@@ -88,6 +88,27 @@ describe('syncPause', () => {
         expect(resume).not.toHaveBeenCalled();
     });
 
+    it('does not let one owner release another active owner', async () => {
+        const resume = vi.fn();
+        const delayIndefinite = vi.fn(() => resume);
+        const {
+            pauseSyncForMutatingRun,
+            scheduleResumeAfterRun,
+            RELEASE_DEBOUNCE_MS,
+        } = await loadSyncPause(delayIndefinite);
+
+        pauseSyncForMutatingRun('local');
+        pauseSyncForMutatingRun('provider');
+        scheduleResumeAfterRun('provider');
+
+        await vi.advanceTimersByTimeAsync(RELEASE_DEBOUNCE_MS);
+        expect(resume).not.toHaveBeenCalled();
+
+        scheduleResumeAfterRun('local');
+        await vi.advanceTimersByTimeAsync(RELEASE_DEBOUNCE_MS);
+        expect(resume).toHaveBeenCalledTimes(1);
+    });
+
     it('resumes immediately and is idempotent', async () => {
         const resume = vi.fn();
         const delayIndefinite = vi.fn(() => resume);

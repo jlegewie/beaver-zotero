@@ -11,6 +11,10 @@ export const SAFETY_IDLE_MS = 600_000;
 const AUTO_SYNC_EDIT_TIMEOUT_SECONDS = 3;
 
 type ResumeSync = () => void;
+export type SyncPauseOwner = string;
+
+export const LOCAL_MUTATING_RUN_SYNC_PAUSE_OWNER = 'local-mutating-run';
+export const PROVIDER_MUTATING_RUN_SYNC_PAUSE_OWNER = 'provider-mutating-run';
 
 interface SyncRunner {
     delayIndefinite?: () => ResumeSync;
@@ -21,7 +25,8 @@ interface SyncRunner {
 
 let resumeSync: ResumeSync | null = null;
 let safetyTimer: ReturnType<typeof setTimeout> | null = null;
-let releaseDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+const releaseDebounceTimers = new Map<SyncPauseOwner, ReturnType<typeof setTimeout>>();
+const activeOwners = new Set<SyncPauseOwner>();
 
 // eslint-disable-next-line no-restricted-globals -- intentionally this script's window, not getMainWindow()
 const currentWindow: Window | undefined = typeof window !== 'undefined' ? window : undefined;
@@ -69,11 +74,20 @@ function restoreAutoSync(runner: SyncRunner, reschedule: boolean): void {
 }
 
 /** Clear the pending debounced release, if one is armed. */
-function clearReleaseDebounce(): void {
-    if (releaseDebounceTimer !== null) {
-        clearTimeout(releaseDebounceTimer);
-        releaseDebounceTimer = null;
+function clearReleaseDebounce(owner: SyncPauseOwner): void {
+    const timer = releaseDebounceTimers.get(owner);
+    if (timer) {
+        clearTimeout(timer);
+        releaseDebounceTimers.delete(owner);
     }
+}
+
+/** Clear all pending debounced releases. */
+function clearAllReleaseDebounces(): void {
+    for (const timer of releaseDebounceTimers.values()) {
+        clearTimeout(timer);
+    }
+    releaseDebounceTimers.clear();
 }
 
 /** Clear the idle safety timer, if one is armed. */
@@ -96,14 +110,15 @@ function armSafetyTimer(): void {
 }
 
 /** Pause Zotero sync before a mutating agent action can schedule auto-sync. */
-export function pauseSyncForMutatingRun(): void {
+export function pauseSyncForMutatingRun(owner: SyncPauseOwner = LOCAL_MUTATING_RUN_SYNC_PAUSE_OWNER): void {
     try {
         const runner = getRunner();
         if (typeof runner?.delayIndefinite !== 'function') {
             return;
         }
 
-        clearReleaseDebounce();
+        clearReleaseDebounce(owner);
+        activeOwners.add(owner);
         armSafetyTimer();
 
         // Suppress the visible auto-sync spinner for edits made during the run.
@@ -123,21 +138,31 @@ export function pauseSyncForMutatingRun(): void {
 }
 
 /** Schedule sync to resume after the run has stayed inactive past the debounce. */
-export function scheduleResumeAfterRun(): void {
-    clearReleaseDebounce();
-    releaseDebounceTimer = setTimeout(() => {
+export function scheduleResumeAfterRun(owner: SyncPauseOwner = LOCAL_MUTATING_RUN_SYNC_PAUSE_OWNER): void {
+    clearReleaseDebounce(owner);
+    releaseDebounceTimers.set(owner, setTimeout(() => {
         // Normal completion: push the run's edits with one batched auto-sync.
-        resumeSyncNow(true);
-    }, RELEASE_DEBOUNCE_MS);
+        releaseOwner(owner, true);
+    }, RELEASE_DEBOUNCE_MS));
     logger(`syncPause: scheduled resume in ${RELEASE_DEBOUNCE_MS}ms`, 3);
 }
 
 /** Cancel a pending debounced resume when a run becomes active again. */
-export function cancelScheduledResume(): void {
-    if (releaseDebounceTimer !== null) {
+export function cancelScheduledResume(owner: SyncPauseOwner = LOCAL_MUTATING_RUN_SYNC_PAUSE_OWNER): void {
+    if (releaseDebounceTimers.has(owner)) {
         logger('syncPause: cancelled scheduled resume (run active again)', 3);
     }
-    clearReleaseDebounce();
+    clearReleaseDebounce(owner);
+}
+
+/** Release one owner and resume Zotero sync only when no other owner remains. */
+function releaseOwner(owner: SyncPauseOwner, reschedule: boolean): void {
+    clearReleaseDebounce(owner);
+    activeOwners.delete(owner);
+    if (activeOwners.size > 0) {
+        return;
+    }
+    resumeSyncNow(reschedule);
 }
 
 /**
@@ -148,8 +173,9 @@ export function cancelScheduledResume(): void {
  *   to restore normal auto-sync behavior.
  */
 export function resumeSyncNow(reschedule = false): void {
-    clearReleaseDebounce();
+    clearAllReleaseDebounces();
     clearSafetyTimer();
+    activeOwners.clear();
 
     const resume = resumeSync;
     resumeSync = null;

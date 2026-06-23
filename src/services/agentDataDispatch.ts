@@ -35,7 +35,11 @@ import {
     handleAgentActionExecuteRequest,
     handleReadNoteRequest,
 } from './agentDataProvider';
-import { pauseSyncForMutatingRun } from './syncPause';
+import {
+    LOCAL_MUTATING_RUN_SYNC_PAUSE_OWNER,
+    pauseSyncForMutatingRun,
+} from './syncPause';
+import type { SyncPauseOwner } from './syncPause';
 
 /** A single data-request handler plus its error-fallback response. */
 export interface AgentDataRequestEntry {
@@ -48,17 +52,26 @@ export interface AgentDataRequestEntry {
      * queue (prevents concurrent mutating actions from racing).
      */
     serialize?: boolean;
+    /** Sync pause owner to release when this mutating request settles. */
+    syncPauseOwner?: SyncPauseOwner;
 }
 
 /** Map from backend request event name to its handler entry. */
 export type AgentDataProviderMap = Record<string, AgentDataRequestEntry>;
+
+export interface ZoteroDataProviderOptions {
+    /** Owner token used for sync suppression around mutating actions. */
+    syncPauseOwner?: SyncPauseOwner;
+}
 
 /**
  * Build the data-provider map backed by the Zotero plugin's handlers. This is
  * the default provider for `AgentService` and preserves the exact handlers and
  * per-request error fallbacks the plugin has always sent.
  */
-export function createZoteroDataProvider(): AgentDataProviderMap {
+export function createZoteroDataProvider(options: ZoteroDataProviderOptions = {}): AgentDataProviderMap {
+    const syncPauseOwner = options.syncPauseOwner ?? LOCAL_MUTATING_RUN_SYNC_PAUSE_OWNER;
+
     return {
         zotero_document_request: {
             handle: handleZoteroDocumentRequest,
@@ -279,9 +292,10 @@ export function createZoteroDataProvider(): AgentDataProviderMap {
         },
         agent_action_execute: {
             handle: async (event) => {
-                pauseSyncForMutatingRun();
+                pauseSyncForMutatingRun(syncPauseOwner);
                 return handleAgentActionExecuteRequest(event);
             },
+            syncPauseOwner,
             // Serialized: concurrent edit_note actions on the same note otherwise
             // race (each reads the original HTML and saves its own edit, so only
             // the last save survives).
