@@ -40,6 +40,34 @@ import { notifyRemoteDownloadFailure, notifyRemoteFileNotSynced } from './utils'
 import { EXTERNAL_LIBRARY_ID, resolveExternalFile } from '../externalFiles';
 import type { ExternalFileRecord } from '../database';
 import { serializeAttachmentStub, serializeItemStub } from '../../utils/zoteroSerializers';
+import {
+    createPreparedJsonMessage,
+    type PreparedJsonMessage,
+} from '../preparedJsonMessage';
+
+export interface ZoteroDocumentRequestOptions {
+    responseMode?: 'object' | 'websocket';
+}
+
+const PDF_CONTENT_KIND_INSERT = '"content_kind":"pdf",';
+
+function serializedPdfWireResultBytes(rawResultBytes: number): number {
+    return rawResultBytes + PDF_CONTENT_KIND_INSERT.length;
+}
+
+function serializedPdfResultToWireJson(jsonBytes: Uint8Array): string {
+    if (jsonBytes.byteLength < 2 || jsonBytes[0] !== 0x7b) {
+        throw new Error('Serialized PDF result must be a JSON object');
+    }
+    const raw = new TextDecoder().decode(jsonBytes);
+    if (raw === '{}') {
+        return '{"content_kind":"pdf"}';
+    }
+    if (raw[0] !== '{' || raw[raw.length - 1] !== '}') {
+        throw new Error('Serialized PDF result must be a JSON object');
+    }
+    return `{"content_kind":"pdf",${raw.slice(1)}`;
+}
 
 /**
  * Reject success responses whose serialized payload would exceed the
@@ -65,6 +93,45 @@ export function guardPayloadSize(
     const payloadBytes = new TextEncoder().encode(JSON.stringify(response.result)).byteLength;
     if (payloadBytes <= limit) {
         return response;
+    }
+
+    const mb = (n: number) => (n / (1024 * 1024)).toFixed(1);
+    logger(
+        `handleZoteroDocumentRequest: payload too large ` +
+        `(${payloadBytes} bytes > ${limit} byte limit, content_kind=${contentKind})`,
+        1,
+    );
+    return errorResponse(
+        `This attachment is too large for Beaver to handle. ` +
+        `${mb(payloadBytes)}MB of extracted text` +
+        `${totalPages != null ? ` across ${totalPages} pages` : ''}, ` +
+        `limit ${mb(limit)}MB. Do not try again with extract, ` +
+        `find_in_attachments, read, or read_pages for this attachment.`,
+        'document_too_large',
+        totalPages,
+        contentKind,
+    );
+}
+
+export function guardSerializedPayloadSize(
+    request: WSZoteroDocumentRequest,
+    payloadBytes: number,
+    totalPages: number | null,
+    contentKind: ExtractContentKind,
+    errorResponse: (
+        error: string,
+        error_code: ZoteroDocumentErrorCode,
+        total_pages?: number | null,
+        content_kind?: ExtractContentKind,
+    ) => WSZoteroDocumentResponse,
+): WSZoteroDocumentResponse | null {
+    const limit = request.max_payload_bytes;
+    if (typeof limit !== 'number' || !Number.isFinite(limit) || limit <= 0) {
+        return null;
+    }
+
+    if (payloadBytes <= limit) {
+        return null;
     }
 
     const mb = (n: number) => (n / (1024 * 1024)).toFixed(1);
@@ -119,12 +186,30 @@ export function buildServedAttachmentStub(
     return serializeAttachmentStub(attachment, contentKind);
 }
 
+function buildPreparedPdfDocumentResponse(
+    envelope: Omit<WSZoteroDocumentResponse, 'result'>,
+    jsonBytes: Uint8Array,
+): PreparedJsonMessage {
+    return createPreparedJsonMessage(
+        envelope,
+        { result: serializedPdfResultToWireJson(jsonBytes) },
+    );
+}
+
 /**
  * Handle zotero_document_request event.
  */
+export function handleZoteroDocumentRequest(
+    request: WSZoteroDocumentRequest,
+): Promise<WSZoteroDocumentResponse>;
+export function handleZoteroDocumentRequest(
+    request: WSZoteroDocumentRequest,
+    options: ZoteroDocumentRequestOptions & { responseMode: 'websocket' },
+): Promise<WSZoteroDocumentResponse | PreparedJsonMessage>;
 export async function handleZoteroDocumentRequest(
     request: WSZoteroDocumentRequest,
-): Promise<WSZoteroDocumentResponse> {
+    options: ZoteroDocumentRequestOptions = {},
+): Promise<WSZoteroDocumentResponse | PreparedJsonMessage> {
     const { attachment, external_file_key, mode, max_pages, max_file_size_mb, request_id, timeout_seconds } = request;
 
     // Populated once the attachment resolves so post-resolution error responses
@@ -153,7 +238,7 @@ export async function handleZoteroDocumentRequest(
     // External files are handled before any Zotero item resolution: the
     // request carries an external file key instead of an attachment reference.
     if (external_file_key) {
-        return handleExternalFileDocumentRequest(request, external_file_key, errorResponse);
+        return handleExternalFileDocumentRequest(request, external_file_key, errorResponse, options);
     }
 
     if (!attachment) {
@@ -370,12 +455,36 @@ export async function handleZoteroDocumentRequest(
             workerName: 'hot',
             externalAbortSignal: timeout.signal,
             onRemoteDownloadFailure: notifyRemoteDownloadFailure,
+            serializedResult: options.responseMode === 'websocket',
         });
 
         if (result.kind === 'ok') {
             if (result.cached) {
                 const { libraryId, zoteroKey } = result.resolvedAttachment;
                 logger(`handleZoteroDocumentRequest: document cache hit for ${libraryId}-${zoteroKey} mode=${mode}`, 3);
+            }
+            if (result.serializedResult) {
+                const payloadBytes = serializedPdfWireResultBytes(result.serializedResult.byteLength);
+                const oversized = guardSerializedPayloadSize(
+                    request,
+                    payloadBytes,
+                    result.totalPages ?? null,
+                    'pdf',
+                    errorResponse,
+                );
+                if (oversized) return oversized;
+                return buildPreparedPdfDocumentResponse({
+                    type: 'zotero_document',
+                    request_id,
+                    resolved_attachment: {
+                        library_id: result.resolvedAttachment.libraryId,
+                        zotero_key: result.resolvedAttachment.zoteroKey,
+                    },
+                    content_type: result.contentType,
+                    content_kind: 'pdf',
+                    ...(parentItem ? { parent_item: parentItem } : {}),
+                    ...(servedAttachment ? { served_attachment: servedAttachment } : {}),
+                }, result.serializedResult.jsonBytes);
             }
             return guardPayloadSize(request, {
                 type: 'zotero_document',
@@ -478,7 +587,8 @@ async function handleExternalFileDocumentRequest(
         total_pages?: number | null,
         content_kind?: ExtractContentKind,
     ) => WSZoteroDocumentResponse,
-): Promise<WSZoteroDocumentResponse> {
+    options: ZoteroDocumentRequestOptions = {},
+): Promise<WSZoteroDocumentResponse | PreparedJsonMessage> {
     const { mode, max_pages, max_file_size_mb, request_id, timeout_seconds } = request;
     const requestKey = `ext-${extKey}`;
 
@@ -607,11 +717,31 @@ async function handleExternalFileDocumentRequest(
             timeoutSeconds: timeout_seconds ?? 0,
             workerName: 'hot',
             externalAbortSignal: timeout.signal,
+            serializedResult: options.responseMode === 'websocket',
         });
 
         if (result.kind === 'ok') {
             if (result.cached) {
                 logger(`handleZoteroDocumentRequest: document cache hit for ${requestKey} mode=${mode}`, 3);
+            }
+            if (result.serializedResult) {
+                const payloadBytes = serializedPdfWireResultBytes(result.serializedResult.byteLength);
+                const oversized = guardSerializedPayloadSize(
+                    request,
+                    payloadBytes,
+                    result.totalPages ?? null,
+                    'pdf',
+                    errorResponse,
+                );
+                if (oversized) return oversized;
+                return buildPreparedPdfDocumentResponse({
+                    type: 'zotero_document',
+                    request_id,
+                    external_file_key: extKey,
+                    content_type: result.contentType,
+                    content_kind: 'pdf',
+                    served_attachment: servedExternal,
+                }, result.serializedResult.jsonBytes);
             }
             return guardPayloadSize(request, {
                 type: 'zotero_document',

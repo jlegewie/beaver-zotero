@@ -20,7 +20,10 @@ vi.mock('../../../react/atoms/profile', () => ({
     searchableLibraryIdsAtom: { toString: () => 'searchableLibraryIdsAtom' },
 }));
 
-import { guardPayloadSize } from '../../../src/services/agentDataProvider/handleZoteroDocumentRequest';
+import {
+    guardPayloadSize,
+    guardSerializedPayloadSize,
+} from '../../../src/services/agentDataProvider/handleZoteroDocumentRequest';
 import type {
     WSZoteroDocumentRequest,
     WSZoteroDocumentResponse,
@@ -104,5 +107,26 @@ describe('guardPayloadSize', () => {
         expect(out.error_code).toBe('document_too_large');
         expect(out.error).not.toContain('across');
         expect(out.content_kind).toBe('text');
+    });
+
+    it('checks a supplied serialized byte count without stringifying the result graph', () => {
+        const out = guardSerializedPayloadSize(
+            makeRequest(1000),
+            10_000,
+            42,
+            'pdf',
+            errorResponse,
+        );
+        expect(out?.error_code).toBe('document_too_large');
+        expect(out?.total_pages).toBe(42);
+
+        const ok = guardSerializedPayloadSize(
+            makeRequest(100_000),
+            10_000,
+            42,
+            'pdf',
+            errorResponse,
+        );
+        expect(ok).toBeNull();
     });
 });

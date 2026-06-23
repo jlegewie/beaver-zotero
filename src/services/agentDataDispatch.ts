@@ -35,11 +35,13 @@ import {
     handleAgentActionExecuteRequest,
     handleReadNoteRequest,
 } from './agentDataProvider';
+import type { PreparedJsonMessage } from './preparedJsonMessage';
+
 
 /** A single data-request handler plus its error-fallback response. */
 export interface AgentDataRequestEntry {
     /** Run the request and resolve with the response object to send back. */
-    handle: (event: any) => Promise<Record<string, any>>;
+    handle: (event: any) => Promise<Record<string, any> | PreparedJsonMessage>;
     /** Build the response to send when `handle` rejects (keeps the backend from timing out). */
     errorResponse: (event: any, err: unknown) => Record<string, any>;
     /**
@@ -60,7 +62,7 @@ export type AgentDataProviderMap = Record<string, AgentDataRequestEntry>;
 export function createZoteroDataProvider(): AgentDataProviderMap {
     return {
         zotero_document_request: {
-            handle: handleZoteroDocumentRequest,
+            handle: (event) => handleZoteroDocumentRequest(event, { responseMode: 'websocket' }),
             errorResponse: (event, err) => ({
                 type: 'zotero_document',
                 request_id: event.request_id,

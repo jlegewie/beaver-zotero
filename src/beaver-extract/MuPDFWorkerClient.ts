@@ -35,6 +35,7 @@ import {
 } from "./types";
 import type {
     BeaverExtractResult,
+    SerializedBeaverExtractResult,
     StructuredExtractWithDebugResult,
 } from "./schema";
 import type {
@@ -856,6 +857,27 @@ export class MuPDFWorkerClient {
         const bytes =
             pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
         return this.call<BeaverExtractResult>("extract", {
+            pdfData: bytes,
+            mode: args?.mode,
+            markdown: args?.markdown,
+            structured: args?.structured,
+            settings: args?.settings,
+            paragraphSettings: args?.paragraphSettings,
+            pageIndices: args?.pageIndices,
+            pageRange: args?.pageRange,
+            analysisWindow: args?.analysisWindow,
+            includeDiagnostics: args?.includeDiagnostics,
+        }, { signal });
+    }
+
+    async extractSerialized(
+        pdfData: Uint8Array | ArrayBuffer,
+        args?: Parameters<MuPDFWorkerClient["extract"]>[1],
+        signal?: AbortSignal,
+    ): Promise<SerializedBeaverExtractResult> {
+        const bytes =
+            pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
+        return this.call<SerializedBeaverExtractResult>("extractSerialized", {
             pdfData: bytes,
             mode: args?.mode,
             markdown: args?.markdown,

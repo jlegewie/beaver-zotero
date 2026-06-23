@@ -33,6 +33,13 @@ import {
     ZoteroInstanceWire,
 } from './agentProtocol';
 import { getBusyContext } from './busyContext';
+import {
+    isPreparedJsonMessage,
+    materializePreparedJsonMessage,
+    preparedJsonEnvelope,
+    withPreparedJsonEnvelope,
+    type PreparedJsonMessage,
+} from './preparedJsonMessage';
 
 /** Options for opening a provider connection. */
 export interface ProviderConnectOptions {
@@ -293,7 +300,7 @@ export class ProviderConnection {
         }
     }
 
-    private send(data: Record<string, any>): void {
+    private send(data: Record<string, any> | PreparedJsonMessage): void {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
             logger('ProviderConnection: Cannot send - WebSocket not connected', 1);
             return;
@@ -301,14 +308,28 @@ export class ProviderConnection {
         // Attach a completion-time busy-context snapshot to request responses
         // (mirrors the chat connection; backend response models tolerate the
         // extra `timing` field).
-        if ('request_id' in data && 'type' in data && data.type !== 'request_received') {
+        if (isPreparedJsonMessage(data)) {
+            const envelope = preparedJsonEnvelope(data);
+            if ('request_id' in envelope && 'type' in envelope && envelope.type !== 'request_received') {
+                try {
+                    data = withPreparedJsonEnvelope(data, (current) => ({
+                        ...current,
+                        timing: { ...current.timing, ...getBusyContext() },
+                    }));
+                } catch (error) {
+                    logger(`ProviderConnection: Failed to attach busy context: ${error}`, 1);
+                }
+            }
+        } else if ('request_id' in data && 'type' in data && data.type !== 'request_received') {
             try {
                 data = { ...data, timing: { ...(data as any).timing, ...getBusyContext() } };
             } catch (error) {
                 logger(`ProviderConnection: Failed to attach busy context: ${error}`, 1);
             }
         }
-        const sanitized = { ...data };
+        const sanitized: Record<string, any> = isPreparedJsonMessage(data)
+            ? { ...preparedJsonEnvelope(data), result: '[stripped for log]' }
+            : { ...data };
         if ('pages' in sanitized && sanitized.type === 'zotero_attachment_page_images') {
             sanitized.pages = '[stripped for log]';
         }
@@ -316,7 +337,11 @@ export class ProviderConnection {
             sanitized.result = '[stripped for log]';
         }
         logger(`ProviderConnection: Sending "${sanitized.type}"`, sanitized, 1);
-        this.ws.send(JSON.stringify(data));
+        this.ws.send(
+            isPreparedJsonMessage(data)
+                ? materializePreparedJsonMessage(data)
+                : JSON.stringify(data),
+        );
     }
 
     /** Ack a backend request before its handler runs (mirrors AgentService). */

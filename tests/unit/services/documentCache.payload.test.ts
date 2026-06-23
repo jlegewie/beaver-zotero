@@ -163,6 +163,50 @@ describe('DocumentCache payloads', () => {
         expect(payload?.contentKind).toBe('pdf');
     });
 
+    it('putSerializedResult stores bytes readable by serialized and object cache APIs', async () => {
+        const item = createCacheAttachment();
+        const jsonBytes = new TextEncoder().encode(JSON.stringify(structuredResult));
+
+        await cache.putSerializedResult({
+            item,
+            filePath: sourcePath,
+            mode: 'structured',
+            sourceSizeBytes: 3,
+            contentType: 'application/pdf',
+            result: {
+                schemaVersion: structuredResult.schemaVersion,
+                mode: structuredResult.mode,
+                document: { pageCount: structuredResult.document.pageCount },
+                byteLength: jsonBytes.byteLength,
+                jsonBytes,
+                metadata: {
+                    pageCount: 1,
+                    pageLabels: { '0': '1' },
+                    pages: onePageGeometry,
+                },
+            },
+            metadata: {
+                pageCount: 1,
+                pageLabels: { '0': '1' },
+                pages: onePageGeometry,
+            },
+        });
+
+        const serialized = await cache.getSerializedResult(
+            { libraryId: 1, zoteroKey: 'ABCD1234' },
+            'structured',
+            sourcePath,
+        );
+        expect(serialized?.byteLength).toBe(jsonBytes.byteLength);
+        expect(new TextDecoder().decode(serialized?.jsonBytes)).toBe(JSON.stringify(structuredResult));
+
+        await expect(cache.getResult(
+            { libraryId: 1, zoteroKey: 'ABCD1234' },
+            'structured',
+            sourcePath,
+        )).resolves.toEqual(structuredResult);
+    });
+
     it('putResult then getEpubResult returns the cached EPUB document', async () => {
         const item = createCacheAttachment();
 

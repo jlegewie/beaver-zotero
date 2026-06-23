@@ -47,6 +47,7 @@ import {
     opAnalyzeLayout,
     opAnalyzeOCRNeeds,
     opExtract,
+    opExtractSerialized,
     opExtractRawPageDetailed,
     opExtractSentenceDebug,
     opGetMetadata,
@@ -97,6 +98,10 @@ async function dispatch(op: string, args: Record<string, unknown> | undefined): 
         // orchestration ops
         case "extract":
             return await opExtract(a as Parameters<typeof opExtract>[0]);
+        case "extractSerialized":
+            return await opExtractSerialized(
+                a as Parameters<typeof opExtractSerialized>[0],
+            );
         case "structuredExtractWithDebug":
             return await opStructuredExtractWithDebug(
                 a as Parameters<typeof opStructuredExtractWithDebug>[0],

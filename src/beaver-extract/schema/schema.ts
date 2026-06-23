@@ -2,6 +2,7 @@ import type {
     DegradationSummary,
     ExtractionSettings,
     ExtractionTimings,
+    PageGeometry,
 } from "../types";
 
 export const SCHEMA_VERSION = "4";
@@ -44,6 +45,21 @@ export interface StructuredExtractWithDebugResult {
 export type BeaverExtractResult =
     | MarkdownExtractResult
     | StructuredExtractResult;
+
+export interface SerializedExtractCacheMetadata {
+    pageCount: number;
+    pageLabels: Record<string, string>;
+    pages: (PageGeometry | null)[];
+}
+
+export interface SerializedBeaverExtractResult {
+    mode: BeaverExtractResult["mode"];
+    schemaVersion: string;
+    pageCount: number;
+    byteLength: number;
+    jsonBytes: Uint8Array;
+    cacheMetadata: SerializedExtractCacheMetadata;
+}
 
 export interface MarkdownDocument {
     pageCount: number;
