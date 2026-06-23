@@ -473,7 +473,7 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
                 description: "Get notified when a response is ready or an approval is waiting (turn off in settings).",
             },
         ],
-        footer: `<a href="https://github.com/jlegewie/beaver-zotero/releases/tag/v0.21.0" target='_blank'>Full changelog</a>`,
+        footer: `<a href="https://github.com/jlegewie/beaver-zotero/releases/tag/v0.21.0-beta.2" target='_blank'>Full changelog</a>`,
     },
 ];
 
