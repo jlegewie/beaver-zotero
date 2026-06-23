@@ -84,6 +84,9 @@ import {
     handleTestAnnotationCreateHttpRequest,
 } from './httpHandlers/testAnnotationHandlers';
 import {
+    handleTestSyncPauseHttpRequest,
+} from './httpHandlers/testSyncHandlers';
+import {
     handleTestPdfPageCountHttpRequest,
     handleTestPdfPageLabelsHttpRequest,
     handleTestPdfRenderPagesHttpRequest,
@@ -256,6 +259,8 @@ const ENDPOINT_PATHS = [
     '/beaver/test/background-clear',
     // Pref control (dev-only)
     '/beaver/test/set-pref',
+    // Sync-suppression control/inspection (dev-only)
+    '/beaver/test/sync-pause',
     // Provider-mode connection control (dev-only)
     '/beaver/test/provider-connect',
     '/beaver/test/provider-status',
@@ -984,6 +989,11 @@ function registerEndpoints(): boolean {
         // Pref control (dev-only)
         Zotero.Server.Endpoints['/beaver/test/set-pref'] =
             createEndpoint(handleTestSetPrefHttpRequest);
+
+        // Sync-suppression control/inspection (dev-only): drives the real
+        // syncPause module + raw Sync.Runner contract for live tests.
+        Zotero.Server.Endpoints['/beaver/test/sync-pause'] =
+            createEndpoint(handleTestSyncPauseHttpRequest);
 
         // Provider-mode connection control (dev-only manual trigger/inspection)
         Zotero.Server.Endpoints['/beaver/test/provider-connect'] =

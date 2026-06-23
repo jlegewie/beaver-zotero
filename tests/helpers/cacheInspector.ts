@@ -779,6 +779,49 @@ export async function workerMarkStale(
 }
 
 // ---------------------------------------------------------------------------
+// Sync suppression (dev-only)
+//
+// Talks to `/beaver/test/sync-pause`, which drives the real
+// `src/services/syncPause` module against the running Zotero's
+// `Zotero.Sync.Runner`. Shared instance with the production webpack path, so
+// always finish a test by releasing the pause (`syncPause('resume')`).
+// ---------------------------------------------------------------------------
+
+export type SyncPauseAction =
+    | 'status'
+    | 'pause'
+    | 'resume'
+    | 'schedule-resume'
+    | 'cancel-resume'
+    | 'probe-runner';
+
+export interface SyncPauseResponse {
+    ok: boolean;
+    action: SyncPauseAction;
+    runner: {
+        available: boolean;
+        delayIndefiniteAvailable: boolean;
+        syncInProgress: boolean | null;
+    };
+    paused: boolean;
+    releaseDebounceMs: number;
+    safetyIdleMs: number;
+    resumeHookRegistered: boolean;
+    probe?: {
+        delayIndefiniteAvailable: boolean;
+        resolveType: string | null;
+        roundTripOk: boolean;
+        error?: string;
+    };
+}
+
+export async function syncPause(
+    action: SyncPauseAction = 'status',
+): Promise<SyncPauseResponse> {
+    return post<SyncPauseResponse>('/beaver/test/sync-pause', { action });
+}
+
+// ---------------------------------------------------------------------------
 // Background extraction queue (dev-only)
 //
 // Talks to the `/beaver/test/background-*` endpoints registered in

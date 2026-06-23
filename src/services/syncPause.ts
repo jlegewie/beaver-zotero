@@ -88,6 +88,11 @@ export function resumeSyncNow(): void {
     }
 }
 
+/** Whether a Zotero sync pause is currently held by this module. */
+export function isSyncPaused(): boolean {
+    return resumeSync !== null;
+}
+
 try {
     const previousResume = currentWindow?.__beaverResumeSyncAfterRun;
     if (previousResume && previousResume !== resumeSyncNow) {
