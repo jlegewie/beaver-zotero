@@ -28,6 +28,7 @@ import { useReaderAnnotationActionHandler } from './hooks/useReaderAnnotationAct
 import { useReaderVisualizerActionHandler } from './hooks/useReaderVisualizerActionHandler';
 import { useOnboardingPopups } from './hooks/useOnboardingPopups';
 import { useBackgroundWorkerStatus } from './hooks/useBackgroundWorkerStatus';
+import { useSyncSuppression } from './hooks/useSyncSuppression';
 import { BeaverTemporaryAnnotations } from './utils/annotationUtils';
 import { registerZoteroHost } from './host/zotero';
 
@@ -59,6 +60,9 @@ const GlobalContextInitializer = () => {
 
     // Handle Zotero sync
     useZoteroSync();
+
+    // Suppress Zotero auto-sync while mutating agent runs are active.
+    useSyncSuppression();
 
     // Handle Zotero tab selection
     useZoteroTabSelection();

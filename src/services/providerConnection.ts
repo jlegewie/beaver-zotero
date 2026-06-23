@@ -40,6 +40,10 @@ import {
     withPreparedJsonEnvelope,
     type PreparedJsonMessage,
 } from './preparedJsonMessage';
+import {
+    PROVIDER_MUTATING_RUN_SYNC_PAUSE_OWNER,
+    scheduleResumeAfterRun,
+} from './syncPause';
 
 /** Options for opening a provider connection. */
 export interface ProviderConnectOptions {
@@ -101,7 +105,9 @@ export class ProviderConnection {
 
     constructor(baseUrl: string, dataProvider?: AgentDataProviderMap) {
         this.baseUrl = baseUrl;
-        this.dataProvider = dataProvider ?? createZoteroDataProvider();
+        this.dataProvider = dataProvider ?? createZoteroDataProvider({
+            syncPauseOwner: PROVIDER_MUTATING_RUN_SYNC_PAUSE_OWNER,
+        });
     }
 
     private getWebSocketUrl(): string {
@@ -417,6 +423,11 @@ export class ProviderConnection {
                         .catch(err => {
                             logger(`ProviderConnection: ${eventName} failed: ${err}`, 1);
                             this.send(entry.errorResponse(event, err));
+                        })
+                        .finally(() => {
+                            if (entry.syncPauseOwner) {
+                                scheduleResumeAfterRun(entry.syncPauseOwner);
+                            }
                         });
                 if (entry.serialize) {
                     const actionConnId = this.connectionId;
