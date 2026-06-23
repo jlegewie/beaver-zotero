@@ -28,7 +28,11 @@ export interface BusyContext {
     busy_indexing: number;
     /** 1 if Beaver's MuPDF worker has in-flight operations */
     busy_extracting: number;
-    /** 1 if the window is hidden/occluded (see `event_loop_lag_ms` caveat) */
+    /**
+     * 1 if the window is hidden/occluded. The platform throttles timers in
+     * hidden/occluded windows, which can inflate `event_loop_lag_ms`, so the
+     * backend should discount that gauge when this reads 1.
+     */
     window_hidden: number;
     /** How many ms the 1s heartbeat is currently overdue */
     event_loop_lag_ms: number;
