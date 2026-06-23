@@ -203,19 +203,6 @@ export function fetchExternalFileDocument(
  * (`wire`) and its byte length (`wire_bytes`); EPUB/text successes and all
  * error paths arrive as a plain object (`prepared: false`) under `response`.
  */
-/** Side-channel telemetry emitted once a PDF cache miss reaches extraction. */
-export interface DocumentExtractionStartEvent {
-    type: 'zotero_document_extraction_start';
-    request_id: string;
-    library_id: number;
-    zotero_key: string;
-    content_kind: 'pdf';
-    mode: string;
-    page_count: number;
-    file_size_bytes: number;
-    file_size_mb: number;
-}
-
 /** Frontend extraction timing breakdown attached to a document response. */
 export interface DocumentTiming {
     resolve_ms?: number;
@@ -252,8 +239,6 @@ export interface SerializedDocumentWireResponse {
     };
     /** The plain response object for non-prepared (EPUB/text/error) outcomes. */
     response?: DocumentResponse & { type?: string; timing?: DocumentTiming };
-    /** Side-channel extraction-start events emitted during the request. */
-    extraction_start_events?: DocumentExtractionStartEvent[];
 }
 
 /**

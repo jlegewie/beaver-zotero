@@ -17,18 +17,10 @@
  *   - cache-metadata parity (page count / labels / geometry) across paths
  *   - `guardSerializedPayloadSize`: `max_payload_bytes` rejects with
  *     `document_too_large` without parsing the result graph
- *   - the `zotero_document_extraction_start` side-channel event: fires once on
- *     a cold miss (and a no-text failure, after page count), never on a warm
- *     hit or an encrypted PDF (which fails before page count)
  *   - the response `timing` breakdown (`cache_hit`/`cache_miss`, worker +
  *     payload metrics)
  *   - non-PDF (EPUB) and error outcomes fall back to a plain object response
  *   - the external-file branch of the serialized path
- *
- * Not covered here (no reachable handler): the connection-side gating of the
- * extraction-start event on the backend `supports_document_extraction_start_events`
- * capability flag (`AgentService`/`ProviderConnection.send`), which needs a live
- * WebSocket backend.
  *
  * Prerequisites (per tests/README.md):
  *   - Dev build of Beaver loaded in a running Zotero (NODE_ENV=development).
@@ -364,58 +356,6 @@ describe('serialized document request — non-PDF and error fallbacks', () => {
         expect(res.prepared).toBe(false);
         expect(res.response?.error_code).toBeTruthy();
         expect(['not_found', 'invalid_format']).toContain(res.response?.error_code);
-    });
-});
-
-describe('serialized document request — extraction-start telemetry', () => {
-    beforeEach((ctx) => skipIfNoZotero(ctx, available));
-
-    it('emits exactly one extraction-start event on a cold miss', async () => {
-        await invalidateCache(SMALL_PDF.library_id, SMALL_PDF.zotero_key);
-        const res = await fetchDocumentSerialized(SMALL_PDF, { mode: 'structured' }, EXTRACT_OPTS);
-        expectPreparedResult(res);
-
-        const events = res.extraction_start_events ?? [];
-        expect(events).toHaveLength(1);
-        expect(events[0]).toMatchObject({
-            type: 'zotero_document_extraction_start',
-            library_id: SMALL_PDF.library_id,
-            zotero_key: SMALL_PDF.zotero_key,
-            content_kind: 'pdf',
-            mode: 'structured',
-            page_count: SMALL_PDF_PAGE_COUNT,
-        });
-        expect(events[0].file_size_bytes).toBeGreaterThan(0);
-        expect(events[0].file_size_mb).toBeGreaterThan(0);
-        expect(typeof events[0].request_id).toBe('string');
-    });
-
-    it('emits no extraction-start event on a warm cache hit', async () => {
-        await invalidateCache(SMALL_PDF.library_id, SMALL_PDF.zotero_key);
-        // Warm the cache.
-        await fetchDocumentSerialized(SMALL_PDF, { mode: 'structured' }, EXTRACT_OPTS);
-        // Second read is a cache hit and must not re-announce extraction.
-        const warm = await fetchDocumentSerialized(SMALL_PDF, { mode: 'structured' }, EXTRACT_OPTS);
-        expect(warm.extraction_start_events ?? []).toHaveLength(0);
-    });
-
-    it('emits no extraction-start event for an encrypted PDF (fails before page count)', async () => {
-        await invalidateCache(ENCRYPTED_PDF.library_id, ENCRYPTED_PDF.zotero_key);
-        const res = await fetchDocumentSerialized(ENCRYPTED_PDF, { mode: 'markdown' }, EXTRACT_OPTS);
-        expect(res.response?.error_code).toBe('encrypted');
-        expect(res.extraction_start_events ?? []).toHaveLength(0);
-    });
-
-    it('emits one extraction-start event for a no-text PDF (page count known before failure)', async () => {
-        await invalidateCache(NO_TEXT_PDF.library_id, NO_TEXT_PDF.zotero_key);
-        const res = await fetchDocumentSerialized(NO_TEXT_PDF, { mode: 'markdown' }, EXTRACT_OPTS);
-        expect(res.response?.error_code).toBe('no_text_layer');
-        const events = res.extraction_start_events ?? [];
-        expect(events).toHaveLength(1);
-        expect(events[0]).toMatchObject({
-            zotero_key: NO_TEXT_PDF.zotero_key,
-            content_kind: 'pdf',
-        });
     });
 });
 

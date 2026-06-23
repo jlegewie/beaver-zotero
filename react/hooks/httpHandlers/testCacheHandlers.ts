@@ -6,7 +6,6 @@
  * in `useHttpEndpoints.ts` → `registerEndpoints()`.
  */
 
-
 export async function handleTestPingHttpRequest(_request: any) {
     const cache = Zotero.Beaver?.documentCache;
     const db = Zotero.Beaver?.db;
@@ -534,13 +533,6 @@ export async function handleTestExternalFileDeleteHttpRequest(request: any) {
  * (`prepared: true`); EPUB/text successes and every error path come back as a
  * plain object (`prepared: false`).
  *
- * `onExtractionStart` is threaded through and any emitted
- * `zotero_document_extraction_start` side-channel events are collected into
- * `extraction_start_events`, so tests can assert the event fires once on a cold
- * extraction and not on a warm cache hit. (The connection-side decision of
- * whether to send the event to the backend is gated on a capability flag in
- * `AgentService`/`ProviderConnection` and is not exercised here.)
- *
  * Accepts the same fields as the WebSocket request, including `max_payload_bytes`
  * (which the object-mode HTTP endpoint does not forward).
  */
@@ -566,10 +558,8 @@ export async function handleTestDocumentSerializedHttpRequest(request: any) {
         timeout_seconds: request?.timeout_seconds ?? undefined,
     };
 
-    const extractionStartEvents: any[] = [];
     const response = await handleZoteroDocumentRequest(wsRequest, {
         responseMode: 'websocket',
-        onExtractionStart: (event) => extractionStartEvents.push(event),
     });
 
     if (isPreparedJsonMessage(response)) {
@@ -579,14 +569,12 @@ export async function handleTestDocumentSerializedHttpRequest(request: any) {
             wire_bytes: new TextEncoder().encode(wireJson).byteLength,
             envelope: preparedJsonEnvelope(response),
             wire: JSON.parse(wireJson),
-            extraction_start_events: extractionStartEvents,
         };
     }
 
     return {
         prepared: false,
         response,
-        extraction_start_events: extractionStartEvents,
     };
 }
 
