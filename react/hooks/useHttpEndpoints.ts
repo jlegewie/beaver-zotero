@@ -71,6 +71,7 @@ import {
     handleTestExternalFileAttachHttpRequest,
     handleTestExternalFileDeleteHttpRequest,
     handleTestExternalFileViewImagesHttpRequest,
+    handleTestDocumentSerializedHttpRequest,
 } from './httpHandlers/testCacheHandlers';
 import {
     handleTestNoteCreateHttpRequest,
@@ -204,6 +205,8 @@ const ENDPOINT_PATHS = [
     '/beaver/test/external-file-attach',
     '/beaver/test/external-file-delete',
     '/beaver/test/external-file-view-images',
+    // Serialized PDF document-request wire path (responseMode: 'websocket')
+    '/beaver/test/document-serialized',
     // Test-only endpoints (note seeding/teardown/inspection)
     '/beaver/test/note-create',
     '/beaver/test/note-delete',
@@ -851,6 +854,12 @@ function registerEndpoints(): boolean {
             createEndpoint(handleTestExternalFileDeleteHttpRequest);
         Zotero.Server.Endpoints['/beaver/test/external-file-view-images'] =
             createEndpoint(handleTestExternalFileViewImagesHttpRequest);
+
+        // Serialized PDF document-request wire path (dev-only): exercises the
+        // websocket response mode, PreparedJsonMessage splice, and
+        // guardSerializedPayloadSize that the object-mode endpoint skips.
+        Zotero.Server.Endpoints['/beaver/test/document-serialized'] =
+            createEndpoint(handleTestDocumentSerializedHttpRequest);
 
         // MuPDF worker singleton stats / lifecycle (dev-only)
         Zotero.Server.Endpoints['/beaver/test/worker-stats'] =

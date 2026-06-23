@@ -517,6 +517,80 @@ export async function handleTestExternalFileDeleteHttpRequest(request: any) {
 }
 
 /**
+ * Dev-only: drive `handleZoteroDocumentRequest` through its production
+ * WebSocket response mode (`responseMode: 'websocket'`).
+ *
+ * The public `/beaver/attachment/document` endpoint uses the default object
+ * mode, so it never exercises the serialized PDF path: the worker
+ * `extractSerialized` op, the `DocumentCache` byte-level (`getSerializedResult`
+ * / `putSerializedResult`) APIs, the `"content_kind":"pdf"` wire splice, the
+ * `PreparedJsonMessage` envelope, or the `guardSerializedPayloadSize` check.
+ *
+ * This handler invokes the real handler in websocket mode and materializes the
+ * result through the exact `materializePreparedJsonMessage` path the agent
+ * connection uses on send. It returns the parsed wire JSON plus its byte
+ * length so tests can assert the spliced output and payload-size accounting
+ * without a WebSocket client. PDF successes come back as a `PreparedJsonMessage`
+ * (`prepared: true`); EPUB/text successes and every error path come back as a
+ * plain object (`prepared: false`).
+ *
+ * `onExtractionStart` is threaded through and any emitted
+ * `zotero_document_extraction_start` side-channel events are collected into
+ * `extraction_start_events`, so tests can assert the event fires once on a cold
+ * extraction and not on a warm cache hit. (The connection-side decision of
+ * whether to send the event to the backend is gated on a capability flag in
+ * `AgentService`/`ProviderConnection` and is not exercised here.)
+ *
+ * Accepts the same fields as the WebSocket request, including `max_payload_bytes`
+ * (which the object-mode HTTP endpoint does not forward).
+ */
+export async function handleTestDocumentSerializedHttpRequest(request: any) {
+    const { handleZoteroDocumentRequest } = await import(
+        '../../../src/services/agentDataProvider/handleZoteroDocumentRequest'
+    );
+    const {
+        isPreparedJsonMessage,
+        materializePreparedJsonMessage,
+        preparedJsonEnvelope,
+    } = await import('../../../src/services/preparedJsonMessage');
+
+    const wsRequest = {
+        event: 'zotero_document_request' as const,
+        request_id: `test-doc-serialized-${request?.attachment?.zotero_key ?? request?.external_file_key ?? 'x'}`,
+        attachment: request?.attachment ?? undefined,
+        external_file_key: request?.external_file_key ?? undefined,
+        mode: request?.mode ?? 'structured',
+        max_pages: request?.max_pages ?? undefined,
+        max_file_size_mb: request?.max_file_size_mb ?? undefined,
+        max_payload_bytes: request?.max_payload_bytes ?? undefined,
+        timeout_seconds: request?.timeout_seconds ?? undefined,
+    };
+
+    const extractionStartEvents: any[] = [];
+    const response = await handleZoteroDocumentRequest(wsRequest, {
+        responseMode: 'websocket',
+        onExtractionStart: (event) => extractionStartEvents.push(event),
+    });
+
+    if (isPreparedJsonMessage(response)) {
+        const wireJson = materializePreparedJsonMessage(response);
+        return {
+            prepared: true,
+            wire_bytes: new TextEncoder().encode(wireJson).byteLength,
+            envelope: preparedJsonEnvelope(response),
+            wire: JSON.parse(wireJson),
+            extraction_start_events: extractionStartEvents,
+        };
+    }
+
+    return {
+        prepared: false,
+        response,
+        extraction_start_events: extractionStartEvents,
+    };
+}
+
+/**
  * Dev-only: invoke `handleZoteroViewImagesRequest` for an external file key.
  *
  * Exposes the external-file branch of the unified view-images handler over

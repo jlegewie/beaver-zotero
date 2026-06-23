@@ -193,6 +193,111 @@ export function fetchExternalFileDocument(
     }, opts);
 }
 
+// -------------------------------------------------------------------------
+// Serialized whole-document wire path (/beaver/test/document-serialized)
+// -------------------------------------------------------------------------
+
+/**
+ * Result of `/beaver/test/document-serialized`. PDF successes arrive as a
+ * `PreparedJsonMessage` (`prepared: true`) carrying the materialized wire JSON
+ * (`wire`) and its byte length (`wire_bytes`); EPUB/text successes and all
+ * error paths arrive as a plain object (`prepared: false`) under `response`.
+ */
+/** Side-channel telemetry emitted once a PDF cache miss reaches extraction. */
+export interface DocumentExtractionStartEvent {
+    type: 'zotero_document_extraction_start';
+    request_id: string;
+    library_id: number;
+    zotero_key: string;
+    content_kind: 'pdf';
+    mode: string;
+    page_count: number;
+    file_size_bytes: number;
+    file_size_mb: number;
+}
+
+/** Frontend extraction timing breakdown attached to a document response. */
+export interface DocumentTiming {
+    resolve_ms?: number;
+    extraction_wait_ms?: number;
+    worker_extract_ms?: number;
+    serialize_ms?: number;
+    payload_bytes?: number;
+    file_size_bytes?: number;
+    file_size_mb?: number;
+    page_count?: number;
+    cache_hit?: number;
+    cache_miss?: number;
+    post_serialize_event_loop_lag_ms?: number;
+    [key: string]: unknown;
+}
+
+export interface SerializedDocumentWireResponse {
+    prepared: boolean;
+    /** Byte length of the materialized wire JSON string (prepared only). */
+    wire_bytes?: number;
+    /** The small envelope object the raw `result` was spliced into. */
+    envelope?: Record<string, any> & { timing?: DocumentTiming };
+    /** Parsed wire message after PreparedJsonMessage materialization. */
+    wire?: {
+        type?: string;
+        request_id?: string;
+        content_kind?: string | null;
+        content_type?: string | null;
+        resolved_attachment?: { library_id: number; zotero_key: string } | null;
+        external_file_key?: string | null;
+        result?: DocumentExtractResult | null;
+        timing?: DocumentTiming;
+        [key: string]: unknown;
+    };
+    /** The plain response object for non-prepared (EPUB/text/error) outcomes. */
+    response?: DocumentResponse & { type?: string; timing?: DocumentTiming };
+    /** Side-channel extraction-start events emitted during the request. */
+    extraction_start_events?: DocumentExtractionStartEvent[];
+}
+
+/**
+ * POST `/beaver/test/document-serialized` — drive `handleZoteroDocumentRequest`
+ * in `responseMode: 'websocket'` and return the materialized wire output.
+ */
+export function fetchDocumentSerialized(
+    attachment: AttachmentFixture,
+    extra?: {
+        mode?: 'markdown' | 'structured';
+        max_pages?: number | null;
+        max_file_size_mb?: number | null;
+        max_payload_bytes?: number | null;
+        timeout_seconds?: number;
+    },
+    opts?: RequestOptions,
+): Promise<SerializedDocumentWireResponse> {
+    return post('/beaver/test/document-serialized', {
+        attachment: {
+            library_id: attachment.library_id,
+            zotero_key: attachment.zotero_key,
+        },
+        ...extra,
+    }, opts);
+}
+
+/** POST `/beaver/test/document-serialized` for a user-attached external file. */
+export function fetchExternalFileDocumentSerialized(
+    extKey: string,
+    extra?: {
+        mode?: 'markdown' | 'structured';
+        max_pages?: number | null;
+        max_file_size_mb?: number | null;
+        max_payload_bytes?: number | null;
+        timeout_seconds?: number;
+    },
+    opts?: RequestOptions,
+): Promise<SerializedDocumentWireResponse> {
+    return post('/beaver/test/document-serialized', {
+        external_file_key: extKey,
+        ...extra,
+    }, opts);
+}
+
 /** POST `/beaver/test/external-file-attach` — dev-only registry seeding. */
 export function attachExternalFileForTest(
     path: string,

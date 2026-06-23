@@ -94,7 +94,49 @@ export async function gzipJsonValueChunked(
     return concatUint8Arrays(chunks);
 }
 
+/** Gzip already-encoded UTF-8 JSON bytes, yielding between deflate slices. */
+export async function gzipUtf8BytesChunked(
+    bytes: Uint8Array,
+    options: ChunkedGzipJsonOptions = {},
+): Promise<Uint8Array> {
+    const requestedSliceChars = options.yieldAfterChars ?? DEFAULT_GZIP_SLICE_CHARS;
+    const sliceBytes = Number.isFinite(requestedSliceChars) && requestedSliceChars >= 1
+        ? Math.floor(requestedSliceChars)
+        : DEFAULT_GZIP_SLICE_CHARS;
+    const yieldToEventLoop = options.yieldToEventLoop ?? defaultYieldToEventLoop;
+
+    const deflator = new (pako as any).Deflate({ gzip: true });
+    const chunks: Uint8Array[] = [];
+
+    deflator.onData = (chunk: Uint8Array | ArrayBuffer) => {
+        chunks.push(chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk));
+    };
+
+    for (let start = 0; start < bytes.byteLength;) {
+        const end = Math.min(start + sliceBytes, bytes.byteLength);
+        const slice = bytes.subarray(start, end);
+        options.onDeflatePush?.(slice.byteLength);
+        deflator.push(slice, false);
+        if (deflator.err) {
+            throw new Error(deflator.msg || `gzip deflate failed with code ${deflator.err}`);
+        }
+        await yieldToEventLoop();
+        start = end;
+    }
+
+    deflator.push(new Uint8Array(), true);
+    if (deflator.err) {
+        throw new Error(deflator.msg || `gzip deflate failed with code ${deflator.err}`);
+    }
+    return concatUint8Arrays(chunks);
+}
+
 /** Gunzip bytes into a UTF-8 string. Throws on malformed input. */
 export function gunzipToString(data: Uint8Array): string {
     return pako.ungzip(data, { to: 'string' }) as string;
+}
+
+/** Gunzip bytes into raw UTF-8 bytes. Throws on malformed input. */
+export function gunzipToBytes(data: Uint8Array): Uint8Array {
+    return pako.ungzip(data) as Uint8Array;
 }
