@@ -132,12 +132,12 @@ export interface NoteState {
 /**
  * TextSelection represents a text selection in a reader.
  *
- * Note: page is 1-based (first page = 1) and matches
- * ReaderState.current_page's coordinate system in the same payload.
+ * Note: page is 1-based (first page = 1) and matches ReaderState.current_page's
+ * coordinate system.
  */
 export interface TextSelection {
     text: string;
-    page: number;
+    page?: number;
 }
 
 /**

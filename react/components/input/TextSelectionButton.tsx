@@ -49,7 +49,7 @@ export const TextSelectionButton = forwardRef<HTMLButtonElement, TextSelectionBu
             extraMenuItems: [{
                 label: 'Reveal in PDF',
                 icon: PdfIcon,
-                onClick: () => navigateToPageInCurrentReader(selection.page),
+                onClick: () => { if (selection.page != null) navigateToPageInCurrentReader(selection.page); },
             }],
         })
 
@@ -59,7 +59,7 @@ export const TextSelectionButton = forwardRef<HTMLButtonElement, TextSelectionBu
                 icon: <Icon icon={TextAlignLeftIcon} className="scale-90 font-color-primary" />,
                 title: 'Text Selection',
                 subtitle: selectionText ? { text: selectionText } : null,
-                action: { icon: PdfIcon, label: `Reveal page ${selection.page} in PDF` },
+                action: { icon: PdfIcon, label: selection.page != null ? `Reveal page ${selection.page} in PDF` : 'Reveal in PDF' },
             };
         }, [selection.page, selection.text]);
 
@@ -97,7 +97,7 @@ export const TextSelectionButton = forwardRef<HTMLButtonElement, TextSelectionBu
                     }}
                     onClick={(e) => {
                         e.stopPropagation();
-                        navigateToPageInCurrentReader(selection.page);
+                        if (selection.page != null) navigateToPageInCurrentReader(selection.page);
                         onClick?.(e);
                     }}
                 >

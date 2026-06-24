@@ -64,8 +64,9 @@ export async function getReaderState(get: Getter): Promise<ReaderState | null> {
             currentPageRange = mapper.toRange(currentPage);
             currentPage = mapper.toPage(currentPage);
         }
-        if (currentTextSelection && currentTextSelection.page != null) {
-            currentTextSelection = { ...currentTextSelection, page: mapper.toPage(currentTextSelection.page) };
+        if (currentTextSelection) {
+            // EPUB readers expose only a section position, not a precise page
+            currentTextSelection = { text: currentTextSelection.text };
         }
     }
 
