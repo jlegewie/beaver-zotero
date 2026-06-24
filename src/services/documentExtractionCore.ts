@@ -522,8 +522,11 @@ export async function extractAndCacheEpubDocument(
                     rawHref: section.rawHref,
                     label: section.label,
                     itemCount: section.items.length,
-                    // Item-less sections do not have an extraction page.
+                    // Item-less sections do not have an extraction page. Page
+                    // numbers are non-decreasing in reading order, so the first
+                    // and last items bound the section's page span.
                     firstPageNumber: section.items[0]?.pageNumber,
+                    lastPageNumber: section.items[section.items.length - 1]?.pageNumber,
                 })),
                 epubExtractedTextChars: doc.diagnostics.extractedTextChars,
             }),

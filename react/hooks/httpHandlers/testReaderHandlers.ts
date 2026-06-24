@@ -68,10 +68,11 @@ export async function handleTestReaderStateHttpRequest(request: any): Promise<an
         ? reader.type
         : null;
     let sectionCount: number | null = null;
+    let primaryView: EpubPrimaryView | undefined;
     if (reader.type === 'epub') {
         // A cold-opened EPUB reader can report its view before the spine
         // renderers exist, which would yield section_count 0 / null position.
-        const primaryView = reader._internalReader?._primaryView as EpubPrimaryView | undefined;
+        primaryView = reader._internalReader?._primaryView as EpubPrimaryView | undefined;
         if (primaryView) await waitForSectionRenderers(primaryView);
         sectionCount = primaryView ? getSectionCount(primaryView) : null;
     }
@@ -81,7 +82,7 @@ export async function handleTestReaderStateHttpRequest(request: any): Promise<an
     if (reader.type === 'epub' && currentPage !== null && reader.itemID != null) {
         const attachmentItem = await Zotero.Items.getAsync(reader.itemID);
         if (attachmentItem) {
-            currentPage = await remapEpubSectionToPage(attachmentItem, currentPage);
+            currentPage = await remapEpubSectionToPage(attachmentItem, currentPage, primaryView);
         }
     }
 

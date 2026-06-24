@@ -46,6 +46,13 @@ export interface EpubSectionSummary {
      * 1-based page coordinate of the section's first extracted item.
      */
     firstPageNumber?: number;
+    /**
+     * 1-based page coordinate of the section's last extracted item. With
+     * `firstPageNumber` this gives the section's full page span, used to report
+     * the reader's current-page range. Absent on cache rows written before this
+     * field existed.
+     */
+    lastPageNumber?: number;
 }
 
 export interface SnapshotSectionSummary {

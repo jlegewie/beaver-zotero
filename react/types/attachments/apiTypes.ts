@@ -108,6 +108,14 @@ export interface ReaderState {
     library_id: number;
     zotero_key: string;
     current_page: number | null;
+    /**
+     * EPUB only: inclusive `[firstPage, lastPage]` extraction-page span of the
+     * section at the top of the viewport. The reader sits within this section, so
+     * the true page is always inside this range. The reader exposes only a
+     * section position (not a fine page), so this conveys the uncertainty without
+     * over-claiming a single page. PDFs omit it (they have an exact page).
+     */
+    current_page_range?: [number, number];
     /** Reader type. Omitted for reader types without page semantics (e.g. snapshots). */
     content_kind?: 'pdf' | 'epub';
     text_selection?: TextSelection;
