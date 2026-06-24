@@ -15,13 +15,13 @@ interface ZoteroSearchResultViewProps {
  * Parse item_id format '<library_id>-<zotero_key>' to ZoteroItemReference.
  */
 function parseItemId(itemId: string): ZoteroItemReference | null {
-    const [libraryIdStr, zoteroKey] = itemId.split('-');
-    if (!libraryIdStr || !zoteroKey) return null;
-    
-    const libraryId = parseInt(libraryIdStr, 10);
+    const match = itemId.match(/^(\d+)-(.+)$/);
+    if (!match) return null;
+
+    const libraryId = parseInt(match[1], 10);
     if (isNaN(libraryId)) return null;
-    
-    return { library_id: libraryId, zotero_key: zoteroKey };
+
+    return { library_id: libraryId, zotero_key: match[2] };
 }
 
 /**
