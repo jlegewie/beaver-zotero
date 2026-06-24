@@ -42,6 +42,10 @@ export interface EpubSectionSummary {
     rawHref: string;
     label?: string;
     itemCount?: number;
+    /**
+     * 1-based page coordinate of the section's first extracted item.
+     */
+    firstPageNumber?: number;
 }
 
 export interface SnapshotSectionSummary {
@@ -61,6 +65,10 @@ export type CachedDocumentMetadata =
         content_kind: 'epub';
         sectionCount: number;
         sections: EpubSectionSummary[];
+        /**
+         * Total page count, based on the max stamped EPUB page coordinate.
+         */
+        pageCount?: number | null;
         /**
          * Total extracted text characters from the extraction diagnostics.
          * Lets the read side flag image-only/scanned EPUBs (sections but no
@@ -156,11 +164,13 @@ export function buildPdfCachedMetadata(
 export function buildEpubCachedMetadata(
     sections: EpubSectionSummary[],
     extractedTextChars?: number | null,
+    pageCount?: number | null,
 ): CachedDocumentMetadata {
     return {
         content_kind: 'epub',
         sectionCount: sections.length,
         sections,
+        pageCount: pageCount ?? null,
         extractedTextChars: extractedTextChars ?? null,
     };
 }

@@ -79,7 +79,7 @@ describe("extractEpubDocument", () => {
         expect(close).toHaveBeenCalledTimes(1);
         expect(doc).toMatchObject({
             content_kind: "epub",
-            schemaVersion: "1",
+            schemaVersion: "2",
             sectionCount: 2,
             sections: [
                 { index: 0, rawHref: "EPUB/index.xhtml" },
@@ -215,6 +215,96 @@ describe("extractEpubDocument", () => {
             { text: "Middle text.", pageLabel: "1" },
             { text: "B text.", pageLabel: "2" },
         ]);
+    });
+});
+
+describe("stampEpubPageNumbers", () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        (globalThis as any).Zotero.Promise = { delay: vi.fn().mockResolvedValue(undefined) };
+        isRemoteAccessAvailableMock.mockReturnValue(false);
+    });
+
+    it("numbers physical pages by marker ordinal, letting a page span sections", async () => {
+        installEpubModule([
+            { href: "EPUB/one.xhtml", doc: parseXhtml('<a id="page_1"></a><p>Alpha.</p>') },
+            { href: "EPUB/two.xhtml", doc: parseXhtml("<p>Bravo.</p>") },
+            { href: "EPUB/three.xhtml", doc: parseXhtml('<a id="page_2"></a><p>Charlie.</p>') },
+        ]);
+
+        const doc = await extractEpubDocumentFromFile("/tmp/book.epub");
+
+        expect(doc.sections[0].items[0]).toMatchObject({ text: "Alpha.", pageNumber: 1, pageLabel: "1" });
+        // A physical page can span section boundaries.
+        expect(doc.sections[1].items[0]).toMatchObject({ text: "Bravo.", pageNumber: 1, pageLabel: "1" });
+        expect(doc.sections[2].items[0]).toMatchObject({ text: "Charlie.", pageNumber: 2, pageLabel: "2" });
+        expect(doc.pageCount).toBe(2);
+    });
+
+    it("demotes to synthetic page numbers when a physical page is too large, keeping marker labels", async () => {
+        const huge = "a".repeat(6500); // exceeds MAX_PHYSICAL_PAGE_CHARS
+        installEpubModule([
+            { href: "EPUB/one.xhtml", doc: parseXhtml(`<a id="page_1"></a><p>${huge}</p>`) },
+            { href: "EPUB/two.xhtml", doc: parseXhtml("<p>Bravo.</p>") },
+            { href: "EPUB/three.xhtml", doc: parseXhtml("<p>Charlie.</p>") },
+            { href: "EPUB/four.xhtml", doc: parseXhtml('<a id="page_2"></a><p>Delta.</p>') },
+        ]);
+
+        const doc = await extractEpubDocumentFromFile("/tmp/book.epub");
+
+        // Marker labels remain independent from synthetic page numbers.
+        expect(doc.sections[1].items[0].pageLabel).toBe("1");
+        expect(doc.sections[3].items[0].pageLabel).toBe("2");
+        expect(doc.sections[0].items[0].pageNumber).toBe(1);
+        expect(doc.sections[1].items[0].pageNumber).toBe(2);
+        expect(doc.sections[2].items[0].pageNumber).toBe(3);
+        expect(doc.sections[3].items[0].pageNumber).toBe(4);
+        expect(doc.pageCount).toBe(4);
+    });
+
+    it("synthesizes uniform pages with section-boundary resets when no markers exist", async () => {
+        installEpubModule([
+            { href: "EPUB/one.xhtml", doc: parseXhtml("<p>Alpha.</p><p>Bravo.</p>") },
+            { href: "EPUB/two.xhtml", doc: parseXhtml("<p>Charlie.</p>") },
+        ]);
+
+        const doc = await extractEpubDocumentFromFile("/tmp/book.epub");
+
+        // Small items in one section share a page; a new section starts a new page.
+        expect(doc.sections[0].items[0]).toMatchObject({ text: "Alpha.", pageNumber: 1 });
+        expect(doc.sections[0].items[1]).toMatchObject({ text: "Bravo.", pageNumber: 1 });
+        expect(doc.sections[1].items[0]).toMatchObject({ text: "Charlie.", pageNumber: 2 });
+        expect(doc.sections[0].items[0].pageLabel).toBeUndefined();
+        expect(doc.pageCount).toBe(2);
+    });
+
+    it("splits a long section into multiple synthetic pages by char interval", async () => {
+        const para = "a".repeat(1700);
+        installEpubModule([
+            { href: "EPUB/one.xhtml", doc: parseXhtml(`<p>${para}</p><p>${para}</p>`) },
+        ]);
+
+        const doc = await extractEpubDocumentFromFile("/tmp/book.epub");
+
+        expect(doc.sections[0].items[0].pageNumber).toBe(1);
+        // 1700 + 1700 exceeds SYNTHETIC_PAGE_CHAR_INTERVAL (1800), so page 2 starts.
+        expect(doc.sections[0].items[1].pageNumber).toBe(2);
+        expect(doc.pageCount).toBe(2);
+    });
+
+    it("assigns page 1 to front matter before the first marker", async () => {
+        installEpubModule([
+            { href: "EPUB/one.xhtml", doc: parseXhtml('<p>Frontmatter.</p><a id="page_1"></a><p>Body.</p>') },
+            { href: "EPUB/two.xhtml", doc: parseXhtml('<a id="page_2"></a><p>More.</p>') },
+        ]);
+
+        const doc = await extractEpubDocumentFromFile("/tmp/book.epub");
+        const [frontmatter, body] = doc.sections[0].items;
+
+        expect(frontmatter).toMatchObject({ text: "Frontmatter.", pageNumber: 1 });
+        expect(frontmatter.pageLabel).toBeUndefined(); // no label precedes the first marker
+        expect(body).toMatchObject({ text: "Body.", pageNumber: 1, pageLabel: "1" });
+        expect(doc.sections[1].items[0]).toMatchObject({ text: "More.", pageNumber: 2, pageLabel: "2" });
     });
 });
 

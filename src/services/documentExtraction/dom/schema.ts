@@ -23,6 +23,11 @@ export interface DomItem {
     sentences?: DomSentence[];
     anchorId?: string;
     pageLabel?: string;
+    /**
+     * 1-based extraction page coordinate for EPUB items. Independent of
+     * `pageLabel`, which is only present when publisher page markers exist.
+     */
+    pageNumber?: number;
 }
 
 export interface DomSection {

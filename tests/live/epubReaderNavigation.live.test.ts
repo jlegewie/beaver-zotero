@@ -176,7 +176,7 @@ describe('reader state (F-5)', () => {
     beforeEach((ctx) => skipIfNoZotero(ctx, available));
 
     it(
-        'reports the EPUB section ordinal as current_page with content_kind epub',
+        'reports the EPUB page number as current_page with content_kind epub',
         { timeout: READER_TIMEOUT },
         async () => {
             const state = await readerState(NON_PDF);
@@ -184,9 +184,8 @@ describe('reader state (F-5)', () => {
             expect(state.reader_type).toBe('epub');
             expect(state.content_kind).toBe('epub');
             expect(state.section_count).toBeGreaterThan(0);
-            // 1-based ordinal within the spine.
+            // EPUB page coordinates are not bounded by section count.
             expect(state.current_page).toBeGreaterThanOrEqual(1);
-            expect(state.current_page).toBeLessThanOrEqual(state.section_count!);
             expect(Number.isInteger(state.current_page)).toBe(true);
         },
     );

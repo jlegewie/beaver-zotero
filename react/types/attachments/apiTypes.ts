@@ -100,11 +100,9 @@ export interface ExternalFileAttachment {
 /**
  * ReaderState represents the state of a reader.
  *
- * Note: current_page is 1-based (first page = 1). For PDFs it is
- * pdfViewer.currentPageNumber from PDF.js; when navigating to a page, the code
- * converts to 0-based indexing using pageIndex: page - 1. For EPUBs it is the
- * spine section ordinal (section index + 1), the same coordinate used as
- * "page N" by reading and citation tools.
+ * Note: current_page is 1-based (first page = 1). For PDFs it is the PDF.js
+ * page number. For EPUBs it is the extraction-backed page coordinate when cached
+ * metadata is available, otherwise the reader section ordinal.
  */
 export interface ReaderState {
     library_id: number;
@@ -126,8 +124,8 @@ export interface NoteState {
 /**
  * TextSelection represents a text selection in a reader.
  *
- * Note: page is 1-based (first page = 1), matching ReaderState.current_page.
- * For EPUBs it is the spine section ordinal of the section in view.
+ * Note: page is 1-based (first page = 1) and matches
+ * ReaderState.current_page's coordinate system in the same payload.
  */
 export interface TextSelection {
     text: string;

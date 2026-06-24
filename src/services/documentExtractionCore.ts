@@ -489,14 +489,18 @@ export async function extractAndCacheEpubDocument(
             },
             metadata: (doc) => ({
                 contentKind: 'epub',
+                // PDF-only fields stay null for EPUB.
                 pageCount: null,
                 pageLabels: null,
                 pages: null,
+                epubPageCount: doc.pageCount ?? null,
                 epubSections: doc.sections.map((section) => ({
                     index: section.index,
                     rawHref: section.rawHref,
                     label: section.label,
                     itemCount: section.items.length,
+                    // Item-less sections do not have an extraction page.
+                    firstPageNumber: section.items[0]?.pageNumber,
                 })),
                 epubExtractedTextChars: doc.diagnostics.extractedTextChars,
             }),

@@ -41,7 +41,7 @@ const structuredResult: BeaverExtractResult = {
 
 const epubDocument: EpubDocument = {
     content_kind: 'epub',
-    schemaVersion: '1',
+    schemaVersion: '2',
     sectionCount: 1,
     sections: [
         {
@@ -251,6 +251,7 @@ describe('DocumentCache payloads', () => {
             content_kind: 'epub',
             sectionCount: 1,
             sections: [{ index: 0, rawHref: 'EPUB/chapter.xhtml', label: 'Chapter 1', itemCount: 1 }],
+            pageCount: null,
             extractedTextChars: 1234,
         });
         const payload = await db.getDocumentCachePayload(1, 'ABCD1234', 'structured');
@@ -931,7 +932,7 @@ describe('DocumentCache payloads', () => {
 
         const metadata = await db.getDocumentCacheMetadataByKey(1, 'ABCD1234');
         expect(metadata?.contentKind).toBe('epub');
-        expect(metadata?.extractionSchemaVersion).toBe('1');
+        expect(metadata?.extractionSchemaVersion).toBe('2');
         expect(await db.getDocumentCachePayloadCount()).toBe(1);
     });
 

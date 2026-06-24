@@ -338,7 +338,9 @@ async function resolveEpubInfo(
                         status_reason: 'EPUB contains no extractable text (image-only or scanned book).',
                     };
                 }
-                return { page_count: sectionCount, status: 'readable' };
+                // Use the cached page count when available; otherwise report
+                // the section count as the best available EPUB extent.
+                return { page_count: epubMeta?.pageCount ?? sectionCount, status: 'readable' };
             }
         } catch (error) {
             logger(`getAttachmentInfo: cache read error: ${error}`, 1);

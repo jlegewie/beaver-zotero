@@ -15,6 +15,7 @@ import {
 } from "./schema";
 import {
     epubPageLabelForPosition,
+    epubPageOrdinalForPosition,
     extractSectionPageMarkers,
     scorePageMarkers,
     type PageMappingSectionMarkers,
@@ -29,6 +30,12 @@ import type { DomItem } from "../dom";
 // book's visible text (an unrecognized container/table structure) and warrants a
 // warning so low-quality EPUB extractions are surfaced rather than silent.
 const LOW_COVERAGE_WARN_THRESHOLD = 0.85;
+
+// Synthetic EPUB pagination cadence, applied at item granularity.
+const SYNTHETIC_PAGE_CHAR_INTERVAL = 1800;
+
+// Reject sparse physical markers that would create very large pages.
+const MAX_PHYSICAL_PAGE_CHARS = 6000;
 
 interface ZoteroEpubModule {
     EPUB: new (filePath: string) => {
@@ -197,7 +204,9 @@ export async function extractEpubDocumentFromFile(
     }
 
     throwIfAborted(options?.abortSignal);
-    stampEpubPageLabels(itemPositions, scorePageMarkers(sectionMarkers, sections.length));
+    const pageMapping = scorePageMarkers(sectionMarkers, sections.length);
+    stampEpubPageLabels(itemPositions, pageMapping);
+    const pageCount = stampEpubPageNumbers(itemPositions, pageMapping);
     const diagnostics = buildDomDiagnostics(sections, sourceTextChars);
     if (diagnostics.textCoverage !== null && diagnostics.textCoverage < LOW_COVERAGE_WARN_THRESHOLD) {
         logger(
@@ -212,6 +221,7 @@ export async function extractEpubDocumentFromFile(
         content_kind: EPUB_CONTENT_KIND,
         schemaVersion: EPUB_SCHEMA_VERSION,
         sectionCount: sections.length,
+        pageCount,
         sections,
         citationIndex: buildDomCitationIndex(sections),
         diagnostics,
@@ -270,6 +280,75 @@ function stampEpubPageLabels(
             sentence.pageLabel = label;
         }
     }
+}
+
+/**
+ * Stamp a 1-based `pageNumber` on every item and return the max page number.
+ * Uses physical marker ordinals when reliable; otherwise uses synthetic pages.
+ */
+function stampEpubPageNumbers(
+    itemPositions: ExtractedItemPosition[],
+    mapping: ReturnType<typeof scorePageMarkers>,
+): number {
+    if (itemPositions.length === 0) return 0;
+    if (mapping.isPhysical) {
+        const physicalCount = stampPhysicalPageNumbers(itemPositions, mapping);
+        if (physicalCount !== null) return physicalCount;
+    }
+    return stampSyntheticPageNumbers(itemPositions);
+}
+
+/**
+ * Assign marker-ordinal pages, or return `null` when the marker map is too
+ * sparse to use as the document page coordinate.
+ */
+function stampPhysicalPageNumbers(
+    itemPositions: ExtractedItemPosition[],
+    mapping: ReturnType<typeof scorePageMarkers>,
+): number | null {
+    const provisional = itemPositions.map(({ sectionIndex, charOffset }) =>
+        epubPageOrdinalForPosition(mapping, sectionIndex, charOffset));
+
+    // Sparse marker maps can otherwise create chapter-sized pages.
+    const charsByPage = new Map<number, number>();
+    for (let i = 0; i < itemPositions.length; i++) {
+        const chars = itemPositions[i].item.text?.length ?? 0;
+        charsByPage.set(provisional[i], (charsByPage.get(provisional[i]) ?? 0) + chars);
+    }
+    for (const total of charsByPage.values()) {
+        if (total > MAX_PHYSICAL_PAGE_CHARS) return null;
+    }
+
+    let maxPage = 1;
+    for (let i = 0; i < itemPositions.length; i++) {
+        itemPositions[i].item.pageNumber = provisional[i];
+        if (provisional[i] > maxPage) maxPage = provisional[i];
+    }
+    return maxPage;
+}
+
+/**
+ * Assign uniform synthetic pages: break at every section boundary and whenever
+ * the accumulated text would exceed {@link SYNTHETIC_PAGE_CHAR_INTERVAL}.
+ */
+function stampSyntheticPageNumbers(itemPositions: ExtractedItemPosition[]): number {
+    let page = 1;
+    let accumulated = 0;
+    let previousSection: number | undefined;
+    for (const { item, sectionIndex } of itemPositions) {
+        const chars = item.text?.length ?? 0;
+        if (previousSection !== undefined && sectionIndex !== previousSection) {
+            page++;
+            accumulated = 0;
+        } else if (accumulated > 0 && accumulated + chars > SYNTHETIC_PAGE_CHAR_INTERVAL) {
+            page++;
+            accumulated = 0;
+        }
+        item.pageNumber = page;
+        accumulated += chars;
+        previousSection = sectionIndex;
+    }
+    return page;
 }
 
 /** Extract an EPUB attachment with request-safe preflight and error responses. */

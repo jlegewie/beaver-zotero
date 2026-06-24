@@ -175,3 +175,26 @@ export function epubPageLabelForPosition(
     }
     return label;
 }
+
+/**
+ * Return the 1-based ordinal of the nearest page marker at or before a position.
+ * Content before the first marker maps to page 1.
+ */
+export function epubPageOrdinalForPosition(
+    mapping: EpubPageMapping,
+    sectionIndex: number,
+    charOffset: number,
+): number {
+    let ordinal = 0;
+    for (const marker of mapping.markers) {
+        const atOrBefore =
+            marker.sectionIndex < sectionIndex
+            || (marker.sectionIndex === sectionIndex && marker.charOffset <= charOffset);
+        if (atOrBefore) {
+            ordinal++;
+        } else {
+            break; // markers are sorted ascending; the rest are past the position
+        }
+    }
+    return ordinal === 0 ? 1 : ordinal;
+}

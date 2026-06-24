@@ -38,8 +38,10 @@ const MAX_LIBRARY_SELECTION = 5;
 
 /**
  * Build reader state for the current reader attachment.
+ * EPUB reader positions are section ordinals, so cached metadata is used when
+ * available to report the same page coordinate as extraction-backed tools.
  */
-export function getReaderState(get: Getter): ReaderState | null {
+export async function getReaderState(get: Getter): Promise<ReaderState | null> {
     const readerAttachment = get(currentReaderAttachmentAtom);
     if (!readerAttachment) return null;
 
@@ -47,14 +49,63 @@ export function getReaderState(get: Getter): ReaderState | null {
     const contentKind = reader?.type === 'pdf' || reader?.type === 'epub'
         ? reader.type
         : undefined;
-    const currentTextSelection = get(readerTextSelectionAtom);
+    let currentTextSelection = get(readerTextSelectionAtom);
+
+    let currentPage = getCurrentPage(reader) || null;
+    if (contentKind === 'epub') {
+        // Keep the reader page and selection page in the same coordinate system.
+        const toPage = await getEpubSectionToPageMapper(readerAttachment);
+        if (currentPage !== null) currentPage = toPage(currentPage);
+        if (currentTextSelection && currentTextSelection.page != null) {
+            currentTextSelection = { ...currentTextSelection, page: toPage(currentTextSelection.page) };
+        }
+    }
+
     return {
         library_id: readerAttachment.libraryID,
         zotero_key: readerAttachment.key,
-        current_page: getCurrentPage(reader) || null,
+        current_page: currentPage,
         ...(contentKind && { content_kind: contentKind }),
         ...(currentTextSelection && { text_selection: currentTextSelection })
     } as ReaderState;
+}
+
+/**
+ * Build a mapper from a 1-based EPUB reader section ordinal to its cached page.
+ * Falls back to identity when cache metadata is unavailable.
+ */
+async function getEpubSectionToPageMapper(
+    readerAttachment: Zotero.Item,
+): Promise<(ordinal: number) => number> {
+    const identity = (ordinal: number) => ordinal;
+    try {
+        const cache = Zotero.Beaver?.documentCache;
+        if (!cache) return identity;
+        const filePath = await readerAttachment.getFilePathAsync();
+        if (!filePath) return identity;
+        const cached = await cache.getMetadata({
+            libraryId: readerAttachment.libraryID,
+            zoteroKey: readerAttachment.key,
+        }, filePath);
+        const meta = cached?.documentMetadata;
+        const epubMeta = meta?.content_kind === 'epub' ? meta : null;
+        if (!epubMeta) return identity;
+        return (ordinal) => epubMeta.sections[ordinal - 1]?.firstPageNumber ?? ordinal;
+    } catch (error) {
+        logger(`getReaderState: EPUB section→page mapper failed: ${error}`, 1);
+        return identity;
+    }
+}
+
+/**
+ * Map one EPUB reader section ordinal to the cached page coordinate.
+ */
+export async function remapEpubSectionToPage(
+    readerAttachment: Zotero.Item,
+    ordinal: number,
+): Promise<number> {
+    const toPage = await getEpubSectionToPageMapper(readerAttachment);
+    return toPage(ordinal);
 }
 
 /**
@@ -77,7 +128,7 @@ export function getNoteState(get: Getter): NoteState | null {
  * embedding-index status, and per-library summaries).
  */
 export async function buildZoteroApplicationState(get: Getter): Promise<ApplicationStateInput> {
-    const readerState = getReaderState(get);
+    const readerState = await getReaderState(get);
     const noteState = getNoteState(get);
 
     // Get current library and collection context

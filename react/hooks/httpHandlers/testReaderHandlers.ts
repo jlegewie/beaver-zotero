@@ -4,8 +4,8 @@
  *
  * `/beaver/test/reader-state` opens (or reuses) a reader tab and reports the
  * same position fields `getReaderState` derives for `application_state`:
- * `current_page` via `getCurrentPage()` (PDF page, or 1-based EPUB section
- * ordinal) and `content_kind` from `reader.type`.
+ * `current_page` (PDF page, or EPUB page coordinate) and `content_kind` from
+ * `reader.type`.
  *
  * `/beaver/test/epub-citation-navigate` drives the EPUB citation-click path
  * against the live reader: either the full `navigateToEpubCitation` flow
@@ -18,6 +18,7 @@ import {
     getCurrentReaderAndWaitForView,
     waitForReaderForItem,
 } from '../../utils/readerUtils';
+import { remapEpubSectionToPage } from '../../atoms/applicationState';
 import { navigateToEpubCitation } from '../../utils/epubVisualizer/epubCitationNavigation';
 import { resolveEpubCitationRange } from '../../utils/epubVisualizer/epubRangeResolver';
 import {
@@ -75,10 +76,19 @@ export async function handleTestReaderStateHttpRequest(request: any): Promise<an
         sectionCount = primaryView ? getSectionCount(primaryView) : null;
     }
 
+    // Match the EPUB page coordinate used by application state.
+    let currentPage = getCurrentPage(reader) || null;
+    if (reader.type === 'epub' && currentPage !== null && reader.itemID != null) {
+        const attachmentItem = await Zotero.Items.getAsync(reader.itemID);
+        if (attachmentItem) {
+            currentPage = await remapEpubSectionToPage(attachmentItem, currentPage);
+        }
+    }
+
     return {
         ok: true,
         reader_type: reader.type ?? null,
-        current_page: getCurrentPage(reader) || null,
+        current_page: currentPage,
         content_kind: contentKind,
         section_count: sectionCount,
     };
