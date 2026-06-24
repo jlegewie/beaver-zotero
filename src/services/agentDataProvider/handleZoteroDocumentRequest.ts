@@ -416,6 +416,7 @@ export async function handleZoteroDocumentRequest(
                     source: { kind: 'zotero', item: resolvedItem },
                     resolvedKey,
                     contentType,
+                    maxPages: max_pages ?? null,
                     maxFileSizeMB: max_file_size_mb ?? 0,
                     externalAbortSignal: timeout.signal,
                     onFileNotSyncedLocally: notifyRemoteFileNotSynced,
@@ -443,7 +444,7 @@ export async function handleZoteroDocumentRequest(
                 }, null, 'epub', errorResponse);
             }
 
-            return errorResponse(result.message, result.code, null, 'epub');
+            return errorResponse(result.message, result.code, result.pageCount ?? null, 'epub');
         }
 
         if (contentKind !== 'pdf') {
@@ -691,6 +692,7 @@ async function handleExternalFileDocumentRequest(
                     source: { kind: 'external', filePath: record.storedPath, itemRef },
                     resolvedKey: requestKey,
                     contentType: record.mimeType,
+                    maxPages: max_pages ?? null,
                     maxFileSizeMB: max_file_size_mb ?? 0,
                     externalAbortSignal: timeout.signal,
                 }),
@@ -715,7 +717,7 @@ async function handleExternalFileDocumentRequest(
             if (result.code === 'file_missing') {
                 return errorResponse(externalFileMissingMessage(extKey, record), 'file_missing', null, 'epub');
             }
-            return errorResponse(result.message, result.code, null, 'epub');
+            return errorResponse(result.message, result.code, result.pageCount ?? null, 'epub');
         }
 
         // PDF

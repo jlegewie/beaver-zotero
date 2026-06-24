@@ -140,6 +140,13 @@ export interface ExtractAndCacheEpubArgs {
     source: ExtractionSource;
     resolvedKey: string;
     contentType: string;
+    /**
+     * Reject threshold for total document page count. `null` falls back to
+     * Beaver's hard page-count cap. EPUB pages are the extractor's per-item
+     * `pageNumber` coordinate (physical print pages when the book carries
+     * markers, otherwise synthetic ~character-interval pages).
+     */
+    maxPages: number | null;
     maxFileSizeMB: number;
     externalAbortSignal?: AbortSignal;
     onFileNotSyncedLocally?: () => void;
@@ -252,6 +259,8 @@ export type ExtractAndCacheEpubResult =
           kind: 'response_error';
           code: ZoteroDocumentErrorCode;
           message: string;
+          /** Document page count when known (e.g. the count that tripped `too_many_pages`). */
+          pageCount?: number | null;
           resolvedAttachment: ResolvedAttachment;
           contentKind?: ExtractContentKind;
       };
@@ -430,6 +439,7 @@ export async function extractAndCacheEpubDocument(
 
     const maxFileSizeMB = effectiveMaxFileSizeMB(args.maxFileSizeMB);
     const maxSourceSizeBytes = maxFileSizeMB * 1024 * 1024;
+    const maxPages = effectiveMaxPageCount(args.maxPages);
 
     const okOrNoText = (
         document: EpubDocument,
@@ -440,6 +450,19 @@ export async function extractAndCacheEpubDocument(
                 kind: 'response_error',
                 code: 'no_text_layer',
                 message: `The EPUB file for ${requestKey} contains no extractable text.`,
+                resolvedAttachment,
+                contentKind: 'epub',
+            };
+        }
+        // Match the PDF path and the backend's document_fetch_max_pages: reject
+        // oversized documents before serializing the (potentially large) payload.
+        // EPUB page counts are the extractor's per-item page coordinate.
+        if (document.pageCount != null && document.pageCount > maxPages) {
+            return {
+                kind: 'response_error',
+                code: 'too_many_pages',
+                message: `The EPUB file for ${requestKey} has ${document.pageCount} pages, which exceeds the ${maxPages}-page limit.`,
+                pageCount: document.pageCount,
                 resolvedAttachment,
                 contentKind: 'epub',
             };
