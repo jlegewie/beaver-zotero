@@ -71,7 +71,6 @@ export const atomRegistry = {
     availableModels: availableModelsAtom,
 
     // Profile
-    currentBeaverVersion: Zotero.Beaver?.pluginVersion,
     isProfileInvalid: isProfileInvalidAtom,
     isProfileLoaded: isProfileLoadedAtom,
     profileWithPlan: profileWithPlanAtom,
@@ -118,7 +117,11 @@ export const getJotaiState = () => {
         } catch (error: any) {
             state[key] = `Error reading atom: ${error.message}`
         }
-    })    
+    })
+
+    // Plugin version is a plain string, not a Jotai atom, so it is read
+    // directly rather than through store.get() (which requires an atom object).
+    state.currentBeaverVersion = Zotero.Beaver?.pluginVersion
 
     return state;
 }
