@@ -85,5 +85,8 @@ export { default as BugIcon } from './BugIcon';
 export { default as PlayIcon } from './PlayIcon';
 export { default as ChevronIcon } from './ChevronIcon';
 export { default as ChartIcon } from './ChartIcon';
+export { default as RockIcon } from './RockIcon';
+export { default as TissuePaperIcon } from './TissuePaperIcon';
+export { default as ScissorIcon } from './ScissorIcon';
 export { default as FileLinkIcon } from './FileLinkIcon';
 export { default as ExternalLinkIcon } from './ExternalLinkIcon';
