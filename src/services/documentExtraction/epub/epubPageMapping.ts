@@ -198,3 +198,42 @@ export function epubPageOrdinalForPosition(
     }
     return ordinal === 0 ? 1 : ordinal;
 }
+
+/** One content text node positioned on a section's character scale. */
+export interface SectionTextNode {
+    /** Cumulative character offset of the node's first character. */
+    start: number;
+    /** Character length of the node. */
+    length: number;
+}
+
+/**
+ * Append synthetic page markers for one EPUB section.
+ *
+ * The input nodes must use the same filtered character scale as extracted item
+ * offsets. Markers are appended in global order, and each section starts with a
+ * fresh break budget.
+ */
+export function appendSyntheticSectionMarkers(
+    nodes: SectionTextNode[],
+    sectionIndex: number,
+    interval: number,
+    out: EpubPageMarker[],
+): void {
+    let remainingBeforeBreak = 0;
+    for (const { start, length } of nodes) {
+        let offsetInNode = 0;
+        let remaining = length;
+        if (remaining <= remainingBeforeBreak) {
+            remainingBeforeBreak -= remaining;
+            continue;
+        }
+        while (remaining > remainingBeforeBreak) {
+            offsetInNode += remainingBeforeBreak;
+            remaining -= remainingBeforeBreak;
+            out.push({ sectionIndex, charOffset: start + offsetInNode, label: String(out.length + 1) });
+            remainingBeforeBreak = interval;
+        }
+        // Keep the post-break remainder out of the next interval.
+    }
+}

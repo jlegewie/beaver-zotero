@@ -256,10 +256,10 @@ describe("stampEpubPageNumbers", () => {
         expect(doc.sections[1].items[0].pageLabel).toBe("1");
         expect(doc.sections[3].items[0].pageLabel).toBe("2");
         expect(doc.sections[0].items[0].pageNumber).toBe(1);
-        expect(doc.sections[1].items[0].pageNumber).toBe(2);
-        expect(doc.sections[2].items[0].pageNumber).toBe(3);
-        expect(doc.sections[3].items[0].pageNumber).toBe(4);
-        expect(doc.pageCount).toBe(4);
+        expect(doc.sections[1].items[0].pageNumber).toBe(5);
+        expect(doc.sections[2].items[0].pageNumber).toBe(6);
+        expect(doc.sections[3].items[0].pageNumber).toBe(7);
+        expect(doc.pageCount).toBe(7);
     });
 
     it("synthesizes uniform pages with section-boundary resets when no markers exist", async () => {
@@ -279,16 +279,18 @@ describe("stampEpubPageNumbers", () => {
     });
 
     it("splits a long section into multiple synthetic pages by char interval", async () => {
-        const para = "a".repeat(1700);
+        const para = `<p>${"a".repeat(299)}.</p>`;
         installEpubModule([
-            { href: "EPUB/one.xhtml", doc: parseXhtml(`<p>${para}</p><p>${para}</p>`) },
+            { href: "EPUB/one.xhtml", doc: parseXhtml(para.repeat(8)) },
         ]);
 
         const doc = await extractEpubDocumentFromFile("/tmp/book.epub");
+        const items = doc.sections[0].items;
 
-        expect(doc.sections[0].items[0].pageNumber).toBe(1);
-        // 1700 + 1700 exceeds SYNTHETIC_PAGE_CHAR_INTERVAL (1800), so page 2 starts.
-        expect(doc.sections[0].items[1].pageNumber).toBe(2);
+        expect(items).toHaveLength(8);
+        expect(items[0].pageNumber).toBe(1);
+        expect(items[6].pageNumber).toBe(1);
+        expect(items[7].pageNumber).toBe(2);
         expect(doc.pageCount).toBe(2);
     });
 
