@@ -71,7 +71,13 @@ export const SettingsRow: React.FC<SettingsRowProps> = ({
 
     return (
         <div
-            className={`display-flex flex-row items-center justify-between gap-4 ${hasBorder ? 'border-top-quinary' : ''} ${onClick && !disabled ? 'cursor-pointer' : ''} ${disabled ? 'opacity-60 cursor-not-allowed' : ''} ${className}`}
+            className={`
+                display-flex flex-row items-center justify-between gap-4
+                ${hasBorder ? 'border-top-quinary' : ''}
+                ${onClick && !disabled ? 'cursor-pointer' : ''}
+                ${disabled ? 'opacity-60 cursor-not-allowed' : ''}
+                ${className}
+            `}
             style={{ padding: '8px 12px', minHeight: '38px' }}
             onClick={(e) => {
                 if (disabled || !onClick) return;

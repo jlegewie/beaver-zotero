@@ -218,47 +218,60 @@ const ApiKeysSection: React.FC = () => {
                 {requestPlusTools ? (
                     remainingBeaverCredits > 0 ? (
                         <span
-                            className="text-xs font-color-secondary px-15 py-05 rounded-md bg-quinary border-quinary"
-                            style={{ marginTop: '20px', marginBottom: '6px' }}
+                            className="text-sm font-color-secondary px-15 py-05 rounded-md bg-quinary border-quinary"
+                            style={{
+                                marginTop: '20px', marginBottom: '6px',
+                                backgroundColor: 'var(--tag-green-quinary)',
+                                color: 'var(--tag-green-secondary)',
+                                borderColor: 'var(--tag-green-tertiary)',
+                            }}
                         >
-                            Enabled
+                            Active
                         </span>
                     ) : (
                         <span
-                            className="text-xs px-15 py-05 rounded-md"
-                            style={{ marginTop: '20px', marginBottom: '6px', color: 'var(--tag-orange-secondary)', border: '1px solid var(--tag-orange-tertiary)', background: 'var(--tag-orange-quinary)' }}
+                            className="text-sm font-color-secondary px-15 py-05 rounded-md bg-quinary border-quinary"
+                            style={{
+                                marginTop: '20px', marginBottom: '6px',
+                                backgroundColor: 'var(--tag-orange-quinary)',
+                                color: 'var(--tag-orange-secondary)',
+                                borderColor: 'var(--tag-orange-tertiary)',
+                            }}
                         >
                             Paused &middot; No credits
                         </span>
                     )
                 ) : (
                     <span
-                        className="text-xs font-color-secondary px-15 py-05 rounded-md bg-quinary border-quinary"
+                        className="text-sm font-color-secondary px-15 py-05 rounded-md bg-quinary border-quinary"
                         style={{ marginTop: '20px', marginBottom: '6px' }}
                     >
-                        Disabled
+                        Inactive
                     </span>
                 )}
             </div>
-            <SettingsGroup>
+            <SettingsGroup className="bg-senary">
                 {requestPlusTools && remainingBeaverCredits > 0 ? (
                     /* State 1: Enabled + has credits */
                     <SettingsRow
+                        className="items-start"
                         title="Use Plus Tools with your API key"
                         description={
                             <>
-                                Enable to use Plus Tools like external search, batch extraction, and AI ranking with your own API key.
-                                Costs 0.25 credits per message. Some actions cost extra.{' '}
-                                <DocLink path="credits">Learn more</DocLink>
+                                Plus tools include external search, batch extraction, and AI ranking with your own key for improved performance.
+                                {/* <DocLink path="credits">See the benchmarks</DocLink> */}
+                                {' '}<DocLink path="credits">Learn more</DocLink>
+                                <br /><br />
+                                <span className="font-semibold font-color-primary text-lg">{remainingBeaverCredits.toLocaleString()}</span>
+                                {' '}<span className="font-color-primary text-base">credits left</span> 
                                 <br />
-                                <br />
-                                <span className="font-color-secondary">
-                                    You have {remainingBeaverCredits.toLocaleString()} credits available.
+                                <span className="font-color-secondary text-sm">
+                                    Just 0.25 credits per message. Some actions cost extra.
                                 </span>
                             </>
                         }
                         control={
-                            <Button variant="outline" onClick={handleRequestPlusToolsToggle}>
+                            <Button variant="outline" className="mt-1" onClick={handleRequestPlusToolsToggle}>
                                 Disable
                             </Button>
                         }
@@ -266,42 +279,46 @@ const ApiKeysSection: React.FC = () => {
                 ) : requestPlusTools && remainingBeaverCredits <= 0 ? (
                     /* State 2: Enabled + no credits */
                     <SettingsRow
+                        className="items-start"
                         title="Use Plus Tools with your API key"
                         description={
                             <>
-                                Plus Tools are enabled but can't run without credits.
-                                Your API key will still work for basic chat.
+                                You're out of credits, so Plus tools are paused. Your API key still works for basic chat.
+                                Add credits for external search, batch extraction, and AI ranking.
                                 <br />
                                 <br />
-                                <span className="text-link cursor-pointer" onClick={() => setActiveTab('billing')}>
-                                    Get credits &rarr;
-                                </span>
+                                <Button variant="outline" className="mt-1" onClick={handleRequestPlusToolsToggle}>
+                                    Disable Plus Tools
+                                </Button>
                             </>
                         }
                         control={
-                            <Button variant="outline" onClick={handleRequestPlusToolsToggle}>
-                                Disable
+                            <Button variant="solid" className="mt-1" onClick={() => setActiveTab('billing')}>
+                                Get credits &rarr;
                             </Button>
                         }
                     />
                 ) : !requestPlusTools && remainingBeaverCredits > 0 ? (
                     /* State 3: Disabled + has credits */
                     <SettingsRow
+                        className="items-start"
                         title="Use Plus Tools with your API key"
                         description={
                             <>
-                                Unlock external search, batch extraction, and AI ranking alongside your API key.
-                                Costs 0.25 credits per message. Some actions cost extra.{' '}
-                                <DocLink path="credits">Learn more</DocLink>
+                                Plus tools include external search, batch extraction, and AI ranking with your own key for improved performance.
+                                {/* <DocLink path="credits">See the benchmarks</DocLink> */}
+                                {' '}<DocLink path="credits">Learn more</DocLink>
+                                <br /><br />
+                                <span className="font-semibold font-color-primary text-lg">{remainingBeaverCredits.toLocaleString()}</span>
+                                {' '}<span className="font-color-primary text-base">credits ready to use</span> 
                                 <br />
-                                <br />
-                                <span className="font-color-secondary">
-                                    You have {remainingBeaverCredits.toLocaleString()} credits available.
+                                <span className="font-color-secondary text-sm">
+                                    Just 0.25 credits per message. Some actions cost extra.
                                 </span>
                             </>
                         }
                         control={
-                            <Button variant="outline" onClick={handleRequestPlusToolsToggle}>
+                            <Button variant="solid" className="mt-1" onClick={handleRequestPlusToolsToggle}>
                                 Enable
                             </Button>
                         }
@@ -309,18 +326,19 @@ const ApiKeysSection: React.FC = () => {
                 ) : (
                     /* State 4: Disabled + no credits */
                     <SettingsRow
+                        className="items-start"
                         title="Use Plus Tools with your API key"
                         description={
                             <>
-                                Unlock external search, batch extraction, and AI ranking alongside your API key.
+                                Plus tools include external search, batch extraction, and AI ranking with your own key for improved performance.
                                 Costs 0.25 credits per message. Some actions cost extra.{' '}
                                 <DocLink path="credits">Learn more</DocLink>
-                                <br />
-                                <br />
-                                <span className="text-link cursor-pointer" onClick={() => setActiveTab('billing')}>
-                                    Get credits &rarr;
-                                </span>
                             </>
+                        }
+                        control={
+                            <Button variant="solid" className="mt-1" onClick={() => {handleRequestPlusToolsToggle(); setActiveTab('billing')}}>
+                                Get credits &rarr;
+                            </Button>
                         }
                     />
                 )}
