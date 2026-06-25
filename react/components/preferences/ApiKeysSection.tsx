@@ -301,7 +301,7 @@ const ApiKeysSection: React.FC = () => {
             <div className="text-base font-color-secondary mb-2" style={{ paddingLeft: '2px' }}>
                 Connect OpenRouter, OpenAI-compatible proxies, or self-hosted endpoints as additional models.
                 Requests are routed through Beaver's backend, so each endpoint must be reachable from the public
-                internet over HTTPS — localhost, private networks, and VPN-only hosts will not work.
+                internet over HTTPS. Localhost, private networks, and VPN-only hosts are not supported.
                 {' '}<DocLink path="custom-models">Learn more</DocLink>.
             </div>
 
