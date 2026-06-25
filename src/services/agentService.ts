@@ -28,6 +28,13 @@ import {
     WSRequestReceivedAck,
 } from './agentProtocol';
 import { getBusyContext } from './busyContext';
+import {
+    isPreparedJsonMessage,
+    materializePreparedJsonMessage,
+    preparedJsonEnvelope,
+    withPreparedJsonEnvelope,
+    type PreparedJsonMessage,
+} from './preparedJsonMessage';
 
 
 // =============================================================================
@@ -302,7 +309,7 @@ export class AgentService {
     /**
      * Send a message to the server
      */
-    send(data: AgentRunRequest | Record<string, any>): void {
+    send(data: AgentRunRequest | Record<string, any> | PreparedJsonMessage): void {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
             logger('AgentService: Cannot send - WebSocket not connected', 1);
             return;
@@ -312,7 +319,23 @@ export class AgentService {
         // (backend response models carry `timing: Dict[str, Any]` and ignore
         // extra fields, so this is safe against any backend version). Shallow
         // copy to avoid mutating the caller's object.
-        if (
+        if (isPreparedJsonMessage(data)) {
+            const envelope = preparedJsonEnvelope(data);
+            if (
+                'request_id' in envelope
+                && 'type' in envelope
+                && envelope.type !== 'request_received'
+            ) {
+                try {
+                    data = withPreparedJsonEnvelope(data, (current) => ({
+                        ...current,
+                        timing: { ...current.timing, ...getBusyContext() },
+                    }));
+                } catch (error) {
+                    logger(`AgentService: Failed to attach busy context: ${error}`, 1);
+                }
+            }
+        } else if (
             'request_id' in data
             && 'type' in data
             && (data as any).type !== 'request_received'
@@ -327,10 +350,14 @@ export class AgentService {
             }
         }
 
-        const message = JSON.stringify(data);
+        const message = isPreparedJsonMessage(data)
+            ? materializePreparedJsonMessage(data)
+            : JSON.stringify(data);
         
         // Sanitize sensitive data for logging
-        const sanitizedData = { ...data };
+        const sanitizedData: Record<string, any> = isPreparedJsonMessage(data)
+            ? { ...preparedJsonEnvelope(data), result: '[stripped document result for log]' }
+            : { ...data };
         if ('api_key' in sanitizedData) {
             sanitizedData.api_key = '[REDACTED]';
         }

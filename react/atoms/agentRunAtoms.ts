@@ -52,7 +52,7 @@ import { isWebSearchEnabledAtom, removePopupMessagesByTypeAtom, isWebSearchAllow
 import { currentNoteItemAtom } from './zoteroContext';
 import { isAnnotationAttachment, messageAttachmentKey } from '../types/attachments/apiTypes';
 import type { ExternalFileAttachment } from '../types/attachments/apiTypes';
-import { getReaderState, getApplicationStateProvider } from './applicationState';
+import { getApplicationStateProvider } from './applicationState';
 import { uint8ArrayToBase64 } from '../utils/fileUtils';
 import { isAttachmentOnServer } from '../../src/utils/webAPI';
 import { AgentRun, BeaverAgentPrompt, MessageSearchFilters, PromptOrigin, ToolRequest } from '../agents/types';
@@ -1734,10 +1734,10 @@ export const sendWSMessageAtom = atom(
             attachments.push(externalAttachment);
         }
 
-        // Add current reader attachment as source if not already present in thread
-        const readerState = getReaderState(get);
+        // Add the current reader attachment as a source if it is not already in
+        // the thread. Reader position is captured in application state.
         const readerAttachment = get(currentReaderAttachmentAtom);
-        if (readerAttachment && readerState) {
+        if (readerAttachment) {
             const allUserAttachmentKeys = get(allUserAttachmentKeysAtom);
             const existingKeys = new Set([
                 ...attachments.map(messageAttachmentKey),

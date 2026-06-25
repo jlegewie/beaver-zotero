@@ -39,6 +39,28 @@ interface EpubExtractStats {
     maxSentenceChars: number;
     avgItemsPerSection: number;
     maxItemsInSection: number;
+    pages: EpubPageStats;
+}
+
+// Page-number health, for validating the per-item `pageNumber` coordinate and
+// optional physical `pageLabel` markers across a corpus.
+interface EpubPageStats {
+    /** `document.pageCount` (max stamped page number), or null if absent. */
+    pageCount: number | null;
+    /** Max `pageNumber` observed across items (0 when no items carry one). */
+    maxPageNumber: number;
+    itemsWithPageNumber: number;
+    itemsMissingPageNumber: number;
+    /** Items carrying a publisher page marker (physical-paging signal). */
+    itemsWithPageLabel: number;
+    /** True when any item carries a `pageLabel` (physical marker mapping used). */
+    isPhysicalPaging: boolean;
+    /** `pageNumber` is non-decreasing across reading order (section, then item order). */
+    monotonic: boolean;
+    /** Smallest `pageNumber` across items is 1 (the expected origin). */
+    startsAtOne: boolean;
+    /** `document.pageCount` equals the max observed `pageNumber`. */
+    pageCountMatchesMax: boolean;
 }
 
 interface EpubExtractSample {
@@ -82,6 +104,17 @@ function computeStats(
     let maxSentenceChars = 0;
     let maxItemsInSection = 0;
 
+    // Page-number tracking. `document.sections`/`section.items` are already in
+    // raw spine + DOM order, which is the reading order page numbers are stamped
+    // against, so a single pass validates monotonicity.
+    let itemsWithPageNumber = 0;
+    let itemsMissingPageNumber = 0;
+    let itemsWithPageLabel = 0;
+    let maxPageNumber = 0;
+    let minPageNumber = Infinity;
+    let prevPageNumber = -Infinity;
+    let pageMonotonic = true;
+
     const sectionLabels: string[] = [];
     const firstItems: EpubExtractSample['firstItems'] = [];
     const shortSentenceSamples: EpubExtractSample['shortSentenceSamples'] = [];
@@ -99,6 +132,18 @@ function computeStats(
             itemCount += 1;
             itemsByKind[item.kind] += 1;
             if (!item.text || item.text.trim().length === 0) emptyTextItems += 1;
+
+            const pageNumber = item.pageNumber;
+            if (typeof pageNumber === 'number') {
+                itemsWithPageNumber += 1;
+                if (pageNumber > maxPageNumber) maxPageNumber = pageNumber;
+                if (pageNumber < minPageNumber) minPageNumber = pageNumber;
+                if (pageNumber < prevPageNumber) pageMonotonic = false;
+                prevPageNumber = pageNumber;
+            } else {
+                itemsMissingPageNumber += 1;
+            }
+            if (item.pageLabel) itemsWithPageLabel += 1;
             if (firstItems.length < 25) {
                 firstItems.push({
                     id: item.id,
@@ -139,6 +184,18 @@ function computeStats(
     }
 
     const sectionCount = document.sectionCount;
+    const pageCount = typeof document.pageCount === 'number' ? document.pageCount : null;
+    const pages: EpubPageStats = {
+        pageCount,
+        maxPageNumber,
+        itemsWithPageNumber,
+        itemsMissingPageNumber,
+        itemsWithPageLabel,
+        isPhysicalPaging: itemsWithPageLabel > 0,
+        monotonic: pageMonotonic,
+        startsAtOne: itemsWithPageNumber === 0 ? false : minPageNumber === 1,
+        pageCountMatchesMax: pageCount !== null && pageCount === maxPageNumber,
+    };
     const stats: EpubExtractStats = {
         sectionCount,
         itemCount,
@@ -158,6 +215,7 @@ function computeStats(
             ? Math.round((itemCount / sectionCount) * 10) / 10
             : 0,
         maxItemsInSection,
+        pages,
     };
 
     return {

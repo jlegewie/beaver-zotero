@@ -10,9 +10,17 @@ import type {
 } from './database';
 import { getFileSignature, isRemoteFilePath, type FileSignature } from './documentFileIdentity';
 import { logger } from '../utils/logger';
-import { gzipJsonValueChunked, gunzipToString } from '../utils/gzip';
+import {
+    gzipJsonValueChunked,
+    gzipUtf8BytesChunked,
+    gunzipToBytes,
+    gunzipToString,
+} from '../utils/gzip';
 import { createAbortController } from '../utils/abortController';
-import type { BeaverExtractResult } from '../beaver-extract/schema/schema';
+import type {
+    BeaverExtractResult,
+    SerializedBeaverExtractResult,
+} from '../beaver-extract/schema/schema';
 import {
     validateMarkdownExtractResult,
     validateStructuredExtractResult,
@@ -77,6 +85,8 @@ interface CacheMetadataInput {
     pageLabels: PageLabels | Record<number, string> | null;
     pages: (PageGeometry | null)[] | null;
     epubSections?: EpubSectionSummary[];
+    /** EPUB total page count (max stamped `pageNumber`); PDF uses `pageCount`. */
+    epubPageCount?: number | null;
     /** Extraction-diagnostics text total; flags image-only EPUBs on read. */
     epubExtractedTextChars?: number | null;
     /** Authoritative error reason; omitted or `null` marks a successful extraction. */
@@ -85,6 +95,14 @@ interface CacheMetadataInput {
 
 interface CacheablePayload {
     schemaVersion: string;
+}
+
+export interface SerializedDocumentCacheResult extends CacheablePayload {
+    mode: ExtractionMode;
+    document: { pageCount: number };
+    byteLength: number;
+    jsonBytes: Uint8Array;
+    metadata: CacheMetadataInput;
 }
 
 interface ExtractionLockEntry<T extends CacheablePayload = BeaverExtractResult> {
@@ -230,6 +248,72 @@ export class DocumentCache {
             return result;
         } catch (error) {
             logger(`DocumentCache.getResult error: ${error}`, 1);
+            return null;
+        }
+    }
+
+    /** Get a cached extraction result as UTF-8 JSON bytes without parsing it. */
+    async getSerializedResult(
+        ref: { libraryId: number; zoteroKey: string },
+        mode: ExtractionMode,
+        filePath: string,
+        options?: { maxSourceSizeBytes?: number },
+    ): Promise<SerializedDocumentCacheResult | null> {
+        try {
+            const payloadKind = DocumentCache.payloadKindForMode(mode);
+            const metadata = await this.getMetadata(ref, filePath);
+            if (!metadata) return null;
+            if (options?.maxSourceSizeBytes != null && metadata.sourceSizeBytes > options.maxSourceSizeBytes) {
+                return null;
+            }
+            if (metadata.contentKind !== 'pdf' || !metadata.documentMetadata || metadata.documentMetadata.content_kind !== 'pdf') {
+                return null;
+            }
+
+            const payload = await this.db.getDocumentCachePayload(ref.libraryId, ref.zoteroKey, payloadKind);
+            if (!payload) return null;
+
+            if (!this.isPayloadRowFresh(payload, metadata, payloadKind)) {
+                await this.deletePayload(payload);
+                return null;
+            }
+
+            const exists = await IOUtils.exists(payload.payloadPath);
+            if (!exists) {
+                await this.deletePayload(payload, false);
+                return null;
+            }
+
+            const compressedBytes = await IOUtils.read(payload.payloadPath);
+            if (payload.payloadSha256) {
+                const sha256 = await this.sha256Hex(compressedBytes);
+                if (sha256 !== payload.payloadSha256) {
+                    await this.deletePayload(payload);
+                    return null;
+                }
+            }
+
+            const jsonBytes = gunzipToBytes(compressedBytes);
+            if (!this.isLikelySerializedPdfResult(jsonBytes, mode, metadata.documentMetadata.pageCount)) {
+                await this.deletePayload(payload);
+                return null;
+            }
+
+            await this.db.touchDocumentCachePayload(payload.id).catch(() => undefined);
+            return {
+                schemaVersion: metadata.extractionSchemaVersion,
+                mode,
+                document: { pageCount: metadata.documentMetadata.pageCount ?? 0 },
+                byteLength: jsonBytes.byteLength,
+                jsonBytes,
+                metadata: {
+                    pageCount: metadata.documentMetadata.pageCount,
+                    pageLabels: metadata.documentMetadata.pageLabels,
+                    pages: metadata.documentMetadata.pages,
+                },
+            };
+        } catch (error) {
+            logger(`DocumentCache.getSerializedResult error: ${error}`, 1);
             return null;
         }
     }
@@ -416,6 +500,104 @@ export class DocumentCache {
         return this.waitForSharedExtraction(entry, input.abortSignal);
     }
 
+    /** Return a cached serialized result or run one shared serialized extraction. */
+    async getOrCreateSerializedResult(input: {
+        item: DocumentCacheItemRef;
+        filePath: string;
+        mode: ExtractionMode;
+        sourceSizeBytes: number;
+        contentType: string;
+        maxSourceSizeBytes?: number;
+        sharedTimeoutMs?: number;
+        abortSignal?: AbortSignal;
+        expectedSourceIdentity?: DocumentCacheSourceIdentity | null;
+        create: (signal: AbortSignal) => Promise<SerializedBeaverExtractResult>;
+    }): Promise<SerializedDocumentCacheResult | null> {
+        const ref = {
+            libraryId: input.item.libraryID,
+            zoteroKey: input.item.key,
+        };
+        const readCached = (cacheRef: DocumentRef) => this.getSerializedResult(
+            cacheRef,
+            input.mode,
+            input.filePath,
+            { maxSourceSizeBytes: input.maxSourceSizeBytes },
+        );
+        const source = input.expectedSourceIdentity
+            ?? await this.getSourceIdentity(input.filePath, input.sourceSizeBytes);
+        if (input.maxSourceSizeBytes != null && source.sourceSizeBytes > input.maxSourceSizeBytes) {
+            return null;
+        }
+        const payloadKind = DocumentCache.payloadKindForMode(input.mode);
+        const lockKey = `${ref.libraryId}/${ref.zoteroKey}/${payloadKind}/${this.sourceIdentityKey(source)}/serialized`;
+        const existing = this.extractionLocks.get(lockKey) as ExtractionLockEntry<SerializedDocumentCacheResult> | undefined;
+        if (existing) return this.waitForSharedExtraction(existing, input.abortSignal);
+
+        const cached = await readCached(ref);
+        if (cached) return cached;
+
+        const refreshedExisting = this.extractionLocks.get(lockKey) as ExtractionLockEntry<SerializedDocumentCacheResult> | undefined;
+        if (refreshedExisting) return this.waitForSharedExtraction(refreshedExisting, input.abortSignal);
+
+        const controller = createAbortController();
+        const entry: ExtractionLockEntry<SerializedDocumentCacheResult> = {
+            controller,
+            waiters: new Set(),
+            settled: false,
+            promise: Promise.resolve(null),
+        };
+        const timer = input.sharedTimeoutMs != null && input.sharedTimeoutMs > 0
+            ? setTimeout(() => controller.abort(), input.sharedTimeoutMs)
+            : null;
+        entry.promise = (async () => {
+            const refreshed = await readCached(ref);
+            if (refreshed) return refreshed;
+
+            let created: SerializedBeaverExtractResult;
+            try {
+                created = await input.create(controller.signal);
+            } finally {
+                if (timer) clearTimeout(timer);
+            }
+            const stored: SerializedDocumentCacheResult = {
+                schemaVersion: created.schemaVersion,
+                mode: created.mode,
+                document: { pageCount: created.pageCount },
+                byteLength: created.byteLength,
+                jsonBytes: created.jsonBytes,
+                metadata: {
+                    pageCount: created.cacheMetadata.pageCount,
+                    pageLabels: created.cacheMetadata.pageLabels,
+                    pages: created.cacheMetadata.pages,
+                },
+            };
+            await this.putSerializedResult({
+                item: input.item,
+                filePath: input.filePath,
+                mode: input.mode,
+                sourceSizeBytes: input.sourceSizeBytes,
+                contentType: input.contentType,
+                result: stored,
+                metadata: stored.metadata,
+                expectedSourceIdentity: source,
+            });
+            return stored;
+        })()
+            .catch((error) => {
+                logger(`DocumentCache.getOrCreateSerializedResult error: ${error}`, 1);
+                throw error;
+            })
+            .finally(() => {
+                entry.settled = true;
+                if (this.extractionLocks.get(lockKey) === entry) {
+                    this.extractionLocks.delete(lockKey);
+                }
+            });
+
+        this.extractionLocks.set(lockKey, entry);
+        return this.waitForSharedExtraction(entry, input.abortSignal);
+    }
+
     private waitForSharedExtraction<T extends CacheablePayload>(
         entry: ExtractionLockEntry<T>,
         abortSignal?: AbortSignal,
@@ -505,6 +687,34 @@ export class DocumentCache {
             .catch(() => undefined)
             .then(() => this.putResultUnlocked(input))
             .catch((error) => logger(`DocumentCache.putResult error: ${error}`, 1))
+            .finally(() => {
+                if (this.writeLocks.get(lockKey) === next) {
+                    this.writeLocks.delete(lockKey);
+                }
+            });
+        this.writeLocks.set(lockKey, next);
+        await next;
+    }
+
+    /** Store fresh source-level metadata and a pre-serialized compressed payload. */
+    async putSerializedResult(input: {
+        item: DocumentCacheItemRef;
+        filePath: string;
+        mode: ExtractionMode;
+        sourceSizeBytes: number;
+        contentType: string;
+        result: SerializedDocumentCacheResult | SerializedBeaverExtractResult;
+        metadata: CacheMetadataInput;
+        expectedSourceIdentity?: DocumentCacheSourceIdentity | null;
+    }): Promise<void> {
+        if (Zotero.__beaverShuttingDown) return;
+        const payloadKind = DocumentCache.payloadKindForMode(input.mode);
+        const lockKey = `${input.item.libraryID}/${input.item.key}/${payloadKind}`;
+        const previous = this.writeLocks.get(lockKey) ?? Promise.resolve();
+        const next = previous
+            .catch(() => undefined)
+            .then(() => this.putSerializedResultUnlocked(input))
+            .catch((error) => logger(`DocumentCache.putSerializedResult error: ${error}`, 1))
             .finally(() => {
                 if (this.writeLocks.get(lockKey) === next) {
                     this.writeLocks.delete(lockKey);
@@ -718,6 +928,63 @@ export class DocumentCache {
         );
     }
 
+    private async putSerializedResultUnlocked(input: {
+        item: DocumentCacheItemRef;
+        filePath: string;
+        mode: ExtractionMode;
+        sourceSizeBytes: number;
+        contentType: string;
+        result: SerializedDocumentCacheResult | SerializedBeaverExtractResult;
+        metadata: CacheMetadataInput;
+        expectedSourceIdentity?: DocumentCacheSourceIdentity | null;
+    }): Promise<void> {
+        if (Zotero.__beaverShuttingDown) return;
+        const source = await this.getSourceIdentity(input.filePath, input.sourceSizeBytes);
+        if (input.expectedSourceIdentity && !this.sourceIdentityMatches(source, input.expectedSourceIdentity)) {
+            return;
+        }
+        if (Zotero.__beaverShuttingDown) return;
+
+        const payloadKind = DocumentCache.payloadKindForMode(input.mode);
+        const metadataInput = this.buildMetadataInput(input.item, source, input.contentType, input.metadata);
+        if (
+            input.result.mode !== input.mode
+            || input.result.schemaVersion !== metadataInput.extractionSchemaVersion
+        ) {
+            return;
+        }
+        const payloadWrite = await this.writePayloadBytesFile(
+            input.item.libraryID,
+            input.item.key,
+            payloadKind,
+            input.result.jsonBytes,
+        );
+        const { metadata, deletedPayloads } = await this.db.upsertDocumentCacheMetadata(metadataInput);
+        const oldPayload = await this.db.getDocumentCachePayload(input.item.libraryID, input.item.key, payloadKind);
+        await this.db.upsertDocumentCachePayload({
+            metadataId: metadata.id,
+            itemId: input.item.id,
+            libraryId: input.item.libraryID,
+            zoteroKey: input.item.key,
+            payloadKind,
+            contentKind: metadataInput.contentKind,
+            sourceFilePath: source.filePath,
+            sourceFileSignature: source.fileSignature,
+            sourceSizeBytes: source.sourceSizeBytes,
+            payloadPath: payloadWrite.path,
+            payloadSizeBytes: payloadWrite.size,
+            payloadSha256: payloadWrite.sha256,
+            extractionSchemaVersion: metadataInput.extractionSchemaVersion,
+            cacheFormatVersion: DOCUMENT_PAYLOAD_FORMAT_VERSION,
+        });
+        const cleanup = oldPayload && oldPayload.payloadPath !== payloadWrite.path
+            ? [...deletedPayloads, oldPayload]
+            : deletedPayloads;
+        await this.removePayloadFiles(
+            cleanup.filter((payload) => payload.payloadPath !== payloadWrite.path),
+        );
+    }
+
     private async isMetadataStale(record: DocumentCacheMetadataRecord, filePath: string): Promise<boolean> {
         if (record.documentMetadata === null) return true;
         if (record.metadataFormatVersion !== DOCUMENT_METADATA_FORMAT_VERSION) return true;
@@ -819,6 +1086,29 @@ export class DocumentCache {
             && payload.sourceSizeBytes === metadata.sourceSizeBytes;
     }
 
+    private isLikelySerializedPdfResult(
+        jsonBytes: Uint8Array,
+        mode: ExtractionMode,
+        pageCount: number | null,
+    ): boolean {
+        if (jsonBytes.byteLength < 2) return false;
+        if (jsonBytes[0] !== 0x7b || jsonBytes[jsonBytes.byteLength - 1] !== 0x7d) {
+            return false;
+        }
+        const head = new TextDecoder().decode(
+            jsonBytes.subarray(0, Math.min(jsonBytes.byteLength, 16 * 1024)),
+        );
+        if (!head.includes(`"mode":"${mode}"`)) return false;
+        const expectedSchema = expectedExtractionSchemaVersion('pdf');
+        if (expectedSchema && !head.includes(`"schemaVersion":"${expectedSchema}"`)) {
+            return false;
+        }
+        if (pageCount != null && !new RegExp(`"pageCount":${pageCount}(?=[,}])`).test(head)) {
+            return false;
+        }
+        return true;
+    }
+
     private async getSourceIdentity(filePath: string, sourceSizeBytes: number): Promise<DocumentCacheSourceIdentity> {
         const fileSignature = await getFileSignature(filePath);
         return {
@@ -870,7 +1160,11 @@ export class DocumentCache {
             sourceSizeBytes: source.sourceSizeBytes,
             contentType,
             documentMetadata: contentKind === 'epub'
-                ? buildEpubCachedMetadata(metadata.epubSections ?? [], metadata.epubExtractedTextChars)
+                ? buildEpubCachedMetadata(
+                    metadata.epubSections ?? [],
+                    metadata.epubExtractedTextChars,
+                    metadata.epubPageCount,
+                )
                 : buildPdfCachedMetadata(metadata.pageCount, pageLabels, pages),
             errorCode: metadata.errorCode ?? null,
             extractionSchemaVersion,
@@ -893,12 +1187,43 @@ export class DocumentCache {
         payloadKind: PayloadKind,
         result: T,
     ): Promise<{ path: string; size: number; sha256: string }> {
+        return this.writePayloadFromGzip(
+            libraryId,
+            zoteroKey,
+            payloadKind,
+            () => gzipJsonValueChunked(result),
+            'writePayloadFile',
+        );
+    }
+
+    private async writePayloadBytesFile(
+        libraryId: number,
+        zoteroKey: string,
+        payloadKind: PayloadKind,
+        jsonBytes: Uint8Array,
+    ): Promise<{ path: string; size: number; sha256: string }> {
+        return this.writePayloadFromGzip(
+            libraryId,
+            zoteroKey,
+            payloadKind,
+            () => gzipUtf8BytesChunked(jsonBytes),
+            'writePayloadBytesFile',
+        );
+    }
+
+    private async writePayloadFromGzip(
+        libraryId: number,
+        zoteroKey: string,
+        payloadKind: PayloadKind,
+        gzipPayload: () => Promise<Uint8Array>,
+        label: string,
+    ): Promise<{ path: string; size: number; sha256: string }> {
         const gzipStart = Date.now();
-        const bytes = await gzipJsonValueChunked(result);
+        const bytes = await gzipPayload();
         const gzipMs = Date.now() - gzipStart;
         if (gzipMs > 2000) {
             logger(
-                `DocumentCache.writePayloadFile: gzip ${bytes.byteLength} bytes for `
+                `DocumentCache.${label}: gzip ${bytes.byteLength} bytes for `
                 + `${libraryId}-${zoteroKey} (${payloadKind}) took ${gzipMs}ms`,
                 2,
             );

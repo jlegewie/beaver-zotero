@@ -8,9 +8,15 @@ export const SectionLabel: React.FC<{ children: React.ReactNode }> = ({ children
     </div>
 );
 
+export const SectionHeader: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+    <div role="heading" aria-level={2} className="text-xl font-color-primary font-bold" style={{ marginTop: '8px', marginBottom: '6px', paddingLeft: '2px' }}>
+        {children}
+    </div>
+);
+
 /** Card container for grouping related settings */
 export const SettingsGroup: React.FC<{ children: React.ReactNode; className?: string }> = ({ children, className = '' }) => (
-    <div className={`display-flex flex-col rounded-lg border-quinary overflow-hidden ${className}`}>
+    <div className={`display-flex flex-col rounded-lg border-popup overflow-hidden ${className}`}>
         {children}
     </div>
 );
@@ -65,7 +71,13 @@ export const SettingsRow: React.FC<SettingsRowProps> = ({
 
     return (
         <div
-            className={`display-flex flex-row items-center justify-between gap-4 ${hasBorder ? 'border-top-quinary' : ''} ${onClick && !disabled ? 'cursor-pointer' : ''} ${disabled ? 'opacity-60 cursor-not-allowed' : ''} ${className}`}
+            className={`
+                display-flex flex-row items-center justify-between gap-4
+                ${hasBorder ? 'border-top-quinary' : ''}
+                ${onClick && !disabled ? 'cursor-pointer' : ''}
+                ${disabled ? 'opacity-60 cursor-not-allowed' : ''}
+                ${className}
+            `}
             style={{ padding: '8px 12px', minHeight: '38px' }}
             onClick={(e) => {
                 if (disabled || !onClick) return;

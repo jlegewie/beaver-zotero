@@ -8,6 +8,7 @@ import type { ExternalFileContentKind } from '../../types/attachments/apiTypes';
 import { logger } from '../../../src/utils/logger';
 import { ChipWithPopup, type ChipPopupContent } from '../agentRuns/requestChips/ChipPopup';
 import { ChipButton } from '../agentRuns/requestChips/ChipButton';
+import { ChipRemovableIcon } from '../agentRuns/requestChips/ChipRemovableIcon';
 import { getHost } from '../../host';
 
 const MAX_FILENAME_LENGTH = 25;
@@ -52,8 +53,6 @@ export const ExternalFileButton = forwardRef<HTMLButtonElement, ExternalFileButt
             onRemoveAll,
             ...rest
         } = props;
-
-        const [isHovered, setIsHovered] = React.useState(false);
 
         // Primary click opens the file in its default app, matching the
         // read-only request chips. Routed through the host so the "no local
@@ -104,20 +103,11 @@ export const ExternalFileButton = forwardRef<HTMLButtonElement, ExternalFileButt
             extraMenuItems: fileMenuItems,
         });
 
-        const getIconElement = () => {
-            if ((isHovered || isRemoveMenuOpen) && canEdit && !disabled) {
-                return (
-                    <span role="button" className="source-remove" {...removeHandlers}>
-                        <CSSIcon name="x-8" className="icon-16" />
-                    </span>
-                );
-            }
-            return (
-                <span className="scale-80">
-                    <CSSItemTypeIcon itemType={EXTERNAL_FILE_ICON_BY_KIND[contentKind] || 'attachmentFile'} />
-                </span>
-            );
-        };
+        const normalIcon = (
+            <span className="scale-80">
+                <CSSItemTypeIcon itemType={EXTERNAL_FILE_ICON_BY_KIND[contentKind] || 'attachmentFile'} />
+            </span>
+        );
 
         const popup: ChipPopupContent = {
             icon: (
@@ -138,13 +128,17 @@ export const ExternalFileButton = forwardRef<HTMLButtonElement, ExternalFileButt
                     ref={ref}
                     className={`${className || ''} ${disabled ? 'disabled-but-styled' : ''}`}
                     disabled={disabled}
-                    onMouseEnter={() => setIsHovered(true)}
-                    onMouseLeave={() => setIsHovered(false)}
                     onClick={() => openFile()}
                     {...contextMenuHandlers}
                     {...rest}
                 >
-                    {getIconElement()}
+                    {canEdit && !disabled ? (
+                        <ChipRemovableIcon
+                            normalIcon={normalIcon}
+                            removeHandlers={removeHandlers}
+                            removeMenuOpen={isRemoveMenuOpen}
+                        />
+                    ) : normalIcon}
                     <span className="truncate">
                         {truncateText(filename, MAX_FILENAME_LENGTH)}
                     </span>

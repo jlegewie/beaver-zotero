@@ -2,13 +2,16 @@ import type { DomDocument } from "../dom/schema";
 import type { ZoteroDocumentErrorCode } from "../../agentProtocol";
 
 export const EPUB_CONTENT_KIND = "epub" as const;
-export const EPUB_SCHEMA_VERSION = "1" as const;
+// Bump when persisted EPUB extraction payloads need to be regenerated.
+export const EPUB_SCHEMA_VERSION = "2" as const;
 
 export type EpubContentKind = typeof EPUB_CONTENT_KIND;
 
 export interface EpubDocument extends DomDocument {
     content_kind: typeof EPUB_CONTENT_KIND;
     schemaVersion: typeof EPUB_SCHEMA_VERSION;
+    /** Total page count (max stamped `pageNumber`); absent on malformed payloads. */
+    pageCount?: number;
 }
 
 export type ExtractEpubResult =

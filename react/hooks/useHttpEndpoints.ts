@@ -71,6 +71,7 @@ import {
     handleTestExternalFileAttachHttpRequest,
     handleTestExternalFileDeleteHttpRequest,
     handleTestExternalFileViewImagesHttpRequest,
+    handleTestDocumentSerializedHttpRequest,
 } from './httpHandlers/testCacheHandlers';
 import {
     handleTestNoteCreateHttpRequest,
@@ -83,6 +84,9 @@ import {
 import {
     handleTestAnnotationCreateHttpRequest,
 } from './httpHandlers/testAnnotationHandlers';
+import {
+    handleTestSyncPauseHttpRequest,
+} from './httpHandlers/testSyncHandlers';
 import {
     handleTestPdfPageCountHttpRequest,
     handleTestPdfPageLabelsHttpRequest,
@@ -204,6 +208,8 @@ const ENDPOINT_PATHS = [
     '/beaver/test/external-file-attach',
     '/beaver/test/external-file-delete',
     '/beaver/test/external-file-view-images',
+    // Serialized PDF document-request wire path (responseMode: 'websocket')
+    '/beaver/test/document-serialized',
     // Test-only endpoints (note seeding/teardown/inspection)
     '/beaver/test/note-create',
     '/beaver/test/note-delete',
@@ -256,6 +262,8 @@ const ENDPOINT_PATHS = [
     '/beaver/test/background-clear',
     // Pref control (dev-only)
     '/beaver/test/set-pref',
+    // Sync-suppression control/inspection (dev-only)
+    '/beaver/test/sync-pause',
     // Provider-mode connection control (dev-only)
     '/beaver/test/provider-connect',
     '/beaver/test/provider-status',
@@ -852,6 +860,12 @@ function registerEndpoints(): boolean {
         Zotero.Server.Endpoints['/beaver/test/external-file-view-images'] =
             createEndpoint(handleTestExternalFileViewImagesHttpRequest);
 
+        // Serialized PDF document-request wire path (dev-only): exercises the
+        // websocket response mode, PreparedJsonMessage splice, and
+        // guardSerializedPayloadSize that the object-mode endpoint skips.
+        Zotero.Server.Endpoints['/beaver/test/document-serialized'] =
+            createEndpoint(handleTestDocumentSerializedHttpRequest);
+
         // MuPDF worker singleton stats / lifecycle (dev-only)
         Zotero.Server.Endpoints['/beaver/test/worker-stats'] =
             createEndpoint(handleTestWorkerStatsHttpRequest);
@@ -984,6 +998,11 @@ function registerEndpoints(): boolean {
         // Pref control (dev-only)
         Zotero.Server.Endpoints['/beaver/test/set-pref'] =
             createEndpoint(handleTestSetPrefHttpRequest);
+
+        // Sync-suppression control/inspection (dev-only): drives the real
+        // syncPause module + raw Sync.Runner contract for live tests.
+        Zotero.Server.Endpoints['/beaver/test/sync-pause'] =
+            createEndpoint(handleTestSyncPauseHttpRequest);
 
         // Provider-mode connection control (dev-only manual trigger/inspection)
         Zotero.Server.Endpoints['/beaver/test/provider-connect'] =

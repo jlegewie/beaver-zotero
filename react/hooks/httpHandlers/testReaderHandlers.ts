@@ -4,8 +4,8 @@
  *
  * `/beaver/test/reader-state` opens (or reuses) a reader tab and reports the
  * same position fields `getReaderState` derives for `application_state`:
- * `current_page` via `getCurrentPage()` (PDF page, or 1-based EPUB section
- * ordinal) and `content_kind` from `reader.type`.
+ * `current_page` (PDF page, or EPUB page coordinate) and `content_kind` from
+ * `reader.type`.
  *
  * `/beaver/test/epub-citation-navigate` drives the EPUB citation-click path
  * against the live reader: either the full `navigateToEpubCitation` flow
@@ -16,6 +16,7 @@
 import {
     getCurrentPage,
     getCurrentReaderAndWaitForView,
+    getEpubReaderPage,
     waitForReaderForItem,
 } from '../../utils/readerUtils';
 import { navigateToEpubCitation } from '../../utils/epubVisualizer/epubCitationNavigation';
@@ -67,18 +68,24 @@ export async function handleTestReaderStateHttpRequest(request: any): Promise<an
         ? reader.type
         : null;
     let sectionCount: number | null = null;
+    let primaryView: EpubPrimaryView | undefined;
     if (reader.type === 'epub') {
         // A cold-opened EPUB reader can report its view before the spine
         // renderers exist, which would yield section_count 0 / null position.
-        const primaryView = reader._internalReader?._primaryView as EpubPrimaryView | undefined;
+        primaryView = reader._internalReader?._primaryView as EpubPrimaryView | undefined;
         if (primaryView) await waitForSectionRenderers(primaryView);
         sectionCount = primaryView ? getSectionCount(primaryView) : null;
     }
 
+    // Keep this endpoint aligned with `getReaderState`.
+    const currentPage = reader.type === 'epub'
+        ? getEpubReaderPage(reader)
+        : (getCurrentPage(reader) || null);
+
     return {
         ok: true,
         reader_type: reader.type ?? null,
-        current_page: getCurrentPage(reader) || null,
+        current_page: currentPage,
         content_kind: contentKind,
         section_count: sectionCount,
     };

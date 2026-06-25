@@ -41,7 +41,7 @@ const structuredResult: BeaverExtractResult = {
 
 const epubDocument: EpubDocument = {
     content_kind: 'epub',
-    schemaVersion: '1',
+    schemaVersion: '2',
     sectionCount: 1,
     sections: [
         {
@@ -163,6 +163,63 @@ describe('DocumentCache payloads', () => {
         expect(payload?.contentKind).toBe('pdf');
     });
 
+    it('putSerializedResult stores bytes readable by serialized and object cache APIs', async () => {
+        const item = createCacheAttachment();
+        const jsonBytes = new TextEncoder().encode(JSON.stringify(structuredResult));
+
+        await cache.putSerializedResult({
+            item,
+            filePath: sourcePath,
+            mode: 'structured',
+            sourceSizeBytes: 3,
+            contentType: 'application/pdf',
+            result: {
+                schemaVersion: structuredResult.schemaVersion,
+                mode: structuredResult.mode,
+                document: { pageCount: structuredResult.document.pageCount },
+                byteLength: jsonBytes.byteLength,
+                jsonBytes,
+                metadata: {
+                    pageCount: 1,
+                    pageLabels: { '0': '1' },
+                    pages: onePageGeometry,
+                },
+            },
+            metadata: {
+                pageCount: 1,
+                pageLabels: { '0': '1' },
+                pages: onePageGeometry,
+            },
+        });
+
+        const serialized = await cache.getSerializedResult(
+            { libraryId: 1, zoteroKey: 'ABCD1234' },
+            'structured',
+            sourcePath,
+        );
+        expect(serialized?.byteLength).toBe(jsonBytes.byteLength);
+        expect(new TextDecoder().decode(serialized?.jsonBytes)).toBe(JSON.stringify(structuredResult));
+
+        await expect(cache.getResult(
+            { libraryId: 1, zoteroKey: 'ABCD1234' },
+            'structured',
+            sourcePath,
+        )).resolves.toEqual(structuredResult);
+    });
+
+    it('serialized PDF probe does not accept pageCount substring matches', () => {
+        const bytes = new TextEncoder().encode(
+            JSON.stringify({
+                schemaVersion: '4',
+                mode: 'structured',
+                document: { pageCount: 15, pages: [] },
+            }),
+        );
+
+        expect((cache as any).isLikelySerializedPdfResult(bytes, 'structured', 1)).toBe(false);
+        expect((cache as any).isLikelySerializedPdfResult(bytes, 'structured', 15)).toBe(true);
+    });
+
     it('putResult then getEpubResult returns the cached EPUB document', async () => {
         const item = createCacheAttachment();
 
@@ -194,6 +251,7 @@ describe('DocumentCache payloads', () => {
             content_kind: 'epub',
             sectionCount: 1,
             sections: [{ index: 0, rawHref: 'EPUB/chapter.xhtml', label: 'Chapter 1', itemCount: 1 }],
+            pageCount: null,
             extractedTextChars: 1234,
         });
         const payload = await db.getDocumentCachePayload(1, 'ABCD1234', 'structured');
@@ -874,7 +932,7 @@ describe('DocumentCache payloads', () => {
 
         const metadata = await db.getDocumentCacheMetadataByKey(1, 'ABCD1234');
         expect(metadata?.contentKind).toBe('epub');
-        expect(metadata?.extractionSchemaVersion).toBe('1');
+        expect(metadata?.extractionSchemaVersion).toBe('2');
         expect(await db.getDocumentCachePayloadCount()).toBe(1);
     });
 

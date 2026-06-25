@@ -35,11 +35,17 @@ import {
     handleAgentActionExecuteRequest,
     handleReadNoteRequest,
 } from './agentDataProvider';
+import type { PreparedJsonMessage } from './preparedJsonMessage';
+import {
+    SyncPauseOwner,
+    LOCAL_MUTATING_RUN_SYNC_PAUSE_OWNER,
+    pauseSyncForMutatingRun,
+} from './syncPause';
 
 /** A single data-request handler plus its error-fallback response. */
 export interface AgentDataRequestEntry {
     /** Run the request and resolve with the response object to send back. */
-    handle: (event: any) => Promise<Record<string, any>>;
+    handle: (event: any) => Promise<Record<string, any> | PreparedJsonMessage>;
     /** Build the response to send when `handle` rejects (keeps the backend from timing out). */
     errorResponse: (event: any, err: unknown) => Record<string, any>;
     /**
@@ -47,20 +53,29 @@ export interface AgentDataRequestEntry {
      * queue (prevents concurrent mutating actions from racing).
      */
     serialize?: boolean;
+    /** Sync pause owner to release when this mutating request settles. */
+    syncPauseOwner?: SyncPauseOwner;
 }
 
 /** Map from backend request event name to its handler entry. */
 export type AgentDataProviderMap = Record<string, AgentDataRequestEntry>;
+
+export interface ZoteroDataProviderOptions {
+    /** Owner token used for sync suppression around mutating actions. */
+    syncPauseOwner?: SyncPauseOwner;
+}
 
 /**
  * Build the data-provider map backed by the Zotero plugin's handlers. This is
  * the default provider for `AgentService` and preserves the exact handlers and
  * per-request error fallbacks the plugin has always sent.
  */
-export function createZoteroDataProvider(): AgentDataProviderMap {
+export function createZoteroDataProvider(options: ZoteroDataProviderOptions = {}): AgentDataProviderMap {
+    const syncPauseOwner = options.syncPauseOwner ?? LOCAL_MUTATING_RUN_SYNC_PAUSE_OWNER;
+
     return {
         zotero_document_request: {
-            handle: handleZoteroDocumentRequest,
+            handle: (event) => handleZoteroDocumentRequest(event, { responseMode: 'websocket' }),
             errorResponse: (event, err) => ({
                 type: 'zotero_document',
                 request_id: event.request_id,
@@ -277,7 +292,11 @@ export function createZoteroDataProvider(): AgentDataProviderMap {
             }),
         },
         agent_action_execute: {
-            handle: handleAgentActionExecuteRequest,
+            handle: async (event) => {
+                pauseSyncForMutatingRun(syncPauseOwner);
+                return handleAgentActionExecuteRequest(event);
+            },
+            syncPauseOwner,
             // Serialized: concurrent edit_note actions on the same note otherwise
             // race (each reads the original HTML and saves its own edit, so only
             // the last save survives).

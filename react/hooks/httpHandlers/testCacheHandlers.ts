@@ -6,7 +6,6 @@
  * in `useHttpEndpoints.ts` → `registerEndpoints()`.
  */
 
-
 export async function handleTestPingHttpRequest(_request: any) {
     const cache = Zotero.Beaver?.documentCache;
     const db = Zotero.Beaver?.db;
@@ -514,6 +513,69 @@ export async function handleTestExternalFileDeleteHttpRequest(request: any) {
     }
     await db.deleteExternalFile(ext_key);
     return { ok: true, existed: !!record };
+}
+
+/**
+ * Dev-only: drive `handleZoteroDocumentRequest` through its production
+ * WebSocket response mode (`responseMode: 'websocket'`).
+ *
+ * The public `/beaver/attachment/document` endpoint uses the default object
+ * mode, so it never exercises the serialized PDF path: the worker
+ * `extractSerialized` op, the `DocumentCache` byte-level (`getSerializedResult`
+ * / `putSerializedResult`) APIs, the `"content_kind":"pdf"` wire splice, the
+ * `PreparedJsonMessage` envelope, or the `guardSerializedPayloadSize` check.
+ *
+ * This handler invokes the real handler in websocket mode and materializes the
+ * result through the exact `materializePreparedJsonMessage` path the agent
+ * connection uses on send. It returns the parsed wire JSON plus its byte
+ * length so tests can assert the spliced output and payload-size accounting
+ * without a WebSocket client. PDF successes come back as a `PreparedJsonMessage`
+ * (`prepared: true`); EPUB/text successes and every error path come back as a
+ * plain object (`prepared: false`).
+ *
+ * Accepts the same fields as the WebSocket request, including `max_payload_bytes`
+ * (which the object-mode HTTP endpoint does not forward).
+ */
+export async function handleTestDocumentSerializedHttpRequest(request: any) {
+    const { handleZoteroDocumentRequest } = await import(
+        '../../../src/services/agentDataProvider/handleZoteroDocumentRequest'
+    );
+    const {
+        isPreparedJsonMessage,
+        materializePreparedJsonMessage,
+        preparedJsonEnvelope,
+    } = await import('../../../src/services/preparedJsonMessage');
+
+    const wsRequest = {
+        event: 'zotero_document_request' as const,
+        request_id: `test-doc-serialized-${request?.attachment?.zotero_key ?? request?.external_file_key ?? 'x'}`,
+        attachment: request?.attachment ?? undefined,
+        external_file_key: request?.external_file_key ?? undefined,
+        mode: request?.mode ?? 'structured',
+        max_pages: request?.max_pages ?? undefined,
+        max_file_size_mb: request?.max_file_size_mb ?? undefined,
+        max_payload_bytes: request?.max_payload_bytes ?? undefined,
+        timeout_seconds: request?.timeout_seconds ?? undefined,
+    };
+
+    const response = await handleZoteroDocumentRequest(wsRequest, {
+        responseMode: 'websocket',
+    });
+
+    if (isPreparedJsonMessage(response)) {
+        const wireJson = materializePreparedJsonMessage(response);
+        return {
+            prepared: true,
+            wire_bytes: new TextEncoder().encode(wireJson).byteLength,
+            envelope: preparedJsonEnvelope(response),
+            wire: JSON.parse(wireJson),
+        };
+    }
+
+    return {
+        prepared: false,
+        response,
+    };
 }
 
 /**

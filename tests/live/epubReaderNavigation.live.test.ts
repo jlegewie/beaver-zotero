@@ -1,14 +1,9 @@
 /**
- * EPUB reader-state + citation-navigation live suite (plan F-4 / F-5).
+ * EPUB reader-state and citation-navigation live tests.
  *
  * Drives two dev endpoints against the live reader:
- *   - `/beaver/test/reader-state` — the `getReaderState` position fields:
- *     `current_page` (1-based EPUB section ordinal via `getCurrentPage`) and
- *     `content_kind` from `reader.type`; PDF readers keep page semantics.
- *   - `/beaver/test/epub-citation-navigate` — the citation-click path:
- *     `resolveEpubCitationRange` (href/ordinal section resolution, anchor-id
- *     scoping, sentence-text range anchoring) and the full
- *     `navigateToEpubCitation` flow including the temporary-annotation flash.
+ *   - `/beaver/test/reader-state` for reader position fields.
+ *   - `/beaver/test/epub-citation-navigate` for the citation click flow.
  *
  * Prerequisites (per tests/README.md):
  *   - Dev build of Beaver loaded in a running Zotero (NODE_ENV=development).
@@ -21,7 +16,7 @@ import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { isZoteroAvailable, skipIfNoZotero } from '../helpers/zoteroAvailability';
 import { fetchDocument, post } from '../helpers/zoteroHttpClient';
-import { NON_PDF, SMALL_PDF } from '../helpers/fixtures';
+import { NON_PDF, SMALL_PDF, type AttachmentFixture } from '../helpers/fixtures';
 
 let available = false;
 beforeAll(async () => {
@@ -53,7 +48,7 @@ interface CitationNavigateResponse {
     section_count?: number;
 }
 
-function readerState(body: Record<string, unknown>): Promise<ReaderStateResponse> {
+function readerState(body: AttachmentFixture): Promise<ReaderStateResponse> {
     return post('/beaver/test/reader-state', body, { timeout: READER_TIMEOUT });
 }
 
@@ -176,7 +171,7 @@ describe('reader state (F-5)', () => {
     beforeEach((ctx) => skipIfNoZotero(ctx, available));
 
     it(
-        'reports the EPUB section ordinal as current_page with content_kind epub',
+        'reports the EPUB page number as current_page with content_kind epub',
         { timeout: READER_TIMEOUT },
         async () => {
             const state = await readerState(NON_PDF);
@@ -184,9 +179,8 @@ describe('reader state (F-5)', () => {
             expect(state.reader_type).toBe('epub');
             expect(state.content_kind).toBe('epub');
             expect(state.section_count).toBeGreaterThan(0);
-            // 1-based ordinal within the spine.
+            // EPUB page coordinates are not bounded by section count.
             expect(state.current_page).toBeGreaterThanOrEqual(1);
-            expect(state.current_page).toBeLessThanOrEqual(state.section_count!);
             expect(Number.isInteger(state.current_page)).toBe(true);
         },
     );

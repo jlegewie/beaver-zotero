@@ -60,6 +60,43 @@ describe('MuPDFWorkerClient', () => {
         await expect(promise).resolves.toBe(42);
     });
 
+    it('returns transferred JSON bytes from extractSerialized', async () => {
+        const client = getMuPDFWorkerClient();
+        const jsonBytes = new TextEncoder().encode('{"mode":"structured","schemaVersion":"4","document":{"pageCount":1,"pages":[]}}');
+
+        const promise = client.extractSerialized(
+            new Uint8Array([0x25, 0x50, 0x44, 0x46]),
+            { mode: 'structured', settings: { checkTextLayer: true } },
+        );
+
+        const worker = MockWorker.instances[0];
+        expect(worker.posted[0].message).toMatchObject({
+            op: 'extractSerialized',
+            args: { mode: 'structured' },
+        });
+        worker.replyToLast({
+            ok: true,
+            result: {
+                mode: 'structured',
+                schemaVersion: '4',
+                pageCount: 1,
+                byteLength: jsonBytes.byteLength,
+                jsonBytes,
+                cacheMetadata: {
+                    pageCount: 1,
+                    pageLabels: {},
+                    pages: [],
+                },
+            },
+        });
+
+        await expect(promise).resolves.toMatchObject({
+            mode: 'structured',
+            schemaVersion: '4',
+            byteLength: jsonBytes.byteLength,
+        });
+    });
+
     it('posts a configure frame as the first message after spawn, before any op', async () => {
         const client = getMuPDFWorkerClient();
         const promise = client.getPageCount(new Uint8Array([0]));

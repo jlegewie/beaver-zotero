@@ -284,6 +284,34 @@ describe('resultFromAttachmentInfo', () => {
         expect(result.reason).toContain(`exceeds the ${HARD_ATTACHMENT_LIMITS.maxPageCount}-page limit`);
     });
 
+    it('blocks over-page-limit EPUBs', () => {
+        const result = resultFromAttachmentInfo(attachmentInfo({
+            content_kind: 'epub',
+            status: 'readable',
+            page_count: HARD_ATTACHMENT_LIMITS.maxPageCount + 1,
+        }));
+
+        expect(result).toMatchObject({
+            state: 'blocked',
+            severity: 'error',
+            statusCode: undefined,
+            contentKind: 'epub',
+            pageCount: HARD_ATTACHMENT_LIMITS.maxPageCount + 1,
+        });
+        expect(result.reason).toContain('EPUB has');
+        expect(result.reason).toContain(`exceeds the ${HARD_ATTACHMENT_LIMITS.maxPageCount}-page limit`);
+    });
+
+    it('allows EPUBs at or under the page limit', () => {
+        const result = resultFromAttachmentInfo(attachmentInfo({
+            content_kind: 'epub',
+            status: 'readable',
+            page_count: HARD_ATTACHMENT_LIMITS.maxPageCount,
+        }));
+
+        expect(result.state).toBe('readable');
+    });
+
     it('blocks scanned PDFs without local OCR support', () => {
         const result = resultFromAttachmentInfo(attachmentInfo({
             status: 'unreadable',

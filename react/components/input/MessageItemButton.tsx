@@ -16,6 +16,7 @@ import { ANNOTATION_ICON_BY_TYPE, ANNOTATION_TEXT_BY_TYPE } from '../../utils/an
 import { ChipWithPopup, type ChipPopupContent } from '../agentRuns/requestChips/ChipPopup';
 import { buildAnnotationChipPopup } from '../agentRuns/requestChips/RequestChipPrimitives';
 import { ChipButton } from '../agentRuns/requestChips/ChipButton';
+import { ChipRemovableIcon } from '../agentRuns/requestChips/ChipRemovableIcon';
 import { buildMessageItemChipPopup } from './MessageItemChipPopup';
 
 const MAX_ITEM_TEXT_LENGTH = 30;
@@ -138,7 +139,6 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
         // Get validation state
         const getValidation = useAtomValue(getItemValidationAtom);
         const validation = getValidation(item);
-        const [isHovered, setIsHovered] = React.useState(false);
 
         // Determine display name based on item type
         const displayName = isAnnotation && annotation
@@ -229,6 +229,25 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
             revealItem();
         };
 
+        const renderNormalIcon = () => {
+            if (isAnnotation && annotation) {
+                return (
+                    <ZoteroIcon icon={ANNOTATION_ICON_BY_TYPE[annotation.annotation_type]} size={14} />
+                );
+            }
+
+            try {
+                const iconName = item.getItemTypeIconName();
+                return iconName ? (
+                    <span className="scale-80">
+                        <CSSItemTypeIcon itemType={iconName} />
+                    </span>
+                ) : null;
+            } catch {
+                return null;
+            }
+        };
+
         // Get icon element based on validation state
         const getIconElement = () => {
             // Show spinner during validation
@@ -240,38 +259,19 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
                 );
             }
 
-            // Show remove icon on hover (if editable). Keep it visible while the
-            // long-press menu is open so the trigger doesn't disappear.
-            if ((isHovered || isRemoveMenuOpen) && canEdit && !disabled) {
+            const normalIcon = renderNormalIcon();
+
+            if (canEdit && !disabled) {
                 return (
-                    <span
-                        role="button"
-                        className={`source-remove ${isAnnotation ? '-ml-015' : ''}`}
-                        {...removeHandlers}
-                    >
-                        <CSSIcon name="x-8" className="icon-16" />
-                    </span>
+                    <ChipRemovableIcon
+                        normalIcon={normalIcon}
+                        removeHandlers={removeHandlers}
+                        removeMenuOpen={isRemoveMenuOpen}
+                    />
                 );
             }
 
-            // Show annotation-specific icon
-            if (isAnnotation && annotation) {
-                return (
-                    <ZoteroIcon icon={ANNOTATION_ICON_BY_TYPE[annotation.annotation_type]} size={14} />
-                );
-            }
-
-            // Show item type icon
-            try {
-                const iconName = item.getItemTypeIconName();
-                return iconName ? (
-                    <span className="scale-80">
-                        <CSSItemTypeIcon itemType={iconName} />
-                    </span>
-                ) : null;
-            } catch (error) {
-                return null;
-            }
+            return normalIcon;
         };
 
         // Determine button styling based on validation state
@@ -295,12 +295,10 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
         };
 
         const handleMouseEnter = (event: React.MouseEvent<HTMLButtonElement>) => {
-            setIsHovered(true);
             onMouseEnter?.(event);
         };
 
         const handleMouseLeave = (event: React.MouseEvent<HTMLButtonElement>) => {
-            setIsHovered(false);
             onMouseLeave?.(event);
         };
 

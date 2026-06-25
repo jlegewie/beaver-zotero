@@ -14,6 +14,7 @@
 
 import type {
     BeaverExtractResult,
+    SerializedBeaverExtractResult,
 } from '../beaver-extract/schema';
 import type { PageGeometry } from '../beaver-extract/types';
 import {
@@ -34,7 +35,11 @@ import {
 } from './agentDataProvider/timeout';
 import type { ZoteroDocumentErrorCode } from './agentProtocol';
 import type { DocumentCacheExtractionMode } from './database';
-import type { DocumentCacheItemRef, DocumentCacheSourceIdentity } from './documentCache';
+import type {
+    DocumentCacheItemRef,
+    DocumentCacheSourceIdentity,
+    SerializedDocumentCacheResult,
+} from './documentCache';
 import { logger } from '../utils/logger';
 import { effectiveMaxFileSizeMB, effectiveMaxPageCount } from './attachmentLimits';
 import {
@@ -127,12 +132,21 @@ export interface ExtractAndCacheResolvedPdfArgs
     contentType: string;
     /** Reuse the caller's timeout when item resolution and PDF extraction share one deadline. */
     timeoutContext?: TimeoutControllerContext;
+    /** Return pre-serialized PDF JSON bytes instead of a parsed result object. */
+    serializedResult?: boolean;
 }
 
 export interface ExtractAndCacheEpubArgs {
     source: ExtractionSource;
     resolvedKey: string;
     contentType: string;
+    /**
+     * Reject threshold for total document page count. `null` falls back to
+     * Beaver's hard page-count cap. EPUB pages are the extractor's per-item
+     * `pageNumber` coordinate (physical print pages when the book carries
+     * markers, otherwise synthetic ~character-interval pages).
+     */
+    maxPages: number | null;
     maxFileSizeMB: number;
     externalAbortSignal?: AbortSignal;
     onFileNotSyncedLocally?: () => void;
@@ -167,11 +181,38 @@ export function buildExtractedDocumentCacheMetadata(extracted: BeaverExtractResu
     };
 }
 
+function serializedWorkerResultToCacheResult(
+    extracted: SerializedBeaverExtractResult,
+): SerializedDocumentCacheResult {
+    return {
+        schemaVersion: extracted.schemaVersion,
+        mode: extracted.mode,
+        document: { pageCount: extracted.pageCount },
+        byteLength: extracted.byteLength,
+        jsonBytes: extracted.jsonBytes,
+        metadata: {
+            pageCount: extracted.cacheMetadata.pageCount,
+            pageLabels: extracted.cacheMetadata.pageLabels,
+            pages: extracted.cacheMetadata.pages,
+        },
+    };
+}
+
 export type ExtractAndCacheResult =
     | {
           kind: 'ok';
           cached: boolean;
           result: BeaverExtractResult;
+          serializedResult?: undefined;
+          totalPages: number;
+          resolvedAttachment: ResolvedAttachment;
+          contentType: string;
+      }
+    | {
+          kind: 'ok';
+          cached: boolean;
+          result?: undefined;
+          serializedResult: SerializedDocumentCacheResult;
           totalPages: number;
           resolvedAttachment: ResolvedAttachment;
           contentType: string;
@@ -218,6 +259,8 @@ export type ExtractAndCacheEpubResult =
           kind: 'response_error';
           code: ZoteroDocumentErrorCode;
           message: string;
+          /** Document page count when known (e.g. the count that tripped `too_many_pages`). */
+          pageCount?: number | null;
           resolvedAttachment: ResolvedAttachment;
           contentKind?: ExtractContentKind;
       };
@@ -396,6 +439,7 @@ export async function extractAndCacheEpubDocument(
 
     const maxFileSizeMB = effectiveMaxFileSizeMB(args.maxFileSizeMB);
     const maxSourceSizeBytes = maxFileSizeMB * 1024 * 1024;
+    const maxPages = effectiveMaxPageCount(args.maxPages);
 
     const okOrNoText = (
         document: EpubDocument,
@@ -406,6 +450,19 @@ export async function extractAndCacheEpubDocument(
                 kind: 'response_error',
                 code: 'no_text_layer',
                 message: `The EPUB file for ${requestKey} contains no extractable text.`,
+                resolvedAttachment,
+                contentKind: 'epub',
+            };
+        }
+        // Match the PDF path and the backend's document_fetch_max_pages: reject
+        // oversized documents before serializing the (potentially large) payload.
+        // EPUB page counts are the extractor's per-item page coordinate.
+        if (document.pageCount != null && document.pageCount > maxPages) {
+            return {
+                kind: 'response_error',
+                code: 'too_many_pages',
+                message: `The EPUB file for ${requestKey} has ${document.pageCount} pages, which exceeds the ${maxPages}-page limit.`,
+                pageCount: document.pageCount,
                 resolvedAttachment,
                 contentKind: 'epub',
             };
@@ -455,14 +512,21 @@ export async function extractAndCacheEpubDocument(
             },
             metadata: (doc) => ({
                 contentKind: 'epub',
+                // PDF-only fields stay null for EPUB.
                 pageCount: null,
                 pageLabels: null,
                 pages: null,
+                epubPageCount: doc.pageCount ?? null,
                 epubSections: doc.sections.map((section) => ({
                     index: section.index,
                     rawHref: section.rawHref,
                     label: section.label,
                     itemCount: section.items.length,
+                    // Item-less sections do not have an extraction page. Page
+                    // numbers are non-decreasing in reading order, so the first
+                    // and last items bound the section's page span.
+                    firstPageNumber: section.items[0]?.pageNumber,
+                    lastPageNumber: section.items[section.items.length - 1]?.pageNumber,
                 })),
                 epubExtractedTextChars: doc.diagnostics.extractedTextChars,
             }),
@@ -675,11 +739,20 @@ export async function extractAndCacheResolvedPdfDocument(
 
         const maxSourceSizeBytes = maxFileSizeMB * 1024 * 1024;
         const cachedResult = cache
-            ? await cache.getResult(
-                { libraryId: cacheItemRef.libraryID, zoteroKey: cacheItemRef.key },
-                mode,
-                effectiveFilePath,
-                { maxSourceSizeBytes },
+            ? await (
+                args.serializedResult
+                    ? cache.getSerializedResult(
+                        { libraryId: cacheItemRef.libraryID, zoteroKey: cacheItemRef.key },
+                        mode,
+                        effectiveFilePath,
+                        { maxSourceSizeBytes },
+                    )
+                    : cache.getResult(
+                        { libraryId: cacheItemRef.libraryID, zoteroKey: cacheItemRef.key },
+                        mode,
+                        effectiveFilePath,
+                        { maxSourceSizeBytes },
+                    )
             ).catch(() => null)
             : null;
         throwIfTimedOut('payload_cache_lookup');
@@ -696,7 +769,9 @@ export async function extractAndCacheResolvedPdfDocument(
             return {
                 kind: 'ok',
                 cached: true,
-                result: cachedResult,
+                ...(args.serializedResult
+                    ? { serializedResult: cachedResult as SerializedDocumentCacheResult }
+                    : { result: cachedResult as BeaverExtractResult }),
                 totalPages: cachedResult.document.pageCount,
                 resolvedAttachment,
                 contentType: zoteroItem?.attachmentContentType || cachedMeta?.contentType || args.contentType || 'application/pdf',
@@ -827,20 +902,43 @@ export async function extractAndCacheResolvedPdfDocument(
         }
         const extractSettings = { checkTextLayer: true as const };
         const createSharedResult = async (extractSignal: AbortSignal) =>
-            client.extract(pdfBytes, { mode, settings: extractSettings }, extractSignal);
+            args.serializedResult
+                ? client.extractSerialized(pdfBytes, { mode, settings: extractSettings }, extractSignal)
+                : client.extract(pdfBytes, { mode, settings: extractSettings }, extractSignal);
 
         const createUnsharedResult = async () => {
-            const extracted = await client.extract(
-                pdfBytes,
-                { mode, settings: extractSettings },
-                signal,
-            );
+            const extracted = args.serializedResult
+                ? serializedWorkerResultToCacheResult(
+                    await client.extractSerialized(
+                        pdfBytes,
+                        { mode, settings: extractSettings },
+                        signal,
+                    ),
+                )
+                : await client.extract(
+                    pdfBytes,
+                    { mode, settings: extractSettings },
+                    signal,
+                );
             throwIfTimedOut('pdf_extract');
             return extracted;
         };
 
         const resultPromise = cache
-            ? cache.getOrCreateResult({
+            ? args.serializedResult
+                ? cache.getOrCreateSerializedResult({
+                    item: cacheItemRef,
+                    filePath: effectiveFilePath,
+                    mode,
+                    sourceSizeBytes: isRemoteOnly ? pdfBytes.byteLength : 0,
+                    contentType: zoteroItem?.attachmentContentType || args.contentType || 'application/pdf',
+                    maxSourceSizeBytes,
+                    sharedTimeoutMs: MAX_PDF_TIMEOUT_SECONDS * 1000,
+                    abortSignal: signal,
+                    expectedSourceIdentity: isRemoteOnly ? null : initialSourceIdentity,
+                    create: createSharedResult as (extractSignal: AbortSignal) => ReturnType<typeof client.extractSerialized>,
+                })
+                : cache.getOrCreateResult({
                 item: cacheItemRef,
                 filePath: effectiveFilePath,
                 mode,
@@ -850,7 +948,7 @@ export async function extractAndCacheResolvedPdfDocument(
                 sharedTimeoutMs: MAX_PDF_TIMEOUT_SECONDS * 1000,
                 abortSignal: signal,
                 expectedSourceIdentity: isRemoteOnly ? null : initialSourceIdentity,
-                create: createSharedResult,
+                create: createSharedResult as (extractSignal: AbortSignal) => Promise<BeaverExtractResult>,
                 metadata: buildExtractedDocumentCacheMetadata,
             })
             : createUnsharedResult();
@@ -882,7 +980,9 @@ export async function extractAndCacheResolvedPdfDocument(
         return {
             kind: 'ok',
             cached: false,
-            result,
+            ...(args.serializedResult
+                ? { serializedResult: result as SerializedDocumentCacheResult }
+                : { result: result as BeaverExtractResult }),
             totalPages: result.document.pageCount,
             resolvedAttachment,
             contentType: zoteroItem?.attachmentContentType || args.contentType || 'application/pdf',
