@@ -1,5 +1,5 @@
 import React, { forwardRef } from 'react'
-import { CSSIcon, Icon, TextAlignLeftIcon, PdfIcon } from "../icons/icons"
+import { Icon, TextAlignLeftIcon, PdfIcon } from "../icons/icons"
 import { useSetAtom } from 'jotai'
 import { readerTextSelectionAtom } from '../../atoms/messageComposition'
 import { navigateToPageInCurrentReader } from '../../utils/readerUtils'
@@ -8,6 +8,7 @@ import { TextSelection } from '../../types/attachments/apiTypes'
 import { truncateText } from '../../utils/stringUtils'
 import { ChipWithPopup, type ChipPopupContent } from '../agentRuns/requestChips/ChipPopup'
 import { ChipButton } from '../agentRuns/requestChips/ChipButton'
+import { ChipRemovableIcon } from '../agentRuns/requestChips/ChipRemovableIcon'
 
 
 const MAX_TEXT_SELECTION_TOOLTIP_TEXT_LENGTH = 160;
@@ -36,7 +37,6 @@ export const TextSelectionButton = forwardRef<HTMLButtonElement, TextSelectionBu
 
         // States/Atoms needed for non-preview logic
         const setReaderTextSelection = useSetAtom(readerTextSelectionAtom)
-        const [isHovered, setIsHovered] = React.useState(false);
 
         const { isRemoveMenuOpen, contextMenuHandlers, removeHandlers, removeMenu } = useRemoveContextMenu({
             onRemove: () => {
@@ -63,20 +63,9 @@ export const TextSelectionButton = forwardRef<HTMLButtonElement, TextSelectionBu
             };
         }, [selection.page, selection.text]);
 
-        const getIconElement = () => {
-            if ((isHovered || isRemoveMenuOpen) && canEdit) {
-                return (<span
-                    role="button"
-                    className="source-remove -ml-020 -mr-015"
-                    {...removeHandlers}
-                >
-                    <CSSIcon name="x-8" className="icon-16" />
-                </span>)
-            }
-            return (
-                <Icon icon={TextAlignLeftIcon} className="mt-015 font-color-secondary"/>
-            )
-        }
+        const normalIcon = (
+            <Icon icon={TextAlignLeftIcon} className="mt-015 font-color-secondary" />
+        );
 
         return (
             <>
@@ -87,21 +76,21 @@ export const TextSelectionButton = forwardRef<HTMLButtonElement, TextSelectionBu
                     {...contextMenuHandlers}
                     className={`${className || ''} ${disabled ? 'disabled-but-styled' : ''}`}
                     disabled={disabled}
-                    onMouseEnter={(event) => {
-                        setIsHovered(true);
-                        onMouseEnter?.(event);
-                    }}
-                    onMouseLeave={(event) => {
-                        setIsHovered(false);
-                        onMouseLeave?.(event);
-                    }}
+                    onMouseEnter={onMouseEnter}
+                    onMouseLeave={onMouseLeave}
                     onClick={(e) => {
                         e.stopPropagation();
                         if (selection.page != null) navigateToPageInCurrentReader(selection.page);
                         onClick?.(e);
                     }}
                 >
-                    {getIconElement()}
+                    {canEdit ? (
+                        <ChipRemovableIcon
+                            normalIcon={normalIcon}
+                            removeHandlers={removeHandlers}
+                            removeMenuOpen={isRemoveMenuOpen}
+                        />
+                    ) : normalIcon}
                     <span className={`truncate`}>
                         Text Selection
                     </span>

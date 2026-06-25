@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { useSetAtom, useAtomValue } from 'jotai';
 import { CSSIcon, LibraryIcon } from '../icons/icons';
 import { removeLibraryIdAtom } from '../../atoms/messageComposition';
@@ -8,6 +8,7 @@ import { searchableLibraryIdsAtom } from '../../atoms/profile';
 import { useRemoveContextMenu } from '../../hooks/useRemoveContextMenu';
 import { ChipWithPopup, type ChipPopupContent } from '../agentRuns/requestChips/ChipPopup';
 import { ChipButton } from '../agentRuns/requestChips/ChipButton';
+import { ChipRemovableIcon } from '../agentRuns/requestChips/ChipRemovableIcon';
 
 const MAX_LIBRARYBUTTON_TEXT_LENGTH = 20;
 
@@ -27,7 +28,6 @@ export const LibraryButton: React.FC<LibraryButtonProps> = ({
     onRemoveAll,
     ...rest
 }) => {
-    const [isHovered, setIsHovered] = useState(false);
     const removeLibraryId = useSetAtom(removeLibraryIdAtom);
     // Use searchableLibraryIds: Free users can search ALL libraries, Pro users can search synced only
     const searchableLibraryIds = useAtomValue(searchableLibraryIdsAtom);
@@ -46,21 +46,11 @@ export const LibraryButton: React.FC<LibraryButtonProps> = ({
         }],
     });
 
-    const getIconElement = () => {
-        if ((isHovered || isRemoveMenuOpen) && canEdit) {
-            return (
-                <span role="button" className="source-remove" {...removeHandlers}>
-                    <CSSIcon name="x-8" className="icon-16" />
-                </span>
-            );
-        }
-
-        return (
-            <span className="scale-90">
-                <CSSIcon name={library.isGroup ? "library-group" : "library"} className="icon-16" />
-            </span>
-        );
-    };
+    const normalIcon = (
+        <span className="scale-90">
+            <CSSIcon name={library.isGroup ? "library-group" : "library"} className="icon-16" />
+        </span>
+    );
 
     const getButtonClasses = () => {
         const classes = `${className || ''} ${disabled ? 'disabled-but-styled' : ''}`;
@@ -87,15 +77,19 @@ export const LibraryButton: React.FC<LibraryButtonProps> = ({
         <>
         <ChipWithPopup popup={popup} suppressed={isRemoveMenuOpen}>
             <ChipButton
-                onMouseEnter={() => setIsHovered(true)}
-                onMouseLeave={() => setIsHovered(false)}
                 {...contextMenuHandlers}
                 className={getButtonClasses()}
                 disabled={disabled}
                 onClick={() => selectLibrary(library)}
                 {...rest}
             >
-                {getIconElement()}
+                {canEdit ? (
+                    <ChipRemovableIcon
+                        normalIcon={normalIcon}
+                        removeHandlers={removeHandlers}
+                        removeMenuOpen={isRemoveMenuOpen}
+                    />
+                ) : normalIcon}
                 <span className={`truncate ${!isValid ? 'font-color-red' : ''}`}>
                     {displayName}
                 </span>

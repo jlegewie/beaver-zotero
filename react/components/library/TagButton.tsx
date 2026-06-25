@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { useSetAtom } from 'jotai';
 import { CSSIcon, TagIcon } from '../icons/icons';
 import { removeTagIdAtom } from '../../atoms/messageComposition';
@@ -7,6 +7,7 @@ import { ZoteroTag } from '../../types/zotero';
 import { useRemoveContextMenu } from '../../hooks/useRemoveContextMenu';
 import { ChipWithPopup, type ChipPopupContent } from '../agentRuns/requestChips/ChipPopup';
 import { ChipButton } from '../agentRuns/requestChips/ChipButton';
+import { ChipRemovableIcon } from '../agentRuns/requestChips/ChipRemovableIcon';
 
 const MAX_TAGBUTTON_TEXT_LENGTH = 20;
 
@@ -26,7 +27,6 @@ export const TagButton: React.FC<TagButtonProps> = ({
     onRemoveAll,
     ...rest
 }) => {
-    const [isHovered, setIsHovered] = useState(false);
     const removeTagId = useSetAtom(removeTagIdAtom);
 
     // Filter the Zotero library by this tag using the tag selector. Tags have no
@@ -75,23 +75,15 @@ export const TagButton: React.FC<TagButtonProps> = ({
         }],
     });
 
-    const getIconElement = () => {
-        if ((isHovered || isRemoveMenuOpen) && canEdit) {
-            return (
-                <span role="button" className="source-remove" {...removeHandlers}>
-                    <CSSIcon name="x-8" className="icon-16" />
-                </span>
-            );
-        }
-
-        return <CSSIcon
+    const normalIcon = (
+        <CSSIcon
             name="tag"
             className="icon-16 scale-80"
             style={{
                 color: tag.color,
             }}
-        />;
-    };
+        />
+    );
 
     const getButtonClasses = () => {
         return `${className || ''} ${disabled ? 'disabled-but-styled' : ''}`;
@@ -116,15 +108,19 @@ export const TagButton: React.FC<TagButtonProps> = ({
         <>
         <ChipWithPopup popup={popup} suppressed={isRemoveMenuOpen}>
             <ChipButton
-                onMouseEnter={() => setIsHovered(true)}
-                onMouseLeave={() => setIsHovered(false)}
                 {...contextMenuHandlers}
                 className={getButtonClasses()}
                 disabled={disabled}
                 onClick={() => filterByTag()}
                 {...rest}
             >
-                {getIconElement()}
+                {canEdit ? (
+                    <ChipRemovableIcon
+                        normalIcon={normalIcon}
+                        removeHandlers={removeHandlers}
+                        removeMenuOpen={isRemoveMenuOpen}
+                    />
+                ) : normalIcon}
                 <span className="truncate">
                     {displayName}
                 </span>

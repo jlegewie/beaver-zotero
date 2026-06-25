@@ -16,6 +16,7 @@ import { ANNOTATION_ICON_BY_TYPE, ANNOTATION_TEXT_BY_TYPE } from '../../utils/an
 import { ChipWithPopup, type ChipPopupContent } from '../agentRuns/requestChips/ChipPopup';
 import { buildAnnotationChipPopup } from '../agentRuns/requestChips/RequestChipPrimitives';
 import { ChipButton } from '../agentRuns/requestChips/ChipButton';
+import { ChipRemovableIcon } from '../agentRuns/requestChips/ChipRemovableIcon';
 import { buildMessageItemChipPopup } from './MessageItemChipPopup';
 
 const MAX_ITEM_TEXT_LENGTH = 30;
@@ -138,7 +139,6 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
         // Get validation state
         const getValidation = useAtomValue(getItemValidationAtom);
         const validation = getValidation(item);
-        const [isHovered, setIsHovered] = React.useState(false);
 
         // Determine display name based on item type
         const displayName = isAnnotation && annotation
@@ -229,8 +229,6 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
             revealItem();
         };
 
-        const showRemoveIcon = (isHovered || isRemoveMenuOpen) && canEdit && !disabled;
-
         const renderNormalIcon = () => {
             if (isAnnotation && annotation) {
                 return (
@@ -263,23 +261,13 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
 
             const normalIcon = renderNormalIcon();
 
-            // Overlay the remove "x" so differently-sized glyphs keep the chip dimensions stable.
-            if (showRemoveIcon) {
+            if (canEdit && !disabled) {
                 return (
-                    <span className="chip-icon-slot">
-                        {normalIcon && (
-                            <span className="chip-icon-slot-normal opacity-0" aria-hidden>
-                                {normalIcon}
-                            </span>
-                        )}
-                        <span
-                            role="button"
-                            className="source-remove chip-icon-slot-remove"
-                            {...removeHandlers}
-                        >
-                            <CSSIcon name="x-8" className="icon-16 scale-80" />
-                        </span>
-                    </span>
+                    <ChipRemovableIcon
+                        normalIcon={normalIcon}
+                        removeHandlers={removeHandlers}
+                        removeMenuOpen={isRemoveMenuOpen}
+                    />
                 );
             }
 
@@ -307,12 +295,10 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
         };
 
         const handleMouseEnter = (event: React.MouseEvent<HTMLButtonElement>) => {
-            setIsHovered(true);
             onMouseEnter?.(event);
         };
 
         const handleMouseLeave = (event: React.MouseEvent<HTMLButtonElement>) => {
-            setIsHovered(false);
             onMouseLeave?.(event);
         };
 

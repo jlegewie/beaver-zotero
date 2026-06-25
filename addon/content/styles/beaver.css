@@ -201,12 +201,31 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    transition: none;
 }
 
 [id^="beaver-pane-"] .chip-icon-slot-remove {
     position: absolute;
     inset: 0;
     margin: 0;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+}
+
+/* CSS :hover on the chip — survives layout reflow under a stationary cursor
+   (React mouseenter/mouseleave does not re-fire when siblings are removed). */
+[id^="beaver-pane-"] .source-button:hover .chip-icon-slot-normal,
+[id^="beaver-pane-"] .chip-icon-slot-remove-open .chip-icon-slot-normal {
+    opacity: 0;
+    visibility: hidden;
+}
+
+[id^="beaver-pane-"] .source-button:hover .chip-icon-slot-remove,
+[id^="beaver-pane-"] .chip-icon-slot-remove-open .chip-icon-slot-remove {
+    opacity: 0.6;
+    visibility: visible;
+    pointer-events: auto;
 }
 
 /* Component: Beaver Chat */
