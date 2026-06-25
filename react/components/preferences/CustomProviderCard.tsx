@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from "react";
+import React, { useState, useCallback, useMemo, useRef, useEffect } from "react";
 import Button from "../ui/Button";
 import MenuButton from "../ui/MenuButton";
 import Spinner from "../icons/Spinner";
@@ -30,6 +30,8 @@ interface CustomProviderCardProps {
     isExpanded: boolean;
     onToggleExpand: () => void;
     hasBorder?: boolean;
+    /** Focus the Name field once on mount (used for newly added providers). */
+    autoFocusName?: boolean;
 }
 
 type TestStatus = 'idle' | 'loading' | 'success' | 'error';
@@ -65,6 +67,7 @@ const CustomProviderCard: React.FC<CustomProviderCardProps> = ({
     isExpanded,
     onToggleExpand,
     hasBorder = false,
+    autoFocusName = false,
 }) => {
     const [testStatus, setTestStatus] = useState<TestStatus>('idle');
     const [testResult, setTestResult] = useState<RockPaperScissorsTestResult | null>(null);
@@ -72,6 +75,14 @@ const CustomProviderCard: React.FC<CustomProviderCardProps> = ({
     const [contextWindowText, setContextWindowText] = useState<string>(
         model.context_window != null ? String(model.context_window) : ''
     );
+    const nameInputRef = useRef<HTMLInputElement>(null);
+
+    // Focus the Name field when a newly added provider mounts in its expanded state.
+    useEffect(() => {
+        if (autoFocusName) {
+            nameInputRef.current?.focus();
+        }
+    }, [autoFocusName]);
 
     // --- Field updates (controlled by parent) ---
     const update = useCallback((patch: Partial<CustomChatModel>) => {
@@ -204,6 +215,7 @@ const CustomProviderCard: React.FC<CustomProviderCardProps> = ({
                 <label className="display-flex flex-col">
                     <span className="text-sm font-color-secondary">Name</span>
                     <input
+                        ref={nameInputRef}
                         type="text"
                         value={model.name}
                         onChange={(e) => update({ name: e.target.value })}

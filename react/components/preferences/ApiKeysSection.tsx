@@ -54,6 +54,8 @@ const ApiKeysSection: React.FC = () => {
     );
     // Only one provider card is expanded at a time.
     const [expandedProviderId, setExpandedProviderId] = useState<string | null>(null);
+    // The newly added provider whose Name field should receive focus on mount.
+    const [autoFocusProviderId, setAutoFocusProviderId] = useState<string | null>(null);
 
     // Persist the providers list to preferences and refresh the live model selector.
     const persistProviders = useCallback((entries: CustomProviderEntry[]) => {
@@ -63,12 +65,14 @@ const ApiKeysSection: React.FC = () => {
 
     const handleAddProvider = useCallback(() => {
         const id = createProviderId();
+        // Add new providers to the top of the list so they're immediately visible.
         setCustomProviders((prev) => {
-            const next = [...prev, { _id: id, model: emptyCustomModel() }];
+            const next = [{ _id: id, model: emptyCustomModel() }, ...prev];
             persistProviders(next);
             return next;
         });
         setExpandedProviderId(id);
+        setAutoFocusProviderId(id);
     }, [persistProviders]);
 
     const handleProviderChange = useCallback((id: string, model: CustomChatModel) => {
@@ -202,12 +206,13 @@ const ApiKeysSection: React.FC = () => {
                                 isExpanded={entry._id === expandedProviderId}
                                 onToggleExpand={() => handleToggleExpand(entry._id)}
                                 hasBorder={index > 0}
+                                autoFocusName={entry._id === autoFocusProviderId}
                             />
                         ))}
                     </SettingsGroup>
                 ) : (
                     <div className="text-base font-color-tertiary" style={{ paddingLeft: '2px' }}>
-                        No custom providers yet. Click <strong>Add Provider</strong> to configure one.
+                        Click <span className="font-semibold" onClick={handleAddProvider}>Add Provider</span> to add custom endpoints
                     </div>
                 )}
             </div>
