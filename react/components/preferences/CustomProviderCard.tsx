@@ -131,13 +131,22 @@ const CustomProviderCard: React.FC<CustomProviderCardProps> = ({
         }
     }, [model]);
 
-    // The dropdown picks the user's move, which is sent to the model.
-    const testMenuItems: MenuItem[] = useMemo(() => MOVES.map((move) => ({
-        label: MOVE_LABELS[move],
-        icon: MOVE_ICONS[move],
-        onClick: () => runTest(move),
-        disabled: !isComplete || testStatus === 'loading',
-    })), [runTest, isComplete, testStatus]);
+    const testMenuItems: MenuItem[] = useMemo(() => [
+        { label: '', isDivider: true, onClick: () => {} },
+        ...MOVES.map((move) => ({
+            label: MOVE_LABELS[move],
+            icon: MOVE_ICONS[move],
+            onClick: () => runTest(move),
+            disabled: !isComplete || testStatus === 'loading',
+        })),
+    ], [runTest, isComplete, testStatus]);
+
+    const testMenuHeader = (
+        <div className="display-flex flex-col gap-05 px-2 py-1 font-color-secondary text-base">
+            <span className="font-semibold">Rock Paper Scissors</span>
+            <span>Pick a move to test the endpoint</span>
+        </div>
+    );
 
     const testButtonCustomContent = (
         <span className="display-flex flex-row items-center gap-2">
@@ -300,9 +309,10 @@ const CustomProviderCard: React.FC<CustomProviderCardProps> = ({
                 <div className="display-flex flex-row items-center justify-between mt-1">
                     <MenuButton
                         menuItems={testMenuItems}
+                        header={testMenuHeader}
                         customContent={testButtonCustomContent}
                         variant="outline"
-                        width="180px"
+                        width="220px"
                         className="text-base"
                         ariaLabel="Test endpoint"
                         disabled={!isComplete && testStatus !== 'loading'}
