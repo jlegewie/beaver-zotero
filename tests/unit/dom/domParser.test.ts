@@ -32,7 +32,7 @@ function bodyOf(doc: Document): Element {
 describe("EPUB document constants", () => {
     it("exposes the EPUB content discriminator and schema version", () => {
         expect(EPUB_CONTENT_KIND).toBe("epub");
-        expect(EPUB_SCHEMA_VERSION).toBe("1");
+        expect(EPUB_SCHEMA_VERSION).toBe("2");
     });
 });
 

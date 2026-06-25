@@ -2,9 +2,12 @@
 
 import { describe, expect, it } from "vitest";
 import {
+    appendSyntheticSectionMarkers,
     epubPageLabelForPosition,
+    epubPageOrdinalForPosition,
     extractSectionPageMarkers,
     scorePageMarkers,
+    type EpubPageMarker,
 } from "../../../src/services/documentExtraction/epub/epubPageMapping";
 
 interface TestSection {
@@ -117,5 +120,56 @@ describe("epubPageLabelForPosition", () => {
 
     it("returns empty string when the mapping is not physical", () => {
         expect(epubPageLabelForPosition({ isPhysical: false, markers: [] }, 0, 5)).toBe("");
+    });
+});
+
+describe("appendSyntheticSectionMarkers", () => {
+    const collect = (sections: { length: number; nodes: number[] }[]) => {
+        const out: EpubPageMarker[] = [];
+        sections.forEach((section, sectionIndex) => {
+            let start = 0;
+            const nodes = section.nodes.map((length) => {
+                const node = { start, length };
+                start += length;
+                return node;
+            });
+            appendSyntheticSectionMarkers(nodes, sectionIndex, 1800, out);
+        });
+        return out;
+    };
+
+    it("places a marker at the section start", () => {
+        const markers = collect([{ length: 1, nodes: [500] }]);
+        expect(markers).toEqual([{ sectionIndex: 0, charOffset: 0, label: "1" }]);
+    });
+
+    it("breaks every interval characters within a long node", () => {
+        const markers = collect([{ length: 1, nodes: [4000] }]);
+        expect(markers.map((m) => m.charOffset)).toEqual([0, 1800, 3600]);
+    });
+
+    it("does not carry a crossing node's remainder toward the next break", () => {
+        const markers = collect([{ length: 1, nodes: [1000, 1000, 1000] }]);
+        expect(markers.map((m) => m.charOffset)).toEqual([0, 2800]);
+    });
+
+    it("continues the global ordinal across sections and resets the per-section budget", () => {
+        const markers = collect([
+            { length: 1, nodes: [500] },
+            { length: 1, nodes: [500] },
+        ]);
+        expect(markers).toEqual([
+            { sectionIndex: 0, charOffset: 0, label: "1" },
+            { sectionIndex: 1, charOffset: 0, label: "2" },
+        ]);
+    });
+
+    it("assigns each position the ordinal of its nearest preceding marker", () => {
+        const markers = collect([{ length: 1, nodes: [4000] }]);
+        const mapping = { isPhysical: true as const, markers };
+        expect(epubPageOrdinalForPosition(mapping, 0, 0)).toBe(1);
+        expect(epubPageOrdinalForPosition(mapping, 0, 1799)).toBe(1);
+        expect(epubPageOrdinalForPosition(mapping, 0, 1800)).toBe(2);
+        expect(epubPageOrdinalForPosition(mapping, 0, 3600)).toBe(3);
     });
 });

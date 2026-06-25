@@ -19,7 +19,7 @@ import {
 } from '../../src/services/agentProtocol';
 import { currentReaderAttachmentAtom, readerTextSelectionAtom } from './messageComposition';
 import { currentNoteItemAtom } from './zoteroContext';
-import { getCurrentPage, getCurrentReader } from '../utils/readerUtils';
+import { getCurrentPage, getCurrentReader, getEpubReaderPage } from '../utils/readerUtils';
 import { searchableLibraryIdsAtom, processingModeAtom } from './profile';
 import { ProcessingMode } from '../types/profile';
 import { isLibraryTabAtom } from './ui';
@@ -38,8 +38,11 @@ const MAX_LIBRARY_SELECTION = 5;
 
 /**
  * Build reader state for the current reader attachment.
+ *
+ * EPUB pages come from the open reader so the reported coordinate matches the
+ * visible reader position.
  */
-export function getReaderState(get: Getter): ReaderState | null {
+export async function getReaderState(get: Getter): Promise<ReaderState | null> {
     const readerAttachment = get(currentReaderAttachmentAtom);
     if (!readerAttachment) return null;
 
@@ -47,11 +50,22 @@ export function getReaderState(get: Getter): ReaderState | null {
     const contentKind = reader?.type === 'pdf' || reader?.type === 'epub'
         ? reader.type
         : undefined;
-    const currentTextSelection = get(readerTextSelectionAtom);
+    let currentTextSelection = get(readerTextSelectionAtom);
+
+    let currentPage = getCurrentPage(reader) || null;
+    if (contentKind === 'epub') {
+        currentPage = getEpubReaderPage(reader);
+        if (currentTextSelection) {
+            // EPUB selection locations are section-based; keep page context at
+            // the reader level.
+            currentTextSelection = { text: currentTextSelection.text };
+        }
+    }
+
     return {
         library_id: readerAttachment.libraryID,
         zotero_key: readerAttachment.key,
-        current_page: getCurrentPage(reader) || null,
+        current_page: currentPage,
         ...(contentKind && { content_kind: contentKind }),
         ...(currentTextSelection && { text_selection: currentTextSelection })
     } as ReaderState;
@@ -77,7 +91,7 @@ export function getNoteState(get: Getter): NoteState | null {
  * embedding-index status, and per-library summaries).
  */
 export async function buildZoteroApplicationState(get: Getter): Promise<ApplicationStateInput> {
-    const readerState = getReaderState(get);
+    const readerState = await getReaderState(get);
     const noteState = getNoteState(get);
 
     // Get current library and collection context

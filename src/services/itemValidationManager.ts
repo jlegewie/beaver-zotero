@@ -129,11 +129,15 @@ export function resultFromAttachmentInfo(
         pageCount: info.page_count,
         attachmentInfo: info,
     };
-    if (info.content_kind === 'pdf' && info.page_count != null) {
+    if (
+        (info.content_kind === 'pdf' || info.content_kind === 'epub')
+        && info.page_count != null
+    ) {
         const maxPageCount = effectiveMaxPageCount();
         if (info.page_count > maxPageCount) {
+            const label = info.content_kind === 'epub' ? 'EPUB' : 'PDF';
             return blockedResult(
-                `PDF has ${info.page_count} pages, which exceeds the ${maxPageCount}-page limit.`,
+                `${label} has ${info.page_count} pages, which exceeds the ${maxPageCount}-page limit.`,
                 base,
             );
         }
