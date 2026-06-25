@@ -71,13 +71,32 @@ export const isCustomChatModel = (obj: unknown): obj is CustomChatModel => {
     return true;
 };
 
+/** Default endpoint used when a custom provider has no explicit endpoint. */
+export const OPENROUTER_API_BASE = 'https://openrouter.ai/api/v1';
+
+/**
+ * Backfill a missing endpoint for custom entries so legacy configs that predate
+ * the endpoint field default to OpenRouter (the same default new providers use)
+ * instead of being dropped as invalid. Entries that already set `api_base`, or
+ * that route through the native `provider: "openrouter"` path, are left untouched.
+ */
+const withDefaultEndpoint = (entry: unknown): unknown => {
+    if (!isObject(entry)) return entry;
+    const provider = typeof entry.provider === 'string' ? entry.provider.toLowerCase() : 'custom';
+    const apiBase = typeof entry.api_base === 'string' ? entry.api_base.trim() : '';
+    if (!apiBase && provider === 'custom') {
+        return { ...entry, api_base: OPENROUTER_API_BASE };
+    }
+    return entry;
+};
+
 export const getCustomChatModelsFromPreferences = (): CustomChatModel[] => {
     try {
         const raw = getPref('customChatModels');
         if (raw && typeof raw === 'string') {
             const parsed = JSON.parse(raw as string);
             if (!Array.isArray(parsed)) throw new Error("customChatModels preference must be an array");
-            return parsed.filter(isCustomChatModel);
+            return parsed.map(withDefaultEndpoint).filter(isCustomChatModel);
         }
     } catch (e) {
         console.error("Error parsing customChatModels:", e);
@@ -99,9 +118,6 @@ export const getCustomChatModelsFromPreferences = (): CustomChatModel[] => {
     return [];
 };
 
-/** Default endpoint used for OpenRouter providers in the custom-providers editor. */
-export const OPENROUTER_API_BASE = 'https://openrouter.ai/api/v1';
-
 /**
  * Read custom models for the preferences editor.
  *
@@ -112,9 +128,11 @@ export const OPENROUTER_API_BASE = 'https://openrouter.ai/api/v1';
  * keeps using the stricter getter so incomplete providers never appear as usable
  * models.
  *
- * Legacy entries that used `provider: "openrouter"` without an explicit endpoint
- * are migrated to the equivalent custom endpoint so the editor treats them as
- * complete custom providers.
+ * Entries without an explicit endpoint default to OpenRouter, matching how new
+ * providers are seeded ({@link OPENROUTER_API_BASE}). This migrates legacy
+ * configs — both `provider: "openrouter"` entries that never stored an endpoint
+ * and OpenRouter-key entries that predate the endpoint field — so the editor
+ * treats them as complete custom providers instead of flagging them incomplete.
  */
 export const getCustomChatModelsForEditing = (): CustomChatModel[] => {
     try {
@@ -124,11 +142,10 @@ export const getCustomChatModelsForEditing = (): CustomChatModel[] => {
             if (!Array.isArray(parsed)) return [];
             return parsed.filter(isObject).map((entry) => {
                 const e = entry as Record<string, unknown>;
-                const provider = typeof e.provider === 'string' ? e.provider.toLowerCase() : 'custom';
                 let api_base = typeof e.api_base === 'string' ? e.api_base : '';
-                // OpenRouter providers route through a fixed endpoint; populate it so
-                // the entry validates as a complete custom provider.
-                if (!api_base.trim() && provider === 'openrouter') {
+                // An empty endpoint defaults to OpenRouter (the most common custom
+                // setup) so legacy entries validate as complete custom providers.
+                if (!api_base.trim()) {
                     api_base = OPENROUTER_API_BASE;
                 }
                 return {
