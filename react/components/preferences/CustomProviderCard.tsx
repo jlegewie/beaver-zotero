@@ -345,7 +345,7 @@ const CustomProviderCard: React.FC<CustomProviderCardProps> = ({
                 {/* Test result (shown below the Test button) */}
                 {testStatus === 'success' && testResult && (
                     <div
-                        className="display-flex flex-col gap-1 rounded-md px-2 py-15 text-sm"
+                        className="display-flex flex-col gap-1 rounded-md px-2 py-15 text-base"
                         style={{ border: '1px solid var(--tag-green-tertiary)', background: 'var(--tag-green-quinary)' }}
                     >
                         <div className="display-flex flex-row items-center gap-2 font-color-primary">
