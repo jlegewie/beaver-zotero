@@ -218,7 +218,7 @@ const isPrivateOrReservedHost = (host: string): boolean => {
 /**
  * Mirror of the backend SSRF protection for custom endpoints. Beaver routes
  * every request through its own backend, so custom endpoints must be reachable
- * from the public internet over HTTPS — localhost, private networks, and reserved
+ * from the public internet over HTTPS. Localhost, private networks, and reserved
  * IP ranges are rejected. Keeping this check client-side gives users an immediate
  * error before a request is attempted.
  */
