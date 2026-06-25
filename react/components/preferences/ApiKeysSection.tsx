@@ -1,6 +1,6 @@
 import React, { useState, useCallback } from "react";
 import Button from "../ui/Button";
-import {SettingsGroup, SettingsRow, SectionLabel, DocLink} from "./components/SettingsElements";
+import {SettingsGroup, SettingsRow, SectionLabel, DocLink, SectionHeader} from "./components/SettingsElements";
 import ApiKeyInput from "./ApiKeyInput";
 import CustomProviderCard from "./CustomProviderCard";
 import PlusSignIcon from "../icons/PlusSignIcon";
@@ -120,21 +120,17 @@ const ApiKeysSection: React.FC = () => {
 
     return (
         <>
-            <SettingsGroup>
-                <div className="display-flex flex-col gap-05 flex-1 min-w-0" style={{ padding: '8px 12px' }}>
-                    {/* <div className="font-color-primary text-base font-medium">Permissions</div> */}
-                    <div className="font-color-secondary text-base">
-                        Beaver supports multiple model providers. Connect your API keys to use Gemini, Claude, or OpenAI models.
-                        See our <DocLink path="api-key">API key guide</DocLink> or learn about <DocLink path="custom-models">additional providers and custom endpoints</DocLink>.
-                    </div>
-
-                    <div className="font-color-secondary text-base mt-1">                                                                                                                                                                                                                                              
-                        <strong>Heads up:</strong> Free API keys and new paid keys (Tier 1) often hit rate limits in Beaver because each question uses much more of your quota than a normal chat. A key with higher rate limits works best (Tier 2+). <DocLink path="api-key#why-beaver-needs-more-from-your-api-key">Learn why</DocLink>.                                    
-                    </div>
+            <SectionHeader>API Keys and Model Providers</SectionHeader>
+            <div className="display-flex flex-col gap-05 flex-1 min-w-0 py-1 mb-2">
+                <div className="font-color-secondary text-base">
+                    Connect your own API keys (see our <DocLink path="api-key">guide</DocLink>),
+                    or add a <DocLink path="custom-models">custom endpoint</DocLink>. Free and new paid keys (Tier 1) keys often hit rate limits. A key with higher rate limits works best (Tier 2+).
+                    <DocLink path="api-key#why-beaver-needs-more-from-your-api-key"> Why?</DocLink>
                 </div>
-            </SettingsGroup>
+            </div>
 
-            <SettingsGroup>
+            {/* API Keys */}
+            <SettingsGroup className="bg-senary">
                 <div style={{ padding: '8px 12px' }}>
                     <ApiKeyInput
                         id="gemini-key"
@@ -173,6 +169,50 @@ const ApiKeysSection: React.FC = () => {
                 </div>
             </SettingsGroup>
 
+            {/* Custom Providers */}
+            <div>
+                <div className="display-flex flex-row items-end justify-between">
+                    <SectionLabel>Custom Providers</SectionLabel>
+                    <Button
+                        variant="outline"
+                        icon={PlusSignIcon}
+                        className="text-base mb-15"
+                        onClick={handleAddProvider}
+                    >
+                        Add Provider
+                    </Button>
+                </div>
+
+                <div className="text-base font-color-secondary mb-2" style={{ paddingLeft: '2px' }}>
+                    OpenRouter, OpenAI-compatible proxies, or self-hosted HTTPS endpoints.
+                    Requests are routed through Beaver's server. Each endpoint must be reachable from the public
+                    internet over HTTPS.
+                    {' '}<DocLink path="custom-models">Learn more</DocLink>
+                </div>
+
+                {customProviders.length > 0 ? (
+                    <SettingsGroup className="bg-senary">
+                        {customProviders.map((entry, index) => (
+                            <CustomProviderCard
+                                key={entry._id}
+                                model={entry.model}
+                                onChange={(model) => handleProviderChange(entry._id, model)}
+                                onRemove={() => handleRemoveProvider(entry._id)}
+                                onDuplicate={() => handleDuplicateProvider(entry._id)}
+                                isExpanded={entry._id === expandedProviderId}
+                                onToggleExpand={() => handleToggleExpand(entry._id)}
+                                hasBorder={index > 0}
+                            />
+                        ))}
+                    </SettingsGroup>
+                ) : (
+                    <div className="text-base font-color-tertiary" style={{ paddingLeft: '2px' }}>
+                        No custom providers yet. Click <strong>Add Provider</strong> to configure one.
+                    </div>
+                )}
+            </div>
+
+            {/* Plus Tools */}
             <div className="display-flex flex-row gap-2">
                 <SectionLabel>Plus Tools</SectionLabel>
                 {requestPlusTools ? (
@@ -285,46 +325,6 @@ const ApiKeysSection: React.FC = () => {
                     />
                 )}
             </SettingsGroup>
-
-            <div className="display-flex flex-row items-end justify-between">
-                <SectionLabel>Custom Providers</SectionLabel>
-                <Button
-                    variant="outline"
-                    icon={PlusSignIcon}
-                    className="text-base mb-15"
-                    onClick={handleAddProvider}
-                >
-                    Add Provider
-                </Button>
-            </div>
-
-            <div className="text-base font-color-secondary mb-2" style={{ paddingLeft: '2px' }}>
-                Connect OpenRouter, OpenAI-compatible proxies, or self-hosted endpoints as additional models.
-                Requests are routed through Beaver's backend, so each endpoint must be reachable from the public
-                internet over HTTPS. Localhost, private networks, and VPN-only hosts are not supported.
-                {' '}<DocLink path="custom-models">Learn more</DocLink>.
-            </div>
-
-            {customProviders.length > 0 ? (
-                <SettingsGroup>
-                    {customProviders.map((entry, index) => (
-                        <CustomProviderCard
-                            key={entry._id}
-                            model={entry.model}
-                            onChange={(model) => handleProviderChange(entry._id, model)}
-                            onRemove={() => handleRemoveProvider(entry._id)}
-                            onDuplicate={() => handleDuplicateProvider(entry._id)}
-                            isExpanded={entry._id === expandedProviderId}
-                            onToggleExpand={() => handleToggleExpand(entry._id)}
-                            hasBorder={index > 0}
-                        />
-                    ))}
-                </SettingsGroup>
-            ) : (
-                <div className="text-base font-color-tertiary" style={{ paddingLeft: '2px' }}>
-                    No custom providers yet. Click <strong>Add Provider</strong> to configure one.
-                </div>
-            )}
 
         </>
     );

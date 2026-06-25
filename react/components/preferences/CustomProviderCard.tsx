@@ -176,6 +176,11 @@ const CustomProviderCard: React.FC<CustomProviderCardProps> = ({
                         <div className="font-color-primary text-base font-medium">
                             {model.name?.trim() || <span className="font-color-tertiary">Untitled provider</span>}
                         </div>
+                        {model.snapshot?.trim() && (
+                            <div className="font-color-secondary text-base action-card-preview">
+                                {model.snapshot}
+                            </div>
+                        )}
                         {!isComplete && (
                             <span
                                 className="scale-90 px-15 py-05 text-sm rounded-md"
@@ -185,11 +190,6 @@ const CustomProviderCard: React.FC<CustomProviderCardProps> = ({
                             </span>
                         )}
                     </div>
-                    {model.snapshot?.trim() && (
-                        <div className="font-color-secondary text-base action-card-preview">
-                            {model.snapshot}
-                        </div>
-                    )}
                 </div>
                 <Icon icon={ArrowDownIcon} className="font-color-tertiary flex-shrink-0" />
             </div>
