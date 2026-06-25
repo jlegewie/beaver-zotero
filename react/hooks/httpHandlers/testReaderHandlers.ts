@@ -16,9 +16,9 @@
 import {
     getCurrentPage,
     getCurrentReaderAndWaitForView,
+    getEpubReaderPage,
     waitForReaderForItem,
 } from '../../utils/readerUtils';
-import { remapEpubSectionToPage } from '../../atoms/applicationState';
 import { navigateToEpubCitation } from '../../utils/epubVisualizer/epubCitationNavigation';
 import { resolveEpubCitationRange } from '../../utils/epubVisualizer/epubRangeResolver';
 import {
@@ -77,14 +77,10 @@ export async function handleTestReaderStateHttpRequest(request: any): Promise<an
         sectionCount = primaryView ? getSectionCount(primaryView) : null;
     }
 
-    // Match the EPUB page coordinate used by application state.
-    let currentPage = getCurrentPage(reader) || null;
-    if (reader.type === 'epub' && currentPage !== null && reader.itemID != null) {
-        const attachmentItem = await Zotero.Items.getAsync(reader.itemID);
-        if (attachmentItem) {
-            currentPage = await remapEpubSectionToPage(attachmentItem, currentPage, primaryView);
-        }
-    }
+    // Keep this endpoint aligned with `getReaderState`.
+    const currentPage = reader.type === 'epub'
+        ? getEpubReaderPage(reader)
+        : (getCurrentPage(reader) || null);
 
     return {
         ok: true,

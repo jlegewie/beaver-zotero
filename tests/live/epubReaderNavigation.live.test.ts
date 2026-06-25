@@ -1,14 +1,9 @@
 /**
- * EPUB reader-state + citation-navigation live suite (plan F-4 / F-5).
+ * EPUB reader-state and citation-navigation live tests.
  *
  * Drives two dev endpoints against the live reader:
- *   - `/beaver/test/reader-state` — the `getReaderState` position fields:
- *     `current_page` (1-based EPUB section ordinal via `getCurrentPage`) and
- *     `content_kind` from `reader.type`; PDF readers keep page semantics.
- *   - `/beaver/test/epub-citation-navigate` — the citation-click path:
- *     `resolveEpubCitationRange` (href/ordinal section resolution, anchor-id
- *     scoping, sentence-text range anchoring) and the full
- *     `navigateToEpubCitation` flow including the temporary-annotation flash.
+ *   - `/beaver/test/reader-state` for reader position fields.
+ *   - `/beaver/test/epub-citation-navigate` for the citation click flow.
  *
  * Prerequisites (per tests/README.md):
  *   - Dev build of Beaver loaded in a running Zotero (NODE_ENV=development).
@@ -21,7 +16,7 @@ import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { isZoteroAvailable, skipIfNoZotero } from '../helpers/zoteroAvailability';
 import { fetchDocument, post } from '../helpers/zoteroHttpClient';
-import { NON_PDF, SMALL_PDF } from '../helpers/fixtures';
+import { NON_PDF, SMALL_PDF, type AttachmentFixture } from '../helpers/fixtures';
 
 let available = false;
 beforeAll(async () => {
@@ -53,7 +48,7 @@ interface CitationNavigateResponse {
     section_count?: number;
 }
 
-function readerState(body: Record<string, unknown>): Promise<ReaderStateResponse> {
+function readerState(body: AttachmentFixture): Promise<ReaderStateResponse> {
     return post('/beaver/test/reader-state', body, { timeout: READER_TIMEOUT });
 }
 

@@ -19,9 +19,7 @@ import {
 } from '../../src/services/agentProtocol';
 import { currentReaderAttachmentAtom, readerTextSelectionAtom } from './messageComposition';
 import { currentNoteItemAtom } from './zoteroContext';
-import { getCurrentPage, getCurrentReader } from '../utils/readerUtils';
-import { getSectionHref, type EpubPrimaryView } from '../utils/epubVisualizer/epubReaderView';
-import { normalizeHrefBasename } from '../../src/services/documentExtraction/epub/epubTextRange';
+import { getCurrentPage, getCurrentReader, getEpubReaderPage } from '../utils/readerUtils';
 import { searchableLibraryIdsAtom, processingModeAtom } from './profile';
 import { ProcessingMode } from '../types/profile';
 import { isLibraryTabAtom } from './ui';
@@ -40,8 +38,9 @@ const MAX_LIBRARY_SELECTION = 5;
 
 /**
  * Build reader state for the current reader attachment.
- * EPUB reader positions are section ordinals, so cached metadata is used when
- * available to report the same page coordinate as extraction-backed tools.
+ *
+ * EPUB pages come from the open reader so the reported coordinate matches the
+ * visible reader position.
  */
 export async function getReaderState(get: Getter): Promise<ReaderState | null> {
     const readerAttachment = get(currentReaderAttachmentAtom);
@@ -54,18 +53,11 @@ export async function getReaderState(get: Getter): Promise<ReaderState | null> {
     let currentTextSelection = get(readerTextSelectionAtom);
 
     let currentPage = getCurrentPage(reader) || null;
-    let currentPageRange: [number, number] | null = null;
     if (contentKind === 'epub') {
-        // Keep the reader page and selection page in the same coordinate system.
-        const primaryView = (reader as any)?._internalReader?._primaryView as EpubPrimaryView | undefined;
-        const mapper = await getEpubSectionMapper(readerAttachment, primaryView);
-        if (currentPage !== null) {
-            // Range first — both derive from the same reader section ordinal.
-            currentPageRange = mapper.toRange(currentPage);
-            currentPage = mapper.toPage(currentPage);
-        }
+        currentPage = getEpubReaderPage(reader);
         if (currentTextSelection) {
-            // EPUB readers expose only a section position, not a precise page
+            // EPUB selection locations are section-based; keep page context at
+            // the reader level.
             currentTextSelection = { text: currentTextSelection.text };
         }
     }
@@ -74,129 +66,9 @@ export async function getReaderState(get: Getter): Promise<ReaderState | null> {
         library_id: readerAttachment.libraryID,
         zotero_key: readerAttachment.key,
         current_page: currentPage,
-        ...(currentPageRange && { current_page_range: currentPageRange }),
         ...(contentKind && { content_kind: contentKind }),
         ...(currentTextSelection && { text_selection: currentTextSelection })
     } as ReaderState;
-}
-
-interface EpubSectionMapper {
-    /** The section's first extraction page (the range's lower bound). */
-    toPage: (ordinal: number) => number;
-    /**
-     * The section's inclusive `[firstPage, lastPage]` extraction-page span, or
-     * null when unknown. The reader sits within the section, so this range always
-     * contains the true current page.
-     */
-    toRange: (ordinal: number) => [number, number] | null;
-}
-
-/**
- * Build an EPUB reader-position mapper backed by cached extraction metadata.
- *
- * The reader reports a 1-based section ordinal (a raw spine index: it counts
- * every spine itemref), while extraction compacts its section indexes below the
- * reader's by skipping non-XHTML/missing spine items. The section is therefore
- * matched by href basename when the live reader view is available (the robust
- * locator the citation-navigation path uses), with the cached array position as
- * the fallback (correct for all-XHTML spines).
- */
-async function getEpubSectionMapper(
-    readerAttachment: Zotero.Item,
-    primaryView?: EpubPrimaryView,
-): Promise<EpubSectionMapper> {
-    const fallback: EpubSectionMapper = {
-        toPage: (ordinal) => ordinal,
-        toRange: () => null,
-    };
-    try {
-        const cache = Zotero.Beaver?.documentCache;
-        if (!cache) return fallback;
-        const filePath = await readerAttachment.getFilePathAsync();
-        if (!filePath) return fallback;
-        const cached = await cache.getMetadata({
-            libraryId: readerAttachment.libraryID,
-            zoteroKey: readerAttachment.key,
-        }, filePath);
-        const meta = cached?.documentMetadata;
-        const epubMeta = meta?.content_kind === 'epub' ? meta : null;
-        if (!epubMeta) return fallback;
-
-        const sections = epubMeta.sections;
-        const pageCount = epubMeta.pageCount ?? null;
-
-        // Index sections by normalized href basename for drift-free lookup.
-        const indexByBasename = new Map<string, number>();
-        for (let i = 0; i < sections.length; i++) {
-            const basename = normalizeHrefBasename(sections[i].rawHref);
-            if (basename && !indexByBasename.has(basename)) {
-                indexByBasename.set(basename, i);
-            }
-        }
-
-        // Resolve a reader ordinal to a cached section array index: prefer the
-        // href match, fall back to the raw array position.
-        const resolveIndex = (ordinal: number): number | null => {
-            if (primaryView) {
-                const basename = normalizeHrefBasename(getSectionHref(primaryView, ordinal - 1));
-                if (basename) {
-                    const idx = indexByBasename.get(basename);
-                    if (idx != null) return idx;
-                }
-            }
-            const arrayIndex = ordinal - 1;
-            return arrayIndex >= 0 && arrayIndex < sections.length ? arrayIndex : null;
-        };
-
-        const toPage = (ordinal: number): number => {
-            const idx = resolveIndex(ordinal);
-            return (idx != null ? sections[idx].firstPageNumber : undefined) ?? ordinal;
-        };
-
-        const toRange = (ordinal: number): [number, number] | null => {
-            const idx = resolveIndex(ordinal);
-            if (idx == null) return null;
-            const start = sections[idx].firstPageNumber;
-            if (start == null) return null;
-            // Prefer the section's own last page. Older cache rows lack it, so
-            // approximate with the next section that starts on a strictly later
-            // page, minus one — front-matter sections can share a page, so the
-            // immediate next section is not a safe bound; the last section runs
-            // to the document's final page.
-            let end = sections[idx].lastPageNumber;
-            if (end == null) {
-                end = pageCount ?? start;
-                for (let i = idx + 1; i < sections.length; i++) {
-                    const nextFp = sections[i].firstPageNumber;
-                    if (nextFp != null && nextFp > start) {
-                        end = nextFp - 1;
-                        break;
-                    }
-                }
-            }
-            if (end < start) end = start;
-            return [start, end];
-        };
-
-        return { toPage, toRange };
-    } catch (error) {
-        logger(`getReaderState: EPUB section mapper failed: ${error}`, 1);
-        return fallback;
-    }
-}
-
-/**
- * Map one EPUB reader section ordinal to the cached page coordinate. Pass the
- * live primary view so the section is matched by href basename rather than by
- * the drift-prone cached array position.
- */
-export async function remapEpubSectionToPage(
-    readerAttachment: Zotero.Item,
-    ordinal: number,
-    primaryView?: EpubPrimaryView,
-): Promise<number> {
-    const mapper = await getEpubSectionMapper(readerAttachment, primaryView);
-    return mapper.toPage(ordinal);
 }
 
 /**

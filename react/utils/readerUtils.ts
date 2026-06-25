@@ -195,8 +195,30 @@ function getCurrentPage(reader?: any): number | null {
 }
 
 /**
+ * Return the open EPUB reader's current 1-based page, or null when unavailable.
+ *
+ * @param reader - The reader instance.
+ */
+function getEpubReaderPage(reader?: any): number | null {
+    if (!reader) reader = getCurrentReader();
+    if (!reader || reader.type !== 'epub') return null;
+    try {
+        const primaryView = reader._internalReader?._primaryView;
+        const pageMapping = primaryView?.pageMapping;
+        const startRange = primaryView?.flow?.startRange;
+        if (!pageMapping || !startRange) return null;
+        // Zotero's EPUB view stores page indexes as 0-based values.
+        const pageIndex = pageMapping.getPageIndex(startRange);
+        return typeof pageIndex === 'number' ? pageIndex + 1 : null;
+    } catch (e) {
+        logger(`getEpubReaderPage failed: ${e}`, 1);
+        return null;
+    }
+}
+
+/**
  * Retrieves the selected text from the reader.
- * 
+ *
  * @param reader - The reader instance.
  * @returns The selected text or null if the reader is not a PDF reader.
  */
@@ -367,6 +389,7 @@ export {
     getCurrentReaderAndWaitForView,
     waitForReaderForItem,
     getCurrentPage,
+    getEpubReaderPage,
     navigateToPage,
     getSelectedText,
     ensureReaderInitialized,
