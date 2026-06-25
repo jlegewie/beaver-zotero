@@ -229,6 +229,27 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
             revealItem();
         };
 
+        const showRemoveIcon = (isHovered || isRemoveMenuOpen) && canEdit && !disabled;
+
+        const renderNormalIcon = () => {
+            if (isAnnotation && annotation) {
+                return (
+                    <ZoteroIcon icon={ANNOTATION_ICON_BY_TYPE[annotation.annotation_type]} size={14} />
+                );
+            }
+
+            try {
+                const iconName = item.getItemTypeIconName();
+                return iconName ? (
+                    <span className="scale-80">
+                        <CSSItemTypeIcon itemType={iconName} />
+                    </span>
+                ) : null;
+            } catch {
+                return null;
+            }
+        };
+
         // Get icon element based on validation state
         const getIconElement = () => {
             // Show spinner during validation
@@ -240,38 +261,29 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
                 );
             }
 
-            // Show remove icon on hover (if editable). Keep it visible while the
-            // long-press menu is open so the trigger doesn't disappear.
-            if ((isHovered || isRemoveMenuOpen) && canEdit && !disabled) {
+            const normalIcon = renderNormalIcon();
+
+            // Overlay the remove "x" so differently-sized glyphs keep the chip dimensions stable.
+            if (showRemoveIcon) {
                 return (
-                    <span
-                        role="button"
-                        className={`source-remove ${isAnnotation ? '-ml-015' : ''}`}
-                        {...removeHandlers}
-                    >
-                        <CSSIcon name="x-8" className="icon-16" />
+                    <span className="chip-icon-slot">
+                        {normalIcon && (
+                            <span className="chip-icon-slot-normal opacity-0" aria-hidden>
+                                {normalIcon}
+                            </span>
+                        )}
+                        <span
+                            role="button"
+                            className="source-remove chip-icon-slot-remove"
+                            {...removeHandlers}
+                        >
+                            <CSSIcon name="x-8" className="icon-16 scale-80" />
+                        </span>
                     </span>
                 );
             }
 
-            // Show annotation-specific icon
-            if (isAnnotation && annotation) {
-                return (
-                    <ZoteroIcon icon={ANNOTATION_ICON_BY_TYPE[annotation.annotation_type]} size={14} />
-                );
-            }
-
-            // Show item type icon
-            try {
-                const iconName = item.getItemTypeIconName();
-                return iconName ? (
-                    <span className="scale-80">
-                        <CSSItemTypeIcon itemType={iconName} />
-                    </span>
-                ) : null;
-            } catch (error) {
-                return null;
-            }
+            return normalIcon;
         };
 
         // Determine button styling based on validation state

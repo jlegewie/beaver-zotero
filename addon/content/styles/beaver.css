@@ -184,6 +184,31 @@
     border-radius: 4px;
 }
 
+/* Fixed leading-icon slot for context chips — keeps chip height/width stable when
+   the hover remove "x" overlays the normal icon instead of replacing it. */
+[id^="beaver-pane-"] .chip-icon-slot {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 16px;
+    height: 16px;
+    position: relative;
+}
+
+[id^="beaver-pane-"] .chip-icon-slot-normal,
+[id^="beaver-pane-"] .chip-icon-slot-remove {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+[id^="beaver-pane-"] .chip-icon-slot-remove {
+    position: absolute;
+    inset: 0;
+    margin: 0;
+}
+
 /* Component: Beaver Chat */
 [id^="beaver-pane-"] .chat-container {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Inter", sans-serif;
