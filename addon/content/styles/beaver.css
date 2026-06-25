@@ -514,11 +514,21 @@
    textarea so the rest of the UI is unchanged. */
 [id^="beaver-pane-"] .beaver-lexical-content {
     min-height: calc(1.25em + 2px);
+    height: auto;
+    max-height: none;
     white-space: pre-wrap;
     word-break: break-word;
     outline: none;
     user-select: text;
     -webkit-user-select: text;
+}
+
+/* Reset the Lexical paragraph's default browser margin (1em top/bottom).
+   Without this the first line is pushed ~13px below the editor's top edge,
+   so the absolutely-positioned placeholder (and the slash/source menus that
+   anchor to the editor's bounding rect) sit too high relative to the text. */
+[id^="beaver-pane-"] .beaver-lexical-content p {
+    margin: 0;
 }
 
 /* Placeholder overlay - absolutely positioned and click-through. */
