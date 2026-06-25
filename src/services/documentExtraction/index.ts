@@ -1,8 +1,12 @@
 export {
+    resolveToReadableAttachment,
     resolveToPdfAttachment,
+    resolveToImageAttachment,
 } from './attachmentResolution';
 export type {
+    ReadableAttachmentResolveResult,
     PdfAttachmentResolveResult,
+    ImageAttachmentResolveResult,
 } from './attachmentResolution';
 
 export {
@@ -10,6 +14,19 @@ export {
     isRemoteAccessAvailable,
     loadPdfData,
 } from './pdfData';
+
+export {
+    checkAttachmentDataSize,
+    loadAttachmentData,
+    resolveAttachmentFileSource,
+} from './attachmentSource';
+export type {
+    AttachmentDataResult,
+    AttachmentFileSource,
+    AttachmentSourceFailureCode,
+    AttachmentSourceResult,
+    LocalSizeStrategy,
+} from './attachmentSource';
 
 export {
     preflightCachedPdfMeta,
@@ -23,6 +40,8 @@ export type {
 export {
     validateZoteroItemReference,
 } from './referenceValidation';
+
+export { extractTextDocument, TEXT_SCHEMA_VERSION } from './text/extractTextDocument';
 export type {
     ZoteroItemReferenceInput,
 } from './referenceValidation';

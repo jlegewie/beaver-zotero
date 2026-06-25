@@ -20,6 +20,7 @@ import { useValidateSyncLibraries } from './hooks/useValidateSyncLibraries';
 import { useUpgradeHandler } from './hooks/useUpgradeHandler';
 import { useHttpEndpoints } from './hooks/useHttpEndpoints';
 import { useMcpServer } from './hooks/useMcpServer';
+import { useProviderWake } from './hooks/useProviderWake';
 import { useThreadProtocolHandler } from './hooks/useThreadProtocolHandler';
 import { useContextMenuActionHandler } from './hooks/useContextMenuActionHandler';
 import { useReaderSelectionActionHandler } from './hooks/useReaderSelectionActionHandler';
@@ -27,7 +28,9 @@ import { useReaderAnnotationActionHandler } from './hooks/useReaderAnnotationAct
 import { useReaderVisualizerActionHandler } from './hooks/useReaderVisualizerActionHandler';
 import { useOnboardingPopups } from './hooks/useOnboardingPopups';
 import { useBackgroundWorkerStatus } from './hooks/useBackgroundWorkerStatus';
+import { useSyncSuppression } from './hooks/useSyncSuppression';
 import { BeaverTemporaryAnnotations } from './utils/annotationUtils';
+import { registerZoteroHost } from './host/zotero';
 
 // Configure the PDF package (webpack bundle copy). The esbuild bundle
 // configures its own copy from `src/hooks.ts`. Both must run because each
@@ -35,6 +38,11 @@ import { BeaverTemporaryAnnotations } from './utils/annotationUtils';
 // The cross-bundle `MuPDFWorkerClient` per-name singletons are shared via
 // `Zotero.__beaverMuPDFWorkerClient_hot` / `_background` regardless.
 configurePDFForBeaver();
+
+// Register the Zotero client host so rendered chat-history components can
+// resolve host-specific navigation and data lookups. Non-Zotero clients omit
+// this and run the render surface with the default empty host.
+registerZoteroHost();
 
 /**
  * Component to initialize global hooks that should only run once.
@@ -52,6 +60,9 @@ const GlobalContextInitializer = () => {
 
     // Handle Zotero sync
     useZoteroSync();
+
+    // Suppress Zotero auto-sync while mutating agent runs are active.
+    useSyncSuppression();
 
     // Handle Zotero tab selection
     useZoteroTabSelection();
@@ -74,6 +85,11 @@ const GlobalContextInitializer = () => {
 
     // Register MCP server endpoint (when mcpServerEnabled pref is true)
     useMcpServer();
+
+    // Provider-wake subscription: lets agent runs started from other Beaver
+    // clients request library data from this Zotero on demand
+    // (when dataProviderEnabled pref is true)
+    useProviderWake();
 
     // Handle zotero://beaver protocol links (thread deep-linking)
     useThreadProtocolHandler();

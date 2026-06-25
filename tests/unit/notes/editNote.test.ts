@@ -144,6 +144,7 @@ vi.mock('../../../src/utils/noteEditorIO', () => ({
 vi.mock('../../../src/utils/noteCitationExpand', () => ({
     expandToRawHtml: vi.fn((str: string, _metadata: any, _context: string) => str),
     preloadPageLabelsForNewCitations: vi.fn().mockResolvedValue(undefined),
+    preloadNotePageLabels: vi.fn().mockResolvedValue({}),
     preloadStructuralLocatorPages: vi.fn().mockResolvedValue({ pages: {}, unresolved: [] }),
     buildUnresolvedLocatorWarning: vi.fn(() => null),
 }));
@@ -199,7 +200,7 @@ vi.mock('../../../react/store', () => ({
 }));
 
 vi.mock('../../../react/atoms/citations', () => ({
-    citationDataMapAtom: Symbol('citationDataMapAtom'),
+    citationMapAtom: Symbol('citationMapAtom'),
 }));
 
 vi.mock('../../../react/atoms/profile', () => ({

@@ -80,7 +80,7 @@ export const OVERLAY_COLORS = {
     marginKeptInZone: "#ffcc00",
 } as const;
 
-const ITEM_KIND_STYLE: Record<DocItem["kind"], { color: string; prefix: string }> = {
+export const ITEM_KIND_STYLE: Record<DocItem["kind"], { color: string; prefix: string }> = {
     text: { color: OVERLAY_COLORS.itemText, prefix: "P" },
     section_header: { color: OVERLAY_COLORS.itemSectionHeader, prefix: "H" },
     footnote: { color: OVERLAY_COLORS.itemFootnote, prefix: "F" },

@@ -23,6 +23,7 @@ vi.mock('../../../react/utils/pageLabels', () => ({
 import {
     buildLocalCitationDataMapForContent,
     prepareCitationRenderContext,
+    resolveExternalFileLocalPaths,
 } from '../../../react/utils/citationRenderContext';
 import {
     getCitationPreloadFilePath,
@@ -119,8 +120,8 @@ describe('citation render context', () => {
             '/storage/ATTACH01/file.pdf',
         );
         expect(data.pages).toEqual([3]);
-        expect(data.parts).toEqual([
-            { part_id: 's25', locations: [{ page_idx: 2 }] },
+        expect(data.locations).toEqual([
+            { part_id: 's25', page_idx: 2 },
         ]);
         expect(data.page_labels).toEqual({ 2: '7' });
         expect(data.requested_ref).toMatchObject({
@@ -132,7 +133,7 @@ describe('citation render context', () => {
     });
 
     it('merges local citation metadata with explicit render context', async () => {
-        const existing = { citation_id: 'c1', run_id: 'r1', parts: [] } as any;
+        const existing = { citation_id: 'c1', run_id: 'r1', locations: [] } as any;
         mockPreloadPageLabelsForContent.mockResolvedValue({ 42: { 2: '7' } });
 
         const context = await prepareCitationRenderContext(
@@ -159,14 +160,14 @@ describe('citation render context', () => {
             ].join('\n')
         );
 
-        expect(map['local:zotero:1-ATTACH01:paragraph12']?.parts).toEqual([
-            { part_id: 'p12', locations: [{ page_idx: 1 }] },
+        expect(map['local:zotero:1-ATTACH01:paragraph12']?.locations).toEqual([
+            { part_id: 'p12', page_idx: 1 },
         ]);
         expect(map['local:zotero:1-ATTACH01:paragraph12']?.pages).toEqual([2]);
         expect(map['local:zotero:1-ATTACH01:paragraph12']?.page_labels).toEqual({ 1: '6' });
 
-        expect(map['local:zotero:1-ATTACH01:tab3']?.parts).toEqual([
-            { part_id: 'table3', locations: [{ page_idx: 4 }] },
+        expect(map['local:zotero:1-ATTACH01:tab3']?.locations).toEqual([
+            { part_id: 'table3', page_idx: 4 },
         ]);
         expect(map['local:zotero:1-ATTACH01:tab3']?.pages).toEqual([5]);
         expect(map['local:zotero:1-ATTACH01:tab3']?.page_labels).toEqual({ 4: '12' });
@@ -179,5 +180,46 @@ describe('citation render context', () => {
 
         expect(map).toEqual({});
         expect(cache.getResult).not.toHaveBeenCalled();
+    });
+
+    describe('resolveExternalFileLocalPaths', () => {
+        let db: any;
+
+        beforeEach(() => {
+            db = { getExternalFileByKey: vi.fn() };
+            (globalThis as any).Zotero.Beaver.db = db;
+        });
+
+        it('returns local paths for external files present on this computer', async () => {
+            db.getExternalFileByKey.mockResolvedValue({ storedPath: '/beaver/external-files/AB12CD34.pdf' });
+            (globalThis as any).IOUtils.exists = vi.fn().mockResolvedValue(true);
+
+            const map = await resolveExternalFileLocalPaths('See <citation id="ext-ab12cd34"/>');
+
+            // Ext key normalized to uppercase before the DB lookup.
+            expect(db.getExternalFileByKey).toHaveBeenCalledWith('AB12CD34');
+            expect(map).toEqual({ AB12CD34: '/beaver/external-files/AB12CD34.pdf' });
+        });
+
+        it('omits external files with no local copy on this computer', async () => {
+            db.getExternalFileByKey.mockResolvedValue({ storedPath: '/beaver/external-files/AB12CD34.pdf' });
+            (globalThis as any).IOUtils.exists = vi.fn().mockResolvedValue(false);
+
+            const map = await resolveExternalFileLocalPaths('See <citation id="ext-ab12cd34"/>');
+
+            expect(map).toEqual({});
+        });
+
+        it('dedupes repeated ext keys and ignores non-external-file citations', async () => {
+            db.getExternalFileByKey.mockResolvedValue({ storedPath: '/p/AB12CD34.pdf' });
+            (globalThis as any).IOUtils.exists = vi.fn().mockResolvedValue(true);
+
+            const map = await resolveExternalFileLocalPaths(
+                'A <citation id="ext-ab12cd34"/> B <citation id="ext-ab12cd34" loc="page2"/> C <citation id="1-ATTACH01"/>'
+            );
+
+            expect(db.getExternalFileByKey).toHaveBeenCalledTimes(1);
+            expect(map).toEqual({ AB12CD34: '/p/AB12CD34.pdf' });
+        });
     });
 });

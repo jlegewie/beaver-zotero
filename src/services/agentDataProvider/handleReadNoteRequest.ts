@@ -7,17 +7,15 @@
 
 import { logger } from '../../utils/logger';
 import { getOrSimplify } from '../../utils/noteHtmlSimplifier';
+import { preloadNotePageLabels } from '../../utils/noteCitationExpand';
 import { getNoteHtmlForRead } from '../../utils/noteEditorIO';
 import {
     WSReadNoteRequest,
     WSReadNoteResponse,
 } from '../agentProtocol';
-import { ItemSummary } from '../../../react/types/zotero';
-import { serializeItemSummary } from '../../utils/zoteroSerializers';
-import { prepareBatchAttachmentData, processAttachmentsWithBatchData, toAttachmentSummary } from './utils';
-import { searchableLibraryIdsAtom, syncWithZoteroAtom } from '../../../react/atoms/profile';
-import { userIdAtom } from '../../../react/atoms/auth';
-import { store } from '../../../react/store';
+import { ItemStub, ItemSummary } from '../../../react/types/zotero';
+import { serializeItemStub, serializeItemSummary } from '../../utils/zoteroSerializers';
+import { prepareAttachmentInfoBatchData, processAttachmentInfoBatch } from './utils';
 import { CITATION_TAG_PATTERN } from '../../../react/utils/citationPreprocessing';
 import {
     normalizeCitationTag,
@@ -152,28 +150,19 @@ async function resolveCitedItems(
     if (regularItems.length > 0) {
         await Zotero.Items.loadDataTypes(regularItems, ["primaryData", "itemData", "creators", "tags", "collections", "childItems"]);
 
-        // Build attachment context
-        const searchableLibraryIds = store.get(searchableLibraryIdsAtom);
-        const attachmentContext = {
-            searchableLibraryIds,
-            syncWithZotero: store.get(syncWithZoteroAtom),
-            userId: store.get(userIdAtom),
-        };
-
         // Batch-fetch attachment data
-        const batchAttachmentData = await prepareBatchAttachmentData(regularItems, attachmentContext);
+        const batchAttachmentData = await prepareAttachmentInfoBatchData(regularItems);
 
         for (const item of regularItems) {
             try {
-                const [itemData, rawAttachments] = await Promise.all([
+                const [itemData, attachments] = await Promise.all([
                     serializeItemSummary(item),
-                    processAttachmentsWithBatchData(item, attachmentContext, batchAttachmentData, {
-                        skipHash: true,
+                    processAttachmentInfoBatch(item, batchAttachmentData, {
                         skipWorkerFallback: true,
                         includeAnnotationsCount: true,
                     }),
                 ]);
-                regularSummaries.set(item, { ...itemData, attachments: rawAttachments.map(toAttachmentSummary) });
+                regularSummaries.set(item, { ...itemData, attachments });
             } catch (error) {
                 logger(`resolveCitedItems: Failed to serialize item ${item.key}: ${error}`, 1);
             }
@@ -276,7 +265,8 @@ export async function handleReadNoteRequest(
         // Pass raw HTML so the cache key matches edit_note's getOrSimplify
         // calls — simplifyNoteHtml normalizes internally, so the cached
         // simplified output is identical either way.
-        const { simplified } = getOrSimplify(note_id, rawHtml, item.libraryID);
+        const pageLabelsByItemId = await preloadNotePageLabels(rawHtml, item.libraryID, { extractOnCacheMiss: true });
+        const { simplified } = getOrSimplify(note_id, rawHtml, item.libraryID, pageLabelsByItemId);
 
         // 7. Apply offset/limit pagination
         const lines = simplified.split('\n');
@@ -295,10 +285,12 @@ export async function handleReadNoteRequest(
         // 8. Gather parent metadata
         let parentItemId: string | undefined;
         let parentTitle: string | undefined;
+        let parentSummary: ItemStub | undefined;
         if (item.parentItem) {
-            await item.parentItem.loadDataType('itemData');
+            await Zotero.Items.loadDataTypes([item.parentItem], ['primaryData', 'itemData', 'creators']);
             parentItemId = `${item.parentItem.libraryID}-${item.parentItem.key}`;
             parentTitle = item.parentItem.getField('title') as string;
+            parentSummary = serializeItemStub(item.parentItem);
         }
 
         // 9. Resolve cited items from the visible slice only
@@ -314,6 +306,7 @@ export async function handleReadNoteRequest(
             title: item.getNoteTitle() || '(untitled)',
             parent_item_id: parentItemId,
             parent_title: parentTitle,
+            parent_item: parentSummary,
             total_lines: totalLines,
             content,
             has_more: hasMore,

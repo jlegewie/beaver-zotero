@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { ItemSearchResult } from '../../../../../src/services/searchService';
 import { getActiveZoteroLibraryId, getRecentAsync, loadFullItemData } from '../../../../../src/utils/zoteroUtils';
-import { ArrowRightIcon, CSSIcon, Icon } from '../../../icons/icons';
+import { ArrowRightIcon, CSSIcon, FileLinkIcon, Icon } from '../../../icons/icons';
 import { SearchMenuItem } from '../SearchMenu';
 import { SourceMenuItemContext, createSourceMenuItem } from '../utils/menuItemFactories';
 
@@ -15,6 +15,8 @@ interface UseSourcesMenuOptions {
     onNavigateToCollections: (libraryId: number) => void;
     onNavigateToTags: (libraryId: number) => void;
     onNavigateToNotes: () => void;
+    /** Open a file picker to attach external files (files from disk). */
+    onSelectFiles: () => void;
     getRecentItems: () => Promise<Zotero.Item[]>;
     recentItemsLimit: number;
     verticalPosition?: 'above' | 'below';
@@ -34,6 +36,7 @@ export const useSourcesMenu = ({
     onNavigateToCollections,
     onNavigateToTags,
     onNavigateToNotes,
+    onSelectFiles,
     getRecentItems,
     recentItemsLimit,
     verticalPosition = 'above'
@@ -59,11 +62,10 @@ export const useSourcesMenu = ({
         let isCancelled = false;
 
         const buildMenuItems = async () => {
-            const currentMessageItemsFiltered = sourceMenuItemContext.currentMessageItems.filter((item) => !item.isAnnotation());
             const recentItems = await getRecentItems();
             const recentlyModifiedItems = await getRecentAsync(1, { limit: recentItemsLimit * 3 }) as Zotero.Item[];
 
-            const allItems = [...currentMessageItemsFiltered, ...recentItems, ...recentlyModifiedItems]
+            const allItems = [...recentItems, ...recentlyModifiedItems]
                 .filter((item): item is Zotero.Item => Boolean(item));
 
             await loadFullItemData(allItems);
@@ -104,12 +106,14 @@ export const useSourcesMenu = ({
                 hasTagsInLibrary
             );
 
-            const filterByHeader: SearchMenuItem = { label: 'Filter Search by', isGroupHeader: true, onClick: () => {} };
-            const filterItems: SearchMenuItem[] = [filterByHeader];
+            // Action rows are self-describing ("Filter by …" / "Add …"), so
+            // the group carries no header; a divider separates it from the
+            // item sections below.
+            const filterItems: SearchMenuItem[] = [];
 
             if (searchableLibraryIds.length > 1) {
                 filterItems.unshift({
-                    label: '"Select Library"',
+                    label: '"Filter by Library"',
                     onClick: async () => {
                         onNavigateToLibraries();
                     },
@@ -117,7 +121,7 @@ export const useSourcesMenu = ({
                         <div className={'display-flex flex-row flex-1 items-start font-color-secondary'}>
                             <div className="display-flex flex-row gap-2">
                                 <CSSIcon name="library" className="icon-16 font-color-secondary scale-90" />
-                                <div>Select Library</div>
+                                <div>Filter by Library</div>
                             </div>
                             <div className="flex-1" />
                             <Icon icon={ArrowRightIcon} className="scale-12 mt-020" />
@@ -127,7 +131,7 @@ export const useSourcesMenu = ({
             }
 
             filterItems.unshift({
-                label: '"Select Collections"',
+                label: '"Filter by Collections"',
                 onClick: async () => {
                     const latestLibraryIdRaw = getActiveZoteroLibraryId();
                     const latestEffectiveLibraryId = getEffectiveLibraryId(latestLibraryIdRaw);
@@ -142,7 +146,7 @@ export const useSourcesMenu = ({
                         <div className="display-flex flex-col gap-05 min-w-0">
                             <div className="display-flex flex-row gap-2">
                                 <CSSIcon name="collection" className="icon-16 font-color-secondary scale-90" />
-                                <div>Select Collections</div>
+                                <div>Filter by Collections</div>
                             </div>
                         </div>
                         <div className="flex-1" />
@@ -152,7 +156,7 @@ export const useSourcesMenu = ({
             });
 
             filterItems.unshift({
-                label: '"Select Tags"',
+                label: '"Filter by Tags"',
                 onClick: async () => {
                     const latestLibraryIdRaw = getActiveZoteroLibraryId();
                     const latestEffectiveLibraryId = getEffectiveLibraryId(latestLibraryIdRaw);
@@ -170,7 +174,7 @@ export const useSourcesMenu = ({
                                     name="tag"
                                     className="icon-16 font-color-secondary scale-90 icon-tag"
                                 />
-                                <div>Select Tags</div>
+                                <div>Filter by Tags</div>
                             </div>
                         </div>
                         <div className="flex-1" />
@@ -180,7 +184,7 @@ export const useSourcesMenu = ({
             });
 
             filterItems.unshift({
-                label: '"Select Notes"',
+                label: '"Add Note"',
                 onClick: async () => {
                     onNavigateToNotes();
                 },
@@ -188,7 +192,7 @@ export const useSourcesMenu = ({
                     <div className={'display-flex flex-row flex-1 items-start font-color-secondary'}>
                         <div className="display-flex flex-row gap-2">
                             <CSSIcon name="note" className="icon-16 font-color-secondary scale-90" />
-                            <div>Select Notes</div>
+                            <div>Add Note</div>
                         </div>
                         <div className="flex-1" />
                         <Icon icon={ArrowRightIcon} className="scale-12 mt-020" />
@@ -196,22 +200,37 @@ export const useSourcesMenu = ({
                 )
             });
 
-            const menuItemsCurrentItems = await Promise.all(
-                currentMessageItemsFiltered.map(async (item) => await createSourceMenuItem(item, sourceMenuItemContext))
-            );
+            filterItems.unshift({
+                label: '"Add File"',
+                onClick: async () => {
+                    onSelectFiles();
+                },
+                customContent: (
+                    <div className={'display-flex flex-row flex-1 items-start font-color-secondary'}>
+                        <div className="display-flex flex-row gap-2">
+                            {/* <CSSIcon name="attachment-file" className="icon-16 font-color-secondary scale-90" /> */}
+                            <Icon icon={FileLinkIcon} className="font-color-secondary mt-015 ml-05 scale-11" />
+                            <div>Add External File…</div>
+                        </div>
+                        <div className="flex-1" />
+                    </div>
+                )
+            });
 
             const recentlyUsedHeader: SearchMenuItem = { label: 'Recent Items', isGroupHeader: true, onClick: () => {} };
-            const currentItemsHeader: SearchMenuItem = { label: 'Current Items', isGroupHeader: true, onClick: () => {} };
 
             const recentlyModifiedItemsFiltered = recentlyModifiedItems
                 .map((item) => (item.parentItem ? item.parentItem : item))
                 .filter((item): item is Zotero.Item => Boolean(item))
                 .filter((item) => item.isRegularItem() || item.isAttachment() || item.isNote());
 
+            // Already-attached items are excluded: the input-area chips are
+            // the "what's attached" affordance, so the menu lists only
+            // addable items.
             const combinedItems = [...recentItems, ...recentlyModifiedItemsFiltered]
                 .filter((item, index, self) => index === self.findIndex((candidate) => candidate.id === item.id))
                 .filter((item) => !sourceMenuItemContext.currentMessageItems.some((existing) => existing.id === item.id))
-                .slice(0, Math.max(recentItemsLimit - menuItemsCurrentItems.length, 0));
+                .slice(0, recentItemsLimit);
 
             await loadFullItemData(combinedItems);
 
@@ -219,15 +238,23 @@ export const useSourcesMenu = ({
                 combinedItems.map(async (item) => await createSourceMenuItem(item, sourceMenuItemContext))
             );
 
+            const hasItemSections = menuItemsRecentItems.length > 0;
+            const groupDivider: SearchMenuItem[] = filterItems.length > 0 && hasItemSections
+                ? [{ label: '', isDivider: true, onClick: () => {} }]
+                : [];
+
+            // 'above' menus display the array reversed, so the divider follows
+            // the group rows here to land between the group and the item
+            // sections on screen.
             const sections: SearchMenuItem[] = verticalPosition === 'above'
                 ? [
-                    ...(filterItems.length > 1 ? filterItems : []),
-                    ...(menuItemsCurrentItems.length > 0 ? [...menuItemsCurrentItems, currentItemsHeader] : []),
+                    ...(filterItems.length > 0 ? filterItems : []),
+                    ...groupDivider,
                     ...(menuItemsRecentItems.length > 0 ? [...menuItemsRecentItems, recentlyUsedHeader] : [])
                 ]
                 : [
-                    ...(filterItems.length > 1 ? [...filterItems].reverse() : []),
-                    ...(menuItemsCurrentItems.length > 0 ? [currentItemsHeader, ...menuItemsCurrentItems] : []),
+                    ...(filterItems.length > 0 ? [...filterItems].reverse() : []),
+                    ...groupDivider,
                     ...(menuItemsRecentItems.length > 0 ? [recentlyUsedHeader, ...menuItemsRecentItems] : [])
                 ];
 
@@ -250,6 +277,7 @@ export const useSourcesMenu = ({
         onNavigateToCollections,
         onNavigateToTags,
         onNavigateToNotes,
+        onSelectFiles,
         getRecentItems,
         recentItemsLimit,
         verticalPosition

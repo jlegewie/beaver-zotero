@@ -13,7 +13,7 @@ import { getLibraryByIdOrName, getCollectionByIdOrName } from '../../src/service
 import { getPref } from '../../src/utils/prefs';
 import { store } from '../store';
 import { currentReaderAttachmentKeyAtom } from '../atoms/messageComposition';
-import { citationDataMapAtom } from '../atoms/citations';
+import { citationMapAtom } from '../atoms/citations';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../atoms/externalReferences';
 import { toolAnnotationApplyBatcher, filterAnnotationAgentActions } from './toolAnnotationApplyBatcher';
 import { saveStreamingNote } from './noteActions';
@@ -326,7 +326,7 @@ export async function autoCreateNoteAgentActions(
     }
 
     // Get citation context for rendering
-    const citationDataMap = store.get(citationDataMapAtom);
+    const citationDataMap = store.get(citationMapAtom);
     const externalMapping = store.get(externalReferenceItemMappingAtom);
     const externalReferencesMap = store.get(externalReferenceMappingAtom);
 

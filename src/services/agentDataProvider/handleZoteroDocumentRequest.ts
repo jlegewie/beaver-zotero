@@ -1,10 +1,10 @@
 /**
  * Whole-document extraction handler for zotero_document_request.
  *
- * Thin wrapper around the shared extraction core
- * (`src/services/documentExtractionCore.ts`). On a v1 hot-path timeout it
- * enqueues a `hot_timeout_retry` background job so the background
- * processor can retry with a longer budget on its own worker.
+ * Resolves the request to a readable attachment, then dispatches by content
+ * kind. Plain text is read directly (no document cache). PDFs and EPUBs use
+ * shared extraction helpers. On a hot-path PDF timeout it enqueues a
+ * `document_timeout_retry` background job; EPUB timeouts are returned directly.
  */
 
 import { logger } from '../../utils/logger';
@@ -13,104 +13,790 @@ import {
     WSZoteroDocumentResponse,
 } from '../agentProtocol';
 import type { ZoteroDocumentErrorCode } from '../agentProtocol';
-import { extractAndCacheDocument } from '../documentExtractionCore';
-import { MAX_PDF_TIMEOUT_SECONDS } from './timeout';
+import type { AttachmentStub, ItemStub } from '../../../react/types/zotero';
+import {
+    extractAndCacheEpubDocument,
+    extractAndCacheResolvedPdfDocument,
+} from '../documentExtractionCore';
+import {
+    extractTextDocument,
+    loadAttachmentData,
+    resolveToReadableAttachment,
+    resolveAttachmentFileSource,
+    validateZoteroItemReference,
+} from '../documentExtraction';
+import { readableToExtractKind, type ExtractContentKind, type ReadableContentKind } from '../documentExtraction/shared/contentKinds';
+import {
+    DEFAULT_PAGES_TIMEOUT_SECONDS,
+    MAX_PDF_TIMEOUT_SECONDS,
+    TimeoutError,
+    awaitWithRequestAbort,
+    createTimeoutController,
+} from './timeout';
 // Hot-path handler keeps the remote-download-failed popup behavior by
 // passing the popup notifier through `onRemoteDownloadFailure`. The
 // background extractor deliberately omits it.
-import { notifyRemoteDownloadFailure } from './utils';
+import { notifyRemoteDownloadFailure, notifyRemoteFileNotSynced } from './utils';
+import { EXTERNAL_LIBRARY_ID, resolveExternalFile } from '../externalFiles';
+import type { ExternalFileRecord } from '../database';
+import { serializeAttachmentStub, serializeItemStub } from '../../utils/zoteroSerializers';
+import {
+    createPreparedJsonMessage,
+    type PreparedJsonMessage,
+} from '../preparedJsonMessage';
+
+export interface ZoteroDocumentRequestOptions {
+    responseMode?: 'object' | 'websocket';
+}
+
+const PDF_CONTENT_KIND_INSERT = '"content_kind":"pdf",';
+
+function serializedPdfWireResultBytes(rawResultBytes: number): number {
+    return rawResultBytes + PDF_CONTENT_KIND_INSERT.length;
+}
+
+function serializedPdfResultToWireJson(jsonBytes: Uint8Array): string {
+    if (jsonBytes.byteLength < 2 || jsonBytes[0] !== 0x7b) {
+        throw new Error('Serialized PDF result must be a JSON object');
+    }
+    const raw = new TextDecoder().decode(jsonBytes);
+    if (raw === '{}') {
+        return '{"content_kind":"pdf"}';
+    }
+    if (raw[0] !== '{' || raw[raw.length - 1] !== '}') {
+        throw new Error('Serialized PDF result must be a JSON object');
+    }
+    return `{"content_kind":"pdf",${raw.slice(1)}`;
+}
+
+function buildPayloadTooLargeResponse(
+    payloadBytes: number,
+    limit: number,
+    totalPages: number | null,
+    contentKind: ExtractContentKind,
+    errorResponse: (
+        error: string,
+        error_code: ZoteroDocumentErrorCode,
+        total_pages?: number | null,
+        content_kind?: ExtractContentKind,
+    ) => WSZoteroDocumentResponse,
+): WSZoteroDocumentResponse {
+    const mb = (n: number) => (n / (1024 * 1024)).toFixed(1);
+    logger(
+        `handleZoteroDocumentRequest: payload too large ` +
+        `(${payloadBytes} bytes > ${limit} byte limit, content_kind=${contentKind})`,
+        1,
+    );
+    return errorResponse(
+        `This attachment is too large for Beaver to handle. ` +
+        `${mb(payloadBytes)}MB of extracted text` +
+        `${totalPages != null ? ` across ${totalPages} pages` : ''}, ` +
+        `limit ${mb(limit)}MB. Do not try again with extract, ` +
+        `find_in_attachments, read, or read_pages for this attachment.`,
+        'document_too_large',
+        totalPages,
+        contentKind,
+    );
+}
+
+/**
+ * Reject success responses whose serialized payload would exceed the
+ * WebSocket message budget (`request.max_payload_bytes`).
+ */
+export function guardPayloadSize(
+    request: WSZoteroDocumentRequest,
+    response: WSZoteroDocumentResponse,
+    totalPages: number | null,
+    contentKind: ExtractContentKind,
+    errorResponse: (
+        error: string,
+        error_code: ZoteroDocumentErrorCode,
+        total_pages?: number | null,
+        content_kind?: ExtractContentKind,
+    ) => WSZoteroDocumentResponse,
+): WSZoteroDocumentResponse {
+    const limit = request.max_payload_bytes;
+    if (typeof limit !== 'number' || !Number.isFinite(limit) || limit <= 0) {
+        return response;
+    }
+
+    const payloadBytes = new TextEncoder().encode(JSON.stringify(response.result)).byteLength;
+    if (payloadBytes <= limit) {
+        return response;
+    }
+
+    return buildPayloadTooLargeResponse(
+        payloadBytes,
+        limit,
+        totalPages,
+        contentKind,
+        errorResponse,
+    );
+}
+
+export function guardSerializedPayloadSize(
+    request: WSZoteroDocumentRequest,
+    payloadBytes: number,
+    totalPages: number | null,
+    contentKind: ExtractContentKind,
+    errorResponse: (
+        error: string,
+        error_code: ZoteroDocumentErrorCode,
+        total_pages?: number | null,
+        content_kind?: ExtractContentKind,
+    ) => WSZoteroDocumentResponse,
+): WSZoteroDocumentResponse | null {
+    const limit = request.max_payload_bytes;
+    if (typeof limit !== 'number' || !Number.isFinite(limit) || limit <= 0) {
+        return null;
+    }
+
+    if (payloadBytes <= limit) {
+        return null;
+    }
+
+    return buildPayloadTooLargeResponse(
+        payloadBytes,
+        limit,
+        totalPages,
+        contentKind,
+        errorResponse,
+    );
+}
+
+export async function getResolvedAttachmentParentStub(
+    attachment: Zotero.Item,
+): Promise<ItemStub | null> {
+    if (!attachment.isAttachment?.() || !attachment.parentItemID) {
+        return null;
+    }
+
+    const parent = await Zotero.Items.getAsync(attachment.parentItemID);
+    if (!parent || !parent.isRegularItem?.()) {
+        return null;
+    }
+
+    await Zotero.Items.loadDataTypes([parent], ['itemData', 'creators']);
+    return serializeItemStub(parent);
+}
+
+/**
+ * Display-only `AttachmentStub` for the served Zotero attachment, for the
+ * backend tool-result view row (the file's own title/filename + content_kind).
+ * Built inline rather than via `getAttachmentInfo` to avoid re-running the
+ * expensive availability/OCR analysis on the hot read path — the document was
+ * just read, so it is readable by construction, and the view row needs only the
+ * file's identity, not its readability status.
+ *
+ * Precondition: `attachment` must have `itemData` loaded — `getField`/
+ * `attachmentFilename` are read directly here without a defensive load.
+ */
+export function buildServedAttachmentStub(
+    attachment: Zotero.Item,
+    contentKind: ReadableContentKind,
+): AttachmentStub {
+    return serializeAttachmentStub(attachment, contentKind);
+}
+
+function buildPreparedPdfDocumentResponse(
+    envelope: Omit<WSZoteroDocumentResponse, 'result'>,
+    jsonBytes: Uint8Array,
+): PreparedJsonMessage {
+    return createPreparedJsonMessage(
+        envelope,
+        { result: serializedPdfResultToWireJson(jsonBytes) },
+    );
+}
 
 /**
  * Handle zotero_document_request event.
- * Extracts the full PDF as a Beaver Extract result.
  */
+export function handleZoteroDocumentRequest(
+    request: WSZoteroDocumentRequest,
+): Promise<WSZoteroDocumentResponse>;
+export function handleZoteroDocumentRequest(
+    request: WSZoteroDocumentRequest,
+    options: ZoteroDocumentRequestOptions & { responseMode: 'websocket' },
+): Promise<WSZoteroDocumentResponse | PreparedJsonMessage>;
 export async function handleZoteroDocumentRequest(
     request: WSZoteroDocumentRequest,
-): Promise<WSZoteroDocumentResponse> {
-    const { attachment, mode, max_pages, max_file_size_mb, request_id, timeout_seconds } = request;
+    options: ZoteroDocumentRequestOptions = {},
+): Promise<WSZoteroDocumentResponse | PreparedJsonMessage> {
+    const { attachment, external_file_key, mode, max_pages, max_file_size_mb, request_id, timeout_seconds } = request;
+
+    // Populated once the attachment resolves so post-resolution error responses
+    // carry the same view-row metadata as success responses (best-effort:
+    // pre-resolution errors leave these null and omit them).
+    let parentItem: ItemStub | null = null;
+    let servedAttachment: AttachmentStub | null = null;
 
     const errorResponse = (
         error: string,
         error_code: ZoteroDocumentErrorCode,
         total_pages: number | null = null,
+        content_kind?: ExtractContentKind,
     ): WSZoteroDocumentResponse => ({
         type: 'zotero_document',
         request_id,
+        ...(external_file_key ? { external_file_key } : {}),
+        ...(content_kind ? { content_kind } : {}),
+        ...(parentItem ? { parent_item: parentItem } : {}),
+        ...(servedAttachment ? { served_attachment: servedAttachment } : {}),
         total_pages,
         error,
         error_code,
     });
 
-    const result = await extractAndCacheDocument({
-        libraryId: attachment.library_id,
-        zoteroKey: attachment.zotero_key,
-        mode,
-        maxPages: max_pages ?? null,
-        maxFileSizeMB: max_file_size_mb ?? 0,
-        timeoutSeconds: timeout_seconds ?? 0,
-        workerName: 'hot',
-        onRemoteDownloadFailure: notifyRemoteDownloadFailure,
-    });
-
-    if (result.kind === 'ok') {
-        return {
-            type: 'zotero_document',
-            request_id,
-            resolved_attachment: {
-                library_id: result.resolvedAttachment.libraryId,
-                zotero_key: result.resolvedAttachment.zoteroKey,
-            },
-            content_type: result.contentType,
-            result: result.result,
-        };
+    // External files are handled before any Zotero item resolution: the
+    // request carries an external file key instead of an attachment reference.
+    if (external_file_key) {
+        return handleExternalFileDocumentRequest(request, external_file_key, errorResponse, options);
     }
 
-    if (result.kind === 'timeout') {
-        // Hot-path budget exhausted. Enqueue a background retry so the
-        // queue processor can finish the work on the background worker
-        // with the MAX_PDF_TIMEOUT_SECONDS budget. Failures here are
-        // logged but do not affect the user-facing response.
-        const target = result.resolvedAttachment ?? {
-            libraryId: attachment.library_id,
-            zoteroKey: attachment.zotero_key,
-        };
+    if (!attachment) {
+        return errorResponse(
+            'Document request carries neither an attachment reference nor an external file key.',
+            'invalid_format',
+        );
+    }
+    const requestKey = `${attachment.library_id}-${attachment.zotero_key}`;
+
+    const formatError = validateZoteroItemReference(attachment);
+    if (formatError) {
+        return errorResponse(
+            `Invalid attachment reference '${requestKey}': ${formatError}`,
+            'invalid_format',
+        );
+    }
+
+    const timeout = createTimeoutController(
+        timeout_seconds,
+        DEFAULT_PAGES_TIMEOUT_SECONDS,
+    );
+    const withRequestDeadline = async <T>(promise: Promise<T>, phase: string): Promise<T> =>
+        awaitWithRequestAbort(
+            promise,
+            timeout.signal,
+            timeout.throwIfTimedOut,
+            phase,
+        );
+    let timeoutContentKind: ExtractContentKind | undefined;
+
+    try {
+        const item = await withRequestDeadline(
+            Zotero.Items.getByLibraryAndKeyAsync(
+                attachment.library_id,
+                attachment.zotero_key,
+            ),
+            'zotero_item_lookup',
+        );
+        if (!item) {
+            return errorResponse(
+                `Attachment does not exist in user's library: ${requestKey}`,
+                'not_found',
+            );
+        }
+
+        await withRequestDeadline(item.loadAllData(), 'zotero_item_load');
+
+        const resolved = await withRequestDeadline(
+            resolveToReadableAttachment(item, requestKey),
+            'readable_attachment_resolution',
+        );
+        if (!resolved.resolved) {
+            const code = resolved.error_code === 'not_readable'
+                ? 'unsupported_type'
+                : resolved.error_code;
+            return errorResponse(resolved.error, code);
+        }
+
+        const { item: resolvedItem, key: resolvedKey, contentKind, contentType } = resolved;
+        timeoutContentKind = readableToExtractKind(contentKind);
+        // View-row metadata for the backend tool-result view (parent-centric
+        // display + the served file's own name/content_kind). Both are optional;
+        // a failure here must never fail document delivery, and both ride on
+        // post-resolution error responses too. Build the served-file stub first
+        // (synchronous, no file analysis) so it is present even if the parent
+        // lookup throws.
         try {
-            await Zotero.Beaver?.db?.enqueueBackgroundJob({
-                jobType: 'hot_timeout_retry',
-                libraryId: target.libraryId,
-                zoteroKey: target.zoteroKey,
-                mode,
-                priority: 50,
-                payload: {
+            servedAttachment = buildServedAttachmentStub(resolvedItem, contentKind);
+        } catch (error) {
+            logger(`handleZoteroDocumentRequest: served attachment stub failed for ${resolvedKey}: ${error}`, 1);
+        }
+        try {
+            parentItem = await getResolvedAttachmentParentStub(resolvedItem);
+        } catch (error) {
+            logger(`handleZoteroDocumentRequest: parent stub failed for ${resolvedKey}: ${error}`, 1);
+        }
+
+        if (contentKind === 'text') {
+            const source = await resolveAttachmentFileSource({
+                item: resolvedItem,
+                maxFileSizeMB: max_file_size_mb ?? 0,
+                localSizeStrategy: 'stat',
+                signal: timeout.signal,
+                throwIfTimedOut: timeout.throwIfTimedOut,
+            });
+            if (source.kind === 'error') {
+                if (source.code === 'file_missing') {
+                    const detail = source.remoteAvailable
+                        ? 'The file is available remotely, but remote file access is disabled.'
+                        : 'The file is not available locally.';
+                    return errorResponse(
+                        `Attachment ${resolvedKey} file is missing. ${detail}`,
+                        'file_missing',
+                        null,
+                        'text',
+                    );
+                }
+                return errorResponse(
+                    `Attachment ${resolvedKey} file is too large (${(source.sizeMB ?? 0).toFixed(1)}MB > ${source.maxMB}MB).`,
+                    'file_too_large',
+                    null,
+                    'text',
+                );
+            }
+
+            const data = await loadAttachmentData({
+                item: resolvedItem,
+                source: source.source,
+                maxFileSizeMB: max_file_size_mb ?? 0,
+                onRemoteDownloadFailure: notifyRemoteDownloadFailure,
+                signal: timeout.signal,
+                throwIfTimedOut: timeout.throwIfTimedOut,
+            });
+            if (data.kind === 'error') {
+                if (data.code === 'file_too_large') {
+                    return errorResponse(
+                        `Attachment ${resolvedKey} file is too large (${(data.sizeMB ?? 0).toFixed(1)}MB > ${data.maxMB}MB).`,
+                        'file_too_large',
+                        null,
+                        'text',
+                    );
+                }
+                if (data.code === 'download_failed') {
+                    return errorResponse(
+                        `Failed to download attachment ${resolvedKey} from remote storage.`,
+                        'download_failed',
+                        null,
+                        'text',
+                    );
+                }
+                return errorResponse(
+                    `Failed to read text attachment ${resolvedKey}.`,
+                    'extraction_failed',
+                    null,
+                    'text',
+                );
+            }
+
+            const result = extractTextDocument({
+                data: data.data,
+                contentType,
+            });
+
+            return guardPayloadSize(request, {
+                type: 'zotero_document',
+                request_id,
+                resolved_attachment: {
+                    library_id: resolvedItem.libraryID,
+                    zotero_key: resolvedItem.key,
+                },
+                content_type: contentType,
+                content_kind: 'text',
+                result,
+                ...(parentItem ? { parent_item: parentItem } : {}),
+                ...(servedAttachment ? { served_attachment: servedAttachment } : {}),
+            }, null, 'text', errorResponse);
+        }
+
+        if (contentKind === 'epub') {
+            const result = await withRequestDeadline(
+                extractAndCacheEpubDocument({
+                    source: { kind: 'zotero', item: resolvedItem },
+                    resolvedKey,
+                    contentType,
                     maxPages: max_pages ?? null,
                     maxFileSizeMB: max_file_size_mb ?? 0,
-                    timeoutSeconds: MAX_PDF_TIMEOUT_SECONDS,
-                },
-                now: Date.now(),
-            });
-            // Wake the background loop so the retry starts immediately
-            // rather than waiting for the next idle poll.
-            Zotero.Beaver?.backgroundExtractor?.notify();
-        } catch (e) {
-            logger(`handleZoteroDocumentRequest: background enqueue failed: ${e}`, 1);
+                    externalAbortSignal: timeout.signal,
+                    onFileNotSyncedLocally: notifyRemoteFileNotSynced,
+                }),
+                'epub_extraction',
+            );
+
+            if (result.kind === 'ok') {
+                if (result.cached) {
+                    const { libraryId, zoteroKey } = result.resolvedAttachment;
+                    logger(`handleZoteroDocumentRequest: document cache hit for ${libraryId}-${zoteroKey} content_kind=epub`, 3);
+                }
+                return guardPayloadSize(request, {
+                    type: 'zotero_document',
+                    request_id,
+                    resolved_attachment: {
+                        library_id: result.resolvedAttachment.libraryId,
+                        zotero_key: result.resolvedAttachment.zoteroKey,
+                    },
+                    content_type: result.contentType,
+                    content_kind: 'epub',
+                    result: result.document,
+                    ...(parentItem ? { parent_item: parentItem } : {}),
+                    ...(servedAttachment ? { served_attachment: servedAttachment } : {}),
+                }, null, 'epub', errorResponse);
+            }
+
+            return errorResponse(result.message, result.code, result.pageCount ?? null, 'epub');
         }
-        return errorResponse(
-            `PDF extraction timed out after ${result.timeoutSeconds} seconds`,
-            'timeout',
-            result.pageCount,
-        );
-    }
 
-    if (result.kind === 'external_abort') {
-        // Hot-path never supplies an external abort signal; this branch
-        // exists for type safety. Return a timeout-shaped response.
-        return errorResponse(
-            `PDF extraction interrupted`,
-            'timeout',
-            result.pageCount,
-        );
-    }
+        if (contentKind !== 'pdf') {
+            const extractKind = readableToExtractKind(contentKind);
+            return errorResponse(
+                `Attachment ${resolvedKey} is a ${contentKind} document, but document extraction currently supports PDF, EPUB, and plain text only.`,
+                'unsupported_type',
+                null,
+                extractKind,
+            );
+        }
 
-    // cached_error / response_error — return the existing message shape.
-    return errorResponse(result.message, result.code, result.pageCount);
+        const result = await extractAndCacheResolvedPdfDocument({
+            source: { kind: 'zotero', item: resolvedItem },
+            resolvedKey,
+            contentType,
+            mode,
+            maxPages: max_pages ?? null,
+            maxFileSizeMB: max_file_size_mb ?? 0,
+            timeoutSeconds: timeout_seconds ?? 0,
+            workerName: 'hot',
+            externalAbortSignal: timeout.signal,
+            onRemoteDownloadFailure: notifyRemoteDownloadFailure,
+            serializedResult: options.responseMode === 'websocket',
+        });
+
+        if (result.kind === 'ok') {
+            if (result.cached) {
+                const { libraryId, zoteroKey } = result.resolvedAttachment;
+                logger(`handleZoteroDocumentRequest: document cache hit for ${libraryId}-${zoteroKey} mode=${mode}`, 3);
+            }
+            if (result.serializedResult) {
+                const payloadBytes = serializedPdfWireResultBytes(result.serializedResult.byteLength);
+                const oversized = guardSerializedPayloadSize(
+                    request,
+                    payloadBytes,
+                    result.totalPages ?? null,
+                    'pdf',
+                    errorResponse,
+                );
+                if (oversized) return oversized;
+                return buildPreparedPdfDocumentResponse({
+                    type: 'zotero_document',
+                    request_id,
+                    resolved_attachment: {
+                        library_id: result.resolvedAttachment.libraryId,
+                        zotero_key: result.resolvedAttachment.zoteroKey,
+                    },
+                    content_type: result.contentType,
+                    content_kind: 'pdf',
+                    ...(parentItem ? { parent_item: parentItem } : {}),
+                    ...(servedAttachment ? { served_attachment: servedAttachment } : {}),
+                }, result.serializedResult.jsonBytes);
+            }
+            return guardPayloadSize(request, {
+                type: 'zotero_document',
+                request_id,
+                resolved_attachment: {
+                    library_id: result.resolvedAttachment.libraryId,
+                    zotero_key: result.resolvedAttachment.zoteroKey,
+                },
+                content_type: result.contentType,
+                content_kind: 'pdf',
+                result: { ...result.result, content_kind: 'pdf' as const },
+                ...(parentItem ? { parent_item: parentItem } : {}),
+                ...(servedAttachment ? { served_attachment: servedAttachment } : {}),
+            }, result.totalPages ?? null, 'pdf', errorResponse);
+        }
+
+        if (result.kind === 'timeout' || (result.kind === 'external_abort' && timeout.signal.aborted)) {
+            const target = result.resolvedAttachment ?? {
+                libraryId: attachment.library_id,
+                zoteroKey: attachment.zotero_key,
+            };
+            try {
+                await Zotero.Beaver?.db?.enqueueBackgroundJob({
+                    jobType: 'document_timeout_retry',
+                    libraryId: target.libraryId,
+                    zoteroKey: target.zoteroKey,
+                    contentKind: 'pdf',
+                    payloadKind: mode,
+                    priority: 50,
+                    payload: {
+                        content_kind: 'pdf',
+                        maxPages: max_pages ?? null,
+                        maxFileSizeMB: max_file_size_mb ?? 0,
+                        timeoutSeconds: MAX_PDF_TIMEOUT_SECONDS,
+                    },
+                    now: Date.now(),
+                });
+                Zotero.Beaver?.backgroundExtractor?.notify();
+            } catch (e) {
+                logger(`handleZoteroDocumentRequest: background enqueue failed: ${e}`, 1);
+            }
+            return errorResponse(
+                `PDF extraction timed out after ${
+                    result.kind === 'timeout' ? result.timeoutSeconds : timeout.timeoutSeconds
+                } seconds`,
+                'timeout',
+                result.pageCount,
+                'pdf',
+            );
+        }
+
+        if (result.kind === 'external_abort') {
+            return errorResponse(
+                `PDF extraction interrupted`,
+                'timeout',
+                result.pageCount,
+                result.resolvedAttachment ? 'pdf' : undefined,
+            );
+        }
+
+        const contentKindOnError = result.contentKind
+            ?? (result.resolvedAttachment && result.code !== 'unsupported_type' ? 'pdf' : undefined);
+        return errorResponse(result.message, result.code, result.pageCount, contentKindOnError);
+    } catch (error) {
+        if (error instanceof TimeoutError) {
+            return errorResponse(
+                `Document request timed out after ${error.timeoutSeconds} seconds`,
+                'timeout',
+                null,
+                timeoutContentKind,
+            );
+        }
+        throw error;
+    } finally {
+        timeout.dispose();
+    }
+}
+
+/** Model-facing message for an external file whose managed copy is unavailable. */
+export function externalFileMissingMessage(extKey: string, record: ExternalFileRecord | null): string {
+    const label = record ? `'ext-${extKey}' ('${record.filename}')` : `'ext-${extKey}'`;
+    return (
+        `External file ${label} is not available on this device — it was attached ` +
+        `on a different computer or its copy was removed. Ask the user to re-attach ` +
+        `the file on this device.`
+    );
+}
+
+/**
+ * Serve a document request for a user-attached external file. The registry
+ * resolves the key to the managed copy; extraction then reuses the shared
+ * pipeline with an external source (no Zotero item, no remote fallback).
+ */
+async function handleExternalFileDocumentRequest(
+    request: WSZoteroDocumentRequest,
+    extKey: string,
+    baseErrorResponse: (
+        error: string,
+        error_code: ZoteroDocumentErrorCode,
+        total_pages?: number | null,
+        content_kind?: ExtractContentKind,
+    ) => WSZoteroDocumentResponse,
+    options: ZoteroDocumentRequestOptions = {},
+): Promise<WSZoteroDocumentResponse | PreparedJsonMessage> {
+    const { mode, max_pages, max_file_size_mb, request_id, timeout_seconds } = request;
+    const requestKey = `ext-${extKey}`;
+
+    // Attach the served-file stub to post-resolution error responses too (it is
+    // null until the registry resolves the key, so the early file_missing error
+    // omits it). External files carry no Zotero parent.
+    let servedExternal: AttachmentStub | null = null;
+    const errorResponse = (
+        error: string,
+        error_code: ZoteroDocumentErrorCode,
+        total_pages?: number | null,
+        content_kind?: ExtractContentKind,
+    ): WSZoteroDocumentResponse =>
+        servedExternal
+            ? { ...baseErrorResponse(error, error_code, total_pages, content_kind), served_attachment: servedExternal }
+            : baseErrorResponse(error, error_code, total_pages, content_kind);
+
+    const resolved = await resolveExternalFile(extKey);
+    if (!resolved.ok) {
+        return errorResponse(externalFileMissingMessage(extKey, resolved.record), 'file_missing');
+    }
+    const record = resolved.record;
+    const itemRef = { id: 0, libraryID: EXTERNAL_LIBRARY_ID, key: extKey };
+    // The served external file's own display metadata, for the backend
+    // tool-result view row (mirrors the Zotero `served_attachment`). Uses the
+    // model-facing `ext-<key>` id; external files carry no Zotero parent.
+    servedExternal = {
+        attachment_id: `ext-${extKey}`,
+        parent_item_id: null,
+        title: null,
+        filename: record.filename,
+        content_kind: record.contentKind,
+    };
+
+    const timeout = createTimeoutController(
+        timeout_seconds,
+        DEFAULT_PAGES_TIMEOUT_SECONDS,
+    );
+
+    try {
+        if (record.contentKind === 'image') {
+            return errorResponse(
+                `External file '${requestKey}' ('${record.filename}') is an image. Use the view tool to look at it.`,
+                'unsupported_type',
+            );
+        }
+
+        if (record.contentKind === 'text') {
+            let data: Uint8Array;
+            try {
+                data = await awaitWithRequestAbort(
+                    IOUtils.read(record.storedPath),
+                    timeout.signal,
+                    timeout.throwIfTimedOut,
+                    'external_file_read',
+                );
+            } catch (error) {
+                if (error instanceof TimeoutError) throw error;
+                return errorResponse(externalFileMissingMessage(extKey, record), 'file_missing', null, 'text');
+            }
+            const maxMB = max_file_size_mb ?? 0;
+            if (maxMB > 0 && data.byteLength > maxMB * 1024 * 1024) {
+                return errorResponse(
+                    `External file '${requestKey}' is too large (${(data.byteLength / 1024 / 1024).toFixed(1)}MB > ${maxMB}MB).`,
+                    'file_too_large',
+                    null,
+                    'text',
+                );
+            }
+            const result = extractTextDocument({
+                data,
+                contentType: record.mimeType,
+            });
+            return guardPayloadSize(request, {
+                type: 'zotero_document',
+                request_id,
+                external_file_key: extKey,
+                content_type: record.mimeType,
+                content_kind: 'text',
+                result,
+                served_attachment: servedExternal,
+            }, null, 'text', errorResponse);
+        }
+
+        if (record.contentKind === 'epub') {
+            const result = await awaitWithRequestAbort(
+                extractAndCacheEpubDocument({
+                    source: { kind: 'external', filePath: record.storedPath, itemRef },
+                    resolvedKey: requestKey,
+                    contentType: record.mimeType,
+                    maxPages: max_pages ?? null,
+                    maxFileSizeMB: max_file_size_mb ?? 0,
+                    externalAbortSignal: timeout.signal,
+                }),
+                timeout.signal,
+                timeout.throwIfTimedOut,
+                'epub_extraction',
+            );
+            if (result.kind === 'ok') {
+                if (result.cached) {
+                    logger(`handleZoteroDocumentRequest: document cache hit for ${requestKey} content_kind=epub`, 3);
+                }
+                return guardPayloadSize(request, {
+                    type: 'zotero_document',
+                    request_id,
+                    external_file_key: extKey,
+                    content_type: result.contentType,
+                    content_kind: 'epub',
+                    result: result.document,
+                    served_attachment: servedExternal,
+                }, null, 'epub', errorResponse);
+            }
+            if (result.code === 'file_missing') {
+                return errorResponse(externalFileMissingMessage(extKey, record), 'file_missing', null, 'epub');
+            }
+            return errorResponse(result.message, result.code, result.pageCount ?? null, 'epub');
+        }
+
+        // PDF
+        const result = await extractAndCacheResolvedPdfDocument({
+            source: { kind: 'external', filePath: record.storedPath, itemRef },
+            resolvedKey: requestKey,
+            contentType: record.mimeType,
+            mode,
+            maxPages: max_pages ?? null,
+            maxFileSizeMB: max_file_size_mb ?? 0,
+            timeoutSeconds: timeout_seconds ?? 0,
+            workerName: 'hot',
+            externalAbortSignal: timeout.signal,
+            serializedResult: options.responseMode === 'websocket',
+        });
+
+        if (result.kind === 'ok') {
+            if (result.cached) {
+                logger(`handleZoteroDocumentRequest: document cache hit for ${requestKey} mode=${mode}`, 3);
+            }
+            if (result.serializedResult) {
+                const payloadBytes = serializedPdfWireResultBytes(result.serializedResult.byteLength);
+                const oversized = guardSerializedPayloadSize(
+                    request,
+                    payloadBytes,
+                    result.totalPages ?? null,
+                    'pdf',
+                    errorResponse,
+                );
+                if (oversized) return oversized;
+                return buildPreparedPdfDocumentResponse({
+                    type: 'zotero_document',
+                    request_id,
+                    external_file_key: extKey,
+                    content_type: result.contentType,
+                    content_kind: 'pdf',
+                    served_attachment: servedExternal,
+                }, result.serializedResult.jsonBytes);
+            }
+            return guardPayloadSize(request, {
+                type: 'zotero_document',
+                request_id,
+                external_file_key: extKey,
+                content_type: result.contentType,
+                content_kind: 'pdf',
+                result: { ...result.result, content_kind: 'pdf' as const },
+                served_attachment: servedExternal,
+            }, result.totalPages ?? null, 'pdf', errorResponse);
+        }
+
+        if (result.kind === 'timeout' || result.kind === 'external_abort') {
+            // No background retry for external files: the background extractor
+            // resolves Zotero items and cannot serve the external-files store.
+            return errorResponse(
+                result.kind === 'timeout'
+                    ? `PDF extraction timed out after ${result.timeoutSeconds} seconds`
+                    : 'PDF extraction interrupted',
+                'timeout',
+                result.pageCount,
+                'pdf',
+            );
+        }
+
+        if (result.code === 'file_missing') {
+            return errorResponse(externalFileMissingMessage(extKey, record), 'file_missing', result.pageCount, 'pdf');
+        }
+        const contentKindOnError = result.contentKind ?? (result.code !== 'unsupported_type' ? 'pdf' : undefined);
+        return errorResponse(result.message, result.code, result.pageCount, contentKindOnError);
+    } catch (error) {
+        if (error instanceof TimeoutError) {
+            return errorResponse(
+                `Document request timed out after ${error.timeoutSeconds} seconds`,
+                'timeout',
+                null,
+                readableToExtractKind(record.contentKind === 'image' ? 'image' : record.contentKind),
+            );
+        }
+        throw error;
+    } finally {
+        timeout.dispose();
+    }
 }

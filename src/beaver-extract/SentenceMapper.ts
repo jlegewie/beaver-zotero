@@ -364,12 +364,26 @@ export function sentenceToBoxes(
     const clampedEnd = Math.min(source.length, range.end);
     if (clampedEnd <= clampedStart) return null;
 
-    type Run = { lineIndex: number; charStart: number; charEnd: number };
+    type Run = {
+        lineIndex: number;
+        charStart: number;
+        charEnd: number;
+        // Whether a filler entry (null source — the inter-line / footnote
+        // space the text builder injects) preceded this run's first char.
+        // When false, the previous run abutted this one with no filler: a
+        // word de-hyphenated across a line break, so the two fragments must
+        // be concatenated with NO space ("broken-" + "windows").
+        precededByFiller: boolean;
+    };
     const runs: Run[] = [];
+    let pendingFiller = false;
 
     for (let i = clampedStart; i < clampedEnd; i++) {
         const src = source[i];
-        if (!src) continue;
+        if (!src) {
+            pendingFiller = true;
+            continue;
+        }
         const last = runs.length > 0 ? runs[runs.length - 1] : null;
         // Extend a run only if we're still on the same line AND the char
         // index advanced by exactly one (contiguous). Anything else starts a
@@ -386,13 +400,18 @@ export function sentenceToBoxes(
                 lineIndex: src.lineIndex,
                 charStart: src.charIndex,
                 charEnd: src.charIndex,
+                precededByFiller: runs.length > 0 && pendingFiller,
             });
         }
+        pendingFiller = false;
     }
 
     if (runs.length === 0) return null;
 
-    const rawFragments: NonNullable<PageWideSentence["fragments"]> = [];
+    type WorkFragment = NonNullable<PageWideSentence["fragments"]>[number] & {
+        precededByFiller: boolean;
+    };
+    const rawFragments: WorkFragment[] = [];
 
     for (const run of runs) {
         const line = lines[run.lineIndex];
@@ -403,12 +422,24 @@ export function sentenceToBoxes(
             lineIndex: run.lineIndex,
             text: fragText,
             bbox: fragBBox,
+            precededByFiller: run.precededByFiller,
         });
     }
 
-    const fragments = mergeSameLineFragments(rawFragments);
+    // Join fragments with a space only where a filler separated them. A
+    // de-hyphenated line break has no filler, so its two fragments abut with
+    // no space; the text builder already dropped the hyphen (join) or kept it
+    // (genuine compound) via the source map.
+    let text = "";
+    for (let i = 0; i < rawFragments.length; i++) {
+        if (i > 0 && rawFragments[i].precededByFiller) text += " ";
+        text += rawFragments[i].text;
+    }
+
+    const fragments = mergeSameLineFragments(
+        rawFragments.map(({ precededByFiller: _drop, ...f }) => f),
+    );
     const bboxes = fragments.map((f) => f.bbox);
-    const text = fragments.map((f) => f.text).join(" ");
     return {
         pageIndex,
         sentenceIndex,

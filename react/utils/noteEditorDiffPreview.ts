@@ -25,6 +25,7 @@ import {
 import {
     expandToRawHtml,
     preloadPageLabelsForNewCitations,
+    preloadNotePageLabels,
     type ExternalRefContext,
 } from '../../src/utils/noteCitationExpand';
 import type { PageLabelsByAttachmentId } from '../atoms/citations';
@@ -329,7 +330,8 @@ export async function showDiffPreview(
         // src/services/agentDataProvider/actions/editNote.ts (lines 309, 914).
         const normalizedHtml = normalizeNoteHtml(rawHtml);
         const noteId = `${libraryId}-${zoteroKey}`;
-        const { metadata } = getOrSimplify(noteId, rawHtml, libraryId);
+        const pageLabelsByItemId = await preloadNotePageLabels(rawHtml, libraryId);
+        const { metadata } = getOrSimplify(noteId, rawHtml, libraryId, pageLabelsByItemId);
         const externalRefContext = getExternalRefContext();
 
         // Resolve page labels for new-citation translation across every edit

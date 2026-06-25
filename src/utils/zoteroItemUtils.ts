@@ -11,6 +11,25 @@
 import { logger } from "./logger";
 
 /**
+ * Build Beaver's stable library-key identifier for a Zotero item.
+ * @param item Zotero item
+ * @returns Identifier in "libraryID-itemKey" format
+ */
+export function getItemKey(item: Zotero.Item): string {
+    return `${item.libraryID}-${item.key}`;
+}
+
+/**
+ * Build Beaver's stable library-key identifier from library ID and item key.
+ * @param libraryID Zotero library ID
+ * @param zoteroKey Zotero item key
+ * @returns Identifier in "libraryID-itemKey" format
+ */
+export function formatItemKey(libraryID: number, zoteroKey: string): string {
+    return `${libraryID}-${zoteroKey}`;
+}
+
+/**
  * Extract available details from a Zotero item for debugging/logging purposes.
  *
  * @param item - Zotero item or any object to extract details from

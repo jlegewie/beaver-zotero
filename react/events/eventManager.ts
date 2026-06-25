@@ -2,37 +2,46 @@ import { BeaverEventName, BeaverEventDetail } from './types';
 
 class EventManager {
     private static instance: EventManager;
-    
+
+    // Resolves the window that owns the shared event bus. Defaults to the Zotero
+    // main window; a non-Zotero host injects its own window
+    // via setWindowResolver so the bus and CustomEvent come from its global.
+    private resolveWindow: () => Window = () => Zotero.getMainWindow();
+
     private constructor() {}
-    
+
     static getInstance(): EventManager {
         if (!this.instance) {
             this.instance = new EventManager();
         }
         return this.instance;
     }
-    
+
+    setWindowResolver(resolver: () => Window) {
+        this.resolveWindow = resolver;
+    }
+
     getEventBus(win: Window): EventTarget {
         if (!win.__beaverEventBus) {
             win.__beaverEventBus = new EventTarget();
         }
         return win.__beaverEventBus;
     }
-    
+
     dispatch<T extends BeaverEventName>(
         eventName: T,
         detail: BeaverEventDetail<T>
     ) {
-        const win = Zotero.getMainWindow();
+        const win = this.resolveWindow();
         const event = new win.CustomEvent(eventName, { detail });
         this.getEventBus(win).dispatchEvent(event);
     }
-    
+
     subscribe<T extends BeaverEventName>(
         eventName: T,
         callback: (detail: BeaverEventDetail<T>) => void
     ): () => void {
-        const win = Zotero.getMainWindow();
+        const win = this.resolveWindow();
         const eventBus = this.getEventBus(win);
         
         const handler = (e: CustomEvent) => callback(e.detail);

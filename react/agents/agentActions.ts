@@ -4,6 +4,7 @@ import { dismissDiffPreview } from '../utils/noteEditorDiffPreview';
 import { updateDiffPreviewForNote, diffPreviewNoteKeyAtom } from '../utils/diffPreviewCoordinator';
 import { makeNoteKey } from '../atoms/editNoteAutoApprove';
 import { agentActionsService, AckActionLink } from '../../src/services/agentActionsService';
+import { notifyApprovalRequest } from '../../src/services/systemNotifications';
 import { ZoteroItemReference } from '../types/zotero';
 import {
     ActionStatus,
@@ -28,6 +29,7 @@ import type {
     HighlightAnnotationItem,
     NoteAnnotationItem,
 } from '../types/agentActions/createAnnotations';
+import { normalizeAnnotationTags } from '../types/agentActions/createAnnotations';
 import type { WSDeferredApprovalRequest, AgentActionType } from '../../src/services/agentProtocol';
 
 // =============================================================================
@@ -290,6 +292,9 @@ function normalizeCreateAnnotationBaseItem(item: any) {
         loc_raw: String(item?.loc_raw ?? item?.locRaw ?? ''),
         loc: item?.loc ?? { kind: 'unknown', value: '', raw: '' },
         page_label: item?.page_label ?? item?.pageLabel ?? null,
+        section_href: item?.section_href ?? item?.sectionHref ?? null,
+        section_ordinal: item?.section_ordinal ?? item?.sectionOrdinal ?? null,
+        anchor_id: item?.anchor_id ?? item?.anchorId ?? null,
     };
 }
 
@@ -312,12 +317,14 @@ function normalizeNoteAnnotationItem(item: any): NoteAnnotationItem {
     return {
         ...normalizeCreateAnnotationBaseItem(item),
         comment: String(item?.comment ?? ''),
+        color: item?.color ?? 'yellow',
         note_position: normalizeNotePosition({ note_position: item?.note_position ?? item?.notePosition }) ?? {
             page_index: 0,
             side: 'right',
             x: 0,
             y: 0,
         },
+        text: item?.text != null ? String(item.text) : undefined,
         ...(readingOrderOffset !== undefined ? { reading_order_offset: readingOrderOffset } : {}),
     };
 }
@@ -394,6 +401,7 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
             items: Array.isArray(proposedData.items)
                 ? proposedData.items.map(normalizeHighlightAnnotationItem)
                 : [],
+            tags: normalizeAnnotationTags(proposedData.tags),
         } as CreateHighlightAnnotationsProposedData;
     } else if (actionType === 'create_note_annotations') {
         proposedData = {
@@ -402,6 +410,7 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
             items: Array.isArray(proposedData.items)
                 ? proposedData.items.map(normalizeNoteAnnotationItem)
                 : [],
+            tags: normalizeAnnotationTags(proposedData.tags),
         } as CreateNoteAnnotationsProposedData;
     } else if (actionType === 'zotero_note') {
         const libraryIdRaw = proposedData.library_id ?? proposedData.libraryId;
@@ -887,8 +896,8 @@ export const undoAgentActionAtom = atom(
 );
 
 /**
- * Find a pending create_item agent action by source_id
- * Used to sync imports from ExternalSearchResultView with agent actions
+ * Find a pending create_item agent action by source_id.
+ * Used to sync external-reference action buttons with pending create-item actions.
  */
 export const getPendingCreateItemActionBySourceIdAtom = atom(
     (get) => (sourceId: string): CreateItemAgentAction | null => {
@@ -963,6 +972,10 @@ export const addPendingApprovalAtom = atom(
                 updateDiffPreviewForNote(library_id, zotero_key);
             }
         }
+
+        // Surface an OS-native notification if the user can't currently see
+        // the approval UI (e.g. working in another app).
+        notifyApprovalRequest(event);
     }
 );
 

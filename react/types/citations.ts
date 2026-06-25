@@ -1,4 +1,4 @@
-import { ZoteroItemReference } from "./zotero";
+import type { ReadableContentKind } from "../../src/services/documentExtraction/shared/contentKinds";
 import {
     baseCitationKey,
     type CitationRef,
@@ -7,7 +7,6 @@ import {
     getResolvedRef,
     normalizeCitationTag,
     parseRawCitationAttributes,
-    parseZoteroId,
     requestedCitationKey,
 } from "../utils/citationGrammar";
 
@@ -33,10 +32,10 @@ export function bboxToZoteroRect(bbox: BoundingBox): number[] {
     if (bbox.coord_origin !== CoordOrigin.BOTTOMLEFT) {
         throw new Error(`Expected BOTTOMLEFT coordinates, got ${bbox.coord_origin}`);
     }
-    
+
     // For BOTTOMLEFT coordinates, direct mapping to Zotero format:
     // bbox.l = left edge (x1)
-    // bbox.b = bottom edge (y1) 
+    // bbox.b = bottom edge (y1)
     // bbox.r = right edge (x2)
     // bbox.t = top edge (y2)
     return [bbox.l - 1, bbox.b - 1, bbox.r + 1, bbox.t + 1];
@@ -88,9 +87,17 @@ export function convertBoundingBoxToBottomLeft(
 }
 
 
+// Citable content kinds: extractable documents plus user-attached image files.
+export type ContentKind = ReadableContentKind;
+
+/**
+ * Bounding-box page location used by annotation locators (agent actions),
+ * mirroring the backend PageLocation model. Citations themselves use the
+ * compact PartLocation format below.
+ */
 export interface PageLocation {
-    /** Physical or logical location inside an attachment. */
-    page_idx: number; // 0-based page index
+    /** 0-based page index. */
+    page_idx: number;
     boxes?: BoundingBox[];
     /** PDF /PageLabels label for this page, or null when none is defined. */
     page_label?: string | null;
@@ -98,85 +105,123 @@ export interface PageLocation {
     reading_order_offset?: number | null;
 }
 
-export interface CitationPart {
-    /**
-     * Represents a single chunk or block of text that is being cited.
-     * e.g., "BLOCK_12"
-     */
-    /** The unique identifier for this specific chunk of text. */
+/**
+ * Compact, self-contained location of one cited document part (citation v2).
+ *
+ * Mirrors the backend PartLocation model. Which fields are set depends on the
+ * attachment's content kind, carried by the surrounding Citation:
+ * - PDF: `page_idx` + `boxes` (integer [l, t, r, b] quads in PDF points,
+ *   top-left origin unless `origin === 'b'`)
+ * - EPUB: `section_href` (+ `anchor_id`, `text`)
+ * - snapshot: `selector` (+ `anchor_id`, `text`)
+ * - text documents: `line` (+ `line_end`, `text`)
+ *
+ * None-valued fields are omitted on the wire.
+ */
+export interface PartLocation {
+    /** Citation anchor of the part, e.g. 's33', 'p12', or 'l12'. */
     part_id: string;
-    /** Physical location of the part in the document. */
-    locations?: PageLocation[];
+    /** 0-based page index (PDF). */
+    page_idx?: number;
+    /** Bounding boxes as [l, t, r, b] integer quads. */
+    boxes?: number[][];
+    /** Coordinate origin of boxes: omitted = top-left, 'b' = bottom-left (legacy rows). */
+    origin?: 'b';
+    /** Section href (EPUB). */
+    section_href?: string;
+    /** HTML anchor id nearest the part (EPUB). */
+    anchor_id?: string;
+    /** Part text, for locating the passage in the live reader DOM. */
+    text?: string;
+    /** DOM selector locating the part (snapshot). */
+    selector?: string;
+    /** 1-based line number (text documents). */
+    line?: number;
+    /** Last line of a line range (text documents). */
+    line_end?: number;
 }
 
-export interface CitationMetadata {
+export type CitationType =
+    | "item"
+    | "attachment"
+    | "note"
+    | "annotation"
+    | "collection"
+    | "external_reference"
+    | "external_file";
+
+/**
+ * V2 self-contained citation (mirrors the backend Citation model).
+ *
+ * Renders without live Zotero access: identity lives exclusively in
+ * `requested_ref`/`resolved_ref`, and `display_name`/`formatted_citation`/
+ * `item_type` carry everything needed for display. The backend converts
+ * legacy stored rows to this shape before they reach the client.
+ *
+ * None-valued and empty-collection fields are omitted on the wire.
+ */
+export interface Citation {
     /** A unique ID for this specific citation instance. */
     citation_id: string;
-    
-    // Zotero reference fields (for items and attachments)
-    library_id?: number;
-    zotero_key?: string;
-    
-    // External reference fields (for external references)
-    external_source?: ExternalCitationSource;
-    external_source_id?: string;
-    
-    // Common fields for all citation types
-    /** Citation type discriminator */
-    citation_type?: "item" | "attachment" | "external_reference" | "note" | "annotation";
-    /** The display marker, e.g., '1', '2'.. */
-    marker?: string;
-    /** The author-year of the citation. */
-    author_year?: string;
-    /** Preview of the cited item. */
-    preview?: string;
-    /** A list of the specific parts/chunks cited. */
-    parts: CitationPart[];
-    /** Page numbers cited directly (e.g., [10] or [10, 11, 12] for ranges). */
-    pages?: number[];
+    /** Identity as cited by the model (absent when unparseable). */
     requested_ref?: CitationRef;
+    /** Canonical resolved identity (absent only when invalid). */
     resolved_ref?: CitationRef;
-    invalid_reason?: string;
+    /** Kind of object the citation resolved to. */
+    citation_type?: CitationType;
+    content_kind?: ContentKind;
+    /** Inline display text: author-year for items, title for attachments/notes, filename for external files. */
+    display_name?: string;
+    /** Formatted bibliographic reference. */
+    formatted_citation?: string;
+    /** Zotero item type of the resolved object for icon rendering. */
+    item_type?: string;
+    /** Filename of the cited attachment */
+    filename?: string;
+    /** Preview of the cited passage. */
+    preview?: string;
+    /** 1-based cited page numbers (EPUB: section ordinals). */
+    pages?: number[];
+    /** Sparse 0-based page index -> printed label map for cited pages. */
     page_labels?: Record<number, string>;
-    
-    /** The agent run ID of the citation. */
-    run_id: string;
+    /** Compact locations of the cited parts. */
+    locations?: PartLocation[];
     /** The original citation tag from the LLM response. */
     raw_tag?: string;
-    /** True when the citation could not be resolved (attachment/item not found, invalid key format). */
+    /** True when the citation could not be resolved. */
     invalid?: boolean;
+    invalid_reason?: string;
+
+    /** The agent run ID of the citation (stamped client-side). */
+    run_id?: string;
 }
 
+/** A citation entry in the cited-sources list, with its thread-scoped marker. */
+export type CitedSource = Citation & { numericCitation: string | null };
+
 /**
- * Helper functions for CitationMetadata
+ * Helper functions for Citation
  */
-export const isExternalCitation = (citation: CitationMetadata): boolean => {
+export const isExternalCitation = (citation: Citation): boolean => {
     const ref = getCitationIdentityRef(citation);
-    if (ref) {
-        return ref.kind === 'external';
-    }
-    return !!(citation.external_source && citation.external_source_id);
+    return ref?.kind === 'external';
 };
 
-export const isZoteroCitation = (citation: CitationMetadata): boolean => {
+export const isZoteroCitation = (citation: Citation): boolean => {
     const ref = getCitationIdentityRef(citation);
-    if (ref) {
-        return ref.kind === 'zotero';
-    }
-    return !!(citation.library_id && citation.zotero_key);
+    return ref?.kind === 'zotero';
+};
+
+export const isExternalFileCitation = (citation: Citation): boolean => {
+    const ref = getCitationIdentityRef(citation);
+    return ref?.kind === 'external_file';
 };
 
 /**
- * Parameters for generating a citation key.
- * Accepts either CitationMetadata fields or component props.
+ * Parameters for generating a citation key (refs + raw_tag only — v2 carries
+ * no flat identity fields).
  */
 export interface CitationKeyParams {
-    // Zotero reference (from metadata or parsed from props)
-    library_id?: number;
-    zotero_key?: string;
-    // External reference
-    external_source?: ExternalCitationSource;
-    external_source_id?: string;
     requested_ref?: CitationRef;
     resolved_ref?: CitationRef;
     raw_tag?: string;
@@ -184,102 +229,44 @@ export interface CitationKeyParams {
 
 /**
  * Generate a base key for a citation (item-level, without location info).
- * 
+ *
  * Used for:
  * - Marker assignment (same item = same marker number)
  * - Base identification of the cited item
- * 
+ *
  * Key format:
  * - Zotero citations: "zotero:{library_id}-{zotero_key}"
  * - Structured external citations: "external:{source}:{external_id}"
  * - Legacy external citations: "external:{external_source_id}"
+ * - External files: "extfile:{ext_key}"
  * - Unknown: "" (empty string)
- * 
- * @param params Citation key parameters
- * @returns Base citation key string
  */
 export function getCitationKey(params: CitationKeyParams): string {
     const ref = getCitationIdentityRef(params);
     if (ref) {
         return baseCitationKey(ref);
     }
-    if (params.library_id && params.zotero_key) {
-        return `zotero:${params.library_id}-${params.zotero_key}`;
-    }
-    if (params.external_source_id) {
-        return `external:${params.external_source_id}`;
-    }
-    const rawRef = getRequestedRef({ external_source: params.external_source, raw_tag: params.raw_tag });
+    const rawRef = getRequestedRef({ raw_tag: params.raw_tag });
     if (rawRef) {
         return baseCitationKey(rawRef);
     }
     return '';
 }
 
-function getStructuredCitationRef(params: CitationKeyParams): CitationRef | null {
+function getCitationIdentityRef(params: CitationKeyParams): CitationRef | null {
     if (params.resolved_ref) {
-        return getResolvedRef({
-            resolved_ref: params.resolved_ref,
-            requested_ref: params.requested_ref,
-            external_source: params.external_source,
-            raw_tag: params.raw_tag,
-        });
+        return getResolvedRef(params);
     }
     if (params.requested_ref) {
-        return getRequestedRef({
-            requested_ref: params.requested_ref,
-            external_source: params.external_source,
-            raw_tag: params.raw_tag,
-        });
+        return getRequestedRef(params);
     }
     return null;
-}
-
-function getCitationIdentityRef(params: CitationKeyParams): CitationRef | null {
-    return getStructuredCitationRef(params);
-}
-
-/**
- * Parameters for generating a full citation key (includes location info).
- */
-export interface FullCitationKeyParams extends CitationKeyParams {
-    loc?: string;   // Unified Beaver Extract locator (e.g., "s343" or "p12")
-    sid?: string;   // Sentence ID (e.g., "s343")
-    page?: string;  // Page number (e.g., "3")
-}
-
-/**
- * Generate a full citation key including location info.
- * 
- * Used for matching in-text citations to their specific metadata.
- * Different locations within the same item get different full keys.
- * 
- * Key format:
- * - Base key only: "zotero:1-ABC123"
- * - With loc: "zotero:1-ABC123:s343"
- * - With sid: "zotero:1-ABC123:s343"
- * - With page: "zotero:1-ABC123:page=3"
- * - With sid and page: "zotero:1-ABC123:s343:page=3"
- * 
- * @param params Full citation key parameters
- * @returns Full citation key string
- */
-export function getFullCitationKey(params: FullCitationKeyParams): string {
-    const baseKey = getCitationKey(params);
-    if (!baseKey) return '';
-    
-    const parts: string[] = [baseKey];
-    if (params.loc) parts.push(params.loc);
-    else if (params.sid) parts.push(params.sid);
-    if (params.page) parts.push(`page=${params.page}`);
-    
-    return parts.join(':');
 }
 
 /**
  * Parse a "libraryID-itemKey" reference string.
  * Handles optional 'user-content-' prefix added by rehype-sanitize.
- * 
+ *
  * @param ref Reference string in format "libraryID-itemKey"
  * @returns Parsed reference or null if invalid
  */
@@ -302,7 +289,7 @@ export function parseItemReference(ref: string | undefined): { libraryID: number
  * All attribute names are normalized (e.g., attachment_id → att_id).
  */
 export interface NormalizedCitationAttrs {
-    id?: string;           // Format: "libraryID-itemKey"
+    id?: string;           // Format: "libraryID-itemKey" or "ext-KEY"
     item_id?: string;      // Format: "libraryID-itemKey"
     att_id?: string;       // Format: "libraryID-itemKey"
     external_id?: string;  // External source ID
@@ -313,11 +300,11 @@ export interface NormalizedCitationAttrs {
 
 /**
  * Parse and normalize citation attributes from a raw attribute string.
- * 
+ *
  * Normalizations:
  * - attachment_id → att_id
  * - Only keeps recognized attributes (id, item_id, att_id, external_id, loc, sid, page)
- * 
+ *
  * @param attributesStr Raw attribute string from citation tag
  * @returns Normalized attributes object
  */
@@ -345,7 +332,7 @@ export function parseCitationAttributes(attributesStr: string): NormalizedCitati
  * Compute a full citation key from normalized citation attributes.
  * Includes loc/sid/page for unique identification of citation instances.
  * Priority: att_id > item_id > external_id
- * 
+ *
  * @param attrs Normalized citation attributes
  * @returns Full citation key or empty string if no valid identifier
  */
@@ -357,7 +344,7 @@ export function computeCitationKeyFromAttrs(attrs: NormalizedCitationAttrs): str
 /**
  * Compute a base (item-only) citation key from normalized citation attributes.
  * Does NOT include loc/sid/page - used for marker assignment.
- * 
+ *
  * @param attrs Normalized citation attributes
  * @returns Base citation key or empty string if no valid identifier
  */
@@ -377,33 +364,69 @@ export function getCitationIdentityKey(attrs: NormalizedCitationAttrs): string {
 
 export { getRequestedRef, getResolvedRef };
 
-export interface CitationData extends CitationMetadata {
-    type: "item" | "attachment" | "note" | "annotation" | "external";
-    parentKey: string | null;    // Key of the parent item
-    icon: string | null;         // Icon for the zotero attachment
-    name: string | null;         // Display name
-    citation: string | null;     // In-text citation
-    formatted_citation: string | null;  // Bibliographic reference
-    url: string | null;          // URL for the zotero attachment
-    numericCitation: string | null;     // Numeric citation
-}
+export const getContentKind = (citation: Citation | null | undefined): ContentKind => {
+    return citation?.content_kind ?? 'pdf';
+};
 
-export const getCitationPages = (citation: CitationData | CitationMetadata | null | undefined): number[] => {
+/**
+ * Symbolic (non-geometric) location derived from a citation's part locations.
+ * Discriminated by the citation's content kind, mirroring the legacy
+ * symbolic_location shape the navigation utilities consume.
+ */
+export type SymbolicLocation =
+    | { content_kind: 'epub'; section_href: string; anchor_id?: string; text?: string }
+    | { content_kind: 'snapshot'; selector?: string; anchor_id?: string; text?: string }
+    | { content_kind: 'text'; line: number; line_end?: number; text?: string };
+
+export const getSymbolicLocation = (
+    citation: Citation | null | undefined,
+): SymbolicLocation | undefined => {
+    for (const location of citation?.locations || []) {
+        if (location.section_href != null) {
+            return {
+                content_kind: 'epub',
+                section_href: location.section_href,
+                ...(location.anchor_id != null ? { anchor_id: location.anchor_id } : {}),
+                ...(location.text != null ? { text: location.text } : {}),
+            };
+        }
+        if (location.line != null) {
+            return {
+                content_kind: 'text',
+                line: location.line,
+                ...(location.line_end != null ? { line_end: location.line_end } : {}),
+                ...(location.text != null ? { text: location.text } : {}),
+            };
+        }
+        if (location.selector != null) {
+            return {
+                content_kind: 'snapshot',
+                selector: location.selector,
+                ...(location.anchor_id != null ? { anchor_id: location.anchor_id } : {}),
+                ...(location.text != null ? { text: location.text } : {}),
+            };
+        }
+    }
+    return undefined;
+};
+
+export const getCitationPages = (citation: Citation | null | undefined): number[] => {
     if (!citation) return [];
-    
-    // Collect pages from parts (sentence-level citations with locations)
-    const pagesFromParts = (citation.parts || [])
-        .flatMap(p => p.locations || [])  
-        .map(l => Number(l.page_idx) + 1)
-        .filter((page): page is number => Number.isFinite(page) && page > 0);
-    
+
+    // Collect pages from part locations (sentence-level citations)
+    const pagesFromLocations = (citation.locations || [])
+        .map(location => location.page_idx)
+        .filter((pageIdx): pageIdx is number => Number.isFinite(pageIdx))
+        .map(pageIdx => pageIdx! + 1)
+        .filter((page) => page > 0);
+
     // Collect pages from direct pages field (page-level citations)
     const directPages = (citation.pages || [])
         .map(page => Number(page))
         .filter((page): page is number => Number.isFinite(page) && page > 0);
-    
+
     // Combine both sources, removing duplicates
-    const allPages = [...new Set([...pagesFromParts, ...directPages])];
+    const allPages = [...new Set([...pagesFromLocations, ...directPages])];
     return allPages.sort((a, b) => a - b);
 }
 
@@ -414,27 +437,48 @@ export interface CitationBoundingBoxData {
     pageLabel?: string | null;
 }
 
-export const getCitationBoundingBoxes = (citation: CitationData | CitationMetadata | null | undefined): CitationBoundingBoxData[] => {
-    if (!citation) return [];
-    if (!citation.parts) return [];
-    
+export const getCitationBoundingBoxes = (citation: Citation | null | undefined): CitationBoundingBoxData[] => {
+    if (!citation?.locations) return [];
+
     const result: CitationBoundingBoxData[] = [];
-    
-    for (const part of citation.parts) {
-        if (!part.locations) continue;
-        
-        for (const locator of part.locations) {
-            if (locator.page_idx !== undefined && locator.boxes && locator.boxes.length > 0) {
-                const pageIndex = Number(locator.page_idx);
-                if (!Number.isFinite(pageIndex) || pageIndex < 0) continue;
-                result.push({
-                    page: pageIndex + 1,
-                    bboxes: locator.boxes,
-                    pageLabel: locator.page_label ?? citation.page_labels?.[pageIndex] ?? null,
-                });
-            }
+
+    for (const location of citation.locations) {
+        if (location.page_idx === undefined || !location.boxes || location.boxes.length === 0) continue;
+        const pageIndex = Number(location.page_idx);
+        if (!Number.isFinite(pageIndex) || pageIndex < 0) continue;
+        const coordOrigin = location.origin === 'b' ? CoordOrigin.BOTTOMLEFT : CoordOrigin.TOPLEFT;
+        result.push({
+            page: pageIndex + 1,
+            bboxes: location.boxes.map(([l, t, r, b]) => ({
+                l, t, r, b, coord_origin: coordOrigin,
+            })),
+            pageLabel: citation.page_labels?.[pageIndex] ?? null,
+        });
+    }
+
+    return result;
+}
+
+/**
+ * CSS item-type icon name for a citation, derived from metadata alone.
+ *
+ * Mirrors Zotero's `item.getItemTypeIconName()` for the cases citations can
+ * resolve to, without requiring a live item. Regular item types pass through
+ * (their type name is the icon name); attachments branch on content kind.
+ */
+export function itemTypeToIconName(
+    itemType: string | undefined,
+    contentKind: ContentKind | undefined,
+): string {
+    if (!itemType) return 'document';
+    if (itemType === 'attachment') {
+        switch (contentKind) {
+            case 'epub': return 'attachmentEPUB';
+            case 'snapshot': return 'attachmentSnapshot';
+            case 'text': return 'attachmentFile';
+            case 'image': return 'attachmentImage';
+            default: return 'attachmentPDF';
         }
     }
-    
-    return result;
+    return itemType;
 }

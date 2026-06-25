@@ -1,21 +1,22 @@
 import config from "../../package.json";
+import { getRuntimeAdapter } from "../platform/runtime";
 
 type PluginPrefsMap = _ZoteroTypes.Prefs["PluginPrefsMap"];
 
 const PREFS_PREFIX = config.config.prefsPrefix;
 
 /**
- * Get preference value.
- * Wrapper of `Zotero.Prefs.get`.
+ * Get preference value. Routes through the platform runtime adapter
+ * (Zotero-backed by default).
  * @param key
  */
 export function getPref<K extends keyof PluginPrefsMap>(key: K) {
-  return Zotero.Prefs.get(`${PREFS_PREFIX}.${key}`, true) as PluginPrefsMap[K];
+  return getRuntimeAdapter().getPref(`${PREFS_PREFIX}.${key}`) as PluginPrefsMap[K];
 }
 
 /**
- * Set preference value.
- * Wrapper of `Zotero.Prefs.set`.
+ * Set preference value. Routes through the platform runtime adapter
+ * (Zotero-backed by default).
  * @param key
  * @param value
  */
@@ -23,14 +24,14 @@ export function setPref<K extends keyof PluginPrefsMap>(
   key: K,
   value: PluginPrefsMap[K],
 ) {
-  return Zotero.Prefs.set(`${PREFS_PREFIX}.${key}`, value, true);
+  return getRuntimeAdapter().setPref(`${PREFS_PREFIX}.${key}`, value);
 }
 
 /**
- * Clear preference value.
- * Wrapper of `Zotero.Prefs.clear`.
+ * Clear preference value. Routes through the platform runtime adapter
+ * (Zotero-backed by default).
  * @param key
  */
 export function clearPref(key: string) {
-  return Zotero.Prefs.clear(`${PREFS_PREFIX}.${key}`, true);
+  return getRuntimeAdapter().clearPref(`${PREFS_PREFIX}.${key}`);
 }

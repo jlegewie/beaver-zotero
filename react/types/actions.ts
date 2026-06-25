@@ -58,7 +58,7 @@ export const TARGET_TYPE_LABELS: Record<ActionTargetType, string> = {
     attachment: "PDF",
     note: "Note",
     collection: "Collection",
-    global: "Global",
+    global: "General",
 };
 
 export const TARGET_TYPE_DESCRIPTIONS: Record<ActionTargetType, string> = {

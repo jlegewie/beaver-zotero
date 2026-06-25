@@ -1,6 +1,19 @@
 import { describe, expect, it } from 'vitest';
 
-import { extractListCollectionsData } from '../../../react/agents/toolResultTypes';
+import {
+    extractAnnotationAttachmentId,
+    extractFindInAttachmentsData,
+    extractGetAnnotationsData,
+    extractListCollectionsData,
+    extractListItemsData,
+    extractZoteroSearchData,
+    isFindInAttachmentsResult,
+    isGetAnnotationsResult,
+    isExternalSearchResult,
+    isLookupWorkResult,
+    extractLookupWorkData,
+    extractLookupWorkFoundCount,
+} from '../../../react/agents/toolResultTypes';
 
 /**
  * extractListCollectionsData is the boundary that normalizes backend
@@ -210,6 +223,341 @@ describe('extractListCollectionsData', () => {
 
             expect(result).not.toBeNull();
             expect(result?.collections).toEqual([]);
+        });
+    });
+});
+
+describe('attachment result references', () => {
+    it('uses attachment_id for current zotero_search attachment rows', () => {
+        const result = extractZoteroSearchData({
+            items: [{
+                result_type: 'attachment',
+                attachment_id: '1-ATTACH1',
+                title: 'Attachment',
+            }],
+            total_count: 1,
+        });
+
+        expect(result?.items).toEqual([{ library_id: 1, zotero_key: 'ATTACH1' }]);
+    });
+
+    it('falls back to legacy item_id for stored zotero_search attachment rows', () => {
+        const result = extractZoteroSearchData({
+            items: [{
+                result_type: 'attachment',
+                item_id: '1-LEGACY1',
+                title: 'Attachment',
+            }],
+            total_count: 1,
+        });
+
+        expect(result?.items).toEqual([{ library_id: 1, zotero_key: 'LEGACY1' }]);
+    });
+
+    it('falls back to legacy item_id for stored list_items attachment rows', () => {
+        const result = extractListItemsData({
+            items: [{
+                result_type: 'attachment',
+                item_id: '1-LEGACY2',
+                title: 'Attachment',
+            }],
+            total_count: 1,
+        });
+
+        expect(result?.items).toEqual([{ library_id: 1, zotero_key: 'LEGACY2' }]);
+    });
+});
+
+describe('find_annotations dehydrated summary', () => {
+    const metadata = {
+        summary: {
+            tool_name: 'find_annotations',
+            result_count: 1,
+            total_count: 3,
+            has_more: true,
+            annotations: [{ library_id: 1, zotero_key: 'ANN12345' }],
+        },
+    };
+
+    it('routes find_annotations through the annotation result guard', () => {
+        expect(isGetAnnotationsResult('find_annotations', undefined, metadata)).toBe(true);
+    });
+
+    it('extracts annotation references without requiring attachment scope', () => {
+        expect(extractGetAnnotationsData(undefined, metadata)).toEqual({
+            annotations: [{ library_id: 1, zotero_key: 'ANN12345' }],
+            totalCount: 3,
+            toolName: 'find_annotations',
+        });
+    });
+});
+
+/**
+ * find_in_attachments summaries omit absent optional fields entirely (the
+ * backend strips None values), so the guard validates only the discriminating
+ * shape and the extractor fills in defaults.
+ */
+describe('find_in_attachments summary', () => {
+    const fullMetadata = {
+        summary: {
+            tool_name: 'find_in_attachments',
+            query: 'social capital',
+            total_matches: 23,
+            attachment_count: 2,
+            attachments: [
+                {
+                    library_id: 1,
+                    zotero_key: 'ABCD2345',
+                    status: 'ok',
+                    match_count: 23,
+                    pages: [3, 12],
+                    content_kind: 'pdf',
+                    matches: [
+                        {
+                            snippet: 'Social capital refers to networks.',
+                            page_number: 12,
+                            page_label: 'iv',
+                            target: { part_id: 's33', page_idx: 11, boxes: [[72, 701, 540, 713]] },
+                        },
+                    ],
+                },
+                {
+                    library_id: 1,
+                    zotero_key: 'FAIL2345',
+                    status: 'error',
+                    match_count: 0,
+                    pages: [],
+                    content_kind: 'pdf',
+                    matches: [],
+                },
+            ],
+        },
+    };
+
+    it('routes by tool name', () => {
+        expect(isFindInAttachmentsResult('find_in_attachments', undefined, fullMetadata)).toBe(true);
+    });
+
+    it('falls back to summary.tool_name for hydrated history', () => {
+        expect(isFindInAttachmentsResult('unknown_tool', undefined, fullMetadata)).toBe(true);
+    });
+
+    it('rejects search_in_attachment summaries (page-shaped, no attachments array)', () => {
+        const metadata = {
+            summary: {
+                tool_name: 'search_in_attachment',
+                query: 'q',
+                total_matches: 1,
+                pages_with_matches: 1,
+                pages: [{ library_id: 1, zotero_key: 'ABCD2345', page_number: 3, match_count: 1, score: 1 }],
+            },
+        };
+        expect(isFindInAttachmentsResult('search_in_attachment', undefined, metadata)).toBe(false);
+        expect(isFindInAttachmentsResult('find_in_attachments', undefined, metadata)).toBe(false);
+    });
+
+    it('extracts full payloads verbatim', () => {
+        const result = extractFindInAttachmentsData(undefined, fullMetadata);
+        expect(result).not.toBeNull();
+        expect(result?.query).toBe('social capital');
+        expect(result?.totalMatches).toBe(23);
+        expect(result?.attachmentCount).toBe(2);
+        expect(result?.attachments[0].matches[0].target?.part_id).toBe('s33');
+        expect(result?.attachments[1].status).toBe('error');
+    });
+
+    it('parses the display error reason on errored attachments', () => {
+        const metadata = {
+            summary: {
+                tool_name: 'find_in_attachments',
+                query: 'q',
+                total_matches: 0,
+                attachment_count: 1,
+                attachments: [{
+                    library_id: -1,
+                    zotero_key: 'AB12CD34',
+                    status: 'error',
+                    match_count: 0,
+                    pages: [],
+                    content_kind: 'pdf',
+                    matches: [],
+                    error: 'Scanned document (no text layer) — can\'t be keyword-searched.',
+                }],
+            },
+        };
+        const result = extractFindInAttachmentsData(undefined, metadata);
+        expect(result?.attachments[0].error).toContain('Scanned document');
+    });
+
+    it('normalizes omitted optional fields', () => {
+        const metadata = {
+            summary: {
+                tool_name: 'find_in_attachments',
+                query: 'q',
+                total_matches: 1,
+                attachment_count: 1,
+                attachments: [{ library_id: 1, zotero_key: 'ABCD2345' }],
+            },
+        };
+        expect(isFindInAttachmentsResult('find_in_attachments', undefined, metadata)).toBe(true);
+        const result = extractFindInAttachmentsData(undefined, metadata);
+        expect(result?.attachments[0]).toEqual({
+            library_id: 1,
+            zotero_key: 'ABCD2345',
+            status: 'ok',
+            match_count: 0,
+            pages: [],
+            content_kind: 'pdf',
+            matches: [],
+        });
+    });
+
+    it('returns null when summary lacks the attachments array', () => {
+        expect(extractFindInAttachmentsData(undefined, { summary: { tool_name: 'find_in_attachments' } })).toBeNull();
+        expect(extractFindInAttachmentsData(undefined, undefined)).toBeNull();
+    });
+});
+
+describe('extractAnnotationAttachmentId', () => {
+    it('reads attachment_id from object args', () => {
+        expect(extractAnnotationAttachmentId({ attachment_id: '1-ABCDEFGH' })).toBe('1-ABCDEFGH');
+    });
+
+    it('reads attachment_id from JSON string args', () => {
+        expect(extractAnnotationAttachmentId('{"attachment_id":"1-ABCDEFGH"}')).toBe('1-ABCDEFGH');
+    });
+
+    it('returns null when args are unparseable or unscoped', () => {
+        expect(extractAnnotationAttachmentId('{')).toBeNull();
+        expect(extractAnnotationAttachmentId({ text_contains: 'foo' })).toBeNull();
+        expect(extractAnnotationAttachmentId(null)).toBeNull();
+    });
+});
+
+describe('lookup_work results', () => {
+    const batchContent = {
+        tool_name: 'lookup_work',
+        found_count: 1,
+        references: [{
+            external_id: 'openlibrary:OL7453684M',
+            title: 'Embracing Defeat: Japan in the Wake of World War II',
+            authors: ['John W. Dower'],
+            year: 2000,
+            venue: 'W. W. Norton & Company',
+        }],
+        not_found_queries: ['Embracing Defeat'],
+        temporarily_unchecked_queries: [],
+    };
+
+    const metadata = {
+        supplemental_data: [{
+            external_id: 'openlibrary:OL7453684M',
+            source: 'openalex',
+            publication_url: 'https://openlibrary.org/books/OL7453684M',
+            authors: ['John W. Dower'],
+            library_items: [],
+        }],
+    };
+
+    it('recognizes batch lookup_work payloads', () => {
+        expect(isLookupWorkResult('lookup_work', batchContent, metadata)).toBe(true);
+    });
+
+    it('does not route lookup_work through external search', () => {
+        expect(isExternalSearchResult('lookup_work', batchContent, metadata)).toBe(false);
+    });
+
+    it('extracts found references and not-found queries', () => {
+        expect(extractLookupWorkData(batchContent, metadata)).toEqual({
+            foundCount: 1,
+            references: [{
+                source_id: 'openlibrary:OL7453684M',
+                title: 'Embracing Defeat: Japan in the Wake of World War II',
+                authors: ['John W. Dower'],
+                year: 2000,
+                venue: 'W. W. Norton & Company',
+                source: 'openalex',
+                id: 'openlibrary:OL7453684M',
+                publication_url: 'https://openlibrary.org/books/OL7453684M',
+                library_items: [],
+            }],
+            notFoundQueries: ['Embracing Defeat'],
+            temporarilyUncheckedQueries: [],
+            message: undefined,
+        });
+    });
+
+    it('reads found_count for completed labels', () => {
+        expect(extractLookupWorkFoundCount(batchContent)).toBe(1);
+    });
+
+    it('still supports legacy single-reference payloads', () => {
+        const legacyContent = {
+            found: true,
+            reference: {
+                external_id: 'openalex:W123',
+                title: 'Legacy Work',
+            },
+        };
+
+        expect(isLookupWorkResult('lookup_work', legacyContent)).toBe(true);
+        expect(extractLookupWorkFoundCount(legacyContent)).toBe(1);
+        expect(extractLookupWorkData(legacyContent)).toEqual({
+            foundCount: 1,
+            references: [{
+                source_id: 'openalex:W123',
+                title: 'Legacy Work',
+                source: 'openalex',
+                id: undefined,
+                library_items: [],
+            }],
+            notFoundQueries: [],
+            temporarilyUncheckedQueries: [],
+            message: undefined,
+        });
+    });
+
+    it('merges legacy single-object supplemental data for lookup_work', () => {
+        const legacyContent = {
+            found: true,
+            reference: {
+                external_id: 'openalex:W123',
+                title: 'Legacy Work',
+            },
+        };
+        const legacyMetadata = {
+            supplemental_data: {
+                external_id: 'openalex:W123',
+                source: 'openalex' as const,
+                publication_url: 'https://example.org/work',
+                identifiers: {
+                    doi: '10.1234/example',
+                },
+                library_items: [{
+                    library_id: 1,
+                    zotero_key: 'ABCDEFGH',
+                    item_id: '1-ABCDEFGH',
+                }],
+            },
+        };
+
+        expect(extractLookupWorkData(legacyContent, legacyMetadata)).toMatchObject({
+            foundCount: 1,
+            references: [{
+                source_id: 'openalex:W123',
+                title: 'Legacy Work',
+                source: 'openalex',
+                id: 'openalex:W123',
+                publication_url: 'https://example.org/work',
+                identifiers: {
+                    doi: '10.1234/example',
+                },
+                library_items: [{
+                    library_id: 1,
+                    zotero_key: 'ABCDEFGH',
+                    item_id: '1-ABCDEFGH',
+                }],
+            }],
         });
     });
 });

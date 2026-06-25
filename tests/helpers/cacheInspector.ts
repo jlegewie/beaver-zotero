@@ -33,17 +33,62 @@ export interface CachedPageGeometry {
     rotation: 0 | 90 | 180 | 270;
 }
 
+export type ExtractContentKind = 'pdf' | 'epub' | 'text' | 'snapshot';
+
+/** Durable per-kind metadata blob persisted in `document_metadata_json`. */
+export interface PdfCachedDocumentMetadata {
+    content_kind: 'pdf';
+    pageCount: number | null;
+    pageLabels: Record<string, string> | null;
+    pages: (CachedPageGeometry | null)[] | null;
+}
+
+/** Per-section summary persisted in the EPUB metadata blob. */
+export interface EpubCachedSectionSummary {
+    index: number;
+    rawHref: string;
+    label?: string | null;
+    itemCount: number;
+}
+
+export interface EpubCachedDocumentMetadata {
+    content_kind: 'epub';
+    sectionCount: number;
+    sections: EpubCachedSectionSummary[];
+}
+
 export interface CacheMetadataRecord {
+    id: number;
     itemId: number;
     libraryId: number;
     zoteroKey: string;
+    contentKind: ExtractContentKind;
     filePath: string;
     sourceSizeBytes: number;
     contentType: string;
+    documentMetadata: PdfCachedDocumentMetadata | EpubCachedDocumentMetadata | null;
     pageCount: number | null;
     pageLabels: Record<string, string> | null;
     pages: (CachedPageGeometry | null)[] | null;
     errorCode: 'encrypted' | 'invalid_pdf' | 'no_text_layer' | null;
+    extractionSchemaVersion: string;
+    metadataFormatVersion: number;
+}
+
+export interface CachePayloadRecord {
+    id: number;
+    metadataId: number;
+    itemId: number;
+    libraryId: number;
+    zoteroKey: string;
+    payloadKind: 'structured' | 'markdown';
+    contentKind: ExtractContentKind;
+    sourceFilePath: string;
+    payloadPath: string;
+    payloadSizeBytes: number;
+    payloadSha256: string;
+    extractionSchemaVersion: string;
+    cacheFormatVersion: number;
 }
 
 export interface ResolveItemResponse {
@@ -52,6 +97,13 @@ export interface ResolveItemResponse {
     is_attachment?: boolean;
     parent_id?: number | null;
     attachment_content_type?: string | null;
+    /**
+     * `<libraryId>-<zoteroKey>` of the PDF attachment the production resolver
+     * would extract for this item (the item itself when it is already a PDF
+     * attachment, or the single child PDF of a regular item). `null` when the
+     * item does not resolve to a PDF.
+     */
+    resolved_pdf_key?: string | null;
     error?: string;
 }
 
@@ -396,6 +448,19 @@ export async function getCacheMetadata(
     return res.record;
 }
 
+export async function getCachePayload(
+    libraryId: number,
+    key: string,
+    payloadKind: 'structured' | 'markdown' = 'markdown',
+): Promise<CachePayloadRecord | null> {
+    const res = await post<{ record: CachePayloadRecord | null; error?: string }>(
+        '/beaver/test/cache-payload',
+        { library_id: libraryId, zotero_key: key, payload_kind: payloadKind },
+    );
+    if (res.error) throw new Error(res.error);
+    return res.record;
+}
+
 export async function invalidateCache(
     libraryId: number,
     key: string,
@@ -407,11 +472,185 @@ export async function invalidateCache(
     if (res.error) throw new Error(res.error);
 }
 
+export interface SeedPageLabelsResponse {
+    ok?: boolean;
+    seeded?: boolean;
+    page_labels?: Record<string, string> | null;
+    error?: string;
+}
+
+/**
+ * `/beaver/test/cache-seed-page-labels` — seed document-cache page labels for
+ * an attachment via the real `DocumentCache.putMetadata` write path. `labels`
+ * is a 0-based index → display-label map (e.g. `{ 0: 'iii', 1: 'iv' }`).
+ */
+export async function seedPageLabels(
+    libraryId: number,
+    key: string,
+    labels: Record<number, string>,
+    pageCount?: number,
+): Promise<SeedPageLabelsResponse> {
+    const res = await post<SeedPageLabelsResponse>('/beaver/test/cache-seed-page-labels', {
+        library_id: libraryId,
+        zotero_key: key,
+        page_labels: labels,
+        page_count: pageCount,
+    });
+    if (res.error) throw new Error(res.error);
+    return res;
+}
+
 export async function resolveItem(
     libraryId: number,
     key: string,
 ): Promise<ResolveItemResponse> {
     return post('/beaver/test/resolve-item', {
+        library_id: libraryId,
+        zotero_key: key,
+    });
+}
+
+export interface ValidateItemResponse {
+    ok: boolean;
+    state?: 'readable' | 'unreadable' | 'blocked';
+    severity?: 'info' | 'error' | null;
+    reason?: string | null;
+    status_code?: string | null;
+    content_kind?: string | null;
+    page_count?: number | null;
+    error?: string;
+}
+
+export interface ValidateItemOptions {
+    /** Whether the active model can read images (gates image attachments). */
+    supportsVision?: boolean;
+    /** Whether OCR can run locally (admits scanned/no-text PDFs). */
+    canHandleOCRLocally?: boolean;
+    /** Restrict the searchable libraries (excluded libraries are blocked). */
+    searchableLibraryIds?: number[];
+    timeout?: number;
+}
+
+/**
+ * `/beaver/test/validate-item` — run `itemValidationManager.validateItem`
+ * against a live item. Capability flags drive the option-dependent gating
+ * (images, OCR, excluded libraries); omit them for the no-capability baseline.
+ */
+export async function validateItem(
+    libraryId: number,
+    key: string,
+    options?: ValidateItemOptions,
+): Promise<ValidateItemResponse> {
+    return post('/beaver/test/validate-item', {
+        library_id: libraryId,
+        zotero_key: key,
+        supports_vision: options?.supportsVision,
+        can_handle_ocr_locally: options?.canHandleOCRLocally,
+        searchable_library_ids: options?.searchableLibraryIds,
+    }, { timeout: options?.timeout ?? 60_000 });
+}
+
+export interface ValidateRegularItemAttachment {
+    attachment_id: string;
+    state: 'readable' | 'unreadable' | 'blocked';
+    severity?: 'info' | 'error' | null;
+    reason?: string | null;
+    status_code?: string | null;
+    content_kind?: string | null;
+    page_count?: number | null;
+    is_primary: boolean;
+    filename?: string | null;
+}
+
+export interface ValidateRegularItemResponse {
+    ok: boolean;
+    state?: 'readable' | 'unreadable' | 'blocked';
+    severity?: 'info' | 'error' | null;
+    reason?: string | null;
+    attachments?: ValidateRegularItemAttachment[];
+    error?: string;
+}
+
+/**
+ * `/beaver/test/validate-regular-item` — run
+ * `itemValidationManager.validateRegularItem` against a live regular item,
+ * surfacing the top-level state plus each child attachment's validation
+ * (including which child was promoted as primary).
+ */
+export async function validateRegularItem(
+    libraryId: number,
+    key: string,
+    options?: ValidateItemOptions,
+): Promise<ValidateRegularItemResponse> {
+    return post('/beaver/test/validate-regular-item', {
+        library_id: libraryId,
+        zotero_key: key,
+        supports_vision: options?.supportsVision,
+        can_handle_ocr_locally: options?.canHandleOCRLocally,
+        searchable_library_ids: options?.searchableLibraryIds,
+    }, { timeout: options?.timeout ?? 60_000 });
+}
+
+/** Readable content kinds the resolver can classify (extractor + image). */
+export type ReadableContentKind = ExtractContentKind | 'image';
+
+export interface ResolveReadableResponse {
+    item_id: number | null;
+    item_type: string | null;
+    is_attachment?: boolean;
+    is_regular_item?: boolean;
+    /** Whether the item resolved to a readable attachment. */
+    resolved?: boolean;
+    /** `<libraryId>-<zoteroKey>` of the resolved readable attachment, or null. */
+    resolved_key?: string | null;
+    /** Readable content kind of the resolved attachment, or null on failure. */
+    content_kind?: ReadableContentKind | null;
+    content_type?: string | null;
+    /** Resolver failure code (`not_attachment` | `is_linked_url` | `not_readable`). */
+    error_code?: 'not_attachment' | 'is_linked_url' | 'not_readable' | null;
+    error?: string | null;
+}
+
+/**
+ * `/beaver/test/resolve-readable` — runs the production
+ * `resolveToReadableAttachment` resolver and returns its result verbatim
+ * (including the chosen attachment key and content kind for non-PDF kinds),
+ * without triggering extraction.
+ */
+export async function resolveReadable(
+    libraryId: number,
+    key: string,
+): Promise<ResolveReadableResponse> {
+    return post('/beaver/test/resolve-readable', {
+        library_id: libraryId,
+        zotero_key: key,
+    });
+}
+
+export interface BestEpubAttachmentResponse {
+    item_id: number | null;
+    item_type: string | null;
+    is_attachment?: boolean;
+    is_regular_item?: boolean;
+    /** Whether an EPUB attachment was selected. */
+    resolved?: boolean;
+    /** `<libraryId>-<zoteroKey>` of the selected EPUB attachment, or null. */
+    resolved_key?: string | null;
+    /** Content type of the selected attachment, or null when none/regular item. */
+    content_type?: string | null;
+    error?: string;
+}
+
+/**
+ * `/beaver/test/best-epub-attachment` — runs the production
+ * `getBestEpubAttachmentAsync` helper (used by the EPUB citation-navigation
+ * path) and returns the selected attachment key/content type verbatim.
+ */
+export async function bestEpubAttachment(
+    libraryId: number,
+    key: string,
+): Promise<BestEpubAttachmentResponse> {
+    return post('/beaver/test/best-epub-attachment', {
         library_id: libraryId,
         zotero_key: key,
     });
@@ -436,7 +675,7 @@ export interface FileStatus {
     is_primary: boolean;
     mime_type: string;
     page_count: number | null;
-    status: 'available' | 'unavailable';
+    status: 'readable' | 'unreadable' | 'processing';
     status_code?: string;
 }
 
@@ -540,19 +779,74 @@ export async function workerMarkStale(
 }
 
 // ---------------------------------------------------------------------------
+// Sync suppression (dev-only)
+//
+// Talks to `/beaver/test/sync-pause`, which drives the real
+// `src/services/syncPause` module against the running Zotero's
+// `Zotero.Sync.Runner`. Shared instance with the production webpack path, so
+// always finish a test by releasing the pause (`syncPause('resume')`).
+// ---------------------------------------------------------------------------
+
+export type SyncPauseAction =
+    | 'status'
+    | 'pause'
+    | 'resume'
+    | 'schedule-resume'
+    | 'cancel-resume'
+    | 'probe-runner';
+
+export interface SyncPauseResponse {
+    ok: boolean;
+    action: SyncPauseAction;
+    runner: {
+        available: boolean;
+        delayIndefiniteAvailable: boolean;
+        delaySyncAvailable: boolean;
+        clearSyncTimeoutAvailable: boolean;
+        setSyncTimeoutAvailable: boolean;
+        syncInProgress: boolean | null;
+    };
+    paused: boolean;
+    releaseDebounceMs: number;
+    safetyIdleMs: number;
+    resumeHookRegistered: boolean;
+    probe?: {
+        delayIndefiniteAvailable: boolean;
+        resolveType: string | null;
+        roundTripOk: boolean;
+        suppressionApisOk: boolean;
+        error?: string;
+    };
+}
+
+export async function syncPause(
+    action: SyncPauseAction = 'status',
+): Promise<SyncPauseResponse> {
+    return post<SyncPauseResponse>('/beaver/test/sync-pause', { action });
+}
+
+// ---------------------------------------------------------------------------
 // Background extraction queue (dev-only)
 //
 // Talks to the `/beaver/test/background-*` endpoints registered in
 // `useHttpEndpoints.ts` from `react/hooks/httpHandlers/testBackgroundHandlers.ts`.
 // ---------------------------------------------------------------------------
 
-export type BackgroundJobType = 'hot_timeout_retry';
+export type BackgroundJobType = 'document_timeout_retry';
+export type BackgroundJobPayloadKind = 'structured' | 'markdown';
 
-export interface BackgroundJobPayload {
+export interface PdfBackgroundJobPayload {
+    content_kind: 'pdf';
     maxPages: number | null;
     maxFileSizeMB: number;
     timeoutSeconds: number;
 }
+
+export type BackgroundJobPayload =
+    | PdfBackgroundJobPayload
+    | { content_kind: 'epub' }
+    | { content_kind: 'text' }
+    | { content_kind: 'snapshot' };
 
 export interface BackgroundJobRecord {
     id: number;
@@ -560,7 +854,8 @@ export interface BackgroundJobRecord {
     libraryId: number;
     itemId: number | null;
     zoteroKey: string;
-    mode: 'structured' | 'markdown';
+    contentKind: ExtractContentKind;
+    payloadKind: BackgroundJobPayloadKind;
     priority: number;
     payload: BackgroundJobPayload | null;
     enqueuedAt: number;
@@ -580,7 +875,8 @@ export interface BackgroundQueueStats {
 export interface BackgroundEnqueueRequest {
     library_id: number;
     zotero_key: string;
-    mode: 'structured' | 'markdown';
+    content_kind: ExtractContentKind;
+    payload_kind: BackgroundJobPayloadKind;
     job_type: BackgroundJobType;
     priority?: number;
     payload?: BackgroundJobPayload | null;
@@ -692,4 +988,33 @@ export async function waitForQueueDrain(
             lastStats,
         )}`,
     );
+}
+
+/** Item-display metadata resolved by the Zotero `itemData` citation host. */
+export interface ResolvedItemDisplay {
+    itemType?: string;
+    hasReadableAttachment: boolean;
+}
+
+interface ResolveItemDisplayResponse {
+    ok: boolean;
+    error?: string;
+    display: ResolvedItemDisplay | null;
+}
+
+/**
+ * Invoke the citation host's `resolveItemDisplay` for one item reference via
+ * `/beaver/test/resolve-item-display`. Returns the resolved display metadata,
+ * or null when the item is missing/unresolvable.
+ */
+export async function resolveItemDisplay(
+    libraryId: number,
+    zoteroKey: string,
+): Promise<ResolvedItemDisplay | null> {
+    const res = await post<ResolveItemDisplayResponse>('/beaver/test/resolve-item-display', {
+        library_id: libraryId,
+        zotero_key: zoteroKey,
+    });
+    if (!res.ok) throw new Error(`resolve-item-display failed: ${res.error ?? 'unknown'}`);
+    return res.display;
 }

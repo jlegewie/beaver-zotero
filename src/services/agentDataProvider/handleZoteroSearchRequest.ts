@@ -14,10 +14,36 @@ import {
     WSZoteroSearchResponse,
     ZoteroSearchResultItem,
     RegularSearchResultItem,
-    AttachmentResultItem,
+    AttachmentRowResult,
 } from '../agentProtocol';
-import { serializeNote } from '../../utils/zoteroSerializers';
-import { validateLibraryAccess, extractYear, formatCreatorsString } from './utils';
+import { ItemStub } from '../../../react/types/zotero';
+import { serializeNote, serializeItemStub } from '../../utils/zoteroSerializers';
+import { validateLibraryAccess, extractYear, formatCreatorsString, getAttachmentInfoForItem } from './utils';
+
+
+async function filterOutAnnotationItemIds(itemIds: number[]): Promise<number[]> {
+    if (itemIds.length === 0) return itemIds;
+
+    const annotationItemTypeID = Zotero.ItemTypes.getID('annotation');
+    const returnableItemIds = new Set<number>();
+    const chunkSize = 500;
+
+    for (let i = 0; i < itemIds.length; i += chunkSize) {
+        const chunk = itemIds.slice(i, i + chunkSize);
+        const placeholders = chunk.map(() => '?').join(', ');
+        await Zotero.DB.queryAsync(
+            `SELECT itemID FROM items WHERE itemID IN (${placeholders}) AND itemTypeID != ?`,
+            [...chunk, annotationItemTypeID],
+            {
+                onRow: (row: any) => {
+                    returnableItemIds.add(row.getResultByIndex(0));
+                },
+            },
+        );
+    }
+
+    return itemIds.filter(id => returnableItemIds.has(id));
+}
 
 
 /**
@@ -140,14 +166,32 @@ export async function handleZoteroSearchRequest(
             if (validForFilter.length > 0) {
                 await Zotero.Items.loadDataTypes(validForFilter, ['childItems']);
             }
-            itemIds = validForFilter
-                .filter(item => {
-                    // Only apply attachment filter to regular items
-                    if (!item.isRegularItem()) return true;
+            const matchingItemIds = new Set<number>();
+            for (const item of validForFilter) {
+                // Only apply attachment filter to regular items
+                let matches = true;
+                if (item.isRegularItem()) {
                     const hasAtt = item.numAttachments() > 0;
-                    return request.has_attachments ? hasAtt : !hasAtt;
-                })
-                .map(item => item.id);
+                    matches = request.has_attachments ? hasAtt : !hasAtt;
+                }
+                if (matches) {
+                    matchingItemIds.add(item.id);
+                }
+            }
+            itemIds = itemIds.filter(id => matchingItemIds.has(id));
+        }
+
+        // zotero_search has no annotation result shape. When annotations can
+        // reach the result set, drop them BEFORE counting and paginating, so
+        // total_count and page boundaries reflect only returnable items.
+        const itemCategory = request.item_category ?? 'regular';
+        const mayContainAnnotations =
+            request.join_mode === 'any'
+            || anyItemTypeCondition
+            || itemCategory === 'all'
+            || itemCategory === 'annotation';
+        if (mayContainAnnotations) {
+            itemIds = await filterOutAnnotationItemIds(itemIds);
         }
 
         const totalCount = itemIds.length;
@@ -232,7 +276,15 @@ export async function handleZoteroSearchRequest(
             // No sorting — paginate on IDs first, then fetch only the page
             const paginatedIds = itemIds.slice(offset, offset + limit);
             const fetchedItems = await Zotero.Items.getAsync(paginatedIds);
-            paginatedZoteroItems = fetchedItems.filter((item): item is Zotero.Item => item !== null);
+            const fetchedItemsById = new Map<number, Zotero.Item>();
+            for (const item of fetchedItems) {
+                if (item !== null) {
+                    fetchedItemsById.set(item.id, item);
+                }
+            }
+            paginatedZoteroItems = paginatedIds
+                .map(id => fetchedItemsById.get(id))
+                .filter((item): item is Zotero.Item => item != null);
 
             if (paginatedZoteroItems.length > 0) {
                 await Zotero.Items.loadDataTypes(paginatedZoteroItems, ['primaryData', 'creators', 'itemData']);
@@ -251,18 +303,13 @@ export async function handleZoteroSearchRequest(
                 childParentIds.add(item.parentItemID);
             }
         }
-        const parentMap = new Map<number, { item_id: string; title: string }>();
+        const parentMap = new Map<number, ItemStub>();
         if (childParentIds.size > 0) {
             const parentItems = await Zotero.Items.getAsync([...childParentIds]);
             const validParents = parentItems.filter((p): p is Zotero.Item => p !== null);
             if (validParents.length > 0) {
-                await Zotero.Items.loadDataTypes(validParents, ['primaryData', 'itemData']);
-            }
-            for (const parent of validParents) {
-                let title = '';
-                try { title = (parent.getField('title', false, true) as string) || ''; }
-                catch { title = parent.getDisplayTitle?.() || ''; }
-                parentMap.set(parent.id, { item_id: `${parent.libraryID}-${parent.key}`, title });
+                await Zotero.Items.loadDataTypes(validParents, ['primaryData', 'itemData', 'creators']);
+                validParents.forEach(parent => parentMap.set(parent.id, serializeItemStub(parent)));
             }
         }
 
@@ -275,16 +322,18 @@ export async function handleZoteroSearchRequest(
                 items.push(serializeNote(item, parentInfo));
             } else if (item.isAttachment()) {
                 const parentInfo = item.parentItemID ? parentMap.get(item.parentItemID) : null;
-                const attachmentItem: AttachmentResultItem = {
+                const attachmentInfo = await getAttachmentInfoForItem(item, {
+                    parentItemId: parentInfo?.item_id ?? null,
+                    isPrimary: false,
+                    includeAnnotationsCount: true,
+                    skipWorkerFallback: true,
+                });
+                const attachmentItem: AttachmentRowResult = {
+                    ...attachmentInfo,
                     result_type: 'attachment',
-                    item_id: `${item.libraryID}-${item.key}`,
-                    title: item.getDisplayTitle?.() || '',
-                    filename: item.attachmentFilename || null,
-                    content_type: item.attachmentContentType || null,
-                    parent_item_id: parentInfo?.item_id ?? null,
                     parent_title: parentInfo?.title ?? null,
+                    parent_item: parentInfo ?? null,
                     date_modified: item.dateModified,
-                    annotations_count: item.isFileAttachment?.() ? item.getAnnotations().length : 0,
                 };
                 items.push(attachmentItem);
             } else {

@@ -1,10 +1,10 @@
 import { truncateText } from './stringUtils';
 import { stripHtmlTags, computeDiff } from '../components/agentRuns/EditNotePreview';
 import { logger } from '../../src/utils/logger';
-import { syncingItemFilter, syncingItemFilterAsync, isSupportedItem, isLibraryValidForSync } from '../../src/utils/sync';
+import { isLibraryValidForSync } from '../../src/utils/sync';
+import { isAgentSupportedItem, agentItemFilter, agentItemFilterAsync } from '../../src/utils/agentItemSupport';
 import { isValidAnnotationType, SourceAttachment } from '../types/attachments/apiTypes';
 import { selectItemById } from '../../src/utils/selectItem';
-import { CitationData } from '../types/citations';
 import { ZoteroItemReference } from '../types/zotero';
 import { isDatabaseSyncSupportedAtom, searchableLibraryIdsAtom, syncWithZoteroAtom} from '../atoms/profile';
 import { store } from '../store';
@@ -24,23 +24,11 @@ import {
 export const MAX_NOTE_TITLE_LENGTH = 20;
 export const MAX_NOTE_CONTENT_LENGTH = 150;
 
-// Limits
-export const FILE_SIZE_LIMIT = 10 * 1024 * 1024; // 10MB
-export const MAX_ATTACHMENTS = 10;
-export const MAX_PAGES = 100;
-
-export const VALID_MIME_TYPES = ['application/pdf', 'image/png', 'image/jpeg', 'image/jpg'] as const;
-type ValidMimeType = typeof VALID_MIME_TYPES[number];
-
-function isValidMimeType(mimeType: string): mimeType is ValidMimeType {
-    return VALID_MIME_TYPES.includes(mimeType as ValidMimeType);
-}
-
 export function getDisplayNameFromItem(item: Zotero.Item, count: number | null = null, noteTitleLength: number = MAX_NOTE_TITLE_LENGTH): string {
     let displayName: string;
 
     if (item.isNote()) {
-        displayName = truncateText(item.getNoteTitle(), noteTitleLength);
+        displayName = truncateText(item.getNoteTitle(), noteTitleLength) || 'Untitled Note';
     } else if(item.isAttachment() && !item.parentItem) {
         displayName = item.getField('title') || '';
     } else {
@@ -71,7 +59,7 @@ export function getReferenceFromItem(item: Zotero.Item): string {
 /**
 * Source method: Get the Zotero item from a Source
 */
-export function getZoteroItem(source: SourceAttachment | CitationData): Zotero.Item | null {
+export function getZoteroItem(source: SourceAttachment | ZoteroItemReference): Zotero.Item | null {
     try {
         let libId: number;
         let itemKeyValue: string;
@@ -165,7 +153,7 @@ export async function isValidZoteroItem(item: Zotero.Item): Promise<{valid: bool
         if (item.isInTrash()) return {valid: false, error: "Item is in trash"};
 
         // (a) Pass the syncing filter
-        if (!(await syncingItemFilterAsync(item))) {
+        if (!(await agentItemFilterAsync(item))) {
             return {valid: false, error: "File not available to use in Beaver"};
         }
 
@@ -186,8 +174,8 @@ export async function isValidZoteroItem(item: Zotero.Item): Promise<{valid: bool
     else if (item.isAttachment()) {
 
         // (a) Check if attachment is supported
-        if (!isSupportedItem(item)) {
-            return {valid: false, error: "Beaver only supports PDF attachments"};
+        if (!isAgentSupportedItem(item)) {
+            return {valid: false, error: "Beaver only supports PDF, EPUB, and plain-text attachments"};
         }
 
         // (b) Check if attachment is in trash
@@ -200,8 +188,8 @@ export async function isValidZoteroItem(item: Zotero.Item): Promise<{valid: bool
         }
 
         // (d) Use comprehensive syncing filter
-        if (!(await syncingItemFilterAsync(item))) {
-            return {valid: false, error: "Attachment not synced with Beaver"};
+        if (!(await agentItemFilterAsync(item))) {
+            return {valid: false, error: "Attachment not available to use in Beaver"};
         }
         
         // (e) If syncWithZotero is true, check whether item has been synced with Zotero
@@ -238,7 +226,7 @@ export async function isValidZoteroItem(item: Zotero.Item): Promise<{valid: bool
         if (!parent || !parent.isAttachment()) return {valid: false, error: "Parent item is not an attachment"};
 
         // (d) Check if the parent exists and is syncing
-        if (!syncingItemFilter(parent)) return {valid: false, error: "Parent item is not syncing"};
+        if (!agentItemFilter(parent)) return {valid: false, error: "Parent item is not available to use in Beaver"};
 
         // (e) Check if the parent file exists
         const hasFile = await safeFileExists(parent);
@@ -271,7 +259,7 @@ export async function isValidZoteroItem(item: Zotero.Item): Promise<{valid: bool
  * @param source - The source item to reveal
  * @param collectionKey - Optional collection key to navigate to before revealing
  */
-export function revealSource(source: ZoteroItemReference | SourceAttachment | CitationData, collectionKey?: string) {
+export function revealSource(source: ZoteroItemReference | SourceAttachment, collectionKey?: string) {
     if (!source.library_id || !source.zotero_key) return;
     const itemID = Zotero.Items.getIDFromLibraryAndKey(source.library_id, source.zotero_key);
     if (itemID && Zotero.getActiveZoteroPane()) {
@@ -326,7 +314,7 @@ export async function getCurrentCollectionKeyForItem(
     }
 }
 
-export async function openSource(source: SourceAttachment | CitationData) {
+export async function openSource(source: SourceAttachment | ZoteroItemReference) {
     const item = getZoteroItem(source);
     if (!item) return;
     
@@ -833,6 +821,66 @@ function normalizeSearchFragment(html: string | undefined): string {
     return stripEllipsis(stripHtmlTags(html).replace(/\s+/g, ' ').trim());
 }
 
+function formatCitationTextForSearch(citationItems: any[]): string | null {
+    if (citationItems.length === 0) return null;
+    try {
+        const citation = { citationItems, properties: {} };
+        const formatted = Zotero.EditorInstanceUtilities.formatCitation(citation);
+        return formatted?.replace(/<[^>]+>/g, '').trim() || null;
+    } catch {
+        return null;
+    }
+}
+
+function lookupCitationItemForSearch(itemId: string, locator?: string): any | null {
+    const dashIdx = itemId.indexOf('-');
+    if (dashIdx === -1) return null;
+    const libraryID = parseInt(itemId.substring(0, dashIdx), 10);
+    const key = itemId.substring(dashIdx + 1);
+    const item = Zotero.Items.getByLibraryAndKey(libraryID, key);
+    if (!item || typeof item === 'boolean') return null;
+    const citeItem = item.isAttachment?.() && item.parentItemID
+        ? Zotero.Items.get(item.parentItemID)
+        : item;
+    if (!citeItem || typeof citeItem === 'boolean') return null;
+    return {
+        uris: [Zotero.URI.getItemURI(citeItem)],
+        itemData: Zotero.Utilities.Item.itemToCSLJSON(citeItem),
+        ...(locator ? { locator, label: 'page' } : {}),
+    };
+}
+
+function parseCompoundCitationItemForSearch(entry: string): { itemId: string; page?: string } {
+    const trimmed = entry.trim();
+    const pageMarker = ':page=';
+    const pageIdx = trimmed.indexOf(pageMarker);
+    if (pageIdx === -1) return { itemId: trimmed };
+    return {
+        itemId: trimmed.substring(0, pageIdx).trim(),
+        page: trimmed.substring(pageIdx + pageMarker.length).trim() || undefined,
+    };
+}
+
+function recoverCitationLabelForSearch(tag: string): string | null {
+    const openTag = tag.match(/^<citation\b([^>]*)\/>/i);
+    const attrs = parseRawCitationAttributes(openTag?.[1] || '');
+    const normalized = normalizeCitationTag(attrs);
+    if (normalized.ok && normalized.ref.kind === 'zotero') {
+        const ci = lookupCitationItemForSearch(`${normalized.ref.library_id}-${normalized.ref.zotero_key}`);
+        return ci ? formatCitationTextForSearch([ci]) : null;
+    }
+    if (attrs.items) {
+        const citationItems = attrs.items.split(',')
+            .map((entry) => {
+                const { itemId, page } = parseCompoundCitationItemForSearch(entry);
+                return lookupCitationItemForSearch(itemId, page);
+            })
+            .filter(Boolean);
+        return formatCitationTextForSearch(citationItems);
+    }
+    return null;
+}
+
 function appendCitationPageWithStyle(tag: string, label: string, style: 'short' | 'word'): string {
     const attrMatch = tag.match(/^<citation\b([^>]*)\/>/i);
     const attrs = parseRawCitationAttributes(attrMatch?.[1] || '');
@@ -861,7 +909,10 @@ function normalizeTargetSearchVariant(html: string, style: 'short' | 'word'): st
             /<citation\b(?:[^>"']|"[^"]*"|'[^']*')*\blabel="([^"]*)"(?:[^>"']|"[^"]*"|'[^']*')*\/>/gi,
             (match, label) => appendCitationPageWithStyle(match, label || '[citation]', style)
         )
-        .replace(/<citation\b(?:[^>"']|"[^"]*"|'[^']*')*\/>/gi, '[citation]');
+        .replace(/<citation\b(?:[^>"']|"[^"]*"|'[^']*')*\/>/gi, (match) => {
+            const label = recoverCitationLabelForSearch(match) || '[citation]';
+            return appendCitationPageWithStyle(match, label, style);
+        });
     return stripEllipsis(stripHtmlTags(expandedCitations).replace(/\s+/g, ' ').trim());
 }
 

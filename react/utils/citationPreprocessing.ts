@@ -107,6 +107,8 @@ export function preprocessCitationMatch(
                 attr('data-library-id', ref.library_id),
                 attr('data-zotero-key', ref.zotero_key),
             );
+        } else if (ref.kind === 'external_file') {
+            attrParts.push(attr('data-ext-key', ref.ext_key));
         } else {
             attrParts.push(
                 attr('data-external-id', ref.external_id),

@@ -14,25 +14,10 @@ import { AgentRun } from '../../react/agents/types';
 import { AgentAction, toAgentAction } from '../../react/agents/agentActions';
 import { ApiService } from './apiService';
 import {
-    handleZoteroDataRequest,
-    handleExternalReferenceCheckRequest,
-    handleZoteroDocumentRequest,
-    handleZoteroAttachmentPageImagesRequest,
-    handleZoteroAttachmentSearchRequest,
-    handleItemSearchByMetadataRequest,
-    handleItemSearchByTopicRequest,
-    handleZoteroSearchRequest,
-    handleListItemsRequest,
-    handleListCollectionsRequest,
-    handleListTagsRequest,
-    handleListLibrariesRequest,
-    handleGetMetadataRequest,
-    handleGetAnnotationsRequest,
-    handleAgentActionValidateRequest,
-    handleAgentActionExecuteRequest,
-    handleReadNoteRequest,
-} from './agentDataProvider';
-import { AgentRunRequest } from './agentProtocol';
+    AgentDataProviderMap,
+    createZoteroDataProvider,
+} from './agentDataDispatch';
+import { AgentRunRequest, ZoteroInstanceWire } from './agentProtocol';
 import {
     WSEvent,
     WSErrorEvent,
@@ -40,7 +25,55 @@ import {
     WSAuthMessage,
     WSReadyData,
     WSRequestAckData,
+    WSRequestReceivedAck,
 } from './agentProtocol';
+import { getBusyContext } from './busyContext';
+import {
+    isPreparedJsonMessage,
+    materializePreparedJsonMessage,
+    preparedJsonEnvelope,
+    withPreparedJsonEnvelope,
+    type PreparedJsonMessage,
+} from './preparedJsonMessage';
+
+
+// =============================================================================
+// Auth helpers
+// =============================================================================
+
+/**
+ * Get an auth token from the Supabase session for a backend WebSocket handshake.
+ * Includes a defense-in-depth expiry check to catch tokens that were valid
+ * when getSession() ran but became stale due to OS process suspension (e.g.
+ * macOS sleep between getSession()'s internal Date.now() check and here).
+ * Shared by the chat connection (AgentService) and the provider connection.
+ */
+export async function getWSAuthToken(): Promise<string> {
+    const { data, error } = await supabase.auth.getSession();
+
+    if (error) {
+        logger(`AgentService: Error getting session: ${error.message}`, 2);
+        throw new Error('Error getting user session');
+    }
+
+    if (!data.session?.access_token) {
+        throw new Error('User not authenticated');
+    }
+
+    // Proactively refresh if token is expired or expires within 30s.
+    const expiresAt = data.session.expires_at;
+    if (expiresAt && expiresAt - Math.floor(Date.now() / 1000) < 30) {
+        logger('AgentService: Access token expired or near-expiry, refreshing session');
+        const refreshResult = await supabase.auth.refreshSession();
+        if (refreshResult.error || !refreshResult.data.session?.access_token) {
+            logger(`AgentService: Session refresh failed: ${refreshResult.error?.message}`, 2);
+            throw new Error('Session expired and refresh failed');
+        }
+        return refreshResult.data.session.access_token;
+    }
+
+    return data.session.access_token;
+}
 
 
 // =============================================================================
@@ -58,9 +91,23 @@ export class AgentService {
     private actionExecutionQueue: Promise<void> = Promise.resolve();
     /** Monotonic counter incremented on close to invalidate stale queued messages */
     private connectionId: number = 0;
+    /** Whether the connected backend understands `request_received` acks (from the ready event) */
+    private serverSupportsRequestAcks: boolean = false;
+    /**
+     * Map of backend data-request event -> handler. Injectable so a non-Zotero
+     * host can serve the same requests its own way. Defaults to the Zotero
+     * plugin's handlers.
+     */
+    private dataProvider: AgentDataProviderMap;
 
-    constructor(baseUrl: string) {
+    constructor(baseUrl: string, dataProvider?: AgentDataProviderMap) {
         this.baseUrl = baseUrl;
+        this.dataProvider = dataProvider ?? createZoteroDataProvider();
+    }
+
+    /** Replace the data-request provider map (e.g. a Word add-in injects its own). */
+    setDataProvider(dataProvider: AgentDataProviderMap): void {
+        this.dataProvider = dataProvider;
     }
 
     private resetConnectionState(): void {
@@ -69,6 +116,7 @@ export class AgentService {
         this.connectionId++;
         this.messageQueue = Promise.resolve();
         this.actionExecutionQueue = Promise.resolve();
+        this.serverSupportsRequestAcks = false;
     }
 
     /**
@@ -81,36 +129,10 @@ export class AgentService {
     }
 
     /**
-     * Get auth token from Supabase session.
-     * Includes a defense-in-depth expiry check to catch tokens that were valid
-     * when getSession() ran but became stale due to OS process suspension (e.g.
-     * macOS sleep between getSession()'s internal Date.now() check and here).
+     * Get auth token from Supabase session (see getWSAuthToken).
      */
     private async getAuthToken(): Promise<string> {
-        const { data, error } = await supabase.auth.getSession();
-
-        if (error) {
-            logger(`AgentService: Error getting session: ${error.message}`, 2);
-            throw new Error('Error getting user session');
-        }
-
-        if (!data.session?.access_token) {
-            throw new Error('User not authenticated');
-        }
-
-        // Proactively refresh if token is expired or expires within 30s.
-        const expiresAt = data.session.expires_at;
-        if (expiresAt && expiresAt - Math.floor(Date.now() / 1000) < 30) {
-            logger('AgentService: Access token expired or near-expiry, refreshing session');
-            const refreshResult = await supabase.auth.refreshSession();
-            if (refreshResult.error || !refreshResult.data.session?.access_token) {
-                logger(`AgentService: Session refresh failed: ${refreshResult.error?.message}`, 2);
-                throw new Error('Session expired and refresh failed');
-            }
-            return refreshResult.data.session.access_token;
-        }
-
-        return data.session.access_token;
+        return getWSAuthToken();
     }
 
     /**
@@ -135,7 +157,7 @@ export class AgentService {
      * @param callbacks Event callbacks
      * @returns Promise that resolves when connection is established and ready, rejects on error
      */
-    async connect(request: AgentRunRequest, callbacks: WSCallbacks, frontendVersion?: string): Promise<void> {
+    async connect(request: AgentRunRequest, callbacks: WSCallbacks, frontendVersion?: string, clientType?: string, clientFeatures?: string[], zoteroInstance?: ZoteroInstanceWire): Promise<void> {
         // Guard: Don't allow overlapping connect attempts
         if (this.connecting) {
             logger('AgentService: connect() already in progress, ignoring duplicate call', 1);
@@ -156,11 +178,15 @@ export class AgentService {
         try {
             const token = await this.getAuthToken();
 
-            // Auth message now includes token and frontend version
+            // Auth message includes token, frontend version, and — when the
+            // caller supplies them — the client identity and declared features.
             const authMessage: WSAuthMessage = {
                 type: 'auth',
                 token,
                 frontend_version: frontendVersion,
+                ...(clientType ? { client_type: clientType } : {}),
+                ...(clientFeatures ? { client_features: clientFeatures } : {}),
+                ...(zoteroInstance ? { zotero_instance: zoteroInstance } : {}),
             };
 
             // Connect with clean URL (no sensitive data in params)
@@ -232,12 +258,15 @@ export class AgentService {
 
                 const connId = this.connectionId;
                 this.ws.onmessage = (event) => {
+                    // Capture arrival time so dispatch lag (message-queue
+                    // backlog) can be reported in request acks.
+                    const receivedAt = Date.now();
                     // Chain onto the queue so async callbacks are processed in order.
                     // connId check prevents stale messages from a previous connection
                     // from being processed after a reconnect.
                     this.messageQueue = this.messageQueue.then(() => {
                         if (this.connectionId !== connId) return;
-                        return this.handleMessage(event.data);
+                        return this.handleMessage(event.data, receivedAt);
                     }).catch(err => {
                         logger(`AgentService: Unhandled error in message queue: ${err}`, 1);
                     });
@@ -280,16 +309,55 @@ export class AgentService {
     /**
      * Send a message to the server
      */
-    send(data: AgentRunRequest | Record<string, any>): void {
+    send(data: AgentRunRequest | Record<string, any> | PreparedJsonMessage): void {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
             logger('AgentService: Cannot send - WebSocket not connected', 1);
             return;
         }
 
-        const message = JSON.stringify(data);
+        // Attach a completion-time busy-context snapshot to request responses
+        // (backend response models carry `timing: Dict[str, Any]` and ignore
+        // extra fields, so this is safe against any backend version). Shallow
+        // copy to avoid mutating the caller's object.
+        if (isPreparedJsonMessage(data)) {
+            const envelope = preparedJsonEnvelope(data);
+            if (
+                'request_id' in envelope
+                && 'type' in envelope
+                && envelope.type !== 'request_received'
+            ) {
+                try {
+                    data = withPreparedJsonEnvelope(data, (current) => ({
+                        ...current,
+                        timing: { ...current.timing, ...getBusyContext() },
+                    }));
+                } catch (error) {
+                    logger(`AgentService: Failed to attach busy context: ${error}`, 1);
+                }
+            }
+        } else if (
+            'request_id' in data
+            && 'type' in data
+            && (data as any).type !== 'request_received'
+        ) {
+            try {
+                data = {
+                    ...data,
+                    timing: { ...(data as any).timing, ...getBusyContext() },
+                };
+            } catch (error) {
+                logger(`AgentService: Failed to attach busy context: ${error}`, 1);
+            }
+        }
+
+        const message = isPreparedJsonMessage(data)
+            ? materializePreparedJsonMessage(data)
+            : JSON.stringify(data);
         
         // Sanitize sensitive data for logging
-        const sanitizedData = { ...data };
+        const sanitizedData: Record<string, any> = isPreparedJsonMessage(data)
+            ? { ...preparedJsonEnvelope(data), result: '[stripped document result for log]' }
+            : { ...data };
         if ('api_key' in sanitizedData) {
             sanitizedData.api_key = '[REDACTED]';
         }
@@ -315,11 +383,44 @@ export class AgentService {
     }
 
     /**
+     * Acknowledge a backend→frontend request as received, before its handler
+     * runs. Gated on the backend's `supports_request_acks` capability (older
+     * backends would route the ack to the pending request as its response).
+     * Best-effort: never blocks or fails request dispatch.
+     */
+    private maybeAckRequest(event: WSEvent, receivedAt: number): void {
+        if (!this.serverSupportsRequestAcks) return;
+        const requestId = (event as any).request_id;
+        const eventName = event.event;
+        if (typeof requestId !== 'string' || typeof eventName !== 'string') return;
+        // Backend requests awaiting a response keyed by request_id: all
+        // `*_request` events plus the agent action validate/execute pair.
+        if (
+            !eventName.endsWith('_request')
+            && eventName !== 'agent_action_validate'
+            && eventName !== 'agent_action_execute'
+        ) return;
+        try {
+            const ack: WSRequestReceivedAck = {
+                type: 'request_received',
+                request_id: requestId,
+                busy: {
+                    ...getBusyContext(),
+                    dispatch_lag_ms: Math.max(0, Date.now() - receivedAt),
+                },
+            };
+            this.send(ack);
+        } catch (error) {
+            logger(`AgentService: Failed to send request_received ack: ${error}`, 1);
+        }
+    }
+
+    /**
      * Handle incoming WebSocket message.
      * Async to support callbacks that load item data before updating state.
      * Messages are serialized via messageQueue to preserve processing order.
      */
-    private async handleMessage(rawData: string): Promise<void> {
+    private async handleMessage(rawData: string, receivedAt: number = Date.now()): Promise<void> {
         if (!this.callbacks) return;
 
         // Guard against invalid data during close handshake
@@ -344,9 +445,14 @@ export class AgentService {
             return;
         }
 
+        // Ack backend requests immediately (before handler dispatch) so the
+        // backend can tell "request never arrived" from "handler is slow".
+        this.maybeAckRequest(event, receivedAt);
+
         try {
             switch (event.event) {
                 case 'ready': {
+                    this.serverSupportsRequestAcks = event.supports_request_acks === true;
                     // Convert snake_case backend response to camelCase frontend data
                     const readyData: WSReadyData = {
                         subscriptionStatus: event.subscription_status,
@@ -445,311 +551,6 @@ export class AgentService {
                     this.callbacks.onMissingZoteroData?.(event);
                     break;
 
-                case 'zotero_document_request':
-                    logger("AgentService: Received zotero_document_request", event, 1);
-                    handleZoteroDocumentRequest(event)
-                        .then(res => this.send(res))
-                        .catch(err => {
-                            logger(`AgentService: zotero_document_request failed: ${err}`, 1);
-                            this.send({
-                                type: 'zotero_document',
-                                request_id: event.request_id,
-                                total_pages: null,
-                                error: String(err),
-                                error_code: 'extraction_failed',
-                            });
-                        });
-                    break;
-
-                case 'zotero_attachment_page_images_request':
-                    logger("AgentService: Received zotero_attachment_page_images_request", event, 1);
-                    handleZoteroAttachmentPageImagesRequest(event)
-                        .then(res => this.send(res))
-                        .catch(err => {
-                            logger(`AgentService: zotero_attachment_page_images_request failed: ${err}`, 1);
-                            // Send error response to backend so it doesn't timeout
-                            this.send({
-                                type: 'zotero_attachment_page_images',
-                                request_id: event.request_id,
-                                attachment: event.attachment,
-                                pages: [],
-                                total_pages: null,
-                                error: String(err),
-                                error_code: 'render_failed',
-                            });
-                        });
-                    break;
-
-                case 'zotero_attachment_search_request':
-                    logger("AgentService: Received zotero_attachment_search_request", event, 1);
-                    handleZoteroAttachmentSearchRequest(event)
-                        .then(res => this.send(res))
-                        .catch(err => {
-                            logger(`AgentService: zotero_attachment_search_request failed: ${err}`, 1);
-                            // Send error response to backend so it doesn't timeout
-                            this.send({
-                                type: 'zotero_attachment_search',
-                                request_id: event.request_id,
-                                attachment: event.attachment,
-                                query: event.query,
-                                total_matches: 0,
-                                pages_with_matches: 0,
-                                total_pages: null,
-                                pages: [],
-                                error: String(err),
-                                error_code: 'search_failed',
-                            });
-                        });
-                    break;
-
-                case 'external_reference_check_request':
-                    logger("AgentService: Received external_reference_check_request", event, 1);
-                    handleExternalReferenceCheckRequest(event)
-                        .then(res => this.send(res))
-                        .catch(err => {
-                            logger(`AgentService: external_reference_check_request failed: ${err}`, 1);
-                            // Send error response with empty results - backend will treat as "none found"
-                            this.send({
-                                type: 'external_reference_check',
-                                request_id: event.request_id,
-                                results: [],
-                            });
-                        });
-                    break;
-
-                case 'zotero_data_request':
-                    logger("AgentService: Received zotero_data_request", event, 1);
-                    handleZoteroDataRequest(event)
-                        .then(res => this.send(res))
-                        .catch(err => {
-                            logger(`AgentService: zotero_data_request failed: ${err}`, 1);
-                            // Send error response with empty data and errors for all requested items
-                            this.send({
-                                type: 'zotero_data',
-                                request_id: event.request_id,
-                                items: [],
-                                attachments: [],
-                                errors: event.items.map(ref => ({
-                                    reference: ref,
-                                    error: String(err),
-                                    error_code: 'load_failed',
-                                })),
-                            });
-                        });
-                    break;
-
-                case 'item_search_by_metadata_request':
-                    logger("AgentService: Received item_search_by_metadata_request", event, 1);
-                    handleItemSearchByMetadataRequest(event)
-                        .then(res => this.send(res))
-                        .catch(err => {
-                            logger(`AgentService: item_search_by_metadata_request failed: ${err}`, 1);
-                            // Send error response to backend so it doesn't timeout
-                            this.send({
-                                type: 'item_search_by_metadata',
-                                request_id: event.request_id,
-                                items: [],
-                                error: String(err),
-                                error_code: 'internal_error',
-                            });
-                        });
-                    break;
-
-                case 'item_search_by_topic_request':
-                    logger("AgentService: Received item_search_by_topic_request", event, 1);
-                    handleItemSearchByTopicRequest(event)
-                        .then(res => this.send(res))
-                        .catch(err => {
-                            logger(`AgentService: item_search_by_topic_request failed: ${err}`, 1);
-                            // Send error response to backend so it doesn't timeout
-                            this.send({
-                                type: 'item_search_by_topic',
-                                request_id: event.request_id,
-                                items: [],
-                                error: String(err),
-                                error_code: 'internal_error',
-                            });
-                        });
-                    break;
-
-                case 'zotero_search_request':
-                    logger("AgentService: Received zotero_search_request", event, 1);
-                    handleZoteroSearchRequest(event)
-                        .then(res => this.send(res))
-                        .catch(err => {
-                            logger(`AgentService: zotero_search_request failed: ${err}`, 1);
-                            this.send({
-                                type: 'zotero_search',
-                                request_id: event.request_id,
-                                items: [],
-                                total_count: 0,
-                                error: String(err),
-                                error_code: 'internal_error',
-                            });
-                        });
-                    break;
-
-                case 'list_items_request':
-                    logger("AgentService: Received list_items_request", event, 1);
-                    handleListItemsRequest(event)
-                        .then(res => this.send(res))
-                        .catch(err => {
-                            logger(`AgentService: list_items_request failed: ${err}`, 1);
-                            this.send({
-                                type: 'list_items',
-                                request_id: event.request_id,
-                                items: [],
-                                total_count: 0,
-                                error: String(err),
-                                error_code: 'internal_error',
-                            });
-                        });
-                    break;
-
-                case 'get_metadata_request':
-                    logger("AgentService: Received get_metadata_request", event, 1);
-                    handleGetMetadataRequest(event)
-                        .then(res => this.send(res))
-                        .catch(err => {
-                            logger(`AgentService: get_metadata_request failed: ${err}`, 1);
-                            this.send({
-                                type: 'get_metadata',
-                                request_id: event.request_id,
-                                items: [],
-                                not_found: event.item_ids,
-                                error: String(err),
-                                error_code: 'internal_error',
-                            });
-                        });
-                    break;
-
-                case 'get_annotations_request':
-                    logger("AgentService: Received get_annotations_request", event, 1);
-                    handleGetAnnotationsRequest(event)
-                        .then(res => this.send(res))
-                        .catch(err => {
-                            logger(`AgentService: get_annotations_request failed: ${err}`, 1);
-                            this.send({
-                                type: 'get_annotations',
-                                request_id: event.request_id,
-                                annotations: [],
-                                total_count: 0,
-                                error: String(err),
-                                error_code: 'internal_error',
-                            });
-                        });
-                    break;
-
-                case 'list_collections_request':
-                    logger("AgentService: Received list_collections_request", event, 1);
-                    handleListCollectionsRequest(event)
-                        .then(res => this.send(res))
-                        .catch(err => {
-                            logger(`AgentService: list_collections_request failed: ${err}`, 1);
-                            this.send({
-                                type: 'list_collections',
-                                request_id: event.request_id,
-                                collections: [],
-                                error: String(err),
-                                error_code: 'internal_error',
-                            });
-                        });
-                    break;
-
-                case 'list_tags_request':
-                    logger("AgentService: Received list_tags_request", event, 1);
-                    handleListTagsRequest(event)
-                        .then(res => this.send(res))
-                        .catch(err => {
-                            logger(`AgentService: list_tags_request failed: ${err}`, 1);
-                            this.send({
-                                type: 'list_tags',
-                                request_id: event.request_id,
-                                tags: [],
-                                error: String(err),
-                                error_code: 'internal_error',
-                            });
-                        });
-                    break;
-
-                case 'list_libraries_request':
-                    logger("AgentService: Received list_libraries_request", event, 1);
-                    handleListLibrariesRequest(event)
-                        .then(res => this.send(res))
-                        .catch(err => {
-                            logger(`AgentService: list_libraries_request failed: ${err}`, 1);
-                            this.send({
-                                type: 'list_libraries',
-                                request_id: event.request_id,
-                                libraries: [],
-                                total_count: 0,
-                                error: String(err),
-                                error_code: 'internal_error',
-                            });
-                        });
-                    break;
-
-                // Note tools
-                case 'read_note_request':
-                    logger("AgentService: Received read_note_request", event, 1);
-                    handleReadNoteRequest(event)
-                        .then(res => this.send(res))
-                        .catch(err => {
-                            logger(`AgentService: read_note_request failed: ${err}`, 1);
-                            this.send({
-                                type: 'read_note',
-                                request_id: event.request_id,
-                                success: false,
-                                error: String(err),
-                            });
-                        });
-                    break;
-
-                // Deferred tool events
-                case 'agent_action_validate':
-                    logger("AgentService: Received agent_action_validate", event, 1);
-                    handleAgentActionValidateRequest(event)
-                        .then(res => this.send(res))
-                        .catch(err => {
-                            logger(`AgentService: agent_action_validate failed: ${err}`, 1);
-                            this.send({
-                                type: 'agent_action_validate_response',
-                                request_id: event.request_id,
-                                valid: false,
-                                error: String(err),
-                                error_code: 'internal_error',
-                                preference: 'always_ask',
-                            });
-                        });
-                    break;
-
-                case 'agent_action_execute': {
-                    logger("AgentService: Received agent_action_execute", event, 1);
-                    // Chain onto actionExecutionQueue to serialize actions.
-                    // Without this, concurrent edit_note actions on the same note
-                    // race: each reads the original HTML and saves its own edit,
-                    // so only the last save survives.
-                    // Capture connectionId so stale queued actions are skipped
-                    // after a close/reconnect (same guard as messageQueue).
-                    const actionConnId = this.connectionId;
-                    this.actionExecutionQueue = this.actionExecutionQueue.then(() => {
-                        if (this.connectionId !== actionConnId) return;
-                        return handleAgentActionExecuteRequest(event)
-                            .then(res => this.send(res))
-                            .catch(err => {
-                                logger(`AgentService: agent_action_execute failed: ${err}`, 1);
-                                this.send({
-                                    type: 'agent_action_execute_response',
-                                    request_id: event.request_id,
-                                    success: false,
-                                    error: String(err),
-                                    error_code: 'internal_error',
-                                });
-                            });
-                    });
-                    break;
-                }
-
                 case 'deferred_approval_request':
                     logger("AgentService: Received deferred_approval_request", event, 1);
                     // This event is handled by the UI via callback
@@ -766,8 +567,41 @@ export class AgentService {
                     }
                     break;
 
-                default:
-                    logger(`AgentService: Unknown event type: ${(event as any).event}`, 1);
+                default: {
+                    // Data-request events are dispatched through the injectable
+                    // data-provider map rather than hardcoded cases. The handler
+                    // resolves with the response to send; on failure the entry's
+                    // error fallback is sent so the backend doesn't time out.
+                    const eventName = (event as any).event;
+                    const entry = this.dataProvider[eventName];
+                    if (!entry) {
+                        logger(`AgentService: Unknown event type: ${eventName}`, 1);
+                        break;
+                    }
+                    const dataEvent = event as any;
+                    logger(`AgentService: Received ${eventName}`, dataEvent, 1);
+                    const runRequest = () =>
+                        entry.handle(dataEvent)
+                            .then(res => this.send(res))
+                            .catch(err => {
+                                logger(`AgentService: ${eventName} failed: ${err}`, 1);
+                                this.send(entry.errorResponse(dataEvent, err));
+                            });
+                    if (entry.serialize) {
+                        // Chain onto actionExecutionQueue to serialize mutating
+                        // actions. Capture connectionId so stale queued actions
+                        // are skipped after a close/reconnect (same guard as
+                        // messageQueue).
+                        const actionConnId = this.connectionId;
+                        this.actionExecutionQueue = this.actionExecutionQueue.then(() => {
+                            if (this.connectionId !== actionConnId) return;
+                            return runRequest();
+                        });
+                    } else {
+                        runRequest();
+                    }
+                    break;
+                }
             }
         } catch (error) {
             logger(`AgentService: Error handling event: ${error}`, 1);

@@ -16,7 +16,12 @@ import {
     clearVisualizationAnnotations,
     resolveActiveReaderContext,
 } from '../utils/extractionVisualizer';
+import {
+    visualizeEpubItems,
+    visualizeEpubSentences,
+} from '../utils/epubVisualizer/epubExtractionVisualizer';
 import { copyToClipboard } from '../utils/clipboard';
+import { getCurrentReader } from '../utils/readerUtils';
 import { getItemLanguage } from '../../src/utils/zoteroUtils';
 import { logger } from '../../src/utils/logger';
 
@@ -42,7 +47,7 @@ export function useReaderVisualizerActionHandler() {
                     return;
                 }
                 case 'items': {
-                    const r = await visualizeCurrentPageItems();
+                    const r = await visualizeItemsForActiveReader();
                     logger(`[ReaderVisualizer] items: ${r.message}`);
                     return;
                 }
@@ -52,7 +57,7 @@ export function useReaderVisualizerActionHandler() {
                     return;
                 }
                 case 'sentences': {
-                    const r = await visualizeCurrentPageSentences();
+                    const r = await visualizeSentencesForActiveReader();
                     logger(`[ReaderVisualizer] sentences: ${r.message}`);
                     return;
                 }
@@ -81,6 +86,18 @@ export function useReaderVisualizerActionHandler() {
             logger(`useReaderVisualizerActionHandler: Error: ${error}`, 1);
         }
     }, []);
+}
+
+async function visualizeItemsForActiveReader(): Promise<{ success: boolean; message: string }> {
+    const reader = getCurrentReader();
+    if (reader?.type === 'epub') return visualizeEpubItems();
+    return visualizeCurrentPageItems();
+}
+
+async function visualizeSentencesForActiveReader(): Promise<{ success: boolean; message: string }> {
+    const reader = getCurrentReader();
+    if (reader?.type === 'epub') return visualizeEpubSentences();
+    return visualizeCurrentPageSentences();
 }
 
 /**

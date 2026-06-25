@@ -11,6 +11,8 @@
 export { handleZoteroDataRequest } from './agentDataProvider/handleZoteroDataRequest';
 export { handleZoteroDocumentRequest } from './agentDataProvider/handleZoteroDocumentRequest';
 export { handleZoteroAttachmentPageImagesRequest } from './agentDataProvider/handleZoteroAttachmentPageImagesRequest';
+export { handleZoteroAttachmentImageRequest } from './agentDataProvider/handleZoteroAttachmentImageRequest';
+export { handleZoteroViewImagesRequest } from './agentDataProvider/handleZoteroViewImagesRequest';
 export { handleZoteroAttachmentSearchRequest } from './agentDataProvider/handleZoteroAttachmentSearchRequest';
 export { handleExternalReferenceCheckRequest } from './agentDataProvider/handleExternalReferenceCheckRequest';
 export { handleItemSearchByMetadataRequest } from './agentDataProvider/handleItemSearchByMetadataRequest';
@@ -19,6 +21,7 @@ export { handleZoteroSearchRequest } from './agentDataProvider/handleZoteroSearc
 export { handleListItemsRequest } from './agentDataProvider/handleListItemsRequest';
 export { handleGetMetadataRequest } from './agentDataProvider/handleGetMetadataRequest';
 export { handleGetAnnotationsRequest } from './agentDataProvider/handleGetAnnotationsRequest';
+export { handleFindAnnotationsRequest } from './agentDataProvider/handleFindAnnotationsRequest';
 export { handleListCollectionsRequest } from './agentDataProvider/handleListCollectionsRequest';
 export { handleListTagsRequest } from './agentDataProvider/handleListTagsRequest';
 export { handleListLibrariesRequest } from './agentDataProvider/handleListLibrariesRequest';
@@ -26,3 +29,4 @@ export { handleAgentActionValidateRequest } from './agentDataProvider/handleAgen
 export { handleAgentActionExecuteRequest } from './agentDataProvider/handleAgentActionExecuteRequest';
 export { handleDeleteItemsRequest } from './agentDataProvider/handleDeleteItemsRequest';
 export { handleReadNoteRequest } from './agentDataProvider/handleReadNoteRequest';
+export { validateCreateNoteAction, executeCreateNoteAction } from './agentDataProvider/actions/createNote';

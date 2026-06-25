@@ -4,6 +4,7 @@ import type { ZoteroItemReference } from '../types/zotero';
 export type LocatorKind =
     | 'page'
     | 'sentence'
+    | 'line'
     | 'paragraph'
     | 'heading'
     | 'list'
@@ -35,7 +36,24 @@ export interface ExternalCitationRef {
     loc?: Locator;
 }
 
-export type CitationRef = ZoteroCitationRef | ExternalCitationRef;
+/** User-attached external file (model-facing id `ext-<KEY>`). */
+export interface ExternalFileCitationRef {
+    kind: 'external_file';
+    ext_key: string;
+    loc?: Locator;
+}
+
+export type CitationRef = ZoteroCitationRef | ExternalCitationRef | ExternalFileCitationRef;
+
+// Model-facing external file id, e.g. "ext-AB12CD34" (case-insensitive,
+// normalized to an uppercase key).
+const EXTERNAL_FILE_ID_RE = /^ext-([A-Za-z0-9]{8})$/i;
+
+export function parseExternalFileId(raw: string | undefined): string | null {
+    if (!raw) return null;
+    const match = EXTERNAL_FILE_ID_RE.exec(stripClobberPrefix(raw));
+    return match ? match[1].toUpperCase() : null;
+}
 
 export type NormalizeCitationResult =
     | { ok: true; ref: CitationRef; rawAttrs: Record<string, string> }
@@ -48,14 +66,9 @@ export type NormalizeCitationResult =
         identityAttr?: 'id' | 'item_id' | 'att_id' | 'attachment_id' | 'external_id';
     };
 
-type CitationMetadataLike = {
-    library_id?: number;
-    zotero_key?: string;
-    external_source?: ExternalCitationSource;
-    external_source_id?: string;
+type CitationLike = {
     requested_ref?: CitationRef;
     resolved_ref?: CitationRef;
-    page_labels?: Record<number, string>;
     raw_tag?: string;
 };
 
@@ -70,6 +83,7 @@ const LOC_PREFIXES: Array<{ prefix: string; kind: LocatorKind; numericOnly?: boo
     { prefix: 'table', kind: 'table', numericOnly: true },
     { prefix: 'page', kind: 'page' },
     { prefix: 'list', kind: 'list', numericOnly: true },
+    { prefix: 'l', kind: 'line', numericOnly: true },
     { prefix: 'fig', kind: 'figure', numericOnly: true },
     { prefix: 'tab', kind: 'table', numericOnly: true },
     { prefix: 'eq', kind: 'equation', numericOnly: true },
@@ -79,6 +93,7 @@ const LOC_PREFIXES: Array<{ prefix: string; kind: LocatorKind; numericOnly?: boo
 
 const CITATION_INDEX_PREFIXES: Partial<Record<LocatorKind, string>> = {
     sentence: ID_PREFIXES.sentence,
+    line: ID_PREFIXES.line,
     paragraph: ID_PREFIXES.text,
     heading: ID_PREFIXES.section_header,
     list: ID_PREFIXES.list_item,
@@ -237,6 +252,16 @@ export function normalizeCitationTag(rawAttrs: Record<string, string>): Normaliz
     const loc = getLocator(rawAttrs);
     if (zoteroIdentity) {
         const rawIdentity = stripClobberPrefix(zoteroIdentity.value);
+        // External-file ids (ext-<KEY>) arrive under the generic id= attribute;
+        // match them before the Zotero parse, which would reject them.
+        const extKey = parseExternalFileId(zoteroIdentity.value);
+        if (extKey) {
+            return {
+                ok: true,
+                rawAttrs,
+                ref: { kind: 'external_file', ext_key: extKey, ...(loc ? { loc } : {}) },
+            };
+        }
         const parsed = parseZoteroId(zoteroIdentity.value);
         if (!parsed) {
             return {
@@ -274,8 +299,17 @@ export function normalizeCitationTag(rawAttrs: Record<string, string>): Normaliz
 
 export function baseCitationKey(ref: CitationRef): string {
     if (ref.kind === 'zotero') return `zotero:${ref.library_id}-${ref.zotero_key}`;
-    if (ref.source) return `external:${ref.source}:${ref.external_id}`;
-    return externalCompatKey(ref.external_id);
+    if (ref.kind === 'external_file') return `extfile:${ref.ext_key}`;
+    if (ref.kind === 'external') {
+        return ref.source ? `external:${ref.source}:${ref.external_id}` : externalCompatKey(ref.external_id);
+    }
+    // Unknown/future ref kind (e.g. another connected app's resource that an
+    // older client doesn't model). Keep a stable, kind-namespaced key so the
+    // citation degrades gracefully — markers/lookups don't collide all unknowns
+    // onto one key, and nothing throws — instead of assuming a closed set.
+    const unknown = ref as { kind: string; loc?: unknown } & Record<string, unknown>;
+    const { loc: _loc, ...identity } = unknown;
+    return `${unknown.kind}:${JSON.stringify(identity)}`;
 }
 
 export function requestedCitationKey(ref: CitationRef): string {
@@ -311,21 +345,9 @@ function withLoc<T extends CitationRef>(ref: T, loc: Locator | undefined): T {
     return !ref.loc && loc ? ({ ...ref, loc } as T) : ref;
 }
 
-function withExternalSource<T extends CitationRef>(
-    ref: T,
-    source: ExternalCitationSource | undefined,
-): T {
-    return ref.kind === 'external' && !ref.source && source
-        ? ({ ...ref, source } as T)
-        : ref;
-}
-
-export function getRequestedRef(meta: CitationMetadataLike): CitationRef | null {
+export function getRequestedRef(meta: CitationLike): CitationRef | null {
     if (meta.requested_ref) {
-        return withExternalSource(
-            withLocFromRawTag(meta.requested_ref, meta.raw_tag),
-            meta.external_source,
-        );
+        return withLocFromRawTag(meta.requested_ref, meta.raw_tag);
     }
     if (!meta.raw_tag) return null;
     const match = meta.raw_tag.match(/^<citation\b([^>]*)/i);
@@ -335,29 +357,13 @@ export function getRequestedRef(meta: CitationMetadataLike): CitationRef | null 
     return normalized.ok ? normalized.ref : null;
 }
 
-export function getResolvedRef(meta: CitationMetadataLike): CitationRef | null {
+export function getResolvedRef(meta: CitationLike): CitationRef | null {
+    if (!meta.resolved_ref) return null;
     const requested = getRequestedRef(meta);
-    const loc = requested?.loc;
-
-    if (meta.resolved_ref) {
-        return withExternalSource(
-            withLoc(withLocFromRawTag(meta.resolved_ref, meta.raw_tag), loc),
-            meta.external_source,
-        );
-    }
-
-    if (meta.library_id && meta.zotero_key) {
-        return { kind: 'zotero', library_id: meta.library_id, zotero_key: meta.zotero_key, ...(loc ? { loc } : {}) };
-    }
-    if (meta.external_source_id) {
-        return {
-            kind: 'external',
-            external_id: meta.external_source_id,
-            ...(meta.external_source ? { source: meta.external_source } : {}),
-            ...(loc ? { loc } : {}),
-        };
-    }
-    return null;
+    return withLoc(
+        withLocFromRawTag(meta.resolved_ref, meta.raw_tag),
+        requested?.loc,
+    );
 }
 
 export function parseRawCitationAttributes(attributesStr: string | undefined): Record<string, string> {

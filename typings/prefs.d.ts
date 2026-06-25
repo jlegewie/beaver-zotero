@@ -18,11 +18,13 @@ declare namespace _ZoteroTypes {
       "statefulChat": boolean;
       "addSelectedItemsOnOpen": boolean;
       "addSelectedItemsOnNewThread": boolean;
+      "addBeaverProvenanceNote": boolean;
       "focusResponseForScreenReaders": boolean;
       "annotationToolEnabled": boolean;
       "maxAddAttachmentToMessage": number;
       "readerExplainPrompt": string;
       "accessRemoteFiles": boolean;
+      "dataProviderEnabled": boolean;
       "autoApplyAnnotations": boolean;
       "autoCreateNotes": boolean;
       "autoImportItems": boolean;
@@ -31,6 +33,8 @@ declare namespace _ZoteroTypes {
       "pauseLongRunningAgent": boolean;
       "requestPlusTools": boolean;
       "showDiffPreviewInNoteEditor": boolean;
+      "enableSystemNotifications": boolean;
+      "enableResponseCompleteNotifications": boolean;
       "deferredToolPreferences": string;
       "customInstructions": string;
       "googleGenerativeAiApiKey": string;
@@ -60,6 +64,7 @@ declare namespace _ZoteroTypes {
       "versionUpdatePopupShownAt": string;
       "onboardingSignInTextShown": boolean;
       "mcpServerEnabled": boolean;
+      "mcpCreateNoteToolEnabled": boolean;
       "backgroundExtractorEnabled": boolean;
       "runConsistencyCheck": boolean;
       "runCollectionSync": boolean;

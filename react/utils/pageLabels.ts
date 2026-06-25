@@ -20,7 +20,7 @@
 import { makeRemoteFilePath } from '../../src/services/documentFileIdentity';
 import { getAttachmentFileStatus, isRemoteAccessAvailable } from '../../src/services/agentDataProvider/utils';
 import type { PageLabels } from '../../src/services/documentCache';
-import type { CitationMetadata } from '../types/citations';
+import type { Citation } from '../types/citations';
 import { getBestPDFAttachmentAsync } from '../../src/utils/zoteroItemHelpers';
 import {
     getPageLocator,
@@ -182,7 +182,7 @@ export async function preloadPageLabelsForContent(content: string): Promise<Page
  * are omitted because renderers fall back to raw page numbers.
  */
 export async function preloadPageLabelsForCitations(
-    citations: ReadonlyArray<Partial<CitationMetadata>>
+    citations: ReadonlyArray<Partial<Citation>>
 ): Promise<PageLabelsByAttachmentId> {
     const cache = Zotero.Beaver?.documentCache;
     if (!cache) return {};
@@ -194,7 +194,7 @@ export async function preloadPageLabelsForCitations(
         // Skip citations that don't have any page locators — labels aren't needed.
         const hasPages =
             (citation.pages && citation.pages.length > 0) ||
-            (citation.parts || []).some((p) => (p.locations || []).length > 0);
+            (citation.locations || []).some((location) => location.page_idx !== undefined);
         const requestedRef = getRequestedRef(citation);
         const resolvedRef = getResolvedRef(citation);
         const hasPageLocator =

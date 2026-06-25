@@ -328,16 +328,55 @@ export const getRecentAsync = async function (
 };
 
 
-export function getZoteroUserIdentifier(): { userID: string | undefined, localUserKey: string } {
+/**
+ * Identifies a specific Zotero install for a Beaver user. `localUserKey` is always
+ * present and unique per install — the stable discriminator when one Beaver account
+ * has several installs running at once (e.g. work + home). The remaining fields are
+ * best-effort context/labels: `userID`/`accountName` are null when Zotero sync is
+ * off; `deviceName` provides a user-recognizable "work vs home" label. All extra
+ * fields are resolved defensively so a failure never blocks auth.
+ */
+export interface ZoteroInstanceIdentity {
+    /** Zotero account user ID; undefined if sync is off. Groups installs by account. */
+    userID: string | undefined;
+    /** Per-install key; always present. The unique discriminator between installs. */
+    localUserKey: string;
+    /** Zotero account login name; undefined if sync is off. */
+    accountName: string | undefined;
+    /** OS hostname (e.g. "XX-MacBook-Pro") — the recognizable "work vs home" label. */
+    deviceName: string | undefined;
+}
+
+export function getZoteroUserIdentifier(): ZoteroInstanceIdentity {
     // First try to get the Zotero account user ID (only exists if user has Zotero sync enabled)
     const userID = Zotero.Users.getCurrentUserID();
-    
+
     // Get local user key - this always exists
     const localUserKey = Zotero.Users.getLocalUserKey();
 
+    // Account login name — only meaningful when synced; treat any failure as absent.
+    let accountName: string | undefined;
+    try {
+        accountName = userID ? (Zotero.Users.getCurrentUsername() || undefined) : undefined;
+    } catch (e) {
+        accountName = undefined;
+    }
+
+    // OS hostname via the DNS service. NB: Services.sysinfo host/hostname props throw,
+    // so the DNS service is the reliable source.
+    let deviceName: string | undefined;
+    try {
+        const dns = Cc["@mozilla.org/network/dns-service;1"].getService(Ci.nsIDNSService);
+        deviceName = dns.myHostName || undefined;
+    } catch (e) {
+        deviceName = undefined;
+    }
+
     return {
         userID: userID ? `${userID}` : undefined,
-        localUserKey: `${localUserKey}`
+        localUserKey: `${localUserKey}`,
+        accountName,
+        deviceName,
     }
 }
 
@@ -782,42 +821,10 @@ export function createCitationHTML(itemOrID: Zotero.Item | number | string, page
 // Citation with page range
 // const citation3 = createCitationHTML(item, "123-145");
 
-// `safeIsInTrash` and `getItemDetailsForLogging` live in `./zoteroItemUtils`
-// so they are usable from the esbuild-side bundle.
+// These helpers live in React-free modules so they are usable from the
+// esbuild-side bundle.
 export { safeIsInTrash, getItemDetailsForLogging } from "./zoteroItemUtils";
-
-/**
- * Safely check if an attachment file exists.
- * 
- * Unlike item.fileExists(), this handles linked URL attachments which have no
- * associated file. Calling fileExists() on a linked URL throws an error.
- * 
- * @param item - Zotero item to check
- * @returns Promise<boolean> - true if file exists, false otherwise (including for linked URLs and non-attachments)
- */
-export async function safeFileExists(item: Zotero.Item): Promise<boolean> {
-    if (!item.isAttachment()) return false;
-    
-    // Linked URLs are web links with no associated file - fileExists() throws on them
-    if (item.attachmentLinkMode === Zotero.Attachments.LINK_MODE_LINKED_URL) {
-        return false;
-    }
-    
-    return item.fileExists();
-}
-
-/**
- * Check if an attachment is a linked URL (web link with no file).
- * 
- * Linked URL attachments don't have an associated file and calling fileExists()
- * on them throws an error.
- * 
- * @param item - Zotero item to check
- * @returns true if the item is a linked URL attachment
- */
-export function isLinkedUrlAttachment(item: Zotero.Item): boolean {
-    return item.isAttachment() && item.attachmentLinkMode === Zotero.Attachments.LINK_MODE_LINKED_URL;
-}
+export { safeFileExists, isLinkedUrlAttachment } from "./attachmentFiles";
 
 /**
  * Check if two Zotero items are duplicates based on metadata similarity.

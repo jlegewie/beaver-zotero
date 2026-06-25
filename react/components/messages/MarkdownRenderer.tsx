@@ -4,7 +4,7 @@ import remarkMath from 'remark-math';
 import remarkGfm from 'remark-gfm'
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
-import ZoteroCitation from '../sources/ZoteroCitation';
+import Citation from '../citations/Citation';
 import rehypeKatex from 'rehype-katex';
 import deepmerge from 'deepmerge';
 import NoteDisplay, { StreamingNoteBlock } from './NoteDisplay';
@@ -19,6 +19,7 @@ const citationDataAttributes = [
     'data-zotero-key', 'dataZoteroKey',
     'data-external-id', 'dataExternalId',
     'data-external-source', 'dataExternalSource',
+    'data-ext-key', 'dataExtKey',
     'data-loc', 'dataLoc',
     'data-loc-kind', 'dataLocKind',
     'data-loc-value', 'dataLocValue',
@@ -304,7 +305,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = React.memo(function Ma
                             components={{
                                 // @ts-expect-error - Custom component not in ReactMarkdown types
                                 citation: ({node, ...props}: any) => {
-                                    return <ZoteroCitation {...props} exportRendering={exportRendering} />;
+                                    return <Citation {...props} exportRendering={exportRendering} />;
                                 }
                             }}
                         >

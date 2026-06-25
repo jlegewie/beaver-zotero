@@ -440,21 +440,40 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
         footer: `<a href="https://github.com/jlegewie/beaver-zotero/releases/tag/v0.19.0" target='_blank'>Full changelog</a>`,
     },
     {
-        version: "0.20.0-beta.1",
+        version: "0.20.0",
         title: "Sentence-level citations and PDF annotations",
         inPanel: false,
         featureList: [
             {
                 title: "Sentence-level citations",
-                description: "Citations now pinpoint the exact sentences, not just the page. Hover to preview the source text, or click to open the PDF with those sentences highlighted.",
+                description: "Citations now pinpoint exact sentences. Hover to preview the source, or click to open the highlighted PDF."
             },
             {
                 title: "AI-powered PDF annotations",
-                description: 'Just ask Beaver to "highlight key findings" or "everything relevant to my project" and it annotates the PDF for you. <a href="https://www.beaverapp.ai/docs/annotations">Learn more</a>',
+                description: 'Ask Beaver to "highlight key findings" or "everything relevant to my project" and it annotates the PDF for you. Color-coded and ready to review. <a href="https://www.beaverapp.ai/docs/annotations">Learn more</a>',
                 
             },
         ],
-        footer: `<a href="https://github.com/jlegewie/beaver-zotero/releases/tag/v0.20.0-beta.1" target='_blank'>Full changelog</a>`,
+        footer: `<a href="https://github.com/jlegewie/beaver-zotero/releases/tag/v0.20.0" target='_blank'>Full changelog</a>`,
+    },
+    {
+        version: "0.21.0",
+        title: "Full-text search, EPUB support, and external files",
+        steps: [
+            {
+                title: "Search inside your documents",
+                description: "Beaver can now search the full text of selected attachments and pinpoint exact sentences where keywords appear.",
+            },
+            {
+                title: "More file types and external files",
+                description: "Support for EPUB, image, and text files, with sentence-level citations and annotations for EPUBs. Drag & drop external files onto Beaver to use them without adding them to Zotero.",
+            },
+            {
+                title: "System notifications",
+                description: "Get notified when a response is ready or an approval is waiting (turn off in settings).",
+            },
+        ],
+        footer: `<a href="https://github.com/jlegewie/beaver-zotero/releases/tag/v0.21.0-beta.3" target='_blank'>Full changelog</a>`,
     },
 ];
 

@@ -7,7 +7,7 @@
  */
 
 import { ExternalReference } from "../types/externalReferences";
-import { ZoteroItemReference, CollectionReference } from "../types/zotero";
+import { ZoteroItemReference, CollectionReference, AttachmentInfo } from "../types/zotero";
 import { ToolReturnPart } from "./types";
 import { logger } from "../../src/utils/logger";
 
@@ -50,6 +50,17 @@ export interface PageImageReference {
 }
 
 /**
+ * Read note result summary.
+ * Matches ReadNoteToolResultSummary from backend.
+ */
+export interface ReadNoteResultSummary {
+    tool_name: string;
+    result_count: number;
+    note_item: ZoteroItemReference;
+    parent_item?: ZoteroItemReference | null;
+}
+
+/**
  * Item search result summary.
  * Matches ItemSearchResultSummary from backend.
  */
@@ -82,11 +93,34 @@ export interface ReadPagesToolResultSummary {
 /**
  * Read pages frontend result summary.
  * Matches ReadPagesFrontendResultSummary from backend.
+ * The unified `read` tool reuses this shape for paginated documents
+ * (ReadDocumentResultSummary on the backend).
  */
 export interface ReadPagesFrontendResultSummary {
     tool_name: string;
     result_count: number;
     pages: PageReference[];
+}
+
+/**
+ * Line range reference with ZoteroItemReference fields and a contiguous
+ * 1-indexed line range. Matches LineReference from backend.
+ */
+export interface LineReference {
+    library_id: number;
+    zotero_key: string;
+    start_line: number;
+    end_line: number;
+}
+
+/**
+ * Read text result summary (unified `read` tool on text/markdown files).
+ * Matches ReadTextResultSummary from backend.
+ */
+export interface ReadTextResultSummary {
+    tool_name: string;
+    result_count: number;
+    lines: LineReference[];
 }
 
 /**
@@ -97,6 +131,32 @@ export interface ViewPageImagesResultSummary {
     tool_name: string;
     result_count: number;
     pages: PageImageReference[];
+}
+
+/**
+ * Reference to a single image returned by the unified `view` tool.
+ * Matches ViewImageReference from backend. `page_number` is null/absent for
+ * image attachments.
+ */
+export interface ViewImageReference {
+    library_id: number;
+    zotero_key: string;
+    page_number?: number | null;
+    page_label?: string | null;
+    format: "png" | "jpeg";
+    width: number;
+    height: number;
+}
+
+/**
+ * Unified view tool result summary.
+ * Matches ViewResultSummary from backend.
+ */
+export interface ViewResultSummary {
+    tool_name: string;
+    kind: "pdf" | "image";
+    result_count: number;
+    images: ViewImageReference[];
 }
 
 /**
@@ -131,6 +191,76 @@ export interface SearchInAttachmentResultSummary {
     total_matches: number;
     pages_with_matches: number;
     pages: PageSearchReference[];
+}
+
+/**
+ * Compact click-to-highlight target for one document part.
+ * Matches PartLocation from backend. Which fields are set depends on the
+ * attachment's content_kind; absent fields are omitted from JSON (not null).
+ */
+export interface AttachmentMatchTarget {
+    /** Citation anchor of the part, e.g. "s33", "p12", or "l12". */
+    part_id: string;
+    /** 0-based page index (PDF). */
+    page_idx?: number;
+    /** Bounding boxes as [l, t, r, b] integer PDF points, top-left origin (PDF). */
+    boxes?: [number, number, number, number][];
+    /** Section href (EPUB). */
+    section_href?: string;
+    /** HTML anchor id nearest the part (EPUB). */
+    anchor_id?: string;
+    /** Part text (possibly a prefix) for locating the passage in the reader DOM (EPUB). */
+    text?: string;
+    /** 1-based line number (text documents). */
+    line?: number;
+    /** Last line of a line range (text documents). */
+    line_end?: number;
+}
+
+/**
+ * One find_in_attachments match for display.
+ * Matches AttachmentMatchSummary from backend.
+ */
+export interface AttachmentMatchSummary {
+    /** Plain-text preview centered on the query hit (no citation markup). */
+    snippet: string;
+    /** 1-based page number (EPUB: 1-based section ordinal); absent for text files. */
+    page_number?: number;
+    /** Printed page label when the PDF defines one (e.g. "226" or "iv"). */
+    page_label?: string;
+    /** Click target; absent when the document carries no citation anchors. */
+    target?: AttachmentMatchTarget;
+}
+
+/**
+ * Per-attachment find_in_attachments result for display.
+ * Matches AttachmentSearchReference from backend.
+ */
+export interface AttachmentSearchReference {
+    library_id: number;
+    zotero_key: string;
+    status: 'ok' | 'no_matches' | 'error';
+    /** Total matches in this attachment; `matches` is the top-ranked subset. */
+    match_count: number;
+    /** Distinct 1-based page numbers of the returned matches, sorted. */
+    pages: number[];
+    content_kind: 'pdf' | 'epub' | 'text' | 'snapshot';
+    /** Display previews of the returned matches, in rank order. */
+    matches: AttachmentMatchSummary[];
+    /** Short, user-facing reason the attachment could not be searched (status='error'). */
+    error?: string;
+}
+
+/**
+ * Find in attachments result summary.
+ * Matches FindInAttachmentsResultSummary from backend.
+ */
+export interface FindInAttachmentsResultSummary {
+    tool_name: string;
+    query: string;
+    total_matches: number;
+    attachment_count: number;
+    attachments: AttachmentSearchReference[];
 }
 
 // ========================
@@ -209,11 +339,24 @@ const FULLTEXT_SEARCH_TOOL_NAMES: readonly string[] = [
 const READ_PAGES_TOOL_NAMES: readonly string[] = [
     'read_pages',
     'read_attachment',
+    // Unified `read` tool: paginated results reuse the read_pages frontend
+    // summary shape; text results are handled by isReadTextResult below.
+    'read',
+] as const;
+
+/** Valid tool names for line-based text read results */
+const READ_TEXT_TOOL_NAMES: readonly string[] = [
+    'read',
 ] as const;
 
 /** Valid tool names for chunk-based fulltext retrieval results */
 const VIEW_PAGE_IMAGES_TOOL_NAMES: readonly string[] = [
     'view_page_images',
+] as const;
+
+/** Valid tool names for unified view results */
+const VIEW_TOOL_NAMES: readonly string[] = [
+    'view',
 ] as const;
 
 /** Valid tool names for chunk-based passage retrieval results */
@@ -224,6 +367,11 @@ const SEARCH_IN_DOCUMENTS_TOOL_NAMES: readonly string[] = [
 /** Valid tool names for keyword search in attachment results */
 const SEARCH_IN_ATTACHMENT_TOOL_NAMES: readonly string[] = [
     'search_in_attachment',
+] as const;
+
+/** Valid tool names for find in attachments results */
+const FIND_IN_ATTACHMENTS_TOOL_NAMES: readonly string[] = [
+    'find_in_attachments',
 ] as const;
 
 /**
@@ -355,6 +503,41 @@ export function isReadPagesFrontendResult(
 }
 
 /**
+ * Type guard for text/markdown read results (unified `read` tool).
+ * Checks if metadata.summary is ReadTextResultSummary.
+ */
+export function isReadTextResult(
+    toolName: string,
+    _content: unknown,
+    metadata?: Record<string, unknown>
+): metadata is { summary: ReadTextResultSummary } {
+    if (!metadata?.summary || typeof metadata.summary !== 'object') return false;
+    const summary = metadata.summary as Record<string, unknown>;
+
+    const toolNameIsRead = READ_TEXT_TOOL_NAMES.includes(toolName);
+    if (!toolNameIsRead) {
+        const summaryToolName = typeof summary.tool_name === 'string' ? summary.tool_name : null;
+        if (!summaryToolName || !READ_TEXT_TOOL_NAMES.includes(summaryToolName)) return false;
+    }
+
+    return (
+        typeof summary.tool_name === 'string' &&
+        typeof summary.result_count === 'number' &&
+        Array.isArray(summary.lines) &&
+        summary.lines.every((range: unknown) => {
+            if (!range || typeof range !== 'object') return false;
+            const obj = range as Record<string, unknown>;
+            return (
+                typeof obj.library_id === 'number' &&
+                typeof obj.zotero_key === 'string' &&
+                typeof obj.start_line === 'number' &&
+                typeof obj.end_line === 'number'
+            );
+        })
+    );
+}
+
+/**
  * Type guard for view page images results.
  * Checks if metadata.summary is ViewPageImagesResultSummary.
  */
@@ -392,70 +575,73 @@ export function isViewPageImagesResult(
 }
 
 /**
- * Type guard for passage retrieval results.
- * Checks if metadata.summary is SearchInDocumentsToolResultSummary.
+ * Type guard for unified view tool results.
+ * Checks if metadata.summary is ViewResultSummary.
  */
-export function isSearchInDocumentsResult(
+export function isViewToolResult(
     toolName: string,
     _content: unknown,
     metadata?: Record<string, unknown>
-): metadata is { summary: SearchInDocumentsToolResultSummary } {
+): metadata is { summary: ViewResultSummary } {
     if (!metadata?.summary || typeof metadata.summary !== 'object') return false;
     const summary = metadata.summary as Record<string, unknown>;
 
-    const toolNameIsPassageRetrieval = SEARCH_IN_DOCUMENTS_TOOL_NAMES.includes(toolName);
-    const toolNameIsOtherKnownChunkTool =
-        FULLTEXT_SEARCH_TOOL_NAMES.includes(toolName) ||
-        READ_PAGES_TOOL_NAMES.includes(toolName);
-    if (!toolNameIsPassageRetrieval) {
-        if (toolNameIsOtherKnownChunkTool) return false;
+    const toolNameIsView = VIEW_TOOL_NAMES.includes(toolName);
+    if (!toolNameIsView) {
         const summaryToolName = typeof summary.tool_name === 'string' ? summary.tool_name : null;
-        if (!summaryToolName || !SEARCH_IN_DOCUMENTS_TOOL_NAMES.includes(summaryToolName)) return false;
+        if (!summaryToolName || !VIEW_TOOL_NAMES.includes(summaryToolName)) return false;
     }
-    
+
     return (
         typeof summary.tool_name === 'string' &&
+        (summary.kind === 'pdf' || summary.kind === 'image') &&
         typeof summary.result_count === 'number' &&
-        Array.isArray(summary.chunks) &&
-        summary.chunks.every((chunk: unknown) => {
-            if (!chunk || typeof chunk !== 'object') return false;
-            const obj = chunk as Record<string, unknown>;
-            return typeof obj.library_id === 'number' && typeof obj.zotero_key === 'string';
+        Array.isArray(summary.images) &&
+        summary.images.every((image: unknown) => {
+            if (!image || typeof image !== 'object') return false;
+            const obj = image as Record<string, unknown>;
+            return (
+                typeof obj.library_id === 'number' &&
+                typeof obj.zotero_key === 'string' &&
+                (obj.page_number == null || typeof obj.page_number === 'number') &&
+                typeof obj.format === 'string' &&
+                typeof obj.width === 'number' &&
+                typeof obj.height === 'number'
+            );
         })
     );
 }
 
+
 /**
- * Type guard for search in attachment results (keyword search).
- * Checks if metadata.summary is SearchInAttachmentResultSummary.
+ * Type guard for find in attachments results (keyword search across attachments).
+ * Checks if metadata.summary is FindInAttachmentsResultSummary.
+ *
+ * Deliberately lenient: only the discriminating shape is validated. Optional
+ * fields (status, matches, content_kind, ...) are omitted by the backend when
+ * absent and normalized by `extractFindInAttachmentsData`.
  */
-export function isSearchInAttachmentResult(
+export function isFindInAttachmentsResult(
     toolName: string,
     _content: unknown,
     metadata?: Record<string, unknown>
-): metadata is { summary: SearchInAttachmentResultSummary } {
+): metadata is { summary: FindInAttachmentsResultSummary } {
     if (!metadata?.summary || typeof metadata.summary !== 'object') return false;
     const summary = metadata.summary as Record<string, unknown>;
 
-    const toolNameIsSearchInAttachment = SEARCH_IN_ATTACHMENT_TOOL_NAMES.includes(toolName);
-    if (!toolNameIsSearchInAttachment) {
+    const toolNameIsFindInAttachments = FIND_IN_ATTACHMENTS_TOOL_NAMES.includes(toolName);
+    if (!toolNameIsFindInAttachments) {
         const summaryToolName = typeof summary.tool_name === 'string' ? summary.tool_name : null;
-        if (!summaryToolName || !SEARCH_IN_ATTACHMENT_TOOL_NAMES.includes(summaryToolName)) return false;
+        if (!summaryToolName || !FIND_IN_ATTACHMENTS_TOOL_NAMES.includes(summaryToolName)) return false;
     }
-    
+
     return (
         typeof summary.tool_name === 'string' &&
-        typeof summary.total_matches === 'number' &&
-        typeof summary.pages_with_matches === 'number' &&
-        Array.isArray(summary.pages) &&
-        summary.pages.every((page: unknown) => {
-            if (!page || typeof page !== 'object') return false;
-            const obj = page as Record<string, unknown>;
-            return (
-                typeof obj.library_id === 'number' &&
-                typeof obj.zotero_key === 'string' &&
-                typeof obj.page_number === 'number'
-            );
+        Array.isArray(summary.attachments) &&
+        summary.attachments.every((att: unknown) => {
+            if (!att || typeof att !== 'object') return false;
+            const obj = att as Record<string, unknown>;
+            return typeof obj.library_id === 'number' && typeof obj.zotero_key === 'string';
         })
     );
 }
@@ -471,10 +657,12 @@ const LOOKUP_WORK_TOOL_NAMES: readonly string[] = [
  * metadata.supplemental_data has array with external_id.
  */
 export function isExternalSearchResult(
-    _toolName: string,
+    toolName: string,
     content: unknown,
     metadata?: Record<string, unknown>
 ): boolean {
+    if (LOOKUP_WORK_TOOL_NAMES.includes(toolName)) return false;
+
     // Validate content has references array with external_id
     if (!content || typeof content !== 'object') return false;
     const contentObj = content as Record<string, unknown>;
@@ -499,9 +687,15 @@ export function isExternalSearchResult(
     return true;
 }
 
+function isExternalReferenceResultContent(ref: unknown): ref is ExternalReferenceResultContent {
+    if (!ref || typeof ref !== 'object') return false;
+    return typeof (ref as Record<string, unknown>).external_id === 'string';
+}
+
 /**
  * Type guard for lookup_work results.
- * Checks content has found bool and optionally a single reference.
+ * Accepts the batch shape (`found_count`, `references`, …) and the legacy
+ * single-result shape (`found`, `reference`).
  */
 export function isLookupWorkResult(
     toolName: string,
@@ -509,20 +703,25 @@ export function isLookupWorkResult(
     _metadata?: Record<string, unknown>
 ): boolean {
     if (!LOOKUP_WORK_TOOL_NAMES.includes(toolName)) return false;
-    
+
     if (!content || typeof content !== 'object') return false;
     const contentObj = content as Record<string, unknown>;
-    
-    // Must have found boolean
+
+    if (typeof contentObj.found_count === 'number') {
+        if (contentObj.references != null && !Array.isArray(contentObj.references)) return false;
+        if (Array.isArray(contentObj.references)) {
+            return contentObj.references.every(isExternalReferenceResultContent);
+        }
+        return true;
+    }
+
     if (typeof contentObj.found !== 'boolean') return false;
-    
-    // If found is true, must have reference with external_id
+
     if (contentObj.found === true) {
         if (!contentObj.reference || typeof contentObj.reference !== 'object') return false;
-        const ref = contentObj.reference as Record<string, unknown>;
-        if (typeof ref.external_id !== 'string') return false;
+        return isExternalReferenceResultContent(contentObj.reference);
     }
-    
+
     return true;
 }
 
@@ -644,6 +843,47 @@ export function extractReadPagesFrontendData(
 
 
 /**
+ * Normalized text read data - line ranges from the unified `read` tool.
+ */
+export interface ReadTextViewData {
+    lines: LineReference[];
+}
+
+/**
+ * Extract line range references from metadata.summary for text reads.
+ * @returns ReadTextViewData or null if summary is not available
+ */
+export function extractReadTextData(
+    _content: unknown,
+    metadata?: Record<string, unknown>
+): ReadTextViewData | null {
+    if (!metadata?.summary || typeof metadata.summary !== 'object') return null;
+    const summary = metadata.summary as ReadTextResultSummary;
+
+    if (!Array.isArray(summary.lines)) return null;
+
+    return { lines: summary.lines };
+}
+
+/**
+ * Build a human-readable line range label (e.g. "lines 1-120") from a
+ * completed text read result. Returns null if the result is not a text read.
+ */
+export function extractReadTextLineRangeLabel(
+    toolName: string,
+    content: unknown,
+    metadata?: Record<string, unknown>
+): string | null {
+    if (!isReadTextResult(toolName, content, metadata)) return null;
+    const data = extractReadTextData(content, metadata);
+    if (!data || data.lines.length === 0) return null;
+
+    const start = Math.min(...data.lines.map(range => range.start_line));
+    const end = Math.max(...data.lines.map(range => range.end_line));
+    return start === end ? `line ${start}` : `lines ${start}-${end}`;
+}
+
+/**
  * Normalized page images data.
  */
 export interface ViewPageImagesViewData {
@@ -667,26 +907,37 @@ export function extractViewPageImagesData(
 }
 
 /**
+ * Normalized unified view tool data.
+ */
+export interface ViewToolViewData {
+    kind: "pdf" | "image";
+    images: ViewImageReference[];
+}
+
+/**
+ * Extract image references from metadata.summary for the unified view tool.
+ * @returns ViewToolViewData or null if summary is not available
+ */
+export function extractViewToolData(
+    _content: unknown,
+    metadata?: Record<string, unknown>
+): ViewToolViewData | null {
+    if (!metadata?.summary || typeof metadata.summary !== 'object') return null;
+    const summary = metadata.summary as ViewResultSummary;
+
+    if (!Array.isArray(summary.images)) return null;
+
+    return {
+        kind: summary.kind === 'image' ? 'image' : 'pdf',
+        images: summary.images,
+    };
+}
+
+/**
  * Normalized passage retrieval data.
  */
 export interface PassageRetrievalViewData {
     chunks: ChunkReference[];
-}
-
-/**
- * Extract chunk-level data from metadata.summary for passage retrieval.
- * @returns PassageRetrievalViewData or null if summary is not available
- */
-export function extractSearchInDocumentsData(
-    _content: unknown,
-    metadata?: Record<string, unknown>
-): PassageRetrievalViewData | null {
-    if (!metadata?.summary || typeof metadata.summary !== 'object') return null;
-    const summary = metadata.summary as SearchInDocumentsToolResultSummary;
-    
-    if (!Array.isArray(summary.chunks)) return null;
-
-    return { chunks: summary.chunks };
 }
 
 /**
@@ -697,25 +948,51 @@ export interface SearchInAttachmentViewData {
 }
 
 /**
- * Extract page-level data from metadata.summary for search in attachment.
- * @returns SearchInAttachmentViewData or null if summary is not available
+ * Normalized find in attachments data ready for rendering.
  */
-export function extractSearchInAttachmentData(
+export interface FindInAttachmentsViewData {
+    query: string;
+    totalMatches: number;
+    attachmentCount: number;
+    attachments: AttachmentSearchReference[];
+}
+
+/**
+ * Extract per-attachment match data from metadata.summary for find_in_attachments.
+ * Normalizes fields the backend omits when absent.
+ * @returns FindInAttachmentsViewData or null if summary is not available
+ */
+export function extractFindInAttachmentsData(
     _content: unknown,
     metadata?: Record<string, unknown>
-): SearchInAttachmentViewData | null {
+): FindInAttachmentsViewData | null {
     if (!metadata?.summary || typeof metadata.summary !== 'object') return null;
-    const summary = metadata.summary as SearchInAttachmentResultSummary;
-    
-    if (!Array.isArray(summary.pages)) return null;
+    const summary = metadata.summary as FindInAttachmentsResultSummary;
 
-    const pages: PageReference[] = summary.pages.map(page => ({
-        library_id: page.library_id,
-        zotero_key: page.zotero_key,
-        page_number: page.page_number,
-    }));
+    if (!Array.isArray(summary.attachments)) return null;
 
-    return { pages };
+    const attachments: AttachmentSearchReference[] = summary.attachments.map(att => {
+        const matches = Array.isArray(att.matches) ? att.matches : [];
+        return {
+            library_id: att.library_id,
+            zotero_key: att.zotero_key,
+            status: att.status ?? 'ok',
+            match_count: typeof att.match_count === 'number' ? att.match_count : matches.length,
+            pages: Array.isArray(att.pages) ? att.pages : [],
+            content_kind: att.content_kind ?? 'pdf',
+            matches,
+            error: typeof att.error === 'string' ? att.error : undefined,
+        };
+    });
+
+    return {
+        query: summary.query ?? '',
+        totalMatches: typeof summary.total_matches === 'number' ? summary.total_matches : 0,
+        attachmentCount: typeof summary.attachment_count === 'number'
+            ? summary.attachment_count
+            : attachments.length,
+        attachments,
+    };
 }
 
 /**
@@ -726,32 +1003,39 @@ export interface ExternalSearchViewData {
 }
 
 /**
- * Extract and merge external references from content and metadata.supplemental_data.
- * Combines ExternalReferenceResultContent with ExternalReferenceResultSupplement by external_id.
+ * Normalize supplemental reference metadata from current batch arrays or legacy single objects.
  */
-export function extractExternalSearchData(
-    content: unknown,
-    metadata?: Record<string, unknown>
-): ExternalSearchViewData | null {
-    const contentObj = content as { references?: ExternalReferenceResultContent[] } | undefined;
-    if (!contentObj || !Array.isArray(contentObj.references)) return null;
+function getExternalReferenceSupplements(metadata?: Record<string, unknown>): ExternalReferenceResultSupplement[] {
+    const supplementalData = metadata?.supplemental_data;
+    if (Array.isArray(supplementalData)) {
+        return supplementalData as ExternalReferenceResultSupplement[];
+    }
 
-    // Build lookup map from supplemental data
+    if (supplementalData && typeof supplementalData === 'object') {
+        return [supplementalData as ExternalReferenceResultSupplement];
+    }
+
+    return [];
+}
+
+/**
+ * Merge ExternalReferenceResultContent rows with metadata.supplemental_data.
+ */
+export function mergeExternalReferenceContents(
+    referenceContents: ExternalReferenceResultContent[],
+    metadata?: Record<string, unknown>
+): ExternalReference[] {
     const supplementMap = new Map<string, ExternalReferenceResultSupplement>();
-    if (Array.isArray(metadata?.supplemental_data)) {
-        for (const supp of metadata.supplemental_data as ExternalReferenceResultSupplement[]) {
-            if (supp.external_id) {
-                supplementMap.set(supp.external_id, supp);
-            }
+    for (const supp of getExternalReferenceSupplements(metadata)) {
+        if (supp.external_id) {
+            supplementMap.set(supp.external_id, supp);
         }
     }
 
-    // Merge content references with supplements
-    const references: ExternalReference[] = contentObj.references.map(ref => {
+    return referenceContents.map(ref => {
         const supp = supplementMap.get(ref.external_id);
-        
+
         return {
-            // From content
             source_id: ref.external_id,
             title: ref.title,
             authors: supp?.authors ?? ref.authors,
@@ -760,8 +1044,6 @@ export function extractExternalSearchData(
             abstract: ref.abstract,
             fields_of_study: ref.fields_of_study,
             citation_count: ref.citation_count,
-            
-            // From supplement (or defaults)
             source: supp?.source ?? "openalex",
             id: supp?.external_id,
             publication_date: supp?.publication_date,
@@ -775,77 +1057,105 @@ export function extractExternalSearchData(
             library_items: supp?.library_items ?? [],
         };
     });
+}
 
-    return { references };
+/**
+ * Extract and merge external references from content and metadata.supplemental_data.
+ * Combines ExternalReferenceResultContent with ExternalReferenceResultSupplement by external_id.
+ */
+export function extractExternalSearchData(
+    content: unknown,
+    metadata?: Record<string, unknown>
+): ExternalSearchViewData | null {
+    const contentObj = content as { references?: ExternalReferenceResultContent[] } | undefined;
+    if (!contentObj || !Array.isArray(contentObj.references)) return null;
+
+    return { references: mergeExternalReferenceContents(contentObj.references, metadata) };
 }
 
 /**
  * Normalized lookup work data ready for rendering.
  */
 export interface LookupWorkViewData {
-    found: boolean;
-    reference?: ExternalReference;
+    foundCount: number;
+    references: ExternalReference[];
+    notFoundQueries: string[];
+    temporarilyUncheckedQueries: string[];
     message?: string;
+}
+
+function stringArrayField(value: unknown): string[] {
+    if (!Array.isArray(value)) return [];
+    return value.filter((entry): entry is string => typeof entry === 'string');
+}
+
+/**
+ * Read the number of works found from a lookup_work tool return payload.
+ */
+export function extractLookupWorkFoundCount(content: unknown): number | null {
+    if (!content || typeof content !== 'object') return null;
+    const contentObj = content as Record<string, unknown>;
+
+    if (typeof contentObj.found_count === 'number') {
+        return contentObj.found_count;
+    }
+
+    if (typeof contentObj.found === 'boolean') {
+        return contentObj.found ? 1 : 0;
+    }
+
+    if (Array.isArray(contentObj.references)) {
+        return contentObj.references.length;
+    }
+
+    return null;
 }
 
 /**
  * Extract and merge lookup work data from content and metadata.supplemental_data.
- * Combines ExternalReferenceResultContent with ExternalReferenceResultSupplement.
  */
 export function extractLookupWorkData(
     content: unknown,
     metadata?: Record<string, unknown>
 ): LookupWorkViewData | null {
-    const contentObj = content as { 
-        found?: boolean;
-        reference?: ExternalReferenceResultContent;
-        message?: string;
-    } | undefined;
-    
-    if (!contentObj || typeof contentObj.found !== 'boolean') return null;
-    
-    // Not found case
-    if (!contentObj.found) {
+    if (!content || typeof content !== 'object') return null;
+    const contentObj = content as Record<string, unknown>;
+    const message = typeof contentObj.message === 'string' ? contentObj.message : undefined;
+
+    if (typeof contentObj.found_count === 'number') {
+        const referenceContents = Array.isArray(contentObj.references)
+            ? contentObj.references.filter(isExternalReferenceResultContent)
+            : [];
+
         return {
-            found: false,
-            message: contentObj.message,
+            foundCount: contentObj.found_count,
+            references: mergeExternalReferenceContents(referenceContents, metadata),
+            notFoundQueries: stringArrayField(contentObj.not_found_queries),
+            temporarilyUncheckedQueries: stringArrayField(contentObj.temporarily_unchecked_queries),
+            message,
         };
     }
-    
-    // Found case - need to merge reference with supplement
-    if (!contentObj.reference) return null;
-    
-    const ref = contentObj.reference;
-    const supp = metadata?.supplemental_data as ExternalReferenceResultSupplement | undefined;
-    
-    const externalRef: ExternalReference = {
-        // From content
-        source_id: ref.external_id,
-        title: ref.title,
-        authors: supp?.authors ?? ref.authors,
-        year: ref.year,
-        venue: ref.venue,
-        abstract: ref.abstract,
-        fields_of_study: ref.fields_of_study,
-        citation_count: ref.citation_count,
-        
-        // From supplement (or defaults)
-        source: supp?.source ?? "openalex",
-        id: supp?.external_id,
-        publication_date: supp?.publication_date,
-        publication_url: supp?.publication_url,
-        url: supp?.url,
-        identifiers: supp?.identifiers,
-        is_open_access: supp?.is_open_access,
-        open_access_url: supp?.open_access_url,
-        reference_count: supp?.reference_count,
-        journal: supp?.journal ?? (ref.journal ? { name: ref.journal } : undefined),
-        library_items: supp?.library_items ?? [],
-    };
-    
+
+    if (typeof contentObj.found !== 'boolean') return null;
+
+    if (!contentObj.found) {
+        return {
+            foundCount: 0,
+            references: [],
+            notFoundQueries: [],
+            temporarilyUncheckedQueries: [],
+            message,
+        };
+    }
+
+    if (!isExternalReferenceResultContent(contentObj.reference)) return null;
+
     return {
-        found: true,
-        reference: externalRef,
+        foundCount: 1,
+        references: mergeExternalReferenceContents([contentObj.reference], metadata),
+        notFoundQueries: [],
+        temporarilyUncheckedQueries: [],
+        message,
     };
 }
 
@@ -865,7 +1175,9 @@ const EXTRACT_TOOL_NAMES: readonly string[] = [
 export interface ItemExtractionReference {
     library_id: number;
     zotero_key: string;
-    status: "relevant" | "not_relevant" | "error";
+    // "success" | "error" is the current backend vocabulary. "relevant" /
+    // "not_relevant" are legacy values still present in older thread history.
+    status: "success" | "error" | "relevant" | "not_relevant";
     title?: string | null;
     authors?: string | null;
     year?: number | null;
@@ -879,7 +1191,9 @@ export interface ExtractToolResultSummary {
     tool_name: string;
     total_items: number;
     items_processed: number;
-    items_relevant: number;
+    // Legacy field; the backend no longer requires it. Kept optional so older
+    // history still type-checks and newer payloads that omit it are accepted.
+    items_relevant?: number;
     items_failed: number;
     total_pages_processed: number;
     items: ItemExtractionReference[];
@@ -908,7 +1222,8 @@ export function isExtractResult(
         typeof summary.tool_name === 'string' &&
         typeof summary.total_items === 'number' &&
         typeof summary.items_processed === 'number' &&
-        typeof summary.items_relevant === 'number' &&
+        // items_relevant is legacy/optional — don't require it so the guard
+        // still matches once the backend stops sending it.
         typeof summary.items_failed === 'number' &&
         Array.isArray(summary.items) &&
         summary.items.every((item: unknown) => {
@@ -949,7 +1264,9 @@ export function extractExtractData(
     return {
         items: summary.items,
         totalItems: summary.total_items,
-        itemsRelevant: summary.items_relevant,
+        // Fall back to items_processed for newer payloads that omit the
+        // legacy items_relevant field.
+        itemsRelevant: summary.items_relevant ?? summary.items_processed,
         itemsProcessed: summary.items_processed,
         itemsFailed: summary.items_failed,
     };
@@ -970,21 +1287,48 @@ const READ_NOTE_TOOL_NAMES: readonly string[] = [
 export interface ReadNoteViewData {
     noteReference: { library_id: number; zotero_key: string };
     parentReference?: { library_id: number; zotero_key: string };
-    title?: string;
     totalLines?: number;
     linesReturned?: string;
 }
 
+function isZoteroItemReference(value: unknown): value is ZoteroItemReference {
+    if (!value || typeof value !== 'object') return false;
+    const obj = value as Record<string, unknown>;
+    return typeof obj.library_id === 'number' && typeof obj.zotero_key === 'string';
+}
+
+function parseZoteroUniqueKey(uniqueKey: string): ZoteroItemReference | null {
+    const [libraryIdStr, ...keyParts] = uniqueKey.split('-');
+    const libraryId = parseInt(libraryIdStr, 10);
+    const zoteroKey = keyParts.join('-');
+    if (isNaN(libraryId) || !zoteroKey) return null;
+    return { library_id: libraryId, zotero_key: zoteroKey };
+}
+
 /**
  * Type guard for read_note results.
- * Checks content for note_id field (content-based, not metadata.summary).
+ * Uses metadata.summary for dehydrated results and content for older hydrated results.
  */
 export function isReadNoteResult(
     toolName: string,
     content: unknown,
-    _metadata?: Record<string, unknown>
+    metadata?: Record<string, unknown>
 ): boolean {
     if (!READ_NOTE_TOOL_NAMES.includes(toolName)) return false;
+
+    if (metadata?.summary && typeof metadata.summary === 'object') {
+        const summary = metadata.summary as Record<string, unknown>;
+        return (
+            summary.tool_name === 'read_note' &&
+            typeof summary.result_count === 'number' &&
+            isZoteroItemReference(summary.note_item) &&
+            (
+                summary.parent_item === undefined ||
+                summary.parent_item === null ||
+                isZoteroItemReference(summary.parent_item)
+            )
+        );
+    }
 
     if (!content || typeof content !== 'object') return false;
     const obj = content as Record<string, unknown>;
@@ -992,43 +1336,47 @@ export function isReadNoteResult(
 }
 
 /**
- * Extract read note data from content.
- * Parses note_id and parent_item_id to extract references.
+ * Extract read note data from metadata.summary or legacy content.
  */
 export function extractReadNoteData(
     content: unknown,
-    _metadata?: Record<string, unknown>
+    metadata?: Record<string, unknown>
 ): ReadNoteViewData | null {
+    if (metadata?.summary && typeof metadata.summary === 'object') {
+        const summary = metadata.summary as ReadNoteResultSummary;
+        if (!isZoteroItemReference(summary.note_item)) return null;
+        if (
+            summary.parent_item !== undefined &&
+            summary.parent_item !== null &&
+            !isZoteroItemReference(summary.parent_item)
+        ) {
+            return null;
+        }
+        return {
+            noteReference: summary.note_item,
+            parentReference: summary.parent_item ?? undefined,
+        };
+    }
+
     if (!content || typeof content !== 'object') return null;
     const obj = content as Record<string, unknown>;
 
     const noteId = obj.note_id as string | undefined;
     if (!noteId) return null;
 
-    // Parse note_id: "<library_id>-<zotero_key>"
-    const [libraryIdStr, ...keyParts] = noteId.split('-');
-    const libraryId = parseInt(libraryIdStr, 10);
-    const zoteroKey = keyParts.join('-');
-    if (isNaN(libraryId) || !zoteroKey) return null;
-
-    const noteReference = { library_id: libraryId, zotero_key: zoteroKey };
+    const noteReference = parseZoteroUniqueKey(noteId);
+    if (!noteReference) return null;
 
     // Parse parent_item_id if present
     let parentReference: { library_id: number; zotero_key: string } | undefined;
     const parentItemId = obj.parent_item_id as string | undefined;
     if (parentItemId) {
-        const [pLibStr, ...pKeyParts] = parentItemId.split('-');
-        const pLib = parseInt(pLibStr, 10);
-        const pKey = pKeyParts.join('-');
-        if (!isNaN(pLib) && pKey) {
-            parentReference = { library_id: pLib, zotero_key: pKey };
-        }
+        parentReference = parseZoteroUniqueKey(parentItemId) ?? undefined;
     }
 
     return {
         noteReference,
         parentReference,
-        title: obj.title as string | undefined,
         totalLines: typeof obj.total_lines === 'number' ? obj.total_lines : undefined,
         linesReturned: obj.lines_returned as string | undefined,
     };
@@ -1071,22 +1419,28 @@ export function extractZoteroReferences(part: ToolReturnPart): ZoteroItemReferen
         return data?.pages ?? [];
     }
 
+    // Text read results (line ranges from the unified `read` tool)
+    if (isReadTextResult(tool_name, content, metadata)) {
+        const data = extractReadTextData(content, metadata);
+        return data?.lines.map(range => ({
+            library_id: range.library_id,
+            zotero_key: range.zotero_key,
+        })) ?? [];
+    }
+
     // View page images results
     if (isViewPageImagesResult(tool_name, content, metadata)) {
         const data = extractViewPageImagesData(content, metadata);
         return data?.pages ?? [];
     }
 
-    // Passage retrieval results (chunks)
-    if (isSearchInDocumentsResult(tool_name, content, metadata)) {
-        const data = extractSearchInDocumentsData(content, metadata);
-        return data?.chunks ?? [];
-    }
-
-    // Search in attachment results (pages)
-    if (isSearchInAttachmentResult(tool_name, content, metadata)) {
-        const data = extractSearchInAttachmentData(content, metadata);
-        return data?.pages ?? [];
+    // Find in attachments results (attachments)
+    if (isFindInAttachmentsResult(tool_name, content, metadata)) {
+        const data = extractFindInAttachmentsData(content, metadata);
+        return data?.attachments.map(att => ({
+            library_id: att.library_id,
+            zotero_key: att.zotero_key,
+        })) ?? [];
     }
 
     // Extract tool results
@@ -1096,6 +1450,12 @@ export function extractZoteroReferences(part: ToolReturnPart): ZoteroItemReferen
             library_id: item.library_id,
             zotero_key: item.zotero_key,
         })) ?? [];
+    }
+
+    // Read note results
+    if (isReadNoteResult(tool_name, content, metadata)) {
+        const data = extractReadNoteData(content, metadata);
+        return data?.noteReference ? [data.noteReference] : [];
     }
 
     return [];
@@ -1254,17 +1614,12 @@ export interface NoteResultItem {
 }
 
 /** Attachment result item from search/list results */
-export interface AttachmentResultItem {
+export type AttachmentResultItem = AttachmentInfo & {
     result_type: 'attachment';
-    item_id: string;
-    title?: string | null;
-    filename?: string | null;
-    content_type?: string | null;
-    parent_item_id?: string | null;
+    item_id?: string | null;
     parent_title?: string | null;
     date_modified?: string | null;
-    annotations_count?: number | null;
-}
+};
 
 /** Result item from zotero_search (regular, note, or attachment) */
 export type ZoteroSearchResultItem = RegularSearchResultItem | NoteResultItem | AttachmentResultItem;
@@ -1562,7 +1917,11 @@ export function extractZoteroSearchData(
             // Convert item_ids to ZoteroItemReference
             const items: ZoteroItemReference[] = obj.items
                 .map(item => {
-                    const parts = item.item_id.split('-');
+                    const itemId = item.result_type === 'attachment'
+                        ? (item.attachment_id ?? item.item_id)
+                        : item.item_id;
+                    if (!itemId) return null;
+                    const parts = itemId.split('-');
                     if (parts.length < 2) return null;
                     const libraryId = parseInt(parts[0], 10);
                     const zoteroKey = parts.slice(1).join('-');
@@ -1619,7 +1978,11 @@ export function extractListItemsData(
             // Convert item_ids to ZoteroItemReference
             const items: ZoteroItemReference[] = obj.items
                 .map(item => {
-                    const parts = item.item_id.split('-');
+                    const itemId = item.result_type === 'attachment'
+                        ? (item.attachment_id ?? item.item_id)
+                        : item.item_id;
+                    if (!itemId) return null;
+                    const parts = itemId.split('-');
                     if (parts.length < 2) return null;
                     const libraryId = parseInt(parts[0], 10);
                     const zoteroKey = parts.slice(1).join('-');
@@ -1889,6 +2252,13 @@ export function extractGetMetadataData(
             // Convert item_ids to ZoteroItemReference
             const items: ZoteroItemReference[] = obj.items
                 .map(item => {
+                    // Some results carry library_id/zotero_key directly instead of a composite item_id.
+                    const libId = (item as Record<string, unknown>)?.library_id;
+                    const key = (item as Record<string, unknown>)?.zotero_key;
+                    if (typeof libId === 'number' && typeof key === 'string' && key) {
+                        return { library_id: libId, zotero_key: key };
+                    }
+                    if (typeof item?.item_id !== 'string') return null;
                     const parts = item.item_id.split('-');
                     if (parts.length < 2) return null;
                     const libraryId = parseInt(parts[0], 10);
@@ -1975,12 +2345,13 @@ export function extractAnnotationAttachmentId(args: string | Record<string, any>
 }
 
 // ============================================================================
-// Get Annotations Tool Results
+// Annotation List Tool Results
 // ============================================================================
 
-/** Valid tool names for get_annotations results */
+/** Valid tool names for annotation-list results */
 const GET_ANNOTATIONS_TOOL_NAMES: readonly string[] = [
     'get_annotations',
+    'find_annotations',
 ] as const;
 
 /**
@@ -1993,8 +2364,7 @@ const GET_ANNOTATIONS_TOOL_NAMES: readonly string[] = [
  * pattern.
  */
 export interface GetAnnotationsResultSummary {
-    tool_name: 'get_annotations';
-    attachment_id: string;
+    tool_name: 'get_annotations' | 'find_annotations';
     result_count: number;
     total_count: number;
     has_more: boolean;
@@ -2014,6 +2384,7 @@ export function isGetAnnotationsResult(
     if (!GET_ANNOTATIONS_TOOL_NAMES.includes(toolName)) return false;
     if (!metadata?.summary || typeof metadata.summary !== 'object') return false;
     const summary = metadata.summary as Record<string, unknown>;
+    if (summary.tool_name !== toolName) return false;
     if (!Array.isArray(summary.annotations)) return false;
     return summary.annotations.every((a: unknown) => {
         if (!a || typeof a !== 'object') return false;
@@ -2028,7 +2399,7 @@ export function isGetAnnotationsResult(
 export interface GetAnnotationsViewData {
     annotations: ZoteroItemReference[];
     totalCount: number;
-    attachmentId?: string | null;
+    toolName: 'get_annotations' | 'find_annotations';
 }
 
 /**
@@ -2048,6 +2419,6 @@ export function extractGetAnnotationsData(
             zotero_key: ref.zotero_key,
         })),
         totalCount: typeof summary.total_count === 'number' ? summary.total_count : summary.annotations.length,
-        attachmentId: summary.attachment_id ?? null,
+        toolName: summary.tool_name,
     };
 }

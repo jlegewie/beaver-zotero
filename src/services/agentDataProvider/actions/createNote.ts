@@ -1,7 +1,7 @@
 import { logger } from '../../../utils/logger';
 import { store } from '../../../../react/store';
 import { searchableLibraryIdsAtom } from '../../../../react/atoms/profile';
-import { citationDataMapAtom } from '../../../../react/atoms/citations';
+import { citationMapAtom } from '../../../../react/atoms/citations';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../../../../react/atoms/externalReferences';
 import { currentThreadIdAtom } from '../../../../react/atoms/threads';
 import { activeRunAtom } from '../../../../react/agents/atoms';
@@ -9,6 +9,7 @@ import { renderToHTML } from '../../../../react/utils/citationRenderers';
 import { prepareCitationRenderContext } from '../../../../react/utils/citationRenderContext';
 import { wrapWithSchemaVersion, getBeaverNoteFooterHTML } from '../../../../react/utils/noteActions';
 import { getOrSimplify } from '../../../utils/noteHtmlSimplifier';
+import { preloadNotePageLabels } from '../../../utils/noteCitationExpand';
 import { getLatestNoteHtml } from '../../../utils/noteEditorIO';
 import {
     WSAgentActionValidateRequest,
@@ -454,7 +455,7 @@ async function executeCreateNoteAction(
 
     try {
         // Get citation context for rendering
-        const citationDataMap = store.get(citationDataMapAtom);
+        const citationDataMap = store.get(citationMapAtom);
         const externalMapping = store.get(externalReferenceItemMappingAtom);
         const externalReferencesMap = store.get(externalReferenceMappingAtom);
 
@@ -556,7 +557,8 @@ async function executeCreateNoteAction(
             const rawHtml = getLatestNoteHtml(zoteroNote);
             if (rawHtml) {
                 const simplifyStart = Date.now();
-                const { simplified } = getOrSimplify(noteId, rawHtml, zoteroNote.libraryID);
+                const pageLabelsByItemId = await preloadNotePageLabels(rawHtml, zoteroNote.libraryID, { extractOnCacheMiss: true });
+                const { simplified } = getOrSimplify(noteId, rawHtml, zoteroNote.libraryID, pageLabelsByItemId);
                 ta.record('simplify_ms', Date.now() - simplifyStart);
                 noteContent = simplified;
             }

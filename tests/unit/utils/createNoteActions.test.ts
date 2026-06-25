@@ -11,7 +11,7 @@ vi.mock('../../../react/store', () => ({
 }));
 
 vi.mock('../../../react/atoms/citations', () => ({
-    citationDataMapAtom: Symbol('citationDataMapAtom'),
+    citationMapAtom: Symbol('citationMapAtom'),
 }));
 
 vi.mock('../../../react/atoms/externalReferences', () => ({

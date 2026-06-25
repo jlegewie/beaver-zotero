@@ -1,5 +1,6 @@
 import { AgentRun, TextPart, ToolCallPart } from '../agents/types';
 import { getToolCallLabel } from '../agents/toolLabels';
+import { isToolResultView } from '../types/toolResultViews';
 
 /**
  * Parse args from a ToolCallPart, handling both string and object formats.
@@ -21,7 +22,15 @@ export function getToolCallDetails(
     part: ToolCallPart,
     toolResultsMap: Map<string, any>
 ): string {
-    const label = getToolCallLabel(part, 'completed');
+    // The view-derived label already bakes in the name/locator and the count
+    // suffix, so we don't append a separate result count here (that would
+    // double-count). Scope names for list_* tools are not host-resolved in this
+    // export path; the label degrades to the raw arg.
+    const result = toolResultsMap.get(part.tool_call_id);
+    const view = result?.part_kind === 'tool-return' && isToolResultView(result.metadata?.view)
+        ? result.metadata.view
+        : null;
+    const label = getToolCallLabel(part, 'completed', { view });
     let query = "";
     try {
         const args = typeof part.args === 'object' && part.args
@@ -34,14 +43,8 @@ export function getToolCallDetails(
         console.error('Error parsing tool call arguments:', e);
     }
 
-    const result = toolResultsMap.get(part.tool_call_id);
-    const count = result && result.part_kind === 'tool-return'
-        ? result?.metadata?.summary?.result_count ?? null
-        : null;
-
     let details = `[${label}`;
     if (query) details += `: "${query}"`;
-    if (result && count !== null) details += ` (${count} results)`;
     details += `]`;
     return details;
 }

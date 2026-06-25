@@ -1,25 +1,25 @@
 import { logger } from '../../utils/logger';
-import { ZoteroItemReference } from '../../../react/types/zotero';
-import { ZoteroItemStatus, FrontendFileStatus, AttachmentDataWithStatus, AttachmentSummary, FileStatusCode } from '../../../react/types/zotero';
+import { ZoteroItemStatus, FrontendFileStatus, AttachmentInfo } from '../../../react/types/zotero';
 import { safeIsInTrash, safeFileExists, isLinkedUrlAttachment } from '../../utils/zoteroUtils';
-import { syncingItemFilter, syncingItemFilterAsync } from '../../utils/sync';
+import { syncingItemFilterAsync } from '../../utils/sync';
 import { getPref } from '../../utils/prefs';
 
-import { isAttachmentOnServer, isAttachmentAvailableRemotely } from '../../utils/webAPI';
+import { isAttachmentOnServer } from '../../utils/webAPI';
 import { addPopupMessageAtom } from '../../../react/utils/popupMessageUtils';
 import { wasItemAddedBeforeLastSync } from '../../../react/utils/sourceUtils';
-import { BeaverExtractor, ExtractionError, ExtractionErrorCode } from '../../beaver-extract';
-import { isRemoteFilePath, makeRemoteFilePath } from '../documentFileIdentity';
-import { effectiveMaxFileSizeMB } from '../attachmentLimits';
-import type { DocumentCacheMetadata } from '../documentCache';
 import { DeferredToolPreference } from '../agentProtocol';
 import { deferredToolPreferencesAtom } from '../../../react/atoms/deferredToolPreferences';
-import { isSupportedItem } from '../../utils/sync';
+import { isAgentSupportedItem } from '../../utils/agentItemSupport';
 import { store } from '../../../react/store';
 import { searchableLibraryIdsAtom } from '../../../react/atoms/profile';
-import { serializeAttachment } from '../../utils/zoteroSerializers';
-import { getPDFPageCountFromFulltext, getPDFPageCountFromWorker } from '../../../react/utils/pdfUtils';
 import { TimingAccumulator } from '../../utils/timing';
+import { getAttachmentInfo as resolveAttachmentInfo, type AttachmentInfoOptions } from '../documentExtraction/attachmentInfo';
+export {
+    getBestAttachmentBatch,
+    prepareAttachmentInfoBatchData,
+    processAttachmentInfoBatch,
+} from '../documentExtraction/attachmentInfoBatch';
+export type { AttachmentInfoBatchData } from '../documentExtraction/attachmentInfoBatch';
 // Re-export shared document-extraction helpers so existing agent-data-provider
 // callers keep importing them from `./utils`.
 import {
@@ -32,12 +32,14 @@ export {
     checkRemotePdfSize,
     preflightCachedPdfMeta,
     resolveToPdfAttachment,
+    resolveToImageAttachment,
 } from '../documentExtraction';
 export type {
     PreflightErrorCode,
     PreflightFailure,
     PreflightOptions,
     PdfAttachmentResolveResult,
+    ImageAttachmentResolveResult,
 } from '../documentExtraction';
 
 // ---------------------------------------------------------------------------
@@ -45,7 +47,9 @@ export type {
 // ---------------------------------------------------------------------------
 
 const REMOTE_FAILURE_NOTIFY_INTERVAL_MS = 8 * 60 * 60 * 1000;
+const REMOTE_NOT_SYNCED_NOTIFY_INTERVAL_MS = 8 * 60 * 60 * 1000;
 let _remoteDownloadFailureLastNotifiedAt = 0;
+let _remoteNotSyncedLastNotifiedAt = 0;
 
 const DISABLE_HINT = 'You can disable Beaver\'s remote file access in Settings \u203A Permissions.';
 
@@ -151,6 +155,25 @@ export function notifyRemoteDownloadFailure(error: unknown): void {
     }
 }
 
+export function notifyRemoteFileNotSynced(): void {
+    const now = Date.now();
+    if (now - _remoteNotSyncedLastNotifiedAt < REMOTE_NOT_SYNCED_NOTIFY_INTERVAL_MS) return;
+    _remoteNotSyncedLastNotifiedAt = now;
+
+    try {
+        store.set(addPopupMessageAtom, {
+            id: 'remote-file-not-synced',
+            type: 'warning',
+            title: 'File Not Synced Locally',
+            text: 'This file is available remotely, but Beaver can only read it after Zotero syncs it locally. Sync the file in Zotero and try again. '
+                + DISABLE_HINT,
+            expire: false,
+        });
+    } catch (error) {
+        logger(`notifyRemoteFileNotSynced: failed to surface popup: ${error}`, 2);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // loadPdfData — wrapper around the react-free primitive
 // ---------------------------------------------------------------------------
@@ -173,381 +196,67 @@ export async function loadPdfData(
     return loadPdfDataPrimitive(item, filePath, isRemoteOnly, notifyRemoteDownloadFailure);
 }
 
-/**
- * Result of attachment availability check.
- * Either an early-exit status (if unavailable) or file info to continue processing.
- */
-type AttachmentAvailabilityResult =
-    | { available: false; status: FrontendFileStatus; fileExistsLocally?: boolean }
-    | { available: true; filePath: string; contentType: string };
-
-/**
- * Check attachment availability before PDF processing.
- * Validates: PDF type, file path, file existence, and size limits.
- * 
- * @param attachment - Zotero attachment item
- * @param isPrimary - Whether this is the primary attachment for the parent item
- * @returns Either early-exit status or file info to continue processing
- */
-async function checkAttachmentAvailability(
-    attachment: Zotero.Item,
-    isPrimary: boolean
-): Promise<AttachmentAvailabilityResult> {
-    const contentType = attachment.attachmentContentType;
-
-    // Non-PDF attachments are not currently supported for content extraction
-    if (!attachment.isPDFAttachment()) {
-        return {
-            available: false,
-            status: {
-                is_primary: isPrimary,
-                mime_type: contentType,
-                page_count: null,
-                status: "unavailable",
-                status_code: FileStatusCode.UnsupportedFileType,
-            }
-        };
-    }
-
-    // Check if the file exists locally
-    // getFilePathAsync() resolves the path AND checks OS-level existence in one call
-    const filePath = await attachment.getFilePathAsync();
-    if (!filePath) {
-        // File is not local — check if remote access is enabled and file is on the server
-        if (isRemoteAccessAvailable(attachment)) {
-            // Report as available with a synthetic remote path.
-            // The actual download will happen when content is requested.
-            const remotePath = makeRemoteFilePath(attachment);
-            return { available: true, filePath: remotePath, contentType };
-        }
-        const isFileAvailableOnServer = isAttachmentAvailableRemotely(attachment);
-        return {
-            available: false,
-            fileExistsLocally: false,
-            status: {
-                is_primary: isPrimary,
-                mime_type: contentType,
-                page_count: null,
-                status: "unavailable",
-                status_code: isFileAvailableOnServer
-                    ? FileStatusCode.FileNotLocalRemote
-                    : FileStatusCode.FileNotLocal,
-            }
-        };
-    }
-
-    // Check file size limit using IOUtils.stat on the PDF file directly.
-    // This replaces Zotero.Attachments.getTotalFileSize() which iterates the
-    // entire storage directory with OS.File.stat() per entry — very expensive.
-    // Skip for remote files (size unknown until download).
-    if (!isRemoteFilePath(filePath)) {
-        const maxFileSizeMB = effectiveMaxFileSizeMB();
-        try {
-            const stat = await IOUtils.stat(filePath);
-            const fileSizeInMB = (stat.size ?? 0) / 1024 / 1024;
-
-            if (fileSizeInMB > maxFileSizeMB) {
-                return {
-                    available: false,
-                    fileExistsLocally: true,
-                    status: {
-                        is_primary: isPrimary,
-                        mime_type: contentType,
-                        page_count: null,
-                        status: "unavailable",
-                        status_reason: `File size of ${fileSizeInMB.toFixed(1)}MB exceeds the ${maxFileSizeMB}MB limit.`,
-                    }
-                };
-            }
-        } catch (error) {
-            // If stat fails, skip size check and continue — the file was confirmed
-            // to exist by getFilePathAsync() above, so this is a transient issue
-            logger(`checkAttachmentAvailability: IOUtils.stat failed for ${filePath}: ${error}`, 2);
-        }
-    }
-
-    return { available: true, filePath, contentType };
-}
-
-/**
- * Build a FrontendFileStatus from a cached metadata record.
- */
-function fileStatusFromCache(record: DocumentCacheMetadata, isPrimary: boolean): FrontendFileStatus {
-    if (record.errorCode === 'encrypted') {
-        return { is_primary: isPrimary, mime_type: record.contentType, page_count: null, status: "unavailable", status_code: FileStatusCode.PdfEncrypted };
-    }
-    if (record.errorCode === 'invalid_pdf') {
-        return { is_primary: isPrimary, mime_type: record.contentType, page_count: null, status: "unavailable", status_code: FileStatusCode.PdfInvalid };
-    }
-    if (record.errorCode === 'no_text_layer') {
-        return { is_primary: isPrimary, mime_type: record.contentType, page_count: record.pageCount, status: "unavailable", status_code: FileStatusCode.PdfNeedsOcr };
-    }
-    return { is_primary: isPrimary, mime_type: record.contentType, page_count: record.pageCount, status: "available" };
-}
-
 // `preflightCachedPdfMeta`, `PreflightOptions`, `PreflightFailure`, and
 // `PreflightErrorCode` live in `../documentExtraction` and are re-exported
 // at the top of this file.
 
 /**
- * Get file status information for an attachment.
- * Determines page count and availability of fulltext/page images.
- * Performs full PDF analysis including OCR detection.
- *
- * Uses cache-first: if a fresh metadata record exists, maps it to FrontendFileStatus
- * without reading the PDF. On miss, runs the full extraction and persists metadata.
- *
- * @param attachment - Zotero attachment item
- * @param isPrimary - Whether this is the primary attachment for the parent item
- * @returns File status information
+ * Project a unified `AttachmentInfo` (documentExtraction/attachmentInfo.ts)
+ * onto the `FrontendFileStatus` wire shape used by the zotero_data lookup
+ * protocol. Pure field projection — status values, codes, and reasons cross
+ * the wire exactly as the resolver produced them; the backend normalizes
+ * legacy payloads from older frontends via before-validators.
  */
-export async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary: boolean): Promise<FrontendFileStatus> {
-    // Check basic availability (PDF type, file exists, size limits)
-    const availabilityCheck = await checkAttachmentAvailability(attachment, isPrimary);
-    if (!availabilityCheck.available) {
-        return availabilityCheck.status;
-    }
-
-    const { filePath, contentType } = availabilityCheck;
-
-    // Cache-first: all writers produce complete records, so any hit is usable.
-    const cache = Zotero.Beaver?.documentCache;
-    if (cache) {
-        try {
-            const cached = await cache.getMetadata({
-                libraryId: attachment.libraryID,
-                zoteroKey: attachment.key,
-            }, filePath);
-            if (cached) {
-                return fileStatusFromCache(cached, isPrimary);
-            }
-        } catch (error) {
-            logger(`getAttachmentFileStatus: cache read error: ${error}`, 1);
-        }
-    }
-
-    // Cache miss: run full extraction
-    try {
-        const isRemote = isRemoteFilePath(filePath);
-        let sourceSizeBytes = 0;
-        let pdfData: Uint8Array;
-        try {
-            pdfData = await loadPdfData(attachment, filePath, isRemote);
-            sourceSizeBytes = isRemote ? pdfData.byteLength : 0;
-        } catch (error) {
-            if (!isRemote) throw error; // local I/O error — let outer catch deal with it
-            logger(`getAttachmentFileStatus: remote download failed: ${error}`, 1);
-            return {
-                is_primary: isPrimary,
-                mime_type: contentType,
-                page_count: null,
-                status: "unavailable",
-                status_reason: 'Failed to download file from remote storage',
-            };
-        }
-        const extractor = new BeaverExtractor();
-
-        // Get metadata - this also validates the PDF and detects encryption.
-        let metadata: Awaited<ReturnType<BeaverExtractor['getMetadata']>>;
-        try {
-            metadata = await extractor.getMetadata(pdfData);
-        } catch (error) {
-            if (error instanceof ExtractionError) {
-                if (error.code === ExtractionErrorCode.ENCRYPTED) {
-                    await cache?.putErrorMetadata({ item: attachment, filePath, sourceSizeBytes, contentType, errorCode: 'encrypted', pageCount: null, pageLabels: null, pages: null });
-                    return {
-                        is_primary: isPrimary,
-                        mime_type: contentType,
-                        page_count: null,
-                        status: "unavailable",
-                        status_code: FileStatusCode.PdfEncrypted,
-                    };
-                } else if (error.code === ExtractionErrorCode.INVALID_PDF) {
-                    await cache?.putErrorMetadata({ item: attachment, filePath, sourceSizeBytes, contentType, errorCode: 'invalid_pdf', pageCount: null, pageLabels: null, pages: null });
-                    return {
-                        is_primary: isPrimary,
-                        mime_type: contentType,
-                        page_count: null,
-                        status: "unavailable",
-                        status_code: FileStatusCode.PdfInvalid,
-                    };
-                } else if (error.code === ExtractionErrorCode.WASM_ERROR) {
-                    return {
-                        is_primary: isPrimary,
-                        mime_type: contentType,
-                        page_count: null,
-                        status: "unavailable",
-                        status_code: FileStatusCode.PdfParserCrash,
-                        status_reason: "PDF crashes the local PDF parser",
-                    };
-                } else if (error.code === ExtractionErrorCode.EMPTY_DOCUMENT) {
-                    // Empty / 0-byte file. Report as invalid without persisting
-                    // metadata — empty-document failures are deliberately not
-                    // cached (re-extraction is cheap).
-                    return {
-                        is_primary: isPrimary,
-                        mime_type: contentType,
-                        page_count: 0,
-                        status: "unavailable",
-                        status_code: FileStatusCode.PdfInvalid,
-                    };
-                }
-            }
-            throw error;
-        }
-        const { pageCount, pageLabels, pages } = metadata;
-
-        // A document that opened but resolves to zero pages is empty or
-        // structurally corrupt. Report as invalid without persisting metadata.
-        if (pageCount === 0) {
-            return {
-                is_primary: isPrimary,
-                mime_type: contentType,
-                page_count: 0,
-                status: "unavailable",
-                status_code: FileStatusCode.PdfInvalid,
-            };
-        }
-
-        const ocrAnalysis = await extractor.analyzeOCRNeeds(pdfData);
-
-        if (ocrAnalysis.needsOCR) {
-            await cache?.putErrorMetadata({ item: attachment, filePath, sourceSizeBytes, contentType, errorCode: 'no_text_layer', pageCount, pageLabels, pages: pages ?? null });
-            return {
-                is_primary: isPrimary,
-                mime_type: contentType,
-                page_count: pageCount,
-                status: "unavailable",
-                status_code: FileStatusCode.PdfNeedsOcr,
-            };
-        }
-
-        // All checks passed - file is fully accessible
-        await cache?.putMetadata({
-            item: attachment,
-            filePath,
-            sourceSizeBytes,
-            contentType,
-            metadata: { pageCount, pageLabels, pages: pages ?? null, errorCode: null },
-        });
-        return {
-            is_primary: isPrimary,
-            mime_type: contentType,
-            page_count: pageCount,
-            status: "available",
-        };
-
-    } catch (error) {
-        // Unexpected error during analysis
-        if (error instanceof ExtractionError && error.code === ExtractionErrorCode.WASM_ERROR) {
-            logger(`getAttachmentFileStatus: PDF parser crashed while analyzing ${attachment.libraryID}-${attachment.key}: ${error.message}`, 1);
-            return {
-                is_primary: isPrimary,
-                mime_type: contentType,
-                page_count: null,
-                status: "unavailable",
-                status_code: FileStatusCode.PdfParserCrash,
-                status_reason: "PDF crashes the local PDF parser",
-            };
-        }
-        logger(`getAttachmentFileStatus: Error analyzing PDF: ${error}`, 1);
-        return {
-            is_primary: isPrimary,
-            mime_type: contentType,
-            page_count: null,
-            status: "unavailable",
-            status_code: FileStatusCode.PdfAnalysisError,
-        };
-    }
+function attachmentInfoToFileStatus(
+    info: AttachmentInfo,
+    mimeType: string | null,
+): FrontendFileStatus {
+    return {
+        is_primary: info.is_primary,
+        mime_type: mimeType,
+        content_kind: info.content_kind,
+        page_count: info.page_count ?? null,
+        line_count: info.line_count ?? null,
+        status: info.status,
+        status_code: (info.status_code as FrontendFileStatus['status_code']) ?? null,
+        status_reason: info.status_reason ?? null,
+    };
 }
 
 /**
- * Lightweight file status check for search results.
- * Skips expensive OCR analysis and uses efficient page count methods.
+ * Get file status information for an attachment.
  *
- * Cache-first: if a fresh metadata record exists (from a prior full extraction),
- * returns richer status (including OCR/encrypted flags) without any I/O.
- * On miss: keeps existing lightweight behavior (fulltext/PDFWorker page count only)
- * and only persists metadata when page count comes from PDFWorker.
+ * Delegates to the unified attachment resolver with full PDF analysis
+ * (cache-first; on a miss reads the file, validates it, runs OCR detection,
+ * and persists metadata). EPUBs and the remaining content kinds follow the
+ * resolver's readability rules.
+ */
+export async function getAttachmentFileStatus(attachment: Zotero.Item, isPrimary: boolean): Promise<FrontendFileStatus> {
+    const info = await resolveAttachmentInfo(attachment, {
+        isPrimary,
+        pdfAnalysis: 'full',
+    });
+    return attachmentInfoToFileStatus(info, attachment.attachmentContentType || null);
+}
+
+/**
+ * Lightweight file status check for search/lookup results.
  *
- * @param attachment - Zotero attachment item
- * @param isPrimary - Whether this is the primary attachment for the parent item
- * @returns File status information (without OCR analysis on cache miss)
+ * Delegates to the unified attachment resolver with lightweight PDF analysis:
+ * cache-first, then cheap page-count probes (fulltext index, optionally the
+ * PDF worker) — never a full file read.
  */
 export async function getAttachmentFileStatusLightweight(
     attachment: Zotero.Item,
     isPrimary: boolean,
     options?: { skipWorkerFallback?: boolean }
-): Promise<{ fileStatus: FrontendFileStatus; fileExistsLocally: boolean | undefined }> {
-    // Check basic availability (PDF type, file exists, size limits)
-    const availabilityCheck = await checkAttachmentAvailability(attachment, isPrimary);
-    if (!availabilityCheck.available) {
-        // fileExistsLocally is set by checkAttachmentAvailability:
-        // - undefined for non-PDF (not checked), false for missing file, true for file-too-large
-        return { fileStatus: availabilityCheck.status, fileExistsLocally: availabilityCheck.fileExistsLocally };
-    }
-
-    const { filePath, contentType } = availabilityCheck;
-
-    // File is available — locally or on the Zotero server
-    const fileExistsLocally = !isRemoteFilePath(filePath);
-
-    // Cache-first: all writers produce complete records, so any hit is usable.
-    const cache = Zotero.Beaver?.documentCache;
-    if (cache) {
-        try {
-            const cached = await cache.getMetadata({
-                libraryId: attachment.libraryID,
-                zoteroKey: attachment.key,
-            }, filePath);
-            if (cached) {
-                return { fileStatus: fileStatusFromCache(cached, isPrimary), fileExistsLocally };
-            }
-        } catch (error) {
-            logger(`getAttachmentFileStatusLightweight: cache read error: ${error}`, 1);
-        }
-    }
-
-    // Cache miss: use lightweight methods (no full file read)
-    // First try fulltext index (instant database query)
-    let pageCount = await getPDFPageCountFromFulltext(attachment);
-
-    // Fallback to PDFWorker if not indexed (reads minimal data).
-    // In batch/search contexts, skip the worker to avoid queue contention —
-    // many concurrent calls serialize on the single PDFWorker and cause timeouts.
-    if (pageCount === null && !options?.skipWorkerFallback && !isRemoteFilePath(filePath)) {
-        pageCount = await getPDFPageCountFromWorker(attachment);
-    }
-
-    if (pageCount === null) {
-        if (options?.skipWorkerFallback || isRemoteFilePath(filePath)) {
-            // Optimistic: file passed availability checks (exists locally or on server, correct type).
-            // Page count is unknown but the PDF is likely usable — just not yet fulltext-indexed
-            // or the file is remote-only (page count will be determined on download).
-            return { fileStatus: {
-                is_primary: isPrimary,
-                mime_type: contentType,
-                page_count: null,
-                status: "available",
-            }, fileExistsLocally };
-        }
-        // Both methods failed — PDF is likely problematic (encrypted, corrupted, or unparseable)
-        return { fileStatus: {
-            is_primary: isPrimary,
-            mime_type: contentType,
-            page_count: null,
-            status: "unavailable",
-            status_code: FileStatusCode.PdfUnreadable,
-        }, fileExistsLocally };
-    }
-
-    // All checks passed - file is available
-    return { fileStatus: {
-        is_primary: isPrimary,
-        mime_type: contentType,
-        page_count: pageCount,
-        status: "available",
-    }, fileExistsLocally };
+): Promise<FrontendFileStatus> {
+    const info = await resolveAttachmentInfo(attachment, {
+        isPrimary,
+        pdfAnalysis: 'lightweight',
+        skipWorkerFallback: options?.skipWorkerFallback,
+    });
+    return attachmentInfoToFileStatus(info, attachment.attachmentContentType || null);
 }
 
 /**
@@ -610,7 +319,7 @@ export async function computeItemStatus(
     syncedLibraryIds: number[],
     syncWithZotero: any,
     userId: string | null,
-    options?: { syncDateCache?: Map<number, string | null>; fileExistsLocally?: boolean }
+    options?: { syncDateCache?: Map<number, string | null> }
 ): Promise<ZoteroItemStatus> {
     const isSyncedLibrary = syncedLibraryIds.includes(item.libraryID);
     const trashState = safeIsInTrash(item);
@@ -627,22 +336,11 @@ export async function computeItemStatus(
             // Skip safeFileExists() and syncingItemFilterAsync() which are not applicable
             availableLocallyOrOnServer = true;
             passesSyncFilters = false;
-        } else if (options?.fileExistsLocally !== undefined) {
-            // File existence already determined by caller (e.g. getAttachmentFileStatusLightweight)
-            // — skip redundant safeFileExists() and syncingItemFilterAsync() I/O
-            const onServerWithHash = isAttachmentOnServer(item);
+        } else {
+            // For file attachments, check if file exists locally or on server.
             // Beaver can access the file when it's local, has a synced hash, or
             // is downloadable via the remote-file-access path (on-demand items
             // in TO_DOWNLOAD/FORCE_DOWNLOAD state, gated by the pref).
-            availableLocallyOrOnServer =
-                options.fileExistsLocally || onServerWithHash || isRemoteAccessAvailable(item);
-            // Sync filters keep the stricter "hash or local" requirement — the
-            // backend needs a concrete hash to sync, so hashless remote-only
-            // items must not be reported as sync-eligible yet.
-            passesSyncFilters =
-                syncingItemFilter(item) && (options.fileExistsLocally || onServerWithHash);
-        } else {
-            // For file attachments, check if file exists locally or on server
             const isLocal = await safeFileExists(item);
             const onServerWithHash = isAttachmentOnServer(item);
             availableLocallyOrOnServer = isLocal || onServerWithHash || isRemoteAccessAvailable(item);
@@ -688,322 +386,16 @@ export async function computeItemStatus(
 }
 
 /**
- * Context for processing attachments (sync configuration)
+ * Resolve one attachment to the unified AttachmentInfo shape.
  */
-export interface AttachmentProcessingContext {
-    searchableLibraryIds: number[];
-    syncWithZotero: any;
-    userId: string | null;
-}
-
-/**
- * Batch-fetch the "best attachment" for multiple parent items in a single SQL query.
- * Replicates Zotero's `getBestAttachment()` ranking:
- *   1. PDF content type preferred
- *   2. URL matches parent's URL preferred
- *   3. Earliest dateAdded wins ties
- *
- * Uses `ROW_NUMBER() OVER (PARTITION BY ...)` to pick the best attachment per parent
- * in one pass instead of N individual queries.
- *
- * @param parentItemIds - IDs of regular (parent) items
- * @returns Map from parentItemID to bestAttachmentItemID
- */
-export async function getBestAttachmentBatch(
-    parentItemIds: number[]
-): Promise<Map<number, number>> {
-    const result = new Map<number, number>();
-    if (parentItemIds.length === 0) return result;
-
-    const CHUNK_SIZE = 500;
-    for (let i = 0; i < parentItemIds.length; i += CHUNK_SIZE) {
-        const chunk = parentItemIds.slice(i, i + CHUNK_SIZE);
-        const placeholders = chunk.map(() => '?').join(',');
-
-        const sql = `
-            WITH ranked AS (
-                SELECT
-                    IA.parentItemID,
-                    IA.itemID AS attachmentItemID,
-                    ROW_NUMBER() OVER (
-                        PARTITION BY IA.parentItemID
-                        ORDER BY
-                            CASE WHEN IA.contentType = 'application/pdf' THEN 0 ELSE 1 END,
-                            CASE WHEN COALESCE(IDV_att.value, '') = COALESCE(IDV_parent.value, '') THEN 0 ELSE 1 END,
-                            I.dateAdded ASC
-                    ) AS rn
-                FROM itemAttachments IA
-                JOIN items I ON I.itemID = IA.itemID
-                LEFT JOIN deletedItems DI ON DI.itemID = IA.itemID
-                LEFT JOIN itemData ID_att ON ID_att.itemID = IA.itemID
-                    AND ID_att.fieldID = (SELECT fieldID FROM fields WHERE fieldName = 'url')
-                LEFT JOIN itemDataValues IDV_att ON IDV_att.valueID = ID_att.valueID
-                LEFT JOIN itemData ID_parent ON ID_parent.itemID = IA.parentItemID
-                    AND ID_parent.fieldID = (SELECT fieldID FROM fields WHERE fieldName = 'url')
-                LEFT JOIN itemDataValues IDV_parent ON IDV_parent.valueID = ID_parent.valueID
-                WHERE IA.parentItemID IN (${placeholders})
-                  AND DI.itemID IS NULL
-                  AND IA.linkMode != ${Zotero.Attachments.LINK_MODE_LINKED_URL}
-            )
-            SELECT parentItemID, attachmentItemID
-            FROM ranked
-            WHERE rn = 1
-        `;
-
-        const rows: { parentItemID: number; attachmentItemID: number }[] = [];
-        await Zotero.DB.queryAsync(sql, chunk, {
-            onRow: (row: any) => {
-                rows.push({
-                    parentItemID: row.getResultByIndex(0),
-                    attachmentItemID: row.getResultByIndex(1),
-                });
-            },
-        });
-
-        for (const row of rows) {
-            result.set(row.parentItemID, row.attachmentItemID);
-        }
-    }
-
-    return result;
-}
-
-/**
- * Pre-fetched batch data for attachment processing.
- */
-export interface BatchAttachmentData {
-    bestAttachmentMap: Map<number, number>;
-    syncDateCache: Map<number, string | null>;
-}
-
-/**
- * Prepare batch attachment data for a set of parent items.
- * Runs getBestAttachmentBatch + prefetchSyncDates in parallel.
- */
-export async function prepareBatchAttachmentData(
-    parentItems: Zotero.Item[],
-    context: AttachmentProcessingContext,
-    timing?: TimingAccumulator
-): Promise<BatchAttachmentData> {
-    const parentItemIds = parentItems.map(item => item.id);
-    const libraryIds = [...new Set(parentItems.map(item => item.libraryID))];
-
-    const fn = () => Promise.all([
-        getBestAttachmentBatch(parentItemIds),
-        prefetchSyncDates(libraryIds, context.syncWithZotero, context.userId),
-    ]);
-
-    const [bestAttachmentMap, syncDateCache] = timing
-        ? await timing.track('batch_prefetch_ms', fn)
-        : await fn();
-
-    return { bestAttachmentMap, syncDateCache };
-}
-
-/**
- * Process attachments for an item using pre-fetched batch data.
- * Variant of processAttachmentsParallel that avoids per-item DB queries
- * for getBestAttachment and prefetchSyncDates.
- *
- * @param item - Parent Zotero item
- * @param context - Sync configuration context
- * @param batchData - Pre-fetched attachment data from prepareBatchAttachmentData
- * @param options.skipHash - If true, skip SHA-256 hash computation
- * @param options.timing - Optional timing accumulator
- * @returns Array of processed attachments with status
- */
-export async function processAttachmentsWithBatchData(
+export async function getAttachmentInfoForItem(
     item: Zotero.Item,
-    context: AttachmentProcessingContext,
-    batchData: BatchAttachmentData,
-    options?: {
-        skipHash?: boolean;
-        skipWorkerFallback?: boolean;
-        timing?: TimingAccumulator;
-        includeAnnotationsCount?: boolean;
-    }
-): Promise<AttachmentDataWithStatus[]> {
-    const skipHash = options?.skipHash ?? false;
-    const skipWorkerFallback = options?.skipWorkerFallback ?? false;
-    const includeAnnotationsCount = options?.includeAnnotationsCount ?? false;
-    const ta = options?.timing;
-    const attachmentIds = item.getAttachments();
-    if (attachmentIds.length === 0) {
-        return [];
-    }
-
-    // Fetch attachment items (mostly cache hits in Zotero's item cache)
-    const fetchFn = () => Zotero.Items.getAsync(attachmentIds);
-    const attachmentItems = ta
-        ? await ta.track('att_fetch_ms', fetchFn)
-        : await fetchFn();
-
-    // Load data types for all attachments
-    const loadFn = () => Zotero.Items.loadDataTypes(attachmentItems, ["primaryData", "itemData", "tags", "collections", "relations", "childItems"]);
-    await (ta ? ta.track('att_load_data_ms', loadFn) : loadFn());
-
-    // Use batch data for primary attachment lookup
-    const bestAttachmentId = batchData.bestAttachmentMap.get(item.id);
-
-    // Process all attachments in parallel
-    const attachmentPromises = attachmentItems.map(async (attachment): Promise<AttachmentDataWithStatus | null> => {
-        // Validate attachment
-        const isValidAttachment = syncingItemFilter(attachment);
-        if (!isValidAttachment) {
-            return null;
-        }
-
-        // Serialize attachment
-        const serializeFn = () => serializeAttachment(attachment, undefined, {
-            skipFileHash: true,
-            skipSyncingFilter: true,
-            skipHash,
-            includeAnnotationsCount,
-        });
-        const attachmentData = ta
-            ? await ta.track('att_serialize_ms', serializeFn)
-            : await serializeFn();
-        if (!attachmentData) {
-            return null;
-        }
-
-        // Use batch data for isPrimary and syncDateCache
-        const isPrimary = bestAttachmentId !== undefined && attachment.id === bestAttachmentId;
-
-        // Run file status first to determine file existence, then pass the hint
-        // to computeItemStatus to avoid redundant filesystem I/O
-        const fileStatusFn = () => getAttachmentFileStatusLightweight(attachment, isPrimary, { skipWorkerFallback });
-        const { fileStatus, fileExistsLocally } = ta
-            ? await ta.track('att_file_status_ms', fileStatusFn)
-            : await fileStatusFn();
-
-        const statusFn = () => computeItemStatus(attachment, context.searchableLibraryIds, context.syncWithZotero, context.userId, { syncDateCache: batchData.syncDateCache, fileExistsLocally });
-        const status = ta
-            ? await ta.track('att_status_ms', statusFn)
-            : await statusFn();
-
-        return {
-            attachment: attachmentData,
-            status,
-            file_status: fileStatus,
-        };
+    options?: AttachmentInfoOptions,
+): Promise<AttachmentInfo> {
+    return resolveAttachmentInfo(item, {
+        ...options,
+        nonPdfReadableEnabled: options?.nonPdfReadableEnabled ?? false,
     });
-
-    const results = await Promise.all(attachmentPromises);
-
-    // Filter out null results (invalid attachments)
-    return results.filter((result): result is AttachmentDataWithStatus => result !== null);
-}
-
-/**
- * Convert AttachmentDataWithStatus to the lightweight AttachmentSummary format
- * used in ItemSummary search results.
- */
-export function toAttachmentSummary(a: AttachmentDataWithStatus): AttachmentSummary {
-    return {
-        library_id: a.attachment.library_id,
-        zotero_key: a.attachment.zotero_key,
-        parent_key: a.attachment.parent_key ?? null,
-        title: a.attachment.title,
-        mime_type: a.attachment.mime_type,
-        is_primary: a.file_status?.is_primary ?? false,
-        page_count: a.file_status?.page_count ?? null,
-        annotations_count: a.attachment.annotations_count,
-        status: a.file_status?.status === 'available' ? 'available' : 'unavailable',
-        status_code: a.file_status?.status_code,
-        status_reason: a.file_status?.status_reason,
-    };
-}
-
-/**
- * Process attachments for an item in parallel.
- * Fetches, validates, and serializes all attachments concurrently.
- * 
- * Uses lightweight file status check (no full PDF read, no OCR analysis)
- * to avoid timeouts when processing many attachments.
- * 
- * @param item - Parent Zotero item
- * @param context - Sync configuration context
- * @param options.skipHash - If true, skip SHA-256 hash computation (for search/lookup paths)
- * @returns Array of processed attachments with status
- */
-export async function processAttachmentsParallel(
-    item: Zotero.Item,
-    context: AttachmentProcessingContext,
-    options?: {
-        skipHash?: boolean;
-        timing?: TimingAccumulator;
-        includeAnnotationsCount?: boolean;
-    }
-): Promise<AttachmentDataWithStatus[]> {
-    const skipHash = options?.skipHash ?? false;
-    const includeAnnotationsCount = options?.includeAnnotationsCount ?? false;
-    const ta = options?.timing;
-    const attachmentIds = item.getAttachments();
-    if (attachmentIds.length === 0) {
-        return [];
-    }
-
-    // Fetch attachment items, primary attachment, and sync dates in parallel
-    const fetchFn = () => Promise.all([
-        Zotero.Items.getAsync(attachmentIds),
-        item.getBestAttachment(),
-        prefetchSyncDates([item.libraryID], context.syncWithZotero, context.userId)
-    ]);
-    const [attachmentItems, primaryAttachment, syncDateCache] = ta
-        ? await ta.track('att_fetch_ms', fetchFn)
-        : await fetchFn();
-
-    // Load data types for all attachments
-    const loadFn = () => Zotero.Items.loadDataTypes(attachmentItems, ["primaryData", "itemData", "tags", "collections", "relations", "childItems"]);
-    await (ta ? ta.track('att_load_data_ms', loadFn) : loadFn());
-
-    // Process all attachments in parallel
-    const attachmentPromises = attachmentItems.map(async (attachment): Promise<AttachmentDataWithStatus | null> => {
-        // Validate attachment
-        const isValidAttachment = syncingItemFilter(attachment);
-        if (!isValidAttachment) {
-            return null;
-        }
-
-        // Serialize attachment (skip file hash — not needed for search results)
-        const serializeFn = () => serializeAttachment(attachment, undefined, {
-            skipFileHash: true,
-            skipSyncingFilter: true,
-            skipHash,
-            includeAnnotationsCount,
-        });
-        const attachmentData = ta
-            ? await ta.track('att_serialize_ms', serializeFn)
-            : await serializeFn();
-        if (!attachmentData) {
-            return null;
-        }
-
-        // Run file status first, then pass file-existence hint to computeItemStatus
-        // to avoid redundant filesystem I/O (getFilePathAsync / fileExists)
-        const isPrimary = primaryAttachment && attachment.id === primaryAttachment.id;
-        const fileStatusFn = () => getAttachmentFileStatusLightweight(attachment, isPrimary);
-        const { fileStatus, fileExistsLocally } = ta
-            ? await ta.track('att_file_status_ms', fileStatusFn)
-            : await fileStatusFn();
-
-        const statusFn = () => computeItemStatus(attachment, context.searchableLibraryIds, context.syncWithZotero, context.userId, { syncDateCache, fileExistsLocally });
-        const status = ta
-            ? await ta.track('att_status_ms', statusFn)
-            : await statusFn();
-
-        return {
-            attachment: attachmentData,
-            status,
-            file_status: fileStatus,
-        };
-    });
-
-    const results = await Promise.all(attachmentPromises);
-
-    // Filter out null results (invalid attachments)
-    return results.filter((result): result is AttachmentDataWithStatus => result !== null);
 }
 
 /**
@@ -1374,8 +766,7 @@ export function extractErrorDetails(error: unknown): { message: string; details:
 // `PdfAttachmentResolveResult` and `resolveToPdfAttachment` live in
 // `../documentExtraction` and are re-exported at the top of this file.
 // `getAttachmentInfo` stays here because other webpack-side callers depend
-// on its richer (text-with-filename) shape, and it transitively uses
-// `isSupportedItem` from `src/utils/sync.ts` (which is not esbuild-safe).
+// on its richer (text-with-filename) shape.
 
 export async function getAttachmentInfo(item: Zotero.Item): Promise<{ count: number, text: string, bestAttachmentKey: string | null }> {
     if (!item.isRegularItem()) {
@@ -1391,9 +782,9 @@ export async function getAttachmentInfo(item: Zotero.Item): Promise<{ count: num
     const bestAttachment = await item.getBestAttachment();
     const bestAttachmentKey = bestAttachment ? `${bestAttachment.libraryID}-${bestAttachment.key}` : null;
 
-    const pdfAttachmentKeys = attachmentIDs
+    const supportedAttachmentKeys = attachmentIDs
         .map(id => Zotero.Items.get(id))
-        .filter(attachment => attachment && isSupportedItem(attachment))
+        .filter(attachment => attachment && isAgentSupportedItem(attachment))
         .map(attachment => {
             const key = `${attachment.libraryID}-${attachment.key}`;
             const isPrimary = bestAttachmentKey && key === bestAttachmentKey;
@@ -1404,8 +795,8 @@ export async function getAttachmentInfo(item: Zotero.Item): Promise<{ count: num
         });
 
     return {
-        count: pdfAttachmentKeys.length,
-        text: pdfAttachmentKeys.join(', '),
+        count: supportedAttachmentKeys.length,
+        text: supportedAttachmentKeys.join(', '),
         bestAttachmentKey: bestAttachmentKey,
     }
 }

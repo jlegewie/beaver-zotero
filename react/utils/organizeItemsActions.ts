@@ -45,12 +45,18 @@ export async function executeOrganizeItemsAction(
 
             let modified = false;
 
+            // Tags apply to any item type; collections only apply to top-level
+            // items (annotations/attachments/notes inherit from their parent).
+            const isTopLevel = item.isTopLevelItem();
+
             // Get current state before modifications
             const existingTags = new Set(item.getTags().map((t: { tag: string }) => t.tag));
-            const existingCollections = new Set(item.getCollections().map((collectionId: number) => {
-                const collection = Zotero.Collections.get(collectionId);
-                return collection ? collection.key : null;
-            }).filter(Boolean) as string[]);
+            const existingCollections = isTopLevel
+                ? new Set(item.getCollections().map((collectionId: number) => {
+                    const collection = Zotero.Collections.get(collectionId);
+                    return collection ? collection.key : null;
+                }).filter(Boolean) as string[])
+                : new Set<string>();
 
             // Add tags (only if not already present)
             if (tags?.add && tags.add.length > 0) {
@@ -73,8 +79,8 @@ export async function executeOrganizeItemsAction(
                 }
             }
 
-            // Add to collections (only if not already member)
-            if (collections?.add && collections.add.length > 0) {
+            // Add to collections (only top-level items; only if not already member)
+            if (isTopLevel && collections?.add && collections.add.length > 0) {
                 for (const collKey of collections.add) {
                     if (!existingCollections.has(collKey)) {
                         const collection = await Zotero.Collections.getByLibraryAndKeyAsync(libraryId, collKey);
@@ -87,8 +93,8 @@ export async function executeOrganizeItemsAction(
                 }
             }
 
-            // Remove from collections (only if member)
-            if (collections?.remove && collections.remove.length > 0) {
+            // Remove from collections (only top-level items; only if member)
+            if (isTopLevel && collections?.remove && collections.remove.length > 0) {
                 for (const collKey of collections.remove) {
                     if (existingCollections.has(collKey)) {
                         const collection = await Zotero.Collections.getByLibraryAndKeyAsync(libraryId, collKey);

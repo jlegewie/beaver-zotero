@@ -13,10 +13,11 @@ import {
     WSListItemsResponse,
     ListItemsResultItem,
     RegularListResultItem,
-    AttachmentResultItem,
+    AttachmentRowResult,
 } from '../agentProtocol';
-import { serializeNote } from '../../utils/zoteroSerializers';
-import { getCollectionByIdOrName, validateLibraryAccess, isLibrarySearchable, getSearchableLibraries, extractYear, formatCreatorsString } from './utils';
+import { ItemStub } from '../../../react/types/zotero';
+import { serializeNote, serializeItemStub } from '../../utils/zoteroSerializers';
+import { getCollectionByIdOrName, validateLibraryAccess, isLibrarySearchable, getSearchableLibraries, extractYear, formatCreatorsString, getAttachmentInfoForItem } from './utils';
 
 function isAnnotationItem(item: Zotero.Item): boolean {
     return String(item.itemType) === 'annotation' || (item as { isAnnotation?: () => boolean }).isAnnotation?.() === true;
@@ -308,18 +309,13 @@ export async function handleListItemsRequest(
                 childParentIds.add(item.parentItemID);
             }
         }
-        const parentMap = new Map<number, { item_id: string; title: string }>();
+        const parentMap = new Map<number, ItemStub>();
         if (childParentIds.size > 0) {
             const parentItems = await Zotero.Items.getAsync([...childParentIds]);
             const validParents = parentItems.filter((p): p is Zotero.Item => p !== null);
             if (validParents.length > 0) {
-                await Zotero.Items.loadDataTypes(validParents, ['primaryData', 'itemData']);
-            }
-            for (const parent of validParents) {
-                let ptitle = '';
-                try { ptitle = (parent.getField('title', false, true) as string) || ''; }
-                catch { ptitle = parent.getDisplayTitle?.() || ''; }
-                parentMap.set(parent.id, { item_id: `${parent.libraryID}-${parent.key}`, title: ptitle });
+                await Zotero.Items.loadDataTypes(validParents, ['primaryData', 'itemData', 'creators']);
+                validParents.forEach(parent => parentMap.set(parent.id, serializeItemStub(parent)));
             }
         }
 
@@ -331,16 +327,18 @@ export async function handleListItemsRequest(
                 items.push(serializeNote(item, parentInfo));
             } else if (item.isAttachment()) {
                 const parentInfo = item.parentItemID ? parentMap.get(item.parentItemID) : null;
-                const attachmentItem: AttachmentResultItem = {
+                const attachmentInfo = await getAttachmentInfoForItem(item, {
+                    parentItemId: parentInfo?.item_id ?? null,
+                    isPrimary: false,
+                    includeAnnotationsCount: true,
+                    skipWorkerFallback: true,
+                });
+                const attachmentItem: AttachmentRowResult = {
+                    ...attachmentInfo,
                     result_type: 'attachment',
-                    item_id: `${library.libraryID}-${item.key}`,
-                    title: item.getDisplayTitle?.() || '',
-                    filename: item.attachmentFilename || null,
-                    content_type: item.attachmentContentType || null,
-                    parent_item_id: parentInfo?.item_id ?? null,
                     parent_title: parentInfo?.title ?? null,
+                    parent_item: parentInfo ?? null,
                     date_modified: item.dateModified,
-                    annotations_count: item.isFileAttachment?.() ? item.getAnnotations().length : 0,
                 };
                 items.push(attachmentItem);
             } else {

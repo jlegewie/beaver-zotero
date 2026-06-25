@@ -10,7 +10,7 @@
  *     cached-result path
  *   - extraction-error backfill: encrypted / invalid / no-text PDFs write an
  *     `errorCode` record to the document cache via `putErrorMetadata`
- *   - attachment-type / reference rejections (non-PDF, unresolvable key)
+ *   - attachment-type / reference behavior (EPUB extraction, unresolvable key)
  *   - parent-item auto-resolution and cross (group) library extraction
  *   - the search handler writing `errorCode` on a cold cache
  *   - the page-image render path deliberately NOT writing cache metadata
@@ -69,6 +69,8 @@ describe('document request — extraction happy paths', () => {
         const res = await fetchDocument(SMALL_PDF, { mode: 'markdown' }, EXTRACT_OPTS);
         const result = expectResult(res);
 
+        expect(res.content_kind).toBe('pdf');
+        expect(result.content_kind).toBe('pdf');
         expect(result.mode).toBe('markdown');
         expect(result.document.pageCount).toBe(SMALL_PDF_PAGE_COUNT);
         expect(result.document.pages).toHaveLength(SMALL_PDF_PAGE_COUNT);
@@ -84,6 +86,8 @@ describe('document request — extraction happy paths', () => {
         const res = await fetchDocument(SMALL_PDF, { mode: 'structured' }, EXTRACT_OPTS);
         const result = expectResult(res);
 
+        expect(res.content_kind).toBe('pdf');
+        expect(result.content_kind).toBe('pdf');
         expect(result.mode).toBe('structured');
         expect(result.document.pageCount).toBe(SMALL_PDF_PAGE_COUNT);
         expect(result.document.pages).toHaveLength(SMALL_PDF_PAGE_COUNT);
@@ -242,13 +246,26 @@ describe('document request — extraction errors backfill the cache', () => {
     });
 });
 
-describe('document request — attachment-type rejections', () => {
+describe('document request — non-PDF attachments', () => {
     beforeEach((ctx) => skipIfNoZotero(ctx, available));
 
-    it('rejects a non-PDF (EPUB) attachment', async () => {
-        const res = await fetchDocument(NON_PDF, { mode: 'markdown' });
-        expect(res.error_code).toBe('not_pdf');
-        expect(res.result ?? null).toBeNull();
+    it('returns an EPUB document for an EPUB attachment', async () => {
+        await invalidateCache(NON_PDF.library_id, NON_PDF.zotero_key);
+
+        const res = await fetchDocument(NON_PDF, { mode: 'markdown' }, EXTRACT_OPTS);
+        const result = expectResult(res) as any;
+        expect(res.content_kind).toBe('epub');
+        expect(result.content_kind).toBe('epub');
+        expect(result.schemaVersion).toBe('1');
+        expect(result.sectionCount).toBeGreaterThan(0);
+        expect(Array.isArray(result.sections)).toBe(true);
+        expect(result.sections.length).toBe(result.sectionCount);
+        expect(result.sections[0].index).toBe(0);
+        expect(Array.isArray(result.sections[0].items)).toBe(true);
+        expect(res.resolved_attachment).toMatchObject({
+            library_id: NON_PDF.library_id,
+            zotero_key: NON_PDF.zotero_key,
+        });
     });
 
     it('reports an unresolvable attachment reference', async () => {

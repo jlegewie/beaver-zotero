@@ -1,5 +1,5 @@
 import { ApplicationStateInput } from "../../src/services/agentProtocol";
-import { CitationMetadata } from "../types/citations";
+import { Citation } from "../types/citations";
 import { MessageAttachment } from "../types/attachments/apiTypes";
 import { ZoteroLibrary, ZoteroCollection, ZoteroTag } from "../types/zotero";
 import type { CardKind } from "../types/librarySuggestions";
@@ -164,6 +164,7 @@ export interface ToolCallPart {
     tool_name: string;
     args: string | Record<string, any> | null;
     tool_call_id: string;
+    tool_kind?: 'tool-search' | 'capability-load' | null;
     provider_details?: Record<string, any>;
     /** Optional progress message during tool execution (e.g., "Searching OpenAlex...") */
     progress?: string;
@@ -178,7 +179,7 @@ export interface ToolCallPart {
 export type AgentRunStatus = 'in_progress' | 'completed' | 'error' | 'canceled' | 'awaiting_deferred';
 
 interface AgentRunMetadata {
-    citations: CitationMetadata[];
+    citations: Citation[];
 }
 
 /**

@@ -4,34 +4,14 @@ import { ZoteroReader } from './annotationUtils';
 import { logger } from '../../src/utils/logger';
 import { getPageViewportInfo, isPDFDocumentAvailable, waitForPDFDocument, applyRotationToBoundingBox } from './pdfUtils';
 import { isLibraryEditable } from '../../src/utils/zoteroUtils';
-import { BEAVER_ANNOTATION_AUTHOR } from '../../src/constants/annotations';
+import { BEAVER_ANNOTATION_AUTHOR, resolveBeaverAnnotationColor } from '../../src/constants/annotations';
 import { AnnotationProposedAction, isHighlightAnnotationAction, isNoteAnnotationAction, AnnotationResultData } from '../types/agentActions/base';
 
 
-const HIGHLIGHT_COLORS: Record<string, string> = {
-    red: '#ff6666',
-    orange: '#ff9f43',
-    yellow: '#ffd400',
-    green: '#90ee90',
-    blue: '#5ac8fa',
-    purple: '#d4a5ff',
-    magenta: '#eb52f7',
-    gray: '#838383',
-    pink: '#ff66c4',
-    brown: '#e6a86e',
-    cyan: '#7fdbff',
-    lime: '#b4ff69',
-    mint: '#b2f7d3',
-    coral: '#ff9999',
-    navy: '#6495ed',
-    olive: '#e6e68a',
-    teal: '#7fffd4',
-};
 const NOTE_RECT_SIZE = 18;
 
 function resolveHighlightColor(color?: string | null): string {
-    if (!color) return '#ffd400';
-    return HIGHLIGHT_COLORS[color] || '#ffd400';
+    return resolveBeaverAnnotationColor(color);
 }
 
 async function getAttachmentItem(

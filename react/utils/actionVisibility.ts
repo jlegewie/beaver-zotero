@@ -7,7 +7,7 @@
 
 import { Action, ActionTargetType } from '../types/actions';
 import { ZoteroContext } from '../atoms/zoteroContext';
-import { isSupportedItem } from '../../src/utils/sync';
+import { agentItemFilter } from '../../src/utils/agentItemSupport';
 import { getDisplayNameFromItem } from './sourceUtils';
 import { truncateText } from './stringUtils';
 import { safeIsInTrash } from '../../src/utils/zoteroUtils';
@@ -34,10 +34,10 @@ const MAX_LABEL_ITEMS = 1;
 
 /**
  * Returns `true` when an item is both supported and actionable.
- * Adds a trash check on top of `isSupportedItem` (type-only).
+ * Adds a trash check on top of `isAgentSupportedItem` (type-only).
  */
 export function isActionableItem(item: Zotero.Item): boolean {
-    return isSupportedItem(item) && !safeIsInTrash(item);
+    return agentItemFilter(item);
 }
 
 // ---------------------------------------------------------------------------
@@ -147,17 +147,9 @@ export function computeActionGroups(allActions: Action[], ctx: ActionContext): A
 
     // --- 1. Reader group ---
     if (isReader) {
-        const readerParent = readerAtt!.parentItem;
         const label = truncateText(readerAtt!.getDisplayTitle(), MAX_LABEL_ITEM_LENGTH);
 
-        // Reader supports both attachment and items actions (parent is a regular item)
-        const readerActions = allActions.filter(a => {
-            if (a.targetType === 'attachment') return true;
-            if (a.targetType === 'items' && readerParent?.isRegularItem()) {
-                return (a.minItems ?? 1) <= 1;
-            }
-            return false;
-        });
+        const readerActions = allActions.filter(a => a.targetType === 'attachment');
 
         if (readerActions.length > 0) {
             const iconInfo = getIconInfoForItem(readerAtt!);

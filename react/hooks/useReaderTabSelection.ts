@@ -11,7 +11,7 @@ import { BeaverTemporaryAnnotations, ZoteroReader } from '../utils/annotationUti
 import { store } from '../store';
 import { threadAgentActionsAtom, getZoteroItemReferenceFromAgentAction, hasAppliedBulkAnnotations, AgentAction } from '../agents/agentActions';
 import { BEAVER_CITATION_ANNOTATION_AUTHOR, isBeaverAuthoredAnnotation } from '../../src/constants/annotations';
-import { getItemValidationAtom } from '../atoms/itemValidation';
+import { getItemValidationAtom, isRejectedItemValidation } from '../atoms/itemValidation';
 import type { CreatedAnnotationResult } from '../types/agentActions/createAnnotations';
 
 /**
@@ -124,8 +124,8 @@ export function useReaderTabSelection() {
             const item = await Zotero.Items.getAsync(reader.itemID);
             if (item) {
                 const validation = getValidation(item);
-                if (validation && !validation.isValid) {
-                    logger(`useReaderTabSelection:setupReader: Reader ${reader.itemID} is invalid. Skipping setup.`);
+                if (isRejectedItemValidation(item, validation)) {
+                    logger(`useReaderTabSelection:setupReader: Reader ${reader.itemID} is rejected. Skipping setup.`);
                     setReaderTextSelection(null);
                     return;
                 }
@@ -145,8 +145,8 @@ export function useReaderTabSelection() {
                         const item = await Zotero.Items.getAsync(reader.itemID);
                         if (item) {
                             const validation = getValidation(item);
-                            if (validation && !validation.isValid) {
-                                logger(`useReaderTabSelection:setupReader: Reader ${reader.itemID} is invalid. Skipping setup.`);
+                            if (isRejectedItemValidation(item, validation)) {
+                                logger(`useReaderTabSelection:setupReader: Reader ${reader.itemID} is rejected. Skipping setup.`);
                                 return;
                             }
                         }

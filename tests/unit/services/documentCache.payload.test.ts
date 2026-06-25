@@ -6,6 +6,7 @@ import { MockDBConnection } from '../../mocks/mockDBConnection';
 import { createMockAttachment } from '../../helpers/factories';
 import type { BeaverExtractResult } from '../../../src/beaver-extract/schema/schema';
 import type { PageGeometry } from '../../../src/services/documentCache';
+import type { EpubDocument } from '../../../src/services/documentExtraction/epub';
 
 const mockIOUtils = (globalThis as any).IOUtils as {
     exists: ReturnType<typeof vi.fn>;
@@ -35,6 +36,43 @@ const structuredResult: BeaverExtractResult = {
         bboxPrecision: 2,
         pages: [{ index: 0, label: '1', width: 100, height: 200, viewBox: [0, 0, 100, 200], rotation: 0, items: [] }],
         citationIndex: {},
+    },
+};
+
+const epubDocument: EpubDocument = {
+    content_kind: 'epub',
+    schemaVersion: '2',
+    sectionCount: 1,
+    sections: [
+        {
+            index: 0,
+            rawHref: 'EPUB/chapter.xhtml',
+            label: 'Chapter 1',
+            items: [
+                {
+                    id: 'p1',
+                    kind: 'text',
+                    sectionIndex: 0,
+                    order: 0,
+                    text: 'First sentence.',
+                    sentences: [{ id: 's1', text: 'First sentence.' }],
+                },
+            ],
+        },
+    ],
+    citationIndex: {
+        s1: {
+            id: 's1',
+            kind: 'sentence',
+            sectionIndex: 0,
+            itemId: 'p1',
+            sentenceId: 's1',
+        },
+    },
+    diagnostics: {
+        extractedTextChars: 15,
+        sourceTextChars: 15,
+        textCoverage: 1,
     },
 };
 
@@ -114,7 +152,169 @@ describe('DocumentCache payloads', () => {
             'structured',
             sourcePath,
         )).resolves.toEqual(structuredResult);
+
+        const metadata = await db.getDocumentCacheMetadataByKey(1, 'ABCD1234');
+        expect(metadata?.contentKind).toBe('pdf');
+        expect(metadata?.documentMetadata).toMatchObject({
+            content_kind: 'pdf',
+            pageCount: 1,
+        });
+        const payload = await db.getDocumentCachePayload(1, 'ABCD1234', 'structured');
+        expect(payload?.contentKind).toBe('pdf');
     });
+
+    it('putSerializedResult stores bytes readable by serialized and object cache APIs', async () => {
+        const item = createCacheAttachment();
+        const jsonBytes = new TextEncoder().encode(JSON.stringify(structuredResult));
+
+        await cache.putSerializedResult({
+            item,
+            filePath: sourcePath,
+            mode: 'structured',
+            sourceSizeBytes: 3,
+            contentType: 'application/pdf',
+            result: {
+                schemaVersion: structuredResult.schemaVersion,
+                mode: structuredResult.mode,
+                document: { pageCount: structuredResult.document.pageCount },
+                byteLength: jsonBytes.byteLength,
+                jsonBytes,
+                metadata: {
+                    pageCount: 1,
+                    pageLabels: { '0': '1' },
+                    pages: onePageGeometry,
+                },
+            },
+            metadata: {
+                pageCount: 1,
+                pageLabels: { '0': '1' },
+                pages: onePageGeometry,
+            },
+        });
+
+        const serialized = await cache.getSerializedResult(
+            { libraryId: 1, zoteroKey: 'ABCD1234' },
+            'structured',
+            sourcePath,
+        );
+        expect(serialized?.byteLength).toBe(jsonBytes.byteLength);
+        expect(new TextDecoder().decode(serialized?.jsonBytes)).toBe(JSON.stringify(structuredResult));
+
+        await expect(cache.getResult(
+            { libraryId: 1, zoteroKey: 'ABCD1234' },
+            'structured',
+            sourcePath,
+        )).resolves.toEqual(structuredResult);
+    });
+
+    it('serialized PDF probe does not accept pageCount substring matches', () => {
+        const bytes = new TextEncoder().encode(
+            JSON.stringify({
+                schemaVersion: '4',
+                mode: 'structured',
+                document: { pageCount: 15, pages: [] },
+            }),
+        );
+
+        expect((cache as any).isLikelySerializedPdfResult(bytes, 'structured', 1)).toBe(false);
+        expect((cache as any).isLikelySerializedPdfResult(bytes, 'structured', 15)).toBe(true);
+    });
+
+    it('putResult then getEpubResult returns the cached EPUB document', async () => {
+        const item = createCacheAttachment();
+
+        await cache.putResult<EpubDocument>({
+            item,
+            filePath: sourcePath,
+            mode: 'structured',
+            sourceSizeBytes: 3,
+            contentType: 'application/epub+zip',
+            result: epubDocument,
+            metadata: {
+                contentKind: 'epub',
+                pageCount: null,
+                pageLabels: null,
+                pages: null,
+                epubSections: [{ index: 0, rawHref: 'EPUB/chapter.xhtml', label: 'Chapter 1', itemCount: 1 }],
+                epubExtractedTextChars: 1234,
+            },
+        });
+
+        await expect(cache.getEpubResult(
+            { libraryId: 1, zoteroKey: 'ABCD1234' },
+            sourcePath,
+        )).resolves.toEqual(epubDocument);
+
+        const metadata = await db.getDocumentCacheMetadataByKey(1, 'ABCD1234');
+        expect(metadata?.contentKind).toBe('epub');
+        expect(metadata?.documentMetadata).toEqual({
+            content_kind: 'epub',
+            sectionCount: 1,
+            sections: [{ index: 0, rawHref: 'EPUB/chapter.xhtml', label: 'Chapter 1', itemCount: 1 }],
+            pageCount: null,
+            extractedTextChars: 1234,
+        });
+        const payload = await db.getDocumentCachePayload(1, 'ABCD1234', 'structured');
+        expect(payload?.contentKind).toBe('epub');
+    });
+
+    it('PDF getResult misses an EPUB row without deleting it', async () => {
+        const item = createCacheAttachment();
+        await cache.putResult<EpubDocument>({
+            item,
+            filePath: sourcePath,
+            mode: 'structured',
+            sourceSizeBytes: 3,
+            contentType: 'application/epub+zip',
+            result: epubDocument,
+            metadata: {
+                contentKind: 'epub',
+                pageCount: null,
+                pageLabels: null,
+                pages: null,
+                epubSections: [{ index: 0, rawHref: 'EPUB/chapter.xhtml', itemCount: 1 }],
+            },
+        });
+
+        await expect(cache.getResult(
+            { libraryId: 1, zoteroKey: 'ABCD1234' },
+            'structured',
+            sourcePath,
+        )).resolves.toBeNull();
+
+        expect(await db.getDocumentCacheMetadataByKey(1, 'ABCD1234')).not.toBeNull();
+        expect(await db.getDocumentCachePayloadCount()).toBe(1);
+        await expect(cache.getEpubResult(
+            { libraryId: 1, zoteroKey: 'ABCD1234' },
+            sourcePath,
+        )).resolves.toEqual(epubDocument);
+    });
+
+    it.each(['text', 'snapshot'] as const)(
+        'does not write payload files for uncacheable %s metadata',
+        async (contentKind) => {
+            const item = createCacheAttachment();
+
+            await cache.putResult({
+                item,
+                filePath: sourcePath,
+                mode: 'structured',
+                sourceSizeBytes: 3,
+                contentType: 'text/plain',
+                result: structuredResult,
+                metadata: {
+                    contentKind,
+                    pageCount: 1,
+                    pageLabels: { '0': '1' },
+                    pages: onePageGeometry,
+                },
+            });
+
+            expect(mockIOUtils.write).not.toHaveBeenCalled();
+            expect(await db.getDocumentCacheMetadataByKey(1, 'ABCD1234')).toBeNull();
+            expect(await db.getDocumentCachePayloadCount()).toBe(0);
+        },
+    );
 
     it('coalesces concurrent cold result creation for the same source identity', async () => {
         const item = createCacheAttachment();
@@ -342,6 +542,134 @@ describe('DocumentCache payloads', () => {
         expect(await db.getDocumentCacheMetadataByKey(1, 'ABCD1234')).not.toBeNull();
     });
 
+    it('corrupt metadata JSON is stale and deletes payload before parsing it', async () => {
+        const raw = conn.getRawDB();
+        const payloadPath = '/cache/corrupt-metadata.gz';
+        files.set(payloadPath, gzipString(JSON.stringify(structuredResult)));
+        raw.prepare(`
+            INSERT INTO document_cache_metadata (
+                item_id, library_id, zotero_key, content_kind, file_path,
+                file_mtime_ms, file_size_bytes, source_size_bytes, content_type,
+                document_metadata_json, extraction_schema_version, metadata_format_version
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+            100,
+            1,
+            'ABCD1234',
+            'pdf',
+            sourcePath,
+            10,
+            3,
+            3,
+            'application/pdf',
+            '{not json',
+            '4',
+            1,
+        );
+        const metadataId = (raw.prepare(`
+            SELECT id FROM document_cache_metadata
+            WHERE library_id = 1 AND zotero_key = 'ABCD1234'
+        `).get() as { id: number }).id;
+        raw.prepare(`
+            INSERT INTO document_cache_payloads (
+                metadata_id, item_id, library_id, zotero_key, payload_kind, content_kind,
+                source_file_path, source_file_mtime_ms, source_file_size_bytes,
+                source_size_bytes, payload_path, payload_size_bytes, payload_sha256,
+                extraction_schema_version, cache_format_version
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+            metadataId,
+            100,
+            1,
+            'ABCD1234',
+            'structured',
+            'pdf',
+            sourcePath,
+            10,
+            3,
+            3,
+            payloadPath,
+            files.get(payloadPath)!.byteLength,
+            null,
+            '4',
+            1,
+        );
+
+        await expect(cache.getResult(
+            { libraryId: 1, zoteroKey: 'ABCD1234' },
+            'structured',
+            sourcePath,
+        )).resolves.toBeNull();
+
+        expect(await db.getDocumentCacheMetadataByKey(1, 'ABCD1234')).toBeNull();
+        expect(await db.getDocumentCachePayloadCount()).toBe(0);
+        expect(files.has(payloadPath)).toBe(false);
+    });
+
+    it('metadata discriminator mismatch is stale and deletes payload', async () => {
+        const raw = conn.getRawDB();
+        const payloadPath = '/cache/mismatch-metadata.gz';
+        files.set(payloadPath, gzipString(JSON.stringify(structuredResult)));
+        raw.prepare(`
+            INSERT INTO document_cache_metadata (
+                item_id, library_id, zotero_key, content_kind, file_path,
+                file_mtime_ms, file_size_bytes, source_size_bytes, content_type,
+                document_metadata_json, extraction_schema_version, metadata_format_version
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+            100,
+            1,
+            'ABCD1234',
+            'pdf',
+            sourcePath,
+            10,
+            3,
+            3,
+            'application/pdf',
+            JSON.stringify({ content_kind: 'epub', sectionCount: 1, sections: [] }),
+            '4',
+            1,
+        );
+        const metadataId = (raw.prepare(`
+            SELECT id FROM document_cache_metadata
+            WHERE library_id = 1 AND zotero_key = 'ABCD1234'
+        `).get() as { id: number }).id;
+        raw.prepare(`
+            INSERT INTO document_cache_payloads (
+                metadata_id, item_id, library_id, zotero_key, payload_kind, content_kind,
+                source_file_path, source_file_mtime_ms, source_file_size_bytes,
+                source_size_bytes, payload_path, payload_size_bytes, payload_sha256,
+                extraction_schema_version, cache_format_version
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+            metadataId,
+            100,
+            1,
+            'ABCD1234',
+            'structured',
+            'pdf',
+            sourcePath,
+            10,
+            3,
+            3,
+            payloadPath,
+            files.get(payloadPath)!.byteLength,
+            null,
+            '4',
+            1,
+        );
+
+        await expect(cache.getResult(
+            { libraryId: 1, zoteroKey: 'ABCD1234' },
+            'structured',
+            sourcePath,
+        )).resolves.toBeNull();
+
+        expect(await db.getDocumentCacheMetadataByKey(1, 'ABCD1234')).toBeNull();
+        expect(await db.getDocumentCachePayloadCount()).toBe(0);
+        expect(files.has(payloadPath)).toBe(false);
+    });
+
     it('overwrites a corrupt orphan at the content-addressed payload path', async () => {
         const item = createCacheAttachment();
         await cache.putResult({
@@ -475,6 +803,39 @@ describe('DocumentCache payloads', () => {
         expect(files.has(secondPayload!.payloadPath)).toBe(true);
     });
 
+    it('payload freshness treats metadata and payload content-kind mismatch as stale', async () => {
+        const item = createCacheAttachment();
+        await cache.putResult({
+            item,
+            filePath: sourcePath,
+            mode: 'structured',
+            sourceSizeBytes: 3,
+            contentType: 'application/pdf',
+            result: structuredResult,
+            metadata: {
+                pageCount: 1,
+                pageLabels: { '0': '1' },
+                pages: onePageGeometry,
+            },
+        });
+        const payload = await db.getDocumentCachePayload(1, 'ABCD1234', 'structured');
+        const raw = conn.getRawDB();
+        raw.prepare(`
+            UPDATE document_cache_payloads
+            SET content_kind = 'epub', extraction_schema_version = '1'
+            WHERE id = ?
+        `).run(payload!.id);
+
+        await expect(cache.getResult(
+            { libraryId: 1, zoteroKey: 'ABCD1234' },
+            'structured',
+            sourcePath,
+        )).resolves.toBeNull();
+
+        expect(await db.getDocumentCachePayloadCount()).toBe(0);
+        expect(files.has(payload!.payloadPath)).toBe(false);
+    });
+
     it('startup GC removes cache entries for attachments missing from Zotero', async () => {
         const item = createCacheAttachment();
         await cache.putResult({
@@ -547,5 +908,57 @@ describe('DocumentCache payloads', () => {
 
         expect(await db.getDocumentCacheMetadataByKey(1, 'ABCD1234')).not.toBeNull();
         expect(await db.getDocumentCachePayloadCount()).toBe(1);
+    });
+
+    it('startup GC keeps valid EPUB cache entries', async () => {
+        const item = createCacheAttachment();
+        await cache.putResult<EpubDocument>({
+            item,
+            filePath: sourcePath,
+            mode: 'structured',
+            sourceSizeBytes: 3,
+            contentType: 'application/epub+zip',
+            result: epubDocument,
+            metadata: {
+                contentKind: 'epub',
+                pageCount: null,
+                pageLabels: null,
+                pages: null,
+                epubSections: [{ index: 0, rawHref: 'EPUB/chapter.xhtml', itemCount: 1 }],
+            },
+        });
+
+        await cache.runStartupGC();
+
+        const metadata = await db.getDocumentCacheMetadataByKey(1, 'ABCD1234');
+        expect(metadata?.contentKind).toBe('epub');
+        expect(metadata?.extractionSchemaVersion).toBe('2');
+        expect(await db.getDocumentCachePayloadCount()).toBe(1);
+    });
+
+    it('startup GC removes cache rows whose schema version mismatches the content kind', async () => {
+        const item = createCacheAttachment();
+        await cache.putResult({
+            item,
+            filePath: sourcePath,
+            mode: 'structured',
+            sourceSizeBytes: 3,
+            contentType: 'application/pdf',
+            result: structuredResult,
+            metadata: {
+                pageCount: 1,
+                pageLabels: { '0': '1' },
+                pages: onePageGeometry,
+            },
+        });
+        const payload = await db.getDocumentCachePayload(1, 'ABCD1234', 'structured');
+        const raw = conn.getRawDB();
+        raw.exec(`UPDATE document_cache_metadata SET extraction_schema_version = '3'`);
+
+        await cache.runStartupGC();
+
+        expect(await db.getDocumentCacheMetadataByKey(1, 'ABCD1234')).toBeNull();
+        expect(await db.getDocumentCachePayloadCount()).toBe(0);
+        expect(files.has(payload!.payloadPath)).toBe(false);
     });
 });

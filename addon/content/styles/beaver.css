@@ -294,11 +294,13 @@
 /* UserRequestView - Clickable user message display */
 [id^="beaver-pane-"] .user-request-view {
     cursor: pointer;
-    transition: filter 0.15s ease, border-color 0.15s ease;
+    transition: border-color 0.15s ease;
 }
 
 [id^="beaver-pane-"] .user-request-view-hover {
-    filter: brightness(1.02);
+    /* No `filter` here: a filter makes this element the containing block for
+       position:fixed descendants, which displaces the inline context menus
+       rendered by the attachment chips. */
     border-color: var(--fill-quarternary);
 }
 
@@ -633,6 +635,9 @@
 [id^="beaver-pane-"] .-translate-x-1\/2 { transform: translateX(-50%); }
 [id^="beaver-pane-"] .z-10 { z-index: 10; }
 [id^="beaver-pane-"] .z-1000 { z-index: 1000; }
+/* Floating overlays (tooltips) must clear Zotero's focused items-tree row,
+   which gets z-index: 10000 while the tree has focus (blue selection). */
+[id^="beaver-pane-"] .z-100000 { z-index: 100000; }
 [id^="beaver-pane-"] .hidden { display: none; }
 
 [id^="beaver-pane-"] .inline-flex { display: inline-flex; }
@@ -943,6 +948,15 @@
 [id^="beaver-pane-"] .border-popup { border: 1px solid var(--fill-quarternary); }
 [id^="beaver-pane-"] .border-transparent { border: 1px solid transparent; }
 [id^="beaver-pane-"] .border-error { border: 1px solid var(--tag-red-tertiary); }
+
+/* Menu items use roving focus, so replace the browser outline with Beaver's menu highlight. */
+[id^="beaver-pane-"] .beaver-menu-item:focus {
+    outline: none;
+}
+
+[id^="beaver-pane-"] .beaver-menu-item:focus-visible {
+    box-shadow: inset 0 0 0 1px var(--fill-tertiary);
+}
 
 /* Shadows */
 [id^="beaver-pane-"] .shadow-sm { box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.1); }

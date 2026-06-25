@@ -29,6 +29,7 @@ import {
 import { extractAndCacheDocument } from './documentExtractionCore';
 import type { BackgroundJobRecord } from './database';
 import type { DocumentCache } from './documentCache';
+import { liveAttachmentContentKind } from './documentExtraction/attachmentResolution';
 
 /**
  * Local alias for the BeaverDB surface this processor actually uses.
@@ -432,7 +433,7 @@ export class BackgroundExtractor {
         if (!record) return inactive('empty');
 
         logger(
-            `BackgroundExtractor: claimed job id=${record.id} type=${record.jobType} ${record.libraryId}-${record.zoteroKey} mode=${record.mode} attempt=${record.attemptCount + 1}`,
+            `BackgroundExtractor: claimed job id=${record.id} type=${record.jobType} ${record.libraryId}-${record.zoteroKey} content_kind=${record.contentKind} payload_kind=${record.payloadKind} attempt=${record.attemptCount + 1}`,
             3,
         );
         this.setWorkerRunning(true);
@@ -562,8 +563,32 @@ export class BackgroundExtractor {
             return;
         }
 
+        const liveKind = liveAttachmentContentKind(item);
+        const canResolvePdfFromParent =
+            liveKind === null
+            && record.contentKind === 'pdf'
+            && typeof item.isRegularItem === 'function'
+            && item.isRegularItem();
+        if (
+            (liveKind === null && !canResolvePdfFromParent)
+            || (liveKind !== null && liveKind !== record.contentKind)
+        ) {
+            if (this.shouldSkipDbWrites()) return;
+            await db.completeBackgroundJob(record.id);
+            dispatchBackgroundEvent('background-job:done', {
+                id: record.id,
+                reason: 'content_kind_stale',
+            });
+            return;
+        }
+
+        if (record.contentKind !== 'pdf') {
+            await this.handleUnsupportedContentKind(record, db);
+            return;
+        }
+
         const payload = record.payload;
-        if (!payload) {
+        if (!payload || payload.content_kind !== 'pdf') {
             if (this.shouldSkipDbWrites()) return;
             await db.completeBackgroundJob(record.id);
             dispatchBackgroundEvent('background-job:done', {
@@ -578,7 +603,7 @@ export class BackgroundExtractor {
             result = await extractAndCacheDocument({
                 libraryId: record.libraryId,
                 zoteroKey: record.zoteroKey,
-                mode: record.mode,
+                mode: record.payloadKind,
                 maxPages: payload.maxPages,
                 maxFileSizeMB: payload.maxFileSizeMB,
                 timeoutSeconds: payload.timeoutSeconds,
@@ -596,6 +621,22 @@ export class BackgroundExtractor {
         }
 
         await this.classifyAndPersist(result, record, db);
+    }
+
+    private async handleUnsupportedContentKind(
+        record: BackgroundJobRecord,
+        db: QueueDB,
+    ): Promise<void> {
+        logger(
+            `BackgroundExtractor: job id=${record.id} done (unsupported_content_kind:${record.contentKind})`,
+            2,
+        );
+        if (this.shouldSkipDbWrites()) return;
+        await db.completeBackgroundJob(record.id);
+        dispatchBackgroundEvent('background-job:done', {
+            id: record.id,
+            reason: 'unsupported_content_kind',
+        });
     }
 
     private async classifyAndPersist(

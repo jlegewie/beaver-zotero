@@ -55,6 +55,7 @@ import type {
     PDFSearchOptions,
     PDFSearchResult,
     InternalProcessedPage,
+    PageGeometry,
     RawPageData,
     RawPageDataDetailed,
     StructuredPagePhaseTimings,
@@ -80,6 +81,7 @@ import {
     type ExtractionDebug,
     type DebugSentence,
     type MarkdownExtractResult,
+    type SerializedBeaverExtractResult,
     type StructuredExtractResult,
     type StructuredExtractWithDebugResult,
 } from "../schema";
@@ -93,6 +95,7 @@ import { isRecoverablePageError } from "../wasmFatal";
 import { acquireDoc, releaseDoc } from "./docCache";
 import { ensureApi } from "./wasmInit";
 import {
+    buildCompoundVocabulary,
     extractSentencesForPage,
     runSentenceExtractionFromDoc,
 } from "./sentenceExtraction";
@@ -348,6 +351,14 @@ function buildAnalysisFromDoc(
     styleProfile: StyleProfile;
     marginAnalysis: MarginAnalysis;
     marginRemoval: MarginRemovalResult;
+    /**
+     * Genuine hyphenated compounds (lowercased) seen mid-line across the
+     * analysis window. Used by the structured sentence mapper to keep a
+     * line-break hyphen when the compound is attested (e.g. "broken-windows")
+     * and join it otherwise. Coverage scales with the analysis window — for
+     * full-document structured extraction it spans the whole document.
+     */
+    compoundVocabulary: ReadonlySet<string>;
     walkMs: number;
     analysisMs: number;
 } {
@@ -379,6 +390,10 @@ function buildAnalysisFromDoc(
     const analysisPageByIndex = new Map<number, RawPageData>(
         analysisPages.map((p) => [p.pageIndex, p]),
     );
+    // Genuine mid-line hyphenated compounds across the analysis window. Built
+    // from the already-walked line text (no extra walk) and consumed by the
+    // structured sentence mapper's line-break de-hyphenation.
+    const compoundVocabulary = buildCompoundVocabulary(analysisPages);
     const walkMs = performance.now() - tWalkStart;
 
     const tAnalysisStart = performance.now();
@@ -399,6 +414,7 @@ function buildAnalysisFromDoc(
         styleProfile,
         marginAnalysis,
         marginRemoval,
+        compoundVocabulary,
         walkMs,
         analysisMs,
     };
@@ -633,6 +649,7 @@ export function runExtractFromIndices(
         styleProfile,
         marginAnalysis,
         marginRemoval,
+        compoundVocabulary,
         walkMs: jsonWalkMs,
         analysisMs,
     } = buildAnalysisFromDoc(
@@ -770,6 +787,7 @@ export function runExtractFromIndices(
                     paragraphSettings,
                     marginRemoval,
                     styleProfile,
+                    compoundVocabulary,
                     margins: opts.margins,
                     marginZone: opts.marginZone,
                     graphicsLayerMode: opts.graphicsLayerMode,
@@ -1152,6 +1170,43 @@ function serializeStyleProfile(styleProfile: StyleProfile): unknown {
     };
 }
 
+function buildSerializedCacheMetadata(
+    result: BeaverExtractResult,
+): SerializedBeaverExtractResult["cacheMetadata"] {
+    const doc = result.document;
+    const pageLabels = doc.pageLabels ?? Object.fromEntries(
+        doc.pages
+            .filter((page) => page.label)
+            .map((page) => [String(page.index), page.label as string]),
+    );
+    const pages: (PageGeometry | null)[] = new Array(doc.pageCount).fill(null);
+    for (const page of doc.pages) {
+        pages[page.index] = {
+            viewBox: page.viewBox,
+            width: page.viewBox[2] - page.viewBox[0],
+            height: page.viewBox[3] - page.viewBox[1],
+            rotation: page.rotation,
+        };
+    }
+    return {
+        pageCount: doc.pageCount,
+        pageLabels,
+        pages,
+    };
+}
+
+function serializeExtractResult(result: BeaverExtractResult): SerializedBeaverExtractResult {
+    const jsonBytes = new TextEncoder().encode(JSON.stringify(result));
+    return {
+        mode: result.mode,
+        schemaVersion: result.schemaVersion,
+        pageCount: result.document.pageCount,
+        byteLength: jsonBytes.byteLength,
+        jsonBytes,
+        cacheMetadata: buildSerializedCacheMetadata(result),
+    };
+}
+
 /**
  * Strict, fused extract op for the agent handlers.
  *
@@ -1350,6 +1405,17 @@ export async function opExtract(
     } finally {
         releaseDoc(doc, docFailed);
     }
+}
+
+export async function opExtractSerialized(
+    args: Parameters<typeof opExtract>[0],
+): Promise<OpReply<SerializedBeaverExtractResult>> {
+    const { result } = await opExtract(args);
+    const serialized = serializeExtractResult(result);
+    return {
+        result: serialized,
+        transfer: [serialized.jsonBytes.buffer],
+    };
 }
 
 export async function opStructuredExtractWithDebug(

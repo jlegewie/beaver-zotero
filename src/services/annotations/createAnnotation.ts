@@ -7,34 +7,22 @@ import { NotePosition } from "../../../react/types/agentActions/annotations";
 import { PageGeometry } from "../../beaver-extract/types";
 import { getAttachmentFileStatus } from "../agentDataProvider/utils";
 import { isRemoteFilePath } from "../documentFileIdentity";
-import { BEAVER_ANNOTATION_AUTHOR } from "../../constants/annotations";
+import {
+    BEAVER_ANNOTATION_AUTHOR,
+    resolveBeaverAnnotationColor,
+} from "../../constants/annotations";
 import {
     displayBoxToZoteroRect,
     sourceBboxesToZoteroRects,
 } from "./annotationGeometry";
+import { getReadableContentKind } from "../documentExtraction/attachmentResolution";
+import {
+    resolveEpubAnnotationTarget,
+    type EpubAnnotationLocator,
+} from "./epub/epubAnnotationResolver";
 
-const HIGHLIGHT_COLORS: Record<string, string> = {
-    red: "#ff6666",
-    orange: "#ff9f43",
-    yellow: "#ffd400",
-    green: "#90ee90",
-    blue: "#5ac8fa",
-    purple: "#d4a5ff",
-    magenta: "#eb52f7",
-    gray: "#838383",
-    pink: "#ff66c4",
-    brown: "#e6a86e",
-    cyan: "#7fdbff",
-    lime: "#b4ff69",
-    mint: "#b2f7d3",
-    coral: "#ff9999",
-    navy: "#6495ed",
-    olive: "#e6e68a",
-    teal: "#7fffd4",
-};
 const NOTE_RECT_SIZE = 18;
 const NOTE_SIDE_MARGIN = 12;
-const DEFAULT_HIGHLIGHT_COLOR = "#ffd400";
 
 export type MissingPageGeometryReason = "unavailable" | "extraction_failed";
 
@@ -73,6 +61,8 @@ export interface CreateHighlightInput {
     pageLabel?: string | null;
     /** Backend-supplied per-page cumulative character offset in reading order. */
     readingOrderOffset?: number | null;
+    /** Tags applied to the created annotation. */
+    tags?: string[];
 }
 
 export interface CreateNoteInput {
@@ -82,11 +72,8 @@ export interface CreateNoteInput {
     pageLabel?: string | null;
     /** See CreateHighlightInput.readingOrderOffset. */
     readingOrderOffset?: number | null;
-}
-
-function resolveHighlightColor(color?: string | null): string {
-    if (!color) return DEFAULT_HIGHLIGHT_COLOR;
-    return HIGHLIGHT_COLORS[color] ?? DEFAULT_HIGHLIGHT_COLOR;
+    /** Tags applied to the created annotation. */
+    tags?: string[];
 }
 
 /**
@@ -358,7 +345,7 @@ export async function createHighlightAnnotation(
     item.annotationType = "highlight";
     item.annotationText = input.text ?? "";
     item.annotationComment = input.comment ?? "";
-    item.annotationColor = resolveHighlightColor(input.color);
+    item.annotationColor = resolveBeaverAnnotationColor(input.color);
     item.annotationPageLabel =
         firstNonBlankPageLabel(input.pageLabel) ?? String(input.pageIndex + 1);
     const sortIndexField: Pick<ZoteroAnnotationItem, "annotationSortIndex"> = {
@@ -370,6 +357,10 @@ export async function createHighlightAnnotation(
         rects,
     });
     item.annotationAuthorName = BEAVER_ANNOTATION_AUTHOR;
+    // addTag calls setTags internally, so tags persist in the same saveTx write.
+    if (input.tags?.length) {
+        for (const tag of input.tags) item.addTag(tag);
+    }
     await item.saveTx();
 
     return { library_id: attachment.libraryID, zotero_key: item.key };
@@ -401,7 +392,7 @@ export async function createNoteAnnotation(
     item.parentID = attachment.id;
     item.annotationType = "note";
     item.annotationComment = input.comment;
-    item.annotationColor = resolveHighlightColor(input.color);
+    item.annotationColor = resolveBeaverAnnotationColor(input.color);
     item.annotationPageLabel =
         firstNonBlankPageLabel(input.pageLabel) ?? String(pageIndex + 1);
     const sortIndexField: Pick<ZoteroAnnotationItem, "annotationSortIndex"> = {
@@ -410,6 +401,157 @@ export async function createNoteAnnotation(
     Object.assign(item, sortIndexField);
     item.annotationPosition = JSON.stringify({ pageIndex, rects: [rect] });
     item.annotationAuthorName = BEAVER_ANNOTATION_AUTHOR;
+    // addTag calls setTags internally, so tags persist in the same saveTx write.
+    if (input.tags?.length) {
+        for (const tag of input.tags) item.addTag(tag);
+    }
+    await item.saveTx();
+
+    return { library_id: attachment.libraryID, zotero_key: item.key };
+}
+
+// ---------------------------------------------------------------------------
+// EPUB annotations (headless epubcfi — no reader instance)
+// ---------------------------------------------------------------------------
+
+/** Failure creating an EPUB annotation; `code` maps to a per-item error code. */
+export class EpubAnnotationError extends Error {
+    readonly code: string;
+
+    constructor(code: string, message?: string) {
+        super(message ?? code);
+        this.name = "EpubAnnotationError";
+        this.code = code;
+    }
+}
+
+interface EpubLocatorInput {
+    /** Section href within the EPUB (matched by basename). */
+    sectionHref?: string;
+    /** 1-based extractor (compacted) section ordinal; href fallback. */
+    sectionOrdinal?: number;
+    /** DOM id of the cited element inside the section. */
+    anchorId?: string;
+    /** Cited passage text used to anchor the range. */
+    text?: string;
+    color?: string | null;
+    pageLabel?: string | null;
+    /** Tags applied to the created annotation. */
+    tags?: string[];
+}
+
+export interface CreateEpubHighlightInput extends EpubLocatorInput {
+    /** Cited passage to locate and highlight. */
+    text: string;
+    comment?: string | null;
+}
+
+export interface CreateEpubNoteInput extends EpubLocatorInput {
+    comment: string;
+}
+
+function assertEpubAttachment(attachment: Zotero.Item): void {
+    if (getReadableContentKind(attachment) !== "epub") {
+        throw new EpubAnnotationError("invalid_attachment", "attachment is not an EPUB");
+    }
+}
+
+async function getEpubFilePath(attachment: Zotero.Item): Promise<string> {
+    const filePath = await attachment.getFilePathAsync();
+    if (!filePath) {
+        throw new EpubAnnotationError("attachment_file_unavailable", "attachment file path is null");
+    }
+    if (isRemoteFilePath(filePath)) {
+        throw new EpubAnnotationError("attachment_file_unavailable", "remote attachment not supported");
+    }
+    return filePath;
+}
+
+async function resolveEpubAnnotationOrThrow(
+    attachment: Zotero.Item,
+    locator: EpubAnnotationLocator,
+) {
+    assertEpubAttachment(attachment);
+    const filePath = await getEpubFilePath(attachment);
+    const resolved = await resolveEpubAnnotationTarget(filePath, locator);
+    if ("error" in resolved) {
+        throw new EpubAnnotationError(resolved.error, resolved.message);
+    }
+    return resolved;
+}
+
+/**
+ * Create a headless Zotero EPUB highlight annotation. The epubcfi `position`
+ * and `sortIndex` are computed from the EPUB's own XHTML (no open reader);
+ * the reader renders the saved item via the notifier if the book is open.
+ */
+export async function createEpubHighlightAnnotation(
+    attachment: Zotero.Item,
+    input: CreateEpubHighlightInput,
+): Promise<ZoteroItemReference> {
+    const resolved = await resolveEpubAnnotationOrThrow(attachment, {
+        sectionHref: input.sectionHref,
+        sectionOrdinal: input.sectionOrdinal,
+        anchorId: input.anchorId,
+        text: input.text,
+    });
+
+    const item = new Zotero.Item("annotation");
+    item.libraryID = attachment.libraryID;
+    item.parentID = attachment.id;
+    item.annotationType = "highlight";
+    item.annotationText = resolved.text;
+    item.annotationComment = input.comment ?? "";
+    item.annotationColor = resolveBeaverAnnotationColor(input.color);
+    item.annotationPageLabel = firstNonBlankPageLabel(input.pageLabel) ?? "";
+    const sortIndexField: Pick<ZoteroAnnotationItem, "annotationSortIndex"> = {
+        annotationSortIndex: resolved.sortIndex,
+    };
+    Object.assign(item, sortIndexField);
+    item.annotationPosition = JSON.stringify(resolved.position);
+    item.annotationAuthorName = BEAVER_ANNOTATION_AUTHOR;
+    if (input.tags?.length) {
+        for (const tag of input.tags) item.addTag(tag);
+    }
+    await item.saveTx();
+
+    return { library_id: attachment.libraryID, zotero_key: item.key };
+}
+
+/**
+ * Create a headless Zotero EPUB note annotation: a comment-icon annotation whose
+ * CFI spans the cited passage's containing block, so the reader renders the icon
+ * in the margin beside the block (matching a note added in the reader itself)
+ * rather than inline over the text.
+ */
+export async function createEpubNoteAnnotation(
+    attachment: Zotero.Item,
+    input: CreateEpubNoteInput,
+): Promise<ZoteroItemReference> {
+    const resolved = await resolveEpubAnnotationOrThrow(attachment, {
+        sectionHref: input.sectionHref,
+        sectionOrdinal: input.sectionOrdinal,
+        anchorId: input.anchorId,
+        text: input.text,
+        anchorToBlock: true,
+    });
+
+    const item = new Zotero.Item("annotation");
+    item.libraryID = attachment.libraryID;
+    item.parentID = attachment.id;
+    item.annotationType = "note";
+    item.annotationComment = input.comment;
+    item.annotationColor = resolveBeaverAnnotationColor(input.color);
+    item.annotationPageLabel = firstNonBlankPageLabel(input.pageLabel) ?? "";
+    const sortIndexField: Pick<ZoteroAnnotationItem, "annotationSortIndex"> = {
+        annotationSortIndex: resolved.sortIndex,
+    };
+    Object.assign(item, sortIndexField);
+    item.annotationPosition = JSON.stringify(resolved.position);
+    item.annotationAuthorName = BEAVER_ANNOTATION_AUTHOR;
+    if (input.tags?.length) {
+        for (const tag of input.tags) item.addTag(tag);
+    }
     await item.saveTx();
 
     return { library_id: attachment.libraryID, zotero_key: item.key };

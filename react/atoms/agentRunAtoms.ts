@@ -8,6 +8,7 @@
 import { atom, Getter, Setter } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
 import { agentService } from '../../src/services/agentService';
+import { notifyRunComplete } from '../../src/services/systemNotifications';
 import {
     WSCallbacks,
     AgentRunRequest,
@@ -26,35 +27,32 @@ import {
     WSDeferredApprovalRequest,
     WSStreamingDoneEvent,
     WSThreadNameEvent,
-    CurrentLibrary,
-    CurrentCollection,
     ChargingPermissions,
-    IndexingStatus,
+    ZOTERO_PLUGIN_CLIENT_TYPE,
+    ZOTERO_PLUGIN_FEATURES,
 } from '../../src/services/agentProtocol';
 import { logger } from '../../src/utils/logger';
 import { selectedModelAtom, ModelConfig } from './models';
 import { getPref } from '../../src/utils/prefs';
-import { MessageAttachment, NoteState, ReaderState, SourceAttachment } from '../types/attachments/apiTypes';
+import { MessageAttachment, SourceAttachment } from '../types/attachments/apiTypes';
 import { toMessageAttachment } from '../types/attachments/converters';
-import { serializeCollection, serializeZoteroLibrary } from '../../src/utils/zoteroSerializers';
+import { safeStub, serializeAttachmentStub, serializeCollection, serializeItemStub, serializeZoteroLibrary } from '../../src/utils/zoteroSerializers';
 import { SubscriptionStatus, ProcessingMode } from '../types/profile';
-import { isDatabaseSyncSupportedAtom, processingModeAtom } from './profile';
-import { embeddingIndexStateAtom } from './embeddingIndex';
-import { BeaverDB } from '../../src/services/database';
-import { EmbeddingIndexer } from '../../src/services/embeddingIndexer';
+import { isDatabaseSyncSupportedAtom } from './profile';
 import { addPopupMessageAtom } from '../utils/popupMessageUtils';
 import {
     currentMessageItemsAtom,
     currentMessageCollectionsAtom,
+    currentMessageExternalFilesAtom,
     currentReaderAttachmentAtom,
     currentMessageFiltersAtom,
-    readerTextSelectionAtom,
     currentMessageContentAtom,
 } from './messageComposition';
-import { isWebSearchEnabledAtom, isLibraryTabAtom, removePopupMessagesByTypeAtom, isWebSearchAllowedAtom } from './ui';
+import { isWebSearchEnabledAtom, removePopupMessagesByTypeAtom, isWebSearchAllowedAtom } from './ui';
 import { currentNoteItemAtom } from './zoteroContext';
-import { isAnnotationAttachment } from '../types/attachments/apiTypes';
-import { getCurrentPage } from '../utils/readerUtils';
+import { isAnnotationAttachment, messageAttachmentKey } from '../types/attachments/apiTypes';
+import type { ExternalFileAttachment } from '../types/attachments/apiTypes';
+import { getApplicationStateProvider } from './applicationState';
 import { uint8ArrayToBase64 } from '../utils/fileUtils';
 import { isAttachmentOnServer } from '../../src/utils/webAPI';
 import { AgentRun, BeaverAgentPrompt, MessageSearchFilters, PromptOrigin, ToolRequest } from '../agents/types';
@@ -71,7 +69,7 @@ import {
     resetRunMessages,
 } from '../agents/atoms';
 import { userIdAtom } from './auth';
-import { citationMetadataAtom, updateCitationDataAtom, resetCitationMarkersAtom, mergePageLabelsByAttachmentIdAtom } from './citations';
+import { citationsAtom, processCitationsAtom, resetCitationMarkersAtom, mergePageLabelsByAttachmentIdAtom } from './citations';
 import { preloadPageLabelsForCitations } from '../utils/pageLabels';
 import {
     addAgentActionsAtom,
@@ -110,6 +108,8 @@ import { undoEditNoteAction } from '../utils/editNoteActions';
 import { undoCreateNoteAction } from '../utils/createNoteActions';
 import { undoCreateAnnotationsAction } from '../utils/createAnnotationsActions';
 import { processToolReturnResults } from '../agents/toolResultProcessing';
+import { upgradeToolReturn } from '../compat/legacyToolResults';
+import { isToolResultView } from '../types/toolResultViews';
 import { addWarningAtom, clearWarningsAtom } from './warnings';
 import { backendHighTokenUsageRunsAtom, softCapTriggeredRunsAtom } from './messageUIState';
 import { currentThreadNameAtom } from './threads';
@@ -122,12 +122,12 @@ import {
     clearAutoApprovedActionIdsAtom,
     makeNoteKey,
 } from './editNoteAutoApprove';
-import { loadFullItemDataWithAllTypes } from '../../src/utils/zoteroUtils';
+import { loadFullItemDataWithAllTypes, getZoteroUserIdentifier } from '../../src/utils/zoteroUtils';
 import { dismissDiffPreview } from '../utils/noteEditorDiffPreview';
 import { store } from '../store';
 import { profileSyncStatusAtom, searchableLibraryIdsAtom, syncWithZoteroAtom } from './profile';
 import { triggerProfileRefresh } from '../hooks/useProfileSync';
-import { syncingItemFilterAsync } from '../../src/utils/sync';
+import { agentItemFilterAsync, isAgentSupportedItem } from '../../src/utils/agentItemSupport';
 import { safeIsInTrash } from '../../src/utils/zoteroUtils';
 import { wasItemAddedBeforeLastSync } from '../utils/sourceUtils';
 import { ZoteroItemReference, createZoteroItemReference } from '../types/zotero';
@@ -136,7 +136,7 @@ import type { CreateItemProposedData, CreateItemResultData } from '../types/agen
 import { appendRunIfMissing, findResumeChainRoot, findRunForResume, hasOnlyThinkingParts, resolveErrorRunId, toRunError } from '../agents/runResumeHelpers';
 import { prewarmMuPDFWorker } from '../../src/beaver-extract';
 import { BeaverTemporaryAnnotations } from '../utils/annotationUtils';
-import { getLibrarySummaries } from '../../src/services/agentDataProvider/libraryCounts';
+import { isRejectedItemValidation, itemValidationResultsAtom } from './itemValidation';
 
 // =============================================================================
 // Helper Functions
@@ -287,36 +287,6 @@ async function cleanupTemporaryAnnotationsForRunReplacement(logPrefix: string): 
     } catch (error) {
         logger(`${logPrefix}: Error cleaning up temporary annotations: ${error}`);
     }
-}
-
-/**
- * Build reader state for the current reader attachment.
- */
-function getReaderState(get: Getter): ReaderState | null {
-    const readerAttachment = get(currentReaderAttachmentAtom);
-    if (!readerAttachment) return null;
-
-    const currentTextSelection = get(readerTextSelectionAtom);
-    return {
-        library_id: readerAttachment.libraryID,
-        zotero_key: readerAttachment.key,
-        current_page: getCurrentPage() || null,
-        ...(currentTextSelection && { text_selection: currentTextSelection })
-    } as ReaderState;
-}
-
-/**
- * Build note state for the current note tab item.
- */
-function getNoteState(get: Getter): NoteState | null {
-    const noteItem = get(currentNoteItemAtom);
-    if (!noteItem) return null;
-    return {
-        library_id: noteItem.libraryID,
-        zotero_key: noteItem.key,
-        ...(noteItem.parentKey && { parent_key: noteItem.parentKey }),
-        ...(noteItem.getNoteTitle?.() && { title: noteItem.getNoteTitle() }),
-    };
 }
 
 /**
@@ -550,8 +520,8 @@ async function startAutoRetryRun(
             const runIdsToRemove = threadRuns.slice(rootIndex).map(r => r.id);
             set(threadRunsAtom, threadRuns.slice(0, rootIndex));
             set(threadAgentActionsAtom, prev => prev.filter(a => !runIdsToRemove.includes(a.run_id)));
-            set(citationMetadataAtom, prev => prev.filter(c => !runIdsToRemove.includes(c.run_id ?? '')));
-            set(updateCitationDataAtom);
+            set(citationsAtom, prev => prev.filter(c => !runIdsToRemove.includes(c.run_id ?? '')));
+            set(processCitationsAtom);
         }
 
         set(prepareForNewRunAtom);
@@ -796,9 +766,9 @@ async function determineMissingReason(ref: ZoteroItemReference, userId: string |
             return 'in_trash';
         }
 
-        // Check if passes sync filters
-        const passesSyncFilters = await syncingItemFilterAsync(item);
-        if (!passesSyncFilters) {
+        // Check if the item is a kind Beaver supports and is available
+        const passesAgentFilters = await agentItemFilterAsync(item);
+        if (!passesAgentFilters) {
             return 'filtered_from_sync';
         }
 
@@ -1005,14 +975,14 @@ async function prevalidateExtractionApproval(
             if (item && item.isAttachment()) {
                 existingCount++;
             } else if (item && item.isRegularItem()) {
-                // Count regular items with exactly one PDF attachment
+                // Count regular items with exactly one supported attachment
                 // (the agent likely confused item ID with attachment ID)
                 await Zotero.Items.loadDataTypes([item], ['childItems']);
                 const attachmentIDs = item.getAttachments();
-                const pdfAttachments = attachmentIDs
+                const supportedAttachments = attachmentIDs
                     .map((id: number) => Zotero.Items.get(id))
-                    .filter((a: any) => a && a.isPDFAttachment());
-                if (pdfAttachments.length === 1) {
+                    .filter((a: any) => a && a.isAttachment() && isAgentSupportedItem(a));
+                if (supportedAttachments.length === 1) {
                     existingCount++;
                 }
             }
@@ -1031,6 +1001,27 @@ async function prevalidateExtractionApproval(
         // Show the dialog with the backend's original numbers
         set(addPendingApprovalAtom, event);
     }
+}
+
+/**
+ * Find the args of the tool-call part that produced a given tool return, by
+ * scanning the run's response messages. Used to derive the annotation-list
+ * variant when synthesizing a legacy view; null when the call can't be found.
+ */
+function findToolCallArgs(
+    run: AgentRun | null,
+    toolCallId: string,
+): string | Record<string, any> | null {
+    if (!run) return null;
+    for (const message of run.model_messages) {
+        if (message.kind !== 'response') continue;
+        for (const part of message.parts) {
+            if (part.part_kind === 'tool-call' && part.tool_call_id === toolCallId) {
+                return part.args;
+            }
+        }
+    }
+    return null;
 }
 
 /**
@@ -1107,9 +1098,23 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             });
 
             // Process tool return results
-            if (event.part.part_kind === "tool-return") await processToolReturnResults(event.part, set);
+            if (event.part.part_kind === "tool-return") {
+                await processToolReturnResults(event.part, set);
 
-            // Update run with tool return
+                // Safety net: the current backend ships a hydrated `metadata.view`
+                // on every tool return, but synthesize one from the legacy summary
+                // when it is missing OR malformed so the shared render layer always
+                // has a valid view to render. The `isToolResultView` check matches
+                // the render-time predicate; `upgradeToolReturn` no-ops on a valid view.
+                if (!isToolResultView(event.part.metadata?.view)) {
+                    logger(`WS onToolReturn: No view model available for tool call ${event.part.tool_call_id}`, 1);
+                    const toolCallArgs = findToolCallArgs(store.get(activeRunAtom), event.part.tool_call_id);
+                    await upgradeToolReturn(event.part, toolCallArgs);
+                }
+            }
+
+            // Update run with tool return (event.part now carries a synthesized
+            // `view` when the backend omitted one).
             set(activeRunAtom, (prev) => prev ? updateRunWithToolReturn(prev, event) : prev);
 
             // Remove pending approval for this specific tool call (if any)
@@ -1172,11 +1177,11 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             // Process citations from run complete event
             if (event.citations && event.citations.length > 0) {
                 logger(`WS onRunComplete: Processing ${event.citations.length} citations`, 1);
-                set(citationMetadataAtom, (prev) => [
+                set(citationsAtom, (prev) => [
                     ...prev,
                     ...event.citations!.map(c => ({ ...c, run_id: event.run_id }))
                 ]);
-                await set(updateCitationDataAtom);
+                set(processCitationsAtom);
 
                 // Preload PDF page labels for cited attachments so the rendering
                 // path can resolve page numbers from explicit render state.
@@ -1208,26 +1213,9 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                 );
             }
 
-            // Show floating popup when the user can't see the result
-            /*const sidebarVisible = store.get(isSidebarVisibleAtom);
-            const beaverWindow = BeaverUIFactory.findBeaverWindow();
-            const beaverWindowFocused = beaverWindow != null && !beaverWindow.closed &&
-                beaverWindow.document?.hasFocus?.() === true;
-
-            if (!sidebarVisible && !beaverWindowFocused) {
-                const isLibraryTab = Zotero.getMainWindow().Zotero_Tabs.selectedType === 'library';
-                set(addFloatingPopupMessageAtom, {
-                    type: 'info',
-                    title: 'Response ready',
-                    text: 'Open Beaver to read the reply.',
-                    expire: false,
-                    duration: 6000,
-                    button: {
-                        text: 'Open',
-                        onClick: () => eventManager.dispatch('toggleChat', { location: isLibraryTab ? 'library' : 'reader' }),
-                    },
-                });
-            }*/
+            // Surface an OS-native notification if the user can't currently see
+            // the completed response (e.g. working in another app).
+            notifyRunComplete();
         },
 
         onThread: (newThreadId: string) => {
@@ -1492,6 +1480,39 @@ function createWSCallbacks(set: Setter): WSCallbacks {
             set(clearAllPendingApprovalsAtom);
             // Clear per-run auto-approve state if the socket drops before done/error.
             set(clearAutoApproveNoteKeysAtom);
+
+            // If the socket dropped uncleanly while a run was still in flight, the
+            // server never delivered an error event
+            if (!wasClean) {
+                const activeRun = store.get(activeRunAtom);
+                if (
+                    activeRun &&
+                    (activeRun.status === 'in_progress' ||
+                        activeRun.status === 'awaiting_deferred')
+                ) {
+                    const message =
+                        'The connection to the server was lost before the run finished. Please try again.';
+                    set(wsErrorAtom, {
+                        event: 'error',
+                        type: 'connection_error',
+                        message,
+                        is_retryable: true,
+                    });
+                    set(activeRunAtom, (prev) =>
+                        prev
+                            ? {
+                                  ...prev,
+                                  status: 'error',
+                                  error: {
+                                      type: 'connection_error',
+                                      message,
+                                      is_retryable: true,
+                                  },
+                              }
+                            : prev,
+                    );
+                }
+            }
         }
     };
 }
@@ -1512,7 +1533,13 @@ async function executeWSRequest(
     try {
         logger('WS Starting connection for run:', run.id);
         const frontendVersion = Zotero.Beaver.pluginVersion || '';
-        await agentService.connect(request, callbacks, frontendVersion);
+        const zid = getZoteroUserIdentifier();
+        await agentService.connect(request, callbacks, frontendVersion, ZOTERO_PLUGIN_CLIENT_TYPE, ZOTERO_PLUGIN_FEATURES, {
+            local_user_key: zid.localUserKey,
+            ...(zid.userID ? { user_id: zid.userID } : {}),
+            ...(zid.accountName ? { account_name: zid.accountName } : {}),
+            ...(zid.deviceName ? { device_name: zid.deviceName } : {}),
+        });
         logger('WS Connection established and ready');
     } catch (error: any) {
         logger('WS connection error:', error, 1);
@@ -1610,8 +1637,28 @@ export const sendWSMessageAtom = atom(
             // Custom instructions (if any)
         const customInstructions = getPref('customInstructions') || undefined;
 
-        // Build attachments from current message items
-        const selectedItems = get(currentMessageItemsAtom);
+        // Build attachments from current message items, dropping anything that
+        // validation has already rejected.
+        const validationResults = get(itemValidationResultsAtom);
+        const rawSelectedItems = get(currentMessageItemsAtom);
+        const rejectedSelectedItems = rawSelectedItems.filter((item) =>
+            isRejectedItemValidation(item, validationResults.get(`${item.libraryID}-${item.key}`))
+        );
+        const selectedItems = rejectedSelectedItems.length > 0
+            ? rawSelectedItems.filter((item) => !rejectedSelectedItems.includes(item))
+            : rawSelectedItems;
+        if (rejectedSelectedItems.length > 0) {
+            set(currentMessageItemsAtom, selectedItems);
+            set(addPopupMessageAtom, {
+                type: 'error',
+                title: rejectedSelectedItems.length === 1 ? 'File Removed' : 'Files Removed',
+                text: rejectedSelectedItems.length === 1
+                    ? 'A file that Beaver cannot read was removed from this message.'
+                    : `${rejectedSelectedItems.length} files that Beaver cannot read were removed from this message.`,
+                expire: true,
+                duration: 4000,
+            });
+        }
 
         // Load note data for any note items (getNoteTitle() requires 'note' data type)
         const currentNoteTabItem = get(currentNoteItemAtom);
@@ -1621,6 +1668,23 @@ export const sendWSMessageAtom = atom(
             : noteItems;
         if (allNoteItems.length > 0) {
             await Promise.all(allNoteItems.map(item => item.loadDataType('note')));
+        }
+        const regularItems = selectedItems.filter(item => item.isRegularItem());
+        if (regularItems.length > 0) {
+            await Zotero.Items.loadDataTypes(regularItems, ['itemData', 'creators']);
+        }
+        const attachmentItems = selectedItems.filter(item => item.isAttachment());
+        if (attachmentItems.length > 0) {
+            await Zotero.Items.loadDataTypes(attachmentItems, ['itemData']);
+        }
+        const attachmentParentItemsById = new Map<number, Zotero.Item>();
+        for (const attachment of attachmentItems) {
+            const parent = attachment.parentItem;
+            if (parent) attachmentParentItemsById.set(parent.id, parent);
+        }
+        const attachmentParentItems = Array.from(attachmentParentItemsById.values());
+        if (attachmentParentItems.length > 0) {
+            await Zotero.Items.loadDataTypes(attachmentParentItems, ['itemData', 'creators']);
         }
 
         let attachments: MessageAttachment[] =
@@ -1641,23 +1705,58 @@ export const sendWSMessageAtom = atom(
             });
         }
 
-        // Add current reader attachment as source if not already present in thread
-        const readerState = getReaderState(get);
+        // Add external file attachments (metadata only; content stays local and
+        // is served on demand through the read/view request paths). Files whose
+        // managed copy disappeared since attach are dropped with a popup.
+        const externalFiles = get(currentMessageExternalFilesAtom);
+        for (const file of externalFiles) {
+            const exists = await IOUtils.exists(file.storedPath).catch(() => false);
+            if (!exists) {
+                logger(`sendWSMessageAtom: External file copy missing, dropping: ext-${file.extKey} ('${file.filename}')`, 1);
+                set(addPopupMessageAtom, {
+                    type: 'warning',
+                    title: 'File unavailable',
+                    text: `"${file.filename}" is no longer available and was removed from the message.`,
+                    expire: true,
+                });
+                continue;
+            }
+            const externalAttachment: ExternalFileAttachment = {
+                type: 'external_file',
+                ext_key: file.extKey,
+                filename: file.filename,
+                content_kind: file.contentKind,
+                mime_type: file.mimeType,
+                file_size: file.fileSize,
+                ...(file.pageCount ? { page_count: file.pageCount } : {}),
+                date_added: new Date(file.createdAt).toISOString(),
+            };
+            attachments.push(externalAttachment);
+        }
+
+        // Add the current reader attachment as a source if it is not already in
+        // the thread. Reader position is captured in application state.
         const readerAttachment = get(currentReaderAttachmentAtom);
-        if (readerAttachment && readerState) {
+        if (readerAttachment) {
             const allUserAttachmentKeys = get(allUserAttachmentKeysAtom);
             const existingKeys = new Set([
-                ...attachments.map(att => `${att.library_id}-${att.zotero_key}`),
+                ...attachments.map(messageAttachmentKey),
                 ...allUserAttachmentKeys
             ]);
             logger(`sendWSMessageAtom: Handeling reader attachment - existingKeys: ${JSON.stringify(existingKeys)}`, 1);
             const readerKey = `${readerAttachment.libraryID}-${readerAttachment.key}`;
             if (!existingKeys.has(readerKey)) {
                 logger(`sendWSMessageAtom: Handeling reader attachment - Adding reader attachment: ${readerKey}`, 1);
+                await Zotero.Items.loadDataTypes([readerAttachment], ['itemData']);
+                if (readerAttachment.parentItem) {
+                    await Zotero.Items.loadDataTypes([readerAttachment.parentItem], ['itemData', 'creators']);
+                }
                 attachments.push({
                     library_id: readerAttachment.libraryID,
                     zotero_key: readerAttachment.key,
                     type: 'source',
+                    attachment: safeStub(() => serializeAttachmentStub(readerAttachment)),
+                    parent_item: safeStub(() => readerAttachment.parentItem ? serializeItemStub(readerAttachment.parentItem) : undefined),
                     include: 'fulltext'
                 } as SourceAttachment);
             } else {
@@ -1669,7 +1768,7 @@ export const sendWSMessageAtom = atom(
         if (currentNoteTabItem) {
             const allUserAttachmentKeys = get(allUserAttachmentKeysAtom);
             const existingKeys = new Set([
-                ...attachments.map(att => `${att.library_id}-${att.zotero_key}`),
+                ...attachments.map(messageAttachmentKey),
                 ...allUserAttachmentKeys
             ]);
             const noteKey = `${currentNoteTabItem.libraryID}-${currentNoteTabItem.key}`;
@@ -1706,132 +1805,10 @@ export const sendWSMessageAtom = atom(
             ? [{ function: "search_external_references", parameters: {} } as ToolRequest]
             : undefined;
 
-        // Get current library and collection context
-        let currentLibrary: CurrentLibrary | undefined = undefined;
-        let currentCollection: CurrentCollection | undefined = undefined;
-        
-        const searchableLibraryIds = get(searchableLibraryIdsAtom);
-        const noteState = getNoteState(get);
-        const currentView: 'library' | 'file_reader' | 'note_editor' = get(isLibraryTabAtom) ? 'library' : noteState ? 'note_editor' : 'file_reader';
-
-        if (currentView === 'file_reader' && readerState) {
-            // In reader view, use the library from the reader attachment
-            const library = Zotero.Libraries.get(readerState.library_id);
-            if (library) {
-                currentLibrary = {
-                    library_id: library.libraryID,
-                    name: library.name,
-                    is_group: library.isGroup,
-                    read_only: !library.editable,
-                    is_synced: searchableLibraryIds.includes(library.libraryID),
-                };
-            }
-        } else if (currentView === 'note_editor' && noteState) {
-            // In note editor view, use the library from the note item
-            const library = Zotero.Libraries.get(noteState.library_id);
-            if (library) {
-                currentLibrary = {
-                    library_id: library.libraryID,
-                    name: library.name,
-                    is_group: library.isGroup,
-                    read_only: !library.editable,
-                    is_synced: searchableLibraryIds.includes(library.libraryID),
-                };
-            }
-        } else if (currentView === 'library') {
-            // In library view, get from ZoteroPane
-            const zp = Zotero.getActiveZoteroPane();
-            if (zp) {
-                const libraryId = zp.getSelectedLibraryID();
-                const library = Zotero.Libraries.get(libraryId);
-                if (library) {
-                    currentLibrary = {
-                        library_id: library.libraryID,
-                        name: library.name,
-                        is_group: library.isGroup,
-                        read_only: !library.editable,
-                        is_synced: searchableLibraryIds.includes(library.libraryID),
-                    };
-                }
-                
-                const collection = zp.getSelectedCollection();
-                if (collection) {
-                    currentCollection = {
-                        collection_key: collection.key,
-                        name: collection.name,
-                        library_id: collection.libraryID,
-                        parent_key: collection.parentKey || null,
-                    };
-                }
-            }
-        }
-
-        // Frontend embedding index status
-        const processingMode = get(processingModeAtom);
-        const localIndexingActive = processingMode !== ProcessingMode.BACKEND;
-        let indexingStatus: IndexingStatus | undefined;
-        if (localIndexingActive && searchableLibraryIds.length > 0) {
-            const indexState = get(embeddingIndexStateAtom);
-
-            let isComplete: boolean;
-            if (indexState.phase === 'incremental') {
-                isComplete = true;
-            } else {
-                try {
-                    const db = Zotero.Beaver?.db as BeaverDB | undefined;
-                    if (db) {
-                        const indexer = new EmbeddingIndexer(db);
-                        let allUpToDate = true;
-                        for (const libId of searchableLibraryIds) {
-                            const diffCheck = await indexer.shouldRunFullDiff(libId);
-                            if (diffCheck.needsDiff) {
-                                logger(`indexing_status: library ${libId} not complete: ${diffCheck.reason}`, 4);
-                                allUpToDate = false;
-                                break;
-                            }
-                        }
-                        isComplete = allUpToDate;
-                    } else {
-                        isComplete = false;
-                    }
-                } catch (err) {
-                    logger(`indexing_status: state probe failed: ${err}`, 2);
-                    isComplete = false;
-                }
-            }
-
-            let percentComplete: number | undefined;
-            let totalItems: number | undefined;
-            let itemsPending: number | undefined;
-            if (!isComplete && indexState.totalItems > 0) {
-                percentComplete = Math.min(100, Math.max(0, Math.round((indexState.indexedItems / indexState.totalItems) * 100)));
-                totalItems = indexState.totalItems;
-                itemsPending = Math.max(0, indexState.totalItems - indexState.indexedItems);
-            }
-
-            indexingStatus = {
-                is_complete: isComplete,
-                ...(!isComplete && percentComplete !== undefined ? { percent_complete: percentComplete } : {}),
-                ...(!isComplete && totalItems !== undefined ? { total_items: totalItems } : {}),
-                ...(!isComplete && itemsPending !== undefined && itemsPending > 0 ? { items_pending: itemsPending } : {}),
-                ...(indexState.failedItems > 0 ? { items_failed: indexState.failedItems } : {}),
-            };
-        }
-
-        const libraries = searchableLibraryIds.length > 0
-            ? await getLibrarySummaries(searchableLibraryIds)
-            : undefined;
-
-        // Application state
-        const applicationState = {
-            current_view: currentView,
-            ...(readerState ? { reader_state: readerState } : {}),
-            ...(noteState ? { note_state: noteState } : {}),
-            ...(currentLibrary ? { current_library: currentLibrary } : {}),
-            ...(currentCollection ? { current_collection: currentCollection } : {}),
-            ...(indexingStatus ? { indexing_status: indexingStatus } : {}),
-            ...(libraries ? { libraries } : {}),
-        };
+        // Application state (current view, reader/note state, library context,
+        // indexing status). Built via the injectable provider so a non-Zotero
+        // host can supply its own document state through the same slot.
+        const applicationState = await getApplicationStateProvider()(get);
 
         // Build the message
         const userPrompt: BeaverAgentPrompt = {
@@ -1890,6 +1867,7 @@ export const sendWSMessageAtom = atom(
             set(removePopupMessagesByTypeAtom, ['items_summary']);
             set(currentMessageItemsAtom, []);
             set(currentMessageCollectionsAtom, []);
+            set(currentMessageExternalFilesAtom, []);
 
             // Execute the WebSocket request
             await executeWSRequest(run, request, get, set);
@@ -2073,10 +2051,10 @@ export const regenerateFromRunAtom = atom(
             );
 
             // Clear citations for removed runs
-            set(citationMetadataAtom, (prev) =>
+            set(citationsAtom, (prev) =>
                 prev.filter(c => !runIdsToRemove.includes(c.run_id ?? ''))
             );
-            set(updateCitationDataAtom);
+            set(processCitationsAtom);
 
             // Reset WS state and set pending
             set(prepareForNewRunAtom);
@@ -2258,10 +2236,10 @@ export const regenerateWithEditedPromptAtom = atom(
             );
 
             // Clear citations for removed runs
-            set(citationMetadataAtom, (prev) => 
+            set(citationsAtom, (prev) => 
                 prev.filter(c => !runIdsToRemove.includes(c.run_id ?? ''))
             );
-            set(updateCitationDataAtom);
+            set(processCitationsAtom);
 
             // Reset WS state and set pending
             set(prepareForNewRunAtom);
@@ -2415,7 +2393,7 @@ export const clearThreadAtom = atom(null, (_get, set) => {
     set(resetWSStateAtom);
     // Clear agent actions, citations, and warnings for the thread
     set(clearAgentActionsAtom);
-    set(citationMetadataAtom, []);
+    set(citationsAtom, []);
     set(resetCitationMarkersAtom);  // Reset citation markers for cleared thread
     set(clearWarningsAtom);
     // Clear per-run auto-approve state (both keys and action IDs)

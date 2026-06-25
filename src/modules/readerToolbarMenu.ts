@@ -178,11 +178,12 @@ function openBeaverMenu(reader: any, anchorButton: HTMLElement): void {
     });
     popup.appendChild(askItem);
 
-    // ---- Actions section (attachment actions, PDF only) ----
+    // ---- Actions section (attachment actions, PDF and EPUB readers) ----
     const isPdf = reader.type === 'pdf';
+    const isEpub = reader.type === 'epub';
     const readerItemID: number | undefined = reader.itemID;
 
-    if (isPdf) {
+    if (isPdf || isEpub) {
         const actions = getMergedActions().filter(a => a.targetType === 'attachment');
 
         if (actions.length > 0) {
@@ -226,26 +227,28 @@ function openBeaverMenu(reader: any, anchorButton: HTMLElement): void {
     });
     popup.appendChild(addItem);
 
-    // ---- Dev-only: extraction visualizer controls (PDF only) ----
+    // ---- Dev-only: extraction visualizer controls ----
     // Dropped from production builds at compile time.
-    if (process.env.NODE_ENV === 'development' && isPdf) {
+    if (process.env.NODE_ENV === 'development' && (isPdf || isEpub)) {
         appendSeparator();
-        appendVisualizerItem('Visualize Columns', 'columns');
-        appendVisualizerItem('Visualize Lines', 'lines');
         appendVisualizerItem('Visualize Items', 'items');
         appendVisualizerItem('Visualize Sentences', 'sentences');
-
-        appendSeparator();
-        appendVisualizerItem('Visualize Columns (graphics)', 'columns-graphics');
-        appendVisualizerItem('Visualize Items (graphics)', 'items-graphics');
-        appendVisualizerItem('Visualize Sentences (graphics)', 'sentences-graphics');
-
-        appendSeparator();
         appendVisualizerItem('Clear Visualization', 'clear');
 
-        appendSeparator();
-        appendVisualizerItem('Copy Extract Fixture Command', 'copy-extract-fixture-command');
-        appendVisualizerItem('Copy OCR Fixture Command', 'copy-ocr-fixture-command');
+        if (isPdf) {
+            appendSeparator();
+            appendVisualizerItem('Visualize Columns', 'columns');
+            appendVisualizerItem('Visualize Lines', 'lines');
+
+            appendSeparator();
+            appendVisualizerItem('Visualize Columns (graphics)', 'columns-graphics');
+            appendVisualizerItem('Visualize Items (graphics)', 'items-graphics');
+            appendVisualizerItem('Visualize Sentences (graphics)', 'sentences-graphics');
+
+            appendSeparator();
+            appendVisualizerItem('Copy Extract Fixture Command', 'copy-extract-fixture-command');
+            appendVisualizerItem('Copy OCR Fixture Command', 'copy-ocr-fixture-command');
+        }
     }
 
     // ---- Position & open ----

@@ -3,15 +3,43 @@ import { getPref } from '../../../src/utils/prefs';
 import { ZoteroIcon, ZOTERO_ICONS } from '../icons/ZoteroIcon';
 import { CSSItemTypeIcon, CSSIcon } from '../icons/zotero';
 import { isValidAnnotationType } from '../../types/attachments/apiTypes';
-import { addItemToCurrentMessageItemsAtom, addItemsToCurrentMessageItemsAtom, currentMessageFiltersAtom } from '../../atoms/messageComposition';
+import { addItemToCurrentMessageItemsAtom, addItemsToCurrentMessageItemsAtom, addExternalFilesToCurrentMessageAtom, currentMessageFiltersAtom } from '../../atoms/messageComposition';
 import { useSetAtom, useAtomValue } from 'jotai';
 import { searchableLibraryIdsAtom } from '../../atoms/profile';
+import { attachExternalFile } from '../../../src/services/externalFiles';
+import type { ExternalFileRecord } from '../../../src/services/database';
+import { selectedModelAtom } from '../../atoms/models';
+import { requestPlusToolsAtom } from '../../atoms/ui';
 
 interface DragDropWrapperProps {
     children: React.ReactNode;
 }
 
-const DragDropWrapper: React.FC<DragDropWrapperProps> = ({ 
+/** True when the drag carries OS files (not Zotero objects). */
+const isFileDrag = (dataTransfer: DataTransfer): boolean =>
+    !dataTransfer.types.includes('zotero/item')
+    && !dataTransfer.types.includes('zotero/annotation')
+    && !dataTransfer.types.includes('zotero/collection')
+    && (dataTransfer.types.includes('application/x-moz-file') || dataTransfer.types.includes('text/x-moz-url'));
+
+/**
+ * Extract dropped OS files as nsIFile objects via Zotero's drag helper, which
+ * handles the macOS percent-escape quirk, excludes folders, and falls back to
+ * file URLs on Linux.
+ */
+const getDroppedFiles = (dataTransfer: DataTransfer): Array<{ path: string }> => {
+    try {
+        const dragData = (Zotero as any).DragDrop.getDataFromDataTransfer(dataTransfer);
+        if (dragData?.dataType === 'application/x-moz-file' && Array.isArray(dragData.data)) {
+            return dragData.data as Array<{ path: string }>;
+        }
+    } catch (error) {
+        console.error('Error extracting dropped files:', error);
+    }
+    return [];
+};
+
+const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
     children
 }) => {
     // Drag and drop states
@@ -19,11 +47,14 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
     const [isDragging, setIsDragging] = useState(false);
     const [dragError, setDragError] = useState<string | null>(null);
     const [dragCount, setDragCount] = useState<number>(0);
-    const [dragType, setDragType] = useState<'item' | 'annotation' | 'collection' | null>(null);
+    const [dragType, setDragType] = useState<'item' | 'annotation' | 'collection' | 'file' | null>(null);
     const dragErrorTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const addItemsToCurrentMessageItems = useSetAtom(addItemsToCurrentMessageItemsAtom);
     const addItemToCurrentMessageItems = useSetAtom(addItemToCurrentMessageItemsAtom);
+    const addExternalFilesToCurrentMessage = useSetAtom(addExternalFilesToCurrentMessageAtom);
     const searchableLibraryIds = useAtomValue(searchableLibraryIdsAtom);
+    const selectedModel = useAtomValue(selectedModelAtom);
+    const requestPlusTools = useAtomValue(requestPlusToolsAtom);
     const setCurrentMessageFilters = useSetAtom(currentMessageFiltersAtom);
 
     const maxAddAttachmentToMessage = getPref('maxAddAttachmentToMessage') as number || 10;
@@ -98,9 +129,10 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
         
         // Set appropriate drop effect
         if (
-            e.dataTransfer.types.includes('zotero/annotation') || 
+            e.dataTransfer.types.includes('zotero/annotation') ||
             e.dataTransfer.types.includes('zotero/item') ||
-            e.dataTransfer.types.includes('zotero/collection')
+            e.dataTransfer.types.includes('zotero/collection') ||
+            isFileDrag(e.dataTransfer)
         ) {
             e.dataTransfer.dropEffect = 'copy';
         }
@@ -185,6 +217,14 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
             } catch (error) {
                 console.error("Error handling item data:", error);
             }
+        }
+
+        // Handle OS file drags (files from disk become external file attachments)
+        else if (isFileDrag(e.dataTransfer)) {
+            setObjectIcon(ZOTERO_ICONS.ATTACHMENTS);
+            setIsDragging(true);
+            setDragType('file');
+            setDragCount((e.dataTransfer as any).mozItemCount || 1);
         }
     };
 
@@ -284,6 +324,14 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
                 console.error("Error handling item data:", error);
             }
         }
+
+        // Handle OS file drags (files from disk become external file attachments)
+        else if (isFileDrag(e.dataTransfer)) {
+            setObjectIcon(ZOTERO_ICONS.ATTACHMENTS);
+            setIsDragging(true);
+            setDragType('file');
+            setDragCount((e.dataTransfer as any).mozItemCount || 1);
+        }
     };
 
     const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
@@ -380,27 +428,35 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
             return;
         }
         
-        // Check for file drops
-        /* if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-            const files = Array.from(e.dataTransfer.files);
-            
-            for (const file of files) {
-                // Check file size
-                if (file.size > FILE_SIZE_LIMIT) {
-                    showErrorMessage(`File too large: ${file.name}. Maximum size is 10MB.`);
-                    continue;
-                }
-                
-                // Check file type
-                if (!VALID_MIME_TYPES.includes(file.type as any)) {
-                    showErrorMessage(`Invalid file type: ${file.type}. Only PDF and PNG files are supported.`);
-                    continue;
-                }
-                
-                // Add file source
-                addFileSource(file);
+        // Handle OS file drops (files from disk become external file attachments)
+        if (isFileDrag(e.dataTransfer)) {
+            const files = getDroppedFiles(e.dataTransfer);
+            if (files.length === 0) {
+                showErrorMessage('No files found in drop');
+                return;
             }
-        }*/
+            if (files.length > maxAddAttachmentToMessage) {
+                showErrorMessage(`You can add up to ${maxAddAttachmentToMessage} files at a time.`);
+                return;
+            }
+            const attached: ExternalFileRecord[] = [];
+            const supportsVision = selectedModel?.supports_vision === true;
+            for (const file of files) {
+                const result = await attachExternalFile(file, {
+                    supportsVision,
+                    canHandleOCRLocally: supportsVision || Boolean(requestPlusTools),
+                });
+                if (result.status === 'attached') {
+                    attached.push(result.record);
+                } else {
+                    showErrorMessage(result.message);
+                }
+            }
+            if (attached.length > 0) {
+                addExternalFilesToCurrentMessage(attached);
+            }
+            return;
+        }
     };
 
     return (
@@ -442,10 +498,12 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
                         </div>
                     )}
                     <div className="text-lg">
-                        {dragType === 'annotation' 
-                            ? `Drop here to add ${dragCount} annotation${dragCount !== 1 ? 's' : ''}` 
+                        {dragType === 'annotation'
+                            ? `Drop here to add ${dragCount} annotation${dragCount !== 1 ? 's' : ''}`
                             : dragType === 'collection'
                             ? `Drop here to filter by ${dragCount} collection${dragCount !== 1 ? 's' : ''}`
+                            : dragType === 'file'
+                            ? `Drop here to add ${dragCount} file${dragCount !== 1 ? 's' : ''}`
                             : `Drop here to add ${dragCount} item${dragCount !== 1 ? 's' : ''}`}
                     </div>
                 </div>
