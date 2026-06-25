@@ -461,19 +461,19 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
         title: "Full-text search, EPUB support, and external files",
         steps: [
             {
-                title: "Search inside your documents",
-                description: "Beaver can now search the full text of selected attachments and pinpoint exact sentences where keywords appear.",
-            },
-            {
                 title: "More file types and external files",
                 description: "Support for EPUB, image, and text files, with sentence-level citations and annotations for EPUBs. Drag & drop external files onto Beaver to use them without adding them to Zotero.",
+            },
+            {
+                title: "Search inside your documents",
+                description: "Beaver can now search the full text of selected attachments and pinpoint exact sentences where keywords appear.",
             },
             {
                 title: "System notifications",
                 description: "Get notified when a response is ready or an approval is waiting (turn off in settings).",
             },
         ],
-        footer: `<a href="https://github.com/jlegewie/beaver-zotero/releases/tag/v0.21.0-beta.3" target='_blank'>Full changelog</a>`,
+        footer: `<a href="https://github.com/jlegewie/beaver-zotero/releases/tag/v0.21.0" target='_blank'>Full changelog</a>`,
     },
 ];
 
