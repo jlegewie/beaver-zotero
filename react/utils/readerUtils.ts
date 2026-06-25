@@ -72,71 +72,6 @@ async function waitForReaderForItem(itemID: number, openedReader?: any, timeoutM
     return undefined;
 }
 
-function getAnnotationPageIndex(annotationItem: Zotero.Item): number | undefined {
-    try {
-        const position = JSON.parse((annotationItem as any).annotationPosition || '{}');
-        return typeof position?.pageIndex === 'number' ? position.pageIndex : undefined;
-    } catch {
-        return undefined;
-    }
-}
-
-function isAnnotationLoadedInReader(reader: any, annotationID: string): boolean | null {
-    const annotationLists = [
-        reader?._internalReader?._state?.annotations,
-        reader?._internalReader?._primaryView?._annotations,
-    ].filter(Array.isArray);
-
-    if (annotationLists.length === 0) return null;
-    return annotationLists.some((annotations) => annotations.some((annotation: any) => annotation?.id === annotationID));
-}
-
-/**
- * Navigates to an annotation once the reader has had time to load and render it.
- */
-async function navigateReaderToAnnotation(reader: any, annotationID: string, pageIndex?: number): Promise<boolean> {
-    for (let attempt = 0; attempt < 6; attempt++) {
-        const annotationLoaded = isAnnotationLoadedInReader(reader, annotationID);
-        if (annotationLoaded === false) {
-            if (attempt === 1 && typeof pageIndex === 'number') {
-                try {
-                    await reader?.navigate?.({ pageIndex });
-                } catch {
-                    // Page navigation is a best-effort fallback before retrying annotation navigation.
-                }
-            }
-            await delay(150);
-            continue;
-        }
-
-        try {
-            await reader?.navigate?.({ annotationID });
-            return true;
-        } catch {
-            // Retry while the newly opened reader finishes registering annotations.
-        }
-
-        try {
-            await reader?._internalReader?.navigate?.({ annotationID });
-            return true;
-        } catch {
-            // Retry below.
-        }
-
-        if (attempt === 1 && typeof pageIndex === 'number') {
-            try {
-                await reader?.navigate?.({ pageIndex });
-            } catch {
-                // Page navigation is a best-effort fallback before retrying annotation navigation.
-            }
-        }
-
-        await delay(150);
-    }
-
-    return false;
-}
-
 /**
  * Navigates to a page in the reader.
  * 
@@ -170,33 +105,34 @@ async function navigateToAnnotation(annotationItem: Zotero.Item) {
     const parentID = annotationItem.parentID;
     if (!parentID) return;
 
-    const annotationID = annotationItem.key;
-    const pageIndex = getAnnotationPageIndex(annotationItem);
-    // Get reader
-    const reader = getCurrentReader();
-    
-    // Navigate to annotation if reader is open and current item is the annotation's parent
-    if (reader && reader.itemID === parentID) {
-        await waitForReaderView(reader, true);
-        const didNavigate = await navigateReaderToAnnotation(reader, annotationID, pageIndex);
-        if (!didNavigate && typeof pageIndex === 'number') {
-            await reader.navigate?.({ pageIndex });
-        }
-        return;
-    }
+    // Match the native library double-click (FileHandlers.open → Reader.open
+    // with the annotation as the location): one Reader.open call selects the
+    // annotation and covers every case — reader closed, on another tab, or
+    // already showing the attachment.
+    const reader: any = await Zotero.Reader.open(parentID, { annotationID: annotationItem.key } as any);
 
-    // Open reader if not open
-    const openedReader = await Zotero.Reader.open(parentID, {annotationID} as any);
-    const openedOrSelectedReader = await waitForReaderForItem(parentID, openedReader);
-    if (!openedOrSelectedReader) return;
+    // EPUB only: Zotero strips an { annotationID } location and navigates to the
+    // annotation *after* the view initializes (Reader.setSelectedAnnotations),
+    // bypassing the EPUB view's initial navigation.
+    try {
+        const resolved = reader ?? await waitForReaderForItem(parentID);
+        if (resolved?.type !== 'epub') return;
+        await waitForReaderForItem(parentID, resolved);
 
-    const didNavigate = await navigateReaderToAnnotation(openedOrSelectedReader, annotationID, pageIndex);
-    if (!didNavigate) {
-        if (typeof pageIndex === 'number') {
-            await openedOrSelectedReader.navigate?.({ pageIndex });
-        } else if (annotationItem.annotationPageLabel) {
-            await openedOrSelectedReader.navigate?.({ pageLabel: annotationItem.annotationPageLabel });
+        let position: any;
+        try {
+            position = JSON.parse((annotationItem as any).annotationPosition);
+        } catch {
+            return;
         }
+        if (position?.type !== 'FragmentSelector') return;
+
+        // Short settle so this runs after Zotero's post-init by-id navigation
+        // and any final layout pass, then land precisely on the cited range.
+        await delay(50);
+        resolved.navigate({ position });
+    } catch (error) {
+        logger(`navigateToAnnotation: EPUB position navigation failed: ${error}`, 1);
     }
 }
 
@@ -212,18 +148,36 @@ function getCurrentReaderAnnotations(reader: any) {
 }
 
 /**
- * Retrieves the current page number of the reader.
- * 
+ * Retrieves the current reading position of the reader as a 1-based "page".
+ *
+ * For PDFs this is the current page number. For EPUBs it is the spine section
+ * ordinal (section index + 1) of the section at the top of the viewport — the
+ * same coordinate used as "page N" by reading and citation tools.
+ *
  * @param reader - The reader instance.
- * @returns The current page number or null if the reader is not a PDF reader.
+ * @returns The 1-based position, or null for unsupported reader types.
  */
 function getCurrentPage(reader?: any): number | null {
     if (!reader) reader = getCurrentReader();
     if (!reader) return null;
+    if (reader.type === 'epub') {
+        try {
+            // The EPUB view's flow tracks the spine section at the top of the
+            // viewport. Reader spine indexes count every spine itemref, while
+            // extraction skips non-XHTML spine items — for such EPUBs this
+            // ordinal can run ahead of the extraction section numbering.
+            const sectionIndex = reader._internalReader?._primaryView?.flow?.startSection?.index;
+            return typeof sectionIndex === 'number' ? sectionIndex + 1 : null;
+        }
+        catch (e) {
+            console.error('Error getting current EPUB section:', e);
+            return null;
+        }
+    }
     if (reader.type !== 'pdf') {
         return null;
     }
-    
+
     try {
         // Access the PDF.js viewer instance
         const pdfViewer = reader._internalReader._primaryView._iframeWindow.PDFViewerApplication.pdfViewer;
@@ -241,16 +195,47 @@ function getCurrentPage(reader?: any): number | null {
 }
 
 /**
+ * Return the open EPUB reader's current 1-based page, or null when unavailable.
+ *
+ * @param reader - The reader instance.
+ */
+function getEpubReaderPage(reader?: any): number | null {
+    if (!reader) reader = getCurrentReader();
+    if (!reader || reader.type !== 'epub') return null;
+    try {
+        const primaryView = reader._internalReader?._primaryView;
+        const pageMapping = primaryView?.pageMapping;
+        const startRange = primaryView?.flow?.startRange;
+        if (!pageMapping || !startRange) return null;
+        // Zotero's EPUB view stores page indexes as 0-based values.
+        const pageIndex = pageMapping.getPageIndex(startRange);
+        return typeof pageIndex === 'number' ? pageIndex + 1 : null;
+    } catch (e) {
+        logger(`getEpubReaderPage failed: ${e}`, 1);
+        return null;
+    }
+}
+
+/**
  * Retrieves the selected text from the reader.
- * 
+ *
  * @param reader - The reader instance.
  * @returns The selected text or null if the reader is not a PDF reader.
  */
-function getSelectedText(reader?: _ZoteroTypes.Reader): string | null {    
+function getSelectedText(reader?: _ZoteroTypes.Reader): string | null {
     try {
         // Get reader
         reader = reader || getCurrentReader();
-        if (!reader || reader.type !== 'pdf') return null;
+        if (!reader) return null;
+
+        // EPUB (and other DOM-based) views expose the selection through the
+        // content iframe's window selection rather than _selectionRanges.
+        if (reader.type === 'epub') {
+            const selection = (reader as any)._internalReader?._primaryView?._iframeWindow?.getSelection();
+            const text = selection?.toString();
+            return text?.trim() ? text : null;
+        }
+        if (reader.type !== 'pdf') return null;
 
         // Access primaryView
         const primaryView = reader._internalReader._primaryView;
@@ -321,7 +306,9 @@ export type ReaderContext = {
 }
 
 function addSelectionChangeListener(reader: any, callback: (selection: TextSelection | null) => void) {
-    if (reader.type !== "pdf") {
+    // PDF and EPUB views both render content into an iframe whose document
+    // fires selectionchange; other reader types are not supported.
+    if (reader.type !== "pdf" && reader.type !== "epub") {
         return null;
     }
     try {
@@ -400,7 +387,9 @@ export {
     getCurrentReaderItemAsync,
     getCurrentReader,
     getCurrentReaderAndWaitForView,
+    waitForReaderForItem,
     getCurrentPage,
+    getEpubReaderPage,
     navigateToPage,
     getSelectedText,
     ensureReaderInitialized,

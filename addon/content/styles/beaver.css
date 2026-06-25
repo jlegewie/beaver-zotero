@@ -184,6 +184,50 @@
     border-radius: 4px;
 }
 
+/* Fixed leading-icon slot for context chips — keeps chip height/width stable when
+   the hover remove "x" overlays the normal icon instead of replacing it. */
+[id^="beaver-pane-"] .chip-icon-slot {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 16px;
+    height: 16px;
+    position: relative;
+}
+
+[id^="beaver-pane-"] .chip-icon-slot-normal,
+[id^="beaver-pane-"] .chip-icon-slot-remove {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: none;
+}
+
+[id^="beaver-pane-"] .chip-icon-slot-remove {
+    position: absolute;
+    inset: 0;
+    margin: 0;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+}
+
+/* CSS :hover on the chip — survives layout reflow under a stationary cursor
+   (React mouseenter/mouseleave does not re-fire when siblings are removed). */
+[id^="beaver-pane-"] .source-button:hover .chip-icon-slot-normal,
+[id^="beaver-pane-"] .chip-icon-slot-remove-open .chip-icon-slot-normal {
+    opacity: 0;
+    visibility: hidden;
+}
+
+[id^="beaver-pane-"] .source-button:hover .chip-icon-slot-remove,
+[id^="beaver-pane-"] .chip-icon-slot-remove-open .chip-icon-slot-remove {
+    opacity: 0.6;
+    visibility: visible;
+    pointer-events: auto;
+}
+
 /* Component: Beaver Chat */
 [id^="beaver-pane-"] .chat-container {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Inter", sans-serif;
@@ -635,6 +679,9 @@
 [id^="beaver-pane-"] .-translate-x-1\/2 { transform: translateX(-50%); }
 [id^="beaver-pane-"] .z-10 { z-index: 10; }
 [id^="beaver-pane-"] .z-1000 { z-index: 1000; }
+/* Floating overlays (tooltips) must clear Zotero's focused items-tree row,
+   which gets z-index: 10000 while the tree has focus (blue selection). */
+[id^="beaver-pane-"] .z-100000 { z-index: 100000; }
 [id^="beaver-pane-"] .hidden { display: none; }
 
 [id^="beaver-pane-"] .inline-flex { display: inline-flex; }

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { useSetAtom, useAtomValue } from 'jotai';
 import { CSSIcon, LibraryIcon } from '../icons/icons';
 import { currentMessageCollectionsAtom } from '../../atoms/messageComposition';
@@ -6,6 +6,9 @@ import { CollectionReference, collectionReferenceKey } from '../../types/zotero'
 import { truncateText } from '../../utils/stringUtils';
 import { selectCollection } from '../../../src/utils/selectItem';
 import { useRemoveContextMenu } from '../../hooks/useRemoveContextMenu';
+import { ChipWithPopup, type ChipPopupContent } from '../agentRuns/requestChips/ChipPopup';
+import { ChipButton } from '../agentRuns/requestChips/ChipButton';
+import { ChipRemovableIcon } from '../agentRuns/requestChips/ChipRemovableIcon';
 
 const MAX_TEXT_LENGTH = 20;
 
@@ -25,7 +28,6 @@ export const MessageCollectionButton: React.FC<MessageCollectionButtonProps> = (
     onRemoveAll,
     ...rest
 }) => {
-    const [isHovered, setIsHovered] = useState(false);
     const setCollections = useSetAtom(currentMessageCollectionsAtom);
     const collections = useAtomValue(currentMessageCollectionsAtom);
 
@@ -53,47 +55,45 @@ export const MessageCollectionButton: React.FC<MessageCollectionButtonProps> = (
         }],
     });
 
-    const handleButtonClick = (e: React.MouseEvent<HTMLButtonElement>) => {
-        e.stopPropagation();
-        if (!disabled) {
-            revealCollection();
-        }
-    };
+    const normalIcon = (
+        <span className="scale-90">
+            <CSSIcon name="collection" className="icon-16" />
+        </span>
+    );
 
-    const getIconElement = () => {
-        if ((isHovered || isRemoveMenuOpen) && canEdit && !disabled) {
-            return (
-                <span role="button" className="source-remove" {...removeHandlers}>
-                    <CSSIcon name="x-8" className="icon-16" />
-                </span>
-            );
-        }
-
-        return (
+    const popup: ChipPopupContent = {
+        icon: (
             <span className="scale-90">
                 <CSSIcon name="collection" className="icon-16" />
             </span>
-        );
+        ),
+        title: collection.name,
+        subtitle: { text: 'Collection' },
+        action: { icon: LibraryIcon, label: 'Reveal in library' },
     };
 
     return (
         <>
-        <button
-            style={{ height: '22px' }}
-            title={collection.name}
-            onMouseEnter={() => setIsHovered(true)}
-            onMouseLeave={() => setIsHovered(false)}
-            {...contextMenuHandlers}
-            className={`variant-outline source-button ${className || ''} ${disabled ? 'disabled-but-styled' : ''}`}
-            disabled={disabled}
-            onClick={handleButtonClick}
-            {...rest}
-        >
-            {getIconElement()}
-            <span className="truncate">
-                {truncateText(collection.name, MAX_TEXT_LENGTH)}
-            </span>
-        </button>
+        <ChipWithPopup popup={popup} suppressed={isRemoveMenuOpen}>
+            <ChipButton
+                {...contextMenuHandlers}
+                className={`${className || ''} ${disabled ? 'disabled-but-styled' : ''}`}
+                disabled={disabled}
+                onClick={() => revealCollection()}
+                {...rest}
+            >
+                {canEdit && !disabled ? (
+                    <ChipRemovableIcon
+                        normalIcon={normalIcon}
+                        removeHandlers={removeHandlers}
+                        removeMenuOpen={isRemoveMenuOpen}
+                    />
+                ) : normalIcon}
+                <span className="truncate">
+                    {truncateText(collection.name, MAX_TEXT_LENGTH)}
+                </span>
+            </ChipButton>
+        </ChipWithPopup>
         {removeMenu}
         </>
     );

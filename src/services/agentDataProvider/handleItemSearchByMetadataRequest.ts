@@ -9,9 +9,8 @@
 
 import { logger } from '../../utils/logger';
 import { deduplicateItems } from '../../utils/zoteroUtils';
-import { syncingItemFilter } from '../../utils/sync';
-import { searchableLibraryIdsAtom, syncWithZoteroAtom } from '../../../react/atoms/profile';
-import { userIdAtom } from '../../../react/atoms/auth';
+import { agentItemFilter } from '../../utils/agentItemSupport';
+import { searchableLibraryIdsAtom } from '../../../react/atoms/profile';
 
 import { store } from '../../../react/store';
 import { serializeItem } from '../../utils/zoteroSerializers';
@@ -22,7 +21,7 @@ import {
     FrontendTimingMetadata,
 } from '../agentProtocol';
 import { searchItemsByMetadata, SearchItemsByMetadataOptions } from '../../../react/utils/searchTools';
-import { getCollectionByIdOrName, prepareBatchAttachmentData, processAttachmentsWithBatchData } from './utils';
+import { getCollectionByIdOrName, prepareAttachmentInfoBatchData, processAttachmentInfoBatch } from './utils';
 import { TimingAccumulator } from '../../utils/timing';
 
 
@@ -228,22 +227,13 @@ export async function handleItemSearchByMetadataRequest(
         items: items.length,
     }, 1);
 
-    // Get sync configuration from store for status computation
-    const syncWithZotero = store.get(syncWithZoteroAtom);
-    const userId = store.get(userIdAtom);
-    const attachmentContext = {
-        searchableLibraryIds,
-        syncWithZotero,
-        userId,
-    };
-
     // Serialize items in parallel in bounded batches (with backfill on failures to ensure limit is reached)
     const targetLimit = request.limit > 0 ? request.limit : items.length;
-    const candidates = items.slice(offset).filter(item => syncingItemFilter(item));
+    const candidates = items.slice(offset).filter(item => agentItemFilter(item));
     const BATCH_SIZE = Math.min(targetLimit, 20);
 
     // Batch-fetch best attachments and sync dates for all candidate items
-    const batchAttachmentData = await prepareBatchAttachmentData(candidates, attachmentContext, ta);
+    const batchAttachmentData = await prepareAttachmentInfoBatchData(candidates, ta);
 
     const resultItems: ItemSearchFrontendResultItem[] = [];
     for (let batchStart = 0; batchStart < candidates.length && resultItems.length < targetLimit; batchStart += BATCH_SIZE) {
@@ -254,12 +244,10 @@ export async function handleItemSearchByMetadataRequest(
                 try {
                     const [itemData, attachments] = await Promise.all([
                         ta.track('item_serialization_ms', () => serializeItem(item, undefined, { skipHash: true })),
-                        ta.track('attachment_processing_ms', () => processAttachmentsWithBatchData(
+                        ta.track('attachment_processing_ms', () => processAttachmentInfoBatch(
                             item,
-                            attachmentContext,
                             batchAttachmentData,
                             {
-                                skipHash: true,
                                 skipWorkerFallback: true,
                                 timing: ta,
                                 includeAnnotationsCount: true,

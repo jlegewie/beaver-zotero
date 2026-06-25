@@ -1,10 +1,9 @@
 import { atom } from "jotai";
-import { currentMessageItemsAtom, currentMessageContentAtom, updateMessageItemsFromZoteroSelectionAtom, updateReaderAttachmentAtom } from "./messageComposition";
+import { currentMessageItemsAtom, currentMessageContentAtom, currentMessageCollectionsAtom, currentMessageExternalFilesAtom, updateMessageItemsFromZoteroSelectionAtom, updateReaderAttachmentAtom } from "./messageComposition";
 import { isLibraryTabAtom, isWebSearchEnabledAtom, removePopupMessagesByTypeAtom, userScrolledAtom, windowUserScrolledAtom } from "./ui";
 
-import { citationMetadataAtom, citationDataMapAtom, updateCitationDataAtom, resetCitationMarkersAtom, mergePageLabelsByAttachmentIdAtom } from "./citations";
+import { citationsAtom, citationMapAtom, processCitationsAtom, resetCitationMarkersAtom, mergePageLabelsByAttachmentIdAtom } from "./citations";
 import { preloadPageLabelsForCitations } from "../utils/pageLabels";
-import { isExternalCitation } from "../types/citations";
 import { agentRunService, agentService } from "../../src/services/agentService";
 import { threadService } from "../../src/services/threadService";
 import { getPref } from "../../src/utils/prefs";
@@ -26,8 +25,10 @@ import {
     clearAllPendingApprovalsAtom,
 } from "../agents/agentActions";
 import { processToolReturnResults } from "../agents/toolResultProcessing";
+import { upgradeToolReturn } from "../compat/legacyToolResults";
 import { loadItemDataForAgentActions } from "../utils/agentActionUtils";
 import { BeaverTemporaryAnnotations } from "../utils/annotationUtils";
+import { enrichMessageAttachmentStub } from "../types/attachments/converters";
 
 /**
  * Stores a run ID that ThreadView should scroll to after a thread finishes loading.
@@ -257,10 +258,11 @@ export const newThreadAtom = atom(
             set(isWebSearchEnabledAtom, false);
             
             set(currentMessageItemsAtom, []);
+            set(currentMessageCollectionsAtom, []);
+            set(currentMessageExternalFilesAtom, []);
             set(removePopupMessagesByTypeAtom, ['items_summary']);
-            set(citationMetadataAtom, []);
+            set(citationsAtom, []);
             set(resetCitationMarkersAtom);
-            set(citationDataMapAtom, {});
             set(currentMessageContentAtom, '');
             set(resetMessageUIStateAtom);
             set(clearExternalReferenceCacheAtom);
@@ -378,40 +380,63 @@ export const loadThreadAtom = atom(
                     }))
                 );
                 
+                // Build a tool_call_id → args map so the compat layer can derive
+                // the annotation-list variant (it needs the originating call args).
+                const toolCallArgsById = new Map<string, string | Record<string, any> | null>();
+                for (const run of processedRuns) {
+                    for (const message of run.model_messages) {
+                        if (message.kind === 'response') {
+                            for (const part of message.parts) {
+                                if (part.part_kind === 'tool-call' && part.tool_call_id) {
+                                    toolCallArgsById.set(part.tool_call_id, part.args);
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // Process tool return results
                 const externalReferences: ExternalReference[] = [];
                 for (const run of processedRuns) {
                     for (const message of run.model_messages) {
                         if (message.kind === 'request') {
                             for (const part of message.parts) {
-                                if (part.part_kind === "tool-return") await processToolReturnResults(part, set);
+                                if (part.part_kind === "tool-return") {
+                                    await processToolReturnResults(part, set);
+                                    // Synthesize a hydrated `view` for legacy results
+                                    // that lack one, so the shared render layer can
+                                    // render old threads from `metadata.view`.
+                                    await upgradeToolReturn(part, toolCallArgsById.get(part.tool_call_id));
+                                }
                             }
                         }
                     }
                 }
                 
-                // Load item data for citations and attachments
+                // Load item data for user attachments. Citations no longer
+                // need item preloading: they render from backend metadata
+                // alone (citation v2).
                 const allItemReferences = new Set<string>();
-                
-                // From citations (filter out external citations)
-                const zoteroCitations = citationMetadata.filter(citation => !isExternalCitation(citation));
-                zoteroCitations
-                    .filter(c => c.library_id && c.zotero_key)
-                    .forEach(c => allItemReferences.add(`${c.library_id}-${c.zotero_key}`));
-                
-                // From user attachments in runs
+
+                // From user attachments in runs (external files have no Zotero
+                // reference to preload)
                 for (const run of processedRuns) {
                     const attachments = run.user_prompt.attachments || [];
                     attachments
+                        .filter(att => att.type !== 'external_file')
                         .filter(att => att.library_id && att.zotero_key)
                         .forEach(att => allItemReferences.add(`${att.library_id}-${att.zotero_key}`));
                 }
 
-                const itemsPromises = Array.from(allItemReferences).map(ref => {
+                const refToItem = new Map<string, Zotero.Item>();
+                const itemsPromises = Array.from(allItemReferences).map(async ref => {
                     const [libraryId, key] = ref.split('-');
-                    return Zotero.Items.getByLibraryAndKeyAsync(parseInt(libraryId), key);
+                    const item = await Zotero.Items.getByLibraryAndKeyAsync(parseInt(libraryId), key);
+                    if (item) refToItem.set(ref, item);
+                    return item;
                 });
-                const itemsToLoad = (await Promise.all(itemsPromises)).filter(Boolean) as Zotero.Item[];
+                await Promise.all(itemsPromises);
+                const itemsToLoad = Array.from(refToItem.values());
 
                 if (itemsToLoad.length > 0) {
                     await loadFullItemDataWithAllTypes(itemsToLoad);
@@ -420,9 +445,17 @@ export const loadThreadAtom = atom(
                     }
                 }
 
-                // Update citation state
-                set(citationMetadataAtom, citationMetadata);
-                await set(updateCitationDataAtom);
+                for (const run of processedRuns) {
+                    for (const att of run.user_prompt.attachments || []) {
+                        if (att.type !== 'item' && att.type !== 'source') continue;
+                        const item = refToItem.get(`${att.library_id}-${att.zotero_key}`);
+                        if (item) enrichMessageAttachmentStub(att, item);
+                    }
+                }
+
+                // Update citation state (synchronous: markers + citation tip)
+                set(citationsAtom, citationMetadata);
+                set(processCitationsAtom);
 
                 // Preload PDF page labels in the background so subsequent
                 // renders can resolve page locators to their display labels.
@@ -476,7 +509,7 @@ export const loadThreadAtom = atom(
                 // No runs found, clear state
                 set(threadRunsAtom, []);
                 set(threadAgentActionsAtom, []);
-                set(citationMetadataAtom, []);
+                set(citationsAtom, []);
             }
 
             // Resolve thread name if fetched asynchronously
@@ -496,7 +529,7 @@ export const loadThreadAtom = atom(
                 set(threadRunsAtom, []);
                 set(activeRunAtom, null);
                 set(threadAgentActionsAtom, []);
-                set(citationMetadataAtom, []);
+                set(citationsAtom, []);
             } else {
                 console.error('Error loading thread:', error);
             }
@@ -505,6 +538,8 @@ export const loadThreadAtom = atom(
         }
         // Clear sources for now
         set(currentMessageItemsAtom, []);
+        set(currentMessageCollectionsAtom, []);
+        set(currentMessageExternalFilesAtom, []);
         set(removePopupMessagesByTypeAtom, ['items_summary']);
         set(currentMessageContentAtom, '');
     }

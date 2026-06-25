@@ -9,6 +9,14 @@ import tseslint from "typescript-eslint";
 /** Resolves ambiguous project roots when nested copies (e.g. .claude/worktrees) exist. */
 const tsconfigRootDir = path.dirname(fileURLToPath(import.meta.url));
 
+/** Globals banned everywhere — use the Zotero-aware accessors instead. */
+const restrictedGlobals = [
+    { message: "Use `Zotero.getMainWindow()` instead.", name: "window" },
+    { message: "Use `Zotero.getMainWindow().document` instead.", name: "document" },
+    { message: "Use `Zotero.getActiveZoteroPane()` instead.", name: "ZoteroPane" },
+    "Zotero_Tabs",
+];
+
 export default tseslint.config(
     {
         ignores: ["build/**", ".scaffold/**", "node_modules/**", "scripts/"],
@@ -21,20 +29,8 @@ export default tseslint.config(
             },
         },
         rules: {
-            "no-restricted-globals": [
-                "error",
-                { message: "Use `Zotero.getMainWindow()` instead.", name: "window" },
-                {
-                    message: "Use `Zotero.getMainWindow().document` instead.",
-                    name: "document",
-                },
-                {
-                    message: "Use `Zotero.getActiveZoteroPane()` instead.",
-                    name: "ZoteroPane",
-                },
-                "Zotero_Tabs",
-            ],
-            
+            "no-restricted-globals": ["error", ...restrictedGlobals],
+
             "@typescript-eslint/ban-ts-comment": [
                 "warn",
                 {
@@ -105,6 +101,62 @@ export default tseslint.config(
                             group: ["../../../react/*"],
                             message:
                                 "Worker code must not import the webpack-only React bundle.",
+                        },
+                    ],
+                },
+            ],
+        },
+    },
+    // The shared render layer must stay client-agnostic so it can be reused
+    // across clients. It may use the host registry (`react/host`) but must NOT
+    // touch the `Zotero` global or import the Zotero host implementation / prefs
+    // directly — those couplings go through `getHost()`.
+    // See docs-zotero/client-host-architecture.md.
+    {
+        files: [
+            "react/components/citations/**/*.{ts,tsx}",
+            "react/components/sources/CitedSourcesList.tsx",
+            "react/components/agentRuns/toolResultViews/**/*.{ts,tsx}",
+            // The tool-result dispatcher: renders only from hydrated view models and
+            // a generic fallback (dev-mode check via getHost().config), no Zotero global.
+            "react/components/agentRuns/ToolResultView.tsx",
+            // Shared agent-run dispatchers + the request-side action fallback.
+            "react/components/agentRuns/ModelResponseView.tsx",
+            "react/components/agentRuns/AgentRunView.tsx",
+            "react/components/agentRuns/GenericAgentActionView.tsx",
+            "react/components/agentRuns/AgentRunFooter.tsx",
+            "react/components/agentRuns/UserRequestView.tsx",
+            "react/components/agentRuns/requestChips/**/*.{ts,tsx}",
+            "react/components/messages/NoteDisplay.tsx",
+            // The tool-call header label is now pure (Zotero data arrives via the
+            // view model / itemData host slice); ToolCallPartView resolves request-
+            // side display names through getHost(), not the Zotero global.
+            "react/components/agentRuns/ToolCallPartView.tsx",
+            "react/agents/toolLabels.ts",
+        ],
+        rules: {
+            "no-restricted-globals": [
+                "error",
+                ...restrictedGlobals,
+                {
+                    name: "Zotero",
+                    message:
+                        "The citation render layer must stay client-agnostic — use getHost() (react/host) for Zotero-specific behavior.",
+                },
+            ],
+            "no-restricted-imports": [
+                "error",
+                {
+                    patterns: [
+                        {
+                            group: ["**/host/zotero/*", "**/host/zotero"],
+                            message:
+                                "Render layer must use the host registry (react/host), not the Zotero implementation (react/host/zotero).",
+                        },
+                        {
+                            group: ["**/utils/prefs"],
+                            message:
+                                "Render layer must read config via getHost().config, not Zotero prefs.",
                         },
                     ],
                 },

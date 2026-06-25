@@ -11,11 +11,11 @@ import { useIsomorphicLayoutEffect } from './useIsomorphicLayoutEffect';
  * **During streaming:**
  * - Citations render as they appear in text
  * - Markers are assigned in render order (first citation = "1")
- * - When metadata arrives, updateCitationDataAtom uses the SAME markers
+ * - When metadata arrives, processCitationsAtom uses the SAME markers
  * 
  * **When loading existing threads:**
  * - resetCitationMarkersAtom clears markers
- * - updateCitationDataAtom assigns markers based on citationMetadataAtom order
+ * - processCitationsAtom assigns markers based on citationsAtom order
  * - Components then retrieve existing markers (no re-assignment)
  * - Order depends on backend: runs are processed chronologically,
  *   citations within runs use backend order (typically text-appearance order)

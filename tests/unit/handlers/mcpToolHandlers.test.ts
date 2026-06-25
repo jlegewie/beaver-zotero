@@ -180,16 +180,12 @@ function makeSearchResultItem(overrides: any = {}) {
             ...overrides.item,
         },
         attachments: overrides.attachments ?? [{
-            attachment: {
-                library_id: 1,
-                zotero_key: 'ATT00001',
-                filename: 'paper.pdf',
-                annotations_count: 2,
-            },
-            file_status: {
-                status: 'available',
-                page_count: 25,
-            },
+            attachment_id: '1-ATT00001',
+            filename: 'paper.pdf',
+            content_kind: 'pdf',
+            page_count: 25,
+            annotations_count: 2,
+            status: 'readable',
         }],
         similarity: overrides.similarity ?? 0.95,
     };
@@ -255,6 +251,17 @@ describe('MCP Tool Handlers (via useMcpServer)', () => {
                 expect(tool.inputSchema).toBeDefined();
                 expect(tool.inputSchema.type).toBe('object');
             }
+        });
+
+        it('describes read_attachment as supporting PDFs and EPUB sections', async () => {
+            const result = await listTools(endpoint);
+            const readAttachmentTool = result.tools.find((tool: any) => tool.name === 'read_attachment');
+
+            expect(readAttachmentTool?.description).toContain('PDF or EPUB');
+            expect(readAttachmentTool?.description).toContain('EPUB sections');
+            expect(readAttachmentTool?.description).not.toContain('Only PDF attachments');
+            expect(readAttachmentTool?.inputSchema.properties.start_page.description).toContain('section ordinal');
+            expect(readAttachmentTool?.inputSchema.properties.end_page.description).toContain('section ordinal');
         });
 
         it('advertises MCP tool annotations', async () => {
@@ -498,6 +505,35 @@ describe('MCP Tool Handlers (via useMcpServer)', () => {
             expect(att.filename).toBe('paper.pdf');
             expect(att.page_count).toBe(25);
             expect(att.annotations_count).toBe(2);
+            expect(att.status).toBe('available');
+        });
+
+        it('accepts legacy nested attachment info in results', async () => {
+            mockHandleItemSearchByTopicRequest.mockResolvedValue({
+                type: 'item_search_by_topic',
+                items: [makeSearchResultItem({
+                    attachments: [{
+                        attachment: {
+                            library_id: 1,
+                            zotero_key: 'ATT00001',
+                            filename: 'paper.pdf',
+                            annotations_count: 2,
+                        },
+                        file_status: {
+                            status: 'available',
+                            page_count: 25,
+                        },
+                    }],
+                })],
+            });
+
+            const result = await callTool(endpoint, 'search_by_topic', { topic_query: 'test' });
+            const data = JSON.parse(result.content[0].text);
+            const att = data.results[0].attachments[0];
+
+            expect(att.attachment_id).toBe('1-ATT00001');
+            expect(att.filename).toBe('paper.pdf');
+            expect(att.page_count).toBe(25);
             expect(att.status).toBe('available');
         });
 
@@ -969,6 +1005,67 @@ describe('MCP Tool Handlers (via useMcpServer)', () => {
             expect(result.content[0].text).toContain('File not found');
         });
 
+        it('renders EPUB sections as page-addressable markdown', async () => {
+            mockHandleZoteroDocumentRequest.mockResolvedValue({
+                type: 'zotero_document',
+                request_id: 'req-epub',
+                content_kind: 'epub',
+                result: {
+                    content_kind: 'epub',
+                    schemaVersion: '1',
+                    sectionCount: 3,
+                    sections: [
+                        {
+                            index: 0,
+                            rawHref: 'EPUB/intro.xhtml',
+                            items: [
+                                { id: 'h1', kind: 'section_header', sectionIndex: 0, order: 0, level: 1, text: 'Intro' },
+                                { id: 'p1', kind: 'text', sectionIndex: 0, order: 1, text: 'Opening text.' },
+                            ],
+                        },
+                        {
+                            index: 1,
+                            rawHref: 'EPUB/chapter.xhtml',
+                            items: [
+                                { id: 'li1', kind: 'list_item', sectionIndex: 1, order: 0, text: 'First point' },
+                            ],
+                        },
+                        {
+                            index: 2,
+                            rawHref: 'EPUB/end.xhtml',
+                            items: [
+                                { id: 'p2', kind: 'text', sectionIndex: 2, order: 0, sentences: [{ id: 's1', text: 'Final sentence.' }] },
+                            ],
+                        },
+                    ],
+                    citationIndex: {},
+                    diagnostics: {
+                        extractedTextChars: 41,
+                        sourceTextChars: 41,
+                        textCoverage: 1,
+                    },
+                },
+            } as any);
+
+            const result = await callTool(endpoint, 'read_attachment', {
+                attachment_id: '1-KEY',
+                start_page: 1,
+                end_page: 2,
+            });
+
+            expect(result.isError).toBeFalsy();
+            const text = result.content[0].text;
+            expect(text).toContain('Total pages: 3');
+            expect(text).toContain('Showing pages 1-2');
+            expect(text).toContain('<page1>');
+            expect(text).toContain('# Intro');
+            expect(text).toContain('Opening text.');
+            expect(text).toContain('<page2>');
+            expect(text).toContain('- First point');
+            expect(text).not.toContain('<page3>');
+            expect(text).not.toContain('Final sentence.');
+        });
+
         it('handles unknown total_pages', async () => {
             mockHandleZoteroDocumentRequest.mockResolvedValue(mockDocumentResponse([{ index: 0, markdown: 'text' }], null));
 
@@ -1390,6 +1487,31 @@ describe('MCP Tool Handlers (via useMcpServer)', () => {
             expect(att.status).toBe('available');
             expect(att.page_count).toBeNull();
             expect(att.annotations_count).toBe(4);
+        });
+
+        it('maps readable attachment status to available without requiring path', async () => {
+            mockHandleGetMetadataRequest.mockResolvedValue({
+                type: 'get_metadata',
+                items: [{
+                    item_id: '1-KEY1',
+                    attachments: [{
+                        attachment_id: '1-ATT1',
+                        filename: 'paper.pdf',
+                        content_kind: 'pdf',
+                        status: 'readable',
+                        page_count: 12,
+                    }],
+                }],
+                not_found: [],
+            });
+
+            const result = await callTool(endpoint, 'get_item_details', { item_ids: ['1-KEY1'] });
+            const data = JSON.parse(result.content[0].text);
+            const att = data.items[0].attachments[0];
+
+            expect(att.attachment_id).toBe('1-ATT1');
+            expect(att.status).toBe('available');
+            expect(att.page_count).toBe(12);
         });
 
         it('marks attachment as unavailable when path is missing', async () => {

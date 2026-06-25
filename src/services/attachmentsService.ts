@@ -122,19 +122,6 @@ export interface UploadResponse {
     message: string;
 }
 
-/**
- * Response from the attachment validation endpoint
- */
-export interface ValidationResponse {
-    file_exists: boolean;
-    processed: boolean;
-    signed_upload_url?: string;
-    storage_path?: string;
-    upload_metadata?: Record<string, string>;
-    details?: string;
-    is_primary?: boolean;
-}
-
 // Types that match the backend models
 export interface UploadQueueItem {
     file_hash: string;
@@ -436,32 +423,6 @@ export class AttachmentsService extends ApiService {
         return this.post<FileUploadFailedResponse>('/api/v1/attachments/file-upload-failed', request);
     }
 
-    /**
-     * Validates an attachment by checking if it exists in storage and providing a signed upload URL if it doesn't exist.
-     * @param libraryId Zotero library ID
-     * @param zoteroKey Zotero key of the attachment
-     * @param fileHash Current file hash of the attachment
-     * @param requestUrl Whether to request a signed upload URL if the file does not exist (default: false)
-     * @returns Promise with validation response containing file existence status and upload URL if needed
-     */
-    async validateAttachment(
-        libraryId: number,
-        zoteroKey: string,
-        fileHash: string,
-        dateAdded: string | null = null,
-        requestUrl: boolean = false
-    ): Promise<ValidationResponse> {
-        const params = new URLSearchParams();
-        if (requestUrl) {
-            params.append('request_url', 'true');
-        }
-        if (dateAdded) {
-            params.append('date_added', Zotero.Date.sqlToISO8601(dateAdded));
-        }
-        
-        const url = `/api/v1/attachments/validate/${libraryId}/${zoteroKey}/${fileHash}${params.toString() ? `?${params.toString()}` : ''}`;
-        return this.get<ValidationResponse>(url);
-    }
 }
 
 // Export attachmentsService instance

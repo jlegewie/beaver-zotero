@@ -14,10 +14,11 @@ import {
     WSZoteroSearchResponse,
     ZoteroSearchResultItem,
     RegularSearchResultItem,
-    AttachmentResultItem,
+    AttachmentRowResult,
 } from '../agentProtocol';
-import { serializeNote } from '../../utils/zoteroSerializers';
-import { validateLibraryAccess, extractYear, formatCreatorsString } from './utils';
+import { ItemStub } from '../../../react/types/zotero';
+import { serializeNote, serializeItemStub } from '../../utils/zoteroSerializers';
+import { validateLibraryAccess, extractYear, formatCreatorsString, getAttachmentInfoForItem } from './utils';
 
 
 async function filterOutAnnotationItemIds(itemIds: number[]): Promise<number[]> {
@@ -302,18 +303,13 @@ export async function handleZoteroSearchRequest(
                 childParentIds.add(item.parentItemID);
             }
         }
-        const parentMap = new Map<number, { item_id: string; title: string }>();
+        const parentMap = new Map<number, ItemStub>();
         if (childParentIds.size > 0) {
             const parentItems = await Zotero.Items.getAsync([...childParentIds]);
             const validParents = parentItems.filter((p): p is Zotero.Item => p !== null);
             if (validParents.length > 0) {
-                await Zotero.Items.loadDataTypes(validParents, ['primaryData', 'itemData']);
-            }
-            for (const parent of validParents) {
-                let title = '';
-                try { title = (parent.getField('title', false, true) as string) || ''; }
-                catch { title = parent.getDisplayTitle?.() || ''; }
-                parentMap.set(parent.id, { item_id: `${parent.libraryID}-${parent.key}`, title });
+                await Zotero.Items.loadDataTypes(validParents, ['primaryData', 'itemData', 'creators']);
+                validParents.forEach(parent => parentMap.set(parent.id, serializeItemStub(parent)));
             }
         }
 
@@ -326,16 +322,18 @@ export async function handleZoteroSearchRequest(
                 items.push(serializeNote(item, parentInfo));
             } else if (item.isAttachment()) {
                 const parentInfo = item.parentItemID ? parentMap.get(item.parentItemID) : null;
-                const attachmentItem: AttachmentResultItem = {
+                const attachmentInfo = await getAttachmentInfoForItem(item, {
+                    parentItemId: parentInfo?.item_id ?? null,
+                    isPrimary: false,
+                    includeAnnotationsCount: true,
+                    skipWorkerFallback: true,
+                });
+                const attachmentItem: AttachmentRowResult = {
+                    ...attachmentInfo,
                     result_type: 'attachment',
-                    item_id: `${item.libraryID}-${item.key}`,
-                    title: item.getDisplayTitle?.() || '',
-                    filename: item.attachmentFilename || null,
-                    content_type: item.attachmentContentType || null,
-                    parent_item_id: parentInfo?.item_id ?? null,
                     parent_title: parentInfo?.title ?? null,
+                    parent_item: parentInfo ?? null,
                     date_modified: item.dateModified,
-                    annotations_count: item.isFileAttachment?.() ? item.getAnnotations().length : 0,
                 };
                 items.push(attachmentItem);
             } else {

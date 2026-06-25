@@ -287,7 +287,7 @@ describe('preloadPageLabelsForCitations', () => {
         (globalThis as any).Zotero.Beaver = { documentCache: cache };
 
         const labels = await preloadPageLabelsForCitations([
-            { library_id: 1, zotero_key: 'REMOTE03', pages: [1], parts: [] },
+            { resolved_ref: { kind: 'zotero' as const, library_id: 1, zotero_key: 'REMOTE03' }, pages: [1] },
         ]);
 
         expect(cache.getMetadata).toHaveBeenCalledWith({ libraryId: 1, zoteroKey: 'REMOTE03' }, 'remote:h:syncedhash');
@@ -308,7 +308,7 @@ describe('preloadPageLabelsForCitations', () => {
         (globalThis as any).Zotero.Beaver = { documentCache: cache };
 
         const labels = await preloadPageLabelsForCitations([
-            { library_id: 1, zotero_key: 'REMOTE04', pages: [1], parts: [] },
+            { resolved_ref: { kind: 'zotero' as const, library_id: 1, zotero_key: 'REMOTE04' }, pages: [1] },
         ]);
 
         expect(labels).toEqual({});
@@ -326,7 +326,7 @@ describe('preloadPageLabelsForCitations', () => {
         (globalThis as any).Zotero.Beaver = { documentCache: cache };
 
         const labels = await preloadPageLabelsForCitations([
-            { library_id: 1, zotero_key: 'PARENT02', pages: [1], parts: [] },
+            { resolved_ref: { kind: 'zotero' as const, library_id: 1, zotero_key: 'PARENT02' }, pages: [1] },
         ]);
 
         expect(parent.getFilePathAsync).not.toHaveBeenCalled();
@@ -348,7 +348,7 @@ describe('preloadPageLabelsForCitations', () => {
         (globalThis as any).Zotero.Beaver = { documentCache: cache };
 
         const labels = await preloadPageLabelsForCitations([
-            { library_id: 1, zotero_key: 'LOCAL01', pages: [1], parts: [] },
+            { resolved_ref: { kind: 'zotero' as const, library_id: 1, zotero_key: 'LOCAL01' }, pages: [1] },
         ]);
 
         expect(mockGetAttachmentFileStatus).toHaveBeenCalledWith(item, false);
@@ -377,7 +377,7 @@ describe('preloadPageLabelsForCitations', () => {
         (globalThis as any).Zotero.Beaver = { documentCache: cache };
 
         const labels = await preloadPageLabelsForCitations([
-            { library_id: 1, zotero_key: 'PARENT03', pages: [3], parts: [] },
+            { resolved_ref: { kind: 'zotero' as const, library_id: 1, zotero_key: 'PARENT03' }, pages: [3] },
         ]);
 
         expect(labels).toEqual({ 78: { 2: '3' } });

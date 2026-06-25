@@ -1,10 +1,12 @@
 export {
     resolveToReadableAttachment,
     resolveToPdfAttachment,
+    resolveToImageAttachment,
 } from './attachmentResolution';
 export type {
     ReadableAttachmentResolveResult,
     PdfAttachmentResolveResult,
+    ImageAttachmentResolveResult,
 } from './attachmentResolution';
 
 export {

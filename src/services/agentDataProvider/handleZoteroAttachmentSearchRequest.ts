@@ -109,7 +109,7 @@ export async function handleZoteroAttachmentSearchRequest(
             const contentType = zoteroItem.attachmentContentType || 'unknown';
             throwIfTimedOut('not_pdf_response');
             return errorResponse(
-                `Attachment is not a PDF (type: ${contentType})`,
+                `In-document search is currently supported for PDF attachments only (this attachment is ${contentType})`,
                 'not_pdf'
             );
         }

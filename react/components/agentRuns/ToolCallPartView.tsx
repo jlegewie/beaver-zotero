@@ -2,10 +2,16 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { AgentRunStatus, ToolCallPart } from '../../agents/types';
 import { toolResultsMapAtom, getToolCallStatus } from '../../agents/atoms';
-import { getToolCallLabel } from '../../agents/toolLabels';
-import { extractLookupWorkFoundCount } from '../../agents/toolResultTypes';
+import { getToolCallLabel, getLabelEnrichmentNeeds, type ToolCallLabelEnrich } from '../../agents/toolLabels';
+import { extractZoteroReferencesFromToolCall, parseArgs } from '../../agents/toolCallRequest';
+import {
+    isToolResultView,
+    getToolResultRenderableCount,
+    type ToolResultView as ToolResultViewModel,
+} from '../../types/toolResultViews';
 import { ToolResultView } from './ToolResultView';
-import { AgentActionView } from './AgentActionView';
+import { GenericAgentActionView } from './GenericAgentActionView';
+import { getHost } from '../../host';
 import { getPendingApprovalForToolcallAtom, getAgentActionsByToolcallAtom } from '../../agents/agentActions';
 import {
     Spinner,
@@ -64,10 +70,13 @@ const TOOL_ICONS: Record<string, IconComponent> = {
     // Reading tools
     search_in_documents: TextAlignLeftIcon,
     search_in_attachment: SearchIcon,
+    find_in_attachments: SearchIcon,
+    read: TextAlignLeftIcon,
     read_pages: TextAlignLeftIcon,
     read_attachment: TextAlignLeftIcon,
     view_page_images: ViewIcon,
     view_pages: ViewIcon,
+    view: ViewIcon,
 
     // Note tools
     read_note: TextAlignLeftIcon,
@@ -102,9 +111,6 @@ const TOOL_ICONS: Record<string, IconComponent> = {
 
 /** Progressive disclosure tools whose returns are framework-internal and shouldn't be expandable. */
 const NON_EXPANDABLE_TOOLS = new Set(['read_file', 'load_capability', 'search_tools', 'load_tool_results']);
-
-/** Tools that return pages */
-const UNIT_PAGES_TOOLS = new Set(['read_pages', 'read_attachment', 'view_page_images', 'view_pages']);
 
 /** Tools that support streaming argument preview */
 const STREAMING_PREVIEW_TOOLS = new Set(['create_note']);
@@ -195,7 +201,63 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
     const result = resultsMap.get(part.tool_call_id);
     const hasResult = result !== undefined;
     const status = getToolCallStatus(part.tool_call_id, resultsMap, runStatus);
-    const baseLabel = getToolCallLabel(part, status);
+
+    // Hydrated tool-result view model — present once the call has returned.
+    const rawView = result?.part_kind === 'tool-return' ? result.metadata?.view : undefined;
+    const view: ToolResultViewModel | null = isToolResultView(rawView) ? rawView : null;
+    // Renderable count, for expansion gating only (don't expand a zero-result tool).
+    // Prefer the view; fall back to the legacy summary count so view-less returns
+    // still block expansion at zero results.
+    const renderableCount = view
+        ? getToolResultRenderableCount(view)
+        : result?.part_kind === 'tool-return'
+            ? result.metadata?.summary?.result_count ?? null
+            : null;
+
+    // Host-resolved request-side display names for the parts the view model does
+    // not cover (pending/failed item names, list_* library/collection scope names).
+    // Resolved in an effect via the itemData host slice, mirroring CitedSourcesList;
+    // degrades to the base label on clients without that capability.
+    const [labelEnrich, setLabelEnrich] = useState<ToolCallLabelEnrich | null>(null);
+    useEffect(() => {
+        let cancelled = false;
+        const itemData = getHost().itemData;
+        const needs = getLabelEnrichmentNeeds(part, view);
+        if (!itemData || (!needs.itemName && !needs.scope)) {
+            setLabelEnrich(null);
+            return;
+        }
+        (async () => {
+            const next: ToolCallLabelEnrich = {};
+            if (needs.itemName && itemData.resolveItemDisplay) {
+                const ref = extractZoteroReferencesFromToolCall(part)[0];
+                if (ref) {
+                    const display = await itemData.resolveItemDisplay(ref);
+                    if (display?.displayName) next.itemDisplayName = display.displayName;
+                }
+            }
+            if (needs.scope) {
+                const args = parseArgs(part);
+                const libParam = args.library as string | number | undefined;
+                const libId = typeof libParam === 'number'
+                    ? libParam
+                    : (typeof libParam === 'string' ? parseInt(libParam, 10) : undefined);
+                const collParam = (args.collection_key ?? args.collection ?? args.parent_collection) as string | undefined;
+                if (collParam && itemData.resolveCollectionName) {
+                    const name = await itemData.resolveCollectionName(collParam, Number.isNaN(libId as number) ? undefined : libId);
+                    if (!cancelled && name) next.collectionName = name;
+                }
+                if (libParam != null && itemData.resolveLibraryName) {
+                    const name = await itemData.resolveLibraryName(libParam);
+                    if (!cancelled && name) next.libraryName = name;
+                }
+            }
+            if (!cancelled) setLabelEnrich(Object.keys(next).length ? next : null);
+        })();
+        return () => { cancelled = true; };
+    }, [part.tool_call_id, part.args, view]);
+
+    const label = getToolCallLabel(part, status, { view, enrich: labelEnrich });
     
     // Check for pending approval for this tool call
     const getPendingApproval = useAtomValue(getPendingApprovalForToolcallAtom);
@@ -247,25 +309,6 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
             ? 'confirm_external_search'
             : part.tool_name;
 
-    const lookupFoundCount =
-        part.tool_name === 'lookup_work' &&
-        status === 'completed' &&
-        result?.part_kind === 'tool-return'
-            ? extractLookupWorkFoundCount(result.content)
-            : null;
-
-    const resultCount =
-        result && result.part_kind === 'tool-return'
-            ? result?.metadata?.summary?.result_count ?? null
-            : null;
-
-    const unit = UNIT_PAGES_TOOLS.has(part.tool_name) ? 'page' : 'result';
-    const label = lookupFoundCount !== null
-        ? `${baseLabel.split(':')[0]}: ${lookupFoundCount} found`
-        : status === 'completed' && resultCount !== null
-            ? `${baseLabel} (${resultCount} ${unit}${resultCount === 1 ? '' : 's'})`
-            : baseLabel;
-
     // Use global Jotai atom for expansion state (persists across re-renders and syncs between panes)
     const expansionKey = `${runId}:${responseIndex}:${part.tool_call_id}`;
     const expansionState = useAtomValue(toolExpandedAtom);
@@ -294,7 +337,7 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
         hasResult &&
         result?.part_kind === 'tool-return' &&
         // If we can compute a count (search-like tools), block expansion for 0 results.
-        (resultCount === null || resultCount > 0) &&
+        (renderableCount === null || renderableCount > 0) &&
         !NON_EXPANDABLE_TOOLS.has(part.tool_name) &&
         !isExtractionRejected &&
         !isExternalSearchRejected &&
@@ -326,34 +369,34 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
     const showStreamingPreview = !!streamingArgs && runStatus === 'in_progress'
         && STREAMING_PREVIEW_TOOLS.has(part.tool_name) && !showAgentActionView && !hasError;
 
+    // Agent-action UI (incl. streaming preview) is host-injected; non-Zotero
+    // clients fall back to a request-side summary.
     if (showStreamingPreview && streamingArgs) {
-        return (
-            <AgentActionView
-                toolcallId={part.tool_call_id}
-                toolName={part.tool_name}
-                runId={runId}
-                responseIndex={responseIndex}
-                pendingApproval={null}
-                hasToolReturn={false}
-                streamingArgs={streamingArgs}
-                runStatus={runStatus}
-            />
-        );
+        return getHost().components?.agentActionInStream({
+            kind: 'tool-action',
+            part,
+            runId,
+            responseIndex,
+            runStatus,
+            toolName: part.tool_name,
+            pendingApproval: null,
+            hasToolReturn: false,
+            streamingArgs,
+        }) ?? <GenericAgentActionView part={part} runStatus={runStatus} streamingArgs={streamingArgs} />;
     }
 
-    // For agent action tools, show the AgentActionView instead of normal tool result
+    // For agent action tools, show the action UI instead of the normal tool result
     if (showAgentActionView) {
-        return (
-            <AgentActionView
-                toolcallId={part.tool_call_id}
-                toolName={actionToolName}
-                runId={runId}
-                responseIndex={responseIndex}
-                pendingApproval={pendingApproval}
-                hasToolReturn={hasResult}
-                runStatus={runStatus}
-            />
-        );
+        return getHost().components?.agentActionInStream({
+            kind: 'tool-action',
+            part,
+            runId,
+            responseIndex,
+            runStatus,
+            toolName: actionToolName,
+            pendingApproval,
+            hasToolReturn: hasResult,
+        }) ?? <GenericAgentActionView part={part} runStatus={runStatus} />;
     }
 
     const effectiveLabelColor = effectiveExpanded
@@ -381,19 +424,23 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
             >
                 <button
                     type="button"
-                    className={`variant-ghost-secondary display-flex flex-row py-15 gap-2 w-full text-left ${canExpand ? 'cursor-pointer' : ''}`}
+                    className={`variant-ghost-secondary display-flex flex-row py-15 gap-2 w-full text-left min-w-0 ${canExpand ? 'cursor-pointer' : ''}`}
                     style={{ fontSize: '0.95rem', background: 'transparent', border: 0, padding: 0 }}
                     aria-expanded={effectiveExpanded}
                     aria-controls={`tool-result-${part.tool_call_id}`}
                     onClick={handleToggleExpanded}
                     disabled={!canExpand}
                 >
-                    <div className="display-flex flex-row px-3 gap-2">
+                    <div className="display-flex flex-row px-3 gap-2 min-w-0">
                         <div className={`flex-1 display-flex mt-010 ${effectiveLabelColor}`}>
                             <Icon icon={getIcon()} />
                         </div>
-                        
-                        <div className={`display-flex ${effectiveLabelColor} ${isShimmering ? 'shimmer-text' : ''}`}>
+
+                        {/* min-w-0 + truncate keep the label on a single line; long item
+                            names/locators get an ellipsis instead of wrapping. Must stay a
+                            block (not display-flex) — text-overflow:ellipsis is ignored on
+                            flex containers, which clips the text without the "…". */}
+                        <div className={`min-w-0 truncate ${effectiveLabelColor} ${isShimmering ? 'shimmer-text' : ''}`}>
                             {label}
                         </div>
                     </div>
@@ -404,7 +451,7 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
             {/* Expanded result view */}
             {hasExpandedResult && (
                 <div id={`tool-result-${part.tool_call_id}`}>
-                    <ToolResultView toolcall={part} result={result} />
+                    <ToolResultView result={result} />
                 </div>
             )}
         </div>

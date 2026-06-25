@@ -74,19 +74,18 @@ describe('document request — readable but unsupported attachment kinds', () =>
         expect(res.result?.document.pageCount).toBeGreaterThan(0);
     });
 
-    it('rejects an EPUB attachment as unsupported_type with content_kind "epub"', async () => {
-        const res = await fetchDocument(NON_PDF, { mode: 'markdown' });
-        expect(res.error_code).toBe('unsupported_type');
+    it('extracts an EPUB attachment with content_kind "epub"', async () => {
+        const res = await fetchDocument(NON_PDF, { mode: 'markdown' }, EXTRACT_OPTS);
+        expect(res.error_code ?? null).toBeNull();
         expect(res.content_kind).toBe('epub');
-        expect(res.error).toContain('currently supports PDF only');
-        expect(res.result ?? null).toBeNull();
+        expect((res.result as any)?.sectionCount).toBeGreaterThan(0);
     });
 
-    it('rejects a text attachment as unsupported_type with content_kind "text"', async () => {
-        const res = await fetchDocument(TEXT_ATTACHMENT, { mode: 'markdown' });
-        expect(res.error_code).toBe('unsupported_type');
+    it('extracts a text attachment with content_kind "text"', async () => {
+        const res = await fetchDocument(TEXT_ATTACHMENT, { mode: 'markdown' }, EXTRACT_OPTS);
+        expect(res.error_code ?? null).toBeNull();
         expect(res.content_kind).toBe('text');
-        expect(res.result ?? null).toBeNull();
+        expect(res.result).toBeTruthy();
     });
 
     it('rejects an HTML snapshot attachment as unsupported_type with content_kind "snapshot"', async () => {

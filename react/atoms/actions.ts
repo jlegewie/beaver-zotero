@@ -21,7 +21,7 @@ import { sendWSMessageAtom } from './agentRunAtoms';
 import { currentMessageContentAtom, currentMessageItemsAtom, currentMessageCollectionsAtom, pendingActionInputFocusAtom } from './messageComposition';
 import { CollectionReference } from '../types/zotero';
 import { addPopupMessageAtom } from '../utils/popupMessageUtils';
-import { itemValidationResultsAtom } from './itemValidation';
+import { isRejectedItemValidation, itemValidationResultsAtom } from './itemValidation';
 
 // ---------------------------------------------------------------------------
 // Base atom — initialised once from prefs + built-ins
@@ -194,17 +194,17 @@ export const sendResolvedActionAtom = atom(
             return;
         }
 
-        // Check cached validation results — warn if any resolved item is known to be invalid
+        // Check cached validation results and skip rejected items.
         if (items.length > 0) {
             const validationResults = get(itemValidationResultsAtom);
             for (const item of items) {
                 const key   = `${item.libraryID}-${item.key}`;
                 const cached = validationResults.get(key);
-                if (cached && !cached.isValidating && !cached.isValid) {
+                if (isRejectedItemValidation(item, cached)) {
                     set(addPopupMessageAtom, {
                         type: 'error',
                         title: 'Action skipped',
-                        text: cached.reason || 'One or more items failed validation.',
+                        text: cached?.reason || 'One or more items failed validation.',
                         expire: true,
                         duration: 4000,
                     });
@@ -272,11 +272,11 @@ export const stageActionInInputAtom = atom(
             for (const item of items) {
                 const key = `${item.libraryID}-${item.key}`;
                 const cached = validationResults.get(key);
-                if (cached && !cached.isValidating && !cached.isValid) {
+                if (isRejectedItemValidation(item, cached)) {
                     set(addPopupMessageAtom, {
                         type: 'error',
                         title: 'Action skipped',
-                        text: cached.reason || 'One or more items failed validation.',
+                        text: cached?.reason || 'One or more items failed validation.',
                         expire: true,
                         duration: 4000,
                     });

@@ -1,12 +1,32 @@
 import { logger } from "../../../src/utils/logger";
 import {
-    collectEpubDomItems,
-    normalizeEpubText,
+    collectDomItems,
+    normalizeText,
+    type DomItem,
+} from "../../../src/services/documentExtraction/dom";
+import {
     type EpubDocument,
-    type EpubItem,
 } from "../../../src/services/documentExtraction/epub";
 import {
+    citationSearchTextCandidates,
+    createElementContentsRange,
+    createSentenceRange,
+    findAnchorElement,
+    normalizeHrefBasename,
+} from "../../../src/services/documentExtraction/epub/epubTextRange";
+
+// Re-export the shared text-search helpers so existing consumers of this module
+// (and tests) keep their import paths. The implementations now live in `src/`
+// so the headless EPUB annotation resolver can reuse them.
+export {
+    createElementContentsRange,
+    createSentenceRange,
+    normalizeHrefBasename,
+} from "../../../src/services/documentExtraction/epub/epubTextRange";
+import {
+    ensureSectionMounted,
     getSectionBody,
+    getSectionCount,
     getSectionHref,
     type EpubPrimaryView,
 } from "./epubReaderView";
@@ -50,7 +70,7 @@ export function resolveEpubRanges(
         const section = document.sections.find((entry) => entry.index === extractedSectionIndex);
         if (!section) continue;
 
-        const candidates = collectEpubDomItems(body);
+        const candidates = collectDomItems(body);
         const itemMap = alignSectionItems(section.items, candidates);
 
         for (const descriptor of sectionDescriptors) {
@@ -87,12 +107,110 @@ export function resolveEpubRanges(
     return resolved;
 }
 
-export function normalizeHrefBasename(href: string | undefined): string | undefined {
-    if (!href) return undefined;
-    const withoutHash = href.split("#", 1)[0];
-    const withoutQuery = withoutHash.split("?", 1)[0];
-    const parts = withoutQuery.split("/").filter(Boolean);
-    return parts[parts.length - 1]?.toLowerCase();
+/** Citation locator inside an EPUB, as carried by citation metadata. */
+export interface EpubCitationTarget {
+    /** Section href from the citation's symbolic location (matched by basename). */
+    sectionHref?: string;
+    /** 1-based agent-facing "page" (section ordinal); used when no href matches. */
+    sectionOrdinal?: number;
+    /** DOM id of the cited element inside the section, when known. */
+    anchorId?: string;
+    /** Cited sentence text to anchor a precise highlight range. */
+    text?: string;
+}
+
+export interface ResolvedEpubCitationTarget {
+    /** Reader spine section index the citation points at. */
+    sectionIndex: number;
+    /** Precise live-DOM range when the cited text/anchor could be located. */
+    range?: Range;
+}
+
+/**
+ * Resolve a citation locator to a reader spine section and, when possible, a
+ * precise DOM range — without requiring an extracted `EpubDocument`. The
+ * section is found by href basename (falling back to the 1-based section
+ * ordinal, which is 1:1 with the spine); the range by anchor id and/or
+ * normalized sentence-text search. Text search returns the first match, so
+ * `anchorId` scoping is what disambiguates repeated phrases.
+ *
+ * Mounts the target section if the reader has it unmounted (mirrors the
+ * reader's own CFI navigation behavior). Returns null when no section can be
+ * determined; returns a section without a range when only coarse navigation
+ * is possible.
+ */
+export function resolveEpubCitationRange(
+    primaryView: EpubPrimaryView,
+    target: EpubCitationTarget,
+): ResolvedEpubCitationTarget | null {
+    const sectionIndex = resolveCitationSectionIndex(primaryView, target);
+    if (sectionIndex === undefined) return null;
+
+    if (!ensureSectionMounted(primaryView, sectionIndex)) {
+        return { sectionIndex };
+    }
+    const body = getSectionBody(primaryView, sectionIndex);
+    if (!body) return { sectionIndex };
+
+    const anchorElement = target.anchorId
+        ? findAnchorElement(body, target.anchorId)
+        : undefined;
+
+    const searchTexts = citationSearchTextCandidates(target.text);
+
+    // Exhaust anchor-scoped candidates before any body-wide search: a
+    // body-wide match for an earlier candidate must not outrank the anchor
+    // disambiguation that `anchorId` exists to provide.
+    if (anchorElement) {
+        for (const searchText of searchTexts) {
+            const scopedRange = createSentenceRange(anchorElement, searchText);
+            if (scopedRange) return { sectionIndex, range: scopedRange };
+        }
+    }
+    for (const searchText of searchTexts) {
+        const bodyRange = createSentenceRange(body, searchText);
+        if (bodyRange) return { sectionIndex, range: bodyRange };
+    }
+
+    if (anchorElement) {
+        const anchorRange = createElementContentsRange(anchorElement);
+        if (anchorRange) return { sectionIndex, range: anchorRange };
+    }
+
+    return { sectionIndex };
+}
+
+function resolveCitationSectionIndex(
+    primaryView: EpubPrimaryView,
+    target: EpubCitationTarget,
+): number | undefined {
+    const sectionCount = getSectionCount(primaryView);
+
+    const targetBasename = normalizeHrefBasename(target.sectionHref);
+    if (targetBasename) {
+        for (let index = 0; index < sectionCount; index++) {
+            if (normalizeHrefBasename(getSectionHref(primaryView, index)) === targetBasename) {
+                return index;
+            }
+        }
+        logger(`[EpubVisualizer] No reader section matches citation href ${targetBasename}`, 1);
+    }
+
+    // Ordinal fallback: extraction ordinals are 1:1 with reader spine indexes
+    // only for all-XHTML spines — the extractor skips non-XHTML spine items,
+    // compacting its indexes below the reader's. The href match above is the
+    // reliable locator; the ordinal can land one-or-more sections early for
+    // EPUBs with skipped spine entries.
+    if (
+        typeof target.sectionOrdinal === "number"
+        && Number.isInteger(target.sectionOrdinal)
+    ) {
+        const index = target.sectionOrdinal - 1;
+        if (index >= 0 && index < sectionCount) return index;
+        logger(`[EpubVisualizer] Citation section ordinal ${target.sectionOrdinal} is out of range`, 1);
+    }
+
+    return undefined;
 }
 
 function mapExtractedSectionsToReaderSections(
@@ -138,23 +256,23 @@ function groupDescriptorsBySection(
 }
 
 function alignSectionItems(
-    extractedItems: EpubItem[],
-    candidates: ReturnType<typeof collectEpubDomItems>,
-): Map<string, ReturnType<typeof collectEpubDomItems>[number]> {
-    const result = new Map<string, ReturnType<typeof collectEpubDomItems>[number]>();
+    extractedItems: DomItem[],
+    candidates: ReturnType<typeof collectDomItems>,
+): Map<string, ReturnType<typeof collectDomItems>[number]> {
+    const result = new Map<string, ReturnType<typeof collectDomItems>[number]>();
     let candidateIndex = 0;
 
     for (const item of extractedItems) {
         if (item.kind === "picture") continue;
 
-        const targetText = normalizeEpubText(item.text);
+        const targetText = normalizeText(item.text);
         if (!targetText) continue;
 
         let matchedIndex = -1;
         for (let i = candidateIndex; i < candidates.length; i++) {
             const candidate = candidates[i];
             if (candidate.kind !== item.kind) continue;
-            if (textsMatch(targetText, normalizeEpubText(candidate.text))) {
+            if (textsMatch(targetText, normalizeText(candidate.text))) {
                 matchedIndex = i;
                 break;
             }
@@ -175,81 +293,4 @@ function alignSectionItems(
 function textsMatch(extractedText: string, candidateText: string): boolean {
     if (extractedText === candidateText) return true;
     return candidateText.includes(extractedText) || extractedText.includes(candidateText);
-}
-
-function createElementContentsRange(element: Element): Range | undefined {
-    const doc = element.ownerDocument;
-    const range = doc.createRange();
-    try {
-        range.selectNodeContents(element);
-        if (normalizeEpubText(range.toString())) return range;
-    } catch (error) {
-        logger(`[EpubVisualizer] Failed to create EPUB item range: ${error}`, 1);
-    }
-    range.detach();
-    return undefined;
-}
-
-function createSentenceRange(element: Element, sentenceText: string): Range | undefined {
-    const normalizedSentence = normalizeEpubText(sentenceText);
-    if (!normalizedSentence) return undefined;
-
-    const textNodes = collectTextNodes(element);
-    const flattened = flattenTextNodes(textNodes);
-    const offset = flattened.normalized.indexOf(normalizedSentence);
-    if (offset === -1) return undefined;
-
-    const start = flattened.positions[offset];
-    const end = flattened.positions[offset + normalizedSentence.length - 1];
-    if (!start || !end) return undefined;
-
-    const range = element.ownerDocument.createRange();
-    range.setStart(start.node, start.offset);
-    range.setEnd(end.node, end.offset + 1);
-    return range;
-}
-
-function collectTextNodes(root: Element): Text[] {
-    const doc = root.ownerDocument;
-    const showText = doc.defaultView?.NodeFilter.SHOW_TEXT ?? NodeFilter.SHOW_TEXT;
-    const walker = doc.createTreeWalker(root, showText);
-    const nodes: Text[] = [];
-    let current = walker.nextNode();
-    while (current) {
-        nodes.push(current as Text);
-        current = walker.nextNode();
-    }
-    return nodes;
-}
-
-interface FlattenedText {
-    normalized: string;
-    positions: Array<{ node: Text; offset: number }>;
-}
-
-function flattenTextNodes(nodes: Text[]): FlattenedText {
-    let normalized = "";
-    const positions: Array<{ node: Text; offset: number }> = [];
-    let pendingSpace: { node: Text; offset: number } | undefined;
-
-    for (const node of nodes) {
-        const value = node.nodeValue ?? "";
-        for (let offset = 0; offset < value.length; offset++) {
-            const char = value[offset];
-            if (/\s/.test(char)) {
-                pendingSpace = { node, offset };
-                continue;
-            }
-
-            if (pendingSpace && normalized.length > 0) {
-                normalized += " ";
-                positions.push(pendingSpace);
-            }
-            pendingSpace = undefined;
-            normalized += char;
-            positions.push({ node, offset });
-        }
-    }
-
-    return { normalized: normalized.trim(), positions };
 }

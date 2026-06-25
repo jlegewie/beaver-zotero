@@ -14,6 +14,7 @@ export interface EpubSectionRenderer {
         index?: number;
         href?: string;
     };
+    mount?: () => void;
 }
 
 export interface EpubPrimaryView {
@@ -97,6 +98,33 @@ export function getSectionHref(
     return getRenderers(primaryView)[sectionIndex]?.section?.href;
 }
 
+/** Return the number of spine sections known to the reader. */
+export function getSectionCount(primaryView: EpubPrimaryView): number {
+    return getRenderers(primaryView).length;
+}
+
+/**
+ * Ensure a spine section's container is attached to the live DOM. Section
+ * bodies are rendered at load time, but the reader keeps off-screen sections
+ * unmounted; the reader itself force-mounts on CFI navigation, so doing the
+ * same here is safe. Returns true when the section body is available.
+ */
+export function ensureSectionMounted(
+    primaryView: EpubPrimaryView,
+    sectionIndex: number,
+): boolean {
+    const renderer = getRenderers(primaryView)[sectionIndex];
+    if (!renderer) return false;
+    if (!renderer.mounted && typeof renderer.mount === "function") {
+        try {
+            renderer.mount();
+        } catch (error) {
+            logger(`[EpubReaderView] Failed to mount section ${sectionIndex}: ${error}`, 1);
+        }
+    }
+    return !!renderer.body;
+}
+
 /** Create a Zotero EPUB annotation descriptor from a DOM range. */
 export function annotationFromRange(
     primaryView: EpubPrimaryView,
@@ -115,6 +143,7 @@ export function annotationFromRange(
 export function setTemporaryAnnotations(
     reader: ZoteroReader,
     annotations: EpubRangeAnnotation[],
+    options: { authorName?: string; idPrefix?: string } = {},
 ): ZoteroItemReference[] {
     if (annotations.length === 0) return [];
 
@@ -124,12 +153,14 @@ export function setTemporaryAnnotations(
         return [];
     }
 
+    const authorName = options.authorName ?? BEAVER_VISUALIZER_ANNOTATION_AUTHOR;
+    const idPrefix = options.idPrefix ?? "epub_visualizer";
     const now = new Date().toISOString();
     const tempAnnotations: any[] = [];
     const refs: ZoteroItemReference[] = [];
 
     annotations.forEach((annotation, index) => {
-        const tempId = `epub_visualizer_${Date.now()}_${index}_${Math.random()
+        const tempId = `${idPrefix}_${Date.now()}_${index}_${Math.random()
             .toString(36)
             .substr(2, 9)}`;
         const annotationColor = annotation.color ?? "#ffcc00";
@@ -149,14 +180,14 @@ export function setTemporaryAnnotations(
             tags: [],
             comment: annotationComment,
             text: annotationText,
-            authorName: "Beaver Visualizer",
+            authorName,
             pageLabel,
             isExternal: false,
             readOnly: false,
             lastModifiedByUser: "",
             dateModified: now,
             annotationType: annotation.type,
-            annotationAuthorName: BEAVER_VISUALIZER_ANNOTATION_AUTHOR,
+            annotationAuthorName: authorName,
             annotationText,
             annotationComment,
             annotationColor,

@@ -5,7 +5,7 @@
 
 import { AgentAction } from '../agents/agentActions';
 import { store } from '../store';
-import { citationDataMapAtom } from '../atoms/citations';
+import { citationMapAtom } from '../atoms/citations';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../atoms/externalReferences';
 import { currentThreadIdAtom } from '../atoms/threads';
 import { renderToHTML } from './citationRenderers';
@@ -79,7 +79,7 @@ export async function executeCreateNoteAction(action: AgentAction, runId?: strin
     const collectionKey = proposed.collection_key || null;
 
     // Get citation context for rendering
-    const citationDataMap = store.get(citationDataMapAtom);
+    const citationDataMap = store.get(citationMapAtom);
     const externalMapping = store.get(externalReferenceItemMappingAtom);
     const externalReferencesMap = store.get(externalReferenceMappingAtom);
 

@@ -4,9 +4,9 @@ import { Provider, createStore } from 'jotai';
 import { store } from '../store';
 import MarkdownRenderer from '../components/messages/MarkdownRenderer';
 import { Citation } from '../../src/services/CitationService';
-import { citationDataMapAtom, citationKeyToMarkerAtom, pageLabelsByAttachmentIdAtom, type PageLabelsByAttachmentId } from '../atoms/citations';
+import { citationsAtom, citationByKeyAtom, citationKeyToMarkerAtom, pageLabelsByAttachmentIdAtom, externalFileLocalPathsAtom, type PageLabelsByAttachmentId } from '../atoms/citations';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../atoms/externalReferences';
-import { CitationData } from '../types/citations';
+import { Citation as BeaverCitation } from '../types/citations';
 import { CITATION_TAG_PATTERN } from '../utils/citationPreprocessing';
 import { ZoteroItemReference } from '../types/zotero';
 import { logger } from '../../src/utils/logger';
@@ -20,6 +20,7 @@ import {
     getPageLocator,
     normalizeCitationTag,
     parseRawCitationAttributes,
+    requestedCitationKey,
 } from './citationGrammar';
 
 // Regex for citation syntax - matches self-closing (/>) and non-self-closing (>) with or without closing tag
@@ -85,7 +86,7 @@ export function renderToMarkdown(
 
     const externalReferenceMapping = store.get(externalReferenceMappingAtom);
     const externalItemMapping = store.get(externalReferenceItemMappingAtom);
-    const citationMetadataMap = store.get(citationDataMapAtom);
+    const citationByKey = store.get(citationByKeyAtom);
 
     // Array of cited items
     const citedItems: Zotero.Item[] = [];
@@ -132,8 +133,23 @@ export function renderToMarkdown(
             ref = { kind: 'zotero', library_id: mappedZoteroItem.library_id, zotero_key: mappedZoteroItem.zotero_key, loc: ref.loc };
         }
 
+        // 2b. External file (user-attached, non-Zotero) — no Zotero item or
+        // bibliography entry; render the filename (+ page) inline so the
+        // citation isn't silently dropped from copied Markdown/text.
+        if (ref.kind === 'external_file') {
+            const meta = citationByKey[requestedCitationKey(ref)] ?? citationByKey[baseCitationKey(ref)];
+            const name = meta?.display_name || `ext-${ref.ext_key}`;
+            const page = getPageLocator(ref);
+            return page ? ` (${name}, p. ${page})` : ` (${name})`;
+        }
+
         // 3. Zotero item ---------------------------------------------------
         if (ref.kind !== 'zotero') {
+            // Unknown/future ref kind (e.g. another connected app's resource):
+            // fall back to the cited display name rather than dropping it.
+            const meta = citationByKey[requestedCitationKey(ref)] ?? citationByKey[baseCitationKey(ref)];
+            const name = meta?.display_name;
+            if (name) return ` (${name})`;
             logger(`renderToMarkdown: Citation tag missing item reference: ${match}`);
             return '';
         }
@@ -193,10 +209,12 @@ export function renderToMarkdown(
 }
 
 export interface RenderContextData {
-    citationDataMap?: Record<string, CitationData>;
+    citationDataMap?: Record<string, BeaverCitation>;
     externalMapping?: Record<string, ZoteroItemReference | null>;
     externalReferencesMap?: Record<string, ExternalReference>;
     pageLabelsByAttachmentId?: PageLabelsByAttachmentId;
+    /** Absolute local paths for external-file citations present on this computer, keyed by ext key. */
+    externalFileLocalPaths?: Record<string, string>;
 }
 
 /**
@@ -259,7 +277,7 @@ export function renderToHTML(
         renderStore = createStore();
         
         if (contextData.citationDataMap) {
-            renderStore.set(citationDataMapAtom, contextData.citationDataMap);
+            renderStore.set(citationsAtom, Object.values(contextData.citationDataMap));
         }
         
         if (contextData.externalMapping) {
@@ -272,6 +290,10 @@ export function renderToHTML(
 
         if (contextData.pageLabelsByAttachmentId) {
             renderStore.set(pageLabelsByAttachmentIdAtom, contextData.pageLabelsByAttachmentId);
+        }
+
+        if (contextData.externalFileLocalPaths) {
+            renderStore.set(externalFileLocalPathsAtom, contextData.externalFileLocalPaths);
         }
     }
 

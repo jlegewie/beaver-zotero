@@ -24,6 +24,7 @@ declare namespace _ZoteroTypes {
       "maxAddAttachmentToMessage": number;
       "readerExplainPrompt": string;
       "accessRemoteFiles": boolean;
+      "dataProviderEnabled": boolean;
       "autoApplyAnnotations": boolean;
       "autoCreateNotes": boolean;
       "autoImportItems": boolean;
@@ -32,6 +33,8 @@ declare namespace _ZoteroTypes {
       "pauseLongRunningAgent": boolean;
       "requestPlusTools": boolean;
       "showDiffPreviewInNoteEditor": boolean;
+      "enableSystemNotifications": boolean;
+      "enableResponseCompleteNotifications": boolean;
       "deferredToolPreferences": string;
       "customInstructions": string;
       "googleGenerativeAiApiKey": string;

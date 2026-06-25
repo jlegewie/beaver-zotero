@@ -41,7 +41,10 @@
  * validation. These helpers trust their inputs.
  */
 
-import { extractPageSentences } from "../ParagraphSentenceMapper";
+import {
+    collectHyphenatedCompounds,
+    extractPageSentences,
+} from "../ParagraphSentenceMapper";
 import type { PageSentenceResult } from "../ParagraphSentenceMapper";
 import { resolveAnalysisPages } from "../AnalysisWindow";
 import {
@@ -109,6 +112,13 @@ export function extractSentencesForPage(args: {
     marginRemoval: MarginRemovalResult;
     /** Pre-computed document-wide style profile. */
     styleProfile: StyleProfile;
+    /**
+     * Document-wide genuine hyphenated-compound vocabulary (lowercased).
+     * Drives line-break de-hyphenation in the sentence mapper — keep the
+     * hyphen when the compound is attested, otherwise join. Built once over
+     * `analysisPages` by the caller. Omitted ⇒ every line-break hyphen joins.
+     */
+    compoundVocabulary?: ReadonlySet<string>;
     /** Caller-supplied extraction margins. Match the markdown branch. */
     margins: MarginSettings;
     marginZone: MarginSettings;
@@ -198,6 +208,7 @@ export function extractSentencesForPage(args: {
     const sentenceResult = extractPageSentences(detailed, {
         paragraphSettings: args.paragraphSettings,
         splitter: args.splitter,
+        compoundVocabulary: args.compoundVocabulary,
         precomputed: {
             paragraphResult: filteredResult.paragraphResult,
             pageRotation: filteredResult.pageRotation,
@@ -232,6 +243,28 @@ export function extractSentencesForPage(args: {
     };
 
     return { sentenceResult, filteredResult, phaseTimings };
+}
+
+/**
+ * Build the document's genuine hyphenated-compound vocabulary from the
+ * analysis-window pages' line text. Shared by the multi-page structured
+ * extract (`buildAnalysisFromDoc`) and the debug single-page paths so all of
+ * them feed the sentence mapper the same line-break de-hyphenation signal.
+ */
+export function buildCompoundVocabulary(
+    pages: readonly RawPageData[],
+): Set<string> {
+    const vocabulary = new Set<string>();
+    for (const page of pages) {
+        for (const block of page.blocks) {
+            if (block.type !== "text" || !block.lines) continue;
+            collectHyphenatedCompounds(
+                block.lines.map((line) => line.text),
+                vocabulary,
+            );
+        }
+    }
+    return vocabulary;
 }
 
 /**
@@ -336,6 +369,10 @@ export async function runSentenceExtractionFromDoc(
         pageIndex,
         detailed,
     );
+    // Same line-break de-hyphenation signal the multi-page extract path uses,
+    // scoped to this request's analysis window so the debug trace/overlay
+    // matches production output.
+    const compoundVocabulary = buildCompoundVocabulary(pagesForFilter);
 
     if (!wantTrace) {
         // Production single-page path. Compute the analysis context from
@@ -376,6 +413,7 @@ export async function runSentenceExtractionFromDoc(
         const result = extractPageSentences(detailed, {
             paragraphSettings,
             splitter,
+            compoundVocabulary,
             precomputed: {
                 paragraphResult: filtered.paragraphResult,
                 pageRotation: filtered.pageRotation,
@@ -421,6 +459,7 @@ export async function runSentenceExtractionFromDoc(
     const result = extractPageSentences(detailed, {
         paragraphSettings,
         splitter,
+        compoundVocabulary,
         precomputed: {
             paragraphResult: filteredResult.paragraphResult,
             pageRotation: filteredResult.pageRotation,

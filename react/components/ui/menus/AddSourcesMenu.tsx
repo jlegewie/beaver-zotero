@@ -3,7 +3,10 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { PlusSignIcon, Icon } from '../../icons/icons';
 import { ItemSearchResult, itemSearchResultFromZoteroItem } from '../../../../src/services/searchService';
 import SearchMenu, { MenuPosition } from './SearchMenu';
-import { currentMessageFiltersAtom, removeItemFromMessageAtom, addItemToCurrentMessageItemsAtom, currentMessageItemsAtom } from '../../../atoms/messageComposition';
+import { currentMessageFiltersAtom, removeItemFromMessageAtom, addItemToCurrentMessageItemsAtom, currentMessageItemsAtom, addExternalFilesToCurrentMessageAtom } from '../../../atoms/messageComposition';
+import { attachExternalFile, EXTERNAL_FILE_PICKER_EXTENSIONS } from '../../../../src/services/externalFiles';
+import type { ExternalFileRecord } from '../../../../src/services/database';
+import { addPopupMessageAtom } from '../../../utils/popupMessageUtils';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { getPref, setPref } from '../../../../src/utils/prefs';
 import { getRecentAsync, loadFullItemData, getActiveZoteroLibraryId } from '../../../../src/utils/zoteroUtils';
@@ -11,6 +14,8 @@ import { searchTitleCreatorYear, scoreSearchResult } from '../../../utils/search
 import { logger } from '../../../../src/utils/logger';
 import { searchableLibraryIdsAtom } from '../../../atoms/profile';
 import { store } from '../../../store';
+import { selectedModelAtom } from '../../../atoms/models';
+import { requestPlusToolsAtom } from '../../../atoms/ui';
 import { SourceMenuItemContext, LibraryMenuItemContext, CollectionMenuItemContext, TagMenuItemContext } from './utils/menuItemFactories';
 import { useSourcesMenu } from './hooks/useSourcesMenu';
 import { useLibrariesMenu } from './hooks/useLibrariesMenu';
@@ -101,7 +106,11 @@ const AddSourcesMenu: React.FC<{
     const setCurrentMessageFilters = useSetAtom(currentMessageFiltersAtom);
     const { libraryIds: currentLibraryIds, collectionIds: currentCollectionIds, tagSelections: currentTagSelections } = currentMessageFilters;
     const addItemToCurrentMessageItems = useSetAtom(addItemToCurrentMessageItemsAtom);
+    const addExternalFilesToCurrentMessage = useSetAtom(addExternalFilesToCurrentMessageAtom);
+    const addPopupMessage = useSetAtom(addPopupMessageAtom);
     const currentMessageItems = useAtomValue(currentMessageItemsAtom);
+    const selectedModel = useAtomValue(selectedModelAtom);
+    const requestPlusTools = useAtomValue(requestPlusToolsAtom);
     const removeItemFromMessage = useSetAtom(removeItemFromMessageAtom);
 
     // Add ref for tracking the current search request
@@ -214,6 +223,46 @@ const AddSourcesMenu: React.FC<{
         setMenuMode('notes');
     }, [setMenuMode, setSearchQuery]);
 
+    // Open a native file picker and attach the chosen files as external files
+    // (copied into the Beaver-managed folder, sent as metadata-only attachments).
+    const handleSelectFiles = useCallback(() => {
+        handleOnClose();
+        (async () => {
+            const { FilePicker } = ChromeUtils.importESModule(
+                'chrome://zotero/content/modules/filePicker.mjs'
+            ) as { FilePicker: any };
+            const fp = new FilePicker();
+            fp.init(Zotero.getMainWindow(), 'Select Files', fp.modeOpenMultiple);
+            fp.appendFilter('Supported files (PDF, EPUB, text, images)', EXTERNAL_FILE_PICKER_EXTENSIONS.join('; '));
+            const rv = await fp.show();
+            if (rv !== fp.returnOK) return;
+            const paths: string[] = fp.files || [];
+            const attached: ExternalFileRecord[] = [];
+            const supportsVision = selectedModel?.supports_vision === true;
+            for (const path of paths) {
+                const result = await attachExternalFile(path, {
+                    supportsVision,
+                    canHandleOCRLocally: supportsVision || Boolean(requestPlusTools),
+                });
+                if (result.status === 'attached') {
+                    attached.push(result.record);
+                } else {
+                    addPopupMessage({
+                        type: 'warning',
+                        title: 'File not added',
+                        text: result.message,
+                        expire: true,
+                    });
+                }
+            }
+            if (attached.length > 0) {
+                addExternalFilesToCurrentMessage(attached);
+            }
+        })().catch((error) => {
+            logger(`AddSourcesMenu.handleSelectFiles: ${error}`, 1);
+        });
+    }, [handleOnClose, addExternalFilesToCurrentMessage, addPopupMessage, selectedModel, requestPlusTools]);
+
     // Handler functions for menu item callbacks
     const handleAddSourceItem = useCallback((item: Zotero.Item) => {
         updateRecentItems([{ zotero_key: item.key, library_id: item.libraryID }]);
@@ -300,6 +349,7 @@ const AddSourcesMenu: React.FC<{
         onNavigateToCollections: handleNavigateToCollections,
         onNavigateToTags: handleNavigateToTags,
         onNavigateToNotes: handleNavigateToNotes,
+        onSelectFiles: handleSelectFiles,
         getRecentItems,
         recentItemsLimit: RECENT_ITEMS_LIMIT,
         verticalPosition

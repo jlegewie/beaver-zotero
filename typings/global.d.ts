@@ -29,6 +29,14 @@ declare const ZOTERO_CONFIG: {
 
 interface Window {
     __beaverDisposeSupabase?: () => Promise<void>;
+    /** Stops the busy-context event-loop-lag heartbeat (registered by busyContext.ts) */
+    __beaverStopBusyHeartbeat?: () => void;
+    /**
+     * Resumes Zotero sync suppression held during mutating agent runs.
+     * Pass `true` to also schedule a single auto-sync so the run's edits are
+     * pushed promptly (omit/`false` to just restore normal auto-sync).
+     */
+    __beaverResumeSyncAfterRun?: (reschedule?: boolean) => void;
     /** Auth lock shared across webpack module reloads to prevent concurrent token refresh */
     __beaverAuthLock?: {
         locked: boolean;
@@ -290,6 +298,29 @@ declare namespace Zotero {
                 zoteroKey: string,
                 payloadKind: import("../src/services/database").DocumentCachePayloadKind,
             ): Promise<import("../src/services/database").DocumentCachePayloadRecord | null>;
+
+            // --- External files (user-attached files behind `ext-<KEY>` ids) ---
+            upsertExternalFile(
+                input: import("../src/services/database").ExternalFileInput,
+            ): Promise<void>;
+
+            getExternalFileByKey(
+                extKey: string,
+            ): Promise<import("../src/services/database").ExternalFileRecord | null>;
+
+            getExternalFileBySha256(
+                sha256: string,
+            ): Promise<import("../src/services/database").ExternalFileRecord | null>;
+
+            setExternalFilePageCount(extKey: string, pageCount: number | null): Promise<void>;
+
+            deleteExternalFile(extKey: string): Promise<void>;
+
+            listExternalFiles(): Promise<import("../src/services/database").ExternalFileRecord[]>;
+
+            getExternalFileStats(): Promise<{ count: number; totalBytes: number }>;
+
+            deleteAllExternalFiles(): Promise<void>;
 
             // --- Background job queue ---
             enqueueBackgroundJob(

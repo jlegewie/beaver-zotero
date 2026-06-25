@@ -54,7 +54,7 @@ import type {
     WSAgentActionExecuteResponse,
     RegularListResultItem,
     NoteResultItem,
-    AttachmentResultItem,
+    AttachmentRowResult,
     ZoteroItemCategory,
     ItemSearchFrontendResultItem,
 } from '../../src/services/agentProtocol';
@@ -300,12 +300,12 @@ const READ_ATTACHMENT_TOOL = {
         openWorldHint: false,
     },
     description:
-        "Read the text content of a PDF attachment from the user's Zotero library. " +
-        'Extracts and returns the text from specified pages (or the first 30 pages if no page range is given). ' +
+        "Read the text content of a PDF or EPUB attachment from the user's Zotero library. " +
+        'Extracts and returns text from specified PDF pages or EPUB sections (or the first 30 if no range is given). ' +
         'The `attachment_id` must be obtained from another tool: use `search_by_topic` or `search_by_metadata` ' +
         '(which include attachment IDs in results), or call `get_item_details` with `include_attachments: true`. ' +
-        'For long documents, read progressively by specifying page ranges. ' +
-        'Only PDF attachments with `status: "available"` are supported.',
+        'For long documents, read progressively by specifying page ranges. For EPUBs, page numbers mean 1-based section ordinals. ' +
+        'Only PDF and EPUB attachments with `status: "available"` are supported.',
     inputSchema: {
         type: 'object' as const,
         properties: {
@@ -316,11 +316,11 @@ const READ_ATTACHMENT_TOOL = {
             },
             start_page: {
                 type: 'integer',
-                description: 'Starting page number (1-indexed). Defaults to page 1.',
+                description: 'Starting page number (1-indexed). For EPUBs, this is the section ordinal. Defaults to page 1.',
             },
             end_page: {
                 type: 'integer',
-                description: 'Ending page number (inclusive). Defaults to the last page. Maximum 30 pages per request.',
+                description: 'Ending page number (inclusive). For EPUBs, this is the section ordinal. Defaults to the last page. Maximum 30 pages per request.',
             },
         },
         required: ['attachment_id'],
@@ -423,7 +423,7 @@ const GET_ITEM_DETAILS_TOOL = {
         'Returns all Zotero fields for each item (title, authors, abstract, DOI, journal, volume, issue, pages, date, etc.), ' +
         'along with tags and collection memberships. Use this to get detailed metadata after finding items via search, ' +
         'or to look up specific fields like DOI or abstract. ' +
-        'Set `include_attachments` to true to also see which files (PDFs) are attached and their availability status. ' +
+        'Set `include_attachments` to true to also see which files are attached and their availability status. ' +
         'Set `include_notes` to true to also fetch the child notes attached to each item.',
     inputSchema: {
         type: 'object' as const,
@@ -559,7 +559,7 @@ const LIST_ITEMS_TOOL = {
         'By default only regular bibliographic items are returned; use `item_category` to list notes, attachments, ' +
         'or all supported item types instead. ' +
         'Note: for regular items this tool returns lightweight metadata without attachment IDs. ' +
-        'To read an item\'s PDF, first call `get_item_details` with `include_attachments: true` to obtain the attachment ID, ' +
+        'To read an item\'s PDF or EPUB, first call `get_item_details` with `include_attachments: true` to obtain the attachment ID, ' +
         'then call `read_attachment`.',
     inputSchema: {
         type: 'object' as const,
@@ -625,13 +625,31 @@ function generateRequestId(): string {
     return `${Date.now()}-${Math.random().toString(36).substring(2, 10)}`;
 }
 
-function parseItemId(itemId: string): { libraryId: number; key: string } | null {
+function parseItemId(itemId: string | null | undefined): { libraryId: number; key: string } | null {
+    if (!itemId) return null;
     const dashIndex = itemId.indexOf('-');
     if (dashIndex === -1) return null;
     const libraryId = parseInt(itemId.substring(0, dashIndex), 10);
     const key = itemId.substring(dashIndex + 1);
     if (isNaN(libraryId) || !key) return null;
     return { libraryId, key };
+}
+
+function getMcpAttachmentId(attachment: any): string | null {
+    if (attachment.attachment_id) return attachment.attachment_id;
+    if (attachment.item_id) return attachment.item_id;
+    if (attachment.attachment?.library_id != null && attachment.attachment?.zotero_key) {
+        return `${attachment.attachment.library_id}-${attachment.attachment.zotero_key}`;
+    }
+    return null;
+}
+
+function getMcpAttachmentStatus(attachment: any): string {
+    const status = attachment.status ?? attachment.file_status?.status;
+    if (status === 'readable') return 'available';
+    if (status === 'unreadable') return 'unavailable';
+    if (status) return status;
+    return attachment.path ? 'available' : 'unavailable';
 }
 
 function mcpError(message: string) {
@@ -718,12 +736,15 @@ function formatSearchResultItem(entry: ItemSearchFrontendResultItem, includeSimi
 
     // Compact attachment format
     if (entry.attachments && entry.attachments.length > 0) {
-        result.attachments = entry.attachments.map((a) => ({
-            attachment_id: `${a.attachment.library_id}-${a.attachment.zotero_key}`,
-            filename: a.attachment.filename || null,
-            page_count: a.file_status?.page_count ?? null,
-            annotations_count: a.attachment.annotations_count,
-            status: a.file_status?.status ?? 'unavailable',
+        result.attachments = entry.attachments.map((a: any) => ({
+            attachment_id: getMcpAttachmentId(a),
+            filename: a.filename ?? a.attachment?.filename ?? null,
+            content_kind: a.content_kind ?? null,
+            page_count: a.page_count ?? a.file_status?.page_count ?? null,
+            line_count: a.line_count ?? null,
+            annotations_count: a.annotations_count ?? a.attachment?.annotations_count ?? null,
+            status: getMcpAttachmentStatus(a),
+            status_reason: a.status_reason ?? a.file_status?.status_reason ?? null,
         }));
     }
 
@@ -856,16 +877,30 @@ export async function handleReadAttachment(args: any): Promise<any> {
     if (response.error || !response.result) {
         return mcpError(response.error ?? 'Failed to read attachment');
     }
-    if (response.result.mode !== 'markdown') {
-        return mcpError('Attachment read returned an unexpected document mode.');
+    const result = response.result;
+    const markdownDocument = result.content_kind === 'epub'
+        ? epubDocumentToMarkdownPages(result)
+        : result.content_kind === 'text'
+            ? null
+            : result.mode === 'markdown'
+                ? {
+                    pageCount: result.document.pageCount,
+                    pages: result.document.pages.map((page) => ({
+                        index: page.index,
+                        markdown: page.markdown ?? '',
+                    })),
+                }
+                : null;
+    if (!markdownDocument) {
+        return mcpError('Attachment read returned an unsupported document format.');
     }
 
-    const totalPages = response.result.document.pageCount;
+    const totalPages = markdownDocument.pageCount;
     if (Number.isInteger(totalPages) && totalPages >= 0 && startPage > totalPages) {
         return mcpError(`Requested start_page ${startPage} is out of range; attachment has ${totalPages} pages.`);
     }
 
-    const requestedPages = response.result.document.pages.filter(
+    const requestedPages = markdownDocument.pages.filter(
         (page) => page.index + 1 >= startPage && page.index + 1 <= endPage,
     );
     if (requestedPages.length === 0) {
@@ -876,12 +911,58 @@ export async function handleReadAttachment(args: any): Promise<any> {
     const actualEnd = requestedPages.length > 0
         ? requestedPages[requestedPages.length - 1].index + 1
         : startPage;
-    const header = `Attachment: ${args.attachment_id} | Total pages: ${response.result.document.pageCount ?? 'unknown'} | Showing pages ${startPage}-${actualEnd}`;
+    const header = `Attachment: ${args.attachment_id} | Total pages: ${markdownDocument.pageCount ?? 'unknown'} | Showing pages ${startPage}-${actualEnd}`;
     const pageTexts = requestedPages.map(
         (p) => `<page${p.index + 1}>\n${p.markdown}\n</page${p.index + 1}>`,
     );
 
     return [header, '', ...pageTexts].join('\n');
+}
+
+interface AttachmentMarkdownPage {
+    index: number;
+    markdown: string;
+}
+
+function epubDocumentToMarkdownPages(
+    document: Extract<NonNullable<WSZoteroDocumentResponse['result']>, { content_kind: 'epub' }>,
+): { pageCount: number; pages: AttachmentMarkdownPage[] } {
+    return {
+        pageCount: document.sectionCount,
+        pages: document.sections.map((section) => ({
+            index: section.index,
+            markdown: section.items
+                .map(epubItemToMarkdown)
+                .filter((text) => text.length > 0)
+                .join('\n\n'),
+        })),
+    };
+}
+
+function epubItemToMarkdown(item: { kind: string; text?: string; level?: number; sentences?: Array<{ text: string }> }): string {
+    const text = normalizeMarkdownText(
+        item.text ?? item.sentences?.map((sentence) => sentence.text).join(' ') ?? '',
+    );
+    if (!text) return '';
+
+    switch (item.kind) {
+        case 'section_header': {
+            const level = Math.min(Math.max(item.level ?? 2, 1), 6);
+            return `${'#'.repeat(level)} ${text}`;
+        }
+        case 'list_item':
+            return `- ${text}`;
+        case 'caption':
+            return `_${text}_`;
+        case 'footnote':
+            return `[^] ${text}`;
+        default:
+            return text;
+    }
+}
+
+function normalizeMarkdownText(text: string): string {
+    return text.replace(/\s+/g, ' ').trim();
 }
 
 /**
@@ -1060,14 +1141,17 @@ async function handleGetItemDetails(args: any): Promise<any> {
         }
 
         if (item.attachments && Array.isArray(item.attachments)) {
-            item.attachments = item.attachments.map((a: any) => ({
-                attachment_id: a.attachment_id,
-                filename: a.filename || null,
-                content_type: a.contentType || null,
-                page_count: null,
-                annotations_count: a.annotations_count,
-                status: a.path ? 'available' : 'unavailable',
-            }));
+            item.attachments = item.attachments.map((a: any) => {
+                return {
+                    attachment_id: getMcpAttachmentId(a),
+                    filename: a.filename || null,
+                    content_type: a.content_type ?? a.contentType ?? null,
+                    content_kind: a.content_kind ?? null,
+                    page_count: a.page_count ?? null,
+                    annotations_count: a.annotations_count,
+                    status: getMcpAttachmentStatus(a),
+                };
+            });
         }
         if (item.notes && Array.isArray(item.notes)) {
             item.notes = item.notes.map((n: any) => ({
@@ -1125,9 +1209,8 @@ async function handleListCollections(args: any): Promise<any> {
         total_count: response.total_count,
         has_more: hasMore,
         next_offset: hasMore ? offset + limit : null,
-        // library_id/library_name are required for ToolResultView to render the
-        // specialized ListCollectionsResultView (extractListCollectionsData fills
-        // each collection's library scope from this container).
+        // library_id/library_name carry the library scope each collection row needs
+        // (used when building the hydrated collection-list view for rendering).
         library_id: response.library_id,
         library_name: response.library_name,
         collections: response.collections.map((c) => ({
@@ -1227,7 +1310,10 @@ async function handleListItems(args: any): Promise<any> {
         // With item_category other than 'regular', results can be notes or attachments,
         // so format each item according to its result_type rather than assuming regular.
         items: response.items.map((item) => {
-            const parsed = parseItemId(item.item_id);
+            const rowItemId = item.result_type === 'attachment'
+                ? (item.attachment_id ?? (item as any).item_id)
+                : item.item_id;
+            const parsed = parseItemId(rowItemId);
             const zoteroUri = parsed ? getZoteroSelectURI(parsed.libraryId, parsed.key) : null;
             const uriField = zoteroUri ? { zotero_uri: zoteroUri } : {};
 
@@ -1245,13 +1331,18 @@ async function handleListItems(args: any): Promise<any> {
             }
 
             if (item.result_type === 'attachment') {
-                const attachment = item as AttachmentResultItem;
+                const attachment = item as AttachmentRowResult;
+                const attachmentId = getMcpAttachmentId(attachment);
                 return {
-                    item_id: attachment.item_id,
+                    attachment_id: attachmentId,
+                    item_id: attachmentId,
                     item_type: 'attachment',
                     title: attachment.title ?? null,
                     filename: attachment.filename ?? null,
-                    content_type: attachment.content_type ?? null,
+                    content_kind: attachment.content_kind,
+                    content_type: (attachment as any).content_type ?? null,
+                    status: getMcpAttachmentStatus(attachment),
+                    status_reason: attachment.status_reason ?? null,
                     parent_item_id: attachment.parent_item_id ?? null,
                     parent_title: attachment.parent_title ?? null,
                     annotations_count: attachment.annotations_count ?? null,

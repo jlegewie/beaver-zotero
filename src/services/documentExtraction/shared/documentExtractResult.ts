@@ -1,4 +1,5 @@
 import type { BeaverExtractResult } from '../../../beaver-extract/schema/schema';
+import type { EpubDocument } from '../epub/schema';
 import type { ExtractContentKind } from './contentKinds';
 
 export type PdfDocumentExtractResult = BeaverExtractResult & {
@@ -25,4 +26,5 @@ export interface TextDocumentExtractResult {
 
 export type DocumentExtractResult =
     | PdfDocumentExtractResult
+    | EpubDocument
     | TextDocumentExtractResult;

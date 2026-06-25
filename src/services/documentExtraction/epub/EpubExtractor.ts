@@ -1,20 +1,87 @@
-import { buildEpubCitationIndex } from "./citationIndex";
 import {
-    createEpubExtractionCounters,
-    parseEpubSection,
-} from "./EpubSectionParser";
+    buildDomCitationIndex,
+    buildDomDiagnostics,
+    createDomCounters,
+    ensureSentencexLoaded,
+    measureSectionSourceText,
+    parseDomSection,
+    type DomSection,
+} from "../dom";
 import {
     EPUB_CONTENT_KIND,
     EPUB_SCHEMA_VERSION,
     type EpubDocument,
-    type EpubSection,
+    type ExtractEpubResult,
 } from "./schema";
+import {
+    appendSyntheticSectionMarkers,
+    epubPageLabelForPosition,
+    epubPageOrdinalForPosition,
+    extractSectionPageMarkers,
+    scorePageMarkers,
+    type EpubPageMapping,
+    type EpubPageMarker,
+    type PageMappingSectionMarkers,
+    type SectionTextNode,
+} from "./epubPageMapping";
+import { effectiveMaxFileSizeMB } from "../../attachmentLimits";
+import { isRemoteAccessAvailable } from "../attachmentSource";
+import { logger } from "../../../utils/logger";
+import type { DomItemCandidate } from "../dom/domWalk";
+import type { DomItem } from "../dom";
+
+// Coverage below this fraction means the walk dropped a meaningful share of the
+// book's visible text (an unrecognized container/table structure) and warrants a
+// warning so low-quality EPUB extractions are surfaced rather than silent.
+const LOW_COVERAGE_WARN_THRESHOLD = 0.85;
+
+// Synthetic EPUB pagination cadence used for marker-less books.
+const SYNTHETIC_PAGE_CHAR_INTERVAL = 1800;
+
+// Reject sparse physical markers that would create very large pages.
+const MAX_PHYSICAL_PAGE_CHARS = 6000;
 
 interface ZoteroEpubModule {
     EPUB: new (filePath: string) => {
         getSectionDocuments(): AsyncIterable<{ href: string; doc: XMLDocument | Document }>;
         close(): void;
     };
+}
+
+export interface ExtractEpubDocumentOptions {
+    maxFileSizeMB?: number | null;
+    onFileNotSyncedLocally?: () => void;
+}
+
+type EpubResponseError = Extract<ExtractEpubResult, { kind: "response_error" }>;
+export type EpubPreflightResult =
+    | { kind: "ok"; filePath: string }
+    | {
+          kind: "response_error";
+          code: EpubResponseError["code"];
+          message: string;
+      };
+
+function responseError(
+    code: EpubResponseError["code"],
+    message: string,
+): ExtractEpubResult {
+    return { kind: "response_error", code, message };
+}
+
+function preflightResponseError(
+    code: EpubResponseError["code"],
+    message: string,
+): EpubPreflightResult {
+    return { kind: "response_error", code, message };
+}
+
+function getErrorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error ?? "Unknown error");
+}
+
+function formatMB(value: number): string {
+    return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }
 
 /** Extract a local Zotero EPUB attachment into Beaver's section-based schema. */
@@ -28,36 +95,372 @@ export async function extractEpubDocument(item: Zotero.Item): Promise<EpubDocume
         throw new Error("EPUB attachment has no local file");
     }
 
+    return extractEpubDocumentFromFile(filePath);
+}
+
+export interface ExtractEpubFromFileOptions {
+    /** Language code for sentence splitting; defaults to the EPUB's own `<html lang>`. */
+    language?: string | null;
+    /** Cooperative cancellation signal checked between EPUB section operations. */
+    abortSignal?: AbortSignal;
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+    if (signal?.aborted) {
+        throw new Error("Operation aborted");
+    }
+}
+
+interface RawTextOffsetIndex {
+    elementOffsets: Map<Element, number>;
+    textNodeOffsets: Map<Text, number>;
+    /** Content text nodes on the same character scale as item offsets. */
+    contentNodes: SectionTextNode[];
+}
+
+interface ExtractedItemPosition {
+    item: DomItem;
+    sectionIndex: number;
+    charOffset: number;
+}
+
+/**
+ * Extract an EPUB into Beaver's section-based schema directly from a file path.
+ *
+ * Path-based core shared by the item-based extractor and dev tooling that runs
+ * over corpus files that are not Zotero attachments. Throws raw errors; callers
+ * that need request-safe error shapes use {@link extractEpubDocumentSafe}.
+ */
+export async function extractEpubDocumentFromFile(
+    filePath: string,
+    options?: ExtractEpubFromFileOptions,
+): Promise<EpubDocument> {
+    throwIfAborted(options?.abortSignal);
     const { EPUB } = (globalThis as any).ChromeUtils.importESModule(
         "chrome://zotero/content/EPUB.mjs",
     ) as ZoteroEpubModule;
     const epub = new EPUB(filePath);
-    const counters = createEpubExtractionCounters();
-    const sections: EpubSection[] = [];
+    const counters = createDomCounters();
+    const sections: DomSection[] = [];
+    const sectionMarkers: PageMappingSectionMarkers[] = [];
+    // Build synthetic markers while section body text nodes are available.
+    const syntheticMarkers: EpubPageMarker[] = [];
+    const itemPositions: ExtractedItemPosition[] = [];
+    let sourceTextChars = 0;
+
+    // Load the sentencex WASM once (best-effort; sentence splitting degrades to
+    // a regex fallback if unavailable).
+    await ensureSentencexLoaded();
+    let documentLanguage: string | null | undefined;
 
     try {
+        // Section indexes are assigned sequentially over the documents that
+        // EPUB.mjs yields. EPUB.mjs skips spine items whose manifest media-type
+        // is not XHTML (or whose zip entry is missing), while the Zotero
+        // reader's spine indexes count every itemref — so for EPUBs with
+        // non-XHTML spine items, extraction indexes are compacted and sit
+        // below the reader's section indexes from the skipped entry onward.
+        // Consumers that map a reader position or section ordinal onto these
+        // indexes (reader state, progressive reads, the citation ordinal
+        // fallback) inherit that drift; href-based matching is unaffected.
+        // All-XHTML spines — the overwhelmingly common case — are 1:1.
         let sectionIndex = 0;
         for await (const { href, doc } of epub.getSectionDocuments()) {
-            sections.push(parseEpubSection({
+            throwIfAborted(options?.abortSignal);
+            const body = findSectionBody(doc);
+            const rawOffsets = body ? buildRawTextOffsetIndex(body) : emptyRawTextOffsetIndex();
+            appendSyntheticSectionMarkers(
+                rawOffsets.contentNodes,
+                sectionIndex,
+                SYNTHETIC_PAGE_CHAR_INTERVAL,
+                syntheticMarkers,
+            );
+            if (documentLanguage === undefined) {
+                // Prefer an explicit language; otherwise use the EPUB's own
+                // declared language from the first section's <html lang>.
+                // A future content-based language detector slots in here:
+                // compute once per document and it flows down as a parameter
+                // (same shape as the PDF path's `structured.language`).
+                documentLanguage = options?.language
+                    ?? doc.documentElement?.getAttribute("lang")
+                    ?? null;
+            }
+            sourceTextChars += measureSectionSourceText(doc);
+            if (body) {
+                sectionMarkers.push(extractSectionPageMarkers(
+                    body,
+                    sectionIndex,
+                    (element) => rawOffsets.elementOffsets.get(element) ?? 0,
+                ));
+            } else {
+                sectionMarkers.push({ sectionIndex, markersByMatcher: [] });
+            }
+            sections.push(parseDomSection({
                 doc,
                 sectionIndex,
                 rawHref: href,
                 counters,
+                language: documentLanguage ?? undefined,
+                onItem: (item, candidate) => {
+                    itemPositions.push({
+                        item,
+                        sectionIndex,
+                        charOffset: itemCharOffset(candidate, rawOffsets),
+                    });
+                },
             }));
             sectionIndex += 1;
             await Zotero.Promise.delay(0);
+            throwIfAborted(options?.abortSignal);
         }
     } finally {
         epub.close();
+    }
+
+    throwIfAborted(options?.abortSignal);
+    const pageMapping = scorePageMarkers(sectionMarkers, sections.length);
+    stampEpubPageLabels(itemPositions, pageMapping);
+    const pageCount = stampEpubPageNumbers(itemPositions, pageMapping, syntheticMarkers);
+    const diagnostics = buildDomDiagnostics(sections, sourceTextChars);
+    if (diagnostics.textCoverage !== null && diagnostics.textCoverage < LOW_COVERAGE_WARN_THRESHOLD) {
+        logger(
+            `extractEpubDocument: low text coverage ${diagnostics.textCoverage} `
+            + `(${diagnostics.extractedTextChars}/${diagnostics.sourceTextChars} chars) for ${filePath} `
+            + `— body text may be in an unsupported structure (e.g. data tables)`,
+            2,
+        );
     }
 
     return {
         content_kind: EPUB_CONTENT_KIND,
         schemaVersion: EPUB_SCHEMA_VERSION,
         sectionCount: sections.length,
+        pageCount,
         sections,
-        citationIndex: buildEpubCitationIndex(sections),
+        citationIndex: buildDomCitationIndex(sections),
+        diagnostics,
     };
+}
+
+function findSectionBody(doc: XMLDocument | Document): Element | null {
+    return doc.body ?? doc.querySelector("body");
+}
+
+function emptyRawTextOffsetIndex(): RawTextOffsetIndex {
+    return { elementOffsets: new Map(), textNodeOffsets: new Map(), contentNodes: [] };
+}
+
+/**
+ * Build the character-offset scale used by extracted items and page markers.
+ *
+ * Whitespace-only text nodes and non-content elements are skipped, while content
+ * text lengths remain unnormalized. Keeping all offsets on one scale lets
+ * nearest-preceding marker lookups stay consistent.
+ */
+function buildRawTextOffsetIndex(root: Element): RawTextOffsetIndex {
+    const elementOffsets = new Map<Element, number>();
+    const textNodeOffsets = new Map<Text, number>();
+    const contentNodes: SectionTextNode[] = [];
+    let offset = 0;
+
+    const visitElement = (element: Element): void => {
+        const tag = element.localName?.toLowerCase();
+        if (tag === "style" || tag === "script") return;
+        elementOffsets.set(element, offset);
+        for (const node of Array.from(element.childNodes)) {
+            if (!node) continue;
+            if (node.nodeType === 3) {
+                const value = (node as Text).nodeValue ?? "";
+                if (/^\s*$/.test(value)) continue;
+                textNodeOffsets.set(node as Text, offset);
+                contentNodes.push({ start: offset, length: value.length });
+                offset += value.length;
+            } else if (node.nodeType === 1) {
+                visitElement(node as Element);
+            }
+        }
+    };
+
+    visitElement(root);
+    return { elementOffsets, textNodeOffsets, contentNodes };
+}
+
+function itemCharOffset(candidate: DomItemCandidate, offsets: RawTextOffsetIndex): number {
+    if (candidate.firstTextNode) {
+        const textOffset = offsets.textNodeOffsets.get(candidate.firstTextNode);
+        if (textOffset !== undefined) return textOffset;
+    }
+    return offsets.elementOffsets.get(candidate.element) ?? 0;
+}
+
+function stampEpubPageLabels(
+    itemPositions: ExtractedItemPosition[],
+    mapping: ReturnType<typeof scorePageMarkers>,
+): void {
+    if (!mapping.isPhysical) return;
+    for (const { item, sectionIndex, charOffset } of itemPositions) {
+        const label = epubPageLabelForPosition(mapping, sectionIndex, charOffset);
+        if (!label) continue;
+        item.pageLabel = label;
+        for (const sentence of item.sentences ?? []) {
+            sentence.pageLabel = label;
+        }
+    }
+}
+
+/**
+ * Stamp a 1-based `pageNumber` on every item and return the max page number.
+ * Uses physical marker ordinals when reliable; otherwise uses synthetic pages.
+ */
+function stampEpubPageNumbers(
+    itemPositions: ExtractedItemPosition[],
+    mapping: ReturnType<typeof scorePageMarkers>,
+    syntheticMarkers: EpubPageMarker[],
+): number {
+    if (itemPositions.length === 0) return 0;
+    if (mapping.isPhysical) {
+        const physicalCount = stampPhysicalPageNumbers(itemPositions, mapping);
+        if (physicalCount !== null) return physicalCount;
+    }
+    return stampSyntheticPageNumbers(itemPositions, syntheticMarkers);
+}
+
+/**
+ * Assign marker-ordinal pages, or return `null` when the marker map is too
+ * sparse to use as the document page coordinate.
+ */
+function stampPhysicalPageNumbers(
+    itemPositions: ExtractedItemPosition[],
+    mapping: ReturnType<typeof scorePageMarkers>,
+): number | null {
+    const provisional = itemPositions.map(({ sectionIndex, charOffset }) =>
+        epubPageOrdinalForPosition(mapping, sectionIndex, charOffset));
+
+    // Sparse marker maps can otherwise create chapter-sized pages.
+    const charsByPage = new Map<number, number>();
+    for (let i = 0; i < itemPositions.length; i++) {
+        const chars = itemPositions[i].item.text?.length ?? 0;
+        charsByPage.set(provisional[i], (charsByPage.get(provisional[i]) ?? 0) + chars);
+    }
+    for (const total of charsByPage.values()) {
+        if (total > MAX_PHYSICAL_PAGE_CHARS) return null;
+    }
+
+    let maxPage = 1;
+    for (let i = 0; i < itemPositions.length; i++) {
+        itemPositions[i].item.pageNumber = provisional[i];
+        if (provisional[i] > maxPage) maxPage = provisional[i];
+    }
+    return maxPage;
+}
+
+/**
+ * Assign each item the ordinal of its nearest preceding synthetic marker.
+ */
+function stampSyntheticPageNumbers(
+    itemPositions: ExtractedItemPosition[],
+    syntheticMarkers: EpubPageMarker[],
+): number {
+    const mapping: EpubPageMapping = { isPhysical: true, markers: syntheticMarkers };
+    let maxPage = 1;
+    for (const { item, sectionIndex, charOffset } of itemPositions) {
+        const page = epubPageOrdinalForPosition(mapping, sectionIndex, charOffset);
+        item.pageNumber = page;
+        if (page > maxPage) maxPage = page;
+    }
+    return maxPage;
+}
+
+/** Extract an EPUB attachment with request-safe preflight and error responses. */
+export async function extractEpubDocumentSafe(
+    item: Zotero.Item,
+    options?: ExtractEpubDocumentOptions,
+): Promise<ExtractEpubResult> {
+    const preflight = await preflightEpubFile(item, options);
+    if (preflight.kind === "response_error") {
+        return responseError(preflight.code, preflight.message);
+    }
+
+    try {
+        return { kind: "ok", document: await extractEpubDocumentFromFile(preflight.filePath) };
+    } catch (error) {
+        return responseError("extraction_failed", `Failed to extract EPUB content: ${getErrorMessage(error)}`);
+    }
+}
+
+/** Resolve and validate a local EPUB attachment path before extraction. */
+export async function preflightEpubFile(
+    item: Zotero.Item,
+    options?: ExtractEpubDocumentOptions,
+): Promise<EpubPreflightResult> {
+    let isEpub = false;
+    try {
+        isEpub = isEpubAttachment(item);
+    } catch (error) {
+        return preflightResponseError(
+            "unsupported_type",
+            `Unable to determine whether the attachment is an EPUB: ${getErrorMessage(error)}`,
+        );
+    }
+
+    if (!isEpub) {
+        return preflightResponseError("unsupported_type", "Attachment is not an EPUB file.");
+    }
+
+    let filePath: string | null = null;
+    try {
+        filePath = await item.getFilePathAsync() || null;
+    } catch (error) {
+        return preflightResponseError(
+            "extraction_failed",
+            `Failed to resolve the EPUB attachment file path: ${getErrorMessage(error)}`,
+        );
+    }
+
+    if (!filePath) {
+        let remoteAvailable = false;
+        try {
+            remoteAvailable = isRemoteAccessAvailable(item);
+        } catch {
+            remoteAvailable = false;
+        }
+
+        if (remoteAvailable) {
+            try {
+                options?.onFileNotSyncedLocally?.();
+            } catch {
+                // Notification callbacks must never change extraction results.
+            }
+            return preflightResponseError(
+                "file_missing",
+                "The EPUB file is available remotely but is not synced locally. Sync it in Zotero so Beaver can read it.",
+            );
+        }
+
+        return preflightResponseError("file_missing", "The EPUB file is not available locally.");
+    }
+
+    const maxFileSizeMB = effectiveMaxFileSizeMB(options?.maxFileSizeMB);
+    try {
+        const stat = await IOUtils.stat(filePath);
+        const sizeMB = typeof stat.size === "number" ? stat.size / 1024 / 1024 : null;
+        if (sizeMB != null && sizeMB > maxFileSizeMB) {
+            return preflightResponseError(
+                "file_too_large",
+                `The EPUB file is ${formatMB(sizeMB)} MB, which exceeds the ${formatMB(maxFileSizeMB)} MB limit.`,
+            );
+        }
+    } catch (error) {
+        if ((error as { name?: string } | null)?.name === "NotFoundError") {
+            return preflightResponseError("file_missing", "The EPUB file is no longer available locally.");
+        }
+        return preflightResponseError(
+            "extraction_failed",
+            `Failed to inspect the EPUB file: ${getErrorMessage(error)}`,
+        );
+    }
+
+    return { kind: "ok", filePath };
 }
 
 function isEpubAttachment(item: Zotero.Item): boolean {

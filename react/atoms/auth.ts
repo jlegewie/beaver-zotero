@@ -1,4 +1,5 @@
 import { atom } from 'jotai';
+import { selectAtom } from 'jotai/utils';
 import { Session } from '@supabase/supabase-js';
 import { supabase } from '../../src/services/supabaseClient';
 import { isProfileLoadedAtom, profileWithPlanAtom } from './profile';
@@ -140,10 +141,28 @@ export type AuthUser = {
 }
 
 /**
- * Atom containing the current user's information
- * Null when no user is authenticated
+ * Atom containing the current user's information.
+ * Derived from sessionAtom so it can never drift out of sync with the
+ * session (and therefore with isAuthenticatedAtom). Null when no user is
+ * authenticated.
+ *
+ * The equality function keeps a stable reference across token refreshes and
+ * focus/visibility events — those change the session's access token but not
+ * the user's identity, so consumers should not re-render.
  */
-export const userAtom = atom<AuthUser | null>(null);
+export const userAtom = selectAtom(
+    sessionAtom,
+    (session): AuthUser | null => {
+        if (!session?.user) return null;
+        const { id, email, last_sign_in_at } = session.user;
+        return { id, email, last_sign_in_at };
+    },
+    (a, b) => {
+        if (a === b) return true;
+        if (!a || !b) return false;
+        return a.id === b.id && a.email === b.email && a.last_sign_in_at === b.last_sign_in_at;
+    }
+);
 export const userIdAtom = atom<string | null>((get) => get(userAtom)?.id || null);
 
 /**

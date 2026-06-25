@@ -27,7 +27,7 @@ import { store } from '../store';
 import { isLoadingThreadAtom } from '../atoms/threads';
 import { Spinner } from './icons/icons';
 import { threadWarningsAtom } from '../atoms/warnings';
-import PreviewAndPopupContainer from './PreviewAndPopupContainer';
+import PopupOverlayContainer from './PopupOverlayContainer';
 import {
     hasAuthorizedFreeAccessAtom,
     hasAuthorizedProAccessAtom,
@@ -348,7 +348,7 @@ const Sidebar = ({ location, isWindow = false }: SidebarProps) => {
                 {/* Prompt area (footer) - only in thread view */}
                 {isThreadView && (
                     <div id="beaver-prompt" className="flex-none px-3 pb-3 relative">
-                        <PreviewAndPopupContainer />
+                        <PopupOverlayContainer />
                         <ScrollDownButton onClick={handleScrollToBottom} isWindow={isWindow} />
                         <DragDropWrapper>
                             <InputArea inputRef={inputRef} placeholder={inputPlaceholder} />

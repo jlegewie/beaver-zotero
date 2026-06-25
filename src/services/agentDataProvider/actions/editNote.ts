@@ -52,7 +52,7 @@ import {
 } from '../../../utils/editNoteMatcher';
 import { clearNoteEditorSelection } from '../../../../react/utils/sourceUtils';
 import { store } from '../../../../react/store';
-import { citationDataMapAtom } from '../../../../react/atoms/citations';
+import { citationMapAtom } from '../../../../react/atoms/citations';
 import { currentThreadIdAtom } from '../../../../react/atoms/threads';
 import {
     externalReferenceMappingAtom,
@@ -141,7 +141,7 @@ async function buildMarkdownRenderFields(
         const needsCitationContext = containsCitationTag(oldString, newString);
         const contextData = needsCitationContext
             ? await prepareCitationRenderContext(`${oldString}\n\n${newString}`, {
-                citationDataMap: store.get(citationDataMapAtom),
+                citationDataMap: store.get(citationMapAtom),
                 externalMapping: store.get(externalReferenceItemMappingAtom),
                 externalReferencesMap: store.get(externalReferenceMappingAtom),
             })

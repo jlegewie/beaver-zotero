@@ -23,6 +23,8 @@ import { useAtomValue } from 'jotai';
 import { isAuthenticatedAtom } from '../atoms/auth';
 import { logger } from '../../src/utils/logger';
 import { getZoteroUserIdentifier } from '../../src/utils/zoteroUtils';
+import { providerConnection } from '../../src/services/providerConnection';
+import { getPref, setPref } from '../../src/utils/prefs';
 import {
     handleZoteroDataRequest,
     handleExternalReferenceCheckRequest,
@@ -63,6 +65,13 @@ import {
     handleTestFileStatusHttpRequest,
     handleTestResolveItemHttpRequest,
     handleTestResolveReadableHttpRequest,
+    handleTestBestEpubAttachmentHttpRequest,
+    handleTestValidateItemHttpRequest,
+    handleTestValidateRegularItemHttpRequest,
+    handleTestExternalFileAttachHttpRequest,
+    handleTestExternalFileDeleteHttpRequest,
+    handleTestExternalFileViewImagesHttpRequest,
+    handleTestDocumentSerializedHttpRequest,
 } from './httpHandlers/testCacheHandlers';
 import {
     handleTestNoteCreateHttpRequest,
@@ -75,6 +84,9 @@ import {
 import {
     handleTestAnnotationCreateHttpRequest,
 } from './httpHandlers/testAnnotationHandlers';
+import {
+    handleTestSyncPauseHttpRequest,
+} from './httpHandlers/testSyncHandlers';
 import {
     handleTestPdfPageCountHttpRequest,
     handleTestPdfPageLabelsHttpRequest,
@@ -91,6 +103,19 @@ import {
     handleTestPdfExtractTraceHttpRequest,
     handleTestPdfAnalyzeLayoutHttpRequest,
 } from './httpHandlers/testPdfHandlers';
+import {
+    handleTestEpubExtractHttpRequest,
+} from './httpHandlers/testEpubHandlers';
+import {
+    handleTestEpubAnnotationParityHttpRequest,
+} from './httpHandlers/testEpubAnnotationHandlers';
+import {
+    handleTestReaderStateHttpRequest,
+    handleTestEpubCitationNavigateHttpRequest,
+} from './httpHandlers/testReaderHandlers';
+import {
+    handleTestResolveItemDisplayHttpRequest,
+} from './httpHandlers/testCitationHandlers';
 import {
     handleTestBackgroundEnqueueHttpRequest,
     handleTestBackgroundStatsHttpRequest,
@@ -177,6 +202,14 @@ const ENDPOINT_PATHS = [
     '/beaver/test/mcp-create-note',
     '/beaver/test/resolve-item',
     '/beaver/test/resolve-readable',
+    '/beaver/test/best-epub-attachment',
+    '/beaver/test/validate-item',
+    '/beaver/test/validate-regular-item',
+    '/beaver/test/external-file-attach',
+    '/beaver/test/external-file-delete',
+    '/beaver/test/external-file-view-images',
+    // Serialized PDF document-request wire path (responseMode: 'websocket')
+    '/beaver/test/document-serialized',
     // Test-only endpoints (note seeding/teardown/inspection)
     '/beaver/test/note-create',
     '/beaver/test/note-delete',
@@ -212,12 +245,29 @@ const ENDPOINT_PATHS = [
     // Document-wide style + margin analysis context (mirrors what
     // `extract({ mode: "structured" })` builds before per-page processing)
     '/beaver/test/pdf-analyze-layout',
+    // EPUB extraction over a raw file path or attachment (corpus triage)
+    '/beaver/test/epub-extract',
+    // EPUB annotation CFI/sortIndex parity (headless resolver vs reader)
+    '/beaver/test/epub-annotation-parity',
+    // Reader position / EPUB citation-navigation verification (dev-only)
+    '/beaver/test/reader-state',
+    '/beaver/test/epub-citation-navigate',
+    // Citation host: itemData.resolveItemDisplay (dev-only)
+    '/beaver/test/resolve-item-display',
     // Background queue inspection / driving (dev-only)
     '/beaver/test/background-enqueue',
     '/beaver/test/background-stats',
     '/beaver/test/background-peek',
     '/beaver/test/background-process-once',
     '/beaver/test/background-clear',
+    // Pref control (dev-only)
+    '/beaver/test/set-pref',
+    // Sync-suppression control/inspection (dev-only)
+    '/beaver/test/sync-pause',
+    // Provider-mode connection control (dev-only)
+    '/beaver/test/provider-connect',
+    '/beaver/test/provider-status',
+    '/beaver/test/provider-close',
 ] as const;
 
 /**
@@ -352,6 +402,7 @@ async function handleAttachmentDocumentHttpRequest(request: any) {
         event: 'zotero_document_request',
         request_id: generateRequestId(),
         attachment: request.attachment,
+        external_file_key: request.external_file_key,
         mode: request.mode ?? 'structured',
         max_pages: request.max_pages,
         max_file_size_mb: request.max_file_size_mb,
@@ -362,6 +413,7 @@ async function handleAttachmentDocumentHttpRequest(request: any) {
 
     return {
         resolved_attachment: response.resolved_attachment,
+        external_file_key: response.external_file_key,
         content_type: response.content_type,
         content_kind: response.content_kind,
         result: response.result,
@@ -658,6 +710,36 @@ async function handleReadNoteHttpRequest(request: any) {
     return await handleReadNoteRequest(wsRequest);
 }
 
+// Provider-mode connection control (dev-only). Lets tests/agents open the
+// provider WebSocket without a wake broadcast, inspect its state, and close it.
+// Set a Beaver pref (dev-only). Lets agents/tests flip pref-gated features
+// (e.g. dataProviderEnabled) without the RDP bridge.
+async function handleTestSetPrefHttpRequest(request: any) {
+    const { key, value } = request ?? {};
+    if (typeof key !== 'string' || !key) {
+        throw new Error('key is required');
+    }
+    setPref(key as any, value);
+    return { ok: true, key, value: getPref(key as any) };
+}
+
+async function handleTestProviderConnectHttpRequest(request: any) {
+    await providerConnection.connect({
+        wakeId: request?.wake_id,
+        wakeInstanceId: request?.wake_instance_id,
+    });
+    return { ok: true, status: providerConnection.getStatus() };
+}
+
+async function handleTestProviderStatusHttpRequest(_request: any) {
+    return providerConnection.getStatus();
+}
+
+async function handleTestProviderCloseHttpRequest(_request: any) {
+    providerConnection.close();
+    return { ok: true, status: providerConnection.getStatus() };
+}
+
 
 // =============================================================================
 // Registration Functions
@@ -763,6 +845,26 @@ function registerEndpoints(): boolean {
             createEndpoint(handleTestResolveItemHttpRequest);
         Zotero.Server.Endpoints['/beaver/test/resolve-readable'] =
             createEndpoint(handleTestResolveReadableHttpRequest);
+        Zotero.Server.Endpoints['/beaver/test/best-epub-attachment'] =
+            createEndpoint(handleTestBestEpubAttachmentHttpRequest);
+        Zotero.Server.Endpoints['/beaver/test/validate-item'] =
+            createEndpoint(handleTestValidateItemHttpRequest);
+        Zotero.Server.Endpoints['/beaver/test/validate-regular-item'] =
+            createEndpoint(handleTestValidateRegularItemHttpRequest);
+
+        // External-file attach/delete/view-images (dev-only; seeds the registry for live tests)
+        Zotero.Server.Endpoints['/beaver/test/external-file-attach'] =
+            createEndpoint(handleTestExternalFileAttachHttpRequest);
+        Zotero.Server.Endpoints['/beaver/test/external-file-delete'] =
+            createEndpoint(handleTestExternalFileDeleteHttpRequest);
+        Zotero.Server.Endpoints['/beaver/test/external-file-view-images'] =
+            createEndpoint(handleTestExternalFileViewImagesHttpRequest);
+
+        // Serialized PDF document-request wire path (dev-only): exercises the
+        // websocket response mode, PreparedJsonMessage splice, and
+        // guardSerializedPayloadSize that the object-mode endpoint skips.
+        Zotero.Server.Endpoints['/beaver/test/document-serialized'] =
+            createEndpoint(handleTestDocumentSerializedHttpRequest);
 
         // MuPDF worker singleton stats / lifecycle (dev-only)
         Zotero.Server.Endpoints['/beaver/test/worker-stats'] =
@@ -855,6 +957,28 @@ function registerEndpoints(): boolean {
         Zotero.Server.Endpoints['/beaver/test/pdf-analyze-layout'] =
             createEndpoint(handleTestPdfAnalyzeLayoutHttpRequest);
 
+        // EPUB extraction over a raw file path / attachment (corpus triage)
+        Zotero.Server.Endpoints['/beaver/test/epub-extract'] =
+            createEndpoint(handleTestEpubExtractHttpRequest);
+
+        // EPUB annotation CFI/sortIndex parity: headless resolver vs the reader's
+        // own getAnnotationFromRange for the same target.
+        Zotero.Server.Endpoints['/beaver/test/epub-annotation-parity'] =
+            createEndpoint(handleTestEpubAnnotationParityHttpRequest);
+
+        // Reader position (`getCurrentPage` / `content_kind`) and the EPUB
+        // citation-navigation path against the live reader.
+        Zotero.Server.Endpoints['/beaver/test/reader-state'] =
+            createEndpoint(handleTestReaderStateHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/epub-citation-navigate'] =
+            createEndpoint(handleTestEpubCitationNavigateHttpRequest);
+
+        // Citation host: itemData.resolveItemDisplay (icon item type +
+        // readable-attachment availability for cited-source rows).
+        Zotero.Server.Endpoints['/beaver/test/resolve-item-display'] =
+            createEndpoint(handleTestResolveItemDisplayHttpRequest);
+
         // Background queue (dev-only)
         Zotero.Server.Endpoints['/beaver/test/background-enqueue'] =
             createEndpoint(handleTestBackgroundEnqueueHttpRequest);
@@ -870,6 +994,25 @@ function registerEndpoints(): boolean {
 
         Zotero.Server.Endpoints['/beaver/test/background-clear'] =
             createEndpoint(handleTestBackgroundClearHttpRequest);
+
+        // Pref control (dev-only)
+        Zotero.Server.Endpoints['/beaver/test/set-pref'] =
+            createEndpoint(handleTestSetPrefHttpRequest);
+
+        // Sync-suppression control/inspection (dev-only): drives the real
+        // syncPause module + raw Sync.Runner contract for live tests.
+        Zotero.Server.Endpoints['/beaver/test/sync-pause'] =
+            createEndpoint(handleTestSyncPauseHttpRequest);
+
+        // Provider-mode connection control (dev-only manual trigger/inspection)
+        Zotero.Server.Endpoints['/beaver/test/provider-connect'] =
+            createEndpoint(handleTestProviderConnectHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/provider-status'] =
+            createEndpoint(handleTestProviderStatusHttpRequest);
+
+        Zotero.Server.Endpoints['/beaver/test/provider-close'] =
+            createEndpoint(handleTestProviderCloseHttpRequest);
     }
 
     logger(`useHttpEndpoints: Registered ${ENDPOINT_PATHS.length} HTTP endpoints`, 3);

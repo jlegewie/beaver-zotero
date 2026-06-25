@@ -247,9 +247,13 @@ export function checkAttachmentDataSize(
     return sizeMB > maxMB ? { sizeMB, maxMB } : null;
 }
 
-/** Load bytes from an already-resolved attachment source. */
+/** Load bytes from an already-resolved attachment source.
+ *
+ * `item` is only consulted for remote sources (the download path); local
+ * sources (including external files, which are always local) may omit it.
+ */
 export async function loadAttachmentData(args: {
-    item: Zotero.Item;
+    item?: Zotero.Item | null;
     source: AttachmentFileSource;
     maxFileSizeMB: number;
     skipSizeCheck?: boolean;
@@ -276,6 +280,13 @@ export async function loadAttachmentData(args: {
             return { kind: 'error', code: 'read_failed', error };
         }
     } else {
+        if (!item) {
+            return {
+                kind: 'error',
+                code: 'download_failed',
+                error: new Error('Remote attachment source requires a Zotero item'),
+            };
+        }
         try {
             throwIfTimedOut?.('remote_download');
             data = await withDeadline(

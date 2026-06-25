@@ -6,7 +6,7 @@
  */
 
 import { logger } from '../../utils/logger';
-import { ItemDataWithStatus, AttachmentDataWithStatus, ZoteroItemReference } from '../../../react/types/zotero';
+import { ItemDataWithStatus, AttachmentDataWithStatus, ZoteroItemReference, ItemStub } from '../../../react/types/zotero';
 import { searchableLibraryIdsAtom, syncWithZoteroAtom } from '../../../react/atoms/profile';
 import { userIdAtom } from '../../../react/atoms/auth';
 import { store } from '../../../react/store';
@@ -18,6 +18,7 @@ import {
     serializeAnnotation,
     serializeItem,
     serializeNote,
+    serializeItemStub,
 } from '../../utils/zoteroSerializers';
 import { computeItemStatus, prefetchSyncDates, getAttachmentFileStatus, getAttachmentFileStatusLightweight, getBestAttachmentBatch } from './utils';
 import {
@@ -405,7 +406,7 @@ export async function lookupZoteroReferences(
                     errors.push({
                         reference: { library_id: attachment.libraryID, zotero_key: attachment.key },
                         error: 'Attachment not available locally',
-                        error_code: 'not_available'
+                        error_code: 'not_available',
                     });
                     return null;
                 }
@@ -416,18 +417,20 @@ export async function lookupZoteroReferences(
                     isPrimary = bestAttachmentId !== undefined && attachment.id === bestAttachmentId;
                 }
 
-                // Get file status based on requested level
                 let fileStatus = undefined;
-                let fileExistsLocally: boolean | undefined;
                 if (fileStatusLevel === 'lightweight') {
-                    const result = await getAttachmentFileStatusLightweight(attachment, isPrimary);
-                    fileStatus = result.fileStatus;
-                    fileExistsLocally = result.fileExistsLocally;
+                    fileStatus = await getAttachmentFileStatusLightweight(attachment, isPrimary);
                 } else if (fileStatusLevel === 'full') {
                     fileStatus = await getAttachmentFileStatus(attachment, isPrimary);
                 }
 
-                const status = await computeItemStatus(attachment, searchableLibraryIds, syncWithZotero, userId, { syncDateCache, fileExistsLocally });
+                const status = await computeItemStatus(
+                    attachment,
+                    searchableLibraryIds,
+                    syncWithZotero,
+                    userId,
+                    { syncDateCache },
+                );
 
                 return { attachment: serialized, status, file_status: fileStatus };
             } catch (error: any) {
@@ -447,20 +450,27 @@ export async function lookupZoteroReferences(
     const items = itemResults.filter((i): i is ItemDataWithStatus => i !== null);
     const attachments = attachmentResults.filter((a): a is AttachmentDataWithStatus => a !== null);
 
+    // Note parents — serialize each distinct parent once into an ItemStub anchor.
+    const noteParentItems = [...new Set(
+        notesToSerialize
+            .map(note => note.parentID)
+            .filter((id): id is number => typeof id === 'number')
+    )]
+        .map(id => parentItemsById.get(id))
+        .filter((p): p is Zotero.Item => p != null);
+    const noteParentSummaries = new Map<number, ItemStub>();
+    if (noteParentItems.length > 0) {
+        await Zotero.Items.loadDataTypes(noteParentItems, ['primaryData', 'itemData', 'creators']);
+        noteParentItems.forEach(parent => noteParentSummaries.set(parent.id, serializeItemStub(parent)));
+    }
+
     // Serialize notes using the same pattern as zotero_search/list_items
     const noteResults: NoteResultItem[] = [];
     for (const note of notesToSerialize) {
         try {
-            const parentInfo = note.parentID ? parentItemsById.get(note.parentID) : null;
-            let parentTitle = '';
-            if (parentInfo) {
-                try { parentTitle = (parentInfo.getField('title', false, true) as string) || ''; }
-                catch { parentTitle = parentInfo.getDisplayTitle?.() || ''; }
-            }
-            noteResults.push(serializeNote(
-                note,
-                parentInfo ? { item_id: `${parentInfo.libraryID}-${parentInfo.key}`, title: parentTitle } : null,
-            ));
+            const parentItem = note.parentID ? parentItemsById.get(note.parentID) : null;
+            const parentSummary = parentItem ? noteParentSummaries.get(parentItem.id) ?? null : null;
+            noteResults.push(serializeNote(note, parentSummary));
         } catch (error: any) {
             logger(`lookupZoteroReferences: Failed to serialize note ${note.libraryID}/${note.key}: ${error}`, 1);
             errors.push({

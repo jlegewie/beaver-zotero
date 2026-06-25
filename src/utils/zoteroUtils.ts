@@ -328,16 +328,55 @@ export const getRecentAsync = async function (
 };
 
 
-export function getZoteroUserIdentifier(): { userID: string | undefined, localUserKey: string } {
+/**
+ * Identifies a specific Zotero install for a Beaver user. `localUserKey` is always
+ * present and unique per install — the stable discriminator when one Beaver account
+ * has several installs running at once (e.g. work + home). The remaining fields are
+ * best-effort context/labels: `userID`/`accountName` are null when Zotero sync is
+ * off; `deviceName` provides a user-recognizable "work vs home" label. All extra
+ * fields are resolved defensively so a failure never blocks auth.
+ */
+export interface ZoteroInstanceIdentity {
+    /** Zotero account user ID; undefined if sync is off. Groups installs by account. */
+    userID: string | undefined;
+    /** Per-install key; always present. The unique discriminator between installs. */
+    localUserKey: string;
+    /** Zotero account login name; undefined if sync is off. */
+    accountName: string | undefined;
+    /** OS hostname (e.g. "XX-MacBook-Pro") — the recognizable "work vs home" label. */
+    deviceName: string | undefined;
+}
+
+export function getZoteroUserIdentifier(): ZoteroInstanceIdentity {
     // First try to get the Zotero account user ID (only exists if user has Zotero sync enabled)
     const userID = Zotero.Users.getCurrentUserID();
-    
+
     // Get local user key - this always exists
     const localUserKey = Zotero.Users.getLocalUserKey();
 
+    // Account login name — only meaningful when synced; treat any failure as absent.
+    let accountName: string | undefined;
+    try {
+        accountName = userID ? (Zotero.Users.getCurrentUsername() || undefined) : undefined;
+    } catch (e) {
+        accountName = undefined;
+    }
+
+    // OS hostname via the DNS service. NB: Services.sysinfo host/hostname props throw,
+    // so the DNS service is the reliable source.
+    let deviceName: string | undefined;
+    try {
+        const dns = Cc["@mozilla.org/network/dns-service;1"].getService(Ci.nsIDNSService);
+        deviceName = dns.myHostName || undefined;
+    } catch (e) {
+        deviceName = undefined;
+    }
+
     return {
         userID: userID ? `${userID}` : undefined,
-        localUserKey: `${localUserKey}`
+        localUserKey: `${localUserKey}`,
+        accountName,
+        deviceName,
     }
 }
 

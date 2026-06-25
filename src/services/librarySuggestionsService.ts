@@ -15,7 +15,7 @@ import {
     getRecentItems,
     getLibraryShape,
 } from "../utils/librarySignals";
-import { isSupportedItem } from "../utils/sync";
+import { isAgentSupportedItem } from "../utils/agentItemSupport";
 import { store } from "../../react/store";
 import {
     libraryViewAtom,
@@ -148,7 +148,7 @@ export class LibrarySuggestionsService extends ApiService {
      * Beaver can process.
      */
     private async toSignalForParent(item: Zotero.Item): Promise<SignalItem | null> {
-        if (item.isAttachment() && !isSupportedItem(item)) return null;
+        if (item.isAttachment() && !isAgentSupportedItem(item)) return null;
         const target = item.isAttachment() && item.parentItemID
             ? await Zotero.Items.getAsync(item.parentItemID)
             : item;

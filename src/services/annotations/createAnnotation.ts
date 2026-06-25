@@ -15,6 +15,11 @@ import {
     displayBoxToZoteroRect,
     sourceBboxesToZoteroRects,
 } from "./annotationGeometry";
+import { getReadableContentKind } from "../documentExtraction/attachmentResolution";
+import {
+    resolveEpubAnnotationTarget,
+    type EpubAnnotationLocator,
+} from "./epub/epubAnnotationResolver";
 
 const NOTE_RECT_SIZE = 18;
 const NOTE_SIDE_MARGIN = 12;
@@ -397,6 +402,153 @@ export async function createNoteAnnotation(
     item.annotationPosition = JSON.stringify({ pageIndex, rects: [rect] });
     item.annotationAuthorName = BEAVER_ANNOTATION_AUTHOR;
     // addTag calls setTags internally, so tags persist in the same saveTx write.
+    if (input.tags?.length) {
+        for (const tag of input.tags) item.addTag(tag);
+    }
+    await item.saveTx();
+
+    return { library_id: attachment.libraryID, zotero_key: item.key };
+}
+
+// ---------------------------------------------------------------------------
+// EPUB annotations (headless epubcfi — no reader instance)
+// ---------------------------------------------------------------------------
+
+/** Failure creating an EPUB annotation; `code` maps to a per-item error code. */
+export class EpubAnnotationError extends Error {
+    readonly code: string;
+
+    constructor(code: string, message?: string) {
+        super(message ?? code);
+        this.name = "EpubAnnotationError";
+        this.code = code;
+    }
+}
+
+interface EpubLocatorInput {
+    /** Section href within the EPUB (matched by basename). */
+    sectionHref?: string;
+    /** 1-based extractor (compacted) section ordinal; href fallback. */
+    sectionOrdinal?: number;
+    /** DOM id of the cited element inside the section. */
+    anchorId?: string;
+    /** Cited passage text used to anchor the range. */
+    text?: string;
+    color?: string | null;
+    pageLabel?: string | null;
+    /** Tags applied to the created annotation. */
+    tags?: string[];
+}
+
+export interface CreateEpubHighlightInput extends EpubLocatorInput {
+    /** Cited passage to locate and highlight. */
+    text: string;
+    comment?: string | null;
+}
+
+export interface CreateEpubNoteInput extends EpubLocatorInput {
+    comment: string;
+}
+
+function assertEpubAttachment(attachment: Zotero.Item): void {
+    if (getReadableContentKind(attachment) !== "epub") {
+        throw new EpubAnnotationError("invalid_attachment", "attachment is not an EPUB");
+    }
+}
+
+async function getEpubFilePath(attachment: Zotero.Item): Promise<string> {
+    const filePath = await attachment.getFilePathAsync();
+    if (!filePath) {
+        throw new EpubAnnotationError("attachment_file_unavailable", "attachment file path is null");
+    }
+    if (isRemoteFilePath(filePath)) {
+        throw new EpubAnnotationError("attachment_file_unavailable", "remote attachment not supported");
+    }
+    return filePath;
+}
+
+async function resolveEpubAnnotationOrThrow(
+    attachment: Zotero.Item,
+    locator: EpubAnnotationLocator,
+) {
+    assertEpubAttachment(attachment);
+    const filePath = await getEpubFilePath(attachment);
+    const resolved = await resolveEpubAnnotationTarget(filePath, locator);
+    if ("error" in resolved) {
+        throw new EpubAnnotationError(resolved.error, resolved.message);
+    }
+    return resolved;
+}
+
+/**
+ * Create a headless Zotero EPUB highlight annotation. The epubcfi `position`
+ * and `sortIndex` are computed from the EPUB's own XHTML (no open reader);
+ * the reader renders the saved item via the notifier if the book is open.
+ */
+export async function createEpubHighlightAnnotation(
+    attachment: Zotero.Item,
+    input: CreateEpubHighlightInput,
+): Promise<ZoteroItemReference> {
+    const resolved = await resolveEpubAnnotationOrThrow(attachment, {
+        sectionHref: input.sectionHref,
+        sectionOrdinal: input.sectionOrdinal,
+        anchorId: input.anchorId,
+        text: input.text,
+    });
+
+    const item = new Zotero.Item("annotation");
+    item.libraryID = attachment.libraryID;
+    item.parentID = attachment.id;
+    item.annotationType = "highlight";
+    item.annotationText = resolved.text;
+    item.annotationComment = input.comment ?? "";
+    item.annotationColor = resolveBeaverAnnotationColor(input.color);
+    item.annotationPageLabel = firstNonBlankPageLabel(input.pageLabel) ?? "";
+    const sortIndexField: Pick<ZoteroAnnotationItem, "annotationSortIndex"> = {
+        annotationSortIndex: resolved.sortIndex,
+    };
+    Object.assign(item, sortIndexField);
+    item.annotationPosition = JSON.stringify(resolved.position);
+    item.annotationAuthorName = BEAVER_ANNOTATION_AUTHOR;
+    if (input.tags?.length) {
+        for (const tag of input.tags) item.addTag(tag);
+    }
+    await item.saveTx();
+
+    return { library_id: attachment.libraryID, zotero_key: item.key };
+}
+
+/**
+ * Create a headless Zotero EPUB note annotation: a comment-icon annotation whose
+ * CFI spans the cited passage's containing block, so the reader renders the icon
+ * in the margin beside the block (matching a note added in the reader itself)
+ * rather than inline over the text.
+ */
+export async function createEpubNoteAnnotation(
+    attachment: Zotero.Item,
+    input: CreateEpubNoteInput,
+): Promise<ZoteroItemReference> {
+    const resolved = await resolveEpubAnnotationOrThrow(attachment, {
+        sectionHref: input.sectionHref,
+        sectionOrdinal: input.sectionOrdinal,
+        anchorId: input.anchorId,
+        text: input.text,
+        anchorToBlock: true,
+    });
+
+    const item = new Zotero.Item("annotation");
+    item.libraryID = attachment.libraryID;
+    item.parentID = attachment.id;
+    item.annotationType = "note";
+    item.annotationComment = input.comment;
+    item.annotationColor = resolveBeaverAnnotationColor(input.color);
+    item.annotationPageLabel = firstNonBlankPageLabel(input.pageLabel) ?? "";
+    const sortIndexField: Pick<ZoteroAnnotationItem, "annotationSortIndex"> = {
+        annotationSortIndex: resolved.sortIndex,
+    };
+    Object.assign(item, sortIndexField);
+    item.annotationPosition = JSON.stringify(resolved.position);
+    item.annotationAuthorName = BEAVER_ANNOTATION_AUTHOR;
     if (input.tags?.length) {
         for (const tag of input.tags) item.addTag(tag);
     }

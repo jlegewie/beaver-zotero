@@ -1,7 +1,7 @@
 import React from 'react';
 import { ExternalReference } from '../../types/externalReferences';
 import { formatAuthors } from './utils';
-import ActionButtons from './actionButtons';
+import { getHost } from '../../host';
 
 interface ExternalReferenceDetailsProps {
     item: ExternalReference;
@@ -40,12 +40,12 @@ const ExternalReferenceDetails: React.FC<ExternalReferenceDetailsProps> = ({ ite
             )}
 
             <div className="p-4 pt-3 border-t border-quaternary shrink-0">
-                <ActionButtons
-                    item={item}
-                    detailsButtonMode="none"
-                    webButtonMode="icon-only"
-                    pdfButtonMode="icon-only"
-                />
+                {getHost().components?.externalReferenceActions({
+                    item,
+                    detailsButtonMode: 'none',
+                    webButtonMode: 'icon-only',
+                    pdfButtonMode: 'icon-only',
+                })}
             </div>
         </div>
     );

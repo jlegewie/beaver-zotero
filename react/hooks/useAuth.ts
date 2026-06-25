@@ -4,8 +4,10 @@
  * Manages:
  * - Initial session loading and setting loading state.
  * - Establishing a single global listener for Supabase auth events.
- * - Filtering auth events to prevent excessive updates, especially for `userAtom` on focus/visibility changes.
- * - Updating `sessionAtom` and `userAtom` (Jotai) based on relevant auth events (sign in, sign out, token refresh, user update, etc.).
+ * - Filtering auth events to prevent excessive updates to `sessionAtom`.
+ * - Updating `sessionAtom` (Jotai) based on relevant auth events (sign in, sign out, token refresh, user update, etc.).
+ *   `userAtom` is a derived atom of `sessionAtom`, so it follows automatically and never drifts out of sync.
+ * - Clearing profile state on account switch and external sign-out.
  * - Providing a `signOut` method.
  * - Ensuring proper cleanup of the global listener.
  *
@@ -14,7 +16,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useAtom, useSetAtom } from 'jotai';
 import {
-    sessionAtom, userAtom, AuthUser,
+    sessionAtom,
     resetLoginFormState,
 } from '../atoms/auth';
 import { supabase } from '../../src/services/supabaseClient';
@@ -50,40 +52,36 @@ function hasSessionChanged(oldSession: Session | null, newSession: Session | nul
 
 export function useAuth() {
     const [session, setSession] = useAtom(sessionAtom);
-    const [user, setUser] = useAtom(userAtom);
     const [loading, setLoading] = useState(true);
-    
-    // useRef for current atom values to avoid re-rendering
+
+    // useRef for current session value to avoid re-rendering
     const sessionRef = useRef(session);
-    const userRef = useRef(user);
     const setProfileWithPlan = useSetAtom(profileWithPlanAtom);
     const setIsProfileLoaded = useSetAtom(isProfileLoadedAtom);
     const setProfileSyncStatus = useSetAtom(profileSyncStatusAtom);
-    
-    // Keep refs updated with the latest atom values
+
+    // Keep ref updated with the latest session value
     useEffect(() => {
         sessionRef.current = session;
     }, [session]);
-    
-    useEffect(() => {
-        userRef.current = user;
-    }, [user]);
-    
+
     // Stable callback for the auth listener
     const handleAuthStateChange = useCallback((event: AuthChangeEvent, newSession: Session | null) => {
-        logger(`auth: received event=${event}, hasSession=${!!newSession}, hasCurrentSession=${!!sessionRef.current}, hasCurrentUser=${!!userRef.current}`);
-        
         const currentSession = sessionRef.current;
-        const currentUser = userRef.current;
+        logger(`auth: received event=${event}, hasSession=${!!newSession}, hasCurrentSession=${!!currentSession}`);
+
         const newUserId = newSession?.user?.id ?? null;
-        const currentUserId = currentUser?.id ?? null;
+        const currentUserId = currentSession?.user?.id ?? null;
 
         // --- Deduplicate SIGNED_OUT events ---
-        if (event === 'SIGNED_OUT' && currentSession === null && currentUser === null) {
+        // userAtom derives from sessionAtom, so a null session already means no user.
+        if (event === 'SIGNED_OUT' && currentSession === null) {
             return;
         }
 
         // --- Determine if Session Atom should be updated ---
+        // userAtom is derived from sessionAtom, so updating the session keeps the
+        // user identity in sync automatically — no separate user update needed.
         const shouldUpdateSession =
             event === 'INITIAL_SESSION' ||
             event === 'SIGNED_OUT' ||
@@ -93,7 +91,7 @@ export function useAuth() {
             event === 'MFA_CHALLENGE_VERIFIED' ||
             (event === 'SIGNED_IN' && currentSession === null) || // Actual sign-in from logged out state
             hasSessionChanged(currentSession, newSession); // Compare session content, not object reference
-        
+
         if (shouldUpdateSession) {
             logger(`auth: updating session atom for ${event}`);
             setSession(newSession);
@@ -101,29 +99,6 @@ export function useAuth() {
         // else {
             // logger(`auth: skipping session update for ${event} - no meaningful changes`);
         // }
-        
-        // --- Determine if User Atom should be updated ---
-        const shouldUpdateUser =
-            event === 'SIGNED_OUT' ||
-            event === 'USER_UPDATED' ||
-            (newUserId && newUserId !== currentUserId) || // User ID changed or logged in from null
-            (event === 'INITIAL_SESSION' && newSession?.user); // Initial load with a user
-        
-        if (shouldUpdateUser) {
-            logger(`auth: updating user atom for ${event}`);
-            if (newSession?.user) {
-                const { id, email, last_sign_in_at } = newSession.user;
-                const newAuthUser: AuthUser = { id, email, last_sign_in_at };
-                // Only update if user data actually changed
-                if (newAuthUser.id !== currentUser?.id || newAuthUser.email !== currentUser?.email) {
-                    setUser(newAuthUser);
-                } else {
-                    logger(`auth: user data unchanged for ${event}, skipping update`);
-                }
-            } else {
-                setUser(null);
-            }
-        }
 
         // Account switch: if the user.id actually changed (and there was a prior user),
         // clear the previous profile so the new user's fetch in useProfileSync starts clean.
@@ -134,9 +109,6 @@ export function useAuth() {
             setIsProfileLoaded(false);
             setProfileSyncStatus({ kind: 'ok' });
         }
-        // else {
-        //     logger(`auth: skipping user update for ${event}`);
-        // }
 
         // Reset transient login form state when there's no active session:
         // - SIGNED_OUT: session expired externally (e.g., "Invalid Refresh Token: Already Used")
@@ -153,7 +125,7 @@ export function useAuth() {
             setIsProfileLoaded(false);
             setProfileSyncStatus({ kind: 'ok' });
         }
-    }, [setSession, setUser, setProfileWithPlan, setIsProfileLoaded, setProfileSyncStatus]);
+    }, [setSession, setProfileWithPlan, setIsProfileLoaded, setProfileSyncStatus]);
     
     useEffect(() => {
         // Increment reference count

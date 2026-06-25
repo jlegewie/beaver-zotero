@@ -1,4 +1,4 @@
-import { citationMetadataAtom, citationDataListAtom, citationsByRunIdAtom } from "../atoms/citations"
+import { citationsAtom, citationMapAtom, citationsByRunIdAtom } from "../atoms/citations"
 import { userAtom, isAuthenticatedAtom, isWaitingForProfileAtom, authLoadingAtom } from "../atoms/auth"
 import { fileStatusAtom, errorCodeStatsAtom, errorCodeStatsIsLoadingAtom, errorCodeStatsErrorAtom, lastFetchedErrorCountsAtom, aggregatedErrorMessagesForFailedFilesAtom, aggregatedErrorMessagesForSkippedFilesAtom, fileStatusSummaryAtom, isUploadProcessedAtom } from "../atoms/files"
 import { readerTextSelectionAtom, currentMessageContentAtom, currentReaderAttachmentAtom, currentReaderAttachmentKeyAtom, currentNoteTabItemKeyAtom } from "../atoms/messageComposition"
@@ -6,7 +6,7 @@ import { supportedModelsAtom, selectedModelAtom, availableModelsAtom } from "../
 import { isProfileInvalidAtom, profileWithPlanAtom, isProfileLoadedAtom, syncedLibraryIdsAtom, updateRequiredAtom, minimumFrontendVersionAtom, planFeaturesAtom, isDatabaseSyncSupportedAtom, processingModeAtom, isBackendIndexingCompleteAtom, profileBalanceAtom, hasAuthorizedAccessAtom, hasAuthorizedProAccessAtom, hasAuthorizedFreeAccessAtom, hasCompletedOnboardingAtom, syncWithZoteroAtom } from "../atoms/profile"
 import { syncStatusAtom, syncingAtom, syncErrorAtom, syncStatusSummaryAtom, overallSyncStatusAtom } from "../atoms/sync"
 import { recentThreadsAtom, currentThreadIdAtom } from "../atoms/threads"
-import { isSidebarVisibleAtom, isLibraryTabAtom, isPreferencePageVisibleAtom, showFileStatusDetailsAtom, userScrolledAtom, activePreviewAtom, popupMessagesAtom } from "../atoms/ui"
+import { isSidebarVisibleAtom, isLibraryTabAtom, isPreferencePageVisibleAtom, showFileStatusDetailsAtom, userScrolledAtom, popupMessagesAtom } from "../atoms/ui"
 import { store } from "../store"
 
 // Agent-related atoms
@@ -43,8 +43,8 @@ export const atomRegistry = {
     wsWarning: wsWarningAtom,
 
     // Citations
-    citationMetadata: citationMetadataAtom,
-    citationMetadataView: citationDataListAtom,
+    citationMetadata: citationsAtom,
+    citationMetadataView: citationMapAtom,
     citationsByRunId: citationsByRunIdAtom,
 
     // Files
@@ -71,7 +71,6 @@ export const atomRegistry = {
     availableModels: availableModelsAtom,
 
     // Profile
-    currentBeaverVersion: Zotero.Beaver?.pluginVersion,
     isProfileInvalid: isProfileInvalidAtom,
     isProfileLoaded: isProfileLoadedAtom,
     profileWithPlan: profileWithPlanAtom,
@@ -106,7 +105,6 @@ export const atomRegistry = {
     isPreferencePageVisible: isPreferencePageVisibleAtom,
     showFileStatusDetails: showFileStatusDetailsAtom,
     userScrolled: userScrolledAtom,
-    activePreview: activePreviewAtom,
     popupMessages: popupMessagesAtom,
 }
 
@@ -119,7 +117,11 @@ export const getJotaiState = () => {
         } catch (error: any) {
             state[key] = `Error reading atom: ${error.message}`
         }
-    })    
+    })
+
+    // Plugin version is a plain string, not a Jotai atom, so it is read
+    // directly rather than through store.get() (which requires an atom object).
+    state.currentBeaverVersion = Zotero.Beaver?.pluginVersion
 
     return state;
 }

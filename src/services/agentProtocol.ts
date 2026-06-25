@@ -1,7 +1,7 @@
 import { SubscriptionStatus, ProcessingMode, ChargeType } from '../../react/types/profile';
 import { TextPart, ThinkingPart, ToolCallPart, ToolReturnPart, RetryPromptPart, RunUsage } from '../../react/agents/types';
 import { ZoteroItemReference } from '../../react/types/zotero';
-import { ItemDataWithStatus, AttachmentDataWithStatus, ItemSummary } from '../../react/types/zotero';
+import { ItemDataWithStatus, AttachmentDataWithStatus, ItemStub, ItemSummary, AttachmentInfo, AttachmentStub } from '../../react/types/zotero';
 import { ReaderState, NoteState } from '../../react/types/attachments/apiTypes';
 import { BeaverAgentPrompt } from '../../react/agents/types';
 import { CustomChatModel } from '../../react/types/settings';
@@ -26,6 +26,18 @@ export interface WSReadyEvent extends WSBaseEvent {
     subscription_status: SubscriptionStatus;
     processing_mode: ProcessingMode;
     indexing_complete: boolean;
+    supports_request_acks?: boolean;
+}
+
+/**
+ * Per-request ack sent to the backend synchronously when a backend→frontend
+ * request is dispatched.
+ */
+export interface WSRequestReceivedAck {
+    type: 'request_received';
+    request_id: string;
+    /** Busy-context snapshot plus dispatch lag, all numeric (booleans as 0/1) */
+    busy: Record<string, number>;
 }
 
 /** Request acknowledgment event sent after chat request is validated */
@@ -77,7 +89,7 @@ export interface WSRunCompleteEvent extends WSBaseEvent {
     run_id: string;
     usage: RunUsage | null;
     cost: number | null;
-    citations: import('../../react/types/citations').CitationMetadata[] | null;
+    citations: import('../../react/types/citations').Citation[] | null;
     agent_actions: import('../../react/agents/agentActions').AgentAction[] | null;
     /** Whether the run had high input token usage (backend-assessed). */
     high_token_usage?: boolean;
@@ -198,8 +210,17 @@ export interface WSPageImage {
 export interface WSZoteroDocumentRequest extends WSBaseEvent {
     event: 'zotero_document_request';
     request_id: string;
-    /** May be a parent item; frontend resolves it to a PDF attachment. */
-    attachment: ZoteroItemReference;
+    /**
+     * May be a parent item; frontend resolves it to a PDF attachment.
+     * Absent for external-file requests (exactly one of `attachment` or
+     * `external_file_key` is set).
+     */
+    attachment?: ZoteroItemReference | null;
+    /**
+     * Key of a user-attached external file (the 8-character key from an
+     * 'ext-<KEY>' id), served from the plugin's external-files store.
+     */
+    external_file_key?: string | null;
     mode: BeaverExtractResult['mode'];
     /** Reject threshold for total document page count; not a page clamp. */
     max_pages?: number | null;
@@ -207,6 +228,8 @@ export interface WSZoteroDocumentRequest extends WSBaseEvent {
     max_file_size_mb?: number | null;
     /** Frontend-side extraction deadline in seconds. */
     timeout_seconds?: number;
+    /** Maximum uncompressed serialized size of payload. */
+    max_payload_bytes?: number | null;
 }
 
 /** Request from backend to render attachment pages as images */
@@ -236,6 +259,83 @@ export interface WSZoteroAttachmentPageImagesRequest extends WSBaseEvent {
      */
     prefer_page_labels?: boolean;
     /** Frontend-side rendering deadline in seconds. */
+    timeout_seconds?: number;
+}
+
+/** Request from backend to fetch a Zotero image attachment as a vision-ready image */
+export interface WSZoteroAttachmentImageRequest extends WSBaseEvent {
+    event: 'zotero_attachment_image_request';
+    request_id: string;
+    /** May be a parent item; frontend resolves it to an image attachment. */
+    attachment: ZoteroItemReference;
+    /** Maximum output width in pixels. Default: 1568, hard-capped at 4096. Never upscales. */
+    max_width?: number;
+    /** Maximum output height in pixels. Default: 1568, hard-capped at 4096. Never upscales. */
+    max_height?: number;
+    /**
+     * Output format. 'auto' (default) passes PNG/JPEG sources through
+     * unchanged when no resize is needed; otherwise JPEG sources re-encode
+     * as JPEG and everything else as PNG (falling back to JPEG when the
+     * PNG exceeds the output byte budget).
+     *
+     * Animated sources (GIF/APNG/animated WebP) are decoded to their first
+     * frame.
+     */
+    format?: 'png' | 'jpeg' | 'auto';
+    /** JPEG quality (1-100), used when the output is JPEG. Default: 85 */
+    jpeg_quality?: number;
+    /** Frontend-side processing deadline in seconds. */
+    timeout_seconds?: number;
+}
+
+/**
+ * Request from backend to fetch rendered images from an attachment (unified
+ * `view` tool). The frontend resolves the attachment and dispatches
+ * internally: PDF attachments render the requested page range; image
+ * attachments return a single (possibly downscaled/converted) image and
+ * ignore the page range and dpi. The response always carries a list of
+ * images (length 1 for image attachments).
+ *
+ * Supersedes WSZoteroAttachmentPageImagesRequest and
+ * WSZoteroAttachmentImageRequest for backends that gate on the `view_tool`
+ * client feature; the legacy messages remain for older backends.
+ */
+export interface WSZoteroViewImagesRequest extends WSBaseEvent {
+    event: 'zotero_view_images_request';
+    request_id: string;
+    /**
+     * May be a parent item; frontend resolves it to a PDF or image attachment.
+     * Absent for external-file requests (exactly one of `attachment` or
+     * `external_file_key` is set).
+     */
+    attachment?: ZoteroItemReference | null;
+    /**
+     * Key of a user-attached external file (the 8-character key from an
+     * 'ext-<KEY>' id), served from the plugin's external-files store.
+     */
+    external_file_key?: string | null;
+    /**
+     * First page to render (1-indexed, contiguous range). Default: 1.
+     * Ignored for image attachments. Inverted ranges (end_page < start_page)
+     * and ranges spanning more than the frontend's hard per-request cap are
+     * rejected with `invalid_page_value`, not clamped.
+     */
+    start_page?: number | null;
+    /** Last page to render (inclusive). Default: start_page. Ignored for image attachments. */
+    end_page?: number | null;
+    /** Target DPI for PDF page rendering. Ignored for image attachments. */
+    dpi?: number | null;
+    /** Maximum output width in pixels for image attachments (never upscales). Ignored for PDFs. */
+    max_width?: number | null;
+    /** Maximum output height in pixels for image attachments (never upscales). Ignored for PDFs. */
+    max_height?: number | null;
+    /** Output format. Defaults: 'png' for PDF pages, 'auto' for image attachments. */
+    format?: 'png' | 'jpeg' | 'auto' | null;
+    /** JPEG quality (1-100), used when the output is JPEG. Default: 85 */
+    jpeg_quality?: number | null;
+    /** Skip caller-specific soft limits. Beaver's hard caps still apply. Default: false */
+    skip_local_limits?: boolean;
+    /** Frontend-side processing deadline in seconds. */
     timeout_seconds?: number;
 }
 
@@ -290,7 +390,7 @@ export interface WSExternalReferenceCheckResponse {
 /** Item search result with attachments (unified format) */
 export interface ItemSearchFrontendResultItem {
     item: ItemData;
-    attachments: AttachmentDataWithStatus[];
+    attachments: AttachmentInfo[];
     /** Semantic similarity score (0-1) for topic searches, undefined for metadata searches */
     similarity?: number;
 }
@@ -318,7 +418,7 @@ export interface FrontendTimingMetadata {
     data_loading_ms?: number;
     /** Cumulative time in serializeItem() across all items */
     item_serialization_ms?: number;
-    /** Cumulative time in processAttachmentsParallel() across all items */
+    /** Cumulative time in processAttachmentInfoBatch() across all items */
     attachment_processing_ms?: number;
     /** Cumulative time fetching attachment items + best attachment + sync dates */
     att_fetch_ms?: number;
@@ -540,6 +640,7 @@ export type ZoteroDocumentErrorCode =
     | 'timeout'             // Extraction timed out
     | 'extraction_failed'  // General extraction failure
     | 'recursion_limit'     // Extraction overflowed the JS stack ("too much recursion" / "Maximum call stack")
+    | 'document_too_large'  // Serialized extraction result exceeds the WebSocket transfer budget
     | 'schema_version_mismatch'
     | 'mode_mismatch';
 
@@ -547,10 +648,22 @@ export type ZoteroDocumentErrorCode =
 export interface WSZoteroDocumentResponse {
     type: 'zotero_document';
     request_id: string;
+    /** Reference for the served Zotero attachment (routing handle) */
     resolved_attachment?: ZoteroItemReference | null;
+    /** Echo of the external file key for external-file requests. */
+    external_file_key?: string | null;
     content_type?: string | null;
     content_kind?: ExtractContentKind | null;
     result?: DocumentExtractResult | null;
+    /** Served attachment's parent regular item anchor, when it has one. */
+    parent_item?: ItemStub | null;
+    /** Display metadata for the served attachment.
+     * 
+     * `attachment_id` is the model-facing id of the same file
+     * (`<library_id>-<zotero_key>` for Zotero attachments,
+     * `ext-<key>` for external files).
+     */
+    served_attachment?: AttachmentStub | null;
     /** Page count on error responses when available. */
     total_pages?: number | null;
     error?: string | null;
@@ -591,6 +704,115 @@ export interface WSZoteroAttachmentPageImagesResponse {
     error?: string | null;
     /** Error code for programmatic handling */
     error_code?: AttachmentPageImagesErrorCode | null;
+}
+
+/** Error codes for attachment image failures */
+export type AttachmentImageErrorCode =
+    | 'invalid_format'             // Invalid library_id, zotero_key, or request parameter format
+    | 'not_found'                  // Attachment not found in Zotero
+    | 'not_attachment'             // Item is not (resolvable to) an image attachment
+    | 'not_image'                  // Attachment is not an image content type
+    | 'is_linked_url'              // Attachment is a linked URL, not a stored file
+    | 'unsupported_image_format'   // Image format the runtime cannot decode (TIFF, HEIC, SVG, ...)
+    | 'file_missing'               // Image file not available locally
+    | 'file_too_large'             // Image file exceeds size limit
+    | 'download_failed'            // Remote file download failed
+    | 'decode_failed'              // Image could not be decoded (corrupt/truncated)
+    | 'timeout'                    // Processing timed out
+    | 'image_processing_failed';   // General resize/encode failure
+
+/** A processed attachment image. Field shapes align with WSPageImage. */
+export interface WSAttachmentImage {
+    /** Base64-encoded image data */
+    image_data: string;
+    /** Image format (png or jpeg) */
+    format: 'png' | 'jpeg';
+    /** Output image width in pixels */
+    width: number;
+    /** Output image height in pixels */
+    height: number;
+    /** Source image width in pixels (after EXIF orientation) */
+    original_width: number;
+    /** Source image height in pixels (after EXIF orientation) */
+    original_height: number;
+    /** Source MIME type, e.g. 'image/webp' */
+    original_format: string;
+    /** True when the output dimensions differ from the source */
+    resized: boolean;
+    /** True when the output MIME type differs from the source MIME type */
+    converted: boolean;
+}
+
+/** Response to zotero attachment image request */
+export interface WSZoteroAttachmentImageResponse {
+    type: 'zotero_attachment_image';
+    request_id: string;
+    attachment: ZoteroItemReference;
+    /** The attachment actually served when a parent item was auto-resolved. */
+    resolved_attachment?: ZoteroItemReference | null;
+    /** The processed image (null on error) */
+    image: WSAttachmentImage | null;
+    /** Error message if processing failed */
+    error?: string | null;
+    /** Error code for programmatic handling */
+    error_code?: AttachmentImageErrorCode | null;
+}
+
+/** Error codes for unified view-images failures */
+export type ViewImagesErrorCode =
+    | AttachmentPageImagesErrorCode
+    | AttachmentImageErrorCode
+    | 'unsupported_type'   // Attachment is neither a PDF nor an image
+    | 'view_failed';       // General dispatch-level failure
+
+/** A single rendered image returned by a zotero_view_images request. */
+export interface WSViewImage {
+    /** Base64-encoded image data */
+    image_data: string;
+    /** Image format (png or jpeg) */
+    format: 'png' | 'jpeg';
+    /** Image width in pixels */
+    width: number;
+    /** Image height in pixels */
+    height: number;
+    /** 1-indexed physical page number for PDF pages. Absent for image attachments. */
+    page_number?: number | null;
+    /** PDF page label for this physical page, when the document declares one. */
+    page_label?: string | null;
+}
+
+/** Response to zotero view images request */
+export interface WSZoteroViewImagesResponse {
+    type: 'zotero_view_images';
+    request_id: string;
+    /**
+     * Echo of the requested attachment. Absent for external-file requests
+     * (exactly one of `attachment` or `external_file_key` is set).
+     */
+    attachment?: ZoteroItemReference | null;
+    /** Echo of the external file key for external-file requests. */
+    external_file_key?: string | null;
+    /** Reference for the served Zotero attachment (routing handle) */
+    resolved_attachment?: ZoteroItemReference | null;
+    /** Kind of the served attachment. Null on errors before resolution. */
+    kind: 'pdf' | 'image' | null;
+    /** Rendered images (empty on error; length 1 for image attachments) */
+    images: WSViewImage[];
+    /** Total number of pages in the document (PDFs only) */
+    total_pages: number | null;
+    /** Served attachment's parent regular item anchor, when it has one. */
+    parent_item?: ItemStub | null;
+    /** Display metadata for the served attachment.
+     * 
+     * `attachment_id` is the model-facing id of the same file
+     * (`<library_id>-<zotero_key>` for Zotero attachments,
+     * `ext-<key>` for external files).
+     */
+    served_attachment?: AttachmentStub | null;
+    /** Error message if processing failed */
+    error?: string | null;
+    /** Error code for programmatic handling */
+    error_code?: ViewImagesErrorCode | null;
 }
 
 /** Error codes for attachment search failures */
@@ -700,8 +922,12 @@ export interface WSReadNoteResponse {
     /** Note metadata */
     note_id?: string;
     title?: string;
+    /** @deprecated Superseded by `parent_item`. Still emitted for clients/backends predating `parent_item`; remove once the backend reads `parent_item`. */
     parent_item_id?: string;
+    /** @deprecated Superseded by `parent_item`. Still emitted for clients/backends predating `parent_item`; remove once the backend reads `parent_item`. */
     parent_title?: string;
+    /** Bibliographic anchor for the parent item, when the note has one. */
+    parent_item?: ItemStub | null;
     /** Total line count of the simplified HTML */
     total_lines?: number;
     /** The simplified HTML content */
@@ -768,23 +994,24 @@ export interface NoteResultItem {
     result_type: 'note';
     item_id: string;
     title?: string | null;
+    /** @deprecated Superseded by `parent_item`. Still emitted for clients/backends predating `parent_item`; remove once the backend reads `parent_item`. */
     parent_item_id?: string | null;
+    /** @deprecated Superseded by `parent_item`. Still emitted for clients/backends predating `parent_item`; remove once the backend reads `parent_item`. */
     parent_title?: string | null;
+    /** Bibliographic anchor for the parent item, when the note has one. */
+    parent_item?: ItemStub | null;
     date_modified?: string | null;
 }
 
 /** Attachment result item from search/list results */
-export interface AttachmentResultItem {
+export type AttachmentRowResult = AttachmentInfo & {
     result_type: 'attachment';
-    item_id: string;
-    title?: string | null;
-    filename?: string | null;
-    content_type?: string | null;
-    parent_item_id?: string | null;
+    /** @deprecated Superseded by `parent_item`. Still emitted for clients/backends predating `parent_item`; remove once the backend reads `parent_item`. */
     parent_title?: string | null;
+    /** Bibliographic anchor for the parent item, when the attachment has one. */
+    parent_item?: ItemStub | null;
     date_modified?: string | null;
-    annotations_count?: number | null;
-}
+};
 
 /**
  * Annotation result item.
@@ -811,6 +1038,8 @@ export interface AnnotationResultItem {
     color?: string | null;
     /** 1-based page number of the annotation's location. */
     page?: number | null;
+    /** Document's printed page label (e.g. roman numerals); UI rendering only, not surfaced to the agent. */
+    page_label?: string | null;
     /** Tag names attached to the annotation. */
     tags?: string[];
     /** Annotation author, when Zotero stores one. */
@@ -832,10 +1061,10 @@ export interface AnnotationResultItem {
 }
 
 /** Result item from zotero_search (regular, note, or attachment) */
-export type ZoteroSearchResultItem = RegularSearchResultItem | NoteResultItem | AttachmentResultItem;
+export type ZoteroSearchResultItem = RegularSearchResultItem | NoteResultItem | AttachmentRowResult;
 
 /** Result item from list_items (regular, note, or attachment) */
-export type ListItemsResultItem = RegularListResultItem | NoteResultItem | AttachmentResultItem;
+export type ListItemsResultItem = RegularListResultItem | NoteResultItem | AttachmentRowResult;
 
 /** Brief library info for error responses */
 export interface AvailableLibraryInfo {
@@ -1230,6 +1459,8 @@ export type WSEvent =
     | WSMissingZoteroDataEvent
     | WSZoteroDocumentRequest
     | WSZoteroAttachmentPageImagesRequest
+    | WSZoteroAttachmentImageRequest
+    | WSZoteroViewImagesRequest
     | WSZoteroAttachmentSearchRequest
     | WSExternalReferenceCheckRequest
     | WSZoteroDataRequest
@@ -1266,7 +1497,81 @@ export interface WSAuthMessage {
     token: string;
     /** frontend version */
     frontend_version?: string;
+    /** Client identifier (e.g. 'zotero-plugin', 'word-addin'). Absent for older
+     * clients; the backend treats a missing value as 'zotero-plugin'. */
+    client_type?: string;
+    /** Features this client supports. When provided, the backend gates tools on
+     * this set instead of deriving it from `frontend_version`. */
+    client_features?: string[];
+    /** Identifies the specific Zotero install behind this connection. Lets the
+     * backend tell apart multiple installs of one Beaver account (e.g. work +
+     * home both open) and show the user a recognizable label. Absent for
+     * non-Zotero clients. */
+    zotero_instance?: ZoteroInstanceWire;
+    /** Provider-mode handshakes only: echo of the `wake_id` from the
+     * provider-wake broadcast that triggered this connection. Absent for chat
+     * connections and for provider connections opened without a wake. */
+    wake_id?: string;
+    /** Provider-mode handshakes only: echo of the originating backend
+     * `instance_id` from the wake broadcast (multi-instance routing seam). */
+    wake_instance_id?: string;
 }
+
+/**
+ * Wire shape (snake_case) identifying a Zotero install. `local_user_key` is always
+ * present and unique per install — the discriminator when one Beaver account has
+ * several installs connected. The rest are best-effort context/labels (`user_id`/
+ * `account_name` are absent when Zotero sync is off).
+ */
+export interface ZoteroInstanceWire {
+    local_user_key: string;
+    user_id?: string;
+    account_name?: string;
+    device_name?: string;
+}
+
+/**
+ * Client feature identifiers — the shared vocabulary a client declares in the
+ * auth handshake (`WSAuthMessage.client_features`) so the backend gates tools on
+ * declared support rather than inferring from `frontend_version`. The string
+ * values MUST match the backend's `FEAT_*` constants exactly.
+ */
+export const CLIENT_FEATURES = {
+    LIBRARY_MANAGEMENT: 'library_management',
+    MANAGE_LIBRARY_STRUCTURE: 'manage_library_structure',
+    NOTE_SUPPORT: 'note_support',
+    NOTE_APPEND: 'note_append',
+    ANNOTATION_SUPPORT: 'annotation_support',
+    FIND_ANNOTATIONS: 'find_annotations',
+    EXTRACT: 'extract',
+    BEAVER_EXTRACT: 'beaver_extract',
+    IMAGE_EXTRACTION: 'image_extraction',
+    VIEW_PAGE_IMAGES: 'view_page_images',
+    READ_TOOL: 'read_tool',
+    VIEW_TOOL: 'view_tool',
+    FIND_IN_ATTACHMENTS: 'find_in_attachments',
+    DOCUMENT_PAYLOAD_BUDGET: 'document_payload_budget',
+    FILTER_ONLY_SEARCH: 'filter_only_search',
+    SENTENCE_LEVEL_CITATION: 'sentence_level_citation',
+    UNIFIED_CITATION_FORMAT: 'unified_citation_format',
+    CITATION_V2: 'citation_v2',
+    TOOL_RESULT_VIEW: 'tool_result_view',
+    EXTERNAL_SEARCH_SURCHARGE: 'external_search_surcharge',
+    EDIT_METADATA_CREATORS: 'edit_metadata_creators',
+    EXTERNAL_FILES: 'external_files',
+} as const;
+
+/** Client type identifier for the Zotero plugin. */
+export const ZOTERO_PLUGIN_CLIENT_TYPE = 'zotero-plugin';
+
+/**
+ * Features the current Zotero plugin build supports, declared explicitly in the
+ * auth handshake. This build supports the full set, which equals what the
+ * backend would otherwise derive from this plugin version — so declaring it is
+ * behavior-preserving while letting the backend stop relying on version
+ * derivation for current clients.
+ */
+export const ZOTERO_PLUGIN_FEATURES: string[] = Object.values(CLIENT_FEATURES);
 
 /** Current library context for application state */
 export interface CurrentLibrary {

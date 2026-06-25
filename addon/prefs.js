@@ -22,6 +22,11 @@ pref("readerExplainPrompt", "Explain the selected passage or annotation(s) from 
 
 pref("accessRemoteFiles", true);
 
+// Data provider: keep a provider-wake subscription open while logged in so
+// agent runs started from other Beaver clients can
+// request library data from this Zotero on demand.
+pref("dataProviderEnabled", false);
+
 // Agent actions
 pref("autoApplyAnnotations", true);
 pref("autoCreateNotes", true);
@@ -31,6 +36,12 @@ pref("confirmExternalSearchCosts", true);
 pref("pauseLongRunningAgent", true);
 pref("requestPlusTools", false);
 pref("showDiffPreviewInNoteEditor", true);
+
+// Show an OS-native system notification when an agent action needs approval
+pref("enableSystemNotifications", true);
+
+// Show an OS-native system notification when a response is complete and Beaver is not visible
+pref("enableResponseCompleteNotifications", true);
 
 // Deferred tool preferences: maps tool group to preference (always_ask, always_apply, continue_without_applying)
 // Defaults are defined in react/atoms/deferredToolPreferences.ts and merged at load time.

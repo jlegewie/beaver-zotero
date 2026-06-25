@@ -35,6 +35,7 @@ import {
 } from "./types";
 import type {
     BeaverExtractResult,
+    SerializedBeaverExtractResult,
     StructuredExtractWithDebugResult,
 } from "./schema";
 import type {
@@ -257,6 +258,15 @@ export class MuPDFWorkerClient {
     /** The logical slot name this client owns. */
     get name(): PDFWorkerSlotName {
         return this.slotName;
+    }
+
+    /**
+     * Number of in-flight worker operations (PDF extraction work); 0 = idle.
+     * Read cross-bundle via the `Zotero.__beaverMuPDFWorkerClient_*` globals to
+     * feed `busy_extracting` in busy-context diagnostics.
+     */
+    get inFlight(): number {
+        return this.pending.size;
     }
 
     /** Test-only: change the idle timeout on a live instance. */
@@ -856,6 +866,27 @@ export class MuPDFWorkerClient {
         const bytes =
             pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
         return this.call<BeaverExtractResult>("extract", {
+            pdfData: bytes,
+            mode: args?.mode,
+            markdown: args?.markdown,
+            structured: args?.structured,
+            settings: args?.settings,
+            paragraphSettings: args?.paragraphSettings,
+            pageIndices: args?.pageIndices,
+            pageRange: args?.pageRange,
+            analysisWindow: args?.analysisWindow,
+            includeDiagnostics: args?.includeDiagnostics,
+        }, { signal });
+    }
+
+    async extractSerialized(
+        pdfData: Uint8Array | ArrayBuffer,
+        args?: Parameters<MuPDFWorkerClient["extract"]>[1],
+        signal?: AbortSignal,
+    ): Promise<SerializedBeaverExtractResult> {
+        const bytes =
+            pdfData instanceof Uint8Array ? pdfData : new Uint8Array(pdfData);
+        return this.call<SerializedBeaverExtractResult>("extractSerialized", {
             pdfData: bytes,
             mode: args?.mode,
             markdown: args?.markdown,

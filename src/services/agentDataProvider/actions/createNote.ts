@@ -1,7 +1,7 @@
 import { logger } from '../../../utils/logger';
 import { store } from '../../../../react/store';
 import { searchableLibraryIdsAtom } from '../../../../react/atoms/profile';
-import { citationDataMapAtom } from '../../../../react/atoms/citations';
+import { citationMapAtom } from '../../../../react/atoms/citations';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '../../../../react/atoms/externalReferences';
 import { currentThreadIdAtom } from '../../../../react/atoms/threads';
 import { activeRunAtom } from '../../../../react/agents/atoms';
@@ -455,7 +455,7 @@ async function executeCreateNoteAction(
 
     try {
         // Get citation context for rendering
-        const citationDataMap = store.get(citationDataMapAtom);
+        const citationDataMap = store.get(citationMapAtom);
         const externalMapping = store.get(externalReferenceItemMappingAtom);
         const externalReferencesMap = store.get(externalReferenceMappingAtom);
 

@@ -1,33 +1,20 @@
 export {
-    buildEpubCitationIndex,
-    resolveEpubCitationId,
-} from "./citationIndex";
-export {
     extractEpubDocument,
+    extractEpubDocumentFromFile,
+    extractEpubDocumentSafe,
+    preflightEpubFile,
 } from "./EpubExtractor";
-export {
-    createEpubExtractionCounters,
-    parseEpubSection,
-    splitEpubSentences,
-} from "./EpubSectionParser";
-export {
-    collectEpubDomItems,
-    findNearestAnchorId,
-    isEpubFootnoteElement,
-    mapEpubElement,
-    normalizeEpubText,
-} from "./domWalk";
 export type {
-    EpubCitationIndex,
-    EpubCitationIndexEntry,
+    ExtractEpubDocumentOptions,
+    EpubPreflightResult,
+} from "./EpubExtractor";
+export type {
     EpubContentKind,
     EpubDocument,
-    EpubItem,
-    EpubItemKind,
-    EpubSection,
-    EpubSentence,
+    ExtractEpubResult,
 } from "./schema";
 export {
     EPUB_CONTENT_KIND,
     EPUB_SCHEMA_VERSION,
+    validateEpubDocument,
 } from "./schema";

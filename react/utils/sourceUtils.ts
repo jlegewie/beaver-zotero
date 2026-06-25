@@ -1,10 +1,10 @@
 import { truncateText } from './stringUtils';
 import { stripHtmlTags, computeDiff } from '../components/agentRuns/EditNotePreview';
 import { logger } from '../../src/utils/logger';
-import { syncingItemFilter, syncingItemFilterAsync, isSupportedItem, isLibraryValidForSync } from '../../src/utils/sync';
+import { isLibraryValidForSync } from '../../src/utils/sync';
+import { isAgentSupportedItem, agentItemFilter, agentItemFilterAsync } from '../../src/utils/agentItemSupport';
 import { isValidAnnotationType, SourceAttachment } from '../types/attachments/apiTypes';
 import { selectItemById } from '../../src/utils/selectItem';
-import { CitationData } from '../types/citations';
 import { ZoteroItemReference } from '../types/zotero';
 import { isDatabaseSyncSupportedAtom, searchableLibraryIdsAtom, syncWithZoteroAtom} from '../atoms/profile';
 import { store } from '../store';
@@ -24,23 +24,11 @@ import {
 export const MAX_NOTE_TITLE_LENGTH = 20;
 export const MAX_NOTE_CONTENT_LENGTH = 150;
 
-// Limits
-export const FILE_SIZE_LIMIT = 10 * 1024 * 1024; // 10MB
-export const MAX_ATTACHMENTS = 10;
-export const MAX_PAGES = 100;
-
-export const VALID_MIME_TYPES = ['application/pdf', 'image/png', 'image/jpeg', 'image/jpg'] as const;
-type ValidMimeType = typeof VALID_MIME_TYPES[number];
-
-function isValidMimeType(mimeType: string): mimeType is ValidMimeType {
-    return VALID_MIME_TYPES.includes(mimeType as ValidMimeType);
-}
-
 export function getDisplayNameFromItem(item: Zotero.Item, count: number | null = null, noteTitleLength: number = MAX_NOTE_TITLE_LENGTH): string {
     let displayName: string;
 
     if (item.isNote()) {
-        displayName = truncateText(item.getNoteTitle(), noteTitleLength);
+        displayName = truncateText(item.getNoteTitle(), noteTitleLength) || 'Untitled Note';
     } else if(item.isAttachment() && !item.parentItem) {
         displayName = item.getField('title') || '';
     } else {
@@ -71,7 +59,7 @@ export function getReferenceFromItem(item: Zotero.Item): string {
 /**
 * Source method: Get the Zotero item from a Source
 */
-export function getZoteroItem(source: SourceAttachment | CitationData): Zotero.Item | null {
+export function getZoteroItem(source: SourceAttachment | ZoteroItemReference): Zotero.Item | null {
     try {
         let libId: number;
         let itemKeyValue: string;
@@ -165,7 +153,7 @@ export async function isValidZoteroItem(item: Zotero.Item): Promise<{valid: bool
         if (item.isInTrash()) return {valid: false, error: "Item is in trash"};
 
         // (a) Pass the syncing filter
-        if (!(await syncingItemFilterAsync(item))) {
+        if (!(await agentItemFilterAsync(item))) {
             return {valid: false, error: "File not available to use in Beaver"};
         }
 
@@ -186,8 +174,8 @@ export async function isValidZoteroItem(item: Zotero.Item): Promise<{valid: bool
     else if (item.isAttachment()) {
 
         // (a) Check if attachment is supported
-        if (!isSupportedItem(item)) {
-            return {valid: false, error: "Beaver only supports PDF attachments"};
+        if (!isAgentSupportedItem(item)) {
+            return {valid: false, error: "Beaver only supports PDF, EPUB, and plain-text attachments"};
         }
 
         // (b) Check if attachment is in trash
@@ -200,8 +188,8 @@ export async function isValidZoteroItem(item: Zotero.Item): Promise<{valid: bool
         }
 
         // (d) Use comprehensive syncing filter
-        if (!(await syncingItemFilterAsync(item))) {
-            return {valid: false, error: "Attachment not synced with Beaver"};
+        if (!(await agentItemFilterAsync(item))) {
+            return {valid: false, error: "Attachment not available to use in Beaver"};
         }
         
         // (e) If syncWithZotero is true, check whether item has been synced with Zotero
@@ -238,7 +226,7 @@ export async function isValidZoteroItem(item: Zotero.Item): Promise<{valid: bool
         if (!parent || !parent.isAttachment()) return {valid: false, error: "Parent item is not an attachment"};
 
         // (d) Check if the parent exists and is syncing
-        if (!syncingItemFilter(parent)) return {valid: false, error: "Parent item is not syncing"};
+        if (!agentItemFilter(parent)) return {valid: false, error: "Parent item is not available to use in Beaver"};
 
         // (e) Check if the parent file exists
         const hasFile = await safeFileExists(parent);
@@ -271,7 +259,7 @@ export async function isValidZoteroItem(item: Zotero.Item): Promise<{valid: bool
  * @param source - The source item to reveal
  * @param collectionKey - Optional collection key to navigate to before revealing
  */
-export function revealSource(source: ZoteroItemReference | SourceAttachment | CitationData, collectionKey?: string) {
+export function revealSource(source: ZoteroItemReference | SourceAttachment, collectionKey?: string) {
     if (!source.library_id || !source.zotero_key) return;
     const itemID = Zotero.Items.getIDFromLibraryAndKey(source.library_id, source.zotero_key);
     if (itemID && Zotero.getActiveZoteroPane()) {
@@ -326,7 +314,7 @@ export async function getCurrentCollectionKeyForItem(
     }
 }
 
-export async function openSource(source: SourceAttachment | CitationData) {
+export async function openSource(source: SourceAttachment | ZoteroItemReference) {
     const item = getZoteroItem(source);
     if (!item) return;
     

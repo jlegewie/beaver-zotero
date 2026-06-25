@@ -3,11 +3,56 @@ import type { PageGeometry } from '../../../beaver-extract/types';
 export type ExtractContentKind = 'pdf' | 'epub' | 'text' | 'snapshot';
 export type DocumentCachePageLabels = Record<string, string>;
 
+export type ReadableContentKind = ExtractContentKind | 'image';
+
+export type ContentKind =
+    | ReadableContentKind
+    | 'word'
+    | 'spreadsheet'
+    | 'presentation'
+    | 'audio'
+    | 'video'
+    | 'archive'
+    | 'linked_url'
+    | 'other';
+
+export type ContentInfoStatus = 'readable' | 'unreadable' | 'processing';
+
+/** Display subset of attachment metadata */
+export interface AttachmentStub {
+    attachment_id: string;
+    parent_item_id?: string | null;
+    title?: string | null;
+    filename?: string | null;
+    content_kind: ContentKind;
+}
+
+export interface AttachmentInfo extends AttachmentStub {
+    status: ContentInfoStatus;
+    status_code?: string | null;
+    status_reason?: string | null;
+    page_count?: number | null;
+    line_count?: number | null;
+    is_primary: boolean;
+    annotations_count?: number | null;
+}
+
 export interface EpubSectionSummary {
     index: number;
     rawHref: string;
     label?: string;
     itemCount?: number;
+    /**
+     * 1-based page coordinate of the section's first extracted item.
+     */
+    firstPageNumber?: number;
+    /**
+     * 1-based page coordinate of the section's last extracted item. With
+     * `firstPageNumber` this gives the section's full page span, used to report
+     * the reader's current-page range. Absent on cache rows written before this
+     * field existed.
+     */
+    lastPageNumber?: number;
 }
 
 export interface SnapshotSectionSummary {
@@ -27,6 +72,17 @@ export type CachedDocumentMetadata =
         content_kind: 'epub';
         sectionCount: number;
         sections: EpubSectionSummary[];
+        /**
+         * Total page count, based on the max stamped EPUB page coordinate.
+         */
+        pageCount?: number | null;
+        /**
+         * Total extracted text characters from the extraction diagnostics.
+         * Lets the read side flag image-only/scanned EPUBs (sections but no
+         * text) as unreadable without re-extracting. Absent on rows written
+         * before this field existed — treat as unknown, not as zero.
+         */
+        extractedTextChars?: number | null;
     }
     | {
         content_kind: 'text';
@@ -50,7 +106,14 @@ export function isExtractContentKind(value: string): value is ExtractContentKind
     return EXTRACT_CONTENT_KINDS.has(value);
 }
 
-export type ReadableContentKind = ExtractContentKind | 'image';
+const READABLE_CONTENT_KINDS: ReadonlySet<string> = new Set([
+    ...EXTRACT_CONTENT_KINDS,
+    'image',
+]);
+
+export function isReadableContentKind(value: string): value is ReadableContentKind {
+    return READABLE_CONTENT_KINDS.has(value);
+}
 
 export function readableToExtractKind(
     kind: ReadableContentKind | null | undefined,
@@ -102,5 +165,19 @@ export function buildPdfCachedMetadata(
         pageCount,
         pageLabels,
         pages,
+    };
+}
+
+export function buildEpubCachedMetadata(
+    sections: EpubSectionSummary[],
+    extractedTextChars?: number | null,
+    pageCount?: number | null,
+): CachedDocumentMetadata {
+    return {
+        content_kind: 'epub',
+        sectionCount: sections.length,
+        sections,
+        pageCount: pageCount ?? null,
+        extractedTextChars: extractedTextChars ?? null,
     };
 }

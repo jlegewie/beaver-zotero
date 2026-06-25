@@ -71,13 +71,32 @@ export const isCustomChatModel = (obj: unknown): obj is CustomChatModel => {
     return true;
 };
 
+/** Default endpoint used when a custom provider has no explicit endpoint. */
+export const OPENROUTER_API_BASE = 'https://openrouter.ai/api/v1';
+
+/**
+ * Backfill a missing endpoint for custom entries so legacy configs that predate
+ * the endpoint field default to OpenRouter (the same default new providers use)
+ * instead of being dropped as invalid. Entries that already set `api_base`, or
+ * that route through the native `provider: "openrouter"` path, are left untouched.
+ */
+const withDefaultEndpoint = (entry: unknown): unknown => {
+    if (!isObject(entry)) return entry;
+    const provider = typeof entry.provider === 'string' ? entry.provider.toLowerCase() : 'custom';
+    const apiBase = typeof entry.api_base === 'string' ? entry.api_base.trim() : '';
+    if (!apiBase && provider === 'custom') {
+        return { ...entry, api_base: OPENROUTER_API_BASE };
+    }
+    return entry;
+};
+
 export const getCustomChatModelsFromPreferences = (): CustomChatModel[] => {
     try {
         const raw = getPref('customChatModels');
         if (raw && typeof raw === 'string') {
             const parsed = JSON.parse(raw as string);
             if (!Array.isArray(parsed)) throw new Error("customChatModels preference must be an array");
-            return parsed.filter(isCustomChatModel);
+            return parsed.map(withDefaultEndpoint).filter(isCustomChatModel);
         }
     } catch (e) {
         console.error("Error parsing customChatModels:", e);
@@ -97,6 +116,134 @@ export const getCustomChatModelsFromPreferences = (): CustomChatModel[] => {
         return [];
     }
     return [];
+};
+
+/**
+ * Read custom models for the preferences editor.
+ *
+ * Unlike {@link getCustomChatModelsFromPreferences}, this does NOT drop entries
+ * that fail full validation. A provider that is still being filled in (missing
+ * api_key, api_base, etc.) must survive a preferences reopen, so the editor reads
+ * the raw array and only coerces it into a predictable shape. The model selector
+ * keeps using the stricter getter so incomplete providers never appear as usable
+ * models.
+ *
+ * Entries without an explicit endpoint default to OpenRouter, matching how new
+ * providers are seeded ({@link OPENROUTER_API_BASE}). This migrates legacy
+ * configs — both `provider: "openrouter"` entries that never stored an endpoint
+ * and OpenRouter-key entries that predate the endpoint field — so the editor
+ * treats them as complete custom providers instead of flagging them incomplete.
+ */
+export const getCustomChatModelsForEditing = (): CustomChatModel[] => {
+    try {
+        const raw = getPref('customChatModels');
+        if (raw && typeof raw === 'string') {
+            const parsed = JSON.parse(raw as string);
+            if (!Array.isArray(parsed)) return [];
+            return parsed.filter(isObject).map((entry) => {
+                const e = entry as Record<string, unknown>;
+                let api_base = typeof e.api_base === 'string' ? e.api_base : '';
+                // An empty endpoint defaults to OpenRouter (the most common custom
+                // setup) so legacy entries validate as complete custom providers.
+                if (!api_base.trim()) {
+                    api_base = OPENROUTER_API_BASE;
+                }
+                return {
+                    api_base,
+                    format: e.format === 'anthropic' ? 'anthropic' : 'openai',
+                    api_key: typeof e.api_key === 'string' ? e.api_key : '',
+                    name: typeof e.name === 'string' ? e.name : '',
+                    snapshot: typeof e.snapshot === 'string' ? e.snapshot : '',
+                    context_window: typeof e.context_window === 'number' ? e.context_window : undefined,
+                    supports_vision: typeof e.supports_vision === 'boolean' ? e.supports_vision : false,
+                } as CustomChatModel;
+            });
+        }
+    } catch (e) {
+        console.error("Error parsing customChatModels:", e);
+    }
+    return [];
+};
+
+/**
+ * Persist the custom models array. Only the known custom-model fields are written
+ * so transient editor state (React keys, etc.) never leaks into the preference.
+ * The `provider` field is intentionally omitted: custom endpoints always default
+ * to "custom" on the backend.
+ */
+export const saveCustomChatModelsToPreferences = (models: CustomChatModel[]): void => {
+    const cleaned = models.map((model) => {
+        const entry: CustomChatModel = {
+            api_base: model.api_base?.trim() || undefined,
+            format: model.format === 'anthropic' ? 'anthropic' : 'openai',
+            api_key: model.api_key?.trim() ?? '',
+            name: model.name?.trim() ?? '',
+            snapshot: model.snapshot?.trim() ?? '',
+            supports_vision: model.supports_vision ?? false,
+        };
+        if (typeof model.context_window === 'number' && Number.isFinite(model.context_window)) {
+            entry.context_window = model.context_window;
+        }
+        return entry;
+    });
+    setPref('customChatModels', JSON.stringify(cleaned));
+};
+
+export interface ApiBaseValidationResult {
+    valid: boolean;
+    error?: string;
+}
+
+/** Returns true when the host is a private, loopback, or link-local address. */
+const isPrivateOrReservedHost = (host: string): boolean => {
+    // IPv6 loopback / link-local / unique-local
+    if (host === '::1' || host.startsWith('fe80:') || host.startsWith('fc') || host.startsWith('fd')) {
+        return true;
+    }
+    // IPv4 dotted-quad ranges
+    const ipv4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+    if (ipv4) {
+        const a = parseInt(ipv4[1], 10);
+        const b = parseInt(ipv4[2], 10);
+        if (a === 10) return true;                        // 10.0.0.0/8
+        if (a === 127) return true;                       // loopback
+        if (a === 0) return true;                         // 0.0.0.0/8
+        if (a === 172 && b >= 16 && b <= 31) return true; // 172.16.0.0/12
+        if (a === 192 && b === 168) return true;          // 192.168.0.0/16
+        if (a === 169 && b === 254) return true;          // link-local / cloud metadata
+    }
+    return false;
+};
+
+/**
+ * Mirror of the backend SSRF protection for custom endpoints. Beaver routes
+ * every request through its own backend, so custom endpoints must be reachable
+ * from the public internet over HTTPS. Localhost, private networks, and reserved
+ * IP ranges are rejected. Keeping this check client-side gives users an immediate
+ * error before a request is attempted.
+ */
+export const validateCustomProviderApiBase = (apiBase: string | undefined): ApiBaseValidationResult => {
+    const value = (apiBase ?? '').trim();
+    if (!value) {
+        return { valid: false, error: 'An endpoint URL is required for custom providers.' };
+    }
+    let url: URL;
+    try {
+        url = new URL(value);
+    } catch {
+        return { valid: false, error: 'Enter a valid URL, for example https://api.example.com/v1.' };
+    }
+    if (url.protocol !== 'https:') {
+        return { valid: false, error: 'The endpoint must use HTTPS. Plain HTTP endpoints are blocked.' };
+    }
+    const host = url.hostname.toLowerCase();
+    if (host === 'localhost' || host === 'localhost.localdomain') {
+        return { valid: false, error: 'The endpoint cannot point to localhost. It must be reachable from the public internet.' };
+    }
+    if (isPrivateOrReservedHost(host)) {
+        return { valid: false, error: 'The endpoint cannot use a private, internal, or reserved IP address. It must be reachable from the public internet.' };
+    }
+    return { valid: true };
 };
 
 export interface CustomPrompt {

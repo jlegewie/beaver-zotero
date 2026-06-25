@@ -24,11 +24,17 @@ vi.mock('../../../src/utils/zoteroSerializers', () => ({
         id: `${item.libraryID}-${item.key}`,
         title: item.title || item.key,
     })),
+    serializeItemStub: vi.fn((item: any) => ({
+        library_id: item.libraryID,
+        zotero_key: item.key,
+        item_type: item.itemType,
+        title: item.title || item.key,
+    })),
 }));
 
 vi.mock('../../../src/services/agentDataProvider/utils', () => ({
-    prepareBatchAttachmentData: vi.fn(async () => new Map()),
-    processAttachmentsWithBatchData: vi.fn(async () => []),
+    prepareAttachmentInfoBatchData: vi.fn(async () => ({ bestAttachmentMap: new Map() })),
+    processAttachmentInfoBatch: vi.fn(async () => []),
     toAttachmentSummary: vi.fn((attachment: any) => attachment),
 }));
 

@@ -1,0 +1,414 @@
+import React, { useEffect, useState, useCallback } from 'react';
+import { useAtomValue, useSetAtom } from 'jotai';
+import {
+    ArrowUpRightIcon,
+    DownloadIcon,
+    PdfIcon,
+    InformationCircleIcon,
+    Spinner,
+} from '../../../components/icons/icons';
+import {
+    isExternalReferenceDetailsDialogVisibleAtom,
+    selectedExternalReferenceAtom
+} from '../../../atoms/ui';
+import Button from '../../../components/ui/Button';
+import IconButton from '../../../components/ui/IconButton';
+import Tooltip from '../../../components/ui/Tooltip';
+import { ZOTERO_ICONS } from '../../../components/icons/ZoteroIcon';
+import { ZoteroIcon } from '../../../components/icons/ZoteroIcon';
+import { revealSource } from '../../../utils/sourceUtils';
+import {
+    checkExternalReferenceAtom,
+    externalReferenceItemMappingAtom,
+    isCheckingReferenceObjectAtom,
+    markExternalReferenceImportedAtom,
+} from '../../../atoms/externalReferences';
+import { createZoteroItem, stampBeaverProvenanceExtra } from '../../../utils/addItemActions';
+import { logger } from '../../../../src/utils/logger';
+import { ensureItemSynced } from '../../../../src/utils/sync';
+import { getPref } from '../../../../src/utils/prefs';
+import { createProvenanceNote } from '../../../utils/noteActions';
+import {
+    getPendingCreateItemActionBySourceIdAtom,
+    ackAgentActionsAtom,
+} from '../../../agents/agentActions';
+import { CreateItemResultData } from '../../../types/agentActions/items';
+import { currentThreadIdAtom } from '../../../atoms/threads';
+import type { ExternalReferenceActionMode, ExternalReferenceActionsProps } from '../../types';
+
+const CITED_BY_URL = 'https://openalex.org/works?page=1&filter=cites:';
+
+const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
+    item,
+    buttonVariant = 'surface-light',
+    className = '',
+    revealButtonMode = 'full',
+    importButtonMode = 'full',
+    detailsButtonMode = 'full',
+    webButtonMode = 'full',
+    pdfButtonMode = 'icon-only',
+    showCitationCount = true,
+}) => {
+    const setIsDetailsVisible = useSetAtom(isExternalReferenceDetailsDialogVisibleAtom);
+    const setSelectedReference = useSetAtom(selectedExternalReferenceAtom);
+    const checkReference = useSetAtom(checkExternalReferenceAtom);
+    const externalReferenceCache = useAtomValue(externalReferenceItemMappingAtom);
+    const isChecking = useAtomValue(isCheckingReferenceObjectAtom);
+    const markExternalReferenceImported = useSetAtom(markExternalReferenceImportedAtom);
+    const getPendingCreateItemAction = useAtomValue(getPendingCreateItemActionBySourceIdAtom);
+    const ackAgentActions = useSetAtom(ackAgentActionsAtom);
+    // Active thread ID — used to stamp the background PDF fetch so the
+    // attachment_resolved ws event can route back to the live agent run.
+    const threadId = useAtomValue(currentThreadIdAtom);
+
+    // Get cached reference directly from the cache for this item's source_id
+    const sourceId = item.source_id;
+    const cachedRef = sourceId && sourceId in externalReferenceCache
+        ? externalReferenceCache[sourceId]
+        : undefined;
+
+    // Track the actual item existence state
+    const [itemExists, setItemExists] = useState(item.library_items && item.library_items.length > 0);
+    const [zoteroItemRef, setZoteroItemRef] = useState(
+        item.library_items && item.library_items.length > 0
+            ? { library_id: item.library_items[0].library_id, zotero_key: item.library_items[0].zotero_key }
+            : null
+    );
+    const [isLoading, setIsLoading] = useState(false);
+    const [isImporting, setIsImporting] = useState(false);
+    const [bestAttachment, setBestAttachment] = useState<Zotero.Item | null>(null);
+
+    /**
+     * Handle importing the external reference to Zotero.
+     * Uses the current library/collection context for import.
+     */
+    const handleImport = useCallback(async () => {
+        if (isImporting || isLoading) return;
+
+        setIsImporting(true);
+        try {
+            logger(`ActionButtons: Importing item "${item.title}"`, 1);
+
+            // Look up the matching pending agent action up front so we can pass
+            // its id/run_id into createZoteroItem. This lets the background PDF
+            // fetch correlate its attachment_resolved ws event back to the right
+            // action server-side.
+            const matchingAction = item.source_id ? getPendingCreateItemAction(item.source_id) : null;
+
+            // createZoteroItem handles library/collection resolution internally
+            // and (since skipBackgroundPdfFetch defaults to false) schedules its
+            // own PDF fetch.
+            const newItem = await createZoteroItem(item, {
+                actionId: matchingAction?.id,
+                runId: matchingAction?.run_id,
+                threadId: threadId ?? undefined,
+            });
+
+            // Use the item's actual library ID (may differ from user library if in group)
+            const libraryId = newItem.libraryID;
+            const newZoteroRef = {
+                library_id: libraryId,
+                zotero_key: newItem.key
+            };
+
+            const provenanceReason = matchingAction?.proposed_data?.reason;
+            if (stampBeaverProvenanceExtra(newItem, { reason: provenanceReason })) {
+                await newItem.saveTx();
+            }
+            if (getPref('addBeaverProvenanceNote') === true) {
+                await createProvenanceNote(
+                    { library_id: libraryId, zotero_key: newItem.key },
+                    {
+                        reason: provenanceReason,
+                        threadId: threadId ?? undefined,
+                        runId: matchingAction?.run_id,
+                    },
+                );
+            }
+
+            // Compute initial attachment_status by inspecting what
+            // createZoteroItem actually did. Mirror applyCreateItemData's logic:
+            // PDF present → "available"; otherwise a bg fetch was scheduled (the
+            // default) → "pending".
+            const attachmentIds = newItem.getAttachments();
+            const attachmentItems = await Promise.all(
+                attachmentIds.map((id) => Zotero.Items.getAsync(id))
+            );
+            const existingPdf = attachmentItems.find(
+                (a) => a && !a.deleted && a.isPDFAttachment()
+            );
+            const attachmentStatus: CreateItemResultData['attachment_status'] = existingPdf
+                ? 'available'
+                : 'pending';
+            const attachmentKey = existingPdf ? `${libraryId}-${existingPdf.key}` : undefined;
+
+            // Update cache + acknowledge matching pending agent action.
+            if (item.source_id) {
+                markExternalReferenceImported(item.source_id, newZoteroRef);
+
+                if (matchingAction) {
+                    logger(`ActionButtons: Found matching agent action ${matchingAction.id}, acknowledging`, 1);
+                    const resultData: CreateItemResultData = {
+                        library_id: libraryId,
+                        zotero_key: newItem.key,
+                        attachment_status: attachmentStatus,
+                        attachment_key: attachmentKey,
+                    };
+                    ackAgentActions(matchingAction.run_id, [{
+                        action_id: matchingAction.id,
+                        result_data: resultData
+                    }]).catch(err => {
+                        logger(`ActionButtons: Failed to acknowledge agent action: ${err}`, 2);
+                    });
+                }
+            }
+
+            // Sync the newly created item to backend immediately
+            // This ensures it's available for follow-up AI queries
+            ensureItemSynced(libraryId, newItem.key).catch(err => {
+                logger(`ActionButtons: Failed to sync imported item: ${err.message}`, 2);
+            });
+
+            // Update local state to switch from Import to Reveal button
+            setZoteroItemRef(newZoteroRef);
+            setItemExists(true);
+
+            // Check for best attachment
+            if (newItem.isRegularItem()) {
+                const attachment = await newItem.getBestAttachment();
+                setBestAttachment(attachment || null);
+            }
+
+            // Select the new item in Zotero
+            const ZoteroPane = Zotero.getMainWindow()?.ZoteroPane;
+            if (ZoteroPane) {
+                ZoteroPane.selectItem(newItem.id);
+            }
+
+            logger(`ActionButtons: Successfully imported "${item.title}" (key: ${newItem.key})`, 1);
+        } catch (error) {
+            logger(`ActionButtons: Failed to import "${item.title}": ${error}`, 1);
+        } finally {
+            setIsImporting(false);
+        }
+    }, [item, isImporting, isLoading, threadId, markExternalReferenceImported, getPendingCreateItemAction, ackAgentActions]);
+
+    // React to cache changes (e.g., when item is deleted and cache is invalidated)
+    useEffect(() => {
+        if (cachedRef === undefined) {
+            // Not in cache yet - will be handled by the check effect below
+            return;
+        }
+
+        // Cache was updated (either set to a value or cleared to null)
+        setItemExists(cachedRef !== null);
+        setZoteroItemRef(cachedRef);
+
+        // Check for best attachment if item exists
+        if (cachedRef !== null) {
+            try {
+                const zoteroItem = Zotero.Items.getByLibraryAndKey(cachedRef.library_id, cachedRef.zotero_key);
+                if (zoteroItem && zoteroItem.isRegularItem()) {
+                    zoteroItem.getBestAttachment().then(attachment => {
+                        setBestAttachment(attachment || null);
+                    });
+                }
+            } catch (e) {
+                logger(`ActionButtons: Item not loaded for ${cachedRef.library_id}/${cachedRef.zotero_key}: ${e}`);
+            }
+        } else {
+            // Item was deleted, clear attachment
+            setBestAttachment(null);
+        }
+    }, [cachedRef]);
+
+    // Check cache and validate on mount
+    useEffect(() => {
+        if (!sourceId) return;
+
+        // If we have cached data, the above effect handles it
+        if (cachedRef !== undefined) {
+            return;
+        }
+
+        // If not cached and not currently checking, start a check
+        if (!isChecking(item)) {
+            setIsLoading(true);
+            checkReference(item).then(result => {
+                setItemExists(result !== null);
+                setZoteroItemRef(result);
+
+                // Check for best attachment if item exists
+                if (result !== null) {
+                    try {
+                        const zoteroItem = Zotero.Items.getByLibraryAndKey(result.library_id, result.zotero_key);
+                        if (zoteroItem && zoteroItem.isRegularItem()) {
+                            zoteroItem.getBestAttachment().then(attachment => {
+                                setBestAttachment(attachment || null);
+                            });
+                        }
+                    } catch (e) {
+                        logger(`ActionButtons: Item not loaded for ${result.library_id}/${result.zotero_key}: ${e}`);
+                    }
+                }
+                setIsLoading(false);
+            }).catch(() => {
+                setIsLoading(false);
+            });
+        } else {
+            setIsLoading(true);
+        }
+    }, [item, sourceId, cachedRef, checkReference, isChecking]);
+
+    // Update loading state when checking state changes
+    useEffect(() => {
+        const checking = isChecking(item);
+        if (checking) {
+            setIsLoading(true);
+        } else if (cachedRef !== undefined) {
+            // Checking completed and we have cached data
+            setIsLoading(false);
+        }
+    }, [isChecking(item), cachedRef, item]);
+
+    // Helper to render a button in different modes
+    const renderButton = (
+        mode: ExternalReferenceActionMode,
+        tooltipContent: string,
+        label: string,
+        icon: React.ComponentType<{ className?: string }> | (() => React.ReactElement),
+        onClick: () => void,
+        disabled: boolean,
+        ariaLabel?: string,
+        iconClassName?: string,
+    ) => {
+        if (mode === 'none') return null;
+
+        if (mode === 'icon-only') {
+            return (
+                <Tooltip content={tooltipContent} singleLine>
+                    <IconButton
+                        variant={buttonVariant}
+                        icon={icon}
+                        className={`font-color-secondary ${className}`}
+                        ariaLabel={ariaLabel || label}
+                        onClick={onClick}
+                        disabled={disabled}
+                        style={{ padding: '2px' }}
+                        iconClassName={iconClassName}
+                    />
+                </Tooltip>
+            );
+        }
+
+        // mode === 'full'
+        return (
+            <Tooltip content={tooltipContent} singleLine>
+                <Button
+                    variant={buttonVariant}
+                    icon={icon}
+                    className={`font-color-secondary truncate ${className}`}
+                    style={{ padding: '1px 4px' }}
+                    onClick={onClick}
+                    disabled={disabled}
+                >
+                    {label}
+                </Button>
+            </Tooltip>
+        );
+    };
+
+    const hasPdf = item.open_access_url || (itemExists && zoteroItemRef && bestAttachment);
+
+    return (
+        <div className="display-flex flex-row items-center gap-3">
+            {/* Details button */}
+            {renderButton(
+                detailsButtonMode,
+                'Show details',
+                'Details',
+                InformationCircleIcon,
+                () => {
+                    setSelectedReference(item);
+                    setIsDetailsVisible(true);
+                },
+                !item.abstract,
+                'Show details',
+                detailsButtonMode=='icon-only' ? 'scale-90' : undefined
+            )}
+
+            {/* Web button */}
+            {renderButton(
+                webButtonMode,
+                'Open website',
+                'Web',
+                ArrowUpRightIcon,
+                () => (item.publication_url || item.url) ? Zotero.launchURL(item.url || item.publication_url!) : undefined,
+                !item.publication_url && !item.url,
+                'Open website'
+            )}
+
+            {/* PDF button - always rendered, disabled when no PDF available */}
+            {renderButton(
+                pdfButtonMode,
+                hasPdf ? 'Open PDF' : 'No PDF available',
+                'PDF',
+                PdfIcon,
+                () => {
+                    if (bestAttachment) {
+                        Zotero.getActiveZoteroPane().viewAttachment(bestAttachment.id);
+                    } else if (item.open_access_url) {
+                        Zotero.launchURL(item.open_access_url);
+                    }
+                },
+                !hasPdf,
+                'Open PDF'
+            )}
+
+            {/* Citation count */}
+            {showCitationCount && item.citation_count !== undefined && item.citation_count > 0 && (
+                <a
+                    onClick={() => Zotero.launchURL(`${CITED_BY_URL}${item.source_id}`)}
+                    className="text-link-muted text-sm"
+                >
+                    Cited by {item.citation_count.toLocaleString()}
+                </a>
+            )}
+            {showCitationCount && item.citation_count !== undefined && item.citation_count === 0 && (
+                <div className="font-color-tertiary text-sm">
+                    Cited by {item.citation_count.toLocaleString()}
+                </div>
+            )}
+            {((
+                (itemExists && zoteroItemRef) && revealButtonMode !== 'none') ||
+                (!itemExists && importButtonMode !== 'none')
+            ) &&
+                <div className="flex-1"/>
+            }
+
+            {/* Reveal button - shown when item exists in library */}
+            {itemExists && zoteroItemRef && renderButton(
+                revealButtonMode,
+                'Reveal in Zotero',
+                'Reveal',
+                isLoading ? () => <Spinner className="scale-14 -mr-1" /> : () => <ZoteroIcon icon={ZOTERO_ICONS.SHOW_ITEM} size={9} />,
+                () => revealSource(zoteroItemRef),
+                isLoading,
+                'Reveal in Zotero'
+            )}
+
+            {/* Import button - shown when item doesn't exist in library */}
+            {!itemExists && renderButton(
+                importButtonMode,
+                'Import to Zotero',
+                'Import',
+                (isLoading || isImporting) ? () => <Spinner className="scale-14 -mr-1" /> : DownloadIcon,
+                handleImport,
+                isLoading || isImporting,
+                'Import to Zotero'
+            )}
+        </div>
+    );
+};
+
+export default ActionButtons;
