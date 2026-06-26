@@ -8,7 +8,7 @@ import { MockDBConnection } from '../../mocks/mockDBConnection';
 
 function makeInput(overrides: Partial<BackgroundJobInput> = {}): BackgroundJobInput {
     const base: BackgroundJobInput = {
-        jobType: 'document_timeout_retry',
+        jobType: 'document_extract',
         libraryId: 1,
         zoteroKey: 'ABCD1234',
         contentKind: 'pdf',
@@ -258,6 +258,43 @@ describe('BeaverDB background queue', () => {
         expect(claimed4).toBeNull();
     });
 
+    it('claimNextBackgroundJob can filter by job type without starving other lanes', async () => {
+        await db.enqueueBackgroundJob(
+            makeInput({ jobType: 'document_extract', zoteroKey: 'AAAAAAAA', priority: 100 }),
+        );
+        await db.enqueueBackgroundJob(
+            makeInput({ jobType: 'document_ocr', zoteroKey: 'BBBBBBBB', priority: 10 }),
+        );
+
+        const now = 1_000_000;
+        const visibility = 60_000;
+        const extract = await db.claimNextBackgroundJob(
+            now,
+            visibility,
+            undefined,
+            ['document_extract'],
+        );
+        expect(extract?.jobType).toBe('document_extract');
+        expect(extract?.zoteroKey).toBe('AAAAAAAA');
+
+        const noExtract = await db.claimNextBackgroundJob(
+            now,
+            visibility,
+            undefined,
+            ['document_extract'],
+        );
+        expect(noExtract).toBeNull();
+
+        const ocr = await db.claimNextBackgroundJob(
+            now,
+            visibility,
+            undefined,
+            ['document_ocr'],
+        );
+        expect(ocr?.jobType).toBe('document_ocr');
+        expect(ocr?.zoteroKey).toBe('BBBBBBBB');
+    });
+
     describe('maxPriority gate', () => {
         it('with maxPriority=100, skips priority-100 jobs and claims only lower-priority ones', async () => {
             await db.enqueueBackgroundJob(
@@ -440,7 +477,7 @@ describe('BeaverDB background queue', () => {
         const stats = await db.getBackgroundQueueStats(500);
         expect(stats.pending).toBe(2);
         expect(stats.available + stats.deferred).toBe(stats.pending);
-        expect(stats.byJobType['document_timeout_retry']).toBe(2);
+        expect(stats.byJobType['document_extract']).toBe(2);
         expect(stats.dead).toBe(0);
     });
 
@@ -464,5 +501,124 @@ describe('BeaverDB background queue', () => {
         expect(typeof rows[0].availableAt).toBe('number');
         expect(rows[0].enqueuedAt).toBe(12345);
         expect(rows[0].availableAt).toBe(12345);
+    });
+
+    it('records, increments, gates, and clears document processing failures by content hash', async () => {
+        await db.recordDocumentProcessingFailure({
+            fileHash: 'hash-a',
+            task: 'ocr',
+            engineVersion: 'engine-1',
+            sourceType: 'zotero',
+            sourceKey: '1-AAAAAAAA',
+            error: 'first',
+        });
+
+        let record = await db.getDocumentProcessingFailure('hash-a', 'ocr', 'engine-1');
+        expect(record).toMatchObject({
+            fileHash: 'hash-a',
+            task: 'ocr',
+            engineVersion: 'engine-1',
+            sourceType: 'zotero',
+            sourceKey: '1-AAAAAAAA',
+            failureCount: 1,
+            terminalCode: null,
+            lastError: 'first',
+        });
+        expect(
+            await db.isDocumentProcessingReadyForRetry(
+                'hash-a',
+                'ocr',
+                'engine-1',
+                '0000-01-01 00:00:00',
+            ),
+        ).toBe(false);
+        expect(
+            await db.isDocumentProcessingReadyForRetry(
+                'hash-a',
+                'ocr',
+                'engine-1',
+                '9999-01-01 00:00:00',
+            ),
+        ).toBe(true);
+
+        await db.recordDocumentProcessingFailure({
+            fileHash: 'hash-a',
+            task: 'ocr',
+            engineVersion: 'engine-1',
+            sourceType: 'zotero',
+            sourceKey: '1-BBBBBBBB',
+            error: 'second',
+        });
+
+        record = await db.getDocumentProcessingFailure('hash-a', 'ocr', 'engine-1');
+        expect(record?.failureCount).toBe(2);
+        expect(record?.lastError).toBe('second');
+        expect(record?.sourceKey).toBe('1-BBBBBBBB');
+        expect(await db.isDocumentProcessingPermanentlyFailed('hash-a', 'ocr', 'engine-1')).toBe(false);
+
+        await db.recordDocumentProcessingFailure({
+            fileHash: 'hash-a',
+            task: 'ocr',
+            engineVersion: 'engine-1',
+            error: 'terminal',
+            terminalCode: 'OCR_NO_TEXT',
+        });
+
+        record = await db.getDocumentProcessingFailure('hash-a', 'ocr', 'engine-1');
+        expect(record?.terminalCode).toBe('OCR_NO_TEXT');
+        expect(await db.isDocumentProcessingPermanentlyFailed('hash-a', 'ocr', 'engine-1')).toBe(true);
+        expect(
+            await db.isDocumentProcessingReadyForRetry(
+                'hash-a',
+                'ocr',
+                'engine-1',
+                '9999-01-01 00:00:00',
+            ),
+        ).toBe(false);
+
+        await expect(
+            db.getDocumentProcessingFailure('hash-a', 'ocr', 'engine-2'),
+        ).resolves.toBeNull();
+
+        await db.clearDocumentProcessingFailure('hash-a', 'ocr', 'engine-1');
+        await expect(
+            db.getDocumentProcessingFailure('hash-a', 'ocr', 'engine-1'),
+        ).resolves.toBeNull();
+    });
+
+    it('atomically upserts concurrent document processing failures for the same content hash', async () => {
+        await Promise.all([
+            db.recordDocumentProcessingFailure({
+                fileHash: 'hash-concurrent',
+                task: 'ocr',
+                engineVersion: 'engine-1',
+                error: 'first',
+            }),
+            db.recordDocumentProcessingFailure({
+                fileHash: 'hash-concurrent',
+                task: 'ocr',
+                engineVersion: 'engine-1',
+                error: 'second',
+            }),
+        ]);
+
+        const record = await db.getDocumentProcessingFailure(
+            'hash-concurrent',
+            'ocr',
+            'engine-1',
+        );
+        expect(record?.failureCount).toBe(2);
+        expect(record?.lastError).toBe('second');
+    });
+
+    it('does not create the unused document processing retry index', async () => {
+        const indexes = conn
+            .getRawDB()
+            .prepare(`SELECT name FROM pragma_index_list('document_processing_failures')`)
+            .all() as Array<{ name: string }>;
+
+        expect(indexes.map((index) => index.name)).not.toContain(
+            'idx_doc_proc_failures_retry',
+        );
     });
 });

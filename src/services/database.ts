@@ -176,8 +176,11 @@ export function isExternalFileContentKind(value: string): value is ExternalFileC
     return EXTERNAL_FILE_CONTENT_KINDS.has(value);
 }
 
-/** Background extraction job kinds. */
-export type BackgroundJobType = 'document_timeout_retry';
+/** Background processing job kinds. */
+export type BackgroundJobType =
+    | 'document_extract'
+    | 'document_ocr'
+    | 'fulltext_upsert';
 
 /**
  * Single row in `background_jobs`. Timestamps are epoch milliseconds so
@@ -217,6 +220,36 @@ export interface BackgroundJobEnqueueResult {
     id: number;
 }
 
+export type DocumentProcessingTask = 'ocr' | 'fulltext_upsert';
+
+export interface DocumentProcessingFailureInput {
+    /** Content identity, usually the attachment hash/MD5. */
+    fileHash: string;
+    task: DocumentProcessingTask;
+    /** OCR engine id; empty for tasks without engine versioning. */
+    engineVersion?: string;
+    /** Attribution only; suppression is keyed by file hash, task, and engine. */
+    sourceType?: string;
+    /** Attribution only, e.g. "<libraryId>-<zoteroKey>" for Zotero. */
+    sourceKey?: string;
+    error: string;
+    /** Permanent failure marker; null/undefined records a transient backoff. */
+    terminalCode?: string | null;
+}
+
+export interface DocumentProcessingFailureRecord {
+    fileHash: string;
+    task: DocumentProcessingTask;
+    engineVersion: string;
+    sourceType: string | null;
+    sourceKey: string | null;
+    failureCount: number;
+    terminalCode: string | null;
+    lastError: string | null;
+    lastAttempt: string;
+    nextRetryAfter: string;
+}
+
 export interface BackgroundQueueStats {
     pending: number;
     available: number;
@@ -243,6 +276,10 @@ export const MAX_EMBEDDING_FAILURES = 5;
  * So delays are: 1h, 2h, 4h, 8h, 16h
  */
 export const EMBEDDING_RETRY_BASE_DELAY_MS = 60 * 60 * 1000; // 1 hour
+
+export const MAX_OCR_FAILURES = 5;
+export const MAX_UPSERT_FAILURES = 5;
+export const DOC_PROCESSING_RETRY_BASE_DELAY_MS = 60 * 60 * 1000; // 1 hour
 
 
 /* 
@@ -406,6 +443,22 @@ export class BeaverDB {
             );
         `);
 
+        await this.conn.queryAsync(`
+            CREATE TABLE IF NOT EXISTS document_processing_failures (
+                file_hash        TEXT NOT NULL,
+                task             TEXT NOT NULL,
+                engine_version   TEXT NOT NULL DEFAULT '',
+                source_type      TEXT,
+                source_key       TEXT,
+                failure_count    INTEGER NOT NULL DEFAULT 1,
+                terminal_code    TEXT,
+                last_error       TEXT,
+                last_attempt     TEXT NOT NULL DEFAULT (datetime('now')),
+                next_retry_after TEXT NOT NULL,
+                UNIQUE(file_hash, task, engine_version)
+            );
+        `);
+
         // DB indexes
         await this.conn.queryAsync(`
             CREATE INDEX IF NOT EXISTS idx_messages_user_thread
@@ -465,6 +518,10 @@ export class BeaverDB {
         await this.conn.queryAsync(`
             CREATE INDEX IF NOT EXISTS idx_failed_embeddings_retry
             ON failed_embeddings(next_retry_after);
+        `);
+
+        await this.conn.queryAsync(`
+            DROP INDEX IF EXISTS idx_doc_proc_failures_retry;
         `);
 
         await this.conn.queryAsync(`DROP TABLE IF EXISTS attachment_file_cache`);
@@ -618,6 +675,11 @@ export class BeaverDB {
                 last_error      TEXT,
                 UNIQUE(job_type, library_id, zotero_key, payload_kind)
             );
+        `);
+
+        await this.conn.queryAsync(`
+            DELETE FROM background_jobs
+            WHERE job_type NOT IN ('document_extract','document_ocr','fulltext_upsert')
         `);
 
         await this.conn.queryAsync(`
@@ -1466,6 +1528,38 @@ export class BeaverDB {
         return nextRetry.toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
     }
 
+    private static formatSqlDate(date = new Date()): string {
+        return date.toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
+    }
+
+    private static maxDocumentProcessingFailures(task: DocumentProcessingTask): number {
+        return task === 'ocr' ? MAX_OCR_FAILURES : MAX_UPSERT_FAILURES;
+    }
+
+    private static calculateDocumentProcessingRetryTime(
+        failureCount: number,
+    ): string {
+        const delayMs = DOC_PROCESSING_RETRY_BASE_DELAY_MS * Math.pow(2, failureCount - 1);
+        return BeaverDB.formatSqlDate(new Date(Date.now() + delayMs));
+    }
+
+    private static rowToDocumentProcessingFailureRecord(
+        row: any,
+    ): DocumentProcessingFailureRecord {
+        return {
+            fileHash: row.getResultByIndex(0),
+            task: row.getResultByIndex(1) as DocumentProcessingTask,
+            engineVersion: row.getResultByIndex(2),
+            sourceType: row.getResultByIndex(3) ?? null,
+            sourceKey: row.getResultByIndex(4) ?? null,
+            failureCount: row.getResultByIndex(5),
+            terminalCode: row.getResultByIndex(6) ?? null,
+            lastError: row.getResultByIndex(7) ?? null,
+            lastAttempt: row.getResultByIndex(8),
+            nextRetryAfter: row.getResultByIndex(9),
+        };
+    }
+
     /**
      * Record a failed embedding attempt for an item.
      * If the item already has failures, increments the counter.
@@ -1723,6 +1817,124 @@ export class BeaverDB {
 
         const rows = await this.conn.queryAsync(sql, params);
         return rows[0]?.count || 0;
+    }
+
+    /**
+     * Record a content-keyed document processing failure.
+     */
+    public async recordDocumentProcessingFailure(
+        input: DocumentProcessingFailureInput,
+    ): Promise<void> {
+        const engineVersion = input.engineVersion ?? '';
+        const now = BeaverDB.formatSqlDate();
+        const nextRetryAfter = BeaverDB.calculateDocumentProcessingRetryTime(1);
+        const terminalCode = input.terminalCode ?? null;
+
+        await this.conn.queryAsync(
+            `INSERT INTO document_processing_failures (
+                file_hash, task, engine_version, source_type, source_key,
+                failure_count, terminal_code, last_error, last_attempt,
+                next_retry_after
+             ) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
+             ON CONFLICT(file_hash, task, engine_version) DO UPDATE SET
+                 source_type = excluded.source_type,
+                 source_key = excluded.source_key,
+                 failure_count = document_processing_failures.failure_count + 1,
+                 terminal_code = COALESCE(
+                     excluded.terminal_code,
+                     document_processing_failures.terminal_code
+                 ),
+                 last_error = excluded.last_error,
+                 last_attempt = excluded.last_attempt,
+                 next_retry_after = datetime(
+                     strftime('%s', excluded.last_attempt)
+                     + (? * (1 << document_processing_failures.failure_count)),
+                     'unixepoch'
+                 )`,
+            [
+                input.fileHash,
+                input.task,
+                engineVersion,
+                input.sourceType ?? null,
+                input.sourceKey ?? null,
+                terminalCode,
+                input.error,
+                now,
+                nextRetryAfter,
+                DOC_PROCESSING_RETRY_BASE_DELAY_MS / 1000,
+            ],
+        );
+    }
+
+    /**
+     * Read a document processing failure by its suppression identity.
+     */
+    public async getDocumentProcessingFailure(
+        fileHash: string,
+        task: DocumentProcessingTask,
+        engineVersion = '',
+    ): Promise<DocumentProcessingFailureRecord | null> {
+        const records: DocumentProcessingFailureRecord[] = [];
+        await this.conn.queryAsync(
+            `SELECT file_hash, task, engine_version, source_type, source_key,
+                    failure_count, terminal_code, last_error, last_attempt,
+                    next_retry_after
+             FROM document_processing_failures
+             WHERE file_hash = ? AND task = ? AND engine_version = ?
+             LIMIT 1`,
+            [fileHash, task, engineVersion],
+            {
+                onRow: (row: any) => {
+                    records.push(BeaverDB.rowToDocumentProcessingFailureRecord(row));
+                },
+            },
+        );
+        return records[0] ?? null;
+    }
+
+    /**
+     * Return true when a failure row suppresses future processing attempts.
+     */
+    public async isDocumentProcessingPermanentlyFailed(
+        fileHash: string,
+        task: DocumentProcessingTask,
+        engineVersion = '',
+    ): Promise<boolean> {
+        const record = await this.getDocumentProcessingFailure(fileHash, task, engineVersion);
+        if (!record) return false;
+        return (
+            record.terminalCode !== null
+            || record.failureCount >= BeaverDB.maxDocumentProcessingFailures(task)
+        );
+    }
+
+    /**
+     * Return true when a transient failure row can be retried at `now`.
+     */
+    public async isDocumentProcessingReadyForRetry(
+        fileHash: string,
+        task: DocumentProcessingTask,
+        engineVersion = '',
+        now = BeaverDB.formatSqlDate(),
+    ): Promise<boolean> {
+        const record = await this.getDocumentProcessingFailure(fileHash, task, engineVersion);
+        if (!record || record.terminalCode !== null) return false;
+        return record.nextRetryAfter <= now;
+    }
+
+    /**
+     * Clear a document processing failure after a successful processing pass.
+     */
+    public async clearDocumentProcessingFailure(
+        fileHash: string,
+        task: DocumentProcessingTask,
+        engineVersion = '',
+    ): Promise<void> {
+        await this.conn.queryAsync(
+            `DELETE FROM document_processing_failures
+             WHERE file_hash = ? AND task = ? AND engine_version = ?`,
+            [fileHash, task, engineVersion],
+        );
     }
 
     // =============================================
@@ -2680,6 +2892,7 @@ export class BeaverDB {
         now: number,
         visibilityTimeoutMs: number,
         maxPriority?: number,
+        jobTypes?: BackgroundJobType[],
     ): Promise<BackgroundJobRecord | null> {
         const params: unknown[] = [now];
         let priorityClause = '';
@@ -2687,10 +2900,15 @@ export class BeaverDB {
             priorityClause = ' AND priority < ?';
             params.push(maxPriority);
         }
+        let jobTypesClause = '';
+        if (jobTypes && jobTypes.length > 0) {
+            jobTypesClause = ` AND job_type IN (${jobTypes.map(() => '?').join(',')})`;
+            params.push(...jobTypes);
+        }
         const candidates = await this.selectBackgroundJobs(
             `SELECT ${BACKGROUND_JOB_COLUMNS}
              FROM background_jobs
-             WHERE available_at <= ?${priorityClause}
+             WHERE available_at <= ?${priorityClause}${jobTypesClause}
              ORDER BY priority ASC, available_at ASC
              LIMIT 1`,
             params,

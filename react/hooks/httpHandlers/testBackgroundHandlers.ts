@@ -90,6 +90,7 @@ export async function handleTestBackgroundStatsHttpRequest(_request: unknown) {
     return {
         ok: true,
         queue,
+        lanes: Zotero.Beaver?.backgroundExtractor?.getLaneStatus() ?? {},
         workers: {
             hot: hot?.getStats() ?? null,
             background: background?.getStats() ?? null,

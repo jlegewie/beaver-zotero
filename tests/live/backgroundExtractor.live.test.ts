@@ -11,7 +11,7 @@
  *   - processOnce drains a healthy PDF and emits `job_done`
  *   - processOnce on missing items / encrypted / no-text-layer PDFs all
  *     complete the job (no retry)
- *   - hot-path timeout enqueues a `document_timeout_retry` background job that
+ *   - hot-path timeout enqueues a `document_extract` background job that
  *     the processor then drains
  *
  * Prerequisites (per tests/README.md):
@@ -73,7 +73,7 @@ describe('background queue — enqueue endpoint', () => {
             zotero_key: SMALL_PDF.zotero_key,
             content_kind: 'pdf',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             priority: 50,
             payload: {
                 content_kind: 'pdf',
@@ -102,7 +102,7 @@ describe('background queue — enqueue endpoint', () => {
             zotero_key: SMALL_PDF.zotero_key,
             content_kind: 'pdf',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             priority: 100,
             payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
         });
@@ -113,7 +113,7 @@ describe('background queue — enqueue endpoint', () => {
             zotero_key: SMALL_PDF.zotero_key,
             content_kind: 'pdf',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             priority: 100,
             payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
         });
@@ -127,7 +127,7 @@ describe('background queue — enqueue endpoint', () => {
             zotero_key: SMALL_PDF.zotero_key,
             content_kind: 'pdf',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
         });
         const markdown = await backgroundEnqueue({
@@ -135,7 +135,7 @@ describe('background queue — enqueue endpoint', () => {
             zotero_key: SMALL_PDF.zotero_key,
             content_kind: 'pdf',
             payload_kind: 'markdown',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
         });
         expect(structured.enqueued).toBe(true);
@@ -161,7 +161,7 @@ describe('background queue — peek endpoint', () => {
             zotero_key: SMALL_PDF.zotero_key,
             content_kind: 'pdf',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             priority: 73,
             payload: {
                 content_kind: 'pdf',
@@ -177,7 +177,7 @@ describe('background queue — peek endpoint', () => {
         expect(res.jobs?.length).toBe(1);
         const job = res.jobs![0];
         expect(job.id).toBe(enqueued.id);
-        expect(job.jobType).toBe('document_timeout_retry');
+        expect(job.jobType).toBe('document_extract');
         expect(job.libraryId).toBe(SMALL_PDF.library_id);
         expect(job.zoteroKey).toBe(SMALL_PDF.zotero_key);
         expect(job.payloadKind).toBe('structured');
@@ -200,7 +200,7 @@ describe('background queue — peek endpoint', () => {
             zotero_key: SMALL_PDF.zotero_key,
             content_kind: 'pdf',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
         });
         await backgroundEnqueue({
@@ -208,7 +208,7 @@ describe('background queue — peek endpoint', () => {
             zotero_key: NORMAL_PDF.zotero_key,
             content_kind: 'pdf',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
         });
 
@@ -226,7 +226,7 @@ describe('background queue — peek endpoint', () => {
             zotero_key: SMALL_PDF.zotero_key,
             content_kind: 'pdf',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             priority: 200,
             payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
         });
@@ -235,7 +235,7 @@ describe('background queue — peek endpoint', () => {
             zotero_key: NORMAL_PDF.zotero_key,
             content_kind: 'pdf',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             priority: 10,
             payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
         });
@@ -272,14 +272,14 @@ describe('background queue — stats endpoint', () => {
             zotero_key: SMALL_PDF.zotero_key,
             content_kind: 'pdf',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
         });
         const res = await backgroundStats();
         expect(res.queue!.pending).toBe(1);
         expect(res.queue!.available).toBe(1);
         expect(res.queue!.deferred).toBe(0);
-        expect(res.queue!.byJobType.document_timeout_retry).toBe(1);
+        expect(res.queue!.byJobType.document_extract).toBe(1);
     });
 
     it('exposes per-slot MuPDF worker snapshots (`hot`, `background`)', async () => {
@@ -312,7 +312,7 @@ describe('background queue — processOnce endpoint', () => {
             zotero_key: SMALL_PDF.zotero_key,
             content_kind: 'pdf',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
         });
 
@@ -336,7 +336,7 @@ describe('background queue — processOnce endpoint', () => {
             zotero_key: MISSING_KEY_ZOTERO,
             content_kind: 'pdf',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
         });
 
@@ -355,7 +355,7 @@ describe('background queue — processOnce endpoint', () => {
             zotero_key: ENCRYPTED_PDF.zotero_key,
             content_kind: 'pdf',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
         });
 
@@ -374,7 +374,7 @@ describe('background queue — processOnce endpoint', () => {
             zotero_key: NO_TEXT_PDF.zotero_key,
             content_kind: 'pdf',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
         });
 
@@ -392,7 +392,7 @@ describe('background queue — processOnce endpoint', () => {
             zotero_key: SMALL_PDF.zotero_key,
             content_kind: 'pdf',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
         });
         await backgroundEnqueue({
@@ -400,7 +400,7 @@ describe('background queue — processOnce endpoint', () => {
             zotero_key: SMALL_PDF.zotero_key,
             content_kind: 'pdf',
             payload_kind: 'markdown',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
         });
 
@@ -429,7 +429,7 @@ describe('background queue — enqueue defaults', () => {
             zotero_key: SMALL_PDF.zotero_key,
             content_kind: 'pdf',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
         });
         const peek = await backgroundPeek();
@@ -443,7 +443,7 @@ describe('background queue — enqueue defaults', () => {
             zotero_key: SMALL_PDF.zotero_key,
             content_kind: 'pdf',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
         });
         const peekNull = await backgroundPeek();
@@ -456,7 +456,7 @@ describe('background queue — enqueue defaults', () => {
             zotero_key: SMALL_PDF.zotero_key,
             content_kind: 'pdf',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             item_id: 42,
             payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
         });
@@ -470,7 +470,7 @@ describe('background queue — enqueue defaults', () => {
             zotero_key: SMALL_PDF.zotero_key,
             content_kind: 'pdf',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             payload: null,
         });
         expect(res.enqueued).toBe(true);
@@ -497,7 +497,7 @@ describe('background queue — clear endpoint', () => {
             zotero_key: SMALL_PDF.zotero_key,
             content_kind: 'pdf',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
         });
         await backgroundEnqueue({
@@ -505,7 +505,7 @@ describe('background queue — clear endpoint', () => {
             zotero_key: SMALL_PDF.zotero_key,
             content_kind: 'pdf',
             payload_kind: 'markdown',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
         });
 
@@ -537,18 +537,18 @@ describe('background queue — terminal response_error completes without retry',
             zotero_key: NON_PDF.zotero_key,
             content_kind: 'pdf',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
-            notify: true,
         });
 
-        // The `notify()` wake races our explicit `processOnce` HTTP call.
         // The live attachment is an EPUB, so its content kind no longer
         // matches the job's recorded `content_kind: 'pdf'` and the job is
-        // dropped (completed without retry) before extraction. That path is
-        // fast, so the queue may already be empty before we call
-        // processOnce. Poll for drain instead.
-        const finalQueue = await waitForQueueDrain({ timeoutMs: 15_000 });
+        // dropped (completed without retry) before extraction.
+        const res = await backgroundProcessOnce();
+        expect(res.processed).toBe(true);
+        expect(res.reason).toBe('job_done');
+
+        const finalQueue = (await backgroundStats()).queue!;
         expect(finalQueue.pending).toBe(0);
         expect(finalQueue.dead).toBe(0);
 
@@ -571,7 +571,7 @@ describe('background queue — group library extraction', () => {
             zotero_key: GROUP_LIB_PDF.zotero_key,
             content_kind: 'pdf',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
             notify: true,
         });
@@ -599,19 +599,18 @@ describe('background queue — worker slot isolation', () => {
     });
 
     it('spawns a separate background MuPDF worker after a successful drain', async () => {
+        await invalidateCache(SMALL_PDF.library_id, SMALL_PDF.zotero_key);
         await backgroundEnqueue({
             library_id: SMALL_PDF.library_id,
             zotero_key: SMALL_PDF.zotero_key,
             content_kind: 'pdf',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
-            notify: true,
         });
 
-        // Wait until the auto-tick drains the row. We just need the
-        // background worker to have been instantiated.
-        await waitForQueueDrain({ timeoutMs: 120_000, pollMs: 250 });
+        const res = await backgroundProcessOnce();
+        expect(res.processed).toBe(true);
 
         const stats = await backgroundStats();
         expect(stats.workers).toBeDefined();
@@ -639,7 +638,7 @@ describe('background queue — stats.byJobType across payload kinds', () => {
             zotero_key: SMALL_PDF.zotero_key,
             content_kind: 'pdf',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
         });
         await backgroundEnqueue({
@@ -647,13 +646,13 @@ describe('background queue — stats.byJobType across payload kinds', () => {
             zotero_key: SMALL_PDF.zotero_key,
             content_kind: 'pdf',
             payload_kind: 'markdown',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
         });
 
         const stats = await backgroundStats();
         expect(stats.queue!.pending).toBe(2);
-        expect(stats.queue!.byJobType.document_timeout_retry).toBe(2);
+        expect(stats.queue!.byJobType.document_extract).toBe(2);
     });
 });
 
@@ -670,7 +669,7 @@ describe('background queue — peek edge cases', () => {
             zotero_key: SMALL_PDF.zotero_key,
             content_kind: 'pdf',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
         });
         const peek = await backgroundPeek({ limit: 0 });
@@ -684,7 +683,7 @@ describe('background queue — peek edge cases', () => {
             zotero_key: SMALL_PDF.zotero_key,
             content_kind: 'pdf',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             priority: 5,
             payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
         });
@@ -693,7 +692,7 @@ describe('background queue — peek edge cases', () => {
             zotero_key: NORMAL_PDF.zotero_key,
             content_kind: 'pdf',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             priority: 50,
             payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
         });
@@ -702,7 +701,7 @@ describe('background queue — peek edge cases', () => {
             zotero_key: NO_TEXT_PDF.zotero_key,
             content_kind: 'pdf',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             priority: 500,
             payload: { content_kind: 'pdf', maxPages: null, maxFileSizeMB: 0, timeoutSeconds: 180 },
         });
@@ -722,7 +721,7 @@ describe('background queue — hot-path timeout integration', () => {
         await backgroundClear();
     });
 
-    it('enqueues a document_timeout_retry job when the hot-path timeout fires', async () => {
+    it('enqueues a document_extract job when the hot-path timeout fires', async () => {
         // Force a hot-path timeout with the smallest positive deadline.
         // Cold cache + a non-trivial extraction makes the timeout likely.
         await invalidateCache(NORMAL_PDF.library_id, NORMAL_PDF.zotero_key);
@@ -740,7 +739,7 @@ describe('background queue — hot-path timeout integration', () => {
             const peek = await backgroundPeek();
             expect(peek.jobs?.length).toBe(1);
             const job = peek.jobs![0];
-            expect(job.jobType).toBe('document_timeout_retry');
+            expect(job.jobType).toBe('document_extract');
             expect(job.libraryId).toBe(NORMAL_PDF.library_id);
             expect(job.zoteroKey).toBe(NORMAL_PDF.zotero_key);
             expect(job.payloadKind).toBe('structured');

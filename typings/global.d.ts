@@ -335,6 +335,7 @@ declare namespace Zotero {
                 now: number,
                 visibilityTimeoutMs: number,
                 maxPriority?: number,
+                jobTypes?: import("../src/services/database").BackgroundJobType[],
             ): Promise<import("../src/services/database").BackgroundJobRecord | null>;
 
             peekBackgroundJobs(
@@ -358,6 +359,35 @@ declare namespace Zotero {
             getBackgroundQueueStats(
                 now: number,
             ): Promise<import("../src/services/database").BackgroundQueueStats>;
+
+            recordDocumentProcessingFailure(
+                input: import("../src/services/database").DocumentProcessingFailureInput,
+            ): Promise<void>;
+
+            getDocumentProcessingFailure(
+                fileHash: string,
+                task: import("../src/services/database").DocumentProcessingTask,
+                engineVersion?: string,
+            ): Promise<import("../src/services/database").DocumentProcessingFailureRecord | null>;
+
+            isDocumentProcessingPermanentlyFailed(
+                fileHash: string,
+                task: import("../src/services/database").DocumentProcessingTask,
+                engineVersion?: string,
+            ): Promise<boolean>;
+
+            isDocumentProcessingReadyForRetry(
+                fileHash: string,
+                task: import("../src/services/database").DocumentProcessingTask,
+                engineVersion?: string,
+                now?: string,
+            ): Promise<boolean>;
+
+            clearDocumentProcessingFailure(
+                fileHash: string,
+                task: import("../src/services/database").DocumentProcessingTask,
+                engineVersion?: string,
+            ): Promise<void>;
         }
 
         const backgroundExtractor:
