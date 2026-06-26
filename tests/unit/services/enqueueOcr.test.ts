@@ -3,7 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('../../../src/utils/logger', () => ({ logger: vi.fn() }));
 
 import { maybeEnqueueOcrJob } from '../../../src/services/ocr/enqueueOcr';
-import { OCR_ENGINE_VERSION } from '../../../src/services/ocr/constants';
+import {
+    OCR_ENGINE_VERSION,
+    OCR_PRIORITY_BACKFILL,
+    OCR_PRIORITY_ON_DEMAND,
+} from '../../../src/services/ocr/constants';
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -62,8 +66,22 @@ describe('maybeEnqueueOcrJob', () => {
             contentKind: 'pdf',
             payloadKind: 'structured',
             payload: null,
+            priority: OCR_PRIORITY_ON_DEMAND,
         });
         expect(notify).toHaveBeenCalledOnce();
+    });
+
+    it('defaults to on-demand priority and honors an explicit backfill priority', async () => {
+        setupBeaver(true);
+
+        maybeEnqueueOcrJob(args());
+        await flush();
+        expect(enqueueBackgroundJob.mock.calls[0][0].priority).toBe(OCR_PRIORITY_ON_DEMAND);
+
+        enqueueBackgroundJob.mockClear();
+        maybeEnqueueOcrJob({ ...args(), priority: OCR_PRIORITY_BACKFILL });
+        await flush();
+        expect(enqueueBackgroundJob.mock.calls[0][0].priority).toBe(OCR_PRIORITY_BACKFILL);
     });
 
     it('does not enqueue when the user lacks OCR entitlement', async () => {

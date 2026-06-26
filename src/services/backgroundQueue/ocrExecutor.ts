@@ -26,11 +26,13 @@ import {
     putBytesToSignedUrl,
 } from '../ocr/gcsTransfer';
 import {
+    OcrAbort,
+    OcrStatusPoller,
+    ocrStatusPoller,
+} from '../ocr/ocrStatusPoller';
+import {
     OCR_ENGINE_VERSION,
-    OCR_POLL_BACKOFF,
     OCR_POLL_BUDGET_MS,
-    OCR_POLL_INITIAL_MS,
-    OCR_POLL_MAX_MS,
     OCR_TERMINAL_FAILED,
     OCR_TERMINAL_GEOMETRY,
     OCR_TERMINAL_NO_TEXT,
@@ -43,9 +45,6 @@ import type {
     JobExecutor,
     JobOutcome,
 } from './jobExecutor';
-
-/** Thrown internally to unwind the flow into a JobOutcome. */
-class OcrAbort extends Error {}
 
 interface ResolvedJob {
     item: Zotero.Item;
@@ -63,6 +62,9 @@ export class OcrExecutor implements JobExecutor {
      * The file hash makes the hint valid only for the same attachment content.
      */
     private readonly resumeHints = new Map<string, { jobId: string; fileHash: string }>();
+
+    /** The poller is injectable so callers can provide scoped instances. */
+    constructor(private readonly poller: OcrStatusPoller = ocrStatusPoller) {}
 
     async execute(
         record: BackgroundJobRecord,
@@ -318,30 +320,31 @@ export class OcrExecutor implements JobExecutor {
         ctx: JobExecutionContext,
         startedAt: number,
     ): Promise<{ getUrl: string } | { outcome: JobOutcome }> {
-        // Budget is measured from the run start (not from here), so a slow
-        // upload eats into it and the total stays under the queue lease.
+        // Hand polling to the shared batched poller. The budget is measured from
+        // the run start (not from here), so a slow upload eats into it and the
+        // total stays under the queue lease. An abort rejects with OcrAbort,
+        // which bubbles to execute()'s catch → release.
         const deadline = startedAt + OCR_POLL_BUDGET_MS;
-        let waitMs = OCR_POLL_INITIAL_MS;
+        const result = await this.poller.poll(jobId, {
+            deadline,
+            signal: ctx.externalAbortSignal,
+        });
 
-        while (Date.now() < deadline) {
-            await this.sleep(waitMs, ctx);
-            const status = await ocrApiClient.status(jobId);
-            this.throwIfAborted(ctx);
-
-            if (status.status === 'completed') {
-                if (status.get_url) return { getUrl: status.get_url };
+        switch (result.kind) {
+            case 'completed':
+                if (result.getUrl) return { getUrl: result.getUrl };
                 return { outcome: { kind: 'retry', error: 'ocr_completed_without_url', reason: 'ocr_completed_without_url' } };
-            }
-            if (status.status === 'failed') {
-                return { outcome: this.failureOutcome(job, status.error) };
-            }
-            waitMs = Math.min(waitMs * OCR_POLL_BACKOFF, OCR_POLL_MAX_MS);
+            case 'failed':
+                return { outcome: this.failureOutcome(job, result.error) };
+            case 'gone':
+                // The row vanished mid-poll; re-claim later and re-request.
+                return { outcome: { kind: 'retry', error: 'ocr_status_gone', reason: 'ocr_status_gone' } };
+            case 'timeout':
+                // Store the backend job id so the next claim resumes polling.
+                this.resumeHints.set(job.sourceKey, { jobId, fileHash: job.fileHash });
+                logger(`OcrExecutor: ${job.sourceKey} poll budget exhausted; releasing to resume`, 2);
+                return { outcome: { kind: 'release', reason: 'ocr_poll_timeout' } };
         }
-
-        // Store the backend job id so the next claim can resume polling.
-        this.resumeHints.set(job.sourceKey, { jobId, fileHash: job.fileHash });
-        logger(`OcrExecutor: ${job.sourceKey} poll budget exhausted; releasing to resume`, 2);
-        return { outcome: { kind: 'release', reason: 'ocr_poll_timeout' } };
     }
 
     // ----------------------------------------------------------------------
@@ -426,24 +429,5 @@ export class OcrExecutor implements JobExecutor {
 
     private throwIfAborted(ctx: JobExecutionContext): void {
         if (ctx.externalAbortSignal.aborted) throw new OcrAbort();
-    }
-
-    private async sleep(ms: number, ctx: JobExecutionContext): Promise<void> {
-        await new Promise<void>((resolve, reject) => {
-            const timer = setTimeout(() => {
-                ctx.externalAbortSignal.removeEventListener('abort', onAbort);
-                resolve();
-            }, ms);
-            const onAbort = () => {
-                clearTimeout(timer);
-                reject(new OcrAbort());
-            };
-            if (ctx.externalAbortSignal.aborted) {
-                clearTimeout(timer);
-                reject(new OcrAbort());
-                return;
-            }
-            ctx.externalAbortSignal.addEventListener('abort', onAbort, { once: true });
-        });
     }
 }

@@ -25,3 +25,19 @@ export const OCR_POLL_BACKOFF = 1.5;
  * polling) instead of silently exceeding its lease.
  */
 export const OCR_POLL_BUDGET_MS = 4 * 60_000;
+
+/**
+ * Max job ids per `/ocr/status/batch` request (mirrors the backend cap). The
+ * shared poller chunks at this size, so raising the in-flight lane cap later
+ * needs no poller change.
+ */
+export const OCR_STATUS_BATCH_MAX = 50;
+
+/**
+ * Background-queue priorities for OCR tickets (lower number = claimed first;
+ * the dispatcher gates `priority >= 100` behind user idleness).
+ *  - On-demand (a scan the user just opened) runs promptly and preempts backfill.
+ *  - Backfill (whole-library signup processing) is idle-only.
+ */
+export const OCR_PRIORITY_ON_DEMAND = 90;
+export const OCR_PRIORITY_BACKFILL = 100;

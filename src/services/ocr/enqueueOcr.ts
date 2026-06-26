@@ -10,7 +10,7 @@
  */
 
 import { logger } from '../../utils/logger';
-import { OCR_ENGINE_VERSION } from './constants';
+import { OCR_ENGINE_VERSION, OCR_PRIORITY_ON_DEMAND } from './constants';
 
 /**
  * Fixed dedup discriminator for OCR tickets. The background queue's dedup key is
@@ -27,6 +27,12 @@ export interface MaybeEnqueueOcrArgs {
     itemId?: number | null;
     /** Page count from no-text-layer detection. */
     pageCount: number | null;
+    /**
+     * Queue priority. Defaults to on-demand (a scan the user just opened), which
+     * runs promptly and preempts a draining backfill. The whole-library backfill
+     * reconciler passes `OCR_PRIORITY_BACKFILL` (idle-only).
+     */
+    priority?: number;
 }
 
 /**
@@ -67,6 +73,7 @@ async function enqueueOcrJob(args: MaybeEnqueueOcrArgs): Promise<void> {
         zoteroKey: args.zoteroKey,
         contentKind: 'pdf',
         payloadKind: OCR_JOB_PAYLOAD_KIND,
+        priority: args.priority ?? OCR_PRIORITY_ON_DEMAND,
         payload: null,
         now: Date.now(),
     });

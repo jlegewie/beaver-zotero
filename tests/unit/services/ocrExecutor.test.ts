@@ -66,6 +66,7 @@ const mockedGet = vi.mocked(getBytesFromSignedUrl);
 const record = { libraryId: 1, zoteroKey: 'AAAAAAAA' } as any;
 
 let dbStub: any;
+let fakePoller: { poll: ReturnType<typeof vi.fn> };
 
 function makeCtx(overrides: Partial<JobExecutionContext> = {}): JobExecutionContext {
     const controller = new AbortController();
@@ -81,6 +82,8 @@ function makeCtx(overrides: Partial<JobExecutionContext> = {}): JobExecutionCont
 
 beforeEach(() => {
     vi.clearAllMocks();
+
+    fakePoller = { poll: vi.fn() };
 
     dbStub = {
         isDocumentProcessingPermanentlyFailed: vi.fn(async () => false),
@@ -117,7 +120,11 @@ afterEach(() => {
 });
 
 describe('OcrExecutor', () => {
-    const executor = new OcrExecutor();
+    let executor: OcrExecutor;
+
+    beforeEach(() => {
+        executor = new OcrExecutor(fakePoller as any);
+    });
 
     it('exposes the document_ocr job type', () => {
         expect(executor.jobType).toBe('document_ocr');
@@ -140,28 +147,27 @@ describe('OcrExecutor', () => {
     it('uploads, confirms, polls, then completes (pending)', async () => {
         api.requestOcr.mockResolvedValue({ status: 'pending', job_id: 'job-1', put_url: 'https://gcs/put' });
         api.markUploaded.mockResolvedValue({ status: 'queued', job_id: 'job-1' });
-        api.status.mockResolvedValue({ status: 'completed', get_url: 'https://gcs/get' });
+        fakePoller.poll.mockResolvedValue({ kind: 'completed', getUrl: 'https://gcs/get' });
         const ctx = makeCtx();
 
         const outcome = await executor.execute(record, ctx);
 
         expect(mockedPut).toHaveBeenCalledWith('https://gcs/put', expect.any(Uint8Array), expect.anything());
         expect(api.markUploaded).toHaveBeenCalledWith('job-1');
-        expect(api.status).toHaveBeenCalledWith('job-1');
+        expect(fakePoller.poll).toHaveBeenCalledWith('job-1', expect.objectContaining({ deadline: expect.any(Number) }));
         expect(outcome).toEqual({ kind: 'complete', reason: 'ocr_ok' });
     });
 
     it('polls an already-queued job to completion', async () => {
         api.requestOcr.mockResolvedValue({ status: 'queued', job_id: 'job-2' });
-        api.status
-            .mockResolvedValueOnce({ status: 'queued' })
-            .mockResolvedValueOnce({ status: 'completed', get_url: 'https://gcs/get' });
+        fakePoller.poll.mockResolvedValue({ kind: 'completed', getUrl: 'https://gcs/get' });
         const ctx = makeCtx();
 
         const outcome = await executor.execute(record, ctx);
 
         expect(mockedPut).not.toHaveBeenCalled();
-        expect(api.status).toHaveBeenCalledTimes(2);
+        expect(fakePoller.poll).toHaveBeenCalledTimes(1);
+        expect(fakePoller.poll).toHaveBeenCalledWith('job-2', expect.objectContaining({ deadline: expect.any(Number) }));
         expect(outcome).toEqual({ kind: 'complete', reason: 'ocr_ok' });
     });
 
@@ -297,7 +303,7 @@ describe('OcrExecutor', () => {
 
     it('releases when the poll budget is exhausted', async () => {
         api.requestOcr.mockResolvedValue({ status: 'queued', job_id: 'job-4' });
-        api.status.mockResolvedValue({ status: 'queued' });
+        fakePoller.poll.mockResolvedValue({ kind: 'timeout' });
         const ctx = makeCtx();
 
         const outcome = await executor.execute(record, ctx);
@@ -307,14 +313,16 @@ describe('OcrExecutor', () => {
     });
 
     it('resumes by job_id after a release and avoids another OCR request', async () => {
-        const ex = new OcrExecutor();
+        const ex = new OcrExecutor(fakePoller as any);
 
         api.requestOcr.mockResolvedValue({ status: 'queued', job_id: 'job-r' });
-        api.status.mockResolvedValue({ status: 'queued' });
+        fakePoller.poll.mockResolvedValue({ kind: 'timeout' });
         const first = await ex.execute(record, makeCtx());
         expect(first.kind).toBe('release');
         expect(api.requestOcr).toHaveBeenCalledTimes(1);
 
+        // Resume: the job is now complete. resumeByJobId probes single /ocr/status
+        // with the known job_id and must NOT call /ocr/request again.
         api.status.mockResolvedValue({ status: 'completed', get_url: 'https://gcs/get' });
         const second = await ex.execute(record, makeCtx());
 
@@ -325,9 +333,9 @@ describe('OcrExecutor', () => {
     });
 
     it('falls back to /ocr/request when the resumed status 404s', async () => {
-        const ex = new OcrExecutor();
+        const ex = new OcrExecutor(fakePoller as any);
         api.requestOcr.mockResolvedValue({ status: 'queued', job_id: 'job-404' });
-        api.status.mockResolvedValue({ status: 'queued' });
+        fakePoller.poll.mockResolvedValue({ kind: 'timeout' });
         await ex.execute(record, makeCtx());
         expect(api.requestOcr).toHaveBeenCalledTimes(1);
 
@@ -340,9 +348,9 @@ describe('OcrExecutor', () => {
     });
 
     it('falls back to /ocr/request when the resumed status is still pending', async () => {
-        const ex = new OcrExecutor();
+        const ex = new OcrExecutor(fakePoller as any);
         api.requestOcr.mockResolvedValue({ status: 'queued', job_id: 'job-p' });
-        api.status.mockResolvedValue({ status: 'queued' });
+        fakePoller.poll.mockResolvedValue({ kind: 'timeout' });
         await ex.execute(record, makeCtx());
 
         api.status.mockResolvedValue({ status: 'pending' });
@@ -354,9 +362,9 @@ describe('OcrExecutor', () => {
     });
 
     it('ignores a stale hint when the file hash changed between release and resume', async () => {
-        const ex = new OcrExecutor();
+        const ex = new OcrExecutor(fakePoller as any);
         api.requestOcr.mockResolvedValue({ status: 'queued', job_id: 'job-h' });
-        api.status.mockResolvedValue({ status: 'queued' });
+        fakePoller.poll.mockResolvedValue({ kind: 'timeout' });
         await ex.execute(record, makeCtx());
         expect(api.requestOcr).toHaveBeenCalledTimes(1);
         const statusCallsAfterFirst = api.status.mock.calls.length;
