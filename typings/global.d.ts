@@ -395,6 +395,13 @@ declare namespace Zotero {
             | undefined;
 
         /**
+         * OCR entitlement mirror, synced from the webpack profile hook so the
+         * esbuild OCR enqueue gate can read it. The backend still enforces
+         * entitlement on `/ocr/request`.
+         */
+        const hasOcrAccess: boolean | undefined;
+
+        /**
          * Citation object for CSL formatting
          */
         type Citation = {

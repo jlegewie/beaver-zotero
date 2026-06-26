@@ -126,6 +126,15 @@ export const isBackendIndexingCompleteAtom = atom<boolean>((get) => {
     return profile?.indexing_complete || false;
 });
 
+/**
+ * Backend-computed OCR entitlement. The frontend uses this value directly for
+ * OCR UI state and background job enqueueing.
+ */
+export const hasOcrAccessAtom = selectAtom(
+    profileWithPlanAtom,
+    (profile: SafeProfileWithPlan | null) => profile?.has_ocr_access ?? false,
+);
+
 export const processingModeAtom = atom<ProcessingMode>((get) => {
     const isBackendIndexingComplete = get(isBackendIndexingCompleteAtom);
     if (get(isDatabaseSyncSupportedAtom) && isBackendIndexingComplete) {

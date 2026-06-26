@@ -5,6 +5,7 @@ import { isAttachmentAvailableRemotely } from '../../utils/webAPI';
 import { effectiveMaxFileSizeMB } from '../attachmentLimits';
 import { isRemoteFilePath, makeRemoteFilePath } from '../documentFileIdentity';
 import { getContentKind } from './attachmentResolution';
+import { maybeEnqueueOcrJob } from '../ocr/enqueueOcr';
 import { isReadableContentKind, type AttachmentInfo, type ContentKind } from './shared/contentKinds';
 import { getPDFPageCountFromFulltext, getPDFPageCountFromWorker } from './shared/pageCount';
 import type { TimingAccumulator } from '../../utils/timing';
@@ -259,6 +260,8 @@ async function resolvePdfInfo(
         const ocrAnalysis = await extractor.analyzeOCRNeeds(pdfData);
         if (ocrAnalysis.needsOCR) {
             await cache?.putErrorMetadata({ item: attachment, filePath: availability.filePath, sourceSizeBytes, contentType: availability.contentType, errorCode: 'no_text_layer', pageCount, pageLabels, pages: pages ?? null });
+            // Kick off a background OCR job (entitlement- and loop-guard-gated).
+            maybeEnqueueOcrJob({ item: attachment, libraryId: attachment.libraryID, zoteroKey: attachment.key, itemId: attachment.id, pageCount });
             return { page_count: pageCount, status: 'unreadable', status_code: 'pdf_needs_ocr' };
         }
 
