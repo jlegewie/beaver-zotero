@@ -81,6 +81,10 @@ export class OcrExecutor implements JobExecutor {
         record: BackgroundJobRecord,
         ctx: JobExecutionContext,
     ): Promise<JobOutcome> {
+        // Anchor the poll budget to the start of the whole run so that resolve
+        // + upload time count against it, not just the polling loop.
+        const startedAt = Date.now();
+
         const resolved = await this.resolveJob(record, ctx);
         if ('outcome' in resolved) return resolved.outcome;
         const job = resolved.job;
@@ -99,7 +103,7 @@ export class OcrExecutor implements JobExecutor {
         const requestResult = await ocrApiClient.requestOcr(job.fileHash, job.pageCount);
         this.throwIfAborted(ctx);
 
-        const ready = await this.resolveToReadyGetUrl(requestResult, job, ctx);
+        const ready = await this.resolveToReadyGetUrl(requestResult, job, ctx, startedAt);
         if ('outcome' in ready) return ready.outcome;
 
         const ocrBytes = await this.download(ready.getUrl, ctx);
@@ -187,6 +191,7 @@ export class OcrExecutor implements JobExecutor {
         request: OcrRequestResponse,
         job: ResolvedJob,
         ctx: JobExecutionContext,
+        startedAt: number,
     ): Promise<{ getUrl: string } | { outcome: JobOutcome }> {
         switch (request.status) {
             case 'disabled':
@@ -209,13 +214,13 @@ export class OcrExecutor implements JobExecutor {
                 await this.upload(request.put_url, job, ctx);
                 await ocrApiClient.markUploaded(request.job_id);
                 this.throwIfAborted(ctx);
-                return this.poll(request.job_id, job, ctx);
+                return this.poll(request.job_id, job, ctx, startedAt);
             }
             case 'queued':
                 if (!request.job_id) {
                     return { outcome: { kind: 'retry', error: 'ocr_queued_without_job_id', reason: 'ocr_queued_without_job_id' } };
                 }
-                return this.poll(request.job_id, job, ctx);
+                return this.poll(request.job_id, job, ctx, startedAt);
         }
     }
 
@@ -224,6 +229,12 @@ export class OcrExecutor implements JobExecutor {
         job: ResolvedJob,
         ctx: JobExecutionContext,
     ): Promise<void> {
+        // Read the scan bytes lazily, only on the pending path where an upload
+        // is actually needed — a cache hit (`ready`) or rejoin (`queued`) never
+        // loads the file. Worth keeping in mind for large scans: the content
+        // hash (computed earlier for `/ocr/request`) reads the file too, so a
+        // first-time OCR reads it twice; eagerly loading once to share the bytes
+        // would instead waste a full read on every cross-machine cache hit.
         const bytes = await IOUtils.read(job.filePath);
         this.throwIfAborted(ctx);
         await putBytesToSignedUrl(putUrl, bytes, {
@@ -236,8 +247,11 @@ export class OcrExecutor implements JobExecutor {
         jobId: string,
         job: ResolvedJob,
         ctx: JobExecutionContext,
+        startedAt: number,
     ): Promise<{ getUrl: string } | { outcome: JobOutcome }> {
-        const deadline = Date.now() + OCR_POLL_BUDGET_MS;
+        // Budget is measured from the run start (not from here), so a slow
+        // upload eats into it and the total stays under the queue lease.
+        const deadline = startedAt + OCR_POLL_BUDGET_MS;
         let waitMs = OCR_POLL_INITIAL_MS;
 
         while (Date.now() < deadline) {
