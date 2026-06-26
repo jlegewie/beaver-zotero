@@ -164,6 +164,9 @@ export interface SafeProfileModel {
     // Data migration version
     data_version: number;
     data_migrated_at: string | null;
+
+    // OCR entitlement
+    has_ocr_access: boolean;
 }
 
 export interface SafeProfileWithPlan extends SafeProfileModel {
