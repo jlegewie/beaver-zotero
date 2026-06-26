@@ -82,7 +82,7 @@ describe('background queue — payload parsing on read', () => {
             zotero_key: SMALL_PDF.zotero_key,
             content_kind: 'pdf',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             payload: pdfPayload(7),
         });
         const peek = await backgroundPeek();
@@ -104,7 +104,7 @@ describe('background queue — payload parsing on read', () => {
             zotero_key: SMALL_PDF.zotero_key,
             content_kind: 'pdf',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             payload: pdfPayload(null),
         });
         const peek = await backgroundPeek();
@@ -122,7 +122,7 @@ describe('background queue — payload parsing on read', () => {
             zotero_key: SMALL_PDF.zotero_key,
             content_kind: 'pdf',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             // Column says pdf, JSON discriminator says epub → rejected on read.
             payload: { content_kind: 'epub' } as unknown as BackgroundJobPayload,
         });
@@ -138,7 +138,7 @@ describe('background queue — payload parsing on read', () => {
             zotero_key: SMALL_PDF.zotero_key,
             content_kind: 'pdf',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             // Missing maxFileSizeMB and timeoutSeconds.
             payload: { content_kind: 'pdf', maxPages: null } as unknown as BackgroundJobPayload,
         });
@@ -152,7 +152,7 @@ describe('background queue — payload parsing on read', () => {
             zotero_key: SMALL_PDF.zotero_key,
             content_kind: 'pdf',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             payload: {
                 content_kind: 'pdf',
                 maxPages: 'all',
@@ -170,7 +170,7 @@ describe('background queue — payload parsing on read', () => {
             zotero_key: SMALL_PDF.zotero_key,
             content_kind: 'epub',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             payload: { content_kind: 'epub' },
         });
         const peek = await backgroundPeek();
@@ -184,7 +184,7 @@ describe('background queue — payload parsing on read', () => {
             zotero_key: SMALL_PDF.zotero_key,
             content_kind: 'pdf',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             payload: null,
         });
         const peek = await backgroundPeek();
@@ -205,7 +205,7 @@ describe('background queue — enqueue merge across content_kind change', () => 
             zotero_key: SMALL_PDF.zotero_key,
             content_kind: 'pdf',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             priority: 100,
             payload: pdfPayload(5),
         });
@@ -219,7 +219,7 @@ describe('background queue — enqueue merge across content_kind change', () => 
             zotero_key: SMALL_PDF.zotero_key,
             content_kind: 'epub',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             priority: 100,
             payload: { content_kind: 'epub' },
         });
@@ -241,7 +241,7 @@ describe('background queue — enqueue merge across content_kind change', () => 
             zotero_key: SMALL_PDF.zotero_key,
             content_kind: 'pdf',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             priority: 100,
             payload: pdfPayload(5),
         });
@@ -250,7 +250,7 @@ describe('background queue — enqueue merge across content_kind change', () => 
             zotero_key: SMALL_PDF.zotero_key,
             content_kind: 'pdf',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             priority: 200, // numerically lower priority
             payload: pdfPayload(99),
         });
@@ -267,7 +267,7 @@ describe('background queue — enqueue merge across content_kind change', () => 
             zotero_key: SMALL_PDF.zotero_key,
             content_kind: 'pdf',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             priority: 100,
             payload: pdfPayload(5),
         });
@@ -276,7 +276,7 @@ describe('background queue — enqueue merge across content_kind change', () => 
             zotero_key: SMALL_PDF.zotero_key,
             content_kind: 'pdf',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             priority: 10, // numerically higher priority
             payload: pdfPayload(99),
         });
@@ -302,7 +302,7 @@ describe('background queue — content_kind dispatch in processOnce', () => {
             zotero_key: SMALL_PDF.zotero_key,
             content_kind: 'epub',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             payload: { content_kind: 'epub' },
         });
 
@@ -329,7 +329,7 @@ describe('background queue — content_kind dispatch in processOnce', () => {
             zotero_key: IMAGE.zotero_key,
             content_kind: 'pdf',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             payload: pdfPayload(null),
         });
 
@@ -353,7 +353,7 @@ describe('background queue — content_kind dispatch in processOnce', () => {
             zotero_key: NON_PDF.zotero_key,
             content_kind: 'epub',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             payload: { content_kind: 'epub' },
         });
 
@@ -377,7 +377,7 @@ describe('background queue — content_kind dispatch in processOnce', () => {
             zotero_key: SMALL_PDF.zotero_key,
             content_kind: 'pdf',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             payload: null,
         });
 
@@ -401,7 +401,7 @@ describe('background queue — content_kind dispatch in processOnce', () => {
             zotero_key: SMALL_PDF.zotero_key,
             content_kind: 'pdf',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             payload: { content_kind: 'epub' } as unknown as BackgroundJobPayload,
         });
 
@@ -431,7 +431,7 @@ describe('background queue — content_kind dispatch in processOnce', () => {
             zotero_key: PARENT_ITEM.zotero_key,
             content_kind: 'pdf',
             payload_kind: 'structured',
-            job_type: 'document_timeout_retry',
+            job_type: 'document_extract',
             payload: pdfPayload(null),
         });
 

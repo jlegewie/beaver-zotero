@@ -1,46 +1,30 @@
 /**
- * Background extraction processor.
+ * Background processing dispatcher.
  *
- * Owns the `"background"` MuPDFWorkerClient and drains the
- * `background_jobs` queue (see `src/services/database.ts`). Lives on the
- * esbuild side of the bundle split, reached via
+ * Owns the `"background"` MuPDFWorkerClient and drains registered lanes from
+ * the `background_jobs` queue. The exported class name is kept stable because
+ * addon lifecycle hooks and dev endpoints reach it through
  * `Zotero.Beaver?.backgroundExtractor`.
- *
- * Lifecycle: `start()` schedules ticks; `stop()` aborts any in-flight job
- * (via the external abort signal threaded into `extractAndCacheDocument`),
- * waits for the current iteration to settle, and disposes the background
- * worker. `processOnce()` exists as a test hook — it drives one iteration
- * synchronously and never schedules a follow-up tick.
- *
- * The processor is intentionally conservative:
- *  - Idles when no main window is open (worker constructor unreachable).
- *  - Optionally backs off when the hot worker has pending dispatches.
- *  - Recycles the background worker every `RECYCLE_AFTER_N` completed jobs
- *    to bound the documented MuPDF WASM heap leak.
- *
- * v1 has no UI subscriber for the emitted events; they exist for future
- * telemetry / indexing UI work and are dispatched on `__beaverEventBus`.
  */
 
 import {
     disposeMuPDFWorker,
     getExistingMuPDFWorkerClient,
 } from '../beaver-extract';
-import { extractAndCacheDocument } from './documentExtractionCore';
-import type { BackgroundJobRecord } from './database';
-import type { DocumentCache } from './documentCache';
-import { liveAttachmentContentKind } from './documentExtraction/attachmentResolution';
-
-/**
- * Local alias for the BeaverDB surface this processor actually uses.
- * Resolves to the structural type that `Zotero.Beaver?.db` exposes in the
- * global typings, which is a narrowed subset of the full `BeaverDB` class
- * exported by `database.ts`.
- */
-type QueueDB = NonNullable<typeof Zotero.Beaver.db>;
+import type {
+    BackgroundJobInput,
+    BackgroundJobRecord,
+    BackgroundJobType,
+} from './database';
+import { DocumentExtractExecutor } from './backgroundQueue/documentExtractExecutor';
+import type {
+    JobExecutionContext,
+    JobExecutor,
+    JobOutcome,
+    QueueDB,
+} from './backgroundQueue/jobExecutor';
+import { MuPDFLane } from './backgroundQueue/muPDFLane';
 import { logger } from '../utils/logger';
-// Import `safeIsInTrash` from the react-free helper module
-import { safeIsInTrash } from '../utils/zoteroItemUtils';
 import { createAbortController } from '../utils/abortController';
 import { getPref } from '../utils/prefs';
 import { getSystemIdleTimeMs, registerIdleObserver } from '../utils/idleService';
@@ -53,31 +37,11 @@ const MAX_ATTEMPTS = 3;
 const BACKOFF_MS = (attempt: number) =>
     Math.min(60_000 * Math.pow(2, attempt - 1), 30 * 60_000);
 
-/**
- * Defer the first claim by this much after `start()` so the loop does not
- * compete with main-window load and lets Zotero finish auto-sync.
- */
 const STARTUP_DELAY_MS = 30_000;
-/**
- * Threshold at which the user is considered idle. Jobs at or above
- * `LOW_PRIORITY_CEILING` only claim once `nsIUserIdleService.idleTime`
- * passes this mark.
- */
 const IDLE_THRESHOLD_MS = 30_000;
 const IDLE_THRESHOLD_SEC = 30;
-/**
- * Exclusive upper bound used by the idle-aware claim. Jobs enqueued with
- * `priority < LOW_PRIORITY_CEILING` (e.g. hot-path retries) run any time;
- * `priority >= LOW_PRIORITY_CEILING` only runs while the user is idle.
- */
 const LOW_PRIORITY_CEILING = 100;
 const PREF_ENABLED = 'backgroundExtractorEnabled';
-
-/**
- * Cooperative throttle: when the hot worker has pending dispatches, the
- * background processor skips its claim and waits a tick. Kept behind a
- * const flag so it's easy to disable if it starves the queue.
- */
 const COOPERATIVE_THROTTLE = true;
 
 export type ProcessOnceReason =
@@ -95,64 +59,73 @@ export interface ProcessOnceResult {
     reason?: ProcessOnceReason;
 }
 
+export type BackgroundLaneStatus = Partial<
+    Record<BackgroundJobType, { inFlight: number; capacity: number }>
+>;
+
+type LaneEntry = {
+    promise: Promise<void>;
+    abort: AbortController;
+};
+
+type ExecutorRegistration = {
+    executor: JobExecutor;
+    maxInFlight: number;
+};
+
 export class BackgroundExtractor {
     private stopRequested = false;
     private started = false;
     private currentTickId: ReturnType<typeof setTimeout> | undefined;
-    private inFlight: Promise<void> | null = null;
-    private inFlightAbortController: AbortController | null = null;
-    private inFlightJobId: number | null = null;
-    private jobsProcessedSinceRecycle = 0;
-    /**
-     * True while `tick()` is executing (from entry to its `finally`).
-     * Used to (1) bounce re-entrant ticks when two timers race, and
-     * (2) tell `notify()` to defer the wake to the active tick instead
-     * of scheduling a parallel one.
-     */
     private tickRunning = false;
-    /**
-     * Set by `notify()` when a tick is already running. The active
-     * tick's tail consumes it to reschedule at 0ms, overriding its
-     * default idle reschedule. Prevents the wake from being dropped
-     * when an enqueue races with a tick that's about to schedule
-     * `IDLE_INTERVAL_MS`.
-     */
     private pendingWake = false;
-    /**
-     * Latched once shutdown is observed (via `Zotero.__beaverShuttingDown`
-     * or `stop()` called during shutdown).
-     */
     private dbWritesPermanentlyDisabled = false;
-    /**
-     * Set to `false` while the user has flipped the kill-switch pref off.
-     * Re-checked at every claim; an in-flight job is not interrupted.
-     */
     private prefEnabled = true;
-    /**
-     * Mirrors `Zotero.Sync.Runner.syncInProgress`. Maintained via the
-     * `['sync']` notifier observer registered in `start()`. While true,
-     * the loop returns `sync_in_progress` from `processOnce()` and waits
-     * for the `'finish'` event to drain.
-     */
     private syncInProgress = false;
-    /**
-     * Earliest epoch-ms at which a tick may fire. Set in `start()` to
-     * `Date.now() + STARTUP_DELAY_MS`. Producers and observers that call
-     * `notify()` during the delay record their intent (no events are
-     * lost) but the scheduler clamps the actual wake to this floor.
-     */
     private startupDelayUntil = 0;
     private prefObserverSymbol: symbol | null = null;
     private syncObserverId: string | null = null;
     private unregisterIdleObserver: (() => void) | null = null;
     private workerRunning = false;
+    private readonly executors = new Map<BackgroundJobType, ExecutorRegistration>();
+    private readonly laneInFlight = new Map<BackgroundJobType, Map<number, LaneEntry>>();
+    private readonly muPDFLane = new MuPDFLane(RECYCLE_AFTER_N);
+
+    constructor() {
+        this.registerExecutor(new DocumentExtractExecutor(), { maxInFlight: 1 });
+    }
 
     /** Return the current background worker activity state for UI subscribers. */
     getStatus(): { running: boolean } {
         return { running: this.workerRunning };
     }
 
-    /** Schedule the first tick. Safe to call more than once (idempotent). */
+    /** Return capacity and in-flight counts for registered lanes. */
+    getLaneStatus(): BackgroundLaneStatus {
+        const status: BackgroundLaneStatus = {};
+        for (const [jobType, registration] of this.executors) {
+            status[jobType] = {
+                inFlight: this.laneInFlight.get(jobType)?.size ?? 0,
+                capacity: registration.maxInFlight,
+            };
+        }
+        return status;
+    }
+
+    /** Register a queue executor and activate its lane. */
+    registerExecutor(
+        executor: JobExecutor,
+        options: { maxInFlight: number },
+    ): void {
+        const maxInFlight = Math.max(1, Math.floor(options.maxInFlight));
+        this.executors.set(executor.jobType, { executor, maxInFlight });
+        if (!this.laneInFlight.has(executor.jobType)) {
+            this.laneInFlight.set(executor.jobType, new Map());
+        }
+        this.notify();
+    }
+
+    /** Schedule the first tick. Safe to call more than once. */
     start(): void {
         if (this.started) return;
         this.started = true;
@@ -161,15 +134,8 @@ export class BackgroundExtractor {
         this.pendingWake = false;
         this.startupDelayUntil = Date.now() + STARTUP_DELAY_MS;
 
-        // Pref: read initial value before registering the observer so a
-        // race-flip during startup is caught by the observer.
         this.prefEnabled = (getPref(PREF_ENABLED) as boolean | undefined) ?? true;
 
-        // Sync: register the observer FIRST, then read the current
-        // `syncInProgress` getter. This closes the race window — if a
-        // sync starts between read and register we would miss it; the
-        // other ordering catches an already-running sync via the getter
-        // and any subsequent transitions via the observer.
         try {
             const syncObs = {
                 notify: (
@@ -181,9 +147,6 @@ export class BackgroundExtractor {
                     if (event === 'start') {
                         this.syncInProgress = true;
                     } else if (event === 'finish' || event === 'stop') {
-                        // Zotero's sync runner emits 'finish' on normal
-                        // completion (syncRunner.js); 'stop' is accepted
-                        // defensively but is not part of the sync flow.
                         this.syncInProgress = false;
                         this.notify();
                     }
@@ -203,9 +166,6 @@ export class BackgroundExtractor {
             this.syncInProgress = false;
         }
 
-        // Pref observer: registered against the full global pref path so
-        // `getPref(PREF_ENABLED)`-equivalent flips trigger a wake. Going
-        // from disabled → enabled re-arms the loop via `notify()`.
         try {
             this.prefObserverSymbol = Zotero.Prefs.registerObserver(
                 'extensions.zotero.beaver.backgroundExtractorEnabled',
@@ -215,15 +175,12 @@ export class BackgroundExtractor {
                     this.prefEnabled = next;
                     if (!wasEnabled && next) this.notify();
                 },
-                true, // global pref path (not a branch-relative key)
+                true,
             );
         } catch (e) {
             logger(`BackgroundExtractor: registerObserver(pref) failed: ${e}`, 1);
         }
 
-        // Idle observer: push-based wake the moment the user crosses
-        // the 30s idle threshold, instead of waiting up to IDLE_INTERVAL_MS
-        // for the next poll tick.
         try {
             this.unregisterIdleObserver = registerIdleObserver(
                 { onIdle: () => this.notify() },
@@ -233,28 +190,19 @@ export class BackgroundExtractor {
             logger(`BackgroundExtractor: registerIdleObserver failed: ${e}`, 1);
         }
 
-        // First tick deferred by STARTUP_DELAY_MS so the loop does not
-        // compete with main-window load / auto-sync kickoff.
         this.scheduleTick(STARTUP_DELAY_MS);
     }
 
     /**
-     * Stop the processor:
-     *  1. Set `stopRequested` so the next tick exits early.
-     *  2. Cancel any pending tick timer.
-     *  3. Abort the in-flight job (if any) via its external abort signal.
-     *  4. Wait for the in-flight extraction to settle and release the job.
-     *  5. Dispose the background worker so its WASM heap is released.
+     * Stop the dispatcher, abort all active lanes, and release the background
+     * MuPDF worker.
      */
     async stop(): Promise<void> {
         this.stopRequested = true;
-        // Latch the per-instance disable NOW if global shutdown is in
-        // progress
         if (Zotero.__beaverShuttingDown === true) {
             this.dbWritesPermanentlyDisabled = true;
         }
-        // Tear down observers BEFORE the rest of shutdown so notifier or
-        // idle callbacks cannot fire into a half-disposed processor.
+
         if (this.prefObserverSymbol) {
             try {
                 Zotero.Prefs.unregisterObserver(this.prefObserverSymbol);
@@ -283,6 +231,7 @@ export class BackgroundExtractor {
             clearTimeout(this.currentTickId);
             this.currentTickId = undefined;
         }
+
         await this.abortAndAwaitInFlight();
         try {
             await disposeMuPDFWorker('background');
@@ -294,74 +243,44 @@ export class BackgroundExtractor {
         this.pendingWake = false;
     }
 
-    /**
-     * Abort any in-flight job and wait for it to settle
-     */
+    /** Abort every active lane and wait for all jobs to settle. */
     async abortInFlight(): Promise<void> {
         await this.abortAndAwaitInFlight();
-        this.setWorkerRunning(false);
+        this.setWorkerRunning(this.totalInFlight() > 0);
     }
 
     /**
-     * Producer-side wake. Producers call this after enqueueing a job
-     * they want picked up immediately, instead of waiting for the next
-     * idle tick (up to `IDLE_INTERVAL_MS`). Safe to call any time.
-     *
-     * Behavior:
-     *  - No-op when the processor is not started, has been stopped, or
-     *    is in (latched) shutdown.
-     *  - When a tick is already running (or a job is in flight from a
-     *    direct `processOnce()` call), records a `pendingWake` that the
-     *    active tick's tail consumes by rescheduling at 0ms instead of
-     *    `IDLE_INTERVAL_MS`. This avoids two failure modes:
-     *      (a) Scheduling a parallel 0ms tick that the active tick's
-     *          own reschedule later cancels — dropping the wake.
-     *      (b) Two ticks entering `processOnce()` concurrently and
-     *          claiming different rows, leaking the first job's abort
-     *          controller (only the latest `inFlight` is tracked).
-     *  - Otherwise (idle, between ticks): reschedules the next tick to
-     *    fire immediately.
-     *
-     * Bulk producers (e.g. library indexers) should call this **once
-     * after a batch commit**, not per row, to avoid thrashing the
-     * timer and to sidestep visibility races where the tick fires
-     * before the transaction commits.
+     * Producer-side wake. In-flight IO jobs do not block scheduling because
+     * free capacity in another lane may still be claimable.
      */
     notify(): void {
         if (!this.started || this.stopRequested) return;
         if (this.dbWritesPermanentlyDisabled) return;
         if (Zotero.__beaverShuttingDown === true) return;
-        if (this.tickRunning || this.inFlight) {
+        if (this.tickRunning) {
             this.pendingWake = true;
             return;
         }
-        // Clamp to the startup-delay floor so a producer enqueue or an
-        // observer callback during the first 30s cannot defeat the
-        // delay. Once we are past the floor this is a no-op (max(0, neg)).
         const delay = Math.max(0, this.startupDelayUntil - Date.now());
         this.scheduleTick(delay);
     }
 
     private async abortAndAwaitInFlight(): Promise<void> {
-        if (this.inFlightAbortController) {
-            try {
-                this.inFlightAbortController.abort();
-            } catch (_e) {
-                // best-effort
+        const promises: Promise<void>[] = [];
+        for (const lane of this.laneInFlight.values()) {
+            for (const entry of lane.values()) {
+                try {
+                    entry.abort.abort();
+                } catch {
+                    // best-effort
+                }
+                promises.push(entry.promise);
             }
         }
-        if (this.inFlight) {
-            try {
-                await this.inFlight;
-            } catch (_e) {
-                // logged by processJob
-            }
-        }
+        await Promise.allSettled(promises);
     }
 
-    /**
-     * Skip DB writes once global shutdown has been observed
-     */
+    /** Skip DB writes once global shutdown has been observed. */
     private shouldSkipDbWrites(): boolean {
         if (this.dbWritesPermanentlyDisabled) return true;
         if (Zotero.__beaverShuttingDown === true) {
@@ -378,35 +297,28 @@ export class BackgroundExtractor {
     }
 
     /**
-     * Drive a single iteration of the tick loop synchronously and return
-     * what happened. Used by tests and the dev `process-once` endpoint.
-     * Never schedules a follow-up tick.
+     * Drive one dispatcher pass. Tests can pass `awaitLaunchedJobs: true` to
+     * await IO lanes; the dev endpoint uses the default non-blocking behavior.
      */
     async processOnce(
-        options: { keepRunningAfterJob?: boolean } = {},
+        options: {
+            keepRunningAfterJob?: boolean;
+            awaitLaunchedJobs?: boolean;
+        } = {},
     ): Promise<ProcessOnceResult> {
         const inactive = (reason: ProcessOnceReason): ProcessOnceResult => {
-            this.setWorkerRunning(false);
+            if (this.totalInFlight() === 0) this.setWorkerRunning(false);
             return { processed: false, reason };
         };
 
         if (this.stopRequested) return inactive('stopped');
-
-        // Global shutdown check BEFORE claim
-        if (this.shouldSkipDbWrites()) {
-            return inactive('shutting_down');
-        }
-
-        if (!this.prefEnabled) {
-            return inactive('disabled');
-        }
+        if (this.shouldSkipDbWrites()) return inactive('shutting_down');
+        if (!this.prefEnabled) return inactive('disabled');
 
         const win = Zotero.getMainWindow?.() ?? null;
         if (!win) return inactive('no_window');
 
-        if (this.syncInProgress) {
-            return inactive('sync_in_progress');
-        }
+        if (this.syncInProgress) return inactive('sync_in_progress');
 
         if (COOPERATIVE_THROTTLE) {
             const hot = getExistingMuPDFWorkerClient('hot');
@@ -416,37 +328,220 @@ export class BackgroundExtractor {
         }
 
         const db = Zotero.Beaver?.db;
-        if (!db) return inactive('empty');
+        if (!db || this.executors.size === 0) return inactive('empty');
 
-        // Idle gate: when the user is actively using the OS we still
-        // run user-blocking work (priority < LOW_PRIORITY_CEILING, e.g.
-        // hot-path retries) but defer library-scale indexing.
         const idleMs = getSystemIdleTimeMs();
         const maxPriority =
             idleMs >= IDLE_THRESHOLD_MS ? undefined : LOW_PRIORITY_CEILING;
 
-        const record = await db.claimNextBackgroundJob(
-            Date.now(),
-            VISIBILITY_TIMEOUT_MS,
+        const launched = await this.dispatchPass({
+            db,
             maxPriority,
-        );
-        if (!record) return inactive('empty');
+            awaitLaunchedJobs: options.awaitLaunchedJobs === true,
+        });
 
-        logger(
-            `BackgroundExtractor: claimed job id=${record.id} type=${record.jobType} ${record.libraryId}-${record.zoteroKey} content_kind=${record.contentKind} payload_kind=${record.payloadKind} attempt=${record.attemptCount + 1}`,
-            3,
-        );
-        this.setWorkerRunning(true);
-        let completedJob = false;
-        try {
-            await this.runJob(record, db);
-            completedJob = true;
-        } finally {
-            if (!options.keepRunningAfterJob || !completedJob) {
-                this.setWorkerRunning(false);
-            }
+        if (launched === 0) return inactive('empty');
+        if (!options.keepRunningAfterJob && this.totalInFlight() === 0) {
+            this.setWorkerRunning(false);
         }
         return { processed: true, reason: 'job_done' };
+    }
+
+    private async dispatchPass(options: {
+        db: QueueDB;
+        maxPriority?: number;
+        awaitLaunchedJobs: boolean;
+    }): Promise<number> {
+        let launched = 0;
+        const waits: Promise<void>[] = [];
+        for (const [jobType, registration] of this.executors) {
+            const freeSlots = this.laneCapacityFree(jobType);
+            for (let slot = 0; slot < freeSlots; slot += 1) {
+                if (this.stopRequested) return launched;
+                const record = await options.db.claimNextBackgroundJob(
+                    Date.now(),
+                    VISIBILITY_TIMEOUT_MS,
+                    options.maxPriority,
+                    [jobType],
+                );
+                if (!record) break;
+                if (this.stopRequested) {
+                    if (!this.shouldSkipDbWrites()) {
+                        await options.db.releaseBackgroundJob(record.id, Date.now());
+                    }
+                    return launched;
+                }
+
+                logger(
+                    `BackgroundExtractor: claimed job id=${record.id} type=${record.jobType} ${record.libraryId}-${record.zoteroKey} content_kind=${record.contentKind} payload_kind=${record.payloadKind} attempt=${record.attemptCount + 1}`,
+                    3,
+                );
+                launched += 1;
+                const shouldAwait =
+                    jobType === 'document_extract' || options.awaitLaunchedJobs;
+                const promise = this.launchJob(
+                    record,
+                    registration.executor,
+                    jobType !== 'document_extract',
+                );
+                if (shouldAwait) {
+                    waits.push(promise);
+                }
+            }
+        }
+        if (waits.length > 0) {
+            await Promise.all(waits);
+        }
+        return launched;
+    }
+
+    private launchJob(
+        record: BackgroundJobRecord,
+        executor: JobExecutor,
+        notifyOnSettle: boolean,
+    ): Promise<void> {
+        const abort = createAbortController();
+        const lane = this.laneInFlight.get(record.jobType) ?? new Map<number, LaneEntry>();
+        this.laneInFlight.set(record.jobType, lane);
+        this.setWorkerRunning(true);
+
+        const promise = this.executeAndPersist(record, executor, abort.signal)
+            .catch((error) => {
+                const message = error instanceof Error ? error.message : String(error);
+                logger(`BackgroundExtractor: job id=${record.id} threw: ${message}`, 1);
+            })
+            .finally(() => {
+                lane.delete(record.id);
+                if (this.totalInFlight() === 0 && !this.tickRunning) {
+                    this.setWorkerRunning(false);
+                }
+                if (notifyOnSettle) {
+                    this.notify();
+                }
+            });
+        lane.set(record.id, { promise, abort });
+        return promise;
+    }
+
+    private async executeAndPersist(
+        record: BackgroundJobRecord,
+        executor: JobExecutor,
+        externalAbortSignal: AbortSignal,
+    ): Promise<void> {
+        dispatchBackgroundEvent('background-job:start', { id: record.id, record });
+        const db = Zotero.Beaver?.db;
+        if (!db) return;
+
+        const ctx: JobExecutionContext = {
+            db,
+            runOnMuPDFWorker: (fn) => this.muPDFLane.run(fn),
+            externalAbortSignal,
+            shouldSkipDbWrites: () => this.shouldSkipDbWrites(),
+            enqueue: async (input: BackgroundJobInput) => {
+                await db.enqueueBackgroundJob(input);
+                this.notify();
+            },
+        };
+
+        let outcome: JobOutcome;
+        try {
+            outcome = await executor.execute(record, ctx);
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            outcome = { kind: 'retry', error: `unexpected: ${message}` };
+        }
+
+        await this.persistOutcome(record, executor, outcome, db);
+    }
+
+    private async persistOutcome(
+        record: BackgroundJobRecord,
+        executor: JobExecutor,
+        outcome: JobOutcome,
+        db: QueueDB,
+    ): Promise<void> {
+        if (this.shouldSkipDbWrites()) return;
+
+        switch (outcome.kind) {
+            case 'complete':
+                await db.completeBackgroundJob(record.id);
+                logger(
+                    `BackgroundExtractor: job id=${record.id} done (${outcome.reason})`,
+                    3,
+                );
+                dispatchBackgroundEvent('background-job:done', {
+                    id: record.id,
+                    reason: outcome.reason,
+                });
+                return;
+            case 'release':
+                await db.releaseBackgroundJob(record.id, Date.now());
+                logger(
+                    `BackgroundExtractor: job id=${record.id} released (${outcome.reason})`,
+                    3,
+                );
+                dispatchBackgroundEvent('background-job:done', {
+                    id: record.id,
+                    reason: outcome.reason,
+                });
+                return;
+            case 'retry':
+                await this.recordRetryFailure(record, executor, outcome, db);
+                return;
+            case 'failPermanent':
+                await db.recordDocumentProcessingFailure(outcome.failure);
+                await db.completeBackgroundJob(record.id);
+                dispatchBackgroundEvent('background-job:done', {
+                    id: record.id,
+                    reason:
+                        outcome.reason
+                        ?? (
+                            outcome.failure.terminalCode
+                                ? `terminal:${outcome.failure.terminalCode}`
+                                : 'terminal'
+                        ),
+                });
+                return;
+        }
+    }
+
+    private async recordRetryFailure(
+        record: BackgroundJobRecord,
+        executor: JobExecutor,
+        outcome: Extract<JobOutcome, { kind: 'retry' }>,
+        db: QueueDB,
+    ): Promise<void> {
+        const result = await db.failBackgroundJob(record.id, outcome.error, {
+            maxAttempts: MAX_ATTEMPTS,
+            backoffMs: BACKOFF_MS,
+            now: Date.now(),
+        });
+        if (result.dead) {
+            const failure = executor.describeFailure?.(record, outcome.error) ?? null;
+            if (failure) {
+                await db.recordDocumentProcessingFailure(failure);
+            }
+            logger(
+                `BackgroundExtractor: job id=${record.id} dead-lettered: ${outcome.error}`,
+                1,
+            );
+            dispatchBackgroundEvent('background-job:dead', {
+                id: record.id,
+                error: outcome.error,
+                reason: outcome.reason,
+            });
+            return;
+        }
+
+        logger(
+            `BackgroundExtractor: job id=${record.id} failed, retry scheduled: ${outcome.error}`,
+            2,
+        );
+        dispatchBackgroundEvent('background-job:failed', {
+            id: record.id,
+            error: outcome.error,
+            reason: outcome.reason,
+        });
     }
 
     private scheduleTick(delayMs: number): void {
@@ -456,8 +551,6 @@ export class BackgroundExtractor {
             this.currentTickId = undefined;
             this.tick().catch((e) => {
                 logger(`BackgroundExtractor: tick threw: ${e}`, 1);
-                // Always reschedule even after a failure so a transient
-                // throw does not park the loop forever.
                 this.scheduleTick(IDLE_INTERVAL_MS);
             });
         }, delayMs);
@@ -467,284 +560,44 @@ export class BackgroundExtractor {
 
     private async tick(): Promise<void> {
         if (this.stopRequested) return;
-        // Re-entrancy guard: if a stale timer races with the active
-        // tick (e.g. two timers queued before the first set
-        // `currentTickId = undefined`), bail out cleanly so two ticks
-        // do not run `processOnce()` in parallel.
         if (this.tickRunning) return;
         this.tickRunning = true;
         try {
             const result = await this.processOnce({ keepRunningAfterJob: true });
-
             if (this.stopRequested) return;
 
-            if (result.processed) {
-                this.jobsProcessedSinceRecycle += 1;
-                if (this.jobsProcessedSinceRecycle >= RECYCLE_AFTER_N) {
-                    try {
-                        await disposeMuPDFWorker('background');
-                    } catch (e) {
-                        logger(
-                            `BackgroundExtractor: recycle disposeMuPDFWorker failed: ${e}`,
-                            1,
-                        );
-                    }
-                    this.jobsProcessedSinceRecycle = 0;
-                }
-            }
-
-            // Always honor a wake recorded during this tick — even when
-            // the queue was empty this iteration — so a notify() racing
-            // a pre-claim await is not swallowed by the default idle
-            // reschedule. JS is single-threaded between these two lines,
-            // so no notify() can sneak in and have its flag cleared.
             const wakeNow = this.pendingWake;
             this.pendingWake = false;
             if (wakeNow) {
-                // Same startup-delay clamp as `notify()` — a wake recorded
-                // during the first 30s must not bypass the delay floor.
                 const delay = Math.max(0, this.startupDelayUntil - Date.now());
                 this.scheduleTick(delay);
                 return;
             }
+
             this.scheduleTick(
-                result.processed ? BUSY_INTERVAL_MS : IDLE_INTERVAL_MS,
+                result.processed || this.totalInFlight() > 0
+                    ? BUSY_INTERVAL_MS
+                    : IDLE_INTERVAL_MS,
             );
         } finally {
             this.tickRunning = false;
         }
     }
 
-    private async runJob(record: BackgroundJobRecord, db: QueueDB): Promise<void> {
-        // Use the shim from `../utils/abortController`: in the chrome JS
-        // realm where this runs, `AbortController` is not a top-level
-        // global — it lives on the main window instead.
-        const abortController = createAbortController();
-        this.inFlightAbortController = abortController;
-        this.inFlightJobId = record.id;
-        const completion = this.processJob(record, db, abortController.signal);
-        this.inFlight = completion;
-        try {
-            await completion;
-        } finally {
-            this.inFlight = null;
-            this.inFlightAbortController = null;
-            this.inFlightJobId = null;
-        }
+    private laneCapacityFree(jobType: BackgroundJobType): number {
+        const registration = this.executors.get(jobType);
+        if (!registration) return 0;
+        const inFlight = this.laneInFlight.get(jobType)?.size ?? 0;
+        return Math.max(0, registration.maxInFlight - inFlight);
     }
 
-    private async processJob(
-        record: BackgroundJobRecord,
-        db: QueueDB,
-        externalAbortSignal: AbortSignal,
-    ): Promise<void> {
-        dispatchBackgroundEvent('background-job:start', { id: record.id, record });
-
-        let item: Zotero.Item | null = null;
-        try {
-            const lookup = await Zotero.Items.getByLibraryAndKeyAsync(
-                record.libraryId,
-                record.zoteroKey,
-            );
-            item = lookup || null;
-        } catch (e) {
-            logger(
-                `BackgroundExtractor: getByLibraryAndKeyAsync failed for ${record.libraryId}-${record.zoteroKey}: ${e}`,
-                1,
-            );
+    private totalInFlight(): number {
+        let total = 0;
+        for (const lane of this.laneInFlight.values()) {
+            total += lane.size;
         }
-        if (!item || safeIsInTrash(item) === true) {
-            if (this.shouldSkipDbWrites()) return;
-            await db.completeBackgroundJob(record.id);
-            dispatchBackgroundEvent('background-job:done', {
-                id: record.id,
-                reason: !item ? 'item_missing' : 'in_trash',
-            });
-            return;
-        }
-
-        const liveKind = liveAttachmentContentKind(item);
-        const canResolvePdfFromParent =
-            liveKind === null
-            && record.contentKind === 'pdf'
-            && typeof item.isRegularItem === 'function'
-            && item.isRegularItem();
-        if (
-            (liveKind === null && !canResolvePdfFromParent)
-            || (liveKind !== null && liveKind !== record.contentKind)
-        ) {
-            if (this.shouldSkipDbWrites()) return;
-            await db.completeBackgroundJob(record.id);
-            dispatchBackgroundEvent('background-job:done', {
-                id: record.id,
-                reason: 'content_kind_stale',
-            });
-            return;
-        }
-
-        if (record.contentKind !== 'pdf') {
-            await this.handleUnsupportedContentKind(record, db);
-            return;
-        }
-
-        const payload = record.payload;
-        if (!payload || payload.content_kind !== 'pdf') {
-            if (this.shouldSkipDbWrites()) return;
-            await db.completeBackgroundJob(record.id);
-            dispatchBackgroundEvent('background-job:done', {
-                id: record.id,
-                reason: 'missing_payload',
-            });
-            return;
-        }
-
-        let result;
-        try {
-            result = await extractAndCacheDocument({
-                libraryId: record.libraryId,
-                zoteroKey: record.zoteroKey,
-                mode: record.payloadKind,
-                maxPages: payload.maxPages,
-                maxFileSizeMB: payload.maxFileSizeMB,
-                timeoutSeconds: payload.timeoutSeconds,
-                workerName: 'background',
-                externalAbortSignal,
-            });
-        } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            await this.recordFailure(db, record.id, `unexpected: ${message}`);
-            dispatchBackgroundEvent('background-job:failed', {
-                id: record.id,
-                error: message,
-            });
-            return;
-        }
-
-        await this.classifyAndPersist(result, record, db);
+        return total;
     }
-
-    private async handleUnsupportedContentKind(
-        record: BackgroundJobRecord,
-        db: QueueDB,
-    ): Promise<void> {
-        logger(
-            `BackgroundExtractor: job id=${record.id} done (unsupported_content_kind:${record.contentKind})`,
-            2,
-        );
-        if (this.shouldSkipDbWrites()) return;
-        await db.completeBackgroundJob(record.id);
-        dispatchBackgroundEvent('background-job:done', {
-            id: record.id,
-            reason: 'unsupported_content_kind',
-        });
-    }
-
-    private async classifyAndPersist(
-        result: Awaited<ReturnType<typeof extractAndCacheDocument>>,
-        record: BackgroundJobRecord,
-        db: QueueDB,
-    ): Promise<void> {
-        if (this.shouldSkipDbWrites()) return;
-        switch (result.kind) {
-            case 'ok':
-                await db.completeBackgroundJob(record.id);
-                logger(
-                    `BackgroundExtractor: job id=${record.id} done (ok) pages=${result.totalPages}`,
-                    3,
-                );
-                dispatchBackgroundEvent('background-job:done', {
-                    id: record.id,
-                    reason: 'ok',
-                });
-                return;
-            case 'external_abort':
-                await db.releaseBackgroundJob(record.id, Date.now());
-                logger(
-                    `BackgroundExtractor: job id=${record.id} released (external_abort)`,
-                    3,
-                );
-                dispatchBackgroundEvent('background-job:done', {
-                    id: record.id,
-                    reason: 'external_abort',
-                });
-                return;
-            case 'cached_error':
-                await db.completeBackgroundJob(record.id);
-                logger(
-                    `BackgroundExtractor: job id=${record.id} done (cached_error:${result.code})`,
-                    3,
-                );
-                dispatchBackgroundEvent('background-job:done', {
-                    id: record.id,
-                    reason: `cached_error:${result.code}`,
-                });
-                return;
-            case 'timeout':
-                await this.recordFailure(
-                    db,
-                    record.id,
-                    `timeout:${result.phase}`,
-                );
-                dispatchBackgroundEvent('background-job:failed', {
-                    id: record.id,
-                    error: `timeout:${result.phase}`,
-                });
-                return;
-            case 'response_error': {
-                if (isTransientResponseError(result.code)) {
-                    await this.recordFailure(
-                        db,
-                        record.id,
-                        `${result.code}: ${result.message}`,
-                    );
-                    dispatchBackgroundEvent('background-job:failed', {
-                        id: record.id,
-                        error: result.code,
-                    });
-                    return;
-                }
-                await db.completeBackgroundJob(record.id);
-                logger(
-                    `BackgroundExtractor: job id=${record.id} done (terminal:${result.code})`,
-                    3,
-                );
-                dispatchBackgroundEvent('background-job:done', {
-                    id: record.id,
-                    reason: `terminal:${result.code}`,
-                });
-                return;
-            }
-        }
-    }
-
-    private async recordFailure(
-        db: QueueDB,
-        id: number,
-        error: string,
-    ): Promise<void> {
-        if (this.shouldSkipDbWrites()) return;
-        const outcome = await db.failBackgroundJob(id, error, {
-            maxAttempts: MAX_ATTEMPTS,
-            backoffMs: BACKOFF_MS,
-            now: Date.now(),
-        });
-        if (outcome.dead) {
-            logger(
-                `BackgroundExtractor: job id=${id} dead-lettered: ${error}`,
-                1,
-            );
-            dispatchBackgroundEvent('background-job:dead', { id, error });
-        } else {
-            logger(
-                `BackgroundExtractor: job id=${id} failed, retry scheduled: ${error}`,
-                2,
-            );
-        }
-    }
-}
-
-function isTransientResponseError(code: string): boolean {
-    return code === 'download_failed' || code === 'extraction_failed';
 }
 
 function dispatchBackgroundEvent(name: string, detail: unknown): void {
@@ -759,8 +612,3 @@ function dispatchBackgroundEvent(name: string, detail: unknown): void {
         logger(`background event dispatch failed for ${name}: ${e}`, 2);
     }
 }
-
-// Suppress unused warning — the DocumentCache module is required only at
-// runtime by the extraction core; this `import type` keeps the dependency
-// visible in tooling.
-export type _DocumentCacheUsed = DocumentCache;

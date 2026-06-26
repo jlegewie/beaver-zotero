@@ -832,7 +832,10 @@ export async function syncPause(
 // `useHttpEndpoints.ts` from `react/hooks/httpHandlers/testBackgroundHandlers.ts`.
 // ---------------------------------------------------------------------------
 
-export type BackgroundJobType = 'document_timeout_retry';
+export type BackgroundJobType =
+    | 'document_extract'
+    | 'document_ocr'
+    | 'fulltext_upsert';
 export type BackgroundJobPayloadKind = 'structured' | 'markdown';
 
 export interface PdfBackgroundJobPayload {
@@ -900,6 +903,7 @@ export interface BackgroundEnqueueResponse {
 export interface BackgroundStatsResponse {
     ok: boolean;
     queue?: BackgroundQueueStats;
+    lanes?: Partial<Record<BackgroundJobType, { inFlight: number; capacity: number }>>;
     workers?: {
         hot: WorkerStatsSnapshot | null;
         background: WorkerStatsSnapshot | null;
