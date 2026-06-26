@@ -19,6 +19,7 @@ import {
     ocrApiClient,
     type OcrError,
     type OcrRequestResponse,
+    type OcrStatusResponse,
 } from '../ocr/ocrApiClient';
 import {
     getBytesFromSignedUrl,
@@ -36,6 +37,7 @@ import {
 } from '../ocr/constants';
 import { logger } from '../../utils/logger';
 import { safeIsInTrash } from '../../utils/zoteroItemUtils';
+import { ApiError } from '../../../react/types/apiErrors';
 import type {
     JobExecutionContext,
     JobExecutor,
@@ -55,6 +57,12 @@ interface ResolvedJob {
 
 export class OcrExecutor implements JobExecutor {
     readonly jobType = 'document_ocr' as const;
+
+    /**
+     * Resume hints keyed by source item after poll-budget release.
+     * The file hash makes the hint valid only for the same attachment content.
+     */
+    private readonly resumeHints = new Map<string, { jobId: string; fileHash: string }>();
 
     async execute(
         record: BackgroundJobRecord,
@@ -100,15 +108,76 @@ export class OcrExecutor implements JobExecutor {
             return { kind: 'complete', reason: 'ocr_perm_failed' };
         }
 
-        const requestResult = await ocrApiClient.requestOcr(job.fileHash, job.pageCount);
-        this.throwIfAborted(ctx);
-
-        const ready = await this.resolveToReadyGetUrl(requestResult, job, ctx, startedAt);
+        const ready = await this.resolveReady(job, ctx, startedAt);
         if ('outcome' in ready) return ready.outcome;
 
         const ocrBytes = await this.download(ready.getUrl, ctx);
 
         return this.reextractAndCache(job, ocrBytes, ctx);
+    }
+
+    /** Resolve a ready GET URL, reusing a valid resume hint when available. */
+    private async resolveReady(
+        job: ResolvedJob,
+        ctx: JobExecutionContext,
+        startedAt: number,
+    ): Promise<{ getUrl: string } | { outcome: JobOutcome }> {
+        const hint = this.resumeHints.get(job.sourceKey);
+        if (hint?.fileHash === job.fileHash) {
+            const resumed = await this.resumeByJobId(hint.jobId, job, ctx, startedAt);
+            if (!('fallback' in resumed)) {
+                // A release from poll() refreshes the hint; all other outcomes consume it.
+                const releasedAgain =
+                    'outcome' in resumed && resumed.outcome.kind === 'release';
+                if (!releasedAgain) this.resumeHints.delete(job.sourceKey);
+                return resumed;
+            }
+            // This backend job cannot be resumed, so request again.
+            this.resumeHints.delete(job.sourceKey);
+        } else if (hint) {
+            // Attachment content changed since the hint was recorded.
+            this.resumeHints.delete(job.sourceKey);
+        }
+
+        const requestResult = await ocrApiClient.requestOcr(job.fileHash, job.pageCount);
+        this.throwIfAborted(ctx);
+        return this.resolveToReadyGetUrl(requestResult, job, ctx, startedAt);
+    }
+
+    /**
+     * Poll an existing backend job. Returns fallback when status cannot resume
+     * the normal poll path, such as a missing row or pending upload.
+     */
+    private async resumeByJobId(
+        jobId: string,
+        job: ResolvedJob,
+        ctx: JobExecutionContext,
+        startedAt: number,
+    ): Promise<{ getUrl: string } | { outcome: JobOutcome } | { fallback: true }> {
+        let status: OcrStatusResponse;
+        try {
+            status = await ocrApiClient.status(jobId);
+        } catch (error) {
+            if (error instanceof ApiError && error.status === 404) {
+                // Missing rows are re-created or rejoined through /ocr/request.
+                return { fallback: true };
+            }
+            throw error;
+        }
+        this.throwIfAborted(ctx);
+
+        switch (status.status) {
+            case 'completed':
+                if (status.get_url) return { getUrl: status.get_url };
+                return { outcome: { kind: 'retry', error: 'ocr_completed_without_url', reason: 'ocr_completed_without_url' } };
+            case 'failed':
+                return { outcome: this.failureOutcome(job, status.error) };
+            case 'queued':
+                return this.poll(jobId, job, ctx, startedAt);
+            case 'pending':
+                // /ocr/status cannot provide upload URLs.
+                return { fallback: true };
+        }
     }
 
     // ----------------------------------------------------------------------
@@ -269,8 +338,8 @@ export class OcrExecutor implements JobExecutor {
             waitMs = Math.min(waitMs * OCR_POLL_BACKOFF, OCR_POLL_MAX_MS);
         }
 
-        // Release after the poll budget so another claim can resume polling
-        // without exceeding this queue lease.
+        // Store the backend job id so the next claim can resume polling.
+        this.resumeHints.set(job.sourceKey, { jobId, fileHash: job.fileHash });
         logger(`OcrExecutor: ${job.sourceKey} poll budget exhausted; releasing to resume`, 2);
         return { outcome: { kind: 'release', reason: 'ocr_poll_timeout' } };
     }

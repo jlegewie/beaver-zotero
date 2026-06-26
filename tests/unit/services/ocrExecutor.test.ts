@@ -50,6 +50,7 @@ import {
 import { extractPdfBytesAndCacheAsOriginalAttachment } from '../../../src/services/documentExtraction/ocrReextract';
 import { resolveAttachmentFileSource } from '../../../src/services/documentExtraction/attachmentSource';
 import { OCR_ENGINE_VERSION } from '../../../src/services/ocr/constants';
+import { ApiError } from '../../../react/types/apiErrors';
 import type { JobExecutionContext } from '../../../src/services/backgroundQueue/jobExecutor';
 
 const api = ocrApiClient as unknown as {
@@ -303,5 +304,76 @@ describe('OcrExecutor', () => {
 
         expect(outcome.kind).toBe('release');
         expect((outcome as any).reason).toBe('ocr_poll_timeout');
+    });
+
+    it('resumes by job_id after a release and avoids another OCR request', async () => {
+        const ex = new OcrExecutor();
+
+        api.requestOcr.mockResolvedValue({ status: 'queued', job_id: 'job-r' });
+        api.status.mockResolvedValue({ status: 'queued' });
+        const first = await ex.execute(record, makeCtx());
+        expect(first.kind).toBe('release');
+        expect(api.requestOcr).toHaveBeenCalledTimes(1);
+
+        api.status.mockResolvedValue({ status: 'completed', get_url: 'https://gcs/get' });
+        const second = await ex.execute(record, makeCtx());
+
+        expect(api.requestOcr).toHaveBeenCalledTimes(1);
+        expect(api.status).toHaveBeenCalledWith('job-r');
+        expect(mockedGet).toHaveBeenCalledWith('https://gcs/get', expect.anything());
+        expect(second).toEqual({ kind: 'complete', reason: 'ocr_ok' });
+    });
+
+    it('falls back to /ocr/request when the resumed status 404s', async () => {
+        const ex = new OcrExecutor();
+        api.requestOcr.mockResolvedValue({ status: 'queued', job_id: 'job-404' });
+        api.status.mockResolvedValue({ status: 'queued' });
+        await ex.execute(record, makeCtx());
+        expect(api.requestOcr).toHaveBeenCalledTimes(1);
+
+        api.status.mockRejectedValueOnce(new ApiError(404, 'Not Found'));
+        api.requestOcr.mockResolvedValue({ status: 'ready', get_url: 'https://gcs/get' });
+        const second = await ex.execute(record, makeCtx());
+
+        expect(api.requestOcr).toHaveBeenCalledTimes(2);
+        expect(second).toEqual({ kind: 'complete', reason: 'ocr_ok' });
+    });
+
+    it('falls back to /ocr/request when the resumed status is still pending', async () => {
+        const ex = new OcrExecutor();
+        api.requestOcr.mockResolvedValue({ status: 'queued', job_id: 'job-p' });
+        api.status.mockResolvedValue({ status: 'queued' });
+        await ex.execute(record, makeCtx());
+
+        api.status.mockResolvedValue({ status: 'pending' });
+        api.requestOcr.mockResolvedValue({ status: 'ready', get_url: 'https://gcs/get' });
+        const second = await ex.execute(record, makeCtx());
+
+        expect(api.requestOcr).toHaveBeenCalledTimes(2);
+        expect(second).toEqual({ kind: 'complete', reason: 'ocr_ok' });
+    });
+
+    it('ignores a stale hint when the file hash changed between release and resume', async () => {
+        const ex = new OcrExecutor();
+        api.requestOcr.mockResolvedValue({ status: 'queued', job_id: 'job-h' });
+        api.status.mockResolvedValue({ status: 'queued' });
+        await ex.execute(record, makeCtx());
+        expect(api.requestOcr).toHaveBeenCalledTimes(1);
+        const statusCallsAfterFirst = api.status.mock.calls.length;
+
+        (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn(async () => ({
+            libraryID: 1,
+            key: 'AAAAAAAA',
+            id: 42,
+            attachmentHash: 'hashCHANGED',
+            attachmentContentType: 'application/pdf',
+        }));
+        api.requestOcr.mockResolvedValue({ status: 'ready', get_url: 'https://gcs/get' });
+        const second = await ex.execute(record, makeCtx());
+
+        expect(api.requestOcr).toHaveBeenCalledTimes(2);
+        expect(api.requestOcr).toHaveBeenLastCalledWith('hashCHANGED', 5);
+        expect(api.status.mock.calls.length).toBe(statusCallsAfterFirst);
+        expect(second).toEqual({ kind: 'complete', reason: 'ocr_ok' });
     });
 });

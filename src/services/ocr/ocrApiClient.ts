@@ -59,6 +59,22 @@ export interface OcrStatusResponse {
     error?: OcrError | null;
 }
 
+/** One job's status in a batched `/ocr/status/batch` response. */
+export interface OcrStatusItem {
+    job_id: string;
+    status: OcrJobStatus;
+    get_url?: string | null;
+    error?: OcrError | null;
+}
+
+/**
+ * Batched status response. Missing job IDs are omitted, so callers can decide
+ * how to recover absent rows.
+ */
+export interface OcrStatusBatchResponse {
+    jobs: OcrStatusItem[];
+}
+
 export class OcrApiClient extends ApiService {
     /** Request OCR for a content hash, joining/creating the backend job. */
     requestOcr(fileHash: string, pageCount: number): Promise<OcrRequestResponse> {
@@ -79,6 +95,16 @@ export class OcrApiClient extends ApiService {
     status(jobId: string): Promise<OcrStatusResponse> {
         return this.get<OcrStatusResponse>(
             `${OCR_API_PREFIX}/status?job_id=${encodeURIComponent(jobId)}`,
+        );
+    }
+
+    /** Poll several jobs in one request. Missing job IDs are omitted. */
+    statusBatch(jobIds: string[]): Promise<OcrStatusBatchResponse> {
+        const query = jobIds
+            .map((id) => `job_ids=${encodeURIComponent(id)}`)
+            .join('&');
+        return this.get<OcrStatusBatchResponse>(
+            `${OCR_API_PREFIX}/status/batch?${query}`,
         );
     }
 }
