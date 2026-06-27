@@ -23,11 +23,11 @@ export const OCR_POLL_MAX_MS = 15_000;
 export const OCR_POLL_BACKOFF = 1.5;
 
 /**
- * Wall-clock budget for one OcrExecutor run's polling. Kept under the queue's
- * visibility timeout so a long OCR releases the job (to be re-picked and resume
- * polling) instead of silently exceeding its lease.
+ * Wall-clock budget for slot-free OCR backend polling. It stays below the
+ * dispatcher's visibility timeout so a parked row does not re-surface while its
+ * background track is still polling.
  */
-export const OCR_POLL_BUDGET_MS = 4 * 60_000;
+export const OCR_TRACK_BUDGET_MS = 4 * 60_000;
 
 /**
  * Max job ids per `/ocr/status/batch` request (mirrors the backend cap). The
@@ -40,7 +40,8 @@ export const OCR_STATUS_BATCH_MAX = 50;
  * Background-queue priorities for OCR tickets (lower number = claimed first;
  * the dispatcher gates `priority >= 100` behind user idleness).
  *  - On-demand (a scan the user just opened) runs promptly and preempts backfill.
- *  - Backfill (whole-library signup processing) is idle-only.
+ *  - Backfill stays below the idle gate so it can make progress while yielding
+ *    to on-demand work.
  */
 export const OCR_PRIORITY_ON_DEMAND = 90;
-export const OCR_PRIORITY_BACKFILL = 100;
+export const OCR_PRIORITY_BACKFILL = 95;

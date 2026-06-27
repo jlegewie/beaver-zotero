@@ -23,7 +23,10 @@ export type JobOutcome =
         kind: 'failPermanent';
         failure: DocumentProcessingFailureInput;
         reason?: string;
-    };
+    }
+    // Free the lane slot while leaving the queue row parked. The executor must
+    // wake the row later, such as after a slot-free remote tracker settles.
+    | { kind: 'defer'; reason: string };
 
 export interface JobExecutor {
     readonly jobType: BackgroundJobType;
@@ -35,4 +38,8 @@ export interface JobExecutor {
         record: BackgroundJobRecord,
         error: string,
     ): DocumentProcessingFailureInput | null;
+    /**
+     * Release executor-owned work that outlives a single `execute()` call.
+     */
+    dispose?(): void;
 }

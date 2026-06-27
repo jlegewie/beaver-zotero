@@ -14,7 +14,7 @@ import { hasOcrAccessAtom } from '../atoms/profile';
 import { OcrExecutor } from '../../src/services/backgroundQueue/ocrExecutor';
 import { logger } from '../../src/utils/logger';
 
-/** OCR jobs are IO-bound (upload/poll/download); run a few concurrently. */
+/** Caps local OCR upload/download work; backend waits run slot-free. */
 const OCR_LANE_MAX_IN_FLIGHT = 3;
 
 export function useOcrLane(): void {

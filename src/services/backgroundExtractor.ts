@@ -118,11 +118,26 @@ export class BackgroundExtractor {
         options: { maxInFlight: number },
     ): void {
         const maxInFlight = Math.max(1, Math.floor(options.maxInFlight));
+        // Releasing a replaced executor stops any background work it owns (e.g.
+        // slot-free trackers behind a `defer`). The lane re-registers on window
+        // reload, so the previous instance must not keep polling.
+        const previous = this.executors.get(executor.jobType);
+        if (previous && previous.executor !== executor) {
+            this.disposeExecutor(previous.executor);
+        }
         this.executors.set(executor.jobType, { executor, maxInFlight });
         if (!this.laneInFlight.has(executor.jobType)) {
             this.laneInFlight.set(executor.jobType, new Map());
         }
         this.notify();
+    }
+
+    private disposeExecutor(executor: JobExecutor): void {
+        try {
+            executor.dispose?.();
+        } catch (e) {
+            logger(`BackgroundExtractor: executor.dispose failed: ${e}`, 1);
+        }
     }
 
     /** Schedule the first tick. Safe to call more than once. */
@@ -233,6 +248,11 @@ export class BackgroundExtractor {
         }
 
         await this.abortAndAwaitInFlight();
+        // Stop executor-owned background work (e.g. slot-free OCR trackers) that
+        // lives outside the lane in-flight maps and so is untouched by the abort.
+        for (const { executor } of this.executors.values()) {
+            this.disposeExecutor(executor);
+        }
         try {
             await disposeMuPDFWorker('background');
         } catch (e) {
@@ -500,6 +520,21 @@ export class BackgroundExtractor {
                                 ? `terminal:${outcome.failure.terminalCode}`
                                 : 'terminal'
                         ),
+                });
+                return;
+            case 'defer':
+                // Leave the row parked: the claim already bumped `available_at`
+                // by the visibility timeout, so doing nothing keeps the row
+                // invisible until the executor's own tracker wakes it (or the
+                // visibility window re-surfaces it). The lane slot is freed by
+                // launchJob's settle handler, like any other returned outcome.
+                logger(
+                    `BackgroundExtractor: job id=${record.id} deferred (${outcome.reason})`,
+                    3,
+                );
+                dispatchBackgroundEvent('background-job:deferred', {
+                    id: record.id,
+                    reason: outcome.reason,
                 });
                 return;
         }

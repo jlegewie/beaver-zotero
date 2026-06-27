@@ -7,7 +7,7 @@ vi.mock('../../../src/services/ocr/constants', async (importOriginal) => {
         ...actual,
         OCR_POLL_INITIAL_MS: 1,
         OCR_POLL_MAX_MS: 1,
-        OCR_POLL_BUDGET_MS: 50,
+        OCR_TRACK_BUDGET_MS: 50,
     };
 });
 
@@ -65,7 +65,7 @@ const mockedResolveSource = vi.mocked(resolveAttachmentFileSource);
 const mockedPut = vi.mocked(putBytesToSignedUrl);
 const mockedGet = vi.mocked(getBytesFromSignedUrl);
 
-const record = { libraryId: 1, zoteroKey: 'AAAAAAAA' } as any;
+const record = { id: 7, libraryId: 1, zoteroKey: 'AAAAAAAA' } as any;
 
 let dbStub: any;
 let fakePoller: { poll: ReturnType<typeof vi.fn> };
@@ -90,6 +90,8 @@ beforeEach(() => {
     dbStub = {
         isDocumentProcessingPermanentlyFailed: vi.fn(async () => false),
         clearDocumentProcessingFailure: vi.fn(async () => undefined),
+        // Used by the slot-free track to wake a parked row for the finish phase.
+        releaseBackgroundJob: vi.fn(async () => undefined),
     };
 
     (globalThis as any).Zotero.Items = {
@@ -102,11 +104,16 @@ beforeEach(() => {
         })),
     };
 
+    // The background track reaches the queue + dispatcher through `Zotero.Beaver`
+    // (the slot's ctx is gone once parked). ctx.db mirrors Zotero.Beaver.db.
     (globalThis as any).Zotero.Beaver = {
         documentCache: {
             getMetadata: vi.fn(async () => ({ pageCount: 5 })),
         },
+        db: dbStub,
+        backgroundExtractor: { notify: vi.fn() },
     };
+    (globalThis as any).Zotero.__beaverShuttingDown = false;
 
     (globalThis as any).IOUtils.read = vi.fn(async () => new Uint8Array([9, 9, 9]));
 
@@ -146,31 +153,54 @@ describe('OcrExecutor', () => {
         expect(outcome).toEqual({ kind: 'complete', reason: 'ocr_ok' });
     });
 
-    it('uploads, confirms, polls, then completes (pending)', async () => {
+    it('uploads, confirms, defers (slot-free), then finishes on re-claim (pending)', async () => {
         api.requestOcr.mockResolvedValue({ status: 'pending', job_id: 'job-1', put_url: 'https://gcs/put' });
         api.markUploaded.mockResolvedValue({ status: 'queued', job_id: 'job-1' });
+        // The slot-free track observes completion and wakes the parked row.
         fakePoller.poll.mockResolvedValue({ kind: 'completed', getUrl: 'https://gcs/get' });
-        const ctx = makeCtx();
 
-        const outcome = await executor.execute(record, ctx);
+        // First claim: upload + confirm, then park without holding the slot.
+        const first = await executor.execute(record, makeCtx());
 
         expect(mockedPut).toHaveBeenCalledWith('https://gcs/put', expect.any(Uint8Array), expect.anything());
         expect(api.markUploaded).toHaveBeenCalledWith('job-1');
         expect(fakePoller.poll).toHaveBeenCalledWith('job-1', expect.objectContaining({ deadline: expect.any(Number) }));
-        expect(outcome).toEqual({ kind: 'complete', reason: 'ocr_ok' });
+        expect(first).toEqual({ kind: 'defer', reason: 'ocr_polling' });
+        // Download and re-extraction wait until the row is re-claimed.
+        expect(mockedGet).not.toHaveBeenCalled();
+        expect(mockedReextract).not.toHaveBeenCalled();
+
+        // The track wakes the parked queue row for the finish phase.
+        await executor.drainTracks();
+        expect(dbStub.releaseBackgroundJob).toHaveBeenCalledWith(7, expect.any(Number));
+        expect((globalThis as any).Zotero.Beaver.backgroundExtractor.notify).toHaveBeenCalled();
+
+        // Re-claim: status confirms completion, then download + re-extract.
+        api.status.mockResolvedValue({ status: 'completed', get_url: 'https://gcs/get' });
+        const second = await executor.execute(record, makeCtx());
+
+        expect(api.status).toHaveBeenCalledWith('job-1');
+        expect(mockedGet).toHaveBeenCalledWith('https://gcs/get', expect.anything());
+        expect(second).toEqual({ kind: 'complete', reason: 'ocr_ok' });
     });
 
-    it('polls an already-queued job to completion', async () => {
+    it('defers an already-queued job, then finishes on re-claim', async () => {
         api.requestOcr.mockResolvedValue({ status: 'queued', job_id: 'job-2' });
         fakePoller.poll.mockResolvedValue({ kind: 'completed', getUrl: 'https://gcs/get' });
-        const ctx = makeCtx();
 
-        const outcome = await executor.execute(record, ctx);
+        const first = await executor.execute(record, makeCtx());
 
         expect(mockedPut).not.toHaveBeenCalled();
         expect(fakePoller.poll).toHaveBeenCalledTimes(1);
         expect(fakePoller.poll).toHaveBeenCalledWith('job-2', expect.objectContaining({ deadline: expect.any(Number) }));
-        expect(outcome).toEqual({ kind: 'complete', reason: 'ocr_ok' });
+        expect(first).toEqual({ kind: 'defer', reason: 'ocr_polling' });
+
+        await executor.drainTracks();
+        expect(dbStub.releaseBackgroundJob).toHaveBeenCalledWith(7, expect.any(Number));
+
+        api.status.mockResolvedValue({ status: 'completed', get_url: 'https://gcs/get' });
+        const second = await executor.execute(record, makeCtx());
+        expect(second).toEqual({ kind: 'complete', reason: 'ocr_ok' });
     });
 
     it('completes without work when the backend reports disabled', async () => {
@@ -335,28 +365,31 @@ describe('OcrExecutor', () => {
         expect(outcome).toEqual({ kind: 'release', reason: 'aborted' });
     });
 
-    it('releases when the poll budget is exhausted', async () => {
+    it('defers; a track timeout leaves the row parked (no early wake)', async () => {
         api.requestOcr.mockResolvedValue({ status: 'queued', job_id: 'job-4' });
         fakePoller.poll.mockResolvedValue({ kind: 'timeout' });
-        const ctx = makeCtx();
 
-        const outcome = await executor.execute(record, ctx);
+        const outcome = await executor.execute(record, makeCtx());
+        expect(outcome).toEqual({ kind: 'defer', reason: 'ocr_polling' });
 
-        expect(outcome.kind).toBe('release');
-        expect((outcome as any).reason).toBe('ocr_poll_timeout');
+        await executor.drainTracks();
+        // A timeout leaves the row parked until its visibility window re-surfaces it.
+        expect(dbStub.releaseBackgroundJob).not.toHaveBeenCalled();
+        expect((globalThis as any).Zotero.Beaver.backgroundExtractor.notify).not.toHaveBeenCalled();
     });
 
-    it('resumes by job_id after a release and avoids another OCR request', async () => {
+    it('resumes by job_id after deferring and avoids another OCR request', async () => {
         const ex = new OcrExecutor(fakePoller as any);
 
         api.requestOcr.mockResolvedValue({ status: 'queued', job_id: 'job-r' });
         fakePoller.poll.mockResolvedValue({ kind: 'timeout' });
         const first = await ex.execute(record, makeCtx());
-        expect(first.kind).toBe('release');
+        expect(first.kind).toBe('defer');
         expect(api.requestOcr).toHaveBeenCalledTimes(1);
+        await ex.drainTracks();
 
-        // Resume: the job is now complete. resumeByJobId probes single /ocr/status
-        // with the known job_id and must NOT call /ocr/request again.
+        // Resume: the job is now complete, so the known job_id is checked
+        // without creating another backend request.
         api.status.mockResolvedValue({ status: 'completed', get_url: 'https://gcs/get' });
         const second = await ex.execute(record, makeCtx());
 
@@ -371,6 +404,7 @@ describe('OcrExecutor', () => {
         api.requestOcr.mockResolvedValue({ status: 'queued', job_id: 'job-404' });
         fakePoller.poll.mockResolvedValue({ kind: 'timeout' });
         await ex.execute(record, makeCtx());
+        await ex.drainTracks();
         expect(api.requestOcr).toHaveBeenCalledTimes(1);
 
         api.status.mockRejectedValueOnce(new ApiError(404, 'Not Found'));
@@ -386,6 +420,7 @@ describe('OcrExecutor', () => {
         api.requestOcr.mockResolvedValue({ status: 'queued', job_id: 'job-p' });
         fakePoller.poll.mockResolvedValue({ kind: 'timeout' });
         await ex.execute(record, makeCtx());
+        await ex.drainTracks();
 
         api.status.mockResolvedValue({ status: 'pending' });
         api.requestOcr.mockResolvedValue({ status: 'ready', get_url: 'https://gcs/get' });
@@ -395,11 +430,12 @@ describe('OcrExecutor', () => {
         expect(second).toEqual({ kind: 'complete', reason: 'ocr_ok' });
     });
 
-    it('ignores a stale hint when the file hash changed between release and resume', async () => {
+    it('ignores a stale hint when the file hash changed between defer and resume', async () => {
         const ex = new OcrExecutor(fakePoller as any);
         api.requestOcr.mockResolvedValue({ status: 'queued', job_id: 'job-h' });
         fakePoller.poll.mockResolvedValue({ kind: 'timeout' });
         await ex.execute(record, makeCtx());
+        await ex.drainTracks();
         expect(api.requestOcr).toHaveBeenCalledTimes(1);
         const statusCallsAfterFirst = api.status.mock.calls.length;
 
@@ -417,5 +453,25 @@ describe('OcrExecutor', () => {
         expect(api.requestOcr).toHaveBeenLastCalledWith('hashCHANGED', 5);
         expect(api.status.mock.calls.length).toBe(statusCallsAfterFirst);
         expect(second).toEqual({ kind: 'complete', reason: 'ocr_ok' });
+    });
+
+    it('dispose() aborts an in-flight track without waking the row', async () => {
+        api.requestOcr.mockResolvedValue({ status: 'queued', job_id: 'job-d' });
+        // A track that only settles when its abort signal fires.
+        fakePoller.poll.mockImplementation(
+            (_id: string, opts: { signal: AbortSignal }) =>
+                new Promise((_resolve, reject) => {
+                    opts.signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+                }),
+        );
+
+        const outcome = await executor.execute(record, makeCtx());
+        expect(outcome).toEqual({ kind: 'defer', reason: 'ocr_polling' });
+
+        executor.dispose();
+        await executor.drainTracks();
+
+        expect(dbStub.releaseBackgroundJob).not.toHaveBeenCalled();
+        expect((globalThis as any).Zotero.Beaver.backgroundExtractor.notify).not.toHaveBeenCalled();
     });
 });

@@ -1,11 +1,13 @@
 /**
  * OCR background lane for scanned PDFs without a text layer.
  *
- * This is a network/IO job: request OCR, upload the source PDF, poll for the
- * searchable PDF, re-extract its bytes, cache the result against the original
- * attachment identity, and discard the OCR PDF. Multiple OCR jobs can run
- * concurrently, but final re-extraction uses the serialized background MuPDF
- * lane via `ctx.runOnMuPDFWorker`.
+ * This is a network/IO job: request OCR, upload the source PDF, wait for a
+ * searchable PDF, re-extract it, and cache it against the original attachment.
+ *
+ * Backend waits are slot-free: queued OCR jobs are tracked by the shared poller,
+ * and the queue row is woken later for download + re-extraction. Final
+ * re-extraction still uses the serialized background MuPDF lane via
+ * `ctx.runOnMuPDFWorker`.
  *
  * Registered from the webpack `GlobalContextInitializer` (it needs the
  * Supabase-authenticated backend client); the esbuild dispatcher only knows the
@@ -27,13 +29,14 @@ import {
 } from '../ocr/gcsTransfer';
 import {
     OcrAbort,
+    type OcrPollResult,
     OcrStatusPoller,
     ocrStatusPoller,
 } from '../ocr/ocrStatusPoller';
 import {
     OCR_ENGINE_VERSION,
     OCR_OUTCOME_DETAIL_MAX,
-    OCR_POLL_BUDGET_MS,
+    OCR_TRACK_BUDGET_MS,
     OCR_TERMINAL_FAILED,
     OCR_TERMINAL_GEOMETRY,
     OCR_TERMINAL_NO_TEXT,
@@ -59,13 +62,39 @@ export class OcrExecutor implements JobExecutor {
     readonly jobType = 'document_ocr' as const;
 
     /**
-     * Resume hints keyed by source item after poll-budget release.
-     * The file hash makes the hint valid only for the same attachment content.
+     * Resume hints keyed by source item. The file hash keeps each hint scoped to
+     * the attachment content that created the backend job.
      */
     private readonly resumeHints = new Map<string, { jobId: string; fileHash: string }>();
 
+    /**
+     * Slot-free background polls keyed by source item. At most one live track
+     * polls and wakes the parked row for each source attachment.
+     */
+    private readonly tracks = new Map<string, { promise: Promise<void>; abort: AbortController }>();
+
     /** The poller is injectable so callers can provide scoped instances. */
     constructor(private readonly poller: OcrStatusPoller = ocrStatusPoller) {}
+
+    /**
+     * Abort background tracks when the dispatcher shuts down or replaces this
+     * executor.
+     */
+    dispose(): void {
+        for (const track of this.tracks.values()) {
+            try {
+                track.abort.abort();
+            } catch {
+                // best-effort
+            }
+        }
+        this.tracks.clear();
+    }
+
+    /** Await all in-flight background tracks to settle before shutdown completes. */
+    async drainTracks(): Promise<void> {
+        await Promise.allSettled([...this.tracks.values()].map((t) => t.promise));
+    }
 
     async execute(
         record: BackgroundJobRecord,
@@ -92,10 +121,6 @@ export class OcrExecutor implements JobExecutor {
         record: BackgroundJobRecord,
         ctx: JobExecutionContext,
     ): Promise<JobOutcome> {
-        // Anchor the poll budget to the start of the whole run so that resolve
-        // + upload time count against it, not just the polling loop.
-        const startedAt = Date.now();
-
         const resolved = await this.resolveJob(record, ctx);
         if ('outcome' in resolved) return resolved.outcome;
         const job = resolved.job;
@@ -111,7 +136,7 @@ export class OcrExecutor implements JobExecutor {
             return { kind: 'complete', reason: 'ocr_perm_failed' };
         }
 
-        const ready = await this.resolveReady(job, ctx, startedAt);
+        const ready = await this.resolveReady(job, ctx, record.id);
         if ('outcome' in ready) return ready.outcome;
 
         const ocrBytes = await this.download(ready.getUrl, ctx);
@@ -123,16 +148,17 @@ export class OcrExecutor implements JobExecutor {
     private async resolveReady(
         job: ResolvedJob,
         ctx: JobExecutionContext,
-        startedAt: number,
+        recordId: number,
     ): Promise<{ getUrl: string } | { outcome: JobOutcome }> {
         const hint = this.resumeHints.get(job.sourceKey);
         if (hint?.fileHash === job.fileHash) {
-            const resumed = await this.resumeByJobId(hint.jobId, job, ctx, startedAt);
+            const resumed = await this.resumeByJobId(hint.jobId, job, ctx, recordId);
             if (!('fallback' in resumed)) {
-                // A release from poll() refreshes the hint; all other outcomes consume it.
-                const releasedAgain =
-                    'outcome' in resumed && resumed.outcome.kind === 'release';
-                if (!releasedAgain) this.resumeHints.delete(job.sourceKey);
+                // Keep hints only for outcomes that are resumed on a later claim.
+                const willResume =
+                    'outcome' in resumed
+                    && (resumed.outcome.kind === 'defer' || resumed.outcome.kind === 'release');
+                if (!willResume) this.resumeHints.delete(job.sourceKey);
                 return resumed;
             }
             // This backend job cannot be resumed, so request again.
@@ -144,18 +170,18 @@ export class OcrExecutor implements JobExecutor {
 
         const requestResult = await ocrApiClient.requestOcr(job.fileHash, job.pageCount);
         this.throwIfAborted(ctx);
-        return this.resolveToReadyGetUrl(requestResult, job, ctx, startedAt);
+        return this.resolveToReadyGetUrl(requestResult, job, ctx, recordId);
     }
 
     /**
-     * Poll an existing backend job. Returns fallback when status cannot resume
-     * the normal poll path, such as a missing row or pending upload.
+     * Check an existing backend job once. Completed jobs finish in this slot;
+     * queued jobs park again, and non-resumable states fall back to /ocr/request.
      */
     private async resumeByJobId(
         jobId: string,
         job: ResolvedJob,
         ctx: JobExecutionContext,
-        startedAt: number,
+        recordId: number,
     ): Promise<{ getUrl: string } | { outcome: JobOutcome } | { fallback: true }> {
         let status: OcrStatusResponse;
         try {
@@ -176,7 +202,7 @@ export class OcrExecutor implements JobExecutor {
             case 'failed':
                 return { outcome: this.failureOutcome(job, status.error) };
             case 'queued':
-                return this.poll(jobId, job, ctx, startedAt);
+                return this.defer(jobId, job, recordId);
             case 'pending':
                 // /ocr/status cannot provide upload URLs.
                 return { fallback: true };
@@ -256,14 +282,14 @@ export class OcrExecutor implements JobExecutor {
     }
 
     // ----------------------------------------------------------------------
-    // Request OCR and poll until the backend provides a signed download URL.
+    // Request OCR, then park the job for slot-free backend polling.
     // ----------------------------------------------------------------------
 
     private async resolveToReadyGetUrl(
         request: OcrRequestResponse,
         job: ResolvedJob,
         ctx: JobExecutionContext,
-        startedAt: number,
+        recordId: number,
     ): Promise<{ getUrl: string } | { outcome: JobOutcome }> {
         switch (request.status) {
             case 'disabled':
@@ -286,13 +312,13 @@ export class OcrExecutor implements JobExecutor {
                 await this.upload(request.put_url, job, ctx);
                 await ocrApiClient.markUploaded(request.job_id);
                 this.throwIfAborted(ctx);
-                return this.poll(request.job_id, job, ctx, startedAt);
+                return this.defer(request.job_id, job, recordId);
             }
             case 'queued':
                 if (!request.job_id) {
                     return { outcome: { kind: 'retry', error: 'ocr_queued_without_job_id', reason: 'ocr_queued_without_job_id' } };
                 }
-                return this.poll(request.job_id, job, ctx, startedAt);
+                return this.defer(request.job_id, job, recordId);
         }
     }
 
@@ -315,37 +341,74 @@ export class OcrExecutor implements JobExecutor {
         });
     }
 
-    private async poll(
+    // ----------------------------------------------------------------------
+    // Park the job: free the slot, let the shared poller track the backend job.
+    // ----------------------------------------------------------------------
+
+    /**
+     * Park the queue row and track the backend job without holding a lane slot.
+     * The resume hint lets the next claim continue this backend job.
+     */
+    private defer(
         jobId: string,
         job: ResolvedJob,
-        ctx: JobExecutionContext,
-        startedAt: number,
-    ): Promise<{ getUrl: string } | { outcome: JobOutcome }> {
-        // Hand polling to the shared batched poller. The budget is measured from
-        // the run start (not from here), so a slow upload eats into it and the
-        // total stays under the queue lease. An abort rejects with OcrAbort,
-        // which bubbles to execute()'s catch → release.
-        const deadline = startedAt + OCR_POLL_BUDGET_MS;
-        const result = await this.poller.poll(jobId, {
-            deadline,
-            signal: ctx.externalAbortSignal,
-        });
+        recordId: number,
+    ): { outcome: JobOutcome } {
+        this.resumeHints.set(job.sourceKey, { jobId, fileHash: job.fileHash });
+        this.startTracking(jobId, job, recordId);
+        return { outcome: { kind: 'defer', reason: 'ocr_polling' } };
+    }
 
-        switch (result.kind) {
-            case 'completed':
-                if (result.getUrl) return { getUrl: result.getUrl };
-                return { outcome: { kind: 'retry', error: 'ocr_completed_without_url', reason: 'ocr_completed_without_url' } };
-            case 'failed':
-                return { outcome: this.failureOutcome(job, result.error) };
-            case 'gone':
-                // The row vanished mid-poll; re-claim later and re-request.
-                return { outcome: { kind: 'retry', error: 'ocr_status_gone', reason: 'ocr_status_gone' } };
-            case 'timeout':
-                // Store the backend job id so the next claim resumes polling.
-                this.resumeHints.set(job.sourceKey, { jobId, fileHash: job.fileHash });
-                logger(`OcrExecutor: ${job.sourceKey} poll budget exhausted; releasing to resume`, 2);
-                return { outcome: { kind: 'release', reason: 'ocr_poll_timeout' } };
+    /**
+     * Start the single slot-free poll for this attachment. Terminal states wake
+     * the parked row; timeouts let the visibility window re-surface it.
+     */
+    private startTracking(jobId: string, job: ResolvedJob, recordId: number): void {
+        // One live track per attachment. If a slow backend job outlives the
+        // visibility window and the row re-surfaces, the re-claim defers again
+        // without starting a second poll for the same source.
+        if (this.tracks.has(job.sourceKey)) return;
+
+        const abort = new AbortController();
+        const deadline = Date.now() + OCR_TRACK_BUDGET_MS;
+        const promise = this.poller
+            .poll(jobId, { deadline, signal: abort.signal })
+            .then((result) => this.wakeOnSettle(job, recordId, result))
+            // Dispose/shutdown aborts the poll; there is no row to wake.
+            .catch(() => undefined)
+            .finally(() => {
+                const current = this.tracks.get(job.sourceKey);
+                if (current && current.abort === abort) {
+                    this.tracks.delete(job.sourceKey);
+                }
+            });
+        this.tracks.set(job.sourceKey, { promise, abort });
+    }
+
+    /**
+     * Re-arm the parked queue row after a terminal backend status.
+     */
+    private async wakeOnSettle(
+        job: ResolvedJob,
+        recordId: number,
+        result: OcrPollResult,
+    ): Promise<void> {
+        // Timeout: leave the row parked; its visibility window re-surfaces it
+        // and the next claim resumes via the stored hint.
+        if (result.kind === 'timeout') return;
+        if (Zotero.__beaverShuttingDown === true) return;
+
+        const db = Zotero.Beaver?.db;
+        if (!db) return;
+        try {
+            // Make the parked row claimable now; the next claim resumes the
+            // backend job (resume hint) and runs the download + re-extract.
+            await db.releaseBackgroundJob(recordId, Date.now());
+        } catch (error) {
+            logger(`OcrExecutor: ${job.sourceKey} wake release failed: ${error}`, 2);
+            return;
         }
+        Zotero.Beaver?.backgroundExtractor?.notify();
     }
 
     // ----------------------------------------------------------------------
