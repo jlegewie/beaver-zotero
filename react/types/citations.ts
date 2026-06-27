@@ -469,13 +469,17 @@ export const getCitationBoundingBoxes = (citation: Citation | null | undefined):
  * Mirrors Zotero's `item.getItemTypeIconName()` for the cases citations can
  * resolve to, without requiring a live item. Regular item types pass through
  * (their type name is the icon name); attachments branch on content kind.
+ *
+ * `content_kind` is set only for attachments and pins the exact attachment
+ * glyph, so it is honored whenever present — including when `item_type` is
+ * absent. Some tool-result rows carry `content_kind` but no `item_type`; without
+ * this, a known attachment kind would fall back to the generic document icon.
  */
 export function itemTypeToIconName(
     itemType: string | undefined,
     contentKind: ContentKind | undefined,
 ): string {
-    if (!itemType) return 'document';
-    if (itemType === 'attachment') {
+    if (itemType === 'attachment' || (!itemType && contentKind)) {
         switch (contentKind) {
             case 'epub': return 'attachmentEPUB';
             case 'snapshot': return 'attachmentSnapshot';
@@ -484,5 +488,6 @@ export function itemTypeToIconName(
             default: return 'attachmentPDF';
         }
     }
+    if (!itemType) return 'document';
     return itemType;
 }
