@@ -63,9 +63,6 @@ function unreadableTypeReason(kind: ContentKind): string {
     if (kind === 'image') {
         return 'Image attachments cannot be read as text.';
     }
-    if (kind === 'snapshot') {
-        return 'Beaver cannot read web page snapshots yet.';
-    }
     if (isReadableContentKind(kind)) {
         return `Beaver cannot yet read ${contentKindLabel(kind)} attachments.`;
     }
@@ -328,8 +325,8 @@ async function resolveEpubInfo(
                 }
                 // Image-only/scanned EPUBs have sections but zero extracted
                 // text; the read path rejects them as no_text_layer, so the
-                // status must agree. Absent diagnostics (older cache rows)
-                // stay readable — unknown is not zero.
+                // status must agree. Missing diagnostics stay readable because
+                // unknown is not zero.
                 if (epubMeta?.extractedTextChars === 0) {
                     return {
                         page_count: sectionCount,
@@ -341,6 +338,49 @@ async function resolveEpubInfo(
                 // Use the cached page count when available; otherwise report
                 // the section count as the best available EPUB extent.
                 return { page_count: epubMeta?.pageCount ?? sectionCount, status: 'readable' };
+            }
+        } catch (error) {
+            logger(`getAttachmentInfo: cache read error: ${error}`, 1);
+        }
+    }
+    return { page_count: null, status: 'readable' };
+}
+
+async function resolveSnapshotInfo(
+    attachment: Zotero.Item,
+    availability: Extract<AttachmentAvailabilityResult, { available: true }>,
+): Promise<Pick<AttachmentInfo, 'status' | 'status_code' | 'status_reason' | 'page_count'>> {
+    const cache = Zotero.Beaver?.documentCache;
+    if (cache) {
+        try {
+            const cached = await cache.getMetadata({
+                libraryId: attachment.libraryID,
+                zoteroKey: attachment.key,
+            }, availability.filePath);
+            if (cached && cached.contentKind === 'snapshot') {
+                if (cached.errorCode) {
+                    return {
+                        page_count: null,
+                        status: 'unreadable',
+                        status_code: 'snapshot_invalid',
+                        status_reason: 'Snapshot could not be read by the local extractor.',
+                    };
+                }
+                const meta = cached.documentMetadata;
+                const snapshotMeta = meta?.content_kind === 'snapshot' ? meta : null;
+                // Text-empty snapshots are rejected as no_text_layer by the read
+                // path, so the status must agree. Missing diagnostics stay
+                // readable because unknown is not zero.
+                if (snapshotMeta?.extractedTextChars === 0) {
+                    return {
+                        page_count: snapshotMeta?.pageCount ?? null,
+                        status: 'unreadable',
+                        status_code: 'snapshot_no_text',
+                        status_reason: 'Snapshot contains no extractable text.',
+                    };
+                }
+                // Synthetic page count when known; a single section otherwise.
+                return { page_count: snapshotMeta?.pageCount ?? 1, status: 'readable' };
             }
         } catch (error) {
             logger(`getAttachmentInfo: cache read error: ${error}`, 1);
@@ -397,18 +437,17 @@ export async function getAttachmentInfo(
         base.annotations_count = item.isFileAttachment?.() ? item.getAnnotations().length : 0;
     }
 
-    // Linked URLs are web links, not files. Snapshots are a recognized content
-    // kind but not agent-readable yet, so they are surfaced as unreadable here
-    // (revisit when end-to-end snapshot support lands).
-    if (contentKind === 'linked_url' || contentKind === 'snapshot') {
+    // Linked URLs are web links, not files Beaver can read.
+    if (contentKind === 'linked_url') {
         return { ...base, status_reason: unreadableTypeReason(contentKind) };
     }
 
-    // PDF, EPUB, and plain text are always readable (text via the line-based
-    // `read` tool); image stays behind the nonPdfReadableEnabled option until
-    // extraction supports it.
+    // PDF, EPUB, snapshots, and plain text are always readable (text via the
+    // line-based `read` tool); image stays behind the nonPdfReadableEnabled
+    // option until extraction supports it.
     const isUnconditionallyReadable =
-        contentKind === 'pdf' || contentKind === 'epub' || contentKind === 'text';
+        contentKind === 'pdf' || contentKind === 'epub'
+        || contentKind === 'snapshot' || contentKind === 'text';
     if (!isReadableContentKind(contentKind) || (!isUnconditionallyReadable && !options.nonPdfReadableEnabled)) {
         return { ...base, status_reason: unreadableTypeReason(contentKind) };
     }
@@ -442,6 +481,22 @@ export async function getAttachmentInfo(
         }
         const epubInfo = await resolveEpubInfo(item, availability);
         return { ...base, ...epubInfo };
+    }
+
+    if (contentKind === 'snapshot') {
+        // Snapshot extraction reads the local HTML file directly and never
+        // downloads remote bytes, so a remote-only snapshot is unreadable even
+        // with remote access enabled.
+        if (isRemoteFilePath(availability.filePath)) {
+            return {
+                ...base,
+                status: 'unreadable',
+                status_code: 'file_not_local_remote',
+                status_reason: 'The snapshot file is available remotely but is not synced locally. Sync it in Zotero so Beaver can read it.',
+            };
+        }
+        const snapshotInfo = await resolveSnapshotInfo(item, availability);
+        return { ...base, ...snapshotInfo };
     }
 
     return { ...base, status: 'readable' };

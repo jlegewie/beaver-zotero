@@ -29,13 +29,16 @@ import type { PageGeometry } from '../beaver-extract/types';
 import {
     buildEpubCachedMetadata,
     buildPdfCachedMetadata,
+    buildSnapshotCachedMetadata,
     type EpubSectionSummary,
+    type SnapshotSectionSummary,
 } from './documentExtraction/shared/contentKinds';
 import {
     expectedExtractionSchemaVersion,
     type ExtractContentKind,
 } from './documentExtraction/shared/extractionSchemaVersions';
 import { validateEpubDocument, type EpubDocument } from './documentExtraction/epub';
+import { validateSnapshotDocument, type SnapshotDocument } from './documentExtraction/snapshot';
 
 export const DOCUMENT_METADATA_FORMAT_VERSION = 1;
 export const DOCUMENT_PAYLOAD_FORMAT_VERSION = 1;
@@ -89,6 +92,13 @@ interface CacheMetadataInput {
     epubPageCount?: number | null;
     /** Extraction-diagnostics text total; flags image-only EPUBs on read. */
     epubExtractedTextChars?: number | null;
+    snapshotSections?: SnapshotSectionSummary[];
+    /** Snapshot document title (first section label). */
+    snapshotTitle?: string;
+    /** Snapshot total synthetic page count; PDF uses `pageCount`. */
+    snapshotPageCount?: number | null;
+    /** Extraction-diagnostics text total; flags text-empty snapshots on read. */
+    snapshotExtractedTextChars?: number | null;
     /** Authoritative error reason; omitted or `null` marks a successful extraction. */
     errorCode?: DocumentCacheErrorCode | null;
 }
@@ -392,6 +402,86 @@ export class DocumentCache {
             return result;
         } catch (error) {
             logger(`DocumentCache.getEpubResult error: ${error}`, 1);
+            return null;
+        }
+    }
+
+    /** Get a cached snapshot extraction result for the current source identity. */
+    async getSnapshotResult(
+        ref: { libraryId: number; zoteroKey: string },
+        filePath: string,
+        options?: { maxSourceSizeBytes?: number },
+    ): Promise<SnapshotDocument | null> {
+        try {
+            const payloadKind: PayloadKind = 'structured';
+            const metadata = await this.getMetadata(ref, filePath);
+            if (!metadata) return null;
+            if (options?.maxSourceSizeBytes != null && metadata.sourceSizeBytes > options.maxSourceSizeBytes) {
+                return null;
+            }
+            if (metadata.contentKind !== 'snapshot') {
+                // `text` is the remaining non-payload kind; drop its stale row.
+                if (metadata.contentKind === 'text') {
+                    const deletedPayloads = await this.db.deleteDocumentCacheMetadataIfUnchanged(metadata);
+                    if (deletedPayloads) {
+                        await this.removePayloadFiles(deletedPayloads);
+                    }
+                }
+                return null;
+            }
+
+            const payload = await this.db.getDocumentCachePayload(ref.libraryId, ref.zoteroKey, payloadKind);
+            if (!payload) return null;
+
+            if (!this.isPayloadRowFresh(payload, metadata, payloadKind)) {
+                await this.deletePayload(payload);
+                return null;
+            }
+
+            const exists = await IOUtils.exists(payload.payloadPath);
+            if (!exists) {
+                await this.deletePayload(payload, false);
+                return null;
+            }
+
+            const bytes = await IOUtils.read(payload.payloadPath);
+            if (payload.payloadSha256) {
+                const sha256 = await this.sha256Hex(bytes);
+                if (sha256 !== payload.payloadSha256) {
+                    await this.deletePayload(payload);
+                    return null;
+                }
+            }
+
+            let parsed: unknown;
+            try {
+                parsed = JSON.parse(gunzipToString(bytes));
+            } catch {
+                await this.deletePayload(payload);
+                return null;
+            }
+
+            let result: SnapshotDocument;
+            try {
+                result = validateSnapshotDocument(parsed);
+            } catch {
+                await this.deletePayload(payload);
+                return null;
+            }
+
+            if (
+                metadata.documentMetadata?.content_kind === 'snapshot'
+                && metadata.documentMetadata.sections != null
+                && metadata.documentMetadata.sections.length !== result.sectionCount
+            ) {
+                await this.deletePayload(payload);
+                return null;
+            }
+
+            await this.db.touchDocumentCachePayload(payload.id).catch(() => undefined);
+            return result;
+        } catch (error) {
+            logger(`DocumentCache.getSnapshotResult error: ${error}`, 1);
             return null;
         }
     }
@@ -1165,7 +1255,14 @@ export class DocumentCache {
                     metadata.epubExtractedTextChars,
                     metadata.epubPageCount,
                 )
-                : buildPdfCachedMetadata(metadata.pageCount, pageLabels, pages),
+                : contentKind === 'snapshot'
+                    ? buildSnapshotCachedMetadata(
+                        metadata.snapshotSections ?? [],
+                        metadata.snapshotTitle,
+                        metadata.snapshotPageCount,
+                        metadata.snapshotExtractedTextChars,
+                    )
+                    : buildPdfCachedMetadata(metadata.pageCount, pageLabels, pages),
             errorCode: metadata.errorCode ?? null,
             extractionSchemaVersion,
             metadataFormatVersion: DOCUMENT_METADATA_FORMAT_VERSION,

@@ -107,6 +107,9 @@ import {
     handleTestEpubExtractHttpRequest,
 } from './httpHandlers/testEpubHandlers';
 import {
+    handleTestSnapshotExtractHttpRequest,
+} from './httpHandlers/testSnapshotHandlers';
+import {
     handleTestEpubAnnotationParityHttpRequest,
 } from './httpHandlers/testEpubAnnotationHandlers';
 import {
@@ -247,6 +250,7 @@ const ENDPOINT_PATHS = [
     '/beaver/test/pdf-analyze-layout',
     // EPUB extraction over a raw file path or attachment (corpus triage)
     '/beaver/test/epub-extract',
+    '/beaver/test/snapshot-extract',
     // EPUB annotation CFI/sortIndex parity (headless resolver vs reader)
     '/beaver/test/epub-annotation-parity',
     // Reader position / EPUB citation-navigation verification (dev-only)
@@ -960,6 +964,10 @@ function registerEndpoints(): boolean {
         // EPUB extraction over a raw file path / attachment (corpus triage)
         Zotero.Server.Endpoints['/beaver/test/epub-extract'] =
             createEndpoint(handleTestEpubExtractHttpRequest);
+
+        // Snapshot extraction over a raw HTML file path / attachment
+        Zotero.Server.Endpoints['/beaver/test/snapshot-extract'] =
+            createEndpoint(handleTestSnapshotExtractHttpRequest);
 
         // EPUB annotation CFI/sortIndex parity: headless resolver vs the reader's
         // own getAnnotationFromRange for the same target.

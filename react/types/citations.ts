@@ -381,6 +381,10 @@ export type SymbolicLocation =
 export const getSymbolicLocation = (
     citation: Citation | null | undefined,
 ): SymbolicLocation | undefined => {
+    // Snapshot citations carry anchor_id/text and (usually) no stored selector —
+    // the selector is computed at click/annotation time — so they are matched by
+    // content kind rather than field presence, unlike EPUB/text.
+    const isSnapshot = getContentKind(citation) === 'snapshot';
     for (const location of citation?.locations || []) {
         if (location.section_href != null) {
             return {
@@ -398,10 +402,10 @@ export const getSymbolicLocation = (
                 ...(location.text != null ? { text: location.text } : {}),
             };
         }
-        if (location.selector != null) {
+        if (isSnapshot && (location.selector != null || location.anchor_id != null || location.text != null)) {
             return {
                 content_kind: 'snapshot',
-                selector: location.selector,
+                ...(location.selector != null ? { selector: location.selector } : {}),
                 ...(location.anchor_id != null ? { anchor_id: location.anchor_id } : {}),
                 ...(location.text != null ? { text: location.text } : {}),
             };

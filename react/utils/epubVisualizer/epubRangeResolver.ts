@@ -13,16 +13,16 @@ import {
     createSentenceRange,
     findAnchorElement,
     normalizeHrefBasename,
-} from "../../../src/services/documentExtraction/epub/epubTextRange";
+} from "../../../src/services/documentExtraction/dom/textRange";
 
-// Re-export the shared text-search helpers so existing consumers of this module
-// (and tests) keep their import paths. The implementations now live in `src/`
-// so the headless EPUB annotation resolver can reuse them.
+// Re-export the shared text-search helpers for callers that use this reader-side
+// module. The implementations live in `src/dom` so headless annotation resolvers
+// can reuse them.
 export {
     createElementContentsRange,
     createSentenceRange,
     normalizeHrefBasename,
-} from "../../../src/services/documentExtraction/epub/epubTextRange";
+} from "../../../src/services/documentExtraction/dom/textRange";
 import {
     ensureSectionMounted,
     getSectionBody,

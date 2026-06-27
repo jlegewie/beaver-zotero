@@ -16,26 +16,16 @@
  * text-separated page anchors these matchers target.
  */
 
-export interface EpubPageMarker {
-    /** Raw spine itemref index of the section the marker is in. */
-    sectionIndex: number;
-    /** Character count from the section root to the marker. */
-    charOffset: number;
-    label: string;
-}
-
-export interface EpubPageMapping {
-    isPhysical: boolean;
-    /** Markers sorted ascending by (sectionIndex, charOffset). Empty when not physical. */
-    markers: EpubPageMarker[];
-}
+import {
+    EMPTY_PAGE_MAPPING,
+    type PageMapping,
+    type PageMarker,
+} from "../dom/pagination";
 
 export interface PageMappingSectionMarkers {
     sectionIndex: number;
-    markersByMatcher: EpubPageMarker[][];
+    markersByMatcher: PageMarker[][];
 }
-
-export const EMPTY_EPUB_PAGE_MAPPING: EpubPageMapping = { isPhysical: false, markers: [] };
 
 interface Matcher {
     selector: string;
@@ -67,7 +57,7 @@ export function extractSectionPageMarkers(
         } catch {
             return [];
         }
-        const markers: EpubPageMarker[] = [];
+        const markers: PageMarker[] = [];
         for (const el of elems) {
             const label = matcher.extract(el);
             if (!label) continue;
@@ -89,12 +79,12 @@ export function extractSectionPageMarkers(
 export function scorePageMarkers(
     sections: PageMappingSectionMarkers[],
     totalSpineCount: number,
-): EpubPageMapping {
+): PageMapping {
     const denominator = Math.max(totalSpineCount, sections.length, 1);
-    let best: EpubPageMarker[] | null = null;
+    let best: PageMarker[] | null = null;
 
     for (let matcherIndex = 0; matcherIndex < MATCHERS.length; matcherIndex++) {
-        const markers: EpubPageMarker[] = [];
+        const markers: PageMarker[] = [];
         let score = 0;
         let sectionsWithMatches = 0;
 
@@ -146,7 +136,7 @@ export function scorePageMarkers(
         }
     }
 
-    if (!best) return EMPTY_EPUB_PAGE_MAPPING;
+    if (!best) return EMPTY_PAGE_MAPPING;
     return { isPhysical: true, markers: best };
 }
 
@@ -157,7 +147,7 @@ export function scorePageMarkers(
  * annotation page label for EPUBs without confident physical paging.
  */
 export function epubPageLabelForPosition(
-    mapping: EpubPageMapping,
+    mapping: PageMapping,
     sectionIndex: number,
     charOffset: number,
 ): string {
@@ -174,66 +164,4 @@ export function epubPageLabelForPosition(
         }
     }
     return label;
-}
-
-/**
- * Return the 1-based ordinal of the nearest page marker at or before a position.
- * Content before the first marker maps to page 1.
- */
-export function epubPageOrdinalForPosition(
-    mapping: EpubPageMapping,
-    sectionIndex: number,
-    charOffset: number,
-): number {
-    let ordinal = 0;
-    for (const marker of mapping.markers) {
-        const atOrBefore =
-            marker.sectionIndex < sectionIndex
-            || (marker.sectionIndex === sectionIndex && marker.charOffset <= charOffset);
-        if (atOrBefore) {
-            ordinal++;
-        } else {
-            break; // markers are sorted ascending; the rest are past the position
-        }
-    }
-    return ordinal === 0 ? 1 : ordinal;
-}
-
-/** One content text node positioned on a section's character scale. */
-export interface SectionTextNode {
-    /** Cumulative character offset of the node's first character. */
-    start: number;
-    /** Character length of the node. */
-    length: number;
-}
-
-/**
- * Append synthetic page markers for one EPUB section.
- *
- * The input nodes must use the same filtered character scale as extracted item
- * offsets. Markers are appended in global order, and each section starts with a
- * fresh break budget.
- */
-export function appendSyntheticSectionMarkers(
-    nodes: SectionTextNode[],
-    sectionIndex: number,
-    interval: number,
-    out: EpubPageMarker[],
-): void {
-    let remainingBeforeBreak = 0;
-    for (const { start, length } of nodes) {
-        let offsetInNode = 0;
-        let remaining = length;
-        if (remaining <= remainingBeforeBreak) {
-            remainingBeforeBreak -= remaining;
-            continue;
-        }
-        while (remaining > remainingBeforeBreak) {
-            offsetInNode += remainingBeforeBreak;
-            remaining -= remainingBeforeBreak;
-            out.push({ sectionIndex, charOffset: start + offsetInNode, label: String(out.length + 1) });
-            remainingBeforeBreak = interval;
-        }
-        // Keep the post-break remainder out of the next interval.
-    }
 }

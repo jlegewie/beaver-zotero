@@ -1,12 +1,13 @@
 import { logger } from "../../../utils/logger";
-import { NON_CONTENT_SELECTOR, normalizeText } from "../dom";
+import { NON_CONTENT_SELECTOR, normalizeText } from "./domWalk";
 
 /**
- * Pure DOM text-search helpers shared by the live reader citation path
- * (`react/utils/epubVisualizer/epubRangeResolver.ts`) and the headless EPUB
- * annotation resolver. These operate on any parsed `Document`/`Element` — they
- * do not touch the Zotero reader — so they live in `src/` and stay free of
- * React/Jotai/reader imports. The React resolver re-exports them unchanged.
+ * Pure DOM text-search helpers shared by the DOM-document content kinds (EPUB and
+ * web snapshots), across both the live reader citation path
+ * (`react/utils/epubVisualizer`, `react/utils/snapshotVisualizer`) and the
+ * headless annotation resolvers. These operate on any parsed `Document`/`Element`
+ * — they do not touch the Zotero reader — so they live in `src/` and stay free of
+ * React/Jotai/reader imports. The React resolvers re-export them unchanged.
  */
 
 // NodeFilter.SHOW_TEXT. Use the spec-fixed literal rather than a global: a
@@ -20,7 +21,7 @@ const ELEMENT_NODE = 1;
  * Block-level container element names, mirroring the reader's getContainingBlock
  * tag set (reader/src/dom/common/lib/nodes.ts). The reader additionally consults
  * computed `display`, but a DOMParser document has no layout, so the headless
- * path relies on the tag set — the robust signal for EPUB content.
+ * path relies on the tag set — the robust signal for DOM-document content.
  */
 const BLOCK_ELEMENT_NAMES = new Set([
     "div", "p", "li", "ol", "ul", "table", "thead", "tbody", "tr", "td", "th",
@@ -75,17 +76,17 @@ export function findAnchorElement(root: Element, anchorId: string): Element | un
     try {
         return root.querySelector(`[id="${escaped}"]`) ?? undefined;
     } catch (error) {
-        logger(`[EpubTextRange] Invalid citation anchor id "${anchorId}": ${error}`, 1);
+        logger(`[DomTextRange] Invalid citation anchor id "${anchorId}": ${error}`, 1);
         return undefined;
     }
 }
 
 /**
  * Build the ordered search-text candidates for a cited passage. The raw
- * normalized text is tried first: EPUB sentence text can legitimately contain
- * literal angle-bracket markup (e.g. code samples rendered in the book), and
- * stripping it would leave nothing to match. The tag-stripped variant is the
- * fallback for preview text that arrives as an HTML fragment.
+ * normalized text is tried first: sentence text can legitimately contain literal
+ * angle-bracket markup (e.g. code samples rendered in the content), and stripping
+ * it would leave nothing to match. The tag-stripped variant is the fallback for
+ * preview text that arrives as an HTML fragment.
  */
 export function citationSearchTextCandidates(text: string | undefined): string[] {
     if (!text) return [];
@@ -114,7 +115,7 @@ export function createElementContentsRange(element: Element): Range | undefined 
         range.selectNodeContents(element);
         if (normalizeText(range.toString())) return range;
     } catch (error) {
-        logger(`[EpubTextRange] Failed to create EPUB item range: ${error}`, 1);
+        logger(`[DomTextRange] Failed to create DOM item range: ${error}`, 1);
     }
     range.detach();
     return undefined;

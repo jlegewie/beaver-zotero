@@ -7,8 +7,10 @@ import {
 import {
     EpubAnnotationError,
     MissingPageGeometryError,
+    SnapshotAnnotationError,
     createEpubNoteAnnotation,
     createNoteAnnotation,
+    createSnapshotNoteAnnotation,
 } from '../../annotations/createAnnotation';
 import { getReadableContentKind } from '../../documentExtraction/attachmentResolution';
 import { getAttachmentFileStatus, getDeferredToolPreference, validateLibraryAccess } from '../utils';
@@ -31,16 +33,16 @@ function mapAnnotationErrorCode(error: unknown): string {
             ? 'page_extraction_failed'
             : 'page_geometry_unavailable';
     }
-    if (error instanceof EpubAnnotationError) {
+    if (error instanceof EpubAnnotationError || error instanceof SnapshotAnnotationError) {
         return error.code;
     }
     return 'apply_failed';
 }
 
-/** PDF and EPUB are the supported annotation targets; everything else is rejected. */
-function getAnnotationContentKind(attachment: Zotero.Item): 'pdf' | 'epub' | null {
+/** PDF, EPUB, and snapshots are the supported annotation targets; else rejected. */
+function getAnnotationContentKind(attachment: Zotero.Item): 'pdf' | 'epub' | 'snapshot' | null {
     const kind = getReadableContentKind(attachment);
-    return kind === 'pdf' || kind === 'epub' ? kind : null;
+    return kind === 'pdf' || kind === 'epub' || kind === 'snapshot' ? kind : null;
 }
 
 /** A numeric page_label doubles as the 1-based EPUB section ordinal fallback. */
@@ -267,6 +269,14 @@ export async function executeCreateNoteAnnotationsAction(
                         comment: item.comment,
                         color: item.color,
                         pageLabel: item.page_label ?? null,
+                        tags,
+                    });
+                } else if (contentKind === 'snapshot') {
+                    ref = await createSnapshotNoteAnnotation(attachment, {
+                        anchorId: item.anchor_id ?? undefined,
+                        text: item.text ?? undefined,
+                        comment: item.comment,
+                        color: item.color,
                         tags,
                     });
                 } else {

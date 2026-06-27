@@ -878,8 +878,8 @@ export async function handleReadAttachment(args: any): Promise<any> {
         return mcpError(response.error ?? 'Failed to read attachment');
     }
     const result = response.result;
-    const markdownDocument = result.content_kind === 'epub'
-        ? epubDocumentToMarkdownPages(result)
+    const markdownDocument = result.content_kind === 'epub' || result.content_kind === 'snapshot'
+        ? domDocumentToMarkdownPages(result)
         : result.content_kind === 'text'
             ? null
             : result.mode === 'markdown'
@@ -924,22 +924,24 @@ interface AttachmentMarkdownPage {
     markdown: string;
 }
 
-function epubDocumentToMarkdownPages(
-    document: Extract<NonNullable<WSZoteroDocumentResponse['result']>, { content_kind: 'epub' }>,
+// EPUB and snapshot both extend DomDocument (sections of items), so one
+// section-based markdown projection serves both content kinds.
+function domDocumentToMarkdownPages(
+    document: Extract<NonNullable<WSZoteroDocumentResponse['result']>, { content_kind: 'epub' | 'snapshot' }>,
 ): { pageCount: number; pages: AttachmentMarkdownPage[] } {
     return {
         pageCount: document.sectionCount,
         pages: document.sections.map((section) => ({
             index: section.index,
             markdown: section.items
-                .map(epubItemToMarkdown)
+                .map(domItemToMarkdown)
                 .filter((text) => text.length > 0)
                 .join('\n\n'),
         })),
     };
 }
 
-function epubItemToMarkdown(item: { kind: string; text?: string; level?: number; sentences?: Array<{ text: string }> }): string {
+function domItemToMarkdown(item: { kind: string; text?: string; level?: number; sentences?: Array<{ text: string }> }): string {
     const text = normalizeMarkdownText(
         item.text ?? item.sentences?.map((sentence) => sentence.text).join(' ') ?? '',
     );

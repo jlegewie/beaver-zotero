@@ -2,13 +2,15 @@
 
 import { describe, expect, it } from "vitest";
 import {
-    appendSyntheticSectionMarkers,
     epubPageLabelForPosition,
-    epubPageOrdinalForPosition,
     extractSectionPageMarkers,
     scorePageMarkers,
-    type EpubPageMarker,
 } from "../../../src/services/documentExtraction/epub/epubPageMapping";
+import {
+    appendSyntheticSectionMarkers,
+    pageOrdinalForPosition,
+    type PageMarker,
+} from "../../../src/services/documentExtraction/dom/pagination";
 
 interface TestSection {
     sectionIndex: number;
@@ -125,7 +127,7 @@ describe("epubPageLabelForPosition", () => {
 
 describe("appendSyntheticSectionMarkers", () => {
     const collect = (sections: { length: number; nodes: number[] }[]) => {
-        const out: EpubPageMarker[] = [];
+        const out: PageMarker[] = [];
         sections.forEach((section, sectionIndex) => {
             let start = 0;
             const nodes = section.nodes.map((length) => {
@@ -167,9 +169,9 @@ describe("appendSyntheticSectionMarkers", () => {
     it("assigns each position the ordinal of its nearest preceding marker", () => {
         const markers = collect([{ length: 1, nodes: [4000] }]);
         const mapping = { isPhysical: true as const, markers };
-        expect(epubPageOrdinalForPosition(mapping, 0, 0)).toBe(1);
-        expect(epubPageOrdinalForPosition(mapping, 0, 1799)).toBe(1);
-        expect(epubPageOrdinalForPosition(mapping, 0, 1800)).toBe(2);
-        expect(epubPageOrdinalForPosition(mapping, 0, 3600)).toBe(3);
+        expect(pageOrdinalForPosition(mapping, 0, 0)).toBe(1);
+        expect(pageOrdinalForPosition(mapping, 0, 1799)).toBe(1);
+        expect(pageOrdinalForPosition(mapping, 0, 1800)).toBe(2);
+        expect(pageOrdinalForPosition(mapping, 0, 3600)).toBe(3);
     });
 });
