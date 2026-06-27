@@ -477,7 +477,7 @@ export const getCitationBoundingBoxes = (citation: Citation | null | undefined):
  */
 export function itemTypeToIconName(
     itemType: string | undefined,
-    contentKind: ContentKind | undefined,
+    contentKind: string | undefined,
 ): string {
     if (itemType === 'attachment' || (!itemType && contentKind)) {
         switch (contentKind) {
@@ -485,8 +485,10 @@ export function itemTypeToIconName(
             case 'epub': return 'attachmentEPUB';
             case 'snapshot': return 'attachmentSnapshot';
             case 'image': return 'attachmentImage';
-            // 'text', office/audio/video/archive kinds, and any unrecognized or
-            // absent kind fall back to the generic file glyph matching Zotero
+            case 'video': return 'attachmentVideo';
+            case 'linked_url': return 'attachmentWebLink';
+            // 'text', office/audio/archive kinds, and any unrecognized 
+            // kind fall back to the generic file glyph.
             default: return 'attachmentFile';
         }
     }
