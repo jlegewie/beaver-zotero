@@ -16,6 +16,35 @@ let popupHandler: ((event: any) => void) | null = null;
 let contextMenuHandler: ((event: any) => void) | null = null;
 let annotationMenuHandler: ((event: any) => void) | null = null;
 
+// Reader view types Beaver integrates with. Downstream (`getReaderState`)
+// recognizes `pdf` and `epub` as `content_kind`s.
+function isSupportedReaderType(type: unknown): boolean {
+    return type === 'pdf' || type === 'epub';
+}
+
+/**
+ * Extract the currently selected text from a reader, regardless of view type.
+ */
+function getReaderSelectedText(reader: any): string | null {
+    try {
+        if (reader?.type === 'epub') {
+            const selection = reader?._internalReader?._primaryView?._iframeWindow?.getSelection();
+            const text = selection?.toString();
+            return text && text.trim() ? text : null;
+        }
+        if (reader?.type === 'pdf') {
+            const ranges = reader?._internalReader?._primaryView?._selectionRanges;
+            if (ranges?.length > 0) {
+                const text = ranges.map((range: any) => range.text).join('\n\n');
+                return text || null;
+            }
+        }
+    } catch (_e) {
+        // Graceful fallback — no selection available
+    }
+    return null;
+}
+
 // ---------------------------------------------------------------------------
 // Event dispatch helper
 // ---------------------------------------------------------------------------
@@ -23,7 +52,7 @@ let annotationMenuHandler: ((event: any) => void) | null = null;
 function dispatchReaderAction(
     action: 'explain' | 'ask',
     text: string,
-    page: number,
+    page: number | undefined,
     readerItemID: number,
 ): void {
     const win = Zotero.getMainWindow();
@@ -42,14 +71,17 @@ function dispatchReaderAction(
 function onRenderTextSelectionPopup(event: any): void {
     const { reader, doc, params, append } = event;
 
-    // Only show for PDF readers
-    if (reader?.type !== 'pdf') return;
+    if (!isSupportedReaderType(reader?.type)) return;
 
     const annotationText = params?.annotation?.text;
     if (!annotationText) return;
 
-    // Page: annotation.pageIndex is 0-based, convert to 1-based
-    const page = (params.annotation.pageIndex ?? 0) + 1;
+    // PDF annotations carry a 0-based pageIndex; EPUB selections are
+    // section-based and have no page (the reader position is captured
+    // downstream when the message is sent).
+    const page = reader.type === 'pdf'
+        ? (params.annotation.pageIndex ?? 0) + 1
+        : undefined;
     const readerItemID = reader?.itemID;
     if (!readerItemID) return;
 
@@ -96,34 +128,26 @@ function onRenderTextSelectionPopup(event: any): void {
 function onCreateViewContextMenu(event: any): void {
     const { reader, append } = event;
 
-    // Only show for PDF readers
-    if (reader?.type !== 'pdf') return;
+    if (!isSupportedReaderType(reader?.type)) return;
 
     const readerItemID = reader?.itemID;
 
-    // Get selected text (same approach as readerUtils.ts getSelectedText)
-    let selectedText: string | null = null;
-    try {
-        const primaryView = reader?._internalReader?._primaryView;
-        if (primaryView?._selectionRanges?.length > 0) {
-            selectedText = primaryView._selectionRanges
-                .map((range: any) => range.text)
-                .join('\n\n');
-        }
-    } catch (_e) {
-        // Graceful fallback — no selection available
-    }
+    const selectedText = getReaderSelectedText(reader);
 
-    // Get current page (1-based) from PDF viewer
-    let page = 1;
-    try {
-        const pdfViewer = reader?._internalReader?._primaryView
-            ?._iframeWindow?.PDFViewerApplication?.pdfViewer;
-        if (pdfViewer?.currentPageNumber) {
-            page = pdfViewer.currentPageNumber;
+    // Current page (1-based) from the PDF viewer. EPUB selections are
+    // section-based and have no page; their position is captured downstream.
+    let page: number | undefined = undefined;
+    if (reader?.type === 'pdf') {
+        page = 1;
+        try {
+            const pdfViewer = reader?._internalReader?._primaryView
+                ?._iframeWindow?.PDFViewerApplication?.pdfViewer;
+            if (pdfViewer?.currentPageNumber) {
+                page = pdfViewer.currentPageNumber;
+            }
+        } catch (_e) {
+            // Fallback to page 1
         }
-    } catch (_e) {
-        // Fallback to page 1
     }
 
     const hasSelection = !!selectedText && selectedText.length > 0;
@@ -175,7 +199,7 @@ function dispatchAnnotationAction(
 function onCreateAnnotationContextMenu(event: any): void {
     const { reader, params, append } = event;
 
-    if (reader?.type !== 'pdf') return;
+    if (!isSupportedReaderType(reader?.type)) return;
 
     const readerItemID = reader?.itemID;
     if (!readerItemID) return;
