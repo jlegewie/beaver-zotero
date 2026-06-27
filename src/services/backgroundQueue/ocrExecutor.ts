@@ -32,6 +32,7 @@ import {
 } from '../ocr/ocrStatusPoller';
 import {
     OCR_ENGINE_VERSION,
+    OCR_OUTCOME_DETAIL_MAX,
     OCR_POLL_BUDGET_MS,
     OCR_TERMINAL_FAILED,
     OCR_TERMINAL_GEOMETRY,
@@ -384,10 +385,12 @@ export class OcrExecutor implements JobExecutor {
                 return { kind: 'complete', reason: 'ocr_ok' };
             case 'no_text':
                 // OCR ran but produced no usable text; terminal for this engine.
+                this.reportTerminalOutcome(job, OCR_TERMINAL_NO_TEXT);
                 return this.terminal(job, OCR_TERMINAL_NO_TEXT, 'OCR produced no usable text layer');
             case 'geometry_mismatch':
                 // Geometry mismatches would misplace coordinate-based highlights.
                 logger(`OcrExecutor: ${job.sourceKey} geometry mismatch: ${result.detail}`, 1);
+                this.reportTerminalOutcome(job, OCR_TERMINAL_GEOMETRY, result.detail);
                 return this.terminal(job, OCR_TERMINAL_GEOMETRY, `OCR geometry mismatch: ${result.detail}`);
             case 'aborted':
                 return { kind: 'release', reason: 'aborted' };
@@ -425,6 +428,21 @@ export class OcrExecutor implements JobExecutor {
             },
             reason: `terminal:${terminalCode}`,
         };
+    }
+
+    /** Fire-and-forget telemetry for a client-detected terminal outcome. */
+    private reportTerminalOutcome(job: ResolvedJob, outcomeCode: string, detail?: string): void {
+        void ocrApiClient
+            .reportOutcome({
+                file_hash: job.fileHash,
+                outcome_code: outcomeCode,
+                engine_version: OCR_ENGINE_VERSION,
+                page_count: job.pageCount,
+                detail: detail?.slice(0, OCR_OUTCOME_DETAIL_MAX),
+            })
+            .catch((error) => {
+                logger(`OcrExecutor: failed to report ${outcomeCode} for ${job.sourceKey}: ${error}`, 2);
+            });
     }
 
     private throwIfAborted(ctx: JobExecutionContext): void {

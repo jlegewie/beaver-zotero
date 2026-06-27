@@ -16,6 +16,7 @@ vi.mock('../../../src/services/ocr/ocrApiClient', () => ({
         requestOcr: vi.fn(),
         markUploaded: vi.fn(),
         status: vi.fn(),
+        reportOutcome: vi.fn(async () => ({ success: true })),
     },
 }));
 
@@ -57,6 +58,7 @@ const api = ocrApiClient as unknown as {
     requestOcr: ReturnType<typeof vi.fn>;
     markUploaded: ReturnType<typeof vi.fn>;
     status: ReturnType<typeof vi.fn>;
+    reportOutcome: ReturnType<typeof vi.fn>;
 };
 const mockedReextract = vi.mocked(extractPdfBytesAndCacheAsOriginalAttachment);
 const mockedResolveSource = vi.mocked(resolveAttachmentFileSource);
@@ -209,6 +211,8 @@ describe('OcrExecutor', () => {
             expect(outcome.failure.terminalCode).toBe('ocr_failed_permanent');
             expect(outcome.failure.engineVersion).toBe(OCR_ENGINE_VERSION);
         }
+        // Backend-permanent failures are already logged backend-side; don't re-report.
+        expect(api.reportOutcome).not.toHaveBeenCalled();
     });
 
     it('retries on a transient backend error', async () => {
@@ -235,11 +239,41 @@ describe('OcrExecutor', () => {
             expect(outcome.failure.terminalCode).toBe('ocr_no_text');
             expect(outcome.failure.task).toBe('ocr');
         }
+        // Client-detected terminal is reported to the backend for observability.
+        expect(api.reportOutcome).toHaveBeenCalledWith({
+            file_hash: 'hash123',
+            outcome_code: 'ocr_no_text',
+            engine_version: OCR_ENGINE_VERSION,
+            page_count: 5,
+            detail: undefined,
+        });
     });
 
     it('records a terminal failure on a geometry mismatch', async () => {
         api.requestOcr.mockResolvedValue({ status: 'ready', get_url: 'https://gcs/get' });
         mockedReextract.mockResolvedValue({ kind: 'geometry_mismatch', detail: 'page 0 width' } as any);
+        const ctx = makeCtx();
+
+        const outcome = await executor.execute(record, ctx);
+
+        expect(outcome.kind).toBe('failPermanent');
+        if (outcome.kind === 'failPermanent') {
+            expect(outcome.failure.terminalCode).toBe('ocr_geometry_mismatch');
+        }
+        // The geometry detail rides along (truncated) for observability.
+        expect(api.reportOutcome).toHaveBeenCalledWith({
+            file_hash: 'hash123',
+            outcome_code: 'ocr_geometry_mismatch',
+            engine_version: OCR_ENGINE_VERSION,
+            page_count: 5,
+            detail: 'page 0 width',
+        });
+    });
+
+    it('still returns the terminal outcome when the outcome report fails (fire-and-forget)', async () => {
+        api.requestOcr.mockResolvedValue({ status: 'ready', get_url: 'https://gcs/get' });
+        mockedReextract.mockResolvedValue({ kind: 'geometry_mismatch', detail: 'page 0 width' } as any);
+        api.reportOutcome.mockRejectedValue(new Error('network down'));
         const ctx = makeCtx();
 
         const outcome = await executor.execute(record, ctx);

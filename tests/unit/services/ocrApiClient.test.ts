@@ -34,3 +34,25 @@ describe('OcrApiClient.statusBatch', () => {
         );
     });
 });
+
+describe('OcrApiClient.reportOutcome', () => {
+    it('POSTs the outcome to /ocr/outcome', async () => {
+        const client = new OcrApiClient('https://api.test');
+        const post = vi
+            .spyOn(client as any, 'post')
+            .mockResolvedValue({ success: true });
+
+        const report = {
+            file_hash: 'hash123',
+            outcome_code: 'ocr_geometry_mismatch',
+            engine_version: 'ocrmypdf-1',
+            page_count: 12,
+            detail: 'page 0 width',
+        };
+        await client.reportOutcome(report);
+
+        expect(post).toHaveBeenCalledOnce();
+        expect(post.mock.calls[0][0]).toBe('/api/v1/ocr/outcome');
+        expect(post.mock.calls[0][1]).toEqual(report);
+    });
+});

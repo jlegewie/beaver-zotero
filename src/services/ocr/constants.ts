@@ -11,6 +11,9 @@ export const OCR_TERMINAL_NO_TEXT = 'ocr_no_text';
 export const OCR_TERMINAL_GEOMETRY = 'ocr_geometry_mismatch';
 export const OCR_TERMINAL_FAILED = 'ocr_failed_permanent';
 
+/** Max length of the diagnostic detail sent with a terminal-outcome report. */
+export const OCR_OUTCOME_DETAIL_MAX = 500;
+
 /** Backend `/api/v1/ocr/*` route prefix. */
 export const OCR_API_PREFIX = '/api/v1/ocr';
 

@@ -75,6 +75,17 @@ export interface OcrStatusBatchResponse {
     jobs: OcrStatusItem[];
 }
 
+/** A client-detected terminal OCR outcome (no_text / geometry_mismatch) */
+export interface OcrOutcomeReport {
+    file_hash: string;
+    /** OCR_TERMINAL_NO_TEXT | OCR_TERMINAL_GEOMETRY */
+    outcome_code: string;
+    engine_version: string;
+    page_count?: number;
+    /** Truncated geometry-mismatch diagnostic detail. */
+    detail?: string;
+}
+
 export class OcrApiClient extends ApiService {
     /** Request OCR for a content hash, joining/creating the backend job. */
     requestOcr(fileHash: string, pageCount: number): Promise<OcrRequestResponse> {
@@ -106,6 +117,11 @@ export class OcrApiClient extends ApiService {
         return this.get<OcrStatusBatchResponse>(
             `${OCR_API_PREFIX}/status/batch?${query}`,
         );
+    }
+
+    /** Report a client-detected terminal OCR outcome (no_text / geometry_mismatch) */
+    reportOutcome(report: OcrOutcomeReport): Promise<{ success: boolean }> {
+        return this.post<{ success: boolean }>(`${OCR_API_PREFIX}/outcome`, report);
     }
 }
 
