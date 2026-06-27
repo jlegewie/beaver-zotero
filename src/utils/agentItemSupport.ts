@@ -14,7 +14,7 @@
  */
 
 import { getReadableContentKind } from '../services/documentExtraction/attachmentResolution';
-import { safeFileExists } from './attachmentFiles';
+import { isLinkedUrlAttachment, safeFileExists } from './attachmentFiles';
 import { safeIsInTrash } from './zoteroItemUtils';
 import { isAttachmentOnServer, isAttachmentAvailableRemotely } from './webAPI';
 import { getPref } from './prefs';
@@ -28,6 +28,10 @@ import { logger } from './logger';
 export const isAgentSupportedItem = (item: Zotero.Item | false): boolean => {
     if (!item) return false;
     if (item.isRegularItem()) return true;
+    // Linked URLs are web links with no local file, even when they carry a
+    // readable content type (e.g. a text/html web link classifies as `snapshot`).
+    // They are never an accessible source, so exclude them before the kind check.
+    if (isLinkedUrlAttachment(item)) return false;
     const kind = getReadableContentKind(item);
     return kind === 'pdf' || kind === 'epub' || kind === 'text' || kind === 'snapshot' || kind === 'image';
 };

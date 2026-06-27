@@ -420,8 +420,9 @@ export class DocumentCache {
                 return null;
             }
             if (metadata.contentKind !== 'snapshot') {
-                // `text` is the remaining non-payload kind; drop its stale row.
-                if (metadata.contentKind === 'text') {
+                // Drop a stale row left by a different DOM/text extraction for the
+                // same item (e.g. its content kind changed). Mirrors getEpubResult.
+                if (metadata.contentKind === 'text' || metadata.contentKind === 'epub') {
                     const deletedPayloads = await this.db.deleteDocumentCacheMetadataIfUnchanged(metadata);
                     if (deletedPayloads) {
                         await this.removePayloadFiles(deletedPayloads);
