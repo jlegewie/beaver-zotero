@@ -69,7 +69,7 @@ export const TextSelectionButton = forwardRef<HTMLButtonElement, TextSelectionBu
         const popup = React.useMemo<ChipPopupContent>(() => {
             const selectionText = truncateText(selection.text.replace(/\s+/g, ' ').trim(), MAX_TEXT_SELECTION_TOOLTIP_TEXT_LENGTH);
             return {
-                icon: <Icon icon={TextAlignLeftIcon} className="scale-90 font-color-primary" />,
+                icon: <Icon icon={TextAlignLeftIcon} className="scale-90 font-color-primary mt-020" />,
                 title: 'Text Selection',
                 subtitle: selectionText ? { text: selectionText } : null,
                 action: { icon: revealIcon, label: revealLabel },
