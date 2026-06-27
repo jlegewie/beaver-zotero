@@ -23,6 +23,8 @@ export interface AttachmentInfoOptions {
      * optimistically — used by batch/lookup paths that must not read files.
      */
     pdfAnalysis?: 'full' | 'lightweight';
+    /** Queue background OCR when a PDF is determined to need it (no text layer) */
+    enqueueOcrIfNeeded?: boolean;
     timing?: TimingAccumulator;
 }
 
@@ -177,7 +179,20 @@ async function resolvePdfInfo(
             // Only consume PDF-shaped rows: an EPUB row's null errorCode/pageCount
             // would otherwise read as a readable PDF with unknown pages.
             if (cached && cached.contentKind === 'pdf') {
-                return statusFromCachedPdf(cached);
+                const pdfStatus = statusFromCachedPdf(cached);
+                // Re-queue OCR on cache hits for the user-facing validation path
+                // so re-adding a known scan reliably (re)queues it. The fresh
+                // analysis below enqueues on first detection for all callers.
+                if (options.enqueueOcrIfNeeded && pdfStatus.status_code === 'pdf_needs_ocr') {
+                    maybeEnqueueOcrJob({
+                        item: attachment,
+                        libraryId: attachment.libraryID,
+                        zoteroKey: attachment.key,
+                        itemId: attachment.id,
+                        pageCount: pdfStatus.page_count ?? null,
+                    });
+                }
+                return pdfStatus;
             }
         } catch (error) {
             logger(`getAttachmentInfo: cache read error: ${error}`, 1);

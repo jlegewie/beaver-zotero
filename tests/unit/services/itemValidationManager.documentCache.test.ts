@@ -99,6 +99,7 @@ describe('ItemValidationManager unified attachment-info validation', () => {
         });
         expect(getAttachmentInfoMock).toHaveBeenCalledWith(item, {
             nonPdfReadableEnabled: true,
+            enqueueOcrIfNeeded: true,
         });
     });
 
@@ -242,6 +243,7 @@ describe('ItemValidationManager unified attachment-info validation', () => {
         expect(prepareAttachmentInfoBatchDataMock).toHaveBeenCalledWith([item]);
         expect(processAttachmentInfoBatchMock).toHaveBeenCalledWith(item, { bestAttachmentMap: new Map([[20, 10]]) }, {
             nonPdfReadableEnabled: true,
+            enqueueOcrIfNeeded: true,
         });
         expect(result.attachmentResults.get('1-2YWA8DTZ')).toMatchObject({
             state: 'readable',
