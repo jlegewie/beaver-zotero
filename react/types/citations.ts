@@ -481,11 +481,13 @@ export function itemTypeToIconName(
 ): string {
     if (itemType === 'attachment' || (!itemType && contentKind)) {
         switch (contentKind) {
+            case 'pdf': return 'attachmentPDF';
             case 'epub': return 'attachmentEPUB';
             case 'snapshot': return 'attachmentSnapshot';
-            case 'text': return 'attachmentFile';
             case 'image': return 'attachmentImage';
-            default: return 'attachmentPDF';
+            // 'text', office/audio/video/archive kinds, and any unrecognized or
+            // absent kind fall back to the generic file glyph matching Zotero
+            default: return 'attachmentFile';
         }
     }
     if (!itemType) return 'document';
