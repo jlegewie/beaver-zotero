@@ -10,7 +10,7 @@ import type { ZoteroReader } from "../annotationUtils";
 import { presentTemporaryAnnotations } from "../citationNavigation";
 import { setTemporaryAnnotations } from "../epubVisualizer/epubReaderView";
 import { getCurrentReaderAndWaitForView, waitForReaderForItem } from "../readerUtils";
-import { getSnapshotBody, type SnapshotPrimaryView } from "./snapshotReaderView";
+import { getSnapshotPreBody, type SnapshotPrimaryView } from "./snapshotReaderView";
 import { resolveSnapshotCitationRange } from "./snapshotRangeResolver";
 
 /** Same highlight color as PDF/EPUB citation highlights. */
@@ -73,7 +73,11 @@ export async function navigateToSnapshotCitation(
     try {
         const primaryView = reader._internalReader?._primaryView as SnapshotPrimaryView | undefined;
         if (!primaryView) return "opened";
-        const body = getSnapshotBody(primaryView);
+        // Resolve against the reader's preBody (original DOM), not the focus/reading
+        // view. In reading mode the displayed body is Readability-restructured, but
+        // the reader resolves the stored selector against preBody and maps it to the
+        // focus DOM for display — so the selector must be built against preBody.
+        const body = getSnapshotPreBody(primaryView);
         if (!body) return "opened";
 
         const snapshotLocation = options.symbolicLocation?.content_kind === "snapshot"

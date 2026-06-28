@@ -18,8 +18,12 @@ export interface SnapshotRangeAnnotation {
 export interface SnapshotPrimaryView {
     _iframeWindow?: Window;
     _iframeDocument?: Document;
-    /** Reading mode restructures the displayed DOM; selectors map back to the original. */
-    _readingMode?: { enabled?: boolean };
+    /**
+     * Reading mode restructures the displayed DOM. `preBody` is the body the reader
+     * resolves stored selectors against — the live body in the default view, the
+     * pre-Readability content fragment in reading mode.
+     */
+    _readingMode?: { enabled?: boolean; preBody?: HTMLElement };
     /** Reader-owned range-to-annotation builder. */
     getAnnotationFromRange?: (
         range: Range,
@@ -31,6 +35,15 @@ export interface SnapshotPrimaryView {
 /** Return the live snapshot body element, or undefined when unavailable. */
 export function getSnapshotBody(primaryView: SnapshotPrimaryView): HTMLElement | undefined {
     return primaryView._iframeDocument?.body ?? undefined;
+}
+
+/**
+ * Return the snapshot's "pre" body — the DOM the reader resolves stored selectors
+ * against. In the default view this is the live `_iframeDocument.body`; in reading mode it is
+ * the original (pre-Readability) content fragment.
+ */
+export function getSnapshotPreBody(primaryView: SnapshotPrimaryView): HTMLElement | undefined {
+    return primaryView._readingMode?.preBody ?? getSnapshotBody(primaryView);
 }
 
 /** True when the reader is currently displaying the Readability reading view. */
