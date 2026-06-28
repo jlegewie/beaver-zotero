@@ -22,6 +22,11 @@ function isSupportedReaderType(type: unknown): boolean {
     return type === 'pdf' || type === 'epub';
 }
 
+// Annotation actions serialize Zotero annotation positions as PDF page/rect data.
+function isSupportedAnnotationReaderType(type: unknown): boolean {
+    return type === 'pdf';
+}
+
 /**
  * Extract the currently selected text from a reader, regardless of view type.
  */
@@ -199,7 +204,7 @@ function dispatchAnnotationAction(
 function onCreateAnnotationContextMenu(event: any): void {
     const { reader, params, append } = event;
 
-    if (!isSupportedReaderType(reader?.type)) return;
+    if (!isSupportedAnnotationReaderType(reader?.type)) return;
 
     const readerItemID = reader?.itemID;
     if (!readerItemID) return;
