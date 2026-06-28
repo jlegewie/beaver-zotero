@@ -184,13 +184,24 @@ export interface MuPDFWorkerCacheStats {
 }
 
 /**
- * Sentinel rejection thrown when the worker dies mid-flight. Used to drive
- * a single transparent retry inside `call()`.
+ * Sentinel rejection thrown when the worker dies mid-flight.
+ * Callers may treat this as transient and retry with a fresh worker.
  */
-class StaleWorkerError extends Error {
+export class StaleWorkerError extends Error {
     constructor(message: string) {
         super(message);
         this.name = "StaleWorkerError";
+    }
+}
+
+/**
+ * Thrown when the host window cannot currently spawn a worker.
+ * This is separate from disposal, which is a permanent shutdown state.
+ */
+export class WorkerSpawnError extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = "WorkerSpawnError";
     }
 }
 
@@ -216,7 +227,7 @@ export class MuPDFWorkerClient {
     /**
      * Once true, the client refuses to spawn a new worker. Set by `dispose()`.
      * Distinguishes a stale-but-recoverable worker (transparent retry OK) from
-     * an explicit teardown (no respawn — would orphan the new worker from
+     * an explicit teardown (no respawn; the new worker would be detached from
      * shutdown cleanup and tie it to a closing window realm).
      */
     private disposed = false;
@@ -300,7 +311,7 @@ export class MuPDFWorkerClient {
         const cfg = getConfig();
         const mainWindow = cfg.getWorkerHost();
         if (!mainWindow) {
-            throw new Error(
+            throw new WorkerSpawnError(
                 "MuPDFWorkerClient: no main window available to spawn worker",
             );
         }
@@ -318,7 +329,7 @@ export class MuPDFWorkerClient {
 
         const WorkerCtor = (mainWindow as any).Worker as typeof Worker;
         if (!WorkerCtor) {
-            throw new Error(
+            throw new WorkerSpawnError(
                 "MuPDFWorkerClient: main window has no Worker constructor",
             );
         }
@@ -1269,13 +1280,8 @@ export class MuPDFWorkerClient {
 function rehydrateError(payload: WorkerErrorPayload | undefined): Error {
     if (!payload) return new Error("Unknown worker error");
     if (payload.name === "ExtractionError" && payload.code) {
-        // ExtractionError stores OCR data on `details` (types.ts:599); the
-        // wire field name stays `payload.ocrAnalysis` for self-documenting
-        // JSON. Payload usage by code:
-        //   NO_TEXT_LAYER       → { ocrAnalysis, pageLabels, pageCount }
-        //   PAGE_OUT_OF_RANGE   → { pageCount } (from strict resolvers in docHelpers.ts)
-        //   ENCRYPTED/INVALID   → undefined
-        // The constructor's optional fields default cleanly when absent.
+        // Worker replies keep optional extraction details in a JSON-friendly
+        // payload shape; missing fields are valid for errors without details.
         const p = payload.payload;
         return new ExtractionError(
             payload.code as ExtractionErrorCode,
@@ -1286,6 +1292,31 @@ function rehydrateError(payload: WorkerErrorPayload | undefined): Error {
         );
     }
     return new Error(payload.message ?? "Unknown worker error");
+}
+
+/**
+ * Return true for worker lifecycle or runtime-pressure failures that are worth
+ * retrying. Document verdicts and caller cancellation are not transient.
+ *
+ * String checks complement `instanceof` because this module can be loaded by
+ * more than one bundle, which gives exported classes distinct identities.
+ */
+export function isTransientWorkerError(error: unknown): boolean {
+    if (error instanceof StaleWorkerError || error instanceof WorkerSpawnError) {
+        return true;
+    }
+    if (
+        error instanceof ExtractionError
+        && error.code === ExtractionErrorCode.HEAP_EXHAUSTION
+    ) {
+        return true;
+    }
+    const name = (error as { name?: unknown } | null | undefined)?.name;
+    if (name === "StaleWorkerError" || name === "WorkerSpawnError") {
+        return true;
+    }
+    const code = (error as { code?: unknown } | null | undefined)?.code;
+    return name === "ExtractionError" && code === ExtractionErrorCode.HEAP_EXHAUSTION;
 }
 
 function isFatalWorkerError(payload: WorkerErrorPayload | undefined): boolean {
