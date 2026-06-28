@@ -1,5 +1,5 @@
 import { logger } from "../../../utils/logger";
-import { NON_CONTENT_SELECTOR, normalizeText } from "./domWalk";
+import { NON_CONTENT_SELECTOR, normalizeText, visibleTextContent } from "./domWalk";
 
 /**
  * Pure DOM text-search helpers shared by the DOM-document content kinds (EPUB and
@@ -55,18 +55,27 @@ export function getContainingBlockElement(node: Node): Element | undefined {
 export function createContainingBlockRange(range: Range): Range | undefined {
     const block = getContainingBlockElement(range.startContainer);
     if (!block) return undefined;
-    const textNodes = collectTextNodes(block);
+    return rangeOverElementText(block);
+}
+
+/**
+ * Range spanning an element's content, bounded by its first and last content text
+ * nodes (so the endpoints sit in text nodes, which the reader's selectors resolve
+ * cleanly). Returns undefined when the element has no visible text.
+ */
+function rangeOverElementText(element: Element): Range | undefined {
+    const textNodes = collectTextNodes(element);
     if (textNodes.length === 0) return undefined;
     const first = textNodes[0];
     const last = textNodes[textNodes.length - 1];
-    const blockRange = block.ownerDocument.createRange();
-    blockRange.setStart(first, 0);
-    blockRange.setEnd(last, (last.nodeValue ?? "").length);
-    if (!normalizeText(blockRange.toString())) {
-        blockRange.detach();
+    const range = element.ownerDocument.createRange();
+    range.setStart(first, 0);
+    range.setEnd(last, (last.nodeValue ?? "").length);
+    if (!normalizeText(range.toString())) {
+        range.detach();
         return undefined;
     }
-    return blockRange;
+    return range;
 }
 
 /** Find an element by id within `root`, escaping the id for attribute-selector use. */
@@ -133,7 +142,12 @@ export function createSentenceRange(element: Element, sentenceText: string): Ran
     const textNodes = collectTextNodes(element);
     const flattened = flattenTextNodes(textNodes);
     const offset = flattened.normalized.indexOf(normalizedSentence);
-    if (offset === -1) return undefined;
+    if (offset === -1) {
+        // A data-table row is extracted as "cell | cell | cell"; that separator
+        // never appears verbatim in the DOM, so the flat search above cannot find
+        // it. Fall back to locating the row structurally and ranging over it.
+        return createTableRowRange(element, normalizedSentence);
+    }
 
     const start = flattened.positions[offset];
     const end = flattened.positions[offset + normalizedSentence.length - 1];
@@ -143,6 +157,60 @@ export function createSentenceRange(element: Element, sentenceText: string): Ran
     range.setStart(start.node, start.offset);
     range.setEnd(end.node, end.offset + 1);
     return range;
+}
+
+// Cell separator that extraction uses when linearizing a data-table row (mirrors
+// linearizeTableRows in domWalk.ts). Single-spaced, so it survives normalizeText.
+const TABLE_ROW_CELL_SEPARATOR = " | ";
+
+/** Linearize one table row's direct cells the way extraction does, or undefined if all empty. */
+function linearizeRowCells(tr: Element): string | undefined {
+    const cells: string[] = [];
+    for (const cell of Array.from(tr.children) as Element[]) {
+        const name = cell.localName.toLowerCase();
+        if (name !== "td" && name !== "th") continue;
+        cells.push(visibleTextContent(cell));
+    }
+    if (!cells.some((cell) => cell.length > 0)) return undefined;
+    return cells.join(TABLE_ROW_CELL_SEPARATOR);
+}
+
+/**
+ * Locate a cited data-table row inside `root` and return a range over it.
+ */
+export function createTableRowRange(root: Element, normalizedRowText: string): Range | undefined {
+    if (!normalizedRowText.includes(TABLE_ROW_CELL_SEPARATOR)) return undefined;
+
+    const trElements = root.localName?.toLowerCase() === "tr"
+        ? [root, ...Array.from(root.querySelectorAll("tr"))]
+        : Array.from(root.querySelectorAll("tr"));
+
+    // Normalize each reconstruction: extraction joins cells without a final
+    // whitespace collapse, so a row with an empty cell is stored with a double
+    // space ("A |  | C") while the cited text arrives already normalized to a
+    // single space. Compare both on the same normalized scale.
+    const candidates: { tr: Element; linearized: string }[] = [];
+    for (const tr of trElements as Element[]) {
+        const linearized = linearizeRowCells(tr);
+        if (linearized) candidates.push({ tr, linearized: normalizeText(linearized) });
+    }
+
+    // Prefer an exact match: a shorter row whose text is a prefix of a longer one
+    // must not be stolen by the longer row via the prefix fallback below.
+    const exact = candidates.find((c) => c.linearized === normalizedRowText);
+    if (exact) return rangeOverElementText(exact.tr);
+
+    // Truncated citation: either side a prefix of the other still resolves.
+    let best: { tr: Element; linearized: string } | undefined;
+    for (const c of candidates) {
+        if (!c.linearized.includes(TABLE_ROW_CELL_SEPARATOR)) continue;
+        const matches =
+            c.linearized.startsWith(normalizedRowText) || normalizedRowText.startsWith(c.linearized);
+        if (matches && (!best || c.linearized.length > best.linearized.length)) {
+            best = c;
+        }
+    }
+    return best ? rangeOverElementText(best.tr) : undefined;
 }
 
 /** Collect the content text nodes under `root`, skipping style/script subtrees. */
