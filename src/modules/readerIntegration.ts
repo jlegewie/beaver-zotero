@@ -16,10 +16,11 @@ let popupHandler: ((event: any) => void) | null = null;
 let contextMenuHandler: ((event: any) => void) | null = null;
 let annotationMenuHandler: ((event: any) => void) | null = null;
 
-// Reader view types Beaver integrates with. Downstream (`getReaderState`)
-// recognizes `pdf` and `epub` as `content_kind`s.
+// Reader view types Beaver integrates with: PDF, EPUB, and web snapshots.
+// EPUB and snapshot are DOM-based views with section/continuous layout and no
+// PDF-style page numbers (the reader position is captured downstream).
 function isSupportedReaderType(type: unknown): boolean {
-    return type === 'pdf' || type === 'epub';
+    return type === 'pdf' || type === 'epub' || type === 'snapshot';
 }
 
 // Annotation actions serialize Zotero annotation positions as PDF page/rect data.
@@ -32,7 +33,9 @@ function isSupportedAnnotationReaderType(type: unknown): boolean {
  */
 function getReaderSelectedText(reader: any): string | null {
     try {
-        if (reader?.type === 'epub') {
+        // EPUB and snapshot are DOM-based views that expose the selection through
+        // the content iframe's window selection rather than `_selectionRanges`.
+        if (reader?.type === 'epub' || reader?.type === 'snapshot') {
             const selection = reader?._internalReader?._primaryView?._iframeWindow?.getSelection();
             const text = selection?.toString();
             return text && text.trim() ? text : null;
@@ -81,9 +84,9 @@ function onRenderTextSelectionPopup(event: any): void {
     const annotationText = params?.annotation?.text;
     if (!annotationText) return;
 
-    // PDF annotations carry a 0-based pageIndex; EPUB selections are
-    // section-based and have no page (the reader position is captured
-    // downstream when the message is sent).
+    // PDF annotations carry a 0-based pageIndex; EPUB/snapshot selections have
+    // no PDF-style page (the reader position is captured downstream when the
+    // message is sent).
     const page = reader.type === 'pdf'
         ? (params.annotation.pageIndex ?? 0) + 1
         : undefined;
@@ -139,8 +142,8 @@ function onCreateViewContextMenu(event: any): void {
 
     const selectedText = getReaderSelectedText(reader);
 
-    // Current page (1-based) from the PDF viewer. EPUB selections are
-    // section-based and have no page; their position is captured downstream.
+    // Current page (1-based) from the PDF viewer. EPUB/snapshot selections have
+    // no PDF-style page; their position is captured downstream.
     let page: number | undefined = undefined;
     if (reader?.type === 'pdf') {
         page = 1;
