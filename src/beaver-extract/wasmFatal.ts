@@ -1,7 +1,6 @@
 /**
- * MuPDF heap exhaustion can be recoverable for the PDF after the runtime is
- * restarted. Keep it separate from `WASM_FATAL_PATTERNS` so callers can retire
- * the current runtime without memoizing the file as permanently fatal.
+ * Heap exhaustion can be recoverable after replacing the current runtime, so
+ * callers classify it separately from permanent WASM traps.
  */
 const HEAP_EXHAUSTION_PATTERNS: RegExp[] = [
     /malloc\b[\s\S]*failed/i,
@@ -38,30 +37,19 @@ export function isFatalWasmError(err: unknown): boolean {
 }
 
 /**
- * MuPDF page-tree resolution failures. A malformed page tree can report N
- * pages via `countPages()` yet fail to resolve individual leaves; every such
- * `loadPage` error carries the substring "page tree" (e.g. "cannot find page N
- * in page tree", "non-page object in page tree", "malformed page tree", "cycle
- * in page tree"). See `source/pdf/pdf-page.c` in the MuPDF source.
+ * Page-resolution failures that mean a page index cannot be resolved, not that
+ * the document or runtime is unusable.
  */
-const PAGE_TREE_ERROR_PATTERN = /page tree/i;
+const RECOVERABLE_PAGE_ERROR_PATTERN = /page tree|invalid page number/i;
 
 /**
- * True only for MuPDF page-tree resolution failures — the case where a page
- * index cannot be resolved to a page object at all. Native `mutool` skips such
- * pages and extracts the rest; this predicate lets page-iteration code do the
- * same, isolating one unresolvable leaf instead of aborting the whole document.
- *
- * Deliberately narrow: a failure later in page processing (a corrupt content
- * stream that breaks `toStructuredText`, a JSON parse error) is NOT recoverable
- * here — silently dropping such a page would hide a real extraction failure, so
- * those propagate and abort. WASM traps are likewise non-recoverable: they
- * leave the runtime unusable.
+ * True only when page iteration may skip a single unresolved page. Later
+ * extraction failures, WASM traps, and heap exhaustion still abort the document.
  */
 export function isRecoverablePageError(err: unknown): boolean {
     if (isHeapExhaustionError(err)) return false;
     if (isFatalWasmError(err)) return false;
-    return PAGE_TREE_ERROR_PATTERN.test(errorText(err));
+    return RECOVERABLE_PAGE_ERROR_PATTERN.test(errorText(err));
 }
 
 function errorText(err: unknown): string {

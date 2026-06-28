@@ -692,8 +692,6 @@ async function onShutdown(): Promise<void> {
             addon.backgroundExtractor = undefined;
         }
 
-        await disposeMuPDFWorker();
-
         addon.documentCache = undefined;
 
         if (addon.db) {
@@ -743,6 +741,14 @@ async function onShutdown(): Promise<void> {
         // Note: the singleton is removed from Zotero in addon/bootstrap.js's
     } catch (error) {
         ztoolkit.log("onShutdown: Error during cleanup:", error);
+    } finally {
+        // Force-clear the cross-bundle MuPDF worker slots even if the cleanup
+        // above threw
+        try {
+            await disposeMuPDFWorker(undefined, { force: true });
+        } catch (e) {
+            ztoolkit.log("onShutdown: disposeMuPDFWorker failed:", e);
+        }
     }
 }
 
