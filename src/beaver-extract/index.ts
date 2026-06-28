@@ -38,6 +38,9 @@ export type {
 export {
     MuPDFWorkerClient,
     WorkerAbortError,
+    StaleWorkerError,
+    WorkerSpawnError,
+    isTransientWorkerError,
     getMuPDFWorkerClient,
     getExistingMuPDFWorkerClient,
     disposeMuPDFWorker,

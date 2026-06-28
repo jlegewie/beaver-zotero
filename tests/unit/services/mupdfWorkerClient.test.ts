@@ -1137,5 +1137,24 @@ describe('MuPDFWorkerClient', () => {
             expect((globalThis as any).Zotero.__beaverMuPDFWorkerClient_hot).toBeUndefined();
             expect((globalThis as any).Zotero.__beaverMuPDFWorkerClient_background).toBeUndefined();
         });
+
+        // A client whose own dispose() leaves the slot populated stands in for
+        // a stale client from a prior bundle whose dispose() cannot clear the
+        // shared global. The shutdown path passes force so the current bundle
+        // clears the slot regardless, preventing reuse by the next bundle.
+        it('force clears a slot whose in-slot client dispose() leaves it populated', async () => {
+            const stale = { dispose: vi.fn() };
+            (globalThis as any).Zotero.__beaverMuPDFWorkerClient_hot = stale;
+
+            // Without force: dispose() runs but the slot is left populated.
+            await disposeMuPDFWorker('hot');
+            expect(stale.dispose).toHaveBeenCalledOnce();
+            expect((globalThis as any).Zotero.__beaverMuPDFWorkerClient_hot).toBe(stale);
+
+            // With force: the slot is cleared even though dispose() did not.
+            await disposeMuPDFWorker('hot', { force: true });
+            expect(stale.dispose).toHaveBeenCalledTimes(2);
+            expect((globalThis as any).Zotero.__beaverMuPDFWorkerClient_hot).toBeUndefined();
+        });
     });
 });

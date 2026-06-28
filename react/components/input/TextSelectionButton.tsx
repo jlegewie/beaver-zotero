@@ -1,8 +1,8 @@
 import React, { forwardRef } from 'react'
-import { Icon, TextAlignLeftIcon, PdfIcon } from "../icons/icons"
+import { Icon, TextAlignLeftIcon, PdfIcon, FileViewIcon } from "../icons/icons"
 import { useSetAtom } from 'jotai'
 import { readerTextSelectionAtom } from '../../atoms/messageComposition'
-import { navigateToPageInCurrentReader } from '../../utils/readerUtils'
+import { getCurrentReader, navigateToPageInCurrentReader } from '../../utils/readerUtils'
 import { useRemoveContextMenu } from '../../hooks/useRemoveContextMenu'
 import { TextSelection } from '../../types/attachments/apiTypes'
 import { truncateText } from '../../utils/stringUtils'
@@ -38,6 +38,19 @@ export const TextSelectionButton = forwardRef<HTMLButtonElement, TextSelectionBu
         // States/Atoms needed for non-preview logic
         const setReaderTextSelection = useSetAtom(readerTextSelectionAtom)
 
+        // PDFs get the page-aware reveal label + navigation. Every other reader
+        // type (EPUB now, snapshot later) falls back to a generic file
+        // affordance with no page.
+        const readerType = getCurrentReader()?.type;
+        const isPdf = readerType === 'pdf';
+        const readerTypeName = readerType === 'epub' ? 'EPUB'
+            : readerType === 'snapshot' ? 'Snapshot'
+            : 'Document';
+        const revealIcon = isPdf ? PdfIcon : FileViewIcon;
+        const revealLabel = isPdf
+            ? (selection.page != null ? `Reveal page ${selection.page} in PDF` : 'Reveal in PDF')
+            : `Reveal in ${readerTypeName}`;
+
         const { isRemoveMenuOpen, contextMenuHandlers, removeHandlers, removeMenu } = useRemoveContextMenu({
             onRemove: () => {
                 setReaderTextSelection(null) // Remove the selection itself
@@ -47,8 +60,8 @@ export const TextSelectionButton = forwardRef<HTMLButtonElement, TextSelectionBu
             disabled,
             // Mirror the button click: scroll the reader to the selection's page.
             extraMenuItems: [{
-                label: 'Reveal in PDF',
-                icon: PdfIcon,
+                label: revealLabel,
+                icon: revealIcon,
                 onClick: () => { if (selection.page != null) navigateToPageInCurrentReader(selection.page); },
             }],
         })
@@ -56,12 +69,12 @@ export const TextSelectionButton = forwardRef<HTMLButtonElement, TextSelectionBu
         const popup = React.useMemo<ChipPopupContent>(() => {
             const selectionText = truncateText(selection.text.replace(/\s+/g, ' ').trim(), MAX_TEXT_SELECTION_TOOLTIP_TEXT_LENGTH);
             return {
-                icon: <Icon icon={TextAlignLeftIcon} className="scale-90 font-color-primary" />,
+                icon: <Icon icon={TextAlignLeftIcon} className="scale-90 font-color-primary mt-020" />,
                 title: 'Text Selection',
                 subtitle: selectionText ? { text: selectionText } : null,
-                action: { icon: PdfIcon, label: selection.page != null ? `Reveal page ${selection.page} in PDF` : 'Reveal in PDF' },
+                action: { icon: revealIcon, label: revealLabel },
             };
-        }, [selection.page, selection.text]);
+        }, [selection.text, revealIcon, revealLabel]);
 
         const normalIcon = (
             <Icon icon={TextAlignLeftIcon} className="mt-015 font-color-secondary" />

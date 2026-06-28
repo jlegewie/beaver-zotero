@@ -1,4 +1,4 @@
-import { BeaverExtractor, ExtractionError, ExtractionErrorCode } from '../../beaver-extract';
+import { BeaverExtractor, ExtractionError, ExtractionErrorCode, isTransientWorkerError } from '../../beaver-extract';
 import { logger } from '../../utils/logger';
 import { getPref } from '../../utils/prefs';
 import { isAttachmentAvailableRemotely } from '../../utils/webAPI';
@@ -16,10 +16,8 @@ export interface AttachmentInfoOptions {
     skipWorkerFallback?: boolean;
     nonPdfReadableEnabled?: boolean;
     /**
-     * PDF analysis depth. 'full' (default) reads the file and runs OCR
-     * detection on a cache miss; 'lightweight' only probes cheap page-count
-     * sources (fulltext index, optionally the PDF worker) and reports
-     * optimistically — used by batch/lookup paths that must not read files.
+     * PDF analysis depth. 'full' reads file bytes and checks OCR needs on a
+     * cache miss; 'lightweight' uses cheap page-count probes only.
      */
     pdfAnalysis?: 'full' | 'lightweight';
     timing?: TimingAccumulator;
@@ -158,6 +156,24 @@ async function getCheapPdfPageCount(
     return pageCount;
 }
 
+/**
+ * Retry limits for transient PDF analysis failures. Heap exhaustion gets fewer
+ * attempts because each retry starts with a fresh worker but remains expensive.
+ */
+const PDF_ANALYSIS_MAX_ATTEMPTS = 3;
+const PDF_HEAP_EXHAUSTION_MAX_ATTEMPTS = 2;
+const PDF_ANALYSIS_RETRY_BACKOFF_MS = [400, 1200];
+const PDF_ANALYSIS_TOTAL_BUDGET_MS = 8000;
+
+function delay(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isHeapExhaustion(error: unknown): boolean {
+    return error instanceof ExtractionError
+        && error.code === ExtractionErrorCode.HEAP_EXHAUSTION;
+}
+
 async function resolvePdfInfo(
     attachment: Zotero.Item,
     availability: Extract<AttachmentAvailabilityResult, { available: true }>,
@@ -205,49 +221,25 @@ async function resolvePdfInfo(
         return { page_count: pageCount, status: 'readable' };
     }
 
+    // Full analysis reads bytes once and reuses them across bounded worker
+    // retries; worker posts copy the data without detaching it.
+    const isRemote = isRemoteFilePath(availability.filePath);
+    let sourceSizeBytes = 0;
+    let pdfData: Uint8Array;
     try {
-        const isRemote = isRemoteFilePath(availability.filePath);
-        let sourceSizeBytes = 0;
-        let pdfData: Uint8Array;
-        try {
-            pdfData = isRemote
-                ? await loadRemoteData(attachment, availability.filePath)
-                : await IOUtils.read(availability.filePath);
-            sourceSizeBytes = isRemote ? pdfData.byteLength : 0;
-        } catch (error) {
-            logger(`getAttachmentInfo: failed to load PDF data: ${error}`, 1);
-            return { page_count: null, status: 'unreadable', status_reason: 'Failed to load attachment file.' };
-        }
+        pdfData = isRemote
+            ? await loadRemoteData(attachment, availability.filePath)
+            : await IOUtils.read(availability.filePath);
+        sourceSizeBytes = isRemote ? pdfData.byteLength : 0;
+    } catch (error) {
+        logger(`getAttachmentInfo: failed to load PDF data: ${error}`, 1);
+        return { page_count: null, status: 'unreadable', status_reason: 'Failed to load attachment file.' };
+    }
 
+    // One worker analysis attempt. The retry loop classifies any thrown error.
+    const runAnalysis = async (): Promise<Pick<AttachmentInfo, 'status' | 'status_code' | 'status_reason' | 'page_count'>> => {
         const extractor = new BeaverExtractor();
-        let metadata: Awaited<ReturnType<BeaverExtractor['getMetadata']>>;
-        try {
-            metadata = await extractor.getMetadata(pdfData);
-        } catch (error) {
-            if (error instanceof ExtractionError) {
-                if (error.code === ExtractionErrorCode.ENCRYPTED) {
-                    await cache?.putErrorMetadata({ item: attachment, filePath: availability.filePath, sourceSizeBytes, contentType: availability.contentType, errorCode: 'encrypted', pageCount: null, pageLabels: null, pages: null });
-                    return { page_count: null, status: 'unreadable', status_code: 'pdf_encrypted' };
-                }
-                if (error.code === ExtractionErrorCode.INVALID_PDF) {
-                    await cache?.putErrorMetadata({ item: attachment, filePath: availability.filePath, sourceSizeBytes, contentType: availability.contentType, errorCode: 'invalid_pdf', pageCount: null, pageLabels: null, pages: null });
-                    return { page_count: null, status: 'unreadable', status_code: 'pdf_invalid' };
-                }
-                if (error.code === ExtractionErrorCode.WASM_ERROR) {
-                    return {
-                        page_count: null,
-                        status: 'unreadable',
-                        status_code: 'pdf_parser_crash',
-                        status_reason: 'PDF crashes the local PDF parser',
-                    };
-                }
-                if (error.code === ExtractionErrorCode.EMPTY_DOCUMENT) {
-                    return { page_count: 0, status: 'unreadable', status_code: 'pdf_invalid' };
-                }
-            }
-            throw error;
-        }
-
+        const metadata = await extractor.getMetadata(pdfData);
         const { pageCount, pageLabels, pages } = metadata;
         if (pageCount === 0) {
             return { page_count: 0, status: 'unreadable', status_code: 'pdf_invalid' };
@@ -267,18 +259,79 @@ async function resolvePdfInfo(
             metadata: { pageCount, pageLabels, pages: pages ?? null, errorCode: null },
         });
         return { page_count: pageCount, status: 'readable' };
-    } catch (error) {
-        if (error instanceof ExtractionError && error.code === ExtractionErrorCode.WASM_ERROR) {
-            return {
-                page_count: null,
-                status: 'unreadable',
-                status_code: 'pdf_parser_crash',
-                status_reason: 'PDF crashes the local PDF parser',
-            };
+    };
+
+    let lastTransientError: unknown;
+    const analysisStart = Date.now();
+    for (let attempt = 0; attempt < PDF_ANALYSIS_MAX_ATTEMPTS; attempt++) {
+        if (attempt > 0) {
+            // Give the worker host a short window to settle before respawning.
+            await delay(PDF_ANALYSIS_RETRY_BACKOFF_MS[Math.min(attempt - 1, PDF_ANALYSIS_RETRY_BACKOFF_MS.length - 1)]);
         }
-        logger(`getAttachmentInfo: Error analyzing PDF: ${error}`, 1);
-        return { page_count: null, status: 'unreadable', status_code: 'pdf_analysis_error' };
+        try {
+            return await runAnalysis();
+        } catch (error) {
+            // Deterministic content verdicts are not retried. Permanent ones
+            // are cached so future reads skip analysis.
+            if (error instanceof ExtractionError) {
+                if (error.code === ExtractionErrorCode.ENCRYPTED) {
+                    await cache?.putErrorMetadata({ item: attachment, filePath: availability.filePath, sourceSizeBytes, contentType: availability.contentType, errorCode: 'encrypted', pageCount: null, pageLabels: null, pages: null });
+                    return { page_count: null, status: 'unreadable', status_code: 'pdf_encrypted' };
+                }
+                if (error.code === ExtractionErrorCode.INVALID_PDF) {
+                    await cache?.putErrorMetadata({ item: attachment, filePath: availability.filePath, sourceSizeBytes, contentType: availability.contentType, errorCode: 'invalid_pdf', pageCount: null, pageLabels: null, pages: null });
+                    return { page_count: null, status: 'unreadable', status_code: 'pdf_invalid' };
+                }
+                if (error.code === ExtractionErrorCode.EMPTY_DOCUMENT) {
+                    return { page_count: 0, status: 'unreadable', status_code: 'pdf_invalid' };
+                }
+                if (error.code === ExtractionErrorCode.WASM_ERROR) {
+                    return {
+                        page_count: null,
+                        status: 'unreadable',
+                        status_code: 'pdf_parser_crash',
+                        status_reason: 'PDF crashes the local PDF parser',
+                    };
+                }
+            }
+
+            // Retry transient worker failures while attempts and time remain.
+            if (isTransientWorkerError(error)) {
+                lastTransientError = error;
+                const heap = isHeapExhaustion(error);
+                const maxAttempts = heap ? PDF_HEAP_EXHAUSTION_MAX_ATTEMPTS : PDF_ANALYSIS_MAX_ATTEMPTS;
+                const hasMoreAttempts = attempt < maxAttempts - 1;
+                const withinBudget = Date.now() - analysisStart < PDF_ANALYSIS_TOTAL_BUDGET_MS;
+                if (hasMoreAttempts && withinBudget) {
+                    logger(`getAttachmentInfo: transient worker error analyzing PDF (attempt ${attempt + 1}/${maxAttempts}), retrying: ${error}`, 2);
+                    continue;
+                }
+                if (heap) {
+                    // Repeated heap exhaustion means this file cannot be
+                    // analyzed under current local parser limits.
+                    logger(`getAttachmentInfo: PDF exhausts the local parser's memory after ${attempt + 1} attempt(s): ${error}`, 1);
+                    return {
+                        page_count: null,
+                        status: 'unreadable',
+                        status_code: 'pdf_parser_crash',
+                        status_reason: 'PDF is too large for the local PDF parser to process.',
+                    };
+                }
+                // Worker analysis is unavailable, but the file exists and has
+                // already passed attachment availability checks.
+                logger(`getAttachmentInfo: PDF analysis unavailable after ${attempt + 1} attempt(s); treating as readable: ${error}`, 1);
+                return { page_count: null, status: 'readable' };
+            }
+
+            // Unknown, non-transient failure.
+            logger(`getAttachmentInfo: Error analyzing PDF: ${error}`, 1);
+            return { page_count: null, status: 'unreadable', status_code: 'pdf_analysis_error' };
+        }
     }
+
+    // Defensive fallback; the final transient attempt normally returns above.
+    logger(`getAttachmentInfo: PDF analysis unavailable; treating as readable: ${lastTransientError}`, 1);
+    return { page_count: null, status: 'readable' };
 }
 
 /**
@@ -442,9 +495,8 @@ export async function getAttachmentInfo(
         return { ...base, status_reason: unreadableTypeReason(contentKind) };
     }
 
-    // PDF, EPUB, snapshots, and plain text are always readable (text via the
-    // line-based `read` tool); image stays behind the nonPdfReadableEnabled
-    // option until extraction supports it.
+    // PDF, EPUB, and plain text are readable by default. Other readable kinds
+    // remain behind the nonPdfReadableEnabled option until extraction supports them.
     const isUnconditionallyReadable =
         contentKind === 'pdf' || contentKind === 'epub'
         || contentKind === 'snapshot' || contentKind === 'text';
@@ -468,9 +520,7 @@ export async function getAttachmentInfo(
     }
 
     if (contentKind === 'epub') {
-        // EPUB extraction requires a local file (the zip reader cannot consume
-        // downloaded bytes, and the extractor never downloads remote files), so
-        // a remote-only EPUB is unreadable even with remote access enabled.
+        // EPUB extraction requires a local file path.
         if (isRemoteFilePath(availability.filePath)) {
             return {
                 ...base,
