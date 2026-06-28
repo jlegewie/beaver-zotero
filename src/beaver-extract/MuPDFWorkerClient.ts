@@ -1496,6 +1496,7 @@ export function getExistingMuPDFWorkerClient(
  */
 export async function disposeMuPDFWorker(
     name?: PDFWorkerSlotName,
+    options?: { force?: boolean },
 ): Promise<void> {
     if (!isConfigured()) return;
     const slots = getConfig().workerClientSlots;
@@ -1506,5 +1507,8 @@ export async function disposeMuPDFWorker(
             | MuPDFWorkerClient
             | undefined;
         if (existing) existing.dispose();
+        // dispose() only nulls the slot when it still holds *this* client;
+        // force-clear ignores that guard for the no-respawn shutdown case.
+        if (options?.force) slots[slotName].set(undefined);
     }
 }
