@@ -113,6 +113,9 @@ import {
     handleTestEpubAnnotationParityHttpRequest,
 } from './httpHandlers/testEpubAnnotationHandlers';
 import {
+    handleTestSnapshotAnnotationParityHttpRequest,
+} from './httpHandlers/testSnapshotAnnotationHandlers';
+import {
     handleTestReaderStateHttpRequest,
     handleTestEpubCitationNavigateHttpRequest,
 } from './httpHandlers/testReaderHandlers';
@@ -253,6 +256,8 @@ const ENDPOINT_PATHS = [
     '/beaver/test/snapshot-extract',
     // EPUB annotation CFI/sortIndex parity (headless resolver vs reader)
     '/beaver/test/epub-annotation-parity',
+    // Snapshot annotation selector/sortIndex parity (headless resolver vs reader)
+    '/beaver/test/snapshot-annotation-parity',
     // Reader position / EPUB citation-navigation verification (dev-only)
     '/beaver/test/reader-state',
     '/beaver/test/epub-citation-navigate',
@@ -973,6 +978,10 @@ function registerEndpoints(): boolean {
         // own getAnnotationFromRange for the same target.
         Zotero.Server.Endpoints['/beaver/test/epub-annotation-parity'] =
             createEndpoint(handleTestEpubAnnotationParityHttpRequest);
+
+        // Snapshot annotation selector/sortIndex parity.
+        Zotero.Server.Endpoints['/beaver/test/snapshot-annotation-parity'] =
+            createEndpoint(handleTestSnapshotAnnotationParityHttpRequest);
 
         // Reader position (`getCurrentPage` / `content_kind`) and the EPUB
         // citation-navigation path against the live reader.

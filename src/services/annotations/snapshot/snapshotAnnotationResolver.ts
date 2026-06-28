@@ -50,6 +50,21 @@ function isResolveError(value: unknown): value is SnapshotAnnotationResolveError
     return typeof value === "object" && value !== null && "error" in value;
 }
 
+// Id of the reader's annotation layer (reader/src/dom/common/dom-view.tsx).
+const READER_ANNOTATION_OVERLAY_ID = "annotation-overlay";
+
+/**
+ * Mirror the reader's empty annotation overlay so generated selectors resolve
+ * against the same body structure as the default snapshot view.
+ */
+function mirrorReaderAnnotationOverlay(body: Element): void {
+    const lastChild = body.lastElementChild;
+    if (lastChild?.id === READER_ANNOTATION_OVERLAY_ID) return;
+    const overlay = body.ownerDocument.createElement("div");
+    overlay.id = READER_ANNOTATION_OVERLAY_ID;
+    body.append(overlay);
+}
+
 /**
  * Build the snapshot selector + sortIndex from a prepared snapshot document.
  * Locates the cited range (anchor-scoped, then body-wide, then anchor contents —
@@ -62,6 +77,9 @@ export function buildAnnotationFromDocument(
 ): { position: SnapshotSelector; sortIndex: string; text: string } | SnapshotAnnotationResolveError {
     const body = doc.body ?? doc.querySelector("body");
     if (!body) return { error: "snapshot_text_not_found" };
+
+    // Match the reader's DOM shape before building CSS selectors.
+    mirrorReaderAnnotationOverlay(body);
 
     const anchorElement = target.anchorId
         ? findAnchorElement(body, target.anchorId)
