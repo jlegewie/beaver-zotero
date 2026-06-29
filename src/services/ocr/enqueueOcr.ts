@@ -53,6 +53,23 @@ async function enqueueOcrJob(args: MaybeEnqueueOcrArgs): Promise<void> {
     const db = Zotero.Beaver?.db;
     if (!db) return;
 
+    const priority = args.priority ?? OCR_PRIORITY_ON_DEMAND;
+
+    // Hash-free fast path: if a ticket is already queued for this attachment,
+    // the work is already tracked — return before reading + MD5-hashing the
+    // file. Detection re-fires on every readability/validation pass for an
+    // un-OCR'd scan, so this keeps the common in-flight case off the IO path.
+    // A duplicate that wants the scan sooner (on-demand over a queued backfill
+    // ticket) still promotes the existing ticket's priority; we wake the
+    // dispatcher only when a promotion actually happened.
+    const pending = await db.promotePendingBackgroundJob(
+        'document_ocr', args.libraryId, args.zoteroKey, OCR_JOB_PAYLOAD_KIND, priority,
+    );
+    if (pending.exists) {
+        if (pending.promoted) Zotero.Beaver?.backgroundExtractor?.notify();
+        return;
+    }
+
     let fileHash: string | undefined;
     try {
         fileHash = await args.item.attachmentHash;
@@ -74,7 +91,7 @@ async function enqueueOcrJob(args: MaybeEnqueueOcrArgs): Promise<void> {
         zoteroKey: args.zoteroKey,
         contentKind: 'pdf',
         payloadKind: OCR_JOB_PAYLOAD_KIND,
-        priority: args.priority ?? OCR_PRIORITY_ON_DEMAND,
+        priority,
         payload: null,
         now: Date.now(),
     });

@@ -342,6 +342,14 @@ declare namespace Zotero {
                 limit?: number,
             ): Promise<import("../src/services/database").BackgroundJobRecord[]>;
 
+            promotePendingBackgroundJob(
+                jobType: import("../src/services/database").BackgroundJobType,
+                libraryId: number,
+                zoteroKey: string,
+                payloadKind: import("../src/services/database").DocumentCachePayloadKind,
+                priority: number,
+            ): Promise<{ exists: boolean; promoted: boolean }>;
+
             completeBackgroundJob(id: number): Promise<void>;
 
             failBackgroundJob(
