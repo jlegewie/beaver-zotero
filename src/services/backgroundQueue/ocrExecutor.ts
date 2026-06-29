@@ -133,13 +133,14 @@ export class OcrExecutor implements JobExecutor {
                 OCR_ENGINE_VERSION,
             )
         ) {
+            logger(`OcrExecutor: ${job.sourceKey} skipped, terminal OCR failure already recorded`, 3);
             return { kind: 'complete', reason: 'ocr_perm_failed' };
         }
 
         const ready = await this.resolveReady(job, ctx, record.id);
         if ('outcome' in ready) return ready.outcome;
 
-        const ocrBytes = await this.download(ready.getUrl, ctx);
+        const ocrBytes = await this.download(ready.getUrl, job, ctx);
 
         return this.reextractAndCache(job, ocrBytes, ctx);
     }
@@ -152,6 +153,7 @@ export class OcrExecutor implements JobExecutor {
     ): Promise<{ getUrl: string } | { outcome: JobOutcome }> {
         const hint = this.resumeHints.get(job.sourceKey);
         if (hint?.fileHash === job.fileHash) {
+            logger(`OcrExecutor: ${job.sourceKey} resuming OCR backend job ${hint.jobId}`, 3);
             const resumed = await this.resumeByJobId(hint.jobId, job, ctx, recordId);
             if (!('fallback' in resumed)) {
                 // Keep hints only for outcomes that are resumed on a later claim.
@@ -162,12 +164,15 @@ export class OcrExecutor implements JobExecutor {
                 return resumed;
             }
             // This backend job cannot be resumed, so request again.
+            logger(`OcrExecutor: ${job.sourceKey} resume unavailable for ${hint.jobId}; requesting OCR again`, 3);
             this.resumeHints.delete(job.sourceKey);
         } else if (hint) {
             // Attachment content changed since the hint was recorded.
+            logger(`OcrExecutor: ${job.sourceKey} discarded stale OCR resume hint for changed file hash`, 3);
             this.resumeHints.delete(job.sourceKey);
         }
 
+        logger(`OcrExecutor: ${job.sourceKey} requesting OCR (pages=${job.pageCount})`, 3);
         const requestResult = await ocrApiClient.requestOcr(job.fileHash, job.pageCount);
         this.throwIfAborted(ctx);
         return this.resolveToReadyGetUrl(requestResult, job, ctx, recordId);
@@ -189,11 +194,13 @@ export class OcrExecutor implements JobExecutor {
         } catch (error) {
             if (error instanceof ApiError && error.status === 404) {
                 // Missing rows are re-created or rejoined through /ocr/request.
+                logger(`OcrExecutor: ${job.sourceKey} OCR backend job ${jobId} was not found`, 3);
                 return { fallback: true };
             }
             throw error;
         }
         this.throwIfAborted(ctx);
+        logger(`OcrExecutor: ${job.sourceKey} resumed OCR backend job ${jobId}: ${status.status}`, 3);
 
         switch (status.status) {
             case 'completed':
@@ -257,6 +264,7 @@ export class OcrExecutor implements JobExecutor {
             return { outcome: { kind: 'complete', reason: 'no_page_count' } };
         }
 
+        logger(`OcrExecutor: ${record.libraryId}-${record.zoteroKey} resolved OCR source (pages=${pageCount})`, 3);
         return {
             job: {
                 item,
@@ -291,9 +299,11 @@ export class OcrExecutor implements JobExecutor {
         ctx: JobExecutionContext,
         recordId: number,
     ): Promise<{ getUrl: string } | { outcome: JobOutcome }> {
+        logger(`OcrExecutor: ${job.sourceKey} OCR request response: ${request.status}`, 3);
         switch (request.status) {
             case 'disabled':
                 // Backend says the user lacks OCR entitlement (gate backstop).
+                logger(`OcrExecutor: ${job.sourceKey} OCR disabled by backend entitlement gate`, 3);
                 return { outcome: { kind: 'complete', reason: 'ocr_disabled' } };
             case 'rejected':
                 // Page-cap rejections depend on the current entitlement limits,
@@ -303,6 +313,7 @@ export class OcrExecutor implements JobExecutor {
             case 'failed':
                 return { outcome: this.failureOutcome(job, request.error) };
             case 'ready':
+                logger(`OcrExecutor: ${job.sourceKey} OCR cache hit; downloading searchable PDF`, 3);
                 if (request.get_url) return { getUrl: request.get_url };
                 return { outcome: { kind: 'retry', error: 'ocr_ready_without_url', reason: 'ocr_ready_without_url' } };
             case 'pending': {
@@ -310,6 +321,7 @@ export class OcrExecutor implements JobExecutor {
                     return { outcome: { kind: 'retry', error: 'ocr_pending_without_put_url', reason: 'ocr_pending_without_put_url' } };
                 }
                 await this.upload(request.put_url, job, ctx);
+                logger(`OcrExecutor: ${job.sourceKey} marking OCR upload complete for backend job ${request.job_id}`, 3);
                 await ocrApiClient.markUploaded(request.job_id);
                 this.throwIfAborted(ctx);
                 return this.defer(request.job_id, job, recordId);
@@ -318,6 +330,7 @@ export class OcrExecutor implements JobExecutor {
                 if (!request.job_id) {
                     return { outcome: { kind: 'retry', error: 'ocr_queued_without_job_id', reason: 'ocr_queued_without_job_id' } };
                 }
+                logger(`OcrExecutor: ${job.sourceKey} joined queued OCR backend job ${request.job_id}`, 3);
                 return this.defer(request.job_id, job, recordId);
         }
     }
@@ -335,10 +348,12 @@ export class OcrExecutor implements JobExecutor {
         // would instead waste a full read on every cross-machine cache hit.
         const bytes = await IOUtils.read(job.filePath);
         this.throwIfAborted(ctx);
+        logger(`OcrExecutor: ${job.sourceKey} uploading source PDF for OCR (${(bytes.length / 1024 / 1024).toFixed(2)}MB)`, 3);
         await putBytesToSignedUrl(putUrl, bytes, {
             contentType: 'application/pdf',
             signal: ctx.externalAbortSignal,
         });
+        logger(`OcrExecutor: ${job.sourceKey} uploaded source PDF for OCR`, 3);
     }
 
     // ----------------------------------------------------------------------
@@ -356,6 +371,7 @@ export class OcrExecutor implements JobExecutor {
     ): { outcome: JobOutcome } {
         this.resumeHints.set(job.sourceKey, { jobId, fileHash: job.fileHash });
         this.startTracking(jobId, job, recordId);
+        logger(`OcrExecutor: ${job.sourceKey} parked queue row while backend job ${jobId} runs`, 3);
         return { outcome: { kind: 'defer', reason: 'ocr_polling' } };
     }
 
@@ -367,10 +383,14 @@ export class OcrExecutor implements JobExecutor {
         // One live track per attachment. If a slow backend job outlives the
         // visibility window and the row re-surfaces, the re-claim defers again
         // without starting a second poll for the same source.
-        if (this.tracks.has(job.sourceKey)) return;
+        if (this.tracks.has(job.sourceKey)) {
+            logger(`OcrExecutor: ${job.sourceKey} OCR backend job ${jobId} already being tracked`, 4);
+            return;
+        }
 
         const abort = new AbortController();
         const deadline = Date.now() + OCR_TRACK_BUDGET_MS;
+        logger(`OcrExecutor: ${job.sourceKey} tracking OCR backend job ${jobId}`, 3);
         const promise = this.poller
             .poll(jobId, { deadline, signal: abort.signal })
             .then((result) => this.wakeOnSettle(job, recordId, result))
@@ -395,8 +415,12 @@ export class OcrExecutor implements JobExecutor {
     ): Promise<void> {
         // Timeout: leave the row parked; its visibility window re-surfaces it
         // and the next claim resumes via the stored hint.
-        if (result.kind === 'timeout') return;
+        if (result.kind === 'timeout') {
+            logger(`OcrExecutor: ${job.sourceKey} OCR backend tracking timed out; queue visibility will resume it`, 3);
+            return;
+        }
         if (Zotero.__beaverShuttingDown === true) return;
+        logger(`OcrExecutor: ${job.sourceKey} OCR backend settled (${result.kind}); waking queue row`, 3);
 
         const db = Zotero.Beaver?.db;
         if (!db) return;
@@ -415,9 +439,15 @@ export class OcrExecutor implements JobExecutor {
     // Download, re-extract, and cache.
     // ----------------------------------------------------------------------
 
-    private async download(getUrl: string, ctx: JobExecutionContext): Promise<Uint8Array> {
+    private async download(
+        getUrl: string,
+        job: ResolvedJob,
+        ctx: JobExecutionContext,
+    ): Promise<Uint8Array> {
+        logger(`OcrExecutor: ${job.sourceKey} downloading OCR searchable PDF`, 3);
         const bytes = await getBytesFromSignedUrl(getUrl, { signal: ctx.externalAbortSignal });
         this.throwIfAborted(ctx);
+        logger(`OcrExecutor: ${job.sourceKey} downloaded OCR searchable PDF (${(bytes.length / 1024 / 1024).toFixed(2)}MB)`, 3);
         return bytes;
     }
 
@@ -427,6 +457,7 @@ export class OcrExecutor implements JobExecutor {
         ctx: JobExecutionContext,
     ): Promise<JobOutcome> {
         // Hand the MuPDF extraction to the serialized background lane.
+        logger(`OcrExecutor: ${job.sourceKey} re-extracting OCR searchable PDF`, 3);
         const result = await ctx.runOnMuPDFWorker(() =>
             extractPdfBytesAndCacheAsOriginalAttachment({
                 item: job.item,
@@ -448,6 +479,7 @@ export class OcrExecutor implements JobExecutor {
                 return { kind: 'complete', reason: 'ocr_ok' };
             case 'no_text':
                 // OCR ran but produced no usable text; terminal for this engine.
+                logger(`OcrExecutor: ${job.sourceKey} OCR re-extract found no usable text`, 2);
                 this.reportTerminalOutcome(job, OCR_TERMINAL_NO_TEXT);
                 return this.terminal(job, OCR_TERMINAL_NO_TEXT, 'OCR produced no usable text layer');
             case 'geometry_mismatch':
@@ -458,8 +490,10 @@ export class OcrExecutor implements JobExecutor {
             case 'aborted':
                 return { kind: 'release', reason: 'aborted' };
             case 'unavailable':
+                logger(`OcrExecutor: ${job.sourceKey} OCR re-extract unavailable (${result.reason})`, 2);
                 return { kind: 'complete', reason: `ocr_${result.reason}` };
             case 'error':
+                logger(`OcrExecutor: ${job.sourceKey} OCR re-extract failed: ${result.message}`, 2);
                 return { kind: 'retry', error: `ocr_reextract: ${result.message}`, reason: 'ocr_reextract_failed' };
         }
     }
@@ -471,9 +505,11 @@ export class OcrExecutor implements JobExecutor {
     /** Map a backend failure to retry (transient) or terminal (permanent). */
     private failureOutcome(job: ResolvedJob, error: OcrError | null | undefined): JobOutcome {
         if (error?.kind === 'permanent') {
+            logger(`OcrExecutor: ${job.sourceKey} OCR backend permanent failure: ${error.code}: ${error.message}`, 2);
             return this.terminal(job, OCR_TERMINAL_FAILED, `${error.code}: ${error.message}`);
         }
         const detail = error ? `${error.code}: ${error.message}` : 'unknown';
+        logger(`OcrExecutor: ${job.sourceKey} OCR backend transient failure: ${detail}`, 2);
         return { kind: 'retry', error: `ocr_backend_failed: ${detail}`, reason: 'ocr_backend_failed' };
     }
 

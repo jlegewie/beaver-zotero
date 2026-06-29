@@ -48,10 +48,16 @@ export function maybeEnqueueOcrJob(args: MaybeEnqueueOcrArgs): void {
 
 async function enqueueOcrJob(args: MaybeEnqueueOcrArgs): Promise<void> {
     // Fast entitlement gate; the backend re-checks on `/ocr/request`.
-    if (Zotero.Beaver?.hasOcrAccess !== true) return;
+    if (Zotero.Beaver?.hasOcrAccess !== true) {
+        logger(`maybeEnqueueOcrJob: ${args.libraryId}-${args.zoteroKey} skipped, OCR access is disabled`, 4);
+        return;
+    }
 
     const db = Zotero.Beaver?.db;
-    if (!db) return;
+    if (!db) {
+        logger(`maybeEnqueueOcrJob: ${args.libraryId}-${args.zoteroKey} skipped, database unavailable`, 4);
+        return;
+    }
 
     const priority = args.priority ?? OCR_PRIORITY_ON_DEMAND;
 
@@ -66,7 +72,12 @@ async function enqueueOcrJob(args: MaybeEnqueueOcrArgs): Promise<void> {
         'document_ocr', args.libraryId, args.zoteroKey, OCR_JOB_PAYLOAD_KIND, priority,
     );
     if (pending.exists) {
-        if (pending.promoted) Zotero.Beaver?.backgroundExtractor?.notify();
+        if (pending.promoted) {
+            logger(`maybeEnqueueOcrJob: ${args.libraryId}-${args.zoteroKey} promoted existing OCR job (priority=${priority})`, 3);
+            Zotero.Beaver?.backgroundExtractor?.notify();
+        } else {
+            logger(`maybeEnqueueOcrJob: ${args.libraryId}-${args.zoteroKey} OCR job already queued`, 4);
+        }
         return;
     }
 
@@ -81,9 +92,11 @@ async function enqueueOcrJob(args: MaybeEnqueueOcrArgs): Promise<void> {
 
     // Loop guard: skip scans this engine has already marked terminal.
     if (await db.isDocumentProcessingPermanentlyFailed(fileHash, 'ocr', OCR_ENGINE_VERSION)) {
+        logger(`maybeEnqueueOcrJob: ${args.libraryId}-${args.zoteroKey} skipped, terminal OCR failure already recorded`, 3);
         return;
     }
 
+    logger(`maybeEnqueueOcrJob: ${args.libraryId}-${args.zoteroKey} enqueueing OCR job (pages=${args.pageCount ?? 'unknown'}, priority=${priority})`, 3);
     await db.enqueueBackgroundJob({
         jobType: 'document_ocr',
         libraryId: args.libraryId,
