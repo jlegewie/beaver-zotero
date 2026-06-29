@@ -207,9 +207,9 @@ export interface AttachmentMatchTarget {
     boxes?: [number, number, number, number][];
     /** Section href (EPUB). */
     section_href?: string;
-    /** HTML anchor id nearest the part (EPUB). */
+    /** HTML anchor id nearest the part (EPUB, snapshot). */
     anchor_id?: string;
-    /** Part text (possibly a prefix) for locating the passage in the reader DOM (EPUB). */
+    /** Part text (possibly a prefix) for locating the passage in the reader DOM (EPUB, snapshot). */
     text?: string;
     /** 1-based line number (text documents). */
     line?: number;

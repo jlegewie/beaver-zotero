@@ -28,3 +28,12 @@ export function effectiveMaxPageCount(requested?: number | null): number {
     return Math.min(requestedLimit ?? HARD_ATTACHMENT_LIMITS.maxPageCount, HARD_ATTACHMENT_LIMITS.maxPageCount);
 }
 
+// Snapshots are parsed twice in memory, so use a tighter cap than other files.
+export const SNAPSHOT_HARD_MAX_FILE_SIZE_MB = 50;
+
+/**
+ * Return the effective snapshot file-size ceiling after both hard caps.
+ */
+export function effectiveMaxSnapshotFileSizeMB(requested?: number | null): number {
+    return Math.min(effectiveMaxFileSizeMB(requested), SNAPSHOT_HARD_MAX_FILE_SIZE_MB);
+}

@@ -16,7 +16,25 @@ vi.mock('../../../../src/services/attachmentLimits', () => ({
     effectiveMaxFileSizeMB: vi.fn(() => 50),
 }));
 
+// Mock only the worker facade; extraction error classification stays real.
+const { mockGetMetadata, mockAnalyzeOCRNeeds } = vi.hoisted(() => ({
+    mockGetMetadata: vi.fn(),
+    mockAnalyzeOCRNeeds: vi.fn(),
+}));
+
+vi.mock('../../../../src/beaver-extract', async (importActual) => {
+    const actual = await importActual<typeof import('../../../../src/beaver-extract')>();
+    return {
+        ...actual,
+        BeaverExtractor: vi.fn().mockImplementation(() => ({
+            getMetadata: mockGetMetadata,
+            analyzeOCRNeeds: mockAnalyzeOCRNeeds,
+        })),
+    };
+});
+
 import { getAttachmentInfo } from '../../../../src/services/documentExtraction/attachmentInfo';
+import { ExtractionError, ExtractionErrorCode } from '../../../../src/beaver-extract';
 import { getPref } from '../../../../src/utils/prefs';
 import { isAttachmentAvailableRemotely } from '../../../../src/utils/webAPI';
 
@@ -149,13 +167,18 @@ describe('getAttachmentInfo', () => {
         expect(info.status_code).toBeUndefined();
     });
 
-    it('reports the cached EPUB section count as page_count', async () => {
+    it('reports the cached EPUB page count as page_count', async () => {
         (globalThis as any).Zotero.Beaver = {
             documentCache: {
                 getMetadata: vi.fn(async () => ({
                     contentKind: 'epub',
                     errorCode: null,
-                    documentMetadata: { content_kind: 'epub', sectionCount: 12, sections: [] },
+                    documentMetadata: {
+                        content_kind: 'epub',
+                        sectionCount: 3,
+                        pageCount: 12,
+                        sections: [],
+                    },
                 })),
             },
         };
@@ -168,6 +191,28 @@ describe('getAttachmentInfo', () => {
             content_kind: 'epub',
             status: 'readable',
             page_count: 12,
+        });
+    });
+
+    it('falls back to EPUB section count for older cache rows without pageCount', async () => {
+        (globalThis as any).Zotero.Beaver = {
+            documentCache: {
+                getMetadata: vi.fn(async () => ({
+                    contentKind: 'epub',
+                    errorCode: null,
+                    documentMetadata: { content_kind: 'epub', sectionCount: 5, sections: [] },
+                })),
+            },
+        };
+
+        const info = await getAttachmentInfo(
+            makeAttachment({ contentType: 'application/epub+zip', filePath: '/tmp/book.epub' }),
+        );
+
+        expect(info).toMatchObject({
+            content_kind: 'epub',
+            status: 'readable',
+            page_count: 5,
         });
     });
 
@@ -228,7 +273,12 @@ describe('getAttachmentInfo', () => {
                 getMetadata: vi.fn(async () => ({
                     contentKind: 'epub',
                     errorCode: null,
-                    documentMetadata: { content_kind: 'epub', sectionCount: 5, sections: [] },
+                    documentMetadata: {
+                        content_kind: 'epub',
+                        sectionCount: 5,
+                        pageCount: 9,
+                        sections: [],
+                    },
                 })),
             },
         };
@@ -240,7 +290,62 @@ describe('getAttachmentInfo', () => {
         expect(info).toMatchObject({
             content_kind: 'epub',
             status: 'readable',
-            page_count: 5,
+            page_count: 9,
+        });
+    });
+
+    it('reports the cached snapshot synthetic page count as page_count', async () => {
+        (globalThis as any).Zotero.Beaver = {
+            documentCache: {
+                getMetadata: vi.fn(async () => ({
+                    contentKind: 'snapshot',
+                    errorCode: null,
+                    documentMetadata: {
+                        content_kind: 'snapshot',
+                        sectionCount: 1,
+                        pageCount: 12,
+                        sections: [],
+                        extractedTextChars: 100,
+                    },
+                })),
+            },
+        };
+
+        const info = await getAttachmentInfo(
+            makeAttachment({ contentType: 'text/html', filePath: '/tmp/snapshot.html' }),
+        );
+
+        expect(info).toMatchObject({
+            content_kind: 'snapshot',
+            status: 'readable',
+            page_count: 12,
+        });
+    });
+
+    it('reports unknown snapshot page_count when cached snapshot metadata lacks pageCount', async () => {
+        (globalThis as any).Zotero.Beaver = {
+            documentCache: {
+                getMetadata: vi.fn(async () => ({
+                    contentKind: 'snapshot',
+                    errorCode: null,
+                    documentMetadata: {
+                        content_kind: 'snapshot',
+                        sectionCount: 1,
+                        sections: [],
+                        extractedTextChars: 100,
+                    },
+                })),
+            },
+        };
+
+        const info = await getAttachmentInfo(
+            makeAttachment({ contentType: 'text/html', filePath: '/tmp/snapshot.html' }),
+        );
+
+        expect(info).toMatchObject({
+            content_kind: 'snapshot',
+            status: 'readable',
+            page_count: null,
         });
     });
 
@@ -337,5 +442,107 @@ describe('getAttachmentInfo', () => {
             status: 'readable',
         });
         expect(info.status_code).toBeUndefined();
+    });
+});
+
+describe('getAttachmentInfo PDF analysis retry', () => {
+    function staleWorkerError(): Error {
+        // Match the cross-bundle error shape used by retry classification.
+        return Object.assign(new Error('stale worker: worker.onerror'), {
+            name: 'StaleWorkerError',
+        });
+    }
+
+    beforeEach(() => {
+        vi.clearAllMocks();
+        // Reset mock implementations and once-queues.
+        mockGetMetadata.mockReset();
+        mockAnalyzeOCRNeeds.mockReset();
+        // No document cache means the full worker analysis path runs.
+        (globalThis as any).Zotero.Beaver = {};
+        (globalThis as any).IOUtils.stat = vi.fn().mockResolvedValue({ size: 1024 });
+        (globalThis as any).IOUtils.read = vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3]));
+        vi.mocked(getPref).mockReturnValue(false);
+        vi.mocked(isAttachmentAvailableRemotely).mockReturnValue(false);
+    });
+
+    it('re-runs after a transient worker failure, then succeeds', async () => {
+        mockGetMetadata
+            .mockRejectedValueOnce(staleWorkerError())
+            .mockResolvedValueOnce({ pageCount: 44, pageLabels: {}, pages: null });
+        mockAnalyzeOCRNeeds.mockResolvedValue({ needsOCR: false });
+
+        const info = await getAttachmentInfo(makeAttachment());
+
+        expect(info).toMatchObject({ content_kind: 'pdf', status: 'readable', page_count: 44 });
+        expect(info.status_code).toBeUndefined();
+        expect(mockGetMetadata).toHaveBeenCalledTimes(2);
+    });
+
+    it('treats a persistently transient worker failure as readable, not rejected', async () => {
+        mockGetMetadata.mockRejectedValue(staleWorkerError());
+
+        const info = await getAttachmentInfo(makeAttachment());
+
+        // Worker availability failures should not permanently reject the file.
+        expect(info).toMatchObject({ content_kind: 'pdf', status: 'readable', page_count: null });
+        expect(info.status_code).toBeUndefined();
+        expect(mockGetMetadata).toHaveBeenCalledTimes(3);
+    }, 10000);
+
+    it('retries heap exhaustion once on a fresh worker, then succeeds', async () => {
+        mockGetMetadata
+            .mockRejectedValueOnce(new ExtractionError(ExtractionErrorCode.HEAP_EXHAUSTION, 'out of memory'))
+            .mockResolvedValueOnce({ pageCount: 12, pageLabels: {}, pages: null });
+        mockAnalyzeOCRNeeds.mockResolvedValue({ needsOCR: false });
+
+        const info = await getAttachmentInfo(makeAttachment());
+
+        expect(info).toMatchObject({ content_kind: 'pdf', status: 'readable', page_count: 12 });
+        expect(mockGetMetadata).toHaveBeenCalledTimes(2);
+    });
+
+    it('reports a PDF that keeps exhausting the heap as unreadable, not readable', async () => {
+        mockGetMetadata.mockRejectedValue(
+            new ExtractionError(ExtractionErrorCode.HEAP_EXHAUSTION, 'out of memory'),
+        );
+
+        const info = await getAttachmentInfo(makeAttachment());
+
+        // Repeated heap exhaustion is reported as a local parser limit.
+        expect(info).toMatchObject({
+            content_kind: 'pdf',
+            status: 'unreadable',
+            status_code: 'pdf_parser_crash',
+        });
+        expect(mockGetMetadata).toHaveBeenCalledTimes(2);
+    });
+
+    it('maps a non-transient analysis failure to pdf_analysis_error without retrying', async () => {
+        mockGetMetadata.mockRejectedValue(new Error('unexpected boom'));
+
+        const info = await getAttachmentInfo(makeAttachment());
+
+        expect(info).toMatchObject({
+            content_kind: 'pdf',
+            status: 'unreadable',
+            status_code: 'pdf_analysis_error',
+        });
+        expect(mockGetMetadata).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not retry a deterministic encrypted verdict', async () => {
+        mockGetMetadata.mockRejectedValue(
+            new ExtractionError(ExtractionErrorCode.ENCRYPTED, 'password protected'),
+        );
+
+        const info = await getAttachmentInfo(makeAttachment());
+
+        expect(info).toMatchObject({
+            content_kind: 'pdf',
+            status: 'unreadable',
+            status_code: 'pdf_encrypted',
+        });
+        expect(mockGetMetadata).toHaveBeenCalledTimes(1);
     });
 });

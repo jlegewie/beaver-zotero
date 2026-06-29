@@ -82,6 +82,18 @@ describe('agentItemSupport', () => {
             expect(isAgentSupportedItem(image)).toBe(true);
         });
 
+        it('accepts imported HTML snapshot attachments', () => {
+            const snapshot = withTrash(createMockAttachment({ contentType: 'text/html' }));
+            expect(isAgentSupportedItem(snapshot)).toBe(true);
+        });
+
+        it('rejects linked-URL web links even with a readable content type', () => {
+            // A text/html linked URL classifies as `snapshot` by content type but
+            // has no local file, so it must not count as an accessible source.
+            const webLink = withTrash(createMockAttachment({ contentType: 'text/html', linkMode: 2 }));
+            expect(isAgentSupportedItem(webLink)).toBe(false);
+        });
+
         it('rejects unsupported attachment types', () => {
             const word = withTrash(createMockAttachment({ contentType: 'application/msword' }));
             const note = withTrash(createMockItem({ isNote: true }));
@@ -127,13 +139,13 @@ describe('agentItemSupport', () => {
         });
 
         it('passes server-only EPUBs when remote access is enabled', async () => {
-            vi.mocked(getPref).mockImplementation((key: string) => key === 'accessRemoteFiles');
+            vi.mocked(getPref).mockImplementation((key) => key === 'accessRemoteFiles');
             vi.mocked(isAttachmentAvailableRemotely).mockReturnValue(true);
             await expect(agentItemFilterAsync(epubAttachment({ fileExists: false }))).resolves.toBe(true);
         });
 
         it('passes hashless remote attachments when remote access is enabled', async () => {
-            vi.mocked(getPref).mockImplementation((key: string) => key === 'accessRemoteFiles');
+            vi.mocked(getPref).mockImplementation((key) => key === 'accessRemoteFiles');
             vi.mocked(isAttachmentAvailableRemotely).mockReturnValue(true);
             await expect(agentItemFilterAsync(pdfAttachment({ fileExists: false }))).resolves.toBe(true);
         });

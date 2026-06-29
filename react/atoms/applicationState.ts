@@ -47,7 +47,7 @@ export async function getReaderState(get: Getter): Promise<ReaderState | null> {
     if (!readerAttachment) return null;
 
     const reader = getCurrentReader();
-    const contentKind = reader?.type === 'pdf' || reader?.type === 'epub'
+    const contentKind = reader?.type === 'pdf' || reader?.type === 'epub' || reader?.type === 'snapshot'
         ? reader.type
         : undefined;
     let currentTextSelection = get(readerTextSelectionAtom);

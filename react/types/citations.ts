@@ -381,6 +381,10 @@ export type SymbolicLocation =
 export const getSymbolicLocation = (
     citation: Citation | null | undefined,
 ): SymbolicLocation | undefined => {
+    // Snapshot citations carry anchor_id/text and (usually) no stored selector —
+    // the selector is computed at click/annotation time — so they are matched by
+    // content kind rather than field presence, unlike EPUB/text.
+    const isSnapshot = getContentKind(citation) === 'snapshot';
     for (const location of citation?.locations || []) {
         if (location.section_href != null) {
             return {
@@ -398,10 +402,10 @@ export const getSymbolicLocation = (
                 ...(location.text != null ? { text: location.text } : {}),
             };
         }
-        if (location.selector != null) {
+        if (isSnapshot && (location.selector != null || location.anchor_id != null || location.text != null)) {
             return {
                 content_kind: 'snapshot',
-                selector: location.selector,
+                ...(location.selector != null ? { selector: location.selector } : {}),
                 ...(location.anchor_id != null ? { anchor_id: location.anchor_id } : {}),
                 ...(location.text != null ? { text: location.text } : {}),
             };
@@ -465,20 +469,29 @@ export const getCitationBoundingBoxes = (citation: Citation | null | undefined):
  * Mirrors Zotero's `item.getItemTypeIconName()` for the cases citations can
  * resolve to, without requiring a live item. Regular item types pass through
  * (their type name is the icon name); attachments branch on content kind.
+ *
+ * `content_kind` is set only for attachments and pins the exact attachment
+ * glyph, so it is honored whenever present — including when `item_type` is
+ * absent. Some tool-result rows carry `content_kind` but no `item_type`; without
+ * this, a known attachment kind would fall back to the generic document icon.
  */
 export function itemTypeToIconName(
     itemType: string | undefined,
-    contentKind: ContentKind | undefined,
+    contentKind: string | undefined,
 ): string {
-    if (!itemType) return 'document';
-    if (itemType === 'attachment') {
+    if (itemType === 'attachment' || (!itemType && contentKind)) {
         switch (contentKind) {
+            case 'pdf': return 'attachmentPDF';
             case 'epub': return 'attachmentEPUB';
             case 'snapshot': return 'attachmentSnapshot';
-            case 'text': return 'attachmentFile';
             case 'image': return 'attachmentImage';
-            default: return 'attachmentPDF';
+            case 'video': return 'attachmentVideo';
+            case 'linked_url': return 'attachmentWebLink';
+            // 'text', office/audio/archive kinds, and any unrecognized 
+            // kind fall back to the generic file glyph.
+            default: return 'attachmentFile';
         }
     }
+    if (!itemType) return 'document';
     return itemType;
 }

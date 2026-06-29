@@ -41,7 +41,7 @@ import type {
     SerializedDocumentCacheResult,
 } from './documentCache';
 import { logger } from '../utils/logger';
-import { effectiveMaxFileSizeMB, effectiveMaxPageCount } from './attachmentLimits';
+import { effectiveMaxFileSizeMB, effectiveMaxPageCount, effectiveMaxSnapshotFileSizeMB } from './attachmentLimits';
 import {
     loadAttachmentData,
     resolveAttachmentFileSource,
@@ -56,6 +56,12 @@ import {
     preflightEpubFile,
     type EpubDocument,
 } from './documentExtraction/epub';
+import {
+    extractSnapshotDocumentFromFile,
+    preflightSnapshotFile,
+    resolveSnapshotSectionMeta,
+    type SnapshotDocument,
+} from './documentExtraction/snapshot';
 
 export interface ResolvedAttachment {
     libraryId: number;
@@ -151,6 +157,39 @@ export interface ExtractAndCacheEpubArgs {
     externalAbortSignal?: AbortSignal;
     onFileNotSyncedLocally?: () => void;
 }
+
+export interface ExtractAndCacheSnapshotArgs {
+    source: ExtractionSource;
+    resolvedKey: string;
+    contentType: string;
+    /**
+     * Reject threshold for total document page count. `null` falls back to
+     * Beaver's hard page-count cap. Snapshot pages are the extractor's per-item
+     * synthetic `pageNumber` coordinate (~character-interval pages).
+     */
+    maxPages: number | null;
+    maxFileSizeMB: number;
+    externalAbortSignal?: AbortSignal;
+    onFileNotSyncedLocally?: () => void;
+}
+
+export type ExtractAndCacheSnapshotResult =
+    | {
+          kind: 'ok';
+          cached: boolean;
+          document: SnapshotDocument;
+          resolvedAttachment: ResolvedAttachment;
+          contentType: string;
+      }
+    | {
+          kind: 'response_error';
+          code: ZoteroDocumentErrorCode;
+          message: string;
+          /** Document page count when known (e.g. the count that tripped `too_many_pages`). */
+          pageCount?: number | null;
+          resolvedAttachment: ResolvedAttachment;
+          contentKind?: ExtractContentKind;
+      };
 
 export function buildExtractedDocumentCacheMetadata(extracted: BeaverExtractResult): {
     pageCount: number;
@@ -559,6 +598,188 @@ export async function extractAndCacheEpubDocument(
             message: `Failed to extract EPUB content for ${requestKey}: ${error instanceof Error ? error.message : String(error)}`,
             resolvedAttachment,
             contentKind: 'epub',
+        };
+    }
+}
+
+/**
+ * Run the snapshot extraction pipeline for an already-resolved HTML snapshot
+ * attachment. Expected outcomes are returned as a tagged union for caller-side
+ * mapping, matching the EPUB extraction result shape.
+ */
+export async function extractAndCacheSnapshotDocument(
+    args: ExtractAndCacheSnapshotArgs,
+): Promise<ExtractAndCacheSnapshotResult> {
+    const cacheItemRef: DocumentCacheItemRef = args.source.kind === 'zotero'
+        ? args.source.item
+        : args.source.itemRef;
+    const resolvedAttachment = {
+        libraryId: cacheItemRef.libraryID,
+        zoteroKey: cacheItemRef.key,
+    };
+    const requestKey = args.resolvedKey;
+
+    let filePath: string;
+    if (args.source.kind === 'zotero') {
+        const preflight = await preflightSnapshotFile(args.source.item, {
+            maxFileSizeMB: args.maxFileSizeMB,
+            onFileNotSyncedLocally: args.onFileNotSyncedLocally,
+        });
+        if (preflight.kind === 'response_error') {
+            return {
+                kind: 'response_error',
+                code: preflight.code,
+                message: preflight.message,
+                resolvedAttachment,
+                contentKind: 'snapshot',
+            };
+        }
+        filePath = preflight.filePath;
+    } else {
+        // Match the tighter Zotero snapshot preflight limit for external files.
+        const externalSource = await resolveExternalFileSource(
+            args.source.filePath,
+            effectiveMaxSnapshotFileSizeMB(args.maxFileSizeMB),
+        );
+        if (externalSource.kind === 'error') {
+            return {
+                kind: 'response_error',
+                code: externalSource.code,
+                message: externalSource.code === 'file_missing'
+                    ? `The snapshot file for ${requestKey} is not available on this device.`
+                    : `The snapshot file for ${requestKey} is ${(externalSource.sizeMB ?? 0).toFixed(1)} MB, which exceeds the ${externalSource.maxMB} MB limit.`,
+                resolvedAttachment,
+                contentKind: 'snapshot',
+            };
+        }
+        filePath = externalSource.filePath;
+    }
+
+    // Section metadata (URL / title) for the single snapshot section. Only Zotero
+    // items carry it; external files fall back to the filename in the extractor.
+    const sectionMeta = args.source.kind === 'zotero'
+        ? await resolveSnapshotSectionMeta(args.source.item)
+        : {};
+
+    // Keep cache and fallback errors aligned with snapshot preflight.
+    const maxFileSizeMB = effectiveMaxSnapshotFileSizeMB(args.maxFileSizeMB);
+    const maxSourceSizeBytes = maxFileSizeMB * 1024 * 1024;
+    const maxPages = effectiveMaxPageCount(args.maxPages);
+
+    const okOrNoText = (
+        document: SnapshotDocument,
+        cached: boolean,
+    ): ExtractAndCacheSnapshotResult => {
+        if (document.diagnostics.extractedTextChars === 0) {
+            return {
+                kind: 'response_error',
+                code: 'no_text_layer',
+                message: `The snapshot file for ${requestKey} contains no extractable text.`,
+                resolvedAttachment,
+                contentKind: 'snapshot',
+            };
+        }
+        // Reject oversized extracted content before serializing the payload.
+        if (document.pageCount != null && document.pageCount > maxPages) {
+            return {
+                kind: 'response_error',
+                code: 'too_many_pages',
+                message: `The snapshot for ${requestKey} is too long for Beaver to process — its extracted content exceeds the supported size.`,
+                pageCount: document.pageCount,
+                resolvedAttachment,
+                contentKind: 'snapshot',
+            };
+        }
+        return {
+            kind: 'ok',
+            cached,
+            document,
+            resolvedAttachment,
+            contentType: args.contentType,
+        };
+    };
+
+    try {
+        const cache = Zotero.Beaver?.documentCache;
+        if (!cache) {
+            logger(`extractAndCacheSnapshotDocument: document cache not available for ${requestKey}`, 1);
+            return okOrNoText(
+                await extractSnapshotDocumentFromFile(filePath, {
+                    ...sectionMeta,
+                    abortSignal: args.externalAbortSignal,
+                }),
+                false,
+            );
+        }
+
+        const ref = {
+            libraryId: cacheItemRef.libraryID,
+            zoteroKey: cacheItemRef.key,
+        };
+        const cached = await cache.getSnapshotResult(ref, filePath, { maxSourceSizeBytes }).catch(() => null);
+        if (cached) {
+            return okOrNoText(cached, true);
+        }
+
+        let created = false;
+        const document = await cache.getOrCreateResult<SnapshotDocument>({
+            item: cacheItemRef,
+            filePath,
+            contentKind: 'snapshot',
+            mode: 'structured',
+            sourceSizeBytes: 0,
+            contentType: args.contentType,
+            maxSourceSizeBytes,
+            abortSignal: args.externalAbortSignal,
+            readCached: (cacheRef) => cache.getSnapshotResult(cacheRef, filePath, { maxSourceSizeBytes }),
+            create: async (signal) => {
+                created = true;
+                return extractSnapshotDocumentFromFile(filePath, { ...sectionMeta, abortSignal: signal });
+            },
+            metadata: (doc) => ({
+                contentKind: 'snapshot',
+                // PDF-only fields stay null for snapshots.
+                pageCount: null,
+                pageLabels: null,
+                pages: null,
+                snapshotPageCount: doc.pageCount ?? null,
+                snapshotTitle: doc.sections[0]?.label,
+                snapshotSections: doc.sections.map((section) => ({
+                    index: section.index,
+                    title: section.label,
+                    itemCount: section.items.length,
+                })),
+                snapshotExtractedTextChars: doc.diagnostics.extractedTextChars,
+            }),
+        });
+
+        if (!document) {
+            return {
+                kind: 'response_error',
+                code: 'file_too_large',
+                message: `The snapshot file for ${requestKey} exceeds the ${maxFileSizeMB}MB limit.`,
+                resolvedAttachment,
+                contentKind: 'snapshot',
+            };
+        }
+
+        return okOrNoText(document, !created);
+    } catch (error) {
+        if (args.externalAbortSignal?.aborted && isAbortError(error)) {
+            return {
+                kind: 'response_error',
+                code: 'timeout',
+                message: `Snapshot extraction interrupted for ${requestKey}`,
+                resolvedAttachment,
+                contentKind: 'snapshot',
+            };
+        }
+        return {
+            kind: 'response_error',
+            code: 'extraction_failed',
+            message: `Failed to extract snapshot content for ${requestKey}: ${error instanceof Error ? error.message : String(error)}`,
+            resolvedAttachment,
+            contentKind: 'snapshot',
         };
     }
 }
