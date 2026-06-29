@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
     buildSnapshotSortIndex,
     toSnapshotSelector,
     type SnapshotSelector,
 } from "../../../src/services/annotations/snapshot/snapshotAnnotationGeometry";
+import { getUniqueSelectorContaining } from "../../../src/services/annotations/snapshot/vendor/readerSelectors";
 
 function bodyWith(html: string): HTMLElement {
     const doc = globalThis.document.implementation.createHTMLDocument("");
@@ -68,6 +69,57 @@ describe("toSnapshotSelector", () => {
         expect(isCss(selector)).toBe(true);
         if (!isCss(selector)) return;
         expect(selector.value).toBe("#para");
+    });
+});
+
+describe("getUniqueSelectorContaining — cssEscape fallback (no globalThis.CSS)", () => {
+    // The headless path may run without `globalThis.CSS`. Force that branch so the
+    // fallback (not native CSS.escape) is exercised, then restore it.
+    let savedCSS: unknown;
+    let hadCSS = false;
+
+    function withoutCSS<T>(fn: () => T): T {
+        const g = globalThis as { CSS?: unknown };
+        hadCSS = "CSS" in g;
+        savedCSS = g.CSS;
+        delete g.CSS;
+        try {
+            return fn();
+        } finally {
+            if (hadCSS) {
+                (g as { CSS?: unknown }).CSS = savedCSS;
+            }
+        }
+    }
+
+    function elementWithId(id: string): Element {
+        const doc = globalThis.document.implementation.createHTMLDocument("");
+        const el = doc.createElement("div");
+        el.id = id;
+        el.textContent = "cited text";
+        doc.body.appendChild(el);
+        return el;
+    }
+
+    afterEach(() => {
+        const g = globalThis as { CSS?: unknown };
+        if (hadCSS) g.CSS = savedCSS;
+    });
+
+    // A leading digit / leading hyphen-digit must be hex-escaped, not passed
+    // through raw, or the reader's querySelector throws on the stored selector.
+    it.each([
+        ["2", "#\\32 "],
+        ["1abc", "#\\31 abc"],
+        ["-1", "#-\\31 "],
+        ["fn:1", "#fn\\:1"],
+        ["a b", "#a\\ b"],
+    ])("escapes id %j to a resolvable selector %j", (id, expected) => {
+        const el = elementWithId(id);
+        const selector = withoutCSS(() => getUniqueSelectorContaining(el));
+        expect(selector).toBe(expected);
+        // The escaped selector must round-trip back to the element.
+        expect(el.ownerDocument.body.querySelector(selector!)).toBe(el);
     });
 });
 

@@ -208,14 +208,55 @@ export function textPositionToRange(selector: TextPositionSelector, root: Elemen
 
 // --- unique-selector.ts -------------------------------------------------------
 
-/** CSS.escape when available (window scope), else a conservative fallback. */
+/**
+ * CSS.escape when available (window scope), else a spec-compliant fallback.
+ */
 function cssEscape(value: string): string {
     const css = (globalThis as { CSS?: { escape?: (v: string) => string } }).CSS;
     if (css?.escape) {
         return css.escape(value);
     }
-    // Fallback: escape characters outside the CSS identifier-safe set.
-    return value.replace(/[^a-zA-Z0-9_-]/g, (ch) => `\\${ch}`);
+    const string = String(value);
+    const length = string.length;
+    const firstCodeUnit = string.charCodeAt(0);
+    // A lone "-" must be escaped; a "-" followed by more characters need not be.
+    if (length === 1 && firstCodeUnit === 0x002d) {
+        return `\\${string}`;
+    }
+    let result = "";
+    for (let index = 0; index < length; index++) {
+        const codeUnit = string.charCodeAt(index);
+        // NULL → U+FFFD REPLACEMENT CHARACTER.
+        if (codeUnit === 0x0000) {
+            result += "�";
+            continue;
+        }
+        if (
+            // Control characters and U+007F: escape as a code point.
+            (codeUnit >= 0x0001 && codeUnit <= 0x001f) || codeUnit === 0x007f
+            // Leading digit, or a digit right after a leading "-".
+            || (index === 0 && codeUnit >= 0x0030 && codeUnit <= 0x0039)
+            || (index === 1 && codeUnit >= 0x0030 && codeUnit <= 0x0039 && firstCodeUnit === 0x002d)
+        ) {
+            result += `\\${codeUnit.toString(16)} `;
+            continue;
+        }
+        // Identifier-safe characters (incl. non-ASCII >= U+0080) pass through.
+        if (
+            codeUnit >= 0x0080
+            || codeUnit === 0x002d
+            || codeUnit === 0x005f
+            || (codeUnit >= 0x0030 && codeUnit <= 0x0039)
+            || (codeUnit >= 0x0041 && codeUnit <= 0x005a)
+            || (codeUnit >= 0x0061 && codeUnit <= 0x007a)
+        ) {
+            result += string.charAt(index);
+            continue;
+        }
+        // Everything else: escape the character itself.
+        result += `\\${string.charAt(index)}`;
+    }
+    return result;
 }
 
 /** Generate a CSS selector uniquely pointing to `element`, relative to its body. */
