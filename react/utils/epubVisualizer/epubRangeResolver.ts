@@ -8,11 +8,10 @@ import {
     type EpubDocument,
 } from "../../../src/services/documentExtraction/epub";
 import {
-    citationSearchTextCandidates,
     createElementContentsRange,
     createSentenceRange,
-    findAnchorElement,
     normalizeHrefBasename,
+    resolveAnchoredTextRange,
 } from "../../../src/services/documentExtraction/dom/textRange";
 
 // Re-export the shared text-search helpers for callers that use this reader-side
@@ -152,32 +151,13 @@ export function resolveEpubCitationRange(
     const body = getSectionBody(primaryView, sectionIndex);
     if (!body) return { sectionIndex };
 
-    const anchorElement = target.anchorId
-        ? findAnchorElement(body, target.anchorId)
-        : undefined;
-
-    const searchTexts = citationSearchTextCandidates(target.text);
-
-    // Exhaust anchor-scoped candidates before any body-wide search: a
-    // body-wide match for an earlier candidate must not outrank the anchor
-    // disambiguation that `anchorId` exists to provide.
-    if (anchorElement) {
-        for (const searchText of searchTexts) {
-            const scopedRange = createSentenceRange(anchorElement, searchText);
-            if (scopedRange) return { sectionIndex, range: scopedRange };
-        }
-    }
-    for (const searchText of searchTexts) {
-        const bodyRange = createSentenceRange(body, searchText);
-        if (bodyRange) return { sectionIndex, range: bodyRange };
-    }
-
-    if (anchorElement) {
-        const anchorRange = createElementContentsRange(anchorElement);
-        if (anchorRange) return { sectionIndex, range: anchorRange };
-    }
-
-    return { sectionIndex };
+    // Shared anchor-scoped → body-wide → anchor-contents search. The
+    // anchor-contents fallback lets an anchor-only locator still resolve a range.
+    const range = resolveAnchoredTextRange(body, {
+        anchorId: target.anchorId,
+        text: target.text,
+    });
+    return range ? { sectionIndex, range } : { sectionIndex };
 }
 
 function resolveCitationSectionIndex(

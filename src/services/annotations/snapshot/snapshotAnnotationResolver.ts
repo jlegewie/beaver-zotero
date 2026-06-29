@@ -1,10 +1,7 @@
 import { logger } from "../../../utils/logger";
 import {
-    citationSearchTextCandidates,
     createContainingBlockRange,
-    createElementContentsRange,
-    createSentenceRange,
-    findAnchorElement,
+    resolveAnchoredTextRange,
 } from "../../documentExtraction/dom/textRange";
 import { parseSnapshotHtml } from "../../documentExtraction/snapshot/snapshotDom";
 import {
@@ -67,9 +64,9 @@ function mirrorReaderAnnotationOverlay(body: Element): void {
 
 /**
  * Build the snapshot selector + sortIndex from a prepared snapshot document.
- * Locates the cited range (anchor-scoped, then body-wide, then anchor contents —
- * mirroring the EPUB resolver), then emits the reader-matching CssSelector and
- * 7-digit sortIndex via the vendored reader helpers.
+ * Locates the cited range via the shared anchor → body → anchor-contents search
+ * ({@link resolveAnchoredTextRange}), then emits the reader-matching CssSelector
+ * and 7-digit sortIndex via the vendored reader helpers.
  */
 export function buildAnnotationFromDocument(
     doc: Document,
@@ -81,27 +78,7 @@ export function buildAnnotationFromDocument(
     // Match the reader's DOM shape before building CSS selectors.
     mirrorReaderAnnotationOverlay(body);
 
-    const anchorElement = target.anchorId
-        ? findAnchorElement(body, target.anchorId)
-        : undefined;
-    const searchTexts = citationSearchTextCandidates(target.text);
-
-    let range: Range | undefined;
-    if (anchorElement) {
-        for (const searchText of searchTexts) {
-            range = createSentenceRange(anchorElement, searchText);
-            if (range) break;
-        }
-    }
-    if (!range) {
-        for (const searchText of searchTexts) {
-            range = createSentenceRange(body, searchText);
-            if (range) break;
-        }
-    }
-    if (!range && anchorElement) {
-        range = createElementContentsRange(anchorElement);
-    }
+    const range = resolveAnchoredTextRange(body, target);
     if (!range) return { error: "snapshot_text_not_found" };
 
     // Highlights store the precise passage range. Notes anchor to the cited

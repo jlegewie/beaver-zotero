@@ -163,6 +163,49 @@ export function createSentenceRange(element: Element, sentenceText: string): Ran
     return range;
 }
 
+/** Locator for a cited passage: a DOM anchor id and/or the passage text. */
+export interface AnchoredTextLocator {
+    /** DOM id of the cited element, when known. */
+    anchorId?: string;
+    /** Cited passage text used to locate a precise range. */
+    text?: string;
+}
+
+/**
+ * Resolve a cited passage to a DOM range inside `root` using the three-tier
+ * search shared by the live reader citation paths (EPUB + snapshot) and the
+ * headless annotation resolvers, so a navigation spotlight and a saved
+ * annotation cover the same locators:
+ *
+ *   1. anchor-scoped sentence search (when the anchor id resolves an element),
+ *   2. body-wide sentence search,
+ *   3. a range over the anchor element's full contents.
+ */
+export function resolveAnchoredTextRange(
+    root: Element,
+    locator: AnchoredTextLocator,
+): Range | undefined {
+    const anchorElement = locator.anchorId
+        ? findAnchorElement(root, locator.anchorId)
+        : undefined;
+    const searchTexts = citationSearchTextCandidates(locator.text);
+
+    if (anchorElement) {
+        for (const searchText of searchTexts) {
+            const range = createSentenceRange(anchorElement, searchText);
+            if (range) return range;
+        }
+    }
+    for (const searchText of searchTexts) {
+        const range = createSentenceRange(root, searchText);
+        if (range) return range;
+    }
+    if (anchorElement) {
+        return createElementContentsRange(anchorElement);
+    }
+    return undefined;
+}
+
 // Cell separator that extraction uses when linearizing a data-table row (mirrors
 // linearizeTableRows in domWalk.ts). Single-spaced, so it survives normalizeText.
 const TABLE_ROW_CELL_SEPARATOR = " | ";
