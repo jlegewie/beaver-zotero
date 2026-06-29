@@ -1,4 +1,5 @@
 import { getReadableContentKind } from '../services/documentExtraction/attachmentResolution';
+import type { ReadableContentKind } from '../services/documentExtraction/shared/contentKinds';
 
 /**
  * Find the best PDF attachment for a regular Zotero item.
@@ -46,10 +47,14 @@ export async function getBestPDFAttachmentAsync(item: any): Promise<any> {
 }
 
 /**
- * Find the best EPUB attachment for a regular Zotero item.
- * Prefers Zotero's best attachment when it is an EPUB, otherwise the first EPUB child.
+ * Find the best attachment of a given readable content kind for a regular
+ * Zotero item. Prefers Zotero's ranked best attachment when it matches the
+ * requested kind, otherwise falls back to the first matching child.
  */
-export async function getBestEpubAttachmentAsync(item: any): Promise<any> {
+export async function getBestAttachmentByKind(
+    item: any,
+    kind: ReadableContentKind,
+): Promise<any> {
     try {
         if (!item) return null;
         if (item.isAttachment?.()) return item;
@@ -70,7 +75,7 @@ export async function getBestEpubAttachmentAsync(item: any): Promise<any> {
             const bestAttachment = await item.getBestAttachment();
             if (bestAttachment && !bestAttachment.deleted) {
                 await Zotero.Items.loadDataTypes([bestAttachment], ['itemData']);
-                if (getReadableContentKind(bestAttachment) === 'epub') {
+                if (getReadableContentKind(bestAttachment) === kind) {
                     return bestAttachment;
                 }
             }
@@ -80,11 +85,19 @@ export async function getBestEpubAttachmentAsync(item: any): Promise<any> {
         }
 
         return attachments.find((attachment: any) =>
-            getReadableContentKind(attachment) === 'epub',
+            getReadableContentKind(attachment) === kind,
         ) ?? null;
     } catch {
         return null;
     }
+}
+
+/**
+ * Find the best EPUB attachment for a regular Zotero item.
+ * Prefers Zotero's best attachment when it is an EPUB, otherwise the first EPUB child.
+ */
+export function getBestEpubAttachmentAsync(item: any): Promise<any> {
+    return getBestAttachmentByKind(item, 'epub');
 }
 
 /**
@@ -92,82 +105,14 @@ export async function getBestEpubAttachmentAsync(item: any): Promise<any> {
  * Prefers Zotero's best attachment when it is a snapshot, otherwise the first
  * snapshot child.
  */
-export async function getBestSnapshotAttachmentAsync(item: any): Promise<any> {
-    try {
-        if (!item) return null;
-        if (item.isAttachment?.()) return item;
-        if (!item.isRegularItem?.()) return null;
-
-        await Zotero.Items.loadDataTypes([item], ['childItems', 'itemData']);
-        const attachmentIDs = item.getAttachments();
-        if (!attachmentIDs?.length) return null;
-
-        const loaded = await Zotero.Items.getAsync(attachmentIDs);
-        const attachments = (Array.isArray(loaded) ? loaded : (loaded ? [loaded] : []))
-            .filter((attachment: any) => attachment && !attachment.deleted);
-        if (attachments.length > 0) {
-            await Zotero.Items.loadDataTypes(attachments, ['itemData']);
-        }
-
-        try {
-            const bestAttachment = await item.getBestAttachment();
-            if (bestAttachment && !bestAttachment.deleted) {
-                await Zotero.Items.loadDataTypes([bestAttachment], ['itemData']);
-                if (getReadableContentKind(bestAttachment) === 'snapshot') {
-                    return bestAttachment;
-                }
-            }
-        } catch {
-            // Fall back to the loaded child attachments if Zotero's ranking
-            // helper cannot inspect the parent item.
-        }
-
-        return attachments.find((attachment: any) =>
-            getReadableContentKind(attachment) === 'snapshot',
-        ) ?? null;
-    } catch {
-        return null;
-    }
+export function getBestSnapshotAttachmentAsync(item: any): Promise<any> {
+    return getBestAttachmentByKind(item, 'snapshot');
 }
 
 /**
  * Find the best plain-text attachment for a regular Zotero item.
  * Prefers Zotero's best attachment when it is text, otherwise the first text child.
  */
-export async function getBestReadableTextAttachmentAsync(item: any): Promise<any> {
-    try {
-        if (!item) return null;
-        if (item.isAttachment?.()) return item;
-        if (!item.isRegularItem?.()) return null;
-
-        await Zotero.Items.loadDataTypes([item], ['childItems', 'itemData']);
-        const attachmentIDs = item.getAttachments();
-        if (!attachmentIDs?.length) return null;
-
-        const loaded = await Zotero.Items.getAsync(attachmentIDs);
-        const attachments = (Array.isArray(loaded) ? loaded : (loaded ? [loaded] : []))
-            .filter((attachment: any) => attachment && !attachment.deleted);
-        if (attachments.length > 0) {
-            await Zotero.Items.loadDataTypes(attachments, ['itemData']);
-        }
-
-        try {
-            const bestAttachment = await item.getBestAttachment();
-            if (bestAttachment && !bestAttachment.deleted) {
-                await Zotero.Items.loadDataTypes([bestAttachment], ['itemData']);
-                if (getReadableContentKind(bestAttachment) === 'text') {
-                    return bestAttachment;
-                }
-            }
-        } catch {
-            // Fall back to the loaded child attachments if Zotero's ranking
-            // helper cannot inspect the parent item.
-        }
-
-        return attachments.find((attachment: any) =>
-            getReadableContentKind(attachment) === 'text',
-        ) ?? null;
-    } catch {
-        return null;
-    }
+export function getBestReadableTextAttachmentAsync(item: any): Promise<any> {
+    return getBestAttachmentByKind(item, 'text');
 }
