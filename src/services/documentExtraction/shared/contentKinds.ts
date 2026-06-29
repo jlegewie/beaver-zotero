@@ -79,8 +79,8 @@ export type CachedDocumentMetadata =
         /**
          * Total extracted text characters from the extraction diagnostics.
          * Lets the read side flag image-only/scanned EPUBs (sections but no
-         * text) as unreadable without re-extracting. Absent on rows written
-         * before this field existed — treat as unknown, not as zero.
+         * text) as unreadable without re-extracting. Missing values mean
+         * unknown, not zero.
          */
         extractedTextChars?: number | null;
     }
@@ -93,6 +93,14 @@ export type CachedDocumentMetadata =
         content_kind: 'snapshot';
         title?: string;
         sections?: SnapshotSectionSummary[];
+        /** Total synthetic page count, based on the max stamped page coordinate. */
+        pageCount?: number | null;
+        /**
+         * Total extracted text characters from the extraction diagnostics. Lets
+         * the read side flag text-empty snapshots as unreadable without
+         * re-extracting. Missing values mean unknown, not zero.
+         */
+        extractedTextChars?: number | null;
     };
 
 const EXTRACT_CONTENT_KINDS: ReadonlySet<string> = new Set([
@@ -176,6 +184,21 @@ export function buildEpubCachedMetadata(
     return {
         content_kind: 'epub',
         sectionCount: sections.length,
+        sections,
+        pageCount: pageCount ?? null,
+        extractedTextChars: extractedTextChars ?? null,
+    };
+}
+
+export function buildSnapshotCachedMetadata(
+    sections: SnapshotSectionSummary[],
+    title?: string,
+    pageCount?: number | null,
+    extractedTextChars?: number | null,
+): CachedDocumentMetadata {
+    return {
+        content_kind: 'snapshot',
+        ...(title ? { title } : {}),
         sections,
         pageCount: pageCount ?? null,
         extractedTextChars: extractedTextChars ?? null,

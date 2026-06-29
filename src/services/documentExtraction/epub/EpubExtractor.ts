@@ -1,11 +1,20 @@
 import {
+    appendSyntheticSectionMarkers,
+    buildContentOffsetIndex,
     buildDomCitationIndex,
     buildDomDiagnostics,
     createDomCounters,
+    emptyContentOffsetIndex,
     ensureSentencexLoaded,
+    itemCharOffset,
     measureSectionSourceText,
+    pageOrdinalForPosition,
     parseDomSection,
+    stampSyntheticPageNumbers,
     type DomSection,
+    type ItemPagePosition,
+    type PageMapping,
+    type PageMarker,
 } from "../dom";
 import {
     EPUB_CONTENT_KIND,
@@ -14,21 +23,14 @@ import {
     type ExtractEpubResult,
 } from "./schema";
 import {
-    appendSyntheticSectionMarkers,
     epubPageLabelForPosition,
-    epubPageOrdinalForPosition,
     extractSectionPageMarkers,
     scorePageMarkers,
-    type EpubPageMapping,
-    type EpubPageMarker,
     type PageMappingSectionMarkers,
-    type SectionTextNode,
 } from "./epubPageMapping";
 import { effectiveMaxFileSizeMB } from "../../attachmentLimits";
 import { isRemoteAccessAvailable } from "../attachmentSource";
 import { logger } from "../../../utils/logger";
-import type { DomItemCandidate } from "../dom/domWalk";
-import type { DomItem } from "../dom";
 
 // Coverage below this fraction means the walk dropped a meaningful share of the
 // book's visible text (an unrecognized container/table structure) and warrants a
@@ -111,19 +113,6 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
     }
 }
 
-interface RawTextOffsetIndex {
-    elementOffsets: Map<Element, number>;
-    textNodeOffsets: Map<Text, number>;
-    /** Content text nodes on the same character scale as item offsets. */
-    contentNodes: SectionTextNode[];
-}
-
-interface ExtractedItemPosition {
-    item: DomItem;
-    sectionIndex: number;
-    charOffset: number;
-}
-
 /**
  * Extract an EPUB into Beaver's section-based schema directly from a file path.
  *
@@ -144,8 +133,8 @@ export async function extractEpubDocumentFromFile(
     const sections: DomSection[] = [];
     const sectionMarkers: PageMappingSectionMarkers[] = [];
     // Build synthetic markers while section body text nodes are available.
-    const syntheticMarkers: EpubPageMarker[] = [];
-    const itemPositions: ExtractedItemPosition[] = [];
+    const syntheticMarkers: PageMarker[] = [];
+    const itemPositions: ItemPagePosition[] = [];
     let sourceTextChars = 0;
 
     // Load the sentencex WASM once (best-effort; sentence splitting degrades to
@@ -168,7 +157,7 @@ export async function extractEpubDocumentFromFile(
         for await (const { href, doc } of epub.getSectionDocuments()) {
             throwIfAborted(options?.abortSignal);
             const body = findSectionBody(doc);
-            const rawOffsets = body ? buildRawTextOffsetIndex(body) : emptyRawTextOffsetIndex();
+            const rawOffsets = body ? buildContentOffsetIndex(body) : emptyContentOffsetIndex();
             appendSyntheticSectionMarkers(
                 rawOffsets.contentNodes,
                 sectionIndex,
@@ -246,56 +235,9 @@ function findSectionBody(doc: XMLDocument | Document): Element | null {
     return doc.body ?? doc.querySelector("body");
 }
 
-function emptyRawTextOffsetIndex(): RawTextOffsetIndex {
-    return { elementOffsets: new Map(), textNodeOffsets: new Map(), contentNodes: [] };
-}
-
-/**
- * Build the character-offset scale used by extracted items and page markers.
- *
- * Whitespace-only text nodes and non-content elements are skipped, while content
- * text lengths remain unnormalized. Keeping all offsets on one scale lets
- * nearest-preceding marker lookups stay consistent.
- */
-function buildRawTextOffsetIndex(root: Element): RawTextOffsetIndex {
-    const elementOffsets = new Map<Element, number>();
-    const textNodeOffsets = new Map<Text, number>();
-    const contentNodes: SectionTextNode[] = [];
-    let offset = 0;
-
-    const visitElement = (element: Element): void => {
-        const tag = element.localName?.toLowerCase();
-        if (tag === "style" || tag === "script") return;
-        elementOffsets.set(element, offset);
-        for (const node of Array.from(element.childNodes)) {
-            if (!node) continue;
-            if (node.nodeType === 3) {
-                const value = (node as Text).nodeValue ?? "";
-                if (/^\s*$/.test(value)) continue;
-                textNodeOffsets.set(node as Text, offset);
-                contentNodes.push({ start: offset, length: value.length });
-                offset += value.length;
-            } else if (node.nodeType === 1) {
-                visitElement(node as Element);
-            }
-        }
-    };
-
-    visitElement(root);
-    return { elementOffsets, textNodeOffsets, contentNodes };
-}
-
-function itemCharOffset(candidate: DomItemCandidate, offsets: RawTextOffsetIndex): number {
-    if (candidate.firstTextNode) {
-        const textOffset = offsets.textNodeOffsets.get(candidate.firstTextNode);
-        if (textOffset !== undefined) return textOffset;
-    }
-    return offsets.elementOffsets.get(candidate.element) ?? 0;
-}
-
 function stampEpubPageLabels(
-    itemPositions: ExtractedItemPosition[],
-    mapping: ReturnType<typeof scorePageMarkers>,
+    itemPositions: ItemPagePosition[],
+    mapping: PageMapping,
 ): void {
     if (!mapping.isPhysical) return;
     for (const { item, sectionIndex, charOffset } of itemPositions) {
@@ -313,9 +255,9 @@ function stampEpubPageLabels(
  * Uses physical marker ordinals when reliable; otherwise uses synthetic pages.
  */
 function stampEpubPageNumbers(
-    itemPositions: ExtractedItemPosition[],
-    mapping: ReturnType<typeof scorePageMarkers>,
-    syntheticMarkers: EpubPageMarker[],
+    itemPositions: ItemPagePosition[],
+    mapping: PageMapping,
+    syntheticMarkers: PageMarker[],
 ): number {
     if (itemPositions.length === 0) return 0;
     if (mapping.isPhysical) {
@@ -330,11 +272,11 @@ function stampEpubPageNumbers(
  * sparse to use as the document page coordinate.
  */
 function stampPhysicalPageNumbers(
-    itemPositions: ExtractedItemPosition[],
-    mapping: ReturnType<typeof scorePageMarkers>,
+    itemPositions: ItemPagePosition[],
+    mapping: PageMapping,
 ): number | null {
     const provisional = itemPositions.map(({ sectionIndex, charOffset }) =>
-        epubPageOrdinalForPosition(mapping, sectionIndex, charOffset));
+        pageOrdinalForPosition(mapping, sectionIndex, charOffset));
 
     // Sparse marker maps can otherwise create chapter-sized pages.
     const charsByPage = new Map<number, number>();
@@ -350,23 +292,6 @@ function stampPhysicalPageNumbers(
     for (let i = 0; i < itemPositions.length; i++) {
         itemPositions[i].item.pageNumber = provisional[i];
         if (provisional[i] > maxPage) maxPage = provisional[i];
-    }
-    return maxPage;
-}
-
-/**
- * Assign each item the ordinal of its nearest preceding synthetic marker.
- */
-function stampSyntheticPageNumbers(
-    itemPositions: ExtractedItemPosition[],
-    syntheticMarkers: EpubPageMarker[],
-): number {
-    const mapping: EpubPageMapping = { isPhysical: true, markers: syntheticMarkers };
-    let maxPage = 1;
-    for (const { item, sectionIndex, charOffset } of itemPositions) {
-        const page = epubPageOrdinalForPosition(mapping, sectionIndex, charOffset);
-        item.pageNumber = page;
-        if (page > maxPage) maxPage = page;
     }
     return maxPage;
 }

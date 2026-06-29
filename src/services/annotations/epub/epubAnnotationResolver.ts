@@ -6,7 +6,7 @@ import {
     createSentenceRange,
     findAnchorElement,
     normalizeHrefBasename,
-} from "../../documentExtraction/epub/epubTextRange";
+} from "../../documentExtraction/dom/textRange";
 import EpubCFI from "./vendor/epubcfi";
 import {
     buildEpubSortIndex,

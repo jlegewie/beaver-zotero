@@ -17,6 +17,7 @@ import type { AttachmentStub, ItemStub } from '../../../react/types/zotero';
 import {
     extractAndCacheEpubDocument,
     extractAndCacheResolvedPdfDocument,
+    extractAndCacheSnapshotDocument,
 } from '../documentExtractionCore';
 import {
     extractTextDocument,
@@ -447,10 +448,47 @@ export async function handleZoteroDocumentRequest(
             return errorResponse(result.message, result.code, result.pageCount ?? null, 'epub');
         }
 
+        if (contentKind === 'snapshot') {
+            const result = await withRequestDeadline(
+                extractAndCacheSnapshotDocument({
+                    source: { kind: 'zotero', item: resolvedItem },
+                    resolvedKey,
+                    contentType,
+                    maxPages: max_pages ?? null,
+                    maxFileSizeMB: max_file_size_mb ?? 0,
+                    externalAbortSignal: timeout.signal,
+                    onFileNotSyncedLocally: notifyRemoteFileNotSynced,
+                }),
+                'snapshot_extraction',
+            );
+
+            if (result.kind === 'ok') {
+                if (result.cached) {
+                    const { libraryId, zoteroKey } = result.resolvedAttachment;
+                    logger(`handleZoteroDocumentRequest: document cache hit for ${libraryId}-${zoteroKey} content_kind=snapshot`, 3);
+                }
+                return guardPayloadSize(request, {
+                    type: 'zotero_document',
+                    request_id,
+                    resolved_attachment: {
+                        library_id: result.resolvedAttachment.libraryId,
+                        zotero_key: result.resolvedAttachment.zoteroKey,
+                    },
+                    content_type: result.contentType,
+                    content_kind: 'snapshot',
+                    result: result.document,
+                    ...(parentItem ? { parent_item: parentItem } : {}),
+                    ...(servedAttachment ? { served_attachment: servedAttachment } : {}),
+                }, null, 'snapshot', errorResponse);
+            }
+
+            return errorResponse(result.message, result.code, result.pageCount ?? null, 'snapshot');
+        }
+
         if (contentKind !== 'pdf') {
             const extractKind = readableToExtractKind(contentKind);
             return errorResponse(
-                `Attachment ${resolvedKey} is a ${contentKind} document, but document extraction currently supports PDF, EPUB, and plain text only.`,
+                `Attachment ${resolvedKey} is a ${contentKind} document, but document extraction currently supports PDF, EPUB, snapshots, and plain text only.`,
                 'unsupported_type',
                 null,
                 extractKind,

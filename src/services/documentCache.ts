@@ -29,13 +29,16 @@ import type { PageGeometry } from '../beaver-extract/types';
 import {
     buildEpubCachedMetadata,
     buildPdfCachedMetadata,
+    buildSnapshotCachedMetadata,
     type EpubSectionSummary,
+    type SnapshotSectionSummary,
 } from './documentExtraction/shared/contentKinds';
 import {
     expectedExtractionSchemaVersion,
     type ExtractContentKind,
 } from './documentExtraction/shared/extractionSchemaVersions';
 import { validateEpubDocument, type EpubDocument } from './documentExtraction/epub';
+import { validateSnapshotDocument, type SnapshotDocument } from './documentExtraction/snapshot';
 
 export const DOCUMENT_METADATA_FORMAT_VERSION = 1;
 export const DOCUMENT_PAYLOAD_FORMAT_VERSION = 1;
@@ -89,6 +92,13 @@ interface CacheMetadataInput {
     epubPageCount?: number | null;
     /** Extraction-diagnostics text total; flags image-only EPUBs on read. */
     epubExtractedTextChars?: number | null;
+    snapshotSections?: SnapshotSectionSummary[];
+    /** Snapshot document title (first section label). */
+    snapshotTitle?: string;
+    /** Snapshot total synthetic page count; PDF uses `pageCount`. */
+    snapshotPageCount?: number | null;
+    /** Extraction-diagnostics text total; flags text-empty snapshots on read. */
+    snapshotExtractedTextChars?: number | null;
     /** Authoritative error reason; omitted or `null` marks a successful extraction. */
     errorCode?: DocumentCacheErrorCode | null;
 }
@@ -318,12 +328,17 @@ export class DocumentCache {
         }
     }
 
-    /** Get a cached EPUB extraction result for the current source identity. */
-    async getEpubResult(
-        ref: { libraryId: number; zoteroKey: string },
+    /**
+     * Read a cached DOM-document (EPUB / snapshot) structured payload for the
+     * current source identity.
+     */
+    private async getDomDocumentResult<T extends { sectionCount: number }>(
+        ref: DocumentRef,
         filePath: string,
+        kind: 'epub' | 'snapshot',
+        validate: (parsed: unknown) => T,
         options?: { maxSourceSizeBytes?: number },
-    ): Promise<EpubDocument | null> {
+    ): Promise<T | null> {
         try {
             const payloadKind: PayloadKind = 'structured';
             const metadata = await this.getMetadata(ref, filePath);
@@ -331,8 +346,15 @@ export class DocumentCache {
             if (options?.maxSourceSizeBytes != null && metadata.sourceSizeBytes > options.maxSourceSizeBytes) {
                 return null;
             }
-            if (metadata.contentKind !== 'epub') {
-                if (metadata.contentKind === 'text' || metadata.contentKind === 'snapshot') {
+            if (metadata.contentKind !== kind) {
+                // Drop a stale row left by a different DOM/text extraction for the
+                // same item (e.g. its content kind changed). PDF rows are left
+                // alone. They live in a separate payload kind.
+                if (
+                    metadata.contentKind === 'text'
+                    || metadata.contentKind === 'epub'
+                    || metadata.contentKind === 'snapshot'
+                ) {
                     const deletedPayloads = await this.db.deleteDocumentCacheMetadataIfUnchanged(metadata);
                     if (deletedPayloads) {
                         await this.removePayloadFiles(deletedPayloads);
@@ -372,18 +394,24 @@ export class DocumentCache {
                 return null;
             }
 
-            let result: EpubDocument;
+            let result: T;
             try {
-                result = validateEpubDocument(parsed);
+                result = validate(parsed);
             } catch {
                 await this.deletePayload(payload);
                 return null;
             }
 
-            if (
-                metadata.documentMetadata?.content_kind === 'epub'
-                && metadata.documentMetadata.sectionCount !== result.sectionCount
-            ) {
+            // Reject a payload whose section count drifted from the durable
+            // metadata row. EPUB rows always carry a section count; snapshot
+            // rows written before sections existed leave it unknown (skip).
+            const docMeta = metadata.documentMetadata;
+            const expectedSectionCount = docMeta?.content_kind === 'epub'
+                ? docMeta.sectionCount
+                : docMeta?.content_kind === 'snapshot' && docMeta.sections != null
+                    ? docMeta.sections.length
+                    : undefined;
+            if (expectedSectionCount != null && expectedSectionCount !== result.sectionCount) {
                 await this.deletePayload(payload);
                 return null;
             }
@@ -391,9 +419,27 @@ export class DocumentCache {
             await this.db.touchDocumentCachePayload(payload.id).catch(() => undefined);
             return result;
         } catch (error) {
-            logger(`DocumentCache.getEpubResult error: ${error}`, 1);
+            logger(`DocumentCache.getDomDocumentResult(${kind}) error: ${error}`, 1);
             return null;
         }
+    }
+
+    /** Get a cached EPUB extraction result for the current source identity. */
+    getEpubResult(
+        ref: DocumentRef,
+        filePath: string,
+        options?: { maxSourceSizeBytes?: number },
+    ): Promise<EpubDocument | null> {
+        return this.getDomDocumentResult(ref, filePath, 'epub', validateEpubDocument, options);
+    }
+
+    /** Get a cached snapshot extraction result for the current source identity. */
+    getSnapshotResult(
+        ref: DocumentRef,
+        filePath: string,
+        options?: { maxSourceSizeBytes?: number },
+    ): Promise<SnapshotDocument | null> {
+        return this.getDomDocumentResult(ref, filePath, 'snapshot', validateSnapshotDocument, options);
     }
 
     /** Snapshot the current source identity used for cache freshness checks. */
@@ -1165,7 +1211,14 @@ export class DocumentCache {
                     metadata.epubExtractedTextChars,
                     metadata.epubPageCount,
                 )
-                : buildPdfCachedMetadata(metadata.pageCount, pageLabels, pages),
+                : contentKind === 'snapshot'
+                    ? buildSnapshotCachedMetadata(
+                        metadata.snapshotSections ?? [],
+                        metadata.snapshotTitle,
+                        metadata.snapshotPageCount,
+                        metadata.snapshotExtractedTextChars,
+                    )
+                    : buildPdfCachedMetadata(metadata.pageCount, pageLabels, pages),
             errorCode: metadata.errorCode ?? null,
             extractionSchemaVersion,
             metadataFormatVersion: DOCUMENT_METADATA_FORMAT_VERSION,

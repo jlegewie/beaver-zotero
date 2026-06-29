@@ -88,7 +88,10 @@ function pluralize(count: number, noun: string): string {
     return `${count} ${plural}`;
 }
 
-function matchPageText(match: AttachmentMatchView): string {
+function matchPageText(row: AttachmentSearchRowView, match: AttachmentMatchView): string {
+    // Snapshots are a continuous scroll view with no page model; any page
+    // number on the wire is meaningless to the reader, so never label it.
+    if (row.content_kind === 'snapshot') return '';
     const page = match.page_label ?? (match.page_number != null ? String(match.page_number) : null);
     return page ? `Page ${page}` : '';
 }
@@ -241,7 +244,7 @@ export const AttachmentSearchResultView: React.FC<{ view: AttachmentSearchView }
                         {rowMatches(row).map((match, index) => {
                             const matchKey = `${attKey}-m${index}`;
                             const matchHovered = hoveredKey === matchKey;
-                            const pageText = matchPageText(match);
+                            const pageText = matchPageText(row, match);
                             return (
                                 <div
                                     key={matchKey}

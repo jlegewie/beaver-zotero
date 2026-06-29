@@ -168,70 +168,80 @@ export function mapElement(element: Element): DomElementMapping | undefined {
 export function collectDomItems(body: Element): DomItemCandidate[] {
     const candidates: DomItemCandidate[] = [];
 
-    // Visit one element: a classified special element becomes its own item;
-    // a generic element is opened up so its inline text and block children are
-    // processed in order.
-    const visit = (element: Element): void => {
-        const mapping = mapElement(element);
-        if (mapping) {
-            const candidate = buildCandidate(element, mapping);
-            if (candidate) candidates.push(candidate);
-            return;
+    // Explicit frames preserve recursive walk order without risking stack overflow
+    // on deeply nested DOM.
+    interface Frame {
+        parent: Element;
+        children: Node[];
+        index: number;
+        buffer: string;
+        firstTextNode?: Text;
+    }
+
+    const makeFrame = (parent: Element): Frame => ({
+        parent,
+        children: Array.from(parent.childNodes).filter((n): n is Node => n != null),
+        index: 0,
+        buffer: "",
+        firstTextNode: undefined,
+    });
+
+    const flush = (frame: Frame): void => {
+        const text = normalizeText(frame.buffer);
+        frame.buffer = "";
+        if (text) {
+            candidates.push({
+                element: frame.parent,
+                kind: "text",
+                text,
+                anchorId: findNearestAnchorId(frame.parent),
+                ...(frame.firstTextNode ? { firstTextNode: frame.firstTextNode } : {}),
+            });
         }
-        walkChildren(element);
+        frame.firstTextNode = undefined;
     };
 
-    // Process an element's children in document order, accumulating inline text
-    // (text nodes + inline elements) and flushing it as a text item at each
-    // block boundary before descending into that block child.
-    const walkChildren = (parent: Element): void => {
-        let buffer = "";
-        let firstTextNode: Text | undefined;
-        const flush = (): void => {
-            const text = normalizeText(buffer);
-            buffer = "";
-            if (text) {
-                candidates.push({
-                    element: parent,
-                    kind: "text",
-                    text,
-                    anchorId: findNearestAnchorId(parent),
-                    ...(firstTextNode ? { firstTextNode } : {}),
-                });
-            }
-            firstTextNode = undefined;
-        };
-
-        const appendTextNode = (node: Text): void => {
-            if (!firstTextNode && /\S/.test(node.nodeValue ?? "")) {
-                firstTextNode = node;
-            }
-            buffer += ` ${node.nodeValue ?? ""} `;
-        };
-
-        for (const node of Array.from(parent.childNodes)) {
-            if (!node) continue;
-            if (node.nodeType === TEXT_NODE) {
-                appendTextNode(node as Text);
-            } else if (node.nodeType === ELEMENT_NODE) {
-                const child = node as Element;
-                if (isNonContentElement(child)) {
-                    continue;
-                }
-                if (isBlockBoundary(child)) {
-                    flush();
-                    visit(child);
-                } else {
-                    // Inline element: fold its text into the surrounding prose.
-                    firstTextNode ??= firstContentTextNode(child);
-                    buffer += ` ${visibleTextContent(child)} `;
-                }
-            }
+    const stack: Frame[] = [makeFrame(body)];
+    while (stack.length > 0) {
+        const frame = stack[stack.length - 1];
+        if (frame.index >= frame.children.length) {
+            flush(frame);
+            stack.pop();
+            continue;
         }
-        flush();
-    };
+        const node = frame.children[frame.index++];
+        if (!node) continue;
 
-    walkChildren(body);
+        if (node.nodeType === TEXT_NODE) {
+            const textNode = node as Text;
+            if (!frame.firstTextNode && /\S/.test(textNode.nodeValue ?? "")) {
+                frame.firstTextNode = textNode;
+            }
+            frame.buffer += ` ${textNode.nodeValue ?? ""} `;
+            continue;
+        }
+        if (node.nodeType !== ELEMENT_NODE) continue;
+
+        const child = node as Element;
+        if (isNonContentElement(child)) continue;
+
+        if (isBlockBoundary(child)) {
+            // Inline text before a block must become its own preceding item.
+            flush(frame);
+            const mapping = mapElement(child);
+            if (mapping) {
+                const candidate = buildCandidate(child, mapping);
+                if (candidate) candidates.push(candidate);
+            } else {
+                stack.push(makeFrame(child));
+            }
+        } else {
+            // Inline element: fold its text into the surrounding prose.
+            frame.firstTextNode ??= firstContentTextNode(child);
+            frame.buffer += ` ${visibleTextContent(child)} `;
+        }
+    }
+
     return candidates;
 }
 
@@ -280,16 +290,24 @@ function optionalFirstTextNode(element: Element): Pick<DomItemCandidate, "firstT
 }
 
 function firstContentTextNode(element: Element): Text | undefined {
-    for (const node of Array.from(element.childNodes)) {
-        if (!node) continue;
+    // Iterative pre-order DFS keeps document order without recursive descent.
+    const stack: Node[] = [];
+    const pushChildren = (parent: Node): void => {
+        const children = parent.childNodes;
+        for (let i = children.length - 1; i >= 0; i--) {
+            const child = children[i];
+            if (child) stack.push(child);
+        }
+    };
+
+    pushChildren(element);
+    while (stack.length > 0) {
+        const node = stack.pop() as Node;
         if (node.nodeType === TEXT_NODE) {
-            const text = node.nodeValue ?? "";
-            if (/\S/.test(text)) return node as Text;
+            if (/\S/.test(node.nodeValue ?? "")) return node as Text;
         } else if (node.nodeType === ELEMENT_NODE) {
-            const child = node as Element;
-            if (isNonContentElement(child)) continue;
-            const nested = firstContentTextNode(child);
-            if (nested) return nested;
+            if (isNonContentElement(node as Element)) continue;
+            pushChildren(node);
         }
     }
     return undefined;

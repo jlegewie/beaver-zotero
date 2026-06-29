@@ -4,6 +4,7 @@ import { getPref } from '../../utils/prefs';
 import { isAttachmentAvailableRemotely } from '../../utils/webAPI';
 import { effectiveMaxFileSizeMB } from '../attachmentLimits';
 import { isRemoteFilePath, makeRemoteFilePath } from '../documentFileIdentity';
+import type { DocumentCacheMetadata } from '../documentCache';
 import { getContentKind } from './attachmentResolution';
 import { isReadableContentKind, type AttachmentInfo, type ContentKind } from './shared/contentKinds';
 import { getPDFPageCountFromFulltext, getPDFPageCountFromWorker } from './shared/pageCount';
@@ -60,9 +61,6 @@ function unreadableTypeReason(kind: ContentKind): string {
     }
     if (kind === 'image') {
         return 'Image attachments cannot be read as text.';
-    }
-    if (kind === 'snapshot') {
-        return 'Beaver cannot read web page snapshots yet.';
     }
     if (isReadableContentKind(kind)) {
         return `Beaver cannot yet read ${contentKindLabel(kind)} attachments.`;
@@ -341,15 +339,23 @@ async function resolvePdfInfo(
  * Resolve readability info for an EPUB attachment.
  *
  * EPUB extraction requires the full DOM pipeline, so this never extracts on
- * the hot path. A cached extraction supplies the section count (the EPUB
- * analogue of a page count); a cold cache simply reports the attachment as
- * readable — file existence and size were already checked by
- * `checkAttachmentAvailability`.
+ * the hot path. A cached extraction supplies the stamped page count when
+ * available, falling back to section count for older cache rows; a cold cache
+ * simply reports the attachment as readable — file existence and size were
+ * already checked by `checkAttachmentAvailability`.
  */
-async function resolveEpubInfo(
+type DomDocumentInfo = Pick<AttachmentInfo, 'status' | 'status_code' | 'status_reason' | 'page_count'>;
+
+/**
+ * Read the cached extraction metadata for a DOM-document (EPUB / snapshot)
+ * attachment and let the caller derive its readability status.
+ */
+async function resolveDomDocumentInfo(
     attachment: Zotero.Item,
     availability: Extract<AttachmentAvailabilityResult, { available: true }>,
-): Promise<Pick<AttachmentInfo, 'status' | 'status_code' | 'status_reason' | 'page_count'>> {
+    kind: 'epub' | 'snapshot',
+    classify: (cached: DocumentCacheMetadata) => DomDocumentInfo,
+): Promise<DomDocumentInfo> {
     const cache = Zotero.Beaver?.documentCache;
     if (cache) {
         try {
@@ -357,49 +363,89 @@ async function resolveEpubInfo(
                 libraryId: attachment.libraryID,
                 zoteroKey: attachment.key,
             }, availability.filePath);
-            if (cached && cached.contentKind === 'epub') {
-                if (cached.errorCode) {
-                    return {
-                        page_count: null,
-                        status: 'unreadable',
-                        status_code: 'epub_invalid',
-                        status_reason: 'EPUB could not be read by the local extractor.',
-                    };
-                }
-                const meta = cached.documentMetadata;
-                const epubMeta = meta?.content_kind === 'epub' ? meta : null;
-                const sectionCount = epubMeta?.sectionCount ?? null;
-                // The extraction path rejects section-less EPUBs as having no
-                // extractable text, so don't advertise them as readable.
-                if (sectionCount === 0) {
-                    return {
-                        page_count: 0,
-                        status: 'unreadable',
-                        status_code: 'epub_invalid',
-                        status_reason: 'EPUB has no readable sections.',
-                    };
-                }
-                // Image-only/scanned EPUBs have sections but zero extracted
-                // text; the read path rejects them as no_text_layer, so the
-                // status must agree. Absent diagnostics (older cache rows)
-                // stay readable — unknown is not zero.
-                if (epubMeta?.extractedTextChars === 0) {
-                    return {
-                        page_count: sectionCount,
-                        status: 'unreadable',
-                        status_code: 'epub_no_text',
-                        status_reason: 'EPUB contains no extractable text (image-only or scanned book).',
-                    };
-                }
-                // Use the cached page count when available; otherwise report
-                // the section count as the best available EPUB extent.
-                return { page_count: epubMeta?.pageCount ?? sectionCount, status: 'readable' };
+            if (cached && cached.contentKind === kind) {
+                return classify(cached);
             }
         } catch (error) {
             logger(`getAttachmentInfo: cache read error: ${error}`, 1);
         }
     }
     return { page_count: null, status: 'readable' };
+}
+
+function resolveEpubInfo(
+    attachment: Zotero.Item,
+    availability: Extract<AttachmentAvailabilityResult, { available: true }>,
+): Promise<DomDocumentInfo> {
+    return resolveDomDocumentInfo(attachment, availability, 'epub', (cached) => {
+        if (cached.errorCode) {
+            return {
+                page_count: null,
+                status: 'unreadable',
+                status_code: 'epub_invalid',
+                status_reason: 'EPUB could not be read by the local extractor.',
+            };
+        }
+        const meta = cached.documentMetadata;
+        const epubMeta = meta?.content_kind === 'epub' ? meta : null;
+        const sectionCount = epubMeta?.sectionCount ?? null;
+        // The extraction path rejects section-less EPUBs as having no
+        // extractable text, so don't advertise them as readable.
+        if (sectionCount === 0) {
+            return {
+                page_count: 0,
+                status: 'unreadable',
+                status_code: 'epub_invalid',
+                status_reason: 'EPUB has no readable sections.',
+            };
+        }
+        // Image-only/scanned EPUBs have sections but zero extracted text; the
+        // read path rejects them as no_text_layer, so the status must agree.
+        // Missing diagnostics stay readable because unknown is not zero.
+        if (epubMeta?.extractedTextChars === 0) {
+            return {
+                page_count: sectionCount,
+                status: 'unreadable',
+                status_code: 'epub_no_text',
+                status_reason: 'EPUB contains no extractable text (image-only or scanned book).',
+            };
+        }
+        // Use the cached page count when available; otherwise report the
+        // section count as the best available EPUB extent.
+        return { page_count: epubMeta?.pageCount ?? sectionCount, status: 'readable' };
+    });
+}
+
+function resolveSnapshotInfo(
+    attachment: Zotero.Item,
+    availability: Extract<AttachmentAvailabilityResult, { available: true }>,
+): Promise<DomDocumentInfo> {
+    return resolveDomDocumentInfo(attachment, availability, 'snapshot', (cached) => {
+        if (cached.errorCode) {
+            return {
+                page_count: null,
+                status: 'unreadable',
+                status_code: 'snapshot_invalid',
+                status_reason: 'Snapshot could not be read by the local extractor.',
+            };
+        }
+        const meta = cached.documentMetadata;
+        const snapshotMeta = meta?.content_kind === 'snapshot' ? meta : null;
+        // Text-empty snapshots are rejected as no_text_layer by the read path,
+        // so the status must agree. Missing diagnostics stay readable because
+        // unknown is not zero.
+        if (snapshotMeta?.extractedTextChars === 0) {
+            return {
+                page_count: snapshotMeta?.pageCount ?? null,
+                status: 'unreadable',
+                status_code: 'snapshot_no_text',
+                status_reason: 'Snapshot contains no extractable text.',
+            };
+        }
+        // Snapshot reads use the same stamped synthetic page coordinate as
+        // citations, so attachment metadata must report that count.
+        return { page_count: snapshotMeta?.pageCount ?? null, status: 'readable' };
+    });
 }
 
 async function loadRemoteData(attachment: Zotero.Item, filePath: string): Promise<Uint8Array> {
@@ -450,15 +496,16 @@ export async function getAttachmentInfo(
         base.annotations_count = item.isFileAttachment?.() ? item.getAnnotations().length : 0;
     }
 
-    // Linked URLs are web links, and snapshots are not agent-readable yet.
-    if (contentKind === 'linked_url' || contentKind === 'snapshot') {
+    // Linked URLs are web links, not files Beaver can read.
+    if (contentKind === 'linked_url') {
         return { ...base, status_reason: unreadableTypeReason(contentKind) };
     }
 
     // PDF, EPUB, and plain text are readable by default. Other readable kinds
     // remain behind the nonPdfReadableEnabled option until extraction supports them.
     const isUnconditionallyReadable =
-        contentKind === 'pdf' || contentKind === 'epub' || contentKind === 'text';
+        contentKind === 'pdf' || contentKind === 'epub'
+        || contentKind === 'snapshot' || contentKind === 'text';
     if (!isReadableContentKind(contentKind) || (!isUnconditionallyReadable && !options.nonPdfReadableEnabled)) {
         return { ...base, status_reason: unreadableTypeReason(contentKind) };
     }
@@ -490,6 +537,22 @@ export async function getAttachmentInfo(
         }
         const epubInfo = await resolveEpubInfo(item, availability);
         return { ...base, ...epubInfo };
+    }
+
+    if (contentKind === 'snapshot') {
+        // Snapshot extraction reads the local HTML file directly and never
+        // downloads remote bytes, so a remote-only snapshot is unreadable even
+        // with remote access enabled.
+        if (isRemoteFilePath(availability.filePath)) {
+            return {
+                ...base,
+                status: 'unreadable',
+                status_code: 'file_not_local_remote',
+                status_reason: 'The snapshot file is available remotely but is not synced locally. Sync it in Zotero so Beaver can read it.',
+            };
+        }
+        const snapshotInfo = await resolveSnapshotInfo(item, availability);
+        return { ...base, ...snapshotInfo };
     }
 
     return { ...base, status: 'readable' };

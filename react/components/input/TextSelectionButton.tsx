@@ -38,9 +38,8 @@ export const TextSelectionButton = forwardRef<HTMLButtonElement, TextSelectionBu
         // States/Atoms needed for non-preview logic
         const setReaderTextSelection = useSetAtom(readerTextSelectionAtom)
 
-        // PDFs get the page-aware reveal label + navigation. Every other reader
-        // type (EPUB now, snapshot later) falls back to a generic file
-        // affordance with no page.
+        // PDFs get the page-aware reveal label + navigation. EPUB and snapshot
+        // reader types fall back to a generic file affordance with no page.
         const readerType = getCurrentReader()?.type;
         const isPdf = readerType === 'pdf';
         const readerTypeName = readerType === 'epub' ? 'EPUB'
