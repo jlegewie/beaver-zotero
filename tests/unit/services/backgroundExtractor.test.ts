@@ -876,6 +876,57 @@ describe('BackgroundExtractor', () => {
         expect(proc.getLaneStatus().document_ocr?.inFlight).toBe(0);
     });
 
+    it('parks the row and frees the slot on a defer outcome', async () => {
+        await db.enqueueBackgroundJob({
+            jobType: 'document_ocr',
+            libraryId: 1,
+            zoteroKey: 'BBBBBBBB',
+            contentKind: 'pdf',
+            payloadKind: 'structured',
+            payload: payload(),
+            now: 0,
+        });
+
+        const { BackgroundExtractor } = await loadProcessor();
+        const proc = new BackgroundExtractor();
+        proc.registerExecutor(
+            ocrExecutor(async () => ({ kind: 'defer', reason: 'ocr_polling' })),
+            { maxInFlight: 1 },
+        );
+
+        const result = await proc.processOnce({ awaitLaunchedJobs: true });
+
+        expect(result.processed).toBe(true);
+        // The slot is released; a deferred job holds no in-flight slot.
+        expect(proc.getLaneStatus().document_ocr?.inFlight).toBe(0);
+
+        // The row is neither completed nor released-to-now: it stays parked at
+        // the visibility deadline the claim set, so it is not claimable now.
+        const rows = await db.peekBackgroundJobs();
+        expect(rows.map((r) => r.zoteroKey)).toEqual(['BBBBBBBB']);
+        const claimed = await db.claimNextBackgroundJob(Date.now(), 1000, undefined, ['document_ocr']);
+        expect(claimed).toBeNull();
+    });
+
+    it('disposes registered executors on stop()', async () => {
+        const disposeSpy = vi.fn();
+        const { BackgroundExtractor } = await loadProcessor();
+        const proc = new BackgroundExtractor();
+        proc.registerExecutor(
+            {
+                jobType: 'document_ocr',
+                execute: async () => ({ kind: 'complete', reason: 'ocr_ok' }),
+                dispose: disposeSpy,
+            },
+            { maxInFlight: 1 },
+        );
+        proc.start();
+
+        await proc.stop();
+
+        expect(disposeSpy).toHaveBeenCalledTimes(1);
+    });
+
     it('does not let an extract backlog starve an OCR lane', async () => {
         await db.enqueueBackgroundJob({
             jobType: 'document_extract',

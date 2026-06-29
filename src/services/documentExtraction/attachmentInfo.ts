@@ -6,6 +6,7 @@ import { effectiveMaxFileSizeMB } from '../attachmentLimits';
 import { isRemoteFilePath, makeRemoteFilePath } from '../documentFileIdentity';
 import type { DocumentCacheMetadata } from '../documentCache';
 import { getContentKind } from './attachmentResolution';
+import { maybeEnqueueOcrJob } from '../ocr/enqueueOcr';
 import { isReadableContentKind, type AttachmentInfo, type ContentKind } from './shared/contentKinds';
 import { getPDFPageCountFromFulltext, getPDFPageCountFromWorker } from './shared/pageCount';
 import type { TimingAccumulator } from '../../utils/timing';
@@ -21,6 +22,8 @@ export interface AttachmentInfoOptions {
      * cache miss; 'lightweight' uses cheap page-count probes only.
      */
     pdfAnalysis?: 'full' | 'lightweight';
+    /** Queue background OCR when a PDF is determined to need it (no text layer) */
+    enqueueOcrIfNeeded?: boolean;
     timing?: TimingAccumulator;
 }
 
@@ -190,7 +193,20 @@ async function resolvePdfInfo(
             // Only consume PDF-shaped rows: an EPUB row's null errorCode/pageCount
             // would otherwise read as a readable PDF with unknown pages.
             if (cached && cached.contentKind === 'pdf') {
-                return statusFromCachedPdf(cached);
+                const pdfStatus = statusFromCachedPdf(cached);
+                // Re-queue OCR on cache hits for the user-facing validation path
+                // so re-adding a known scan reliably (re)queues it. The fresh
+                // analysis below enqueues on first detection for all callers.
+                if (options.enqueueOcrIfNeeded && pdfStatus.status_code === 'pdf_needs_ocr') {
+                    maybeEnqueueOcrJob({
+                        item: attachment,
+                        libraryId: attachment.libraryID,
+                        zoteroKey: attachment.key,
+                        itemId: attachment.id,
+                        pageCount: pdfStatus.page_count ?? null,
+                    });
+                }
+                return pdfStatus;
             }
         } catch (error) {
             logger(`getAttachmentInfo: cache read error: ${error}`, 1);
@@ -249,6 +265,8 @@ async function resolvePdfInfo(
         const ocrAnalysis = await extractor.analyzeOCRNeeds(pdfData);
         if (ocrAnalysis.needsOCR) {
             await cache?.putErrorMetadata({ item: attachment, filePath: availability.filePath, sourceSizeBytes, contentType: availability.contentType, errorCode: 'no_text_layer', pageCount, pageLabels, pages: pages ?? null });
+            // Kick off a background OCR job (entitlement- and loop-guard-gated).
+            maybeEnqueueOcrJob({ item: attachment, libraryId: attachment.libraryID, zoteroKey: attachment.key, itemId: attachment.id, pageCount });
             return { page_count: pageCount, status: 'unreadable', status_code: 'pdf_needs_ocr' };
         }
 

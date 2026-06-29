@@ -2875,6 +2875,51 @@ export class BeaverDB {
     }
 
     /**
+     * Resolve a duplicate enqueue against the queue dedup key
+     * (`job_type, library_id, zotero_key, payload_kind`) without re-inserting.
+     *
+     * Lets a caller skip expensive pre-enqueue work (e.g. content hashing) when
+     * a ticket is already queued, while still promoting an on-demand request
+     * over a lower-priority backfill ticket. When a duplicate exists at a worse
+     * (higher-number) priority, its `priority` is lowered toward `priority`.
+     * Only that column is touched — `available_at` is deliberately left alone so
+     * a parked row's visibility window stays intact (a waiting row is re-ranked
+     * in claim order; an in-flight parked row is not disturbed).
+     *
+     * `promoted` is true only when an existing ticket's priority was actually
+     * improved, so callers can wake the dispatcher just for that case.
+     */
+    public async promotePendingBackgroundJob(
+        jobType: BackgroundJobType,
+        libraryId: number,
+        zoteroKey: string,
+        payloadKind: DocumentCachePayloadKind,
+        priority: number,
+    ): Promise<{ exists: boolean; promoted: boolean }> {
+        // Current priority doubles as the existence check (dedup key is UNIQUE).
+        const current: number[] = [];
+        await this.conn.queryAsync(
+            `SELECT priority FROM background_jobs
+             WHERE job_type = ? AND library_id = ? AND zotero_key = ? AND payload_kind = ?
+             LIMIT 1`,
+            [jobType, libraryId, zoteroKey, payloadKind],
+            { onRow: (row: any) => current.push(row.getResultByIndex(0)) },
+        );
+        if (current.length === 0) return { exists: false, promoted: false };
+        if ((current[0] ?? 0) <= priority) return { exists: true, promoted: false };
+
+        // Lower priority only. The `priority > ?` guard keeps the value
+        // monotonically decreasing if the row changed since the read above.
+        await this.conn.queryAsync(
+            `UPDATE background_jobs SET priority = ?
+             WHERE job_type = ? AND library_id = ? AND zotero_key = ? AND payload_kind = ?
+               AND priority > ?`,
+            [priority, jobType, libraryId, zoteroKey, payloadKind, priority],
+        );
+        return { exists: true, promoted: true };
+    }
+
+    /**
      * Claim the next visible job (pgmq-style): pick lowest-priority, then
      * oldest-available row whose `available_at <= now`, then bump its
      * `available_at` forward by `visibilityTimeoutMs` so a crash/abort

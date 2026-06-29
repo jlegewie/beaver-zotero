@@ -16,12 +16,17 @@ vi.mock('../../../../src/services/attachmentLimits', () => ({
     effectiveMaxFileSizeMB: vi.fn(() => 50),
 }));
 
-// Mock only the worker facade; extraction error classification stays real.
-const { mockGetMetadata, mockAnalyzeOCRNeeds } = vi.hoisted(() => ({
+const { maybeEnqueueOcrJobMock, mockGetMetadata, mockAnalyzeOCRNeeds } = vi.hoisted(() => ({
+    maybeEnqueueOcrJobMock: vi.fn(),
     mockGetMetadata: vi.fn(),
     mockAnalyzeOCRNeeds: vi.fn(),
 }));
 
+vi.mock('../../../../src/services/ocr/enqueueOcr', () => ({
+    maybeEnqueueOcrJob: maybeEnqueueOcrJobMock,
+}));
+
+// Mock only the worker facade; extraction error classification stays real.
 vi.mock('../../../../src/beaver-extract', async (importActual) => {
     const actual = await importActual<typeof import('../../../../src/beaver-extract')>();
     return {
@@ -113,6 +118,45 @@ describe('getAttachmentInfo', () => {
         expect(info.status).toBe('unreadable');
         expect(info.status_code).toBe('pdf_needs_ocr');
         expect(info.page_count).toBe(7);
+    });
+
+    it('does not enqueue OCR for a cached scan without enqueueOcrIfNeeded', async () => {
+        (globalThis as any).Zotero.Beaver = {
+            documentCache: {
+                getMetadata: vi.fn(async () => ({ contentKind: 'pdf', errorCode: 'no_text_layer', pageCount: 7 })),
+            },
+        };
+
+        await getAttachmentInfo(makeAttachment());
+
+        expect(maybeEnqueueOcrJobMock).not.toHaveBeenCalled();
+    });
+
+    it('enqueues OCR for a cached scan when enqueueOcrIfNeeded is set', async () => {
+        (globalThis as any).Zotero.Beaver = {
+            documentCache: {
+                getMetadata: vi.fn(async () => ({ contentKind: 'pdf', errorCode: 'no_text_layer', pageCount: 7 })),
+            },
+        };
+
+        await getAttachmentInfo(makeAttachment(), { enqueueOcrIfNeeded: true });
+
+        expect(maybeEnqueueOcrJobMock).toHaveBeenCalledTimes(1);
+        expect(maybeEnqueueOcrJobMock).toHaveBeenCalledWith(
+            expect.objectContaining({ libraryId: 1, zoteroKey: 'ATTACH1', pageCount: 7 }),
+        );
+    });
+
+    it('does not enqueue OCR for a cached readable PDF even with enqueueOcrIfNeeded', async () => {
+        (globalThis as any).Zotero.Beaver = {
+            documentCache: {
+                getMetadata: vi.fn(async () => ({ contentKind: 'pdf', errorCode: null, pageCount: 5 })),
+            },
+        };
+
+        await getAttachmentInfo(makeAttachment(), { enqueueOcrIfNeeded: true });
+
+        expect(maybeEnqueueOcrJobMock).not.toHaveBeenCalled();
     });
 
     it('reports a local-only missing file as unreadable', async () => {

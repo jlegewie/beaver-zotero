@@ -28,6 +28,7 @@ import { useReaderAnnotationActionHandler } from './hooks/useReaderAnnotationAct
 import { useReaderVisualizerActionHandler } from './hooks/useReaderVisualizerActionHandler';
 import { useOnboardingPopups } from './hooks/useOnboardingPopups';
 import { useBackgroundWorkerStatus } from './hooks/useBackgroundWorkerStatus';
+import { useOcrLane } from './hooks/useOcrLane';
 import { useSyncSuppression } from './hooks/useSyncSuppression';
 import { BeaverTemporaryAnnotations } from './utils/annotationUtils';
 import { registerZoteroHost } from './host/zotero';
@@ -111,6 +112,9 @@ const GlobalContextInitializer = () => {
 
     // Mirror background extraction activity into the shared Jotai store
     useBackgroundWorkerStatus();
+
+    // Register the OCR background lane + mirror the OCR entitlement flag
+    useOcrLane();
 
     return null; // This component does not render any UI
 };

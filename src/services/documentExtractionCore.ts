@@ -51,6 +51,7 @@ import {
     type AttachmentFileSource,
 } from './documentExtraction';
 import { readableToExtractKind, type ExtractContentKind } from './documentExtraction/shared/contentKinds';
+import { maybeEnqueueOcrJob } from './ocr/enqueueOcr';
 import {
     extractEpubDocumentFromFile,
     preflightEpubFile,
@@ -1271,6 +1272,18 @@ export async function extractAndCacheResolvedPdfDocument(
                     pageLabels,
                     pages: null,
                 });
+
+                // Queue OCR for Zotero attachments that lack a text layer.
+                // External files have no attachment hash, so they are skipped.
+                if (error.code === ExtractionErrorCode.NO_TEXT_LAYER && zoteroItem) {
+                    maybeEnqueueOcrJob({
+                        item: zoteroItem,
+                        libraryId: zoteroItem.libraryID,
+                        zoteroKey: zoteroItem.key,
+                        itemId: zoteroItem.id,
+                        pageCount: error.pageCount ?? totalPages,
+                    });
+                }
 
                 const cachedCode = error.code === ExtractionErrorCode.ENCRYPTED
                     ? 'encrypted'
