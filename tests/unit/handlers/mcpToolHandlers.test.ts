@@ -1066,6 +1066,102 @@ describe('MCP Tool Handlers (via useMcpServer)', () => {
             expect(text).not.toContain('Final sentence.');
         });
 
+        it('emits contiguous pages when a spanning item skips an interior page', async () => {
+            // A single item longer than the synthetic page interval is stamped
+            // with the page of its first text node, so the page(s) it spans get
+            // no item. The next item resumes a couple of pages later. The read
+            // must still emit every page from 1 to pageCount contiguously, with
+            // the spanned interior page present but empty.
+            mockHandleZoteroDocumentRequest.mockResolvedValue({
+                type: 'zotero_document',
+                request_id: 'req-snapshot',
+                content_kind: 'snapshot',
+                result: {
+                    content_kind: 'snapshot',
+                    schemaVersion: '1',
+                    sectionCount: 1,
+                    pageCount: 3,
+                    sections: [
+                        {
+                            index: 0,
+                            rawHref: 'snapshot.html',
+                            items: [
+                                { id: 'p1', kind: 'text', sectionIndex: 0, order: 0, text: 'Long spanning block.', pageNumber: 1 },
+                                { id: 'p2', kind: 'text', sectionIndex: 0, order: 1, text: 'Resumes later.', pageNumber: 3 },
+                            ],
+                        },
+                    ],
+                    citationIndex: {},
+                    diagnostics: {
+                        extractedTextChars: 34,
+                        sourceTextChars: 34,
+                        textCoverage: 1,
+                    },
+                },
+            } as any);
+
+            const result = await callTool(endpoint, 'read_attachment', {
+                attachment_id: '1-KEY',
+                start_page: 1,
+                end_page: 3,
+            });
+
+            expect(result.isError).toBeFalsy();
+            const text = result.content[0].text;
+            expect(text).toContain('Total pages: 3');
+            expect(text).toContain('Showing pages 1-3');
+            // Every page in the advertised range is present and ordered.
+            expect(text).toContain('<page1>');
+            expect(text).toContain('Long spanning block.');
+            expect(text).toContain('<page2>');
+            expect(text).toContain('<page3>');
+            expect(text).toContain('Resumes later.');
+            expect(text.indexOf('<page1>')).toBeLessThan(text.indexOf('<page2>'));
+            expect(text.indexOf('<page2>')).toBeLessThan(text.indexOf('<page3>'));
+        });
+
+        it('returns an addressable empty page for a spanned interior page', async () => {
+            // Reading a page that a long item spans over (but is not stamped to)
+            // must succeed rather than fail "out of range" for a page the header
+            // advertises.
+            mockHandleZoteroDocumentRequest.mockResolvedValue({
+                type: 'zotero_document',
+                request_id: 'req-snapshot',
+                content_kind: 'snapshot',
+                result: {
+                    content_kind: 'snapshot',
+                    schemaVersion: '1',
+                    sectionCount: 1,
+                    pageCount: 3,
+                    sections: [
+                        {
+                            index: 0,
+                            rawHref: 'snapshot.html',
+                            items: [
+                                { id: 'p1', kind: 'text', sectionIndex: 0, order: 0, text: 'Long spanning block.', pageNumber: 1 },
+                                { id: 'p2', kind: 'text', sectionIndex: 0, order: 1, text: 'Resumes later.', pageNumber: 3 },
+                            ],
+                        },
+                    ],
+                    citationIndex: {},
+                    diagnostics: { extractedTextChars: 34, sourceTextChars: 34, textCoverage: 1 },
+                },
+            } as any);
+
+            const result = await callTool(endpoint, 'read_attachment', {
+                attachment_id: '1-KEY',
+                start_page: 2,
+                end_page: 2,
+            });
+
+            expect(result.isError).toBeFalsy();
+            const text = result.content[0].text;
+            expect(text).toContain('Showing pages 2-2');
+            expect(text).toContain('<page2>');
+            expect(text).not.toContain('Long spanning block.');
+            expect(text).not.toContain('Resumes later.');
+        });
+
         it('handles unknown total_pages', async () => {
             mockHandleZoteroDocumentRequest.mockResolvedValue(mockDocumentResponse([{ index: 0, markdown: 'text' }], null));
 

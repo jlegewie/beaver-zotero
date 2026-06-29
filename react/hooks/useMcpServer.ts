@@ -961,19 +961,23 @@ function domDocumentToMarkdownPages(
         }
     }
 
+    // An item is stamped with the page of its first text node, so a single item
+    // longer than the synthetic page interval (a long <p>/<pre> or a linearized
+    // table) spans interior pages that no item is stamped to.
     const observedPageCount = Math.max(0, ...Array.from(pagesByNumber.keys()));
-    return {
-        pageCount: document.pageCount ?? observedPageCount,
-        pages: Array.from(pagesByNumber.entries())
-            .sort(([a], [b]) => a - b)
-            .map(([pageNumber, items]) => ({
-                pageNumber,
-                markdown: items
-                    .map(domItemToMarkdown)
-                    .filter((text) => text.length > 0)
-                    .join('\n\n'),
-            })),
-    };
+    const pageCount = Math.max(document.pageCount ?? observedPageCount, observedPageCount);
+    const pages: AttachmentMarkdownPage[] = [];
+    for (let pageNumber = 1; pageNumber <= pageCount; pageNumber++) {
+        const items = pagesByNumber.get(pageNumber) ?? [];
+        pages.push({
+            pageNumber,
+            markdown: items
+                .map(domItemToMarkdown)
+                .filter((text) => text.length > 0)
+                .join('\n\n'),
+        });
+    }
+    return { pageCount, pages };
 }
 
 function domItemToMarkdown(item: { kind: string; text?: string; level?: number; sentences?: Array<{ text: string }> }): string {
