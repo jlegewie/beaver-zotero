@@ -20,6 +20,14 @@ import {
     resolveEpubAnnotationTarget,
     type EpubAnnotationLocator,
 } from "./epub/epubAnnotationResolver";
+import {
+    buildAnnotationFromDocument,
+    loadSnapshotDocument,
+    resolveSnapshotAnnotationTarget,
+    type ResolvedSnapshotAnnotation,
+    type SnapshotAnnotationLocator,
+    type SnapshotAnnotationResolveError,
+} from "./snapshot/snapshotAnnotationResolver";
 
 const NOTE_RECT_SIZE = 18;
 const NOTE_SIDE_MARGIN = 12;
@@ -547,6 +555,173 @@ export async function createEpubNoteAnnotation(
         annotationSortIndex: resolved.sortIndex,
     };
     Object.assign(item, sortIndexField);
+    item.annotationPosition = JSON.stringify(resolved.position);
+    item.annotationAuthorName = BEAVER_ANNOTATION_AUTHOR;
+    if (input.tags?.length) {
+        for (const tag of input.tags) item.addTag(tag);
+    }
+    await item.saveTx();
+
+    return { library_id: attachment.libraryID, zotero_key: item.key };
+}
+
+// ---------------------------------------------------------------------------
+// Snapshot annotations (headless CSS selectors — no reader instance)
+// ---------------------------------------------------------------------------
+
+/** Failure creating a snapshot annotation; `code` maps to a per-item error code. */
+export class SnapshotAnnotationError extends Error {
+    readonly code: string;
+
+    constructor(code: string, message?: string) {
+        super(message ?? code);
+        this.name = "SnapshotAnnotationError";
+        this.code = code;
+    }
+}
+
+interface SnapshotLocatorInput {
+    /** DOM id of the cited element, when known. */
+    anchorId?: string;
+    /** Cited passage text used to anchor the range. */
+    text?: string;
+    color?: string | null;
+    /** Tags applied to the created annotation. */
+    tags?: string[];
+}
+
+export interface CreateSnapshotHighlightInput extends SnapshotLocatorInput {
+    /** Cited passage to locate and highlight. */
+    text: string;
+    comment?: string | null;
+}
+
+export interface CreateSnapshotNoteInput extends SnapshotLocatorInput {
+    comment: string;
+}
+
+function assertSnapshotAttachment(attachment: Zotero.Item): void {
+    if (getReadableContentKind(attachment) !== "snapshot") {
+        throw new SnapshotAnnotationError("invalid_attachment", "attachment is not an HTML snapshot");
+    }
+}
+
+async function getSnapshotFilePath(attachment: Zotero.Item): Promise<string> {
+    const filePath = await attachment.getFilePathAsync();
+    if (!filePath) {
+        throw new SnapshotAnnotationError("attachment_file_unavailable", "attachment file path is null");
+    }
+    if (isRemoteFilePath(filePath)) {
+        throw new SnapshotAnnotationError("attachment_file_unavailable", "remote attachment not supported");
+    }
+    return filePath;
+}
+
+async function resolveSnapshotAnnotationOrThrow(
+    attachment: Zotero.Item,
+    locator: SnapshotAnnotationLocator,
+    preparedDoc?: Document,
+) {
+    assertSnapshotAttachment(attachment);
+    // A batch on one snapshot parses the file once (preparedDoc) and resolves each
+    // locator synchronously; a lone call falls back to read + parse here.
+    let resolved: ResolvedSnapshotAnnotation | SnapshotAnnotationResolveError;
+    if (preparedDoc) {
+        resolved = buildAnnotationFromDocument(preparedDoc, locator);
+    } else {
+        const filePath = await getSnapshotFilePath(attachment);
+        resolved = await resolveSnapshotAnnotationTarget(filePath, locator);
+    }
+    if ("error" in resolved) {
+        throw new SnapshotAnnotationError(resolved.error, resolved.message);
+    }
+    return resolved;
+}
+
+/**
+ * Read + parse a snapshot attachment's HTML once for a batch. Pass the returned
+ * Document to each {@link createSnapshotHighlightAnnotation} /
+ * {@link createSnapshotNoteAnnotation} call so the batch shares a single read +
+ * parse instead of re-reading and re-parsing identical bytes per item. Throws
+ * SnapshotAnnotationError when the file is unavailable or cannot be parsed.
+ */
+export async function prepareSnapshotAnnotationDocument(
+    attachment: Zotero.Item,
+): Promise<Document> {
+    assertSnapshotAttachment(attachment);
+    const filePath = await getSnapshotFilePath(attachment);
+    const doc = await loadSnapshotDocument(filePath);
+    if ("error" in doc) {
+        throw new SnapshotAnnotationError(doc.error, doc.message);
+    }
+    return doc;
+}
+
+/**
+ * Create a headless Zotero snapshot highlight annotation. The CSS-selector
+ * `position` and `sortIndex` are computed from the snapshot's own HTML (no open
+ * reader); the reader renders the saved item via the notifier if the page is open.
+ */
+export async function createSnapshotHighlightAnnotation(
+    attachment: Zotero.Item,
+    input: CreateSnapshotHighlightInput,
+    preparedDoc?: Document,
+): Promise<ZoteroItemReference> {
+    const resolved = await resolveSnapshotAnnotationOrThrow(attachment, {
+        anchorId: input.anchorId,
+        text: input.text,
+    }, preparedDoc);
+
+    const item = new Zotero.Item("annotation");
+    item.libraryID = attachment.libraryID;
+    item.parentID = attachment.id;
+    item.annotationType = "highlight";
+    item.annotationText = resolved.text;
+    item.annotationComment = input.comment ?? "";
+    item.annotationColor = resolveBeaverAnnotationColor(input.color);
+    // Snapshots have no printed pages; the reader stores an empty page label.
+    item.annotationPageLabel = "";
+    const highlightSortIndex: Pick<ZoteroAnnotationItem, "annotationSortIndex"> = {
+        annotationSortIndex: resolved.sortIndex,
+    };
+    Object.assign(item, highlightSortIndex);
+    item.annotationPosition = JSON.stringify(resolved.position);
+    item.annotationAuthorName = BEAVER_ANNOTATION_AUTHOR;
+    if (input.tags?.length) {
+        for (const tag of input.tags) item.addTag(tag);
+    }
+    await item.saveTx();
+
+    return { library_id: attachment.libraryID, zotero_key: item.key };
+}
+
+/**
+ * Create a headless Zotero snapshot note annotation: a comment-icon annotation
+ * whose selector spans the cited passage's containing block, so the reader renders
+ * the icon in the margin beside the block rather than inline over the text.
+ */
+export async function createSnapshotNoteAnnotation(
+    attachment: Zotero.Item,
+    input: CreateSnapshotNoteInput,
+    preparedDoc?: Document,
+): Promise<ZoteroItemReference> {
+    const resolved = await resolveSnapshotAnnotationOrThrow(attachment, {
+        anchorId: input.anchorId,
+        text: input.text,
+        anchorToBlock: true,
+    }, preparedDoc);
+
+    const item = new Zotero.Item("annotation");
+    item.libraryID = attachment.libraryID;
+    item.parentID = attachment.id;
+    item.annotationType = "note";
+    item.annotationComment = input.comment;
+    item.annotationColor = resolveBeaverAnnotationColor(input.color);
+    item.annotationPageLabel = "";
+    const noteSortIndex: Pick<ZoteroAnnotationItem, "annotationSortIndex"> = {
+        annotationSortIndex: resolved.sortIndex,
+    };
+    Object.assign(item, noteSortIndex);
     item.annotationPosition = JSON.stringify(resolved.position);
     item.annotationAuthorName = BEAVER_ANNOTATION_AUTHOR;
     if (input.tags?.length) {

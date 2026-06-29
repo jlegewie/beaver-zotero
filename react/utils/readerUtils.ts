@@ -228,9 +228,9 @@ function getSelectedText(reader?: _ZoteroTypes.Reader): string | null {
         reader = reader || getCurrentReader();
         if (!reader) return null;
 
-        // EPUB (and other DOM-based) views expose the selection through the
-        // content iframe's window selection rather than _selectionRanges.
-        if (reader.type === 'epub') {
+        // EPUB and snapshot are DOM-based views that expose the selection through
+        // the content iframe's window selection rather than _selectionRanges.
+        if (reader.type === 'epub' || reader.type === 'snapshot') {
             const selection = (reader as any)._internalReader?._primaryView?._iframeWindow?.getSelection();
             const text = selection?.toString();
             return text?.trim() ? text : null;
@@ -306,9 +306,9 @@ export type ReaderContext = {
 }
 
 function addSelectionChangeListener(reader: any, callback: (selection: TextSelection | null) => void) {
-    // PDF and EPUB views both render content into an iframe whose document
-    // fires selectionchange; other reader types are not supported.
-    if (reader.type !== "pdf" && reader.type !== "epub") {
+    // PDF, EPUB, and snapshot views all render content into an iframe whose
+    // document fires selectionchange; other reader types are not supported.
+    if (reader.type !== "pdf" && reader.type !== "epub" && reader.type !== "snapshot") {
         return null;
     }
     try {

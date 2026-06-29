@@ -30,6 +30,22 @@ export {
     measureSectionSourceText,
     sumExtractedTextChars,
 } from "./diagnostics";
+export {
+    appendSyntheticSectionMarkers,
+    buildContentOffsetIndex,
+    emptyContentOffsetIndex,
+    EMPTY_PAGE_MAPPING,
+    itemCharOffset,
+    pageOrdinalForPosition,
+    stampSyntheticPageNumbers,
+} from "./pagination";
+export type {
+    ContentOffsetIndex,
+    ItemPagePosition,
+    PageMapping,
+    PageMarker,
+    SectionTextNode,
+} from "./pagination";
 export type {
     DomExtractionCounters,
     ParseDomSectionInput,

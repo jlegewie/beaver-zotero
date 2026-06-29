@@ -14,6 +14,7 @@ import {
     presentTemporaryAnnotations,
 } from './citationNavigation';
 import { navigateToEpubCitation } from './epubVisualizer/epubCitationNavigation';
+import { navigateToSnapshotCitation } from './snapshotVisualizer/snapshotCitationNavigation';
 import { getCurrentReaderAndWaitForView } from './readerUtils';
 import { revealSource } from './sourceUtils';
 
@@ -99,7 +100,34 @@ export async function navigateToAttachmentMatch(nav: AttachmentMatchNavRequest):
         return;
     }
 
-    // Snapshots and other non-PDF attachments: open the reader without locators
+    if (nav.content_kind === 'snapshot') {
+        // Snapshots have no section/page navigation (continuous scroll view);
+        // resolve the cited passage from the target's anchor/text in the live
+        // reader DOM, the same way snapshot citation clicks do.
+        const symbolicLocation: SymbolicLocation | undefined =
+            (nav.target?.anchor_id || nav.target?.text)
+                ? {
+                    content_kind: 'snapshot',
+                    anchor_id: nav.target.anchor_id,
+                    text: nav.target.text,
+                }
+                : undefined;
+        const outcome = await navigateToSnapshotCitation({
+            item,
+            symbolicLocation,
+            searchText: nav.target?.text ?? nav.snippet,
+            previewText: nav.snippet,
+            useTemporaryAnnotations,
+            ownerDocument: nav.ownerDocument,
+        });
+        logger(`navigateToAttachmentMatch: snapshot navigation outcome: ${outcome}`);
+        if (outcome === 'failed') {
+            revealSource({ library_id: nav.library_id, zotero_key: nav.zotero_key } as ZoteroItemReference);
+        }
+        return;
+    }
+
+    // Other non-PDF attachments: open the reader without locators
     if (nav.content_kind !== 'pdf') {
         try {
             await Zotero.Reader.open(item.id);

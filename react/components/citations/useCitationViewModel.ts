@@ -340,6 +340,13 @@ export function useCitationViewModel(props: Record<string, unknown>): CitationVi
         let pageLabels: string[] = rawPages.map((p) => String(p));
         const contentKind = getContentKind(metadata);
 
+        if (contentKind === 'snapshot') {
+            // Synthetic page numbers are a logical coordinate only; the snapshot
+            // reader is a continuous scroll view, so a "page N" badge would
+            // mislead. Keep the raw pages for navigation but show no page label.
+            return { pageLabels, pagesDisplay: '', pages: rawPages };
+        }
+
         if (contentKind === 'epub') {
             const backendLabels = metadata?.page_labels;
             pageLabels = rawPages.map((p) => explicitPageLabel(backendLabels, p));

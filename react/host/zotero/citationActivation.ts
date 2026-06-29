@@ -24,6 +24,7 @@ import {
     presentTemporaryAnnotations,
 } from '../../utils/citationNavigation';
 import { navigateToEpubCitation } from '../../utils/epubVisualizer/epubCitationNavigation';
+import { navigateToSnapshotCitation } from '../../utils/snapshotVisualizer/snapshotCitationNavigation';
 import { resolvePageLabelFromLabels } from '../../utils/pageLabels';
 import { getPageLabelsForItem } from './itemData';
 import { launchExternalFile } from './sourceActions';
@@ -199,6 +200,37 @@ export async function activateCitation(activation: CitationActivation): Promise<
             ownerDocument,
         });
         logger(`Citation activation: EPUB navigation outcome: ${outcome}`);
+        if (outcome === 'failed') {
+            revealInLibrary(item.libraryID, item.key);
+        }
+        return;
+    }
+
+    if (contentKind === 'snapshot') {
+        // Snapshot locator model: the symbolic location carries the cited
+        // selector / anchor / passage text. There is no section/page navigation
+        // (the reader is a continuous scroll view), so a regular item with no
+        // symbolic locator just reveals in the library.
+        const snapshotSymbolicLocation = symbolicLocation?.content_kind === 'snapshot'
+            ? symbolicLocation
+            : undefined;
+        const hasSnapshotLocator = !!snapshotSymbolicLocation || !!(metadata?.preview);
+        logger(`Citation activation: snapshot citation (symbolic: ${!!snapshotSymbolicLocation})`);
+
+        if (item.isRegularItem() && !hasSnapshotLocator) {
+            revealInLibrary(item.libraryID, item.key);
+            return;
+        }
+
+        const outcome = await navigateToSnapshotCitation({
+            item,
+            symbolicLocation: snapshotSymbolicLocation,
+            searchText: metadata?.preview || undefined,
+            previewText,
+            useTemporaryAnnotations: useTemporaryCitationAnnotations,
+            ownerDocument,
+        });
+        logger(`Citation activation: snapshot navigation outcome: ${outcome}`);
         if (outcome === 'failed') {
             revealInLibrary(item.libraryID, item.key);
         }
