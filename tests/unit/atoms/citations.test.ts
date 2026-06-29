@@ -344,7 +344,11 @@ describe('itemTypeToIconName', () => {
         expect(itemTypeToIconName('journalArticle', undefined)).toBe('journalArticle');
         expect(itemTypeToIconName('attachment', 'pdf')).toBe('attachmentPDF');
         expect(itemTypeToIconName('attachment', 'epub')).toBe('attachmentEPUB');
+        expect(itemTypeToIconName('attachment', 'snapshot')).toBe('attachmentSnapshot');
         expect(itemTypeToIconName('attachment', 'text')).toBe('attachmentFile');
-        expect(itemTypeToIconName(undefined, 'pdf')).toBe('document');
+        // content_kind pins the attachment glyph even when item_type is absent.
+        expect(itemTypeToIconName(undefined, 'pdf')).toBe('attachmentPDF');
+        // No item_type and no content_kind falls back to the generic document icon.
+        expect(itemTypeToIconName(undefined, undefined)).toBe('document');
     });
 });

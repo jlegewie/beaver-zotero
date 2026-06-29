@@ -886,7 +886,7 @@ export async function handleReadAttachment(args: any): Promise<any> {
                 ? {
                     pageCount: result.document.pageCount,
                     pages: result.document.pages.map((page) => ({
-                        index: page.index,
+                        pageNumber: page.index + 1,
                         markdown: page.markdown ?? '',
                     })),
                 }
@@ -901,7 +901,7 @@ export async function handleReadAttachment(args: any): Promise<any> {
     }
 
     const requestedPages = markdownDocument.pages.filter(
-        (page) => page.index + 1 >= startPage && page.index + 1 <= endPage,
+        (page) => page.pageNumber >= startPage && page.pageNumber <= endPage,
     );
     if (requestedPages.length === 0) {
         return mcpError(`Requested page window ${startPage}-${endPage} is out of range or contains no extractable pages.`);
@@ -909,35 +909,70 @@ export async function handleReadAttachment(args: any): Promise<any> {
 
     // Build plain text response with <pageN> tags
     const actualEnd = requestedPages.length > 0
-        ? requestedPages[requestedPages.length - 1].index + 1
+        ? requestedPages[requestedPages.length - 1].pageNumber
         : startPage;
     const header = `Attachment: ${args.attachment_id} | Total pages: ${markdownDocument.pageCount ?? 'unknown'} | Showing pages ${startPage}-${actualEnd}`;
     const pageTexts = requestedPages.map(
-        (p) => `<page${p.index + 1}>\n${p.markdown}\n</page${p.index + 1}>`,
+        (p) => `<page${p.pageNumber}>\n${p.markdown}\n</page${p.pageNumber}>`,
     );
 
     return [header, '', ...pageTexts].join('\n');
 }
 
 interface AttachmentMarkdownPage {
-    index: number;
+    pageNumber: number;
     markdown: string;
 }
 
-// EPUB and snapshot both extend DomDocument (sections of items), so one
-// section-based markdown projection serves both content kinds.
+type DomReadItem = {
+    kind: string;
+    sectionIndex: number;
+    order: number;
+    text?: string;
+    level?: number;
+    sentences?: Array<{ text: string }>;
+    pageNumber?: number;
+};
+
+// EPUB and snapshot both carry stamped per-item page numbers. Grouping items by
+// that coordinate keeps MCP reads aligned with backend read pagination.
 function domDocumentToMarkdownPages(
     document: Extract<NonNullable<WSZoteroDocumentResponse['result']>, { content_kind: 'epub' | 'snapshot' }>,
 ): { pageCount: number; pages: AttachmentMarkdownPage[] } {
+    const pagesByNumber = new Map<number, DomReadItem[]>();
+    const orderedItems = document.sections
+        .slice()
+        .sort((a, b) => a.index - b.index)
+        .flatMap((section) => section.items
+            .slice()
+            .sort((a, b) => a.order - b.order)
+            .map((item) => ({
+                ...item,
+                pageNumber: item.pageNumber ?? section.index + 1,
+            })));
+
+    for (const item of orderedItems) {
+        const pageNumber = item.pageNumber ?? 1;
+        const pageItems = pagesByNumber.get(pageNumber);
+        if (pageItems) {
+            pageItems.push(item);
+        } else {
+            pagesByNumber.set(pageNumber, [item]);
+        }
+    }
+
+    const observedPageCount = Math.max(0, ...Array.from(pagesByNumber.keys()));
     return {
-        pageCount: document.sectionCount,
-        pages: document.sections.map((section) => ({
-            index: section.index,
-            markdown: section.items
-                .map(domItemToMarkdown)
-                .filter((text) => text.length > 0)
-                .join('\n\n'),
-        })),
+        pageCount: document.pageCount ?? observedPageCount,
+        pages: Array.from(pagesByNumber.entries())
+            .sort(([a], [b]) => a - b)
+            .map(([pageNumber, items]) => ({
+                pageNumber,
+                markdown: items
+                    .map(domItemToMarkdown)
+                    .filter((text) => text.length > 0)
+                    .join('\n\n'),
+            })),
     };
 }
 

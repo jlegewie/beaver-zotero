@@ -21,9 +21,9 @@ import {
     type ExtractSnapshotResult,
     type SnapshotDocument,
 } from "./schema";
-import { parseSnapshotHtml } from "./snapshotDom";
+import { getDeclaredCharset, isLikelyNonUtf8Charset, parseSnapshotHtml } from "./snapshotDom";
 import { getReadableContentKind } from "../attachmentResolution";
-import { effectiveMaxFileSizeMB } from "../../attachmentLimits";
+import { effectiveMaxSnapshotFileSizeMB } from "../../attachmentLimits";
 import { isRemoteAccessAvailable } from "../attachmentSource";
 import { logger } from "../../../utils/logger";
 
@@ -177,6 +177,17 @@ export async function extractSnapshotDocumentFromFile(
     await ensureSentencexLoaded();
 
     const doc = parseSnapshotHtml(bytes);
+
+    // The reader decodes snapshots as UTF-8; warn when the page declares otherwise.
+    const declaredCharset = getDeclaredCharset(doc);
+    if (isLikelyNonUtf8Charset(declaredCharset)) {
+        logger(
+            `extractSnapshotDocument: declared charset "${declaredCharset}" is not UTF-8 for ${filePath} `
+            + `— bytes are decoded as UTF-8 (matching the reader), so the extracted text may be garbled`,
+            2,
+        );
+    }
+
     const body = doc.body ?? doc.querySelector("body");
     const language = options?.language ?? doc.documentElement?.getAttribute("lang") ?? null;
 
@@ -306,7 +317,7 @@ export async function preflightSnapshotFile(
         return preflightResponseError("file_missing", "The snapshot file is not available locally.");
     }
 
-    const maxFileSizeMB = effectiveMaxFileSizeMB(options?.maxFileSizeMB);
+    const maxFileSizeMB = effectiveMaxSnapshotFileSizeMB(options?.maxFileSizeMB);
     try {
         const stat = await IOUtils.stat(filePath);
         const sizeMB = typeof stat.size === "number" ? stat.size / 1024 / 1024 : null;

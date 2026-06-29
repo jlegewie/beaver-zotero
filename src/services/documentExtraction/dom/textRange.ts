@@ -78,7 +78,11 @@ function rangeOverElementText(element: Element): Range | undefined {
     return range;
 }
 
-/** Find an element by id within `root`, escaping the id for attribute-selector use. */
+/**
+ * Find an element by id within `root`, escaping the id for attribute-selector use.
+ *
+ * Returns the first match, matching the reader's querySelector-based resolution.
+ */
 export function findAnchorElement(root: Element, anchorId: string): Element | undefined {
     // Attribute selector instead of #id so arbitrary ids only need string escaping.
     const escaped = anchorId.replace(/["\\]/g, "\\$&");

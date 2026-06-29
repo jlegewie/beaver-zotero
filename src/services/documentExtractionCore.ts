@@ -41,7 +41,7 @@ import type {
     SerializedDocumentCacheResult,
 } from './documentCache';
 import { logger } from '../utils/logger';
-import { effectiveMaxFileSizeMB, effectiveMaxPageCount } from './attachmentLimits';
+import { effectiveMaxFileSizeMB, effectiveMaxPageCount, effectiveMaxSnapshotFileSizeMB } from './attachmentLimits';
 import {
     loadAttachmentData,
     resolveAttachmentFileSource,
@@ -636,7 +636,11 @@ export async function extractAndCacheSnapshotDocument(
         }
         filePath = preflight.filePath;
     } else {
-        const externalSource = await resolveExternalFileSource(args.source.filePath, args.maxFileSizeMB);
+        // Match the tighter Zotero snapshot preflight limit for external files.
+        const externalSource = await resolveExternalFileSource(
+            args.source.filePath,
+            effectiveMaxSnapshotFileSizeMB(args.maxFileSizeMB),
+        );
         if (externalSource.kind === 'error') {
             return {
                 kind: 'response_error',
@@ -657,7 +661,8 @@ export async function extractAndCacheSnapshotDocument(
         ? await resolveSnapshotSectionMeta(args.source.item)
         : {};
 
-    const maxFileSizeMB = effectiveMaxFileSizeMB(args.maxFileSizeMB);
+    // Keep cache and fallback errors aligned with snapshot preflight.
+    const maxFileSizeMB = effectiveMaxSnapshotFileSizeMB(args.maxFileSizeMB);
     const maxSourceSizeBytes = maxFileSizeMB * 1024 * 1024;
     const maxPages = effectiveMaxPageCount(args.maxPages);
 
@@ -674,13 +679,12 @@ export async function extractAndCacheSnapshotDocument(
                 contentKind: 'snapshot',
             };
         }
-        // Reject oversized documents before serializing the (potentially large)
-        // payload. Snapshot page counts are the extractor's synthetic coordinate.
+        // Reject oversized extracted content before serializing the payload.
         if (document.pageCount != null && document.pageCount > maxPages) {
             return {
                 kind: 'response_error',
                 code: 'too_many_pages',
-                message: `The snapshot file for ${requestKey} has ${document.pageCount} pages, which exceeds the ${maxPages}-page limit.`,
+                message: `The snapshot for ${requestKey} is too long for Beaver to process — its extracted content exceeds the supported size.`,
                 pageCount: document.pageCount,
                 resolvedAttachment,
                 contentKind: 'snapshot',

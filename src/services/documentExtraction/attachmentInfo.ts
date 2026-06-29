@@ -338,10 +338,10 @@ async function resolvePdfInfo(
  * Resolve readability info for an EPUB attachment.
  *
  * EPUB extraction requires the full DOM pipeline, so this never extracts on
- * the hot path. A cached extraction supplies the section count (the EPUB
- * analogue of a page count); a cold cache simply reports the attachment as
- * readable — file existence and size were already checked by
- * `checkAttachmentAvailability`.
+ * the hot path. A cached extraction supplies the stamped page count when
+ * available, falling back to section count for older cache rows; a cold cache
+ * simply reports the attachment as readable — file existence and size were
+ * already checked by `checkAttachmentAvailability`.
  */
 async function resolveEpubInfo(
     attachment: Zotero.Item,
@@ -432,8 +432,9 @@ async function resolveSnapshotInfo(
                         status_reason: 'Snapshot contains no extractable text.',
                     };
                 }
-                // Synthetic page count when known; a single section otherwise.
-                return { page_count: snapshotMeta?.pageCount ?? 1, status: 'readable' };
+                // Snapshot reads use the same stamped synthetic page coordinate
+                // as citations, so attachment metadata must report that count.
+                return { page_count: snapshotMeta?.pageCount ?? null, status: 'readable' };
             }
         } catch (error) {
             logger(`getAttachmentInfo: cache read error: ${error}`, 1);

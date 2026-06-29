@@ -118,25 +118,48 @@ export function buildContentOffsetIndex(root: Element): ContentOffsetIndex {
     const contentNodes: SectionTextNode[] = [];
     let offset = 0;
 
-    const visitElement = (element: Element): void => {
+    // Iterative pre-order walk avoids stack overflow on deeply nested DOM.
+    interface Frame {
+        children: Node[];
+        index: number;
+    }
+
+    const enter = (element: Element): Frame | null => {
         const tag = element.localName?.toLowerCase();
-        if (tag === "style" || tag === "script") return;
+        if (tag === "style" || tag === "script") return null;
         elementOffsets.set(element, offset);
-        for (const node of Array.from(element.childNodes)) {
-            if (!node) continue;
-            if (node.nodeType === 3) {
-                const value = (node as Text).nodeValue ?? "";
-                if (/^\s*$/.test(value)) continue;
-                textNodeOffsets.set(node as Text, offset);
-                contentNodes.push({ start: offset, length: value.length });
-                offset += value.length;
-            } else if (node.nodeType === 1) {
-                visitElement(node as Element);
-            }
-        }
+        return {
+            children: Array.from(element.childNodes).filter((n): n is Node => n != null),
+            index: 0,
+        };
     };
 
-    visitElement(root);
+    const rootFrame = enter(root);
+    if (!rootFrame) {
+        return { elementOffsets, textNodeOffsets, contentNodes };
+    }
+
+    const stack: Frame[] = [rootFrame];
+    while (stack.length > 0) {
+        const frame = stack[stack.length - 1];
+        if (frame.index >= frame.children.length) {
+            stack.pop();
+            continue;
+        }
+        const node = frame.children[frame.index++];
+        if (!node) continue;
+        if (node.nodeType === 3) {
+            const value = (node as Text).nodeValue ?? "";
+            if (/^\s*$/.test(value)) continue;
+            textNodeOffsets.set(node as Text, offset);
+            contentNodes.push({ start: offset, length: value.length });
+            offset += value.length;
+        } else if (node.nodeType === 1) {
+            const childFrame = enter(node as Element);
+            if (childFrame) stack.push(childFrame);
+        }
+    }
+
     return { elementOffsets, textNodeOffsets, contentNodes };
 }
 

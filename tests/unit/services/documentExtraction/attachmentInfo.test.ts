@@ -167,13 +167,18 @@ describe('getAttachmentInfo', () => {
         expect(info.status_code).toBeUndefined();
     });
 
-    it('reports the cached EPUB section count as page_count', async () => {
+    it('reports the cached EPUB page count as page_count', async () => {
         (globalThis as any).Zotero.Beaver = {
             documentCache: {
                 getMetadata: vi.fn(async () => ({
                     contentKind: 'epub',
                     errorCode: null,
-                    documentMetadata: { content_kind: 'epub', sectionCount: 12, sections: [] },
+                    documentMetadata: {
+                        content_kind: 'epub',
+                        sectionCount: 3,
+                        pageCount: 12,
+                        sections: [],
+                    },
                 })),
             },
         };
@@ -186,6 +191,28 @@ describe('getAttachmentInfo', () => {
             content_kind: 'epub',
             status: 'readable',
             page_count: 12,
+        });
+    });
+
+    it('falls back to EPUB section count for older cache rows without pageCount', async () => {
+        (globalThis as any).Zotero.Beaver = {
+            documentCache: {
+                getMetadata: vi.fn(async () => ({
+                    contentKind: 'epub',
+                    errorCode: null,
+                    documentMetadata: { content_kind: 'epub', sectionCount: 5, sections: [] },
+                })),
+            },
+        };
+
+        const info = await getAttachmentInfo(
+            makeAttachment({ contentType: 'application/epub+zip', filePath: '/tmp/book.epub' }),
+        );
+
+        expect(info).toMatchObject({
+            content_kind: 'epub',
+            status: 'readable',
+            page_count: 5,
         });
     });
 
@@ -246,7 +273,12 @@ describe('getAttachmentInfo', () => {
                 getMetadata: vi.fn(async () => ({
                     contentKind: 'epub',
                     errorCode: null,
-                    documentMetadata: { content_kind: 'epub', sectionCount: 5, sections: [] },
+                    documentMetadata: {
+                        content_kind: 'epub',
+                        sectionCount: 5,
+                        pageCount: 9,
+                        sections: [],
+                    },
                 })),
             },
         };
@@ -258,7 +290,62 @@ describe('getAttachmentInfo', () => {
         expect(info).toMatchObject({
             content_kind: 'epub',
             status: 'readable',
-            page_count: 5,
+            page_count: 9,
+        });
+    });
+
+    it('reports the cached snapshot synthetic page count as page_count', async () => {
+        (globalThis as any).Zotero.Beaver = {
+            documentCache: {
+                getMetadata: vi.fn(async () => ({
+                    contentKind: 'snapshot',
+                    errorCode: null,
+                    documentMetadata: {
+                        content_kind: 'snapshot',
+                        sectionCount: 1,
+                        pageCount: 12,
+                        sections: [],
+                        extractedTextChars: 100,
+                    },
+                })),
+            },
+        };
+
+        const info = await getAttachmentInfo(
+            makeAttachment({ contentType: 'text/html', filePath: '/tmp/snapshot.html' }),
+        );
+
+        expect(info).toMatchObject({
+            content_kind: 'snapshot',
+            status: 'readable',
+            page_count: 12,
+        });
+    });
+
+    it('reports unknown snapshot page_count when cached snapshot metadata lacks pageCount', async () => {
+        (globalThis as any).Zotero.Beaver = {
+            documentCache: {
+                getMetadata: vi.fn(async () => ({
+                    contentKind: 'snapshot',
+                    errorCode: null,
+                    documentMetadata: {
+                        content_kind: 'snapshot',
+                        sectionCount: 1,
+                        sections: [],
+                        extractedTextChars: 100,
+                    },
+                })),
+            },
+        };
+
+        const info = await getAttachmentInfo(
+            makeAttachment({ contentType: 'text/html', filePath: '/tmp/snapshot.html' }),
+        );
+
+        expect(info).toMatchObject({
+            content_kind: 'snapshot',
+            status: 'readable',
+            page_count: null,
         });
     });
 

@@ -31,6 +31,31 @@ export function prepareSnapshotDocument(doc: Document): void {
     removeMatching(doc, "noscript");
 }
 
+// Charset labels that decode identically to UTF-8 for extraction purposes.
+const UTF8_COMPATIBLE_CHARSETS = new Set(["utf-8", "utf8", "us-ascii", "ascii"]);
+
+/**
+ * Return the lowercased declared charset, or null when none can be read.
+ */
+export function getDeclaredCharset(doc: Document): string | null {
+    try {
+        const metaCharset = doc.querySelector("meta[charset]")?.getAttribute("charset");
+        if (metaCharset && metaCharset.trim()) return metaCharset.trim().toLowerCase();
+        const contentType = doc
+            .querySelector('meta[http-equiv="content-type" i]')
+            ?.getAttribute("content");
+        const match = contentType ? /charset\s*=\s*([^\s;"']+)/i.exec(contentType) : null;
+        return match ? match[1].trim().toLowerCase() : null;
+    } catch {
+        return null;
+    }
+}
+
+/** True when a declared charset is present and not UTF-8/ASCII compatible. */
+export function isLikelyNonUtf8Charset(charset: string | null): boolean {
+    return charset != null && !UTF8_COMPATIBLE_CHARSETS.has(charset);
+}
+
 /** Decode + parse + transform + serialize/reparse snapshot bytes into a Document. */
 export function parseSnapshotHtml(bytes: Uint8Array): Document {
     const text = new TextDecoder("utf-8").decode(bytes);
