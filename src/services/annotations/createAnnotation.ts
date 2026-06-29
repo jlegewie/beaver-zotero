@@ -21,8 +21,12 @@ import {
     type EpubAnnotationLocator,
 } from "./epub/epubAnnotationResolver";
 import {
+    buildAnnotationFromDocument,
+    loadSnapshotDocument,
     resolveSnapshotAnnotationTarget,
+    type ResolvedSnapshotAnnotation,
     type SnapshotAnnotationLocator,
+    type SnapshotAnnotationResolveError,
 } from "./snapshot/snapshotAnnotationResolver";
 
 const NOTE_RECT_SIZE = 18;
@@ -616,14 +620,41 @@ async function getSnapshotFilePath(attachment: Zotero.Item): Promise<string> {
 async function resolveSnapshotAnnotationOrThrow(
     attachment: Zotero.Item,
     locator: SnapshotAnnotationLocator,
+    preparedDoc?: Document,
 ) {
     assertSnapshotAttachment(attachment);
-    const filePath = await getSnapshotFilePath(attachment);
-    const resolved = await resolveSnapshotAnnotationTarget(filePath, locator);
+    // A batch on one snapshot parses the file once (preparedDoc) and resolves each
+    // locator synchronously; a lone call falls back to read + parse here.
+    let resolved: ResolvedSnapshotAnnotation | SnapshotAnnotationResolveError;
+    if (preparedDoc) {
+        resolved = buildAnnotationFromDocument(preparedDoc, locator);
+    } else {
+        const filePath = await getSnapshotFilePath(attachment);
+        resolved = await resolveSnapshotAnnotationTarget(filePath, locator);
+    }
     if ("error" in resolved) {
         throw new SnapshotAnnotationError(resolved.error, resolved.message);
     }
     return resolved;
+}
+
+/**
+ * Read + parse a snapshot attachment's HTML once for a batch. Pass the returned
+ * Document to each {@link createSnapshotHighlightAnnotation} /
+ * {@link createSnapshotNoteAnnotation} call so the batch shares a single read +
+ * parse instead of re-reading and re-parsing identical bytes per item. Throws
+ * SnapshotAnnotationError when the file is unavailable or cannot be parsed.
+ */
+export async function prepareSnapshotAnnotationDocument(
+    attachment: Zotero.Item,
+): Promise<Document> {
+    assertSnapshotAttachment(attachment);
+    const filePath = await getSnapshotFilePath(attachment);
+    const doc = await loadSnapshotDocument(filePath);
+    if ("error" in doc) {
+        throw new SnapshotAnnotationError(doc.error, doc.message);
+    }
+    return doc;
 }
 
 /**
@@ -634,11 +665,12 @@ async function resolveSnapshotAnnotationOrThrow(
 export async function createSnapshotHighlightAnnotation(
     attachment: Zotero.Item,
     input: CreateSnapshotHighlightInput,
+    preparedDoc?: Document,
 ): Promise<ZoteroItemReference> {
     const resolved = await resolveSnapshotAnnotationOrThrow(attachment, {
         anchorId: input.anchorId,
         text: input.text,
-    });
+    }, preparedDoc);
 
     const item = new Zotero.Item("annotation");
     item.libraryID = attachment.libraryID;
@@ -671,12 +703,13 @@ export async function createSnapshotHighlightAnnotation(
 export async function createSnapshotNoteAnnotation(
     attachment: Zotero.Item,
     input: CreateSnapshotNoteInput,
+    preparedDoc?: Document,
 ): Promise<ZoteroItemReference> {
     const resolved = await resolveSnapshotAnnotationOrThrow(attachment, {
         anchorId: input.anchorId,
         text: input.text,
         anchorToBlock: true,
-    });
+    }, preparedDoc);
 
     const item = new Zotero.Item("annotation");
     item.libraryID = attachment.libraryID;

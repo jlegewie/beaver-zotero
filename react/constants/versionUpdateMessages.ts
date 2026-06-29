@@ -458,7 +458,7 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
     },
     {
         version: "0.21.0",
-        title: "Full-text search, EPUB support, and external files",
+        title: "EPUB support, external files and improved search",
         steps: [
             {
                 title: "More file types and external files",
@@ -474,6 +474,12 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
             },
         ],
         footer: `<a href="https://github.com/jlegewie/beaver-zotero/releases/tag/v0.21.0" target='_blank'>Full changelog</a>`,
+    },
+    {
+        version: "0.21.1",
+        title: "Support for Snapshot Attachments",
+        text: "Beaver can now read, annotate, and cite snapshot attachments down to the sentence level. As of version 0.21, that means support for PDFs, EPUBs, snapshots, images, and plain text files.",
+        inPanel: true,
     },
 ];
 

@@ -11,6 +11,7 @@ import {
     createEpubNoteAnnotation,
     createNoteAnnotation,
     createSnapshotNoteAnnotation,
+    prepareSnapshotAnnotationDocument,
 } from '../../annotations/createAnnotation';
 import { getReadableContentKind } from '../../documentExtraction/attachmentResolution';
 import { getAttachmentFileStatus, getDeferredToolPreference, validateLibraryAccess } from '../utils';
@@ -256,6 +257,12 @@ export async function executeCreateNoteAnnotationsAction(
         const created: CreatedAnnotationResult[] = [];
         const failed: FailedAnnotationResult[] = [];
 
+        // Snapshots: parse the HTML once for the whole batch so each item resolves
+        // against the shared Document instead of re-reading + re-parsing the file.
+        const snapshotDoc = contentKind === 'snapshot'
+            ? await prepareSnapshotAnnotationDocument(attachment)
+            : undefined;
+
         for (const item of items) {
             checkAborted(ctx, `create_note_annotations:item_${item.index}`);
             try {
@@ -278,7 +285,7 @@ export async function executeCreateNoteAnnotationsAction(
                         comment: item.comment,
                         color: item.color,
                         tags,
-                    });
+                    }, snapshotDoc);
                 } else {
                     const notePosition = item.note_position;
                     if (!notePosition) {

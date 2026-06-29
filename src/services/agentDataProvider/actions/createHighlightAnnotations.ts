@@ -11,6 +11,7 @@ import {
     createEpubHighlightAnnotation,
     createHighlightAnnotation,
     createSnapshotHighlightAnnotation,
+    prepareSnapshotAnnotationDocument,
 } from '../../annotations/createAnnotation';
 import { getReadableContentKind } from '../../documentExtraction/attachmentResolution';
 import { getAttachmentFileStatus, getDeferredToolPreference, validateLibraryAccess } from '../utils';
@@ -245,6 +246,12 @@ export async function executeCreateHighlightAnnotationsAction(
         const created: CreatedAnnotationResult[] = [];
         const failed: FailedAnnotationResult[] = [];
 
+        // Snapshots: parse the HTML once for the whole batch so each item resolves
+        // against the shared Document instead of re-reading + re-parsing the file.
+        const snapshotDoc = contentKind === 'snapshot'
+            ? await prepareSnapshotAnnotationDocument(attachment)
+            : undefined;
+
         for (const item of items) {
             checkAborted(ctx, `create_highlight_annotations:item_${item.index}`);
 
@@ -287,7 +294,7 @@ export async function executeCreateHighlightAnnotationsAction(
                         color: item.color,
                         comment: item.comment ?? item.title,
                         tags,
-                    });
+                    }, snapshotDoc);
                     created.push({
                         client_item_id: item.client_item_id,
                         index: item.index,
