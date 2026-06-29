@@ -58,6 +58,59 @@ describe("buildAnnotationFromDocument — reader overlay parity", () => {
         expect(doc.body.lastElementChild?.id).toBe(OVERLAY_ID);
     });
 
+    it.each([
+        {
+            name: "body-level last child (sibling present)",
+            html: '<div>Header text here that is long enough.</div>'
+                + '<div>The cited sentence lives in the last div here.</div>',
+            cited: "div:nth-of-type(2)",
+            text: "The cited sentence lives in the last div here.",
+        },
+        {
+            name: "body-level only child",
+            html: '<div>The only cited sentence lives alone here.</div>',
+            cited: "div",
+            text: "The only cited sentence lives alone here.",
+        },
+        {
+            name: "body-level last child, unique tag",
+            html: '<div>Body paragraph one here long enough.</div>'
+                + '<footer>The cited footnote sentence here is unique.</footer>',
+            cited: "footer",
+            text: "The cited footnote sentence here is unique.",
+        },
+        {
+            name: "nested last child inside a container",
+            html: '<div class="container"><p>Intro paragraph here.</p>'
+                + '<p>The cited nested sentence is the last paragraph.</p></div>',
+            cited: ".container > p:nth-of-type(2)",
+            text: "The cited nested sentence is the last paragraph.",
+        },
+    ])(
+        "resolves to the cited element with the overlay removed (reading-mode preBody): $name",
+        ({ html, cited, text }) => {
+            const doc = docWith(html);
+            const citedEl = doc.body.querySelector(cited);
+            expect(citedEl).not.toBeNull();
+
+            const built = buildAnnotationFromDocument(doc, { text });
+            expect("error" in built).toBe(false);
+            if ("error" in built) return;
+            // A TextPositionSelector fallback resolves against the full body and is
+            // unaffected by the overlay, so only the CssSelector path needs guarding.
+            if (!isCss(built.position)) return;
+
+            // Default view: the reader resolves selectors against the overlay-bearing body.
+            expect(doc.body.querySelector(built.position.value)).toBe(citedEl);
+
+            // Reading mode: the reader resolves against `preBody`, which omits the
+            // overlay. Since the overlay is only ever a trailing body child, the
+            // generated from-start/type selectors stay valid once it is removed.
+            doc.body.querySelector(`#${OVERLAY_ID}`)?.remove();
+            expect(doc.body.querySelector(built.position.value)).toBe(citedEl);
+        },
+    );
+
     it("keeps selectors resolving for a unique element and leaves sortIndex unaffected", () => {
         // The empty overlay does not contribute to text offsets.
         const doc = docWith('<p id="para">Hello world foo bar</p>');
