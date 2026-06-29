@@ -90,38 +90,53 @@ export function buildAnnotationFromDocument(
         : range;
 
     let position: SnapshotSelector | null;
+    let sortIndex: string;
     try {
         position = toSnapshotSelector(selectorRange);
+        if (!position) return { error: "snapshot_selector_failed" };
+        // Throws if the range's start is unreachable within `body` (DOM mismatch).
+        sortIndex = buildSnapshotSortIndex(selectorRange, body);
     } catch (error) {
         return { error: "snapshot_selector_failed", message: String(error) };
     }
-    if (!position) return { error: "snapshot_selector_failed" };
 
-    const sortIndex = buildSnapshotSortIndex(selectorRange, body);
     return { position, sortIndex, text };
 }
 
 /**
+ * Read + parse a snapshot file into the reader-matching Document, applying the
+ * same transforms the reader applies (see `parseSnapshotHtml`) so CSS selectors +
+ * offsets line up with the live `SnapshotView`. Hoist this out of a per-item loop
+ * so a batch of annotations on one snapshot shares a single read + parse instead
+ * of re-reading and re-parsing identical bytes per item; the returned Document is
+ * reusable across {@link buildAnnotationFromDocument} calls (its only DOM
+ * mutation, the annotation overlay, is idempotent). Returns a typed error when the
+ * file cannot be read or parsed.
+ */
+export async function loadSnapshotDocument(
+    filePath: string,
+): Promise<Document | SnapshotAnnotationResolveError> {
+    try {
+        const bytes = await IOUtils.read(filePath);
+        return parseSnapshotHtml(bytes);
+    } catch (error) {
+        logger(`[SnapshotAnnotation] Failed to parse snapshot: ${error}`, 1);
+        return { error: "snapshot_parse_failed", message: String(error) };
+    }
+}
+
+/**
  * Resolve a snapshot annotation locator to a persistable `{ position, sortIndex }`
- * by parsing the snapshot HTML headlessly — no reader instance. Parses the file
- * with the same transforms the reader applies (see `parseSnapshotHtml`) so the
- * CSS selector + offsets line up with the live `SnapshotView`. Returns a typed
- * error on any failure.
+ * by parsing the snapshot HTML headlessly — no reader instance. For a single
+ * locator; batch callers should {@link loadSnapshotDocument} once and call
+ * {@link buildAnnotationFromDocument} per item. Returns a typed error on any
+ * failure.
  */
 export async function resolveSnapshotAnnotationTarget(
     filePath: string,
     target: SnapshotAnnotationLocator,
 ): Promise<ResolvedSnapshotAnnotation | SnapshotAnnotationResolveError> {
-    let doc: Document;
-    try {
-        const bytes = await IOUtils.read(filePath);
-        doc = parseSnapshotHtml(bytes);
-    } catch (error) {
-        logger(`[SnapshotAnnotation] Failed to parse snapshot: ${error}`, 1);
-        return { error: "snapshot_parse_failed", message: String(error) };
-    }
-
-    const built = buildAnnotationFromDocument(doc, target);
-    if (isResolveError(built)) return built;
-    return built;
+    const doc = await loadSnapshotDocument(filePath);
+    if (isResolveError(doc)) return doc;
+    return buildAnnotationFromDocument(doc, target);
 }

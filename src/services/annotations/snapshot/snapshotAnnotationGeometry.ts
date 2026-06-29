@@ -17,10 +17,12 @@ import {
  * body to the annotation start.
  *
  * These replicate `SnapshotView.toSelector` and `_getSortIndex`
- * (reader/src/dom/snapshot/snapshot-view.ts) byte-for-byte, minus the reading-mode
- * remapping: the reader maps a focus-DOM range back to the original DOM before
- * computing the stored selector, and the headless resolver already operates on the
- * original DOM, so the stored output is identical.
+ * (reader/src/dom/snapshot/snapshot-view.ts), minus the reading-mode remapping:
+ * the reader maps a focus-DOM range back to the original DOM before computing the
+ * stored selector, and the headless resolver already operates on the original DOM,
+ * so the stored output is identical. The one intentional difference is that
+ * `buildSnapshotSortIndex` throws when the range start is unreachable instead of
+ * returning the reader's "0000000" fallback (see below).
  */
 
 export type { SnapshotSelector } from "./vendor/readerSelectors";
@@ -66,21 +68,37 @@ export function toSnapshotSelector(range: Range): SnapshotSelector | null {
     return body ? textPositionFromRange(range, body) : null;
 }
 
-/** Compute the 7-digit snapshot sortIndex for a range, relative to `body`. */
+/**
+ * Compute the 7-digit snapshot sortIndex for a range, relative to `body`.
+ *
+ * Diverges from the reader's `_getSortIndex` in one way: the reader returns
+ * "0000000" when the range start is never reached while walking the body's text
+ * nodes, conflating it with a genuine start-of-document offset. In the headless
+ * builder an unreachable start means the range was built against a different DOM
+ * than `body`, so we throw instead — surfacing the mismatch rather than silently
+ * sorting the annotation to the very top of the document.
+ */
 export function buildSnapshotSortIndex(range: Range, body: Node): string {
-    const getCount = (root: Node, stopContainer?: Node, stopOffset?: number): number => {
+    // Returns the trimmed-character offset of `stopContainer` within `root`, or
+    // null when `stopContainer` is never reached (range belongs to another DOM).
+    const getCount = (root: Node, stopContainer: Node, stopOffset: number): number | null => {
         const iter = root.ownerDocument!.createNodeIterator(root, SHOW_TEXT);
         let count = 0;
         for (const node of iterateWalker(iter)) {
-            if (stopContainer?.contains(node)) {
-                return count + (stopOffset ?? 0);
+            if (stopContainer.contains(node)) {
+                return count + stopOffset;
             }
             count += (node.nodeValue ?? "").trim().length;
         }
-        return 0;
+        return null;
     };
 
     const count = getCount(body, range.startContainer, range.startOffset);
+    if (count === null) {
+        throw new Error(
+            "Snapshot sortIndex: range start not found within body (range built against a different DOM)",
+        );
+    }
     let countString = String(count).padStart(SORT_INDEX_LENGTH, "0");
     if (countString.length > SORT_INDEX_LENGTH) {
         countString = countString.substring(0, SORT_INDEX_LENGTH);

@@ -141,4 +141,23 @@ describe("buildSnapshotSortIndex", () => {
         // "First." trims to 6 chars; "Second " before "selection" adds 7 → 13.
         expect(buildSnapshotSortIndex(range, body)).toBe("0000013");
     });
+
+    it("returns 0000000 for a range at the very start of the body", () => {
+        const body = bodyWith("<p>Hello world</p>");
+        const range = rangeOverText(body.querySelector("p")!, "Hello");
+
+        // First text node, offset 0 → a genuine zero, distinct from the
+        // unreachable-start case below.
+        expect(buildSnapshotSortIndex(range, body)).toBe("0000000");
+    });
+
+    it("throws when the range was built against a different DOM than the body", () => {
+        const body = bodyWith("<p>Body text here</p>");
+        const otherBody = bodyWith("<p>Different document</p>");
+        const range = rangeOverText(otherBody.querySelector("p")!, "Different");
+
+        // The range start is never reached while walking `body`; surfacing this
+        // prevents a silently mis-sorted "0000000" annotation.
+        expect(() => buildSnapshotSortIndex(range, body)).toThrow();
+    });
 });
