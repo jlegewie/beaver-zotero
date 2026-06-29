@@ -164,4 +164,40 @@ describe('maybeEnqueueOcrJob', () => {
 
         expect(enqueueBackgroundJob).not.toHaveBeenCalled();
     });
+
+    it('falls back to the synced hash for a remote-only attachment and enqueues', async () => {
+        setupBeaver(true);
+        // Remote-only: attachmentHash (hashes the local file) is undefined.
+        const item = {
+            libraryID: 1,
+            key: 'AAAAAAAA',
+            id: 42,
+            attachmentHash: undefined,
+            attachmentSyncedHash: 'syncedABC',
+        } as any;
+
+        maybeEnqueueOcrJob({ ...args(), item });
+        await flush();
+
+        // Loop guard uses the synced hash, matching the executor.
+        expect(isPermFailed).toHaveBeenCalledWith('syncedABC', 'ocr', OCR_ENGINE_VERSION);
+        expect(enqueueBackgroundJob).toHaveBeenCalledOnce();
+        expect(notify).toHaveBeenCalledOnce();
+    });
+
+    it('does not enqueue a remote-only attachment with no synced hash', async () => {
+        setupBeaver(true);
+        const item = {
+            libraryID: 1,
+            key: 'AAAAAAAA',
+            id: 42,
+            attachmentHash: undefined,
+            attachmentSyncedHash: '',
+        } as any;
+
+        maybeEnqueueOcrJob({ ...args(), item });
+        await flush();
+
+        expect(enqueueBackgroundJob).not.toHaveBeenCalled();
+    });
 });

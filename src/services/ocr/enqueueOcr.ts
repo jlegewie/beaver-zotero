@@ -86,8 +86,15 @@ async function enqueueOcrJob(args: MaybeEnqueueOcrArgs): Promise<void> {
         fileHash = await args.item.attachmentHash;
     } catch (error) {
         logger(`maybeEnqueueOcrJob: attachmentHash failed for ${args.libraryId}-${args.zoteroKey}: ${error}`, 2);
-        return;
+        // Fall through to the synced-hash fallback rather than returning.
     }
+    // Remote-only attachments have no local file, so attachmentHash (which hashes
+    // the local file) is undefined. Fall back to the synced server MD5 — the same
+    // content hash a local machine's attachmentHash produces — so a remote scan is
+    // enqueued and its loop guard stays consistent with the OCR executor.
+    if (!fileHash) fileHash = args.item.attachmentSyncedHash || undefined;
+    // Truly hashless (rare not-yet-synced item): the backend OCR dedup needs a
+    // content hash, so there is nothing actionable to enqueue.
     if (!fileHash) return;
 
     // Loop guard: skip scans this engine has already marked terminal.

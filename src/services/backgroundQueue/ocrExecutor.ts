@@ -15,7 +15,12 @@
  */
 
 import type { BackgroundJobRecord, DocumentProcessingFailureInput } from '../database';
-import { resolveAttachmentFileSource } from '../documentExtraction/attachmentSource';
+import {
+    loadAttachmentData,
+    resolveAttachmentFileSource,
+    type AttachmentFileSource,
+} from '../documentExtraction/attachmentSource';
+import { ExternalAbortError } from '../agentDataProvider/timeout';
 import { extractPdfBytesAndCacheAsOriginalAttachment } from '../documentExtraction/ocrReextract';
 import {
     ocrApiClient,
@@ -36,6 +41,7 @@ import {
 import {
     OCR_ENGINE_VERSION,
     OCR_OUTCOME_DETAIL_MAX,
+    OCR_PRIORITY_BACKFILL,
     OCR_TRACK_BUDGET_MS,
     OCR_TERMINAL_FAILED,
     OCR_TERMINAL_GEOMETRY,
@@ -52,10 +58,25 @@ import type {
 
 interface ResolvedJob {
     item: Zotero.Item;
+    /** Local path or supported remote source for the original scan. */
+    source: AttachmentFileSource;
+    /** Convenience alias of `source.filePath` (synthetic `remote:` path for remote). */
     filePath: string;
     fileHash: string;
     pageCount: number;
+    /** Original byte length for a remote source (keys the cache); `0` for local. */
+    sourceSizeBytes: number;
     sourceKey: string;
+    /** Lazily reads/downloads the original scan bytes once, memoized per job. */
+    loadOriginalBytes: () => Promise<Uint8Array>;
+}
+
+/** Sentinel raised when the original remote scan cannot be loaded for upload. */
+class OcrRemoteLoadError extends Error {
+    constructor(public readonly code: 'file_too_large' | 'download_failed' | 'read_failed') {
+        super(`ocr_remote_load_failed: ${code}`);
+        this.name = 'OcrRemoteLoadError';
+    }
 }
 
 export class OcrExecutor implements JobExecutor {
@@ -105,6 +126,14 @@ export class OcrExecutor implements JobExecutor {
         } catch (error) {
             if (error instanceof OcrAbort || ctx.externalAbortSignal.aborted) {
                 return { kind: 'release', reason: 'aborted' };
+            }
+            if (error instanceof OcrRemoteLoadError) {
+                // Oversized scans are terminal-for-now (recoverable if limits change);
+                // a failed/partial download is transient, so let the queue retry.
+                if (error.code === 'file_too_large') {
+                    return { kind: 'complete', reason: 'file_too_large' };
+                }
+                return { kind: 'retry', error: `ocr_remote_download_failed: ${error.code}`, reason: 'ocr_remote_download_failed' };
             }
             const message = error instanceof Error ? error.message : String(error);
             logger(`OcrExecutor: job ${record.libraryId}-${record.zoteroKey} error: ${message}`, 1);
@@ -236,57 +265,130 @@ export class OcrExecutor implements JobExecutor {
         if (!item || safeIsInTrash(item) === true) {
             return { outcome: { kind: 'complete', reason: !item ? 'item_missing' : 'in_trash' } };
         }
+        const resolvedItem = item;
 
-        // OCR requires the local scan bytes (to upload) and a stable on-disk
-        // path (to key the cache). Remote-only attachments are out of scope.
+        // Resolve a local path or a supported remote source. OCR needs the scan
+        // bytes (to upload) and a stable identity (to key the cache). Remote-only
+        // sources are downloaded in-memory like every other extraction path; the
+        // `accessRemoteFiles` gate is already enforced by resolveAttachmentFileSource.
         const source = await resolveAttachmentFileSource({
-            item,
+            item: resolvedItem,
             maxFileSizeMB: 0,
             localSizeStrategy: 'zotero-total',
         });
-        if (source.kind === 'error' || source.source.isRemoteOnly) {
-            return { outcome: { kind: 'complete', reason: 'file_unavailable' } };
+        if (source.kind === 'error') {
+            if (source.code === 'file_too_large') {
+                return { outcome: { kind: 'complete', reason: 'file_too_large' } };
+            }
+            // Not available locally. Distinguish "on server but remote access is
+            // disabled" from "not retrievable" so the skip is observable. Recorded
+            // as `complete` (no permanent-failure row), so detection re-enqueues
+            // once the file becomes local.
+            const reason = source.remoteAvailable ? 'file_not_local_remote' : 'file_not_local';
+            logger(`OcrExecutor: ${record.libraryId}-${record.zoteroKey} skipped (${reason})`, 2);
+            return { outcome: { kind: 'complete', reason } };
         }
-        const filePath = source.source.filePath;
 
+        const fileSource = source.source;
+        const isRemoteOnly = fileSource.isRemoteOnly;
+        const filePath = fileSource.filePath;
+
+        // Backstop for a future whole-library backfill: a background sweep must not
+        // pull remote bytes (it should pre-filter not-local items at enqueue time).
+        if (isRemoteOnly && record.priority >= OCR_PRIORITY_BACKFILL) {
+            logger(`OcrExecutor: ${record.libraryId}-${record.zoteroKey} skipped (file_not_local_remote; backfill)`, 2);
+            return { outcome: { kind: 'complete', reason: 'file_not_local_remote' } };
+        }
+
+        // attachmentHash hashes the local file and is undefined for remote-only
+        // items; the synced server MD5 is the same content hash, so backend OCR
+        // dedup stays consistent across machines.
         let fileHash: string | undefined;
-        try {
-            fileHash = await item.attachmentHash;
-        } catch (e) {
-            logger(`OcrExecutor: attachmentHash failed for ${record.libraryId}-${record.zoteroKey}: ${e}`, 1);
+        if (isRemoteOnly) {
+            fileHash = resolvedItem.attachmentSyncedHash || undefined;
+        } else {
+            try {
+                fileHash = await resolvedItem.attachmentHash;
+            } catch (e) {
+                logger(`OcrExecutor: attachmentHash failed for ${record.libraryId}-${record.zoteroKey}: ${e}`, 1);
+            }
         }
         if (!fileHash) {
             return { outcome: { kind: 'complete', reason: 'no_file_hash' } };
         }
 
-        const pageCount = await this.resolvePageCount(item, filePath);
+        // Page count and the original byte length both come from the cached
+        // NO_TEXT_LAYER metadata written at detection. For remote the row is keyed
+        // by the same synthetic path and stores the original byteLength, so no extra
+        // download is needed here to learn the cache key.
+        const meta = await this.resolveSourceMetadata(resolvedItem, filePath);
+        const pageCount = meta?.pageCount ?? null;
         if (pageCount == null || pageCount < 1) {
             return { outcome: { kind: 'complete', reason: 'no_page_count' } };
         }
+        const sourceSizeBytes = isRemoteOnly ? (meta?.sourceSizeBytes ?? 0) : 0;
 
-        logger(`OcrExecutor: ${record.libraryId}-${record.zoteroKey} resolved OCR source (pages=${pageCount})`, 3);
+        // Lazy, memoized: only the first-time `pending` upload path reads/downloads
+        // bytes; a cache hit (`ready`) or rejoin (`queued`) never loads the original.
+        let bytesPromise: Promise<Uint8Array> | undefined;
+        const loadOriginalBytes = () =>
+            (bytesPromise ??= this.loadOriginalBytes(resolvedItem, fileSource, ctx));
+
+        logger(`OcrExecutor: ${record.libraryId}-${record.zoteroKey} resolved OCR source (pages=${pageCount}${isRemoteOnly ? '; remote' : ''})`, 3);
         return {
             job: {
-                item,
+                item: resolvedItem,
+                source: fileSource,
                 filePath,
                 fileHash,
                 pageCount,
+                sourceSizeBytes,
                 sourceKey: `${record.libraryId}-${record.zoteroKey}`,
+                loadOriginalBytes,
             },
         };
     }
 
-    /** Page count from the cached NO_TEXT_LAYER metadata (set at detection). */
-    private async resolvePageCount(
+    /** Page count + original byte length from the cached NO_TEXT_LAYER metadata. */
+    private async resolveSourceMetadata(
         item: Zotero.Item,
         filePath: string,
-    ): Promise<number | null> {
+    ): Promise<{ pageCount: number | null; sourceSizeBytes: number } | null> {
         const cache = Zotero.Beaver?.documentCache;
         if (!cache) return null;
         const meta = await cache
             .getMetadata({ libraryId: item.libraryID, zoteroKey: item.key }, filePath)
             .catch(() => null);
-        return meta?.pageCount ?? null;
+        if (!meta) return null;
+        return { pageCount: meta.pageCount ?? null, sourceSizeBytes: meta.sourceSizeBytes ?? 0 };
+    }
+
+    /**
+     * Read (local) or download (remote, in-memory) the original scan bytes. Remote
+     * downloads honor the abort signal only when a `throwIfTimedOut` callback is
+     * also passed; the underlying HTTP is otherwise bounded by the download timeout.
+     */
+    private async loadOriginalBytes(
+        item: Zotero.Item,
+        source: AttachmentFileSource,
+        ctx: JobExecutionContext,
+    ): Promise<Uint8Array> {
+        if (source.kind === 'local') {
+            return IOUtils.read(source.filePath);
+        }
+        const result = await loadAttachmentData({
+            item,
+            source,
+            maxFileSizeMB: 0,
+            signal: ctx.externalAbortSignal,
+            throwIfTimedOut: (phase) => {
+                if (ctx.externalAbortSignal.aborted) throw new ExternalAbortError(phase);
+            },
+        });
+        if (result.kind === 'error') {
+            throw new OcrRemoteLoadError(result.code);
+        }
+        return result.data;
     }
 
     // ----------------------------------------------------------------------
@@ -340,13 +442,11 @@ export class OcrExecutor implements JobExecutor {
         job: ResolvedJob,
         ctx: JobExecutionContext,
     ): Promise<void> {
-        // Read the scan bytes lazily, only on the pending path where an upload
-        // is actually needed — a cache hit (`ready`) or rejoin (`queued`) never
-        // loads the file. Worth keeping in mind for large scans: the content
-        // hash (computed earlier for `/ocr/request`) reads the file too, so a
-        // first-time OCR reads it twice; eagerly loading once to share the bytes
-        // would instead waste a full read on every cross-machine cache hit.
-        const bytes = await IOUtils.read(job.filePath);
+        // Read (local) or download (remote, in-memory) the scan bytes lazily, only
+        // on the pending path where an upload is actually needed — a cache hit
+        // (`ready`) or rejoin (`queued`) never loads the file. `loadOriginalBytes`
+        // memoizes so the bytes are loaded at most once per job.
+        const bytes = await job.loadOriginalBytes();
         this.throwIfAborted(ctx);
         logger(`OcrExecutor: ${job.sourceKey} uploading source PDF for OCR (${(bytes.length / 1024 / 1024).toFixed(2)}MB)`, 3);
         await putBytesToSignedUrl(putUrl, bytes, {
@@ -464,6 +564,8 @@ export class OcrExecutor implements JobExecutor {
                 filePath: job.filePath,
                 ocrBytes,
                 expectedPageCount: job.pageCount,
+                isRemoteOnly: job.source.isRemoteOnly,
+                sourceSizeBytes: job.sourceSizeBytes,
                 workerName: 'background',
                 abortSignal: ctx.externalAbortSignal,
             }),

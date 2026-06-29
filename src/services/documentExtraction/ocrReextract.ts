@@ -62,6 +62,16 @@ export interface ExtractOcrBytesArgs {
     ocrBytes: Uint8Array;
     /** Page count from the original no-text-layer detection; enforced 1:1. */
     expectedPageCount: number | null;
+    /**
+     * Whether the original is a remote-only source. Remote entries are keyed by
+     * size (not on-disk mtime), so the cache identity uses `sourceSizeBytes`.
+     */
+    isRemoteOnly?: boolean;
+    /**
+     * Original source byte length, used as the remote cache identity. Ignored for
+     * local sources (which key on the on-disk path + mtime + size).
+     */
+    sourceSizeBytes?: number;
     /** MuPDF worker slot. The background lane passes `'background'`. */
     workerName?: PDFWorkerSlotName;
     abortSignal?: AbortSignal;
@@ -76,6 +86,9 @@ export async function extractPdfBytesAndCacheAsOriginalAttachment(
 ): Promise<OcrReextractResult> {
     const { item, filePath, ocrBytes, expectedPageCount, abortSignal } = args;
     const workerName = args.workerName ?? 'background';
+    // Remote sources have no stable on-disk signature; key the cache by the
+    // original byte length, mirroring the regular remote extraction path.
+    const sourceSizeBytes = args.isRemoteOnly ? (args.sourceSizeBytes ?? 0) : 0;
 
     const cache = Zotero.Beaver?.documentCache;
     if (!cache) {
@@ -89,7 +102,7 @@ export async function extractPdfBytesAndCacheAsOriginalAttachment(
     // stamped against the new bytes.
     let sourceIdentity;
     try {
-        sourceIdentity = await cache.getSourceIdentitySnapshot(filePath);
+        sourceIdentity = await cache.getSourceIdentitySnapshot(filePath, sourceSizeBytes);
     } catch (error) {
         logger(`extractPdfBytesAndCacheAsOriginalAttachment: source identity snapshot failed: ${error}`, 1);
         return { kind: 'unavailable', reason: 'source_identity_unavailable' };
@@ -145,7 +158,7 @@ export async function extractPdfBytesAndCacheAsOriginalAttachment(
                 item,
                 filePath,
                 mode,
-                sourceSizeBytes: 0,
+                sourceSizeBytes,
                 contentType: item.attachmentContentType || 'application/pdf',
                 result: extracted,
                 metadata: buildExtractedDocumentCacheMetadata(extracted),

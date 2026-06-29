@@ -34,6 +34,7 @@ vi.mock('../../../src/services/documentExtraction/attachmentSource', () => ({
         kind: 'ok',
         source: { kind: 'local', filePath: '/scan.pdf', isRemoteOnly: false },
     })),
+    loadAttachmentData: vi.fn(async () => ({ kind: 'ok', data: new Uint8Array([4, 5, 6]) })),
 }));
 
 vi.mock('../../../src/utils/zoteroItemUtils', () => ({
@@ -49,8 +50,11 @@ import {
     putBytesToSignedUrl,
 } from '../../../src/services/ocr/gcsTransfer';
 import { extractPdfBytesAndCacheAsOriginalAttachment } from '../../../src/services/documentExtraction/ocrReextract';
-import { resolveAttachmentFileSource } from '../../../src/services/documentExtraction/attachmentSource';
-import { OCR_ENGINE_VERSION } from '../../../src/services/ocr/constants';
+import {
+    loadAttachmentData,
+    resolveAttachmentFileSource,
+} from '../../../src/services/documentExtraction/attachmentSource';
+import { OCR_ENGINE_VERSION, OCR_PRIORITY_BACKFILL } from '../../../src/services/ocr/constants';
 import { ApiError } from '../../../react/types/apiErrors';
 import type { JobExecutionContext } from '../../../src/services/backgroundQueue/jobExecutor';
 
@@ -62,8 +66,25 @@ const api = ocrApiClient as unknown as {
 };
 const mockedReextract = vi.mocked(extractPdfBytesAndCacheAsOriginalAttachment);
 const mockedResolveSource = vi.mocked(resolveAttachmentFileSource);
+const mockedLoad = vi.mocked(loadAttachmentData);
 const mockedPut = vi.mocked(putBytesToSignedUrl);
 const mockedGet = vi.mocked(getBytesFromSignedUrl);
+
+const REMOTE_SOURCE = {
+    kind: 'ok',
+    source: { kind: 'remote', filePath: 'remote:AAAAAAAA', isRemoteOnly: true },
+} as const;
+
+function mockRemoteItem(syncedHash: string | undefined = 'synced999') {
+    (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn(async () => ({
+        libraryID: 1,
+        key: 'AAAAAAAA',
+        id: 42,
+        attachmentHash: undefined,
+        attachmentSyncedHash: syncedHash,
+        attachmentContentType: 'application/pdf',
+    }));
+}
 
 const record = { id: 7, libraryId: 1, zoteroKey: 'AAAAAAAA' } as any;
 
@@ -122,6 +143,7 @@ beforeEach(() => {
         source: { kind: 'local', filePath: '/scan.pdf', isRemoteOnly: false },
     } as any);
     mockedReextract.mockResolvedValue({ kind: 'ok', pageCount: 5 } as any);
+    mockedLoad.mockResolvedValue({ kind: 'ok', data: new Uint8Array([4, 5, 6]) } as any);
 });
 
 afterEach(() => {
@@ -343,13 +365,116 @@ describe('OcrExecutor', () => {
         expect(outcome).toEqual({ kind: 'complete', reason: 'item_missing' });
     });
 
-    it('completes when the scan is not available locally', async () => {
+    it('completes file_not_local when the scan is not retrievable', async () => {
         mockedResolveSource.mockResolvedValue({ kind: 'error', code: 'file_missing' } as any);
         const ctx = makeCtx();
 
         const outcome = await executor.execute(record, ctx);
 
-        expect(outcome).toEqual({ kind: 'complete', reason: 'file_unavailable' });
+        // Recoverable skip (no permanent-failure row), re-enqueued once local.
+        expect(outcome).toEqual({ kind: 'complete', reason: 'file_not_local' });
+    });
+
+    it('completes file_not_local_remote when on server but remote access is disabled', async () => {
+        mockedResolveSource.mockResolvedValue({ kind: 'error', code: 'file_missing', remoteAvailable: true } as any);
+
+        const outcome = await executor.execute(record, makeCtx());
+
+        expect(outcome).toEqual({ kind: 'complete', reason: 'file_not_local_remote' });
+    });
+
+    it('completes file_too_large when the resolver rejects on size', async () => {
+        mockedResolveSource.mockResolvedValue({ kind: 'error', code: 'file_too_large' } as any);
+
+        const outcome = await executor.execute(record, makeCtx());
+
+        expect(outcome).toEqual({ kind: 'complete', reason: 'file_too_large' });
+    });
+
+    it('downloads a remote-only scan in-memory, uploads it, and caches size-keyed', async () => {
+        mockRemoteItem('synced999');
+        mockedResolveSource.mockResolvedValue(REMOTE_SOURCE as any);
+        (globalThis as any).Zotero.Beaver.documentCache.getMetadata = vi.fn(async () => ({ pageCount: 5, sourceSizeBytes: 12345 }));
+        api.requestOcr.mockResolvedValue({ status: 'pending', job_id: 'job-rem', put_url: 'https://gcs/put' });
+        api.markUploaded.mockResolvedValue({ status: 'queued', job_id: 'job-rem' });
+        fakePoller.poll.mockResolvedValue({ kind: 'completed', getUrl: 'https://gcs/get' });
+
+        // First claim: backend dedup uses the synced hash; bytes come from the
+        // in-memory download, not the (absent) local file.
+        const first = await executor.execute(record, makeCtx());
+        expect(first).toEqual({ kind: 'defer', reason: 'ocr_polling' });
+        expect(api.requestOcr).toHaveBeenCalledWith('synced999', 5);
+        expect(mockedLoad).toHaveBeenCalledOnce();
+        expect((globalThis as any).IOUtils.read).not.toHaveBeenCalled();
+        expect(mockedPut).toHaveBeenCalledWith('https://gcs/put', expect.any(Uint8Array), expect.anything());
+
+        await executor.drainTracks();
+
+        // Re-claim: finish + cache the OCR result keyed by the original byte length.
+        api.status.mockResolvedValue({ status: 'completed', get_url: 'https://gcs/get' });
+        const second = await executor.execute(record, makeCtx());
+        expect(second).toEqual({ kind: 'complete', reason: 'ocr_ok' });
+        expect(mockedReextract).toHaveBeenCalledWith(
+            expect.objectContaining({ isRemoteOnly: true, sourceSizeBytes: 12345 }),
+        );
+    });
+
+    it('skips a remote-only scan for a backfill-priority job (no download)', async () => {
+        mockedResolveSource.mockResolvedValue(REMOTE_SOURCE as any);
+        const backfillRecord = { ...record, priority: OCR_PRIORITY_BACKFILL };
+
+        const outcome = await executor.execute(backfillRecord, makeCtx());
+
+        expect(outcome).toEqual({ kind: 'complete', reason: 'file_not_local_remote' });
+        expect(mockedLoad).not.toHaveBeenCalled();
+        expect(api.requestOcr).not.toHaveBeenCalled();
+    });
+
+    it('completes no_file_hash when a remote scan has no synced hash', async () => {
+        mockRemoteItem('');
+        mockedResolveSource.mockResolvedValue(REMOTE_SOURCE as any);
+
+        const outcome = await executor.execute(record, makeCtx());
+
+        expect(outcome).toEqual({ kind: 'complete', reason: 'no_file_hash' });
+        expect(api.requestOcr).not.toHaveBeenCalled();
+    });
+
+    it('retries when the remote scan download fails on the upload path', async () => {
+        mockRemoteItem('synced999');
+        mockedResolveSource.mockResolvedValue(REMOTE_SOURCE as any);
+        (globalThis as any).Zotero.Beaver.documentCache.getMetadata = vi.fn(async () => ({ pageCount: 5, sourceSizeBytes: 12345 }));
+        mockedLoad.mockResolvedValue({ kind: 'error', code: 'download_failed' } as any);
+        api.requestOcr.mockResolvedValue({ status: 'pending', job_id: 'job-rem', put_url: 'https://gcs/put' });
+
+        const outcome = await executor.execute(record, makeCtx());
+
+        expect(outcome.kind).toBe('retry');
+        expect((outcome as any).reason).toBe('ocr_remote_download_failed');
+        expect(mockedPut).not.toHaveBeenCalled();
+    });
+
+    it('completes file_too_large when the remote download exceeds the cap', async () => {
+        mockRemoteItem('synced999');
+        mockedResolveSource.mockResolvedValue(REMOTE_SOURCE as any);
+        (globalThis as any).Zotero.Beaver.documentCache.getMetadata = vi.fn(async () => ({ pageCount: 5, sourceSizeBytes: 12345 }));
+        mockedLoad.mockResolvedValue({ kind: 'error', code: 'file_too_large' } as any);
+        api.requestOcr.mockResolvedValue({ status: 'pending', job_id: 'job-rem', put_url: 'https://gcs/put' });
+
+        const outcome = await executor.execute(record, makeCtx());
+
+        expect(outcome).toEqual({ kind: 'complete', reason: 'file_too_large' });
+    });
+
+    it('passes local identity (isRemoteOnly false, sourceSizeBytes 0) to the cache write', async () => {
+        api.requestOcr.mockResolvedValue({ status: 'ready', get_url: 'https://gcs/get' });
+
+        const outcome = await executor.execute(record, makeCtx());
+
+        expect(outcome).toEqual({ kind: 'complete', reason: 'ocr_ok' });
+        expect(mockedReextract).toHaveBeenCalledWith(
+            expect.objectContaining({ isRemoteOnly: false, sourceSizeBytes: 0 }),
+        );
     });
 
     it('releases (not fails) when the lane is aborted mid-flight', async () => {
