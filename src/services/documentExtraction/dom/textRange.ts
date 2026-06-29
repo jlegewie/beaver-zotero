@@ -223,6 +223,16 @@ function linearizeRowCells(tr: Element): string | undefined {
 }
 
 /**
+ * True when `prefix` equals `text`, or is a prefix of `text` that ends on a cell
+ * boundary (the next characters are the cell separator).
+ */
+function isCellAlignedPrefix(text: string, prefix: string): boolean {
+    if (!text.startsWith(prefix)) return false;
+    if (text.length === prefix.length) return true;
+    return text.slice(prefix.length).startsWith(TABLE_ROW_CELL_SEPARATOR);
+}
+
+/**
  * Locate a cited data-table row inside `root` and return a range over it.
  */
 export function createTableRowRange(root: Element, normalizedRowText: string): Range | undefined {
@@ -247,12 +257,15 @@ export function createTableRowRange(root: Element, normalizedRowText: string): R
     const exact = candidates.find((c) => c.linearized === normalizedRowText);
     if (exact) return rangeOverElementText(exact.tr);
 
-    // Truncated citation: either side a prefix of the other still resolves.
+    // Truncated citation: either side a cell-aligned prefix of the other still
+    // resolves. The cell-boundary check (see isCellAlignedPrefix) keeps this from
+    // matching prose/code that merely contains " | ".
     let best: { tr: Element; linearized: string } | undefined;
     for (const c of candidates) {
         if (!c.linearized.includes(TABLE_ROW_CELL_SEPARATOR)) continue;
         const matches =
-            c.linearized.startsWith(normalizedRowText) || normalizedRowText.startsWith(c.linearized);
+            isCellAlignedPrefix(c.linearized, normalizedRowText)
+            || isCellAlignedPrefix(normalizedRowText, c.linearized);
         if (matches && (!best || c.linearized.length > best.linearized.length)) {
             best = c;
         }

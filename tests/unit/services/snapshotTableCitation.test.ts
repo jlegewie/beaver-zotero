@@ -106,6 +106,31 @@ describe("createTableRowRange — data-table citation matching", () => {
         expect(createTableRowRange(doc.body, "Cell A")).toBeUndefined();
     });
 
+    it("does not mis-resolve pipe-containing prose onto an unrelated row (mid-cell prefix)", () => {
+        // A shell snippet "cmd | grep x" contains " | " but is not a table row.
+        // A 2-cell row whose cells are "cmd" and "grep" is a substring prefix of
+        // it, yet "grep" only partially overlaps the cited cell "grep x" — the
+        // cell-boundary guard must reject it rather than land on the wrong row.
+        const doc = docWith(
+            "<table><tr><td>cmd</td><td>grep</td></tr></table>",
+        );
+        expect(createTableRowRange(doc.body, "cmd | grep x")).toBeUndefined();
+        // And the same passage routed through createSentenceRange (flat search
+        // misses because " | " is absent verbatim) likewise resolves to nothing.
+        expect(createSentenceRange(doc.body, "cmd | grep x")).toBeUndefined();
+    });
+
+    it("still matches a cell-aligned shorter live row (longer truncated citation)", () => {
+        // The cited text is longer than the live row, but ends a cell exactly at
+        // the row's last cell boundary, so it is a genuine structural match.
+        const doc = docWith(
+            "<table><tr><td>A</td><td>B</td></tr></table>",
+        );
+        const range = createTableRowRange(doc.body, "A | B | C");
+        expect(range).toBeDefined();
+        expect(range!.toString()).toContain("B");
+    });
+
     it("resolves a snapshot annotation for a table-row citation instead of failing", () => {
         const doc = docWith(TABLE_HTML);
         const built = buildAnnotationFromDocument(doc, { text: "Cell A | Cell B | Cell C" });
