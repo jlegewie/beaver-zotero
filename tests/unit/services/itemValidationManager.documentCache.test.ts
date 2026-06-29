@@ -24,7 +24,7 @@ vi.mock('../../../src/services/documentExtraction/attachmentInfoBatch', () => ({
     processAttachmentInfoBatch: processAttachmentInfoBatchMock,
 }));
 
-import { itemValidationManager, resultFromAttachmentInfo } from '../../../src/services/itemValidationManager';
+import { itemValidationManager, resultFromAttachmentInfo, formatValidationOcrLogSuffix, formatRegularItemOcrLogSuffix } from '../../../src/services/itemValidationManager';
 import { HARD_ATTACHMENT_LIMITS } from '../../../src/services/attachmentLimits';
 
 type ValidationItem = Parameters<typeof itemValidationManager.validateItem>[0];
@@ -404,5 +404,49 @@ describe('resultFromAttachmentInfo', () => {
             statusCode: 'pdf_encrypted',
         });
         expect(result.reason).toContain('password-protected');
+    });
+});
+
+describe('formatValidationOcrLogSuffix', () => {
+    it('returns empty for non-OCR results', () => {
+        expect(formatValidationOcrLogSuffix(
+            { state: 'readable', statusCode: undefined },
+            { supportsVision: true, canHandleOCRLocally: true },
+        )).toBe('');
+    });
+
+    it('notes vision admission for readable scanned PDFs', () => {
+        expect(formatValidationOcrLogSuffix(
+            { state: 'readable', statusCode: 'pdf_needs_ocr' },
+            { supportsVision: true, canHandleOCRLocally: true },
+        )).toBe(', ocr=required, admitted via vision');
+    });
+
+    it('notes plus-tools admission when vision is unavailable', () => {
+        expect(formatValidationOcrLogSuffix(
+            { state: 'readable', statusCode: 'pdf_needs_ocr' },
+            { supportsVision: false, canHandleOCRLocally: true },
+        )).toBe(', ocr=required, admitted via plus-tools');
+    });
+
+    it('notes blocked scanned PDFs without local OCR support', () => {
+        expect(formatValidationOcrLogSuffix(
+            { state: 'blocked', statusCode: 'pdf_needs_ocr' },
+            { supportsVision: false, canHandleOCRLocally: false },
+        )).toBe(', ocr=required, blocked');
+    });
+});
+
+describe('formatRegularItemOcrLogSuffix', () => {
+    it('summarizes only attachments that need OCR', () => {
+        const attachmentResults = new Map([
+            ['1-READ1', { state: 'readable' as const, statusCode: undefined }],
+            ['1-SCAN1', { state: 'readable' as const, statusCode: 'pdf_needs_ocr' }],
+        ]);
+
+        expect(formatRegularItemOcrLogSuffix(attachmentResults, {
+            supportsVision: true,
+            canHandleOCRLocally: true,
+        })).toBe(', ocr=[1-SCAN1(ocr=required, admitted via vision)]');
     });
 });
