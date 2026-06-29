@@ -60,13 +60,13 @@ function pageIndexForItem(kind: 'highlight' | 'note', item: HighlightAnnotationI
 function pageLabelForItem(
     kind: 'highlight' | 'note',
     item: HighlightAnnotationItem | NoteAnnotationItem,
-    isEpub: boolean,
+    contentKind: 'pdf' | 'epub' | 'snapshot' | null,
 ): string | null {
     const raw = item as any;
     const nonBlank = (value: unknown): string | null =>
         typeof value === 'string' && value.trim() !== '' ? value : null;
 
-    if (isEpub) {
+    if (contentKind === 'epub') {
         return nonBlank(raw.page_label ?? raw.pageLabel);
     }
 
@@ -314,7 +314,7 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
                         const failureMessage = formatAnnotationFailureMessages(failures, noun);
                         const pageIndex = pageIndexForItem(kind, item);
                         const pageNumber = typeof pageIndex === 'number' ? pageIndex + 1 : null;
-                        const pageLabel = pageLabelForItem(kind, item, isEpub);
+                        const pageLabel = pageLabelForItem(kind, item, contentKind);
                         const fallbackLabel = isEpub
                             ? pageLabel
                             : pageLabel ?? (pageNumber !== null ? String(pageNumber) : null);
@@ -325,16 +325,15 @@ export const CreateAnnotationsPreview: React.FC<CreateAnnotationsPreviewProps> =
 
                         const kindLabel = kind === 'highlight' ? 'Highlight Annotation' : 'Sticky Note';
                         const tooltipContent = text || rawItem.title || '';
-                        const surface = isEpub ? 'reader' : 'PDF';
                         // Only a pending highlight previews (the reader flashes its
                         // cited extent). Notes have no flashable extent and applied
                         // items navigate to the saved annotation, so both say "view".
                         let footerLabel = isFailed
                             ? failureMessage || `Failed to create ${noun}`
                             : (kind === 'highlight' && !isCreated)
-                                ? `Click to preview in ${surface}`
-                                : `Click to view in ${surface}`;
-                        if (kind === 'note' && !isCreated) footerLabel = `Click to view page in ${surface}`
+                                ? `Click to preview in Zotero Reader`
+                                : `Click to view in Zotero Reader`;
+                        if (kind === 'note' && !isCreated) footerLabel = `Click to view page in Zotero Reader`
                         const footerClass = isFailed ? 'font-color-red' : 'font-color-tertiary';
 
                         const isDimmed = status === 'rejected' || status === 'undone';

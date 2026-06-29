@@ -50,7 +50,7 @@ export const AnnotationResultRow: React.FC<AnnotationResultRowProps> = ({
     isHovered,
     onMouseEnter,
     onMouseLeave,
-    footerLabel = 'Click to view in PDF',
+    footerLabel = 'Click to view in Zotero Reader',
 }) => {
     const placeholder = row.annotation_type
         ? `${row.annotation_type.charAt(0).toUpperCase()}${row.annotation_type.slice(1)} annotation`
