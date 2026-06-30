@@ -126,13 +126,25 @@ export const isBackendIndexingCompleteAtom = atom<boolean>((get) => {
     return profile?.indexing_complete || false;
 });
 
-/**
- * Backend-computed OCR entitlement. The frontend uses this value directly for
- * OCR UI state and background job enqueueing.
- */
+/** Backend-computed OCR entitlement */
 export const hasOcrAccessAtom = selectAtom(
     profileWithPlanAtom,
     (profile: SafeProfileWithPlan | null) => profile?.has_ocr_access ?? false,
+);
+
+/** Backend-computed cloud search-index entitlement. */
+export const hasSearchIndexAccessAtom = selectAtom(
+    profileWithPlanAtom,
+    (profile: SafeProfileWithPlan | null) => profile?.has_search_index_access ?? false,
+);
+
+/**
+ * Copy-only label for the background-processing welcome popup (plan §3, §8.3).
+ * Decoupled from gating: 'pro' / 'search' / null (generic copy).
+ */
+export const indexingPlanLabelAtom = selectAtom(
+    profileWithPlanAtom,
+    (profile: SafeProfileWithPlan | null) => profile?.indexing_plan_label ?? null,
 );
 
 export const processingModeAtom = atom<ProcessingMode>((get) => {

@@ -29,6 +29,7 @@ import { useReaderVisualizerActionHandler } from './hooks/useReaderVisualizerAct
 import { useOnboardingPopups } from './hooks/useOnboardingPopups';
 import { useBackgroundWorkerStatus } from './hooks/useBackgroundWorkerStatus';
 import { useOcrLane } from './hooks/useOcrLane';
+import { useSearchIndexAccess } from './hooks/useSearchIndexAccess';
 import { useSyncSuppression } from './hooks/useSyncSuppression';
 import { BeaverTemporaryAnnotations } from './utils/annotationUtils';
 import { registerZoteroHost } from './host/zotero';
@@ -115,6 +116,9 @@ const GlobalContextInitializer = () => {
 
     // Register the OCR background lane + mirror the OCR entitlement flag
     useOcrLane();
+
+    // Mirror the cloud search-index entitlement flag (background-processing plan)
+    useSearchIndexAccess();
 
     return null; // This component does not render any UI
 };

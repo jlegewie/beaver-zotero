@@ -404,10 +404,15 @@ declare namespace Zotero {
 
         /**
          * OCR entitlement mirror, synced from the webpack profile hook so the
-         * esbuild OCR enqueue gate can read it. The backend still enforces
-         * entitlement on `/ocr/request`.
+         * esbuild OCR enqueue gate can read it.
          */
         const hasOcrAccess: boolean | undefined;
+
+        /**
+         * Cloud search-index entitlement mirror, synced from the webpack profile
+         * hook so the esbuild `fulltext_upsert` enqueue gate can read it.
+         */
+        const hasSearchIndexAccess: boolean | undefined;
 
         /**
          * Citation object for CSL formatting

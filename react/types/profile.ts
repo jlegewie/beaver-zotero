@@ -167,6 +167,12 @@ export interface SafeProfileModel {
 
     // OCR entitlement
     has_ocr_access: boolean;
+
+    // Cloud search-index entitlement
+    has_search_index_access: boolean;
+
+    // Copy-only label for the background-processing welcome popup
+    indexing_plan_label: 'pro' | 'search' | null;
 }
 
 export interface SafeProfileWithPlan extends SafeProfileModel {

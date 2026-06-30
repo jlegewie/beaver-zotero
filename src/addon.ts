@@ -31,12 +31,10 @@ class Addon {
     public documentCache?: DocumentCache;
     public backgroundExtractor?: BackgroundExtractor;
     public pluginVersion?: typeof version;
-    /**
-     * OCR entitlement mirror kept in sync from the webpack profile hook. The
-     * esbuild enqueue gate reads this before creating OCR jobs, and the backend
-     * still enforces entitlement on `/ocr/request`.
-     */
+    /** OCR entitlement mirror kept in sync from the webpack profile hook */
     public hasOcrAccess: boolean = false;
+    /** Cloud search-index entitlement mirror kept in sync from the webpack profile hook */
+    public hasSearchIndexAccess: boolean = false;
     // Lifecycle hooks
     public hooks: typeof hooks;
     // APIs
