@@ -1257,7 +1257,14 @@ export interface WSListTagsRequest extends WSBaseEvent {
 /** Tag information */
 export interface TagInfo {
     name: string;
+    /** Number of top-level regular items carrying this tag. */
     item_count: number;
+    /** Number of attachments carrying this tag. Omitted by older frontends. */
+    attachment_count?: number;
+    /** Number of notes carrying this tag. Omitted by older frontends. */
+    note_count?: number;
+    /** Number of annotations carrying this tag. Omitted by older frontends. */
+    annotation_count?: number;
     color?: string | null;
 }
 

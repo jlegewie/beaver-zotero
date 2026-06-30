@@ -1517,7 +1517,14 @@ export interface BackendCollectionRef {
  */
 export interface TagReference {
     name: string;
+    /** Number of top-level regular items carrying this tag. */
     item_count: number;
+    /** Number of attachments carrying this tag. Omitted by older backends. */
+    attachment_count?: number;
+    /** Number of notes carrying this tag. Omitted by older backends. */
+    note_count?: number;
+    /** Number of annotations carrying this tag. Omitted by older backends. */
+    annotation_count?: number;
 }
 
 /**
@@ -1663,7 +1670,14 @@ export interface CollectionInfo {
  */
 export interface TagInfo {
     name: string;
+    /** Number of top-level regular items carrying this tag. */
     item_count: number;
+    /** Number of attachments carrying this tag. Omitted by older frontends. */
+    attachment_count?: number;
+    /** Number of notes carrying this tag. Omitted by older frontends. */
+    note_count?: number;
+    /** Number of annotations carrying this tag. Omitted by older frontends. */
+    annotation_count?: number;
     color?: string | null;
 }
 
@@ -2194,12 +2208,15 @@ export function extractListTagsData(
     if (content && typeof content === 'object') {
         const obj = content as ListTagsResultContent;
         if (Array.isArray(obj.tags) && obj.tags.length > 0) {
-            // Convert TagInfo to TagReference (keep name and item_count)
+            // Convert TagInfo to TagReference (carry name + per-type counts)
             const tags: TagReference[] = obj.tags.map(tag => ({
                 name: tag.name,
                 item_count: tag.item_count,
+                attachment_count: tag.attachment_count,
+                note_count: tag.note_count,
+                annotation_count: tag.annotation_count,
             }));
-            
+
             return {
                 tags,
                 totalCount: obj.total_count,
@@ -2208,15 +2225,18 @@ export function extractListTagsData(
             };
         }
     }
-    
+
     // Fall back to metadata.summary (dehydrated)
     if (metadata?.summary && typeof metadata.summary === 'object') {
         const summary = metadata.summary as ListTagsResultSummary;
         if (Array.isArray(summary.tags)) {
-            return { 
+            return {
                 tags: summary.tags.map(tag => ({
                     name: tag.name,
                     item_count: tag.item_count,
+                    attachment_count: tag.attachment_count,
+                    note_count: tag.note_count,
+                    annotation_count: tag.annotation_count,
                 })),
                 totalCount: summary.total_count,
                 libraryId: summary.library_id,

@@ -108,7 +108,14 @@ export interface CollectionRowView {
 
 export interface TagRowView {
     name: string;
+    /** Number of top-level regular items carrying this tag. */
     item_count: number;
+    /** Number of attachments carrying this tag. Absent on older results. */
+    attachment_count?: number;
+    /** Number of notes carrying this tag. Absent on older results. */
+    note_count?: number;
+    /** Number of annotations carrying this tag. Absent on older results. */
+    annotation_count?: number;
 }
 
 /** One find_in_attachments match (snippet + click-to-highlight target). */

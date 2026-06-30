@@ -551,7 +551,13 @@ function buildTagListView(part: ToolReturnPart): TagListView | null {
     return {
         view_type: "tag_list",
         tool_name: "list_tags",
-        tags: data.tags.map((t) => ({ name: t.name, item_count: t.item_count })),
+        tags: data.tags.map((t) => ({
+            name: t.name,
+            item_count: t.item_count,
+            attachment_count: t.attachment_count,
+            note_count: t.note_count,
+            annotation_count: t.annotation_count,
+        })),
         total_count: data.totalCount,
     };
 }
