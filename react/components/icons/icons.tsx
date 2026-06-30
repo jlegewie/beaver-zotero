@@ -92,3 +92,4 @@ export { default as FileLinkIcon } from './FileLinkIcon';
 export { default as ExternalLinkIcon } from './ExternalLinkIcon';
 export { default as FileIcon } from './FileIcon';
 export { default as LayersIcon } from './LayersIcon';
+export { default as BookSearchIcon } from './BookSearchIcon';
