@@ -830,4 +830,148 @@ export const searchItemsByPublication = async (
 };
 
 
+/**
+ * Filters for {@link resolveItemsByFilters}.
+ *
+ * Values are OR'd within a dimension and AND'd across dimensions.
+ */
+export interface ResolveItemsByFiltersOptions {
+    /**
+     * Collection keys already resolved for this library.
+     * Resolve raw collection filters before calling.
+     */
+    collectionKeys?: string[];
+    /** Tag names, validated against this library's tags. */
+    tags?: string[];
+    /** Creator-name substrings. */
+    authors?: string[];
+    /** Publication-year filter. */
+    year?: { min?: number; max?: number; exact?: number };
+    /** Include subcollections of the given collection keys. Default true. */
+    recursive?: boolean;
+}
+
+/** Result of {@link resolveItemsByFilters} for a single library. */
+export interface ResolveItemsByFiltersResult {
+    /** Item IDs matching all provided dimensions. */
+    itemIDs: number[];
+    /** Input tag names that exist in this library. */
+    matchedTags: string[];
+    /** Input author substrings that matched at least one item in this library. */
+    matchedAuthors: string[];
+}
+
+/** Run a single Zotero search scoped to a library and return matching item IDs. */
+const runLibrarySearchIds = async (
+    libraryID: number,
+    build: (search: Zotero.Search) => void,
+): Promise<number[]> => {
+    // Use the libraryID property, not a condition: joinMode='any' applies to
+    // conditions and would OR the library scope with collection/tag filters.
+    const search = new Zotero.Search();
+    // libraryID is readonly in the type defs; set it via a minimal cast.
+    (search as unknown as { libraryID: number }).libraryID = libraryID;
+    build(search);
+    return await search.search();
+};
+
+/**
+ * Resolve filters to item IDs in one library.
+ *
+ * Zotero's `joinMode` is global per search, so this runs one search per
+ * dimension and intersects the resulting ID sets.
+ */
+export const resolveItemsByFilters = async (
+    libraryID: number,
+    options: ResolveItemsByFiltersOptions,
+): Promise<ResolveItemsByFiltersResult> => {
+    const { collectionKeys, tags, authors, year, recursive = true } = options;
+
+    const hasCollections = !!collectionKeys && collectionKeys.length > 0;
+    const hasTags = !!tags && tags.length > 0;
+    const hasAuthors = !!authors && authors.length > 0;
+    const hasYear = !!year && (
+        (year.min ?? 0) > 0 || (year.max ?? 0) > 0 || (year.exact ?? 0) > 0
+    );
+
+    const dimensionSets: Set<number>[] = [];
+    const matchedTags: string[] = [];
+    const matchedAuthors: string[] = [];
+
+    // Collections
+    if (hasCollections) {
+        const ids = await runLibrarySearchIds(libraryID, (search) => {
+            if (collectionKeys!.length > 1) search.addCondition('joinMode', 'any');
+            for (const key of collectionKeys!) search.addCondition('collection', 'is', key);
+            if (recursive) search.addCondition('recursive', 'true');
+        });
+        dimensionSets.push(new Set(ids));
+    }
+
+    // Tags: validate against this library, preserving exact casing.
+    if (hasTags) {
+        const allTags = (await Zotero.Tags.getAll(libraryID)) as { tag: string }[];
+        const lowerToExact = new Map<string, string>();
+        for (const t of allTags) lowerToExact.set(t.tag.toLowerCase(), t.tag);
+
+        const exactTags: string[] = [];
+        for (const tag of tags!) {
+            const exact = lowerToExact.get(tag.toLowerCase());
+            if (exact !== undefined) {
+                exactTags.push(exact);
+                matchedTags.push(tag);
+            }
+        }
+        const ids = exactTags.length > 0
+            ? await runLibrarySearchIds(libraryID, (search) => {
+                if (exactTags.length > 1) search.addCondition('joinMode', 'any');
+                for (const tag of exactTags) search.addCondition('tag', 'is', tag);
+            })
+            : [];
+        dimensionSets.push(new Set(ids));
+    }
+
+    // Authors: search separately so matched inputs can be reported.
+    if (hasAuthors) {
+        const authorSet = new Set<number>();
+        for (const author of authors!) {
+            const ids = await runLibrarySearchIds(libraryID, (search) => {
+                search.addCondition('creator', 'contains', author);
+            });
+            if (ids.length > 0) {
+                matchedAuthors.push(author);
+                for (const id of ids) authorSet.add(id);
+            }
+        }
+        dimensionSets.push(authorSet);
+    }
+
+    // Year (min/max are AND'd; exact overrides)
+    if (hasYear) {
+        const ids = await runLibrarySearchIds(libraryID, (search) => {
+            if (year!.exact && year!.exact > 0) {
+                search.addCondition('year', 'is', String(year!.exact));
+            } else {
+                if (year!.min && year!.min > 0) {
+                    search.addCondition('date', 'isAfter', `${year!.min - 1}-12-31`);
+                }
+                if (year!.max && year!.max > 0) {
+                    search.addCondition('date', 'isBefore', `${year!.max + 1}-01-01`);
+                }
+            }
+        });
+        dimensionSets.push(new Set(ids));
+    }
+
+    // Intersect all provided dimensions (AND). Start from the smallest set.
+    let itemIDs: number[] = [];
+    if (dimensionSets.length > 0) {
+        dimensionSets.sort((a, b) => a.size - b.size);
+        const [smallest, ...rest] = dimensionSets;
+        itemIDs = Array.from(smallest).filter((id) => rest.every((set) => set.has(id)));
+    }
+
+    return { itemIDs, matchedTags, matchedAuthors };
+};
+
 

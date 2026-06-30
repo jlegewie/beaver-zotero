@@ -574,6 +574,64 @@ export interface WSItemSearchByTopicResponse {
     timing?: FrontendTimingMetadata;
 }
 
+/** Publication-year filter for resolve-search-filters requests. */
+export interface ResolveSearchFiltersYear {
+    /** Minimum publication year (inclusive) */
+    min?: number;
+    /** Maximum publication year (inclusive) */
+    max?: number;
+    /** Exact publication year to match (overrides min/max when set) */
+    exact?: number;
+}
+
+/**
+ * Request from backend to resolve structured filters into attachment references
+ * for full-text search.
+ *
+ * Values are OR'd within a dimension and AND'd across dimensions. Each matched
+ * item contributes all agent-supported attachments.
+ */
+export interface WSResolveSearchFiltersRequest extends WSBaseEvent {
+    event: 'resolve_search_filters_request';
+    request_id: string;
+    /** Library names or ids, intersected with searchable libraries */
+    libraries?: (string | number)[];
+    /** Collection key, compound key, or name */
+    collections?: (string | number)[];
+    /** Tag names, resolved per library */
+    tags?: string[];
+    /** Creator-name substrings */
+    authors?: string[];
+    /** Publication-year filter */
+    year?: ResolveSearchFiltersYear;
+    /** Include items in subcollections of matched collections. Default: true. */
+    recursive_collections?: boolean;
+}
+
+/** Filter values that matched nothing in any searched library. */
+export interface ResolveSearchFiltersUnresolved {
+    collections?: (string | number)[];
+    tags?: string[];
+    authors?: string[];
+    libraries?: (string | number)[];
+}
+
+/** Response to a resolve-search-filters request. */
+export interface WSResolveSearchFiltersResponse {
+    type: 'resolve_search_filters';
+    request_id: string;
+    /** Deduped attachment references ({ library_id, zotero_key }) matched by the filters */
+    attachments: ZoteroItemReference[];
+    /** Filter values that matched nothing in any searched library */
+    unresolved?: ResolveSearchFiltersUnresolved;
+    /** Error message if resolution failed */
+    error?: string | null;
+    /** Error code for programmatic handling */
+    error_code?: ItemSearchErrorCode | null;
+    /** Optional timing breakdown for diagnostics */
+    timing?: FrontendTimingMetadata;
+}
+
 /** Level of file status analysis to perform for attachments */
 export type FileStatusLevel = 'none' | 'lightweight' | 'full';
 
@@ -1466,6 +1524,7 @@ export type WSEvent =
     | WSZoteroDataRequest
     | WSItemSearchByMetadataRequest
     | WSItemSearchByTopicRequest
+    | WSResolveSearchFiltersRequest
     // Library management tools
     | WSZoteroSearchRequest
     | WSListItemsRequest
