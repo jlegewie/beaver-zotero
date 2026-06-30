@@ -71,81 +71,6 @@ function makePayload(overrides: Partial<DocumentCachePayloadInput> = {}): Docume
     };
 }
 
-function recreateLegacyPayloadWithoutContentKind(conn: MockDBConnection): void {
-    const raw = conn.getRawDB();
-    raw.exec('DROP TABLE IF EXISTS document_cache_payloads');
-    raw.exec(`
-        CREATE TABLE document_cache_payloads (
-            id INTEGER PRIMARY KEY,
-            metadata_id INTEGER NOT NULL,
-            item_id INTEGER NOT NULL,
-            library_id INTEGER NOT NULL,
-            zotero_key TEXT NOT NULL,
-            mode TEXT NOT NULL,
-            source_file_path TEXT NOT NULL,
-            source_file_mtime_ms INTEGER NOT NULL,
-            source_file_size_bytes INTEGER NOT NULL,
-            source_size_bytes INTEGER NOT NULL,
-            payload_path TEXT NOT NULL,
-            payload_size_bytes INTEGER NOT NULL,
-            payload_sha256 TEXT,
-            extraction_schema_version TEXT NOT NULL,
-            cache_format_version INTEGER NOT NULL,
-            created_at TEXT NOT NULL DEFAULT (datetime('now')),
-            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-            last_accessed_at TEXT,
-            UNIQUE(library_id, zotero_key, mode)
-        )
-    `);
-    raw.exec(`
-        INSERT INTO document_cache_payloads (
-            metadata_id, item_id, library_id, zotero_key, mode,
-            source_file_path, source_file_mtime_ms, source_file_size_bytes,
-            source_size_bytes, payload_path, payload_size_bytes,
-            extraction_schema_version, cache_format_version
-        ) VALUES (1, 100, 1, 'STALE003', 'structured', '/tmp/a.pdf',
-            10, 20, 20, '/cache/old.gz', 10, '4', 1)
-    `);
-}
-
-function recreateLegacyPayloadWithModeColumn(conn: MockDBConnection): void {
-    const raw = conn.getRawDB();
-    raw.exec('DROP TABLE IF EXISTS document_cache_payloads');
-    raw.exec(`
-        CREATE TABLE document_cache_payloads (
-            id INTEGER PRIMARY KEY,
-            metadata_id INTEGER NOT NULL,
-            item_id INTEGER NOT NULL,
-            library_id INTEGER NOT NULL,
-            zotero_key TEXT NOT NULL,
-            mode TEXT NOT NULL,
-            content_kind TEXT NOT NULL,
-            source_file_path TEXT NOT NULL,
-            source_file_mtime_ms INTEGER NOT NULL,
-            source_file_size_bytes INTEGER NOT NULL,
-            source_size_bytes INTEGER NOT NULL,
-            payload_path TEXT NOT NULL,
-            payload_size_bytes INTEGER NOT NULL,
-            payload_sha256 TEXT,
-            extraction_schema_version TEXT NOT NULL,
-            cache_format_version INTEGER NOT NULL,
-            created_at TEXT NOT NULL DEFAULT (datetime('now')),
-            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-            last_accessed_at TEXT,
-            UNIQUE(library_id, zotero_key, mode)
-        )
-    `);
-    raw.exec(`
-        INSERT INTO document_cache_payloads (
-            metadata_id, item_id, library_id, zotero_key, mode, content_kind,
-            source_file_path, source_file_mtime_ms, source_file_size_bytes,
-            source_size_bytes, payload_path, payload_size_bytes,
-            extraction_schema_version, cache_format_version
-        ) VALUES (1, 100, 1, 'STALE004', 'structured', 'pdf', '/tmp/a.pdf',
-            10, 20, 20, '/cache/old.gz', 10, '4', 1)
-    `);
-}
-
 describe('BeaverDB document cache methods', () => {
     let conn: MockDBConnection;
     let db: BeaverDB;
@@ -246,97 +171,77 @@ describe('BeaverDB document cache methods', () => {
         expect(row?.documentMetadata).toEqual(makeMetadata().documentMetadata);
     });
 
-    it('rebuilds a stale document cache schema without touching unrelated tables', async () => {
+    it('wipes the document cache when the recorded schema version is older, then persists', async () => {
+        await db.upsertDocumentCacheMetadata(makeMetadata());
+        await db.upsertDocumentCachePayload(makePayload({ metadataId: 1 }));
+
+        // Simulate an install whose cache predates the current schema version.
         const raw = conn.getRawDB();
-        raw.exec('DROP TABLE IF EXISTS document_cache_payloads');
-        raw.exec('DROP TABLE IF EXISTS document_cache_metadata');
-        raw.exec(`
-            CREATE TABLE document_cache_metadata (
-                id INTEGER PRIMARY KEY, library_id INTEGER, zotero_key TEXT,
-                content_kind TEXT, document_metadata_json TEXT,
-                page_count INTEGER, is_encrypted INTEGER, needs_ocr INTEGER
-            )
-        `);
-        raw.exec(`INSERT INTO document_cache_metadata (library_id, zotero_key) VALUES (1, 'STALE001')`);
+        raw.exec(`UPDATE schema_versions SET version = 0 WHERE component = 'document_cache'`);
+
+        const rebuilt = new BeaverDB(conn);
+        await rebuilt.initDatabase('0.99.0');
+
+        // Both cache tables are reset on the version mismatch.
+        expect(await rebuilt.getDocumentCacheMetadataCount()).toBe(0);
+        expect(await rebuilt.getDocumentCachePayloadCount()).toBe(0);
+
+        // The current version is now recorded, so a second init keeps the data.
+        await rebuilt.upsertDocumentCacheMetadata(makeMetadata());
+        const again = new BeaverDB(conn);
+        await again.initDatabase('0.99.0');
+        expect(await again.getDocumentCacheMetadataCount()).toBe(1);
+    });
+
+    it('preserves current document cache tables on upgrade from an unversioned install', async () => {
+        const { metadata } = await db.upsertDocumentCacheMetadata(makeMetadata());
+        await db.upsertDocumentCachePayload(makePayload({ metadataId: metadata.id }));
+
+        // Pre-versioning installs have no recorded version for the cache.
+        const raw = conn.getRawDB();
+        raw.exec(`DELETE FROM schema_versions WHERE component = 'document_cache'`);
         raw.exec(`CREATE TABLE unrelated_marker (id INTEGER PRIMARY KEY, note TEXT)`);
         raw.exec(`INSERT INTO unrelated_marker (note) VALUES ('keep me')`);
 
         const rebuilt = new BeaverDB(conn);
         await rebuilt.initDatabase('0.99.0');
 
-        expect(await rebuilt.getDocumentCacheMetadataCount()).toBe(0);
-        await rebuilt.upsertDocumentCacheMetadata(makeMetadata());
+        expect(await rebuilt.getDocumentCacheMetadataCount()).toBe(1);
+        expect(await rebuilt.getDocumentCachePayloadCount()).toBe(1);
         const row = await rebuilt.getDocumentCacheMetadataByKey(1, 'ABCD1234');
         expect(row?.contentKind).toBe('pdf');
 
         const marker = raw.prepare('SELECT note FROM unrelated_marker').get() as { note: string };
         expect(marker.note).toBe('keep me');
+        const version = raw
+            .prepare(`SELECT version FROM schema_versions WHERE component = 'document_cache'`)
+            .get() as { version: number };
+        expect(version.version).toBe(1);
     });
 
-    it('rebuilds document cache metadata when durable columns are missing', async () => {
+    it('wipes stale document cache tables on upgrade from an unversioned install', async () => {
         const raw = conn.getRawDB();
+        raw.exec(`DELETE FROM schema_versions WHERE component = 'document_cache'`);
         raw.exec('DROP TABLE IF EXISTS document_cache_payloads');
         raw.exec('DROP TABLE IF EXISTS document_cache_metadata');
         raw.exec(`
             CREATE TABLE document_cache_metadata (
                 id INTEGER PRIMARY KEY,
-                item_id INTEGER NOT NULL,
-                library_id INTEGER NOT NULL,
-                zotero_key TEXT NOT NULL,
-                file_path TEXT NOT NULL,
-                file_mtime_ms INTEGER NOT NULL,
-                file_size_bytes INTEGER NOT NULL,
-                source_size_bytes INTEGER NOT NULL,
-                content_type TEXT NOT NULL,
-                error_code TEXT,
-                extraction_schema_version TEXT NOT NULL,
-                metadata_format_version INTEGER NOT NULL,
-                created_at TEXT NOT NULL DEFAULT (datetime('now')),
-                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-                last_accessed_at TEXT,
-                UNIQUE(library_id, zotero_key)
+                library_id INTEGER,
+                zotero_key TEXT,
+                content_kind TEXT,
+                document_metadata_json TEXT,
+                page_count INTEGER,
+                is_encrypted INTEGER,
+                needs_ocr INTEGER
             )
         `);
-        raw.exec(`
-            INSERT INTO document_cache_metadata (
-                item_id, library_id, zotero_key, file_path, file_mtime_ms,
-                file_size_bytes, source_size_bytes, content_type,
-                extraction_schema_version, metadata_format_version
-            ) VALUES (100, 1, 'STALE002', '/tmp/a.pdf', 10, 20, 20, 'application/pdf', '4', 1)
-        `);
+        raw.exec(`INSERT INTO document_cache_metadata (library_id, zotero_key) VALUES (1, 'STALE001')`);
 
         const rebuilt = new BeaverDB(conn);
         await rebuilt.initDatabase('0.99.0');
 
         expect(await rebuilt.getDocumentCacheMetadataCount()).toBe(0);
-        await rebuilt.upsertDocumentCacheMetadata(makeMetadata());
-        const row = await rebuilt.getDocumentCacheMetadataByKey(1, 'ABCD1234');
-        expect(row?.documentMetadata).toEqual(makeMetadata().documentMetadata);
-    });
-
-    it('rebuilds document cache payloads when durable payload columns are missing', async () => {
-        await db.upsertDocumentCacheMetadata(makeMetadata());
-        recreateLegacyPayloadWithoutContentKind(conn);
-
-        const rebuilt = new BeaverDB(conn);
-        await rebuilt.initDatabase('0.99.0');
-
-        expect(await rebuilt.getDocumentCacheMetadataCount()).toBe(0);
-        expect(await rebuilt.getDocumentCachePayloadCount()).toBe(0);
-        await rebuilt.upsertDocumentCacheMetadata(makeMetadata());
-        const row = await rebuilt.getDocumentCacheMetadataByKey(1, 'ABCD1234');
-        expect(row?.contentKind).toBe('pdf');
-    });
-
-    it('rebuilds document cache payloads when the legacy mode column is present', async () => {
-        await db.upsertDocumentCacheMetadata(makeMetadata());
-        recreateLegacyPayloadWithModeColumn(conn);
-
-        const rebuilt = new BeaverDB(conn);
-        await rebuilt.initDatabase('0.99.0');
-
-        expect(await rebuilt.getDocumentCacheMetadataCount()).toBe(0);
-        expect(await rebuilt.getDocumentCachePayloadCount()).toBe(0);
         await rebuilt.upsertDocumentCacheMetadata(makeMetadata());
         const row = await rebuilt.getDocumentCacheMetadataByKey(1, 'ABCD1234');
         expect(row?.contentKind).toBe('pdf');

@@ -131,7 +131,25 @@ describe('BeaverDB background queue', () => {
         expect(rows[0].lastError).toBeNull();
     });
 
-    it('rebuilds columns-correct background tables when the unique key is stale', async () => {
+    it('preserves current background queue tables on upgrade from an unversioned install', async () => {
+        const first = await db.enqueueBackgroundJob(makeInput({ now: 10_000 }));
+        const raw = conn.getRawDB();
+        raw.exec(`DELETE FROM schema_versions WHERE component = 'background_jobs'`);
+
+        const rebuilt = new BeaverDB(conn);
+        await rebuilt.initDatabase('0.99.0');
+
+        const rows = await rebuilt.peekBackgroundJobs();
+        expect(rows).toHaveLength(1);
+        expect(rows[0].id).toBe(first.id);
+        expect(rows[0].zoteroKey).toBe('ABCD1234');
+        const version = raw
+            .prepare(`SELECT version FROM schema_versions WHERE component = 'background_jobs'`)
+            .get() as { version: number };
+        expect(version.version).toBe(1);
+    });
+
+    it('rebuilds the background queue with the current unique key on upgrade from an unversioned install', async () => {
         await conn.closeDatabase();
         conn = new MockDBConnection();
         const raw = conn.getRawDB();

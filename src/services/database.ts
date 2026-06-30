@@ -281,6 +281,17 @@ export const MAX_OCR_FAILURES = 5;
 export const MAX_UPSERT_FAILURES = 5;
 export const DOC_PROCESSING_RETRY_BASE_DELAY_MS = 60 * 60 * 1000; // 1 hour
 
+// Schema versions for the disposable, drop-and-recreate tables. These tables
+// hold derived/ephemeral state (a re-warmable document cache and a re-enqueable
+// job queue), so on an incompatible schema change we drop and recreate them
+// rather than migrating. Bump the relevant constant on ANY change to the
+// corresponding table shapes (columns, constraints, or a correctness-affecting
+// index such as the queue dedupe key). The recorded version lives in the
+// `schema_versions` table and survives the table drops, so existing installs
+// reset exactly once when the version changes.
+export const DOCUMENT_CACHE_SCHEMA_VERSION = 1;
+export const BACKGROUND_JOBS_SCHEMA_VERSION = 1;
+
 
 /* 
  * Interface for the 'threads' table row
@@ -342,6 +353,16 @@ export class BeaverDB {
         const previousVersion = getPref('installedVersion') || '0.1';
 
         await this.conn.queryAsync(`PRAGMA foreign_keys = ON`);
+
+        // Tracks the schema version of the disposable drop-and-recreate tables
+        // (document cache, background queue). Created first so the version
+        // checks below can read it. Outlives those tables' drops.
+        await this.conn.queryAsync(`
+            CREATE TABLE IF NOT EXISTS schema_versions (
+                component  TEXT PRIMARY KEY,
+                version    INTEGER NOT NULL
+            );
+        `);
 
         // Delete all tables in test versions
         if (previousVersion.startsWith('0.1') || previousVersion == '0.2.4') {
@@ -526,10 +547,18 @@ export class BeaverDB {
 
         await this.conn.queryAsync(`DROP TABLE IF EXISTS attachment_file_cache`);
 
-        // Drop and recreate the document cache tables if the schema is stale
-        if (await this.documentCacheSchemaIsStale()) {
+        // Drop and recreate the document cache tables when their schema version
+        // changes. The cache re-warms on demand, so resetting is safe. Bump
+        // DOCUMENT_CACHE_SCHEMA_VERSION on any change to the tables below.
+        if (await this.disposableSchemaNeedsReset(
+            'document_cache',
+            DOCUMENT_CACHE_SCHEMA_VERSION,
+            ['document_cache_metadata', 'document_cache_payloads'],
+            () => this.documentCacheSchemaIsCurrent(),
+        )) {
             await this.conn.queryAsync(`DROP TABLE IF EXISTS document_cache_payloads`);
             await this.conn.queryAsync(`DROP TABLE IF EXISTS document_cache_metadata`);
+            await this.setSchemaVersion('document_cache', DOCUMENT_CACHE_SCHEMA_VERSION);
         }
 
         await this.conn.queryAsync(`
@@ -649,10 +678,19 @@ export class BeaverDB {
             ON external_files(sha256);
         `);
 
-        // Drop and recreate the ephemeral queue if the schema or unique key is stale.
-        if (await this.backgroundJobsSchemaIsStale()) {
+        // Drop and recreate the ephemeral queue when its schema version changes.
+        // Jobs are re-enqueued on demand, so resetting is safe. Bump
+        // BACKGROUND_JOBS_SCHEMA_VERSION on any change to the queue tables below,
+        // including the dedupe UNIQUE key.
+        if (await this.disposableSchemaNeedsReset(
+            'background_jobs',
+            BACKGROUND_JOBS_SCHEMA_VERSION,
+            ['background_jobs', 'background_jobs_dead'],
+            () => this.backgroundJobsSchemaIsCurrent(),
+        )) {
             await this.conn.queryAsync(`DROP TABLE IF EXISTS background_jobs_dead`);
             await this.conn.queryAsync(`DROP TABLE IF EXISTS background_jobs`);
+            await this.setSchemaVersion('background_jobs', BACKGROUND_JOBS_SCHEMA_VERSION);
         }
 
         // Background job queue: one row per logical document extraction request.
@@ -2008,75 +2046,209 @@ export class BeaverDB {
         };
     }
 
-    /** Detect document-cache tables whose schema does not match the current shape. */
-    private async documentCacheSchemaIsStale(): Promise<boolean> {
-        const metadataColumns = new Set<string>();
+    /** Read the recorded schema version for a disposable table group; null if unset. */
+    private async getSchemaVersion(component: string): Promise<number | null> {
+        let version: number | null = null;
         await this.conn.queryAsync(
-            `SELECT name FROM pragma_table_info('document_cache_metadata')`,
-            [],
-            { onRow: (row: any) => metadataColumns.add(row.getResultByIndex(0)) },
+            `SELECT version FROM schema_versions WHERE component = ?`,
+            [component],
+            { onRow: (row: any) => { version = row.getResultByIndex(0); } },
         );
-        if (metadataColumns.size > 0) {
-            if (!metadataColumns.has('content_kind')) return true;
-            if (!metadataColumns.has('document_metadata_json')) return true;
-            const legacyMetadataColumns = [
-                'page_count',
-                'page_labels_json',
-                'pages_json',
-                'status',
-                'has_text_layer',
-                'needs_ocr',
-                'is_encrypted',
-                'is_invalid',
-            ];
-            if (legacyMetadataColumns.some((col) => metadataColumns.has(col))) {
-                return true;
+        return version;
+    }
+
+    /**
+     * Decide whether a disposable table group must be rebuilt.
+     *
+     * Missing version rows come from installs that predate `schema_versions`.
+     * If those tables already match the current v1 shape, stamp the version
+     * without dropping data. A recorded older version still forces a rebuild.
+     */
+    private async disposableSchemaNeedsReset(
+        component: string,
+        currentVersion: number,
+        tableNames: string[],
+        schemaIsCurrent: () => Promise<boolean>,
+    ): Promise<boolean> {
+        const recordedVersion = await this.getSchemaVersion(component);
+        if (recordedVersion === currentVersion) {
+            return false;
+        }
+
+        if (recordedVersion === null) {
+            if (await this.allTablesAbsent(tableNames) || await schemaIsCurrent()) {
+                await this.setSchemaVersion(component, currentVersion);
+                return false;
             }
         }
 
-        const payloadColumns = new Set<string>();
-        await this.conn.queryAsync(
-            `SELECT name FROM pragma_table_info('document_cache_payloads')`,
-            [],
-            { onRow: (row: any) => payloadColumns.add(row.getResultByIndex(0)) },
-        );
-        if (payloadColumns.size > 0) {
-            if (!payloadColumns.has('content_kind')) return true;
-            if (!payloadColumns.has('payload_kind')) return true;
-            if (payloadColumns.has('mode')) return true;
-        }
-
-        return false;
+        return true;
     }
 
-    /** Detect background queue tables whose ephemeral schema should be rebuilt. */
-    private async backgroundJobsSchemaIsStale(): Promise<boolean> {
-        const liveColumns = new Set<string>();
+    /** Record the schema version for a disposable table group. */
+    private async setSchemaVersion(component: string, version: number): Promise<void> {
         await this.conn.queryAsync(
-            `SELECT name FROM pragma_table_info('background_jobs')`,
-            [],
-            { onRow: (row: any) => liveColumns.add(row.getResultByIndex(0)) },
+            `INSERT INTO schema_versions (component, version) VALUES (?, ?)
+             ON CONFLICT(component) DO UPDATE SET version = excluded.version`,
+            [component, version],
         );
-        if (liveColumns.size > 0) {
-            if (!liveColumns.has('content_kind')) return true;
-            if (!liveColumns.has('payload_kind')) return true;
-            if (liveColumns.has('mode')) return true;
-            if (!(await this.backgroundJobsUniqueKeyIsCurrent())) return true;
+    }
+
+    /** Return true only when none of the named tables exists. */
+    private async allTablesAbsent(tableNames: string[]): Promise<boolean> {
+        for (const tableName of tableNames) {
+            if (await this.tableExists(tableName)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** Check for a SQLite table by name. */
+    private async tableExists(tableName: string): Promise<boolean> {
+        let exists = false;
+        await this.conn.queryAsync(
+            `SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?`,
+            [tableName],
+            { onRow: () => { exists = true; } },
+        );
+        return exists;
+    }
+
+    /** Verify unversioned document-cache tables already match the current shape. */
+    private async documentCacheSchemaIsCurrent(): Promise<boolean> {
+        if (
+            !(await this.tableExists('document_cache_metadata'))
+            || !(await this.tableExists('document_cache_payloads'))
+        ) {
+            return false;
         }
 
-        const deadColumns = new Set<string>();
-        await this.conn.queryAsync(
-            `SELECT name FROM pragma_table_info('background_jobs_dead')`,
-            [],
-            { onRow: (row: any) => deadColumns.add(row.getResultByIndex(0)) },
-        );
-        if (deadColumns.size > 0) {
-            if (!deadColumns.has('content_kind')) return true;
-            if (!deadColumns.has('payload_kind')) return true;
-            if (deadColumns.has('mode')) return true;
+        const metadataColumns = await this.getTableColumns('document_cache_metadata');
+        const requiredMetadataColumns = [
+            'id',
+            'item_id',
+            'library_id',
+            'zotero_key',
+            'content_kind',
+            'file_path',
+            'file_mtime_ms',
+            'file_size_bytes',
+            'source_size_bytes',
+            'content_type',
+            'document_metadata_json',
+            'error_code',
+            'extraction_schema_version',
+            'metadata_format_version',
+            'created_at',
+            'updated_at',
+            'last_accessed_at',
+        ];
+        if (requiredMetadataColumns.some((col) => !metadataColumns.has(col))) {
+            return false;
+        }
+        const legacyMetadataColumns = [
+            'page_count',
+            'page_labels_json',
+            'pages_json',
+            'status',
+            'has_text_layer',
+            'needs_ocr',
+            'is_encrypted',
+            'is_invalid',
+        ];
+        if (legacyMetadataColumns.some((col) => metadataColumns.has(col))) {
+            return false;
         }
 
-        return false;
+        const payloadColumns = await this.getTableColumns('document_cache_payloads');
+        const requiredPayloadColumns = [
+            'id',
+            'metadata_id',
+            'item_id',
+            'library_id',
+            'zotero_key',
+            'payload_kind',
+            'content_kind',
+            'source_file_path',
+            'source_file_mtime_ms',
+            'source_file_size_bytes',
+            'source_size_bytes',
+            'payload_path',
+            'payload_size_bytes',
+            'payload_sha256',
+            'extraction_schema_version',
+            'cache_format_version',
+            'created_at',
+            'updated_at',
+            'last_accessed_at',
+        ];
+        if (requiredPayloadColumns.some((col) => !payloadColumns.has(col))) {
+            return false;
+        }
+
+        return !payloadColumns.has('mode');
+    }
+
+    /** Verify unversioned background-queue tables already match the current shape. */
+    private async backgroundJobsSchemaIsCurrent(): Promise<boolean> {
+        if (
+            !(await this.tableExists('background_jobs'))
+            || !(await this.tableExists('background_jobs_dead'))
+        ) {
+            return false;
+        }
+
+        const liveColumns = await this.getTableColumns('background_jobs');
+        const requiredLiveColumns = [
+            'id',
+            'job_type',
+            'library_id',
+            'item_id',
+            'zotero_key',
+            'content_kind',
+            'payload_kind',
+            'priority',
+            'payload_json',
+            'enqueued_at',
+            'available_at',
+            'attempt_count',
+            'last_error',
+        ];
+        if (requiredLiveColumns.some((col) => !liveColumns.has(col)) || liveColumns.has('mode')) {
+            return false;
+        }
+        if (!(await this.backgroundJobsUniqueKeyIsCurrent())) {
+            return false;
+        }
+
+        const deadColumns = await this.getTableColumns('background_jobs_dead');
+        const requiredDeadColumns = [
+            'id',
+            'job_type',
+            'library_id',
+            'zotero_key',
+            'content_kind',
+            'payload_kind',
+            'payload_json',
+            'enqueued_at',
+            'died_at',
+            'attempt_count',
+            'last_error',
+        ];
+        return requiredDeadColumns.every((col) => deadColumns.has(col)) && !deadColumns.has('mode');
+    }
+
+    /** Read SQLite table column names. */
+    private async getTableColumns(tableName: string): Promise<Set<string>> {
+        const columns = new Set<string>();
+        const escapedName = tableName.replace(/'/g, `''`);
+        await this.conn.queryAsync(
+            `SELECT name FROM pragma_table_info('${escapedName}')`,
+            [],
+            { onRow: (row: any) => columns.add(row.getResultByIndex(0)) },
+        );
+        return columns;
     }
 
     /** Verify the live queue has the exact current dedupe key. */
