@@ -1,6 +1,6 @@
 import React, { useState, useRef, useCallback, useMemo } from 'react';
 import { useAtom, useSetAtom, useAtomValue } from 'jotai';
-import { PlusSignIcon } from '../components/icons/icons';
+import { PlusSignIcon, BookSearchIcon, LayersIcon, HighlighterIcon, ZapIcon } from '../components/icons/icons';
 import { CSSIcon, CSSItemTypeIcon } from '../components/icons/zotero';
 import { currentMessageContentAtom, currentMessageItemsAtom } from '../atoms/messageComposition';
 import { isWSChatPendingAtom } from '../atoms/agentRunAtoms';
@@ -10,8 +10,19 @@ import { hasUserInputVariables } from '../utils/userInputVariables';
 import { computeActionGroups } from '../utils/actionVisibility';
 import { addPopupMessageAtom } from '../utils/popupMessageUtils';
 import { openPreferencesWindow } from '../../src/ui/openPreferencesWindow';
-import { Action, ActionTargetType } from '../types/actions';
+import { Action, ActionCategory, ActionTargetType } from '../types/actions';
 import { MenuPosition, SearchMenuItem } from '../components/ui/menus/SearchMenu';
+
+// Category icons mirror the homepage launcher and Actions preferences so the
+// slash menu matches what users see elsewhere. Uncategorized actions fall
+// back to the general "Actions" icon (Zap).
+const CATEGORY_ICONS: Record<ActionCategory, React.ComponentType<React.SVGProps<SVGSVGElement>>> = {
+    research: BookSearchIcon,
+    organize: LayersIcon,
+    annotate: HighlighterIcon,
+};
+const categoryIcon = (cat: ActionCategory | undefined): React.ComponentType<React.SVGProps<SVGSVGElement>> =>
+    cat ? CATEGORY_ICONS[cat] : ZapIcon;
 
 export function useSlashMenu(inputRef: React.RefObject<HTMLTextAreaElement | null>, verticalPosition: 'above' | 'below' = 'above') {
     const [messageContent, setMessageContent] = useAtom(currentMessageContentAtom);
@@ -137,7 +148,7 @@ export function useSlashMenu(inputRef: React.RefObject<HTMLTextAreaElement | nul
             if (group.iconInfo) {
                 headerItem.customContent = (
                     <span className="display-flex items-center gap-1 truncate">
-                        <span className="scale-80 flex-shrink-0" style={{ filter: 'grayscale(1)' }}>
+                        <span className="scale-80 flex-shrink-0">
                             {group.iconInfo.type === 'item-type'
                                 ? <CSSItemTypeIcon itemType={group.iconInfo.name} className="icon-16" />
                                 : <CSSIcon name={group.iconInfo.name} className="icon-16" />}
@@ -160,6 +171,7 @@ export function useSlashMenu(inputRef: React.RefObject<HTMLTextAreaElement | nul
                 for (const action of group.filtered) {
                     items.push({
                         label: action.title,
+                        icon: categoryIcon(action.category),
                         onClick: () => handleSlashSelect(action, group.targetType),
                     });
                 }
@@ -182,6 +194,7 @@ export function useSlashMenu(inputRef: React.RefObject<HTMLTextAreaElement | nul
                 for (const action of group.filtered) {
                     items.push({
                         label: action.title,
+                        icon: categoryIcon(action.category),
                         onClick: () => handleSlashSelect(action, group.targetType),
                     });
                 }

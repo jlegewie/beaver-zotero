@@ -1007,6 +1007,7 @@
 [id^="beaver-pane-"] .opacity-60 { opacity: 0.6; }
 [id^="beaver-pane-"] .opacity-70 { opacity: 0.7; }
 [id^="beaver-pane-"] .opacity-80 { opacity: 0.8; }
+[id^="beaver-pane-"] .opacity-85 { opacity: 0.85; }
 [id^="beaver-pane-"] .opacity-90 { opacity: 0.9; }
 [id^="beaver-pane-"] .opacity-100 { opacity: 1; }
 [id^="beaver-pane-"] .cursor-pointer { cursor: pointer; }

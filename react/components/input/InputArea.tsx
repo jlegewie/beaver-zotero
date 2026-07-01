@@ -388,6 +388,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                 placeholder="Search actions..."
                 closeOnSelect={false}
                 showSearchInput={false}
+                groupHeaderClassName="font-color-primary opacity-70"
             />
 
             {/* Input Form */}
