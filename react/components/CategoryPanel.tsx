@@ -79,8 +79,8 @@ const CategoryPanel: React.FC<CategoryPanelProps> = ({ category, style }) => {
     return (
         <div className="display-flex flex-col gap-5 p-1" style={style}>
             {!hasAny && (
-                <div className="font-color-tertiary text-sm px-1 py-2">
-                    No actions available for the current selection.
+                <div className="font-color-secondary text-sm px-2 py-2">
+                    Create repeatable workflows for common research tasks
                 </div>
             )}
 
