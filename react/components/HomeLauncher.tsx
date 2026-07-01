@@ -21,23 +21,23 @@ interface CategoryDef {
 const CATEGORIES: CategoryDef[] = [
     {
         id: "actions", label: "Actions", icon: ZapIcon, category: null,
-        tooltipTitle: "General-purpose actions",
-        tooltipDescription: "Summarize a paper, review a note, and other one-off prompts",
+        tooltipTitle: "Repeatable workflows",
+        tooltipDescription: "Run a common task in one click: summarize, review, refine",
     },
     {
         id: "research", label: "Research", icon: BookSearchIcon, category: "research",
-        tooltipTitle: "Find and connect sources",
-        tooltipDescription: "Find similar papers, check references, spot gaps in your library",
+        tooltipTitle: "Ask and explore your library",
+        tooltipDescription: "Grounded answers from full text, plus related work and gaps",
     },
     {
         id: "organize", label: "Organize", icon: LayersIcon, category: "organize",
-        tooltipTitle: "Keep your library tidy",
-        tooltipDescription: "Auto-tag items, sort into collections, fix missing metadata",
+        tooltipTitle: "Organize & edit your library",
+        tooltipDescription: "Tag, sort, and fix metadata. You approve every change",
     },
     {
         id: "annotate", label: "Annotate", icon: HighlighterIcon, category: "annotate",
-        tooltipTitle: "Highlight while you read",
-        tooltipDescription: "Skim papers and mark key findings as annotations",
+        tooltipTitle: "AI-powered PDF annotations",
+        tooltipDescription: "Highlights and notes added right in your PDF, ready to review",
     },
 ];
 
@@ -70,7 +70,7 @@ const HomeLauncher: React.FC<{ style?: React.CSSProperties }> = ({ style }) => {
                             customContent={
                                 <div className="px-2 py-1 display-flex flex-col gap-1">
                                     <span className="text-base font-color-secondary font-medium">{cat.tooltipTitle}</span>
-                                    <span className="text-sm font-color-tertiary">{cat.tooltipDescription}</span>
+                                    <span className="text-sm font-color-secondary">{cat.tooltipDescription}</span>
                                 </div>
                             }
                         >
