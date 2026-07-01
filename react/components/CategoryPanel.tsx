@@ -22,8 +22,11 @@ interface CategoryPanelProps {
 /** Section header — the selected target (with its item icon) or "Library-wide". */
 const SectionHeader: React.FC<{ label: string; iconInfo?: GroupIconInfo }> = ({ label, iconInfo }) => (
     <div
-        className="display-flex flex-row items-center gap-1 min-w-0 font-color-secondary"
-        style={{ fontSize: '0.925rem' }}
+        className="display-flex flex-row items-center gap-1 min-w-0 font-color-primary opacity-90"
+        style={{
+            fontSize: '0.925rem',
+            padding: iconInfo ? '3px' : '6px',
+        }}
     >
         {iconInfo && (
             <span className="scale-80 flex-shrink-0" style={{ filter: 'grayscale(1)' }}>
@@ -56,22 +59,24 @@ const CategoryPanel: React.FC<CategoryPanelProps> = ({ category, style }) => {
     const { targetActions, globalActions } = splitCategoryActions(contextActions, category, active?.targetType ?? null);
 
     const renderAction = (action: Action) => (
-        <Button
-            key={action.id}
-            variant="ghost"
-            onClick={() => runAction(action)}
-            disabled={!isLibrarySupported || isBusy}
-            className="w-full justify-between"
-            style={{ padding: '6px 6px' }}
-        >
-            <span className="text-base truncate">{action.title}</span>
-        </Button>
+        // <div className="border-bottom-quinary">
+            <Button
+                key={action.id}
+                variant="ghost"
+                onClick={() => runAction(action)}
+                disabled={!isLibrarySupported || isBusy}
+                className="w-full justify-between"
+                style={{ padding: '6px 6px' }}
+            >
+                <span className="text-base truncate">{action.title}</span>
+            </Button>
+        // </div>
     );
 
     const hasAny = targetActions.length > 0 || globalActions.length > 0;
 
     return (
-        <div className="display-flex flex-col gap-2 px-1" style={style}>
+        <div className="display-flex flex-col gap-5 p-1" style={style}>
             {!hasAny && (
                 <div className="font-color-tertiary text-sm px-1 py-2">
                     No actions available for the current selection.
@@ -79,14 +84,14 @@ const CategoryPanel: React.FC<CategoryPanelProps> = ({ category, style }) => {
             )}
 
             {globalActions.length > 0 && (
-                <div className="display-flex flex-col gap-05">
+                <div className="display-flex flex-col gap-1">
                     <SectionHeader label="Library-wide" />
                     {globalActions.map(renderAction)}
                 </div>
             )}
 
             {targetActions.length > 0 && (
-                <div className="display-flex flex-col gap-05">
+                <div className="display-flex flex-col gap-1">
                     <SectionHeader
                         label={active?.label ?? (active ? TARGET_TYPE_LABELS[active.targetType] : '')}
                         iconInfo={active?.iconInfo}
@@ -98,13 +103,15 @@ const CategoryPanel: React.FC<CategoryPanelProps> = ({ category, style }) => {
             {/* Footer — edit actions + not-synced warning */}
             <div className="display-flex flex-row items-center gap-2 mt-2 pt-2 border-top-quinary">
                 <div className="flex-1" />
-                <IconButton
-                    variant="ghost-tertiary"
+                <Button
+                    variant="outline"
                     onClick={() => openPreferencesWindow('actions')}
                     icon={SettingsIcon}
                     ariaLabel="Edit actions"
                     title="Edit actions"
-                />
+                >
+                    Configure
+                </Button>
             </div>
             {!isLibrarySupported && (
                 <div className="display-flex flex-row gap-1 items-start font-color-tertiary mt-1">
