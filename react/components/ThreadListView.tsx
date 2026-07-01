@@ -264,9 +264,10 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
             // Invalidate caches
             searchCache.clear();
             clearRecentChatsCache(threadId);
-            // If deleting the current thread, create a new one
+            // If deleting the current thread, create a new one. The user already
+            // confirmed the delete above, so skip the active-run confirmation.
             if (threadId === currentThreadId) {
-                await newThread();
+                await newThread({ skipActiveRunConfirm: true });
             }
         } catch (error) {
             console.error('Error deleting thread:', error);
