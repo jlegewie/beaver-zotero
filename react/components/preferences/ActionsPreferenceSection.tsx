@@ -4,7 +4,7 @@ import { Icon, FilterIcon, TickIcon, ArrowDownIcon } from '../icons/icons';
 import PlusSignIcon from '../icons/PlusSignIcon';
 import Button from "../ui/Button";
 import { useSetAtom } from 'jotai';
-import { Action, ActionCategory, ActionCategoryFilter, ActionTargetType, generateActionId, TARGET_TYPE_LABELS, TARGET_TYPE_DESCRIPTIONS, CATEGORY_LABELS } from "../../types/actions";
+import { Action, ActionCategory, ActionCategoryFilter, ActionTargetType, generateActionId, TARGET_TYPE_LABELS, CATEGORY_LABELS } from "../../types/actions";
 import { actionsAtom, saveActionsAtom, hideActionAtom, restoreActionAtom, resetActionToDefaultAtom } from "../../atoms/actions";
 import { pendingActionsCategoryFilterAtom } from "../../atoms/ui";
 import { isBuiltinAction, getActionCustomizations, getHiddenBuiltinActions, importFromOldCustomPrompts, hasOldCustomPrompts } from "../../types/actionStorage";
@@ -70,19 +70,23 @@ const ActionsPreferenceSection: React.FC = () => {
     }, [actions, saveActions]);
 
     // --- Add Action Handler ---
-    // Clear filters so the newly created (empty, in-edit) card is always visible,
-    // even if its target/category wouldn't match the active filters.
-    const handleAddAction = useCallback((targetType: ActionTargetType) => {
-        clearFilters();
+    // New action inherits the currently active target/category filters (falling back to
+    // global target / no category when a dimension is unfiltered). Since it always matches
+    // the active filter by construction, filters are left as-is and the new card appears
+    // right in the filtered list.
+    const handleAddAction = useCallback(() => {
+        const targetType = targetFilter ?? 'global';
+        const category = categoryFilter && categoryFilter !== 'uncategorized' ? categoryFilter : undefined;
         const newAction: Action = {
             id: generateActionId(),
             title: "",
             text: "",
             targetType,
+            category,
             sortOrder: 999,
         };
         saveActions([...actions, newAction]);
-    }, [actions, saveActions, clearFilters]);
+    }, [actions, saveActions, targetFilter, categoryFilter]);
 
     // --- Remove Action Handler ---
     const handleRemoveAction = useCallback((id: string) => {
@@ -152,73 +156,19 @@ const ActionsPreferenceSection: React.FC = () => {
 
     const hiddenBuiltins = useMemo(() => getHiddenBuiltinActions(), [actions]);
 
-    // --- Add Action Menu Items ---
-    const addActionMenuItems: MenuItem[] = useMemo(() => [
-        {
-            label: TARGET_TYPE_LABELS.global,
-            onClick: () => handleAddAction('global'),
-            customContent: (
-                <div className="display-flex flex-col">
-                    <span className="text-sm font-color-primary">{TARGET_TYPE_LABELS.global}</span>
-                    <span className="text-sm font-color-tertiary">{TARGET_TYPE_DESCRIPTIONS.global}</span>
-                </div>
-            ),
-        },
-        {
-            label: TARGET_TYPE_LABELS.items,
-            onClick: () => handleAddAction('items'),
-            customContent: (
-                <div className="display-flex flex-col">
-                    <span className="text-base font-color-primary">{TARGET_TYPE_LABELS.items}</span>
-                    <span className="text-base font-color-tertiary">{TARGET_TYPE_DESCRIPTIONS.items}</span>
-                </div>
-            ),
-        },
-        {
-            label: TARGET_TYPE_LABELS.attachment,
-            onClick: () => handleAddAction('attachment'),
-            customContent: (
-                <div className="display-flex flex-col">
-                    <span className="text-sm font-color-primary">{TARGET_TYPE_LABELS.attachment}</span>
-                    <span className="text-sm font-color-tertiary">{TARGET_TYPE_DESCRIPTIONS.attachment}</span>
-                </div>
-            ),
-        },
-        {
-            label: TARGET_TYPE_LABELS.note,
-            onClick: () => handleAddAction('note'),
-            customContent: (
-                <div className="display-flex flex-col">
-                    <span className="text-sm font-color-primary">{TARGET_TYPE_LABELS.note}</span>
-                    <span className="text-sm font-color-tertiary">{TARGET_TYPE_DESCRIPTIONS.note}</span>
-                </div>
-            ),
-        },
-        {
-            label: TARGET_TYPE_LABELS.collection,
-            onClick: () => handleAddAction('collection'),
-            customContent: (
-                <div className="display-flex flex-col">
-                    <span className="text-sm font-color-primary">{TARGET_TYPE_LABELS.collection}</span>
-                    <span className="text-sm font-color-tertiary">{TARGET_TYPE_DESCRIPTIONS.collection}</span>
-                </div>
-            ),
-        },
-    ], [handleAddAction]);
-
     return (
         <>
             <div className="display-flex flex-row items-end justify-between">
                 <SectionHeader>Actions</SectionHeader>
-                <MenuButton
-                    menuItems={addActionMenuItems}
-                    buttonLabel="Add Action"
+                <Button
                     variant="solid"
                     className="text-base mb-15"
-                    width="220px"
                     icon={PlusSignIcon}
                     style={{ padding: '4px 6px' }}
-                />
+                    onClick={handleAddAction}
+                >
+                    Add Action
+                </Button>
             </div>
             <div className="text-base font-color-secondary mb-2" style={{ paddingLeft: '2px' }}>
                 Actions are reusable prompts for common research tasks.
