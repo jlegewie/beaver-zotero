@@ -122,6 +122,11 @@ const ActionsPreferenceSection: React.FC = () => {
             ? 'Uncategorized'
             : CATEGORY_LABELS[categoryFilter];
 
+    // No background when a filter dimension is unset ("All ..."); a filled, bordered
+    // chip once it's narrowed down, so the active filters stand out at a glance.
+    const targetButtonVariant = targetFilter !== null ? 'surface' : 'outline';
+    const categoryButtonVariant = categoryFilter !== null ? 'surface' : 'outline';
+
     // --- Override Status ---
     const overriddenBuiltinIds = useMemo(() => {
         const c = getActionCustomizations();
@@ -231,7 +236,7 @@ const ActionsPreferenceSection: React.FC = () => {
                 <MenuButton
                     menuItems={targetFilterItems}
                     buttonLabel={targetButtonLabel}
-                    variant="surface"
+                    variant={targetButtonVariant}
                     rightIcon={ArrowDownIcon}
                     ariaLabel="Filter by target"
                     className="text-sm"
@@ -241,7 +246,7 @@ const ActionsPreferenceSection: React.FC = () => {
                 <MenuButton
                     menuItems={categoryFilterItems}
                     buttonLabel={categoryButtonLabel}
-                    variant="surface"
+                    variant={categoryButtonVariant}
                     rightIcon={ArrowDownIcon}
                     ariaLabel="Filter by category"
                     className="text-sm"
