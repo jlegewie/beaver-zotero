@@ -107,11 +107,12 @@ const CategoryPanel: React.FC<CategoryPanelProps> = ({ category, style }) => {
                 <Button
                     variant="outline"
                     onClick={() => openPreferencesWindow('actions')}
-                    icon={SettingsIcon}
+                    rightIcon={SettingsIcon}
                     ariaLabel="Edit actions"
                     title="Edit actions"
+                    style={{ padding: '4px 6px' }}
                 >
-                    Configure
+                    Edit Actions
                 </Button>
             </div>
             {!isLibrarySupported && (
