@@ -1,11 +1,9 @@
 import React from "react";
 import Button from "./ui/Button";
-import { useAtomValue, useSetAtom } from "jotai";
-import { isStreamingAtom } from "../agents/atoms";
-import { isWSChatPendingAtom } from "../atoms/agentRunAtoms";
+import { useAtomValue } from "jotai";
 import { Action, ActionTargetType } from "../types/actions";
-import { actionsForContextAtom, actionContextAtom, markActionUsedAtom, sendResolvedActionAtom, stageActionInInputAtom } from "../atoms/actions";
-import { hasUserInputVariables } from "../utils/userInputVariables";
+import { actionsForContextAtom, actionContextAtom } from "../atoms/actions";
+import { useActionRunner } from "../hooks/useActionRunner";
 import { getDisplayNameFromItem } from "../utils/sourceUtils";
 import { truncateText } from "../utils/stringUtils";
 import { ActionContext, GroupIconInfo, getIconInfoForItem, isActionableItem } from "../utils/actionVisibility";
@@ -19,7 +17,7 @@ import IconButton from "./ui/IconButton";
 const MAX_CONTEXT_ITEM_LENGTH = 50;
 const MAX_VISIBLE_ITEMS = 1;
 
-interface ActiveTarget {
+export interface ActiveTarget {
     targetType: ActionTargetType;
     label: string | null;
     iconInfo?: GroupIconInfo;
@@ -39,7 +37,7 @@ interface ActiveTarget {
  * 5. Collection (treeRowType === 'collection') → 'collection'
  * 6. Fallback → null (global only)
  */
-function getActiveTarget(ctx: ActionContext): ActiveTarget | null {
+export function getActiveTarget(ctx: ActionContext): ActiveTarget | null {
     const { zotero, manualItems } = ctx;
 
     // 1. Reader
@@ -159,14 +157,10 @@ interface ActionSuggestionsProps {
 
 
 const ActionSuggestions: React.FC<ActionSuggestionsProps> = ({ showGlobal = true, style, variant = 'default' }) => {
-    const isStreaming = useAtomValue(isStreamingAtom);
-    const isPending = useAtomValue(isWSChatPendingAtom);
     const contextActions = useAtomValue(actionsForContextAtom);
-    const sendResolvedAction = useSetAtom(sendResolvedActionAtom);
-    const stageActionInInput = useSetAtom(stageActionInInputAtom);
-    const markActionUsed = useSetAtom(markActionUsedAtom);
     const ctx = useAtomValue(actionContextAtom);
     const searchableLibraryIds = useAtomValue(searchableLibraryIdsAtom);
+    const { runAction, isBusy } = useActionRunner();
 
     // Check if the current library is supported
     const currentLibraryId = ctx.zotero.isLibraryTab
@@ -188,20 +182,6 @@ const ActionSuggestions: React.FC<ActionSuggestionsProps> = ({ showGlobal = true
     } else {
         actions = globalActions;
     }
-
-    const handleAction = async (action: Action) => {
-        if (isPending || isStreaming || action.text.length === 0) return;
-        if (hasUserInputVariables(action.text)) {
-            await stageActionInInput({
-                actionId: action.id,
-                text: action.text,
-                targetType: action.targetType,
-            });
-            return;
-        }
-        markActionUsed(action.id);
-        await sendResolvedAction({ text: action.text, targetType: action.targetType });
-    };
 
     // The default variant renders nothing when there are no actions. The panel
     // variant always renders so the expanded category shows an empty hint and
@@ -233,8 +213,8 @@ const ActionSuggestions: React.FC<ActionSuggestionsProps> = ({ showGlobal = true
         <Button
             key={action.id}
             variant="ghost"
-            onClick={() => handleAction(action)}
-            disabled={isPending || isStreaming || !isLibrarySupported}
+            onClick={() => runAction(action)}
+            disabled={isBusy || !isLibrarySupported}
             className="w-full justify-between"
             style={{ padding: '6px 6px' }}
         >

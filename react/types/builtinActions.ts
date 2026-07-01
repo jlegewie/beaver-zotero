@@ -41,6 +41,7 @@ export const BUILTIN_ACTIONS: Action[] = [
         title: 'How does this fit into my library?',
         text: 'How does this paper connect to the rest of my library? Does it support, challenge, or extend ideas in papers I already have? Write a short report that directly compares the paper to other research in my library including a comparison table. Use a Zotero note attached to the item.',
         targetType: 'items',
+        category: 'research',
         sortOrder: 110,
     },
 
@@ -49,6 +50,7 @@ export const BUILTIN_ACTIONS: Action[] = [
         title: 'Find similar papers',
         text: 'Use external search to find papers that are closely related to this item. Focus on papers that use similar methods or study the same phenomenon. Return 10 results ranked by relevance with a one-sentence explanation of why each is relevant.',
         targetType: 'items',
+        category: 'research',
         sortOrder: 120,
     },
 
@@ -65,6 +67,7 @@ export const BUILTIN_ACTIONS: Action[] = [
         title: 'Auto-tag',
         text: 'Analyze these items and assign appropriate tags to them. Use tags that already exist in my library when they fit. For new tags, keep them concise (1-3 words), lowercase, and consistent with my existing tagging style.',
         targetType: 'items',
+        category: 'organize',
         sortOrder: 140,
     },
 
@@ -73,6 +76,7 @@ export const BUILTIN_ACTIONS: Action[] = [
         title: 'Sort into collections',
         text: 'Look at these items and add them to my existing collections if they fit. If an item doesn\'t fit any existing collection, say so and suggest a new collection name.',
         targetType: 'items',
+        category: 'organize',
         sortOrder: 150,
     },
 
@@ -85,6 +89,7 @@ export const BUILTIN_ACTIONS: Action[] = [
         title: 'Skim this paper',
         text: 'Help me skim this paper. Use highlight annotations to mark the key passages I should read to get the gist: the central argument and contribution, data and methods, main findings, and key conclusions. Aim for 4-8 short highlights (2-3 sentences each) in the main body of the paper, avoid the introduction. Be extremely selective and only highlight short passages so I can skim it quickly. After completingthe highlights, provide a short summary structured in the following format: **Central argument and contribution**. [1-2 sentence summary] [citations to relevant annotations] etc.',
         targetType: 'attachment',
+        category: 'annotate',
         sortOrder: 200,
     },
 
@@ -93,6 +98,7 @@ export const BUILTIN_ACTIONS: Action[] = [
         title: 'Highlight key findings',
         text: 'Read this paper and identify the key findings. For each one, create a highlight annotation with 1-3 specific sentences that states the finding, with a brief comment explaining its significance. Focus on empirical results and novel contributions, not background or literature review. Aim for 3-6 highlights covering the most important findings. After completing the highlights, provide a short summary with citations to the new annotations.',
         targetType: 'attachment',
+        category: 'annotate',
         sortOrder: 210,
     },
 
@@ -101,6 +107,7 @@ export const BUILTIN_ACTIONS: Action[] = [
         title: 'How does this fit into my library?',
         text: 'How does this paper connect to the rest of my library? Does it support, challenge, or extend ideas in papers I already have? Write a short report that directly compares the paper to other research in my library including a comparison table. Use a Zotero note attached to the item.',
         targetType: 'attachment',
+        category: 'research',
         sortOrder: 220,
     },
 
@@ -117,6 +124,7 @@ export const BUILTIN_ACTIONS: Action[] = [
         title: 'Find key references from this paper',
         text: 'Identify the 3-4 most important references cited in this paper. Focus on the ones that are foundational to its argument or method. For each, explain why it matters to this paper and search my library to check if I already have it. For any I am missing, search for them outside of my library and cite them as external references.',
         targetType: 'attachment',
+        category: 'research',
         sortOrder: 230,
     },
 
@@ -165,6 +173,7 @@ export const BUILTIN_ACTIONS: Action[] = [
         title: 'What am I missing in this collection?',
         text: 'Analyze the papers in this collection and identify gaps in coverage. What subtopics, methods, or perspectives are underrepresented? Use external search for papers in these areas to fill the gaps and suggest up to 8 additions with a short explanation of why each is relevant. Always cite the most relevant papers as external references.',
         targetType: 'collection',
+        category: 'research',
         sortOrder: 400,
     },
 
@@ -192,6 +201,7 @@ export const BUILTIN_ACTIONS: Action[] = [
         title: 'Organize into thematic sub-collections',
         text: 'Organize every item in this collection into thematic sub-collections. Make sure to check for existing sub-collections first. Only create new sub-collections if necessary.',
         targetType: 'collection',
+        category: 'organize',
         sortOrder: 430,
     },
 
@@ -200,6 +210,7 @@ export const BUILTIN_ACTIONS: Action[] = [
         title: 'Tag all items in this collection',
         text: 'Analyze every item in this collection and assign appropriate tags to each item. Use my existing tags where they fit. Be consistent across items. Papers on similar subtopics should share tags.',
         targetType: 'collection',
+        category: 'organize',
         sortOrder: 440,
     },
     
@@ -212,6 +223,7 @@ export const BUILTIN_ACTIONS: Action[] = [
         title: 'Organize my recent additions',
         text: 'Look at items I\'ve added in the last 7 days. For each one, assign appropriate tags and add them to the appropriate collection. If no existing collection fits, suggest creating a new one.{{recent_items}}',
         targetType: 'global',
+        category: 'organize',
         sortOrder: 500,
     },
 
@@ -220,6 +232,7 @@ export const BUILTIN_ACTIONS: Action[] = [
         title: 'What\'s new in my research areas?',
         text: 'Look at my recent additions to identify what I\'m currently working on. Search for notable recent papers in these areas, prioritizing highly-cited and relevant results. Return up to 10 papers. Indicate which ones I already have.{{recent_items}}',
         targetType: 'global',
+        category: 'research',
         sortOrder: 510,
     },
 
@@ -237,6 +250,7 @@ export const BUILTIN_ACTIONS: Action[] = [
         title: 'Fix metadata for my recent additions',
         text: 'Look at items I\'ve added in the last 7 days. For each one, fix missing or incomplete metadata (DOI, title, abstract, authors).{{recent_items}}',
         targetType: 'global',
+        category: 'organize',
         sortOrder: 530,
     },
 
@@ -246,6 +260,7 @@ export const BUILTIN_ACTIONS: Action[] = [
         text: 'Find all items in my library that have no tags. Analyze each one and assign appropriate subject tags. Use existing tags from my library when they fit. Be consistent: similar papers should get similar tags.',
         // {{untagged_items}}
         targetType: 'global',
+        category: 'organize',
         sortOrder: 550,
     },
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { Action, ActionTargetType, TARGET_TYPE_LABELS, TARGET_TYPE_DESCRIPTIONS } from "../../types/actions";
+import { Action, ActionCategory, ActionTargetType, CATEGORY_LABELS, TARGET_TYPE_LABELS, TARGET_TYPE_DESCRIPTIONS } from "../../types/actions";
 import Button from "../ui/Button";
 import MenuButton from "../ui/MenuButton";
 import { MenuItem } from "../ui/menu/ContextMenu";
@@ -9,6 +9,7 @@ const MAX_TITLE_LENGTH = 45;
 const MAX_PROMPT_TEXT_LENGTH = 2250;
 
 const TARGET_TYPE_OPTIONS: ActionTargetType[] = ["items", "attachment", "note", "collection", "global"];
+const CATEGORY_OPTIONS: (ActionCategory | undefined)[] = [undefined, "research", "organize", "annotate"];
 
 interface ActionCardProps {
     action: Action;
@@ -35,16 +36,17 @@ const ActionCard: React.FC<ActionCardProps> = ({
     const [editTitle, setEditTitle] = useState(action.title);
     const [editText, setEditText] = useState(action.text);
     const [editTargetType, setEditTargetType] = useState<ActionTargetType>(action.targetType);
+    const [editCategory, setEditCategory] = useState<ActionCategory | undefined>(action.category);
     const textareaRef = useRef<HTMLTextAreaElement | null>(null);
     const titleInputRef = useRef<HTMLInputElement | null>(null);
     const cardRef = useRef<HTMLDivElement | null>(null);
     const previousActionRef = useRef(action);
 
     // Ref to hold latest draft values so the click-outside listener doesn't re-register on every keystroke
-    const draftRef = useRef({ editTitle, editText, editTargetType });
+    const draftRef = useRef({ editTitle, editText, editTargetType, editCategory });
     useEffect(() => {
-        draftRef.current = { editTitle, editText, editTargetType };
-    }, [editTitle, editText, editTargetType]);
+        draftRef.current = { editTitle, editText, editTargetType, editCategory };
+    }, [editTitle, editText, editTargetType, editCategory]);
 
     // Sync local draft state when action changes
     useEffect(() => {
@@ -53,9 +55,10 @@ const ActionCard: React.FC<ActionCardProps> = ({
             setEditTitle(action.title);
             setEditText(action.text);
             setEditTargetType(action.targetType);
+            setEditCategory(action.category);
         }
         previousActionRef.current = action;
-    }, [action, action.title, action.text, action.targetType, isEditing]);
+    }, [action, action.title, action.text, action.targetType, action.category, isEditing]);
 
     // Close edit mode on click outside — auto-saves, or removes if the action is empty
     useEffect(() => {
@@ -65,13 +68,13 @@ const ActionCard: React.FC<ActionCardProps> = ({
 
         const handleClickOutside = (e: MouseEvent) => {
             if (cardRef.current && !cardRef.current.contains(e.target as Node)) {
-                const { editTitle: title, editText: text, editTargetType: targetType } = draftRef.current;
+                const { editTitle: title, editText: text, editTargetType: targetType, editCategory: category } = draftRef.current;
                 // New action that's still empty — remove it
                 if (!title && !text && !action.title && !action.text) {
                     onRemove();
                 } else {
                     // Auto-save current draft
-                    onChange({ ...action, title, text, targetType });
+                    onChange({ ...action, title, text, targetType, category });
                 }
                 setIsEditing(false);
             }
@@ -107,6 +110,7 @@ const ActionCard: React.FC<ActionCardProps> = ({
             setEditTitle(action.title);
             setEditText(action.text);
             setEditTargetType(action.targetType);
+            setEditCategory(action.category);
             setIsEditing(true);
         }
     }, [isEditing, action]);
@@ -118,6 +122,7 @@ const ActionCard: React.FC<ActionCardProps> = ({
         setEditTitle(action.title);
         setEditText(action.text);
         setEditTargetType(action.targetType);
+        setEditCategory(action.category);
         setIsEditing(false);
     }, [action, onRemove]);
 
@@ -127,9 +132,10 @@ const ActionCard: React.FC<ActionCardProps> = ({
             title: editTitle,
             text: editText,
             targetType: editTargetType,
+            category: editCategory,
         });
         setIsEditing(false);
-    }, [action, editTitle, editText, editTargetType, onChange]);
+    }, [action, editTitle, editText, editTargetType, editCategory, onChange]);
 
     const targetTypeMenuItems: MenuItem[] = TARGET_TYPE_OPTIONS.map(tt => ({
         label: TARGET_TYPE_LABELS[tt],
@@ -139,6 +145,15 @@ const ActionCard: React.FC<ActionCardProps> = ({
                 <span className="text-sm font-color-primary">{TARGET_TYPE_LABELS[tt]}</span>
                 <span className="text-sm font-color-secondary">{TARGET_TYPE_DESCRIPTIONS[tt]}</span>
             </div>
+        )
+    }));
+
+    const categoryLabel = (cat: ActionCategory | undefined): string => cat ? CATEGORY_LABELS[cat] : "Uncategorized";
+    const categoryMenuItems: MenuItem[] = CATEGORY_OPTIONS.map(cat => ({
+        label: categoryLabel(cat),
+        onClick: () => setEditCategory(cat),
+        customContent: (
+            <span className="text-sm font-color-primary">{categoryLabel(cat)}</span>
         )
     }));
 
@@ -213,6 +228,15 @@ const ActionCard: React.FC<ActionCardProps> = ({
                     <span className="text-sm font-color-tertiary">
                         {TARGET_TYPE_DESCRIPTIONS[editTargetType]}
                     </span>
+                    <MenuButton
+                        menuItems={categoryMenuItems}
+                        buttonLabel={categoryLabel(editCategory)}
+                        variant="surface"
+                        rightIcon={ArrowDownIcon}
+                        className="action-target-badge"
+                        customContent={<span>{categoryLabel(editCategory)}</span>}
+                        style={{ padding: '2px 6px', fontSize: '13px' }}
+                    />
                     {isBuiltin && isOverridden && onResetToDefault && (
                         <Button
                             variant="ghost-secondary"

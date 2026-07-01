@@ -58,6 +58,8 @@ export const saveActionsAtom = atom(
                 if (action.text !== base.text) { override.text = action.text; hasChange = true; }
                 if ((action.id_model ?? undefined) !== (base.id_model ?? undefined)) { override.id_model = action.id_model; hasChange = true; }
                 if (action.targetType !== base.targetType) { override.targetType = action.targetType; hasChange = true; }
+                if ((action.category ?? undefined) !== (base.category ?? undefined)) { override.category = action.category; hasChange = true; }
+                if ((action.placeholder ?? undefined) !== (base.placeholder ?? undefined)) { override.placeholder = action.placeholder; hasChange = true; }
                 if ((action.sortOrder ?? undefined) !== (base.sortOrder ?? undefined)) { override.sortOrder = action.sortOrder; hasChange = true; }
                 if ((action.minItems ?? undefined) !== (base.minItems ?? undefined)) { override.minItems = action.minItems; hasChange = true; }
 
