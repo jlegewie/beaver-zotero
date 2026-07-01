@@ -37,12 +37,18 @@ export interface SlashCommandDescriptor {
     commandName: string;
     actionId: string;
     targetType?: ActionTargetType;
+    /** Human-readable action title, shown as a native hover tooltip. */
+    title?: string;
 }
 
 export type LexicalEditorInputHandle = {
     focus: () => void;
     clear: () => void;
     setText: (text: string, caretOffset?: number) => void;
+    /** Delete the last character of the editor content in place (no full
+     *  rebuild), leaving the caret at the end. Used to strip the `@` that opens
+     *  the attachment menu without flattening colored command nodes. */
+    deleteTrailingCharacter: () => void;
     selectRange: (start: number, end: number, options?: { skipFocus?: boolean }) => void;
     getSelectionOffset: () => number | null;
     /** Replace the trailing `/query` (length `queryLength`, excluding the `/`)
@@ -60,6 +66,11 @@ export interface LexicalEditorInputProps {
     ariaLabel?: string;
     disabled?: boolean;
     onKeyDown?: React.KeyboardEventHandler<HTMLDivElement>;
+    /**
+     * When true, the built-in caret-navigation handling is suspended so an open
+     * menu (slash / attachment) can own the arrow keys. See CaretNavigationPlugin.
+     */
+    suspendKeyboardNavigation?: boolean;
     /**
      * Callback fired with the contenteditable root element when it mounts /
      * unmounts. Useful for parents that keep an HTMLElement ref around (e.g.
@@ -109,6 +120,21 @@ const EditorApi = forwardRef<LexicalEditorInputHandle>(
                 },
                 setText: (text, caretOffset = text.length) => {
                     setPlainText(text, caretOffset);
+                },
+                deleteTrailingCharacter: () => {
+                    editor.update(() => {
+                        const root = $getRoot();
+                        const textNodes = root.getAllTextNodes();
+                        const last = textNodes[textNodes.length - 1];
+                        if (!last) return;
+                        const text = last.getTextContent();
+                        if (text.length <= 1) {
+                            last.remove();
+                        } else {
+                            last.setTextContent(text.slice(0, -1));
+                        }
+                        root.selectEnd();
+                    });
                 },
                 selectRange: (start, end, options) => {
                     editor.update(() => {
@@ -197,6 +223,7 @@ const EditorApi = forwardRef<LexicalEditorInputHandle>(
                             descriptor.commandName,
                             descriptor.actionId,
                             descriptor.targetType,
+                            descriptor.title,
                         );
                         const spaceNode = $createTextNode(' ');
                         const lastChild = root.getLastChild();
@@ -281,6 +308,55 @@ const PlainTextSync: React.FC<{
 };
 
 /**
+ * Reverts a SlashCommandNode back to plain text once the user edits its interior
+ * so it no longer reads "/<commandName>" - the moment a command is edited, it
+ * loses its color (like a hashtag losing its `#`).
+ *
+ * This is a one-way transform on purpose: we never auto-color arbitrary typed
+ * "/text" (commands are only ever created via the slash menu, which supplies the
+ * exact actionId/targetType/title), we only strip color on edit. Because the
+ * replacement is a plain TextNode and no TextNode transform is registered, there
+ * is no recursion.
+ */
+const SlashCommandRevertPlugin: React.FC = () => {
+    const [editor] = useLexicalComposerContext();
+    useEffect(() => {
+        return editor.registerNodeTransform(SlashCommandNode, (node) => {
+            const text = node.getTextContent();
+            if (text === `/${node.getCommandName()}`) return; // unchanged - keep colored
+
+            // Don't rip the node out mid-IME-composition.
+            if (editor.isComposing()) return;
+
+            // LexicalNode.replace() snaps the selection to the END of the new
+            // node, so capture any caret offsets pointing into this node first
+            // and restore them afterward (identical text length keeps them valid).
+            const selection = $getSelection();
+            let anchorOffset: number | null = null;
+            let focusOffset: number | null = null;
+            if ($isRangeSelection(selection)) {
+                if (selection.anchor.key === node.getKey()) anchorOffset = selection.anchor.offset;
+                if (selection.focus.key === node.getKey()) focusOffset = selection.focus.offset;
+            }
+
+            const plain = $createTextNode(text);
+            plain.setFormat(node.getFormat());
+            plain.setDetail(node.getDetail());
+            const newNode = node.replace(plain);
+
+            if (anchorOffset !== null || focusOffset !== null) {
+                const sel = $getSelection();
+                if ($isRangeSelection(sel)) {
+                    if (anchorOffset !== null) sel.anchor.set(newNode.getKey(), anchorOffset, 'text');
+                    if (focusOffset !== null) sel.focus.set(newNode.getKey(), focusOffset, 'text');
+                }
+            }
+        });
+    }, [editor]);
+    return null;
+};
+
+/**
  * Registers a KEY_ENTER handler so the host form can submit on Enter
  * (and newline on Shift+Enter, matching the textarea behavior).
  */
@@ -302,6 +378,127 @@ const SubmitOnEnterPlugin: React.FC<{ onSubmit: () => void }> = ({ onSubmit }) =
     return null;
 };
 
+/**
+ * Caret navigation for the contenteditable.
+ *
+ * Beaver's editor lives directly in Zotero's chrome (XUL) document, where the
+ * native focus manager treats un-consumed navigation keys (arrows / Home / End /
+ * Page) as *focus movement* and pulls focus out of the editor. We therefore
+ * consume every caret-navigation key here (preventDefault stops the focus
+ * theft) and move the caret ourselves via the Selection API; Lexical
+ * then syncs its model from the resulting selectionchange.
+ *
+ * Mappings follow the host platform: on macOS Cmd = line/document boundary and
+ * Option = word / line-boundary walk; elsewhere Ctrl = word and Home/End =
+ * line/document boundary. Vertical document-boundary and paragraph movement is
+ * done by hand because Gecko's Selection.modify() silently ignores the
+ * 'documentboundary' and 'paragraph' granularities.
+ */
+const CaretNavigationPlugin: React.FC<{ suspendedRef: React.MutableRefObject<boolean> }> = ({ suspendedRef }) => {
+    const [editor] = useLexicalComposerContext();
+    useEffect(() => {
+        const handler = (e: KeyboardEvent) => {
+            // While a menu (slash / attachment) is open, let it own the keys.
+            if (suspendedRef.current) return;
+            const key = e.key;
+            const isNavKey =
+                key === 'ArrowLeft' || key === 'ArrowRight' ||
+                key === 'ArrowUp' || key === 'ArrowDown' ||
+                key === 'Home' || key === 'End' ||
+                key === 'PageUp' || key === 'PageDown';
+            if (!isNavKey) return;
+
+            const root = e.currentTarget as HTMLElement;
+            const win = root.ownerDocument.defaultView;
+            if (!win) return;
+            const sel = win.getSelection();
+            if (!sel) return;
+
+            const isMac = Zotero.isMac;
+            const shift = e.shiftKey;
+            const alter = shift ? 'extend' : 'move';
+
+            const modify = (dir: string, gran: string) => {
+                try {
+                    (sel as unknown as { modify: (a: string, d: string, g: string) => void }).modify(alter, dir, gran);
+                } catch { /* Selection.modify is best-effort */ }
+            };
+            // Jump to the very start/end of the editable content - used for the
+            // document-boundary moves Gecko's Selection.modify() can't perform.
+            const docEdge = (forward: boolean) => {
+                const walker = root.ownerDocument.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+                let first: Text | null = null;
+                let last: Text | null = null;
+                let cur: Node | null;
+                while ((cur = walker.nextNode())) {
+                    if (!first) first = cur as Text;
+                    last = cur as Text;
+                }
+                let node: Node = root;
+                let offset = forward ? root.childNodes.length : 0;
+                if (forward && last) { node = last; offset = last.length; }
+                else if (!forward && first) { node = first; offset = 0; }
+                try {
+                    if (shift) sel.extend(node, offset);
+                    else sel.collapse(node, offset);
+                } catch { /* boundary point may be unresolvable in an empty editor */ }
+            };
+            // Walk line boundaries: to this line's boundary, or - if already
+            // there - one line up/down and to that line's boundary.
+            const lineWalk = (forward: boolean) => {
+                const vdir = forward ? 'forward' : 'backward';
+                const bn = sel.focusNode;
+                const bo = sel.focusOffset;
+                modify(vdir, 'lineboundary');
+                if (sel.focusNode === bn && sel.focusOffset === bo) {
+                    modify(vdir, 'line');
+                    modify(vdir, 'lineboundary');
+                }
+            };
+
+            switch (key) {
+                case 'ArrowLeft':
+                case 'ArrowRight': {
+                    const fwd = key === 'ArrowRight';
+                    if (isMac && e.metaKey) modify(fwd ? 'forward' : 'backward', 'lineboundary');
+                    else if ((isMac && e.altKey) || (!isMac && e.ctrlKey)) modify(fwd ? 'right' : 'left', 'word');
+                    else modify(fwd ? 'right' : 'left', 'character');
+                    break;
+                }
+                case 'ArrowUp':
+                case 'ArrowDown': {
+                    const fwd = key === 'ArrowDown';
+                    if (isMac && e.metaKey) docEdge(fwd);
+                    else if (isMac && e.altKey) lineWalk(fwd);
+                    else modify(fwd ? 'forward' : 'backward', 'line');
+                    break;
+                }
+                case 'Home':
+                    if (isMac || e.ctrlKey) docEdge(false);
+                    else modify('backward', 'lineboundary');
+                    break;
+                case 'End':
+                    if (isMac || e.ctrlKey) docEdge(true);
+                    else modify('forward', 'lineboundary');
+                    break;
+                case 'PageUp':
+                    docEdge(false);
+                    break;
+                case 'PageDown':
+                    docEdge(true);
+                    break;
+            }
+            e.preventDefault();
+        };
+
+        return editor.registerRootListener((rootElement, prevRootElement) => {
+            if (prevRootElement) prevRootElement.removeEventListener('keydown', handler, true);
+            if (rootElement) rootElement.addEventListener('keydown', handler, true);
+        });
+    }, [editor, suspendedRef]);
+    return null;
+};
+
 // Keep the composer configured as a plain-text editor. Menu orchestration stays
 // in InputArea so the source and slash menus share the same behavior as the
 // rest of the app.
@@ -318,10 +515,15 @@ const editorConfig = {
 
 export const LexicalEditorInput = forwardRef<LexicalEditorInputHandle, LexicalEditorInputProps>(
     function LexicalEditorInput(
-        { value, onChange, onSubmit, placeholder, ariaLabel, disabled = false, onKeyDown, onContentEditableRef },
+        { value, onChange, onSubmit, placeholder, ariaLabel, disabled = false, onKeyDown, suspendKeyboardNavigation = false, onContentEditableRef },
         ref,
     ) {
         const contentEditableRef = useRef<HTMLDivElement | null>(null);
+
+        // Mirror the latest suspend flag into a ref so CaretNavigationPlugin can
+        // read it without re-registering its keydown listener on every change.
+        const suspendNavRef = useRef(false);
+        suspendNavRef.current = suspendKeyboardNavigation;
 
         // The ContentEditable ref callback MUST keep a stable identity across
         // renders. Lexical memoizes its root-element ref on this callback, so a
@@ -371,6 +573,8 @@ export const LexicalEditorInput = forwardRef<LexicalEditorInputHandle, LexicalEd
                     </div>
                     <HistoryPlugin />
                     <PlainTextSync value={value} onChange={onChange} />
+                    <SlashCommandRevertPlugin />
+                    <CaretNavigationPlugin suspendedRef={suspendNavRef} />
                     <SubmitOnEnterPlugin onSubmit={onSubmit} />
                     <EditorApi ref={ref} />
                 </div>

@@ -264,7 +264,9 @@ const InputArea: React.FC<InputAreaProps> = ({
             }
             setIsAddAttachmentMenuOpen(true);
             setMessageContent(nextValue);
-            editorHandleRef.current?.setText(nextValue, nextValue.length);
+            // Delete just the trailing `@` in place rather than rebuilding the
+            // editor from the string, so any colored /command nodes survive.
+            editorHandleRef.current?.deleteTrailingCharacter();
             sourceMenuSelectionRestoreRef.current = { offset: nextValue.length, skipFocus: true };
             return;
         }
@@ -524,6 +526,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                         ariaLabel="Message Beaver"
                         disabled={isAwaitingApproval}
                         onKeyDown={handleEditorKeyDown}
+                        suspendKeyboardNavigation={isSlashMenuOpen || isAddAttachmentMenuOpen}
                         onContentEditableRef={(el) => {
                             // Forward the Lexical content-editable element to the
                             // parent's inputRef so legacy `.focus()` callers work.

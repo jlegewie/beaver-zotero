@@ -553,9 +553,11 @@
     margin: 0 1px;
 }
 
-/* Slash-command pill - styled as a colored text token. */
+/* Slash-command - editable colored text (behaves like normal text, so it must
+   stay `display: inline`; inline-block breaks caret placement between characters
+   in Gecko). Horizontal padding, background and radius still render inline. */
 [id^="beaver-pane-"] .beaver-slash-command {
-    display: inline-block;
+    display: inline;
     padding: 0 4px;
     margin: 0 1px;
     border-radius: 4px;

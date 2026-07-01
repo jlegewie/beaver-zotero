@@ -48,7 +48,7 @@ export function useSlashMenu(
         slashQueryRef.current = '';
 
         insertSlashCommand?.(
-            { commandName: toSlashToken(action.title), actionId: action.id, targetType: groupTargetType },
+            { commandName: toSlashToken(action.title), actionId: action.id, targetType: groupTargetType, title: action.title },
             queryLength,
         );
         markActionUsed(action.id);
