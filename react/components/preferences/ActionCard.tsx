@@ -345,7 +345,10 @@ const ActionCard: React.FC<ActionCardProps> = ({
                                 variant="outline"
                                 icon={UndoIcon}
                                 style={{ padding: "3px 8px" }}
-                                onClick={(e) => { e.stopPropagation(); onResetToDefault(); setIsEditing(false); }}
+                                // Reset persists immediately (the override is cleared) and
+                                // re-merges the default action; the draft-sync effect refreshes
+                                // the fields, so we stay in edit mode showing the restored values.
+                                onClick={(e) => { e.stopPropagation(); onResetToDefault(); }}
                             >
                                 Reset to default
                             </Button>
