@@ -1,10 +1,9 @@
 import React from "react";
 import { useAtomValue } from "jotai";
 import Button from "./ui/Button";
-import IconButton from "./ui/IconButton";
 import Icon from "./icons/Icon";
 import { CSSIcon, CSSItemTypeIcon } from "./icons/zotero";
-import { AlertIcon, SettingsIcon } from "./icons/icons";
+import { AlertIcon, SettingsIcon, ArrowUpRightIcon } from "./icons/icons";
 import { Action, ActionCategory, TARGET_TYPE_LABELS } from "../types/actions";
 import { actionsForContextAtom, actionContextAtom } from "../atoms/actions";
 import { searchableLibraryIdsAtom } from "../atoms/profile";
@@ -20,12 +19,13 @@ interface CategoryPanelProps {
 }
 
 /** Section header — the selected target (with its item icon) or "Library-wide". */
-const SectionHeader: React.FC<{ label: string; iconInfo?: GroupIconInfo }> = ({ label, iconInfo }) => (
+const SectionHeader: React.FC<{ label: string; iconInfo?: GroupIconInfo, className?: string }> = ({ label, iconInfo, className }) => (
     <div
-        className="display-flex flex-row items-center gap-1 min-w-0 font-color-primary opacity-90"
+        className={`display-flex flex-row items-center gap-1 min-w-0 font-color-primary opacity-90 ${className}`}
         style={{
             fontSize: '0.925rem',
             padding: iconInfo ? '3px' : '6px',
+            paddingTop: '6px',
         }}
     >
         {iconInfo && (
@@ -67,6 +67,7 @@ const CategoryPanel: React.FC<CategoryPanelProps> = ({ category, style }) => {
                 disabled={!isLibrarySupported || isBusy}
                 className="w-full justify-between"
                 style={{ padding: '6px 6px' }}
+                rightIcon={ArrowUpRightIcon}
             >
                 <span className="text-base truncate">{action.title}</span>
             </Button>
@@ -91,7 +92,7 @@ const CategoryPanel: React.FC<CategoryPanelProps> = ({ category, style }) => {
             )}
 
             {targetActions.length > 0 && (
-                <div className="display-flex flex-col gap-1">
+                <div className="display-flex flex-col gap-1 border-top-quinary">
                     <SectionHeader
                         label={active?.label ?? (active ? TARGET_TYPE_LABELS[active.targetType] : '')}
                         iconInfo={active?.iconInfo}
@@ -101,7 +102,7 @@ const CategoryPanel: React.FC<CategoryPanelProps> = ({ category, style }) => {
             )}
 
             {/* Footer — edit actions + not-synced warning */}
-            <div className="display-flex flex-row items-center gap-2 mt-2 pt-2 border-top-quinary">
+            <div className="display-flex flex-row items-center gap-2 pt-3 border-top-quinary">
                 <div className="flex-1" />
                 <Button
                     variant="outline"
