@@ -2,14 +2,49 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Action, ActionCategory, ActionTargetType, CATEGORY_LABELS, TARGET_TYPE_LABELS, TARGET_TYPE_DESCRIPTIONS } from "../../types/actions";
 import Button from "../ui/Button";
 import MenuButton from "../ui/MenuButton";
+import Tooltip from "../ui/Tooltip";
 import { MenuItem } from "../ui/menu/ContextMenu";
-import { ArrowDownIcon } from "../icons/icons";
+import {
+    Icon,
+    ArrowDownIcon,
+    ZapIcon,
+    BookSearchIcon,
+    LayersIcon,
+    HighlighterIcon,
+    InformationCircleIcon,
+    DeleteIcon,
+    UndoIcon,
+} from "../icons/icons";
 
 const MAX_TITLE_LENGTH = 45;
 const MAX_PROMPT_TEXT_LENGTH = 2250;
 
 const TARGET_TYPE_OPTIONS: ActionTargetType[] = ["items", "attachment", "note", "collection", "global"];
 const CATEGORY_OPTIONS: (ActionCategory | undefined)[] = [undefined, "research", "organize", "annotate"];
+
+// Category icons mirror the homepage launcher so the picker matches what users
+// see there. Uncategorized actions fall under the general "Actions" bucket (Zap).
+const CATEGORY_ICONS: Record<ActionCategory, React.ComponentType<React.SVGProps<SVGSVGElement>>> = {
+    research: BookSearchIcon,
+    organize: LayersIcon,
+    annotate: HighlighterIcon,
+};
+const categoryIcon = (cat: ActionCategory | undefined): React.ComponentType<React.SVGProps<SVGSVGElement>> =>
+    cat ? CATEGORY_ICONS[cat] : ZapIcon;
+
+const categoryLabel = (cat: ActionCategory | undefined): string => (cat ? CATEGORY_LABELS[cat] : "Uncategorized");
+const categoryHelp = (cat: ActionCategory | undefined): string =>
+    cat ? `Shown under the ${CATEGORY_LABELS[cat]} group.` : "Shown in the general Actions group.";
+
+/** Field heading with a hover-info circle, matching the two-column edit layout. */
+const FieldLabel: React.FC<{ label: string; tooltip: string }> = ({ label, tooltip }) => (
+    <div className="action-field-label text-base font-color-primary font-semibold">
+        <span>{label}</span>
+        <Tooltip content={tooltip} width="220px">
+            <Icon icon={InformationCircleIcon} size={13} className="font-color-tertiary" />
+        </Tooltip>
+    </div>
+);
 
 interface ActionCardProps {
     action: Action;
@@ -148,12 +183,14 @@ const ActionCard: React.FC<ActionCardProps> = ({
         )
     }));
 
-    const categoryLabel = (cat: ActionCategory | undefined): string => cat ? CATEGORY_LABELS[cat] : "Uncategorized";
     const categoryMenuItems: MenuItem[] = CATEGORY_OPTIONS.map(cat => ({
         label: categoryLabel(cat),
         onClick: () => setEditCategory(cat),
         customContent: (
-            <span className="text-sm font-color-primary">{categoryLabel(cat)}</span>
+            <div className="display-flex flex-row items-center gap-2 w-full min-w-0">
+                <Icon icon={categoryIcon(cat)} size={14} className="font-color-secondary flex-shrink-0" />
+                <span className="flex-1 truncate text-sm font-color-primary">{categoryLabel(cat)}</span>
+            </div>
         )
     }));
 
@@ -187,91 +224,17 @@ const ActionCard: React.FC<ActionCardProps> = ({
     // --- Edit mode ---
     return (
         <div ref={cardRef} className={`action-card action-card-editing ${hasBorder ? 'border-top-popup' : ''}`}>
-            <input
-                ref={titleInputRef}
-                type="text"
-                value={editTitle}
-                onChange={(e) => setEditTitle(e.target.value)}
-                placeholder="Action title..."
-                aria-label="Action title"
-                maxLength={MAX_TITLE_LENGTH}
-                className="chat-input text-base font-medium font-color-primary action-edit-title font-medium"
-            />
-
-            <textarea
-                ref={textareaRef}
-                value={editText}
-                onChange={(e) => setEditText(e.target.value)}
-                onInput={(e) => {
-                    e.currentTarget.style.height = "auto";
-                    e.currentTarget.style.height = `${e.currentTarget.scrollHeight}px`;
-                }}
-                placeholder="Enter prompt text..."
-                aria-label="Action prompt text"
-                maxLength={MAX_PROMPT_TEXT_LENGTH}
-                className="chat-input custom-prompt-edit-textarea text-base"
-                rows={2}
-            />
-
-            <div className="display-flex flex-row items-center justify-between mt-2">
-                <div className="display-flex flex-row items-center gap-3">
-                    <MenuButton
-                        menuItems={targetTypeMenuItems}
-                        buttonLabel={TARGET_TYPE_LABELS[editTargetType]}
-                        variant="surface"
-                        rightIcon={ArrowDownIcon}
-                        ariaLabel="Select target type"
-                        className="action-target-badge"
-                        dataType={editTargetType}
-                        style={{ padding: '3px 8px' }}
-                    />
-                    <span className="text-sm font-color-tertiary">
-                        {TARGET_TYPE_DESCRIPTIONS[editTargetType]}
-                    </span>
-                    <MenuButton
-                        menuItems={categoryMenuItems}
-                        buttonLabel={categoryLabel(editCategory)}
-                        variant="surface"
-                        rightIcon={ArrowDownIcon}
-                        ariaLabel="Select category"
-                        className="action-target-badge"
-                        style={{ padding: '3px 8px' }}
-                    />
-                    {isBuiltin && isOverridden && onResetToDefault && (
-                        <Button
-                            variant="ghost-secondary"
-                            style={{ padding: "2px 8px" }}
-                            onClick={(e) => { e.stopPropagation(); onResetToDefault(); setIsEditing(false); }}
-                        >
-                            <span className="text-xs">Reset to Default</span>
-                        </Button>
-                    )}
+            {/* Header bar — distinct background, no leading icon, primary actions on the right */}
+            <div className="action-edit-header">
+                <div className="text-base font-color-secondary truncate min-w-0">
+                    Editing action:{' '}
+                    <span className="font-semibold font-color-primary">{editTitle.trim() || "New action"}</span>
                 </div>
-
-                <div className="display-flex flex-row items-center gap-3">
-                    {isBuiltin ? (
-                        onHide && (
-                            <Button
-                                variant="ghost-secondary"
-                                style={{ padding: "2px 8px" }}
-                                onClick={(e) => { e.stopPropagation(); onHide(); setIsEditing(false); }}
-                            >
-                                <span className="text-xs">Hide</span>
-                            </Button>
-                        )
-                    ) : (
-                        <Button
-                            variant="ghost-secondary"
-                            style={{ padding: "2px 8px" }}
-                            onClick={() => { onRemove(); setIsEditing(false); }}
-                        >
-                            <span className="text-xs">Delete</span>
-                        </Button>
-                    )}
+                <div className="display-flex flex-row items-center gap-2 flex-shrink-0">
                     <Button
                         type="button"
-                        variant="ghost-secondary"
-                        style={{ padding: "2px 8px" }}
+                        variant="outline"
+                        style={{ padding: '3px 12px' }}
                         onClick={handleCancel}
                     >
                         Cancel
@@ -279,10 +242,123 @@ const ActionCard: React.FC<ActionCardProps> = ({
                     <Button
                         type="button"
                         variant="solid"
-                        style={{ padding: "2px 8px" }}
+                        style={{ padding: '3px 12px' }}
                         onClick={handleSave}
                     >
                         Save
+                    </Button>
+                </div>
+            </div>
+
+            <div className="action-edit-body">
+                {/* Name */}
+                <div className="action-field-label text-base font-color-primary font-semibold">Name</div>
+                <div className="action-field-box">
+                    <input
+                        ref={titleInputRef}
+                        type="text"
+                        value={editTitle}
+                        onChange={(e) => setEditTitle(e.target.value)}
+                        placeholder="Action name..."
+                        aria-label="Action name"
+                        maxLength={MAX_TITLE_LENGTH}
+                        className="action-field-control text-base font-medium"
+                    />
+                </div>
+
+                {/* Prompt */}
+                <div className="action-field-label text-base font-color-primary font-semibold mt-3">Prompt</div>
+                <div className="action-field-box">
+                    <textarea
+                        ref={textareaRef}
+                        value={editText}
+                        onChange={(e) => setEditText(e.target.value)}
+                        onInput={(e) => {
+                            e.currentTarget.style.height = "auto";
+                            e.currentTarget.style.height = `${e.currentTarget.scrollHeight}px`;
+                        }}
+                        placeholder="Enter prompt text..."
+                        aria-label="Action prompt text"
+                        maxLength={MAX_PROMPT_TEXT_LENGTH}
+                        className="action-field-control action-edit-textarea text-base"
+                        rows={3}
+                    />
+                </div>
+
+                {/* Applies to + Category — two outlined pickers side by side */}
+                <div className="display-flex flex-row gap-4 mt-3">
+                    <div className="display-flex flex-col flex-1 min-w-0">
+                        <FieldLabel
+                            label="Applies to"
+                            tooltip="Controls when this action shows up, based on your current Zotero selection."
+                        />
+                        <MenuButton
+                            menuItems={targetTypeMenuItems}
+                            variant="outline"
+                            ariaLabel="Select what this action applies to"
+                            className="action-field-select"
+                            customContent={
+                                <div className="display-flex flex-row items-center gap-2 w-full min-w-0">
+                                    <span className="flex-1 truncate text-base font-color-primary">{TARGET_TYPE_LABELS[editTargetType]}</span>
+                                    <Icon icon={ArrowDownIcon} size={14} className="font-color-tertiary flex-shrink-0" />
+                                </div>
+                            }
+                        />
+                        <div className="action-field-help text-sm font-color-tertiary">
+                            {TARGET_TYPE_DESCRIPTIONS[editTargetType]}
+                        </div>
+                    </div>
+
+                    <div className="display-flex flex-col flex-1 min-w-0">
+                        <FieldLabel
+                            label="Category"
+                            tooltip="Groups this action on the Beaver homepage launcher."
+                        />
+                        <MenuButton
+                            menuItems={categoryMenuItems}
+                            variant="outline"
+                            ariaLabel="Select category"
+                            className="action-field-select"
+                            customContent={
+                                <div className="display-flex flex-row items-center gap-2 w-full min-w-0">
+                                    <Icon icon={categoryIcon(editCategory)} size={14} className="font-color-secondary flex-shrink-0" />
+                                    <span className="flex-1 truncate text-base font-color-primary">{categoryLabel(editCategory)}</span>
+                                    <Icon icon={ArrowDownIcon} size={14} className="font-color-tertiary flex-shrink-0" />
+                                </div>
+                            }
+                        />
+                        <div className="action-field-help text-sm font-color-tertiary">
+                            {categoryHelp(editCategory)}
+                        </div>
+                    </div>
+                </div>
+
+                {/* Secondary actions — Delete always sits bottom-left. For a built-in,
+                    "Delete" hides it (built-ins are defined in code and can't be truly
+                    removed); it stays restorable from the Deleted actions list. Reset to
+                    default (edited built-ins only) sits bottom-right. */}
+                <div className="display-flex flex-row flex-1 items-center gap-2 px-2 pt-2">
+                    <div className="flex-1"></div>
+                    {isBuiltin && isOverridden && onResetToDefault && (
+                        <>
+                            <Button
+                                variant="outline"
+                                icon={UndoIcon}
+                                style={{ padding: "3px 8px" }}
+                                onClick={(e) => { e.stopPropagation(); onResetToDefault(); setIsEditing(false); }}
+                            >
+                                Reset to default
+                            </Button>
+                        </>
+                    )}
+                    <Button
+                        variant="error"
+                        icon={DeleteIcon}
+                        iconClassName="font-color-red"
+                        style={{ padding: "3px 8px" }}
+                        onClick={(e) => { e.stopPropagation(); (isBuiltin ? onHide : onRemove)?.(); setIsEditing(false); }}
+                    >
+                        <span className="font-color-red">Delete</span>
                     </Button>
                 </div>
             </div>

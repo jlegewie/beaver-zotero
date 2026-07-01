@@ -246,11 +246,12 @@ const ActionsPreferenceSection: React.FC = () => {
                 </SettingsGroup>
             )}
 
-            {/* Hidden built-ins restore section */}
+            {/* Deleted built-ins restore section. Built-ins can't be truly removed, so
+                "Delete" hides them; they land here and can be restored. */}
             {hiddenBuiltins.length > 0 && (
                 <details className="mt-4">
                     <summary className="text-sm font-color-tertiary cursor-pointer">
-                        Hidden actions ({hiddenBuiltins.length})
+                        Deleted actions ({hiddenBuiltins.length})
                     </summary>
                     <div className="display-flex flex-col gap-2 mt-2">
                         {hiddenBuiltins.map(action => (
