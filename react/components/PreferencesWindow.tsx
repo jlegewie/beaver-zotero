@@ -32,8 +32,8 @@ const PreferencesWindow: React.FC<PreferencesWindowProps> = ({ initialTab, initi
         // actions category filter) on an already-open window
         (Zotero as any).__beaverOpenPreferencesTab = (tab: PreferencePageTab, actionsCategoryFilter?: ActionCategoryFilter) => {
             setActiveTab(tab);
-            if (actionsCategoryFilter) {
-                setPendingActionsCategoryFilter({ filter: actionsCategoryFilter, requestId: Date.now() });
+            if (tab === 'actions') {
+                setPendingActionsCategoryFilter({ filter: actionsCategoryFilter ?? null, requestId: Date.now() });
             }
         };
 

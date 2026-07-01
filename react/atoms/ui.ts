@@ -14,13 +14,13 @@ export const activePreferencePageTabAtom = atom<PreferencePageTab>('general');
 export const isPreferencePageVisibleAtom = atom(false);
 
 /**
- * A one-shot request to pre-filter the Actions preferences list to a category —
- * e.g. from the homepage "Edit Actions" button. `requestId` makes every request
+ * A one-shot request to set the Actions preferences category filter. A null
+ * filter explicitly clears category filtering. `requestId` makes every request
  * distinct so re-requesting the same category still re-triggers the consumer's
  * effect. `ActionsPreferenceSection` applies it once, then resets this to null.
  */
 export interface ActionsCategoryFilterRequest {
-    filter: ActionCategoryFilter;
+    filter: ActionCategoryFilter | null;
     requestId: number;
 }
 export const pendingActionsCategoryFilterAtom = atom<ActionsCategoryFilterRequest | null>(null);
