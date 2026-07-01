@@ -58,6 +58,9 @@ const CategoryPanel: React.FC<CategoryPanelProps> = ({ category, style }) => {
     const active = getActiveTarget(ctx);
     const { targetActions, globalActions } = splitCategoryActions(contextActions, category, active?.targetType ?? null);
 
+    // The uncategorized "Actions" bucket maps to the "uncategorized" filter value.
+    const categoryFilter = category ?? "uncategorized";
+
     const renderAction = (action: Action) => (
         // <div className="border-bottom-quinary">
             <Button
@@ -106,7 +109,7 @@ const CategoryPanel: React.FC<CategoryPanelProps> = ({ category, style }) => {
                 <div className="flex-1" />
                 <Button
                     variant="outline"
-                    onClick={() => openPreferencesWindow('actions')}
+                    onClick={() => openPreferencesWindow('actions', categoryFilter)}
                     rightIcon={SettingsIcon}
                     ariaLabel="Edit actions"
                     title="Edit actions"

@@ -1,24 +1,22 @@
-import React, { useState, useCallback, useMemo } from "react";
-import { useAtomValue } from 'jotai';
+import React, { useState, useCallback, useEffect, useMemo } from "react";
+import { useAtom, useAtomValue } from 'jotai';
 import { Icon, FilterIcon, TickIcon, ArrowDownIcon } from '../icons/icons';
 import PlusSignIcon from '../icons/PlusSignIcon';
 import Button from "../ui/Button";
 import { useSetAtom } from 'jotai';
-import { Action, ActionCategory, ActionTargetType, generateActionId, TARGET_TYPE_LABELS, TARGET_TYPE_DESCRIPTIONS, CATEGORY_LABELS } from "../../types/actions";
+import { Action, ActionCategory, ActionCategoryFilter, ActionTargetType, generateActionId, TARGET_TYPE_LABELS, TARGET_TYPE_DESCRIPTIONS, CATEGORY_LABELS } from "../../types/actions";
 import { actionsAtom, saveActionsAtom, hideActionAtom, restoreActionAtom, resetActionToDefaultAtom } from "../../atoms/actions";
+import { pendingActionsCategoryFilterAtom } from "../../atoms/ui";
 import { isBuiltinAction, getActionCustomizations, getHiddenBuiltinActions, importFromOldCustomPrompts, hasOldCustomPrompts } from "../../types/actionStorage";
 import ActionCard from "./ActionCard";
 import MenuButton from "../ui/MenuButton";
 import { MenuItem } from "../ui/menu/ContextMenu";
-import {SettingsGroup, SectionLabel, DocLink} from "./components/SettingsElements";
+import {SettingsGroup, SectionLabel, DocLink, SectionHeader} from "./components/SettingsElements";
 
 // Filter dimensions. `targetType` is what an action binds to; `category` is the
 // kind of work it is (both are shown on each action card).
 const TARGET_FILTER_OPTIONS: ActionTargetType[] = ["items", "attachment", "note", "collection", "global"];
 const CATEGORY_FILTER_OPTIONS: ActionCategory[] = ["research", "organize", "annotate"];
-
-/** Category filter value — a real category, the "no category" bucket, or `null` for all. */
-type CategoryFilterValue = ActionCategory | "uncategorized";
 
 /** A radio-style filter menu row with a leading check column for the active option. */
 const filterMenuItem = (label: string, isSelected: boolean, onSelect: () => void): MenuItem => ({
@@ -47,13 +45,23 @@ const ActionsPreferenceSection: React.FC = () => {
 
     // --- Filter state (null = show all for that dimension) ---
     const [targetFilter, setTargetFilter] = useState<ActionTargetType | null>(null);
-    const [categoryFilter, setCategoryFilter] = useState<CategoryFilterValue | null>(null);
+    const [categoryFilter, setCategoryFilter] = useState<ActionCategoryFilter | null>(null);
     const isFiltering = targetFilter !== null || categoryFilter !== null;
 
     const clearFilters = useCallback(() => {
         setTargetFilter(null);
         setCategoryFilter(null);
     }, []);
+
+    // --- Incoming category-filter request (e.g. from the homepage "Edit Actions"
+    // button) — apply it once, then clear it so it doesn't reapply on remount ---
+    const [pendingCategoryFilter, setPendingCategoryFilter] = useAtom(pendingActionsCategoryFilterAtom);
+    useEffect(() => {
+        if (!pendingCategoryFilter) return;
+        setTargetFilter(null);
+        setCategoryFilter(pendingCategoryFilter.filter);
+        setPendingCategoryFilter(null);
+    }, [pendingCategoryFilter, setPendingCategoryFilter]);
 
     // --- Action Change Handler ---
     const handleActionChange = useCallback((updatedAction: Action) => {
@@ -107,9 +115,9 @@ const ActionsPreferenceSection: React.FC = () => {
         filterMenuItem('Uncategorized', categoryFilter === 'uncategorized', () => setCategoryFilter('uncategorized')),
     ], [categoryFilter]);
 
-    const targetButtonLabel = targetFilter ? TARGET_TYPE_LABELS[targetFilter] : 'Target';
+    const targetButtonLabel = targetFilter ? TARGET_TYPE_LABELS[targetFilter] : 'All targets';
     const categoryButtonLabel = categoryFilter === null
-        ? 'Category'
+        ? 'All categories'
         : categoryFilter === 'uncategorized'
             ? 'Uncategorized'
             : CATEGORY_LABELS[categoryFilter];
@@ -141,6 +149,16 @@ const ActionsPreferenceSection: React.FC = () => {
 
     // --- Add Action Menu Items ---
     const addActionMenuItems: MenuItem[] = useMemo(() => [
+        {
+            label: TARGET_TYPE_LABELS.global,
+            onClick: () => handleAddAction('global'),
+            customContent: (
+                <div className="display-flex flex-col">
+                    <span className="text-sm font-color-primary">{TARGET_TYPE_LABELS.global}</span>
+                    <span className="text-sm font-color-tertiary">{TARGET_TYPE_DESCRIPTIONS.global}</span>
+                </div>
+            ),
+        },
         {
             label: TARGET_TYPE_LABELS.items,
             onClick: () => handleAddAction('items'),
@@ -181,29 +199,20 @@ const ActionsPreferenceSection: React.FC = () => {
                 </div>
             ),
         },
-        {
-            label: TARGET_TYPE_LABELS.global,
-            onClick: () => handleAddAction('global'),
-            customContent: (
-                <div className="display-flex flex-col">
-                    <span className="text-sm font-color-primary">{TARGET_TYPE_LABELS.global}</span>
-                    <span className="text-sm font-color-tertiary">{TARGET_TYPE_DESCRIPTIONS.global}</span>
-                </div>
-            ),
-        },
     ], [handleAddAction]);
 
     return (
         <>
             <div className="display-flex flex-row items-end justify-between">
-                <SectionLabel>Actions</SectionLabel>
+                <SectionHeader>Actions</SectionHeader>
                 <MenuButton
                     menuItems={addActionMenuItems}
                     buttonLabel="Add Action"
-                    variant="outline"
+                    variant="solid"
                     className="text-base mb-15"
                     width="220px"
                     icon={PlusSignIcon}
+                    style={{ padding: '4px 6px' }}
                 />
             </div>
             <div className="text-base font-color-secondary mb-2" style={{ paddingLeft: '2px' }}>
@@ -214,8 +223,11 @@ const ActionsPreferenceSection: React.FC = () => {
             </div>
 
             {/* Filter toolbar — narrow the list by target and/or category */}
-            <div className="display-flex flex-row flex-1 items-center gap-2 flex-wrap mb-15" style={{ paddingLeft: '2px' }}>
-                <Icon icon={FilterIcon} size={14} className="font-color-primary flex-shrink-0" />
+            <div className="display-flex flex-row flex-1 items-center gap-3 flex-wrap mb-15 mt-4" style={{ paddingLeft: '2px' }}>
+                <div className="display-flex flex-row items-center gap-1 p-1">
+                    {/* <Icon icon={FilterIcon} size={14} className="font-color-primary flex-shrink-0" /> */}
+                    <span className="text-base font-color-secondary">Show:</span>
+                </div>
                 <MenuButton
                     menuItems={targetFilterItems}
                     buttonLabel={targetButtonLabel}
@@ -238,17 +250,17 @@ const ActionsPreferenceSection: React.FC = () => {
                 />
                 {isFiltering && (
                     <>
-                        <div className="flex-1"></div>
-                        <span className="text-sm font-color-tertiary">
-                            {filteredActions.length} of {actions.length}
-                        </span>
                         <Button
                             variant="ghost-secondary"
                             style={{ padding: "3px 8px" }}
                             onClick={clearFilters}
                         >
-                            <span className="text-xs">Clear</span>
+                            Clear
                         </Button>
+                        <div className="flex-1"></div>
+                        <span className="text-sm font-color-secondary">
+                            {filteredActions.length} of {actions.length}
+                        </span>
                     </>
                 )}
             </div>

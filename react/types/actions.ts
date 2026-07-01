@@ -19,6 +19,9 @@ export type ActionTargetType = "items" | "attachment" | "note" | "collection" | 
  */
 export type ActionCategory = "research" | "organize" | "annotate";
 
+/** Category filter for the Actions preferences list — a skill category, or the "no category" bucket. */
+export type ActionCategoryFilter = ActionCategory | "uncategorized";
+
 export interface Action {
     id: string;                    // "builtin-*" for built-ins, crypto.randomUUID() for user
     title: string;                 // Max 45 chars
