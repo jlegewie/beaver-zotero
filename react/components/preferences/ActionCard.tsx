@@ -220,10 +220,10 @@ const ActionCard: React.FC<ActionCardProps> = ({
                         buttonLabel={TARGET_TYPE_LABELS[editTargetType]}
                         variant="surface"
                         rightIcon={ArrowDownIcon}
+                        ariaLabel="Select target type"
                         className="action-target-badge"
                         dataType={editTargetType}
-                        customContent={<span>{TARGET_TYPE_LABELS[editTargetType]}</span>}
-                        style={{ padding: '2px 6px', fontSize: '13px' }}
+                        style={{ padding: '3px 8px' }}
                     />
                     <span className="text-sm font-color-tertiary">
                         {TARGET_TYPE_DESCRIPTIONS[editTargetType]}
@@ -233,9 +233,9 @@ const ActionCard: React.FC<ActionCardProps> = ({
                         buttonLabel={categoryLabel(editCategory)}
                         variant="surface"
                         rightIcon={ArrowDownIcon}
+                        ariaLabel="Select category"
                         className="action-target-badge"
-                        customContent={<span>{categoryLabel(editCategory)}</span>}
-                        style={{ padding: '2px 6px', fontSize: '13px' }}
+                        style={{ padding: '3px 8px' }}
                     />
                     {isBuiltin && isOverridden && onResetToDefault && (
                         <Button
