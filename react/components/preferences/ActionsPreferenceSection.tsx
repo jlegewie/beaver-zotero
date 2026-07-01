@@ -213,7 +213,7 @@ const ActionsPreferenceSection: React.FC = () => {
                             Clear
                         </Button>
                         <div className="flex-1"></div>
-                        <span className="text-sm font-color-secondary">
+                        <span className="text-base font-color-secondary px-15">
                             {filteredActions.length} of {actions.length}
                         </span>
                     </>
