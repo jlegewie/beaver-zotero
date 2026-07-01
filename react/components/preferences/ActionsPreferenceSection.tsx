@@ -250,7 +250,7 @@ const ActionsPreferenceSection: React.FC = () => {
                 "Delete" hides them; they land here and can be restored. */}
             {hiddenBuiltins.length > 0 && (
                 <details className="mt-4">
-                    <summary className="text-sm font-color-tertiary cursor-pointer">
+                    <summary className="text-sm font-color-secondary cursor-pointer">
                         Deleted actions ({hiddenBuiltins.length})
                     </summary>
                     <div className="display-flex flex-col gap-2 mt-2">
@@ -258,7 +258,7 @@ const ActionsPreferenceSection: React.FC = () => {
                             <div key={action.id} className="display-flex flex-row items-center justify-between px-2 py-1">
                                 <span className="text-sm font-color-secondary">{action.title}</span>
                                 <Button
-                                    variant="ghost-secondary"
+                                    variant="outline"
                                     style={{ padding: "2px 8px" }}
                                     onClick={() => restoreAction(action.id)}
                                 >

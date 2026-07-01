@@ -76,11 +76,11 @@ export const TARGET_TYPE_LABELS: Record<ActionTargetType, string> = {
 };
 
 export const TARGET_TYPE_DESCRIPTIONS: Record<ActionTargetType, string> = {
+    global: "Works anywhere, no context needed",
     items: "Works with library items",
     attachment: "Works with PDF, EPUB, and snapshot attachments",
     note: "Works with Zotero notes",
     collection: "Works with collections",
-    global: "Works anywhere, no context needed",
 };
 
 /** User-facing labels for the homepage skill categories. */

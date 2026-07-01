@@ -19,7 +19,7 @@ import {
 const MAX_TITLE_LENGTH = 45;
 const MAX_PROMPT_TEXT_LENGTH = 2250;
 
-const TARGET_TYPE_OPTIONS: ActionTargetType[] = ["items", "attachment", "note", "collection", "global"];
+const TARGET_TYPE_OPTIONS: ActionTargetType[] = ["global", "items", "attachment", "note", "collection"];
 const CATEGORY_OPTIONS: (ActionCategory | undefined)[] = [undefined, "research", "organize", "annotate"];
 
 // Category icons mirror the homepage launcher so the picker matches what users
@@ -38,7 +38,7 @@ const categoryHelp = (cat: ActionCategory | undefined): string =>
 
 /** Field heading with a hover-info circle, matching the two-column edit layout. */
 const FieldLabel: React.FC<{ label: string; tooltip: string }> = ({ label, tooltip }) => (
-    <div className="action-field-label text-base font-color-primary font-semibold">
+    <div className="action-field-label text-base font-color-primary">
         <span>{label}</span>
         <Tooltip content={tooltip} width="220px">
             <Icon icon={InformationCircleIcon} size={13} className="font-color-tertiary" />
