@@ -16,6 +16,8 @@ export type SerializedSlashCommandNode = Spread<
         targetType?: ActionTargetType;
         title?: string;
         argumentHint?: string;
+        missing?: boolean;
+        persisted?: boolean;
     },
     SerializedTextNode
 >;
@@ -54,6 +56,13 @@ export class SlashCommandNode extends TextNode {
     // Ghost text rendered after the pill while it awaits an argument
     // (see ArgumentHintPlugin in LexicalEditorInput).
     __argumentHint?: string;
+    // The action definition no longer exists (deleted since the pill was
+    // created). Rendered greyed out; clicking it does not open preferences.
+    __missing?: boolean;
+    // The pill was rebuilt from a sent message's persisted wire actions (edit
+    // overlay); the resubmit path reuses the persisted entry for it. Purely
+    // data — no DOM representation.
+    __persisted?: boolean;
 
     static getType(): string {
         return 'beaver-slash-command';
@@ -66,6 +75,8 @@ export class SlashCommandNode extends TextNode {
             node.__targetType,
             node.__title,
             node.__argumentHint,
+            node.__missing,
+            node.__persisted,
             node.__text,
             node.__key,
         );
@@ -77,6 +88,8 @@ export class SlashCommandNode extends TextNode {
         targetType?: ActionTargetType,
         title?: string,
         argumentHint?: string,
+        missing?: boolean,
+        persisted?: boolean,
         text?: string,
         key?: NodeKey,
     ) {
@@ -87,6 +100,8 @@ export class SlashCommandNode extends TextNode {
         this.__targetType = targetType;
         this.__title = title;
         this.__argumentHint = argumentHint;
+        this.__missing = missing;
+        this.__persisted = persisted;
         // Token mode is applied in $createSlashCommandNode (Lexical copies
         // __mode across clones via afterCloneFrom, so setting it once at
         // creation is enough).
@@ -99,6 +114,8 @@ export class SlashCommandNode extends TextNode {
             serializedNode.targetType,
             serializedNode.title,
             serializedNode.argumentHint,
+            serializedNode.missing,
+            serializedNode.persisted,
         );
         node.setFormat(serializedNode.format);
         node.setDetail(serializedNode.detail);
@@ -117,6 +134,8 @@ export class SlashCommandNode extends TextNode {
             targetType: this.__targetType,
             title: this.__title,
             argumentHint: this.__argumentHint,
+            missing: this.__missing,
+            persisted: this.__persisted,
         };
     }
 
@@ -132,6 +151,10 @@ export class SlashCommandNode extends TextNode {
         // Title snapshot for the hover card's fallback when the action has
         // been deleted (a native `title` would double up with the card).
         if (this.__title) dom.setAttribute('data-title', this.__title);
+        if (this.__missing) {
+            dom.classList.add('beaver-slash-command-missing');
+            dom.setAttribute('data-missing', 'true');
+        }
         return dom;
     }
 
@@ -147,6 +170,11 @@ export class SlashCommandNode extends TextNode {
         if (prevNode.__title !== this.__title) {
             if (this.__title) dom.setAttribute('data-title', this.__title);
             else dom.removeAttribute('data-title');
+        }
+        if ((prevNode.__missing ?? false) !== (this.__missing ?? false)) {
+            dom.classList.toggle('beaver-slash-command-missing', !!this.__missing);
+            if (this.__missing) dom.setAttribute('data-missing', 'true');
+            else dom.removeAttribute('data-missing');
         }
         return updated;
     }
@@ -171,6 +199,14 @@ export class SlashCommandNode extends TextNode {
         return this.__argumentHint;
     }
 
+    isMissingAction(): boolean {
+        return !!this.__missing;
+    }
+
+    isPersisted(): boolean {
+        return !!this.__persisted;
+    }
+
     // Slash pills should never split into two text nodes on typing
     canInsertTextBefore(): boolean {
         return false;
@@ -191,8 +227,10 @@ export function $createSlashCommandNode(
     targetType?: ActionTargetType,
     title?: string,
     argumentHint?: string,
+    missing?: boolean,
+    persisted?: boolean,
 ): SlashCommandNode {
-    const node = new SlashCommandNode(commandName, actionId, targetType, title, argumentHint);
+    const node = new SlashCommandNode(commandName, actionId, targetType, title, argumentHint, missing, persisted);
     // Atomic editing: delete removes the whole pill, typing inside replaces it.
     node.setMode('token');
     return $applyNodeReplacement(node);

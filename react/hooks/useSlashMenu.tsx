@@ -26,8 +26,13 @@ export function useSlashMenu(
     verticalPosition: 'above' | 'below' = 'above',
     focusInput?: () => void,
     insertSlashCommand?: (descriptor: SlashCommandDescriptor, queryLength: number) => void,
+    /** Where to write the editor content the menu logic consumed. Defaults to
+     *  the shared compose atom; pass a local setter when the menu drives an
+     *  editor that is not the main chat input (e.g. the message edit overlay). */
+    setContent?: (value: string) => void,
 ) {
-    const [, setMessageContent] = useAtom(currentMessageContentAtom);
+    const [, setComposeMessageContent] = useAtom(currentMessageContentAtom);
+    const setMessageContent = setContent ?? setComposeMessageContent;
     const allActions = useAtomValue(actionsAtom);
     const ctx = useAtomValue(actionContextAtom);
     const markActionUsed = useSetAtom(markActionUsedAtom);

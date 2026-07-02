@@ -595,6 +595,15 @@
     background-color: var(--tag-blue-tertiary);
 }
 
+/* Pill whose action no longer exists (deleted since the message was sent):
+   greyed out, no click affordance, no hover feedback. */
+[id^="beaver-pane-"] .beaver-slash-command-missing,
+[id^="beaver-pane-"] .beaver-slash-command-missing:hover {
+    background-color: var(--fill-quinary);
+    color: var(--fill-secondary);
+    cursor: default;
+}
+
 
 [id^="beaver-pane-"] .preference-input {
     font-family: system-ui, -apple-system, sans-serif;

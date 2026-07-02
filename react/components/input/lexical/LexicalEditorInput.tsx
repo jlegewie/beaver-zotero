@@ -54,6 +54,8 @@ function $collectSlashCommandDescriptors(): SlashCommandDescriptor[] {
                 targetType: node.getTargetType(),
                 title: node.getTitle(),
                 argumentHint: node.getArgumentHint(),
+                missing: node.isMissingAction() || undefined,
+                persisted: node.isPersisted() || undefined,
             });
         } else if ($isElementNode(node)) {
             node.getChildren().forEach(visit);
@@ -77,6 +79,8 @@ function $buildContentNodes(text: string, pills: SlashCommandDescriptor[]): Lexi
                 segment.match.targetType,
                 segment.match.title,
                 segment.match.argumentHint,
+                segment.match.missing,
+                segment.match.persisted,
             )
             : $createTextNode(segment.text));
 }
@@ -369,6 +373,8 @@ const EditorApi = forwardRef<LexicalEditorInputHandle, {
                             descriptor.targetType,
                             descriptor.title,
                             descriptor.argumentHint,
+                            descriptor.missing,
+                            descriptor.persisted,
                         );
                         const spaceNode = $createTextNode(' ');
                         const lastChild = root.getLastChild();
@@ -1067,7 +1073,11 @@ const SlashCommandClickPlugin: React.FC = () => {
     useEffect(() => {
         const activatedPill = (e: MouseEvent): HTMLElement | null => {
             if (e.button !== 0 || e.shiftKey) return null;
-            return ((e.target as Element | null)?.closest?.('.beaver-slash-command') ?? null) as HTMLElement | null;
+            const pill = ((e.target as Element | null)?.closest?.('.beaver-slash-command') ?? null) as HTMLElement | null;
+            // Missing actions have nothing to open in preferences; keep native
+            // text behavior for them.
+            if (pill?.getAttribute('data-missing') === 'true') return null;
+            return pill;
         };
         const onMouseDown = (e: MouseEvent) => {
             if (activatedPill(e)) e.preventDefault();

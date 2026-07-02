@@ -7,9 +7,11 @@ import {
     slashDescriptorsEqual,
     hasSlashToken,
     filterPromptActionsForContent,
+    promptActionsToDescriptors,
     type SlashCommandDescriptor,
 } from '../../../react/utils/slashCommands';
 import type { PromptAction } from '../../../react/agents/types';
+import type { Action } from '../../../react/types/actions';
 
 const action = (command: string, title?: string): PromptAction => ({
     command,
@@ -148,6 +150,70 @@ describe('slashDescriptorsEqual', () => {
             [{ ...d('x'), argumentHint: 'topic' }],
             [d('x')],
         )).toBe(false);
+    });
+
+    it('compares missing, treating undefined and false as equal', () => {
+        expect(slashDescriptorsEqual([{ ...d('x'), missing: true }], [d('x')])).toBe(false);
+        expect(slashDescriptorsEqual([{ ...d('x'), missing: false }], [d('x')])).toBe(true);
+        expect(slashDescriptorsEqual(
+            [{ ...d('x'), missing: true }],
+            [{ ...d('x'), missing: true }],
+        )).toBe(true);
+    });
+});
+
+describe('promptActionsToDescriptors', () => {
+    const availableAction = (overrides: Partial<Action> & Pick<Action, 'id' | 'title'>): Action => ({
+        text: 'Prompt text',
+        targetType: 'global',
+        ...overrides,
+    });
+
+    const wireAction = (command: string, actionId: string): PromptAction => ({
+        command,
+        action_id: actionId,
+        title: `Title of ${command}`,
+        prompt: `Prompt for ${command}`,
+        target_type: 'items',
+    });
+
+    it('returns empty for missing or empty wire actions', () => {
+        expect(promptActionsToDescriptors(undefined, [])).toEqual([]);
+        expect(promptActionsToDescriptors([], [])).toEqual([]);
+    });
+
+    it('re-links by action id and takes title/argumentHint from the current definition', () => {
+        const current = availableAction({ id: 'a1', title: 'Renamed Title', argumentHint: 'topic' });
+        const [desc] = promptActionsToDescriptors([wireAction('summarize', 'a1')], [current]);
+        expect(desc).toEqual({
+            commandName: 'summarize', // persisted token, must match the content
+            actionId: 'a1',
+            targetType: 'items',
+            title: 'Renamed Title',
+            argumentHint: 'topic',
+            persisted: true,
+        });
+    });
+
+    it('falls back to matching the current /command token when the id is gone', () => {
+        const recreated = availableAction({ id: 'new-id', title: 'Summarize Paper' });
+        const [desc] = promptActionsToDescriptors([wireAction('summarize-paper', 'old-id')], [recreated]);
+        expect(desc.actionId).toBe('new-id');
+        expect(desc.missing).toBeUndefined();
+        expect(desc.persisted).toBe(true);
+    });
+
+    it('marks unmatched actions as missing, keeping the persisted identity', () => {
+        const other = availableAction({ id: 'b1', title: 'Other' });
+        const [desc] = promptActionsToDescriptors([wireAction('deleted-action', 'gone')], [other]);
+        expect(desc).toEqual({
+            commandName: 'deleted-action',
+            actionId: 'gone',
+            targetType: 'items',
+            title: 'Title of deleted-action',
+            missing: true,
+            persisted: true,
+        });
     });
 });
 

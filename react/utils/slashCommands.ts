@@ -19,6 +19,15 @@ export interface SlashCommandDescriptor {
     title?: string;
     /** Ghost text shown after the inserted pill to indicate expected arguments. */
     argumentHint?: string;
+    /** The action no longer exists (deleted since the message was sent). The
+     *  pill renders greyed out and is not clickable. */
+    missing?: boolean;
+    /** The pill was rebuilt from a sent message's persisted wire actions
+     *  (message edit overlay). On resubmit, such pills reuse their persisted
+     *  wire entry; pills without this flag resolve fresh. Never set for pills
+     *  inserted via the slash menu — a reinserted pill with the same /command
+     *  must not be mistaken for the original one. */
+    persisted?: boolean;
 }
 
 /** Turn an action title into a single `/command` token (e.g. "Summarize Paper"
@@ -132,13 +141,53 @@ export function slashDescriptorsEqual(
         p.actionId === b[i].actionId &&
         p.targetType === b[i].targetType &&
         p.title === b[i].title &&
-        p.argumentHint === b[i].argumentHint
+        p.argumentHint === b[i].argumentHint &&
+        (p.missing ?? false) === (b[i].missing ?? false) &&
+        (p.persisted ?? false) === (b[i].persisted ?? false)
     );
 }
 
 /** Whether `content` contains `/command` as a properly bounded token. */
 export function hasSlashToken(content: string, command: string): boolean {
     return buildTokenRegex([command]).test(content);
+}
+
+/**
+ * Rebuild editor pill descriptors from a message's persisted wire actions,
+ * used when a sent message is opened for editing. Each descriptor keeps the
+ * persisted `command` (it must match the token in the message content), and is
+ * re-linked to the current action definition: by id first (ids survive
+ * renames), then by the action's current `/command` token (covers a deleted
+ * and re-created action). Actions that no longer resolve are marked `missing`
+ * so the pill renders greyed out.
+ */
+export function promptActionsToDescriptors(
+    promptActions: PromptAction[] | undefined,
+    availableActions: Action[],
+): SlashCommandDescriptor[] {
+    if (!promptActions?.length) return [];
+    return promptActions.map((pa) => {
+        const matched = availableActions.find(a => a.id === pa.action_id)
+            ?? availableActions.find(a => getActionCommand(a) === pa.command);
+        if (!matched) {
+            return {
+                commandName: pa.command,
+                actionId: pa.action_id,
+                targetType: pa.target_type,
+                title: pa.title,
+                missing: true,
+                persisted: true,
+            };
+        }
+        return {
+            commandName: pa.command,
+            actionId: matched.id,
+            targetType: pa.target_type,
+            title: matched.title,
+            argumentHint: matched.argumentHint,
+            persisted: true,
+        };
+    });
 }
 
 /**

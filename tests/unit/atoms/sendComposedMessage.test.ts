@@ -66,6 +66,12 @@ vi.mock('../../../react/utils/actionVisibility', () => ({
     isActionVisible: vi.fn(() => true),
 }));
 
+// converters pulls in src serializers → supabase-backed services; actions.ts
+// only needs `toMessageAttachment` from it.
+vi.mock('../../../react/types/attachments/converters', () => ({
+    toMessageAttachment: vi.fn(() => null),
+}));
+
 vi.mock('../../../react/types/actionStorage', () => ({
     getMergedActions: vi.fn(() => []),
     getActionCustomizations: vi.fn(() => ({ version: 1, overrides: {}, custom: [] })),
@@ -80,6 +86,7 @@ vi.mock('../../../react/types/actionStorage', () => ({
 
 import {
     actionsAtom,
+    resolvePillsToPromptActionsAtom,
     sendComposedMessageAtom,
     stageActionPillAtom,
 } from '../../../react/atoms/actions';
@@ -224,6 +231,45 @@ describe('sendComposedMessageAtom', () => {
         });
         expect(store.get(currentMessageItemsAtom)).toEqual([item]);
         expect(sendWSMessageMock).toHaveBeenCalled();
+    });
+});
+
+describe('resolvePillsToPromptActionsAtom (edited-message reuse)', () => {
+    const persistedAction = {
+        command: 'summarize',
+        action_id: 'custom-1',
+        title: 'Summarize',
+        prompt: 'Original resolved prompt',
+        target_type: 'items' as const,
+    };
+
+    it('reuses the persisted wire entry for pills flagged as persisted', async () => {
+        const store = makeStore();
+        const resolved = await store.set(resolvePillsToPromptActionsAtom, {
+            pills: [{ commandName: 'summarize', actionId: 'custom-1', title: 'Summarize', persisted: true }],
+            persistedActions: [persistedAction],
+        });
+        expect(resolved?.actions).toEqual([persistedAction]);
+        expect(resolvePromptVariables).not.toHaveBeenCalled();
+    });
+
+    it('resolves fresh for a reinserted pill with the same command (no persisted flag)', async () => {
+        const store = makeStore();
+        const resolved = await store.set(resolvePillsToPromptActionsAtom, {
+            pills: [{ commandName: 'summarize', actionId: 'custom-1', title: 'Summarize' }],
+            persistedActions: [persistedAction],
+        });
+        expect(resolvePromptVariables).toHaveBeenCalledTimes(1);
+        expect(resolved?.actions[0].prompt).toBe('resolved:Summarize the {{selected_items}}.');
+    });
+
+    it('reuses the persisted entry for surviving pills of deleted actions', async () => {
+        const store = makeStore([]);
+        const resolved = await store.set(resolvePillsToPromptActionsAtom, {
+            pills: [{ commandName: 'summarize', actionId: 'custom-1', title: 'Summarize', missing: true, persisted: true }],
+            persistedActions: [persistedAction],
+        });
+        expect(resolved?.actions).toEqual([persistedAction]);
     });
 });
 

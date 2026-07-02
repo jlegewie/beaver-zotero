@@ -24,6 +24,8 @@ import { addPopupMessageAtom } from '../utils/popupMessageUtils';
 import { isRejectedItemValidation, itemValidationResultsAtom } from './itemValidation';
 import { getActionCommand, toSlashToken, type SlashCommandDescriptor } from '../utils/slashCommands';
 import type { PromptAction } from '../agents/types';
+import { MessageAttachment, messageAttachmentKey } from '../types/attachments/apiTypes';
+import { toMessageAttachment } from '../types/attachments/converters';
 
 // ---------------------------------------------------------------------------
 // Base atom — initialised once from prefs + built-ins
@@ -210,25 +212,42 @@ export const stageActionPillAtom = atom(
 );
 
 // ---------------------------------------------------------------------------
-// Send a composed message that contains one or more /command pills.
+// Resolve /command pills to structured wire actions.
 //
-// The pill tokens stay verbatim in the message content; each pill's action
-// prompt is resolved here ({{ }} variables + item/collection attachment) and
-// sent as a structured `actions` entry on the prompt. The backend appends a
-// definition block telling the model what each /command means.
+// Shared by the compose send path (sendComposedMessageAtom) and the message
+// edit overlay (buildEditedPromptActionsAtom). Each pill's action prompt is
+// resolved ({{ }} variables + targetType context items/collection); the
+// resolved items/collection are returned for the caller to attach.
+//
+// When `persistedActions` is provided (editing a sent message), pills that
+// were rebuilt from those wire actions (descriptor `persisted` flag) reuse
+// their persisted entry verbatim instead of re-resolving: the original
+// attachments still ride on the prompt, and the regenerated message keeps the
+// meaning it had when sent (including pills whose action definition has since
+// been deleted). Pills inserted during the edit never carry the flag, so a
+// removed-and-reinserted /command resolves fresh like any new pill.
+//
+// Returns null when a pill's action cannot run right now (empty item variable,
+// rejected item) — a popup has been shown and the send must be aborted.
 // ---------------------------------------------------------------------------
 
-export const sendComposedMessageAtom = atom(
+interface ResolvedPillActions {
+    actions: PromptAction[];
+    items: Zotero.Item[];
+    collection: CollectionReference | null;
+}
+
+export const resolvePillsToPromptActionsAtom = atom(
     null,
     async (
         get,
         set,
         payload: {
-            baseText: string;
             pills: SlashCommandDescriptor[];
+            persistedActions?: PromptAction[];
         },
-    ): Promise<boolean> => {
-        const { baseText, pills } = payload;
+    ): Promise<ResolvedPillActions | null> => {
+        const { pills, persistedActions } = payload;
         const actions = get(actionsAtom);
         const validationResults = get(itemValidationResultsAtom);
 
@@ -243,6 +262,14 @@ export const sendComposedMessageAtom = atom(
         for (const pill of pills) {
             if (seenCommands.has(pill.commandName)) continue;
             seenCommands.add(pill.commandName);
+
+            const persisted = pill.persisted
+                ? persistedActions?.find(a => a.command === pill.commandName)
+                : undefined;
+            if (persisted) {
+                promptActions.push(persisted);
+                continue;
+            }
 
             const action = actions.find(a => a.id === pill.actionId);
             if (!action) {
@@ -271,7 +298,7 @@ export const sendComposedMessageAtom = atom(
                     expire: true,
                     duration: 4000,
                 });
-                return false;
+                return null;
             }
 
             for (const item of items) {
@@ -285,7 +312,7 @@ export const sendComposedMessageAtom = atom(
                         expire: true,
                         duration: 4000,
                     });
-                    return false;
+                    return null;
                 }
             }
 
@@ -312,6 +339,35 @@ export const sendComposedMessageAtom = atom(
             });
         }
 
+        return { actions: promptActions, items: accumulatedItems, collection: accumulatedCollection };
+    },
+);
+
+// ---------------------------------------------------------------------------
+// Send a composed message that contains one or more /command pills.
+//
+// The pill tokens stay verbatim in the message content; each pill's action
+// prompt is resolved here ({{ }} variables + item/collection attachment) and
+// sent as a structured `actions` entry on the prompt. The backend appends a
+// definition block telling the model what each /command means.
+// ---------------------------------------------------------------------------
+
+export const sendComposedMessageAtom = atom(
+    null,
+    async (
+        get,
+        set,
+        payload: {
+            baseText: string;
+            pills: SlashCommandDescriptor[];
+        },
+    ): Promise<boolean> => {
+        const { baseText, pills } = payload;
+
+        const resolved = await set(resolvePillsToPromptActionsAtom, { pills });
+        if (!resolved) return false;
+        const { actions: promptActions, items: accumulatedItems, collection: accumulatedCollection } = resolved;
+
         if (accumulatedItems.length > 0) {
             const currentItems = get(currentMessageItemsAtom);
             const existingKeys = new Set(currentItems.map(i => `${i.libraryID}-${i.key}`));
@@ -327,5 +383,86 @@ export const sendComposedMessageAtom = atom(
 
         await set(sendWSMessageAtom, baseText.trim(), { actions: promptActions });
         return true;
+    },
+);
+
+// ---------------------------------------------------------------------------
+// Build the wire `actions` (and any attachments they pull in) for an edited
+// message about to be regenerated.
+//
+// Pills that survive from the original message reuse their persisted wire
+// entry (see resolvePillsToPromptActionsAtom); pills added during the edit
+// resolve like a fresh compose, and the items/collection their action pulls
+// in are converted to message attachments here (deduped against the ones
+// already on the message).
+//
+// Returns null when the edit cannot be submitted (a popup has been shown).
+// ---------------------------------------------------------------------------
+
+export const buildEditedPromptActionsAtom = atom(
+    null,
+    async (
+        _get,
+        set,
+        payload: {
+            pills: SlashCommandDescriptor[];
+            persistedActions?: PromptAction[];
+            existingAttachments?: MessageAttachment[];
+        },
+    ): Promise<{ actions?: PromptAction[]; addedAttachments: MessageAttachment[] } | null> => {
+        const { pills, persistedActions, existingAttachments } = payload;
+        if (pills.length === 0) return { actions: undefined, addedAttachments: [] };
+
+        const resolved = await set(resolvePillsToPromptActionsAtom, { pills, persistedActions });
+        if (!resolved) return null;
+
+        const addedAttachments: MessageAttachment[] = [];
+        const existingKeys = new Set((existingAttachments ?? []).map(messageAttachmentKey));
+
+        if (resolved.items.length > 0) {
+            // toMessageAttachment reads fields/creators, which lazy loading
+            // may not have populated yet.
+            const regularItems = resolved.items.filter(i => i.isRegularItem());
+            if (regularItems.length > 0) {
+                await Zotero.Items.loadDataTypes(regularItems, ['itemData', 'creators']);
+            }
+            const attachmentItems = resolved.items.filter(i => i.isAttachment());
+            if (attachmentItems.length > 0) {
+                await Zotero.Items.loadDataTypes(attachmentItems, ['itemData']);
+                const parents = attachmentItems
+                    .map(i => i.parentItem)
+                    .filter((p): p is Zotero.Item => !!p);
+                if (parents.length > 0) {
+                    await Zotero.Items.loadDataTypes(parents, ['itemData', 'creators']);
+                }
+            }
+            const noteItems = resolved.items.filter(i => i.isNote());
+            await Promise.all(noteItems.map(i => i.loadDataType('note')));
+
+            for (const item of resolved.items) {
+                const attachment = toMessageAttachment(item);
+                if (!attachment) continue;
+                const key = messageAttachmentKey(attachment);
+                if (existingKeys.has(key)) continue;
+                existingKeys.add(key);
+                addedAttachments.push(attachment);
+            }
+        }
+
+        const hasCollection = (existingAttachments ?? []).some(a => a.type === 'collection');
+        if (resolved.collection && !hasCollection) {
+            addedAttachments.push({
+                type: 'collection',
+                library_id: resolved.collection.library_id,
+                zotero_key: resolved.collection.zotero_key,
+                name: resolved.collection.name,
+                parent_key: resolved.collection.parent_key,
+            });
+        }
+
+        return {
+            actions: resolved.actions.length > 0 ? resolved.actions : undefined,
+            addedAttachments,
+        };
     },
 );
