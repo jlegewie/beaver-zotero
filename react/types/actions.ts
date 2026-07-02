@@ -17,7 +17,7 @@ export type ActionTargetType = "items" | "attachment" | "note" | "collection" | 
  * `targetType` is what an action binds to; `category` is what kind of work it is.
  * An action can have both, independently.
  */
-export type ActionCategory = "research" | "organize" | "annotate";
+export type ActionCategory = "research" | "write" | "organize" | "annotate";
 
 /** Category filter for the Actions preferences list — a skill category, or the "no category" bucket. */
 export type ActionCategoryFilter = ActionCategory | "uncategorized";
@@ -88,6 +88,7 @@ export const TARGET_TYPE_DESCRIPTIONS: Record<ActionTargetType, string> = {
 /** User-facing labels for the homepage skill categories. */
 export const CATEGORY_LABELS: Record<ActionCategory, string> = {
     research: "Research",
+    write: "Write",
     organize: "Organize",
     annotate: "Annotate",
 };
@@ -97,7 +98,7 @@ export const CATEGORY_LABELS: Record<ActionCategory, string> = {
 // ---------------------------------------------------------------------------
 
 const VALID_TARGET_TYPES: Set<string> = new Set(["items", "attachment", "note", "collection", "global"]);
-const VALID_CATEGORIES: Set<string> = new Set(["research", "organize", "annotate"]);
+const VALID_CATEGORIES: Set<string> = new Set(["research", "write", "organize", "annotate"]);
 
 export const isAction = (obj: unknown): obj is Action => {
     if (typeof obj !== 'object' || obj === null) return false;

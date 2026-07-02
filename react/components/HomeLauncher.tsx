@@ -1,18 +1,18 @@
 import React, { useState } from "react";
 import Button from "./ui/Button";
 import Tooltip from "./ui/Tooltip";
-import { ZapIcon, BookSearchIcon, LayersIcon, HighlighterIcon } from "./icons/icons";
+import { QuillWriteIcon, BookSearchIcon, LayersIcon, HighlighterIcon } from "./icons/icons";
 import CategoryPanel from "./CategoryPanel";
 import { ActionCategory } from "../types/actions";
 
-type CategoryId = "actions" | "research" | "organize" | "annotate";
+type CategoryId = "research" | "write" | "organize" | "annotate";
 
 interface CategoryDef {
     id: CategoryId;
     label: string;
     icon: React.ComponentType<React.SVGProps<SVGSVGElement>>;
-    /** The skill category, or `null` for the uncategorized "Actions" bucket. */
-    category: ActionCategory | null;
+    /** The skill category this launcher button maps to. */
+    category: ActionCategory;
     /** Tooltip: short value line + concrete examples of what lives in this bucket. */
     tooltipTitle: string;
     tooltipDescription: string;
@@ -20,14 +20,14 @@ interface CategoryDef {
 
 const CATEGORIES: CategoryDef[] = [
     {
-        id: "actions", label: "Actions", icon: ZapIcon, category: null,
-        tooltipTitle: "Repeatable workflows",
-        tooltipDescription: "Run a common task in one click: summarize, review, refine",
-    },
-    {
         id: "research", label: "Research", icon: BookSearchIcon, category: "research",
         tooltipTitle: "Ask and explore your library",
         tooltipDescription: "Grounded answers from full text, plus related work and gaps",
+    },
+    {
+        id: "write", label: "Write", icon: QuillWriteIcon, category: "write",
+        tooltipTitle: "Write & synthesize",
+        tooltipDescription: "Summaries, reviews, and notes drawn from your sources — every claim cited",
     },
     {
         id: "organize", label: "Organize", icon: LayersIcon, category: "organize",
@@ -43,14 +43,15 @@ const CATEGORIES: CategoryDef[] = [
 
 /**
  * HomePage launcher shown under the input area. Category is a partition: each
- * action lives in exactly one bucket, so "Actions" holds the uncategorized
- * actions and each skill button holds its own. The selected tab is sticky —
- * changing the Zotero selection updates the actions listed inside the open
- * panel (via CategoryPanel), but never switches the tab.
+ * action lives in exactly one skill bucket (Research / Write / Organize /
+ * Annotate). Actions with no category are not surfaced here — they stay
+ * available from the slash menu. The selected tab is sticky — changing the
+ * Zotero selection updates the actions listed inside the open panel (via
+ * CategoryPanel), but never switches the tab.
  */
 const HomeLauncher: React.FC<{ style?: React.CSSProperties }> = ({ style }) => {
     // Sticky tab — only the user changes it. `null` = collapsed.
-    const [expanded, setExpanded] = useState<CategoryId | null>("actions");
+    const [expanded, setExpanded] = useState<CategoryId | null>("research");
 
     const toggle = (id: CategoryId) => setExpanded((prev) => (prev === id ? null : id));
     const activeCategory = CATEGORIES.find((c) => c.id === expanded)?.category ?? null;

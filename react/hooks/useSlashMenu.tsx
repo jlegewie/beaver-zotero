@@ -1,6 +1,6 @@
 import React, { useState, useRef, useCallback, useMemo } from 'react';
 import { useAtom, useSetAtom, useAtomValue } from 'jotai';
-import { PlusSignIcon, BookSearchIcon, LayersIcon, HighlighterIcon, ZapIcon } from '../components/icons/icons';
+import { PlusSignIcon, BookSearchIcon, LayersIcon, HighlighterIcon, ZapIcon, QuillWriteIcon } from '../components/icons/icons';
 import { CSSIcon, CSSItemTypeIcon } from '../components/icons/zotero';
 import { currentMessageContentAtom } from '../atoms/messageComposition';
 import { actionsAtom, actionContextAtom, markActionUsedAtom } from '../atoms/actions';
@@ -15,6 +15,7 @@ import { MenuPosition, SearchMenuItem } from '../components/ui/menus/SearchMenu'
 // back to the general "Actions" icon (Zap).
 const CATEGORY_ICONS: Record<ActionCategory, React.ComponentType<React.SVGProps<SVGSVGElement>>> = {
     research: BookSearchIcon,
+    write: QuillWriteIcon,
     organize: LayersIcon,
     annotate: HighlighterIcon,
 };

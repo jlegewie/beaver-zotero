@@ -15,6 +15,7 @@ import {
     BookSearchIcon,
     LayersIcon,
     HighlighterIcon,
+    QuillWriteIcon,
     InformationCircleIcon,
     DeleteIcon,
     UndoIcon,
@@ -26,12 +27,13 @@ const MAX_ARGUMENT_HINT_LENGTH = 100;
 const MAX_PROMPT_TEXT_LENGTH = 2250;
 
 const TARGET_TYPE_OPTIONS: ActionTargetType[] = ["global", "items", "attachment", "note", "collection"];
-const CATEGORY_OPTIONS: (ActionCategory | undefined)[] = [undefined, "research", "organize", "annotate"];
+const CATEGORY_OPTIONS: (ActionCategory | undefined)[] = [undefined, "research", "write", "organize", "annotate"];
 
 // Category icons mirror the homepage launcher so the picker matches what users
 // see there. Uncategorized actions fall under the general "Actions" bucket (Zap).
 const CATEGORY_ICONS: Record<ActionCategory, React.ComponentType<React.SVGProps<SVGSVGElement>>> = {
     research: BookSearchIcon,
+    write: QuillWriteIcon,
     organize: LayersIcon,
     annotate: HighlighterIcon,
 };

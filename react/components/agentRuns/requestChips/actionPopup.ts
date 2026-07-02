@@ -1,7 +1,7 @@
 import type React from 'react';
 import type { ChipPopupContent } from './ChipPopup';
 import type { ActionCategory } from '../../../types/actions';
-import { ZapIcon, BookSearchIcon, LayersIcon, HighlighterIcon } from '../../icons/icons';
+import { ZapIcon, BookSearchIcon, LayersIcon, HighlighterIcon, QuillWriteIcon } from '../../icons/icons';
 import { truncateText } from '../../../utils/stringUtils';
 
 /**
@@ -18,6 +18,7 @@ import { truncateText } from '../../../utils/stringUtils';
 /** Category icons, mirroring the homepage launcher (Zap = uncategorized). */
 const CATEGORY_ICONS: Record<ActionCategory, React.ComponentType<React.SVGProps<SVGSVGElement>>> = {
     research: BookSearchIcon,
+    write: QuillWriteIcon,
     organize: LayersIcon,
     annotate: HighlighterIcon,
 };

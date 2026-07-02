@@ -16,7 +16,7 @@ import {SettingsGroup, SectionLabel, DocLink, SectionHeader} from "./components/
 // Filter dimensions. `targetType` is what an action binds to; `category` is the
 // kind of work it is (both are shown on each action card).
 const TARGET_FILTER_OPTIONS: ActionTargetType[] = ["items", "attachment", "note", "collection", "global"];
-const CATEGORY_FILTER_OPTIONS: ActionCategory[] = ["research", "organize", "annotate"];
+const CATEGORY_FILTER_OPTIONS: ActionCategory[] = ["research", "write", "organize", "annotate"];
 
 /** A radio-style filter menu row with a leading check column for the active option. */
 const filterMenuItem = (label: string, isSelected: boolean, onSelect: () => void): MenuItem => ({
