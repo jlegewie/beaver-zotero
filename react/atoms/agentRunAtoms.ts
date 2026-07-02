@@ -8,7 +8,7 @@
 import { atom, Getter, Setter } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
 import { agentService } from '../../src/services/agentService';
-import { notifyRunComplete } from '../../src/services/systemNotifications';
+import { notifyRunComplete, notifyUserQuestion } from '../../src/services/systemNotifications';
 import {
     WSCallbacks,
     AgentRunRequest,
@@ -98,10 +98,12 @@ import {
     pendingApprovalsAtom,
     buildPendingApprovalFromAction,
     clearAllPendingApprovalsAtom,
+} from '../agents/agentActions';
+import {
     addPendingQuestionAtom,
     removePendingQuestionAtom,
     clearAllPendingQuestionsAtom,
-} from '../agents/agentActions';
+} from '../agents/pendingQuestions';
 import { getAppliedPdfAnnotationCount } from '../agents/agentActionCounts';
 import { undoEditMetadataAction } from '../utils/editMetadataActions';
 import { undoCreateItemAction } from '../utils/createItemActions';
@@ -1486,6 +1488,11 @@ function createWSCallbacks(set: Setter): WSCallbacks {
                 questionCount: event.questions.length,
             }, 1);
             set(addPendingQuestionAtom, event);
+
+            // Surface an OS-native notification if the user can't currently see
+            // the question panel (e.g. working in another app), mirroring the
+            // deferred-approval path.
+            notifyUserQuestion(event);
         },
 
         onOpen: () => {
